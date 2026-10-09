@@ -1,5 +1,5 @@
 use anyhow::{Result, bail, ensure};
-use geo::Point;
+use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_expr::expr::Error as ExprError;
 use surrealdb_expr::val::{

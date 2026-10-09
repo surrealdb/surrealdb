@@ -9,8 +9,6 @@ use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 #[cfg(test)]
 use surrealdb_types::ToSql;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::common::resolve_version_stamp;
@@ -281,7 +279,10 @@ impl ExecOperator for DynamicScan {
 		mode
 	}
 
-	#[instrument(name = "Scan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "Scan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Get database context - we declared Database level, so this should succeed
 		let db_ctx = ctx.database()?.clone();

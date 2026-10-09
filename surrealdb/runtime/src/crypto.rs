@@ -1,9 +1,22 @@
+//! The `crypto::*` function family.
+//!
+//! Two families are behind cargo features, so a build that does not need them
+//! can leave their dependencies out: the digests (`crypto-digest`) and the
+//! password hashes (`crypto-password`). With a feature off, this module does
+//! not define that family at all; the function names stay known to the parser
+//! and the registry, and `surrealdb-core` answers a call with an error naming
+//! the missing feature.
+
 use anyhow::Result;
+#[cfg(feature = "crypto-digest")]
 use md5::{Digest, Md5};
+#[cfg(feature = "crypto-digest")]
 use sha1::Sha1;
+#[cfg(feature = "crypto-digest")]
 use sha2::{Sha256, Sha512};
 use surrealdb_expr::val::Value;
 
+#[cfg(feature = "crypto-digest")]
 pub fn blake3((arg,): (String,)) -> Result<Value> {
 	Ok(blake3::hash(arg.as_bytes()).to_string().into())
 }
@@ -12,6 +25,7 @@ pub fn joaat((arg,): (String,)) -> Result<Value> {
 	Ok(joaat::hash_bytes(arg.as_bytes()).into())
 }
 
+#[cfg(feature = "crypto-digest")]
 pub fn md5((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Md5::new();
 	hasher.update(arg.as_str());
@@ -20,6 +34,7 @@ pub fn md5((arg,): (String,)) -> Result<Value> {
 	Ok(val.into())
 }
 
+#[cfg(feature = "crypto-digest")]
 pub fn sha1((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha1::new();
 	hasher.update(arg.as_str());
@@ -28,6 +43,7 @@ pub fn sha1((arg,): (String,)) -> Result<Value> {
 	Ok(val.into())
 }
 
+#[cfg(feature = "crypto-digest")]
 pub fn sha256((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha256::new();
 	hasher.update(arg.as_str());
@@ -36,6 +52,7 @@ pub fn sha256((arg,): (String,)) -> Result<Value> {
 	Ok(val.into())
 }
 
+#[cfg(feature = "crypto-digest")]
 pub fn sha512((arg,): (String,)) -> Result<Value> {
 	let mut hasher = Sha512::new();
 	hasher.update(arg.as_str());
@@ -45,10 +62,12 @@ pub fn sha512((arg,): (String,)) -> Result<Value> {
 }
 
 /// Allowed to cost this much more than default setting for each hash function.
+#[cfg(feature = "crypto-password")]
 const COST_ALLOWANCE: u32 = 4;
 
 /// Like verify_password, but takes a closure to determine whether the cost of
 /// performing the operation is not too high.
+#[cfg(feature = "crypto-password")]
 macro_rules! bounded_verify_password {
 	($algo: ident, $instance: expr_2021, $password: expr_2021, $hash: expr_2021, $bound: expr_2021) => {
 		if let (Some(salt), Some(expected_output)) = (&$hash.salt, &$hash.hash) {
@@ -83,6 +102,7 @@ macro_rules! bounded_verify_password {
 	};
 }
 
+#[cfg(feature = "crypto-password")]
 pub mod argon2 {
 
 	use anyhow::Result;
@@ -119,6 +139,7 @@ pub mod argon2 {
 	}
 }
 
+#[cfg(feature = "crypto-password")]
 pub mod bcrypt {
 
 	use anyhow::Result;
@@ -235,6 +256,7 @@ pub mod bcrypt {
 	}
 }
 
+#[cfg(feature = "crypto-password")]
 pub mod pbkdf2 {
 
 	use anyhow::Result;
@@ -272,6 +294,7 @@ pub mod pbkdf2 {
 	}
 }
 
+#[cfg(feature = "crypto-password")]
 pub mod scrypt {
 
 	use anyhow::Result;

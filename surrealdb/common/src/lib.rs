@@ -37,6 +37,7 @@ pub mod mem_registry;
 pub mod net;
 pub mod non_max;
 pub mod range;
+pub mod rt;
 pub mod span;
 pub mod str;
 pub mod time;

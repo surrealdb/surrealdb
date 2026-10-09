@@ -472,8 +472,8 @@ impl Parser<'_> {
 
 					let y = this.next_token_value::<f64>()?;
 					this.expect_closing_delimiter(t!(")"), start)?;
-					Ok(Some(Expr::Literal(Literal::Geometry(geo::Geometry::Point(
-						geo::Point::new(x, y),
+					Ok(Some(Expr::Literal(Literal::Geometry(geo_types::Geometry::Point(
+						geo_types::Point::new(x, y),
 					)))))
 				})? {
 					return Ok(x);

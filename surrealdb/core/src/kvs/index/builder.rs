@@ -11,13 +11,9 @@ use chrono::Utc;
 use common::time::sleep;
 use futures::channel::oneshot::{Receiver, Sender, channel};
 use surrealdb_datastore::close::{CommitAction, RollbackAction};
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
 use tokio::sync::{Notify, OnceCell, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
 use super::replay::CountPrimaryProgress;
@@ -231,7 +227,7 @@ impl IndexBuilder {
 		// fall out of scope instead would drop it here, at the end of this
 		// function, and report every build finished before it had begun.
 		let guard = BuildingFinishGuard(Arc::clone(&building));
-		spawn(async move {
+		common::rt::spawn_detached(async move {
 			let r = b.run_acquired(acquired).await;
 			let generation = b.build_generation.load(Ordering::Acquire);
 			if let Err(err) = &r {
@@ -389,6 +385,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<()> {
+		crate::idx::check_index_kernel(&ix.index)?;
 		match self.build(ctx, opt, tb, ix, blocking).await? {
 			Some(rcv) => rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
 				reason: "Channel shutdown".to_string(),

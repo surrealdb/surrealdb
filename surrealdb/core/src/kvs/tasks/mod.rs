@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "maintenance-tasks"), allow(dead_code, unused_imports))]
+
 use core::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
@@ -7,11 +9,7 @@ use common::time::{Instant, MissedTickBehavior, sleep};
 use futures::StreamExt;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_types::Error;
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
 use tokio_util::sync::CancellationToken;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::err::{is_query_cancelled, is_query_timedout};
 use crate::kvs::{Datastore, LiveQueryEngine};
@@ -22,32 +20,33 @@ mod interval;
 
 use self::interval::IntervalStream;
 
-#[cfg(not(target_family = "wasm"))]
-type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+type Task = Pin<Box<dyn Future<Output = Result<(), common::rt::JoinError>> + Send + 'static>>;
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 type Task = Pin<Box<()>>;
 
 /// Spawns `fut` on the ambient runtime and returns a handle the caller can await
 /// to observe the task finishing.
 ///
-/// Awaiting the returned [`Task`] is only meaningful off wasm. `spawn_local`
-/// yields no join handle, so on wasm the task is detached and the returned
-/// `Task` completes immediately without waiting for `fut`.
-#[cfg(not(target_family = "wasm"))]
+/// Awaiting the returned [`Task`] is meaningful on every target but browser
+/// wasm. The browser executor yields no join handle, so there the task is
+/// detached and the returned `Task` completes immediately without waiting for
+/// `fut`.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn into_task<F>(fut: F) -> Task
 where
 	F: Future<Output = ()> + Send + 'static,
 {
-	Box::pin(spawn(fut))
+	Box::pin(common::rt::spawn(fut))
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn into_task<F>(fut: F) -> Task
 where
 	F: Future<Output = ()> + 'static,
 {
-	spawn(fut);
+	common::rt::spawn_detached(fut);
 	Box::pin(())
 }
 
@@ -74,14 +73,16 @@ enum NodeMembershipUpdateResult {
 	Failed(anyhow::Error),
 }
 
-pub struct Tasks(#[cfg_attr(target_family = "wasm", expect(dead_code))] Vec<Task>);
+pub struct Tasks(
+	#[cfg_attr(all(target_family = "wasm", target_os = "unknown"), expect(dead_code))] Vec<Task>,
+);
 
 impl Tasks {
-	#[cfg(target_family = "wasm")]
+	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 	pub async fn resolve(self) -> Result<(), Error> {
 		Ok(())
 	}
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 	pub async fn resolve(self) -> Result<(), Error> {
 		for task in self.0 {
 			// Surface a task that panicked or was aborted. The maintenance
@@ -126,7 +127,25 @@ impl Tasks {
 /// The datastore starts these itself, so the only reason to call this directly
 /// is to start them against a datastore built with
 /// [`Builder::without_maintenance_tasks`](crate::kvs::ds::builder::Builder::without_maintenance_tasks).
+///
+/// A build without the `maintenance-tasks` feature starts nothing and logs an
+/// error naming the feature: its host drives that work instead.
 pub fn init(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
+	#[cfg(not(feature = "maintenance-tasks"))]
+	{
+		let _ = (dbs, canceller, opts);
+		error!(
+			"Maintenance tasks were requested, but this build was compiled without the \
+			 `maintenance-tasks` feature; none were started"
+		);
+		Tasks(Vec::new())
+	}
+	#[cfg(feature = "maintenance-tasks")]
+	start(dbs, canceller, opts)
+}
+
+#[cfg(feature = "maintenance-tasks")]
+fn start(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
 	let weak = Arc::downgrade(dbs);
 	// The triggers are shared state in their own right, so a task holding them
 	// does not keep the datastore alive.

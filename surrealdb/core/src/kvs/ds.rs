@@ -1,8 +1,8 @@
 use std::any::TypeId;
 use std::borrow::Cow;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use std::collections::HashMap;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, HashSet};
 use std::fmt::{self, Display};
@@ -19,6 +19,8 @@ use anyhow::{Context as _, Result, ensure};
 use arc_swap::ArcSwap;
 use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+use common::rt::spawn;
 use common::time::{Instant, sleep, timeout, timeout_at};
 use futures::{Future, Stream};
 use rand::Rng;
@@ -30,10 +32,8 @@ use surrealdb_datastore::values::graph::GraphFoldScope;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, trace, warn};
 use uuid::Uuid;
 
 use super::tx::Transaction;
@@ -74,7 +74,7 @@ use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
-use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
+use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
@@ -1125,7 +1125,10 @@ impl Datastore {
 	/// so an embedder that skips it against pre-3.3 storage sees sequences that
 	/// appear not to exist — which `DEFINE SEQUENCE ... IF NOT EXISTS` will then
 	/// recreate, resetting an allocator that has already issued values.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		let (version, is_new) = self.settle_storage_version().await?;
 		// Check we are running the latest version
@@ -1174,7 +1177,10 @@ impl Datastore {
 	/// `None` for a datastore last written before 3.3, the release that
 	/// introduced the stamp. Its major version is still available from
 	/// [`Self::get_version`].
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn storage_version(&self) -> Result<Option<StorageVersion>> {
 		let txn = self.transaction(Read).await?;
 		let version = catch!(txn, txn.get_key(&StorageVersionKey {}, None).await);
@@ -1186,7 +1192,10 @@ impl Datastore {
 	///
 	/// One entry per version transition, not per startup: a node that starts
 	/// against a datastore already stamped at its own version adds nothing.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn version_history(&self) -> Result<Vec<VersionHistoryEntry>> {
 		let txn = self.transaction(Read).await?;
 		let range = catch!(txn, VersionHistoryPrefix {}.range());
@@ -1197,7 +1206,10 @@ impl Datastore {
 
 	/// Every data migration applied to this datastore, in the order they were
 	/// declared.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	/// Paired with the ledger id the entry was filed under, which is a
 	/// migration's identity; the name in the record is documentation and may be
 	/// reworded between releases.
@@ -1257,7 +1269,10 @@ impl Datastore {
 	/// [`Datastore::start_maintenance_tasks`]). The sentinel is what keeps a
 	/// writer that escapes it anyway — a future job, a storage engine with keys
 	/// of its own — from turning a fresh datastore into an unstartable one.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
 		#[cfg(test)]
 		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapBegin, self.id)?;
@@ -1390,7 +1405,10 @@ impl Datastore {
 	// --------------------------------------------------
 
 	/// Setup the initial cluster access credentials
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Retry because concurrent instances may conflict when creating the root user
 		Self::retry("Initialise credentials", || self.initialise_credentials_attempt(user, pass))
@@ -1434,7 +1452,10 @@ impl Datastore {
 	}
 
 	/// Setup the default namespace and database
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn initialise_defaults(&self, namespace: &str, database: &str) -> Result<()> {
 		info!(target: TARGET, "This is a new SurrealDB instance. Initialising default namespace '{namespace}' and database '{database}'");
 		// Create the SQL statement
@@ -1470,7 +1491,10 @@ impl Datastore {
 	/// restored by `surreal import`. Parsed under the datastore's configured
 	/// query limits instead, this entry point would refuse depths that an
 	/// export is required to be able to write back.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
@@ -1498,8 +1522,11 @@ impl Datastore {
 		if maintenance.is_some() {
 			return;
 		}
-		*maintenance =
-			Some(crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options));
+		let tasks = crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options);
+		// A build without `maintenance-tasks` started none, and records none.
+		if cfg!(feature = "maintenance-tasks") {
+			*maintenance = Some(tasks);
+		}
 	}
 
 	/// Whether this datastore's maintenance tasks are running.
@@ -1515,7 +1542,10 @@ impl Datastore {
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
@@ -1571,7 +1601,10 @@ impl Datastore {
 	/// join a cluster and catch up first blocks here for as long as that takes,
 	/// which keeps a legitimately slow join from being charged against a
 	/// caller's retry budget. `Err` means the backend will never serve.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn wait_until_serve_ready(&self) -> Result<()> {
 		self.transaction_factory.wait_until_serve_ready().await
 	}
@@ -1591,7 +1624,7 @@ impl Datastore {
 	/// data is already logically inaccessible (typically because a committed
 	/// transaction cleared the catalog entry naming it), and any snapshot that
 	/// could still read it has expired.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self), fields(rng = range.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self), fields(rng = range.to_string())))]
 	pub async fn unsafe_destroy_range(&self, range: KeyRange<'static>) -> Result<()> {
 		let Some(ops) = self.destroy_range_ops() else {
 			return Err(crate::kvs::Error::RangeDestroyNotSupported.into());
@@ -1836,7 +1869,10 @@ impl Datastore {
 	// --------------------------------------------------
 
 	/// Initialise the cluster and run bootstrap utilities
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Each bootstrap step is retried independently, because concurrent instances
 		// writing to the same cluster metadata keys may cause transaction conflicts.
@@ -2062,7 +2098,10 @@ impl Datastore {
 	/// is stable across restarts (e.g. a stateful cluster member reusing
 	/// its durable storage) without forcing the operator to clean up state
 	/// between runs.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn insert_node(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id,"Inserting node in the cluster");
@@ -2085,7 +2124,10 @@ impl Datastore {
 	/// This function updates the entry for this node with an up-to-date
 	/// timestamp. This ensures that the node is not marked as expired by any
 	/// garbage collection tasks, preventing any data cleanup for this node.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn update_node(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
@@ -2101,7 +2143,15 @@ impl Datastore {
 
 	/// Updates this node, bounding each step and explicitly cancelling any
 	/// open write transaction before returning on timeout or cancellation.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			err,
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, canceller)
+		)
+	)]
 	pub(crate) async fn update_node_with_timeout(
 		&self,
 		timeout_duration: Duration,
@@ -2138,7 +2188,10 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn delete_node(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
@@ -2161,7 +2214,10 @@ impl Datastore {
 
 	/// Archives this node, bounding each step and explicitly cancelling any
 	/// open write transaction before returning on timeout.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn delete_node_with_timeout(&self, timeout_duration: Duration) -> Result<()> {
 		trace!(target: TARGET, id = %self.id, timeout = ?timeout_duration, "Archiving node in the cluster with timeout");
 
@@ -2192,7 +2248,10 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn expire_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
@@ -2271,7 +2330,10 @@ impl Datastore {
 	/// This function clears up all nodes which have been marked as archived.
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn remove_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
@@ -2381,7 +2443,15 @@ impl Datastore {
 	/// [`load_rpc_session`](Self::load_rpc_session), so none resurrects or
 	/// duplicates a session across nodes. This blind upsert is retained as a
 	/// primitive for callers that own the id exclusively (and for test setup).
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			err,
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, session)
+		)
+	)]
 	pub async fn persist_rpc_session(
 		&self,
 		id: Uuid,
@@ -2411,7 +2481,15 @@ impl Datastore {
 	/// different nodes cannot both create it: one wins and the other is
 	/// reported as an existing session, letting `attach` return
 	/// `session_exists` instead of silently overwriting.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			err,
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, session)
+		)
+	)]
 	pub async fn create_rpc_session(
 		&self,
 		id: Uuid,
@@ -2464,7 +2542,15 @@ impl Datastore {
 	/// the "push a local change to storage" path (a session-mutating method);
 	/// the authoritative *reload* path is
 	/// [`load_rpc_session`](Self::load_rpc_session).
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			err,
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, session)
+		)
+	)]
 	pub async fn update_rpc_session(
 		&self,
 		id: Uuid,
@@ -2524,7 +2610,10 @@ impl Datastore {
 	/// rehydrates an evicted session and when the transport reconciles a
 	/// cached session against storage before dispatch. The TTL is slid only
 	/// after authorization, by [`update_rpc_session`](Self::update_rpc_session).
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, u64)>> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %id, "Loading durable RPC session");
@@ -2596,7 +2685,10 @@ impl Datastore {
 	/// then fails the teardown and can retry, keeping detach fail-closed. In
 	/// the supported single-node-per-session model such a conflict does not
 	/// arise (the owning node serializes the session's writes).
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn delete_rpc_session(&self, id: Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %id, "Deleting durable RPC session");
@@ -2639,7 +2731,10 @@ impl Datastore {
 	///
 	/// # Arguments
 	/// * `interval` - The interval between purge runs, to calculate the lease duration
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting expired RPC session purge");
@@ -2738,7 +2833,10 @@ impl Datastore {
 	/// are specified by uique live query UUIDs. This is necessary when a
 	/// WebSocket disconnects, and any associated live queries need to be
 	/// cleaned up and removed.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<()> {
 		// Log the node deletion
 		trace!(target: TARGET, "Deleting live queries for a connection");
@@ -2795,7 +2893,10 @@ impl Datastore {
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
 	pub async fn changefeed_process(
 		&self,
 		interval: &Duration,
@@ -2886,7 +2987,10 @@ impl Datastore {
 	/// cheap no-op, so the engine's background task can call it unconditionally.
 	/// Unlike changefeed GC this runs on every node without a lease: each node
 	/// delivers only to the subscriptions it owns.
-	#[instrument(level = "trace", target = "surrealdb::core::lq", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::lq", skip(self))
+	)]
 	pub(crate) async fn live_query_router_process(&self) -> Result<()> {
 		// Only the Router engine delivers via the router.
 		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
@@ -2963,7 +3067,14 @@ impl Datastore {
 	/// finishes. User-initiated `REBUILD INDEX` is not throttled by this.
 	///
 	/// Returns the number of stalled builds adopted this pass.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, canceller)
+		)
+	)]
 	pub(crate) async fn resume_stalled_index_builds(
 		&self,
 		interval: Duration,
@@ -3105,7 +3216,14 @@ impl Datastore {
 	/// Coordinated across the cluster by a [`TaskLeaseType::IndexCompaction`]
 	/// lease. Returns the number of processed batches and the number of
 	/// indexes that failed to compact.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(dbs, canceller)
+		)
+	)]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,
 		interval: Duration,
@@ -3319,7 +3437,14 @@ impl Datastore {
 	/// the language-test harness teardown, where there are no concurrent readers).
 	///
 	/// Returns `(iterations, errors)`.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(dbs, canceller)
+		)
+	)]
 	pub async fn reclaim_tombstones(
 		dbs: Arc<Datastore>,
 		interval: Duration,
@@ -3973,10 +4098,10 @@ impl Datastore {
 		})
 	}
 
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 	async fn await_index_compaction_handle(
 		ikb: &IndexKeyBase,
-		handle: &mut tokio::task::JoinHandle<Result<()>>,
+		handle: &mut common::rt::JoinHandle<Result<()>>,
 		canceller: &CancellationToken,
 	) {
 		match handle.await {
@@ -3996,9 +4121,9 @@ impl Datastore {
 		}
 	}
 
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 	async fn await_index_compaction_handles(
-		handles: &mut Vec<(IndexKeyBase, tokio::task::JoinHandle<Result<()>>)>,
+		handles: &mut Vec<(IndexKeyBase, common::rt::JoinHandle<Result<()>>)>,
 		canceller: &CancellationToken,
 	) {
 		while let Some((ikb, mut handle)) = handles.pop() {
@@ -4289,13 +4414,13 @@ impl Datastore {
 		}
 	}
 
-	/// On native targets, compaction tasks are spawned in parallel — one per
+	/// Off the browser, compaction tasks are spawned concurrently — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
 	/// spawned per index. Failures are logged but do not abort the loop.
 	///
 	/// Returns the number of indexes that failed to compact.
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
@@ -4359,14 +4484,14 @@ impl Datastore {
 
 	/// Compacts each distinct index referenced by the given queue keys.
 	///
-	/// On wasm, `tokio::spawn` is unavailable so compactions run
+	/// The browser executor has no join handle, so there compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
 	/// for the same index. Failures are logged but do not abort the loop,
-	/// matching the non-wasm behavior so that a single transient failure
+	/// matching the other targets so that a single transient failure
 	/// does not prevent other indexes from being compacted.
 	///
 	/// Returns the number of indexes that failed to compact.
-	#[cfg(target_family = "wasm")]
+	#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
@@ -5064,7 +5189,14 @@ impl Datastore {
 	/// this bounds the wait to one batch rather than to the whole queue — which
 	/// is what stops a busy queue from holding [`Self::shutdown`] open for as
 	/// long as writes keep arriving.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, canceller)
+		)
+	)]
 	pub(crate) async fn event_processing(
 		&self,
 		interval: Duration,
@@ -5242,7 +5374,10 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn run(
 		&self,
 		req: QueryRequest<'_>,
@@ -5289,7 +5424,10 @@ impl Datastore {
 	/// reading is only noticed at the next send otherwise, so a query in a
 	/// phase that emits nothing for a while — a sort, an aggregate — would run
 	/// to completion after the client had gone.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub fn run_streaming(
 		self: &Arc<Self>,
 		req: QueryRequest<'_>,
@@ -5532,7 +5670,10 @@ impl Datastore {
 	///     Ok(())
 	/// }
 	/// ```
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn execute(
 		&self,
 		txt: &str,
@@ -5543,7 +5684,10 @@ impl Datastore {
 	}
 
 	/// Execute a pre-parsed SQL query
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn process(
 		&self,
 		ast: Ast,
@@ -5575,7 +5719,10 @@ impl Datastore {
 		}
 	}
 
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
@@ -5681,7 +5828,10 @@ impl Datastore {
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub(crate) async fn evaluate(
 		&self,
 		val: &Expr,
@@ -5752,7 +5902,10 @@ impl Datastore {
 	/// the datastore's configured query limits, so that this entry point and
 	/// [`Self::execute_import`] restore the same exports. Everything after
 	/// parsing is an ordinary query execution.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
@@ -5774,7 +5927,10 @@ impl Datastore {
 	}
 
 	/// Performs a database import from SQL
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
@@ -5786,7 +5942,10 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn export(
 		&self,
 		sess: &Session,
@@ -5798,7 +5957,10 @@ impl Datastore {
 	}
 
 	/// Performs a full database export as SQL
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
 	pub async fn export_with_config(
 		&self,
 		sess: &Session,
@@ -5844,7 +6006,14 @@ impl Datastore {
 	}
 
 	/// Checks the required permissions level for this session
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, sess))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::ds",
+			skip(self, sess)
+		)
+	)]
 	#[allow(clippy::needless_pass_by_value)] // Public API: ergonomic for callers passing `ResourceKind::X.on_db(ns, db)` inline.
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<()> {
 		// Check if the session has expired
@@ -6426,7 +6595,7 @@ pub(crate) fn define_user_statement_new_with_password(
 		roles: vec![role],
 		duration: UserDuration::default(),
 		comment: Expr::Literal(Literal::None),
-		scram: Some(ScramCredential::generate(pass)),
+		scram: surrealdb_expr::scram::derive(pass),
 	}
 }
 

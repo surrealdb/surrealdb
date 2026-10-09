@@ -4,10 +4,13 @@ use std::hash;
 use std::iter::once;
 
 use common::fmt::Fmt;
+#[cfg(feature = "geo")]
 use geo::algorithm::contains::Contains;
+#[cfg(feature = "geo")]
 use geo::algorithm::intersects::Intersects;
-use geo::{Coord, LineString, LinesIter, Point, Polygon};
-use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use geo_types::{
+	Coord, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
+};
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -50,20 +53,20 @@ impl Geometry {
 			Geometry::MultiPoint(v) => v
 				.iter()
 				.all(|p| (-90.0..=90.0).contains(&p.0.y) && (-180.0..=180.0).contains(&p.0.x)),
-			Geometry::Line(v) => v.lines_iter().all(|l| {
+			Geometry::Line(v) => v.lines().all(|l| {
 				(-90.0..=90.0).contains(&l.start.y)
 					&& (-180.0..=180.0).contains(&l.start.x)
 					&& (-90.0..=90.0).contains(&l.end.y)
 					&& (-180.0..=180.0).contains(&l.end.x)
 			}),
-			Geometry::Polygon(v) => v.lines_iter().all(|l| {
+			Geometry::Polygon(v) => polygon_lines(v).all(|l| {
 				(-90.0..=90.0).contains(&l.start.y)
 					&& (-180.0..=180.0).contains(&l.start.x)
 					&& (-90.0..=90.0).contains(&l.end.y)
 					&& (-180.0..=180.0).contains(&l.end.x)
 			}),
 			Geometry::MultiLine(v) => v.iter().all(|l| {
-				l.lines_iter().all(|l| {
+				l.lines().all(|l| {
 					(-90.0..=90.0).contains(&l.start.y)
 						&& (-180.0..=180.0).contains(&l.start.x)
 						&& (-90.0..=90.0).contains(&l.end.y)
@@ -71,7 +74,7 @@ impl Geometry {
 				})
 			}),
 			Geometry::MultiPolygon(v) => v.iter().all(|p| {
-				p.lines_iter().all(|l| {
+				polygon_lines(p).all(|l| {
 					(-90.0..=90.0).contains(&l.start.y)
 						&& (-180.0..=180.0).contains(&l.start.x)
 						&& (-90.0..=90.0).contains(&l.end.y)
@@ -291,6 +294,8 @@ impl Geometry {
 	// Value operations
 	// -----------------------------------
 
+	/// Whether this geometry contains `other`. Needs the `geo` feature.
+	#[cfg(feature = "geo")]
 	pub fn contains(&self, other: &Self) -> bool {
 		match self {
 			Self::Point(v) => match other {
@@ -340,6 +345,8 @@ impl Geometry {
 		}
 	}
 
+	/// Whether this geometry intersects `other`. Needs the `geo` feature.
+	#[cfg(feature = "geo")]
 	pub fn intersects(&self, other: &Self) -> bool {
 		match self {
 			Self::Point(v) => match other {
@@ -567,7 +574,7 @@ impl From<Vec<Polygon<f64>>> for Geometry {
 	}
 }
 
-impl From<Geometry> for geo::Geometry<f64> {
+impl From<Geometry> for geo_types::Geometry<f64> {
 	fn from(v: Geometry) -> Self {
 		match v {
 			Geometry::Point(v) => v.into(),
@@ -576,42 +583,42 @@ impl From<Geometry> for geo::Geometry<f64> {
 			Geometry::MultiPoint(v) => v.into(),
 			Geometry::MultiLine(v) => v.into(),
 			Geometry::MultiPolygon(v) => v.into(),
-			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>(),
+			Geometry::Collection(v) => v.into_iter().collect::<geo_types::Geometry<f64>>(),
 		}
 	}
 }
 
-impl From<geo::Geometry<f64>> for Geometry {
+impl From<geo_types::Geometry<f64>> for Geometry {
 	/// Convert from the upstream geometry enum.
 	///
 	/// `geo`'s enum is a superset of SurrealQL's geometry variants: `Rect` and
 	/// `Triangle` convert to their equivalent polygons, and a bare `Line`
 	/// (segment) becomes a two-point line string.
-	fn from(v: geo::Geometry<f64>) -> Self {
+	fn from(v: geo_types::Geometry<f64>) -> Self {
 		match v {
-			geo::Geometry::Point(v) => Geometry::Point(v),
-			geo::Geometry::Line(v) => Geometry::Line(LineString::from(vec![v.start, v.end])),
-			geo::Geometry::LineString(v) => Geometry::Line(v),
-			geo::Geometry::Polygon(v) => Geometry::Polygon(v),
-			geo::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
-			geo::Geometry::MultiLineString(v) => Geometry::MultiLine(v),
-			geo::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
-			geo::Geometry::GeometryCollection(v) => {
+			geo_types::Geometry::Point(v) => Geometry::Point(v),
+			geo_types::Geometry::Line(v) => Geometry::Line(LineString::from(vec![v.start, v.end])),
+			geo_types::Geometry::LineString(v) => Geometry::Line(v),
+			geo_types::Geometry::Polygon(v) => Geometry::Polygon(v),
+			geo_types::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
+			geo_types::Geometry::MultiLineString(v) => Geometry::MultiLine(v),
+			geo_types::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
+			geo_types::Geometry::GeometryCollection(v) => {
 				Geometry::Collection(v.0.into_iter().map(Geometry::from).collect())
 			}
-			geo::Geometry::Rect(v) => Geometry::Polygon(v.to_polygon()),
-			geo::Geometry::Triangle(v) => Geometry::Polygon(v.to_polygon()),
+			geo_types::Geometry::Rect(v) => Geometry::Polygon(v.to_polygon()),
+			geo_types::Geometry::Triangle(v) => Geometry::Polygon(v.to_polygon()),
 		}
 	}
 }
 
-impl FromIterator<Geometry> for geo::Geometry<f64> {
+impl FromIterator<Geometry> for geo_types::Geometry<f64> {
 	fn from_iter<I: IntoIterator<Item = Geometry>>(iter: I) -> Self {
-		let mut c: Vec<geo::Geometry<f64>> = vec![];
+		let mut c: Vec<geo_types::Geometry<f64>> = vec![];
 		for i in iter {
 			c.push(i.into())
 		}
-		geo::Geometry::GeometryCollection(geo::GeometryCollection(c))
+		geo_types::Geometry::GeometryCollection(geo_types::GeometryCollection(c))
 	}
 }
 
@@ -996,11 +1003,16 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 	}
 }
 
+/// The segments of a polygon's exterior ring and then of each interior ring.
+fn polygon_lines(polygon: &Polygon) -> impl Iterator<Item = Line> + '_ {
+	polygon.exterior().lines().chain(polygon.interiors().iter().flat_map(LineString::lines))
+}
+
 #[cfg(test)]
 mod test {
 	use core::f64;
 
-	use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+	use geo_types::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 	use super::Geometry;
 

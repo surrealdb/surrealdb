@@ -154,6 +154,13 @@ pub enum Error {
 
 	#[error("The string could not be parsed into a bytesize")]
 	InvalidBytesize,
+
+	/// The build left out the cargo feature an operation needs.
+	#[error("{what} are not available: this build was compiled without the `{feature}` feature")]
+	FeatureDisabled {
+		feature: &'static str,
+		what: &'static str,
+	},
 }
 
 impl LeafError for Error {
@@ -202,6 +209,10 @@ impl LeafError for Error {
 			// A versionstamp that will not fit is an engine-internals fault, not
 			// something the caller phrased wrongly.
 			Error::TimestampOverflow(..) => TypesError::internal(message),
+
+			Error::FeatureDisabled {
+				..
+			} => TypesError::configuration(message, None),
 
 			// Reach clients as an untyped internal error only because they always
 			// have. Each is a candidate for a real kind, and giving one a kind
@@ -259,8 +270,8 @@ impl Error {
 	}
 }
 
-impl From<regex::Error> for Error {
-	fn from(error: regex::Error) -> Self {
+impl From<surrealdb_types::regex_engine::RegexError> for Error {
+	fn from(error: surrealdb_types::regex_engine::RegexError) -> Self {
 		Error::InvalidRegex(error.to_string())
 	}
 }

@@ -20,8 +20,6 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 #[cfg(test)]
 use futures::StreamExt;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::pipeline::{ScanPipeline, build_field_state};
@@ -338,7 +336,10 @@ impl ExecOperator for UnionIndexScan {
 		}
 	}
 
-	#[instrument(name = "UnionIndexScan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "UnionIndexScan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		if self.inputs.is_empty() {
 			return Ok(monitor_stream(

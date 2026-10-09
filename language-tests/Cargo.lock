@@ -4022,6 +4022,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4115,7 +4121,6 @@ dependencies = [
  "bytes",
  "chrono",
  "geo",
- "regex",
  "revision-derive 0.30.0",
  "roaring",
  "rust_decimal",
@@ -5027,6 +5032,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "unicase",
+ "wasm-bindgen-futures",
  "wasmtimer",
 ]
 
@@ -5041,14 +5047,12 @@ dependencies = [
  "async-channel",
  "async-graphql",
  "base64",
- "bcrypt",
  "bytes",
  "chrono",
  "ciborium",
  "dashmap",
  "ext-sort",
  "futures",
- "geo",
  "geo-types",
  "getrandom 0.3.4",
  "headers",
@@ -5057,7 +5061,6 @@ dependencies = [
  "ipnet",
  "jsonwebtoken",
  "libmimalloc-sys",
- "md-5",
  "memchr",
  "mimalloc",
  "mime",
@@ -5065,18 +5068,15 @@ dependencies = [
  "object_store",
  "parking_lot",
  "path-clean",
- "pbkdf2",
  "quick_cache",
  "rand 0.9.4",
  "rand_core 0.6.4",
  "rayon",
- "regex",
  "revision 0.30.0",
  "ring",
  "roaring",
  "rquickjs",
  "rust_decimal",
- "scrypt",
  "semver",
  "serde",
  "serde_json",
@@ -5115,8 +5115,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "wasm-bindgen-futures",
- "wasmtimer",
  "web-time",
 ]
 
@@ -5173,7 +5171,6 @@ dependencies = [
  "lexicmp",
  "quick_cache",
  "rand 0.9.4",
- "regex",
  "revision 0.30.0",
  "rquickjs",
  "rust_decimal",
@@ -5476,11 +5473,11 @@ dependencies = [
  "deunicode",
  "fuzzy-matcher",
  "geo",
+ "geo-types",
  "md-5",
  "pbkdf2",
  "rand 0.9.4",
  "rand_core 0.6.4",
- "regex",
  "rust_decimal",
  "scrypt",
  "semver",
@@ -5504,12 +5501,11 @@ version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "getrandom 0.3.4",
  "hex",
  "phf",
  "rand 0.9.4",
- "regex",
  "rust_decimal",
  "serde",
  "surrealdb-common",
@@ -5558,9 +5554,8 @@ version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "phf",
- "regex",
  "rust_decimal",
  "surrealdb-cnf",
  "surrealdb-common",
@@ -5611,7 +5606,7 @@ dependencies = [
  "castaway",
  "chrono",
  "flatbuffers",
- "geo",
+ "geo-types",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "hex",
@@ -5619,6 +5614,7 @@ dependencies = [
  "papaya",
  "rand 0.9.4",
  "regex",
+ "regex-lite",
  "rust_decimal",
  "serde",
  "serde_json",

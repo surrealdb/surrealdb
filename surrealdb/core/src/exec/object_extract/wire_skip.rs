@@ -417,7 +417,7 @@ mod tests {
 		// involved than the other Varlen variants and pulling `geo` types
 		// into the table above would obscure the simpler cases.
 		use crate::val::Geometry;
-		let v = Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0)));
+		let v = Value::Geometry(Geometry::Point(geo_types::Point::new(0.0, 0.0)));
 		let bytes = encoded(&v);
 		let tag = revision::optimised::tag::Tag(bytes[1]);
 		assert_eq!(tag.variant_id(), 11, "Geometry variant_id drift");

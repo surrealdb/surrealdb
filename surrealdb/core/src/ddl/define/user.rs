@@ -43,7 +43,10 @@ pub(crate) async fn define_user_statement_to_definition(
 }
 
 /// Process this type returning a computed simple Value
-#[instrument(level = "trace", name = "DefineUserStatement::compute", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", name = "DefineUserStatement::compute", skip_all)
+)]
 pub(crate) async fn define_user_statement_compute(
 	this: &DefineUserStatement,
 	ctx: &FrozenContext,

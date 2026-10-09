@@ -174,7 +174,9 @@ impl Parser<'_> {
 
 							let y = self.next_token_value::<f64>()?;
 							self.expect_closing_delimiter(t!(")"), open)?;
-							PublicValue::Geometry(PublicGeometry::Point(geo::Point::new(x, y)))
+							PublicValue::Geometry(PublicGeometry::Point(geo_types::Point::new(
+								x, y,
+							)))
 						} else {
 							self.expect_closing_delimiter(t!(")"), open)?;
 

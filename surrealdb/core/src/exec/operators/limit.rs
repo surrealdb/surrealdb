@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
-use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -147,7 +146,10 @@ impl ExecOperator for Limit {
 		self.input.output_ordering()
 	}
 
-	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "Limit::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input = Arc::clone(&self.input);
 		let access_mode = self.access_mode().combine(self.input.access_mode());

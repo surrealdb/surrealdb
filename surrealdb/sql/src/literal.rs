@@ -29,13 +29,13 @@ pub enum Literal {
 	Uuid(uuid::Uuid),
 	Regex(
 		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::arbitrary::arb_regex))]
-		regex::Regex,
+		surrealdb_types::regex_engine::Regex,
 	),
 
 	Array(Vec<Expr>),
 	Set(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
-	Geometry(geo::Geometry<f64>),
+	Geometry(geo_types::Geometry<f64>),
 	File(File),
 	Bytes(
 		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::arbitrary::arb_bytes))]
@@ -54,7 +54,7 @@ impl PartialEq for Literal {
 			(Literal::Decimal(a), Literal::Decimal(b)) => a == b,
 			(Literal::String(a), Literal::String(b)) => a == b,
 			(Literal::Bytes(a), Literal::Bytes(b)) => a == b,
-			// `regex::Regex` has no `PartialEq`; compare the source pattern instead.
+			// The engine regex has no `PartialEq`; compare the source pattern instead.
 			(Literal::Regex(a), Literal::Regex(b)) => a.as_str() == b.as_str(),
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
 			(Literal::Array(a), Literal::Array(b)) => a == b,
@@ -298,7 +298,7 @@ mod tests {
 			Literal::Array(vec![]),
 			Literal::Set(vec![]),
 			Literal::Object(vec![]),
-			Literal::Geometry(geo::Geometry::Point(geo::Point::new(1.0, 2.0))),
+			Literal::Geometry(geo_types::Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 			Literal::File(File {
 				bucket: "b".to_owned(),
 				key: "p".to_owned(),

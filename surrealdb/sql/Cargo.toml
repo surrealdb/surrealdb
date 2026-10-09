@@ -35,11 +35,10 @@ surrealdb-types = { workspace = true }
 
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-geo = { workspace = true, features = ["use-serde"] }
+geo-types = { workspace = true }
 hex.workspace = true
 phf = { workspace = true, features = ["macros", "unicase"] }
 rand.workspace = true
-regex.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 serde = { workspace = true, features = ["derive", "rc"] }
 unicase.workspace = true
@@ -52,6 +51,8 @@ regex-syntax = { workspace = true, optional = true }
 getrandom = { workspace = true, features = ["wasm_js"] }
 
 [dev-dependencies]
+# Tests run against the Unicode regex engine whatever the build selects.
+surrealdb-types = { workspace = true, features = ["regex-unicode"] }
 rstest = { workspace = true }
 
 [lints]

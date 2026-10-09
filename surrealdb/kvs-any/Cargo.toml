@@ -14,6 +14,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
+# Tracing spans on the in-memory backend's functions; see
+# `surrealdb-kvs-mem`'s feature of the same name.
+observability = ["surrealdb-kvs-mem?/observability"]
 kv-mem = ["dep:surrealdb-kvs-mem"]
 kv-rocksdb = ["dep:surrealdb-kvs-rocksdb"]
 kv-tikv = ["dep:surrealdb-kvs-tikv"]

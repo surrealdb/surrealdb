@@ -10,11 +10,6 @@ use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use surrealdb_datastore::close::CommitAction;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
-use tracing::instrument;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
 use crate::catalog::providers::{
@@ -461,7 +456,7 @@ impl Executor {
 		if receiver.is_empty() && receiver.is_closed() {
 			return;
 		}
-		spawn(async move {
+		common::rt::spawn_detached(async move {
 			while let Ok(item) = receiver.recv().await {
 				delivery.send(item).await;
 			}
@@ -978,21 +973,20 @@ impl Executor {
 		/// The task has to be spawned rather than raced inside the query
 		/// future: the point is for it to fire while the executor is inside an
 		/// operator that is not otherwise yielding to check the deadline.
-		#[cfg(not(target_family = "wasm"))]
-		struct TimeoutGuard(tokio::task::JoinHandle<()>);
-		#[cfg(not(target_family = "wasm"))]
+		#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+		struct TimeoutGuard(common::rt::JoinHandle<()>);
+		#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 		impl Drop for TimeoutGuard {
 			fn drop(&mut self) {
 				self.0.abort();
 			}
 		}
 
-		/// Wasm has no runtime to spawn onto and `spawn_local` returns no
-		/// handle to abort, so the task is stopped by a token it waits on
-		/// alongside the timer.
-		#[cfg(target_family = "wasm")]
+		/// The browser executor returns no handle to abort, so there the task
+		/// is stopped by a token it waits on alongside the timer.
+		#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 		struct TimeoutGuard(CancellationToken);
-		#[cfg(target_family = "wasm")]
+		#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 		impl Drop for TimeoutGuard {
 			fn drop(&mut self) {
 				self.0.cancel();
@@ -1002,18 +996,18 @@ impl Executor {
 		/// Cancels `token` once `timeout` elapses, unless the returned guard is
 		/// dropped first.
 		fn spawn_timeout(timeout: Duration, token: CancellationToken) -> TimeoutGuard {
-			#[cfg(not(target_family = "wasm"))]
+			#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 			{
-				TimeoutGuard(tokio::spawn(async move {
+				TimeoutGuard(common::rt::spawn(async move {
 					common::time::sleep(timeout).await;
 					token.cancel();
 				}))
 			}
-			#[cfg(target_family = "wasm")]
+			#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 			{
 				let finished = CancellationToken::new();
 				let stop = finished.clone();
-				wasm_bindgen_futures::spawn_local(async move {
+				common::rt::spawn_detached(async move {
 					tokio::select! {
 						_ = common::time::sleep(timeout) => token.cancel(),
 						_ = stop.cancelled() => {}
@@ -1484,7 +1478,15 @@ impl Executor {
 	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
 	/// Argon2 hash and a SCRAM verifier: deliberately expensive, and with no
 	/// yield point. A schema statement converts once, during lowering.
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "debug",
+			name = "executor",
+			target = "surrealdb::core::dbs",
+			skip_all
+		)
+	)]
 	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
@@ -3010,7 +3012,15 @@ impl Executor {
 		Ok(())
 	}
 
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "debug",
+			name = "executor",
+			target = "surrealdb::core::dbs",
+			skip_all
+		)
+	)]
 	pub(crate) async fn execute_statements(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -3025,7 +3035,15 @@ impl Executor {
 	}
 
 	/// Execute a batch of statements with an existing transaction
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "debug",
+			name = "executor",
+			target = "surrealdb::core::dbs",
+			skip_all
+		)
+	)]
 	pub(crate) async fn execute_statements_with_transaction(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -3172,7 +3190,15 @@ impl Executor {
 		Ok(())
 	}
 
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "debug",
+			name = "executor",
+			target = "surrealdb::core::dbs",
+			skip_all
+		)
+	)]
 	pub(crate) async fn execute_stream<S>(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -3193,7 +3219,7 @@ impl Executor {
 		.await
 	}
 
-	#[instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "debug",
 		name = "executor",
 		target = "surrealdb::core::dbs",
@@ -3214,7 +3240,7 @@ impl Executor {
 			surrealdb.session_id = tracing::field::Empty,
 			surrealdb.statement_type = tracing::field::Empty,
 		),
-	)]
+	))]
 	pub(crate) async fn execute_statement_stream<S>(
 		kvs: &Datastore,
 		ctx: FrozenContext,

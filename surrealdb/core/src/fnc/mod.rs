@@ -13,6 +13,16 @@ pub mod api;
 pub(crate) mod closure;
 pub mod encoding;
 pub mod eval;
+#[cfg(not(all(
+	feature = "collate",
+	feature = "geo",
+	feature = "crypto-digest",
+	feature = "crypto-password",
+	feature = "html-sanitize"
+)))]
+mod feature;
+#[cfg(test)]
+mod feature_tests;
 pub mod file;
 pub mod http;
 pub(crate) mod module;
@@ -29,10 +39,19 @@ pub mod r#type;
 pub mod util;
 // The pure families live one crate down; these keep every `fnc::math::…`
 // path in core, in exec's builtins and in the script bridge resolving.
+#[cfg(feature = "collate")]
+pub use surrealdb_runtime::array;
+#[cfg(feature = "geo")]
+pub use surrealdb_runtime::geo;
 pub use surrealdb_runtime::{
-	args, array, bytes, count, crypto, duration, geo, math, not, object, parse, rand, set, string,
-	time,
+	args, bytes, count, duration, math, not, object, parse, rand, set, time,
 };
+#[cfg(not(feature = "collate"))]
+pub mod array;
+pub mod crypto;
+#[cfg(not(feature = "geo"))]
+pub mod geo;
+pub mod string;
 pub mod value;
 pub mod vector;
 

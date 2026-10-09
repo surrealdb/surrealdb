@@ -11,6 +11,7 @@ members = [
     "surrealdb/common",
     "surrealdb/core",
     "surrealdb/datastore",
+    "surrealdb/edge-size-probe",
     "surrealdb/embedded",
     "surrealdb/catalog",
     "surrealdb/engine-api",
@@ -85,7 +86,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 # SurrealDB crates
 surrealdb = { version = "3.4.0-nightly", path = "surrealdb", default-features = false }
 surrealdb-catalog = { version = "3.4.0-nightly", path = "surrealdb/catalog" }
-surrealdb-expr = { version = "3.4.0-nightly", path = "surrealdb/expr" }
+surrealdb-expr = { version = "3.4.0-nightly", path = "surrealdb/expr", default-features = false }
 surrealdb-gql = { version = "3.4.0-nightly", path = "surrealdb/gql" }
 surrealdb-sql = { version = "3.4.0-nightly", path = "surrealdb/sql" }
 surrealdb-strand = { version = "3.4.0-nightly", path = "surrealdb/strand", default-features = false }
@@ -99,7 +100,7 @@ surrealdb-server = { version = "3.4.0-nightly", path = "surrealdb/server", defau
 surrealdb-mcp = { version = "3.4.0-nightly", path = "surrealdb/mcp", default-features = false }
 surrealdb-mywire = { version = "3.4.0-nightly", path = "surrealdb/mywire", default-features = false }
 surrealdb-pgwire = { version = "3.4.0-nightly", path = "surrealdb/pgwire", default-features = false }
-surrealdb-types = { version = "3.4.0-nightly", path = "surrealdb/types" }
+surrealdb-types = { version = "3.4.0-nightly", path = "surrealdb/types", default-features = false }
 surrealdb-types-derive = { version = "3.4.0-nightly", path = "surrealdb/types/derive" }
 ast = { version = "3.4.0-nightly", package = "surrealdb-ast", path = "surrealdb/ast" }
 token = { version = "3.4.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
@@ -108,10 +109,10 @@ parse-common = { version = "3.4.0-nightly", package = "surrealdb-parse-common", 
 sqon = { version = "3.4.0-nightly", package = "surrealdb-sqon", path = "surrealdb/sqon" }
 common = { version = "3.4.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
 surrealdb-cnf = { version = "3.4.0-nightly", path = "surrealdb/cnf" }
-surrealdb-runtime = { version = "3.4.0-nightly", path = "surrealdb/runtime" }
+surrealdb-runtime = { version = "3.4.0-nightly", path = "surrealdb/runtime", default-features = false }
 surrealdb-rpc = { version = "3.4.0-nightly", path = "surrealdb/rpc" }
 surrealdb-iam = { version = "3.4.0-nightly", path = "surrealdb/iam" }
-surrealdb-idx = { version = "3.4.0-nightly", path = "surrealdb/idx" }
+surrealdb-idx = { version = "3.4.0-nightly", path = "surrealdb/idx", default-features = false }
 surrealdb-observe = { version = "3.4.0-nightly", path = "surrealdb/observe" }
 surrealdb-keyspace-macro = { version = "3.4.0-nightly", path = "surrealdb/keyspace-macro" }
 surrealdb-kvs = { version = "3.4.0-nightly", path = "surrealdb/kvs" }
@@ -151,7 +152,6 @@ revision = { version = "0.30.0", features = [
     "chrono",
     "geo",
     "roaring",
-    "regex",
     "rust_decimal",
     "specialised-vectors",
     "uuid",
@@ -260,6 +260,7 @@ rand = "0.9.4"
 rand_core = "0.6"
 rayon = "1.12.0"
 regex = "1.12.3"
+regex-lite = "0.1.9"
 regex-syntax = "0.8.10"
 reqwest = { version = "0.13.2", default-features = false }
 ring = "0.17.14"
@@ -385,7 +386,26 @@ surrealdb = { workspace = true, features = [
     "protocol-ws",
     "rustls",
 ] }
-surrealdb-core.workspace = true
+surrealdb-core = { workspace = true, features = [
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "regex-unicode",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+] }
 surrealdb-rpc.workspace = true
 surrealdb-server.workspace = true
 surrealdb-syn.workspace = true
@@ -701,6 +721,19 @@ opt-level = 'z'
 inherits = "wasm-release"
 strip = false
 panic = 'unwind'
+
+# The engine as an edge worker (Cloudflare Workers) bundles it, measured by
+# `scripts/wasm-size-budget.sh`. Its size is the worker's cold-start cost, so
+# every setting favours size: `opt-level = 'z'`, one fat-LTO codegen unit and
+# no unwinding. The nightly-only flags that shrink it further — rebuilding std
+# with `panic=immediate-abort`, `-Zlocation-detail=none` and friends — cannot
+# be set from a profile on stable; the script passes them, and documents each.
+[profile.edge]
+inherits = "release"
+opt-level = 'z'
+lto = 'fat'
+codegen-units = 1
+panic = 'abort'
 
 [profile.bench]
 strip = false

@@ -13,6 +13,12 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# Tracing spans on this crate's functions (`#[instrument]`). Off, the
+# functions run without a span wrapper; log events are not affected. Turned on
+# by `surrealdb-core`'s `observability` feature.
+observability = []
+
 [dependencies]
 affinitypool = { workspace = true }
 chrono = { workspace = true }

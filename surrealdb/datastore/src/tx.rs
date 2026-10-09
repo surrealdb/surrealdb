@@ -49,7 +49,6 @@ use surrealdb_observe::{
 	TransactionMetrics,
 };
 use tokio::sync::Mutex;
-use tracing::Instrument;
 use uuid::Uuid;
 use web_time::Instant;
 
@@ -74,6 +73,7 @@ use crate::key::schema::{
 	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
 	SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
 };
+use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{
@@ -1470,7 +1470,10 @@ impl Transaction {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn cancel(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		if let Some(changefeed) = self.changefeed.get() {
@@ -1611,7 +1614,10 @@ impl Transaction {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn commit(&self) -> Result<()> {
 		// Refuse a commit the transaction is no longer allowed to make, and roll
 		// back instead. See [`Self::poisoned`].
@@ -1762,7 +1768,10 @@ impl Transaction {
 	}
 
 	/// Check if a key exists in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn exists_key<K>(&self, key: &K, version: Option<u64>) -> Result<bool>
 	where
 		K: KVKey + Debug,
@@ -1775,7 +1784,10 @@ impl Transaction {
 	}
 
 	/// Fetch a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get_key<K>(
 		&self,
 		key: &K,
@@ -1798,7 +1810,10 @@ impl Transaction {
 	}
 
 	/// Fetch a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Vec<u8>>> {
 		let key_bytes = key.len() as u64;
 		let val = self.tr.get(key, version).await?;
@@ -1812,7 +1827,10 @@ impl Transaction {
 
 	/// [`Self::getu_key`] over an encoded key, without decoding the value: for
 	/// a program that encodes keys and values itself.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn getu_raw(&self, key: Key<'_>) -> Result<Option<Val>> {
 		if !self.tr.writeable() {
 			anyhow::bail!(KvsError::TransactionReadonly);
@@ -1829,7 +1847,10 @@ impl Transaction {
 
 	/// Fetch a key from the datastore, registering the key for
 	/// commit-time conflict detection.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn getu_key<K>(&self, key: &K) -> Result<Option<<K as KVKey>::Value>>
 	where
 		K: KVKey + Debug,
@@ -1862,7 +1883,10 @@ impl Transaction {
 	/// the record is present in the transaction read cache: the conflict
 	/// registration must reach the storage engine. The fetched value
 	/// refreshes the cache afterwards.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get_record_for_update(
 		&self,
 		ns: NamespaceId,
@@ -1893,7 +1917,10 @@ impl Transaction {
 
 	/// Fetch every entry in a range, with its value decoded under the type the range
 	/// says it stores.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn getr<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -1980,7 +2007,10 @@ impl Transaction {
 	}
 
 	/// Fetch every entry in a range or region as bytes.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn getr_raw(
 		&self,
 		rng: impl AnyRange,
@@ -1992,7 +2022,10 @@ impl Transaction {
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get_many_key<K>(
 		&self,
 		keys: Vec<K>,
@@ -2022,7 +2055,10 @@ impl Transaction {
 	/// each row's storage key. Callers that need to scan a record range
 	/// must decode the storage key per row and reconstruct the context
 	/// themselves.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get_prefix_key<K>(
 		&self,
 		key: &K,
@@ -2040,7 +2076,10 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -2055,7 +2094,10 @@ impl Transaction {
 	}
 
 	/// Delete a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
@@ -2108,7 +2150,10 @@ impl Transaction {
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del_compare_key<K>(&self, key: &K, chk: Option<&K::Value>) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -2141,7 +2186,10 @@ impl Transaction {
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del_compare(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
@@ -2155,7 +2203,10 @@ impl Transaction {
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn delr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		self.tr.delr(rng.into_key_range()).await?;
@@ -2169,7 +2220,10 @@ impl Transaction {
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del_prefix_key<K>(&self, rng: &K) -> Result<()>
 	where
 		K: KVSubspace + Debug,
@@ -2179,7 +2233,10 @@ impl Transaction {
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
@@ -2190,7 +2247,10 @@ impl Transaction {
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn clr_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -2206,7 +2266,10 @@ impl Transaction {
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn clr_compare_key<K>(&self, key: &K, chk: Option<&<K as KVKey>::Value>) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -2241,7 +2304,10 @@ impl Transaction {
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn clrr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		self.tr.clrr(rng.into_key_range()).await?;
@@ -2253,7 +2319,10 @@ impl Transaction {
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn clr_prefix_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVSubspace,
@@ -2502,7 +2571,10 @@ impl Transaction {
 		Box::pin(crate::catalog_reads::sealed(false, self.get_tb(ns, db, tb, version)))
 	}
 
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
 	pub async fn catalog_version(
 		&self,
 		ns: NamespaceId,
@@ -2640,7 +2712,10 @@ impl Transaction {
 	/// Storage is read once per object per transaction, as for a table: the
 	/// answer, `None` included, is held in the transaction cache, and a stamp
 	/// replaces it with the version it mints.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
 	pub async fn catalog_object_version(
 		&self,
 		ns: NamespaceId,
@@ -3245,7 +3320,10 @@ impl Transaction {
 	/// to no record. `DEFINE INDEX` upholds this with
 	/// [`Self::claim_tb_doc_ids_reclaim`], which it calls in the transaction
 	/// that defines the consumer.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn del_tb_doc_ids_deferred(
 		&self,
 		ns: NamespaceId,
@@ -3295,7 +3373,10 @@ impl Transaction {
 	/// transaction, a strict subset of it surviving means the reaper drained and
 	/// retired the rest: a tear no surviving cursor records, since retiring an
 	/// entry destroys its cursor with it.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn claim_tb_doc_ids_reclaim(
 		&self,
 		ns: NamespaceId,
@@ -3313,7 +3394,10 @@ impl Transaction {
 	/// table from leaving another table's queued reclaim already cancelled
 	/// in the same transaction. Within one transaction a probe's verdict
 	/// holds for a following claim: both scan the same snapshot.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn probe_tb_doc_ids_reclaim(
 		&self,
 		ns: NamespaceId,
@@ -3425,7 +3509,10 @@ impl Transaction {
 	}
 
 	/// Insert or update a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn set_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -3474,7 +3561,10 @@ impl Transaction {
 	}
 
 	/// Insert or update a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -3490,7 +3580,10 @@ impl Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn put_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -3507,7 +3600,10 @@ impl Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn put<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -3523,7 +3619,10 @@ impl Transaction {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn put_compare_key<K>(
 		&self,
 		key: &K,
@@ -3567,7 +3666,10 @@ impl Transaction {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn put_compare<V>(&self, key: Key<'_>, val: V, chk: Option<V>) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -3583,7 +3685,10 @@ impl Transaction {
 	}
 
 	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn replace_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -3601,7 +3706,10 @@ impl Transaction {
 
 	/// [`Self::replace_key`] over an encoded key and value: for a program that
 	/// encodes keys and values itself.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn replace_raw(&self, key: Key<'_>, val: Val) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
@@ -3623,7 +3731,10 @@ impl Transaction {
 	/// would splice in data from the key that this caller must not have, or one
 	/// that has to be compared byte for byte against what is stored. Everything
 	/// else should use [`Self::get_key`] and let the key name the value's type.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn get_key_raw<K>(&self, key: &K, version: Option<u64>) -> Result<Option<Val>>
 	where
 		K: KVKey + Debug,
@@ -3640,7 +3751,10 @@ impl Transaction {
 	}
 
 	/// Retrieve a batch set of keys from the datastore, without decoding.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn getm_raw<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<Vec<Option<Val>>>
 	where
 		K: KVKey + Debug,
@@ -3663,7 +3777,10 @@ impl Transaction {
 	/// The keys come back as bytes because a key *is* bytes until it is decoded;
 	/// what the typed range guarantees is which key type they all are, so the
 	/// caller's `decode_key` cannot be the wrong one.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn keys<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3675,7 +3792,10 @@ impl Transaction {
 	}
 
 	/// Retrieve the keys in a range, in reverse order.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn keysr<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3687,7 +3807,10 @@ impl Transaction {
 	}
 
 	/// Retrieve the keys in a region whose contents are of more than one type.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn keys_raw(
 		&self,
 		rng: impl AnyRange,
@@ -3701,7 +3824,10 @@ impl Transaction {
 	}
 
 	/// Retrieve the keys in a region, in reverse order. See [`Self::keys_raw`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn keysr_raw(
 		&self,
 		rng: impl AnyRange,
@@ -3716,7 +3842,10 @@ impl Transaction {
 
 	/// Retrieve a range of keys and their values, decoded under the type the range
 	/// says they store.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn scan<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3735,7 +3864,10 @@ impl Transaction {
 	}
 
 	/// As [`Self::scan`], in reverse order.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn scanr<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3758,7 +3890,10 @@ impl Transaction {
 	/// For a region holding several kinds of key, and for the scan paths that
 	/// deliberately work on bytes — the pre-decode filter reads a value's wire form
 	/// without building it.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn scan_raw(
 		&self,
 		rng: impl AnyRange,
@@ -3772,7 +3907,10 @@ impl Transaction {
 	}
 
 	/// As [`Self::scan_raw`], in reverse order.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn scanr_raw(
 		&self,
 		rng: impl AnyRange,
@@ -3788,7 +3926,10 @@ impl Transaction {
 	/// Count the keys in a range or region.
 	///
 	/// Counting reads no values, so it takes either kind of range.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn count(&self, rng: impl AnyRange, version: Option<u64>) -> Result<usize> {
 		let n = self.tr.count(rng.into_key_range(), version).await?;
 		// `count` only reports the number of keys, not their byte size.
@@ -3799,7 +3940,10 @@ impl Transaction {
 	/// Count the keys in a range or region, examining at most `budget` of
 	/// them, and answer the key to resume at when it holds more
 	/// ([`Transactor::count_bounded`]).
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn count_bounded(
 		&self,
 		rng: impl AnyRange,
@@ -3826,7 +3970,10 @@ impl Transaction {
 	/// The keys come back as bytes because a key *is* bytes until it is decoded;
 	/// what the typed range guarantees is which key type they all are, so the
 	/// caller's `decode_key` cannot be the wrong one.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn open_keys_cursor<'a, V>(
 		&'a self,
 		rng: TypedRange<V>,
@@ -3839,7 +3986,10 @@ impl Transaction {
 
 	/// Open a keys-only scan cursor over a region whose contents are of more than
 	/// one type. See [`Self::open_keys_cursor`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn open_keys_cursor_raw<'a>(
 		&'a self,
 		rng: impl AnyRange,
@@ -3860,7 +4010,10 @@ impl Transaction {
 	/// Both halves are lent as bytes. The typed range fixes which key type and
 	/// which value type the region holds, so a caller that defers the decode past
 	/// a filter still knows what to decode each surviving row as.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn open_vals_cursor<'a, V>(
 		&'a self,
 		rng: TypedRange<V>,
@@ -3873,7 +4026,10 @@ impl Transaction {
 
 	/// Open a key+value scan cursor over a region whose contents are of more than
 	/// one type. See [`Self::open_keys_cursor`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn open_vals_cursor_raw<'a>(
 		&'a self,
 		rng: impl AnyRange,
@@ -3896,7 +4052,10 @@ impl Transaction {
 	///
 	/// This function fetches the keys in batches, with multiple requests to the
 	/// underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn batch_keys<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3908,7 +4067,10 @@ impl Transaction {
 
 	/// Retrieve a batched scan over a region whose contents are of more than one
 	/// type.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn batch_keys_raw(
 		&self,
 		rng: impl AnyRange,
@@ -3924,7 +4086,10 @@ impl Transaction {
 	/// This function fetches the key-value pairs in batches, with multiple
 	/// requests to the underlying datastore. Both halves are returned as bytes;
 	/// the typed range is what says which key type and which value type they are.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn batch_keys_vals<V>(
 		&self,
 		rng: TypedRange<V>,
@@ -3936,7 +4101,10 @@ impl Transaction {
 
 	/// Retrieve a batched scan of keys and values over a region whose contents are
 	/// of more than one type. See [`Self::batch_keys_vals`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn batch_keys_vals_raw(
 		&self,
 		rng: impl AnyRange,
@@ -4874,12 +5042,18 @@ impl Transaction {
 	}
 
 	/// Clears all keys from the transaction cache.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
 	pub fn clear_cache(&self) {
 		self.cache.clear()
 	}
 
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn compact<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVSubspace + Debug,
@@ -4890,13 +5064,19 @@ impl Transaction {
 	}
 
 	/// [`Self::compact`] over a range a program encoded itself.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn compact_raw(&self, range: impl AnyRange) -> Result<()> {
 		self.tr.inner.compact(Some(range.into_key_range())).await?;
 		Ok(())
 	}
 
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
 	pub async fn compact_all(&self) -> Result<()> {
 		self.tr.inner.compact(None).await?;
 		Ok(())

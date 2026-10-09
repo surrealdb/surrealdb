@@ -996,7 +996,7 @@ impl_surreal_value!(
 
 // Geometry implementations
 impl_surreal_value!(
-	geo::Point as kind!(geometry<point>),
+	geo_types::Point as kind!(geometry<point>),
 	is_point(value) => matches!(value, Value::Geometry(Geometry::Point(_))),
 	from_point(self) => Value::Geometry(Geometry::Point(self)),
 	into_point(value) => {
@@ -1022,7 +1022,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::LineString as kind!(geometry<line>),
+	geo_types::LineString as kind!(geometry<line>),
 	is_line(value) => matches!(value, Value::Geometry(Geometry::Line(_))),
 	from_line(self) => Value::Geometry(Geometry::Line(self)),
 	into_line(value) => {
@@ -1048,7 +1048,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::Polygon as kind!(geometry<polygon>),
+	geo_types::Polygon as kind!(geometry<polygon>),
 	is_polygon(value) => matches!(value, Value::Geometry(Geometry::Polygon(_))),
 	from_polygon(self) => Value::Geometry(Geometry::Polygon(self)),
 	into_polygon(value) => {
@@ -1074,7 +1074,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiPoint as kind!(geometry<multipoint>),
+	geo_types::MultiPoint as kind!(geometry<multipoint>),
 	is_multipoint(value) => matches!(value, Value::Geometry(Geometry::MultiPoint(_))),
 	from_multipoint(self) => Value::Geometry(Geometry::MultiPoint(self)),
 	into_multipoint(value) => {
@@ -1100,7 +1100,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiLineString as kind!(geometry<multiline>),
+	geo_types::MultiLineString as kind!(geometry<multiline>),
 	is_multiline(value) => matches!(value, Value::Geometry(Geometry::MultiLine(_))),
 	from_multiline(self) => Value::Geometry(Geometry::MultiLine(self)),
 	into_multiline(value) => {
@@ -1126,7 +1126,7 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
-	geo::MultiPolygon as kind!(geometry<multipolygon>),
+	geo_types::MultiPolygon as kind!(geometry<multipolygon>),
 	is_multipolygon(value) => matches!(value, Value::Geometry(Geometry::MultiPolygon(_))),
 	from_multipolygon(self) => Value::Geometry(Geometry::MultiPolygon(self)),
 	into_multipolygon(value) => {

@@ -45,7 +45,7 @@ mod tests {
 	use super::*;
 	use crate::{
 		Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-		RecordIdKey, RecordIdKeyRange, Regex, Set, Table, Uuid, object,
+		RecordIdKey, RecordIdKeyRange, Set, Table, Uuid, object,
 	};
 
 	#[rstest]
@@ -99,14 +99,14 @@ mod tests {
 		Bound::Included(Value::Number(Number::Int(43)))
 	))))]
 	#[case::range(Value::Range(Box::new(Range::new(Bound::Unbounded, Bound::Unbounded))))]
-	#[case::regex(Value::Regex(Regex(regex::Regex::new("").unwrap())))]
-	#[case::regex(Value::Regex(Regex(regex::Regex::new("test_regex").unwrap())))]
+	#[case::regex(Value::Regex("".parse().unwrap()))]
+	#[case::regex(Value::Regex("test_regex".parse().unwrap()))]
 	#[case::array(Value::Array(Array::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::object(Value::Object(object! { "key": "value".to_string() }))]
 	#[case::set(Value::Set(Set::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))])))]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
-	#[case::geometry(Value::Geometry(Geometry::Line(geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }]))))]
-	#[case::geometry(Value::Geometry(Geometry::Collection(vec![Geometry::Point(geo::Point::new(1.0, 2.0))])))]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))))]
+	#[case::geometry(Value::Geometry(Geometry::Line(geo_types::LineString(vec![geo_types::Coord { x: 1.0, y: 2.0 }, geo_types::Coord { x: 3.0, y: 4.0 }]))))]
+	#[case::geometry(Value::Geometry(Geometry::Collection(vec![Geometry::Point(geo_types::Point::new(1.0, 2.0))])))]
 	fn test_proto_encode_decode(#[case] input: Value) {
 		let encoded = encode(&input).expect("Failed to encode");
 		let decoded = decode(&encoded).expect("Failed to decode");

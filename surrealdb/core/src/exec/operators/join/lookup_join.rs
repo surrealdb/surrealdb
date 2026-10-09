@@ -36,8 +36,6 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 #[cfg(test)]
 use futures::StreamExt;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::JoinFrame;
@@ -229,7 +227,10 @@ impl ExecOperator for LookupJoin {
 		self.left.output_ordering()
 	}
 
-	#[instrument(name = "LookupJoin::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "LookupJoin::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let buffer_size = ctx.root().ctx.config.exec.operator_buffer_size;
 		let left_stream = buffer_stream(
@@ -451,7 +452,10 @@ impl ExecOperator for RecordBatchFetch {
 		}
 	}
 
-	#[instrument(name = "RecordBatchFetch::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "RecordBatchFetch::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;

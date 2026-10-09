@@ -118,9 +118,10 @@ fn std_error_to_types_error(error: impl std::fmt::Display) -> surrealdb_types::E
 
 /// Spawns a detached task on whichever executor this target has.
 ///
-/// Nothing joins one of these, which is what lets Wasm's `spawn_local` --
-/// which returns no handle at all -- stand in for `tokio::spawn`.
-#[cfg(not(target_family = "wasm"))]
+/// Nothing joins one of these, which is what lets the browser's `spawn_local`
+/// -- which returns no handle at all -- stand in for `tokio::spawn`. Every
+/// other target, emscripten included, spawns on the ambient tokio runtime.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn spawn<F>(future: F)
 where
 	F: Future<Output = ()> + Send + 'static,
@@ -128,7 +129,7 @@ where
 	drop(tokio::spawn(future));
 }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn spawn<F>(future: F)
 where
 	F: Future<Output = ()> + 'static,

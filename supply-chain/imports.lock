@@ -853,6 +853,13 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.regex-lite]]
+version = "0.1.9"
+when = "2026-02-03"
+user-id = 189
+user-login = "BurntSushi"
+user-name = "Andrew Gallant"
+
 [[publisher.regex-syntax]]
 version = "0.8.10"
 when = "2026-02-24"

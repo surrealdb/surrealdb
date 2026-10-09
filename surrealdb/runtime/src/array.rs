@@ -20,8 +20,9 @@ const ON: ControlFlow<()> = ControlFlow::Continue(());
 /// ([`fuel::now`]): the units the walk charges stand, and the executor yields
 /// at its next yield point.
 macro_rules! now {
-	($($name:ident = $walk:ident($args:ty);)+) => {
+	($($(#[$attr:meta])* $name:ident = $walk:ident($args:ty);)+) => {
 		$(
+			$(#[$attr])*
 			pub fn $name(args: $args) -> Result<Value> {
 				fuel::now($walk(args))
 			}
@@ -58,7 +59,9 @@ now! {
 	shuffle = shuffle_walk((Array,));
 	sort = sort_walk((Array, Optional<Value>));
 	sort_natural = sort_natural_walk((Array, Optional<Value>));
+	#[cfg(feature = "collate")]
 	sort_lexical = sort_lexical_walk((Array, Optional<Value>));
+	#[cfg(feature = "collate")]
 	sort_natural_lexical = sort_natural_lexical_walk((Array, Optional<Value>));
 	transpose = transpose_walk((Array,));
 	union = union_walk((Array, Array));
@@ -1094,12 +1097,17 @@ pub async fn sort_natural_walk(
 	sorted_by(array, &order, |a, b| a.natural_cmp(b).unwrap_or(Ordering::Equal)).await
 }
 
+/// Needs the `collate` feature; without it this function is absent and
+/// `surrealdb-core` answers a call with an error naming the feature.
+#[cfg(feature = "collate")]
 pub async fn sort_lexical_walk(
 	(array, Optional(order)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	sorted_by(array, &order, |a, b| a.lexical_cmp(b).unwrap_or(Ordering::Equal)).await
 }
 
+/// Needs the `collate` feature, as `sort_lexical_walk` does.
+#[cfg(feature = "collate")]
 pub async fn sort_natural_lexical_walk(
 	(array, Optional(order)): (Array, Optional<Value>),
 ) -> Result<Value> {

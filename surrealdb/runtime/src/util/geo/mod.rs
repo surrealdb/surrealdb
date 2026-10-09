@@ -1,4 +1,4 @@
-use geo::Point;
+use geo_types::Point;
 use surrealdb_expr::val::Geometry;
 
 static BASE32: &[char] = &[

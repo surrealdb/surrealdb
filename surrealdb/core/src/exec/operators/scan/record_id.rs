@@ -10,8 +10,6 @@ use std::sync::Arc;
 #[cfg(test)]
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::common::resolve_version_stamp;
@@ -223,7 +221,10 @@ impl ExecOperator for RecordIdScan {
 		}])
 	}
 
-	#[instrument(name = "RecordLookup::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "RecordLookup::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 

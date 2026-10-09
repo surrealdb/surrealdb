@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
@@ -80,7 +79,10 @@ impl ExecOperator for Filter {
 		self.input.constant_output_fields()
 	}
 
-	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "Filter::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
@@ -122,7 +124,7 @@ impl ExecOperator for Filter {
 	}
 }
 
-#[instrument(level = "trace", skip_all)]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", skip_all))]
 async fn filter_batch_in_place(
 	batch: &mut ValueBatch,
 	predicate: &dyn PhysicalExpr,

@@ -36,7 +36,8 @@ tracing = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
-surrealdb-core = { workspace = true, features = ["kv-mem", "graphql", "gql"] }
+# `fulltext`: the schema tests define and list analyzers.
+surrealdb-core = { workspace = true, features = ["kv-mem", "graphql", "gql", "fulltext"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
 # Enable `client` so integration tests can drive the MCP server over an
 # in-process duplex transport (same code path as `serve_stdio`).

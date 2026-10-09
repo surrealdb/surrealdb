@@ -16,8 +16,6 @@
 use std::sync::Arc;
 
 use common::future::stream::{Yielder, try_async_stream};
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::pipeline::{FieldState, build_field_state, filter_and_process_batch};
@@ -99,7 +97,10 @@ impl ExecOperator for LightweightEdgeScan {
 		self.predicate.as_ref().map(|p| p.access_mode()).unwrap_or(AccessMode::ReadOnly)
 	}
 
-	#[instrument(name = "LightweightEdgeScan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "LightweightEdgeScan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;

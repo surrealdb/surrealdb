@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use geo::Point;
+use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_types::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Kind, KindLiteral, Number, Object, Range,
@@ -439,41 +439,44 @@ test_surreal_value!(
 	)
 );
 
-fn geo_point() -> geo::Point {
-	geo::Point::new(10.0, 10.0)
+fn geo_point() -> geo_types::Point {
+	geo_types::Point::new(10.0, 10.0)
 }
 
-fn geo_line() -> geo::LineString {
-	geo::LineString::new(vec![
-		geo::Coord {
+fn geo_line() -> geo_types::LineString {
+	geo_types::LineString::new(vec![
+		geo_types::Coord {
 			x: 10.0,
 			y: 10.0,
 		},
-		geo::Coord {
+		geo_types::Coord {
 			x: 20.0,
 			y: 20.0,
 		},
 	])
 }
 
-fn geo_polygon() -> geo::Polygon {
-	geo::Polygon::new(geo_line(), vec![geo_line()])
+fn geo_polygon() -> geo_types::Polygon {
+	geo_types::Polygon::new(geo_line(), vec![geo_line()])
 }
 
-fn geo_multipoint() -> geo::MultiPoint {
-	geo::MultiPoint::new(vec![geo::Point::new(10.0, 10.0), geo::Point::new(20.0, 20.0)])
+fn geo_multipoint() -> geo_types::MultiPoint {
+	geo_types::MultiPoint::new(vec![
+		geo_types::Point::new(10.0, 10.0),
+		geo_types::Point::new(20.0, 20.0),
+	])
 }
 
-fn geo_multilinestring() -> geo::MultiLineString {
-	geo::MultiLineString::new(vec![geo_line()])
+fn geo_multilinestring() -> geo_types::MultiLineString {
+	geo_types::MultiLineString::new(vec![geo_line()])
 }
 
-fn geo_multipolygon() -> geo::MultiPolygon {
-	geo::MultiPolygon::new(vec![geo_polygon()])
+fn geo_multipolygon() -> geo_types::MultiPolygon {
+	geo_types::MultiPolygon::new(vec![geo_polygon()])
 }
 
 test_surreal_value!(
-	point<geo::Point>(
+	point<geo_types::Point>(
 		geo_point() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -487,7 +490,7 @@ test_surreal_value!(
 );
 
 test_surreal_value!(
-	line<geo::LineString>(
+	line<geo_types::LineString>(
 		geo_line() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -501,7 +504,7 @@ test_surreal_value!(
 );
 
 test_surreal_value!(
-	polygon<geo::Polygon>(
+	polygon<geo_types::Polygon>(
 		geo_polygon() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -515,7 +518,7 @@ test_surreal_value!(
 );
 
 test_surreal_value!(
-	multipoint<geo::MultiPoint>(
+	multipoint<geo_types::MultiPoint>(
 		geo_multipoint() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -529,7 +532,7 @@ test_surreal_value!(
 );
 
 test_surreal_value!(
-	multilinestring<geo::MultiLineString>(
+	multilinestring<geo_types::MultiLineString>(
 		geo_multilinestring() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -543,7 +546,7 @@ test_surreal_value!(
 );
 
 test_surreal_value!(
-	multipolygon<geo::MultiPolygon>(
+	multipolygon<geo_types::MultiPolygon>(
 		geo_multipolygon() => (
 			Value::Geometry(_),
 			Kind::Geometry(_)
@@ -635,7 +638,7 @@ mod serde_json_from_value {
 
 	#[test]
 	fn geometry_point() {
-		let val = Value::Geometry(Geometry::Point(geo::Point::new(10.0, 20.0)));
+		let val = Value::Geometry(Geometry::Point(geo_types::Point::new(10.0, 20.0)));
 		let json = serde_json::Value::from_value(val).unwrap();
 		assert!(json.is_object(), "Geometry should convert to GeoJSON object");
 		assert_eq!(json["type"], "Point");
@@ -676,7 +679,7 @@ mod serde_json_from_value {
 			Value::Bytes(Bytes::from(vec![1, 2, 3])),
 			Value::RecordId(RecordId::new("test", 123)),
 			Value::Table(Table::from("users")),
-			Value::Geometry(Geometry::Point(geo::Point::new(10.0, 20.0))),
+			Value::Geometry(Geometry::Point(geo_types::Point::new(10.0, 20.0))),
 		];
 		for val in values {
 			let via_into_json = val.clone().into_json_value();

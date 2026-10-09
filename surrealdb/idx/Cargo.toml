@@ -14,12 +14,32 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
+default = ["cjk-tokenizer", "fulltext", "vector-index"]
+
+# Analyzers and the full-text index, with their stemmers and the `ascii`
+# filter. Without it `DEFINE ANALYZER` and full-text index definitions still
+# parse and stored state still decodes, and defining or using an analyzer, and
+# building, loading or querying a full-text index, fails with an error naming
+# this feature.
+fulltext = ["dep:deunicode", "dep:rust-stemmers"]
+
+# The HNSW vector index. Without it `HNSW` index definitions still parse and
+# stored HNSW state still decodes, and building, loading or searching an HNSW
+# index fails with an error naming this feature. Brute-force KNN and the
+# vector functions are not affected.
+vector-index = []
+
 # Backends for the engines' own concurrency tests. The library selects no
 # backend; the in-memory one is always available as a dev-dependency, and these
 # add the on-disk and distributed ones so the matching KVS CI lane runs the
 # race tests against its own store. Nothing in the library reads them.
 kv-rocksdb = ["surrealdb-kvs-any/kv-rocksdb"]
 kv-tikv = ["surrealdb-kvs-any/kv-tikv"]
+
+# The `SEGMENT(<language>)` tokenizer and its lindera dependency. Without it
+# `SEGMENT` still parses, and building an analyzer that uses it fails with an
+# error naming this feature.
+cjk-tokenizer = ["dep:lindera"]
 
 # Bake a morphological dictionary for `TOKENIZERS SEGMENT(<language>)` into the
 # binary, so `SEGMENT` works with no files on disk. Without these, `SEGMENT`
@@ -37,9 +57,9 @@ kv-tikv = ["surrealdb-kvs-any/kv-tikv"]
 # archive at build time. lindera checks the archive against an MD5 constant in
 # that crate's source, so what lands in the binary is pinned transitively by
 # `Cargo.lock` - though by a hash that is not collision-resistant.
-cjk-embed-chinese = ["lindera/embed-cc-cedict"]
-cjk-embed-japanese = ["lindera/embed-ipadic"]
-cjk-embed-korean = ["lindera/embed-ko-dic"]
+cjk-embed-chinese = ["cjk-tokenizer", "lindera?/embed-cc-cedict"]
+cjk-embed-japanese = ["cjk-tokenizer", "lindera?/embed-ipadic"]
+cjk-embed-korean = ["cjk-tokenizer", "lindera?/embed-ko-dic"]
 cjk-embed-all = ["cjk-embed-chinese", "cjk-embed-japanese", "cjk-embed-korean"]
 
 [dependencies]
@@ -48,17 +68,17 @@ anyhow.workspace = true
 bytes.workspace = true
 common.workspace = true
 dashmap.workspace = true
-deunicode.workspace = true
+deunicode = { workspace = true, optional = true }
 fst.workspace = true
 half.workspace = true
-lindera.workspace = true
+lindera = { workspace = true, optional = true }
 ndarray.workspace = true
 ndarray-stats.workspace = true
 parking_lot.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
 roaring = { workspace = true, features = ["serde"] }
-rust-stemmers.workspace = true
+rust-stemmers = { workspace = true, optional = true }
 storekey.workspace = true
 surrealdb-catalog.workspace = true
 surrealdb-cnf.workspace = true

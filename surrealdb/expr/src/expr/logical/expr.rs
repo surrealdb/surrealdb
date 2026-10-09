@@ -4530,7 +4530,7 @@ mod tests {
 			LogicalLiteral::Duration(Duration::from_secs(1)),
 			LogicalLiteral::Datetime(Datetime::MIN_UTC),
 			LogicalLiteral::Uuid(Uuid::nil()),
-			LogicalLiteral::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+			LogicalLiteral::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 			LogicalLiteral::File(File::new("b".to_owned(), "p".to_owned())),
 		];
 		for sample in samples {

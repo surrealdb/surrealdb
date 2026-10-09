@@ -1,5 +1,5 @@
 use chrono::SecondsFormat;
-use geo::{LineString, Point, Polygon};
+use geo_types::{LineString, Point, Polygon};
 use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
 
 use crate::sql::ToSql;

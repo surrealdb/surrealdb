@@ -263,6 +263,13 @@ fn every_expr_variant() -> Vec<(&'static str, ExprError)> {
 		("ArithmeticOverflow", ExprError::ArithmeticOverflow("sample".to_string())),
 		("ArithmeticNegativeOverflow", ExprError::ArithmeticNegativeOverflow("sample".to_string())),
 		("InvalidBytesize", ExprError::InvalidBytesize),
+		(
+			"FeatureDisabled",
+			ExprError::FeatureDisabled {
+				feature: "sample",
+				what: "sample",
+			},
+		),
 	]
 }
 
@@ -307,6 +314,13 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 				table: "sample".to_string(),
 				index_id: 1,
 				element: 1,
+			},
+		),
+		(
+			"FeatureDisabled",
+			IdxError::FeatureDisabled {
+				feature: "sample",
+				what: "sample",
 			},
 		),
 	]
@@ -401,6 +415,7 @@ fn every_buc_variant() -> Vec<(&'static str, BucError)> {
 			"ObjectStoreFailure",
 			BucError::ObjectStoreFailure("sample".to_string(), "sample".to_string()),
 		),
+		("FeatureDisabled", BucError::FeatureDisabled),
 	]
 }
 

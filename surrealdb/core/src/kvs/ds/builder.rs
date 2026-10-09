@@ -100,7 +100,8 @@ impl Builder {
 			id: None,
 			slow_log: None,
 			engine_options: EngineOptions::default(),
-			maintenance: true,
+			// A build without `maintenance-tasks` leaves that work to its host.
+			maintenance: cfg!(feature = "maintenance-tasks"),
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,

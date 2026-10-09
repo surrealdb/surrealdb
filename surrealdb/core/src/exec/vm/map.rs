@@ -4013,6 +4013,14 @@ fn sort_keys(
 	let LogicalOrdering::Order(orders) = ordering else {
 		return Err(NotCovered::internal("ORDER BY RAND()"));
 	};
+	// The comparison a collated key needs is not in a build without `collate`.
+	if !cfg!(feature = "collate") && orders.iter().any(|order| order.collate) {
+		return Err(NotCovered::refused(super::plan::Refusal::Query {
+			message: "ORDER BY … COLLATE is not available: this build was compiled without the \
+			          `collate` feature"
+				.to_owned(),
+		}));
+	}
 	let (projected, mut projection) = match shared {
 		Some((fields, projection)) => (Some(fields), Some(projection)),
 		None => (None, None),

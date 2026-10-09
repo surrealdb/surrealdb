@@ -8,7 +8,6 @@ use surrealdb_expr::val::{Regex, Value};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
-use crate::util::string;
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -301,8 +300,11 @@ pub fn slice(
 	Ok(val.chars().skip(start).take(len).collect::<String>().into())
 }
 
+/// Needs the `collate` feature; without it this function is absent and
+/// `surrealdb-core` answers a call with an error naming the feature.
+#[cfg(feature = "collate")]
 pub fn slug((string,): (String,)) -> Result<Value> {
-	Ok(string::slug::slug(string).into())
+	Ok(crate::util::string::slug::slug(string).into())
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
@@ -419,12 +421,66 @@ pub mod html {
 	use anyhow::Result;
 	use surrealdb_expr::val::Value;
 
+	/// Escapes every character that can open a tag, close an attribute value
+	/// or start an entity, so the result is inert as element text and as a
+	/// quoted or unquoted attribute value. Every other character passes
+	/// through.
+	///
+	/// The escape table is `ammonia::clean_text`'s, kept here so that encoding
+	/// does not need the `html-sanitize` feature; a test pins the two to the
+	/// same output while that feature is on.
 	pub fn encode((arg,): (String,)) -> Result<Value> {
-		Ok(ammonia::clean_text(&arg).into())
+		Ok(escape_text(&arg).into())
 	}
 
+	fn escape_text(src: &str) -> String {
+		let mut out = String::with_capacity(src.len().max(4));
+		for c in src.chars() {
+			let replacement = match c {
+				'<' => "&lt;",
+				'>' => "&gt;",
+				'"' => "&quot;",
+				'\'' => "&apos;",
+				'`' => "&grave;",
+				'/' => "&#47;",
+				'&' => "&amp;",
+				'=' => "&#61;",
+				' ' => "&#32;",
+				'\t' => "&#9;",
+				'\n' => "&#10;",
+				'\x0c' => "&#12;",
+				'\r' => "&#13;",
+				'\0' => "&#65533;",
+				_ => {
+					out.push(c);
+					continue;
+				}
+			};
+			out.push_str(replacement);
+		}
+		out
+	}
+
+	/// Strips everything outside ammonia's default allowlist of tags and
+	/// attributes. Needs the `html-sanitize` feature; without it this function
+	/// is absent and `surrealdb-core` answers a call with an error naming the
+	/// feature.
+	#[cfg(feature = "html-sanitize")]
 	pub fn sanitize((arg,): (String,)) -> Result<Value> {
 		Ok(ammonia::clean(&arg).into())
+	}
+
+	#[cfg(all(test, feature = "html-sanitize"))]
+	mod tests {
+		#[test]
+		fn escape_text_matches_ammonia_clean_text() {
+			let mut all = String::new();
+			for c in (0u32..0x180).filter_map(char::from_u32) {
+				all.push(c);
+			}
+			all.push_str("<a href='x' title=\"y\">`z`</a>&amp;\u{1F600}");
+			assert_eq!(super::escape_text(&all), ammonia::clean_text(&all));
+		}
 	}
 }
 
@@ -435,17 +491,19 @@ pub mod is {
 
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
-	use regex::Regex;
 	use semver::Version;
 	use surrealdb_expr::expr::Error;
 	use surrealdb_expr::val::{Datetime, Value};
 	use surrealdb_syn as syn;
+	use surrealdb_types::regex_engine::Regex;
 	use ulid::Ulid;
 	use url::Url;
 	use uuid::Uuid;
 
 	use crate::args::Optional;
 
+	// `\d` is any Unicode decimal digit with the `regex-unicode` feature and
+	// `[0-9]` without it.
 	static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| {
 		Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern")
 	});
@@ -852,6 +910,7 @@ mod tests {
 	}
 
 	#[test]
+	#[cfg(feature = "html-sanitize")]
 	fn html_sanitize() {
 		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
 		assert_eq!(value, Value::String(Strand::new_static("<div>Hello world!</div>")));

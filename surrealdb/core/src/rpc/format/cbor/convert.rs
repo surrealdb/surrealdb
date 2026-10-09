@@ -5,8 +5,7 @@ use std::ops::Bound;
 use anyhow::{Context, Result, anyhow};
 use ciborium::Value as CborValue;
 use common::decimal::DecimalExt;
-use geo::{LineString, Point, Polygon};
-use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 
 use crate::syn;

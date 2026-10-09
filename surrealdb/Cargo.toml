@@ -15,12 +15,15 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls", "parse"]
+default = ["protocol-ws", "rustls", "parse", "regex-unicode"]
 # Tuning features for the embedded engine. They forward unconditionally, so
 # selecting one brings the engine (and with it the database core) into the
 # build even without a `kv-*` backend, as they always have.
 allocator = ["surrealdb-engine-local/allocator"]
 parse = ["dep:surrealdb-syn"]
+# Regex values match with full Unicode support (see the same feature on
+# `surrealdb-core`).
+regex-unicode = ["surrealdb-types/regex-unicode"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 # Native only: tonic does not build for wasm32.

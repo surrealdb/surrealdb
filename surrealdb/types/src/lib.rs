@@ -11,6 +11,7 @@ mod kind;
 mod notification;
 #[cfg(feature = "proto")]
 mod proto;
+pub mod regex_engine;
 #[macro_use]
 mod sql;
 mod traits;

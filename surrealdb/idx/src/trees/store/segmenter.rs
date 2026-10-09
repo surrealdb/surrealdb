@@ -107,6 +107,16 @@ impl Segmenters {
 	/// line each node emits when it resolves a dictionary is what makes that
 	/// divergence observable.
 	pub async fn validate(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
+		// Without `fulltext` no analyzer can be built, so none may be defined.
+		#[cfg(not(feature = "fulltext"))]
+		{
+			let _ = (self, az);
+			anyhow::bail!(crate::Error::FeatureDisabled {
+				feature: "fulltext",
+				what: "Analyzers",
+			})
+		}
+		#[cfg(feature = "fulltext")]
 		self.for_definition(az).await.map(|_| ())
 	}
 

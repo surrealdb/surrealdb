@@ -66,6 +66,11 @@ pub(crate) enum Error {
 	#[error("Bucket backend is not supported")]
 	UnsupportedBackend,
 
+	/// The build left out the `files` feature, which buckets need
+	#[cfg_attr(feature = "files", allow(dead_code))]
+	#[error("Buckets are not available: this build was compiled without the `files` feature")]
+	FeatureDisabled,
+
 	/// A write was attempted against a bucket defined as read-only
 	#[error("Write operation is not supported, as bucket `{0}` is in read-only mode")]
 	ReadonlyBucket(String),
@@ -82,6 +87,9 @@ impl LeafError for Error {
 			// an engine-internal fault, and the underlying error travels with
 			// it as the cause.
 			Error::ObsError(_) => TypesError::internal(message),
+			// The build, not the request, is at fault: a configuration error,
+			// as the expression and index layers classify theirs.
+			Error::FeatureDisabled => TypesError::configuration(message, None),
 			Error::BucketPermissions {
 				..
 			}

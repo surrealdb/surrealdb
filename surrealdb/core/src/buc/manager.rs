@@ -144,6 +144,11 @@ impl BucketsManager {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
+		#[cfg(not(feature = "files"))]
+		{
+			let _ = (tx, ns, db, bu);
+			bail!(crate::buc::Error::FeatureDisabled)
+		}
 		let key = BucketConnectionKey::new(ns, db, bu);
 		// Attempt to obtain an existing bucket connection, dropping the guard
 		// before the connect below.
@@ -191,6 +196,11 @@ impl BucketsManager {
 		read_only: bool,
 		backend: Option<&str>,
 	) -> Result<()> {
+		#[cfg(not(feature = "files"))]
+		{
+			let _ = (ns, db, bu, read_only, backend);
+			bail!(crate::buc::Error::FeatureDisabled)
+		}
 		// Validate the store
 		let store = if let Some(backend) = backend {
 			self.connect(backend, false, read_only).await?

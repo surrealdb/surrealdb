@@ -75,51 +75,84 @@ pub fn more_than_or_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.ge(b).into())
 }
 
+/// Fails where a containment or intersection test of `container` against
+/// `other` would be spatial — a geometry against a geometry, or against the
+/// elements of an array or set — in a build without the `geo` feature.
+#[cfg(not(feature = "geo"))]
+fn spatial(container: &Value, other: &Value) -> Result<()> {
+	if let Value::Geometry(_) = container
+		&& matches!(other, Value::Geometry(_) | Value::Array(_) | Value::Set(_))
+	{
+		anyhow::bail!(surrealdb_expr::expr::Error::FeatureDisabled {
+			feature: "geo",
+			what: "Geometry operations",
+		});
+	}
+	Ok(())
+}
+
+#[cfg(feature = "geo")]
+fn spatial(_: &Value, _: &Value) -> Result<()> {
+	Ok(())
+}
+
 pub fn contain(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok(a.contains(b).into())
 }
 
 pub fn not_contain(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok((!a.contains(b)).into())
 }
 
 pub fn contain_all(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok(a.contains_all(b).into())
 }
 
 pub fn contain_any(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok(a.contains_any(b).into())
 }
 
 pub fn contain_none(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok((!a.contains_any(b)).into())
 }
 
 pub fn inside(a: &Value, b: &Value) -> Result<Value> {
+	spatial(b, a)?;
 	Ok(b.contains(a).into())
 }
 
 pub fn not_inside(a: &Value, b: &Value) -> Result<Value> {
+	spatial(b, a)?;
 	Ok((!b.contains(a)).into())
 }
 
 pub fn inside_all(a: &Value, b: &Value) -> Result<Value> {
+	spatial(b, a)?;
 	Ok(b.contains_all(a).into())
 }
 
 pub fn inside_any(a: &Value, b: &Value) -> Result<Value> {
+	spatial(b, a)?;
 	Ok(b.contains_any(a).into())
 }
 
 pub fn inside_none(a: &Value, b: &Value) -> Result<Value> {
+	spatial(b, a)?;
 	Ok((!b.contains_any(a)).into())
 }
 
 pub fn outside(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok((!a.intersects(b)).into())
 }
 
 pub fn intersects(a: &Value, b: &Value) -> Result<Value> {
+	spatial(a, b)?;
 	Ok(a.intersects(b).into())
 }
 

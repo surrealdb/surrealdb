@@ -4,7 +4,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use surrealdb_strand::Strand;

@@ -58,6 +58,7 @@ define_pure_function!(StringIsNumeric, "string::is_numeric", effects: EffectSet:
 define_pure_function!(StringIsRecord, "string::is_record", effects: EffectSet::PURE, (value: String, ?table: Any) -> Bool, crate::fnc::string::is::record);
 define_pure_function!(StringIsSemver, "string::is_semver", effects: EffectSet::PURE, (value: String) -> Bool, crate::fnc::string::is::semver);
 define_pure_function!(StringIsUlid, "string::is_ulid", effects: EffectSet::PURE, (value: String) -> Bool, crate::fnc::string::is::ulid);
+#[cfg(feature = "url")]
 define_pure_function!(StringIsUrl, "string::is_url", effects: EffectSet::PURE, (value: String) -> Bool, crate::fnc::string::is::url);
 define_pure_function!(StringIsUuid, "string::is_uuid", effects: EffectSet::PURE, (value: String) -> Bool, crate::fnc::string::is::uuid);
 
@@ -111,7 +112,6 @@ pub fn register(registry: &mut FunctionRegistry) {
 		StringIsRecord,
 		StringIsSemver,
 		StringIsUlid,
-		StringIsUrl,
 		StringIsUuid,
 		StringJoin,
 		StringLen,
@@ -143,4 +143,8 @@ pub fn register(registry: &mut FunctionRegistry) {
 		StringUppercase,
 		StringWords,
 	);
+	#[cfg(feature = "url")]
+	registry.register(StringIsUrl);
+	#[cfg(not(feature = "url"))]
+	super::disabled::register(registry, "url", &["string::is_url"]);
 }

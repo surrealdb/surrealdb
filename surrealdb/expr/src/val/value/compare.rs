@@ -12,10 +12,14 @@ impl Value {
 		numeric: bool,
 	) -> Option<Ordering> {
 		let Some(p) = path.first() else {
+			// Without the `collate` feature a collated comparison orders as an
+			// uncollated one; the engine rejects a collated sort before it runs.
 			return match (collate, numeric) {
+				#[cfg(feature = "collate")]
 				(true, true) => self.natural_lexical_cmp(other),
+				#[cfg(feature = "collate")]
 				(true, false) => self.lexical_cmp(other),
-				(false, true) => self.natural_cmp(other),
+				(_, true) => self.natural_cmp(other),
 				_ => self.partial_cmp(other),
 			};
 		};

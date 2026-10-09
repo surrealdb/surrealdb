@@ -6,4 +6,5 @@
 
 pub mod geo;
 pub mod math;
+#[cfg(feature = "collate")]
 pub mod string;

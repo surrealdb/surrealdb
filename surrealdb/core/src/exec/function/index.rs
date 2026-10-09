@@ -49,7 +49,9 @@ use crate::val::{Number, RecordId, RecordIdentity, TableName, Value};
 /// time without needing to know about specific function names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexContextKind {
-	/// Full-text search context (resolved from MATCHES clauses).
+	/// Full-text search context (resolved from MATCHES clauses). Only
+	/// `search::*` reads it.
+	#[cfg_attr(not(feature = "search"), allow(dead_code))]
 	FullText,
 	/// KNN distance context (resolved from KNN operators).
 	Knn,
@@ -181,6 +183,7 @@ pub struct MatchContext {
 }
 
 /// The full-text resources a [`MatchContext`] resolves once per statement.
+#[cfg_attr(not(feature = "search"), allow(dead_code))]
 pub struct FullTextResources {
 	pub index: FullTextIndex,
 	pub terms: QueryTerms,
@@ -214,6 +217,7 @@ impl MatchContext {
 	/// optionally creates a Scorer. Subsequent calls return the cached
 	/// result. Returns `Ok(None)` when no full-text index on the table
 	/// covers the field (see the `ft_cache` field docs).
+	#[cfg_attr(not(feature = "search"), allow(dead_code))]
 	pub async fn ft_resources(&self, ctx: &EvalContext<'_>) -> Result<&Option<FullTextResources>> {
 		self.ft_cache
 			.get_or_try_init(|| async {

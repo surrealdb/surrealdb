@@ -70,6 +70,9 @@ impl Value {
 					})
 				}
 			}
+			// A text patch needs the `text-diff` feature; without it a changed
+			// string is replaced whole, which applies to the same value.
+			#[cfg(feature = "text-diff")]
 			(Value::String(a), Value::String(b)) if a != b => ops.push(Operation::Change {
 				path: path.clone(),
 				value: {

@@ -538,27 +538,27 @@ fn geometry_heap_size(geometry: &crate::val::Geometry) -> usize {
 	use std::mem::size_of;
 
 	use crate::val::Geometry;
-	fn line(line: &geo::LineString<f64>) -> usize {
-		size_of::<geo::Coord<f64>>() * line.0.len()
+	fn line(line: &geo_types::LineString<f64>) -> usize {
+		size_of::<geo_types::Coord<f64>>() * line.0.len()
 	}
-	fn polygon(polygon: &geo::Polygon<f64>) -> usize {
+	fn polygon(polygon: &geo_types::Polygon<f64>) -> usize {
 		line(polygon.exterior())
 			+ polygon
 				.interiors()
 				.iter()
-				.map(|ring| size_of::<geo::LineString<f64>>() + line(ring))
+				.map(|ring| size_of::<geo_types::LineString<f64>>() + line(ring))
 				.sum::<usize>()
 	}
 	match geometry {
 		Geometry::Point(_) => 0,
 		Geometry::Line(l) => line(l),
 		Geometry::Polygon(p) => polygon(p),
-		Geometry::MultiPoint(m) => size_of::<geo::Point<f64>>() * m.0.len(),
+		Geometry::MultiPoint(m) => size_of::<geo_types::Point<f64>>() * m.0.len(),
 		Geometry::MultiLine(m) => {
-			m.0.iter().map(|l| size_of::<geo::LineString<f64>>() + line(l)).sum()
+			m.0.iter().map(|l| size_of::<geo_types::LineString<f64>>() + line(l)).sum()
 		}
 		Geometry::MultiPolygon(m) => {
-			m.0.iter().map(|p| size_of::<geo::Polygon<f64>>() + polygon(p)).sum()
+			m.0.iter().map(|p| size_of::<geo_types::Polygon<f64>>() + polygon(p)).sum()
 		}
 		Geometry::Collection(c) => {
 			c.iter().map(|g| size_of::<Geometry>() + geometry_heap_size(g)).sum()
@@ -1029,7 +1029,7 @@ mod tests {
 
 	#[test]
 	fn a_geometry_counts_its_containers() {
-		let empty = || geo::Polygon::new(geo::LineString::<f64>::new(vec![]), vec![]);
+		let empty = || geo_types::Polygon::new(geo_types::LineString::<f64>::new(vec![]), vec![]);
 		let members: Vec<crate::val::Geometry> =
 			(0..5000).map(|_| crate::val::Geometry::Polygon(empty())).collect();
 		let collection = Value::Geometry(crate::val::Geometry::Collection(members));
@@ -1037,14 +1037,14 @@ mod tests {
 			approx_value_size(&collection) >= 5000 * std::mem::size_of::<crate::val::Geometry>(),
 			"a collection of 5000 empty polygons is sized by its members"
 		);
-		let rings: Vec<geo::LineString<f64>> =
-			(0..5000).map(|_| geo::LineString::new(vec![])).collect();
-		let polygon = Value::Geometry(crate::val::Geometry::Polygon(geo::Polygon::new(
-			geo::LineString::new(vec![]),
+		let rings: Vec<geo_types::LineString<f64>> =
+			(0..5000).map(|_| geo_types::LineString::new(vec![])).collect();
+		let polygon = Value::Geometry(crate::val::Geometry::Polygon(geo_types::Polygon::new(
+			geo_types::LineString::new(vec![]),
 			rings,
 		)));
 		assert!(
-			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo::LineString<f64>>(),
+			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo_types::LineString<f64>>(),
 			"a polygon of 5000 empty interior rings is sized by its rings"
 		);
 	}
@@ -1052,10 +1052,12 @@ mod tests {
 	#[test]
 	fn a_geometry_counts_its_coordinates() {
 		let ring: Vec<(f64, f64)> = (0..5000).map(|i| (i as f64, 0.0)).collect();
-		let polygon =
-			Value::Geometry(crate::val::Geometry::Polygon(geo::Polygon::new(ring.into(), vec![])));
+		let polygon = Value::Geometry(crate::val::Geometry::Polygon(geo_types::Polygon::new(
+			ring.into(),
+			vec![],
+		)));
 		assert!(
-			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo::Coord<f64>>(),
+			approx_value_size(&polygon) >= 5000 * std::mem::size_of::<geo_types::Coord<f64>>(),
 			"a 5000-point polygon is sized by its coordinates"
 		);
 	}

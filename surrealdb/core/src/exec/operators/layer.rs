@@ -71,8 +71,6 @@ use futures::StreamExt;
 #[cfg(test)]
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use crate::err::EngineError;
@@ -425,7 +423,10 @@ impl ExecOperator for ProjectLayer {
 		self.input.constant_output_fields()
 	}
 
-	#[instrument(name = "ProjectLayer::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "ProjectLayer::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,

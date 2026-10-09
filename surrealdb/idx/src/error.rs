@@ -70,6 +70,16 @@ pub enum Error {
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
 
+	/// The build left out the cargo feature an index kernel needs.
+	///
+	/// The definition still parses and stored state still decodes; building,
+	/// loading or querying the structure fails with this error.
+	#[error("{what} are not available: this build was compiled without the `{feature}` feature")]
+	FeatureDisabled {
+		feature: &'static str,
+		what: &'static str,
+	},
+
 	/// An ANN graph's in-memory state names an entry-point element whose
 	/// vector the reading transaction cannot see.
 	///
@@ -102,6 +112,9 @@ impl LeafError for Error {
 			| Error::AnalyzerError(_)
 			| Error::HighlightError(_)
 			| Error::FstError(_) => TypesError::internal(message),
+			Error::FeatureDisabled {
+				..
+			} => TypesError::configuration(message, None),
 			// The graph state this search started from disagrees with its own
 			// snapshot, which is what a retry resolves: the next search
 			// reconciles the state before reading. Reported as a conflict so a

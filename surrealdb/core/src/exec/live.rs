@@ -117,7 +117,10 @@ pub(crate) async fn live_statement_arrive(
 /// registration commits or rolls back with the statement. `arrived` is the
 /// unit compiled as the statement arrived, if any; nothing is compiled in this
 /// transaction.
-#[instrument(level = "trace", name = "LiveStatement::compute", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", name = "LiveStatement::compute", skip_all)
+)]
 pub(crate) async fn live_statement_compute(
 	this: &LiveStatement,
 	ctx: &FrozenContext,

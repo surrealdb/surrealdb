@@ -64,7 +64,7 @@ pub fn settings_from_capabilities_config(
 /// configured limit; exceeding it is a parse error rather than unbounded
 /// recursion. Errors render exactly like SurrealQL parse errors
 /// ([`ParseError::InvalidQuery`] with a [`crate::syn::error::RenderedError`]).
-#[instrument(level = "trace", target = "surrealdb::core::gql", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::gql", fields(length = input.len())))]
 pub fn parse_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,

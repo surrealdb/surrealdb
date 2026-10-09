@@ -305,13 +305,13 @@ fn same_bound<T>(
 /// coordinate of the same bits, so `0.0` and `-0.0` differ.
 fn same_geometry(a: &crate::val::Geometry, b: &crate::val::Geometry) -> bool {
 	use crate::val::Geometry;
-	fn coord(a: &geo::Coord<f64>, b: &geo::Coord<f64>) -> bool {
+	fn coord(a: &geo_types::Coord<f64>, b: &geo_types::Coord<f64>) -> bool {
 		a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits()
 	}
-	fn line(a: &geo::LineString<f64>, b: &geo::LineString<f64>) -> bool {
+	fn line(a: &geo_types::LineString<f64>, b: &geo_types::LineString<f64>) -> bool {
 		a.0.len() == b.0.len() && a.0.iter().zip(&b.0).all(|(a, b)| coord(a, b))
 	}
-	fn polygon(a: &geo::Polygon<f64>, b: &geo::Polygon<f64>) -> bool {
+	fn polygon(a: &geo_types::Polygon<f64>, b: &geo_types::Polygon<f64>) -> bool {
 		line(a.exterior(), b.exterior())
 			&& a.interiors().len() == b.interiors().len()
 			&& a.interiors().iter().zip(b.interiors()).all(|(a, b)| line(a, b))

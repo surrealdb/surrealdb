@@ -889,6 +889,12 @@ user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-25"
 end = "2026-11-06"
 
+[[trusted.regex-lite]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2023-02-28"
+end = "2027-10-08"
+
 [[trusted.regex-syntax]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)

@@ -20,6 +20,7 @@ pub mod expr;
 #[cfg(feature = "scripting")]
 pub mod js;
 pub use val::rnd;
+pub mod scram;
 pub mod val;
 
 // The module tree spells intra-layer paths as `crate::<name>`; these aliases

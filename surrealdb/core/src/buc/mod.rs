@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "files"), allow(unused_imports, dead_code, unreachable_code))]
+
 //! Bucket storage module for SurrealDB.
 //!
 //! This module provides abstractions for object storage backends (buckets) that can be used
@@ -100,28 +102,37 @@ impl BucketStoreProvider for CommunityComposer {
 		_readonly: bool,
 		config: Config,
 	) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>> {
-		Box::pin(async {
-			#[cfg(target_arch = "wasm32")]
-			let _ = config;
-			if MemoryStore::parse_url(url) {
-				return Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>);
+		Box::pin(async move {
+			// Buckets back `file::*`; a build without them connects none.
+			#[cfg(not(feature = "files"))]
+			{
+				let _ = (url, config);
+				bail!(Error::FeatureDisabled)
 			}
+			#[cfg(feature = "files")]
+			{
+				#[cfg(target_arch = "wasm32")]
+				let _ = config;
+				if MemoryStore::parse_url(url) {
+					return Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>);
+				}
 
-			#[cfg(not(target_arch = "wasm32"))]
-			if let Some(opts) = FileStore::parse_url(url, &config).await? {
-				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
+				#[cfg(not(target_arch = "wasm32"))]
+				if let Some(opts) = FileStore::parse_url(url, &config).await? {
+					return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
+				}
+
+				// Cloud object storage — AWS S3 (and S3-compatible services like
+				// MinIO, Backblaze B2, Wasabi, Cloudflare R2), Google Cloud Storage,
+				// and Azure Blob Storage — all via the `object_store` crate. See
+				// `store::cloud` for the supported URL formats.
+				#[cfg(not(target_arch = "wasm32"))]
+				if let Some(store) = crate::buc::store::cloud::connect(url)? {
+					return Ok(store);
+				}
+
+				bail!(Error::UnsupportedBackend)
 			}
-
-			// Cloud object storage — AWS S3 (and S3-compatible services like
-			// MinIO, Backblaze B2, Wasabi, Cloudflare R2), Google Cloud Storage,
-			// and Azure Blob Storage — all via the `object_store` crate. See
-			// `store::cloud` for the supported URL formats.
-			#[cfg(not(target_arch = "wasm32"))]
-			if let Some(store) = crate::buc::store::cloud::connect(url)? {
-				return Ok(store);
-			}
-
-			bail!(Error::UnsupportedBackend)
 		})
 	}
 }

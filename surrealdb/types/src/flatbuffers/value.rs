@@ -255,17 +255,17 @@ mod tests {
 	#[case::thing_range(Value::RecordId(RecordId::new("test_table", RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })))))]
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::String("value".to_owned()))]))))]
 	#[case::array(Value::Array(Array::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
-	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]
-	#[case::geometry::line(Value::Geometry(Geometry::Line(geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }]))))]
-	#[case::geometry::polygon(Value::Geometry(Geometry::Polygon(geo::Polygon::new(
-		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
-		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	#[case::geometry::point(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))))]
+	#[case::geometry::line(Value::Geometry(Geometry::Line(geo_types::LineString(vec![geo_types::Coord { x: 1.0, y: 2.0 }, geo_types::Coord { x: 3.0, y: 4.0 }]))))]
+	#[case::geometry::polygon(Value::Geometry(Geometry::Polygon(geo_types::Polygon::new(
+		geo_types::LineString(vec![geo_types::Coord { x: 0.0, y: 0.0 }, geo_types::Coord { x: 1.0, y: 1.0 }, geo_types::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo_types::LineString(vec![geo_types::Coord { x: 0.5, y: 0.5 }, geo_types::Coord { x: 0.75, y: 0.75 }])]
 	))))]
-	#[case::geometry::multipoint(Value::Geometry(Geometry::MultiPoint(geo::MultiPoint(vec![geo::Point::new(1.0, 2.0), geo::Point::new(3.0, 4.0)]))))]
-	#[case::geometry::multiline(Value::Geometry(Geometry::MultiLine(geo::MultiLineString(vec![geo::LineString(vec![geo::Coord { x: 1.0, y: 2.0 }, geo::Coord { x: 3.0, y: 4.0 }])] ))))]
-	#[case::geometry::multipolygon(Value::Geometry(Geometry::MultiPolygon(geo::MultiPolygon(vec![geo::Polygon::new(
-		geo::LineString(vec![geo::Coord { x: 0.0, y: 0.0 }, geo::Coord { x: 1.0, y: 1.0 }, geo::Coord { x: 0.0, y: 1.0 }]),
-		vec![geo::LineString(vec![geo::Coord { x: 0.5, y: 0.5 }, geo::Coord { x: 0.75, y: 0.75 }])]
+	#[case::geometry::multipoint(Value::Geometry(Geometry::MultiPoint(geo_types::MultiPoint(vec![geo_types::Point::new(1.0, 2.0), geo_types::Point::new(3.0, 4.0)]))))]
+	#[case::geometry::multiline(Value::Geometry(Geometry::MultiLine(geo_types::MultiLineString(vec![geo_types::LineString(vec![geo_types::Coord { x: 1.0, y: 2.0 }, geo_types::Coord { x: 3.0, y: 4.0 }])] ))))]
+	#[case::geometry::multipolygon(Value::Geometry(Geometry::MultiPolygon(geo_types::MultiPolygon(vec![geo_types::Polygon::new(
+		geo_types::LineString(vec![geo_types::Coord { x: 0.0, y: 0.0 }, geo_types::Coord { x: 1.0, y: 1.0 }, geo_types::Coord { x: 0.0, y: 1.0 }]),
+		vec![geo_types::LineString(vec![geo_types::Coord { x: 0.5, y: 0.5 }, geo_types::Coord { x: 0.75, y: 0.75 }])]
 	)]))))]
 	#[case::file(Value::File(File { bucket: "test_bucket".to_string(), key: "test_key".to_string() }))]
 	#[case::range(Value::Range(Box::new(Range { start: Bound::Included(Value::String("Hello, World!".to_string())), end: Bound::Excluded(Value::String("Hello, World!".to_string())) })))]

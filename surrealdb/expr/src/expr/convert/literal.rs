@@ -3,7 +3,7 @@
 //! Lives in core rather than beside the AST: `surrealdb-sql` sits below
 //! core, so it cannot name `expr` types.
 
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 use crate::sql::Expr;
 use crate::sql::literal::*;

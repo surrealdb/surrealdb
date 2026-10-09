@@ -72,6 +72,7 @@ UnsupportedDestructure	{ cause: NONE, code: -32000, kind: 'Internal', message: '
 ArithmeticOverflow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Failed to compute: "sample", as the operation results in an arithmetic overflow.' }
 ArithmeticNegativeOverflow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Failed to compute: "sample", as the operation results in a negative value.' }
 InvalidBytesize	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a bytesize' }
+FeatureDisabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'sample are not available: this build was compiled without the `sample` feature' }
 InvalidVectorDimension	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect vector dimension (1). Expected a vector of 1 dimension.' }
 InvalidVectorValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The value cannot be converted to a vector: sample' }
 IndexExists	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` already contains sample, with record `t:`1``' }
@@ -82,6 +83,7 @@ FstError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'I/O e
 DuplicatedMatchRef	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Duplicated Match reference: 1' }
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
 AnnEntryPointUnreadable	{ cause: NONE, code: -32009, details: { kind: 'TransactionConflict' }, kind: 'Query', message: 'Vector index 1 on table `sample` cannot be searched: entry point element 1 has no vector in this transaction' }
+FeatureDisabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'sample are not available: this build was compiled without the `sample` feature' }
 ExpiredSession	{ cause: NONE, code: -32000, details: { details: { kind: 'SessionExpired' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The session has expired' }
 RealtimeDisabled	{ cause: NONE, code: -32604, details: { kind: 'LiveQueryNotSupported' }, kind: 'Configuration', message: 'Unable to perform the realtime query' }
 InvalidTimeout	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid timeout: 1 seconds' }
@@ -107,6 +109,7 @@ InvalidBucketUrl	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket
 UnsupportedBackend	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket backend is not supported' }
 ReadonlyBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Write operation is not supported, as bucket `sample` is in read-only mode' }
 ObjectStoreFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Operation for bucket `sample` failed: sample' }
+FeatureDisabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'Buckets are not available: this build was compiled without the `files` feature' }
 RecordExists	{ cause: NONE, code: -32000, details: { details: { id: 't:`1`' }, kind: 'Record' }, kind: 'AlreadyExists', message: 'Database record `t:`1`` already exists' }
 IdNotFound	{ cause: NONE, code: -32000, details: { details: { id: 'sample' }, kind: 'Record' }, kind: 'NotFound', message: "The record 'sample' does not exist" }
 IdMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `id` field, but a specific record has been specified' }

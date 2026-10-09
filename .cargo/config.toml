@@ -23,7 +23,16 @@ RUST_MIN_STACK = "8388608"
 # `Makefile.local.toml` and CI set `-D warnings`. Such a build must carry the
 # cfg itself, as `ci-check-wasm` does; this line covers only the wasm builds
 # that set no `RUSTFLAGS`, such as `wasm-pack`.
-rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+#
+# The stack is 4 MiB rather than the linker's 1 MiB default: the parser
+# recurses up to its depth limits, and at the stored-text ceilings that takes
+# most of 1 MiB. A build that sets `RUSTFLAGS` carries this link argument too
+# (`ci-check-wasm`, `scripts/wasm-size-budget.sh`).
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"', '-C', 'link-arg=-zstack-size=4194304']
+
+# The same 4 MiB stack for the emscripten target, set through emcc.
+[target.wasm32-unknown-emscripten]
+rustflags = ['-C', 'link-arg=-sSTACK_SIZE=4194304']
 
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"

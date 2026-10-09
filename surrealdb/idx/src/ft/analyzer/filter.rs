@@ -1,8 +1,11 @@
 use anyhow::Result;
+#[cfg(feature = "fulltext")]
 use deunicode::deunicode;
+#[cfg(feature = "fulltext")]
 use rust_stemmers::{Algorithm, Stemmer};
 
 use crate::expr::filter::Filter as SqlFilter;
+#[cfg(feature = "fulltext")]
 use crate::expr::language::Language;
 use crate::ft::Position;
 use crate::ft::analyzer::mapper::Mapper;
@@ -15,7 +18,9 @@ pub(in crate::ft) enum FilteringStage {
 	Querying,
 }
 pub(super) enum Filter {
+	#[cfg(feature = "fulltext")]
 	Stemmer(Stemmer),
+	#[cfg(feature = "fulltext")]
 	Ascii,
 	Ngram(u16, u16),
 	EdgeNgram(u16, u16),
@@ -27,10 +32,19 @@ pub(super) enum Filter {
 impl Filter {
 	fn new(ixs: &IndexStores, f: &SqlFilter) -> Result<Self> {
 		let f = match f {
+			#[cfg(feature = "fulltext")]
 			SqlFilter::Ascii => Filter::Ascii,
+			#[cfg(not(feature = "fulltext"))]
+			SqlFilter::Ascii | SqlFilter::Snowball(_) => {
+				anyhow::bail!(crate::Error::FeatureDisabled {
+					feature: "fulltext",
+					what: "Analyzers",
+				})
+			}
 			SqlFilter::EdgeNgram(min, max) => Filter::EdgeNgram(*min, *max),
 			SqlFilter::Lowercase => Filter::Lowercase,
 			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
+			#[cfg(feature = "fulltext")]
 			SqlFilter::Snowball(l) => {
 				let a = match l {
 					Language::Arabic => Stemmer::create(Algorithm::Arabic),
@@ -100,10 +114,12 @@ impl Filter {
 
 	pub(super) fn apply_filter(&self, c: &str) -> FilterResult {
 		match self {
+			#[cfg(feature = "fulltext")]
 			Filter::Ascii => Self::deunicode(c),
 			Filter::EdgeNgram(min, max) => Self::edgengram(c, *min, *max),
 			Filter::Lowercase => Self::lowercase(c),
 			Filter::Ngram(min, max) => Self::ngram(c, *min, *max),
+			#[cfg(feature = "fulltext")]
 			Filter::Stemmer(s) => Self::stem(s, c),
 			Filter::Uppercase => Self::uppercase(c),
 			Filter::Mapper(m) => m.map(c),
@@ -131,11 +147,13 @@ impl Filter {
 		Self::check_term(c, c.to_uppercase())
 	}
 
+	#[cfg(feature = "fulltext")]
 	#[inline]
 	fn deunicode(c: &str) -> FilterResult {
 		Self::check_term(c, deunicode(c))
 	}
 
+	#[cfg(feature = "fulltext")]
 	#[inline]
 	fn stem(s: &Stemmer, c: &str) -> FilterResult {
 		Self::check_term(c, s.stem(&c.to_lowercase()).into())
@@ -202,6 +220,7 @@ pub(super) enum Term {
 }
 
 #[cfg(test)]
+#[cfg(feature = "fulltext")]
 mod tests {
 	use crate::ft::analyzer::tests::{test_analyzer, test_analyzer_tokens};
 	use crate::ft::analyzer::tokenizer::Token;

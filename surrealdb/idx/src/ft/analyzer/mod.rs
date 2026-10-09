@@ -20,6 +20,10 @@ use crate::val::Value;
 
 pub(in crate::ft) mod filter;
 pub(crate) mod mapper;
+#[cfg(feature = "cjk-tokenizer")]
+pub(crate) mod segmenter;
+#[cfg(not(feature = "cjk-tokenizer"))]
+#[path = "segmenter_disabled.rs"]
 pub(crate) mod segmenter;
 pub(in crate::ft) mod tokenizer;
 
@@ -57,6 +61,10 @@ pub struct Analyzer {
 	/// declares one. Held beside the definition rather than looked up per call
 	/// because resolving it loads a dictionary.
 	segmenter: Arc<Option<Segmenter>>,
+	/// Without `fulltext` no analyzer exists, so neither does a full-text
+	/// index, which holds one.
+	#[cfg(not(feature = "fulltext"))]
+	disabled: std::convert::Infallible,
 }
 
 impl Analyzer {
@@ -64,12 +72,22 @@ impl Analyzer {
 	/// dictionary, which is slow enough that it runs on the blocking pool and
 	/// that concurrent callers wait for one load rather than each doing their
 	/// own.
+	#[cfg(feature = "fulltext")]
 	pub async fn new(ixs: &IndexStores, az: Arc<catalog::AnalyzerDefinition>) -> Result<Self> {
 		Ok(Self {
 			filters: Arc::new(Filter::try_from(ixs, &az.filters)?),
 			segmenter: Arc::new(ixs.segmenters().for_definition(&az).await?),
 			az,
 		})
+	}
+
+	/// Always fails: this build has no full-text support.
+	#[cfg(not(feature = "fulltext"))]
+	pub async fn new(_ixs: &IndexStores, _az: Arc<catalog::AnalyzerDefinition>) -> Result<Self> {
+		Err(anyhow::Error::new(crate::Error::FeatureDisabled {
+			feature: "fulltext",
+			what: "Analyzers and full-text indexes",
+		}))
 	}
 
 	pub(in crate::ft) async fn analyze_content(
@@ -192,6 +210,7 @@ impl Analyzer {
 }
 
 #[cfg(test)]
+#[cfg(feature = "fulltext")]
 mod tests {
 	use std::sync::Arc;
 

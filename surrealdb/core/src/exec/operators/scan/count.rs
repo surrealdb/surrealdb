@@ -21,8 +21,6 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use common::future::stream::{Yielder, try_async_stream};
-#[cfg(test)]
-use tracing::instrument;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 #[cfg(test)]
@@ -186,7 +184,10 @@ impl ExecOperator for CountScan {
 		CardinalityHint::AtMostOne
 	}
 
-	#[instrument(name = "CountScan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "CountScan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;

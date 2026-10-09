@@ -12,7 +12,6 @@ use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transactio
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tracing::info;
-use tracing::instrument;
 
 // Only the persistence configuration is logged, and wasm has no persistence.
 #[cfg(not(target_family = "wasm"))]
@@ -195,7 +194,10 @@ impl Transactable for Transaction {
 	}
 
 	/// Cancels the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))
+	)]
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			// Atomically mark transaction as done and check if it was already closed
@@ -212,7 +214,10 @@ impl Transactable for Transaction {
 	}
 
 	/// Commits the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))
+	)]
 	fn commit(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			// Atomically mark transaction as done and check if it was already closed
@@ -233,7 +238,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Checks if a key exists in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>> {
 		Box::pin(async move {
 			// The memory backend does not support versioned queries.
@@ -254,7 +259,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Fetch a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>> {
 		Box::pin(async move {
 			// The memory backend does not support versioned queries.
@@ -276,12 +281,12 @@ impl Transactable for Transaction {
 
 	/// Fetch a key from the database, registering the key for
 	/// commit-time conflict detection.
-	#[instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "trace",
 		target = "surrealdb::core::kvs::api",
 		skip(self),
 		fields(key = key.to_string())
-	)]
+	))]
 	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<Option<Val>>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -310,12 +315,12 @@ impl Transactable for Transaction {
 	}
 
 	/// Fetch multiple keys from the database.
-	#[instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "trace",
 		target = "surrealdb::core::kvs::api",
 		skip(self),
 		fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))
-	)]
+	))]
 	fn getm<'a>(
 		&'a self,
 		keys: &'a [Key<'a>],
@@ -358,7 +363,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert or update a key in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -379,7 +384,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert or replace a key in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn replace<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -400,7 +405,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -426,7 +431,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn putc<'a>(&'a self, key: Key<'a>, val: Val, chk: Option<Val>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -453,7 +458,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -474,7 +479,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -499,7 +504,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Deletes all versions of a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -520,7 +525,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete all versions of a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn clrc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -545,7 +550,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Count the total number of keys within a range.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
 		Box::pin(async move {
 			// The memory backend does not support versioned queries.
@@ -585,7 +590,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn keys<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -618,7 +623,10 @@ impl Transactable for Transaction {
 	/// Count the keys within a range, examining at most `budget` of them
 	/// ([`Transactable::count_bounded`]): a key iterator walked `budget`
 	/// keys, the next key it yields being the resume key.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))
+	)]
 	fn count_bounded<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -650,7 +658,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of keys, in reverse.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn keysr<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -681,7 +689,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of key-value pairs.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn scan<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -712,7 +720,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of key-value pairs, in reverse.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn scanr<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -746,7 +754,7 @@ impl Transactable for Transaction {
 	/// arena — with a resume-by-bound cursor that packs each key straight
 	/// from the engine iterator into the reusable batch arena. See
 	/// [`MemKeysCursor`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn open_keys_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -777,7 +785,7 @@ impl Transactable for Transaction {
 	/// (double-copying) cursor with a resume-by-bound cursor whose `for_each`
 	/// streams the engine's refcounted `Bytes` to the visitor with no payload
 	/// copy. See [`MemValsCursor`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn open_vals_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,

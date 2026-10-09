@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::hash::BuildHasher;
 
-use geo::Point;
+use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 

@@ -65,15 +65,15 @@ const FRAME_BUFFER: usize = 1;
 
 /// Runs the driver on the runtime the stream was opened on.
 ///
-/// Exists only to name one spawn across both targets: wasm has a single event
-/// loop and no `Send` to offer, so the driver's future is not `Send` there.
-#[cfg(not(target_family = "wasm"))]
+/// Off the browser that is tokio's: a multi-thread runtime natively, or the
+/// current-thread runtime an emscripten host drives from its event loop.
+#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 fn spawn(task: impl Future<Output = ()> + Send + 'static) {
 	tokio::spawn(task);
 }
 
-/// The wasm counterpart.
-#[cfg(target_family = "wasm")]
+/// The browser counterpart, on the JavaScript microtask queue.
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 fn spawn(task: impl Future<Output = ()> + 'static) {
 	wasm_bindgen_futures::spawn_local(task);
 }

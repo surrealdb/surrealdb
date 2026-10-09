@@ -17,6 +17,9 @@
 #![allow(clippy::mutable_key_type)]
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
+// Without `vector-index` the graph engine is left out, and without `fulltext`
+// no analyzer exists; the helpers and caches only they reach go unused.
+#![cfg_attr(not(all(feature = "vector-index", feature = "fulltext")), allow(dead_code))]
 
 #[macro_use]
 mod mac;
@@ -77,6 +80,27 @@ use surrealdb_kvs::Error as KvsError;
 use uuid::Uuid;
 
 pub use self::error::{Error, index_exists_record};
+
+/// Fails when this build left out the kernel an index of kind `index` needs.
+///
+/// Checked before an index is built, so a definition this build cannot serve
+/// is refused by the statement that defines it rather than accepted and left
+/// unbuildable.
+pub fn check_index_kernel(index: &catalog::Index) -> Result<()> {
+	match index {
+		#[cfg(not(feature = "vector-index"))]
+		catalog::Index::Hnsw(_) => Err(anyhow::Error::new(Error::FeatureDisabled {
+			feature: "vector-index",
+			what: "HNSW indexes",
+		})),
+		#[cfg(not(feature = "fulltext"))]
+		catalog::Index::FullText(_) => Err(anyhow::Error::new(Error::FeatureDisabled {
+			feature: "fulltext",
+			what: "Full-text indexes",
+		})),
+		_ => Ok(()),
+	}
+}
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::docids::DocId;
 use crate::key::schema::{

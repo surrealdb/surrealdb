@@ -5694,6 +5694,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5833,7 +5839,6 @@ dependencies = [
  "bytes",
  "chrono",
  "geo",
- "regex",
  "revision-derive",
  "roaring",
  "rust_decimal",
@@ -7192,6 +7197,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "unicase",
+ "wasm-bindgen-futures",
  "wasmtimer",
 ]
 
@@ -7207,7 +7213,6 @@ dependencies = [
  "async-graphql",
  "async-trait",
  "base64 0.22.1",
- "bcrypt",
  "bytes",
  "chrono",
  "ciborium",
@@ -7218,7 +7223,6 @@ dependencies = [
  "flate2",
  "fst",
  "futures",
- "geo",
  "geo-types",
  "getrandom 0.3.4",
  "headers",
@@ -7227,7 +7231,6 @@ dependencies = [
  "ipnet",
  "jsonwebtoken",
  "libmimalloc-sys",
- "md-5 0.10.6",
  "memchr",
  "mimalloc",
  "mime",
@@ -7236,7 +7239,6 @@ dependencies = [
  "parking_lot",
  "paste",
  "path-clean",
- "pbkdf2",
  "quick_cache",
  "rand 0.9.4",
  "rand_core 0.6.4",
@@ -7249,7 +7251,6 @@ dependencies = [
  "rquickjs",
  "rstest",
  "rust_decimal",
- "scrypt",
  "semver",
  "serde",
  "serde_json",
@@ -7298,8 +7299,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "wasm-bindgen-futures",
- "wasmtimer",
  "web-time",
  "wiremock",
  "zstd",
@@ -7343,6 +7342,13 @@ dependencies = [
  "tracing",
  "uuid",
  "web-time",
+]
+
+[[package]]
+name = "surrealdb-edge-size-probe"
+version = "3.4.0-nightly"
+dependencies = [
+ "surrealdb-core",
 ]
 
 [[package]]
@@ -7428,7 +7434,6 @@ dependencies = [
  "lexicmp",
  "quick_cache",
  "rand 0.9.4",
- "regex",
  "revision",
  "rquickjs",
  "rstest",
@@ -7905,11 +7910,11 @@ dependencies = [
  "deunicode",
  "fuzzy-matcher",
  "geo",
+ "geo-types",
  "md-5 0.10.6",
  "pbkdf2",
  "rand 0.9.4",
  "rand_core 0.6.4",
- "regex",
  "rust_decimal",
  "scrypt",
  "semver",
@@ -8027,12 +8032,11 @@ dependencies = [
  "arbitrary",
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "getrandom 0.3.4",
  "hex",
  "phf",
  "rand 0.9.4",
- "regex",
  "regex-syntax",
  "rstest",
  "rust_decimal",
@@ -8111,9 +8115,8 @@ version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "phf",
- "regex",
  "rstest",
  "rust_decimal",
  "surrealdb-cnf",
@@ -8175,7 +8178,6 @@ dependencies = [
  "castaway",
  "chrono",
  "flatbuffers",
- "geo",
  "geo-types",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -8185,6 +8187,7 @@ dependencies = [
  "prost 0.14.3",
  "rand 0.9.4",
  "regex",
+ "regex-lite",
  "regex-syntax",
  "reqwest 0.13.3",
  "rstest",

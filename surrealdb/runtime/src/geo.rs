@@ -1,9 +1,20 @@
+//! The `geo::*` functions. `geo::area`, `geo::bearing`, `geo::centroid` and
+//! `geo::distance` need the `geo` feature; without it they are absent and
+//! `surrealdb-core` answers a call with an error naming the feature. The hash
+//! and validity functions need no geometry algorithms.
+
+#[cfg(feature = "geo")]
 use anyhow::Result;
+#[cfg(feature = "geo")]
 use geo::algorithm::centroid::Centroid;
+#[cfg(feature = "geo")]
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
+#[cfg(feature = "geo")]
 use geo::{Bearing, Distance, Haversine};
+#[cfg(feature = "geo")]
 use surrealdb_expr::val::{Geometry, Value};
 
+#[cfg(feature = "geo")]
 pub fn area((arg,): (Geometry,)) -> Result<Value> {
 	match arg {
 		Geometry::Point(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
@@ -14,12 +25,13 @@ pub fn area((arg,): (Geometry,)) -> Result<Value> {
 		Geometry::MultiPolygon(v) => Ok(v.chamberlain_duquette_unsigned_area().into()),
 		Geometry::Collection(v) => Ok(v
 			.into_iter()
-			.collect::<geo::Geometry<f64>>()
+			.collect::<geo_types::Geometry<f64>>()
 			.chamberlain_duquette_unsigned_area()
 			.into()),
 	}
 }
 
+#[cfg(feature = "geo")]
 pub fn bearing((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
 		(Geometry::Point(v), Geometry::Point(w)) => {
@@ -36,6 +48,7 @@ pub fn bearing((v, w): (Geometry, Geometry)) -> Result<Value> {
 	})
 }
 
+#[cfg(feature = "geo")]
 pub fn centroid((arg,): (Geometry,)) -> Result<Value> {
 	let centroid = match arg {
 		Geometry::Point(v) => Some(v.centroid()),
@@ -44,11 +57,12 @@ pub fn centroid((arg,): (Geometry,)) -> Result<Value> {
 		Geometry::MultiPoint(v) => v.centroid(),
 		Geometry::MultiLine(v) => v.centroid(),
 		Geometry::MultiPolygon(v) => v.centroid(),
-		Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>().centroid(),
+		Geometry::Collection(v) => v.into_iter().collect::<geo_types::Geometry<f64>>().centroid(),
 	};
 	Ok(centroid.map(Into::into).unwrap_or(Value::None))
 }
 
+#[cfg(feature = "geo")]
 pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
 		(Geometry::Point(v), Geometry::Point(w)) => Haversine.distance(v, w).into(),

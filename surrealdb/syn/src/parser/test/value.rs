@@ -30,7 +30,7 @@ fn parse_index_expression() {
 fn parse_coordinate() {
 	let coord =
 		crate::parse_with("(1.88, -18.0)".as_bytes(), |parser| parser.parse_expr_field()).unwrap();
-	let Expr::Literal(Literal::Geometry(geo::Geometry::Point(x))) = coord else {
+	let Expr::Literal(Literal::Geometry(geo_types::Geometry::Point(x))) = coord else {
 		panic!("not the right value");
 	};
 	assert_eq!(x.x(), 1.88);

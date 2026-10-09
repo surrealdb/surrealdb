@@ -125,7 +125,9 @@ impl Expr {
 			PublicValue::Duration(x) => Expr::Literal(Literal::Duration(x.into_inner())),
 			PublicValue::Datetime(x) => Expr::Literal(Literal::Datetime(x.into_inner())),
 			PublicValue::Uuid(x) => Expr::Literal(Literal::Uuid(x.into_inner())),
-			PublicValue::Geometry(x) => Expr::Literal(Literal::Geometry(geo::Geometry::from(x))),
+			PublicValue::Geometry(x) => {
+				Expr::Literal(Literal::Geometry(geo_types::Geometry::from(x)))
+			}
 			PublicValue::File(x) => Expr::Literal(Literal::File(x.into())),
 			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}

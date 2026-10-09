@@ -34,7 +34,10 @@ use crate::lq::event::LiveEvents;
 /// so one large backlog cannot take the whole pass. As in the changefeed
 /// collector, every database visited is granted a share of what the budget has
 /// left, so each makes progress on every pass however many databases there are.
-#[instrument(level = "trace", target = "surrealdb::core::lq", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", target = "surrealdb::core::lq", skip_all)
+)]
 pub async fn gc_all_at(
 	ds: &Datastore,
 	lh: &LeaseHandler,

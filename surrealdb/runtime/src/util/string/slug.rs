@@ -1,11 +1,12 @@
 use std::sync::LazyLock;
 
 use deunicode::deunicode;
-use regex::Regex;
+use surrealdb_types::regex_engine::{self, Regex};
 
 static ALLOWED: LazyLock<Regex> =
-	LazyLock::new(|| Regex::new("[^a-z0-9-_]").expect("valid regex pattern"));
-static HYPHENS: LazyLock<Regex> = LazyLock::new(|| Regex::new("-+").expect("valid regex pattern"));
+	LazyLock::new(|| regex_engine::compile("[^a-z0-9-_]", None).expect("valid regex pattern"));
+static HYPHENS: LazyLock<Regex> =
+	LazyLock::new(|| regex_engine::compile("-+", None).expect("valid regex pattern"));
 
 pub fn slug<S: AsRef<str>>(s: S) -> String {
 	// Get a reference

@@ -12,7 +12,6 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tracing::instrument;
 
 use crate::exec::field_path::FieldPath;
 use crate::exec::operators::OmitPath;
@@ -244,7 +243,7 @@ impl ExecOperator for Project {
 		self.input.output_ordering()
 	}
 
-	#[instrument(level = "trace", skip_all)]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", skip_all))]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,
@@ -649,7 +648,7 @@ impl ExecOperator for SelectProject {
 		self.input.output_ordering()
 	}
 
-	#[instrument(level = "trace", skip_all)]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", skip_all))]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,

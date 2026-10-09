@@ -27,7 +27,10 @@ use crate::val::{Uuid, Value};
 /// The context must already hold the statement's transaction. The key
 /// deletions are made in that transaction and the `KILLED` notification is
 /// queued to be sent if it commits.
-#[instrument(level = "trace", name = "KillStatement::compute", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", name = "KillStatement::compute", skip_all)
+)]
 pub(crate) async fn kill_statement_compute(
 	this: &KillStatement,
 	ctx: &FrozenContext,

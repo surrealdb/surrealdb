@@ -23,7 +23,7 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 					.expect("PASSSCRAM verifier must be validated at parse time"),
 			)
 		} else if let PassType::Password(ref p) = v.pass_type {
-			Some(ScramCredential::generate(p))
+			crate::scram::derive(p)
 		} else {
 			None
 		};

@@ -109,37 +109,37 @@ impl FromFlatbuffers for Geometry {
 				let point = input
 					.geometry_as_point()
 					.ok_or_else(|| anyhow::anyhow!("Expected Point geometry"))?;
-				Ok(Geometry::Point(geo::Point::from_fb(point)?))
+				Ok(Geometry::Point(geo_types::Point::from_fb(point)?))
 			}
 			proto_fb::GeometryType::LineString => {
 				let line_string = input
 					.geometry_as_line_string()
 					.ok_or_else(|| anyhow::anyhow!("Expected LineString geometry"))?;
-				Ok(Geometry::Line(geo::LineString::from_fb(line_string)?))
+				Ok(Geometry::Line(geo_types::LineString::from_fb(line_string)?))
 			}
 			proto_fb::GeometryType::Polygon => {
 				let polygon = input
 					.geometry_as_polygon()
 					.ok_or_else(|| anyhow::anyhow!("Expected Polygon geometry"))?;
-				Ok(Geometry::Polygon(geo::Polygon::from_fb(polygon)?))
+				Ok(Geometry::Polygon(geo_types::Polygon::from_fb(polygon)?))
 			}
 			proto_fb::GeometryType::MultiPoint => {
 				let multi_point = input
 					.geometry_as_multi_point()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiPoint geometry"))?;
-				Ok(Geometry::MultiPoint(geo::MultiPoint::from_fb(multi_point)?))
+				Ok(Geometry::MultiPoint(geo_types::MultiPoint::from_fb(multi_point)?))
 			}
 			proto_fb::GeometryType::MultiLineString => {
 				let multi_line_string = input
 					.geometry_as_multi_line_string()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiLineString geometry"))?;
-				Ok(Geometry::MultiLine(geo::MultiLineString::from_fb(multi_line_string)?))
+				Ok(Geometry::MultiLine(geo_types::MultiLineString::from_fb(multi_line_string)?))
 			}
 			proto_fb::GeometryType::MultiPolygon => {
 				let multi_polygon = input
 					.geometry_as_multi_polygon()
 					.ok_or_else(|| anyhow::anyhow!("Expected MultiPolygon geometry"))?;
-				Ok(Geometry::MultiPolygon(geo::MultiPolygon::from_fb(multi_polygon)?))
+				Ok(Geometry::MultiPolygon(geo_types::MultiPolygon::from_fb(multi_polygon)?))
 			}
 			proto_fb::GeometryType::Collection => {
 				let collection = input
@@ -160,7 +160,7 @@ impl FromFlatbuffers for Geometry {
 	}
 }
 
-impl ToFlatbuffers for geo::Point {
+impl ToFlatbuffers for geo_types::Point {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Point<'bldr>>;
 
 	#[inline]
@@ -178,16 +178,16 @@ impl ToFlatbuffers for geo::Point {
 	}
 }
 
-impl FromFlatbuffers for geo::Point {
+impl FromFlatbuffers for geo_types::Point {
 	type Input<'a> = proto_fb::Point<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		Ok(geo::Point::new(input.x(), input.y()))
+		Ok(geo_types::Point::new(input.x(), input.y()))
 	}
 }
 
-impl ToFlatbuffers for geo::Coord {
+impl ToFlatbuffers for geo_types::Coord {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Point<'bldr>>;
 
 	#[inline]
@@ -205,19 +205,19 @@ impl ToFlatbuffers for geo::Coord {
 	}
 }
 
-impl FromFlatbuffers for geo::Coord {
+impl FromFlatbuffers for geo_types::Coord {
 	type Input<'a> = proto_fb::Point<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		Ok(geo::Coord {
+		Ok(geo_types::Coord {
 			x: input.x(),
 			y: input.y(),
 		})
 	}
 }
 
-impl ToFlatbuffers for geo::LineString {
+impl ToFlatbuffers for geo_types::LineString {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::LineString<'bldr>>;
 
 	#[inline]
@@ -239,20 +239,20 @@ impl ToFlatbuffers for geo::LineString {
 	}
 }
 
-impl FromFlatbuffers for geo::LineString {
+impl FromFlatbuffers for geo_types::LineString {
 	type Input<'a> = proto_fb::LineString<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let mut points = Vec::new();
 		for point in input.points().context("Points is not set")? {
-			points.push(geo::Coord::from_fb(point)?);
+			points.push(geo_types::Coord::from_fb(point)?);
 		}
 		Ok(Self(points))
 	}
 }
 
-impl ToFlatbuffers for geo::Polygon {
+impl ToFlatbuffers for geo_types::Polygon {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Polygon<'bldr>>;
 
 	#[inline]
@@ -276,19 +276,19 @@ impl ToFlatbuffers for geo::Polygon {
 	}
 }
 
-impl FromFlatbuffers for geo::Polygon {
+impl FromFlatbuffers for geo_types::Polygon {
 	type Input<'a> = proto_fb::Polygon<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let exterior =
 			input.exterior().ok_or_else(|| anyhow::anyhow!("Missing exterior in Polygon"))?;
-		let exterior = geo::LineString::from_fb(exterior)?;
+		let exterior = geo_types::LineString::from_fb(exterior)?;
 
 		let mut interiors = Vec::new();
 		if let Some(interiors_reader) = input.interiors() {
 			for interior in interiors_reader {
-				interiors.push(geo::LineString::from_fb(interior)?);
+				interiors.push(geo_types::LineString::from_fb(interior)?);
 			}
 		}
 
@@ -296,7 +296,7 @@ impl FromFlatbuffers for geo::Polygon {
 	}
 }
 
-impl ToFlatbuffers for geo::MultiPoint {
+impl ToFlatbuffers for geo_types::MultiPoint {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiPoint<'bldr>>;
 
 	#[inline]
@@ -318,20 +318,20 @@ impl ToFlatbuffers for geo::MultiPoint {
 	}
 }
 
-impl FromFlatbuffers for geo::MultiPoint {
+impl FromFlatbuffers for geo_types::MultiPoint {
 	type Input<'a> = proto_fb::MultiPoint<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let mut points = Vec::new();
 		for point in input.points().context("Points is not set")? {
-			points.push(geo::Point::from_fb(point)?);
+			points.push(geo_types::Point::from_fb(point)?);
 		}
 		Ok(Self(points))
 	}
 }
 
-impl ToFlatbuffers for geo::MultiLineString {
+impl ToFlatbuffers for geo_types::MultiLineString {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiLineString<'bldr>>;
 
 	#[inline]
@@ -353,20 +353,20 @@ impl ToFlatbuffers for geo::MultiLineString {
 	}
 }
 
-impl FromFlatbuffers for geo::MultiLineString {
+impl FromFlatbuffers for geo_types::MultiLineString {
 	type Input<'a> = proto_fb::MultiLineString<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let mut lines = Vec::new();
 		for line in input.lines().context("Lines is not set")? {
-			lines.push(geo::LineString::from_fb(line)?);
+			lines.push(geo_types::LineString::from_fb(line)?);
 		}
 		Ok(Self(lines))
 	}
 }
 
-impl ToFlatbuffers for geo::MultiPolygon {
+impl ToFlatbuffers for geo_types::MultiPolygon {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::MultiPolygon<'bldr>>;
 
 	#[inline]
@@ -388,14 +388,14 @@ impl ToFlatbuffers for geo::MultiPolygon {
 	}
 }
 
-impl FromFlatbuffers for geo::MultiPolygon {
+impl FromFlatbuffers for geo_types::MultiPolygon {
 	type Input<'a> = proto_fb::MultiPolygon<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let mut polygons = Vec::new();
 		for polygon in input.polygons().context("Polygons is not set")? {
-			polygons.push(geo::Polygon::from_fb(polygon)?);
+			polygons.push(geo_types::Polygon::from_fb(polygon)?);
 		}
 		Ok(Self(polygons))
 	}

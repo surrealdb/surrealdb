@@ -14,6 +14,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
+# Tracing spans on this crate's functions (`#[instrument]`). Off, the
+# functions run without a span wrapper; log events are not affected. Turned on
+# by `surrealdb-core`'s `observability` feature.
+observability = []
 # The datastore cache's JWKS slot. Matches the crate above, which owns the
 # fetching and verification; only the cached document lives here.
 jwks = ["dep:jsonwebtoken"]

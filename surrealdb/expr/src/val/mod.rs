@@ -8,7 +8,7 @@ use std::time::Duration as StdDuration;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use common::fmt::{EscapeIdent, QuoteStr};
-use geo::Point;
+use geo_types::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
@@ -479,7 +479,8 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value contains another Value
+	/// Check if this Value contains another Value. Without the `geo` feature
+	/// no geometry contains anything; the operators that reach this fail first.
 	pub fn contains(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
@@ -492,6 +493,7 @@ impl Value {
 				Value::String(w) => v.contains(w.as_str()),
 				_ => false,
 			},
+			#[cfg(feature = "geo")]
 			Value::Geometry(v) => match other {
 				Value::Geometry(w) => v.contains(w),
 				_ => false,
@@ -611,15 +613,17 @@ impl Value {
 		}
 	}
 
-	/// Check if this Geometry intersects another Value
+	/// Check if this Geometry intersects another Value. Without the `geo`
+	/// feature no geometry intersects anything; the operators that reach this
+	/// fail first.
 	pub fn intersects(&self, other: &Value) -> bool {
-		match self {
-			Value::Geometry(v) => match other {
-				Value::Geometry(w) => v.intersects(w),
-				_ => false,
-			},
-			_ => false,
+		#[cfg(feature = "geo")]
+		if let (Value::Geometry(v), Value::Geometry(w)) = (self, other) {
+			return v.intersects(w);
 		}
+		#[cfg(not(feature = "geo"))]
+		let _ = other;
+		false
 	}
 
 	// -----------------------------------
@@ -627,6 +631,7 @@ impl Value {
 	// -----------------------------------
 
 	/// Compare this Value to another Value lexicographically
+	#[cfg(feature = "collate")]
 	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::String(a), Value::String(b)) => Some(lexicmp::lexical_cmp(a, b)),
@@ -644,6 +649,7 @@ impl Value {
 
 	/// Compare this Value to another Value lexicographically and using natural
 	/// numerical comparison
+	#[cfg(feature = "collate")]
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
 			(Value::String(a), Value::String(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
@@ -2209,7 +2215,7 @@ mod tests {
 		assert_eq!(Value::Table(TableName::from("a b")).to_sql(), "`a b`");
 	}
 	use chrono::{TimeZone, Utc};
-	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
+	use geo_types::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
 	use rstest::rstest;
 	use rust_decimal::Decimal;
 	use serde_json::{Value as Json, json};

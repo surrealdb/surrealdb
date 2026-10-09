@@ -26,7 +26,27 @@ async-channel = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-surrealdb-core = { workspace = true, features = ["http"] }
+surrealdb-core = { workspace = true, features = [
+    "http",
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "regex-unicode",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+] }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
 surrealdb-kvs = { workspace = true }
@@ -39,10 +59,12 @@ web-time = { workspace = true }
 
 # A query stream's execution is driven by a task of its own, so that it is
 # finished and its transaction finalised whether or not anyone is still reading.
-[target.'cfg(target_family = "wasm")'.dependencies]
+# The browser drives it on the JavaScript microtask queue; every other target,
+# emscripten included, on tokio.
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 wasm-bindgen-futures = { workspace = true }
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]

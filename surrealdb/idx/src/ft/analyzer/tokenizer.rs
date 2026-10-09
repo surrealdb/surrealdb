@@ -506,6 +506,7 @@ impl Splitter {
 }
 
 #[cfg(test)]
+#[cfg(feature = "fulltext")]
 mod tests {
 	use crate::ft::analyzer::tests::test_analyzer;
 	#[cfg(feature = "cjk-embed-korean")]

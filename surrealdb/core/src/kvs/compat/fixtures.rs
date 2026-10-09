@@ -14,7 +14,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use chrono::DateTime;
-use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, coord};
+use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, coord};
 use rust_decimal::Decimal;
 use surrealdb_datastore::values::changefeed::{TableMutation, TableMutations};
 use surrealdb_strand::Strand;

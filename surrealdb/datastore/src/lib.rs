@@ -27,6 +27,27 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
+/// Attaching a span to a future.
+///
+/// With `observability`, this is [`tracing::Instrument`]. Without it,
+/// `instrument` returns the future unchanged, so no span wrapper is built or
+/// polled.
+pub(crate) mod obs {
+	#[cfg(feature = "observability")]
+	pub(crate) use tracing::Instrument;
+
+	#[cfg(not(feature = "observability"))]
+	pub(crate) trait Instrument: Sized {
+		/// Returns `self` unchanged; the span is dropped.
+		fn instrument(self, _span: tracing::Span) -> Self {
+			self
+		}
+	}
+
+	#[cfg(not(feature = "observability"))]
+	impl<T> Instrument for T {}
+}
+
 pub mod cache;
 pub mod catalog_reads;
 pub mod close;

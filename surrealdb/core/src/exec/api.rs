@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "api"), allow(unused_imports, dead_code))]
+
 //! A `DEFINE API` request on the engine.
 //!
 //! A request to a defined endpoint runs as a program assembled from its
@@ -59,6 +61,29 @@ use crate::val::{Closure, Value};
 /// Run `req` through `api`, the definition that handles it, in the caller's
 /// frame `ctx` and `opt`; see the module documentation.
 pub(crate) async fn process(
+	ctx: &FrozenContext,
+	opt: &Options,
+	api: &ApiDefinition,
+	req: ApiRequest,
+) -> Result<ApiResponse> {
+	#[cfg(feature = "api")]
+	{
+		run_chain(ctx, opt, api, req).await
+	}
+	#[cfg(not(feature = "api"))]
+	{
+		let _ = (ctx, opt, api, req);
+		Err(anyhow::Error::new(crate::exec::Error::Unimplemented(
+			"DEFINE API handlers are not available: this build was compiled without the `api` \
+			 feature"
+				.to_owned(),
+		)))
+	}
+}
+
+/// The body of [`process`]: authorises the request and runs the API's chain.
+#[cfg(feature = "api")]
+async fn run_chain(
 	ctx: &FrozenContext,
 	opt: &Options,
 	api: &ApiDefinition,
@@ -207,14 +232,28 @@ impl ApiContinuation {
 		args: Vec<Value>,
 		exec: &ExecutionContext,
 	) -> FlowResult<Value> {
-		let req = args.into_iter().next().unwrap_or(Value::None);
-		crate::exec::trampoline::nest(run_stage(
-			Arc::clone(&self.chain),
-			self.stage,
-			req,
-			exec.clone(),
-		))
-		.await
+		#[cfg(not(feature = "api"))]
+		{
+			// Only `process` makes a continuation, and without `api` it runs
+			// no chain.
+			let _ = (args, exec);
+			Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Unimplemented(
+				"DEFINE API handlers are not available: this build was compiled without the \
+				 `api` feature"
+					.to_owned(),
+			))))
+		}
+		#[cfg(feature = "api")]
+		{
+			let req = args.into_iter().next().unwrap_or(Value::None);
+			crate::exec::trampoline::nest(run_stage(
+				Arc::clone(&self.chain),
+				self.stage,
+				req,
+				exec.clone(),
+			))
+			.await
+		}
 	}
 }
 

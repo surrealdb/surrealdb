@@ -2,7 +2,6 @@
 #![warn(clippy::missing_docs_in_private_items)]
 
 pub use common::future::BoxFut;
-use tracing::instrument;
 
 use crate::consts::{COUNT_BATCH_SIZE, NORMAL_BATCH_SIZE};
 use crate::cursor::{DefaultKeysCursor, DefaultValsCursor};
@@ -584,7 +583,8 @@ pub trait Transactable: Send + Sync {
 	/// it armed. Callers that must keep the guarantee across a rollback
 	/// re-issue the locked read afterwards rather than relying on
 	/// either behaviour.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
+	#[cfg_attr(not(feature = "observability"), expect(unused_variables))]
 	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<Option<Val>>> {
 		Box::pin(async move { Err(Error::UnsupportedLockedReads) })
 	}
@@ -737,20 +737,20 @@ pub trait Transactable: Send + Sync {
 	}
 
 	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn replace<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.set(key, val).await })
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.del(key).await })
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string())))]
 	fn clrc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.delc(key, chk).await })
 	}
@@ -764,7 +764,7 @@ pub trait Transactable: Send + Sync {
 	/// number of input keys that were found and the total value bytes across
 	/// the hits, accumulated in the same loop that performs the individual
 	/// point gets.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))))]
 	fn getm<'a>(
 		&'a self,
 		keys: &'a [Key<'a>],
@@ -802,7 +802,7 @@ pub trait Transactable: Send + Sync {
 	/// datastore in grouped batches. The returned [`ScanResult`] also reports
 	/// the total key and value bytes consumed during the scan, accumulated
 	/// while merging successive batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn getr<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -839,7 +839,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn delr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -866,7 +866,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn clrr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -894,7 +894,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// This function fetches the total key count from the underlying datastore
 	/// in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
@@ -934,7 +934,7 @@ pub trait Transactable: Send + Sync {
 	/// whole whatever the budget.
 	///
 	/// The default reads up to `budget` keys through [`Self::keys`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn count_bounded<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -963,7 +963,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
 	/// underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn batch_keys<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -1005,7 +1005,7 @@ pub trait Transactable: Send + Sync {
 	///
 	/// This function fetches key-value pairs, in batches, with multiple
 	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
 	fn batch_keys_vals<'a>(
 		&'a self,
 		rng: KeyRange<'a>,

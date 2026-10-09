@@ -13,6 +13,12 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# Tracing spans on this crate's functions (`#[instrument]`). Off, the
+# functions run without a span wrapper; log events are not affected. Turned on
+# by `surrealdb-core`'s `observability` feature.
+observability = []
+
 [dependencies]
 common = { workspace = true }
 surrealdb-cnf = { workspace = true }
@@ -23,9 +29,8 @@ surrealdb-types = { workspace = true }
 
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-geo = { workspace = true, features = ["use-serde"] }
+geo-types = { workspace = true }
 phf = { workspace = true, features = ["macros", "unicase"] }
-regex.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -33,6 +38,8 @@ unicase.workspace = true
 uuid = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
+# Tests run against the Unicode regex engine whatever the build selects.
+surrealdb-types = { workspace = true, features = ["regex-unicode"] }
 rstest = { workspace = true }
 
 [lints]

@@ -321,7 +321,7 @@ mod equality_tests {
 			Literal::Duration(crate::val::Duration::from_secs(1)),
 			Literal::Datetime(crate::val::Datetime::MIN_UTC),
 			Literal::Uuid(crate::val::Uuid::nil()),
-			Literal::Geometry(crate::val::Geometry::Point(geo::Point::new(1.0, 2.0))),
+			Literal::Geometry(crate::val::Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 			Literal::File(crate::val::File::new("b".to_owned(), "p".to_owned())),
 		];
 		for s in samples {

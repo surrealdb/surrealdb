@@ -47,7 +47,10 @@ struct Target<R> {
 /// be re-derived from [`LeaseHandler::try_maintain_lease`] here: the check that
 /// lost it consumed this maintenance period's one datastore read, so the next
 /// call answers `true` from the throttle without asking.
-#[instrument(level = "trace", target = "surrealdb::core::cfs", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", target = "surrealdb::core::cfs", skip_all)
+)]
 pub async fn gc_all_at(
 	ds: &Datastore,
 	lh: &LeaseHandler,

@@ -15,8 +15,6 @@ use std::sync::Arc;
 #[cfg(test)]
 use futures::StreamExt;
 use surrealdb_iam::AuthLimit;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use crate::err::EngineError;
@@ -215,7 +213,10 @@ impl ExecOperator for PermissionFilterExec {
 		self.input.constant_output_fields()
 	}
 
-	#[instrument(name = "PermissionFilter::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "PermissionFilter::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(
 			self.input.execute(ctx)?,

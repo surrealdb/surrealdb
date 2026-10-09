@@ -90,7 +90,10 @@ impl GrantFilter {
 /// A record subject is written as a record-id literal, whose key may itself be
 /// an expression, so it is evaluated rather than read: `GRANT FOR RECORD
 /// user:$id` names the record `$id` holds.
-#[instrument(level = "trace", name = "Subject::compute", skip_all)]
+#[cfg_attr(
+	feature = "observability",
+	tracing::instrument(level = "trace", name = "Subject::compute", skip_all)
+)]
 pub(crate) async fn subject_compute(
 	this: &Subject,
 	exec: &ExecutionContext,

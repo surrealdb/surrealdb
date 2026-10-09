@@ -4,7 +4,7 @@
 //! assert the rendering of `val::Value`, which sits above the AST.
 
 use common::range::TypedRange;
-use geo::Point;
+use geo_types::Point;
 use rstest::rstest;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
@@ -78,7 +78,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
     }
 ])), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::expr_lit_geometry(
-	Expr::Literal(Literal::Geometry(geo::Geometry::Point(Point::new(1.0, 2.0)))),
+	Expr::Literal(Literal::Geometry(geo_types::Geometry::Point(Point::new(1.0, 2.0)))),
 	"(1f, 2f)",
 	"(1f, 2f)"
 )]

@@ -30,7 +30,6 @@ use surrealdb_catalog::{
 	DatabaseId, FieldDefinition, IndexDefinition, NamespaceId, TableDefinition,
 };
 use surrealdb_expr::val::TableName;
-use tracing::instrument;
 use uuid::Uuid;
 
 use super::{DatastoreCache, Entry, Lookup};
@@ -206,7 +205,14 @@ impl CatalogSnapshot {
 	///
 	/// Tables the statement discovers later — through a `record<t>` field kind,
 	/// or a body that names another table — are added with [`Self::extended`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(cache, txn))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip(cache, txn)
+		)
+	)]
 	pub async fn for_tables(
 		cache: Option<&DatastoreCache>,
 		txn: &Transaction,
@@ -229,7 +235,14 @@ impl CatalogSnapshot {
 	/// `txn`, which must be the transaction this snapshot was obtained for, and
 	/// the grown snapshot is returned; the tables already held are carried
 	/// over as they are.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, cache, txn))]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(
+			level = "trace",
+			target = "surrealdb::core::kvs::tx",
+			skip(self, cache, txn)
+		)
+	)]
 	pub async fn extended(
 		self: &Arc<Self>,
 		cache: Option<&DatastoreCache>,

@@ -421,9 +421,9 @@ impl<T> std::future::Future for Scoped<'_, T> {
 	}
 }
 
-/// `future`, polled under the run-time seal. Only work handed to another
-/// task is sealed this way, and a program hands none on wasm.
-#[cfg(not(target_family = "wasm"))]
+/// `future`, polled under the run-time seal. Its one caller outside tests,
+/// `while_running_task`, does not exist on wasm.
+#[cfg(any(test, not(target_family = "wasm")))]
 pub(crate) fn sealed<'a, F: std::future::Future + Send + 'a>(
 	future: F,
 ) -> impl std::future::Future<Output = F::Output> + Send + 'a {

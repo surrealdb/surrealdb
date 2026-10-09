@@ -78,7 +78,7 @@ pub fn settings_from_capabilities_config(
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn parse(input: &str) -> Result<Ast> {
 	let capabilities = Capabilities::all();
 	parse_with_capabilities(input, &capabilities, &ParserConfig::default())
@@ -94,7 +94,7 @@ pub fn parse(input: &str) -> Result<Ast> {
 ///
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn parse_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
@@ -110,7 +110,7 @@ pub fn parse_with_capabilities(
 }
 
 /// Parses a SurrealQL [`Expr`].
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 #[allow(dead_code)]
 pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
@@ -118,7 +118,7 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 }
 
 /// Parses a SurrealQL [`Value`].
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 #[allow(dead_code)]
 pub(crate) fn expr_with_capabilities(
 	input: &str,
@@ -135,7 +135,7 @@ pub(crate) fn expr_with_capabilities(
 }
 
 /// Parses a SurrealQL function name.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn function_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
@@ -151,7 +151,7 @@ pub fn function_with_capabilities(
 }
 
 /// Parses JSON into an inert SurrealQL [`PublicValue`].
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn json(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
@@ -164,7 +164,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 }
 
 /// Parses a SurrealQL [`Idiom`]
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
@@ -172,7 +172,7 @@ pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn datetime(input: &str) -> Result<PublicDatetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
@@ -187,7 +187,7 @@ pub fn datetime(input: &str) -> Result<PublicDatetime> {
 }
 
 /// Parse a duration from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn duration(input: &str) -> Result<PublicDuration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
@@ -203,7 +203,7 @@ pub fn duration(input: &str) -> Result<PublicDuration> {
 }
 
 /// Parse a record id.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL record id");
 
@@ -211,7 +211,7 @@ pub fn record_id(input: &str) -> Result<PublicRecordId> {
 }
 
 /// Parse a table name from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn table(input: &str) -> Result<surrealdb_strand::TableName> {
 	trace!(target: TARGET, "Parsing SurrealQL table name");
 
@@ -230,7 +230,7 @@ pub fn table(input: &str) -> Result<surrealdb_strand::TableName> {
 /// per nesting level, and a stack overflow aborts the process instead of
 /// returning an error.
 /// Fresh input therefore keeps the limits, whoever hands it in.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
@@ -242,7 +242,7 @@ pub fn block(input: &str) -> Result<Block> {
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 #[allow(dead_code)]
 pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
@@ -263,7 +263,7 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 ///
 /// This function is for testing only, don't use it outside of tests!
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
@@ -273,7 +273,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
@@ -289,7 +289,8 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
 /// strings.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+#[cfg_attr(not(feature = "observability"), expect(unused_variables))]
 pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
@@ -306,7 +307,7 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 }
 
 /// Parse a kind from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 

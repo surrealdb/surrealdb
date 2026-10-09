@@ -465,13 +465,13 @@ pub trait RpcProtocol {
 	/// but consumed by enterprise audit sinks). Auth-related methods
 	/// additionally fan out an [`AuthEvent`] so auth attempt counters can
 	/// be broken out by action/scope/outcome.
-	#[tracing::instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "debug",
 		target = "surrealdb::core::rpc",
 		name = "rpc.execute",
 		skip_all,
 		fields(rpc.method = method.to_str(), rpc.session = %session)
-	)]
+	))]
 	async fn execute(
 		&self,
 		txn: Option<Uuid>,
@@ -940,13 +940,13 @@ pub trait RpcProtocol {
 		Ok(DbResult::Other(value))
 	}
 
-	#[tracing::instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "debug",
 		target = "surrealdb::core::rpc",
 		name = "rpc.signup",
 		skip_all,
 		fields(rpc.session = %session_id)
-	)]
+	))]
 	async fn signup(
 		&self,
 		session_id: Uuid,
@@ -974,13 +974,13 @@ pub trait RpcProtocol {
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
-	#[tracing::instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "debug",
 		target = "surrealdb::core::rpc",
 		name = "rpc.signin",
 		skip_all,
 		fields(rpc.session = %session_id)
-	)]
+	))]
 	async fn signin(
 		&self,
 		session_id: Uuid,
@@ -1008,13 +1008,13 @@ pub trait RpcProtocol {
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
-	#[tracing::instrument(
+	#[cfg_attr(feature = "observability", tracing::instrument(
 		level = "debug",
 		target = "surrealdb::core::rpc",
 		name = "rpc.authenticate",
 		skip_all,
 		fields(rpc.session = %session_id)
-	)]
+	))]
 	async fn authenticate(
 		&self,
 		session_id: Uuid,
@@ -2159,10 +2159,10 @@ pub trait RpcProtocol {
 											"Streaming query did not stop within the grace period \
 											 after its timeout; detaching it to finalise on its own"
 										);
-										#[cfg(not(target_family = "wasm"))]
+										#[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 										{
 											let kvs = Arc::clone(&kvs);
-											tokio::spawn(async move {
+											common::rt::spawn_detached(async move {
 												settle_detached_live_queries(&kvs, run.await).await;
 											});
 											break Err(query_timeout_error(timeout));
@@ -2173,7 +2173,7 @@ pub trait RpcProtocol {
 										// the tripped handle and the
 										// execution's own context deadline are
 										// what end it.
-										#[cfg(target_family = "wasm")]
+										#[cfg(all(target_family = "wasm", target_os = "unknown"))]
 										{
 											settle_detached_live_queries(&kvs, run.await).await;
 											break Err(query_timeout_error(timeout));

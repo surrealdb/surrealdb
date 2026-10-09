@@ -1,17 +1,41 @@
+//! The HNSW vector index.
+//!
+//! The graph engine is built only with the `vector-index` feature. Without it,
+//! [`index::HnswIndex`] keeps its API but no value of it can exist: loading an
+//! HNSW index fails with an error naming the feature. The keyspace values and
+//! the vector cache stay, so stored HNSW state still decodes.
+
+#[cfg(feature = "vector-index")]
 mod batch;
 pub(crate) mod cache;
+#[cfg(feature = "vector-index")]
 pub(crate) mod docs;
+#[cfg(feature = "vector-index")]
 mod elements;
+#[cfg(feature = "vector-index")]
 mod filter;
+#[cfg(feature = "vector-index")]
 mod flavor;
+#[cfg(feature = "vector-index")]
 mod heuristic;
+#[cfg(feature = "vector-index")]
 pub mod index;
+#[cfg(not(feature = "vector-index"))]
+#[path = "index_disabled.rs"]
+pub mod index;
+#[cfg(feature = "vector-index")]
 mod layer;
+mod outcome;
 
+#[cfg(feature = "vector-index")]
 use anyhow::Result;
+#[cfg(feature = "vector-index")]
 use rand::rngs::SmallRng;
+#[cfg(feature = "vector-index")]
 use rand::{Rng, SeedableRng};
+#[cfg(feature = "vector-index")]
 use roaring::RoaringTreemap;
+#[cfg(feature = "vector-index")]
 use surrealdb_datastore::Transaction;
 // The graph's state record, the queued updates in both their layouts, the vector
 // identity they carry and the element id they address are keyspace values, so
@@ -21,21 +45,35 @@ pub use surrealdb_datastore::values::hnsw::{
 };
 pub(crate) use surrealdb_datastore::values::vector::ElementId;
 
+#[cfg(feature = "vector-index")]
 use crate::IndexKeyBase;
+#[cfg(feature = "vector-index")]
 use crate::catalog::{HnswParams, TableId};
+#[cfg(feature = "vector-index")]
 use crate::env::IndexEnv;
+#[cfg(feature = "vector-index")]
 use crate::error::Error;
+#[cfg(feature = "vector-index")]
 use crate::trees::dynamicset::DynamicSet;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::cache::VectorCache;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::elements::HnswElements;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::heuristic::Heuristic;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::index::HnswContext;
+#[cfg(feature = "vector-index")]
 use crate::trees::hnsw::layer::{HnswLayer, LayerState};
+#[cfg(feature = "vector-index")]
 use crate::trees::knn::DoublePriorityQueue;
+#[cfg(feature = "vector-index")]
 use crate::trees::vector::{SerializedVector, SharedVector, Vector};
 
 /// Parameters for a k-nearest neighbor search on the HNSW graph.
+#[cfg(feature = "vector-index")]
 struct HnswSearch {
 	/// The query vector to search for.
 	pt: SharedVector,
@@ -45,6 +83,7 @@ struct HnswSearch {
 	ef: usize,
 }
 
+#[cfg(feature = "vector-index")]
 impl HnswSearch {
 	pub(super) fn new(pt: SharedVector, k: usize, ef: usize) -> Self {
 		Self {
@@ -58,6 +97,7 @@ impl HnswSearch {
 /// A graph's entry point and every layer's `(node, edges)` lists, layer 0
 /// first, all in id order.
 #[cfg(test)]
+#[cfg(feature = "vector-index")]
 type Adjacency = (Option<ElementId>, Vec<Vec<(ElementId, Vec<ElementId>)>>);
 
 /// Core HNSW (Hierarchical Navigable Small World) graph implementation.
@@ -67,6 +107,7 @@ type Adjacency = (Option<ElementId>, Vec<Vec<(ElementId, Vec<ElementId>)>>);
 /// long-range traversal. The type parameters `L0` and `L` control the neighbor
 /// set implementation for layer 0 and upper layers respectively, allowing
 /// compile-time optimization based on the `m` (max connections) parameter.
+#[cfg(feature = "vector-index")]
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet,
@@ -94,6 +135,7 @@ where
 	heuristic: Heuristic,
 }
 
+#[cfg(feature = "vector-index")]
 impl<L0, L> Hnsw<L0, L>
 where
 	L0: DynamicSet,
@@ -609,6 +651,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "vector-index")]
 async fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
 where
 	L0: DynamicSet,
@@ -621,6 +664,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg(feature = "vector-index")]
 mod tests {
 	use std::borrow::Cow;
 	use std::collections::hash_map::Entry;

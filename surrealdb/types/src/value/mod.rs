@@ -784,7 +784,7 @@ mod tests {
 	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
 	#[case::array(Value::Array(Array::new()), true)]
 	#[case::array(Value::Array(Array::from(vec![Value::String("hello".to_string())])), false)]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), false)]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))), false)]
 	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), false)]
 	#[case::file(Value::File(File::default()), false)]
 	#[case::range(Value::Range(Box::new(Range::unbounded())), false)]
@@ -954,22 +954,22 @@ mod tests {
 	)]
 	#[case::object_lt_geometry(
 		Value::Object(Object::default()),
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Ordering::Less
 	)]
 	#[case::geometry_gt_object(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Value::Object(Object::default()),
 		Ordering::Greater
 	)]
 	#[case::geometry_lt_bytes(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Value::Bytes(Bytes::default()),
 		Ordering::Less
 	)]
 	#[case::bytes_gt_geometry(
 		Value::Bytes(Bytes::default()),
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		Ordering::Greater
 	)]
 	#[case::bytes_lt_record(
@@ -1161,9 +1161,9 @@ mod tests {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
 	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0f, 0f)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1f, 2f)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(0.0, 0.0))), "(0f, 0f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))), "(1f, 2f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo_types::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
@@ -1293,18 +1293,18 @@ mod tests {
 		vec![Kind::Record(vec!["post".into(), "comment".into()])]
 	)]
 	#[case::geometry_point(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		vec![Kind::Geometry(vec![GeometryKind::Point]), Kind::Geometry(vec![]), Kind::Any],
 		vec![Kind::None, Kind::Null, Kind::Geometry(vec![GeometryKind::Line])]
 	)]
 	#[case::geometry_line(
-		Value::Geometry(Geometry::Line(geo::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]))),
+		Value::Geometry(Geometry::Line(geo_types::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]))),
 		vec![Kind::Geometry(vec![GeometryKind::Line]), Kind::Geometry(vec![]), Kind::Any],
 		vec![Kind::Geometry(vec![GeometryKind::Point])]
 	)]
 	#[case::geometry_polygon(
-		Value::Geometry(Geometry::Polygon(geo::Polygon::new(
-			geo::LineString::from(vec![
+		Value::Geometry(Geometry::Polygon(geo_types::Polygon::new(
+			geo_types::LineString::from(vec![
 				(0.0, 0.0),
 				(1.0, 0.0),
 				(1.0, 1.0),
@@ -1317,7 +1317,7 @@ mod tests {
 		vec![Kind::Geometry(vec![GeometryKind::Point])]
 	)]
 	#[case::geometry_multi(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Geometry(Geometry::Point(geo_types::Point::new(1.0, 2.0))),
 		vec![Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Line]), Kind::Any],
 		vec![Kind::Geometry(vec![GeometryKind::Line, GeometryKind::Polygon])]
 	)]

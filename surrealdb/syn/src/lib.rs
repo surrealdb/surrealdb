@@ -41,7 +41,6 @@ use surrealdb_types::{
 	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
 	RecordId as PublicRecordId, Value as PublicValue,
 };
-use tracing::instrument;
 
 pub use self::config::ParserConfig;
 pub use self::error::RenderedError;
@@ -132,7 +131,7 @@ impl ParserSettings {
 /// Parses a SurrealQL query with every optional grammar enabled.
 ///
 /// Core's `syn::parse` narrows this to the datastore's live capabilities.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn parse(input: &str) -> Result<Ast, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
@@ -142,7 +141,7 @@ pub fn parse(input: &str) -> Result<Ast, ParseError> {
 }
 
 /// Parses a single SurrealQL expression with every optional grammar enabled.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn expr(input: &str) -> Result<Expr, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
@@ -152,7 +151,7 @@ pub fn expr(input: &str) -> Result<Expr, ParseError> {
 }
 
 /// Parses a SurrealQL expression, also parsing values found inside strings.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn expr_legacy_strand(input: &str) -> Result<Expr, ParseError> {
 	// Parsing recurses on the call stack, so the depth limits stay bounded:
 	// the stored-text ceilings are the most the parser admits anywhere.
@@ -173,7 +172,7 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr, ParseError> {
 /// The whole of `input` must be consumed: `parse_block` returns at the closing
 /// brace, so without the [`Parser::assert_finished`] check stored text holding
 /// anything after it would silently compile to the leading block alone.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn block(input: &str) -> Result<Block, ParseError> {
 	block_with_settings(input, ParserSettings::STORED_TEXT, true)
 }
@@ -191,7 +190,7 @@ pub fn block(input: &str) -> Result<Block, ParseError> {
 /// not a safety one: stored text must be consumed whole or a definition with
 /// trailing content silently compiles to its leading block, while fresh input
 /// has always been allowed to stop at the closing brace.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn block_with_settings(
 	input: &str,
 	settings: ParserSettings,
@@ -217,7 +216,7 @@ pub fn block_with_settings(
 }
 
 /// Parses a SurrealQL [`Idiom`]
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
 	parse_with(input.as_bytes(), |parser| parser.parse_plain_idiom())
 }
@@ -225,7 +224,7 @@ pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 ///
 /// This function is for testing only, don't use it outside of tests!
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value(input: &str) -> Result<PublicValue, ParseError> {
 	let settings = ParserSettings::default();
 
@@ -233,7 +232,7 @@ pub fn value(input: &str) -> Result<PublicValue, ParseError> {
 }
 
 /// Parse a record id.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 	parse_with(input.as_bytes(), |parser| parser.parse_value_record_id())
 }
@@ -245,7 +244,7 @@ pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 /// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
 /// profile — unlike [`kind`], which parses fresh input. The whole of `input`
 /// must be consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
 	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
 		let kind = parser.parse_inner_kind()?;
@@ -255,7 +254,7 @@ pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue, ParseError> {
 	let settings = ParserSettings {
 		object_recursion_limit: config.max_object_parsing_depth as usize,
@@ -304,7 +303,7 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 /// the [`Parser::assert_finished`] check a stored definition holding trailing
 /// content (`"a.b bogus"`) would silently compile to its prefix (`a.b`) and be
 /// used as if that were what the user defined.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn expr_for_definition(input: &str) -> Result<Expr, ParseError> {
 	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
 		let expr = parser.parse_expr_field()?;
@@ -314,7 +313,7 @@ pub fn expr_for_definition(input: &str) -> Result<Expr, ParseError> {
 }
 
 /// Parse a duration from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn duration(input: &str) -> Result<PublicDuration, ParseError> {
 	if input.len() > u32::MAX as usize {
 		return Err(ParseError::QueryTooLarge);
@@ -329,7 +328,7 @@ pub fn duration(input: &str) -> Result<PublicDuration, ParseError> {
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn datetime(input: &str) -> Result<PublicDatetime, ParseError> {
 	if input.len() > u32::MAX as usize {
 		return Err(ParseError::QueryTooLarge);
@@ -347,7 +346,7 @@ pub fn datetime(input: &str) -> Result<PublicDatetime, ParseError> {
 /// under [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
 /// profile — and requires the whole input to be consumed. Expects the input to
 /// be wrapped in `{}`.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn block_for_definition(input: &str) -> Result<Block, ParseError> {
 	block(input)
 }
@@ -359,7 +358,7 @@ pub fn block_for_definition(input: &str) -> Result<Block, ParseError> {
 /// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
 /// profile — unlike [`idiom`], which parses fresh input. The whole of `input`
 /// must be consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
 	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
 		let idiom = parser.parse_plain_idiom()?;
@@ -373,7 +372,7 @@ pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
 /// `StoredSubscriptionDefinition.fields`), under [`ParserSettings::STORED_TEXT`] —
 /// the storage wire contract's parser profile. The whole of `input` must be
 /// consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
 	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
 		let fields = parser.parse_fields()?;
@@ -383,7 +382,7 @@ pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
 }
 
 /// Parse a kind from a string.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind(input: &str) -> Result<Kind, ParseError> {
 	parse_with(input.as_bytes(), |parser| parser.parse_inner_kind())
 }

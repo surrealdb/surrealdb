@@ -194,7 +194,10 @@ impl Transactor {
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`surrealdb_kvs::Error::TransactionFinished`] error.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub fn closed(&self) -> bool {
 		self.inner.closed()
 	}
@@ -207,7 +210,10 @@ impl Transactor {
 	/// allows data to be modified, and if not then the function
 	/// will return a [`surrealdb_kvs::Error::TransactionReadonly`] error when
 	/// attempting to modify any data within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub fn writeable(&self) -> bool {
 		self.inner.writeable()
 	}
@@ -223,7 +229,10 @@ impl Transactor {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn cancel(&self) -> Result<()> {
 		self.inner.cancel().await
 	}
@@ -236,13 +245,19 @@ impl Transactor {
 	/// It refuses a poisoned transaction and flushes the buffered index deltas into
 	/// the same transaction as the writes they describe, and reaching this one past
 	/// it — which `Transaction`'s `Deref` would otherwise allow — skips both.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub(crate) async fn commit(&self) -> Result<()> {
 		self.inner.commit().await
 	}
 
 	/// Check if a key exists in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn exists(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
@@ -255,7 +270,10 @@ impl Transactor {
 	}
 
 	/// Fetch a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
 		if version.is_none() && self.speculating() {
 			match self.held(key.as_slice()) {
@@ -269,7 +287,10 @@ impl Transactor {
 
 	/// Fetch a key from the datastore, registering the key for
 	/// commit-time conflict detection.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn getu(&self, key: Key<'_>) -> Result<Option<Val>> {
 		if self.speculating() {
 			match self.held(key.as_slice()) {
@@ -282,7 +303,10 @@ impl Transactor {
 	}
 
 	/// Fetch many keys from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
 		if version.is_none() && self.speculating() {
 			let mut result = GetMultiResult::default();
@@ -303,7 +327,10 @@ impl Transactor {
 	///
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn getr(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
 		if self.speculated(&rng, version) {
 			return Ok(scan_result(self.speculative_pairs(&rng, true).await?));
@@ -312,7 +339,10 @@ impl Transactor {
 	}
 
 	/// Insert or update a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -325,7 +355,10 @@ impl Transactor {
 	}
 
 	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn replace<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -338,7 +371,10 @@ impl Transactor {
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn put<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -354,7 +390,10 @@ impl Transactor {
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn putc<V>(&self, key: Key<'_>, val: V, chk: Option<V>) -> Result<()>
 	where
 		V: IntoBytes + Debug,
@@ -371,7 +410,10 @@ impl Transactor {
 	}
 
 	/// Delete a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
@@ -381,7 +423,10 @@ impl Transactor {
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		if self.speculating() {
 			if self.speculative_value(&key).await?.as_deref() != chk {
@@ -396,7 +441,10 @@ impl Transactor {
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
@@ -405,7 +453,10 @@ impl Transactor {
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.delete(&key));
@@ -415,7 +466,10 @@ impl Transactor {
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		if self.speculating() {
 			if self.speculative_value(&key).await?.as_deref() != chk {
@@ -430,7 +484,10 @@ impl Transactor {
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
 		if self.speculating() {
 			return self.overlay_mut(|overlay| overlay.clear(&rng));
@@ -448,7 +505,10 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn keys(
 		&self,
 		rng: KeyRange<'_>,
@@ -472,7 +532,10 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn keysr(
 		&self,
 		rng: KeyRange<'_>,
@@ -498,7 +561,10 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`ScanResult`] also
 	/// reports the total value bytes scanned, accumulated by the backend
 	/// during the same iteration that produced the values.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn scan(
 		&self,
 		rng: KeyRange<'_>,
@@ -522,7 +588,10 @@ impl Transactor {
 	/// request to the underlying datastore. The returned [`ScanResult`] also
 	/// reports the total value bytes scanned, accumulated by the backend
 	/// during the same iteration that produced the values.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn scanr(
 		&self,
 		rng: KeyRange<'_>,
@@ -546,7 +615,10 @@ impl Transactor {
 	///
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
 		if self.speculated(&rng, version) {
 			return Ok(self.speculative_pairs(&rng, false).await?.len());
@@ -561,7 +633,10 @@ impl Transactor {
 	/// speculation holds over what the storage does.
 	///
 	/// See [`surrealdb_kvs::api::Transactable::count_bounded`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn count_bounded(
 		&self,
 		rng: KeyRange<'_>,
@@ -593,7 +668,10 @@ impl Transactor {
 	/// re-seeking from scratch, which is the primary cost on RocksDB
 	/// paged scans. `skip` is applied once on the first batch. See
 	/// [`ScanCursorKey<'_>s`].
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn open_keys_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -610,7 +688,10 @@ impl Transactor {
 
 	/// Open a stateful key+value scan cursor over a range. See
 	/// [`Self::open_keys_cursor`] for the rationale.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn open_vals_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -633,7 +714,10 @@ impl Transactor {
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
 	/// underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn batch_keys(
 		&self,
 		rng: KeyRange<'_>,
@@ -651,7 +735,10 @@ impl Transactor {
 	///
 	/// This function fetches key-value pairs, in batches, with multiple
 	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
 	pub async fn batch_keys_vals(
 		&self,
 		rng: KeyRange<'_>,

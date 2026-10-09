@@ -84,7 +84,26 @@ surrealdb = { workspace = true, features = [
     "protocol-ws",
     "rustls",
 ] }
-surrealdb-core.workspace = true
+surrealdb-core = { workspace = true, features = [
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "regex-unicode",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+] }
 surrealdb-cnf.workspace = true
 common.workspace = true
 surrealdb-catalog.workspace = true

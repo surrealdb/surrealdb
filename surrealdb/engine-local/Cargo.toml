@@ -35,7 +35,29 @@ scripting = ["surrealdb-core/scripting"]
 
 [dependencies]
 # workspace internal dependencies
-surrealdb-core = { workspace = true, default-features = false }
+# The optional function families stay on: an embedded engine runs the same
+# functions as the server. Leaving one out takes a direct `surrealdb-core`
+# dependency.
+surrealdb-core = { workspace = true, default-features = false, features = [
+    "crypto-digest",
+    "crypto-password",
+    "html-sanitize",
+    "cjk-tokenizer",
+    "observability",
+    "vector-index",
+    "fulltext",
+    "regex-unicode",
+    "collate",
+    "geo",
+    "scram",
+    "text-diff",
+    "url",
+    "maintenance-tasks",
+    "api",
+    "files",
+    "search",
+    "encoding",
+] }
 surrealdb-engine-api = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-datastore = { workspace = true }
@@ -58,6 +80,8 @@ tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 

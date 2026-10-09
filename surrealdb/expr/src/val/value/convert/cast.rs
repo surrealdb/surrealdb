@@ -3,7 +3,7 @@ use std::ops::Bound;
 use std::str::FromStr as _;
 
 use common::decimal::DecimalExt;
-use geo::Point;
+use geo_types::Point;
 use rust_decimal::Decimal;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_types::ToSql;

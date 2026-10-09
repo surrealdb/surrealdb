@@ -2,6 +2,7 @@ use rust_decimal::Decimal;
 use surrealdb_sql::Param;
 use surrealdb_sql::language::Language;
 use surrealdb_strand::Strand;
+use surrealdb_types::regex_engine;
 
 use crate::error::bail;
 use crate::lexer::Lexer;
@@ -213,7 +214,7 @@ impl TokenValue for surrealdb_types::Bytes {
 	}
 }
 
-impl TokenValue for regex::Regex {
+impl TokenValue for regex_engine::Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let peek = parser.peek();
 		match peek.kind {
@@ -226,7 +227,7 @@ impl TokenValue for regex::Regex {
 				}
 				let token = parser.lex_compound(peek, compound::regex)?;
 				let s = parser.unescape_regex_span(token.span)?;
-				match regex::Regex::new(s) {
+				match regex_engine::compile(s, None) {
 					Ok(x) => Ok(x),
 					Err(e) => {
 						bail!("Invalid regex syntax {e}", @token.span);
@@ -240,7 +241,7 @@ impl TokenValue for regex::Regex {
 
 impl TokenValue for surrealdb_types::Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-		Ok(Self::from(regex::Regex::from_token(parser)?))
+		Ok(Self::from(regex_engine::Regex::from_token(parser)?))
 	}
 }
 

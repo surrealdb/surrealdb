@@ -289,6 +289,8 @@ run_task = { name = [
     "ci-feature-check-datastore",
     "ci-feature-check-runtime",
     "ci-feature-check-idx",
+    "ci-feature-check-types",
+    "ci-feature-check-expr",
 ], fork = true, parallel = false }
 
 [tasks.ci-feature-check-sdk]
@@ -423,6 +425,36 @@ args = [
     "kv-tikv",
 ]
 
+[tasks.ci-feature-check-types]
+category = "CI - CHECK"
+description = "Verify each surrealdb-types feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-types",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-expr]
+category = "CI - CHECK"
+description = "Verify each surrealdb-expr feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings ${SURREAL_NIGHTLY_RUSTFLAGS}" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--locked",
+    "--package",
+    "surrealdb-expr",
+    "--each-feature",
+]
+
 [tasks.ci-feature-check-server]
 category = "CI - CHECK"
 description = "Verify each server feature compiles individually (with storage-mem base)"
@@ -549,7 +581,9 @@ script = '''
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
 description = "Run clippy linting (WASM)"
-env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js" ${SURREAL_NIGHTLY_RUSTFLAGS}' }
+# `RUSTFLAGS` replaces `.cargo/config.toml`'s target rustflags, so the
+# getrandom backend and the 4 MiB stack set there are repeated here.
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js" -C link-arg=-zstack-size=4194304 ${SURREAL_NIGHTLY_RUSTFLAGS}' }
 script = '''
     #!/bin/bash
     set -euo pipefail
@@ -583,6 +617,18 @@ script = '''
             -- -D warnings
     done
 '''
+
+[tasks.ci-wasm-size-budget]
+# Builds the edge worker bundles (`surrealdb-edge-size-probe`, lean and full)
+# for wasm32 with the `edge` profile, runs `wasm-opt -Oz`, and fails when a
+# bundle is over its budget. Needs binaryen's `wasm-opt` and a clang that
+# targets wasm32 (see `ci-check-wasm`). `cargo make ci-wasm-size-budget --
+# --toolchain nightly` checks the Cloudflare build with the pinned nightly;
+# the budgets and flags are documented in the script.
+category = "CI - CHECK"
+description = "Check the edge wasm bundles against their size budgets"
+command = "scripts/wasm-size-budget.sh"
+args = ["${@}"]
 
 [tasks.ci-pgsql]
 category = "CI - CHECK"
@@ -961,6 +1007,9 @@ run_task = { name = [
 # KVS tests
 # --------------------------------------------------
 
+# The engine features are listed because these tests drive whole statements
+# through a datastore (analyzers, users, API handlers, a default-built
+# datastore's maintenance tasks); the backend is the only part that varies.
 [tasks.test-kvs]
 private = true
 command = "cargo"
@@ -973,7 +1022,7 @@ args = [
     "surrealdb-core",
     "--no-default-features",
     "--features",
-    "${_TEST_FEATURES}",
+    "${_TEST_FEATURES},crypto-digest,crypto-password,html-sanitize,cjk-tokenizer,observability,vector-index,fulltext,regex-unicode,collate,geo,scram,text-diff,url,maintenance-tasks,api,files,search,encoding",
     "--lib",
     "--",
     "kvs::tests",

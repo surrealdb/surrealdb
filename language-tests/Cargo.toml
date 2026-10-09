@@ -21,7 +21,7 @@ bench-pprof = ["bench", "dep:pprof"]
 
 [dependencies]
 # Crates for running surrealdb.
-surrealdb-core = { path = "../surrealdb/core", default-features = false, features = ["scripting", "kv-mem", "graphql", "gql", "allocator", "postgres", "mysql"] }
+surrealdb-core = { path = "../surrealdb/core", default-features = false, features = ["scripting", "kv-mem", "graphql", "gql", "allocator", "postgres", "mysql", "crypto-digest", "crypto-password", "html-sanitize", "cjk-tokenizer", "observability", "vector-index", "fulltext", "regex-unicode", "collate", "geo", "scram", "text-diff", "url", "maintenance-tasks", "api", "files", "search", "encoding"] }
 surrealdb-cnf = { path = "../surrealdb/cnf" }
 surrealdb-rpc = { path = "../surrealdb/rpc" }
 surrealdb-expr = { path = "../surrealdb/expr" }

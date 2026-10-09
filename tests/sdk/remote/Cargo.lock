@@ -1828,6 +1828,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
+
+[[package]]
 name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1892,7 +1898,6 @@ dependencies = [
  "bytes",
  "chrono",
  "geo",
- "regex",
  "revision-derive",
  "roaring",
  "rust_decimal",
@@ -2488,6 +2493,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "unicase",
+ "wasm-bindgen-futures",
  "wasmtimer",
 ]
 
@@ -2575,12 +2581,11 @@ version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "getrandom 0.3.4",
  "hex",
  "phf",
  "rand 0.9.5",
- "regex",
  "rust_decimal",
  "serde",
  "surrealdb-common",
@@ -2606,9 +2611,8 @@ version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
- "geo",
+ "geo-types",
  "phf",
- "regex",
  "rust_decimal",
  "surrealdb-cnf",
  "surrealdb-common",
@@ -2632,7 +2636,7 @@ dependencies = [
  "castaway",
  "chrono",
  "flatbuffers",
- "geo",
+ "geo-types",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
  "hex",
@@ -2640,6 +2644,7 @@ dependencies = [
  "papaya",
  "rand 0.9.5",
  "regex",
+ "regex-lite",
  "rust_decimal",
  "semver",
  "serde",

@@ -291,32 +291,32 @@ pub(super) fn decode_record_id_key(r: &mut Reader<'_>) -> Result<RecordIdKey> {
 	})
 }
 
-fn decode_coord(r: &mut Reader<'_>) -> Result<geo::Coord<f64>> {
+fn decode_coord(r: &mut Reader<'_>) -> Result<geo_types::Coord<f64>> {
 	let x = f64::from_le_bytes(r.array()?);
 	let y = f64::from_le_bytes(r.array()?);
-	Ok(geo::Coord {
+	Ok(geo_types::Coord {
 		x,
 		y,
 	})
 }
 
-fn decode_line(r: &mut Reader<'_>) -> Result<geo::LineString<f64>> {
+fn decode_line(r: &mut Reader<'_>) -> Result<geo_types::LineString<f64>> {
 	let len = r.len()?;
 	let mut coords = Vec::with_capacity(len.min(4096));
 	for _ in 0..len {
 		coords.push(decode_coord(r)?);
 	}
-	Ok(geo::LineString(coords))
+	Ok(geo_types::LineString(coords))
 }
 
-fn decode_polygon(r: &mut Reader<'_>) -> Result<geo::Polygon<f64>> {
+fn decode_polygon(r: &mut Reader<'_>) -> Result<geo_types::Polygon<f64>> {
 	let exterior = decode_line(r)?;
 	let len = r.len()?;
 	let mut interiors = Vec::with_capacity(len.min(4096));
 	for _ in 0..len {
 		interiors.push(decode_line(r)?);
 	}
-	Ok(geo::Polygon::new(exterior, interiors))
+	Ok(geo_types::Polygon::new(exterior, interiors))
 }
 
 fn decode_vec<T>(
@@ -334,14 +334,14 @@ fn decode_vec<T>(
 fn decode_geometry(r: &mut Reader<'_>) -> Result<Geometry> {
 	revision(r, "Geometry", 1)?;
 	Ok(match r.varint()? {
-		0 => Geometry::Point(geo::Point(decode_coord(r)?)),
+		0 => Geometry::Point(geo_types::Point(decode_coord(r)?)),
 		1 => Geometry::Line(decode_line(r)?),
 		2 => Geometry::Polygon(decode_polygon(r)?),
-		3 => Geometry::MultiPoint(geo::MultiPoint(decode_vec(r, |r| {
-			Ok(geo::Point(decode_coord(r)?))
+		3 => Geometry::MultiPoint(geo_types::MultiPoint(decode_vec(r, |r| {
+			Ok(geo_types::Point(decode_coord(r)?))
 		})?)),
-		4 => Geometry::MultiLine(geo::MultiLineString(decode_vec(r, decode_line)?)),
-		5 => Geometry::MultiPolygon(geo::MultiPolygon(decode_vec(r, decode_polygon)?)),
+		4 => Geometry::MultiLine(geo_types::MultiLineString(decode_vec(r, decode_line)?)),
+		5 => Geometry::MultiPolygon(geo_types::MultiPolygon(decode_vec(r, decode_polygon)?)),
 		6 => Geometry::Collection(decode_vec(r, decode_geometry)?),
 		v => bail!("no Geometry variant {v}"),
 	})
@@ -659,19 +659,19 @@ pub(super) fn encode_record_id_key(key: &RecordIdKey, w: &mut Writer) -> Result<
 	Ok(())
 }
 
-fn encode_coord(c: &geo::Coord<f64>, w: &mut Writer) {
+fn encode_coord(c: &geo_types::Coord<f64>, w: &mut Writer) {
 	w.raw(&c.x.to_le_bytes());
 	w.raw(&c.y.to_le_bytes());
 }
 
-fn encode_line(l: &geo::LineString<f64>, w: &mut Writer) {
+fn encode_line(l: &geo_types::LineString<f64>, w: &mut Writer) {
 	w.varint(l.0.len() as u128);
 	for c in &l.0 {
 		encode_coord(c, w);
 	}
 }
 
-fn encode_polygon(p: &geo::Polygon<f64>, w: &mut Writer) {
+fn encode_polygon(p: &geo_types::Polygon<f64>, w: &mut Writer) {
 	encode_line(p.exterior(), w);
 	w.varint(p.interiors().len() as u128);
 	for interior in p.interiors() {

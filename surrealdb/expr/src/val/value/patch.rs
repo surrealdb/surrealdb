@@ -222,6 +222,16 @@ impl Value {
 					value,
 				} => {
 					let parts = Operation::path_to_parts(&path);
+					#[cfg(not(feature = "text-diff"))]
+					{
+						let _ = (parts, value);
+						return Err(Error::FeatureDisabled {
+							feature: "text-diff",
+							what: "Text patches (the `change` operation)",
+						}
+						.into());
+					}
+					#[cfg(feature = "text-diff")]
 					if let Value::String(p) = value
 						&& let Value::String(v) = this.pick(&parts)
 					{

@@ -220,7 +220,10 @@ impl ExecOperator for TableScan {
 		}])
 	}
 
-	#[instrument(name = "TableScan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "TableScan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;

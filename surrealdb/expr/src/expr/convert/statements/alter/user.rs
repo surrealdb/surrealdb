@@ -22,7 +22,7 @@ impl From<AlterUserStatement> for crate::expr::statements::alter::AlterUserState
 			))
 		} else {
 			match v.pass_type {
-				Some(PassType::Password(ref p)) => Some(Some(ScramCredential::generate(p))),
+				Some(PassType::Password(ref p)) => Some(crate::scram::derive(p)),
 				Some(PassType::Hash(_)) => Some(None),
 				Some(PassType::Unset) | None => None,
 			}

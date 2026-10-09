@@ -6,47 +6,99 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use quick_cache::sync::{Cache, GuardResult};
-use regex::RegexBuilder;
-use revision::revisioned;
+use revision::{
+	BorrowedReader, DeserializeRevisioned, LeafWalker, Revisioned, SerializeRevisioned,
+	SkipRevisioned, WalkRevisioned,
+};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
+use surrealdb_types::regex_engine::{self, RegexError};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 
-#[revisioned(revision = 1)]
 #[derive(Clone)]
-pub struct Regex(pub regex::Regex);
+pub struct Regex(pub regex_engine::Regex);
+
+// Stored as a revision-1 struct holding the pattern string: the `u16` revision
+// then the pattern's length-prefixed bytes. Decoding compiles the pattern with
+// the engine's default size limit, so a pattern this build cannot compile
+// fails to decode.
+impl Revisioned for Regex {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Regex {
+	fn serialize_revisioned<W: std::io::Write>(&self, w: &mut W) -> Result<(), revision::Error> {
+		Self::revision().serialize_revisioned(w)?;
+		self.0.as_str().serialize_revisioned(w)
+	}
+}
+
+impl DeserializeRevisioned for Regex {
+	fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error> {
+		match u16::deserialize_revisioned(r)? {
+			1 => {
+				let s = String::deserialize_revisioned(r)?;
+				regex_engine::compile(&s, None)
+					.map(Self)
+					.map_err(|e| revision::Error::Deserialize(format!("invalid regex: {e}")))
+			}
+			x => Err(revision::Error::Deserialize(format!(
+				"Invalid revision `{x}` for type `Regex`"
+			))),
+		}
+	}
+}
+
+impl SkipRevisioned for Regex {
+	fn skip_revisioned<R: std::io::Read>(r: &mut R) -> Result<(), revision::Error> {
+		u16::skip_revisioned(r)?;
+		String::skip_revisioned(r)
+	}
+}
+
+impl WalkRevisioned for Regex {
+	type Walker<'r, R: BorrowedReader + 'r> = LeafWalker<'r, Regex, R>;
+
+	fn walk_revisioned<'r, R: BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(LeafWalker::new(reader))
+	}
+}
 
 impl Regex {
-	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
+	// Deref would expose the engine's `as_str`, which wouldn't have the '/'
 	// delimiters.
-	pub fn inner(&self) -> &regex::Regex {
+	pub fn inner(&self) -> &regex_engine::Regex {
 		&self.0
 	}
 }
 
-pub fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
-	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
+pub fn regex_new(str: &str) -> Result<regex_engine::Regex, RegexError> {
+	static REGEX_CACHE: LazyLock<Cache<String, regex_engine::Regex>> =
 		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
 	match REGEX_CACHE.get_value_or_guard(str, None) {
 		GuardResult::Value(v) => Ok(v),
 		GuardResult::Guard(g) => {
-			let re = RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()?;
+			let re = regex_engine::compile(str, Some(*REGEX_SIZE_LIMIT))?;
 			g.insert(re.clone()).ok();
 			Ok(re)
 		}
 		GuardResult::Timeout => {
 			warn!("Regex cache timeout");
-			RegexBuilder::new(str).size_limit(*REGEX_SIZE_LIMIT).build()
+			regex_engine::compile(str, Some(*REGEX_SIZE_LIMIT))
 		}
 	}
 }
 
 impl FromStr for Regex {
-	type Err = <regex::Regex as FromStr>::Err;
+	type Err = RegexError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		regex_new(&s.replace("\\/", "/")).map(Self)
@@ -100,13 +152,13 @@ impl ToSql for Regex {
 	}
 }
 
-impl From<regex::Regex> for Regex {
-	fn from(v: regex::Regex) -> Self {
+impl From<regex_engine::Regex> for Regex {
+	fn from(v: regex_engine::Regex) -> Self {
 		Self(v)
 	}
 }
 
-impl From<Regex> for regex::Regex {
+impl From<Regex> for regex_engine::Regex {
 	fn from(v: Regex) -> Self {
 		v.0
 	}
@@ -164,7 +216,8 @@ impl<'de> Deserialize<'de> for Regex {
 					where
 						E: de::Error,
 					{
-						Regex::from_str(value).map_err(|_| de::Error::custom("invalid regex"))
+						Regex::from_str(value)
+							.map_err(|e| de::Error::custom(format_args!("invalid regex: {e}")))
 					}
 				}
 
@@ -198,7 +251,7 @@ mod tests {
 	fn regex_compile_limit() {
 		match regex_new("^(a|b|c){1000000}") {
 			Err(e) => {
-				assert!(matches!(e, regex::Error::CompiledTooBig(10_485_760)), "{e}");
+				assert!(e.message().contains("size limit"), "{e}");
 			}
 			Ok(_) => panic!("regex should have failed"),
 		}

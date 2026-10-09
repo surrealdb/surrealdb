@@ -30,8 +30,6 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 #[cfg(test)]
 use surrealdb_types::ToSql;
-#[cfg(test)]
-use tracing::instrument;
 
 #[cfg(test)]
 use super::count::CountOutput;
@@ -181,7 +179,10 @@ impl ExecOperator for IndexCountScan {
 		CardinalityHint::AtMostOne
 	}
 
-	#[instrument(name = "IndexCountScan::execute", level = "trace", skip_all)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(name = "IndexCountScan::execute", level = "trace", skip_all)
+	)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 		validate_record_user_access(&db_ctx)?;
