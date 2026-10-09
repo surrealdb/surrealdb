@@ -52,6 +52,7 @@
 //! | A call to a `DEFINE FUNCTION` whose body is one expression is replaced by that expression | [`inline`] |
 //! | A cast to the kind an expression already has, and a broadcast over a value that is not a collection, go | [`kind`] |
 //! | A statement `IF` drops the arms a literal condition rules out, and becomes the arm a literal condition selects | [`control_flow`] |
+//! | A closure-written `array::filter` / `array::map` (call or method) over a proven array becomes the `[WHERE]` filter or the broadcast it computes; a `[WHERE true]` over a proven array is its base | [`unify`] |
 //!
 //! And the expression rules:
 //!
@@ -95,6 +96,7 @@ pub(super) mod join;
 pub(super) mod kind;
 pub(super) mod layers;
 pub(super) mod prune;
+pub(super) mod unify;
 
 pub(super) use super::reads;
 
@@ -277,6 +279,7 @@ pub(super) fn rewrite_row_positions(
 /// affects only how many passes the fixpoint takes, never what it is.
 pub(super) const RULES: &[RuleDef] = &[
 	control_flow::RULE,
+	unify::RULE,
 	filter::RULE,
 	layers::RULE,
 	join::RULE,
@@ -1033,6 +1036,7 @@ pub(super) mod test_support {
 	use super::super::lower_test;
 	use super::super::optimise::optimise;
 	use super::RuleContext;
+	use crate::dbs::capabilities::Capabilities;
 	use crate::exec::function::FunctionRegistry;
 	use crate::exec::planner::util::SELECT_ITERATION_PARAMS;
 	use crate::expr::logical::{LogicalOp, LogicalSource, Schema, SourceRef};
@@ -1062,20 +1066,36 @@ pub(super) mod test_support {
 		rewritten_in(op, &Functions::none(), &permission_checked)
 	}
 
+	/// [`rewritten`] for a caller holding `capabilities`.
+	pub(in crate::exec::logical) fn rewritten_capable(
+		op: LogicalOp,
+		capabilities: &Capabilities,
+	) -> LogicalOp {
+		rewritten_under(op, &Functions::none(), &HashSet::new(), capabilities)
+	}
+
 	fn rewritten_in(
 		op: LogicalOp,
 		functions: &Functions,
 		permission_checked: &HashSet<String>,
 	) -> LogicalOp {
+		rewritten_under(op, functions, permission_checked, &Capabilities::all())
+	}
+
+	fn rewritten_under(
+		op: LogicalOp,
+		functions: &Functions,
+		permission_checked: &HashSet<String>,
+		capabilities: &Capabilities,
+	) -> LogicalOp {
 		let registry = FunctionRegistry::with_builtins();
-		let capabilities = crate::dbs::capabilities::Capabilities::all();
 		let mut cx = RuleContext {
 			row_scoped: SELECT_ITERATION_PARAMS,
 			registry: &registry,
 			functions,
 			permission_checked_params: permission_checked,
 			next_alias: 0,
-			capabilities: &capabilities,
+			capabilities,
 			folds_clock: true,
 		};
 		optimise(op, &mut cx)

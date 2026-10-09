@@ -449,6 +449,13 @@ fn substitute_node(
 /// than assumed bound: the answer is about the name, not about the frame
 /// reading it. Without a transaction and a database the catalog cannot be
 /// asked, and every name the plan reads is one of these.
+///
+/// A closure body is entered, unlike where [`resolve_params`] substitutes: the
+/// body runs where the closure is invoked and a read of a name there fetches
+/// there, so a name read only inside a body is one of these too. A name a
+/// closure binds as its own argument is not told from a read of the catalog's
+/// parameter of the same name, so it is counted when the catalog defines one;
+/// that only keeps a read from being dropped.
 pub(super) async fn permission_checked_names(
 	op: &LogicalOp,
 	bx: &BindContext<'_>,
@@ -456,7 +463,12 @@ pub(super) async fn permission_checked_names(
 	let mut names: HashSet<String> = HashSet::new();
 	visit_deep(op, &mut |node| {
 		let Ok(()) = node.visit_scalars(&mut |scalar| {
-			collect_names(scalar, &mut names);
+			let _ = scalar.visit(&mut |e| {
+				if let LogicalExpr::Param(param) = e {
+					names.insert(param.as_str().to_owned());
+				}
+				ControlFlow::<()>::Continue(())
+			});
 			Ok::<_, Infallible>(())
 		});
 	});
@@ -759,6 +771,41 @@ mod tests {
 		// the source included.
 		assert!(plan.contains("a = 1 AND b = 3 AND c = $gated AND d = NONE"), "{plan}");
 		assert!(plan.contains("Values[NONE]"), "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_gated_param_read_only_in_a_closure_body_is_permission_checked() {
+		use super::super::test_fixture::{Fixture, owner};
+		let fixture = Fixture::new(
+			"DEFINE PARAM $open VALUE 3 PERMISSIONS FULL; \
+			 DEFINE PARAM $gated VALUE 4 PERMISSIONS WHERE $auth.id = user:x;",
+		)
+		.await;
+		let bound = fixture.bound_as(&owner(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+		let checked = |sql: &'static str| {
+			let bx = &bx;
+			async move { permission_checked_names(&lower(sql), bx).await }
+		};
+		let inside = checked("RETURN array::filter([1, 2], |$v| $v > $gated AND $v < $open)").await;
+		assert!(inside.contains("gated"), "{inside:?}");
+		assert!(!inside.contains("open"), "{inside:?}");
+		let outside = checked("RETURN array::filter([1, 2], |$v| $v > 1) + [$gated]").await;
+		assert!(outside.contains("gated"), "{outside:?}");
+	}
+
+	#[tokio::test]
+	async fn a_gated_param_read_only_in_a_closure_body_keeps_the_closure_call() {
+		use super::super::test_fixture::{Fixture, owner};
+		// Reading `$gated` fetches a `DEFINE PARAM` judged by its clause, so
+		// the body may raise and the call stays a call.
+		let fixture =
+			Fixture::new("DEFINE PARAM $gated VALUE 4 PERMISSIONS WHERE $auth.id = user:x;").await;
+		let plan =
+			fixture.bind_as(&owner(), "RETURN array::filter(<array> $a, |$v| $v > $gated)").await;
+		assert!(plan.contains("array::filter"), "{plan}");
+		let plan = fixture.bind_as(&owner(), "RETURN array::filter(<array> $a, |$v| $v > 1)").await;
+		assert!(!plan.contains("array::filter"), "{plan}");
 	}
 
 	#[tokio::test]
