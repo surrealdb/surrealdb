@@ -1142,6 +1142,10 @@ struct Lowering<'p, 'ctx> {
 	sources: Vec<(LogicalOp, Vec<String>)>,
 	/// The loops enclosing the block statement being lowered, innermost last.
 	loops: Vec<block::LoopTargets>,
+	/// The `LET` and `RETURN` values enclosing the block statement being
+	/// lowered, innermost last, whose own `RETURN`s are jumps to the end of
+	/// the value.
+	returns: Vec<block::ReturnTarget>,
 	/// The `FOR` iterator slots the program has taken.
 	iter_slots: u16,
 	/// How many frames the control flow being lowered has saved.
@@ -1779,6 +1783,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			slot_scopes: Vec::new(),
 			sources: Vec::new(),
 			loops: Vec::new(),
+			returns: Vec::new(),
 			iter_slots: 0,
 			saved: 0,
 			groups: Vec::new(),

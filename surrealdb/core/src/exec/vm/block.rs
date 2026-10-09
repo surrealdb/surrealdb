@@ -51,6 +51,7 @@ pub(super) async fn step(
 			collect,
 			on_break,
 			on_continue,
+			on_return,
 			resolve,
 		} => {
 			let frame = state.frame.clone().unwrap_or_else(|| ctx.clone());
@@ -76,6 +77,11 @@ pub(super) async fn step(
 				Err(ControlFlow::Continue) if on_continue.is_some() => {
 					return Ok(on_continue.map(|at| at as usize));
 				}
+				Err(ControlFlow::Return(value)) if on_return.is_some() => {
+					let catch = on_return.expect("checked above");
+					write(regs, catch.value, value);
+					return Ok(Some(catch.label as usize));
+				}
 				Err(signal) => return Err(signal),
 			}
 		}
@@ -85,6 +91,7 @@ pub(super) async fn step(
 			collect,
 			on_break,
 			on_continue,
+			on_return,
 			resolve,
 		} => {
 			let frame = state.frame.clone().unwrap_or_else(|| ctx.clone());
@@ -111,6 +118,11 @@ pub(super) async fn step(
 				}
 				Err(ControlFlow::Continue) if on_continue.is_some() => {
 					return Ok(on_continue.map(|at| at as usize));
+				}
+				Err(ControlFlow::Return(value)) if on_return.is_some() => {
+					let catch = on_return.expect("checked above");
+					write(regs, catch.value, value);
+					return Ok(Some(catch.label as usize));
 				}
 				Err(signal) => return Err(signal),
 			}

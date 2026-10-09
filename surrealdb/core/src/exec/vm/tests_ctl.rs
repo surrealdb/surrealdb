@@ -164,6 +164,7 @@ async fn control_statements_compile_into_one_program() {
 			"{ LET $on = true; IF rand::bool() { CREATE t:1 } ELSE IF $on { SELECT * FROM t } ELSE { DELETE t } }",
 			3,
 		),
+		("{ LET $x = { IF rand::bool() { RETURN 1 }; CREATE t:1; 2 }; RETURN $x }", 1),
 	] {
 		let bound = bind(&ctx, sql).await;
 		let physical = super::map::map(&planner(&ctx), &bound).await.expect("maps");
@@ -185,6 +186,41 @@ async fn control_statements_compile_into_one_program() {
 			.count();
 		assert_eq!(runs, groups, "`{sql}` runs a statement that is not a group of the program");
 		assert!(program.subqueries.is_empty(), "`{sql}` runs a statement as a program of its own");
+	}
+}
+
+/// A `RETURN` that the `LET` or `RETURN` whose value holds it catches is a
+/// jump of the program, and raises nothing: only the `RETURN` reaching the
+/// program's root leaves it.
+#[tokio::test]
+async fn a_return_its_program_catches_is_a_jump() {
+	let db = TestDb::new("DEFINE TABLE t; DEFINE FIELD n ON t TYPE int;").await;
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	for sql in [
+		"{ LET $x = { IF rand::bool() { RETURN 1 }; 2 }; RETURN $x }",
+		"{ IF rand::bool() { RETURN 1 }; 2 }",
+		"{ RETURN { IF rand::bool() { RETURN 1 }; 2 } }",
+		"{ LET $x = { FOR $i IN 0..3 { IF $i = 1 { RETURN $i } }; 0 }; RETURN $x }",
+	] {
+		let bound = bind(&ctx, sql).await;
+		let physical = super::map::map(&planner(&ctx), &bound).await.expect("maps");
+		let program = super::lower::lower(&planner(&ctx), &physical).await.expect("lowers");
+		let returns = program
+			.pipelines
+			.iter()
+			.flat_map(|p| &p.code)
+			.filter(|i| matches!(i, Instr::Block(BlockInstr::Return { .. })))
+			.count();
+		assert_eq!(returns, 1, "`{sql}` raises a RETURN its program catches");
+		// No statement the block runs holds one either.
+		let in_groups = program
+			.pipelines
+			.iter()
+			.filter(|p| p.group.is_some())
+			.flat_map(|p| &p.code)
+			.filter(|i| matches!(i, Instr::Block(BlockInstr::Return { .. })))
+			.count();
+		assert_eq!(in_groups, 0, "`{sql}` has a statement raising a RETURN");
 	}
 }
 

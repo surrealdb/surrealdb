@@ -4,7 +4,9 @@
 //! The control flow is the program's own instructions: a loop is a jump back
 //! to its head, `BREAK` and `CONTINUE` are jumps to its exit and to its next
 //! element — or, where no loop of the program encloses them, signals that
-//! leave it — and `LET` and `FOR` bind their names in a slot of the running
+//! leave it — a `RETURN` is a jump to the end of the `LET` or `RETURN` whose
+//! value holds it, and a signal that leaves the program only where none
+//! does, and `LET` and `FOR` bind their names in a slot of the running
 //! state, which the program's own reads of the name take, and — when
 //! something in the name's scope that the program does not lower may read it
 //! — in the block's frame, which each loop iteration saves and restores.
@@ -34,7 +36,9 @@
 use super::{Lowered, Lowering, NotCovered};
 use crate::exec::AccessMode;
 use crate::exec::vm::plan::{Control, PhysicalPlan};
-use crate::exec::vm::program::{BlockInstr, Collect, Instr, Label, Operand, Reg, Source};
+use crate::exec::vm::program::{
+	BlockInstr, Collect, Instr, Label, Operand, Reg, ReturnCatch, Source,
+};
 use crate::expr::logical::LogicalOp;
 use crate::val::Value;
 
@@ -50,6 +54,20 @@ pub(super) struct Planned<'a> {
 	raises_when_reached: bool,
 	modelled: Option<&'a crate::exec::vm::speculate::Speculated>,
 	analysis: Option<&'a super::super::program::Analysis>,
+}
+
+/// A `LET` or `RETURN` value being lowered, whose own `RETURN`s are jumps to
+/// its end.
+pub(super) struct ReturnTarget {
+	/// How many frames are saved inside the value's own frame.
+	depth: usize,
+	/// The register the value is left in.
+	value: Reg,
+	/// The jumps of the `RETURN`s inside the value, to its end.
+	jumps: Vec<Label>,
+	/// The runs of statements inside the value, with the frames saved when
+	/// each runs, whose `RETURN` signals the value takes.
+	runs: Vec<(Label, usize)>,
 }
 
 /// A loop being lowered: the jumps and the statements run inside it that
@@ -271,8 +289,19 @@ impl Lowering<'_, '_> {
 				value,
 			} => {
 				let bound = self.register()?;
-				crate::exec::vm::host::out_of_line(|| self.node(value, bound, Collect::Let))
-					.await?;
+				match value.as_ref() {
+					Control::Value(_)
+					| Control::Statement {
+						..
+					} => {
+						crate::exec::vm::host::out_of_line(|| self.node(value, bound, Collect::Let))
+							.await?
+					}
+					inline => {
+						crate::exec::vm::host::out_of_line(|| self.caught_control(inline, bound))
+							.await?
+					}
+				}
 				self.fields.push(name.clone());
 				let name = (self.fields.len() - 1) as u32;
 				if let Some(kind) = kind {
@@ -313,9 +342,21 @@ impl Lowering<'_, '_> {
 					Control::Value(expr) => {
 						crate::exec::vm::host::out_of_line(|| self.once_value(expr, true)).await
 					}
+					statement @ Control::Statement {
+						..
+					} => match self.register() {
+						Ok(returned) => crate::exec::vm::host::out_of_line(|| {
+							self.node(statement, returned, Collect::Return)
+						})
+						.await
+						.map(|()| returned),
+						Err(e) => Err(e),
+					},
+					// Any other value is control flow whose own `RETURN`s answer
+					// this one.
 					other => match self.register() {
 						Ok(returned) => crate::exec::vm::host::out_of_line(|| {
-							self.node(other, returned, Collect::Return)
+							self.caught_control(other, returned)
 						})
 						.await
 						.map(|()| returned),
@@ -324,9 +365,30 @@ impl Lowering<'_, '_> {
 				};
 				self.control_nested = outer_nested;
 				let returned = returned?;
-				self.block(BlockInstr::Return {
-					value: returned,
-				});
+				match self.returns.last() {
+					// The `LET` or `RETURN` whose value this is takes it: the
+					// frames saved since are restored on the way out.
+					Some(target) => {
+						let (caught, depth) = (target.value, target.depth);
+						self.emit(Instr::Load {
+							dst: caught,
+							src: Operand::Reg(returned),
+						});
+						for _ in depth..self.saved {
+							self.block(BlockInstr::Restore);
+						}
+						let jump = self.emit(Instr::Jump {
+							target: 0,
+						});
+						self.returns.last_mut().expect("checked above").jumps.push(jump);
+						self.load_none(dst);
+					}
+					None => {
+						self.block(BlockInstr::Return {
+							value: returned,
+						});
+					}
+				}
 			}
 			Control::Value(expr) => {
 				let value =
@@ -504,6 +566,86 @@ impl Lowering<'_, '_> {
 		}
 		self.saved -= 1;
 		self.block(BlockInstr::Restore);
+		lowered
+	}
+
+	/// The value of a `LET` or `RETURN` that is control flow, left in `dst`:
+	/// it runs in a frame of its own, and a `RETURN` it holds, raised by the
+	/// program's own instructions or by a statement it runs, is a jump to its
+	/// end with the value stored in `dst`.
+	async fn caught_control(&mut self, value: &Control, dst: Reg) -> Lowered<()> {
+		self.block(BlockInstr::Save);
+		self.saved += 1;
+		let outer_scopes = self.slot_scopes.len();
+		self.returns.push(ReturnTarget {
+			depth: self.saved,
+			value: dst,
+			jumps: Vec::new(),
+			runs: Vec::new(),
+		});
+		let lowered =
+			crate::exec::vm::host::out_of_line(|| self.node(value, dst, Collect::Block)).await;
+		let target = self.returns.pop().expect("pushed above");
+		// A `LET` the value holds binds its name for nothing after it.
+		while self.slot_scopes.len() > outer_scopes {
+			let scope = self.slot_scopes.pop().expect("checked above");
+			self.close_slot(&scope);
+		}
+		// A statement signalling from inside blocks within the value lands on
+		// a pad that restores their frames first.
+		let mut pads: Vec<(usize, Label)> = Vec::new();
+		let mut over = Vec::new();
+		let mut onward = Vec::new();
+		let mut landings: Vec<(Label, Option<Label>)> = Vec::new();
+		for (run, saved) in target.runs {
+			if saved == target.depth {
+				landings.push((run, None));
+				continue;
+			}
+			let pad = match pads.iter().find(|(depth, _)| *depth == saved) {
+				Some((_, pad)) => *pad,
+				None => {
+					if over.is_empty() {
+						over.push(self.emit(Instr::Jump {
+							target: 0,
+						}));
+					}
+					let pad = self.here();
+					for _ in target.depth..saved {
+						self.block(BlockInstr::Restore);
+					}
+					onward.push(self.emit(Instr::Jump {
+						target: 0,
+					}));
+					pads.push((saved, pad));
+					pad
+				}
+			};
+			landings.push((run, Some(pad)));
+		}
+		let end = self.block(BlockInstr::Restore);
+		self.saved -= 1;
+		self.patch_all(over, end);
+		self.patch_all(onward, end);
+		self.patch_all(target.jumps, end);
+		for (run, pad) in landings {
+			if let Instr::Block(
+				BlockInstr::RunEmbedded {
+					on_return,
+					..
+				}
+				| BlockInstr::RunServed {
+					on_return,
+					..
+				},
+			) = &mut self.code[run as usize]
+			{
+				*on_return = Some(ReturnCatch {
+					value: dst,
+					label: pad.unwrap_or(end),
+				});
+			}
+		}
 		lowered
 	}
 
@@ -871,6 +1013,7 @@ impl Lowering<'_, '_> {
 				collect,
 				on_break: None,
 				on_continue: None,
+				on_return: None,
 				resolve: Some(required_context),
 			})
 		} else {
@@ -880,6 +1023,7 @@ impl Lowering<'_, '_> {
 				collect,
 				on_break: None,
 				on_continue: None,
+				on_return: None,
 				resolve,
 			})
 		};
@@ -894,6 +1038,9 @@ impl Lowering<'_, '_> {
 		let saved = self.saved;
 		if let Some(targets) = self.loops.last_mut() {
 			targets.runs.push((at, saved));
+		}
+		if let Some(target) = self.returns.last_mut() {
+			target.runs.push((at, saved));
 		}
 		Ok(())
 	}

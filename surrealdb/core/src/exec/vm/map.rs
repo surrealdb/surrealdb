@@ -1318,6 +1318,17 @@ fn maps_as_control(op: &LogicalOp) -> bool {
 	}
 }
 
+/// Whether `op`, the value of a `LET` or `RETURN`, is mapped inline as the
+/// control flow whose `RETURN` that `LET` or `RETURN` catches. A value holding a
+/// schema statement is mapped as a statement, so it is declined or planned
+/// late-bound. So is a `RETURN` of a `RETURN`, because its group shapes the
+/// value as rows.
+fn inline_value(op: &LogicalOp) -> bool {
+	maps_as_control(op)
+		&& !matches!(op, LogicalOp::Return(_))
+		&& !crate::exec::planner::fold::changes_the_catalog(op)
+}
+
 /// Whether an arm of a statement `IF` holds a statement: one that is not an
 /// expression, or is the expression of a statement in value position.
 fn arm_holds_a_statement(arm: &LogicalOp) -> bool {
@@ -4537,6 +4548,9 @@ impl Blocks {
 						.await;
 						Control::Value(eval.expr.clone())
 					}
+					value if inline_value(value) => {
+						crate::exec::vm::host::out_of_line(|| self.inline(planner, value)).await?
+					}
 					value => {
 						crate::exec::vm::host::out_of_line(|| self.statement(planner, value))
 							.await?
@@ -4665,6 +4679,9 @@ impl Blocks {
 					});
 				}
 				let value = match ret.what.as_ref() {
+					what if inline_value(what) => {
+						crate::exec::vm::host::out_of_line(|| self.inline(planner, what)).await?
+					}
 					// An expression's value is its one value, a `RETURN` inside
 					// it answering it.
 					Op::Eval(eval) => {
@@ -4734,6 +4751,43 @@ impl Blocks {
 			},
 			other => crate::exec::vm::host::out_of_line(|| self.statement(planner, other)).await?,
 		})
+	}
+
+	/// The control flow of `value`, the value of a `LET` or `RETURN` that
+	/// [`inline_value`] holds, bound as a statement of its own is and mapped
+	/// with this program, so that a `RETURN` it holds is the `LET` or `RETURN`'s
+	/// to catch. A value that does not bind now is mapped as a statement, which
+	/// declines or refuses it as the operator tree does.
+	async fn inline(&mut self, planner: &Planner<'_>, value: &LogicalOp) -> Mapped<Control> {
+		let bound = crate::exec::vm::host::out_of_line(|| self.bound_value(planner, value)).await;
+		match bound {
+			Some(bound) => {
+				crate::exec::vm::host::out_of_line(|| self.control(planner, &bound)).await
+			}
+			None => crate::exec::vm::host::out_of_line(|| self.statement(planner, value)).await,
+		}
+	}
+
+	/// `value` bound as [`Self::statement`] binds a statement: against the names
+	/// bound around it and the catalog the block's schema statements before it
+	/// leave. `None` where it does not bind.
+	async fn bound_value(&self, planner: &Planner<'_>, value: &LogicalOp) -> Option<LogicalOp> {
+		let planner = planner.shadowing(self.bound.iter().cloned());
+		let within =
+			crate::exec::vm::host::out_of_line(|| catalog_within(&planner, value, &self.bound))
+				.await;
+		let planner = planner.reaching(within);
+		let over = self.overlay.as_ref().filter(|overlay| !overlay.is_empty());
+		let reached = !self.eager;
+		match over {
+			Some(overlay) => {
+				let (speculation, over) = super::speculate::view(&planner, overlay)?;
+				let bound = bind_for_map(&over, value, reached).await;
+				drop(speculation);
+				bound.ok()
+			}
+			None => bind_for_map(&planner, value, reached).await.ok(),
+		}
 	}
 
 	/// An `IF` in a statement's place: each condition not settled by the
@@ -5713,13 +5767,42 @@ async fn bind_and_map(
 	bound: &[String],
 	reached: bool,
 ) -> BoundAndMapped {
+	let bound_op = match bind_for_map(planner, op, reached).await {
+		Ok(bound_op) => bound_op,
+		Err(unmapped) => return unmapped,
+	};
+	let when_reached = reached.then(|| planner.compiled_when_reached());
+	let planner = when_reached.as_ref().unwrap_or(planner);
+	match crate::exec::vm::host::out_of_line(|| map_as_bound(planner, &bound_op)).await {
+		Ok(PhysicalPlan {
+			catalog: None,
+			root: Plan::Refused {
+				refusal,
+			},
+			..
+		}) => BoundAndMapped::Refused(refusal),
+		Ok(physical) => BoundAndMapped::Mapped(Box::new(physical), seen(planner, op, bound).await),
+		Err(why) => BoundAndMapped::Declined(why),
+	}
+}
+
+/// The binding half of [`bind_and_map`]: `op` bound with `planner`, and a
+/// membership the logical rules lifted into a semi or anti join put back as
+/// the predicate it was lifted from ([`memberships_of`]). The error is the
+/// [`BoundAndMapped`] that declines or refuses the statement, never
+/// [`BoundAndMapped::Mapped`].
+async fn bind_for_map(
+	planner: &Planner<'_>,
+	op: &LogicalOp,
+	reached: bool,
+) -> Result<LogicalOp, BoundAndMapped> {
 	if reached
 		&& !planner.is_late_bound()
 		&& crate::exec::vm::host::out_of_line(|| binds_the_clock(op, planner)).await
 	{
-		return BoundAndMapped::Declined(NotCovered::new(
+		return Err(BoundAndMapped::Declined(NotCovered::new(
 			"a block statement after a schema statement whose binding reads the clock",
-		));
+		)));
 	}
 	let when_reached = reached.then(|| planner.compiled_when_reached());
 	let planner = when_reached.as_ref().unwrap_or(planner);
@@ -5732,28 +5815,17 @@ async fn bind_and_map(
 		// The operator tree refuses a statement whose binding fails with the
 		// error the binding raises.
 		Err(e) => {
-			return match super::plan::Refusal::of(&e) {
+			return Err(match super::plan::Refusal::of(&e) {
 				Some(refusal) => BoundAndMapped::Refused(refusal),
 				None => BoundAndMapped::Declined(NotCovered::new(format!(
 					"a block statement that does not bind: {e}"
 				))),
-			};
+			});
 		}
 	};
-	let bound_op = match memberships_of(&bound_op) {
-		Ok(recorrelated) => recorrelated.into_owned(),
-		Err(why) => return BoundAndMapped::Declined(why),
-	};
-	match crate::exec::vm::host::out_of_line(|| map_as_bound(planner, &bound_op)).await {
-		Ok(PhysicalPlan {
-			catalog: None,
-			root: Plan::Refused {
-				refusal,
-			},
-			..
-		}) => BoundAndMapped::Refused(refusal),
-		Ok(physical) => BoundAndMapped::Mapped(Box::new(physical), seen(planner, op, bound).await),
-		Err(why) => BoundAndMapped::Declined(why),
+	match memberships_of(&bound_op) {
+		Ok(recorrelated) => Ok(recorrelated.into_owned()),
+		Err(why) => Err(BoundAndMapped::Declined(why)),
 	}
 }
 

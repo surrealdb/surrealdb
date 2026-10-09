@@ -52,6 +52,17 @@ pub(super) struct Catch {
 	pub(super) loops_fail: bool,
 }
 
+/// Where a `RETURN` a block statement raises is taken, by the `LET` or
+/// `RETURN` whose value the statement is part of: the register the `RETURN`'s
+/// value is stored in, and where the program resumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ReturnCatch {
+	pub(super) value: Reg,
+	pub(super) label: Label,
+}
+
+assert_plain!(ReturnCatch);
+
 /// The most registers a body's register file holds on the stack. A body's
 /// registers may borrow from its row, so they live with the row's visit: on
 /// the stack up to this many, and in one allocation made for the visit past
@@ -887,6 +898,10 @@ pub(super) enum BlockInstr {
 		collect: Collect,
 		on_break: Option<Label>,
 		on_continue: Option<Label>,
+		/// A `RETURN` the statement raises and its `collect` does not take is
+		/// stored in `value`, and the program jumps to `label`; otherwise it
+		/// leaves the program.
+		on_return: Option<ReturnCatch>,
 		/// For a late-bound statement, or one after a schema statement of the
 		/// program, the context it requires: the session's namespace and
 		/// database are resolved again as far as that before it runs, since a
@@ -977,6 +992,10 @@ pub(super) enum BlockInstr {
 		collect: Collect,
 		on_break: Option<Label>,
 		on_continue: Option<Label>,
+		/// A `RETURN` the statement raises and its `collect` does not take is
+		/// stored in `value`, and the program jumps to `label`; otherwise it
+		/// leaves the program.
+		on_return: Option<ReturnCatch>,
 		/// The context it requires: the session's namespace and database are
 		/// resolved again as far as that before it runs, since a statement
 		/// before it may have removed or replaced either.
@@ -2336,14 +2355,20 @@ impl Instr {
 				BlockInstr::RunEmbedded {
 					on_break,
 					on_continue,
+					on_return,
 					..
 				}
 				| BlockInstr::RunServed {
 					on_break,
 					on_continue,
+					on_return,
 					..
 				},
-			) => on_break.iter_mut().chain(on_continue.iter_mut()).collect(),
+			) => on_break
+				.iter_mut()
+				.chain(on_continue.iter_mut())
+				.chain(on_return.iter_mut().map(|catch| &mut catch.label))
+				.collect(),
 			Instr::Block(BlockInstr::IterNext {
 				done,
 				..
