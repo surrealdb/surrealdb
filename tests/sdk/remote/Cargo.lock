@@ -2537,6 +2537,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-parser-next"
+version = "3.4.0-nightly"
+
+[[package]]
+name = "surrealdb-parser-next-lower"
+version = "3.4.0-nightly"
+dependencies = [
+ "surrealdb-common",
+ "surrealdb-parser-next",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-types",
+]
+
+[[package]]
 name = "surrealdb-protocol"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2617,6 +2632,8 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-iam",
+ "surrealdb-parser-next",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-types",

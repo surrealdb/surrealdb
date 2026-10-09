@@ -122,7 +122,9 @@ impl Distinct {
 					let seen_count = self.seen.len();
 					let rows = self.seen.take_sorted().into_iter().map(|v| (vec![v], Value::None));
 					let mut seen = Runs::default();
-					seen.push(write_run(&memory, spec(BreakerKind::DistinctSeen, 1), rows, ctx).await?)?;
+					seen.push(
+						write_run(&memory, spec(BreakerKind::DistinctSeen, 1), rows, ctx).await?,
+					)?;
 					self.account.clear();
 					self.spilled = Some(Box::new(Spilled {
 						memory,

@@ -707,7 +707,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -738,7 +738,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -768,7 +768,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -863,7 +863,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -897,7 +897,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -916,7 +916,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;

@@ -1006,6 +1006,15 @@ impl Datastore {
 		self
 	}
 
+	/// Selects the SurrealQL front end: `syn`'s parser, or parser-next behind
+	/// the same AST. The choice is process-wide, as the parse entry points are
+	/// free functions, and overrides `SURREAL_PARSER_NEXT`; see
+	/// [`crate::syn::ParserNextMode`].
+	pub fn with_parser_next(self, mode: crate::syn::ParserNextMode) -> Self {
+		surrealdb_syn::next::set_mode(mode);
+		self
+	}
+
 	/// Configure whether surrealism modules are loaded lazily on first use
 	/// rather than eagerly at startup.
 	#[cfg(feature = "surrealism")]

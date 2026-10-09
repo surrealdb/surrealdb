@@ -5403,6 +5403,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-parser-next"
+version = "3.4.0-nightly"
+
+[[package]]
+name = "surrealdb-parser-next-lower"
+version = "3.4.0-nightly"
+dependencies = [
+ "surrealdb-common",
+ "surrealdb-parser-next",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-types",
+]
+
+[[package]]
 name = "surrealdb-pgsql"
 version = "3.4.0-nightly"
 dependencies = [
@@ -5560,6 +5575,8 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-iam",
+ "surrealdb-parser-next",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-types",

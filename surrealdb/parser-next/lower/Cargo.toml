@@ -1,0 +1,24 @@
+[package]
+name = "surrealdb-parser-next-lower"
+publish = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# Lowers parser-next's flat tree into the `surrealdb_sql` AST, so the engine
+# can run the new parser behind the existing AST.
+[dependencies]
+common.workspace = true
+surrealdb-parser-next.workspace = true
+surrealdb-sql.workspace = true
+surrealdb-strand.workspace = true
+surrealdb-types.workspace = true
+
+[lints]
+workspace = true

@@ -36,6 +36,9 @@ members = [
     "surrealdb/observe",
     "surrealdb/parse-common",
     "surrealdb/parser",
+    "surrealdb/parser-next",
+    "surrealdb/parser-next/lower",
+    "surrealdb/parser-next/size-probe",
     "surrealdb/pgsql",
     "surrealdb/pgwire",
     "surrealdb/rpc",
@@ -89,6 +92,8 @@ surrealdb-catalog = { version = "3.4.0-nightly", path = "surrealdb/catalog" }
 surrealdb-expr = { version = "3.4.0-nightly", path = "surrealdb/expr", default-features = false }
 surrealdb-gql = { version = "3.4.0-nightly", path = "surrealdb/gql" }
 surrealdb-sql = { version = "3.4.0-nightly", path = "surrealdb/sql" }
+surrealdb-parser-next = { version = "3.4.0-nightly", path = "surrealdb/parser-next" }
+surrealdb-parser-next-lower = { version = "3.4.0-nightly", path = "surrealdb/parser-next/lower" }
 surrealdb-strand = { version = "3.4.0-nightly", path = "surrealdb/strand", default-features = false }
 surrealdb-syn = { version = "3.4.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.4.0-nightly", path = "surrealdb/core", default-features = false }

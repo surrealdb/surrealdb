@@ -679,6 +679,16 @@ impl StatementStream {
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
+		if crate::next::routed() {
+			return self.parse_next(buffer, false);
+		}
+		self.parse_partial_syn(buffer)
+	}
+
+	fn parse_partial_syn(
+		&mut self,
+		buffer: &mut BytesMut,
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.
@@ -762,6 +772,112 @@ impl StatementStream {
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
+		if crate::next::routed() {
+			return self.parse_next(buffer, true);
+		}
+		self.parse_complete_syn(buffer)
+	}
+
+	fn parse_syn(
+		&mut self,
+		buffer: &mut BytesMut,
+		complete: bool,
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
+		if complete {
+			self.parse_complete_syn(buffer)
+		} else {
+			self.parse_partial_syn(buffer)
+		}
+	}
+
+	/// [`Self::parse_partial`] or [`Self::parse_complete`] through
+	/// parser-next. A rejected statement is parsed again by this crate's
+	/// parser for its error, as [`crate::next`] describes; input that is not
+	/// UTF-8 goes to this crate's parser, which reports it.
+	fn parse_next(
+		&mut self,
+		buffer: &mut BytesMut,
+		complete: bool,
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
+		use surrealdb_parser_next_lower::entry::{self, Statement};
+
+		let slice = &buffer[..buffer.len().min(u32::MAX as usize)];
+		let src = match std::str::from_utf8(slice) {
+			Ok(s) => s,
+			// A character split at the end of a partial buffer waits for its
+			// remaining bytes.
+			Err(e) if e.error_len().is_none() && !complete => {
+				std::str::from_utf8(&slice[..e.valid_up_to()]).expect("validated prefix")
+			}
+			Err(_) => return self.parse_syn(buffer, complete),
+		};
+		let complete = complete && src.len() == buffer.len();
+		let settings = crate::next::settings(&self.settings);
+		match entry::statement(src, &settings, complete) {
+			Statement::Empty {
+				consumed,
+			} => {
+				let eaten = buffer.split_to(consumed as usize);
+				self.accumulate_line_col(&eaten);
+				Ok(None)
+			}
+			Statement::NeedMore => Ok(None),
+			Statement::Parsed {
+				stmt,
+				consumed,
+			} => {
+				if crate::next::mode() == crate::next::Mode::Check {
+					let mut other = StatementStream {
+						settings: self.settings.clone(),
+						col_offset: self.col_offset,
+						line_offset: self.line_offset,
+					};
+					let mut copy = buffer.clone();
+					match other.parse_syn(&mut copy, complete) {
+						Ok(Some(old))
+							if old != *stmt
+								&& crate::next::mask_keys(&surrealdb_types::ToSql::to_sql(
+									&old,
+								)) != crate::next::mask_keys(
+									&surrealdb_types::ToSql::to_sql(&*stmt),
+								) =>
+						{
+							return Err(stream_divergence(
+								&format!(
+									"trees differ: syn `{}`, parser-next `{}`",
+									surrealdb_types::ToSql::to_sql(&old),
+									surrealdb_types::ToSql::to_sql(&*stmt)
+								),
+								buffer,
+							));
+						}
+						Err(_) => {
+							return Err(stream_divergence(
+								"parser-next accepts, syn rejects",
+								buffer,
+							));
+						}
+						_ => {}
+					}
+				}
+				let eaten = buffer.split_to(consumed as usize);
+				self.accumulate_line_col(&eaten);
+				Ok(Some(*stmt))
+			}
+			Statement::Rejected(e) => match self.parse_syn(buffer, complete) {
+				Ok(Some(_)) => Err(stream_divergence(
+					&format!("parser-next rejects ({e:?}), syn accepts"),
+					buffer,
+				)),
+				other => other,
+			},
+		}
+	}
+
+	fn parse_complete_syn(
+		&mut self,
+		buffer: &mut BytesMut,
+	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
 		let mut slice = &**buffer;
 		if slice.len() > u32::MAX as usize {
 			// limit slice length.
@@ -798,6 +914,12 @@ impl StatementStream {
 			}
 		}
 	}
+}
+
+/// An error for a divergence between the parsers in a statement stream.
+fn stream_divergence(what: &str, buffer: &[u8]) -> RenderedError {
+	syntax_error!("parser-next diverges from surrealdb-syn: {what}", @Span { offset: 0, len: 0 })
+		.render_on_bytes(buffer)
 }
 
 #[cfg(test)]

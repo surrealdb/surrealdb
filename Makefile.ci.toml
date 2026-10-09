@@ -1197,6 +1197,16 @@ run_task = { name = [
     "test-lang",
 ], fork = true, parallel = false }
 
+[tasks.ci-lang-test-parser-next]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with the front end on parser-next, checking every parse against surrealdb-syn"
+# `check` parses each input with both parsers and fails on any difference in
+# outcome or tree, so a divergence that would not change a result still fails.
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "", SURREAL_PARSER_NEXT = "check" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
 [tasks.ci-lang-test-tikv]
 category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with the TiKV engine"
@@ -1275,6 +1285,14 @@ echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests with the SurrealKV backend"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade" }
+run_task = "test-lang-upgrade"
+
+[tasks.ci-lang-upgrade-test-parser-next]
+category = "CI - LANGUAGE TESTS"
+description = "Run language upgrade tests with the current checkout's front end on parser-next"
+# Released binaries ignore the variable; the current checkout re-parses every
+# stored definition they wrote through parser-next, checked against syn.
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade", SURREAL_PARSER_NEXT = "check" }
 run_task = "test-lang-upgrade"
 
 [tasks.ci-lang-upgrade-test-rocksdb]

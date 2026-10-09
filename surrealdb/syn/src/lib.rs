@@ -32,10 +32,12 @@
 pub mod config;
 pub mod error;
 pub mod lexer;
+pub mod next;
 pub mod parser;
 pub mod token;
 
 use common::{LeafError, internal_todo};
+use surrealdb_parser_next_lower::{entry as next_entry, value as next_value};
 use surrealdb_sql::{Ast, Block, Expr, Fields, Idiom, Kind};
 use surrealdb_types::{
 	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
@@ -133,21 +135,123 @@ impl ParserSettings {
 /// Core's `syn::parse` narrows this to the datastore's live capabilities.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn parse(input: &str) -> Result<Ast, ParseError> {
-	parse_with_settings(
-		input.as_bytes(),
-		ParserSettings::all_features(&ParserConfig::default()),
-		|parser| parser.parse_query(),
-	)
+	query_with_settings(input, ParserSettings::all_features(&ParserConfig::default()))
+}
+
+/// Parses a SurrealQL query under `settings`.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn query_with_settings(input: &str, settings: ParserSettings) -> Result<Ast, ParseError> {
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(
+			input,
+			|| next_entry::query(input, &n),
+			|| parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_query()),
+		);
+	}
+	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_query())
+}
+
+/// Parses an expression in which a bare identifier is a field, under
+/// `settings`. With `require_all`, anything after the expression is an error.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn expr_with_settings(
+	input: &str,
+	settings: ParserSettings,
+	require_all: bool,
+) -> Result<Expr, ParseError> {
+	let old = |settings| {
+		parse_with_settings(input.as_bytes(), settings, |parser| {
+			let expr = parser.parse_expr_field()?;
+			if require_all {
+				parser.assert_finished()?;
+			}
+			Ok(expr)
+		})
+	};
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_entry::expr(input, &n, require_all), || old(settings));
+	}
+	old(settings)
+}
+
+/// Parses an idiom without a leading value under `settings`. With
+/// `require_all`, anything after the idiom is an error.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn idiom_with_settings(
+	input: &str,
+	settings: ParserSettings,
+	require_all: bool,
+) -> Result<Idiom, ParseError> {
+	let old = |settings| {
+		parse_with_settings(input.as_bytes(), settings, |parser| {
+			let idiom = parser.parse_plain_idiom()?;
+			if require_all {
+				parser.assert_finished()?;
+			}
+			Ok(idiom)
+		})
+	};
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_entry::idiom(input, &n, require_all), || old(settings));
+	}
+	old(settings)
+}
+
+/// Parses a kind without the enclosing `<` `>` under `settings`. With
+/// `require_all`, anything after the kind is an error.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn kind_with_settings(
+	input: &str,
+	settings: ParserSettings,
+	require_all: bool,
+) -> Result<Kind, ParseError> {
+	let old = |settings| {
+		parse_with_settings(input.as_bytes(), settings, |parser| {
+			let kind = parser.parse_inner_kind()?;
+			if require_all {
+				parser.assert_finished()?;
+			}
+			Ok(kind)
+		})
+	};
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_entry::kind(input, &n, require_all), || old(settings));
+	}
+	old(settings)
+}
+
+/// Parses a projection list, or `VALUE` and one selector, under `settings`.
+/// With `require_all`, anything after it is an error.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn fields_with_settings(
+	input: &str,
+	settings: ParserSettings,
+	require_all: bool,
+) -> Result<Fields, ParseError> {
+	let old = |settings| {
+		parse_with_settings(input.as_bytes(), settings, |parser| {
+			let fields = parser.parse_fields()?;
+			if require_all {
+				parser.assert_finished()?;
+			}
+			Ok(fields)
+		})
+	};
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_entry::fields(input, &n, require_all), || old(settings));
+	}
+	old(settings)
 }
 
 /// Parses a single SurrealQL expression with every optional grammar enabled.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn expr(input: &str) -> Result<Expr, ParseError> {
-	parse_with_settings(
-		input.as_bytes(),
-		ParserSettings::all_features(&ParserConfig::default()),
-		|parser| parser.parse_expr_field(),
-	)
+	expr_with_settings(input, ParserSettings::all_features(&ParserConfig::default()), false)
 }
 
 /// Parses a SurrealQL expression, also parsing values found inside strings.
@@ -163,7 +267,7 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr, ParseError> {
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_expr_field())
+	expr_with_settings(input, settings, false)
 }
 
 /// Re-parses the canonical block text a catalog definition stores, for
@@ -196,6 +300,22 @@ pub fn block_with_settings(
 	settings: ParserSettings,
 	require_all_input: bool,
 ) -> Result<Block, ParseError> {
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(
+			input,
+			|| next_entry::block(input, &n, require_all_input),
+			|| block_with_settings_old(input, settings, require_all_input),
+		);
+	}
+	block_with_settings_old(input, settings, require_all_input)
+}
+
+fn block_with_settings_old(
+	input: &str,
+	settings: ParserSettings,
+	require_all_input: bool,
+) -> Result<Block, ParseError> {
 	parse_with_settings(input.as_bytes(), settings, |parser| {
 		let found = parser.peek();
 		match found.kind {
@@ -218,7 +338,7 @@ pub fn block_with_settings(
 /// Parses a SurrealQL [`Idiom`]
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
-	parse_with(input.as_bytes(), |parser| parser.parse_plain_idiom())
+	idiom_with_settings(input, ParserSettings::default(), false)
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -226,15 +346,48 @@ pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
 /// This function is for testing only, don't use it outside of tests!
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value(input: &str) -> Result<PublicValue, ParseError> {
-	let settings = ParserSettings::default();
+	value_with_settings(input, ParserSettings::default())
+}
 
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
+/// Parses a SurrealQL literal value under `settings`.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn value_with_settings(
+	input: &str,
+	settings: ParserSettings,
+) -> Result<PublicValue, ParseError> {
+	let old =
+		|settings| parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value());
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_value::value(input, &n), || old(settings));
+	}
+	old(settings)
+}
+
+/// Parses a JSON value under `settings`.
+#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
+pub fn json_with_settings(
+	input: &str,
+	settings: ParserSettings,
+) -> Result<PublicValue, ParseError> {
+	let old =
+		|settings| parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_json());
+	if next::routed() {
+		let n = next::settings(&settings);
+		return next::route(input, || next_value::json(input, &n), || old(settings));
+	}
+	old(settings)
 }
 
 /// Parse a record id.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
-	parse_with(input.as_bytes(), |parser| parser.parse_value_record_id())
+	let old = || parse_with(input.as_bytes(), |parser| parser.parse_value_record_id());
+	if next::routed() {
+		let n = next::settings(&ParserSettings::default());
+		return next::route(input, || next_value::record_id(input, &n), old);
+	}
+	old()
 }
 
 /// Re-parses the canonical kind-grammar text a catalog definition stores for
@@ -246,11 +399,7 @@ pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
 /// must be consumed, for the reason [`expr_for_definition`] documents.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
-		let kind = parser.parse_inner_kind()?;
-		parser.assert_finished()?;
-		Ok(kind)
-	})
+	kind_with_settings(input, ParserSettings::STORED_TEXT, true)
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -263,7 +412,7 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
+	value_with_settings(input, settings)
 }
 
 /// Re-parses the canonical SurrealQL text a catalog definition stores for one
@@ -305,11 +454,7 @@ pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicV
 /// used as if that were what the user defined.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn expr_for_definition(input: &str) -> Result<Expr, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
-		let expr = parser.parse_expr_field()?;
-		parser.assert_finished()?;
-		Ok(expr)
-	})
+	expr_with_settings(input, ParserSettings::STORED_TEXT, true)
 }
 
 /// Parse a duration from a string.
@@ -360,11 +505,7 @@ pub fn block_for_definition(input: &str) -> Result<Block, ParseError> {
 /// must be consumed, for the reason [`expr_for_definition`] documents.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
-		let idiom = parser.parse_plain_idiom()?;
-		parser.assert_finished()?;
-		Ok(idiom)
-	})
+	idiom_with_settings(input, ParserSettings::STORED_TEXT, true)
 }
 
 /// Re-parses the canonical `SELECT`-clause field-list text a catalog
@@ -374,15 +515,11 @@ pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
 /// consumed, for the reason [`expr_for_definition`] documents.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, |parser| {
-		let fields = parser.parse_fields()?;
-		parser.assert_finished()?;
-		Ok(fields)
-	})
+	fields_with_settings(input, ParserSettings::STORED_TEXT, true)
 }
 
 /// Parse a kind from a string.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind(input: &str) -> Result<Kind, ParseError> {
-	parse_with(input.as_bytes(), |parser| parser.parse_inner_kind())
+	kind_with_settings(input, ParserSettings::default(), false)
 }

@@ -1,0 +1,34 @@
+[package]
+name = "surrealdb-parser-next"
+publish = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Exports a C ABI entry point so the crate can be built as a standalone wasm
+# module whose size is the parser's size.
+wasm-probe = []
+
+[dependencies]
+
+[dev-dependencies]
+surrealdb-parser-next-lower = { path = "lower" }
+# Workspace crates only: the harness builds the old AST to compare with.
+common.workspace = true
+surrealdb-syn.workspace = true
+surrealdb-sql.workspace = true
+surrealdb-types.workspace = true
+surrealdb-strand.workspace = true
+parser.workspace = true
+ast.workspace = true
+web-time.workspace = true
+
+[lints]
+workspace = true

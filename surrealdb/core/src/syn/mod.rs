@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+pub use surrealdb_syn::next::Mode as ParserNextMode;
 pub(crate) use surrealdb_syn::{ParseError, ParserConfig, lexer, parser};
 
 use crate::dbs::Capabilities;
@@ -102,11 +103,10 @@ pub fn parse_with_capabilities(
 ) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	parse_with_settings(
-		input.as_bytes(),
+	lift(surrealdb_syn::query_with_settings(
+		input,
 		settings_from_capabilities_config(capabilities, config),
-		|parser| parser.parse_query(),
-	)
+	))
 }
 
 /// Parses a SurrealQL [`Expr`].
@@ -127,11 +127,11 @@ pub(crate) fn expr_with_capabilities(
 ) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	parse_with_settings(
-		input.as_bytes(),
+	lift(surrealdb_syn::expr_with_settings(
+		input,
 		settings_from_capabilities_config(capabilities, config),
-		|parser| parser.parse_expr_field(),
-	)
+		false,
+	))
 }
 
 /// Parses a SurrealQL function name.
@@ -160,7 +160,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_json())
+	lift(surrealdb_syn::json_with_settings(input, settings))
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -168,7 +168,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	parse_with(input.as_bytes(), |parser| parser.parse_plain_idiom())
+	lift(surrealdb_syn::idiom(input))
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
@@ -207,7 +207,7 @@ pub fn duration(input: &str) -> Result<PublicDuration> {
 pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL record id");
 
-	parse_with(input.as_bytes(), |parser| parser.parse_value_record_id())
+	lift(surrealdb_syn::record_id(input))
 }
 
 /// Parse a table name from a string.
@@ -247,17 +247,7 @@ pub fn block(input: &str) -> Result<Block> {
 pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	// Parsing recurses on the call stack, so the depth limits stay bounded:
-	// the stored-text ceilings are the most the parser admits anywhere.
-	let settings = ParserSettings {
-		object_recursion_limit: ParserSettings::STORED_TEXT.object_recursion_limit,
-		query_recursion_limit: ParserSettings::STORED_TEXT.query_recursion_limit,
-		expr_recursion_limit: ParserSettings::STORED_TEXT.expr_recursion_limit,
-		legacy_strands: true,
-		..Default::default()
-	};
-
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_expr_field())
+	lift(surrealdb_syn::expr_legacy_strand(input))
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -265,11 +255,9 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 /// This function is for testing only, don't use it outside of tests!
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn value(input: &str) -> Result<PublicValue> {
-	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
+	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	let settings = ParserSettings::default();
-
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
+	lift(surrealdb_syn::value(input))
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -277,14 +265,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	let settings = ParserSettings {
-		object_recursion_limit: config.max_object_parsing_depth as usize,
-		query_recursion_limit: config.max_query_parsing_depth as usize,
-		legacy_strands: true,
-		..Default::default()
-	};
-
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_value())
+	lift(surrealdb_syn::value_legacy_strand(input, config))
 }
 
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
@@ -303,15 +284,15 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 		..Default::default()
 	};
 
-	parse_with_settings(input.as_bytes(), settings, |parser| parser.parse_json())
+	lift(surrealdb_syn::json_with_settings(input, settings))
 }
 
 /// Parse a kind from a string.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn kind(input: &str) -> Result<Kind> {
-	trace!(target: TARGET, "Parsing SurrealQL duration");
+	trace!(target: TARGET, "Parsing SurrealQL kind");
 
-	parse_with(input.as_bytes(), |parser| parser.parse_inner_kind())
+	lift(surrealdb_syn::kind(input))
 }
 
 /// Extracts the tables from the given kind definition string.
