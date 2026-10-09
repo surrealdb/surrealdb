@@ -143,6 +143,6 @@ doc:1
 ### record user: { LET $f = || fn::v(); RETURN $f() }
 1
 ### record user: { LET $f = || $auth.id; RETURN $f() }
-error: The table 'user' does not exist
+NONE
 ### record user: array::fold([1, 2, 3], 0, |$acc, $v| $acc + (SELECT VALUE n FROM ONLY item:1))
 3

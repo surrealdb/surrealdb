@@ -46,7 +46,7 @@ use super::NotCovered;
 use super::host::{host_frames, out_of_line, run_cow_row_from, run_unit_inline, unit_state};
 use super::lower::Lowered;
 use super::program::{Program, UnitHead, UnitSig};
-use crate::exec::operators::fetch::{fetch_raw_record, require_table};
+use crate::exec::operators::fetch::{fetch_raw_deref, require_table};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::planner::Planner;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -488,9 +488,9 @@ impl Deref {
 		served: Served<'_>,
 		unchecked: bool,
 	) -> FlowResult<Value> {
-		let Some(raw) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
+		let Some(raw) = fetch_raw_deref(ctx, rid, ctx.version_stamp()).await? else {
 			if checked {
-				require_table(ctx, &rid.table).await?;
+				require_table(ctx, rid).await?;
 			}
 			return Ok(Value::None);
 		};

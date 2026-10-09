@@ -471,6 +471,27 @@ pub(crate) async fn fetch_raw_record(
 	rid: &RecordId,
 	version: Option<u64>,
 ) -> crate::expr::FlowResult<Option<Value>> {
+	fetch_raw_record_in(ctx, rid, version, false).await
+}
+
+/// [`fetch_raw_record`] for a dereference — a path or `FETCH` reading fields
+/// of the record the id names — where the signed-in record user's own record
+/// (see [`is_auth_record`]) reads as absent when its table is not defined,
+/// rather than failing with `TbNotFound`.
+pub(crate) async fn fetch_raw_deref(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	version: Option<u64>,
+) -> crate::expr::FlowResult<Option<Value>> {
+	fetch_raw_record_in(ctx, rid, version, true).await
+}
+
+async fn fetch_raw_record_in(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	version: Option<u64>,
+	auth_reads_none: bool,
+) -> crate::expr::FlowResult<Option<Value>> {
 	let db_ctx = ctx.database().context("fetch_raw_record requires database context")?;
 	let txn = db_ctx.txn();
 	let record = txn
@@ -484,11 +505,11 @@ pub(crate) async fn fetch_raw_record(
 		.await
 		.context("Failed to fetch record")?;
 	if record.data.is_none() {
-		if db_ctx
-			.get_table_def(&rid.table, version)
-			.await
-			.context("Failed to get table definition")?
-			.is_none()
+		if !(auth_reads_none && is_auth_record(ctx, rid))
+			&& db_ctx
+				.table_is_undefined(&rid.table, version)
+				.await
+				.context("Failed to get table definition")?
 		{
 			return Err(crate::expr::ControlFlow::Err(anyhow::Error::new(
 				crate::catalog::Error::TbNotFound {
@@ -624,7 +645,7 @@ pub(crate) async fn fetch_record_no_perms(
 	{
 		return fetched;
 	}
-	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
+	let Some(mut val) = fetch_raw_deref(ctx, rid, ctx.version_stamp()).await? else {
 		return Ok(Value::None);
 	};
 	let field_state =
@@ -668,8 +689,8 @@ pub(crate) async fn fetch_record(
 	{
 		return fetched.map_err(computed_coercion);
 	}
-	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
-		require_table(ctx, &rid.table).await?;
+	let Some(mut val) = fetch_raw_deref(ctx, rid, ctx.version_stamp()).await? else {
+		require_table(ctx, rid).await?;
 		return Ok(Value::None);
 	};
 	if !process_fetched_record(ctx, rid, &mut val).await? {
@@ -767,28 +788,43 @@ pub(crate) async fn batch_fetch_in_place(
 	Ok(())
 }
 
-/// Raise `TbNotFound` when `table` does not exist.
+/// Whether `rid` is the record `$auth` holds for the signed-in record user.
+///
+/// A dereference reads this record's fields to judge the caller against its
+/// own attributes (`PERMISSIONS ... WHERE author = $auth.id`), and neither the
+/// record nor its table need exist: a dereference that finds no record yields
+/// `NONE` for every field, and a comparison against `NONE` grants nothing a
+/// comparison against a stored value would not. Only a dereference of this
+/// record is exempt; every other record id naming a table that is not defined
+/// fails with `TbNotFound`.
+pub(crate) fn is_auth_record(ctx: &ExecutionContext, rid: &RecordId) -> bool {
+	matches!(ctx.value("auth"), Some(Value::RecordId(auth)) if auth == rid)
+}
+
+/// Raise `TbNotFound` when the table of `rid` does not exist, unless `rid` is
+/// the signed-in record user's own record ([`is_auth_record`]).
 ///
 /// Reading a record through a table that does not exist is an error wherever
 /// the read happens — a `FROM` source, a record link followed by a path, a
 /// `FETCH`, a destructure — as it is for a point read (`RecordIdScan`) and a
 /// table scan. A table that exists but holds no such record reads as `NONE`.
 /// Asked only once the record is absent, since a record cannot be present in
-/// a table that is not; the definition lookup is cached per execution.
+/// a table that is not; a cached absence is re-read from the transaction
+/// before it is believed (`DatabaseContext::table_is_undefined`).
 pub(crate) async fn require_table(
 	ctx: &ExecutionContext,
-	table: &TableName,
+	rid: &RecordId,
 ) -> crate::expr::FlowResult<()> {
 	let db_ctx = ctx.database().context("A record read requires a database context")?;
-	if db_ctx
-		.get_table_def(table, ctx.version_stamp())
-		.await
-		.context("Failed to get table")?
-		.is_none()
+	if !is_auth_record(ctx, rid)
+		&& db_ctx
+			.table_is_undefined(&rid.table, ctx.version_stamp())
+			.await
+			.context("Failed to get table")?
 	{
 		return Err(crate::expr::ControlFlow::Err(anyhow::Error::new(
 			crate::catalog::Error::TbNotFound {
-				name: table.clone(),
+				name: rid.table.clone(),
 			},
 		)));
 	}

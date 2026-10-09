@@ -442,6 +442,30 @@ impl DatabaseContext {
 		Ok(result)
 	}
 
+	/// Whether `table` is not defined at `version`, for a read that found no
+	/// record in it and fails with `TbNotFound` where the answer is yes.
+	///
+	/// An absence the execution-level cache holds is read again from the
+	/// transaction before it is believed: a statement block that implicitly
+	/// defines the table after an earlier read cached its absence leaves the
+	/// cache behind the catalog, and a read must not fail for a table the
+	/// block itself defined. The repeat is paid only by a read that is about
+	/// to fail.
+	pub(crate) async fn table_is_undefined(
+		&self,
+		table: &TableName,
+		version: Option<u64>,
+	) -> anyhow::Result<bool> {
+		if self.get_table_def(table, version).await?.is_some() {
+			return Ok(false);
+		}
+		let current = crate::exec::vm::descriptor::definition(self, table, version).await?;
+		if version.is_none() {
+			self.table_def_cache.write().await.insert(table.clone(), current.clone());
+		}
+		Ok(current.is_none())
+	}
+
 	/// Look up all index definitions for a table, checking the execution-level cache first.
 	///
 	/// This avoids repeated `all_tb_indexes` KV roundtrips for the same table

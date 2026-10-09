@@ -106,7 +106,7 @@ error: Reached excessive computation depth due to functions, subqueries, or comp
 ### record user: { LET $f = || $this; RETURN $f() }
 NONE
 ### record user: { LET $f = || $auth.id; RETURN $f() }
-error: The table 'user' does not exist
+NONE
 ### record user: SELECT VALUE (|| $parent.n)() FROM item ORDER BY n
 1
 2

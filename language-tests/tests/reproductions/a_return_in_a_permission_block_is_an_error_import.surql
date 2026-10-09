@@ -3,9 +3,6 @@
 reason = "Setup for a_return_in_a_permission_block_is_an_error.surql: tables whose permissions, computed fields and field values are blocks that RETURN, beside a table no record user may read."
 run = false
 */
--- The record users' table exists: the permissions read `$auth.id`, and a
--- record id naming an undefined table is an error rather than `NONE`.
-DEFINE TABLE user SCHEMALESS;
 DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN ( type::record($rid) ) DURATION FOR TOKEN 1h, FOR SESSION 1h;
 DEFINE TABLE private SCHEMALESS PERMISSIONS NONE;
 CREATE private:1 SET s = 'SECRET';

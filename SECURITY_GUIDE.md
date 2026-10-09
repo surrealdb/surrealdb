@@ -198,6 +198,16 @@ SurrealDB's security model rests on four pillars:
   able to raise, which is what keeps every rule gated on inertness from
   dropping it — `SELECT * FROM [$secret] WHERE false` must be refused, not
   answered `[]`.
+- A record user's `$auth` is the record id of the signed-in record, and a path
+  read from it (`$auth.email`, `$auth.id`) dereferences that record. Where the
+  record's table is not defined the record is absent and every field of it
+  reads `NONE`, the id included — never a `TbNotFound`, which every other
+  record id naming an undefined table raises (`exec/operators/fetch.rs::is_auth_record`).
+  The exemption keys on the id `$auth` holds and widens no access: `NONE`
+  satisfies no predicate that compares a field to a stored value, so a
+  permission written over `$auth.<field>` denies, as it does for a record
+  that exists without the field, and a rewrite must not substitute the record
+  id for the `NONE` of `$auth.id`.
 - Session state must only be committed after all authentication steps complete
   successfully. Partial failures must leave the session in its pre-authentication
   state.
