@@ -46,6 +46,8 @@ pub use crate::catalog::node;
 pub(crate) use crate::expr::variables::Variables;
 
 #[cfg(all(test, feature = "kv-mem"))]
+mod catalog_boundary_test;
+#[cfg(all(test, feature = "kv-mem"))]
 mod definer_rights_test;
 #[cfg(all(test, feature = "kv-mem"))]
 mod live_notification_test;
