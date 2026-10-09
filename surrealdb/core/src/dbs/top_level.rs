@@ -13,7 +13,7 @@ use crate::observe::StatementType;
 ///
 /// Parsed statements carry inert credentials and generated identities until
 /// execution reaches them. Frontends may instead supply a logical plan, which
-/// runs on the streaming engine.
+/// runs on the VM.
 pub(crate) enum TopLevelStatement {
 	/// A runtime statement, as the parser produced it.
 	Ast(TopLevelExpr),

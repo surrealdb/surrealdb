@@ -24,7 +24,6 @@ use super::write::WriteState;
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
 use crate::catalog::{Metadata, Record, RecordType};
-use crate::exec::operators::write::clauses::WriteClauses;
 use crate::exec::operators::write::ctx::TableExistence;
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
@@ -196,14 +195,11 @@ async fn maintain(
 			}
 		},
 	};
-	let scope = Arc::clone(state.backfill.get_or_insert_with(|| {
-		WriteScope::new(
-			ctx.clone(),
-			Arc::new(WriteClauses::default()),
-			None,
-			TableExistence::DefinedOnDemand,
-		)
-	}));
+	let scope = Arc::clone(
+		state
+			.backfill
+			.get_or_insert_with(|| WriteScope::new(ctx.clone(), TableExistence::DefinedOnDemand)),
+	);
 	let id = RecordId {
 		table: table.clone(),
 		key,

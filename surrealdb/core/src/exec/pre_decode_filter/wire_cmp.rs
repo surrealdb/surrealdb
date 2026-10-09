@@ -1131,10 +1131,8 @@ mod tests {
 
 	#[test]
 	fn wire_eq_number_int_byte_mismatch_is_provably_false() {
-		// Previously: same outer Number variant + byte mismatch returned
-		// `None` (defer to decode). Now: same Int sub-variant + byte
-		// mismatch is decisively `Some(false)` — Int's wire form is
-		// canonical-per-value.
+		// Same Int sub-variant + byte mismatch is decisively `Some(false)` —
+		// Int's wire form is canonical-per-value.
 		let lit = LiteralWire::from_value(&Value::Number(Number::Int(5)));
 		let v = encoded(&Value::Number(Number::Int(7)));
 		assert_eq!(wire_eq(&v, &lit), Some(false));

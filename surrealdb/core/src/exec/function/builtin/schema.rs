@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
+use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;

@@ -21,7 +21,6 @@ use surrealdb_strand::TableName;
 
 use crate::dbs::{MessageBroker, Session};
 use crate::doc::Action;
-use crate::exec::operators::write::clauses::WriteClauses;
 use crate::exec::operators::write::ctx::{TableExistence, WriteCtx};
 use crate::exec::operators::write::stages::lives::{Images, Notify, deliver};
 use crate::expr::ControlFlow;
@@ -80,15 +79,8 @@ pub(crate) async fn replay_table_live_events(
 	let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
 	// The table's definitions, including the live subscriptions each event is
 	// replayed against.
-	let write_ctx = WriteCtx::resolve(
-		&exec,
-		table,
-		TableExistence::Required,
-		None,
-		Arc::new(WriteClauses::default()),
-	)
-	.await
-	.map_err(into_error)?;
+	let write_ctx =
+		WriteCtx::resolve(&exec, table, TableExistence::Required).await.map_err(into_error)?;
 	for event in events {
 		// The action selects the same source image and emits the same
 		// notification action the inline engine does.

@@ -51,7 +51,8 @@ mod storage;
 #[path = "write_view.rs"]
 mod view;
 
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 pub(super) use cascade::CASCADE_UNITS_RUN;
 pub(super) use cascade::{ReferenceInstr, RepairStrategy, TableRepairs};
 pub(super) use data::DataInstr;
@@ -61,10 +62,12 @@ pub(super) use observe::{
 	Admission, ClauseDepth, EventClauses, LoweredEvents, LoweredSubscription, ObserveInstr,
 	SubscriptionFieldsLowered,
 };
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 pub(super) use observe::{LIVES_DECLINED, LIVES_LOWERED, LIVES_RUN};
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 pub(super) use storage::INDEX_STEPS;
 pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
 pub(super) use view::{LoweredView, LoweredViews, Recalc, ViewClause, ViewRows};
@@ -615,17 +618,15 @@ fn scope_for(
 	kept: Option<&mut Option<Arc<crate::exec::operators::write::scope::KeptContexts>>>,
 ) -> Arc<WriteScope> {
 	let late = spec.tables.as_ref().is_some_and(|tables| tables.revalidates);
-	let (output, existence) = (spec.output.clone(), spec.form.table_existence());
+	let existence = spec.form.table_existence();
 	match kept {
-		_ if late => WriteScope::revalidating(ctx.clone(), Arc::default(), output, existence),
+		_ if late => WriteScope::revalidating(ctx.clone(), existence),
 		Some(kept) => WriteScope::kept(
 			ctx.clone(),
-			Arc::default(),
-			output,
 			existence,
 			Arc::clone(kept.get_or_insert_with(Default::default)),
 		),
-		None => WriteScope::new(ctx.clone(), Arc::default(), output, existence),
+		None => WriteScope::new(ctx.clone(), existence),
 	}
 }
 

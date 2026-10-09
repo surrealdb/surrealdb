@@ -48,8 +48,7 @@ late-bound*).
 
 Every statement is a group of the program. A statement the VM does not bind, map or lower as a
 group fails the whole block. A statement after the block's first schema statement that the planner
-refuses raises the refusal when the block reaches it, as the operator tree, which compiles it only
-then, raises it; one whose binding folds the clock makes the block planned with it late-bound,
+refuses raises the refusal when the block reaches it; one whose binding folds the clock makes the block planned with it late-bound,
 whose clock reads are evaluated when it runs. `EXPLAIN ANALYZE` of a statement maps the statement it explains,
 and the text it renders of that statement's plan is fixed when the query arrives
 (`Program::analyses`). A semi or anti join the logical rules lifted out of a filter is mapped as the

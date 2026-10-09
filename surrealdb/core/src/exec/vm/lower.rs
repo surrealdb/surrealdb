@@ -8,13 +8,15 @@
 //! feeds.
 //!
 //! Every scalar becomes instructions, and a statement holding one the
-//! instructions do not answer is not covered: it runs on the operator tree.
-//! Operands are evaluated in the order the operator tree evaluates them: left
+//! instructions do not answer fails with a decline error.
+//! Operands are evaluated left
 //! before right, the right-hand side of `AND` and `OR` only when the left
 //! does not decide.
 
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use surrealdb_types::ToSql;
 
 use super::NotCovered;
 use super::plain::ValueData;
@@ -70,7 +72,8 @@ mod path;
 mod write_cascade;
 #[path = "lower_write_data.rs"]
 mod write_data;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 pub(super) use write_observe::OPEN_EVENT_UNITS;
 pub(super) use write_observe::lower_subscription;
 #[path = "lower_write_gate.rs"]
@@ -83,32 +86,6 @@ mod write_schema;
 mod write_storage;
 #[path = "lower_write_view.rs"]
 mod write_view;
-
-/// A statement a write performs on its own behalf, `bound` by `planner`, as
-/// the one group of a program of its own (group 0), so it runs over a state
-/// kept from one run to the next ([`super::subroutine`]).
-pub(super) async fn lower_subroutine(
-	planner: &Planner<'_>,
-	bound: &crate::expr::logical::LogicalOp,
-) -> Lowered<Program> {
-	let physical = super::optimize::optimize(super::map::map(planner, bound).await?);
-	let mut program = crate::kvs::catalog_reads::sealed(true, async {
-		let mut l = Lowering::new(planner);
-		if let Some(catalog) = &physical.catalog {
-			l.catalog = Arc::clone(catalog);
-		}
-		l.stage_sets = true;
-		let (_, access_mode, _) =
-			crate::exec::vm::host::out_of_line(|| l.group(planner, &physical)).await?;
-		l.scalar = true;
-		l.writes =
-			access_mode != AccessMode::ReadOnly || l.groups.iter().any(|g| g.write.is_some());
-		l.finish()
-	})
-	.await?;
-	seal(planner, &mut program, Default::default()).await?;
-	Ok(program)
-}
 
 pub(super) async fn lower(planner: &Planner<'_>, plan: &PhysicalPlan) -> Lowered<Program> {
 	let mut program = lower_in(planner, plan, None, None).await?;
@@ -954,8 +931,8 @@ enum Sink<'a> {
 }
 
 /// The document root an index or a method argument of a path step is
-/// evaluated against, which is its current value; the operator tree takes the
-/// value stepped from where there is none.
+/// evaluated against, which is its current value; the value stepped from
+/// stands in where there is none.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum DocumentRoot {
 	/// Not known to the lowering: only an argument that reads no row lowers.
@@ -1103,8 +1080,8 @@ struct Lowering<'p, 'ctx> {
 	/// is left out rather than guarded.
 	write_catalog_fixed: bool,
 	/// Whether the statement this lowering lowers, refused by the planner,
-	/// raises the refusal when it runs: a block statement the operator tree
-	/// compiles when the block reaches it ([`Self::refused_when_run`]).
+	/// raises the refusal when it runs: a block statement that is
+	/// compiled when the block reaches it ([`Self::refused_when_run`]).
 	refuses_when_run: bool,
 	/// Whether the next group lowered is such a statement.
 	next_group_refuses: bool,
@@ -1123,7 +1100,7 @@ struct Lowering<'p, 'ctx> {
 	/// pipeline.
 	shape_of: Option<Option<super::program::WriteShape>>,
 	/// Why an expression a place embeds has no pipeline, where one has none:
-	/// the refusal the operator tree raises for it, or the reason the VM does
+	/// the refusal the planner raises for it, or the reason the VM does
 	/// not lower it.
 	place_refused: Option<NotCovered>,
 	/// The views of the one table the write writes to, once lowered.
@@ -1179,8 +1156,8 @@ struct Lowering<'p, 'ctx> {
 	/// The tables the program reads records of by id where the table is known
 	/// only from data ([`Program::reach`]).
 	reach: Option<super::dispatch::Reach>,
-	/// What of [`Self::reach`] this lowering reads at sites the operator tree
-	/// resolves against the catalog as it stands when they run: a value in
+	/// What of [`Self::reach`] this lowering reads at sites resolved against
+	/// the catalog as it stands when they run: a value in
 	/// `FROM` only the data names, and a `FETCH`. A value written in `FROM`,
 	/// and the records it names, are bound with the statement.
 	late_reach: Option<super::dispatch::Reach>,
@@ -1715,8 +1692,8 @@ struct LayerTargets {
 	reduced: Option<Reg>,
 }
 
-/// Where a `RETURN` signalled inside an expression lands, as the operator
-/// tree takes one at the expression's root.
+/// Where a `RETURN` signalled inside an expression lands, at the
+/// expression's root.
 struct ReturnCatch {
 	/// The register the returned value goes to.
 	root: Reg,
@@ -2988,7 +2965,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 
 	/// [`Self::image_view`], and for a table whose field view has no layer
 	/// form a host pipeline that puts the image through the table's field
-	/// declarations at run time, as the operator tree shows a written record.
+	/// declarations at run time.
 	pub(super) async fn shown_view(
 		&mut self,
 		table: &surrealdb_strand::TableName,
@@ -3286,7 +3263,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			}
 		}
 		// A source naming one record, whose row is read and judged whatever
-		// the paging, as the operator tree's lookup judges it.
+		// the paging.
 		let one_record = matches!(
 			node,
 			Plan::RecordScan {
@@ -4131,7 +4108,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					let dst = first + i as Reg;
 					match &key.read {
 						// Over rows that may be any value, the key is read from
-						// the row as the operator tree's sort extracts it.
+						// the row as a path step.
 						SortKeyRead::Path(path) if !self.rows_are_objects => {
 							let row = self.current()?;
 							self.paths.push(path.clone());
@@ -4645,8 +4622,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				let record =
 					crate::exec::vm::host::out_of_line(|| self.host_scalar(record)).await?;
 				// A locked read reads the record's key and locks it, a
-				// lightweight edge's as any other, as the operator tree's
-				// locked read does.
+				// lightweight edge's as any other.
 				if !*for_update && self.is_lightweight(table)? {
 					return Ok(Source::LightweightEdges {
 						table: table.clone(),
@@ -6667,8 +6643,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// Whether `body`, evaluated with an element as its current value, lowers
-	/// to instructions that read the element as the operator tree does: every
-	/// part is native and none reads the row where the tree reads the element
+	/// to instructions that read the element: every
+	/// part is native and none reads the row in place of the element
 	/// ([`Self::reads_frame_of_element`]).
 	fn is_native_element_body(&self, body: &LogicalExpr) -> bool {
 		self.is_native_predicate(body) && !self.reads_frame_of_element(body)
@@ -6955,7 +6931,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			LogicalExpr::Object(entries) => entries.iter().all(|(_, value)| self.is_native(value)),
 			LogicalExpr::RecordId(rid) => self.is_native_key(&rid.key),
 			// A statement in scalar position runs as a plan of its own. `LET`
-			// is refused there, by the operator tree's planner.
+			// is refused there by the planner.
 			LogicalExpr::Subquery(op) => !matches!(**op, LogicalOp::Let(_)),
 			LogicalExpr::If(branches) => {
 				branches
@@ -6990,7 +6966,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// The shape of record-id key `key`, the instructions computing its parts
-	/// emitted in the order the operator tree evaluates them.
+	/// emitted in the order they are evaluated.
 	async fn record_key(
 		&mut self,
 		key: &crate::expr::logical::LogicalRecordIdKey,
@@ -7075,7 +7051,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// Whether `expr`, an index or a method argument of a path step, has the
-	/// value the body reads for it. The operator tree evaluates one against
+	/// value the body reads for it. One is evaluated against
 	/// the document root, and against the value stepped from when there is
 	/// none: rows that are records are their own document roots, so is the
 	/// row a projection's fields are evaluated over, inside an element body
@@ -7095,7 +7071,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// `arg`, an index or a method argument of a path step taken from `recv`,
-	/// evaluated against the document root as the operator tree evaluates it:
+	/// evaluated against the document root:
 	/// with the root as its current value, and with `recv` where there is no
 	/// root. Where the root is unknown an element body holds no argument that
 	/// reads a row.
@@ -7523,17 +7499,16 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// The value index operator `expr` answers for every row where nothing in
-	/// scope answers it, as the operator tree's operator answers it without
-	/// evaluating either operand: `false` for a `MATCHES` outside the scope of
-	/// a `SELECT` that registers its clauses, and for a `KNN` operator with no
-	/// `KNN` in scope. `None` for any other expression.
+	/// scope answers it, without evaluating either operand: `false` for a
+	/// `MATCHES`, which no statement registers a scope for here, and for a
+	/// `KNN` operator with no `KNN` in scope. `None` for any other expression.
 	fn answers_unscoped_operator(&self, expr: &LogicalExpr) -> Option<Value> {
 		let planner = self.bare.as_ref().unwrap_or(self.planner);
 		match expr {
 			LogicalExpr::Binary {
 				op: BinaryOperator::Matches(_),
 				..
-			} if planner.matches_scope.is_none() => Some(Value::Bool(false)),
+			} => Some(Value::Bool(false)),
 			LogicalExpr::Binary {
 				op: BinaryOperator::NearestNeighbor(_),
 				..
@@ -7550,7 +7525,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// The spec of `expr`, a `MATCHES` operator of the statement being lowered,
-	/// as the operator tree's planner builds it: whether the `WHERE` registers
+	/// as the planner builds it: whether the `WHERE` registers
 	/// it, the probe it makes of an index, and the pipeline that reads its
 	/// left operand where the operand can cross a record link.
 	async fn matches_spec(
@@ -7560,7 +7535,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		left: &LogicalExpr,
 		right: &LogicalExpr,
 	) -> Lowered<super::program::MatchesSpec> {
-		use crate::exec::physical_expr::MatchProbe;
+		use crate::exec::vm::matches::MatchProbe;
 		// The `WHERE` registers the node as written, and a projection naming a
 		// statement parameter as its query is registered by the node the bind
 		// passes left in the `WHERE`, with the parameter's value in place.
@@ -7585,14 +7560,14 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		// parameter bound around the plan holds the binding's value when the
 		// operator runs, so its query is read then ([`Instr::Matches`]).
 		let probe = |query: &Value| MatchProbe {
-			field: left.clone(),
+			field: left.field_path(),
 			query: Some(query.to_raw_string()),
 		};
 		let probe = match right {
 			_ if !left.is_path() => None,
 			LogicalExpr::Param(param) if self.planner.param_is_shadowed(param.as_str()) => {
 				Some(MatchProbe {
-					field: left.clone(),
+					field: left.field_path(),
 					query: None,
 				})
 			}
@@ -7606,23 +7581,41 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		// than one field can cross.
 		let crosses_link = probe
 			.as_ref()
-			.and_then(|probe| probe.field.field_path())
+			.and_then(|probe| probe.field.as_ref())
 			.is_some_and(|path| path.segments().len() > 1);
 		let left_code = if crosses_link {
 			Some(crate::exec::vm::host::out_of_line(|| self.host_code(left)).await?)
 		} else {
 			None
 		};
-		// The tree's own expression names the operator in the error it raises.
-		let sql = self
-			.planner
-			.physical_expr(expr.clone())
-			.await
-			.map_err(|e| match super::plan::Refusal::of(&e) {
-				Some(refusal) => NotCovered::refused(refusal),
-				None => NotCovered::internal(format!("an expression did not compile: {e}")),
-			})?
-			.to_sql();
+		// Errors name the resolved query that the index searches for.
+		let right = match probe.as_ref().and_then(|probe| probe.query.as_ref()) {
+			Some(query) => LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
+				query.as_str().into(),
+			)),
+			None => right.clone(),
+		};
+		// A subquery operand is named by the operator at the top of the plan
+		// `EXPLAIN` renders for it, as an expression holding its statement
+		// shows it, not by its source.
+		let sql = match &right {
+			LogicalExpr::Subquery(op) => {
+				let physical = super::map::explained_plan(self.planner, op).await?;
+				format!(
+					"{} {} ({})",
+					left.to_sql(),
+					BinaryOperator::Matches(operator.clone()).to_sql(),
+					super::explain::root_name(&physical)
+				)
+			}
+			_ => LogicalExpr::Binary {
+				left: Box::new(left.clone()),
+				op: BinaryOperator::Matches(operator.clone()),
+				right: Box::new(right),
+			}
+			.to_sql(),
+		};
+
 		Ok(super::program::MatchesSpec {
 			operator: operator.clone(),
 			probe,
@@ -8111,7 +8104,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// The register a statement in an element body is taken over, as its
 	/// `$this` and `$parent`, where the document root is the row or else the
 	/// element: the row the pipeline runs over, and the element where it runs
-	/// over none, as the operator tree takes the document root and else the
+	/// over none: the document root is taken where there is one, else the
 	/// current value. Otherwise the statement document already in force.
 	fn element_statement_doc(&mut self) -> Lowered<Option<Reg>> {
 		let (DocumentRoot::RowElseReceiver, None, Some(element)) =
@@ -8206,8 +8199,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 
 	/// Why `expr`, a `what` the body does not answer itself, is not covered:
 	/// a `LET` written as an expression, an index function it calls that the
-	/// statement declares no clause for, or a recursion, which the operator
-	/// tree refuses too, or else that it has no instructions.
+	/// statement declares no clause for, or a recursion, which the planner
+	/// refuses too, or else that it has no instructions.
 	fn uncovered(&self, expr: &LogicalExpr, what: &str) -> NotCovered {
 		if expr.any(
 			|node| matches!(node, LogicalExpr::Subquery(op) if matches!(**op, LogicalOp::Let(_))),
@@ -8235,7 +8228,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		}
 	}
 
-	/// The error the operator tree raises as it compiles an index function
+	/// The error the planner raises as it compiles an index function
 	/// call in `expr` that names no clause of its statement: an index
 	/// reference that is no literal in range, no `MATCHES` or `KNN` operator in
 	/// the statement's `WHERE`, or no `MATCHES` clause with the reference.
@@ -8311,7 +8304,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	}
 
 	/// `expr`'s value, where a `RETURN` a subquery inside it signals is the
-	/// value of the whole expression, as the operator tree takes one at a
+	/// value of the whole expression, at a
 	/// projected field's root and at a statement's.
 	async fn caught_value(&mut self, expr: &LogicalExpr) -> Lowered<Operand> {
 		crate::exec::vm::host::out_of_line(|| self.caught(expr, false)).await
@@ -8347,7 +8340,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		Ok(Operand::Reg(root))
 	}
 
-	/// The steps `paths`, resolved `FETCH` paths, walk, as the operator tree's
+	/// The steps `paths`, resolved `FETCH` paths, walk, as the
 	/// planner reads them off the paths; a computed index is the host
 	/// pipeline that evaluates it.
 	pub(super) async fn fetch_steps(
@@ -8391,7 +8384,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		});
 	}
 
-	/// [`Self::reaches`], for a site the operator tree resolves against the
+	/// [`Self::reaches`], for a site resolved against the
 	/// catalog as it stands when the site runs ([`Self::late_reach`]).
 	pub(super) fn reaches_late(&mut self, reach: super::dispatch::Reach) {
 		self.late_reach = Some(match self.late_reach.take() {
@@ -8644,7 +8637,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// held as a unit of the program this lowering builds.
 	///
 	/// A statement the VM does not lower fails the enclosing statement's
-	/// lowering, which then runs on the operator tree whole; no subquery is
+	/// lowering; no subquery is
 	/// planned apart from its program. The unit is the root of an arena of its
 	/// own, so the host pipelines it runs over states of their own find the
 	/// units they call. It runs in the frame it is lowered for and in no
@@ -9162,7 +9155,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					value
 				}
 				// A branch evaluated by the host could signal `RETURN` through
-				// the value; the operator tree's `IfElseExpr` passes it on.
+				// the value, which the `if` passes on.
 				// Each condition but the first and each value is lowered behind
 				// a `JumpIf`, so `dag::reach` classes every child but the first
 				// condition conditional.
@@ -9410,7 +9403,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					Ok(Operand::Field(self.field(name.as_str())))
 				}
 				// Over rows that may be any value, a field is read as a path step
-				// from the row, as the operator tree steps from its current value.
+				// from the row.
 				LogicalExpr::Field(name) => {
 					let row = match self.element {
 						Some(element) => element,
@@ -9545,8 +9538,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				} if CompareOp::of(op).is_some() => {
 					let op = CompareOp::of(op).expect("checked above");
 					let left = crate::exec::vm::host::out_of_line(|| self.value(left)).await?;
-					// The probe is evaluated before the statement, as the
-					// operator tree evaluates it.
+					// The probe is evaluated before the statement.
 					if matches!(op, CompareOp::Inside | CompareOp::NotInside)
 						&& let LogicalExpr::Subquery(statement) = right.as_ref()
 						&& !self.column_statements
@@ -9603,7 +9595,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 							.await
 						{
 							// Inside an element body the statement is taken over the
-							// element, as the operator tree's lookup is.
+							// element.
 							Some(statement) => {
 								let outer = match self.element {
 									Some(element) => self.statement_doc.replace(element),

@@ -9,7 +9,7 @@
 //! A stored clause is compiled from its text into the engine's
 //! scalar. A clause that cannot be — one the lowering has no form for, or one
 //! holding a write no operator compiles — is carried as an
-//! [`UncompilableClause`], which fails with `PlannerUnsupported` where the
+//! [`Clause::Uncompilable`], which fails with `PlannerUnsupported` where the
 //! clause is evaluated and nowhere else, so a statement that merely reaches a
 //! table declaring such a clause is not refused.
 //!
@@ -39,16 +39,11 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use arc_swap::ArcSwapOption;
 use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
-#[cfg(test)]
-use crate::catalog::Record;
-use crate::catalog::aggregation::AggregateFields;
 use crate::catalog::{
-	EventDefinition, FieldDefinition, IndexDefinition, LogicalBody, Permission, TableDefinition,
-	ViewDefinition,
+	EventDefinition, FieldDefinition, IndexDefinition, Permission, TableDefinition,
 };
 use crate::doc::Action as DocAction;
 use crate::err::{EngineError, Error};
@@ -56,22 +51,15 @@ use crate::exe::FlowResultExt as _;
 use crate::exec::operators::scan::pipeline::{
 	FieldState, build_field_state, compute_fields_for_value, narrowing_auth_limit,
 };
-use crate::exec::operators::write::place::WritePlace;
-use crate::exec::planner::{Planner, compile_expr};
+use crate::exec::planner::Planner;
 use crate::exec::{
-	AccessMode, BoxFut, ContextLevel, DatabaseContext, Error as ExecError, EvalContext,
-	ExecutionContext, FlowResult, PhysicalExpr,
+	Clause, DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, FlowResult,
 };
 use crate::expr::computed_deps::extract_computed_deps;
 pub(crate) use crate::expr::logical::GuardKind;
-use crate::expr::logical::{LogicalExpr, LogicalPermission, LogicalPermissionRef};
-use crate::expr::{ControlFlow, Expr, Fields};
+use crate::expr::logical::{LogicalExpr, LogicalPermission};
+use crate::expr::{ControlFlow, Expr};
 use crate::iam::{Action, Auth};
-#[cfg(test)]
-use crate::idx::trees::gate::{BoxGateFut, TableSelectGate};
-use crate::kvs::Transaction;
-#[cfg(test)]
-use crate::val::RecordId;
 use crate::val::Value;
 
 /// Result of a permission check.
@@ -82,7 +70,7 @@ pub enum PhysicalPermission {
 	/// Permission denies access unconditionally
 	Deny,
 	/// Permission requires per-record evaluation
-	Conditional(Arc<dyn PhysicalExpr>),
+	Conditional(Clause),
 }
 
 /// The `SELECT` permission of a table as the engine applies it,
@@ -92,7 +80,7 @@ pub enum PhysicalPermission {
 /// stored text, lowered once for the life of the definition and shared with
 /// the analyzer — so a statement that plans the table does not lower the
 /// clause again. A guard whose text has no logical form is carried as an
-/// [`UncompilableClause`].
+/// [`Clause::Uncompilable`].
 /// A table with no definition denies, as
 /// [`table_select_permission`](crate::catalog::table_select_permission)
 /// resolves it. Inner subqueries inherit the planner's `CycleGuard`, so a
@@ -156,7 +144,7 @@ pub(crate) async fn table_select_permission_physical(
 /// guard's own batch evaluation; once the field state is resolved that way, a
 /// row or batch is handed to the guard without passing through this node.
 pub(crate) struct ComputedFieldGuard {
-	guard: Arc<dyn PhysicalExpr>,
+	guard: Clause,
 	table: TableName,
 	/// The fields the guard reads by name, or `None` when it reads the row
 	/// other than by name and every computed field is derived.
@@ -170,11 +158,7 @@ impl ComputedFieldGuard {
 	/// `guard`, the compiled form of the stored clause `clause` of `table`,
 	/// judged as the type documentation states — or `guard` itself when the
 	/// clause reads no field of the row at all.
-	pub(crate) fn for_clause(
-		guard: Arc<dyn PhysicalExpr>,
-		table: &TableName,
-		clause: &Expr,
-	) -> Arc<dyn PhysicalExpr> {
+	pub(crate) fn for_clause(guard: Clause, table: &TableName, clause: &Expr) -> Clause {
 		let deps = extract_computed_deps(clause);
 		if deps.is_complete && deps.fields.is_empty() {
 			return guard;
@@ -189,16 +173,16 @@ impl ComputedFieldGuard {
 	/// `guard` over rows of `table`, reading `reads` of them by name, or the
 	/// row as a whole when `reads` is `None`.
 	pub(crate) fn for_reads(
-		guard: Arc<dyn PhysicalExpr>,
+		guard: Clause,
 		table: TableName,
 		reads: Option<HashSet<String>>,
-	) -> Arc<dyn PhysicalExpr> {
-		Arc::new(Self {
+	) -> Clause {
+		Clause::Guard(Arc::new(Self {
 			guard,
 			table,
 			reads,
 			state: tokio::sync::OnceCell::new(),
-		})
+		}))
 	}
 
 	/// The field state the guard's reads need, or `None` when they need no
@@ -249,71 +233,49 @@ impl std::fmt::Debug for ComputedFieldGuard {
 	}
 }
 
-impl PhysicalExpr for ComputedFieldGuard {
-	fn name(&self) -> &'static str {
-		"ComputedFieldGuard"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// The field definitions belong to a table of a database.
-		ContextLevel::Database.max(self.guard.required_context())
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+impl ComputedFieldGuard {
+	/// The guard's verdict on the value in `ctx`: the row's derived copy
+	/// where the guard reads a computed field, the row as it came otherwise.
+	pub(crate) async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		// Resolved to derive nothing: the guard judges the row as it came.
 		if matches!(self.state.get(), Some(None)) {
-			return self.guard.evaluate(ctx);
+			return self.guard.evaluate(ctx).await;
 		}
-		Box::pin(async move {
-			// Only a record carries fields to derive.
-			let Some(row @ Value::Object(_)) = ctx.document_root.or(ctx.current_value) else {
-				return self.guard.evaluate(ctx).await;
-			};
-			let frame = Self::frame(ctx.exec_ctx);
-			let Some(state) = self.state(&frame).await? else {
-				return self.guard.evaluate(ctx).await;
-			};
-			let derived = Self::derive(&frame, state, row).await?;
-			self.guard.evaluate(ctx.with_value_and_doc(&derived)).await
-		})
+		// Only a record carries fields to derive.
+		let Some(row @ Value::Object(_)) = ctx.document_root.or(ctx.current_value) else {
+			return self.guard.evaluate(ctx).await;
+		};
+		let frame = Self::frame(ctx.exec_ctx);
+		let Some(state) = self.state(&frame).await? else {
+			return self.guard.evaluate(ctx).await;
+		};
+		let derived = Self::derive(&frame, state, row).await?;
+		self.guard.evaluate(ctx.with_value_and_doc(&derived)).await
 	}
 
-	fn evaluate_batch<'a>(
-		&'a self,
-		ctx: EvalContext<'a>,
-		values: &'a [Value],
-	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+	/// The guard's verdict on each of `values`, each judged as
+	/// [`Self::evaluate`] judges the current value.
+	pub(crate) async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
 		// Resolved to derive nothing: the guard judges the batch as it came.
 		if matches!(self.state.get(), Some(None)) {
-			return self.guard.evaluate_batch(ctx, values);
+			return self.guard.evaluate_batch(ctx, values).await;
 		}
-		Box::pin(async move {
-			let frame = Self::frame(ctx.exec_ctx);
-			let Some(state) = self.state(&frame).await? else {
-				return self.guard.evaluate_batch(ctx, values).await;
-			};
-			let mut derived = Vec::with_capacity(values.len());
-			for row in values {
-				derived.push(match row {
-					Value::Object(_) => Self::derive(&frame, state, row).await?,
-					other => other.clone(),
-				});
-			}
-			self.guard.evaluate_batch(ctx, &derived).await
-		})
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// The derivation runs in a frame that refuses writes.
-		self.guard.access_mode()
-	}
-
-	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		vec![("guard", &self.guard)]
+		let frame = Self::frame(ctx.exec_ctx);
+		let Some(state) = self.state(&frame).await? else {
+			return self.guard.evaluate_batch(ctx, values).await;
+		};
+		let mut derived = Vec::with_capacity(values.len());
+		for row in values {
+			derived.push(match row {
+				Value::Object(_) => Self::derive(&frame, state, row).await?,
+				other => other.clone(),
+			});
+		}
+		self.guard.evaluate_batch(ctx, &derived).await
 	}
 }
 
@@ -322,23 +284,6 @@ impl ToSql for ComputedFieldGuard {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.guard.fmt_sql(f, fmt);
 	}
-}
-
-/// A stored `SELECT` clause as the engine applies it: `logical`,
-/// the clause compiled from its stored text by the definition that holds it,
-/// or — when the text has no logical form — an [`UncompilableClause`] carrying
-/// the reason. `permission` is the definition's expression form of the same
-/// clause; the two are the same clause of the same definition, and a caller
-/// passes both halves of one definition, never a body of its own making.
-///
-/// A `RETURN` leaving the guard is its verdict, as a write's gate judges it.
-pub(crate) async fn permission_to_physical(
-	permission: &Permission,
-	logical: anyhow::Result<LogicalPermission>,
-	guard: GuardKind,
-	planner: &Planner<'_>,
-) -> Result<PhysicalPermission, Error> {
-	permission_to_physical_as(permission, logical, guard, planner, false).await
 }
 
 /// [`permission_to_physical`] for a guard a read applies to the record it
@@ -376,16 +321,16 @@ async fn permission_to_physical_as(
 		Ok(LogicalPermission::None) => Ok(PhysicalPermission::Deny),
 		Ok(LogicalPermission::Full) => Ok(PhysicalPermission::Allow),
 		Ok(LogicalPermission::Specific(guard)) if unplannable.is_none() => {
-			let compiled = planner.physical_expr(guard.clone()).await?;
+			let compiled = planner.scalar_metadata(guard.clone()).await?;
 			Ok(PhysicalPermission::Conditional(match predicate {
-				true => crate::exec::scalar_unit::UnitClause::predicate(guard, compiled),
-				false => crate::exec::scalar_unit::UnitClause::of(guard, compiled),
+				true => Clause::predicate(guard, compiled),
+				false => Clause::of(guard, compiled),
 			}))
 		}
 		Ok(LogicalPermission::Specific(_)) => Ok(match permission {
 			Permission::None => PhysicalPermission::Deny,
 			Permission::Full => PhysicalPermission::Allow,
-			Permission::Specific(_) => PhysicalPermission::Conditional(UncompilableClause::of(
+			Permission::Specific(_) => PhysicalPermission::Conditional(Clause::uncompilable(
 				unplannable.unwrap_or_default(),
 			)),
 		}),
@@ -393,71 +338,9 @@ async fn permission_to_physical_as(
 			Permission::None => PhysicalPermission::Deny,
 			Permission::Full => PhysicalPermission::Allow,
 			Permission::Specific(_) => {
-				PhysicalPermission::Conditional(UncompilableClause::of(reason.to_string()))
+				PhysicalPermission::Conditional(Clause::uncompilable(reason.to_string()))
 			}
 		}),
-	}
-}
-
-/// A stored clause the engine cannot compile.
-///
-/// The engine compiles a catalog clause — a table or field
-/// `PERMISSIONS FOR select` guard, a `COMPUTED` or `DEFAULT` body, an event's
-/// `WHEN` or `THEN`, a materialized view's condition, a stored field list —
-/// from its stored text into a [`PhysicalExpr`]. A clause whose text has no
-/// logical form, and one whose logical form holds a write no operator
-/// compiles, cannot be compiled that way. It is carried as this expression
-/// instead, which fails with `PlannerUnsupported` naming the reason when it is
-/// evaluated. Compiling is the decision to run a clause, so a statement that
-/// never evaluates it is not refused; one that does fails closed, and a
-/// permission guard that fails denies.
-#[derive(Debug)]
-pub(crate) struct UncompilableClause {
-	reason: String,
-}
-
-impl UncompilableClause {
-	/// The clause that cannot be compiled, for `reason`.
-	pub(crate) fn of(reason: String) -> Arc<dyn PhysicalExpr> {
-		Arc::new(Self {
-			reason,
-		})
-	}
-}
-
-impl PhysicalExpr for UncompilableClause {
-	fn name(&self) -> &'static str {
-		"UncompilableClause"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// A clause belongs to a table, so it is only ever evaluated with a
-		// database selected.
-		ContextLevel::Database
-	}
-
-	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
-		Box::pin(async move {
-			Err(ExecError::PlannerUnsupported {
-				reason: self.reason.clone(),
-			}
-			.into())
-		})
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// Evaluating it does nothing but fail.
-		AccessMode::ReadOnly
-	}
-}
-
-impl ToSql for UncompilableClause {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		f.push_str("<uncompilable clause>");
 	}
 }
 
@@ -468,7 +351,7 @@ impl ToSql for UncompilableClause {
 /// A stored clause as the engine evaluates it: `logical`, the clause
 /// compiled from its text by the definition that holds it, or — when that text
 /// has no logical form, or holds a write no operator compiles — an
-/// [`UncompilableClause`] naming why.
+/// [`Clause::Uncompilable`] naming why.
 ///
 /// A clause holding a write the planner declines is carried rather than
 /// failed: compiling one would fail the read that merely reached the clause. A
@@ -489,81 +372,17 @@ impl ToSql for UncompilableClause {
 async fn clause_to_physical(
 	logical: anyhow::Result<&LogicalExpr>,
 	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
+) -> Result<Clause, Error> {
 	match logical {
 		Ok(body) => match crate::exec::logical::unplannable_write_in_expr(body) {
 			None => {
-				let compiled = planner.physical_expr(body.clone()).await?;
-				Ok(crate::exec::scalar_unit::UnitClause::of(body.clone(), compiled))
+				let compiled = planner.scalar_metadata(body.clone()).await?;
+				Ok(Clause::of(body.clone(), compiled))
 			}
-			Some(reason) => Ok(UncompilableClause::of(reason)),
+			Some(reason) => Ok(Clause::uncompilable(reason)),
 		},
-		Err(reason) => Ok(UncompilableClause::of(reason.to_string())),
+		Err(reason) => Ok(Clause::uncompilable(reason.to_string())),
 	}
-}
-
-/// A field's `VALUE` or `ASSERT` clause as the engine evaluates it,
-/// compiled through `planner`.
-///
-/// `body` is the logical form the definition carries, lowered once and kept
-/// for as long as the catalog holds the definition. Building one here instead
-/// would render the stored expression back to text and re-parse it for every
-/// record the clause is applied to.
-///
-/// The clause is compiled, or carried as an [`UncompilableClause`], on the
-/// same terms as the `DEFAULT`: a definition the engine cannot
-/// compile must still be enforceable, or a table would become unwritable for
-/// having declared one. Compiling is the decision to run, so the caller
-/// reaches this only where the clause is about to be evaluated.
-pub(crate) async fn field_body_physical(
-	_expr: &Expr,
-	body: &LogicalBody,
-	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	clause_to_physical(body.logical(), planner).await
-}
-
-/// A field's `DEFAULT` clause as the engine evaluates it, compiled
-/// through `planner`; `None` for a field that declares none.
-///
-/// The clause is compiled from the definition's logical body — the stored
-/// text, lowered once for the life of the definition — or carried as an
-/// [`UncompilableClause`]; see [`clause_to_physical`].
-///
-/// # The frame it is evaluated in
-///
-/// Record-id generation is the caller, and it evaluates
-/// the `id` field's clause in this frame:
-///
-/// - **Authority**: the caller's, narrowed to the field's `AUTH LIMIT` — ADR 0001's
-///   definer's-rights clamp, so a lower-privileged definer's `DEFAULT` cannot run with the caller's
-///   broader privileges. [`field_default_frame`] applies it.
-/// - **Permissions**: enforced exactly as the statement enforces them. The site overrides nothing,
-///   so a checked caller stays checked and every read the clause makes is checked as the caller's
-///   own.
-/// - **Document**: the record as it stands before the data clause is merged — `self.current` —
-///   except under `INSERT`, where the row payload is bound instead, because the id has to be known
-///   before the payload is merged. Nothing is bound as `$value`, `$before`, `$after` or `$input`.
-/// - **Control flow**: the caller catches a `RETURN`, so a clause written as a block yields the
-///   value it returns rather than propagating it out of the statement.
-/// - **Bindings**: the session's own values and the database's parameters; none of the caller's
-///   `LET`s, `FOR` variables, query parameters or session `LET`s.
-/// - **Writes**: not refused.
-///
-/// Record-id generation reads the `DEFAULT` spelling alone
-/// — `DEFAULT ALWAYS` is rejected on the `id` field — and which spelling a
-/// field declares is [`FieldDefinition::default`]'s to say; this compiles
-/// whichever one it holds.
-pub(crate) async fn field_default_physical(
-	field: &FieldDefinition,
-	planner: &Planner<'_>,
-) -> Result<Option<Arc<dyn PhysicalExpr>>, Error> {
-	// Both halves name the same clause, so they are `Some` together; a field
-	// with no `DEFAULT` has neither.
-	let (Some(_), Some(logical)) = (field.default.expression(), field.default_logical()) else {
-		return Ok(None);
-	};
-	clause_to_physical(logical, planner).await.map(Some)
 }
 
 /// The frame a field's clauses — `DEFAULT`, `VALUE`, `ASSERT` and
@@ -584,93 +403,6 @@ pub(crate) fn field_default_frame(
 	Ok(match narrowing_auth_limit(&field.auth_limit)? {
 		Some(limit) => frame.with_limited_auth(&limit),
 		None => frame,
-	})
-}
-
-/// An event's bodies as the engine evaluates them, compiled through
-/// `planner`.
-///
-/// The `WHEN` is compiled when the event is resolved; the `THEN` clauses are
-/// compiled by [`PhysicalEvent::then`], which a caller reaches only once the
-/// `WHEN` has fired. Compiling a clause is the decision to run it (see
-/// [`clause_to_physical`]) and an event's clauses are compiled per record, so
-/// compiling a `THEN` alongside the `WHEN` would fail the statement over a
-/// body the `WHEN` never admits — one the authority never looks at.
-pub(crate) struct PhysicalEvent<'a, 'p> {
-	/// The `WHEN` clause, whose truthiness decides whether the event fires
-	///.
-	pub(crate) when: Arc<dyn PhysicalExpr>,
-	/// The definition the clauses come from, held so the `THEN` clauses can be
-	/// compiled from it once the `WHEN` has fired.
-	event: &'a EventDefinition,
-	/// The planner that compiled the `WHEN`, so every clause of one event is
-	/// compiled the same way.
-	planner: &'a Planner<'p>,
-}
-
-impl PhysicalEvent<'_, '_> {
-	/// The event's `THEN` clauses, in the order they run
-	///, compiled here.
-	///
-	/// One call compiles the whole list, so a firing event compiles each of
-	/// its bodies once however many it has, and an event that does not fire
-	/// compiles none of them. Call it only for an event whose `WHEN` was
-	/// truthy.
-	///
-	/// The gate the compilations are held behind is the event's, not each
-	/// body's: every body of a firing event is compiled before the first one
-	/// runs, so a decline in a later body is raised ahead of an earlier body's
-	/// own failure. Both fail the statement, which is the only outcome either
-	/// has.
-	pub(crate) async fn then(&self) -> Result<Vec<Arc<dyn PhysicalExpr>>, Error> {
-		let mut then = Vec::with_capacity(self.event.then.len());
-		for logical in self.event.then_logical() {
-			then.push(clause_to_physical(logical, self.planner).await?);
-		}
-		Ok(then)
-	}
-}
-
-/// An event's `WHEN` as the engine evaluates it, compiled through
-/// `planner`, and the route from it to the event's `THEN` clauses
-/// ([`PhysicalEvent::then`]), which compiles those only once the `WHEN` has
-/// fired.
-///
-/// Each clause is compiled from the definition's logical body — the stored
-/// text, lowered once for the life of the definition — or carried as a
-/// [`UncompilableClause`]; see [`clause_to_physical`].
-///
-/// # The frame they are evaluated in
-///
-/// The event stage is the caller, and it evaluates both clauses in this
-/// frame:
-///
-/// - **Authority**: the writer's, narrowed to the event's own `AUTH LIMIT` — ADR 0001's
-///   definer's-rights clamp. [`event_frame`] applies it.
-/// - **Permissions**: not enforced, for the whole loop. Every read the bodies make is unchecked, so
-///   an event body sees the record and everything it reaches whatever the writer may select.
-/// - **Parameters**: `$before` the pre-image, `$after` the post-image, `$event` the action as
-///   `"CREATE"` / `"UPDATE"` / `"DELETE"`, `$value` the image the event is about — the pre-image on
-///   a delete and the post-image otherwise — and `$input` the statement's evaluated data clause,
-///   `NONE` where it has none.
-/// - **Document**: the image `$value` names, so a bare field path in a body reads the record the
-///   event is about.
-/// - **Control flow**: the caller catches a `RETURN` in each clause.
-/// - **Writes**: allowed. A `THEN` is a write body, and the frame is the one frame here that
-///   disables permissions without also refusing writes.
-///
-/// What the caller decides, not this: that an import and an unmodified record
-/// run no event at all, and that an `ASYNC` event is
-/// queued rather than run.
-pub(crate) async fn event_physical<'a, 'p>(
-	event: &'a EventDefinition,
-	planner: &'a Planner<'p>,
-) -> Result<PhysicalEvent<'a, 'p>, Error> {
-	let when = clause_to_physical(event.when_logical(), planner).await?;
-	Ok(PhysicalEvent {
-		when,
-		event,
-		planner,
 	})
 }
 
@@ -737,356 +469,6 @@ pub(crate) fn event_frame(
 	Ok((frame, subject))
 }
 
-/// A materialized view's clauses as the engine evaluates them,
-/// compiled through `planner`.
-#[derive(Debug)]
-pub(crate) struct PhysicalView {
-	/// The view's condition, which decides whether the written record belongs
-	/// in the view. `None` for a view with no condition,
-	/// where a record belongs in the view unless the write deleted it.
-	pub(crate) condition: Option<Arc<dyn PhysicalExpr>>,
-	/// The view's field list, which projects the row stored on the view table
-	///.
-	pub(crate) projection: Arc<dyn PhysicalExpr>,
-}
-
-/// A stored `SELECT` field list, compiled: the object it projects from the
-/// record the caller binds as the document.
-///
-/// It is compiled as a write's `RETURN <fields>` is ([`Planner::write_output`])
-/// and applied as that clause and a `SELECT`'s projection apply a field — `*`
-/// seeding the object with the record, each field set in the order written
-/// ([`evaluate_and_set_field`](crate::exec::operators::evaluate_and_set_field)).
-/// It binds nothing: the frame, the authority and whether reads are checked
-/// are the caller's, which evaluates it in the frame it evaluates the clause
-/// beside it in.
-#[derive(Debug)]
-pub(crate) struct CompiledProjection {
-	projection: crate::exec::operators::write::clauses::WriteProjection,
-}
-
-impl PhysicalExpr for CompiledProjection {
-	fn name(&self) -> &'static str {
-		"CompiledProjection"
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// A field list belongs to a view of a table, so it is only ever
-		// evaluated with a database selected.
-		ContextLevel::Database
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
-		use crate::exec::operators::write::clauses::WriteProjection;
-		Box::pin(async move {
-			let row = ctx.document_root.or(ctx.current_value).cloned().unwrap_or(Value::None);
-			match &self.projection {
-				WriteProjection::Value(expr) => expr.evaluate(ctx).await,
-				// `*` and nothing else is the record itself.
-				WriteProjection::Fields {
-					fields,
-					include_all: true,
-				} if fields.is_empty() => Ok(row),
-				WriteProjection::Fields {
-					fields,
-					include_all,
-				} => {
-					let mut object = crate::val::Object::default();
-					if *include_all && let Value::Object(record) = &row {
-						object = record.clone();
-					}
-					for field in fields {
-						crate::exec::operators::evaluate_and_set_field(
-							&mut object,
-							field,
-							ctx.clone(),
-						)
-						.await?;
-					}
-					Ok(Value::Object(object))
-				}
-			}
-		})
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		use crate::exec::operators::write::clauses::WriteProjection;
-		match &self.projection {
-			WriteProjection::Value(expr) => expr.access_mode(),
-			WriteProjection::Fields {
-				fields,
-				..
-			} => crate::exec::CombineAccessModes::combine_all(
-				fields.iter().map(|field| field.expr.access_mode()),
-			),
-		}
-	}
-}
-
-impl ToSql for CompiledProjection {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		use crate::exec::operators::write::clauses::WriteProjection;
-		match &self.projection {
-			WriteProjection::Value(expr) => {
-				f.push_str("VALUE ");
-				expr.fmt_sql(f, fmt);
-			}
-			WriteProjection::Fields {
-				fields,
-				include_all,
-			} => {
-				let mut first = true;
-				if *include_all {
-					f.push('*');
-					first = false;
-				}
-				for field in fields {
-					if !first {
-						f.push_str(", ");
-					}
-					first = false;
-					field.expr.fmt_sql(f, fmt);
-				}
-			}
-		}
-	}
-}
-
-/// A stored `SELECT` field list as the engine evaluates it,
-/// compiled through `planner`: a [`CompiledProjection`], or an
-/// [`UncompilableClause`] naming why where the list does not compile.
-async fn projection_physical(fields: &Fields, planner: &Planner<'_>) -> Arc<dyn PhysicalExpr> {
-	let output = crate::expr::output::Output::Fields(fields.clone());
-	match planner.write_output(Some(&output)).await {
-		Ok(Some(projection)) => Arc::new(CompiledProjection {
-			projection,
-		}),
-		Ok(None) => UncompilableClause::of("the field list has no projection".to_owned()),
-		Err(e) => UncompilableClause::of(e.to_string()),
-	}
-}
-
-/// A materialized view's condition and field list as the engine
-/// evaluates them, compiled through `planner`; `None` for a view that is
-/// maintained some other way.
-///
-/// The condition is compiled from the definition's logical body — the stored
-/// text, lowered once for the life of the definition — or carried as a
-/// [`UncompilableClause`]; see [`clause_to_physical`]. The field list is
-/// compiled as a [`CompiledProjection`]; see [`projection_physical`].
-///
-/// Only [`ViewDefinition::Materialized`] has a route. An aggregated view's
-/// maintenance runs a statement over the group rather than evaluating the
-/// clauses against the written record, and a `Select` view is not maintained
-/// at all.
-///
-/// # The frame they are evaluated in
-///
-/// The view stage is the caller, and it evaluates both clauses in this
-/// frame:
-///
-/// - **Authority**: the *writer's*, unnarrowed. A view definition records no `AUTH LIMIT`, and the
-///   caller applies none, so ADR 0001's definer's rights do not reach a view body: it runs as
-///   whoever wrote the record. This is the one clause here for which that is true.
-/// - **Permissions**: not enforced, for every view of the table.
-/// - **Document**: the post-image, `self.current`, for both clauses — including on a delete, where
-///   the caller has already cleared it, so a condition judges the cleared image and the view row is
-///   removed. With no condition the caller decides by the action alone. No parameters are bound.
-/// - **Control flow**: the caller catches a `RETURN` in the condition.
-/// - **Writes**: not refused.
-///
-/// What the caller decides, not this: that an import and an unmodified record
-/// maintain no view, and what is done with the projected
-/// row — stored on the view table under the record's own key, or deleted from
-/// it.
-pub(crate) async fn materialized_view_physical(
-	view: &ViewDefinition,
-	planner: &Planner<'_>,
-) -> Result<Option<PhysicalView>, Error> {
-	let ViewDefinition::Materialized {
-		fields,
-		condition,
-		..
-	} = view
-	else {
-		return Ok(None);
-	};
-	// Both halves name the same clause, so they are `Some` together.
-	let condition = match (condition, view.materialized_condition_logical()) {
-		(Some(_), Some(logical)) => Some(clause_to_physical(logical, planner).await?),
-		_ => None,
-	};
-	Ok(Some(PhysicalView {
-		condition,
-		projection: projection_physical(fields, planner).await,
-	}))
-}
-
-/// A view's clauses as the engine evaluates them, whichever kind of
-/// view it is.
-///
-/// The one route from a stored [`ViewDefinition`] to the clauses that maintain
-/// it, so the write path asks what a view *is* in one place rather than
-/// matching the definition itself at each use.
-#[derive(Debug)]
-pub(crate) enum PhysicalViewKind {
-	/// A view nothing maintains: it was classified as unmaintained, and a
-	/// write to its source table does nothing for it.
-	Unmaintained,
-	/// A view holding one row per source record.
-	Materialized(PhysicalView),
-	/// A view holding one row per group.
-	Aggregated(PhysicalAggregatedView),
-}
-
-/// Compile the clauses that maintain `view`, whichever kind it is.
-pub(crate) async fn view_physical(
-	view: &ViewDefinition,
-	planner: &Planner<'_>,
-) -> Result<PhysicalViewKind, Error> {
-	if let Some(materialized) = materialized_view_physical(view, planner).await? {
-		return Ok(PhysicalViewKind::Materialized(materialized));
-	}
-	if let Some(aggregated) = aggregated_view_physical(view, planner).await? {
-		return Ok(PhysicalViewKind::Aggregated(aggregated));
-	}
-	Ok(PhysicalViewKind::Unmaintained)
-}
-
-/// An aggregated materialized view's clauses as the engine evaluates
-/// them, compiled through `planner`; `None` for a view of another kind.
-///
-/// Where [`materialized_view_physical`] projects a row per record, this one
-/// maintains a row per *group*, and its clauses are the four the maintenance
-/// reads: the view's condition, the group key, the arguments the stored
-/// aggregates accumulate, and the field list that renders a group's stats into
-/// the row.
-///
-/// The definition stores no logical form of any of them — an
-/// [`AggregationAnalysis`] holds bare expressions — so each is lowered on
-/// demand and carried as an [`UncompilableClause`] when it has none, exactly as
-/// the materialized condition is.
-///
-/// The frame is the same for all four, and is [`view_frame`]'s.
-pub(crate) async fn aggregated_view_physical(
-	view: &ViewDefinition,
-	planner: &Planner<'_>,
-) -> Result<Option<PhysicalAggregatedView>, Error> {
-	let ViewDefinition::Aggregated {
-		analysis,
-		condition,
-		..
-	} = view
-	else {
-		return Ok(None);
-	};
-	let condition = match condition {
-		Some(expr) => Some(view_expr_physical(expr, planner).await?),
-		None => None,
-	};
-	let mut group = Vec::with_capacity(analysis.group_expressions.len());
-	for expr in &analysis.group_expressions {
-		group.push(view_expr_physical(expr, planner).await?);
-	}
-	let mut arguments = Vec::with_capacity(analysis.aggregate_arguments.len());
-	for expr in &analysis.aggregate_arguments {
-		arguments.push(view_expr_physical(expr, planner).await?);
-	}
-	let AggregateFields::Fields(items) = &analysis.fields else {
-		return Err(Error::Exec(ExecError::InvalidStatement(
-			"a VALUE selector is not supported on a view".to_string(),
-		)));
-	};
-	let mut fields = Vec::with_capacity(items.len());
-	for (name, expr) in items {
-		fields.push((
-			WritePlace::compile(planner, name.clone()).await?,
-			view_expr_physical(expr, planner).await?,
-		));
-	}
-	Ok(Some(PhysicalAggregatedView {
-		condition,
-		group,
-		arguments,
-		fields,
-	}))
-}
-
-/// One clause of a view, compiled or carried; see [`clause_to_physical`].
-async fn view_expr_physical(
-	expr: &Expr,
-	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = crate::expr::logical::lower_expr(expr.clone());
-	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
-	clause_to_physical(logical, planner).await
-}
-
-/// An aggregated materialized view's clauses as the engine evaluates
-/// them. See [`aggregated_view_physical`].
-pub(crate) struct PhysicalAggregatedView {
-	/// The view's condition, which decides whether a record belongs to the
-	/// view at all — evaluated against the before-image and the post-image
-	/// separately, because a record can enter or leave the view
-	///. `None` for a view with no condition, where every
-	/// record belongs.
-	pub(crate) condition: Option<Arc<dyn PhysicalExpr>>,
-	/// The `GROUP BY` targets, whose values are the view row's record id
-	///.
-	pub(crate) group: Vec<Arc<dyn PhysicalExpr>>,
-	/// The arguments the stored aggregates accumulate, one per entry of the
-	/// analysis.
-	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
-	/// The field list, evaluated against the document a group's stats make
-	/// rather than against the record, and written to the places it names
-	///.
-	pub(crate) fields: Vec<(WritePlace, Arc<dyn PhysicalExpr>)>,
-}
-
-impl std::fmt::Debug for PhysicalAggregatedView {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("PhysicalAggregatedView")
-			.field("condition", &self.condition.is_some())
-			.field("group", &self.group.len())
-			.field("arguments", &self.arguments.len())
-			.field("fields", &self.fields.len())
-			.finish()
-	}
-}
-
-/// A `REFERENCE ON DELETE THEN` expression as the engine evaluates
-/// it, compiled through `planner`.
-///
-/// Unlike every sibling here, the definition stores no logical form of this
-/// clause: a `Reference` holds the expression alone. It is lowered on demand,
-/// and a clause that has no logical form — or holds a write no operator
-/// compiles — is carried as an [`UncompilableClause`]; see
-/// [`clause_to_physical`].
-///
-/// # The frame it is evaluated in
-///
-/// - **Authority**: the writer's. A reference definition records no `AUTH LIMIT`, so there is
-///   nothing to narrow to, exactly as for a view body.
-/// - **Permissions**: enforcement off and writes allowed — the strategy repairs the referencing
-///   record whatever the actor may do to it. That is `with_perms(false)`, not the permission frame,
-///   which would refuse the write the strategy exists to make.
-/// - **Parameters**: `$reference` is the record being deleted, bound by the caller.
-/// - **Document**: the referencing record's *id*, not its content. The strategy is told which
-///   record to repair and reads it itself.
-/// - **Control flow**: the caller catches a `RETURN`.
-pub(crate) async fn reference_custom_physical(
-	expr: &Expr,
-	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = crate::expr::logical::lower_expr(expr.clone());
-	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
-	clause_to_physical(logical, planner).await
-}
-
 /// An index's stored expressions as the engine evaluates them: the
 /// columns whose values the index holds, and a `COUNT` index's `WHERE` guard.
 ///
@@ -1119,10 +501,10 @@ pub(crate) struct PhysicalIndexEntry {
 	/// One expression per column of `IndexDefinition::cols`, in the order the
 	/// definition holds them, because the values they produce are the index
 	/// key and the key's order is the definition's.
-	cols: Vec<Arc<dyn PhysicalExpr>>,
+	cols: Vec<Clause>,
 	/// A `COUNT` index's `WHERE` guard; `None` for every other index kind and
 	/// for an unguarded count index.
-	guard: Option<Arc<dyn PhysicalExpr>>,
+	guard: Option<Clause>,
 }
 
 impl std::fmt::Debug for PhysicalIndexEntry {
@@ -1138,7 +520,7 @@ impl std::fmt::Debug for PhysicalIndexEntry {
 /// [`PhysicalIndexEntry`].
 ///
 /// An expression the lowering has no form for — or one holding a write no
-/// operator compiles — is carried as an [`UncompilableClause`], as every other
+/// operator compiles — is carried as a [`Clause::Uncompilable`], as every other
 /// stored clause is; see [`clause_to_physical`].
 ///
 /// Compile only a definition whose entries this caller would evaluate: an
@@ -1172,16 +554,13 @@ pub(crate) async fn index_entry_physical(
 async fn index_column_physical(
 	col: &crate::expr::Idiom,
 	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
+) -> Result<Clause, Error> {
 	index_expr_physical(&Expr::Idiom(col.clone()), planner).await
 }
 
 /// One stored expression of an index, compiled or carried; see
 /// [`clause_to_physical`].
-async fn index_expr_physical(
-	expr: &Expr,
-	planner: &Planner<'_>,
-) -> Result<Arc<dyn PhysicalExpr>, Error> {
+async fn index_expr_physical(expr: &Expr, planner: &Planner<'_>) -> Result<Clause, Error> {
 	let logical = crate::expr::logical::lower_expr(expr.clone());
 	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
 	clause_to_physical(logical, planner).await
@@ -1249,7 +628,7 @@ fn index_entry_eval<'a>(exec: &'a ExecutionContext, image: &Value) -> EvalContex
 	if let Value::Object(obj) = image
 		&& let Some(Value::RecordId(rid)) = obj.get("id")
 	{
-		base.computing_record = Some(Arc::new(crate::exec::physical_expr::ComputingRecord {
+		base.computing_record = Some(Arc::new(crate::exec::eval_context::ComputingRecord {
 			rid: rid.clone(),
 			stored: Some(image.clone()),
 		}));
@@ -1269,28 +648,6 @@ fn index_entry_eval<'a>(exec: &'a ExecutionContext, image: &Value) -> EvalContex
 /// which keeps the stricter signal.
 pub(crate) fn view_frame(ctx: &ExecutionContext) -> ExecutionContext {
 	ctx.with_perms_suppressed(true)
-}
-
-/// [`table_select_permission_physical`] for a scan that resolves its table
-/// when it runs: a txn-less planner is built from `ctx` — no plan-time index
-/// resolution, no cycle guard interaction.
-///
-/// Cycle safety note: this path is intentionally *txn-less*. A planner
-/// without a transaction resolves no table context, so a self-referential
-/// permission compiled here (e.g. a cache-miss runtime build for a permission
-/// that contains `SELECT FROM same_table`) cannot recurse into table-context
-/// resolution. Do **not** switch this helper to [`Planner::with_txn`] without
-/// re-deriving cycle safety — in particular, runtime callers don't share a
-/// parent [`CycleGuard`] the way plan-time nested planners do, so the inner
-/// subtree would either need its own guard or a different cycle-break
-/// mechanism.
-#[cfg(test)]
-pub(crate) async fn table_select_permission_physical_runtime(
-	table_def: Option<&TableDefinition>,
-	ctx: &ExecutionContext,
-) -> Result<PhysicalPermission, Error> {
-	table_select_permission_physical(table_def, &Planner::new(ctx.ctx(), ctx.function_registry()))
-		.await
 }
 
 /// Whether `action` by `auth` is permission-checked, by role and actor level
@@ -1436,23 +793,6 @@ pub(crate) async fn check_permission_for_value(
 	check_guard_for_value(permission, value, value_param, ctx, GuardKind::Read).await
 }
 
-/// Check a `PERMISSIONS FOR create`, `update` or `delete` guard against a
-/// specific record value.
-///
-/// As [`check_permission_for_value`], but the guard may write: it is reached
-/// from a statement that is already writing, so a guard that records the
-/// attempt performs its write rather than being refused. That is the line
-/// between [`crate::dbs::Options::new_for_permission_predicate`] and
-/// `Options::new_for_mutable_permission_predicate`.
-pub(crate) async fn check_write_permission_for_value(
-	permission: &PhysicalPermission,
-	value: &Value,
-	value_param: Option<&Value>,
-	ctx: &ExecutionContext,
-) -> anyhow::Result<bool> {
-	check_guard_for_value(permission, value, value_param, ctx, GuardKind::Write).await
-}
-
 /// The body of both, with the frame the guard is judged in named by `guard`.
 async fn check_guard_for_value(
 	permission: &PhysicalPermission,
@@ -1464,7 +804,7 @@ async fn check_guard_for_value(
 	match permission {
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
-		PhysicalPermission::Conditional(physical_expr) => {
+		PhysicalPermission::Conditional(clause) => {
 			// Inside a permission predicate evaluation (propagated via
 			// skip_fetch_perms), allow unconditionally so cyclic links
 			// don't recurse forever.
@@ -1514,9 +854,8 @@ async fn check_guard_for_value(
 			// reporting as cancelled rather than as an internal failure.
 			//
 			// A predicate that signals control flow has nowhere to send it —
-			// there is no surrounding block — so those stay an error, as
-			// before.
-			let result = physical_expr.evaluate(eval_ctx).await.map_err(|ctrl| match ctrl {
+			// there is no surrounding block — so those stay an error.
+			let result = clause.evaluate(eval_ctx).await.map_err(|ctrl| match ctrl {
 				ControlFlow::Err(e) => e,
 				other => anyhow::Error::new(EngineError::Internal(format!(
 					"unexpected control flow in a permission predicate: {other}"
@@ -1528,238 +867,12 @@ async fn check_guard_for_value(
 }
 
 #[cfg(test)]
-/// The engine's SELECT-permission gate for ANN truthy-document
-/// filters.
-///
-/// Pairs a permission already resolved for the surrounding scan with the
-/// context it is evaluated against, so the ANN search gates each candidate on
-/// exactly the permission that filters the fetched batch after the search and
-/// the two checks cannot disagree.
-pub(crate) struct PhysicalTableSelect {
-	permission: PhysicalPermission,
-	ctx: ExecutionContext,
-}
-
-#[cfg(test)]
-impl PhysicalTableSelect {
-	#[cfg(test)]
-	pub(crate) fn new(permission: PhysicalPermission, ctx: ExecutionContext) -> Self {
-		Self {
-			permission,
-			ctx,
-		}
-	}
-}
-
-#[cfg(test)]
-impl TableSelectGate for PhysicalTableSelect {
-	fn allows_every_doc(&self) -> Option<bool> {
-		match self.permission {
-			PhysicalPermission::Allow => Some(true),
-			PhysicalPermission::Deny => Some(false),
-			PhysicalPermission::Conditional(_) => None,
-		}
-	}
-
-	fn allows_doc<'a>(
-		&'a self,
-		_rid: &'a Arc<RecordId>,
-		record: &'a Arc<Record>,
-	) -> BoxGateFut<'a> {
-		Box::pin(async move {
-			check_permission_for_value(&self.permission, &record.data, None, &self.ctx).await
-		})
-	}
-}
-
-/// A stored `PERMISSIONS` clause, compiled once for the definition it was read
-/// from rather than once per evaluation.
-///
-/// A clause of this kind is judged per *evaluation*, not per statement: a
-/// `DEFINE PARAM` guard against the row the parameter is read on, a function's
-/// against the frame of the call. Compiling it there puts plan-time work
-/// inside a row loop, and a parameter or a call in a projection is evaluated
-/// once per row.
-///
-/// Only the compilation is kept. The definition is still read afresh, and the
-/// compiled predicate is still evaluated, on every evaluation — what the
-/// predicate answers belongs to that evaluation, so a guard that admits one
-/// row still refuses the next.
-///
-/// Reuse is keyed on the definition and the depth. The transaction cache hands
-/// out one `Arc` per definition, so an evaluation that gets this very
-/// allocation back has the clause the compilation came from without comparing
-/// it, and a `DEFINE` that replaces the definition matches nothing. The depth
-/// is part of the key because a guard is compiled one re-entry deeper than the
-/// expression reading it, and compilation is bounded by that depth.
-///
-/// What the key pins is the clause, not everything compiling it resolved: a
-/// subquery inside a predicate is bound against the catalog the first
-/// evaluation saw, and a later evaluation of the same node reads that binding.
-/// It is the rule the rest of the plan already follows — a statement binds
-/// once, before anything it goes on to define — and it is why the guard is
-/// compiled for the definition rather than for the statement.
-///
-/// The caller's authority is *not* in the key, and the reuse rests on it being
-/// fixed: compiling a scalar consults the principal — a read the caller
-/// bypasses is planned without the permission the check would apply
-/// ([`Planner::should_check_perms_for_view`]) — so a guard compiled for one
-/// principal states another's plan wrongly. What holds it is that a physical
-/// node belongs to one plan, one statement and one principal, and the authority
-/// at the node is a function of that principal and the definition, both of which
-/// the key already pins: an `AUTH LIMIT` derives a fresh `Arc` per call, but
-/// from the same caller and the same definition, so its value does not move.
-/// A cache that let two principals reach one compiled node would break that,
-/// and would have to key this memo on the principal as well.
-///
-/// The swap cell is made when the first guard is compiled. Most nodes that
-/// carry one never compile a guard, and a node is dropped with every plan
-/// holding it, so a cell made up front would be paid for — its drop waits out
-/// every thread's readers — by plans that never use it.
-pub(crate) struct CompiledGuard<D> {
-	memo: std::sync::OnceLock<ArcSwapOption<Memo<D>>>,
-}
-
-/// Judge `compiled`, a guard compiled from a permission clause, for the
-/// evaluation `ctx`: in the permission frame, one re-entry deeper than the
-/// expression reading it, with enforcement off so the guard does not recurse
-/// into its own subject, and writes refused, since the guard is evaluated on a
-/// read of the definition it protects. The guard is definer code, so the frame
-/// is privileged: it holds none of the caller's bindings, neither its
-/// context's nor its block's. A guard that raises anything but an error
-/// denies; an error keeps its type.
-pub(crate) async fn judge_compiled_guard(
-	compiled: &Arc<dyn PhysicalExpr>,
-	ctx: &EvalContext<'_>,
-	denied: impl Fn() -> ExecError,
-) -> FlowResult<()> {
-	let guarded_ctx = ctx
-		.exec_ctx
-		.clone()
-		.privileged_frame()
-		.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
-	let mut frame = ctx.clone();
-	frame.exec_ctx = &guarded_ctx;
-	frame.local_params = None;
-	frame.skip_fetch_perms = true;
-	match compiled.evaluate(frame).await {
-		Ok(result) if result.is_truthy() => Ok(()),
-		Ok(_) => Err(denied().into()),
-		Err(ControlFlow::Err(e)) => Err(ControlFlow::Err(e)),
-		Err(_) => Err(denied().into()),
-	}
-}
-
-/// A compiled guard and the definition and depth it was compiled for.
-struct Memo<D> {
-	definition: Arc<D>,
-	plan_depth: u32,
-	compiled: Arc<dyn PhysicalExpr>,
-}
-
-/// A cloned node carries the compilation the original made. Reuse is keyed on
-/// the definition, which every evaluation checks, so the copy is used only
-/// where the original's would have been.
-impl<D> Clone for CompiledGuard<D> {
-	fn clone(&self) -> Self {
-		let memo = std::sync::OnceLock::new();
-		if let Some(kept) = self.memo.get() {
-			let _ = memo.set(ArcSwapOption::new(kept.load_full()));
-		}
-		Self {
-			memo,
-		}
-	}
-}
-
-impl<D> Default for CompiledGuard<D> {
-	fn default() -> Self {
-		Self {
-			memo: std::sync::OnceLock::new(),
-		}
-	}
-}
-
-/// The memo is an evaluation-time cache and says nothing about the node, so it
-/// is not printed.
-impl<D> std::fmt::Debug for CompiledGuard<D> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.debug_struct("CompiledGuard").finish_non_exhaustive()
-	}
-}
-
-impl<D> CompiledGuard<D> {
-	/// Judge `permission`, the clause `definition` stores, for this
-	/// evaluation, and answer whether it admits the caller.
-	///
-	/// The guard is evaluated in the permission frame — reads inside it are
-	/// not themselves permission-checked, which is what stops a predicate
-	/// following a record link from recursing into itself — one re-entry
-	/// deeper than the expression reading it. `denied` builds the error a
-	/// refusal raises; a guard that fails to compile denies, and so does one
-	/// that raises anything but an error, while an error keeps its type so a
-	/// write conflict raised inside a predicate stays retryable.
-	pub(crate) async fn check(
-		&self,
-		permission: LogicalPermissionRef<'_>,
-		definition: &Arc<D>,
-		ctx: &EvalContext<'_>,
-		txn: Option<Arc<Transaction>>,
-		denied: impl Fn() -> ExecError,
-	) -> FlowResult<()> {
-		let guard = match permission {
-			LogicalPermissionRef::Full => return Ok(()),
-			LogicalPermissionRef::None => return Err(denied().into()),
-			LogicalPermissionRef::Specific(guard) => guard,
-		};
-		let compiled = match self.cached(definition, ctx.plan_depth) {
-			Some(compiled) => compiled,
-			None => {
-				// The guard is judged in a privileged frame, so it is compiled
-				// against the session's own values alone, never a caller's
-				// bindings.
-				let frame = crate::ctx::Context::new_isolated(ctx.exec_ctx.ctx()).freeze();
-				let Ok(compiled) = compile_expr(
-					guard.clone(),
-					&frame,
-					ctx.exec_ctx.function_registry(),
-					txn,
-					Some(Arc::clone(&ctx.exec_ctx.root().auth)),
-					ctx.plan_depth + 1,
-				)
-				.await
-				else {
-					return Err(denied().into());
-				};
-				self.memo.get_or_init(ArcSwapOption::empty).store(Some(Arc::new(Memo {
-					definition: Arc::clone(definition),
-					plan_depth: ctx.plan_depth,
-					compiled: Arc::clone(&compiled),
-				})));
-				compiled
-			}
-		};
-		judge_compiled_guard(&compiled, ctx, denied).await
-	}
-
-	/// The kept compilation, if it was made for this definition at this depth.
-	fn cached(&self, definition: &Arc<D>, plan_depth: u32) -> Option<Arc<dyn PhysicalExpr>> {
-		let memo = self.memo.get()?.load();
-		let memo = memo.as_ref()?;
-		(Arc::ptr_eq(&memo.definition, definition) && memo.plan_depth == plan_depth)
-			.then(|| Arc::clone(&memo.compiled))
-	}
-}
-
-#[cfg(test)]
 mod tests {
 	use super::*;
 	use crate::dbs::Session;
 	use crate::exec::operators::test_util::{
-		TestDb, field_idiom, parse_expr, parse_sql_expr, physical_expr, root_ctx,
-		root_ctx_with_options, val,
+		TestDb, field_idiom, parse_sql_expr, root_ctx, root_ctx_with_options,
 	};
-	use crate::expr::Groups;
 	use crate::iam::{Level, Role};
 	use crate::kvs::TransactionType;
 
@@ -1817,132 +930,6 @@ mod tests {
 		// A table with no definition denies.
 		let absent = table_select_permission_physical(None, &planner).await.unwrap();
 		assert!(matches!(absent, PhysicalPermission::Deny));
-	}
-
-	/// The guard is compiled from the definition's logical body, compiled
-	/// once for the life of the definition, and not lowered again from the
-	/// expression form: a body that disagrees with the expression form is
-	/// what the predicate evaluates.
-	#[tokio::test]
-	async fn the_guard_is_compiled_from_the_definitions_logical_body() {
-		let ctx = root_ctx();
-		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
-		let def = table_with_disagreeing_halves(
-			Permission::Specific(parse_sql_expr("false")),
-			&Permission::Specific(parse_sql_expr("true")),
-		);
-		let permission = table_select_permission_physical(Some(&def), &planner).await.unwrap();
-		let allowed =
-			check_permission_for_value(&permission, &val("{ }").await, None, &ctx).await.unwrap();
-		assert!(allowed, "the logical body (`true`) decides, not the expression form (`false`)");
-	}
-
-	#[tokio::test]
-	async fn runtime_conversion_matches_the_planner_conversion() {
-		// A table guard is evaluated with the table's database selected: a
-		// guard reading a field resolves the table's field definitions there.
-		let db = TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let def = table_with_select(Permission::Specific(parse_sql_expr("age > 18")));
-
-		let resolved = table_select_permission_physical_runtime(Some(&def), &ctx).await.unwrap();
-		let PhysicalPermission::Conditional(expr) = resolved else {
-			panic!("a Specific permission resolves to Conditional");
-		};
-
-		// The txn-less runtime path must still produce an evaluable predicate,
-		// not a deferred/unsupported placeholder.
-		let allowed = check_permission_for_value(
-			&PhysicalPermission::Conditional(expr),
-			&val("{ age: 21 }").await,
-			None,
-			&ctx,
-		)
-		.await
-		.unwrap();
-		assert!(allowed);
-	}
-
-	/// The `SELECT` guard of `table` in `db`, as a scan resolving the table at
-	/// runtime compiles it.
-	async fn table_guard(ctx: &ExecutionContext, table: &str) -> PhysicalPermission {
-		let def = ctx
-			.database()
-			.expect("a database context")
-			.get_table_def(&TableName::from(table), None)
-			.await
-			.expect("catalog read")
-			.expect("the table is defined");
-		table_select_permission_physical_runtime(Some(&def), ctx).await.expect("compiles")
-	}
-
-	/// A guard naming a computed field is judged against the value the field
-	/// computes to, derived after the computed field it reads in turn, not
-	/// against the record as stored, where it reads `NONE`.
-	#[tokio::test]
-	async fn a_table_guard_reads_the_computed_fields_it_names() {
-		let db = TestDb::new(
-			"DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE visible = true;
-			 DEFINE FIELD visible ON doc COMPUTED !withheld;
-			 DEFINE FIELD withheld ON doc COMPUTED status != 'public';",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let guard = table_guard(&ctx, "doc").await;
-		let public = val("{ id: doc:1, status: 'public' }").await;
-		let secret = val("{ id: doc:2, status: 'secret' }").await;
-		assert!(check_permission_for_value(&guard, &public, None, &ctx).await.unwrap());
-		assert!(!check_permission_for_value(&guard, &secret, None, &ctx).await.unwrap());
-		// A stored value under the computed name is not what the guard reads.
-		let forged = val("{ id: doc:3, status: 'secret', visible: true }").await;
-		assert!(!check_permission_for_value(&guard, &forged, None, &ctx).await.unwrap());
-	}
-
-	/// The copy the guard judges is its own: a batch keeps the rows it was
-	/// handed, and the guard answers per row as it does one at a time.
-	#[tokio::test]
-	async fn a_table_guard_judges_a_batch_on_copies_of_its_rows() {
-		let db = TestDb::new(
-			"DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE hidden != true;
-			 DEFINE FIELD hidden ON doc COMPUTED status = 'secret';",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let PhysicalPermission::Conditional(guard) = table_guard(&ctx, "doc").await else {
-			panic!("a conditional guard");
-		};
-		let rows = vec![
-			val("{ id: doc:1, status: 'public' }").await,
-			val("{ id: doc:2, status: 'secret' }").await,
-		];
-		let before = rows.clone();
-		let verdicts = guard.evaluate_batch(EvalContext::from_exec_ctx(&ctx), &rows).await.unwrap();
-		assert_eq!(verdicts, vec![Value::Bool(true), Value::Bool(false)]);
-		assert_eq!(rows, before, "the rows are not derived in place");
-	}
-
-	/// A clause that reads no field of the row — a constant, or the session
-	/// alone — is compiled as it stands.
-	#[tokio::test]
-	async fn a_guard_reading_no_field_of_the_row_is_not_wrapped() {
-		let ctx = root_ctx();
-		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
-		for clause in ["true", "$auth.admin = true", "$session.ns = 'test'"] {
-			let def = table_with_select(Permission::Specific(parse_sql_expr(clause)));
-			let PhysicalPermission::Conditional(guard) =
-				table_select_permission_physical(Some(&def), &planner).await.unwrap()
-			else {
-				panic!("`{clause}` is conditional");
-			};
-			assert_ne!(guard.name(), "ComputedFieldGuard", "`{clause}` reads no field");
-		}
-		let def = table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id")));
-		let PhysicalPermission::Conditional(guard) =
-			table_select_permission_physical(Some(&def), &planner).await.unwrap()
-		else {
-			panic!("a conditional guard");
-		};
-		assert_eq!(guard.name(), "ComputedFieldGuard", "a guard reading a field is wrapped");
 	}
 
 	// =========================================================================
@@ -2145,288 +1132,13 @@ mod tests {
 	// CompiledGuard
 	// =========================================================================
 
-	/// Judge `clause`, stored by `definition`, against `row`, and report
-	/// whether it admitted.
-	async fn guard_admits<D>(
-		guard: &CompiledGuard<D>,
-		clause: &crate::expr::logical::LogicalExpr,
-		definition: &Arc<D>,
-		row: &Value,
-		ctx: &ExecutionContext,
-	) -> bool {
-		let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(row);
-		guard
-			.check(LogicalPermissionRef::Specific(clause), definition, &eval_ctx, None, || {
-				ExecError::Thrown("denied".to_owned())
-			})
-			.await
-			.is_ok()
-	}
-
-	/// The memo keeps a compilation, never an answer: the kept predicate is
-	/// evaluated afresh against every row, so a guard that admits one row
-	/// still refuses the next.
-	#[tokio::test]
-	async fn a_kept_compilation_is_judged_against_each_row() {
-		// A stored clause runs as a unit, which is lowered over a transaction.
-		let db = crate::exec::operators::test_util::TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let guard: CompiledGuard<String> = CompiledGuard::default();
-		// To the memo a definition is an identity and nothing more, so a
-		// `String` stands in for the catalog struct a caller passes.
-		let definition = Arc::new("v1".to_owned());
-		let clause = parse_expr("public = true");
-
-		assert!(
-			guard_admits(&guard, &clause, &definition, &val("{ public: true }").await, &ctx).await
-		);
-		assert!(
-			!guard_admits(&guard, &clause, &definition, &val("{ public: false }").await, &ctx)
-				.await
-		);
-	}
-
-	/// A definition the caller re-read is a different `Arc`, and the clause it
-	/// carries is compiled afresh. This is what stops a redefinition from
-	/// being judged by the clause it replaced: every caller re-reads the
-	/// definition per evaluation, so the memo cannot outlive the one it was
-	/// made for.
-	#[tokio::test]
-	async fn a_redefinition_is_judged_by_its_own_clause() {
-		// A stored clause runs as a unit, which is lowered over a transaction.
-		let db = crate::exec::operators::test_util::TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let guard: CompiledGuard<String> = CompiledGuard::default();
-		let admits = parse_expr("public = true");
-		let refuses = parse_expr("public = false");
-
-		let first = Arc::new("v1".to_owned());
-		assert!(guard_admits(&guard, &admits, &first, &val("{ public: true }").await, &ctx).await);
-
-		// The same row, the same guard node, a definition read afresh.
-		let second = Arc::new("v2".to_owned());
-		assert!(
-			!guard_admits(&guard, &refuses, &second, &val("{ public: true }").await, &ctx).await
-		);
-
-		// And back: the memo now holds the second definition's compilation,
-		// so the first's clause is compiled again rather than answered by it.
-		assert!(guard_admits(&guard, &admits, &first, &val("{ public: true }").await, &ctx).await);
-	}
-
-	/// The re-entry depth is the other half of the key. A guard reached one
-	/// level deeper is compiled with a depth budget of its own, so a
-	/// compilation made at one depth is not served at another.
-	#[tokio::test]
-	async fn a_kept_compilation_belongs_to_the_depth_it_was_made_at() {
-		// A stored clause runs as a unit, which is lowered over a transaction.
-		let db = crate::exec::operators::test_util::TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let guard: CompiledGuard<String> = CompiledGuard::default();
-		let definition = Arc::new("v1".to_owned());
-		let clause = parse_expr("public = true");
-		let row = val("{ public: true }").await;
-
-		let shallow = EvalContext::from_exec_ctx(&ctx).with_value_and_doc(&row);
-		assert!(
-			guard
-				.check(LogicalPermissionRef::Specific(&clause), &definition, &shallow, None, || {
-					ExecError::Thrown("denied".to_owned())
-				})
-				.await
-				.is_ok()
-		);
-		assert!(guard.cached(&definition, 0).is_some());
-		assert!(guard.cached(&definition, 1).is_none());
-	}
-
 	// =========================================================================
 	// check_permission_for_value
 	// =========================================================================
 
-	#[tokio::test]
-	async fn unconditional_arms_short_circuit_without_evaluating() {
-		let ctx = root_ctx();
-		let row = val("{ id: person:tobie }").await;
-
-		assert!(
-			check_permission_for_value(&PhysicalPermission::Allow, &row, None, &ctx).await.unwrap()
-		);
-		assert!(
-			!check_permission_for_value(&PhysicalPermission::Deny, &row, None, &ctx).await.unwrap()
-		);
-	}
-
-	#[tokio::test]
-	async fn a_conditional_permission_is_evaluated_against_the_record() {
-		let ctx = root_ctx();
-		let perm = PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await);
-
-		let allowed = check_permission_for_value(&perm, &val("{ public: true }").await, None, &ctx)
-			.await
-			.unwrap();
-		assert!(allowed);
-
-		let denied = check_permission_for_value(&perm, &val("{ public: false }").await, None, &ctx)
-			.await
-			.unwrap();
-		assert!(!denied);
-
-		// A missing field is NONE, which is not truthy — deny, not error.
-		let absent = check_permission_for_value(&perm, &val("{ other: 1 }").await, None, &ctx)
-			.await
-			.unwrap();
-		assert!(!absent);
-	}
-
-	#[tokio::test]
-	async fn value_param_binds_the_picked_field_for_field_level_checks() {
-		let ctx = root_ctx();
-		let perm = PhysicalPermission::Conditional(physical_expr("$value > 10", &ctx).await);
-		let row = val("{ score: 42 }").await;
-
-		let allowed =
-			check_permission_for_value(&perm, &row, Some(&Value::from(42)), &ctx).await.unwrap();
-		assert!(allowed);
-
-		let denied =
-			check_permission_for_value(&perm, &row, Some(&Value::from(3)), &ctx).await.unwrap();
-		assert!(!denied);
-	}
-
-	#[tokio::test]
-	async fn the_record_is_bound_as_the_document_root_so_parent_resolves() {
-		// `$parent` is the one reader that does not fall back to the current
-		// value, so binding only the value would leave this predicate falsy and
-		// deny every row.
-		let ctx = root_ctx();
-		let perm = PhysicalPermission::Conditional(
-			physical_expr("acl[WHERE $parent.owner = 'tobie'] != []", &ctx).await,
-		);
-
-		let row = val("{ owner: 'tobie', acl: [{ read: true }] }").await;
-		assert!(check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
-
-		let other = val("{ owner: 'jaime', acl: [{ read: true }] }").await;
-		assert!(!check_permission_for_value(&perm, &other, None, &ctx).await.unwrap());
-	}
-
-	#[tokio::test]
-	async fn skip_fetch_perms_allows_a_conditional_permission_unconditionally() {
-		let ctx = root_ctx();
-		// A predicate that would otherwise deny.
-		let perm = PhysicalPermission::Conditional(physical_expr("false", &ctx).await);
-		let row = val("{ id: person:tobie }").await;
-		assert!(!check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
-
-		let ExecutionContext::Root(mut root) = ctx else {
-			panic!("root_ctx builds a Root context");
-		};
-		root.skip_fetch_perms = true;
-		let inner = ExecutionContext::Root(root);
-		assert!(check_permission_for_value(&perm, &row, None, &inner).await.unwrap());
-	}
-
-	#[tokio::test]
-	async fn control_flow_out_of_a_predicate_becomes_an_error_not_a_panic() {
-		let ctx = root_ctx();
-		// BREAK has no surrounding loop inside a permission predicate, so it has
-		// nowhere to go and must surface as an error.
-		let perm = PhysicalPermission::Conditional(physical_expr("BREAK", &ctx).await);
-		let row = val("{ id: person:tobie }").await;
-
-		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
-		assert!(
-			err.to_string().contains("unexpected control flow"),
-			"expected the control-flow message, got {err}"
-		);
-	}
-
-	#[tokio::test]
-	async fn an_error_inside_a_predicate_is_carried_through_unwrapped() {
-		let ctx = root_ctx();
-		// A thrown error must stay downcastable rather than collapse to
-		// `Internal`, so a write conflict raised per row can still be retried.
-		let perm = PhysicalPermission::Conditional(physical_expr("THROW 'boom'", &ctx).await);
-		let row = val("{ id: person:tobie }").await;
-
-		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
-		assert!(err.to_string().contains("boom"), "expected the thrown message, got {err}");
-		assert!(
-			!err.to_string().contains("unexpected control flow"),
-			"a THROW is an error, not a stray control-flow signal: {err}"
-		);
-	}
-
-	#[tokio::test]
-	async fn a_conditional_permission_reads_through_a_record_link() {
-		// A table permission that dereferences a link needs a transaction, so
-		// this is the path that `root_ctx` cannot serve.
-		let db = TestDb::new(
-			"DEFINE TABLE org SCHEMALESS;
-			 DEFINE TABLE doc SCHEMALESS;
-			 CREATE org:acme SET public = true;
-			 CREATE org:secret SET public = false;
-			 CREATE doc:1 SET org = org:acme;
-			 CREATE doc:2 SET org = org:secret;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let perm = PhysicalPermission::Conditional(physical_expr("org.public = true", &ctx).await);
-
-		let doc1 = val("{ id: doc:1, org: org:acme }").await;
-		let doc2 = val("{ id: doc:2, org: org:secret }").await;
-		assert!(check_permission_for_value(&perm, &doc1, None, &ctx).await.unwrap());
-		assert!(!check_permission_for_value(&perm, &doc2, None, &ctx).await.unwrap());
-	}
-
 	// =========================================================================
 	// PhysicalTableSelect
 	// =========================================================================
-
-	#[tokio::test]
-	async fn the_ann_gate_reports_whole_index_decisions_up_front() {
-		let ctx = root_ctx();
-
-		let allow = PhysicalTableSelect::new(PhysicalPermission::Allow, ctx.clone());
-		assert_eq!(allow.allows_every_doc(), Some(true));
-
-		let deny = PhysicalTableSelect::new(PhysicalPermission::Deny, ctx.clone());
-		assert_eq!(deny.allows_every_doc(), Some(false));
-
-		// Conditional cannot be decided for the whole index, so the search must
-		// gate each candidate individually.
-		let conditional = PhysicalTableSelect::new(
-			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
-			ctx.clone(),
-		);
-		assert_eq!(conditional.allows_every_doc(), None);
-	}
-
-	#[tokio::test]
-	async fn the_ann_gate_decides_a_candidate_with_the_same_predicate() {
-		let ctx = root_ctx();
-		let gate = PhysicalTableSelect::new(
-			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
-			ctx.clone(),
-		);
-
-		let rid = Arc::new(RecordId {
-			table: "doc".into(),
-			key: crate::val::RecordIdKey::Number(1),
-		});
-		let allowed = Arc::new(Record::new(val("{ public: true }").await));
-		let denied = Arc::new(Record::new(val("{ public: false }").await));
-
-		let (yes, no) = async {
-			let yes = gate.allows_doc(&rid, &allowed).await.unwrap();
-			let no = gate.allows_doc(&rid, &denied).await.unwrap();
-			(yes, no)
-		}
-		.await;
-		assert!(yes);
-		assert!(!no);
-	}
 
 	// =========================================================================
 	// The stored clauses that are not permissions
@@ -2465,77 +1177,14 @@ mod tests {
 		)
 	}
 
-	/// A view over `source`, classified as [`view_to_definition`] classifies a
-	/// parsed one.
-	fn view(fields: &str, condition: Option<&str>, groups: Option<Groups>) -> ViewDefinition {
-		let view = crate::expr::View {
-			expr: crate::catalog::FieldsText::from_raw(fields)
-				.compile()
-				.expect("the field list should compile"),
-			what: vec!["source".into()],
-			cond: condition.map(|c| crate::expr::Cond(parse_sql_expr(c))),
-			group: groups,
-		};
-		crate::catalog::view_to_definition(&view).expect("the view should classify")
-	}
-
-	/// A txn-less planner over `ctx`, the way runtime clause compilation
-	/// builds one.
-	fn planner_for(ctx: &ExecutionContext) -> Planner<'_> {
-		Planner::new(ctx.ctx(), ctx.function_registry())
-	}
-
 	/// Evaluate a compiled clause against `row`, bound as both the value and
 	/// the document, the way every caller of a stored clause binds the record.
 	async fn eval_clause(
-		clause: &Arc<dyn PhysicalExpr>,
+		clause: &Clause,
 		row: &Value,
 		ctx: &ExecutionContext,
 	) -> FlowResult<Value> {
 		clause.evaluate(EvalContext::from_exec_ctx(ctx).with_value_and_doc(row)).await
-	}
-
-	#[tokio::test]
-	async fn a_field_default_is_compiled_from_the_definitions_logical_body() {
-		// A stored clause runs as a unit, which is lowered over a transaction.
-		let db = crate::exec::operators::test_util::TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let field = field_with_default("n + 1");
-		let compiled = field_default_physical(&field, &planner_for(&ctx))
-			.await
-			.unwrap()
-			.expect("a field that declares a DEFAULT compiles one");
-		assert_ne!(
-			compiled.name(),
-			"UncompilableClause",
-			"a clause with a logical form is compiled, not carried"
-		);
-		let row = val("{ n: 1 }").await;
-		assert_eq!(eval_clause(&compiled, &row, &ctx).await.unwrap(), Value::from(2));
-	}
-
-	#[tokio::test]
-	async fn a_field_with_no_default_compiles_nothing() {
-		let ctx = root_ctx();
-		let field = FieldDefinition {
-			name: field_idiom("n"),
-			table: "t".into(),
-			..Default::default()
-		};
-		assert!(field_default_physical(&field, &planner_for(&ctx)).await.unwrap().is_none());
-	}
-
-	/// A clause holding a write compiles like any other. The frames that must
-	/// not write — a `SELECT` permission predicate, a `COMPUTED` body — refuse
-	/// the write where it runs rather than refusing to compile the clause that
-	/// holds it, and a `DEFAULT` is neither of those.
-	#[tokio::test]
-	async fn a_clause_holding_a_write_compiles() {
-		let ctx = root_ctx();
-		let field = field_with_default("(CREATE ONLY other:1).id");
-		let compiled =
-			field_default_physical(&field, &planner_for(&ctx)).await.unwrap().expect("a DEFAULT");
-		assert_ne!(compiled.name(), "UncompilableClause");
 	}
 
 	/// The field's `AUTH LIMIT` is ADR 0001's definer's-rights clamp, and a
@@ -2559,41 +1208,6 @@ mod tests {
 		assert!(
 			!Arc::ptr_eq(&frame.root().auth, &ctx.root().auth),
 			"a narrowing stamp is applied to the frame's authority"
-		);
-	}
-
-	#[tokio::test]
-	async fn an_events_clauses_are_compiled_in_the_order_they_run() {
-		let ctx = root_ctx();
-		let definition = event("$event = 'CREATE'", &["$value.n", "(UPDATE other:1 SET n = 1)"]);
-		let planner = planner_for(&ctx);
-		let compiled = event_physical(&definition, &planner).await.unwrap();
-		assert_ne!(compiled.when.name(), "UncompilableClause");
-		let then = compiled.then().await.unwrap();
-		assert_eq!(then.len(), 2, "one body per THEN clause");
-		assert_ne!(then[0].name(), "UncompilableClause");
-		assert_ne!(
-			then[1].name(),
-			"UncompilableClause",
-			"an event body may write, so a THEN that writes compiles like any other"
-		);
-	}
-
-	/// Resolving an event compiles its `WHEN` alone. A `THEN` the planner
-	/// declines is only declined where the body would have run, which is
-	/// inside the gate the `WHEN` opens.
-	#[tokio::test]
-	async fn a_declined_then_is_only_declined_when_it_is_asked_for() {
-		let ctx = root_ctx();
-		let definition = event("true", &["[LET $x = 1]"]);
-		let planner = planner_for(&ctx);
-		let compiled = event_physical(&definition, &planner)
-			.await
-			.expect("resolving the event compiles the WHEN alone");
-		let declined = compiled.then().await.expect_err("the planner declines the body");
-		assert!(
-			declined.to_string().contains("LET statements can only appear"),
-			"the decline names the clause the planner could not compile: {declined}"
 		);
 	}
 
@@ -2625,57 +1239,6 @@ mod tests {
 		assert_eq!(frame.value("event"), Some(&Value::from("DELETE")));
 		assert_eq!(frame.value("value"), Some(&before), "a delete's event is about the pre-image");
 		assert_eq!(document, before);
-	}
-
-	#[tokio::test]
-	async fn a_materialized_views_condition_and_field_list_are_compiled() {
-		// A stored clause runs as a unit, which is lowered over a transaction.
-		let db = crate::exec::operators::test_util::TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let definition = view("name", Some("paid = true"), None);
-		let compiled = materialized_view_physical(&definition, &planner_for(&ctx))
-			.await
-			.unwrap()
-			.expect("a materialized view has a route");
-		let condition = compiled.condition.expect("the view declares a condition");
-		assert_ne!(condition.name(), "UncompilableClause");
-		assert_eq!(compiled.projection.name(), "CompiledProjection");
-
-		let paid = val("{ paid: true }").await;
-		assert!(eval_clause(&condition, &paid, &ctx).await.unwrap().is_truthy());
-		let unpaid = val("{ paid: false }").await;
-		assert!(!eval_clause(&condition, &unpaid, &ctx).await.unwrap().is_truthy());
-	}
-
-	#[tokio::test]
-	async fn a_view_with_no_condition_compiles_none() {
-		let ctx = root_ctx();
-		let definition = view("name", None, None);
-		let compiled =
-			materialized_view_physical(&definition, &planner_for(&ctx)).await.unwrap().unwrap();
-		assert!(compiled.condition.is_none());
-	}
-
-	/// Only a materialized view is maintained by judging the written record
-	/// against its clauses, so only it has a route here.
-	#[tokio::test]
-	async fn a_view_maintained_some_other_way_has_no_route() {
-		let ctx = root_ctx();
-		let aggregated = view("count()", None, Some(Groups::default()));
-		assert!(matches!(aggregated, ViewDefinition::Aggregated { .. }));
-		assert!(
-			materialized_view_physical(&aggregated, &planner_for(&ctx)).await.unwrap().is_none()
-		);
-
-		let unmaintained = ViewDefinition::Select {
-			fields: crate::expr::Fields::all(),
-			tables: vec!["source".into()],
-			condition: None,
-			groups: None,
-		};
-		assert!(
-			materialized_view_physical(&unmaintained, &planner_for(&ctx)).await.unwrap().is_none()
-		);
 	}
 
 	/// A view definition records no `AUTH LIMIT`, so a view body runs as whoever wrote the record —
@@ -2752,36 +1315,12 @@ mod tests {
 		assert!(options.perms);
 	}
 
-	/// A field list projects the record it is evaluated against, which is
-	/// what the view's row is stored from.
-	#[tokio::test]
-	async fn a_field_list_projects_the_record_it_is_evaluated_against() {
-		let db = TestDb::new("DEFINE TABLE t SCHEMALESS;").await;
-		let ctx = db.exec_ctx().await;
-		let row = val("{ name: 'a', price: 2, qty: 3 }").await;
-		for (text, expected) in [
-			("name, price * qty AS total", "{ name: 'a', total: 6 }"),
-			("*", "{ name: 'a', price: 2, qty: 3 }"),
-			("*, price * qty AS price", "{ name: 'a', price: 6, qty: 3 }"),
-			("VALUE qty", "3"),
-		] {
-			let fields = crate::catalog::FieldsText::from_raw(text)
-				.compile()
-				.expect("the field list should compile");
-			let compiled = projection_physical(&fields, &planner_for(&ctx)).await;
-			assert_eq!(compiled.name(), "CompiledProjection", "`{text}`");
-			let expected = val(expected).await;
-			assert_eq!(eval_clause(&compiled, &row, &ctx).await.unwrap(), expected, "`{text}`");
-		}
-	}
-
 	/// A clause the engine cannot compile fails where it is evaluated, naming
-	/// why, and is read-only.
+	/// why.
 	#[tokio::test]
 	async fn an_uncompilable_clause_fails_when_evaluated() {
 		let ctx = root_ctx();
-		let clause = UncompilableClause::of("a shape".to_owned());
-		assert_eq!(clause.access_mode(), AccessMode::ReadOnly);
+		let clause = Clause::uncompilable("a shape".to_owned());
 		let err = eval_clause(&clause, &Value::None, &ctx).await.expect_err("it never evaluates");
 		assert!(err.to_string().contains("a shape"), "the reason is reported: {err}");
 	}

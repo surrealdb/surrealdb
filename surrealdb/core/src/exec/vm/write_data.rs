@@ -159,8 +159,8 @@ fn statement_data<'p>(
 /// Evaluates what the places of a data clause embed by running the host
 /// pipelines the program holds for them.
 ///
-/// A subscript is evaluated with no record in scope, as the operator tree
-/// evaluates one, and a `WHERE` step judges one element as the row.
+/// A subscript is evaluated with no record in scope,
+/// and a `WHERE` step judges one element as the row.
 pub(super) struct PlaceRun<'a> {
 	pub(super) program: &'a Program,
 	pub(super) state: &'a mut State,

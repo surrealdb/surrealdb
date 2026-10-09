@@ -456,97 +456,11 @@ impl ArrayOverlapsLiteralSet {
 	}
 }
 
-/// `WHERE array::len(field) <op> N` against an array leaf.
-///
-/// The rev-2 `Array` wire prologue carries the element count as a varint
-/// right after the `flags` byte (see `IndexedSeqWalker`); we read just that
-/// prefix and compare against `expected_len`. No element decode, no array
-/// iteration, no Strand / Value materialisation.
-// Constructed or read only by the operator-tree oracle, which test builds compile.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug)]
-pub(crate) struct ArrayLenCompare {
-	/// Right-hand side of the predicate: the numeric literal `array::len`
-	/// is being compared against.
-	pub(crate) expected_len: i64,
-	/// The binary operator. Restricted at compile time to the comparison
-	/// ops below; anything else returns `Evidence::Unknown`.
-	pub(crate) op: crate::expr::operator::BinaryOperator,
-}
-
-impl StreamingLeafEvaluator for ArrayLenCompare {
-	fn evaluate(&self, leaf: ValueWalker<'_>) -> Evidence {
-		use crate::expr::operator::BinaryOperator;
-
-		if !leaf.is_array() {
-			// `array::len` on a non-array is a runtime error at
-			// post-decode time ("Argument 1 was the wrong type. Expected
-			// `array` but found `<T>`"); bailing to Unknown lets the
-			// authoritative evaluator surface that error instead of
-			// silently rejecting the row.
-			return Evidence::Unknown;
-		}
-		let Ok(array_view) = leaf.array_view() else {
-			return Evidence::Unknown;
-		};
-		// Bypass the macro-emitted walker chain — see
-		// `indexed_seq_walker_from_array_bytes` for rationale.
-		let Ok(seq_walker) = indexed_seq_walker_from_array_bytes(array_view.as_bytes()) else {
-			return Evidence::Unknown;
-		};
-		let actual: i64 = seq_walker.len() as i64;
-		let truth = match self.op {
-			BinaryOperator::Equal | BinaryOperator::ExactEqual => actual == self.expected_len,
-			BinaryOperator::NotEqual => actual != self.expected_len,
-			BinaryOperator::LessThan => actual < self.expected_len,
-			BinaryOperator::LessThanEqual => actual <= self.expected_len,
-			BinaryOperator::MoreThan => actual > self.expected_len,
-			BinaryOperator::MoreThanEqual => actual >= self.expected_len,
-			_ => return Evidence::Unknown,
-		};
-		if truth {
-			Evidence::ProvablyTrue
-		} else {
-			Evidence::ProvablyFalse
-		}
-	}
-
-	/// Field absent → `array::len(NONE)` errors at post-decode time
-	/// (`Incorrect arguments for function array::len(). Argument 1 was the
-	/// wrong type. Expected array but found NONE`). Bail to `Unknown` so
-	/// the authoritative evaluator surfaces the error rather than the
-	/// pre-decode filter silently rejecting the row via
-	/// `evidence_from_binary_cmp` against `Value::None`.
-	fn evaluate_missing(&self, _fallback: &super::LeafFallback) -> Evidence {
-		Evidence::Unknown
-	}
-}
-
 #[cfg(test)]
 mod array_len_missing_tests {
 	use super::*;
 	use crate::exec::pre_decode_filter::LeafFallback;
 	use crate::expr::operator::BinaryOperator;
-	use crate::val::Number;
-
-	/// Regression for `reproductions/3545_where_clause_relations.surql`:
-	/// `array::len(absent_field) >= 1` must NOT be wire-rejected by the
-	/// pre-decode filter — the post-decode evaluator needs to error with
-	/// "Expected array but found NONE". Confirms `evaluate_missing`
-	/// returns `Unknown` regardless of the fallback's literal/op.
-	#[test]
-	fn array_len_compare_evaluate_missing_returns_unknown() {
-		let evaluator = ArrayLenCompare {
-			expected_len: 1,
-			op: BinaryOperator::MoreThanEqual,
-		};
-		let fallback = LeafFallback {
-			op: BinaryOperator::MoreThanEqual,
-			literal: Value::Number(Number::Int(1)),
-			reversed: false,
-		};
-		assert_eq!(evaluator.evaluate_missing(&fallback), Evidence::Unknown);
-	}
 
 	/// SubstringMatch's default `evaluate_missing` should still fall
 	/// through the LeafFallback path — `Value::None CONTAINS 'x'` is a

@@ -488,17 +488,6 @@ pub(crate) fn write_unit<'a, F: std::future::Future + Send + 'a>(
 	crate::exec::compiles::seam(work)
 }
 
-/// A planner for the clauses of a table's write unit — its permissions,
-/// field clauses, index expressions, views, events and live subscriptions —
-/// compiled once per write context where a write first reaches them. The
-/// planner holds no transaction, so it reads no catalog.
-pub(crate) fn write_unit_planner<'c>(
-	ctx: &'c crate::ctx::FrozenContext,
-	registry: &'c crate::exec::function::FunctionRegistry,
-) -> crate::exec::planner::Planner<'c> {
-	crate::exec::compiles::seam_sync(|| crate::exec::planner::Planner::new(ctx, registry))
-}
-
 /// `work`, a schema statement's step, which reads the catalog it writes as
 /// its data: the definitions it checks the new one against, and the ids it
 /// allocates.

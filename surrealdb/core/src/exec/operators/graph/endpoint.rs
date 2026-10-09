@@ -1,23 +1,16 @@
-//! The `EndpointBind` operator — bind a node from a bound edge's endpoint.
+//! Binding a node from a bound edge's endpoint.
 //!
-//! `EndpointBind` is the companion of [`Expand`](super::expand::Expand) for
+//! [`bind_endpoints`] is the companion of [`expand`](super::expand) for
 //! *edge-anchored* MATCH patterns. When a pattern is anchored on a labeled edge
-//! (`(a)-[:x]->(b)` with no labeled node), the planner scans the edge table and
-//! [`Bind`](crate::exec::operators::bind::Bind)s each edge record under a binding name, then
-//! stacks two `EndpointBind`s on top to recover the two endpoint nodes — the
-//! `in` endpoint and the `out` endpoint — as full node bindings. See the worked
-//! plan tree (ii) in `doc/gql/V2_DESIGN.md` §6:
-//!
-//! ```text
-//! EndpointBind [edge: __e0, field: out, node: b]
-//!     EndpointBind [edge: __e0, field: in, node: a]
-//!         Bind [binding: __e0]  ← TableScan [table: x]
-//! ```
+//! (`(a)-[:x]->(b)` with no labeled node), the plan scans the edge table and binds
+//! each edge record under a binding name, then runs two endpoint steps to recover
+//! the two endpoint nodes — the `in` endpoint and the `out` endpoint — as full
+//! node bindings. See the worked plan tree (ii) in `doc/gql/V2_DESIGN.md` §6.
 //!
 //! For every input row it:
 //!
-//! 1. reads `row[edge]` — a full edge record object bound by a prior `Bind` on an edge table (see
-//!    the edge-extraction rules below);
+//! 1. reads `row[edge]` — a full edge record object bound by a prior step on an edge table (see the
+//!    edge-extraction rules below);
 //! 2. reads that edge's `in`/`out` field (per `field`), which holds the endpoint vertex
 //!    [`RecordId`];
 //! 3. applies `target_label` (an endpoint whose table differs is dropped);
@@ -36,7 +29,7 @@
 //! - `row[edge]` is a full edge object ⇒ its `field` (`in`/`out`) value is read; a missing or
 //!   non-record `field` value drops the row (`debug!` log, never a panic);
 //! - `row[edge]` is itself a `Value::RecordId` ⇒ the row is dropped: an id-only edge carries no
-//!   `in`/`out` to read, and the planner only stacks `EndpointBind` above a `Bind` that holds the
+//!   `in`/`out` to read, and the plan only runs an endpoint step above a binding that holds the
 //!   full edge record. (Defensive; unreachable on valid plans.)
 //! - `row[edge]` is `Value::Null` (a prior optional miss), is missing, or holds any other value ⇒
 //!   the row is dropped with a `debug!` log.
@@ -44,27 +37,15 @@
 //! ## Security
 //!
 //! The endpoint node binding is produced by the FieldState-aware
-//! [`fetch::resolve_with_field_state`] helper, exactly as `Expand` resolves its
+//! [`fetch::resolve_with_field_state`] helper, exactly as [`expand`](super::expand) resolves its
 //! targets: table-level SELECT permission, computed fields, and field-level
 //! SELECT permissions are all applied, so the binding contents are exactly what
 //! a `SELECT` on that table would return for the caller. A permission denial is
 //! indistinguishable from a missing record — both drop the row.
 
-#[cfg(test)]
-use std::sync::Arc;
-
-#[cfg(test)]
-use common::future::stream::{self, Yielder};
-#[cfg(test)]
-use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, OperatorMetrics, OutputOrdering,
-	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::val::{Object, RecordId, TableName, Value};
 
@@ -88,143 +69,6 @@ impl EndpointField {
 			EndpointField::In => "in",
 			EndpointField::Out => "out",
 		}
-	}
-}
-
-#[cfg(test)]
-/// Bind a node from a bound edge's `in`/`out` endpoint.
-///
-/// See the module docs for the per-row algorithm and the edge-extraction rules.
-#[derive(Debug, Clone)]
-pub struct EndpointBind {
-	/// Child operator producing input binding rows.
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Name of the bound edge binding to read the endpoint from. The bound value
-	/// must be a full edge record object (produced by a prior `Bind` on an edge
-	/// table).
-	pub(crate) edge: String,
-	/// Which endpoint (`in`/`out`) to bind.
-	pub(crate) field: EndpointField,
-	/// Name of the target node binding to introduce.
-	pub(crate) target_binding: String,
-	/// Optional label filter on the endpoint vertex's table.
-	pub(crate) target_label: Option<TableName>,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-#[cfg(test)]
-impl EndpointBind {
-	#[cfg(test)]
-	/// Create a new `EndpointBind` operator with fresh metrics.
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		edge: String,
-		field: EndpointField,
-		target_binding: String,
-		target_label: Option<TableName>,
-	) -> Self {
-		Self {
-			input,
-			edge,
-			field,
-			target_binding,
-			target_label,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-}
-
-#[cfg(test)]
-impl ExecOperator for EndpointBind {
-	fn name(&self) -> &'static str {
-		"EndpointBind"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = vec![
-			("edge".to_string(), self.edge.clone()),
-			("field".to_string(), self.field.field().to_string()),
-			("node".to_string(), self.target_binding.clone()),
-		];
-		if let Some(label) = self.target_label.as_ref() {
-			attrs.push(("target_label".to_string(), label.as_str().to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// Endpoint fetches need database context; never demote below the input.
-		ContextLevel::Database.max(self.input.required_context())
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		// 1:≤1 — each input row produces at most one output row, so the input's
-		// cardinality is an upper bound and is preserved.
-		self.input.cardinality_hint()
-	}
-
-	fn output_ordering(&self) -> OutputOrdering {
-		// Rows are emitted in input order (filtered, never reordered).
-		self.input.output_ordering()
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// SECURITY: the endpoint node binding is produced by the FieldState
-		// helper ([`resolve_with_field_state`]), which resolves whether SELECT
-		// permissions must be enforced (once, internally) and applies table +
-		// field SELECT permissions and computed fields per record.
-		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-
-		let edge = self.edge.clone();
-		let field = self.field;
-		let target_binding = self.target_binding.clone();
-		let target_label = self.target_label.clone();
-		let ctx = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			// One FieldState cache for the endpoint table, reused across batches
-			// so each table's permission + FieldState are resolved at most once.
-			let mut target_cache = FetchFieldStateCache::new();
-
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				let out = bind_endpoints(
-					&ctx,
-					&mut target_cache,
-					&edge,
-					field,
-					&target_binding,
-					target_label.as_ref(),
-					batch.values(),
-				)
-				.await?;
-				if !out.is_empty() {
-					yielder.emit(ValueBatch::new(out)).await;
-				}
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), "EndpointBind", &self.metrics))
 	}
 }
 
@@ -329,7 +173,6 @@ pub(crate) fn bound_row(input: &Value, target_binding: &str, target: Value) -> V
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::operators::test_util::ValuesOperator;
 
 	fn obj_row(pairs: &[(&str, Value)]) -> Value {
 		let mut o = Object::default();
@@ -353,42 +196,6 @@ mod tests {
 			("in", Value::RecordId(in_rid)),
 			("out", Value::RecordId(out_rid)),
 		])
-	}
-
-	fn sample(field: EndpointField, target_label: Option<&str>) -> EndpointBind {
-		EndpointBind::new(
-			ValuesOperator::new(Vec::new()),
-			"__e0".to_string(),
-			field,
-			"a".to_string(),
-			target_label.map(|l| TableName::new(l.to_string())),
-		)
-	}
-
-	#[test]
-	fn name_is_endpoint_bind() {
-		assert_eq!(sample(EndpointField::In, None).name(), "EndpointBind");
-	}
-
-	#[test]
-	fn attrs_render_edge_field_node_and_label() {
-		let attrs = sample(EndpointField::Out, Some("person")).attrs();
-		assert!(attrs.iter().any(|(k, v)| k == "edge" && v == "__e0"));
-		assert!(attrs.iter().any(|(k, v)| k == "field" && v == "out"));
-		assert!(attrs.iter().any(|(k, v)| k == "node" && v == "a"));
-		assert!(attrs.iter().any(|(k, v)| k == "target_label" && v == "person"));
-	}
-
-	#[test]
-	fn attrs_omit_label_when_unset() {
-		let attrs = sample(EndpointField::In, None).attrs();
-		assert!(attrs.iter().any(|(k, v)| k == "field" && v == "in"));
-		assert!(!attrs.iter().any(|(k, _)| k == "target_label"));
-	}
-
-	#[test]
-	fn required_context_is_at_least_database() {
-		assert_eq!(sample(EndpointField::In, None).required_context(), ContextLevel::Database);
 	}
 
 	#[test]

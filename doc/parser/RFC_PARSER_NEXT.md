@@ -229,9 +229,9 @@ inlines the construction and drop glue of the boxed AST it builds.
   regex literals are compiled at parse time;
 - 95K of sql AST code.
 
-`reblessive` is also used by the legacy executor and `idx` (`TreeStack`).
+`reblessive` is also used by `idx` (`TreeStack`).
 Removing it from the parser is necessary but not sufficient to drop the crate;
-EDGE_PLAN's "no `reblessive`" covers both.
+EDGE_PLAN's "no `reblessive`" covers every use.
 
 ## 4. The in-tree successor: `surrealdb-parser` ("v3")
 

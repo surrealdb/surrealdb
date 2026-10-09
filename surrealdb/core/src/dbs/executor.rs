@@ -1273,8 +1273,6 @@ impl Executor {
 			computing_record: None,
 			no_write: None,
 			version_stamp: None,
-			zero_limits: Vec::new(),
-			topk_thresholds: None,
 			guard_verdicts: Arc::new(crate::exec::guard_verdicts::GuardVerdicts::for_statement(
 				writes,
 			)),
@@ -1438,8 +1436,8 @@ impl Executor {
 		})
 	}
 
-	/// Bind a lowered bare expression for `txn` and compile it into the
-	/// operator tree that runs it.
+	/// Bind a lowered bare expression for `txn` and plan it as the operator
+	/// that runs it.
 	async fn plan_bare_expression(
 		&self,
 		op: LogicalOp,

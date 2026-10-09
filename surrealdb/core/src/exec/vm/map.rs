@@ -6,9 +6,8 @@
 //!
 //! A table source's access path is chosen by the planner's decision
 //! ([`Planner::decide_access_path`]) over what the pipeline offers it
-//! ([`Planner::access_offer`]): the choice the operator tree makes for the
-//! same statement, including the indexes it withholds from a caller who may
-//! not read their columns. The VM runs a table scan, a record lookup and a
+//! ([`Planner::access_offer`]), including the indexes it withholds from a
+//! caller who may not read their columns. The VM runs a table scan, a record lookup and a
 //! B-tree index scan, and declines every other access path.
 
 use surrealdb_strand::TableName;
@@ -59,7 +58,7 @@ pub(super) async fn map(planner: &Planner<'_>, op: &LogicalOp) -> Mapped<Physica
 async fn map_unsealed(planner: &Planner<'_>, op: &LogicalOp) -> Mapped<PhysicalPlan> {
 	// A statement that explains nothing maps the memberships the logical
 	// rules lifted as the predicates they were lifted from; an explained
-	// statement keeps its joins, which the operator tree renders.
+	// statement keeps its joins, which its plan renders.
 	let explains = op
 		.visit_ops_deep(&mut |node| match node {
 			LogicalOp::Explain(_) => std::ops::ControlFlow::Break(()),
@@ -105,8 +104,8 @@ async fn map_as_bound_unsealed(planner: &Planner<'_>, op: &LogicalOp) -> Mapped<
 		super::speculate::DECLINED.with(|count| count.set(count.get() + 1));
 		return Err(NotCovered::new(super::speculate::DATA_DEPENDENT_DDL));
 	}
-	// A `LET` in an expression of the statement is refused as the operator
-	// tree compiles the expression, which is as it plans the statement. A
+	// A `LET` in an expression of the statement is refused as the expression
+	// is compiled, which is as the statement is planned. A
 	// block's statements are refused by the block, as its control flow
 	// reaches them ([`Blocks::statement`]).
 	if !matches!(plan.root, Plan::Control { .. } | Plan::Refused { .. })
@@ -189,12 +188,11 @@ fn version_of(op: &LogicalOp) -> Option<&LogicalExpr> {
 	}
 }
 
-/// What the operator tree raises for a `VERSION` clause beside a statement
-/// in `FROM`.
+/// What planning raises for a `VERSION` clause beside a statement in `FROM`.
 const SUBQUERY_SOURCE_VERSION: &str = "VERSION clause cannot be used with a subquery source. \
 	 Place the VERSION clause inside the subquery instead.";
 
-/// What the operator tree raises for a `LET` written as an expression.
+/// What planning raises for a `LET` written as an expression.
 pub(super) const LET_IN_AN_EXPRESSION: &str =
 	"LET statements can only appear at the top level of a query or inside a block expression";
 
@@ -535,9 +533,9 @@ fn in_subquery_frame(
 	}
 }
 
-/// Whether the operator tree, planning `op`, compiles an expression that holds
-/// a `LET` written as an expression: in `op`'s own expressions or its inputs',
-/// down to but not into a block, whose statements the block plans.
+/// Whether planning `op` compiles an expression that holds a `LET` written as
+/// an expression: in `op`'s own expressions or its inputs', down to but not into a block, whose
+/// statements the block plans.
 fn compiles_a_let_statement(op: &LogicalOp) -> bool {
 	if matches!(
 		op,
@@ -553,8 +551,8 @@ fn compiles_a_let_statement(op: &LogicalOp) -> bool {
 		|| op.children().iter().any(compiles_a_let_statement)
 }
 
-/// Whether `expr` holds a `LET` written as an expression, which the operator
-/// tree refuses as it compiles `expr`: outside a closure's body, which is
+/// Whether `expr` holds a `LET` written as an expression, which planning
+/// refuses as it compiles `expr`: outside a closure's body, which is
 /// compiled apart from the expression, and outside a statement nested in it,
 /// whose own expressions are its own plan's to refuse.
 fn holds_a_let_statement(expr: &LogicalExpr) -> bool {
@@ -1206,7 +1204,7 @@ fn map_statement<'a>(
 				super::explain::to_explain_operator(
 					&explain.input,
 					&planned,
-					None,
+					false,
 					planner.reads_are_checked(),
 				)
 				.as_ref(),
@@ -1440,9 +1438,9 @@ fn map_statement<'a>(
 	})
 }
 
-/// The refusal the operator tree raises for the `VERSION` of statement `op`
-/// when a statement is among its sources: a stamp is read at tables, and a
-/// statement in `FROM` is none. The clause belongs inside that statement.
+/// The refusal planning raises for the `VERSION` of statement `op` when a statement is among its
+/// sources: a stamp is read at tables, and a statement in `FROM` is none. The clause belongs inside
+/// that statement.
 fn version_over_subquery_refusal(op: &LogicalOp) -> Option<super::plan::Refusal> {
 	use crate::exec::planner::fold::{PipelineStop, collect_pipeline};
 	let (_, stop) = collect_pipeline(op.clone());
@@ -1458,12 +1456,12 @@ fn version_over_subquery_refusal(op: &LogicalOp) -> Option<super::plan::Refusal>
 	})
 }
 
-/// The refusal the operator tree raises for statement `op`'s `FOR UPDATE` as
-/// it plans the pipeline whose leaves carry it, by the rules of
+/// The refusal planning raises for statement `op`'s `FOR UPDATE` as it plans
+/// the pipeline whose leaves carry it, by the rules of
 /// [`check_locked_read`](crate::exec::planner::check_locked_read). `None` for
 /// a statement whose pipeline locks nothing, or keeps those rules. A pipeline
-/// under a `VERSION` of its own is not covered: the tree evaluates the stamp
-/// before it checks the rules.
+/// under a `VERSION` of its own is not covered: the stamp is evaluated before
+/// the rules are checked.
 fn locked_read_refusal(
 	planner: &Planner<'_>,
 	op: &LogicalOp,
@@ -2356,14 +2354,13 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 		_ => None,
 	};
 	// A grouped projection that reads `$this` or `$parent` is refused as the
-	// operator tree plans the read, once it has planned the read's source,
-	// which is mapped first. A grouped read that locks its own records is
-	// refused for its locking before it reaches here.
+	// read is planned, once its source has been planned, which is mapped first. A grouped read that
+	// locks its own records is refused for its locking before it reaches here.
 	let mut refused = None;
 	let aggregate = match below {
 		LogicalOp::Aggregate(aggregate) => {
-			// The operator tree checks the grouped projection's parameters,
-			// then analyses its fields; either may refuse the statement.
+			// The grouped projection's parameters are checked, then its fields
+			// analysed; either may refuse the statement.
 			let refusal = check_forbidden_group_by_params(&aggregate.fields).and_then(|()| {
 				crate::exec::planner::analyse_aggregation(
 					planner.function_registry(),
@@ -2745,8 +2742,8 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 	let has_knn = leaves.iter().any(|l| matches!(l, Plan::KnnScan { .. }));
 	let strips_knn = has_knn || brute.is_some();
 	// Every row the search yields is one its KNN operator admits, so the
-	// operator in the selection answers `true` for each, as the operator
-	// tree's answers it from the search's results.
+	// operator in the selection answers `true` for each, from the search's
+	// results.
 	if strips_knn {
 		knn_answered(&mut projection);
 	}
@@ -3006,9 +3003,8 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 	})
 }
 
-/// The refusal the operator tree raises for a `KNN` operator its planning
-/// cannot place: one of the retired `<|k|>` form, or one under an `OR` or a
-/// `NOT`, where no scan or search consumes it.
+/// The refusal planning raises for a `KNN` operator it cannot place: one of the retired `<|k|>`
+/// form, or one under an `OR` or a `NOT`, where no scan or search consumes it.
 fn knn_placement_refusal(stages: &[RowStage]) -> Option<super::plan::Refusal> {
 	use crate::exec::planner::util::{has_knn_ktree_operator, has_knn_operator};
 	for stage in stages {
@@ -3099,8 +3095,7 @@ fn runtime_queries(
 }
 
 /// The `MATCHES` clauses and `KNN` operator the predicates of a statement
-/// declare, as the operator tree's planner collects them for the statement:
-/// its table is the first table it reads whole, and an index answers a
+/// declare: its table is the first table it reads whole, and an index answers a
 /// `MATCHES` for the rows of the tables it reads whole, never for those a
 /// record id names.
 ///
@@ -3163,15 +3158,15 @@ fn index_scope_over(
 		select: true,
 		..IndexScope::default()
 	};
-	// The stages are collected outermost first, and the tree reads the
-	// conjunction in the order it is written.
+	// The stages are collected outermost first, and the conjunction is read in
+	// the order it is written.
 	for (at, stage) in stages.iter().enumerate().rev() {
 		let RowStage::Filter(predicate) = stage else {
 			continue;
 		};
 		scope.knn |= crate::exec::planner::util::has_knn_operator(predicate);
 		for predicate in std::iter::once(predicate).chain(folded[at].as_ref()) {
-			crate::exec::physical_expr::collect_cond_matches(predicate, &mut scope.registered);
+			crate::exec::vm::matches::collect_cond_matches(predicate, &mut scope.registered);
 			let found = crate::exec::planner::util::extract_matches_context(
 				predicate,
 				Some(planner.frozen()),
@@ -3200,14 +3195,14 @@ fn index_scope_over(
 	if !scope.matches.is_empty() {
 		scope.table = known.first().cloned();
 	}
-	scope.executor_tables = crate::exec::physical_expr::ExecutorTables::new(known, excluded, open);
+	scope.executor_tables = crate::exec::vm::matches::ExecutorTables::new(known, excluded, open);
 	// A `MATCHES` the registration walk does not reach binds to no index; when a
 	// table is read whole the statement is refused before it reads a row, so
 	// the outcome does not depend on which rows the condition reaches.
 	if scope.executor_tables.any_known() {
 		for stage in stages {
 			if let RowStage::Filter(predicate) = stage
-				&& let Some(found) = crate::exec::physical_expr::first_unregistered_cond_matches(
+				&& let Some(found) = crate::exec::vm::matches::first_unregistered_cond_matches(
 					predicate,
 					&scope.registered,
 				) {
@@ -3564,14 +3559,12 @@ fn is_table_source(op: &LogicalOp) -> bool {
 }
 
 /// The leaf for a source that is not a table: a value, a parameter, a mock or
-/// an expression in `FROM`, read as the operator tree reads it
-/// ([`ValuesRead`]), or a statement in `FROM`, mapped as a statement of its
-/// own. `None` for any other node.
+/// an expression in `FROM`, read as [`ValuesRead`] describes, or a statement in `FROM`, mapped as a
+/// statement of its own. `None` for any other node.
 async fn map_value_source(planner: &Planner<'_>, op: &LogicalOp) -> Mapped<Option<Plan>> {
 	let (expr, read) = match op {
 		LogicalOp::Values(values) => {
-			// A value is not a record: `FOR UPDATE` over it is the tree's
-			// error to raise.
+			// A value is not a record: a `FOR UPDATE` over it is declined.
 			if values.for_update {
 				return Err(NotCovered::internal("FOR UPDATE over a value"));
 			}
@@ -3771,8 +3764,7 @@ async fn table_access(
 		}
 		return Err(NotCovered::internal("no plan-time access path"));
 	};
-	// A union is planned with the ordering the choice was made with, as the
-	// operator tree plans it.
+	// A union is planned with the ordering the choice was made with.
 	let union_order = if decision.order_withheld {
 		None
 	} else {
@@ -3831,8 +3823,8 @@ async fn table_access(
 			paths,
 			dedupe,
 		} => index_union(table, paths, dedupe, union_order, schema),
-		// An OR fusion carries the union it replaced, planned as the operator
-		// tree plans it, for when a branch overflows.
+		// An OR fusion carries the union it replaced, planned as any union is,
+		// for when a branch overflows.
 		AccessPath::BitmapFusion {
 			root,
 			fallback,
@@ -3966,8 +3958,7 @@ async fn answers_exactly(
 	})
 }
 
-/// An index union over B-tree scans `paths`, merged as the operator tree
-/// merges it for `order`.
+/// An index union over B-tree scans `paths`, merged for `order`.
 fn index_union(
 	table: TableName,
 	paths: Vec<AccessPath>,
@@ -4035,7 +4026,7 @@ fn index_union(
 }
 
 /// Read what a scan of `table` depends on, declining a table the VM cannot
-/// scan the way the operator tree would.
+/// scan.
 async fn table_dependency(planner: &Planner<'_>, table: &TableName) -> Mapped<Dependency> {
 	let Some(txn) = planner.txn() else {
 		return Err(NotCovered::internal("no transaction at plan time"));
@@ -4120,8 +4111,7 @@ pub(super) fn projection(fields: &LogicalFields, omit: Vec<Omission>) -> Mapped<
 /// ([`Planner::resolve_field_paths`]). A path of fields and literal indices is
 /// removed from an object; any other is walked to the locations it names.
 ///
-/// An expression that names no path is refused as the operator tree refuses
-/// it, before any row is read.
+/// An expression that names no path is refused before any row is read.
 pub(super) async fn omissions(
 	planner: &Planner<'_>,
 	omit: &[LogicalExpr],
@@ -4363,9 +4353,8 @@ fn expand_omit(
 	Some(())
 }
 
-/// Where a projected field lands, as the operator tree places it: at its
-/// alias; at the position a path reads; otherwise under its derived name as
-/// one flat key.
+/// Where a projected field lands: at its alias; at the position a path reads; otherwise under its
+/// derived name as one flat key.
 fn output_path(expr: &LogicalExpr, alias: Option<&crate::expr::logical::OutputPath>) -> FieldPath {
 	match alias {
 		Some(alias) => output_field_path(alias),
@@ -4375,7 +4364,7 @@ fn output_path(expr: &LogicalExpr, alias: Option<&crate::expr::logical::OutputPa
 }
 
 /// The keys of an `ORDER BY`, each read from the row the sort is handed — the
-/// source row, before any projection — as the operator tree reads them.
+/// source row, before any projection.
 ///
 /// A key is resolved against the projection first (`resolve_order_by_alias`):
 /// a key naming a projected field or alias sorts by that field's expression.
@@ -4385,8 +4374,8 @@ fn output_path(expr: &LogicalExpr, alias: Option<&crate::expr::logical::OutputPa
 /// With `shared`, the statement's fields and the projection they map to, a
 /// computed key naming a field's alias is that field's value: the field is
 /// marked to read the key rather than evaluate its expression again, so the
-/// row's one evaluation is both what it sorts by and what it returns, as the
-/// operator tree's `Compute` hands its value to the projection. Otherwise a
+/// row's one evaluation is both what it sorts by and what it returns.
+/// Otherwise a
 /// computed key is evaluated again by the projection, which is taken only
 /// when the key has no effect, so that one evaluation or two answer alike.
 fn sort_keys(
@@ -4707,13 +4696,13 @@ struct Blocks {
 	/// schema statement mapped, with its footprint and whether it was folded
 	/// away as doing nothing.
 	later_schema: Option<Vec<(crate::exec::logical::footprint::Footprint, bool)>>,
-	/// Whether the statement being mapped is one the operator tree compiles
-	/// when it plans the statement holding the block, before any of it runs:
-	/// in each block, the statements up to and including its first schema
-	/// statement. It compiles a later one when the block reaches it.
+	/// Whether the statement being mapped is compiled when the statement
+	/// holding the block is planned, before any of it runs: in each block, the
+	/// statements up to and including its first schema statement. A later one
+	/// is compiled when the block reaches it.
 	eager: bool,
-	/// The error the operator tree raises as it plans the statement, which
-	/// the statement is answered with ([`Plan::Refused`]).
+	/// The error planning raises for the statement, which the statement is
+	/// answered with ([`Plan::Refused`]).
 	refusal: Option<super::plan::Refusal>,
 	/// Whether the block is planned late-bound after a change: no schema
 	/// statement is run speculatively, and whatever follows one that may
@@ -4802,8 +4791,8 @@ impl Blocks {
 		self.refusal = mark.refusal;
 	}
 
-	/// Statement `op`, which the operator tree refuses with `refusal` when the
-	/// block reaches it, raising the refusal there.
+	/// Statement `op`, which is refused with `refusal` when the block reaches
+	/// it, raising the refusal there.
 	fn raised_when_reached(
 		&mut self,
 		op: &LogicalOp,
@@ -4902,13 +4891,12 @@ impl Blocks {
 				Control::Seq(stmts)
 			}
 			Op::Let(stmt) => {
-				// A protected name is refused when the operator tree compiles
-				// the `LET`, which is before the statement runs where the tree
-				// compiles it with the statement.
+				// A protected name is refused when the `LET` is compiled,
+				// which is before the statement runs where it is compiled with
+				// the statement.
 				if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stmt.name.as_str()) {
-					// After a schema statement the operator tree compiles the
-					// `LET` when its block reaches it, so the refusal is
-					// raised there.
+					// After a schema statement the `LET` is compiled when its
+					// block reaches it, so the refusal is raised there.
 					if !self.eager {
 						return self.raised_when_reached(
 							op,
@@ -4923,7 +4911,7 @@ impl Blocks {
 					});
 				}
 				// A stored clause's `LET` of a `LET` raises when the clause
-				// reaches it, as the operator tree evaluates the value then.
+				// reaches it, where the value is evaluated.
 				if planner.is_stored_clause() && is_a_let(&stmt.value) {
 					return self.raised_when_reached(
 						op,
@@ -5041,7 +5029,7 @@ impl Blocks {
 			}
 			Op::Return(ret) => {
 				// A stored clause's `RETURN` of a `LET` raises when the clause
-				// reaches it, as the operator tree evaluates the `LET` then.
+				// reaches it, where the `LET` is evaluated.
 				if planner.is_stored_clause() && is_a_let(&ret.what) {
 					return self.raised_when_reached(
 						op,
@@ -5167,7 +5155,7 @@ impl Blocks {
 	/// [`inline_value`] holds, bound as a statement of its own is and mapped
 	/// with this program, so that a `RETURN` it holds is the `LET` or `RETURN`'s
 	/// to catch. A value that does not bind now is mapped as a statement, which
-	/// declines or refuses it as the operator tree does.
+	/// declines or refuses it as any statement is.
 	async fn inline(&mut self, planner: &Planner<'_>, value: &LogicalOp) -> Mapped<Control> {
 		let bound = crate::exec::vm::host::out_of_line(|| self.bound_value(planner, value)).await;
 		match bound {
@@ -5386,12 +5374,11 @@ impl Blocks {
 	/// a value.
 	///
 	/// A branch that is a `LET`, rather than a block holding one, is a `LET`
-	/// written as an expression, which the operator tree refuses as it
-	/// compiles the `IF` with the block, whether or not the branch is taken:
-	/// it is mapped as the expression statement it is, which refuses the
-	/// block. After a schema statement, or late-bound, the tree compiles the
-	/// `IF` when the block reaches it, and the refusal is raised only when
-	/// the branch is taken.
+	/// written as an expression, which is refused as the `IF` is compiled with
+	/// the block, whether or not the branch is taken: it is mapped as the
+	/// expression statement it is, which refuses the block. After a schema
+	/// statement, or late-bound, the `IF` is compiled when the block reaches
+	/// it, and the refusal is raised only when the branch is taken.
 	async fn branch(&mut self, planner: &Planner<'_>, value: &LogicalExpr) -> Mapped<Control> {
 		use crate::expr::logical::{LogicalEval, LogicalOp as Op};
 		match value {
@@ -5492,9 +5479,9 @@ impl Blocks {
 	/// covered where a statement does not bind or map against the catalog the
 	/// block's schema statements leave, where a statement holds a schema
 	/// statement inside it, and where a statement can be compiled only when
-	/// the block reaches it: one the operator tree refuses only then, and one
-	/// after a schema statement whose binding folds the clock, which the
-	/// operator tree binds when the block reaches it ([`binds_the_clock`]).
+	/// the block reaches it: one refused only then, and one after a schema
+	/// statement whose binding folds the clock, which is bound when the block
+	/// reaches it ([`binds_the_clock`]).
 	async fn statement(&mut self, planner: &Planner<'_>, op: &LogicalOp) -> Mapped<Control> {
 		match op {
 			LogicalOp::Eval(eval) if matches!(eval.expr, LogicalExpr::Break) => {
@@ -5574,12 +5561,11 @@ impl Blocks {
 		};
 		let (physical, seen) = match mapped {
 			BoundAndMapped::Mapped(physical, seen) => (*physical, seen),
-			// A statement the operator tree refuses as it plans it refuses the
-			// block where the tree plans it with the block: the statement is
-			// answered with the refusal and nothing of the block runs.
-			// A statement after the block's first schema statement, which the
-			// operator tree compiles when the block reaches it, raises the
-			// refusal there; so does a late-bound statement.
+			// A statement refused as it is planned refuses the block it is
+			// planned with: the statement is answered with the refusal and
+			// nothing of the block runs. A statement after the block's first
+			// schema statement, which is compiled when the block reaches it,
+			// raises the refusal there; so does a late-bound statement.
 			BoundAndMapped::Refused(refusal) if planner.is_late_bound() || !self.eager => {
 				return Ok(Self::refusal_statement(source, refusal, planner.is_late_bound()));
 			}
@@ -5593,8 +5579,8 @@ impl Blocks {
 			BoundAndMapped::Declined(why) => return Err(why),
 		};
 		let physical = super::optimize::optimize(physical);
-		// A refusal mapped for a statement the operator tree compiles when
-		// the block reaches it is raised there.
+		// A refusal mapped for a statement compiled when the block reaches
+		// it is raised there.
 		let raises_when_reached = matches!(physical.root, Plan::Refused { .. })
 			&& (planner.is_late_bound() || !self.eager);
 		let analysis = match analyzed {
@@ -6032,7 +6018,7 @@ enum BoundAndMapped {
 	/// reaches it, for the reason given: the whole statement holding the
 	/// block is not covered.
 	Declined(NotCovered),
-	/// The operator tree refuses it as it plans it.
+	/// Planning refuses it.
 	Refused(super::plan::Refusal),
 }
 
@@ -6161,8 +6147,8 @@ async fn seen(planner: &Planner<'_>, op: &LogicalOp, bound: &[String]) -> Seen {
 /// Bind and map block statement `op` as `planner` plans the block's
 /// statements, `bound` the names bound around it.
 ///
-/// `reached` is whether the operator tree binds the statement when the block
-/// reaches it rather than when it plans the block: one whose binding folds the
+/// `reached` is whether the statement is bound when the block reaches it
+/// rather than when the block is planned: one whose binding folds the
 /// clock then folds it as it stands at that reach, which a binding made when
 /// the query arrives cannot, so such a statement is not mapped. A membership
 /// the logical rules lifted into a semi or anti join is mapped as the
@@ -6218,8 +6204,8 @@ async fn bind_for_map(
 	.await
 	{
 		Ok(bound_op) => bound_op,
-		// The operator tree refuses a statement whose binding fails with the
-		// error the binding raises.
+		// A statement whose binding fails is refused with the error the
+		// binding raises.
 		Err(e) => {
 			return Err(match super::plan::Refusal::of(&e) {
 				Some(refusal) => BoundAndMapped::Refused(refusal),
@@ -6260,10 +6246,10 @@ pub(super) fn binds_alike_closure(op: &LogicalOp, planner: &Planner<'_>) -> bool
 }
 
 /// Whether binding `op` with `planner` folds a call that reads the clock, in
-/// `op` or in the body of a user-defined function it reaches: the operator
-/// tree binds a block statement after the block's first schema statement when
-/// the block reaches it, so such a statement folds the clock as it stands
-/// then. A body whose definition cannot be read is taken to fold it.
+/// `op` or in the body of a user-defined function it reaches: a block
+/// statement after the block's first schema statement is bound when the block
+/// reaches it, so such a statement folds the clock as it stands then. A body whose definition
+/// cannot be read is taken to fold it.
 pub(super) async fn binds_the_clock(op: &LogicalOp, planner: &Planner<'_>) -> bool {
 	if !binds_alike_recorded(op, planner) {
 		return true;

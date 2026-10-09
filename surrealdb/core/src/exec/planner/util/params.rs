@@ -11,15 +11,9 @@
 //! projection function calls (`type::field("name")`) into the path expression
 //! the argument names so the index analyzer can match them.
 
-#[cfg(test)]
-use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
-#[cfg(test)]
-use std::ops::ControlFlow;
 use std::sync::Arc;
 
-#[cfg(test)]
-use super::literals::try_value_to_logical_expr;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Function;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, lower_expr};
@@ -56,7 +50,7 @@ pub(crate) enum ParamBinding {
 
 /// Bind a parameter at plan time.
 ///
-/// The order is the runtime's (`physical_expr::Param`): the row-scoped names
+/// The order is the runtime's: the row-scoped names
 /// — `$this`, `$self`, `$parent` — are bound per row and never here, even
 /// when the context holds a value under the name; then the context's value
 /// chain, which holds `LET` bindings, client bind parameters and the session
@@ -109,67 +103,6 @@ pub(crate) async fn resolve_param_value(
 		ParamBinding::Value(value) => Some(value),
 		ParamBinding::Runtime | ParamBinding::Unbound => None,
 	}
-}
-
-#[cfg(test)]
-/// Resolve bind-parameter references in a `WHERE` condition to their literal
-/// values. Returns a new expression with [`LogicalExpr::Param`] nodes replaced
-/// by their literal form wherever the value is available.
-///
-/// Delegates to [`resolve_param_value`] per parameter. Row-scoped names
-/// (e.g. [`SELECT_ITERATION_PARAMS`]) are never resolved; all other params
-/// are looked up first in the context, then as `DEFINE PARAM` values.
-///
-/// Parameters that cannot be resolved, or whose literal form would evaluate
-/// to a different value (see [`super::literals::substitution_is_lossy`]), are
-/// left as-is: runtime parameter resolution yields the correct value, whereas
-/// a lossy substitution changes results, not just the plan. A
-/// [`LogicalExpr::Subquery`] is not entered; the plan inside it is bound on
-/// its own.
-pub(crate) async fn resolve_condition_params(
-	cond: &LogicalExpr,
-	ctx: &crate::ctx::FrozenContext,
-	txn: Option<&Arc<crate::kvs::Transaction>>,
-	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
-	row_scoped: &[&str],
-) -> LogicalExpr {
-	// Pass 1: collect all param names referenced in the condition.
-	let mut names: HashSet<String> = HashSet::new();
-	let _ = cond.visit(&mut |e| {
-		if let LogicalExpr::Param(param) = e {
-			names.insert(param.as_str().to_string());
-		}
-		ControlFlow::<()>::Continue(())
-	});
-	if names.is_empty() {
-		return cond.clone();
-	}
-
-	// Pass 2: resolve each parameter via the shared resolution path.
-	let mut resolved: HashMap<String, LogicalExpr> = HashMap::with_capacity(names.len());
-	for name in names {
-		if let Some(value) = resolve_param_value(&name, ctx, txn, ns_db, row_scoped).await
-			&& let Some(literal) = try_value_to_logical_expr(value)
-		{
-			resolved.insert(name, literal);
-		}
-	}
-
-	if resolved.is_empty() {
-		return cond.clone();
-	}
-
-	// Pass 3: apply substitutions.
-	let mut expr = cond.clone();
-	let Ok(()) = expr.visit_mut(&mut |e| {
-		if let LogicalExpr::Param(param) = e
-			&& let Some(literal) = resolved.get(param.as_str())
-		{
-			*e = literal.clone();
-		}
-		Ok::<_, Infallible>(())
-	});
-	expr
 }
 
 /// Rewrite projection function calls with a single string literal argument
@@ -225,30 +158,5 @@ mod tests {
 		// The literal argument is rewritten; the parameter one is left for
 		// evaluation.
 		assert_eq!(e.to_sql(), "a.b = 1 AND type::field($p) = 2");
-	}
-
-	#[cfg(feature = "kv-mem")]
-	#[tokio::test]
-	async fn statement_params_resolve_and_row_params_do_not() {
-		use std::sync::Arc;
-
-		use crate::kvs::Datastore;
-		use crate::val::Value;
-
-		let ds = Datastore::new("memory").await.expect("datastore");
-		let mut ctx = ds.setup_ctx().expect("context");
-		ctx.add_value("p", Arc::new(Value::Bool(true)));
-		ctx.add_value("this", Arc::new(Value::Bool(false)));
-		let ctx = ctx.freeze();
-
-		let resolved = resolve_condition_params(
-			&expr("$p AND a = $q AND $this.b"),
-			&ctx,
-			None,
-			None,
-			SELECT_ITERATION_PARAMS,
-		)
-		.await;
-		assert_eq!(resolved.to_sql(), "true AND a = $q AND $this.b");
 	}
 }

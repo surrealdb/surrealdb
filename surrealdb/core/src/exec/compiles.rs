@@ -2,10 +2,9 @@
 //! for tests that must know a running program compiled nothing.
 //!
 //! Every entry point that binds, maps, lowers or compiles a plan or a scalar
-//! notes itself here: [`Planner::bind_scoped`], [`Planner::plan_logical`],
-//! [`Planner::physical_expr`], the VM's mapping and lowering, and the lowering
-//! of a closure body. A note made while a program's stream is being polled
-//! ([`while_running`]) is a compilation the running program made; one made
+//! notes itself here: [`Planner::bind_scoped`], [`Planner::scalar_metadata`], the VM's
+//! mapping and lowering, and the lowering of a closure body. A note made while a program's stream
+//! is being polled ([`while_running`]) is a compilation the running program made; one made
 //! while the statement is planned is not. A test runs a query and reads
 //! [`count`] before and after.
 //!
@@ -26,21 +25,13 @@
 //! while a request runs, outside its compilation and outside a fault, is a
 //! compilation made after the request arrived, counted by [`after_arrival`].
 //!
-//! Every closure invocation runs a unit; no closure body is evaluated in the
-//! operator tree's form. A body the host lowers no unit of is compiled to that
-//! form once, in the fault that finds it, only for the error compiling it
-//! reports ([`crate::exec::vm::closure`]). Each such compilation is noted by
-//! [`note_tree_body`] and counted by [`tree_bodies`], whether or not a
-//! program is running, so a test can tell exactly how many bodies took it.
-//!
 //! The counts are per thread, so tests running in parallel do not see one
 //! another's compilations, and a test that asks them runs on a current-thread
 //! runtime, which runs every task a plan spawns on the same thread. Outside
 //! a test build none of this is compiled in.
 //!
 //! [`Planner::bind_scoped`]: crate::exec::planner::Planner::bind_scoped
-//! [`Planner::plan_logical`]: crate::exec::planner::Planner::plan_logical
-//! [`Planner::physical_expr`]: crate::exec::planner::Planner::physical_expr
+//! [`Planner::scalar_metadata`]: crate::exec::planner::Planner::scalar_metadata
 
 use crate::exec::ValueBatchStream;
 
@@ -54,9 +45,6 @@ thread_local! {
 	static SERVING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// The faults this thread has served.
 	static FAULTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-	/// The closure bodies this thread has compiled to the operator tree's
-	/// form for the error a body no unit of which is lowered reports.
-	static TREE_BODIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// The program streams this thread has started ([`while_running`]).
 	static PROGRAMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// How many requests this thread is executing, nested ([`request`]).
@@ -88,21 +76,6 @@ pub(crate) fn per_statement() -> bool {
 #[cfg(test)]
 pub(crate) fn set_per_statement(on: bool) {
 	PER_STATEMENT.with(|flag| flag.set(on));
-}
-
-/// Note one compilation of a closure body to the operator tree's form for the
-/// error it reports, on this thread.
-#[inline]
-pub(crate) fn note_tree_body() {
-	#[cfg(test)]
-	TREE_BODIES.with(|count| count.set(count.get() + 1));
-}
-
-/// How many closure bodies this thread has compiled to the operator tree's
-/// form for the error it reports.
-#[cfg(test)]
-pub(crate) fn tree_bodies() -> usize {
-	TREE_BODIES.with(std::cell::Cell::get)
 }
 
 /// Note one compilation on this thread.
@@ -339,13 +312,12 @@ pub(crate) fn while_running_task<'a, F: std::future::Future + Send + 'a>(
 // - a load from the compile cache (`crate::exec::vm::compile_cache`), by name or by text: a table's
 //   read unit, its field state and `SELECT` permission, the stages a write that may reach any
 //   table, or a late-bound write, applies to a table, a closure body's unit, the code reached
-//   through the operator tree's expressions — a function body a compiled expression calls, an
-//   analyzer's function, an API's middleware and handler, an expression reached through
-//   `crate::exec::entry`, a GQL mutation step's write (`crate::exec::vm::serve`) — and for a
-//   late-bound statement a function's call unit, the body of a function that reads an argument
-//   where only a value answers compiled for the call's values, and a parameter's permission
-//   predicate. A load reads the object's version and checks what else the unit depends on, and
-//   compiles nothing;
+//   through an expression — a function body a compiled expression calls, an analyzer's function, an
+//   API's middleware and handler, an expression reached through `crate::exec::entry`, a GQL
+//   mutation step's write (`crate::exec::vm::serve`) — and for a late-bound statement a function's
+//   call unit, the body of a function that reads an argument where only a value answers compiled
+//   for the call's values, and a parameter's permission predicate. A load reads the object's
+//   version and checks what else the unit depends on, and compiles nothing;
 // - a compile-cache miss ([`serving_fault`]): the unit a load found none of, compiled once per key
 //   and frame, the one kind of compile a running program causes;
 // - the closure links a run makes and their checks that a held unit still stands;
@@ -519,13 +491,6 @@ impl<F: std::future::Future> std::future::Future for NestedQuery<F> {
 		let _declared = Declared::new(false);
 		self.inner.as_mut().poll(cx)
 	}
-}
-
-/// [`seam`] for synchronous work.
-#[inline]
-pub(crate) fn seam_sync<R>(work: impl FnOnce() -> R) -> R {
-	let _declared = Declared::new(false);
-	work()
 }
 
 /// Panics, in a build with debug assertions, when a running program outside

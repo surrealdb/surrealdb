@@ -475,7 +475,7 @@ pub(super) async fn permission_checked_names(
 	let mut checked = HashSet::new();
 	for name in names {
 		// `$this` and `$self` are answered from the row, or as `NONE`, before
-		// any catalog read (`physical_expr::Param`), so neither is a fetch.
+		// any catalog read, so neither is a fetch.
 		if matches!(name.as_str(), "this" | "self") {
 			continue;
 		}

@@ -400,40 +400,6 @@ pub(crate) fn key_lit_to_expr(key: &LogicalRecordIdKey) -> Result<LogicalExpr, E
 // Constant folding
 // ============================================================================
 
-/// Fold constant, row-independent subexpressions of a `WHERE` predicate to
-/// literal values, bottom-up. This enables proper index range access for
-/// expressions like `time::now() - 365d` which would otherwise be opaque to
-/// index analysis.
-///
-/// Must be called **after** parameter resolution
-/// ([`super::params::resolve_condition_params`]) so that parameter references
-/// have already been replaced with literals.
-///
-/// Only folds expressions that:
-/// - Contain no field references (row-independent)
-/// - Are arithmetic on literals, or calls to a built-in that is both context-free and deterministic
-///   (math::*, string::*, type::*, etc.) with all arguments already literals. `rand::*` is
-///   context-free but not deterministic, so it is left for per-row evaluation.
-/// - Call only functions `capabilities` permits the caller to execute.
-///
-/// `time::now()` is evaluated once at plan time, consistent with how most
-/// databases evaluate `NOW()` once per statement/transaction.
-///
-/// A [`LogicalExpr::Subquery`] is not entered: the plan inside it is bound and
-/// folded on its own.
-///
-/// Returns whether anything folded, so a caller driving this to a fixpoint
-/// can tell a pass that changed the expression from one that did not.
-#[cfg(test)]
-pub(crate) fn fold_condition_expressions(
-	expr: &mut LogicalExpr,
-	registry: &FunctionRegistry,
-	capabilities: &Capabilities,
-	restricted_fields: Option<&RestrictedFields>,
-) -> bool {
-	fold_expressions(expr, registry, capabilities, restricted_fields, false, true)
-}
-
 /// [`fold_condition_expressions`], with the aggregate exception under the
 /// caller's control.
 ///
@@ -1013,7 +979,7 @@ pub(crate) fn try_fold_to_literal(
 		} => {
 			let base = try_literal_to_value(base)?;
 			let index = try_literal_to_value(index)?;
-			let result = crate::exec::parts::index::evaluate_index(&base, &index).ok()?;
+			let result = crate::exec::vm::access::index::evaluate_index(&base, &index).ok()?;
 			try_value_to_logical_expr(result)
 		}
 
@@ -1185,6 +1151,40 @@ fn try_eval_binary(op: &BinaryOperator, left: Value, right: Value) -> Option<Val
 		// datetime ± duration patterns.
 		_ => None,
 	}
+}
+
+/// Fold constant, row-independent subexpressions of a `WHERE` predicate to
+/// literal values, bottom-up. This enables proper index range access for
+/// expressions like `time::now() - 365d` which would otherwise be opaque to
+/// index analysis.
+///
+/// Must be called **after** parameter resolution
+/// ([`super::params::resolve_condition_params`]) so that parameter references
+/// have already been replaced with literals.
+///
+/// Only folds expressions that:
+/// - Contain no field references (row-independent)
+/// - Are arithmetic on literals, or calls to a built-in that is both context-free and deterministic
+///   (math::*, string::*, type::*, etc.) with all arguments already literals. `rand::*` is
+///   context-free but not deterministic, so it is left for per-row evaluation.
+/// - Call only functions `capabilities` permits the caller to execute.
+///
+/// `time::now()` is evaluated once at plan time, consistent with how most
+/// databases evaluate `NOW()` once per statement/transaction.
+///
+/// A [`LogicalExpr::Subquery`] is not entered: the plan inside it is bound and
+/// folded on its own.
+///
+/// Returns whether anything folded, so a caller driving this to a fixpoint
+/// can tell a pass that changed the expression from one that did not.
+#[cfg(test)]
+pub(crate) fn fold_condition_expressions(
+	expr: &mut LogicalExpr,
+	registry: &FunctionRegistry,
+	capabilities: &Capabilities,
+	restricted_fields: Option<&RestrictedFields>,
+) -> bool {
+	fold_expressions(expr, registry, capabilities, restricted_fields, false, true)
 }
 
 #[cfg(test)]

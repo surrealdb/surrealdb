@@ -46,96 +46,15 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
-use super::observe::is_observed;
 use crate::catalog::SubscriptionDefinition;
 use crate::dbs::RoutedNotification;
 use crate::doc::Action;
+use crate::exec::ExecutionContext;
 use crate::exec::operators::write::ctx::WriteCtx;
-use crate::exec::operators::write::row::WriteRow;
-use crate::exec::operators::write::stage::{StageId, StageOutcome, WriteStage};
-use crate::exec::{BoxFut, ExecutionContext};
 use crate::expr::ControlFlow;
 use crate::expr::paths::{AC, ID, RD, TK};
-use crate::kvs::LiveQueryEngine;
 use crate::types::{PublicAction, PublicNotification};
 use crate::val::{RecordId, Value, convert_value_to_public_value};
-
-/// This module's stages, by id.
-#[allow(
-	clippy::wildcard_enum_match_arm,
-	reason = "a stage this module does not own is not this module's to name, and `super::lookup` \
-	          routes none of them here"
-)]
-pub(crate) fn stage(id: StageId) -> Option<Arc<dyn WriteStage>> {
-	match id {
-		StageId::ProcessTableLives(action) => Some(Arc::new(ProcessTableLives(action))),
-		// `super::lookup` routes only this module's stages here, so anything
-		// else is a routing mistake rather than a missing body.
-		_ => None,
-	}
-}
-
-/// Notify the table's live subscriptions of this record.
-///
-/// The third of the four observers on every order that has them: after the
-/// event bodies, which may themselves write, and before the change feed.
-#[derive(Debug)]
-struct ProcessTableLives(Action);
-
-impl WriteStage for ProcessTableLives {
-	fn name(&self) -> &'static str {
-		StageId::ProcessTableLives(self.0).name()
-	}
-
-	fn apply<'a>(
-		&'a self,
-		row: &'a mut WriteRow,
-		ctx: &'a WriteCtx,
-	) -> BoxFut<'a, Result<StageOutcome, ControlFlow>> {
-		Box::pin(async move {
-			// Cheapest gates first. Under the Router engine delivery happens
-			// off the write path, replayed by the per-node router from the
-			// events the change capture already wrote, so the inline loop is
-			// the one thing that is turned off.
-			if ctx.exec().root().ctx.config.datastore.live_query_engine == LiveQueryEngine::Router {
-				return Ok(StageOutcome::Continue);
-			}
-			if ctx.lives.is_empty() || !is_observed(row, ctx) {
-				return Ok(StageOutcome::Continue);
-			}
-			let Some(broker) = ctx.exec().ctx().broker().cloned() else {
-				return Ok(StageOutcome::Continue);
-			};
-			// Per record rather than per subscription: a record with no id is
-			// a broken order, not a subscription that cannot be served.
-			let Some(rid) = row.id.clone() else {
-				return Err(ControlFlow::Err(anyhow::anyhow!(
-					crate::err::EngineError::unreachable(
-						"notifying a subscription of a record with no record id"
-					)
-				)));
-			};
-			// Read off the row before the first await: a `WriteRow` holds a
-			// `OnceCell`, so a shared borrow alive across one would poison the
-			// `Send` bound on this future.
-			let images = Images {
-				initial: Arc::new(row.initial.clone()),
-				current: Arc::new(row.current.clone()),
-				action: self.0,
-			};
-
-			for at in 0..ctx.lives.len() {
-				let Notify::Deliver(notification) =
-					crate::exec::vm::notify_at(ctx, at, &rid, &images).await?
-				else {
-					continue;
-				};
-				deliver(&broker, ctx, &ctx.lives[at], notification).await?;
-			}
-			Ok(StageOutcome::Continue)
-		})
-	}
-}
 
 /// Send `notification` to `subscription`'s node, when this node emits for it.
 ///

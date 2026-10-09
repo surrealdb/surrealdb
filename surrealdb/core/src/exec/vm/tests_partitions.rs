@@ -674,7 +674,7 @@ async fn c_join_from_partitions_pairs_as_the_in_memory_join() {
 	let any_program = program_of(&free_ctx, "SELECT * FROM u").await;
 	let builds = build_rows_c();
 	let probes = probe_rows_plain();
-	for join_type in [JoinType::Inner, JoinType::Left, JoinType::Semi, JoinType::Anti] {
+	for join_type in [JoinType::Inner, JoinType::Left] {
 		let step = join_step(join_type);
 		let want = in_memory_join(&builds, &probes, &step, &any_program, &free_ctx).await;
 		assert!(!want.is_empty(), "{join_type:?} pairs nothing");

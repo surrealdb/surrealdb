@@ -1,14 +1,8 @@
 //! Physical plan EXPLAIN tree representation for the VM.
 //!
-//! Converts a [`PhysicalPlan`] into an operator tree suitable for
-//! [`ExplainPlan`] and [`AnalyzePlan`] rendering. Every statement the VM runs
-//! is explained from the plan it is mapped to: the access path of each source,
-//! the statements nested in its predicates that run as membership joins, and,
-//! under `EXPLAIN ANALYZE`, what the run measured of a KNN search's prefilter.
-//!
-//! [`ExplainPlan`]: crate::exec::operators::ExplainPlan
-//! [`AnalyzePlan`]: crate::exec::operators::AnalyzePlan
-
+//! Converts a [`PhysicalPlan`] into inert display nodes. The VM adapter runs
+//! the program under EXPLAIN ANALYZE and renders its counters through these
+//! nodes; no display node executes an expression or a statement.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
@@ -27,13 +21,12 @@ use crate::exec::operators::scan::{
 	BitmapNode, FusedCandidates, MergeMode, PrefilterTier, choose_prefilter_tier,
 };
 use crate::exec::planner::CountDecision;
-use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, ValueBatch, ValueBatchStream,
-};
+use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{LogicalExpr, LogicalOp, SourceRef};
 
-/// An operator tree node representing a step of a [`PhysicalPlan`].
+/// A node of the `EXPLAIN` display tree, representing a step of a
+/// [`PhysicalPlan`].
 #[derive(Debug)]
 pub(crate) struct ExplainNode {
 	pub(crate) name: &'static str,
@@ -41,7 +34,6 @@ pub(crate) struct ExplainNode {
 	pub(crate) attrs: Vec<(String, String)>,
 	pub(crate) children: Vec<Arc<dyn ExecOperator>>,
 	pub(crate) metrics: Option<Arc<OperatorMetrics>>,
-	pub(crate) exec: Option<Arc<dyn ExecOperator>>,
 	/// For a KNN scan under `EXPLAIN ANALYZE`: the strategy its prefilter's
 	/// allow-list chose, once [`Self::measured`] has been evaluated.
 	tier: Option<Arc<AtomicU8>>,
@@ -73,7 +65,6 @@ impl ExplainNode {
 			attrs,
 			children,
 			metrics: metrics.cloned(),
-			exec: None,
 			tier: None,
 			fallback: None,
 			measured: Vec::new(),
@@ -118,19 +109,7 @@ impl ExecOperator for ExplainNode {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		if let Some(exec) = &self.exec {
-			exec.access_mode()
-		} else {
-			AccessMode::ReadOnly
-		}
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		if let Some(exec) = &self.exec {
-			exec.cardinality_hint()
-		} else {
-			CardinalityHint::AtMostOne
-		}
+		AccessMode::ReadOnly
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -142,48 +121,11 @@ impl ExecOperator for ExplainNode {
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
-		self.metrics.as_deref().or_else(|| self.exec.as_ref().and_then(|e| e.metrics()))
+		self.metrics.as_deref()
 	}
 
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let Some(exec) = &self.exec else {
-			return Ok(Box::pin(futures::stream::empty()));
-		};
-		// The program records the counters of its host steps into the metrics
-		// every node of the analysed plan reports.
-		let stream = match &self.metrics {
-			Some(metrics) => exec.execute(&ctx.with_vm_metrics(Arc::clone(metrics)))?,
-			None => exec.execute(ctx)?,
-		};
-		let stream = if let Some(metrics) = &self.metrics {
-			crate::exec::metrics::monitor_stream(stream, self.name, metrics)
-		} else {
-			stream
-		};
-		if self.measured.is_empty() {
-			return Ok(stream);
-		}
-		// The bitmap trees are evaluated once the statement has run, before
-		// the plan is rendered, which the end of this stream tells.
-		let trees = self.measured.clone();
-		let ctx = ctx.clone();
-		let measured = futures::stream::once(async move {
-			for tree in &trees {
-				tree.measure(&ctx).await?;
-			}
-			Ok::<Option<ValueBatch>, crate::expr::ControlFlow>(None)
-		})
-		.filter_map(|measured| std::future::ready(measured.transpose()));
-		Ok(Box::pin(stream.chain(measured)))
-	}
-
-	fn enable_metrics(&self) {
-		if let Some(m) = &self.metrics {
-			m.enable();
-		}
-		if let Some(exec) = &self.exec {
-			exec.enable_metrics();
-		}
+	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		Ok(Box::pin(futures::stream::empty()))
 	}
 }
 
@@ -1606,9 +1548,8 @@ fn index_scan_attrs(
 
 /// Convert a [`PhysicalPlan`] into an [`ExecOperator`] tree for EXPLAIN rendering.
 ///
-/// Given the operator `exec` that runs the statement, the tree is the one
-/// `EXPLAIN ANALYZE` runs: it executes `exec`, every node reports the metrics
-/// of that run, and the bitmap trees of its scans are evaluated when it ends.
+/// With `analyze`, every node reports the counters of the VM run. The
+/// adapter measures the bitmap trees after draining the statement.
 ///
 /// `explained` is the statement `physical` was planned from by
 /// [`map::explained_plan`](super::map::explained_plan): a `LET` is rendered as the binding of its
@@ -1616,13 +1557,13 @@ fn index_scan_attrs(
 pub(crate) fn to_explain_operator(
 	explained: &LogicalOp,
 	physical: &PhysicalPlan,
-	exec: Option<&Arc<dyn ExecOperator>>,
+	analyze: bool,
 	checked: bool,
-) -> Arc<dyn ExecOperator> {
-	let metrics = exec.is_some().then(|| Arc::new(OperatorMetrics::new()));
+) -> Arc<ExplainNode> {
+	let metrics = analyze.then(|| Arc::new(OperatorMetrics::new()));
 	let mut walk = Explainer {
 		metrics: metrics.as_ref(),
-		measure: exec.is_some(),
+		measure: analyze,
 		versioned: false,
 		tempfiles: false,
 		nested: &[],
@@ -1641,8 +1582,7 @@ pub(crate) fn to_explain_operator(
 			metrics.as_ref(),
 		);
 	}
-	if let Some(exec) = exec {
-		root.exec = Some(Arc::clone(exec));
+	if analyze {
 		root.measured = std::mem::take(&mut walk.measured);
 	}
 	Arc::new(root)
@@ -1685,4 +1625,53 @@ pub(crate) fn to_analysis_operator(
 		prefilter: None,
 	};
 	Arc::new(walk.plan(physical))
+}
+
+/// A VM run's display and counters. Display nodes never execute a statement.
+#[derive(Debug)]
+pub(super) struct VmAnalysis {
+	pub(super) plan: Arc<ExplainNode>,
+	pub(super) format: crate::expr::ExplainFormat,
+	pub(super) redact: bool,
+}
+impl VmAnalysis {
+	pub(super) fn frame(&self, ctx: &ExecutionContext) -> ExecutionContext {
+		let metrics = self.plan.metrics.as_ref().expect("analyzed plans hold counters");
+		metrics.enable();
+		ctx.with_vm_metrics(Arc::clone(metrics))
+	}
+	pub(super) fn run(&self, input: ValueBatchStream, ctx: &ExecutionContext) -> ValueBatchStream {
+		let mut input = crate::exec::monitor_stream(
+			input,
+			self.plan.name,
+			self.plan.metrics.as_ref().expect("analyzed plans hold counters"),
+		);
+		let plan = Arc::clone(&self.plan);
+		let format = self.format;
+		let redact = self.redact;
+		let ctx = ctx.clone();
+		Box::pin(futures::stream::once(async move {
+			let mut total_rows = 0;
+			while let Some(batch) = input.next().await {
+				match batch {
+					Ok(batch) => total_rows += batch.len() as u64,
+					Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Return(_)) => {
+						break;
+					}
+					Err(crate::expr::ControlFlow::Continue) => continue,
+					Err(error @ crate::expr::ControlFlow::Err(_)) => return Err(error),
+				}
+			}
+			for measured in &plan.measured {
+				measured.measure(&ctx).await?;
+			}
+			let value = crate::exec::operators::ExplainPlan::render_analyzed(
+				plan.as_ref(),
+				format,
+				redact,
+				total_rows,
+			);
+			Ok(ValueBatch::new(vec![value]))
+		}))
+	}
 }

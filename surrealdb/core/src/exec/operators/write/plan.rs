@@ -22,16 +22,10 @@
 // naming it.
 #![warn(clippy::wildcard_enum_match_arm)]
 
-use std::sync::Arc;
-
-use super::ctx::{TableExistence, WriteCtx};
+use super::ctx::TableExistence;
 use super::row::WriteRow;
-use super::stage::{
-	LightweightReason, RecordImage, StageId, StageOutcome, TableTypeFor, WriteStage,
-};
-use crate::catalog::providers::TableProvider;
+use super::stage::{LightweightReason, RecordImage, StageId, TableTypeFor};
 use crate::doc::{Action, Error as DocError};
-use crate::expr::ControlFlow;
 use crate::val::RecordId;
 
 /// The statement form a write operator runs.
@@ -120,37 +114,6 @@ pub(crate) enum WriteOrder {
 }
 
 impl WriteOrder {
-	/// Every order a *statement* runs, so a test over the set cannot silently
-	/// omit one. The three view-maintenance orders are deliberately absent:
-	/// they are not a form's, they open on no tenant guard, and a property
-	/// asserted of every statement order is not asserted of them.
-	pub(crate) const ALL: [WriteOrder; 9] = [
-		WriteOrder::Create,
-		WriteOrder::Update,
-		WriteOrder::Delete,
-		WriteOrder::UpsertCreate,
-		WriteOrder::UpsertUpdate,
-		WriteOrder::RelateCreate,
-		WriteOrder::RelateUpdate,
-		WriteOrder::InsertCreate,
-		WriteOrder::InsertUpdate,
-	];
-
-	/// The form this order belongs to, and `None` for a view-maintenance
-	/// order: those belong to no statement kind — a write reaches one by
-	/// synthesising a row, not by being a `CREATE` or a `DELETE`.
-	pub(crate) fn form(self) -> Option<WriteForm> {
-		match self {
-			WriteOrder::Create => Some(WriteForm::Create),
-			WriteOrder::Update => Some(WriteForm::Update),
-			WriteOrder::Delete => Some(WriteForm::Delete),
-			WriteOrder::UpsertCreate | WriteOrder::UpsertUpdate => Some(WriteForm::Upsert),
-			WriteOrder::RelateCreate | WriteOrder::RelateUpdate => Some(WriteForm::Relate),
-			WriteOrder::InsertCreate | WriteOrder::InsertUpdate => Some(WriteForm::Insert),
-			WriteOrder::ViewCreate | WriteOrder::ViewUpdate | WriteOrder::ViewDelete => None,
-		}
-	}
-
 	/// The view-maintenance order for one action.
 	pub(crate) fn for_view(action: Action) -> Self {
 		match action {
@@ -266,7 +229,6 @@ pub(crate) struct RetryPolicy {
 /// A form's orders and its branching, as data.
 #[derive(Clone, Debug)]
 pub(crate) struct WritePlan {
-	form: WriteForm,
 	orders: Vec<(WriteOrder, Vec<StageId>)>,
 	branching: Branching,
 }
@@ -340,15 +302,9 @@ impl WritePlan {
 			),
 		};
 		Self {
-			form: facts.form,
 			orders,
 			branching,
 		}
-	}
-
-	/// The form these orders belong to.
-	pub(crate) fn form(&self) -> WriteForm {
-		self.form
 	}
 
 	/// How the orders are selected between.
@@ -360,240 +316,6 @@ impl WritePlan {
 	pub(crate) fn order(&self, which: WriteOrder) -> Option<&[StageId]> {
 		self.orders.iter().find(|(o, _)| *o == which).map(|(_, s)| s.as_slice())
 	}
-
-	/// Every order this form runs, in the order they are declared.
-	pub(crate) fn orders(&self) -> impl Iterator<Item = (WriteOrder, &[StageId])> {
-		self.orders.iter().map(|(o, s)| (*o, s.as_slice()))
-	}
-
-	/// The maintenance a view row gets for `action`, as a program of its own:
-	/// the order [`WriteForm::View`]'s plan holds for the action, bound to its
-	/// stages. The action is settled by the caller, which has just written or
-	/// deleted the row and knows which it did.
-	pub(crate) fn view_maintenance(action: Action) -> Result<WriteProgram, StageId> {
-		let which = WriteOrder::for_view(action);
-		let mut stages = Vec::new();
-		for id in view_maintenance_order(action) {
-			stages.push(stage_impl(id).ok_or(id)?);
-		}
-		Ok(WriteProgram {
-			orders: vec![(which, stages)],
-			branching: Branching::Sole(which),
-		})
-	}
-
-	/// Bind each named stage to its implementation.
-	///
-	/// `Err` names the first stage whose implementation has not landed, which
-	/// is the whole of the gap: the orders are complete, and a form becomes
-	/// runnable exactly when every stage its orders name is implemented.
-	pub(crate) fn resolve(&self) -> Result<WriteProgram, StageId> {
-		let mut orders = Vec::with_capacity(self.orders.len());
-		for (which, ids) in &self.orders {
-			let mut stages = Vec::with_capacity(ids.len());
-			for id in ids {
-				stages.push(stage_impl(*id).ok_or(*id)?);
-			}
-			orders.push((*which, stages));
-		}
-		Ok(WriteProgram {
-			orders,
-			branching: self.branching,
-		})
-	}
-}
-
-/// The implementation of a stage, when one is registered.
-///
-/// An order names stages; [`super::stages`] is where a name becomes a body,
-/// and this is the only call into it. A `None` has no implementation, and
-/// [`WritePlan::resolve`] refuses to bind a plan that names it rather than
-/// running a partial order — which is what keeps a half-built order from
-/// writing anything.
-///
-/// # A stage reaches the statement's clauses through the context, not the id
-///
-/// `StageId` is `Copy`, so it can carry no `Arc<dyn PhysicalExpr>` and the
-/// lookup is a pure function of a name. The statement's compiled `WHERE`, data
-/// clause and `ON DUPLICATE KEY UPDATE` reach a stage through
-/// [`WriteCtx::clauses`](super::ctx::WriteCtx), resolved once per statement and
-/// shared by every record. A stage that wants one reads it from the context it
-/// is handed; it is never a constructor argument, because one implementation of
-/// a stage is shared by every statement of that form.
-fn stage_impl(id: StageId) -> Option<Arc<dyn WriteStage>> {
-	super::stages::lookup(id)
-}
-
-/// A form's orders with every stage bound, plus the control flow that selects
-/// between them.
-#[derive(Debug)]
-pub(crate) struct WriteProgram {
-	orders: Vec<(WriteOrder, Vec<Arc<dyn WriteStage>>)>,
-	branching: Branching,
-}
-
-impl WriteProgram {
-	/// Run one record.
-	pub(crate) async fn run_record(
-		&self,
-		row: &mut WriteRow,
-		ctx: &WriteCtx,
-	) -> Result<StageOutcome, ControlFlow> {
-		match self.branching {
-			Branching::Sole(order) => self.run_order(order, row, ctx).await,
-			Branching::UpFront {
-				creating,
-				updating,
-			} => {
-				// The record decides, before any order-specific stage runs, so
-				// a subject that named an id is read here rather than by a
-				// stage of the order this reading picks.
-				row.load_named_subject(ctx).await?;
-				let order = if row.is_new() {
-					creating
-				} else {
-					updating
-				};
-				self.run_order(order, row, ctx).await
-			}
-			Branching::Retry {
-				creating,
-				updating,
-				policy,
-			} => {
-				// A record the source already read has nothing to create.
-				if !row.is_iteration_initial() {
-					return self.run_order(updating, row, ctx).await;
-				}
-				self.attempt_create(creating, updating, policy, row, ctx).await
-			}
-			Branching::ByAction => {
-				Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
-					"a view row's order is chosen by the action its maintenance settled"
-						.to_string()
-				))))
-			}
-		}
-	}
-
-	/// Attempt the creating order behind a savepoint, and re-run a classified
-	/// conflict as an update.
-	async fn attempt_create(
-		&self,
-		creating: WriteOrder,
-		updating: WriteOrder,
-		policy: RetryPolicy,
-		row: &mut WriteRow,
-		ctx: &WriteCtx,
-	) -> Result<StageOutcome, ControlFlow> {
-		let stages = self.stages(creating)?;
-		let split = policy.savepoint_after.min(stages.len());
-		// Stages ahead of the savepoint are not part of the attempt and are
-		// not undone by rolling it back.
-		match run_stages(&stages[..split], row, ctx).await? {
-			StageOutcome::SkipRow => return Ok(StageOutcome::SkipRow),
-			StageOutcome::Continue => {}
-		}
-		let txn = ctx.txn();
-		txn.new_save_point().await.map_err(ControlFlow::Err)?;
-		let outcome = run_stages(&stages[split..], row, ctx).await;
-		let failure = match outcome {
-			Ok(outcome) => {
-				txn.release_last_save_point().await.map_err(ControlFlow::Err)?;
-				return Ok(outcome);
-			}
-			// `BREAK`, `CONTINUE` and `RETURN` belong to a construct outside
-			// this statement and are not create conflicts, so they are not
-			// reclassified — but the attempt behind them is half-run, and the
-			// savepoint must be rolled back before the signal leaves. Releasing
-			// it would commit a record stored without its index entries, its
-			// edges or its observers into the enclosing transaction.
-			//
-			// A stage that propagates one is rolled back like any other
-			// failure, so the signal never leaves a half-written record behind.
-			Err(signal @ (ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_))) => {
-				txn.rollback_to_save_point().await.map_err(ControlFlow::Err)?;
-				row.mutated = false;
-				return Err(signal);
-			}
-			Err(ControlFlow::Err(err)) => classify_create_failure(err, row, policy),
-		};
-		// Undo the attempt before anything else looks at the transaction, and
-		// clear the record's mutation flag so a half-written record is not
-		// counted as affected.
-		txn.rollback_to_save_point().await.map_err(ControlFlow::Err)?;
-		row.mutated = false;
-		let (target, carried) = match failure {
-			CreateFailure::Skip => return Ok(StageOutcome::SkipRow),
-			CreateFailure::Raise(err) => return Err(ControlFlow::Err(err)),
-			CreateFailure::RetryAsUpdate {
-				record,
-				carried,
-			} => (record, carried),
-		};
-		// A statement that ran out of time between the attempt and the retry
-		// abandons the record rather than starting a second pass on it.
-		if ctx.exec().ctx().is_done(None).await.map_err(ControlFlow::Err)? {
-			return Ok(StageOutcome::SkipRow);
-		}
-		let stored = ctx
-			.txn()
-			.get_record(
-				ctx.ns.namespace_id,
-				ctx.db.database_id,
-				&target.table,
-				&target.key,
-				ctx.exec().version_stamp(),
-			)
-			.await
-			.map_err(ControlFlow::Err)?;
-		row.reset_for_update_retry(target, &stored);
-		let outcome = self.run_order(updating, row, ctx).await;
-		// A schema failure the attempt carried over is the caller's answer
-		// unless the update produced a record, which means the schema was
-		// satisfied by the stored one. A skipped record is not a success: the
-		// record the statement was asked to write still does not conform.
-		match (carried, outcome) {
-			(Some(err), Err(_) | Ok(StageOutcome::SkipRow)) => Err(ControlFlow::Err(err)),
-			(_, outcome) => outcome,
-		}
-	}
-
-	/// Run every stage of one order.
-	async fn run_order(
-		&self,
-		which: WriteOrder,
-		row: &mut WriteRow,
-		ctx: &WriteCtx,
-	) -> Result<StageOutcome, ControlFlow> {
-		let stages = self.stages(which)?;
-		run_stages(stages, row, ctx).await
-	}
-
-	/// The bound stages of one order.
-	fn stages(&self, which: WriteOrder) -> Result<&[Arc<dyn WriteStage>], ControlFlow> {
-		self.orders.iter().find(|(o, _)| *o == which).map(|(_, s)| s.as_slice()).ok_or_else(|| {
-			ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
-				"the write plan holds no {} order",
-				which.name()
-			))))
-		})
-	}
-}
-
-/// Apply a run of stages to one record, stopping at the first that skips it.
-async fn run_stages(
-	stages: &[Arc<dyn WriteStage>],
-	row: &mut WriteRow,
-	ctx: &WriteCtx,
-) -> Result<StageOutcome, ControlFlow> {
-	for stage in stages {
-		match stage.apply(row, ctx).await? {
-			StageOutcome::Continue => {}
-			StageOutcome::SkipRow => return Ok(StageOutcome::SkipRow),
-		}
-	}
-	Ok(StageOutcome::Continue)
 }
 
 /// What a rolled-back creating attempt becomes.
@@ -1305,87 +1027,6 @@ mod tests {
 		);
 	}
 
-	/// Every form declares exactly the orders its branching selects between,
-	/// and the nine orders across the six forms are the nine this module names.
-	#[test]
-	fn the_six_forms_declare_the_nine_orders() {
-		let mut declared = Vec::new();
-		for form in [
-			WriteForm::Create,
-			WriteForm::Update,
-			WriteForm::Upsert,
-			WriteForm::Delete,
-			WriteForm::Relate,
-			WriteForm::Insert,
-		] {
-			let plan = WritePlan::build(facts(form));
-			for (which, _) in plan.orders() {
-				assert_eq!(
-					which.form(),
-					Some(form),
-					"{} declared a {} order",
-					form.kind(),
-					which.name()
-				);
-				declared.push(which);
-			}
-			match plan.branching() {
-				Branching::Sole(order) => {
-					assert!(plan.order(order).is_some());
-					assert_eq!(plan.orders().count(), 1);
-				}
-				Branching::UpFront {
-					creating,
-					updating,
-				} => {
-					assert!(plan.order(creating).is_some());
-					assert!(plan.order(updating).is_some());
-					assert_eq!(plan.orders().count(), 2);
-				}
-				Branching::Retry {
-					creating,
-					updating,
-					policy,
-				} => {
-					let create = plan.order(creating).expect("a retrying form has a create order");
-					assert!(plan.order(updating).is_some());
-					assert_eq!(plan.orders().count(), 2);
-					assert!(policy.savepoint_after <= create.len());
-				}
-				Branching::ByAction => panic!("{} chose its order by action", form.kind()),
-			}
-		}
-		assert_eq!(declared.len(), WriteOrder::ALL.len());
-		for order in WriteOrder::ALL {
-			assert!(declared.contains(&order), "{} is declared by no form", order.name());
-		}
-	}
-
-	/// Tenant confinement heads all nine orders. The read path enforces it at
-	/// the scan operators; a write performs no scan, so an order that omits it
-	/// reintroduces a fixed vulnerability.
-	#[test]
-	fn tenant_confinement_heads_every_order() {
-		for form in [
-			WriteForm::Create,
-			WriteForm::Update,
-			WriteForm::Upsert,
-			WriteForm::Delete,
-			WriteForm::Relate,
-			WriteForm::Insert,
-		] {
-			let plan = WritePlan::build(facts(form));
-			for (which, stages) in plan.orders() {
-				assert_eq!(
-					stages.first().map(|s| s.name()),
-					Some("check_record_user_access"),
-					"{} does not open with the tenant guard",
-					which.name()
-				);
-			}
-		}
-	}
-
 	/// The savepoint sits after the stages that must survive a rolled-back
 	/// attempt: the tenant guard on `UPSERT`, and the tenant guard plus the id
 	/// derivation on `INSERT`, which must not derive a second id.
@@ -1419,24 +1060,6 @@ mod tests {
 		assert_eq!(order[1], StageId::GenerateRecordId);
 	}
 
-	/// `RELATE` guards the lightweight edge only when the statement carries a
-	/// data clause, and both of its orders agree about that.
-	#[test]
-	fn relate_guards_a_lightweight_edge_only_with_data() {
-		let guard = StageId::CheckTableNotLightweight(LightweightReason::GivenADataClause);
-		let with_data = WritePlan::build(facts(WriteForm::Relate));
-		for (_, stages) in with_data.orders() {
-			assert!(stages.contains(&guard));
-		}
-		let without_data = WritePlan::build(WriteFacts {
-			has_data: false,
-			..facts(WriteForm::Relate)
-		});
-		for (_, stages) in without_data.orders() {
-			assert!(!stages.contains(&guard));
-		}
-	}
-
 	/// `INSERT`'s retry policy is the statement's clauses, not the form's:
 	/// a conflict is retried only with `ON DUPLICATE KEY UPDATE`, and a failure
 	/// that is not retried is skipped only under `IGNORE`.
@@ -1467,88 +1090,5 @@ mod tests {
 		};
 		assert!(policy.retry_conflict);
 		assert!(policy.skip_failures);
-	}
-
-	/// Every stage this module names is placed in at least one order. A stage
-	/// that lands with nowhere to run is a stage whose order was never decided.
-	#[test]
-	fn every_stage_is_used_by_some_order() {
-		let mut used: Vec<StageId> = Vec::new();
-		for form in [
-			WriteForm::Create,
-			WriteForm::Update,
-			WriteForm::Upsert,
-			WriteForm::Delete,
-			WriteForm::Relate,
-			WriteForm::Insert,
-		] {
-			for has_data in [true, false] {
-				let plan = WritePlan::build(WriteFacts {
-					has_data,
-					..facts(form)
-				});
-				for (_, stages) in plan.orders() {
-					for stage in stages {
-						if !used.contains(stage) {
-							used.push(*stage);
-						}
-					}
-				}
-			}
-		}
-		for expected in StageId::ALL {
-			assert!(used.contains(expected), "{expected:?} is placed in no order");
-		}
-	}
-
-	/// Every stage has a body, so every form resolves and none is declined for
-	/// a stage it names.
-	#[test]
-	fn every_stage_has_a_body() {
-		for id in StageId::ALL {
-			assert!(stage_impl(*id).is_some(), "{id:?} has no body");
-		}
-	}
-
-	/// Resolving a form either binds every stage its orders name or binds none
-	/// of them, and names the first stage with no body rather than running a
-	/// partial order.
-	///
-	/// The expectation is derived from the registry rather than written down,
-	/// so the test states the contract for as long as stages keep landing
-	/// instead of pinning which stage is missing on the day it was written.
-	#[test]
-	fn resolving_reports_the_first_unimplemented_stage() {
-		for form in [
-			WriteForm::Create,
-			WriteForm::Update,
-			WriteForm::Upsert,
-			WriteForm::Delete,
-			WriteForm::Relate,
-			WriteForm::Insert,
-		] {
-			let plan = WritePlan::build(facts(form));
-			// The orders in the sequence `resolve` walks them, so the first
-			// unbound stage here is the one it must report.
-			let unbound = plan
-				.orders()
-				.flat_map(|(_, stages)| stages.iter().copied())
-				.find(|id| stage_impl(*id).is_none());
-			match (plan.resolve(), unbound) {
-				(Ok(_), None) => {}
-				(Err(reported), Some(expected)) => assert_eq!(
-					reported, expected,
-					"{form:?} reported {reported:?} rather than its first unbound stage"
-				),
-				(Ok(_), Some(expected)) => {
-					panic!("{form:?} bound an order although {expected:?} has no body")
-				}
-				(Err(reported), None) => {
-					panic!(
-						"{form:?} reported {reported:?} although every stage it names has a body"
-					)
-				}
-			}
-		}
 	}
 }

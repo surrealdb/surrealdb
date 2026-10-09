@@ -215,8 +215,8 @@ A closure's weight includes the values it captures.
 |---|---|---|
 | The pool: the governor, a lease, a reservation | nowhere | A query spills, waits or proceeds past the limit. |
 | `QueryBeyondMemoryThreshold` | `QueryMemory::within_ceiling` | The query's own pinned bytes would pass `query_memory_max`. |
-| `QueryBeyondMemoryThreshold` | the `SURREAL_MEMORY_THRESHOLD` guard (`ALLOC.is_beyond_threshold`) | The process guard, opt-in, and the same as the operator tree's. It reads the process, not a query: overcommit can push the process past the threshold, and the guard then fails whichever query checks next. Where a threshold is set, keep `query_memory_max` well below the threshold less `memory_limit`. |
-| Row-count limits | `gql_max_join_build_rows` and the distinct's | The limits the operator tree raises. |
+| `QueryBeyondMemoryThreshold` | the `SURREAL_MEMORY_THRESHOLD` guard (`ALLOC.is_beyond_threshold`) | The process guard, opt-in. It reads the process, not a query: overcommit can push the process past the threshold, and the guard then fails whichever query checks next. Where a threshold is set, keep `query_memory_max` well below the threshold less `memory_limit`. |
+| Row-count limits | `gql_max_join_build_rows` and the distinct's | The limits the host's join build and distinct operators raise. |
 | A spill past the temporary store's quota | `QueryMemory::spilled` | A disk quota of the store, not the memory budget. The default file store has none. |
 | Cancellation and timeout | the query's context | A wait ends with them. |
 

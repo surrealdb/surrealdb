@@ -138,7 +138,8 @@ pub(super) async fn sorted(
 	.await
 }
 
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests {
 	use super::*;
 

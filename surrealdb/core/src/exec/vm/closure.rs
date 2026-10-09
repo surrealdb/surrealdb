@@ -74,9 +74,8 @@ use super::UnitTable;
 use super::program::{ClosureDigest, ClosureHead, ISA_VERSION, Program, UnitFrame};
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId};
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::physical_expr::function::CompiledClosure;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::vm::calls::CompiledClosure;
+use crate::exec::{EvalContext, ExecutionContext, FlowResult};
 use crate::kvs::Transaction;
 use crate::val::Value;
 
@@ -895,9 +894,9 @@ async fn load_unit(
 /// what acts on nothing outside the transaction. Every other frame grants
 /// every effect here. A frame that refuses writes, a read-only transaction and
 /// a capability the frame lacks each refuse an effect where the body reaches
-/// it, with the error the operator tree raises there: a body that holds a
-/// write it does not reach runs to its value on the tree, so refusing the
-/// write when the unit is linked would refuse what the language allows.
+/// it, with that effect's own error: a body that holds a write it does not
+/// reach runs to its value, so refusing the write when the unit is linked
+/// would refuse what the language allows.
 pub(super) fn grants(exec: &ExecutionContext, effects: crate::expr::logical::EffectSet) -> bool {
 	match exec.ctx().try_tx() {
 		Some(txn) if txn.speculating() => super::speculate::admits(effects),
@@ -954,8 +953,7 @@ fn captured(closure: &CompiledClosure) -> Vec<String> {
 ///
 /// The unit's row is the invocation's document root, and where it has none
 /// its current value, which the body then reads as no document
-/// ([`super::interp::State::undocumented`]), as the operator tree reads a
-/// body invoked with a current value and no document.
+/// ([`super::interp::State::undocumented`]).
 async fn run_body(
 	held: &RunUnit,
 	head: &ClosureHead,

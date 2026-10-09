@@ -179,17 +179,13 @@ executor (ADR 0007): a program requests a scan, an index read or a record fetch
 through a host step, and the host runs the operator that serves it. A statement
 is run by the program `exec/vm` lowers from the bound plan.
 
-`Planner::plan_logical` is a bottom-up fold (`planner/fold.rs`): one
-`LogicalOp` in, one `ExecOperator` out. A statement operator compiles
-directly — `Eval` to `ExprPlan`, `Sequence` to `SequencePlan`, `Foreach` to
-`ForeachPlan`, and so on — with branches and bodies compiled eagerly, since
-the whole statement is planned at once. A relational tree is
-compiled by walking down from its top, collecting clauses into a
-`PipelineClauses` until a leaf or a node the walk does not collect, then
-compiling the leaf with the whole clause set in hand through the access-path
-machinery in `planner/select` (fast paths included) and wrapping the clauses
-back on in pipeline order. A source nested in `FROM` is compiled by recursing
-into its plan, never by rebuilding a statement.
+A relational tree is read by walking down from its top (`collect_pipeline`,
+`planner/fold.rs`), collecting clauses into a `PipelineClauses` until a leaf or
+a node the walk does not collect. The VM's mapping (`vm/map.rs`) then maps the
+leaf with the whole clause set in hand, choosing its access path through the
+machinery in `planner/select` (fast paths included), and puts the clauses back
+on in pipeline order. A source nested in `FROM` is mapped by recursing into its
+plan, never by rebuilding a statement.
 
 **The barrier rule.** A user expression never moves below a
 `PermissionFilter`, and below a layer only when it reads no column of that
@@ -206,12 +202,10 @@ above still judge every row it yields. `planner/fold.rs`'s `chain_offer`
 states what the offer withholds of the pipeline's predicate: every conjunct
 that reads a layer column — by the field's name, or opaquely through a row
 parameter, the document or a nested plan — the ordering when one of its keys
-does, and a permission predicate never joins a KNN residual. Beneath a chain
-with no `PermissionFilter` the chain's filter is the scan predicate, applied
-per row before a row is decoded into a layer, and the filter node keeps only
-what the access path reports unconsumed; beneath a table permission the scan
-applies none of it and the filter is compiled where it stands, since the
-table permission is judged before the user's predicate.
+does, and a permission predicate never joins a KNN residual. A permission
+predicate joins the offer only where no part of the offer is evaluated per row,
+and the table permission is judged before the user's predicate, so a filter
+beneath a table permission is judged where it stands and never by the scan.
 
 **A vertical cut and a horizontal one.** The barrier rule governs what crosses
 the chain, not how many chains a table is read by. Replicating the whole chain
@@ -234,10 +228,10 @@ for a chain that drops rows, cuts fields and computes a field.
 `EnforcementMode::Planned` (`operators/scan/resolved.rs`): the analyzer put
 above it everything the read needs, and the scan applies nothing again — so
 a field guard sees the raw row and a computed field is computed once. The
-layers compile to `ProjectLayer` (`operators/layer.rs`), which evaluates its
-columns on stored fields against the input row and its columns on computed
+layers map to `Plan::Layer`, which the VM lowers to instructions that evaluate
+its columns on stored fields against the input row and its columns on computed
 fields against the reduced record — the input with the stored guards applied
-— each in the column's frame, and lands each under the field's name: a
+— each in the column's frame, and land each under the field's name: a
 computed column is inserted whatever its value; a guard that does not hold
 cuts the field; one that holds sets the admitted value, except that a `NONE`
 admitted for a stored field leaves the row as it is. A guard is judged
@@ -256,11 +250,12 @@ read with the caller's `SELECT` permission and its computed fields evaluated,
 so an id no record answers is no row at all. The source performs that read
 before any predicate, limit or start the planner pushed into it, so a pushed
 predicate is judged against the record and never against a row the source does
-not produce. `SourceExpr` and the array branch of `DynamicScan`
-(`operators/scan/dynamic.rs`) both do this, and must: which of the two plans a
-given expression is a syntactic distinction the query does not make.
+not produce. The VM's values source (`Source::Values`) does this for every
+expression alike: which form plans a given expression is a syntactic
+distinction the query does not make.
 
-`Planner::physical_expr` compiles a `LogicalExpr`; `compile_expr` is the one
+`Planner::scalar_metadata` describes a `LogicalExpr`, and `Clause::of` makes the
+`Clause` that evaluates it; `compile_unit_expr` is the one
 runtime re-entry, used where a stored clause is compiled by a scan that
 resolves its table when it runs (a `DEFINE PARAM` permission, a function's
 `PERMISSIONS` guard); a dynamic source resolved per row builds a
@@ -270,12 +265,10 @@ A call to a `DEFINE FUNCTION` the rules did not inline is compiled with its
 body: for each call site, `Planner::plan_function_body` reads the function's
 snapshot from the node-level cache, binds the body for the caller's principal
 capped by the function's `AUTH LIMIT` with the arguments as per-call names,
-plans it one re-entry deeper, and embeds the plan in the
-`UserDefinedFunctionExec` with the definition's content hash. A call evaluates the embedded plan while the
-definition it reads still hashes the same, and binds and plans the body
-itself otherwise — as it does in a permission frame, which binds without a
-principal, under a `VERSION`, and for a recursive edge, a call to a function
-whose body is being compiled, which the runtime's depth count bounds.
+plans it one re-entry deeper, and lowers it as a unit of the program with the
+definition's content hash. A call runs the unit while the definition it reads
+still hashes the same, and fails closed otherwise; a recursive edge, a call to a
+function whose body is being compiled, is bounded by the runtime's depth count.
 
 ## What stays `expr::Expr`
 
@@ -288,8 +281,8 @@ paths, an `ACCESS` subject, a bucket's `PERMISSIONS` clause, a record access's
 `SIGNIN` — builds the VM's frame with `exec::entry::frame` and evaluates it with
 `exec::entry::scalar`; the pair is the one route in, so a clause is judged
 the same way whichever caller reaches it. A GQL `MATCH` plan holds no
-`expr::Expr`: its scalars are `LogicalExpr`, compiled through
-`Planner::physical_expr` like every other scalar, and `operators/mutate.rs`
+`expr::Expr`: its scalars are `LogicalExpr`, described through
+`Planner::scalar_metadata` like every other scalar, and `operators/mutate.rs`
 builds its synthetic write statement from the values it has already evaluated.
 
 ## The target algebra
@@ -344,9 +337,9 @@ partial map from `Field`/`Access`/`Each` chains to declared paths. Index
 analysis uses the same map to match an expression to an indexed column; a
 shape the map does not cover matches no index, as today.
 
-The physical consequence is that `physical_idiom` (`planner/idiom.rs`,
-`physical_expr/idiom.rs`) and its constant-chain fold go: each form compiles
-to its own `PhysicalExpr`, and constant folding is the `fold` pass's job.
+The physical consequence is that `physical_idiom` (`planner/idiom.rs`) and its
+constant-chain fold go: each form compiles to its own `Clause`, and constant
+folding is the `fold` pass's job.
 
 ### The row is a document, and a projection shadows
 
@@ -498,33 +491,32 @@ is a join form the rule set of step 4 can add as one rule under the same
 guard-rail the pass holds itself to: a shape is lifted only where the rows are
 identical on every language test.
 
-Physically (`planner/fold.rs`, "Joins"), the left input is planned with the
+Physically (`vm/map.rs`), the left input is planned with the
 pipeline's predicate and ordering offered to its access path less every
 conjunct or key that reads the alias or the row opaquely: a join adds to or
 removes from the left rows without changing them, so a conjunct over the left
 row judges the same value on either side. When the one key pair is `(x,
 alias.id)` over a table chain — an `IN (SELECT VALUE id FROM t …)` — the
-right side is a `LookupJoin` (`operators/join/lookup_join.rs`): the table is
-read by the left keys, one batched get per left batch, and the chain over it
-(permission filter, layers, filter, permission joins) runs over a
-`RecordBatchFetch` leaf, so what was one point get per row is one read per
-batch. That path is taken only where nothing in the chain can raise
+join is a `Plan::Join` with a `JoinLookup`: the table is read by the left
+keys, one batched get per left batch, and the chain over it (permission
+filter, layers, filter, permission joins) runs over the fetched records, so
+what was one point get per row is one read per batch. That path is taken only where nothing in the chain can raise
 (`plan_may_raise`): the lookup evaluates the chain for the rows the left keys
 name, where the hash join and the scalar form the lift replaced evaluate it
 for the whole relation, and an access path may not remove an evaluation the
 plan owes ([What a rewrite may do to an
 evaluation](#what-a-rewrite-may-do-to-an-evaluation)).
-Otherwise the right input is folded like any plan and `HashJoin`
-(`operators/join/hash_join.rs`, one operator for MATCH binding rows and for
-document rows with expression keys) builds it once, after the probe has
+Otherwise the right input is mapped like any plan and the join (`Plan::Join`,
+one form for MATCH binding rows and for document rows with expression keys)
+builds it once, after the probe has
 yielded its first row — so a right side lifted from an `IN` subquery is never
 evaluated when no left row reaches the join — and probes the left rows against
 it. The residual reads the build row through the alias whatever the probe row
 is: a bare value from a `VALUE` projection or a scalar source has no field to
 hold the alias and is emitted as it is, so the residual is evaluated against
 an object carrying the alias alone, where every other name answers `NONE` as
-it does off the bare value. The graph `Expand` operators MATCH uses are
-candidate implementations of a lookup join over an edge table.
+it does off the bare value. A MATCH's graph expansion is a
+candidate implementation of a lookup join over an edge table.
 
 ## What a rewrite may do to an evaluation
 
@@ -580,7 +572,7 @@ the sort was the only reader. A literal array source is read through
 `batch_fetch_in_place` before the pushed predicate judges the row, since the
 fetch is where a record id's `PERMISSIONS FOR select` is judged ([A source
 that yields values](#the-physical-planner--execplanner)). And an id-keyed
-join is planned as a `LookupJoin`, which reads only the records the left keys
+join is planned as a lookup join, which reads only the records the left keys
 name, only where the chain over the right table is inert — the one place the
 *physical* planner asks the question, using `plan_may_raise` because the bind
 pass's parameter classification is not in hand there.
@@ -602,8 +594,8 @@ the plan is.
    `Aggregate.group` and `LogicalOrder` carry expressions; give `Schema` a
    declared `FieldPath` and the expression-to-path map; retarget index
    analysis, `row_scope`, `projection` and `fields` utilities onto the forms;
-   compile each form to its own `PhysicalExpr`; delete `LogicalIdiom`,
-   `LogicalPart`, `planner/idiom.rs` and `physical_expr/idiom.rs`. A graph
+   compile each form to its own `Clause`; delete `LogicalIdiom`,
+   `LogicalPart` and `planner/idiom.rs`. A graph
    hop stays a `Lookup` form here. This step
    changes representation only: every lowered path renders and evaluates as
    the idiom did. The one behaviour change in this area lands as its own
@@ -617,7 +609,7 @@ the plan is.
    through a user projection and never through a layer; the physical planner
    offers a predicate to index selection through any chain of
    `PermissionFilter` and layers over a source, withholding what reads a
-   layer column, and compiles a layer to `ProjectLayer`. Every statement
+   layer column, and maps a layer to `Plan::Layer`. Every statement
    shape resolves: `SELECT *`, `$this`, grouped, split, ordered, whole-row
    and multi-source reads all see the layered row, and a resolved source has
    no runtime reducer. A declared kind on a computed field is its column's
@@ -626,7 +618,7 @@ the plan is.
    lifting the membership subqueries — `IN`, `NOT IN`, `CONTAINS`,
    `CONTAINSNOT` over a `SELECT VALUE` from a table — out of user and
    permission predicates into `Semi` and `Anti` joins in the predicate's
-   frame; `HashJoin` generalised to document rows and `LookupJoin` added;
+   frame; the join generalised to document rows and a lookup form added;
    the scalar subquery kept as the per-row form of every shape the pass does
    not lift. `FETCH` stays its own operator, and the record-link dereference
    and the graph lookup stay expression forms: each is lifted only once a

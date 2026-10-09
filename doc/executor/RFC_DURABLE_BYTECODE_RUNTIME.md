@@ -16,8 +16,7 @@ The write path it builds on: `doc/adr/0001-streaming-write-path.md`.
 ## 1. Why
 
 What a write causes today is spread across the write stages
-(`core/src/exec/operators/write/stage.rs`), the per-record engine's document
-pipeline, and a queue for async events drained after commit with its own
+(`core/src/exec/operators/write/stage.rs`), and a queue for async events drained after commit with its own
 retries (`core/src/doc/event.rs`). Background work — index builds, compaction,
 data migrations — runs under per-type task leases (`datastore/src/tasklease.rs`),
 each with its own resume logic. One runtime gives all of it one execution

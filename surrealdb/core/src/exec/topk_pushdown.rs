@@ -56,20 +56,12 @@
 //! the scan's context, and the scan runs without a probe.
 
 use std::cmp::Ordering;
-#[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, RwLock};
 
-#[cfg(test)]
-use crate::exec::ExecutionContext;
 use crate::exec::OperatorMetrics;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
-#[cfg(test)]
-use crate::exec::operators::scan::pipeline::FieldState;
-use crate::exec::operators::{SortDirection, SortKey, compare_values};
-#[cfg(test)]
-use crate::exec::pre_decode_filter::{PreDecodeFilterReason, field_state_blocks_raw_read};
+use crate::exec::operators::{SortDirection, compare_values};
 use crate::val::Value;
 
 /// Monotonically-tightening threshold shared, for one execution, between the
@@ -106,55 +98,6 @@ impl TopKThresholdCell {
 	}
 }
 
-#[cfg(test)]
-/// A fresh pushdown id, naming the scan and the sort of one top-k pushdown in
-/// one plan.
-pub(crate) fn next_id() -> u64 {
-	static NEXT: AtomicU64 = AtomicU64::new(1);
-	NEXT.fetch_add(1, AtomicOrdering::Relaxed)
-}
-
-/// The thresholds of the top-k sorts executing around a context, innermost
-/// first.
-///
-/// Each execution of a sort that publishes a threshold pushes its own cell
-/// under its pushdown's id ([`ExecutionContext::with_topk_threshold`]). A plan
-/// run inside another run of itself therefore finds its own execution's cell
-/// ahead of the outer one's.
-#[derive(Debug)]
-pub(crate) struct TopKThresholds {
-	pushdown: u64,
-	cell: Arc<TopKThresholdCell>,
-	outer: Option<Arc<TopKThresholds>>,
-}
-
-impl TopKThresholds {
-	/// `outer` with `cell` held in front of it under `pushdown`.
-	pub(crate) fn push(
-		outer: Option<Arc<TopKThresholds>>,
-		pushdown: u64,
-		cell: Arc<TopKThresholdCell>,
-	) -> Arc<Self> {
-		Arc::new(Self {
-			pushdown,
-			cell,
-			outer,
-		})
-	}
-
-	/// The innermost cell held under `pushdown`, if any.
-	pub(crate) fn find(&self, pushdown: u64) -> Option<&Arc<TopKThresholdCell>> {
-		let mut frame = Some(self);
-		while let Some(f) = frame {
-			if f.pushdown == pushdown {
-				return Some(&f.cell);
-			}
-			frame = f.outer.as_deref();
-		}
-		None
-	}
-}
-
 /// Scan-side probe: rejects rows from raw revision-encoded record bytes when
 /// their first ORDER BY key cannot beat the current threshold.
 ///
@@ -186,33 +129,6 @@ pub(crate) struct TopKThresholdProbe {
 }
 
 impl TopKThresholdProbe {
-	#[cfg(test)]
-	pub(crate) fn new(
-		path: Vec<PathSegment>,
-		direction: SortDirection,
-		single_key: bool,
-		pushdown: u64,
-		depth_limit: u32,
-	) -> Self {
-		Self {
-			path: path.into(),
-			direction,
-			single_key,
-			pushdown,
-			cell: None,
-			depth_limit,
-			metrics: None,
-		}
-	}
-
-	#[cfg(test)]
-	/// Root field name the probe reads from raw bytes — the subject of the
-	/// computed-field / field-permission eligibility checks.
-	pub(crate) fn root_field(&self) -> &str {
-		// `field_path_wire_segments` rejects empty paths, so index 0 exists.
-		self.path[0].as_str()
-	}
-
 	/// Current threshold snapshot; [`None`] until this execution's sort heap
 	/// fills.
 	pub(crate) fn snapshot(&self) -> Option<Arc<Value>> {
@@ -286,85 +202,6 @@ impl PartialEq for TopKThresholdProbe {
 	}
 }
 
-#[cfg(test)]
-/// Why TopK threshold pushdown cannot be applied to a scan.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum TopKPushdownReason {
-	/// ORDER BY shape unsupported: COLLATE / NUMERIC modifiers, alias
-	/// resolving to an expression, non-`Field` path parts (indices, lookups),
-	/// or a first key the planner must compute post-decode.
-	UnsupportedOrder,
-	/// No literal effective limit, or it exceeds
-	/// `max_order_limit_priority_queue_size` — the plan uses a full sort, so
-	/// no heap threshold exists.
-	LimitTooLarge,
-	/// `TEMPFILES` routes the sort to disk; no in-memory heap.
-	Tempfiles,
-	/// The ORDER BY root field is read-time computed (`DEFINE FIELD …
-	/// COMPUTED …`, directly or nested beneath the root); raw bytes diverge
-	/// from the engine-visible value.
-	ComputedFields,
-	/// The ORDER BY root field carries a non-`Allow` SELECT permission;
-	/// reading it raw would bypass per-field authorisation.
-	FieldPermissions,
-}
-
-#[cfg(test)]
-/// Plan / execute-time status of TopK threshold pushdown for a KV table scan.
-/// Mirrors [`PreDecodeFilterStatus`](crate::exec::pre_decode_filter::PreDecodeFilterStatus).
-#[derive(Debug, Clone)]
-pub(crate) enum TopKPushdownStatus {
-	/// No eligible ORDER BY + LIMIT opportunity — omit the attribute in
-	/// EXPLAIN entirely.
-	NotApplicable,
-	/// Probe built and field checks passed at plan time.
-	Active(Arc<TopKThresholdProbe>),
-	/// Probe built; field state or permission checks need runtime context.
-	Deferred(Arc<TopKThresholdProbe>),
-	/// Opportunity exists but the shape or field state disqualifies it.
-	Ineligible(TopKPushdownReason),
-}
-
-#[cfg(test)]
-impl TopKPushdownStatus {
-	#[cfg(test)]
-	/// Human-readable value for the `topk_pushdown` attribute in EXPLAIN
-	/// output; [`None`] means the attribute is omitted.
-	pub(crate) fn explain_text(&self) -> Option<&'static str> {
-		match self {
-			Self::NotApplicable => None,
-			Self::Active(_) => Some("yes"),
-			Self::Deferred(_) => Some("deferred (runtime field state)"),
-			Self::Ineligible(TopKPushdownReason::UnsupportedOrder) => {
-				Some("no (unsupported order)")
-			}
-			Self::Ineligible(TopKPushdownReason::LimitTooLarge) => Some("no (limit too large)"),
-			Self::Ineligible(TopKPushdownReason::Tempfiles) => Some("no (tempfiles)"),
-			Self::Ineligible(TopKPushdownReason::ComputedFields) => Some("no (computed fields)"),
-			Self::Ineligible(TopKPushdownReason::FieldPermissions) => {
-				Some("no (field permissions)")
-			}
-		}
-	}
-}
-
-/// Planner-side handle from scan construction to sort construction.
-///
-/// `plan_table_scan_source` creates the probe and names the pushdown;
-/// `plan_sort_consolidated` installs the pushdown's id into
-/// [`SortTopKByKey`](crate::exec::operators::SortTopKByKey) **only** when the
-/// sort plan it actually built matches what the probe was compiled against —
-/// `sort_keys.first() == Some(&expected_first_key)` and
-/// `sort_keys.len() == expected_key_count`. A mismatch (alias resolution or
-/// registry compute diverging from the request-time analysis) leaves the
-/// pushdown without a publisher, and the scan without a threshold.
-#[derive(Debug, Clone)]
-pub(crate) struct TopKPushdownHandle {
-	pub(crate) pushdown: u64,
-	pub(crate) expected_first_key: SortKey,
-	pub(crate) expected_key_count: usize,
-}
-
 /// Convert a [`FieldPath`] into pre-encoded wire segments for raw-bytes
 /// descent.
 ///
@@ -391,128 +228,10 @@ pub(crate) fn field_path_wire_segments(path: &FieldPath) -> Option<Vec<PathSegme
 }
 
 #[cfg(test)]
-/// Map the shared raw-read eligibility reason onto the pushdown's reason enum.
-fn map_reason(reason: PreDecodeFilterReason) -> TopKPushdownReason {
-	match reason {
-		PreDecodeFilterReason::ComputedFields => TopKPushdownReason::ComputedFields,
-		PreDecodeFilterReason::FieldPermissions => TopKPushdownReason::FieldPermissions,
-		// field_state_blocks_raw_read never returns this; conservative map.
-		PreDecodeFilterReason::UnsupportedPredicate => TopKPushdownReason::UnsupportedOrder,
-	}
-}
-
-#[cfg(test)]
-/// Resolve pushdown status at plan time given an optional plan-time
-/// [`FieldState`]. Mirrors
-/// [`pre_decode_filter_status_at_plan_time`](crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time):
-/// full check passes → `Active`; only the permission check fails (the active
-/// session's permission level is an execute-time fact) or no field state →
-/// `Deferred`; otherwise `Ineligible`.
-pub(crate) fn topk_pushdown_status_at_plan_time(
-	probe: Arc<TopKThresholdProbe>,
-	field_state: Option<&FieldState>,
-) -> TopKPushdownStatus {
-	match field_state {
-		Some(fs) => match field_state_blocks_raw_read(fs, probe.root_field(), true) {
-			None => TopKPushdownStatus::Active(probe),
-			Some(PreDecodeFilterReason::FieldPermissions) => {
-				match field_state_blocks_raw_read(fs, probe.root_field(), false) {
-					None => TopKPushdownStatus::Deferred(probe),
-					Some(reason) => TopKPushdownStatus::Ineligible(map_reason(reason)),
-				}
-			}
-			Some(reason) => TopKPushdownStatus::Ineligible(map_reason(reason)),
-		},
-		None => TopKPushdownStatus::Deferred(probe),
-	}
-}
-
-#[cfg(test)]
-/// Resolve the optional probe for a KV scan at execution time. Mirrors
-/// [`pre_decode_filter_for_execute`](crate::exec::pre_decode_filter::pre_decode_filter_for_execute):
-/// `Active` arms directly, `Deferred` re-checks against the runtime
-/// [`FieldState`] with the session's `check_perms`, everything else is
-/// [`None`].
-///
-/// The armed probe reads the cell that the pushdown's sort created for the
-/// execution `ctx` belongs to. A context holding no cell for the pushdown arms
-/// nothing, so the scan reads every row. The armed probe carries the scan's
-/// metrics handle only when EXPLAIN ANALYZE enabled it.
-///
-/// The metrics handle is additionally withheld when permission checks apply
-/// (`check_perms`): the `skipped` counter tallies rows rejected *before*
-/// table/row permission filtering, so exposing it to a permission-checked
-/// session would leak a lower bound on the number of rows that exist but are
-/// not visible to that session. The rejection itself stays active — only the
-/// observable count is suppressed.
-pub(crate) fn topk_probe_for_execute(
-	status: &TopKPushdownStatus,
-	field_state: &FieldState,
-	check_perms: bool,
-	metrics: &Arc<OperatorMetrics>,
-	ctx: &ExecutionContext,
-) -> Option<Arc<TopKThresholdProbe>> {
-	let probe = match status {
-		TopKPushdownStatus::NotApplicable | TopKPushdownStatus::Ineligible(_) => return None,
-		TopKPushdownStatus::Active(p) => p,
-		TopKPushdownStatus::Deferred(p) => {
-			if field_state_blocks_raw_read(field_state, p.root_field(), check_perms).is_some() {
-				return None;
-			}
-			p
-		}
-	};
-	let cell = ctx.topk_threshold(probe.pushdown)?;
-	Some(Arc::new(TopKThresholdProbe {
-		cell: Some(cell),
-		metrics: (metrics.is_enabled() && !check_perms).then(|| Arc::clone(metrics)),
-		..probe.as_ref().clone()
-	}))
-}
-
-#[cfg(test)]
 mod tests {
-	use std::collections::BTreeMap;
-
-	use chrono::{TimeZone, Utc};
-	use revision::SerializeRevisioned;
-	use surrealdb_strand::Strand;
 
 	use super::*;
-	use crate::catalog::Record;
-	use crate::val::{Datetime, Number, Object};
-
-	/// Matches the default `ctx.config.exec.idiom_recursion_limit` (256).
-	const TEST_DEPTH_LIMIT: u32 = 256;
-
-	fn wire_record(obj: Object) -> Vec<u8> {
-		// Route through the macro-generated serializer so the bytes always
-		// match the latest revision's wire layout.
-		let rec = Record {
-			metadata: None,
-			data: Value::Object(obj),
-		};
-		let mut out = Vec::new();
-		rec.serialize_revisioned(&mut out).unwrap();
-		out
-	}
-
-	fn record_with_int(field: &str, n: i64) -> Vec<u8> {
-		wire_record(Object::from(BTreeMap::from([(
-			Strand::from(field),
-			Value::Number(Number::Int(n)),
-		)])))
-	}
-
-	fn probe(direction: SortDirection, single_key: bool, path: &[&str]) -> TopKThresholdProbe {
-		TopKThresholdProbe::new(
-			path.iter().map(|s| PathSegment::new(*s)).collect(),
-			direction,
-			single_key,
-			next_id(),
-			TEST_DEPTH_LIMIT,
-		)
-	}
+	use crate::val::Number;
 
 	#[test]
 	fn cell_starts_empty_publishes_and_overwrites() {
@@ -522,147 +241,6 @@ mod tests {
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
 		cell.publish(Value::Number(Number::Int(7)));
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(7))));
-	}
-
-	/// A plan-time probe holds no threshold: only arming it with an
-	/// execution's cell gives it one.
-	#[test]
-	fn plan_time_probe_reads_no_threshold() {
-		let p = probe(SortDirection::Desc, true, &["a"]);
-		assert!(p.snapshot().is_none());
-		let cell = Arc::new(TopKThresholdCell::default());
-		cell.publish(Value::Number(Number::Int(5)));
-		let armed = TopKThresholdProbe {
-			cell: Some(Arc::clone(&cell)),
-			..p.clone()
-		};
-		assert_eq!(armed.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
-		assert!(p.snapshot().is_none());
-	}
-
-	/// Each pushdown finds its own cell, and a pushdown held twice finds the
-	/// innermost one.
-	#[test]
-	fn thresholds_find_the_innermost_cell_of_their_pushdown() {
-		let (a, b) = (next_id(), next_id());
-		assert_ne!(a, b);
-		let outer_a = Arc::new(TopKThresholdCell::default());
-		let cell_b = Arc::new(TopKThresholdCell::default());
-		let inner_a = Arc::new(TopKThresholdCell::default());
-		let outer = TopKThresholds::push(None, a, Arc::clone(&outer_a));
-		assert!(Arc::ptr_eq(outer.find(a).unwrap(), &outer_a));
-		assert!(outer.find(b).is_none());
-		let both = TopKThresholds::push(Some(Arc::clone(&outer)), b, Arc::clone(&cell_b));
-		assert!(Arc::ptr_eq(both.find(a).unwrap(), &outer_a));
-		assert!(Arc::ptr_eq(both.find(b).unwrap(), &cell_b));
-		let nested = TopKThresholds::push(Some(both), a, Arc::clone(&inner_a));
-		assert!(Arc::ptr_eq(nested.find(a).unwrap(), &inner_a));
-		assert!(Arc::ptr_eq(nested.find(b).unwrap(), &cell_b));
-		// The outer context is unchanged by what was pushed after it.
-		assert!(Arc::ptr_eq(outer.find(a).unwrap(), &outer_a));
-	}
-
-	/// Full reject matrix: {Asc, Desc} × {candidate better, tie, worse} ×
-	/// {single-key, multi-key}. Candidate field value is fixed at 5; the
-	/// threshold varies.
-	#[test]
-	fn reject_matrix() {
-		let rec = record_with_int("a", 5);
-		let t = |n: i64| Value::Number(Number::Int(n));
-		// (direction, threshold, single_key, expect_reject)
-		let cases = [
-			// Asc: smaller is better. 5 vs 6 → better → pass.
-			(SortDirection::Asc, 6, true, false),
-			(SortDirection::Asc, 6, false, false),
-			// Asc tie: single rejects, multi passes.
-			(SortDirection::Asc, 5, true, true),
-			(SortDirection::Asc, 5, false, false),
-			// Asc worse: always rejects.
-			(SortDirection::Asc, 4, true, true),
-			(SortDirection::Asc, 4, false, true),
-			// Desc: larger is better. 5 vs 4 → better → pass.
-			(SortDirection::Desc, 4, true, false),
-			(SortDirection::Desc, 4, false, false),
-			// Desc tie: single rejects, multi passes.
-			(SortDirection::Desc, 5, true, true),
-			(SortDirection::Desc, 5, false, false),
-			// Desc worse: always rejects.
-			(SortDirection::Desc, 6, true, true),
-			(SortDirection::Desc, 6, false, true),
-		];
-		for (direction, threshold, single_key, expect) in cases {
-			let p = probe(direction, single_key, &["a"]);
-			assert_eq!(
-				p.rejects(&t(threshold), &rec),
-				expect,
-				"direction={direction:?} threshold={threshold} single_key={single_key}",
-			);
-		}
-	}
-
-	/// Missing field reads as Value::None. Under DESC, None is the worst
-	/// possible key — rejected against any real threshold. Under ASC, None is
-	/// the best possible key — always passes.
-	#[test]
-	fn missing_field_reads_as_none() {
-		let rec = record_with_int("other", 1);
-		let threshold = Value::Number(Number::Int(5));
-		assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&threshold, &rec));
-		assert!(!probe(SortDirection::Asc, true, &["a"]).rejects(&threshold, &rec));
-		// None == None tie: single-key rejects, multi-key passes.
-		assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&Value::None, &rec));
-		assert!(!probe(SortDirection::Desc, false, &["a"]).rejects(&Value::None, &rec));
-	}
-
-	/// Wire-level bail (corrupt bytes / non-object intermediate) must pass the
-	/// row through to full decode, never reject.
-	#[test]
-	fn bail_passes_through() {
-		let threshold = Value::Number(Number::Int(5));
-		let p = probe(SortDirection::Desc, true, &["a"]);
-		assert!(!p.rejects(&threshold, b"\xff\xff\xff\xff"));
-		// Descending through a non-object intermediate (`a.b` where `a` is an
-		// int) bails rather than treating the leaf as missing.
-		let rec = record_with_int("a", 5);
-		let nested = probe(SortDirection::Desc, true, &["a", "b"]);
-		assert!(!nested.rejects(&threshold, &rec));
-	}
-
-	/// Datetime keys take the leaf-decode path (wire-level ordered compare is
-	/// Int-only) and must still order correctly.
-	#[test]
-	fn datetime_leaf_compares() {
-		let older = Datetime(Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap());
-		let newer = Datetime(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
-		let rec = wire_record(Object::from(BTreeMap::from([(
-			Strand::from("created_at"),
-			Value::Datetime(older),
-		)])));
-		let p = probe(SortDirection::Desc, true, &["created_at"]);
-		// Row is older than the heap's worst → cannot enter the top-K.
-		assert!(p.rejects(&Value::Datetime(newer), &rec));
-		// Row ties with the heap's worst → single-key reject.
-		assert!(p.rejects(&Value::Datetime(older), &rec));
-		// Threshold older than the row → row wins → pass.
-		let rec_newer = wire_record(Object::from(BTreeMap::from([(
-			Strand::from("created_at"),
-			Value::Datetime(newer),
-		)])));
-		assert!(!p.rejects(&Value::Datetime(older), &rec_newer));
-	}
-
-	/// Nested Field chains descend; the leaf compares like a root field.
-	#[test]
-	fn nested_field_path_descends() {
-		let inner =
-			Object::from(BTreeMap::from([(Strand::from("score"), Value::Number(Number::Int(3)))]));
-		let rec = wire_record(Object::from(BTreeMap::from([(
-			Strand::from("stats"),
-			Value::Object(inner),
-		)])));
-		let p = probe(SortDirection::Desc, true, &["stats", "score"]);
-		assert!(p.rejects(&Value::Number(Number::Int(9)), &rec));
-		assert!(!p.rejects(&Value::Number(Number::Int(1)), &rec));
 	}
 
 	#[test]
@@ -686,36 +264,6 @@ mod tests {
 			FieldPath(vec![FieldPathPart::Field("id".into()), FieldPathPart::Field("x".into())]),
 		] {
 			assert!(field_path_wire_segments(&bad).is_none(), "expected None for {bad:?}");
-		}
-	}
-
-	#[test]
-	fn explain_text_covers_every_variant() {
-		let p = Arc::new(probe(SortDirection::Desc, true, &["a"]));
-		assert_eq!(TopKPushdownStatus::NotApplicable.explain_text(), None);
-		assert_eq!(TopKPushdownStatus::Active(Arc::clone(&p)).explain_text(), Some("yes"));
-		assert_eq!(
-			TopKPushdownStatus::Deferred(p).explain_text(),
-			Some("deferred (runtime field state)")
-		);
-		// Every reason variant must render — adding a variant breaks this
-		// match, forcing the EXPLAIN text (and language tests) to be updated.
-		let reasons = [
-			TopKPushdownReason::UnsupportedOrder,
-			TopKPushdownReason::LimitTooLarge,
-			TopKPushdownReason::Tempfiles,
-			TopKPushdownReason::ComputedFields,
-			TopKPushdownReason::FieldPermissions,
-		];
-		for reason in reasons {
-			match reason {
-				TopKPushdownReason::UnsupportedOrder
-				| TopKPushdownReason::LimitTooLarge
-				| TopKPushdownReason::Tempfiles
-				| TopKPushdownReason::ComputedFields
-				| TopKPushdownReason::FieldPermissions => {}
-			}
-			assert!(TopKPushdownStatus::Ineligible(reason).explain_text().is_some());
 		}
 	}
 }

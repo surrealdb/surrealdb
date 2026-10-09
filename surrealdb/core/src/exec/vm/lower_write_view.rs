@@ -160,7 +160,6 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						analysis,
 						tables,
 						condition: stored.as_ref(),
-						table: &definition.name,
 					};
 					let recalc = crate::exec::vm::host::out_of_line(|| {
 						self.recalculation(&planner, &sources)

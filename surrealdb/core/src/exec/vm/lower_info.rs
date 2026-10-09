@@ -76,7 +76,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// A register holding the name `expr` gives: a bare name as written, and
-	/// anything else evaluated and read as a string (`physical_expr_as_name`).
+	/// anything else evaluated and read as a string.
 	async fn info_name(&mut self, expr: &LogicalExpr) -> Lowered<Reg> {
 		match expr {
 			LogicalExpr::Field(name) => {

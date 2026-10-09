@@ -94,3 +94,30 @@ async fn a_statements_profile_names_what_bars_it() {
 		);
 	}
 }
+
+/// Native host dispatch stays conservative for missing entries and asynchronous calls.
+#[test]
+fn unknown_and_async_functions_require_the_host() {
+	use crate::exec::function::{EffectSet, ScalarFunction, Signature};
+	#[derive(Debug)]
+	struct AsyncPure;
+	impl ScalarFunction for AsyncPure {
+		fn name(&self) -> &'static str {
+			"test::async_pure"
+		}
+		fn signature(&self) -> Signature {
+			Signature::new()
+		}
+		fn effects(&self) -> EffectSet {
+			EffectSet::PURE
+		}
+		fn is_async(&self) -> bool {
+			true
+		}
+	}
+	let mut registry = FunctionRegistry::with_builtins();
+	registry.register(AsyncPure);
+	assert!(matches!(builtin("test::async_pure", &registry), Class::Kernel(_)));
+	assert!(matches!(builtin("test::missing", &registry), Class::Kernel(_)));
+	assert!(matches!(builtin("type::fields", &registry), Class::Kernel(_)));
+}

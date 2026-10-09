@@ -7,25 +7,17 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-#[cfg(test)]
-use common::future::stream::Yielder;
 use surrealdb_strand::Strand;
 
-#[cfg(test)]
-use super::pipeline::ScanPipeline;
 use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
-#[cfg(test)]
-use super::resolved::ResolvedTableContext;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::err::EngineError;
-#[cfg(test)]
-use crate::exec::ValueBatch;
 use crate::exec::object_extract::{
 	PathSegment, project_record_bytes, project_record_bytes_excluding,
 };
 use crate::exec::permission::PhysicalPermission;
-use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
+use crate::exec::{Clause, ControlFlowExt, EvalContext, ExecutionContext};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::key::KVValue;
 use crate::key::schema::RecordKey;
@@ -188,56 +180,6 @@ impl DecodeFields {
 	}
 }
 
-#[cfg(test)]
-/// Whether a scan may decode only its [`DecodeFields`] of each record rather
-/// than the whole record.
-///
-/// Holds when nothing evaluated against a row reads a stored field the
-/// statement does not name: the table defines no computed field, whose body
-/// may read any field, and, when permissions are checked, its SELECT
-/// permission is `FULL` and no field carries a SELECT permission, both of
-/// which are evaluated against the stored record. `table_state` must be the
-/// table's whole field state, not one filtered to a projection, so that
-/// computed fields and permissions evaluated above the scan count too.
-pub(crate) fn projected_decode_applies(
-	select_permission: &PhysicalPermission,
-	check_perms: bool,
-	table_state: &FieldState,
-) -> bool {
-	table_state.computed_fields.is_empty()
-		&& (!check_perms
-			|| (matches!(select_permission, PhysicalPermission::Allow)
-				&& table_state.field_permissions.is_empty()))
-}
-
-#[cfg(test)]
-/// The decode set a scan uses for one execution: `fields` when
-/// [`projected_decode_applies`] to `table_name`, `None` — decode whole
-/// records — otherwise.
-///
-/// The answer comes from `resolved` when the plan resolved the table, and
-/// from the catalog otherwise.
-pub(crate) async fn decode_fields_for_execution(
-	ctx: &ExecutionContext,
-	table_name: &TableName,
-	resolved: Option<&ResolvedTableContext>,
-	select_permission: &PhysicalPermission,
-	check_perms: bool,
-	fields: Option<&DecodeFields>,
-) -> Result<Option<DecodeFields>, ControlFlow> {
-	let Some(fields) = fields else {
-		return Ok(None);
-	};
-	let applies = match resolved {
-		Some(resolved) => resolved.projected_decode_applies(select_permission, check_perms),
-		None => {
-			let table_state = build_field_state(ctx, table_name, check_perms, None).await?;
-			projected_decode_applies(select_permission, check_perms, &table_state)
-		}
-	};
-	Ok(applies.then(|| fields.clone()))
-}
-
 /// The owned contents of a record-id key, beyond its inline size.
 fn approx_key_size(key: &RecordIdKey) -> usize {
 	match key {
@@ -326,27 +268,6 @@ impl ReadAhead {
 			last_bytes: 0,
 			last_rows: 0,
 		}
-	}
-
-	#[cfg(test)]
-	/// Size the next batch from the last batch decoded, once `pipeline`
-	/// processed it.
-	///
-	/// When the pipeline materialises computed fields, a processed row can be
-	/// far wider than the record it was decoded from, so the next batch
-	/// decodes at most as many records as keep a batch like this one near the
-	/// budget, sized from the larger of the decoded records and
-	/// [`ScanPipeline::materialised_bytes`], rows the filters dropped included;
-	/// see [`next_batch_len`]. Otherwise the decoded size alone bounds a batch
-	/// and this does nothing.
-	pub(crate) fn processed(&mut self, pipeline: &ScanPipeline) {
-		let materialised = pipeline.materialised_bytes();
-		if materialised == 0 || self.last_rows == 0 {
-			return;
-		}
-		let held = self.last_bytes.max(materialised);
-		self.row_cap =
-			next_batch_len(held, self.last_rows, self.last_rows, self.budget, usize::MAX);
 	}
 
 	/// Whether every record read has been decoded.
@@ -492,37 +413,6 @@ impl ReadAhead {
 	}
 }
 
-#[cfg(test)]
-/// Decode what `read_ahead` holds, a byte budget at a time, through
-/// `pipeline`, emitting each batch the pipeline keeps.
-///
-/// # Returns
-///
-/// Whether the pipeline takes more rows; once it does not, the rest of
-/// `read_ahead` is left undecoded.
-pub(crate) async fn drain_read_ahead(
-	read_ahead: &mut ReadAhead,
-	pipeline: &mut ScanPipeline,
-	yielder: &mut Yielder<'_, ValueBatch>,
-	ctx: &ExecutionContext,
-) -> FlowResult<bool> {
-	while !read_ahead.is_empty() {
-		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-		}
-		let mut values = read_ahead.decode_batch(ctx).await?;
-		let cont = pipeline.process_batch(&mut values, ctx).await?;
-		read_ahead.processed(pipeline);
-		if !values.is_empty() {
-			yielder.emit(ValueBatch::new(values)).await;
-		}
-		if !cont {
-			return Ok(false);
-		}
-	}
-	Ok(true)
-}
-
 /// The size of a range bound's value, by `size`; 0 for an unbounded end.
 fn approx_bound_size<T>(bound: &std::ops::Bound<T>, size: fn(&T) -> usize) -> usize {
 	match bound {
@@ -608,10 +498,10 @@ pub(crate) fn extract_record_ids_into(val: Value, rids: &mut Vec<RecordId>) {
 
 /// Evaluate a bound expression and convert the result to a [`RecordIdKey`].
 ///
-/// Used by range-bounded scans to turn a `PhysicalExpr` bound value into a
+/// Used by range-bounded scans to turn a bound [`Clause`] into a
 /// key that can be encoded into datastore prefix/suffix bytes.
 pub(crate) async fn evaluate_bound_key(
-	expr: &Arc<dyn PhysicalExpr>,
+	expr: &Clause,
 	ctx: &ExecutionContext,
 ) -> Result<RecordIdKey, ControlFlow> {
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
@@ -627,7 +517,7 @@ pub(crate) async fn evaluate_bound_key(
 /// that evaluates the expression once in the *unversioned* outer
 /// context and sets the resulting timestamp on
 /// [`ExecutionContext::version_stamp`] before delegating to the inner
-/// operator tree.
+/// operator.
 ///
 /// This helper prefers that already-resolved stamp and only falls back
 /// to evaluating `version_expr` when no enclosing `VersionScope` was
@@ -643,7 +533,7 @@ pub(crate) async fn evaluate_bound_key(
 /// the right timestamp.
 pub(crate) async fn resolve_version_stamp(
 	ctx: &ExecutionContext,
-	version_expr: Option<&Arc<dyn PhysicalExpr>>,
+	version_expr: Option<&Clause>,
 ) -> Result<Option<u64>, ControlFlow> {
 	if let Some(stamp) = ctx.version_stamp() {
 		return Ok(Some(stamp));
@@ -798,80 +688,25 @@ pub(crate) async fn resolve_record_batch(
 }
 
 #[cfg(test)]
-/// Fetch full records for a batch of [`RecordId`]s in one batch, applying
-/// permission filtering to each record.
+/// Whether a scan may decode only its [`DecodeFields`] of each record rather
+/// than the whole record.
 ///
-/// Uses the transaction's batch multi-get (`get_records`), which is
-/// cache-aware and uses the store's native batch read (e.g. RocksDB
-/// `multi_get_opt`) for cache misses.  Records that don't exist or that
-/// fail the permission check are silently skipped.
-///
-/// The record ID is already injected into the data by `get_records`, so
-/// no additional `def()` call is needed.  When the `Arc<Record>` has a
-/// reference count of 1, the data is moved out without cloning.
-///
-/// Used by [`super::index_scan::IndexScan`],
-/// [`super::fulltext_scan::FullTextScan`], and
-/// [`super::knn_scan::KnnScan`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn fetch_and_filter_records_batch(
-	ctx: &ExecutionContext,
-	txn: &Transaction,
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	rids: &[RecordId],
-	select_permission: &crate::exec::permission::PhysicalPermission,
+/// Holds when nothing evaluated against a row reads a stored field the
+/// statement does not name: the table defines no computed field, whose body
+/// may read any field, and, when permissions are checked, its SELECT
+/// permission is `FULL` and no field carries a SELECT permission, both of
+/// which are evaluated against the stored record. `table_state` must be the
+/// table's whole field state, not one filtered to a projection, so that
+/// computed fields and permissions evaluated above the scan count too.
+pub(crate) fn projected_decode_applies(
+	select_permission: &PhysicalPermission,
 	check_perms: bool,
-	version: Option<u64>,
-	cache_policy: CachePolicy,
-) -> Result<Vec<Value>, ControlFlow> {
-	let records = txn
-		.get_records(ns_id, db_id, rids, version, cache_policy)
-		.await
-		.context("Failed to fetch records")?;
-	ensure_below_memory_threshold()?;
-
-	let mut values = Vec::with_capacity(rids.len());
-	let mut cloned = false;
-	for record in records {
-		if record.data.is_none() {
-			continue;
-		}
-
-		if check_perms {
-			// Permission checks need a reference; avoid moving data out of
-			// the Arc until we know the record is allowed.
-			let allowed = crate::exec::permission::check_permission_for_value(
-				select_permission,
-				&record.data,
-				None,
-				ctx,
-			)
-			.await
-			.context("Failed to check permission")?;
-
-			if !allowed {
-				continue;
-			}
-		}
-
-		// Move data out of the Arc when possible (refcount == 1),
-		// otherwise fall back to cloning.
-		let value = match Arc::try_unwrap(record) {
-			Ok(rec) => rec.data,
-			Err(arc) => {
-				cloned = true;
-				arc.data.clone()
-			}
-		};
-		values.push(value);
-	}
-	if cloned {
-		// A record the transaction's cache still shares is cloned above, after
-		// the check that followed the fetch.
-		ensure_below_memory_threshold()?;
-	}
-	Ok(values)
+	table_state: &FieldState,
+) -> bool {
+	table_state.computed_fields.is_empty()
+		&& (!check_perms
+			|| (matches!(select_permission, PhysicalPermission::Allow)
+				&& table_state.field_permissions.is_empty()))
 }
 
 #[cfg(test)]

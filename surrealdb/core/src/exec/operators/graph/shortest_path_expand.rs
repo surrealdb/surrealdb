@@ -1,12 +1,11 @@
-//! The `ShortestPathExpand` operator — shortest-path search for GQL v2
-//! `MATCH` (the `ALL SHORTEST` / `ANY SHORTEST` / `SHORTEST k` / `SHORTEST k
-//! GROUP(S)` path-search prefixes).
+//! Shortest-path search for GQL v2 `MATCH` (the `ALL SHORTEST` / `ANY SHORTEST`
+//! / `SHORTEST k` / `SHORTEST k GROUP(S)` path-search prefixes).
 //!
-//! Like [`PathExpand`](super::path_expand::PathExpand) it expands a single
+//! Like [`expand_paths`](super::path_expand::expand_paths) it expands a single
 //! quantified segment from a bound *source* node, per input binding row, and
 //! emits one row per selected path with the terminal node, the edge group (R4)
 //! and the alternating path array (R5). It differs in *which* paths it keeps:
-//! the planner routes a pattern carrying a `SHORTEST` (or `ANY`) selector here.
+//! a pattern carrying a `SHORTEST` (or `ANY`) selector is routed here.
 //! Grouping is per-source-row by terminal node id, which equals the GQL endpoint
 //! partition `(start, end)`. A pattern bound on its far node expands backwards
 //! (`source` is the pattern's end); grouping and path length are symmetric so
@@ -15,13 +14,13 @@
 //!
 //! ## Algorithm: BFS over partial paths
 //!
-//! Per source row the operator runs a breadth-first traversal whose frontier is
+//! Per source row the search runs a breadth-first traversal whose frontier is
 //! a FIFO queue of partial paths `{ tip, edges, nodes }` (the same struct
-//! `PathExpand` uses). Because successors are enqueued at the back, paths are
+//! path expansion uses). Because successors are enqueued at the back, paths are
 //! processed in non-decreasing depth (hop count), so a terminal is *reached* in
 //! non-decreasing length order — the property every selector relies on.
 //! Edge-uniqueness within a path (DIFFERENT EDGES, R2) is enforced by the
-//! adjacency scan exactly as in `PathExpand`, which also bounds the queue on
+//! adjacency scan exactly as in path expansion, which also bounds the queue on
 //! cyclic graphs; the optional path mode adds node-uniqueness
 //! ([`step_kind`]). Shortest is by **hop count** (unweighted).
 //!
@@ -57,45 +56,24 @@
 #![cfg_attr(not(feature = "gql"), allow(dead_code))]
 
 use std::collections::{HashMap, HashSet, VecDeque};
-#[cfg(test)]
-use std::sync::Arc;
 
-#[cfg(test)]
-use common::future::stream::{self, Yielder};
-#[cfg(test)]
-use futures::StreamExt;
 use tracing::debug;
 
-#[cfg(test)]
-use super::expand::ExpandDir;
-#[cfg(test)]
-use super::path_expand::PathMode;
-#[cfg(test)]
-use super::path_expand::StreamFlush;
 use super::path_expand::{
 	PartialPath, PathCaches, PathFlush, PathParams, StepKind, assemble_row, build_group_and_path,
 	edge_target, node_id, node_passes_label, path_rows_exceeded, push_row, scan_dir,
 	source_record_id, step_kind, target_field,
 };
 use crate::exec::operators::scan::fetch::resolve_with_field_state;
-#[cfg(test)]
-use crate::exec::operators::scan::graph_keys::EdgeTableSpec;
 use crate::exec::operators::scan::graph_keys::collect_adjacency;
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, OperatorMetrics, ValueBatch,
-	ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::exec::{ExecutionContext, FlowResult};
-#[cfg(test)]
-use crate::val::TableName;
 use crate::val::{RecordId, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
 /// shortest family (its main job), it also serves the non-shortest `ANY [k]`
 /// selector ([`ShortestSelector::Any`]) — a shortest representative is a valid
 /// arbitrary path, so `ANY` reuses the same cheap visit-once / `k`-bounded
-/// traversal rather than the full `PathExpand` DFS.
+/// traversal rather than the full path-expansion DFS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortestSelector {
 	/// `k` arbitrary paths per endpoint (`ANY [k]`); implemented as the `k`
@@ -291,231 +269,6 @@ impl TerminalSelector {
 	}
 }
 
-#[cfg(test)]
-/// Shortest-path variable-length expansion from a bound source node.
-///
-/// See the module documentation for the full semantics. Constructed by the GQL
-/// streaming planner from a quantified `EdgeStep` whose pattern carries a
-/// `SHORTEST` path-search selector.
-#[derive(Debug, Clone)]
-pub struct ShortestPathExpand {
-	/// Child operator providing the input binding rows.
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Name of the bound source-node binding in each input row.
-	pub(crate) source: String,
-	/// Direction of every hop in the quantified step.
-	pub(crate) direction: ExpandDir,
-	/// Edge table(s) the step may traverse; empty ⇒ all edge tables in `direction`.
-	pub(crate) edge_tables: Vec<TableName>,
-	/// Minimum path length (number of edges). `0` enables the zero-length path.
-	pub(crate) min: u32,
-	/// Maximum path length, or `None` for unbounded (`*`, `+`, `{n,}`).
-	pub(crate) max: Option<u32>,
-	/// Binding name the terminal node is written under.
-	pub(crate) target_binding: String,
-	/// Optional table the terminal node must belong to (label filter).
-	pub(crate) target_label: Option<TableName>,
-	/// Binding name for the edge-group list (kind `EdgeGroup`), when present.
-	pub(crate) group_binding: Option<String>,
-	/// Binding name for the whole-path array (kind `Path`), when present.
-	pub(crate) path_binding: Option<String>,
-	/// The path mode (node/edge repetition discipline).
-	pub(crate) mode: PathMode,
-	/// Which paths to each endpoint survive.
-	pub(crate) selector: ShortestSelector,
-	/// `true` when the pattern was anchored on its far node, so the traversal
-	/// runs the segment backwards (`source` is the pattern's *end*); the emitted
-	/// group and path arrays are reversed to read in the pattern's written order.
-	/// Path length is symmetric, so the shortest selection is unaffected.
-	pub(crate) reversed: bool,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-#[cfg(test)]
-impl ShortestPathExpand {
-	#[cfg(test)]
-	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		source: String,
-		direction: ExpandDir,
-		edge_tables: Vec<TableName>,
-		min: u32,
-		max: Option<u32>,
-		target_binding: String,
-		target_label: Option<TableName>,
-		group_binding: Option<String>,
-		path_binding: Option<String>,
-		mode: PathMode,
-		selector: ShortestSelector,
-		reversed: bool,
-	) -> Self {
-		Self {
-			input,
-			source,
-			direction,
-			edge_tables,
-			min,
-			max,
-			target_binding,
-			target_label,
-			group_binding,
-			path_binding,
-			mode,
-			selector,
-			reversed,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	#[cfg(test)]
-	/// What the search is parameterised by, read from `self` and the
-	/// configuration of `ctx`.
-	pub(crate) fn params(&self, ctx: &ExecutionContext) -> PathParams {
-		let exec = &ctx.root().ctx.config.exec;
-		PathParams {
-			source: self.source.clone(),
-			direction: self.direction,
-			edge_specs: self.edge_specs(),
-			min: self.min,
-			max: self.max,
-			target_binding: self.target_binding.clone(),
-			target_label: self.target_label.clone(),
-			group_binding: self.group_binding.clone(),
-			path_binding: self.path_binding.clone(),
-			mode: self.mode,
-			reversed: self.reversed,
-			scan_batch_size: exec.scan_batch_size,
-			path_row_limit: exec.gql_max_path_rows,
-		}
-	}
-
-	#[cfg(test)]
-	/// Build the `EdgeTableSpec` list (unbounded ranges) for the configured edge
-	/// tables. Mirrors `PathExpand::edge_specs`.
-	fn edge_specs(&self) -> Vec<EdgeTableSpec> {
-		self.edge_tables
-			.iter()
-			.cloned()
-			.map(|table| EdgeTableSpec {
-				table,
-				range_start: std::ops::Bound::Unbounded,
-				range_end: std::ops::Bound::Unbounded,
-			})
-			.collect()
-	}
-}
-
-#[cfg(test)]
-impl ExecOperator for ShortestPathExpand {
-	fn name(&self) -> &'static str {
-		"ShortestPathExpand"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let dir = match self.direction {
-			ExpandDir::Out => "->",
-			ExpandDir::In => "<-",
-		};
-		let tables = if self.edge_tables.is_empty() {
-			"*".to_string()
-		} else {
-			self.edge_tables.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
-		};
-		let max = self.max.map(|m| m.to_string()).unwrap_or_else(|| "∞".to_string());
-		let mut attrs = vec![
-			("source".to_string(), self.source.clone()),
-			("direction".to_string(), dir.to_string()),
-			("tables".to_string(), tables),
-			("min".to_string(), self.min.to_string()),
-			("max".to_string(), max),
-			("target_binding".to_string(), self.target_binding.clone()),
-			("search".to_string(), self.selector.attr()),
-		];
-		if let Some(label) = self.target_label.as_ref() {
-			attrs.push(("target_label".to_string(), label.as_str().to_string()));
-		}
-		if let Some(group) = self.group_binding.as_ref() {
-			attrs.push(("group".to_string(), group.clone()));
-		}
-		if let Some(path) = self.path_binding.as_ref() {
-			attrs.push(("path".to_string(), path.clone()));
-		}
-		if let Some(mode) = self.mode.attr() {
-			attrs.push(("mode".to_string(), mode.to_string()));
-		}
-		if self.reversed {
-			attrs.push(("reversed".to_string(), "true".to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		self.input.required_context().max(ContextLevel::Database)
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		CardinalityHint::Unbounded
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-		ctx.database()?;
-		let params = self.params(ctx);
-		let selector = self.selector;
-		let scan_batch_size = params.scan_batch_size;
-		let ctx = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			let mut caches = PathCaches::new();
-			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
-			let mut flush = StreamFlush(&mut yielder);
-
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				for row in batch.into_values() {
-					expand_shortest(
-						&ctx,
-						&params,
-						selector,
-						&mut caches,
-						&row,
-						&mut out,
-						&mut flush,
-					)
-					.await?;
-				}
-			}
-
-			if !out.is_empty() {
-				yielder.emit(ValueBatch::new(out)).await;
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), "ShortestPathExpand", &self.metrics))
-	}
-}
-
 /// The paths from the node bound at `params.source` in `row` that `selector`
 /// keeps, as the rows of `out`: breadth-first, so a terminal is reached in
 /// non-decreasing length, with a full batch handed to `flush` as it forms.
@@ -604,7 +357,7 @@ pub(crate) async fn expand_shortest(
 
 		// Enumerate the tip's adjacency, retaining only edges not already on
 		// the path (DIFFERENT EDGES), filtered per streamed item. Identical to
-		// `PathExpand`.
+		// path expansion.
 		let mut edge_ids: Vec<RecordId> = Vec::new();
 		let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 		collect_adjacency(
@@ -725,6 +478,7 @@ pub(crate) async fn expand_shortest(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::val::TableName;
 
 	fn rid(key: &str) -> RecordId {
 		RecordId {

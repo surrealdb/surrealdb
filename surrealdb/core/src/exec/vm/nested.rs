@@ -2,16 +2,14 @@
 //! nested in an expression, run over the program's own state.
 //!
 //! A value in `FROM` ([`Source::Values`]) is evaluated when its pipeline opens
-//! and read as the operator tree reads it (see
-//! [`ValuesRead`](super::plan::ValuesRead)). A record id among the values is
+//! and read as [`ValuesRead`](super::plan::ValuesRead) describes. A record id among the values is
 //! read under the caller's permissions; a table a dynamic read finds is read as
 //! the pipeline takes its rows, no more records asked of storage first than
 //! the pipeline's paging admits, and no further once a limit of the pipeline
 //! is spent. Under a program lowered with the units that read each table its
 //! values can name ([`super::dispatch`]) both are read by the unit of the
-//! table. A record the units do not read is read by the fetch helpers the
-//! operator tree's sources read it with. A table they do not read is one the
-//! catalog did not hold when the program was lowered, which the run defined by
+//! table. A record the units do not read is read by the fetch helpers. A table they do not read is
+//! one the catalog did not hold when the program was lowered, which the run defined by
 //! writing to it: it holds no definition a unit would have lowered, and is read
 //! by key range, as a scan of such a table reads it ([`undispatched_table`]).
 //! Nothing is planned or lowered while the program runs.
@@ -53,7 +51,6 @@ use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::scan::pipeline::kv_scan_stream;
 use crate::exec::operators::scan::resolved::EnforcementMode;
 use crate::exec::operators::scan::{execute_record_lookup, record_key_range};
-use crate::exec::pre_decode_filter::PreDecodeFilterStatus;
 use crate::exec::{ExecutionContext, FlowResult, ValueBatchStream};
 use crate::expr::ControlFlow;
 use crate::val::{RecordIdKey, TableName, Value};
@@ -99,8 +96,8 @@ pub(super) async fn run_source(
 		Source::Nested {
 			group,
 		} => {
-			// The zero limit binds the statement's own reads of storage, as
-			// the operator tree binds the scans beneath it, unless it writes.
+			// The zero limit binds the statement's own reads of storage,
+			// including the scans beneath it, unless it writes.
 			let zeroed = (spent || state.zeroed) && program.groups[*group as usize].write.is_none();
 			let outer = std::mem::replace(&mut state.zeroed, zeroed);
 			let (rows, ran) = run_group(program, *group, state, ctx).await;
@@ -145,8 +142,7 @@ pub(super) async fn run_source(
 
 /// Run `pipeline` over the rows of `rows`, a table's as they are read.
 /// Answers whether the pipeline stopped: the read stops once a limit of the
-/// pipeline is spent, reading no row past it, as the operator tree's read of
-/// a table stops.
+/// pipeline is spent, reading no row past it.
 async fn stream_rows(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
@@ -414,9 +410,7 @@ async fn values(
 				None,
 				zeroed.then_some(0),
 				0,
-				None,
 				EnforcementMode::Runtime,
-				&PreDecodeFilterStatus::NotApplicable,
 			)
 			.await?;
 			Ok(Values::Rows(rows))
@@ -446,7 +440,7 @@ async fn values(
 					.map_err(|e| ControlFlow::Err(e.into()))?;
 					let version = resolve_version_stamp(ctx, None).await?;
 					// A zero limit checks the table and its permission and
-					// reads no record (see `crate::exec::zero_limit`).
+					// reads no record.
 					let rows = execute_record_lookup(
 						&rid,
 						version,
@@ -457,9 +451,7 @@ async fn values(
 						None,
 						zeroed.then_some(0),
 						0,
-						None,
 						EnforcementMode::Runtime,
-						&PreDecodeFilterStatus::NotApplicable,
 					)
 					.await?;
 					Ok(Values::Rows(rows))
@@ -645,7 +637,7 @@ async fn records_of(ctx: &ExecutionContext, mut values: Vec<Value>) -> FlowResul
 /// the frame `ctx` runs in — a table whose read the host lowers no unit of,
 /// or one read in a frame other than the one its linked unit was lowered for
 /// ([`super::Deref::serving`]): every record in key order, read as the
-/// pipeline takes them, as the operator tree's helpers read a record by id
+/// pipeline takes them, as a record is read by id
 /// ([`crate::exec::operators::fetch::process_fetched_record`]) — the table's
 /// permission, its computed fields and the permissions of its fields — where
 /// the table defines any, and as storage holds it otherwise. A table the
@@ -825,10 +817,9 @@ async fn run_statement(
 		.program
 		.clone()
 		.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("a nested statement with no program")))?;
-	// The frame the operator tree's subquery runs in: the row bound as
-	// `$parent` and `$this`, and as the current row when the statement
-	// inherits it; unchecked reads, and the record a computed frame
-	// computes, carried in.
+	// The frame a subquery runs in: the row bound as `$parent` and `$this`,
+	// and as the current row when the statement inherits it; unchecked reads,
+	// and the record a computed frame computes, carried in.
 	let frame = {
 		let eval_ctx = super::host::frame_eval(program, state, ctx, frame);
 		let mut nested_ctx = eval_ctx.exec_ctx.clone();
@@ -891,7 +882,7 @@ async fn run_statement(
 struct Aside {
 	frame: Option<ExecutionContext>,
 	write_input: Option<Value>,
-	computing: Option<Arc<crate::exec::physical_expr::ComputingRecord>>,
+	computing: Option<Arc<crate::exec::eval_context::ComputingRecord>>,
 	unchecked_reads: bool,
 	permissions_bypassed: bool,
 	zeroed: bool,

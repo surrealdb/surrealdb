@@ -876,41 +876,6 @@ async fn a_read_unit_is_shared_by_every_principal_of_a_class() {
 	assert_eq!(rows.len(), 2);
 }
 
-/// The field state a table's read applies is compiled with a transaction, its
-/// computed fields' statements planned with it rather than where they are
-/// evaluated, and served from the compile cache to a later read of the same
-/// catalog version and class of principal, which compiles nothing; a record
-/// user, of another class, gets its own.
-#[tokio::test]
-async fn a_field_state_is_planned_with_its_statements_and_served_from_the_cache() {
-	let db = TestDb::new_with_auth(
-		"DEFINE TABLE q PERMISSIONS FULL;
-		 DEFINE FIELD n ON q TYPE int;
-		 DEFINE FIELD t ON q COMPUTED (SELECT VALUE n FROM ONLY q:1);
-		 CREATE q:1 SET n = 5;",
-	)
-	.await;
-	let table = crate::val::TableName::from("q".to_owned());
-	let state = |session: crate::dbs::Session| {
-		let (db, table) = (&db, &table);
-		async move {
-			let ctx = db.exec_ctx_as(&session, crate::kvs::TransactionType::Read).await;
-			let state = crate::exec::vm::descriptor::field_state(&ctx, table, true)
-				.await
-				.expect("the field state compiles");
-			ctx.txn().cancel().await.expect("cancel");
-			state
-		}
-	};
-	let owner = state(TestDb::owner()).await;
-	let names: Vec<&str> = owner.computed_names().collect();
-	assert_eq!(names, vec!["ScalarSubquery"], "a computed statement left to its evaluation");
-	let again = state(TestDb::owner()).await;
-	assert!(std::sync::Arc::ptr_eq(&owner, &again), "the owner's state was compiled again");
-	let reader = state(record_user("alice")).await;
-	assert!(!std::sync::Arc::ptr_eq(&owner, &reader), "a record user took the owner's state");
-}
-
 /// A table memo serves the descriptor it loaded again while the transaction
 /// is the same and stamps no catalog version, loads it afresh once a schema
 /// statement of the transaction stamps one, and never holds one read through

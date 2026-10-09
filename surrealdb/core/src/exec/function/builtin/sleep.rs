@@ -4,8 +4,8 @@
 
 use anyhow::Result;
 
+use crate::exec::EvalContext;
 use crate::exec::function::FunctionRegistry;
-use crate::exec::physical_expr::EvalContext;
 use crate::val::Value;
 use crate::{define_async_function, register_functions};
 

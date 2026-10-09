@@ -187,7 +187,7 @@ pub struct PrefetchFrontier {
     /// Target table and secondary index definitions.
     pub table: String,
     /// Projected key expressions / record IDs needed by subsequent segments.
-    pub key_expressions: Vec<PhysicalExprId>,
+    pub key_expressions: Vec<ClauseId>,
     /// Range bounds for lookahead scans.
     pub scan_bounds: Option<KeyRange>,
 }

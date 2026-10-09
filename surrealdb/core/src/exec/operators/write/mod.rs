@@ -27,14 +27,7 @@
 //! holds one batch, not the table — which is sound because a cursor a statement
 //! opened does not observe the records that statement writes.
 
-// The surface here is the contract the per-record stages share — where a stage
-// runs, what it is handed, and what the transaction guarantees around it — not
-// the subset any single stage calls. The orders, which stand on their own, are
-// covered by this module's own tests.
-#![allow(dead_code)]
-
 pub(crate) mod apply;
-pub(crate) mod clauses;
 pub(crate) mod ctx;
 pub(crate) mod metadata;
 pub(crate) mod place;
@@ -47,130 +40,18 @@ pub(crate) mod subject;
 
 use std::sync::Arc;
 
-use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use surrealdb_types::ToSql;
 
-use self::clauses::WriteClauses;
-use self::place::WritePlace;
-use self::plan::{WritePlan, WriteProgram};
 use self::row::WriteRow;
-use self::scope::{WritePurpose, WriteScope};
 use self::stage::StageOutcome;
 use self::subject::extract_table_and_rid_key;
 use crate::catalog::PermissionKind;
-use crate::exec::operators::check_cancelled;
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, Error as ExecError, EvalContext, ExecOperator,
-	ExecutionContext, FlowResult, OperatorMetrics, OutputShape, PhysicalExpr, ValueBatch,
-	ValueBatchStream, buffer_stream, monitor_stream,
-};
-use crate::expr::mock::{IntoIter as MockIds, Mock};
-use crate::expr::output::Output;
+use crate::exec::{Error as ExecError, ExecutionContext, ValueBatchStream};
+use crate::expr::mock::IntoIter as MockIds;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{ControlFlow, ControlFlowExt, Part};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
-
-/// Where a mutation's subjects come from.
-///
-/// The arms are not interchangeable. A creating form's subject does not
-/// exist yet, so it must not be read: a reading source resolves a record id to
-/// its stored document and yields nothing when there is none, which for a
-/// record being created is always, dropping the write instead of performing it.
-#[derive(Debug)]
-pub enum WriteSource {
-	/// Targets the statement named, each naming a table to derive an id in or
-	/// a record id to write at. Nothing is read.
-	Targets(Vec<WriteTarget>),
-	/// `RELATE`'s three expressions, which name one edge each rather than one
-	/// subject each. Nothing is read: `from` and `to` evaluate to the ids the
-	/// edge joins, and `through` to the table the edge record is derived in or
-	/// the id it is written at. One edge is written per `from` × `to` pair,
-	/// which is why the three cannot be carried as three targets.
-	Edges {
-		from: Arc<dyn PhysicalExpr>,
-		through: Arc<dyn PhysicalExpr>,
-		to: Arc<dyn PhysicalExpr>,
-	},
-	/// `INSERT`'s rows, which are the records to write rather than a clause
-	/// applied to records named elsewhere. Nothing is read.
-	Inserts(Arc<InsertSubjects>),
-	/// Records read by an ordinary plan subtree, for a form whose subjects
-	/// already exist. This is what lowering a mutation buys: the source
-	/// inherits index selection, filter pushdown and the projection-layer
-	/// encoding from the read side.
-	Rows(Arc<dyn ExecOperator>),
-}
-
-/// One target of a target-taking form, compiled.
-///
-/// Cloned per run of the operator, as the compiled targets were: the clone
-/// copies a handle and a mock's bounds, never the ids a mock generates.
-#[derive(Clone, Debug)]
-pub(crate) enum WriteTarget {
-	/// An expression evaluated once for the statement, whose value names the
-	/// subjects — a table, a record id, or an array of either.
-	Expr(Arc<dyn PhysicalExpr>),
-	/// `|t:n|`, carried whole so its ids are generated as the write consumes
-	/// them. Compiling it as an expression would build the whole set as an
-	/// array before the first record is written, which for `CREATE |t:1000000|`
-	/// is a million values held at once to write them one at a time.
-	Mock(Mock),
-}
-
-/// `INSERT`'s rows and where they land, compiled.
-///
-/// Held behind an `Arc` so one run of the operator borrows it whole: a `VALUES`
-/// tuple's places are compiled once for the statement and are not `Clone`,
-/// which is the point — nothing a user wrote is planned per row.
-#[derive(Debug)]
-pub(crate) struct InsertSubjects {
-	/// The `INTO` table, evaluated once per statement to a table name or to a
-	/// string naming one. `None` where the statement names none, in which case
-	/// every row must carry a record id, which supplies its table.
-	pub(crate) into: Option<Arc<dyn PhysicalExpr>>,
-	/// The rows themselves.
-	pub(crate) rows: InsertRows,
-	/// `INSERT RELATION`: every row is an edge, and the `in` and `out` it
-	/// carries are the endpoints the edge joins rather than ordinary fields.
-	pub(crate) relation: bool,
-}
-
-/// How an `INSERT` spells its rows, compiled.
-#[derive(Debug)]
-pub(crate) enum InsertRows {
-	/// `INSERT INTO t (a, b) VALUES (1, 2), (3, 4)` — one tuple per row. Each
-	/// tuple builds a fresh empty object by writing every expression through
-	/// the place paired with it.
-	Tuples(Vec<Vec<InsertField>>),
-	/// `INSERT INTO t { … }`, `INSERT INTO t [ … ]`, `INSERT INTO t (SELECT …)`
-	/// — one expression evaluated once for the statement. An object is one
-	/// row, an array one row per element, and anything else is refused.
-	Value(Arc<dyn PhysicalExpr>),
-}
-
-/// One `(place, expression)` pair of a `VALUES` tuple, compiled.
-///
-/// The left-hand side is a place rather than a field name: `INSERT INTO t
-/// (a.b) VALUES (1)` writes `1` at `a.b`, building the objects the path needs,
-/// exactly as the same path on the left of a `SET` does.
-#[derive(Debug)]
-pub(crate) struct InsertField {
-	pub(crate) place: WritePlace,
-	pub(crate) value: Arc<dyn PhysicalExpr>,
-}
-
-/// The owned subjects one run of the operator works from.
-///
-/// [`WriteSource`] is what the plan holds; this is what the stream body took
-/// from it, which for a row source is the executing stream rather than the
-/// operator that produces it.
-enum Subjects {
-	Targets(Vec<WriteTarget>),
-	Edges(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>),
-	Inserts(Arc<InsertSubjects>),
-	Rows(ValueBatchStream),
-}
 
 /// Which end of a `RELATE` a value was found at.
 ///
@@ -188,10 +69,10 @@ impl RelateSide {
 		let value = value.to_sql();
 		ControlFlow::Err(anyhow::anyhow!(match self {
 			RelateSide::From => ExecError::RelateStatementIn {
-				value,
+				value
 			},
 			RelateSide::To => ExecError::RelateStatementId {
-				value,
+				value
 			},
 		}))
 	}
@@ -236,7 +117,7 @@ pub(crate) fn relate_row(at: Value, from: RecordId, to: RecordId) -> Result<Writ
 		at @ (Value::RecordId(_) | Value::Table(_)) => WriteRow::for_target(at)?,
 		other => {
 			return Err(ControlFlow::Err(anyhow::anyhow!(ExecError::RelateStatementOut {
-				value: other.to_sql(),
+				value: other.to_sql()
 			})));
 		}
 	};
@@ -320,7 +201,7 @@ pub(crate) fn target_subjects(
 ) -> Result<(), ControlFlow> {
 	let refuse = |value: &Value| {
 		ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatementTarget {
-			value: value.to_sql(),
+			value: value.to_sql()
 		}))
 	};
 	match value {
@@ -463,28 +344,6 @@ impl Rows {
 	}
 }
 
-/// The evaluation context a mutation's subject expressions read.
-///
-/// A mutation written where a scalar is expected — a projection, a block, a
-/// function body — names its subjects against the row that holds it, exactly
-/// as `$this` denotes that row: the target of `UPSERT link.target`, the
-/// endpoints of a `RELATE`, and an `INSERT`'s `INTO` and its values all
-/// resolve a bare path against the enclosing record. The row is bound as both
-/// the current value and the document root, so a read nested inside a subject
-/// expression — a method's argument, a dynamic index — is answered from the
-/// row rather than from the position the path has reached; this is what
-/// `SourceExpr` binds for a read's `FROM` expression.
-///
-/// A statement with no enclosing row evaluates its subjects against no
-/// document, so a bare path there is `NONE` and names no subject.
-pub(crate) fn subject_ctx(exec: &ExecutionContext) -> EvalContext<'_> {
-	let ctx = EvalContext::from_exec_ctx(exec);
-	match exec.value("this") {
-		Some(row) => ctx.with_value_and_doc(row),
-		None => ctx,
-	}
-}
-
 /// Re-label a target the subject expansion rejected with the form that
 /// rejected it.
 pub(crate) fn refused_by(err: ControlFlow, form: plan::WriteForm) -> ControlFlow {
@@ -518,58 +377,6 @@ pub(crate) fn refused_by(err: ControlFlow, form: plan::WriteForm) -> ControlFlow
 			value,
 		},
 	}))
-}
-
-/// The table an `INSERT`'s `INTO` clause names.
-///
-/// A table name or a string naming one; anything else refuses the statement,
-/// naming the expression rather than what it produced, because the expression
-/// is what the author can change.
-pub(crate) async fn insert_into(
-	expr: &Arc<dyn PhysicalExpr>,
-	exec: &ExecutionContext,
-) -> Result<TableName, ControlFlow> {
-	match expr.evaluate(subject_ctx(exec)).await? {
-		Value::Table(into) => Ok(into),
-		Value::String(into) => Ok(TableName::new(into)),
-		_ => Err(ControlFlow::Err(anyhow::anyhow!(ExecError::InsertStatement {
-			value: expr.to_sql(),
-		}))),
-	}
-}
-
-/// The values one `INSERT` writes, evaluated.
-///
-/// Every row is produced before any of them is written, so a row expression
-/// never observes a record this statement has already written.
-pub(crate) async fn insert_values(
-	rows: &InsertRows,
-	exec: &ExecutionContext,
-) -> Result<Vec<Value>, ControlFlow> {
-	match rows {
-		InsertRows::Tuples(tuples) => {
-			let mut out = Vec::with_capacity(tuples.len());
-			for tuple in tuples {
-				check_cancelled(exec)?;
-				// A fresh object per row, written through the tuple's places in
-				// the order the statement wrote them.
-				let mut row = Value::empty_object();
-				for field in tuple {
-					let value = field.value.evaluate(subject_ctx(exec)).await?;
-					apply::set(&mut row, field.place.steps(), value, exec).await?;
-				}
-				out.push(row);
-			}
-			Ok(out)
-		}
-		InsertRows::Value(expr) => match expr.evaluate(subject_ctx(exec)).await? {
-			Value::Array(array) => Ok(array.into_iter().collect()),
-			object @ Value::Object(_) => Ok(vec![object]),
-			other => Err(ControlFlow::Err(anyhow::anyhow!(ExecError::InsertStatement {
-				value: other.to_sql(),
-			}))),
-		},
-	}
 }
 
 /// The row one `INSERT` value is written through.
@@ -621,439 +428,6 @@ fn insert_endpoint(
 	match value.pick(path) {
 		Value::RecordId(id) => Ok(id),
 		other => Err(ControlFlow::Err(anyhow::anyhow!(refuse(other.to_sql())))),
-	}
-}
-
-/// A mutation.
-#[derive(Debug)]
-pub struct WriteOperator {
-	/// What the statement writes to.
-	source: WriteSource,
-	/// The statement's clauses, compiled once and handed to every record's
-	/// context.
-	clauses: Arc<WriteClauses>,
-	/// The per-record orders and the control flow between them.
-	plan: Arc<WritePlan>,
-	/// The statement's `RETURN` clause, which `output_write` dispatches on.
-	output: Option<Output>,
-	/// Whether the statement asked for a single record with `ONLY`. Carried on
-	/// the operator because `ONLY` is a clause of the statement rather than a
-	/// node of the plan, so nothing above compiles the cardinality rule for it.
-	only: bool,
-	metrics: Arc<OperatorMetrics>,
-}
-
-impl WriteOperator {
-	pub(crate) fn new(
-		source: WriteSource,
-		plan: Arc<WritePlan>,
-		clauses: Arc<WriteClauses>,
-		output: Option<Output>,
-		only: bool,
-	) -> Self {
-		Self {
-			source,
-			plan,
-			clauses,
-			output,
-			only,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-}
-
-impl ExecOperator for WriteOperator {
-	fn name(&self) -> &'static str {
-		"Write"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = vec![("form".to_string(), self.plan.form().kind().to_string())];
-		if self.only {
-			attrs.push(("only".to_string(), "true".to_string()));
-		}
-		// A mock target carries no operator, so it is named here rather than
-		// among the expressions. One entry per mock however many ids it
-		// generates: the write drains them, it does not hold them.
-		if let WriteSource::Targets(targets) = &self.source {
-			for target in targets {
-				if let WriteTarget::Mock(mock) = target {
-					attrs.push(("target".to_string(), mock.to_sql()));
-				}
-			}
-		}
-		// The per-record order is the operator's own, and is what a reader of
-		// an `EXPLAIN` needs in order to know when a gate runs relative to a
-		// user expression.
-		for (which, stages) in self.plan.orders() {
-			let names: Vec<&str> = stages.iter().map(|s| s.name()).collect();
-			attrs.push((which.name().to_string(), names.join(" → ")));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		match &self.source {
-			WriteSource::Targets(_)
-			| WriteSource::Edges {
-				..
-			}
-			| WriteSource::Inserts(_) => ContextLevel::Database,
-			WriteSource::Rows(input) => ContextLevel::Database.max(input.required_context()),
-		}
-	}
-
-	/// A mutation writes storage, whatever its source and whatever its stages
-	/// turn out to do for a given record.
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadWrite
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		match &self.source {
-			WriteSource::Targets(_)
-			| WriteSource::Edges {
-				..
-			}
-			| WriteSource::Inserts(_) => {
-				vec![]
-			}
-			WriteSource::Rows(input) => vec![input],
-		}
-	}
-
-	/// The compiled targets, so `EXPLAIN ANALYZE` reaches the operators
-	/// embedded in them. A mock target holds no operator and is named by
-	/// [`Self::attributes`] instead.
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		match &self.source {
-			WriteSource::Targets(targets) => targets
-				.iter()
-				.filter_map(|target| match target {
-					WriteTarget::Expr(expr) => Some(("target", expr)),
-					WriteTarget::Mock(_) => None,
-				})
-				.collect(),
-			WriteSource::Edges {
-				from,
-				through,
-				to,
-			} => vec![("from", from), ("through", through), ("to", to)],
-			WriteSource::Inserts(inserts) => {
-				let mut out: Vec<(&str, &Arc<dyn PhysicalExpr>)> = Vec::new();
-				if let Some(into) = &inserts.into {
-					out.push(("into", into));
-				}
-				match &inserts.rows {
-					InsertRows::Tuples(tuples) => {
-						out.extend(tuples.iter().flatten().map(|field| ("value", &field.value)))
-					}
-					InsertRows::Value(expr) => out.push(("rows", expr)),
-				}
-				out
-			}
-			WriteSource::Rows(_) => vec![],
-		}
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		if self.only {
-			CardinalityHint::AtMostOne
-		} else {
-			CardinalityHint::Unbounded
-		}
-	}
-
-	/// `ONLY` makes the statement's value the one row it returned rather than
-	/// an array of rows. The rule counts **returned** rows, so it applies after
-	/// `output_write` has dropped the records the `RETURN` clause produces
-	/// nothing for: `DELETE ONLY … RETURN NONE` returns no row and answers
-	/// `NONE`, not a cardinality failure.
-	fn output_shape(&self) -> OutputShape {
-		if self.only {
-			OutputShape::Scalar
-		} else {
-			OutputShape::Rows
-		}
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// This is where a frame that refuses a write refuses a *compiled* one.
-		// A definition-time check cannot stand in for it: whether a called
-		// function writes may depend on which branch its arguments select, so
-		// only reaching the statement settles it.
-		//
-		// Code that reads the frame off `Options::no_write` refuses the same
-		// frames. Both raise the frame's own error rather than choosing one
-		// here, so the two routes cannot name a frame differently and a frame
-		// added later is refused by both.
-		if let Some(frame) = ctx.root().no_write {
-			return Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error())));
-		}
-		// R2: a plan whose access mode is `ReadWrite` requires the inherited
-		// transaction to be writable. This is a plan-level diagnosis raised
-		// before any of the statement's work begins, rather than the
-		// storage-level one a stage would eventually get, and it is an error
-		// rather than a panic: the statement's transaction is selected from a
-		// syntactic predicate over the parsed statement, and a clause that
-		// predicate under-approximates puts a mutation on a read-only
-		// transaction.
-		let txn = ctx.try_txn().ok_or_else(|| {
-			ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatement(format!(
-				"Cannot run {} without a transaction",
-				self.plan.form().kind()
-			))))
-		})?;
-		if !txn.writeable() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatement(format!(
-				"Cannot run {} on a read only transaction",
-				self.plan.form().kind()
-			)))));
-		}
-
-		// R4: the input is consumed a batch at a time, never drained. The mode
-		// passed to the buffer is this operator's own combined with its
-		// input's, which keeps the read and the write on one task: a source
-		// running ahead on a spawned task would order this operator's writes by
-		// the scheduler, and savepoints are a stack with no handle.
-		let mut subjects = match &self.source {
-			WriteSource::Targets(targets) => Subjects::Targets(targets.clone()),
-			WriteSource::Edges {
-				from,
-				through,
-				to,
-			} => Subjects::Edges(Arc::clone(from), Arc::clone(through), Arc::clone(to)),
-			WriteSource::Inserts(inserts) => Subjects::Inserts(Arc::clone(inserts)),
-			WriteSource::Rows(input) => Subjects::Rows(buffer_stream(
-				input.execute(ctx)?,
-				self.access_mode().combine(input.access_mode()),
-				input.cardinality_hint(),
-				ctx.root().ctx.config.exec.operator_buffer_size,
-			)),
-		};
-		let plan = Arc::clone(&self.plan);
-		let output = self.output.clone();
-		let clauses = Arc::clone(&self.clauses);
-		let has_cond = clauses.cond.is_some();
-		let only = self.only;
-		let exec = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			let program = plan.resolve().map_err(|missing| {
-				ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatement(format!(
-					"{} cannot run on the engine: the {} stage is not implemented",
-					plan.form().kind(),
-					missing.name()
-				))))
-			})?;
-			let scope =
-				WriteScope::new(exec.clone(), clauses, output, plan.form().table_existence());
-			let mut gate = WriteGate::resolve(plan.form(), &exec)?;
-			// Rows shown to the caller, which `ONLY` is judged against.
-			let mut returned = 0usize;
-			// Records the statement's condition accepted, which the guaranteed
-			// record is judged against. Distinct from the rows shown: a record
-			// matched under `RETURN NONE`, or withheld by the select gate after
-			// it was written, counts here and not there. Only a target that scans
-			// a table can leave a guarantee owing, so only that arm counts.
-			let mut matched = 0usize;
-			let mut guaranteed: Option<TableName> = None;
-
-			match &mut subjects {
-				Subjects::Rows(input) => {
-					while let Some(batch) = input.next().await {
-						check_cancelled(&exec)?;
-						let mut emitted = Vec::new();
-						for value in batch?.into_values() {
-							// A row that is a record id names the record, as
-							// a target does: a subquery yielding ids writes
-							// the records they name.
-							let row = match value {
-								Value::RecordId(id) if !id.key.is_range() => {
-									read_subject(&exec, id).await?
-								}
-								value => WriteRow::for_record(value)
-									.map_err(|err| refused_by(err, plan.form()))?,
-							};
-							// Taken by value: a `WriteRow` holds a `OnceCell`,
-							// so a borrow of one alive across an await would
-							// make the whole write stream `!Send`.
-							let table = row.table().cloned();
-							if !gate.admits(table.as_ref(), &exec).await? {
-								continue;
-							}
-							if let Some(value) = write_one(&program, row, &scope).await?.output {
-								emitted.push(value);
-							}
-						}
-						returned += emitted.len();
-						if only && returned > 1 {
-							return Err(ControlFlow::Err(anyhow::anyhow!(
-								ExecError::SingleOnlyOutput
-							)));
-						}
-						if !emitted.is_empty() {
-							yielder.emit(ValueBatch::new(emitted)).await;
-						}
-					}
-				}
-				Subjects::Targets(targets) => {
-					let form = plan.form();
-					// `Statement::is_deferable`: for these a target naming a
-					// table names a record to invent, and for every other form
-					// it names the records stored there.
-					let deferable = matches!(form, plan::WriteForm::Create)
-						|| (matches!(form, plan::WriteForm::Upsert) && !has_cond);
-					for target in targets.iter() {
-						check_cancelled(&exec)?;
-						let mut subjects = match target {
-							WriteTarget::Expr(expr) => {
-								let value = expr.evaluate(subject_ctx(&exec)).await?;
-								let mut named = Vec::new();
-								target_subjects(value, form, deferable, &mut named)
-									.map_err(|err| refused_by(err, form))?;
-								TargetSubjects::Named(named.into_iter())
-							}
-							WriteTarget::Mock(mock) => {
-								TargetSubjects::Mock(mock.clone().into_iter())
-							}
-						};
-						while let Some(subject) =
-							subjects.next(form, deferable).map_err(|err| refused_by(err, form))?
-						{
-							check_cancelled(&exec)?;
-							let mut rows = match subject {
-								Subject::Row(row) => Rows::One(Some(row)),
-								Subject::Read(id) => {
-									Rows::One(Some(Box::new(read_subject(&exec, id).await?)))
-								}
-								Subject::Scan(table, range) => {
-									// An `UPSERT` over a table it matched
-									// nothing in writes one record, once for the
-									// whole statement. The slot holds the last
-									// bare-table target the gate admits, assigned
-									// per admitted table: a table
-									// this caller may not write claims no slot,
-									// and a later admitted target supersedes an
-									// earlier one. The gate memoises its answer,
-									// so the per-record ask that follows costs
-									// nothing more.
-									if matches!(form, plan::WriteForm::Upsert)
-										&& range.is_none() && gate
-										.admits(Some(&table), &exec)
-										.await?
-									{
-										guaranteed = Some(table.clone());
-									}
-									Rows::Scan(scan_subjects(&exec, &table, range.as_deref())?)
-								}
-							};
-							while let Some(row) = rows.next().await? {
-								check_cancelled(&exec)?;
-								let table = row.table().cloned();
-								if !gate.admits(table.as_ref(), &exec).await? {
-									continue;
-								}
-								let written = write_one(&program, row, &scope).await?;
-								if written.matched {
-									matched += 1;
-								}
-								if let Some(value) = written.output {
-									returned += 1;
-									if only && returned > 1 {
-										return Err(ControlFlow::Err(anyhow::anyhow!(
-											ExecError::SingleOnlyOutput
-										)));
-									}
-									yielder.emit(ValueBatch::new(vec![value])).await;
-								}
-							}
-						}
-					}
-					// A form that owes a guaranteed record writes one when the
-					// statement matched nothing. What it matched is counted, not
-					// what it returned: `RETURN NONE`, `OPTION IMPORT` and a select
-					// gate that withholds a record all write it and show no row for
-					// it, so counting rows would read a statement that updated every
-					// record it scanned as one that matched none. An import is exempt
-					// outright: it replays statements whose records it also
-					// writes, and a guaranteed record would be a row the export
-					// never held. The table is one the gate admitted when it
-					// claimed the slot, so this writes without asking again.
-					if matched == 0
-						&& !exec.options().is_some_and(|options| options.import)
-						&& let Some(table) = guaranteed.take()
-					{
-						let row = WriteRow::for_target(Value::Table(table))?;
-						if let Some(value) = write_one(&program, row, &scope).await?.output {
-							yielder.emit(ValueBatch::new(vec![value])).await;
-						}
-					}
-				}
-				Subjects::Inserts(inserts) => {
-					let into = match &inserts.into {
-						Some(expr) => Some(insert_into(expr, &exec).await?),
-						None => None,
-					};
-					for value in insert_values(&inserts.rows, &exec).await? {
-						check_cancelled(&exec)?;
-						let row = insert_row(value, &into, inserts.relation)?;
-						if let Some(value) = write_one(&program, row, &scope).await?.output {
-							returned += 1;
-							if only && returned > 1 {
-								return Err(ControlFlow::Err(anyhow::anyhow!(
-									ExecError::SingleOnlyOutput
-								)));
-							}
-							yielder.emit(ValueBatch::new(vec![value])).await;
-						}
-					}
-				}
-				Subjects::Edges(from, through, to) => {
-					// Both sides are evaluated once, and the edges are their
-					// cross product: `RELATE [a, b]->knows->[c, d]` writes four
-					// edges, not two subjects.
-					let froms = relate_endpoints(
-						from.evaluate(subject_ctx(&exec)).await?,
-						RelateSide::From,
-					)?;
-					let tos =
-						relate_endpoints(to.evaluate(subject_ctx(&exec)).await?, RelateSide::To)?;
-					for f in &froms {
-						for t in &tos {
-							check_cancelled(&exec)?;
-							// Evaluated per edge rather than once, which is
-							// what a `through` naming a fresh id per edge needs.
-							let at = through.evaluate(subject_ctx(&exec)).await?;
-							let row = relate_row(at, f.clone(), t.clone())?;
-							if let Some(value) = write_one(&program, row, &scope).await?.output {
-								returned += 1;
-								if only && returned > 1 {
-									return Err(ControlFlow::Err(anyhow::anyhow!(
-										ExecError::SingleOnlyOutput
-									)));
-								}
-								yielder.emit(ValueBatch::new(vec![value])).await;
-							}
-						}
-					}
-				}
-			}
-			// A scalar-shaped operator emits exactly one value. No rows is
-			// `NONE` whatever the reason: a missing record, a condition nothing
-			// satisfied, and a `RETURN` clause that produced nothing all answer
-			// alike.
-			if only && returned == 0 {
-				yielder.emit(ValueBatch::new(vec![Value::None])).await;
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), "Write", &self.metrics))
 	}
 }
 
@@ -1201,65 +575,6 @@ impl WriteGate {
 	}
 }
 
-/// What one record's run of the write program came to.
-///
-/// The two answers are independent, and a form that owes a guaranteed record
-/// needs the first rather than the second: a record can be matched and show
-/// nothing — under `RETURN NONE`, under `OPTION IMPORT`, or when the select
-/// gate withholds a record already written — while a record the `WHERE`
-/// condition rejected is neither matched nor shown.
-struct Written {
-	/// Whether the statement's condition accepted the record, as
-	/// `check_where_condition` recorded on the row.
-	matched: bool,
-	/// What the statement's output clause produced for the record, and `None`
-	/// whenever it produced nothing or a stage declined the record.
-	output: Option<Value>,
-}
-
-/// Run one record through the statement's program, and report what the program
-/// made of it.
-async fn write_one(
-	program: &WriteProgram,
-	mut row: WriteRow,
-	scope: &Arc<WriteScope>,
-) -> Result<Written, ControlFlow> {
-	let exec = scope.exec();
-	// Polled per record as well as per batch: a statement whose stages are slow
-	// pulls no fresh batch for as long as one record takes, and the buffer and
-	// metric wrappers inject no cancellation of their own.
-	check_cancelled(exec)?;
-	exec.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
-	let table = row
-		.table()
-		.cloned()
-		.ok_or_else(|| {
-			anyhow::anyhow!(ExecError::InvalidStatement(
-				"A write subject names neither a record nor a table".to_string()
-			))
-		})
-		.map_err(ControlFlow::Err)?;
-	let write_ctx = scope.write_ctx_for(&table, WritePurpose::Statement).await?;
-	// The record-type marker cannot travel in a batch of values, so a row a
-	// row source produced arrives without one and picks it up here, before any
-	// stage that dispatches on it runs. See `WriteRow::load_stored_metadata`.
-	row.load_stored_metadata(&write_ctx).await?;
-	let outcome = program.run_record(&mut row, &write_ctx).await;
-	if counts_as_affected(row.mutated, &outcome)
-		&& let Some(counters) = exec.ctx().statement_counters()
-	{
-		counters.record_affected();
-	}
-	let output = match outcome? {
-		StageOutcome::SkipRow => None,
-		StageOutcome::Continue => row.output.take(),
-	};
-	Ok(Written {
-		matched: row.matched,
-		output,
-	})
-}
-
 /// Whether a record just run counts towards the statement's affected-row
 /// total, which is counted before the row is dropped.
 ///
@@ -1292,7 +607,7 @@ mod tests {
 	use super::*;
 	use crate::dbs::Session;
 	use crate::exec::operators::test_util::{TestDb, collect, plan_statement, try_collect};
-	use crate::exec::operators::write::plan::{WriteFacts, WriteForm, WritePlan};
+	use crate::exec::operators::write::plan::WriteForm;
 	use crate::expr::paths::ID;
 	use crate::kvs::TransactionType;
 
@@ -1421,41 +736,6 @@ mod tests {
 		assert!(counts_as_affected(true, &Err(ControlFlow::Break)));
 		assert!(counts_as_affected(true, &Err(ControlFlow::Return(Value::None))));
 		assert!(!counts_as_affected(false, &Err(ControlFlow::Continue)));
-	}
-
-	/// R2: a mutation refuses a read-only transaction before any of the
-	/// statement's work begins. The transaction is selected from a syntactic
-	/// predicate over the parsed statement, so a clause that predicate
-	/// under-approximates must fail here rather than at the first storage
-	/// write, half a record in.
-	#[tokio::test]
-	async fn a_write_refuses_a_read_only_transaction() {
-		let db = TestDb::new("DEFINE TABLE t SCHEMALESS;").await;
-		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
-		let plan = Arc::new(WritePlan::build(WriteFacts {
-			form: WriteForm::Create,
-			has_data: true,
-			on_duplicate_key_update: false,
-			ignore: false,
-			repeatable: false,
-		}));
-		let op = WriteOperator::new(
-			WriteSource::Targets(vec![]),
-			plan,
-			Arc::new(WriteClauses::default()),
-			None,
-			false,
-		);
-		let Err(err) = op.execute(&ctx) else {
-			panic!("a write must refuse a read transaction");
-		};
-		let ControlFlow::Err(err) = err else {
-			panic!("expected an error, got a loop or return signal");
-		};
-		assert!(
-			err.to_string().contains("read only transaction"),
-			"the refusal must name the transaction, got: {err}"
-		);
 	}
 
 	/// A caller with no permission for the statement's clause writes nothing on

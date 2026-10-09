@@ -26,10 +26,9 @@ fn p(segments: &[&str]) -> Vec<PathSegment> {
 ///
 /// Routes through the macro-generated [`Record::serialize_revisioned`] so the
 /// produced bytes always match the latest revision's wire layout (rev-2
-/// optimised + indexed_struct as of DB-655's predecessor). Hand-rolling the
-/// envelope here used to work for rev 1 but breaks the moment the revision
-/// bumps — the offset prologue and `u32_le payload_length` envelope would be
-/// missing.
+/// optimised + indexed_struct). Hand-rolling the envelope here would break
+/// the moment the revision bumps — the offset prologue and
+/// `u32_le payload_length` envelope would be missing.
 fn wire_record_plain_object(obj: Object) -> Vec<u8> {
 	let rec = Record {
 		metadata: None,
@@ -42,8 +41,8 @@ fn wire_record_plain_object(obj: Object) -> Vec<u8> {
 
 /// Test-only convenience over [`scan_record_object_at_path_with_slots`] that
 /// decodes each slot's wire bytes into a [`Value`] (or [`Value::None`] when
-/// the slot is absent), giving back the same `Vec<Value>` shape the legacy
-/// scan returned. Production callers run their evaluator on borrowed slot
+/// the slot is absent), giving back one `Vec<Value>` entry per slot.
+/// Production callers run their evaluator on borrowed slot
 /// bytes inside the closure — the tests just verify the descent + needle
 /// pairing logic, so decoding the slots is harmless.
 fn scan_slots_decoded(

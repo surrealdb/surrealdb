@@ -1,11 +1,11 @@
 //! O(1) rev-2 envelope skip for [`crate::val::Value`] wires, without the
 //! `SkipRevisioned` trait.
 //!
-//! The legacy `<Value as SkipRevisioned>::skip_revisioned` path was forbidden
-//! in the scan/predicate hot path because its name implies a recursive
-//! skip-walk; under rev-2 it actually inlines to a tag + length-prefix read,
-//! but the directive is to call the optimised envelope primitives directly
-//! so the cost model is obvious at every call site.
+//! The `<Value as SkipRevisioned>::skip_revisioned` path is avoided in the
+//! scan/predicate hot path because its name implies a recursive skip-walk;
+//! under rev-2 it actually inlines to a tag + length-prefix read, but the
+//! optimised envelope primitives are called directly so the cost model is
+//! obvious at every call site.
 //!
 //! This helper reads the `u16` rev prefix, validates `rev == 2`, then reads
 //! the optimised tag and advances the reader past the value's payload in O(1)

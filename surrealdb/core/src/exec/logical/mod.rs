@@ -105,10 +105,7 @@ pub(crate) use effects::{
 	Needs, effects_of_body, effects_of_expr, effects_of_plan, effects_of_plan_late_bound,
 	needs_of_expr, stored_functions_of,
 };
-pub(crate) use rules::{
-	BatchRetry, ColumnEffects, and, columns_may_run_column_major, conjuncts, is_effect_free,
-	is_false, may_signal_control_flow, named_reads, plan_may_raise,
-};
+pub(crate) use rules::{and, conjuncts, is_effect_free, is_false, named_reads, plan_may_raise};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
@@ -582,15 +579,13 @@ fn next_alias_index(op: &LogicalOp) -> usize {
 	next
 }
 
-/// The first write in `op` that no operator can run, named by the form and the
-/// stage it is missing — or `None` when every write it holds can run.
+/// The first write in `op` that cannot run, named by the clause the planner
+/// cannot compile — or `None` when every write it holds can run.
 ///
 /// A mutation has a logical form, so a statement holding one reaches the
-/// planner instead of being refused by statement kind. A form is declined
-/// exactly when one of its orders names a stage with no body
-/// ([`WritePlan::resolve`](crate::exec::operators::write::plan::WritePlan)),
-/// so this narrows as stages land and answers `None` once they all have. But
-/// *where* a decline happens is load-bearing, which is why this runs at
+/// planner instead of being refused by statement kind. A write is declined
+/// exactly when one of its clauses has no logical form. *Where* a decline
+/// happens is load-bearing, which is why this runs at
 /// [`crate::exec::planner::plan_statement_inner`], before anything is bound
 /// or compiled.
 ///
@@ -630,7 +625,7 @@ pub(crate) fn unplannable_write(op: &LogicalOp) -> Option<String> {
 /// The same question as [`unplannable_write`], asked of a bare expression.
 ///
 /// A stored catalog clause is an expression rather than a statement, and it
-/// reaches the planner through [`crate::exec::Planner::physical_expr`] instead
+/// reaches the planner through [`crate::exec::Planner::scalar_metadata`] instead
 /// of `plan_statement_inner`, so the statement-level pre-flight never sees it.
 /// A caller compiling such a clause asks here, and carries the clause as an
 /// uncompilable one when the answer is `Some`.
@@ -641,8 +636,8 @@ pub(crate) fn unplannable_write_in_expr(expr: &LogicalExpr) -> Option<String> {
 }
 
 /// Whether `expr` holds a `LET` of a protected name in a statement it nests,
-/// wherever it stands in it: a statement the operator tree refuses when it
-/// plans it, whether or not it runs.
+/// wherever it stands in it: a statement planning refuses, whether or not it
+/// runs.
 pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
 	use std::ops::ControlFlow;
 	expr.visit_deep(&mut |node| {
@@ -792,8 +787,6 @@ mod write_walk {
 	use surrealdb_types::ToSql;
 
 	use super::{LogicalExpr, LogicalOp};
-	use crate::exec::operators::write::plan::WritePlan;
-	use crate::exec::planner::write::write_facts;
 	use crate::expr::logical::{LogicalWrite, LogicalWriteStatement};
 	use crate::expr::{Data, Expr};
 
@@ -802,17 +795,14 @@ mod write_walk {
 	///
 	/// A parameter rather than an inlined test so that the traversal and the
 	/// decision are testable apart: the traversal's job is to reach a write
-	/// wherever it is written, which stays the same question after every form
-	/// can run and [`cannot_run`] has stopped answering `Some` for any of
-	/// them.
+	/// wherever it is written, whatever the decision.
 	pub(super) type Decide = dyn FnMut(&LogicalWrite) -> Option<String>;
 
-	/// The production decision, asked of the statement alone: the orders it
-	/// names must resolve, and every clause it carries must have a compiled
-	/// form.
+	/// The production decision, asked of the statement alone: every clause it
+	/// carries must have a compiled form.
 	///
-	/// Both questions are answered here rather than left to the planner
-	/// because the answer decides whether the caller falls back to the compute
+	/// The question is answered here rather than left to the planner because
+	/// the answer decides whether the caller falls back to the compute
 	/// executor. A decline raised once the fold has reached the write would
 	/// let an unrelated refusal elsewhere in the statement — a `MATCHES` in an
 	/// untaken branch that binds to no index, say — surface first and fail a
@@ -824,9 +814,6 @@ mod write_walk {
 	/// are small and the work is per statement rather than per record, which
 	/// is the price of an answer that does not depend on compile order.
 	pub(super) fn cannot_run(write: &LogicalWrite) -> Option<String> {
-		if let Err(missing) = WritePlan::build(write_facts(write)).resolve() {
-			return Some(format!("{} has no {} stage yet", write.statement.kind(), missing.name()));
-		}
 		uncompilable_clause(&write.statement)
 	}
 
@@ -1125,7 +1112,7 @@ mod tests {
 	/// `children()` does not reach.
 	///
 	/// The depth is the point. `LogicalOp::visit` and `children()` walk the
-	/// operator tree, and a mutation written into a scalar — an `IF` branch, a
+	/// plan's `LogicalOp` nodes, and a mutation written into a scalar — an `IF` branch, a
 	/// call argument, a `LIMIT` — hangs off a subquery instead, so a walk over
 	/// children alone reports a statement holding one as plannable. It would
 	/// then be declined later, at the node, which is the ordering hazard
@@ -1352,8 +1339,8 @@ mod tests {
 			let reference = seq_reference(&plan);
 			let walked = seq_walk(&plan);
 			assert_eq!(reference, walked, "walk order diverged for: {sql}");
-			// A plan whose walk reaches more nodes than the operator tree
-			// alone proves the corpus entry actually nests a subquery.
+			// A plan whose walk reaches more nodes than its `LogicalOp`
+			// nodes alone proves the corpus entry actually nests a subquery.
 			let mut tree = Vec::new();
 			let _ = plan.visit(&mut |n| {
 				tree.push(n as *const LogicalOp);
@@ -1377,7 +1364,7 @@ mod tests {
 			let Some(plan) = lower_opt(sql) else {
 				continue;
 			};
-			// Walk every scalar of the whole operator tree with the expr
+			// Walk every scalar of the whole plan with the expr
 			// walk that DOES enter closure bodies.
 			let _ = plan.visit_scalars_deep(&mut |scalar| {
 				let _ = scalar.visit(&mut |e| {

@@ -2,10 +2,9 @@
 
 use anyhow::Result;
 
-use crate::exec::ContextLevel;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, Signature};
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::val::Value;
 use crate::{define_pure_function, register_functions};

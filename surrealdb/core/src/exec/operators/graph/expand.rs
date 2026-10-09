@@ -1,7 +1,7 @@
-//! The `Expand` operator — single-hop graph traversal for GQL v2 `MATCH`.
+//! Single-hop graph traversal for GQL v2 `MATCH`.
 //!
-//! `Expand` is the workhorse of binding-table execution. Given a stream of
-//! binding rows (each a `Value::Object` keyed by binding name, per
+//! [`expand_input_row`] is the workhorse of binding-table execution. Given a
+//! binding row (a `Value::Object` keyed by binding name, per
 //! `doc/gql/V2_DESIGN.md` §3), it expands one edge step from a bound source
 //! node, binding the traversed edge and the reached target node into each
 //! surviving row.
@@ -18,8 +18,8 @@
 //! 5. applies `target_label` (a candidate whose target table differs is dropped);
 //! 6. batch-fetches the target node through the FieldState-aware helper (a miss or permission
 //!    denial drops the candidate);
-//! 7. assembles `input ∪ {edge_binding, target_binding}` and evaluates the optional `predicate`
-//!    against that candidate row (mirroring `Filter`);
+//! 7. assembles `input ∪ {edge_binding, target_binding}` and judges the optional predicate against
+//!    that candidate row ([`CandidateJudge`]);
 //! 8. emits the survivors.
 //!
 //! ## Source extraction
@@ -60,8 +60,8 @@
 //! Binding the edge id-only must not let a user *traverse* an edge table they
 //! cannot SELECT — otherwise `->edge` would enumerate otherwise-hidden
 //! relationships even though the edge content is never returned.
-//! [`GraphEdgeScan`](super::super::scan::graph::GraphEdgeScan) gates its
-//! id-only output on the edge perm for exactly this reason. So when permissions
+//! The VM's graph scan gates its id-only output on the edge perm for exactly
+//! this reason. So when permissions
 //! are enforced (`check_perms`), `IdOnly` edges are still resolved through the
 //! FieldState-aware [`fetch`](crate::exec::operators::scan::fetch) helper purely to *gate*
 //! traversal: an edge denied (or missing) yields `None` and the candidate target is
@@ -74,19 +74,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[cfg(test)]
-use common::future::stream::{self, Yielder};
-#[cfg(test)]
-use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
 use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, OperatorMetrics,
-	PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::adjacency::VertexAdjacency;
@@ -124,15 +115,6 @@ impl ExpandDir {
 			ExpandDir::In => "in",
 		}
 	}
-
-	#[cfg(test)]
-	/// EXPLAIN arrow rendering.
-	fn arrow(self) -> &'static str {
-		match self {
-			ExpandDir::Out => "->",
-			ExpandDir::In => "<-",
-		}
-	}
 }
 
 /// How the traversed edge is bound into each surviving row.
@@ -160,206 +142,6 @@ impl EdgeBinding {
 	}
 }
 
-#[cfg(test)]
-/// Single-hop graph expansion over a stream of binding rows.
-///
-/// See the module docs for the per-row algorithm and the target-rid decision.
-#[derive(Debug, Clone)]
-pub struct Expand {
-	/// Child operator producing input binding rows.
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Name of the bound source node binding in each input row.
-	pub(crate) source: String,
-	/// Edge traversal direction.
-	pub(crate) direction: ExpandDir,
-	/// Edge tables to traverse; empty ⇒ all edge tables in `direction`.
-	pub(crate) edge_tables: Vec<TableName>,
-	/// How to bind the traversed edge.
-	pub(crate) edge_binding: EdgeBinding,
-	/// Name of the target node binding to introduce.
-	pub(crate) target_binding: String,
-	/// Optional label filter on the target vertex's table.
-	pub(crate) target_label: Option<TableName>,
-	/// Optional predicate over the assembled candidate row.
-	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
-	/// When `true`, an input row with zero survivors emits one row with the
-	/// edge and target bindings set to `Value::Null` (left-outer semantics).
-	pub(crate) optional: bool,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-#[cfg(test)]
-impl Expand {
-	#[cfg(test)]
-	/// Create a new `Expand` operator with fresh metrics.
-	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		source: String,
-		direction: ExpandDir,
-		edge_tables: Vec<TableName>,
-		edge_binding: EdgeBinding,
-		target_binding: String,
-		target_label: Option<TableName>,
-		predicate: Option<Arc<dyn PhysicalExpr>>,
-		optional: bool,
-	) -> Self {
-		Self {
-			input,
-			source,
-			direction,
-			edge_tables,
-			edge_binding,
-			target_binding,
-			target_label,
-			predicate,
-			optional,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	#[cfg(test)]
-	/// Build the `EdgeTableSpec` list (unbounded ranges) for the configured
-	/// edge tables. An empty list yields the all-edges wildcard scan.
-	fn edge_specs(&self) -> Vec<EdgeTableSpec> {
-		edge_specs_for(&self.edge_tables)
-	}
-}
-
-#[cfg(test)]
-impl ExecOperator for Expand {
-	fn name(&self) -> &'static str {
-		if self.optional {
-			"OptionalExpand"
-		} else {
-			"Expand"
-		}
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let tables = if self.edge_tables.is_empty() {
-			"*".to_string()
-		} else {
-			self.edge_tables.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
-		};
-		let mut attrs = vec![
-			("source".to_string(), self.source.clone()),
-			("direction".to_string(), self.direction.arrow().to_string()),
-			("tables".to_string(), tables),
-			("edge".to_string(), self.edge_binding.name().to_string()),
-			("target".to_string(), self.target_binding.clone()),
-		];
-		if let Some(label) = self.target_label.as_ref() {
-			attrs.push(("target_label".to_string(), label.as_str().to_string()));
-		}
-		if let Some(predicate) = self.predicate.as_ref() {
-			attrs.push(("predicate".to_string(), predicate.to_sql()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		let mut level = self.input.required_context().max(ContextLevel::Database);
-		if let Some(predicate) = self.predicate.as_ref() {
-			level = level.max(predicate.required_context());
-		}
-		level
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		let mut mode = self.input.access_mode();
-		if let Some(predicate) = self.predicate.as_ref() {
-			mode = mode.combine(predicate.access_mode());
-		}
-		mode
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		// One input row fans out to an unknown number of edges/targets.
-		CardinalityHint::Unbounded
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		match self.predicate.as_ref() {
-			Some(predicate) => vec![("predicate", predicate)],
-			None => vec![],
-		}
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		ctx.database()?;
-		// SECURITY: target/edge binding contents are produced by the FieldState
-		// helper ([`resolve_with_field_state`]), which resolves whether SELECT
-		// permissions must be enforced (once, internally) and applies table +
-		// field SELECT permissions and computed fields per record. The operator
-		// therefore does not re-derive the permission-check flag itself.
-		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-
-		let source = self.source.clone();
-		let params = ExpandParams {
-			direction: self.direction,
-			edge_specs: self.edge_specs(),
-			edge_name: self.edge_binding.name().to_string(),
-			fetch_full_edge: self.edge_binding.fetch_full(),
-			target_binding: self.target_binding.clone(),
-			target_label: self.target_label.clone(),
-			optional: self.optional,
-			scan_batch_size: ctx.root().ctx.config.exec.scan_batch_size,
-			max_output_rows: ctx.root().ctx.config.exec.gql_max_output_rows,
-		};
-		let predicate = self.predicate.clone();
-		let ctx = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			let mut caches = ExpandCaches::new();
-			let mut judge = PredicateJudge {
-				predicate: predicate.as_deref(),
-				ctx: &ctx,
-			};
-
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				let mut out: Vec<Value> = Vec::with_capacity(batch.len());
-
-				for row in batch.into_values() {
-					expand_input_row(
-						&ctx,
-						&params,
-						&source,
-						&mut caches,
-						&mut judge,
-						&row,
-						&mut out,
-					)
-					.await?;
-				}
-
-				if !out.is_empty() {
-					yielder.emit(ValueBatch::new(out)).await;
-				}
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), self.name(), &self.metrics))
-	}
-}
-
 /// The edge-table specs, with unbounded ranges, of `tables`. No tables is the
 /// all-edges wildcard scan.
 pub(crate) fn edge_specs_for(tables: &[TableName]) -> Vec<EdgeTableSpec> {
@@ -382,24 +164,6 @@ pub(crate) trait CandidateJudge {
 		&'a mut self,
 		candidate: &'a Value,
 	) -> impl std::future::Future<Output = FlowResult<bool>> + Send + 'a;
-}
-
-#[cfg(test)]
-/// The judge of a compiled predicate, evaluated as `Filter` evaluates it.
-struct PredicateJudge<'a> {
-	predicate: Option<&'a dyn PhysicalExpr>,
-	ctx: &'a ExecutionContext,
-}
-
-#[cfg(test)]
-impl CandidateJudge for PredicateJudge<'_> {
-	async fn passes(&mut self, candidate: &Value) -> FlowResult<bool> {
-		let Some(predicate) = self.predicate else {
-			return Ok(true);
-		};
-		let base_eval = EvalContext::from_exec_ctx(self.ctx);
-		Ok(predicate.evaluate(base_eval.with_value(candidate)).await?.is_truthy())
-	}
 }
 
 /// What one expansion is parameterised by, fixed for the whole run.
@@ -803,7 +567,6 @@ async fn expand_row<J: CandidateJudge>(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::operators::CurrentValueSource;
 
 	fn obj_row(pairs: &[(&str, Value)]) -> Value {
 		let mut o = Object::default();
@@ -818,67 +581,6 @@ mod tests {
 			table: TableName::new(table.to_string()),
 			key: crate::val::RecordIdKey::from(key.to_string()),
 		}
-	}
-
-	fn sample_expand(optional: bool) -> Expand {
-		Expand::new(
-			Arc::new(CurrentValueSource::new()),
-			"a".to_string(),
-			ExpandDir::Out,
-			vec![TableName::new("knows".to_string())],
-			EdgeBinding::Full("k".to_string()),
-			"b".to_string(),
-			Some(TableName::new("person".to_string())),
-			None,
-			optional,
-		)
-	}
-
-	#[test]
-	fn name_reflects_optional() {
-		assert_eq!(sample_expand(false).name(), "Expand");
-		assert_eq!(sample_expand(true).name(), "OptionalExpand");
-	}
-
-	#[test]
-	fn attrs_render_direction_tables_and_label() {
-		let attrs = sample_expand(false).attrs();
-		assert!(attrs.iter().any(|(k, v)| k == "source" && v == "a"));
-		assert!(attrs.iter().any(|(k, v)| k == "direction" && v == "->"));
-		assert!(attrs.iter().any(|(k, v)| k == "tables" && v == "knows"));
-		assert!(attrs.iter().any(|(k, v)| k == "edge" && v == "k"));
-		assert!(attrs.iter().any(|(k, v)| k == "target" && v == "b"));
-		assert!(attrs.iter().any(|(k, v)| k == "target_label" && v == "person"));
-	}
-
-	#[test]
-	fn attrs_render_wildcard_tables() {
-		let mut e = sample_expand(false);
-		e.edge_tables.clear();
-		let attrs = e.attrs();
-		assert!(attrs.iter().any(|(k, v)| k == "tables" && v == "*"));
-	}
-
-	#[test]
-	fn required_context_is_at_least_database() {
-		assert_eq!(sample_expand(false).required_context(), ContextLevel::Database);
-	}
-
-	#[test]
-	fn edge_specs_unbounded_per_table() {
-		let e = sample_expand(false);
-		let specs = e.edge_specs();
-		assert_eq!(specs.len(), 1);
-		assert_eq!(specs[0].table.as_str(), "knows");
-		assert!(matches!(specs[0].range_start, std::ops::Bound::Unbounded));
-		assert!(matches!(specs[0].range_end, std::ops::Bound::Unbounded));
-	}
-
-	#[test]
-	fn edge_specs_empty_for_wildcard() {
-		let mut e = sample_expand(false);
-		e.edge_tables.clear();
-		assert!(e.edge_specs().is_empty());
 	}
 
 	#[test]

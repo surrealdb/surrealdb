@@ -243,8 +243,6 @@ struct Handed {
 	bodies: usize,
 	/// The compilations the program made while it ran, faults aside.
 	compiles: usize,
-	/// The bodies compiled to the operator tree's form for an invocation.
-	trees: usize,
 }
 
 /// `sql`, planned on the VM in `ctx` with no `$f` bound and run with `$f`
@@ -256,14 +254,12 @@ async fn run_handed(ctx: &ExecutionContext, sql: &str, closure: &Value) -> Hande
 	let bodies = BODIES_RUN.with(std::cell::Cell::get);
 	let faults = crate::exec::compiles::faults();
 	let compiles = crate::exec::compiles::count();
-	let trees = crate::exec::compiles::tree_bodies();
 	let rows = outcome(&op, &later).await;
 	Handed {
 		rows,
 		faults: crate::exec::compiles::faults() - faults,
 		bodies: BODIES_RUN.with(std::cell::Cell::get) - bodies,
 		compiles: crate::exec::compiles::count() - compiles,
-		trees: crate::exec::compiles::tree_bodies() - trees,
 	}
 }
 
@@ -285,7 +281,6 @@ async fn expr2_a_closure_that_exists_only_at_run_time_faults_once_for_its_unit()
 	assert_eq!(run.faults, 1, "the first invocation faults, and no other");
 	assert_eq!(run.bodies, 3, "every invocation runs the unit");
 	assert_eq!(run.compiles, 0, "the program compiled something");
-	assert_eq!(run.trees, 0, "an invocation took the operator tree's body");
 	// A later run, in a transaction of its own, faults for none.
 	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Read).await;
 	let run = run_handed(&ctx, "[$f(4), $f(5)]", &closure).await;
@@ -359,7 +354,7 @@ async fn expr2_a_faulted_unit_is_linked_for_its_own_principal_alone() {
 /// The fault is the instruction's: a builtin, a method and an `Invoke`
 /// handed a closure no table holds each yield for its unit before the call,
 /// so every invocation inside the call runs the unit and none compiles the
-/// operator tree's body. Each distinct closure faults once.
+/// body. Each distinct closure faults once.
 #[tokio::test]
 async fn expr2_an_instruction_handing_over_a_closure_faults_for_it_before_the_call() {
 	let db = TestDb::new_with_auth(SETUP).await;
@@ -379,7 +374,6 @@ async fn expr2_an_instruction_handing_over_a_closure_faults_for_it_before_the_ca
 		golden.rows(format!("{sql} with {made}"), &run.rows);
 		assert_eq!(run.faults, 1, "`{sql}`: the closure faults once");
 		assert_eq!(run.bodies, bodies, "`{sql}`: every invocation runs the unit");
-		assert_eq!(run.trees, 0, "`{sql}`: an invocation took the operator tree's body");
 		assert_eq!(run.compiles, 0, "`{sql}`: the program compiled something");
 	}
 	golden.check();
@@ -426,19 +420,18 @@ async fn expr2_a_running_program_compiles_a_closure_only_in_a_counted_fault() {
 		ctx.txn().cancel().await.expect("cancel");
 		golden.rows(made, &run.rows);
 		assert_eq!(
-			(run.faults, run.bodies, run.compiles, run.trees),
-			(faults, bodies, 0, 0),
-			"`{sql}` with `{made}`: (faults, bodies, compiles outside a fault, tree bodies)"
+			(run.faults, run.bodies, run.compiles),
+			(faults, bodies, 0),
+			"`{sql}` with `{made}`: (faults, bodies, compiles outside a fault)"
 		);
 	}
 	golden.check();
 }
 
 /// A body that fails to compile is lowered once, on the compile cache's miss,
-/// which keeps the failure compiling it reports — the body compiled to the
-/// operator tree's form for that error alone, never evaluated — and every
-/// invocation, in that run and later ones, reports it without compiling it
-/// again. A call that invokes nothing reports nothing.
+/// which keeps the failure compiling it reports; every invocation, in that
+/// run and later ones, reports it without compiling it again. A call that
+/// invokes nothing reports nothing.
 #[tokio::test]
 async fn expr2_a_body_that_fails_to_compile_reports_the_faults_failure() {
 	let db = TestDb::new_with_auth(SETUP).await;
@@ -453,7 +446,7 @@ async fn expr2_a_body_that_fails_to_compile_reports_the_faults_failure() {
 	// A value holding no compiled body, as one the VM made does.
 	let value = || {
 		Value::Closure(Box::new(crate::val::Closure::Builtin(std::sync::Arc::new(
-			crate::exec::physical_expr::function::CompiledClosure::planned(
+			crate::exec::vm::calls::CompiledClosure::planned(
 				&closure,
 				digest,
 				crate::dbs::Variables::new(),
@@ -469,14 +462,14 @@ async fn expr2_a_body_that_fails_to_compile_reports_the_faults_failure() {
 		let run = run_handed(&ctx, sql, &value).await;
 		golden.rows(sql, &run.rows);
 		let expected = if i == 0 {
-			(1, 0, 0, 1)
+			(1, 0, 0)
 		} else {
-			(0, 0, 0, 0)
+			(0, 0, 0)
 		};
 		assert_eq!(
-			(run.faults, run.bodies, run.compiles, run.trees),
+			(run.faults, run.bodies, run.compiles),
 			expected,
-			"`{sql}`: (faults, bodies, compiles outside a fault, tree bodies)"
+			"`{sql}`: (faults, bodies, compiles outside a fault)"
 		);
 	}
 	golden.check();
@@ -496,8 +489,8 @@ async fn expr2_a_body_reading_the_clock_runs_a_unit_reading_it_when_it_runs() {
 	let single = made_closure(&ctx, &format!("{{ f: || {body} }}")).await;
 	let first = run_handed(&ctx, "[$f()]", &single).await;
 	assert_eq!(
-		(first.faults, first.bodies, first.trees, first.compiles),
-		(1, 1, 0, 0),
+		(first.faults, first.bodies, first.compiles),
+		(1, 1, 0),
 		"the first run faults once for the unit, and runs it"
 	);
 	let sql = "[$f(), $f()]";
@@ -506,8 +499,8 @@ async fn expr2_a_body_reading_the_clock_runs_a_unit_reading_it_when_it_runs() {
 		Golden::new("expr2_a_body_reading_the_clock_runs_a_unit_reading_it_when_it_runs");
 	golden.rows(sql, &run.rows);
 	assert_eq!(
-		(run.faults, run.bodies, run.trees, run.compiles),
-		(0, 2, 0, 0),
+		(run.faults, run.bodies, run.compiles),
+		(0, 2, 0),
 		"a later run of the same closure compiled its body again"
 	);
 	// A literal made per row, and one made per invocation of an enclosing
@@ -518,12 +511,10 @@ async fn expr2_a_body_reading_the_clock_runs_a_unit_reading_it_when_it_runs() {
 	] {
 		let bound = bind(&ctx, &sql).await;
 		let op = super::plan(&planner(&ctx), &bound).await.expect("the VM plans it");
-		let trees = crate::exec::compiles::tree_bodies();
 		let compiles = crate::exec::compiles::count();
 		let bodies = BODIES_RUN.with(std::cell::Cell::get);
 		let ran = outcome(&op, &ctx).await;
 		assert_eq!(ran.as_ref().map(Vec::len), Ok(rows), "`{sql}`: {ran:?}");
-		assert_eq!(crate::exec::compiles::tree_bodies() - trees, 0, "`{sql}`: compiled a tree");
 		assert_eq!(crate::exec::compiles::count() - compiles, 0, "`{sql}`: planned while running");
 		assert!(BODIES_RUN.with(std::cell::Cell::get) > bodies, "`{sql}`: ran no unit");
 		golden.rows(&sql, &ran);
@@ -534,8 +525,7 @@ async fn expr2_a_body_reading_the_clock_runs_a_unit_reading_it_when_it_runs() {
 /// An invocation from a computed field in the middle of computing it, and one
 /// read at a `VERSION` stamp, run the body as a unit: one the program lowered
 /// for the frame and stamp, or one the host lowers for them on the
-/// instruction's fault. Nothing compiles outside a fault, and no body takes
-/// the operator tree's form.
+/// instruction's fault. Nothing compiles outside a fault.
 #[tokio::test]
 async fn expr2_an_invocation_mid_computation_or_at_a_version_runs_a_unit() {
 	let db = TestDb::new_with_auth(
@@ -565,11 +555,9 @@ async fn expr2_an_invocation_mid_computation_or_at_a_version_runs_a_unit() {
 	] {
 		let bound = bind(&ctx, sql).await;
 		let op = super::plan(&planner(&ctx), &bound).await.expect("the VM plans it");
-		let (trees, compiles) =
-			(crate::exec::compiles::tree_bodies(), crate::exec::compiles::count());
+		let compiles = crate::exec::compiles::count();
 		let bodies = BODIES_RUN.with(std::cell::Cell::get);
 		let ran = outcome(&op, &ctx).await;
-		assert_eq!(crate::exec::compiles::tree_bodies() - trees, 0, "`{sql}`: compiled a tree");
 		assert_eq!(crate::exec::compiles::count() - compiles, 0, "`{sql}`: compiled outside it");
 		assert!(BODIES_RUN.with(std::cell::Cell::get) > bodies, "`{sql}`: ran no unit");
 		golden.rows(sql, &ran);
@@ -586,9 +574,9 @@ async fn expr2_an_invocation_mid_computation_or_at_a_version_runs_a_unit() {
 	.await;
 	assert_eq!(run.rows, Ok(vec![Value::from(2), Value::from(3), Value::from(4)]));
 	assert_eq!(
-		(run.faults, run.bodies, run.trees, run.compiles),
-		(1, 3, 0, 0),
-		"(faults, bodies, tree bodies, compiles outside a fault)"
+		(run.faults, run.bodies, run.compiles),
+		(1, 3, 0),
+		"(faults, bodies, compiles outside a fault)"
 	);
 }
 
@@ -608,7 +596,6 @@ async fn expr2_a_unit_is_refused_an_effect_where_the_frame_refuses_it() {
 	for sql in ["$f(false)", "$f(true)"] {
 		let run = run_handed(&ctx, sql, &closure).await;
 		golden.rows(format!("read-only: {sql}"), &run.rows);
-		assert_eq!(run.trees, 0, "`{sql}`: an invocation took the operator tree's body");
 	}
 	assert_eq!(
 		run_handed(&ctx, "$f(false)", &closure).await.rows,
@@ -816,7 +803,7 @@ async fn expr2_a_closure_digest_is_stable_and_names_the_closure_alone() {
 			panic!("a compiled closure");
 		};
 		obj.as_any()
-			.downcast_ref::<crate::exec::physical_expr::function::CompiledClosure>()
+			.downcast_ref::<crate::exec::vm::calls::CompiledClosure>()
 			.expect("a compiled closure")
 			.digest()
 	};
@@ -933,7 +920,7 @@ async fn expr2_closures_that_share_a_digest_never_share_a_unit() {
 		};
 		let compiled = obj
 			.as_any()
-			.downcast_ref::<crate::exec::physical_expr::function::CompiledClosure>()
+			.downcast_ref::<crate::exec::vm::calls::CompiledClosure>()
 			.expect("a compiled closure");
 		(compiled.digest(), compiled.logical().body.clone())
 	};

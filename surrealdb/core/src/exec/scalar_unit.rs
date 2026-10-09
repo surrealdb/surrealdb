@@ -6,7 +6,7 @@
 //! body of a closure that takes no argument ([`ScalarUnit`]): the unit the
 //! closure machinery lowers for the invoking frame and `VERSION` stamp, and
 //! the compile cache keeps by the expression as written
-//! ([`crate::exec::vm::closure`]). No operator-tree expression is evaluated.
+//! ([`crate::exec::vm::closure`]).
 //!
 //! The unit reads the row it is evaluated over as its document, the
 //! parameters the expression names from where it is evaluated — a block's
@@ -20,9 +20,9 @@ use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_types::ToSql;
 
 use crate::dbs::Variables;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::physical_expr::function::CompiledClosure;
+use crate::exec::EvalContext;
 use crate::exec::vm::ClosureDigest;
+use crate::exec::vm::calls::CompiledClosure;
 use crate::expr::logical::{LogicalClosure, LogicalExpr};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::val::Value;
@@ -106,79 +106,5 @@ impl ScalarUnit {
 				))))
 			}
 		}
-	}
-}
-
-/// A stored clause whose evaluation runs its [`ScalarUnit`]: the operator
-/// tree's compilation it holds answers what the clause does to the
-/// transaction and what context it needs, and is never evaluated.
-#[derive(Debug)]
-pub(crate) struct UnitClause {
-	unit: ScalarUnit,
-	compiled: Arc<dyn crate::exec::physical_expr::PhysicalExpr>,
-}
-
-impl UnitClause {
-	/// `expr`, compiled to `compiled`, evaluated as a unit.
-	pub(crate) fn of(
-		expr: LogicalExpr,
-		compiled: Arc<dyn crate::exec::physical_expr::PhysicalExpr>,
-	) -> Arc<dyn crate::exec::physical_expr::PhysicalExpr> {
-		// A constant is its value.
-		if let Some(value) = compiled.try_literal() {
-			return Arc::new(crate::exec::physical_expr::Literal(value.clone()));
-		}
-		Arc::new(Self {
-			unit: ScalarUnit::new(expr),
-			compiled,
-		})
-	}
-
-	/// Permission predicate `expr`, compiled to `compiled`, evaluated as a
-	/// unit ([`ScalarUnit::predicate`]).
-	pub(crate) fn predicate(
-		expr: LogicalExpr,
-		compiled: Arc<dyn crate::exec::physical_expr::PhysicalExpr>,
-	) -> Arc<dyn crate::exec::physical_expr::PhysicalExpr> {
-		if let Some(value) = compiled.try_literal() {
-			return Arc::new(crate::exec::physical_expr::Literal(value.clone()));
-		}
-		Arc::new(Self {
-			unit: ScalarUnit::predicate(expr),
-			compiled,
-		})
-	}
-}
-
-impl ToSql for UnitClause {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		self.compiled.fmt_sql(f, fmt);
-	}
-}
-
-impl crate::exec::physical_expr::PhysicalExpr for UnitClause {
-	/// The physical form the clause compiled to, which its unit runs.
-	fn name(&self) -> &'static str {
-		self.compiled.name()
-	}
-
-	fn required_context(&self) -> crate::exec::ContextLevel {
-		self.compiled.required_context()
-	}
-
-	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
-		Box::pin(async move { self.unit.evaluate(&ctx).await })
-	}
-
-	fn access_mode(&self) -> crate::exec::AccessMode {
-		self.compiled.access_mode()
-	}
-
-	fn try_simple_field(&self) -> Option<&str> {
-		self.compiled.try_simple_field()
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
 	}
 }

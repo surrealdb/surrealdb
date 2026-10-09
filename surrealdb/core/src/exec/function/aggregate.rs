@@ -34,6 +34,7 @@ pub trait Accumulator: Send + Sync + Debug {
 	/// The default implementation calls `update()` for each value.
 	/// Accumulators can override this for better performance (e.g.,
 	/// `CountAccumulator` can just add `values.len()` without iterating).
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			self.update(value.clone())?;

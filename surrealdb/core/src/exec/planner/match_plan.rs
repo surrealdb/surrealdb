@@ -1,8 +1,8 @@
 //! Planning for GQL v2 `MATCH` queries.
 //!
-//! [`Planner::plan_match`] compiles a [`MatchPlan`] (the language-neutral
+//! `plan_match` (in `exec::vm`) compiles a [`MatchPlan`] (the language-neutral
 //! binding-table IR produced by the GQL lowering, `expr/match_plan.rs`) into a
-//! tree of streaming operators. See `doc/gql/V2_DESIGN.md` §6 for the
+//! VM program through the fold in this module. See `doc/gql/V2_DESIGN.md` §6 for the
 //! normative algorithm and the worked plan trees this module pins as EXPLAIN
 //! snapshots.
 //!
@@ -55,23 +55,12 @@
 //! (Sort/Limit/Project, or Project/Distinct/Sort/Limit for DISTINCT) is
 //! unchanged from the single-pattern case.
 
-#[cfg(test)]
-use std::sync::Arc;
-
 use surrealdb_strand::TableName;
 
-#[cfg(test)]
-use super::Planner;
-#[cfg(test)]
-use super::match_backend::TreeBackend;
 use super::match_backend::{
 	BindingBackend, EndpointSpec, ExpandSpec, JoinSpec, PathSpec, Planning,
 };
 use crate::err::EngineError;
-#[cfg(test)]
-use crate::err::Error;
-#[cfg(test)]
-use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	EdgeBinding, EndpointField, ExpandDir, JoinType, PathMode, ShortestSelector,
 };
@@ -164,22 +153,6 @@ struct PlannedClause<N> {
 	/// earlier clause's bindings, so the join is the earliest stage that binds
 	/// them all).
 	deferred: Vec<MatchPredicate>,
-}
-
-#[cfg(test)]
-impl Planner<'_> {
-	/// Plan a GQL `MATCH` query into a streaming operator tree.
-	pub(crate) async fn plan_match(&self, plan: MatchPlan) -> Result<Arc<dyn ExecOperator>, Error> {
-		let backend = TreeBackend {
-			planner: self,
-		};
-		MatchFold {
-			backend: &backend,
-		}
-		.plan(plan)
-		.await
-		.map_err(Planning::into_error)
-	}
 }
 
 impl<B: BindingBackend> MatchFold<'_, B> {
@@ -563,8 +536,7 @@ impl<B: BindingBackend> MatchFold<'_, B> {
 		// OUTER binding (one not bound inside the block) cannot be placed in this
 		// standalone subplan; it is collected here and surfaced (via the returned
 		// `PlannedClause.deferred`) for the left-join residual in `fold_optional`,
-		// NOT dropped. (Previously a `debug_assert!` masked this: it panicked in
-		// debug and silently dropped the predicate in release.)
+		// NOT dropped.
 		let mut block_deferred = seed.deferred;
 
 		// Subsequent clauses of the block EXTEND the block's running sub-tree: a
@@ -1635,28 +1607,10 @@ mod tests {
 	use surrealdb_strand::TableName;
 
 	use super::*;
-	use crate::ctx::Context;
 	use crate::expr::logical::LogicalLiteral;
-	use crate::expr::match_plan::{
-		BindingDef, BindingKind, EdgeQuantifier, MatchColumn, MatchOrder, MatchOutput,
-	};
-	use crate::kvs::{Datastore, TransactionType};
+	use crate::expr::match_plan::{BindingDef, BindingKind, MatchColumn, MatchOutput};
 
 	// ---- shared builders ----
-
-	/// Wrap read clauses as the plan's [`MatchStage::Read`] steps (these planner
-	/// builders are all read-only).
-	fn stages_of(clauses: Vec<MatchClausePlan>) -> Vec<MatchStage> {
-		clauses.into_iter().map(MatchStage::Read).collect()
-	}
-
-	/// Mutable access to the read clause at step `i` (panics if it is not a read).
-	fn clause_mut(plan: &mut MatchPlan, i: usize) -> &mut MatchClausePlan {
-		match &mut plan.stages[i] {
-			MatchStage::Read(c) => c,
-			MatchStage::Mutate(_) => panic!("stage {i} is not a read clause"),
-		}
-	}
 
 	fn binding(name: &str, kind: BindingKind, user_named: bool) -> BindingDef {
 		BindingDef {
@@ -1668,10 +1622,6 @@ mod tests {
 
 	fn node(name: &str) -> BindingDef {
 		binding(name, BindingKind::Node, true)
-	}
-
-	fn edge(name: &str) -> BindingDef {
-		binding(name, BindingKind::Edge, true)
 	}
 
 	fn hidden_edge(name: &str) -> BindingDef {
@@ -1689,14 +1639,6 @@ mod tests {
 	/// `RETURN b` — a bare-binding column expression.
 	fn var(b: &str) -> LogicalExpr {
 		LogicalExpr::Field(b.into())
-	}
-
-	fn col(name: &str, expr: LogicalExpr) -> MatchColumn {
-		MatchColumn {
-			name: name.to_string(),
-			expr,
-			hidden: false,
-		}
 	}
 
 	fn tbl(name: &str) -> TableName {
@@ -1732,156 +1674,13 @@ mod tests {
 
 	// ---- worked tree (i): single pattern, edge predicate ----
 
-	fn plan_tree_i() -> MatchPlan {
-		MatchPlan {
-			bindings: vec![node("a"), edge("k"), node("b")],
-			stages: stages_of(vec![MatchClausePlan {
-				optional_group: None,
-				patterns: vec![PatternPlan {
-					path_var: None,
-					search: None,
-					start: nodestep(0, Some("person")),
-					steps: vec![(
-						edgestep(1, Some("knows"), ExpandDirection::Out),
-						nodestep(2, Some("person")),
-					)],
-				}],
-				predicates: vec![MatchPredicate {
-					expr: LogicalExpr::Binary {
-						left: Box::new(field_path("k", "since")),
-						op: BinaryOperator::MoreThan,
-						right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(2020))),
-					},
-					deps: vec![1],
-				}],
-			}]),
-			output: out_columns(vec![
-				col("a_name", field_path("a", "name")),
-				col("b_name", field_path("b", "name")),
-			]),
-		}
-	}
-
 	// ---- worked tree (iv): quantified path + ORDER BY ----
-
-	fn plan_tree_iv() -> MatchPlan {
-		MatchPlan {
-			bindings: vec![
-				node("a"),
-				binding("__e0", BindingKind::EdgeGroup, false),
-				node("b"),
-				node("p"),
-			],
-			stages: stages_of(vec![MatchClausePlan {
-				optional_group: None,
-				patterns: vec![PatternPlan {
-					path_var: Some(3),
-					search: None,
-					start: nodestep(0, Some("person")),
-					steps: vec![(
-						EdgeStep {
-							binding: 1,
-							label: Some(tbl("knows")),
-							direction: ExpandDirection::Out,
-							quantifier: Some(EdgeQuantifier {
-								min: 1,
-								max: Some(3),
-							}),
-						},
-						nodestep(2, Some("person")),
-					)],
-				}],
-				predicates: Vec::new(),
-			}]),
-			output: Some(MatchOutput {
-				columns: vec![col("p", var("p")), col("b", var("b"))],
-				distinct: false,
-				group_by: None,
-				order: vec![MatchOrder {
-					expr: field_path("a", "age"),
-					ascending: true,
-				}],
-				skip: None,
-				limit: None,
-			}),
-		}
-	}
 
 	// ---- worked tree (ii): edge-anchored multi-pattern, HashJoin on b ----
 	// `MATCH (a)-[:x]->(b), (c)-[:y]->(b) RETURN a, c`
-	fn plan_tree_ii() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=__e0, 2=b, 3=c, 4=__e1
-			bindings: vec![
-				node("a"),
-				hidden_edge("__e0"),
-				node("b"),
-				node("c"),
-				hidden_edge("__e1"),
-			],
-			stages: stages_of(vec![MatchClausePlan {
-				optional_group: None,
-				patterns: vec![
-					// (a)-[:x]->(b)
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(1, Some("x"), ExpandDirection::Out),
-							nodestep(2, None),
-						)],
-					},
-					// (c)-[:y]->(b)
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(3, None),
-						steps: vec![(
-							edgestep(4, Some("y"), ExpandDirection::Out),
-							nodestep(2, None),
-						)],
-					},
-				],
-				predicates: Vec::new(),
-			}]),
-			output: out_columns(vec![col("a", var("a")), col("c", var("c"))]),
-		}
-	}
 
 	// ---- shared-node multi-pattern, same edge table (DistinctEdges kept) ----
 	// `MATCH (a:person)-[k:knows]->(b:person), (c:person)-[k2:knows]->(b) RETURN a, c`
-	fn plan_shared_node_same_edge() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=k, 2=b, 3=c, 4=k2
-			bindings: vec![node("a"), edge("k"), node("b"), node("c"), edge("k2")],
-			stages: stages_of(vec![MatchClausePlan {
-				optional_group: None,
-				patterns: vec![
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: vec![(
-							edgestep(1, Some("knows"), ExpandDirection::Out),
-							nodestep(2, Some("person")),
-						)],
-					},
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(3, Some("person")),
-						steps: vec![(
-							edgestep(4, Some("knows"), ExpandDirection::Out),
-							nodestep(2, None),
-						)],
-					},
-				],
-				predicates: Vec::new(),
-			}]),
-			output: out_columns(vec![col("a", var("a")), col("c", var("c"))]),
-		}
-	}
 
 	// ---- anonymous quantified group + a second edge sharing the table ----
 	// `MATCH (a:person)-[:knows]->{1,1}(b:person), (a)-[k2:knows]->(c:person) RETURN b, c`
@@ -1890,341 +1689,19 @@ mod tests {
 	// table), so the planner must (a) bind the hidden group on the row via
 	// `PathExpand`'s `group:` slot and (b) wrap the clause in DistinctEdges over
 	// `{__e0, k2}`. Pins the regression for the anonymous-group R2 skip.
-	fn plan_anon_group_second_edge() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=__e0 (hidden EdgeGroup), 2=b, 3=k2, 4=c
-			bindings: vec![
-				node("a"),
-				binding("__e0", BindingKind::EdgeGroup, false),
-				node("b"),
-				edge("k2"),
-				node("c"),
-			],
-			stages: stages_of(vec![MatchClausePlan {
-				optional_group: None,
-				patterns: vec![
-					// (a:person)-[__e0:knows]->{1,1}(b:person)
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: vec![(
-							EdgeStep {
-								binding: 1,
-								label: Some(tbl("knows")),
-								direction: ExpandDirection::Out,
-								quantifier: Some(EdgeQuantifier {
-									min: 1,
-									max: Some(1),
-								}),
-							},
-							nodestep(2, Some("person")),
-						)],
-					},
-					// (a)-[k2:knows]->(c:person)
-					PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(3, Some("knows"), ExpandDirection::Out),
-							nodestep(4, Some("person")),
-						)],
-					},
-				],
-				predicates: Vec::new(),
-			}]),
-			output: out_columns(vec![col("b", var("b")), col("c", var("c"))]),
-		}
-	}
 
 	// ---- sequential MATCH join (two clauses, shared b) ----
 	// `MATCH (a:person)-[k:knows]->(b:person) MATCH (b:person)-[k2:likes]->(c:person) RETURN a, c`
-	fn plan_sequential_clauses() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=k, 2=b, 3=k2, 4=c
-			bindings: vec![node("a"), edge("k"), node("b"), edge("k2"), node("c")],
-			stages: stages_of(vec![
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: vec![(
-							edgestep(1, Some("knows"), ExpandDirection::Out),
-							nodestep(2, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(2, Some("person")),
-						steps: vec![(
-							edgestep(3, Some("likes"), ExpandDirection::Out),
-							nodestep(4, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-			]),
-			output: out_columns(vec![col("a", var("a")), col("c", var("c"))]),
-		}
-	}
 
 	// ---- EXPLAIN snapshot harness ----
 
-	fn render_plan(plan: &dyn ExecOperator, out: &mut String, prefix: &str) {
-		use std::fmt::Write;
-		let _ = write!(out, "{} [ctx: {}]", plan.name(), plan.required_context().short_name());
-		let attrs = plan.attrs();
-		if !attrs.is_empty() {
-			let _ = write!(out, " [");
-			for (i, (k, v)) in attrs.iter().enumerate() {
-				if i > 0 {
-					let _ = write!(out, ", ");
-				}
-				let _ = write!(out, "{k}: {v}");
-			}
-			let _ = write!(out, "]");
-		}
-		let _ = writeln!(out);
-		let children = plan.children();
-		if !children.is_empty() {
-			let child_prefix = format!("{prefix}    ");
-			for child in children.iter() {
-				let _ = write!(out, "{child_prefix}");
-				render_plan(child.as_ref(), out, &child_prefix);
-			}
-		}
-	}
-
-	/// Build a memory Datastore, define ns/db + the node/edge tables the plans
-	/// reference, then plan `plan` and return its rendered EXPLAIN tree.
-	async fn explain(plan: MatchPlan) -> String {
-		let ds = Datastore::new("memory").await.expect("datastore");
-		let session = crate::dbs::Session::owner().with_ns("test").with_db("test");
-		ds.execute(
-			"DEFINE NAMESPACE test; DEFINE DATABASE test; \
-			 DEFINE TABLE person; DEFINE TABLE knows; DEFINE TABLE likes; \
-			 DEFINE TABLE x; DEFINE TABLE y;",
-			&session,
-			None,
-		)
-		.await
-		.expect("define schema");
-
-		let base = ds.setup_ctx().expect("setup_ctx").freeze();
-		let txn = Arc::new(ds.transaction(TransactionType::Read).await.expect("txn"));
-		let mut ctx = Context::new_child(&base);
-		ctx.set_transaction(Arc::clone(&txn));
-		let ctx = ctx.freeze();
-
-		let planner = Planner::with_txn(
-			&ctx,
-			ds.function_registry(),
-			txn,
-			Some("test".to_string()),
-			Some("test".to_string()),
-		);
-		let operator = planner.plan_match(plan).await.expect("plan_match");
-
-		let mut out = String::new();
-		render_plan(operator.as_ref(), &mut out, "");
-		out
-	}
-
 	// ---- pinned EXPLAIN snapshots ----
-
-	#[tokio::test]
-	async fn explain_tree_i_single_pattern_edge_predicate() {
-		let rendered = explain(plan_tree_i()).await;
-		let expected = "\
-Project [ctx: Db]
-    Expand [ctx: Db] [source: a, direction: ->, tables: knows, edge: k, target: b, target_label: person, predicate: k.since > 2020]
-        Bind [ctx: Db] [binding: a]
-            TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	#[tokio::test]
-	async fn explain_tree_iv_quantified_path_order() {
-		let rendered = explain(plan_tree_iv()).await;
-		let expected = "\
-Project [ctx: Db]
-    Sort [ctx: Db] [order_by: a.age ASC]
-        PathExpand [ctx: Db] [source: a, direction: ->, tables: knows, min: 1, max: 3, target_binding: b, target_label: person, group: __e0, path: p]
-            Bind [ctx: Db] [binding: a]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	#[tokio::test]
-	async fn explain_shortest_routes_to_shortest_path_expand() {
-		// A SHORTEST selector routes the quantified step to `ShortestPathExpand`,
-		// carrying the selector and (non-default) path mode.
-		let mut plan = plan_tree_iv();
-		clause_mut(&mut plan, 0).patterns[0].search = Some(PathPrefixPlan {
-			search: PathSearch::AllShortest,
-			mode: IrPathMode::Acyclic,
-		});
-		let rendered = explain(plan).await;
-		assert!(rendered.contains("ShortestPathExpand"), "\n--- got ---\n{rendered}");
-		assert!(rendered.contains("search: all shortest"), "\n--- got ---\n{rendered}");
-		assert!(rendered.contains("mode: acyclic"), "\n--- got ---\n{rendered}");
-	}
-
-	#[tokio::test]
-	async fn explain_any_routes_to_shortest_path_expand() {
-		// `ANY [k]` routes to the bounded `ShortestPathExpand` (a shortest
-		// representative is a valid arbitrary path), labelled `search: any`.
-		let mut plan = plan_tree_iv();
-		clause_mut(&mut plan, 0).patterns[0].search = Some(PathPrefixPlan {
-			search: PathSearch::Any {
-				count: 3,
-			},
-			mode: IrPathMode::Walk,
-		});
-		let rendered = explain(plan).await;
-		assert!(rendered.contains("ShortestPathExpand"), "\n--- got ---\n{rendered}");
-		assert!(rendered.contains("search: any 3"), "\n--- got ---\n{rendered}");
-		// Default `WALK` mode renders no `mode:` attr.
-		assert!(!rendered.contains("mode:"), "\n--- got ---\n{rendered}");
-	}
-
-	/// Pin worked tree (ii): edge-anchored multi-pattern. Each pattern scans its
-	/// edge table, binds the edge, then EndpointBind×2 (in then out). The two
-	/// sub-trees join on the shared node `b`. DistinctEdges is ELIDED because the
-	/// edge tables `x` and `y` are statically disjoint.
-	#[tokio::test]
-	async fn explain_tree_ii_edge_anchored_hashjoin_distinctedges_elided() {
-		let rendered = explain(plan_tree_ii()).await;
-		let expected = "\
-Project [ctx: Db]
-    HashJoin [ctx: Db] [type: Inner, keys: b]
-        EndpointBind [ctx: Db] [edge: __e0, field: out, node: b]
-            EndpointBind [ctx: Db] [edge: __e0, field: in, node: a]
-                Bind [ctx: Db] [binding: __e0]
-                    TableScan [ctx: Db] [table: x, direction: Forward]
-        EndpointBind [ctx: Db] [edge: __e1, field: out, node: b]
-            EndpointBind [ctx: Db] [edge: __e1, field: in, node: c]
-                Bind [ctx: Db] [binding: __e1]
-                    TableScan [ctx: Db] [table: y, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// Shared-node multi-pattern over the SAME edge table (`knows`): the two
-	/// patterns are node-anchored (TableScan person + Bind + Expand), HashJoin'd
-	/// on `b`, and wrapped in DistinctEdges{k, k2} since the edge tables are NOT
-	/// disjoint (R2 must hold dynamically).
-	#[tokio::test]
-	async fn explain_shared_node_same_edge_keeps_distinctedges() {
-		let rendered = explain(plan_shared_node_same_edge()).await;
-		let expected = "\
-Project [ctx: Db]
-    DistinctEdges [ctx: Db] [edges: k, k2]
-        HashJoin [ctx: Db] [type: Inner, keys: b]
-            Expand [ctx: Db] [source: a, direction: ->, tables: knows, edge: k, target: b, target_label: person]
-                Bind [ctx: Db] [binding: a]
-                    TableScan [ctx: Db] [table: person, direction: Forward]
-            Expand [ctx: Db] [source: c, direction: ->, tables: knows, edge: k2, target: b]
-                Bind [ctx: Db] [binding: c]
-                    TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// Sequential MATCH clauses joined on the shared node `b`: the second clause
-	/// is planned as its own sub-tree (TableScan person + Bind b + Expand to c)
-	/// and HashJoin'd Inner into the first clause's plan on `b` (R1: sequential
-	/// MATCH joins exactly like comma patterns).
-	#[tokio::test]
-	async fn explain_sequential_clause_hashjoin_on_shared_node() {
-		let rendered = explain(plan_sequential_clauses()).await;
-		let expected = "\
-Project [ctx: Db]
-    HashJoin [ctx: Db] [type: Inner, keys: b]
-        Expand [ctx: Db] [source: a, direction: ->, tables: knows, edge: k, target: b, target_label: person]
-            Bind [ctx: Db] [binding: a]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-        Expand [ctx: Db] [source: b, direction: ->, tables: likes, edge: k2, target: c, target_label: person]
-            Bind [ctx: Db] [binding: b]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// Pin the anonymous-quantified-group R2 regression: the hidden group `__e0`
-	/// must be bound on the row (PathExpand `group: __e0`) AND the clause wrapped
-	/// in DistinctEdges over `{__e0, k2}` (both draw from `knows`, not disjoint),
-	/// so R2 can drop a row reusing one edge in both positions. Pattern 2 has a
-	/// labelled single edge, so it is planned edge-anchored and HashJoin'd on the
-	/// shared node `a`.
-	#[tokio::test]
-	async fn explain_anon_group_second_edge_binds_group_and_keeps_distinctedges() {
-		let rendered = explain(plan_anon_group_second_edge()).await;
-		let expected = "\
-Project [ctx: Db]
-    DistinctEdges [ctx: Db] [edges: __e0, k2]
-        HashJoin [ctx: Db] [type: Inner, keys: a]
-            PathExpand [ctx: Db] [source: a, direction: ->, tables: knows, min: 1, max: 1, target_binding: b, target_label: person, group: __e0]
-                Bind [ctx: Db] [binding: a]
-                    TableScan [ctx: Db] [table: person, direction: Forward]
-            EndpointBind [ctx: Db] [edge: k2, field: out, node: c, target_label: person]
-                EndpointBind [ctx: Db] [edge: k2, field: in, node: a]
-                    Bind [ctx: Db] [binding: k2]
-                        TableScan [ctx: Db] [table: knows, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
 
 	// ---- OPTIONAL: fast path (iii) ----
 	// `MATCH (a:person) OPTIONAL MATCH (a)-[k:knows]->(b) RETURN a.name, b.name`
 	// The optional clause is a single single-hop pattern whose source `a` is bound
 	// by the mandatory clause ⇒ the OptionalExpand fast path (one operator, no
 	// join), null-filling `k` and `b` on a miss.
-	fn plan_optional_fast_path() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=k, 2=b
-			bindings: vec![node("a"), edge("k"), node("b")],
-			stages: stages_of(vec![
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: Vec::new(),
-					}],
-					predicates: Vec::new(),
-				},
-				MatchClausePlan {
-					optional_group: Some(0),
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(1, Some("knows"), ExpandDirection::Out),
-							nodestep(2, None),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-			]),
-			output: out_columns(vec![
-				col("a_name", field_path("a", "name")),
-				col("b_name", field_path("b", "name")),
-			]),
-		}
-	}
 
 	// ---- OPTIONAL: LeftJoin general path, brace block as a unit ----
 	// `MATCH (a:person) OPTIONAL { MATCH (a)-[:knows]->(b:person)
@@ -2236,54 +1713,6 @@ Project [ctx: Db]
 	// every block-introduced binding (`__e0, b, k2, c`). No DistinctEdges appears:
 	// R2 (DIFFERENT EDGES) is per-MATCH-statement, and each block clause has just
 	// one edge binding, so neither clause triggers the ≥2-edges wrapper.
-	fn plan_optional_block_unit() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=__e0 (hidden knows), 2=b, 3=k2, 4=c
-			bindings: vec![node("a"), hidden_edge("__e0"), node("b"), edge("k2"), node("c")],
-			stages: stages_of(vec![
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: Vec::new(),
-					}],
-					predicates: Vec::new(),
-				},
-				// OPTIONAL#0, clause 1: (a)-[__e0:knows]->(b:person)
-				MatchClausePlan {
-					optional_group: Some(0),
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(1, Some("knows"), ExpandDirection::Out),
-							nodestep(2, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-				// OPTIONAL#0, clause 2: (b)-[k2]->(c:person) — unlabeled edge,
-				// expands off the within-block `b`.
-				MatchClausePlan {
-					optional_group: Some(0),
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(2, None),
-						steps: vec![(
-							edgestep(3, None, ExpandDirection::Out),
-							nodestep(4, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-			]),
-			output: out_columns(vec![col("a", var("a"))]),
-		}
-	}
 
 	// ---- OPTIONAL: chained optionals (distinct blocks) ----
 	// `MATCH (a:person) OPTIONAL MATCH (a)-[:knows]->(b:person)
@@ -2294,57 +1723,6 @@ Project [ctx: Db]
 	// second OptionalExpand expands off `a` on rows the first produced (where `b`
 	// may already be a null-fill), so a chained optional referencing an earlier
 	// accumulator binding flows through (R3, chained left-to-right).
-	fn plan_chained_optionals() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=__e0 knows, 2=b, 3=__e1 likes, 4=c
-			bindings: vec![
-				node("a"),
-				hidden_edge("__e0"),
-				node("b"),
-				hidden_edge("__e1"),
-				node("c"),
-			],
-			stages: stages_of(vec![
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, Some("person")),
-						steps: Vec::new(),
-					}],
-					predicates: Vec::new(),
-				},
-				MatchClausePlan {
-					optional_group: Some(0),
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(1, Some("knows"), ExpandDirection::Out),
-							nodestep(2, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-				MatchClausePlan {
-					optional_group: Some(1),
-					patterns: vec![PatternPlan {
-						path_var: None,
-						search: None,
-						start: nodestep(0, None),
-						steps: vec![(
-							edgestep(3, Some("likes"), ExpandDirection::Out),
-							nodestep(4, Some("person")),
-						)],
-					}],
-					predicates: Vec::new(),
-				},
-			]),
-			output: out_columns(vec![col("a", var("a"))]),
-		}
-	}
 
 	// ---- OPTIONAL: multi-pattern single-clause LeftJoin ----
 	// `MATCH (a:person), (z:person)
@@ -2352,145 +1730,6 @@ Project [ctx: Db]
 	// The optional clause has TWO patterns sharing no variable ⇒ its subplan is a
 	// Cross of two edge-anchored sub-trees, left-joined onto the accumulator on the
 	// shared `{a, z}`. `knows`/`likes` are disjoint ⇒ DistinctEdges elided.
-	fn plan_optional_multipattern() -> MatchPlan {
-		MatchPlan {
-			// 0=a, 1=z, 2=__e0 knows, 3=b, 4=__e1 likes, 5=c
-			bindings: vec![
-				node("a"),
-				node("z"),
-				hidden_edge("__e0"),
-				node("b"),
-				hidden_edge("__e1"),
-				node("c"),
-			],
-			stages: stages_of(vec![
-				MatchClausePlan {
-					optional_group: None,
-					patterns: vec![
-						PatternPlan {
-							path_var: None,
-							search: None,
-							start: nodestep(0, Some("person")),
-							steps: Vec::new(),
-						},
-						PatternPlan {
-							path_var: None,
-							search: None,
-							start: nodestep(1, Some("person")),
-							steps: Vec::new(),
-						},
-					],
-					predicates: Vec::new(),
-				},
-				MatchClausePlan {
-					optional_group: Some(0),
-					patterns: vec![
-						PatternPlan {
-							path_var: None,
-							search: None,
-							start: nodestep(0, None),
-							steps: vec![(
-								edgestep(2, Some("knows"), ExpandDirection::Out),
-								nodestep(3, Some("person")),
-							)],
-						},
-						PatternPlan {
-							path_var: None,
-							search: None,
-							start: nodestep(1, None),
-							steps: vec![(
-								edgestep(4, Some("likes"), ExpandDirection::Out),
-								nodestep(5, Some("person")),
-							)],
-						},
-					],
-					predicates: Vec::new(),
-				},
-			]),
-			output: out_columns(vec![col("a", var("a"))]),
-		}
-	}
-
-	/// Fast path (iii): OptionalExpand appended directly to the mandatory anchor —
-	/// one operator, no join. The edge `k` (user-named ⇒ Full) and target `b` are
-	/// null-filled on a miss (exactly the clause-introduced bindings).
-	#[tokio::test]
-	async fn explain_optional_fast_path_is_optionalexpand() {
-		let rendered = explain(plan_optional_fast_path()).await;
-		let expected = "\
-Project [ctx: Db]
-    OptionalExpand [ctx: Db] [source: a, direction: ->, tables: knows, edge: k, target: b]
-        Bind [ctx: Db] [binding: a]
-            TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// LeftJoin general path: the whole brace block is one standalone subplan
-	/// (build side), left-joined onto the accumulator (probe) on the shared `a`,
-	/// with the entire block's introduced bindings as the null_template ⇒
-	/// all-or-nothing block semantics (R3).
-	#[tokio::test]
-	async fn explain_optional_block_is_one_leftjoin_unit() {
-		let rendered = explain(plan_optional_block_unit()).await;
-		let expected = "\
-Project [ctx: Db]
-    HashJoin [ctx: Db] [type: Left, keys: a, null_template: __e0, b, k2, c]
-        Expand [ctx: Db] [source: b, direction: ->, tables: *, edge: k2, target: c, target_label: person]
-            EndpointBind [ctx: Db] [edge: __e0, field: out, node: b, target_label: person]
-                EndpointBind [ctx: Db] [edge: __e0, field: in, node: a]
-                    Bind [ctx: Db] [binding: __e0]
-                        TableScan [ctx: Db] [table: knows, direction: Forward]
-        Bind [ctx: Db] [binding: a]
-            TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// Chained optionals: two independent single-hop blocks fold left-to-right;
-	/// each source `a` is bound, so each is the OptionalExpand fast path, stacked.
-	/// The second OptionalExpand sees `a` on the (possibly null-filled) rows the
-	/// first produced — a chained optional referencing an earlier accumulator
-	/// binding flows through.
-	#[tokio::test]
-	async fn explain_chained_optionals_stack_optionalexpands() {
-		let rendered = explain(plan_chained_optionals()).await;
-		let expected = "\
-Project [ctx: Db]
-    OptionalExpand [ctx: Db] [source: a, direction: ->, tables: likes, edge: __e1, target: c, target_label: person]
-        OptionalExpand [ctx: Db] [source: a, direction: ->, tables: knows, edge: __e0, target: b, target_label: person]
-            Bind [ctx: Db] [binding: a]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
-
-	/// Multi-pattern single-clause optional: the subplan is a Cross of two
-	/// edge-anchored sub-trees, left-joined onto the accumulator on the shared
-	/// `{a, z}`. DistinctEdges is elided (`knows`/`likes` are statically disjoint).
-	#[tokio::test]
-	async fn explain_optional_multipattern_is_leftjoin_over_cross() {
-		let rendered = explain(plan_optional_multipattern()).await;
-		let expected = "\
-Project [ctx: Db]
-    HashJoin [ctx: Db] [type: Left, keys: a, z, null_template: __e0, b, __e1, c]
-        HashJoin [ctx: Db] [type: Cross]
-            EndpointBind [ctx: Db] [edge: __e0, field: out, node: b, target_label: person]
-                EndpointBind [ctx: Db] [edge: __e0, field: in, node: a]
-                    Bind [ctx: Db] [binding: __e0]
-                        TableScan [ctx: Db] [table: knows, direction: Forward]
-            EndpointBind [ctx: Db] [edge: __e1, field: out, node: c, target_label: person]
-                EndpointBind [ctx: Db] [edge: __e1, field: in, node: z]
-                    Bind [ctx: Db] [binding: __e1]
-                        TableScan [ctx: Db] [table: likes, direction: Forward]
-        HashJoin [ctx: Db] [type: Cross]
-            Bind [ctx: Db] [binding: a]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-            Bind [ctx: Db] [binding: z]
-                TableScan [ctx: Db] [table: person, direction: Forward]
-";
-		assert_eq!(rendered, expected, "\n--- got ---\n{rendered}");
-	}
 
 	// ---- helper unit tests ----
 

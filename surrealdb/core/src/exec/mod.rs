@@ -6,7 +6,7 @@
 //!
 //! ## Design Principles
 //!
-//! - **One engine**: Evaluation is implemented through [`PhysicalExpr`] and the VM's programs. The
+//! - **One engine**: Evaluation is implemented through [`Clause`] and the VM's programs. The
 //!   operators of [`operators`] are host services the VM calls — storage scans, index iterators,
 //!   record fetches — and not a second executor.
 //!
@@ -23,7 +23,7 @@
 //!   the program needs
 //! - [`vm`]: The physical plan, the bytecode lowering and the interpreter
 //! - [`operators`]: Physical operators the VM uses as host services (scan, graph, join, etc.)
-//! - [`physical_expr`]: Expression evaluation within the execution context
+//! - [`clause`]: The stored expression the engine evaluates, as one concrete type
 //! - [`context`]: Execution context hierarchy (root → namespace → database)
 //!
 //! ## Execution Flow
@@ -39,7 +39,6 @@ use std::sync::Arc;
 
 use futures::Stream;
 
-use crate::exe::FlowResultExt;
 // Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
 pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
 
@@ -54,19 +53,20 @@ pub(crate) mod batch;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
 pub(crate) mod catalog_deps;
+pub(crate) mod clause;
 pub(crate) mod closure;
 pub(crate) mod compiles;
 pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod entry;
 pub(crate) mod error;
+pub(crate) mod eval_context;
 pub(crate) mod expression_registry;
 pub(crate) mod fan_out;
 pub(crate) mod frame;
 pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod scalar_unit;
-pub(crate) mod zero_limit;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod field_rules;
@@ -82,7 +82,6 @@ pub(crate) mod ordering;
 pub(crate) mod partitioning;
 pub(crate) mod parts;
 pub(crate) mod permission;
-pub(crate) mod physical_expr;
 pub(crate) mod planner;
 pub(crate) mod pre_decode_filter;
 pub(crate) mod reference_purge;
@@ -94,24 +93,24 @@ pub(crate) mod topk_pushdown;
 pub(crate) mod trampoline;
 pub(crate) mod vm;
 // Re-export access mode types
-pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+pub(crate) use access_mode::AccessMode;
 // Re-export the operator data unit
 pub(crate) use batch::ValueBatch;
 // Re-export buffer helper
 pub(crate) use buffer::buffer_stream;
 // Re-export cardinality hint
 pub(crate) use cardinality::CardinalityHint;
+// Re-export the stored-expression type and its evaluation context
+pub(crate) use clause::Clause;
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
 pub(crate) use error::Error;
+pub(crate) use eval_context::EvalContext;
 // Re-export metrics types
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
 // Re-export ordering types
-pub(crate) use ordering::OutputOrdering;
 // Re-export the output-partitioning property
 pub(crate) use partitioning::Partitioning;
-// Re-export physical expression types
-pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
 /// The shape an operator's output takes when it is a statement's result.
 ///
@@ -149,12 +148,6 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 /// meets these requirements before execution begins.
 pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	fn name(&self) -> &'static str;
-
-	/// The name an expression holding this operator's statement shows it
-	/// by: the operator at the top of the plan `EXPLAIN` renders for it.
-	fn display_name(&self) -> &'static str {
-		self.name()
-	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
 		vec![]
@@ -206,12 +199,6 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 		vec![]
 	}
 
-	/// For a scan of storage, the limit it is bound to, which spares it its
-	/// records when that limit evaluates to zero (see [`zero_limit`]).
-	fn zero_limit_binding(&self) -> Option<&zero_limit::ZeroLimitBinding> {
-		None
-	}
-
 	/// The children `EXPLAIN` renders beneath this operator: every child,
 	/// unless the operator hides one from the caller. A join lifted out of a
 	/// permission predicate hides its right side from a caller the permission
@@ -253,25 +240,11 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	/// must return `ReadWrite` even though it's syntactically a SELECT.
 	fn access_mode(&self) -> AccessMode;
 
-	/// Returns a hint about the expected number of output rows.
-	///
-	/// Used by [`buffer_stream`] to choose an appropriate buffering strategy:
-	/// - `AtMostOne`: skip buffering entirely (no point spawning a task for one row)
-	/// - `Bounded(n)`: use cooperative prefetch when `n` is small
-	/// - `Unbounded`: full buffering based on [`AccessMode`]
-	///
-	/// The default is `Unbounded` (conservative, status-quo behaviour).
-	/// Override in leaf operators with known small cardinality.
-	fn cardinality_hint(&self) -> CardinalityHint {
-		CardinalityHint::Unbounded
-	}
-
 	/// How this operator's output is divided across parallel streams.
 	///
 	/// The default is [`Partitioning::Single`]: one stream carrying every row,
 	/// which is what every operator produces. An operator that passes rows
-	/// through unchanged should delegate to its input, the way it delegates
-	/// [`output_ordering`](Self::output_ordering); an operator that must see
+	/// through unchanged should delegate to its input; an operator that must see
 	/// every row together must declare `Single` and merge its input rather than
 	/// let a partial view reach anything downstream.
 	///
@@ -295,66 +268,5 @@ pub(crate) trait ExecOperator: Debug + Send + Sync + std::any::Any {
 	/// the plan has been fully consumed.
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		None
-	}
-
-	/// Recursively enable metrics collection on this operator and all
-	/// its children.
-	///
-	/// Called by `AnalyzePlan` before execution so that `monitor_stream`
-	/// wraps each operator's output with timing/counting instrumentation.
-	/// For normal (non-ANALYZE) queries, metrics remain disabled and
-	/// `monitor_stream` returns the inner stream directly with zero overhead.
-	fn enable_metrics(&self) {
-		if let Some(m) = self.metrics() {
-			m.enable();
-		}
-		// Operator trees embedded in this operator's expressions — a lookup
-		// part's pre-planned scan, for example — are rendered by EXPLAIN
-		// ANALYZE exactly like children, so they must be instrumented like
-		// children too.
-		for (_, expr) in self.expressions() {
-			for (_, embedded) in expr.embedded_operators() {
-				embedded.enable_metrics();
-			}
-		}
-		for child in self.children() {
-			child.enable_metrics();
-		}
-	}
-
-	/// Returns named references to physical expressions owned by this operator.
-	///
-	/// Used by `EXPLAIN` / `EXPLAIN ANALYZE` to display the expression tree
-	/// beneath each operator. The name describes the role of the expression
-	/// (e.g. "predicate", "projection", "sort_key").
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		vec![]
-	}
-
-	/// Returns the output ordering guarantee for this operator's stream.
-	///
-	/// Used by the planner to determine whether a downstream Sort operator
-	/// can be eliminated. The default is [`OutputOrdering::Unordered`].
-	///
-	/// Operators that preserve input ordering (Filter, Limit, Project, etc.)
-	/// should delegate to `self.input.output_ordering()`. Operators that
-	/// produce ordered output (Sort, IndexScan, TableScan) should return
-	/// `OutputOrdering::Sorted(...)`.
-	fn output_ordering(&self) -> OutputOrdering {
-		OutputOrdering::Unordered
-	}
-
-	/// Returns field paths that are guaranteed to have a single constant
-	/// value across all output rows.
-	///
-	/// Used by sort-elimination: if a leading ORDER BY field references a
-	/// constant column, it can be stripped from the requirement because any
-	/// direction trivially holds for a single-valued column.
-	///
-	/// The default is an empty list (no constant fields).  IndexScan
-	/// overrides this for equality-pinned columns.  Pass-through operators
-	/// (Filter, Limit, etc.) should delegate to their input.
-	fn constant_output_fields(&self) -> Vec<crate::exec::field_path::FieldPath> {
-		vec![]
 	}
 }

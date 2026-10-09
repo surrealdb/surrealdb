@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
+use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
@@ -60,10 +60,13 @@ impl ScalarFunction for RecordExists {
 			// A record exists for the caller when reading its `id` finds one:
 			// the read a path step makes, under the caller's permissions, so
 			// a record the caller may not select does not exist for it.
-			let id =
-				crate::exec::parts::field::evaluate_field(&Value::RecordId(rid), "id", ctx.clone())
-					.await
-					.catch_return();
+			let id = crate::exec::vm::access::field::evaluate_field(
+				&Value::RecordId(rid),
+				"id",
+				ctx.clone(),
+			)
+			.await
+			.catch_return();
 			match id {
 				Ok(id) => Ok(Value::Bool(!id.is_none())),
 				// An undefined table means the record cannot exist.

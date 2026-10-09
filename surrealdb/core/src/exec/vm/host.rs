@@ -40,7 +40,7 @@ use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
 use crate::exec::permission::validate_record_user_access;
-use crate::exec::physical_expr::graph_degree::DegreeCounter;
+use crate::exec::vm::degree::DegreeCounter;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
@@ -63,6 +63,7 @@ pub(crate) struct VmOperator {
 	/// The program's late-bound statements, as written, which its blocks
 	/// serve when they reach them.
 	served: Option<super::ServedStatements>,
+	analysis: Option<super::explain::VmAnalysis>,
 }
 
 impl VmOperator {
@@ -76,7 +77,13 @@ impl VmOperator {
 			display: Self::NAME,
 			held: None,
 			served: None,
+			analysis: None,
 		}
+	}
+
+	pub(super) fn analyzed(mut self, analysis: super::explain::VmAnalysis) -> Self {
+		self.analysis = Some(analysis);
+		self
 	}
 
 	/// This operator serving `served`, its program's late-bound statements.
@@ -121,11 +128,11 @@ impl futures::Stream for Holding {
 
 impl ExecOperator for VmOperator {
 	fn name(&self) -> &'static str {
-		Self::NAME
-	}
-
-	fn display_name(&self) -> &'static str {
-		self.display
+		if self.analysis.is_some() {
+			"ExplainAnalyze"
+		} else {
+			Self::NAME
+		}
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -150,17 +157,14 @@ impl ExecOperator for VmOperator {
 		Some(&self.metrics)
 	}
 
-	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
-		match &self.program.tail {
-			Some(tail) if tail.only => crate::exec::CardinalityHint::AtMostOne,
-			_ => cardinality_hint(&self.program),
-		}
-	}
-
 	/// A write's `ONLY` makes its value the one row it returned, which the
 	/// write body judges itself.
 	fn output_shape(&self) -> crate::exec::OutputShape {
-		output_shape(&self.program)
+		if self.analysis.is_some() {
+			crate::exec::OutputShape::Scalar
+		} else {
+			output_shape(&self.program)
+		}
 	}
 
 	fn execute_encoded(
@@ -192,7 +196,22 @@ impl VmOperator {
 			}
 			None => ctx,
 		};
-		let stream = execute_program_in(&self.program, ctx, None, format)?;
+		let analyzing = self.analysis.as_ref().map(|analysis| analysis.frame(ctx));
+		let ctx = analyzing.as_ref().unwrap_or(ctx);
+		let stream = execute_program_in(
+			&self.program,
+			ctx,
+			None,
+			if self.analysis.is_some() {
+				None
+			} else {
+				format
+			},
+		)?;
+		let stream = match &self.analysis {
+			Some(analysis) => analysis.run(stream, ctx),
+			None => stream,
+		};
 		let stream: ValueBatchStream = match &self.held {
 			Some(held) => Box::pin(Holding {
 				stream,
@@ -655,8 +674,7 @@ pub(super) fn host_frames(program: &Program, state: &mut State, ctx: &ExecutionC
 }
 
 /// Run block statement `group` under its tail: in the frame its `VERSION`
-/// reads at, and failed once its `TIMEOUT` has passed, as the operator tree's
-/// version scope and timeout apply them.
+/// reads at, and failed once its `TIMEOUT` has passed.
 async fn run_tailed(
 	program: &Arc<Program>,
 	group: u16,
@@ -894,8 +912,7 @@ pub(super) async fn run_pipelines(
 		// A pipeline one of whose limits admits nothing reads no
 		// record: it opens no read of storage — a table, an index,
 		// a record id or range, a union of them — and no sort or
-		// aggregate, which has already drained its own input (see
-		// `crate::exec::zero_limit`). A source that is not a read
+		// aggregate, which has already drained its own input. A source that is not a read
 		// of storage still yields its rows and every row is
 		// judged, so the errors its layers and predicates raise
 		// are raised.
@@ -2203,8 +2220,7 @@ async fn scan_range(
 	let mut source =
 		kv_scan_stream(ctx.txn(), range, version, None, direction, 0, first, prefilter, topk_probe);
 	// The rows of a program that does heavy work for each, reading only, are
-	// read and decoded on a task of their own, ahead of the work, as the
-	// operator tree reads the rows its operators consume.
+	// read and decoded on a task of their own, ahead of the work.
 	if program.access_mode == crate::exec::access_mode::AccessMode::ReadOnly
 		&& program
 			.splits
@@ -2911,7 +2927,7 @@ async fn run_body(
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
 								let value = out_of_line(|| {
-									crate::exec::parts::field::evaluate_field(
+									crate::exec::vm::access::field::evaluate_field(
 										&base,
 										program.fields[*field as usize].as_str(),
 										eval_ctx,
@@ -2937,7 +2953,9 @@ async fn run_body(
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
 								let value = out_of_line(|| {
-									crate::exec::parts::array_ops::evaluate_all(&base, eval_ctx)
+									crate::exec::vm::access::array_ops::evaluate_all(
+										&base, eval_ctx,
+									)
 								})
 								.await?;
 								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
@@ -3388,11 +3406,12 @@ async fn run_body(
 												captures.insert(name.as_str(), value.clone());
 											}
 										}
-										let compiled = crate::exec::physical_expr::function::CompiledClosure::planned(
-											&spec.closure,
-											spec.digest,
-											captures,
-										);
+										let compiled =
+											crate::exec::vm::calls::CompiledClosure::planned(
+												&spec.closure,
+												spec.digest,
+												captures,
+											);
 										(
 											Value::Closure(Box::new(crate::val::Closure::Builtin(
 												Arc::new(compiled),
@@ -3443,7 +3462,7 @@ async fn run_body(
 											}
 											None => {
 												out_of_line(|| {
-													crate::exec::physical_expr::function::helpers::invoke_uncompiled_closure(
+													crate::exec::vm::calls::helpers::invoke_uncompiled_closure(
 														closure, values, &eval_ctx,
 													)
 												})
@@ -5060,7 +5079,7 @@ async fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 /// temporary store: it prunes in memory and never fails for memory. A sort
 /// labelled [`Spill::Spillable`](super::plan::Spill) under
 /// `TEMPFILES` also spills each time it holds the external sorting buffer
-/// limit's rows, as the operator tree's external sort does, when the context
+/// limit's rows, when the context
 /// names a temporary directory. An aggregate so labelled charges its groups.
 fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	let Some(memory) = ctx.ctx().memory() else {
@@ -5523,8 +5542,7 @@ fn frame_ctx<'c>(
 	}
 }
 
-/// Apply builtin `call` to `args`, as the operator tree's `BuiltinFunctionExec`
-/// applies it once its arguments are evaluated: the experimental gate, then
+/// Apply builtin `call` to `args` once its arguments are evaluated: the experimental gate, then
 /// the function, with the call's plan depth for `eval::*`.
 async fn call_builtin(
 	call: &super::program::CallSpec,
@@ -5786,9 +5804,8 @@ pub(super) fn admitted_unit_as<'u>(
 
 /// The value of subquery `spec` evaluated in `eval_ctx`: its unit, a program
 /// of its own, run over the context the enclosing row derives
-/// ([`crate::exec::physical_expr::subquery_context`], as the operator tree's
-/// subquery derives it), and its rows gathered — its one value, `NONE` for
-/// none, when the unit's value is one row, and an array of its rows
+/// ([`crate::exec::vm::subquery::subquery_context`]), and its rows gathered — its one value, `NONE`
+/// for none, when the unit's value is one row, and an array of its rows
 /// otherwise.
 ///
 /// The unit runs on the frame stack of the statement's driver, when there is
@@ -5800,7 +5817,7 @@ async fn run_subprogram(
 	spec: &super::program::SubquerySpec,
 	eval_ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
-	let ctx = crate::exec::physical_expr::subquery_context(&eval_ctx, spec.inherits_row);
+	let ctx = crate::exec::vm::subquery::subquery_context(&eval_ctx, spec.inherits_row);
 	let unit = Arc::clone(admitted_unit(units, spec.unit, &ctx)?);
 	// A unit that holds no arena of its own finds the units its ids name in
 	// the table it was found in.
@@ -5882,7 +5899,7 @@ async fn run_unit_in(
 	ctx: &ExecutionContext,
 	row: Option<&Value>,
 	args: Vec<Value>,
-	recursion: Option<crate::exec::physical_expr::RecursionCtx>,
+	recursion: Option<crate::exec::eval_context::RecursionCtx>,
 ) -> FlowResult<Value> {
 	let head = program.unit.as_ref().ok_or_else(|| {
 		ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
@@ -5940,8 +5957,7 @@ impl crate::exec::operators::recursion::DepthBody for RecurseBody<'_> {
 	}
 }
 
-/// Recursion `spec` from `value`, as the operator tree's `RecursePart`
-/// answers it: its body, a unit of the root, evaluated with each depth's value
+/// Recursion `spec` from `value`: its body, a unit of the root, evaluated with each depth's value
 /// as the current value. `units` is the root's unit table when `spec` has a
 /// body.
 async fn recurse(
@@ -6023,7 +6039,7 @@ impl crate::exec::operators::recursion::RepeatBody for RepeatUnit<'_> {
 	fn eval<'a>(
 		&'a self,
 		value: &'a Value,
-		rec: crate::exec::physical_expr::RecursionCtx,
+		rec: crate::exec::eval_context::RecursionCtx,
 	) -> crate::exec::BoxFut<'a, FlowResult<Value>> {
 		crate::exec::vm::host::out_of_line(|| async move {
 			super::fuel::tick(self.ctx, 1).await?;
@@ -6075,8 +6091,7 @@ impl crate::exec::operators::fetch::FetchIndex<super::program::FetchStepSpec> fo
 	}
 }
 
-/// `value` destructured into `fields`, as the operator tree's
-/// `DestructurePart` answers it: an object's fields gathered, a record id's
+/// `value` destructured into `fields`: an object's fields gathered, a record id's
 /// record fetched — without its table's permissions when `skip` — and
 /// destructured, an array's elements each destructured, and `NONE` for
 /// anything else. An aliased field is its host pipeline's value over the
@@ -6222,8 +6237,8 @@ fn closures_handed(
 	})
 }
 
-/// Apply method `method` to the receiver `recv` and `args`, as the operator
-/// tree's `MethodPart` applies it once the receiver has been resolved and
+/// Apply method `method` to the receiver `recv` and `args`, once the
+/// receiver has been resolved and
 /// the arguments evaluated: the closure the receiver holds under the method's
 /// name when `closure`, and otherwise the builtin that implements the method
 /// for the receiver's type, behind the capability that refuses a direct call
@@ -6255,10 +6270,7 @@ async fn call_method(
 		return match super::closure::compiled_of(value) {
 			Some(compiled) => compiled.invoke(&ctx, args).await,
 			None => {
-				crate::exec::physical_expr::function::helpers::invoke_uncompiled_closure(
-					body, args, &ctx,
-				)
-				.await
+				crate::exec::vm::calls::helpers::invoke_uncompiled_closure(body, args, &ctx).await
 			}
 		};
 	}

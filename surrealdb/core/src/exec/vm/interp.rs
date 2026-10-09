@@ -370,7 +370,7 @@ pub(super) struct State {
 	pub(super) frames: Vec<crate::exec::ExecutionContext>,
 	/// The call frames open, by [`CALL_FRAME`](super::program::CALL_FRAME)
 	/// offset: the function each has entered, until it is called.
-	pub(super) calls: Vec<Option<crate::exec::physical_expr::EnteredCall>>,
+	pub(super) calls: Vec<Option<crate::exec::vm::calls::EnteredCall>>,
 	/// For each of the program's [`FunctionSpec`](super::program::FunctionSpec)s,
 	/// what an entry of the run learned of it.
 	pub(super) functions: Vec<FunctionMemo>,
@@ -382,7 +382,7 @@ pub(super) struct State {
 	pub(super) call_principals: Vec<u64>,
 	/// The record the computed frames compute, as [`Instr::BeginComputing`]
 	/// last set it for the row.
-	pub(super) computing: Option<std::sync::Arc<crate::exec::physical_expr::ComputingRecord>>,
+	pub(super) computing: Option<std::sync::Arc<crate::exec::eval_context::ComputingRecord>>,
 	/// What `$input` names while a write's data clause that binds it is
 	/// evaluated: the value the statement supplied for the record. Every host
 	/// step's evaluation reads it as its write binding.
@@ -494,7 +494,7 @@ pub(super) struct State {
 	/// The decision tree each of the program's `MATCHES` operators runs, by
 	/// [`Program::matches`](super::program::Program::matches) index, with the
 	/// index resolutions it has cached.
-	pub(super) matches_evals: Vec<Option<std::sync::Arc<crate::exec::physical_expr::MatchesEval>>>,
+	pub(super) matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
 	/// The scope a schema statement's backfill of a view maintains the view
 	/// table's rows through, opened by the backfill's first row so that the
 	/// view table's write context is resolved once for the run.
@@ -512,16 +512,14 @@ pub(super) struct State {
 	pub(super) call_units: Vec<Option<super::call_unit::Linked>>,
 	/// For a unit that is a `.@` recursion's body, the phase the recursion
 	/// runs it in, which its `.@` markers answer in.
-	pub(super) recursion: Option<crate::exec::physical_expr::RecursionCtx>,
+	pub(super) recursion: Option<crate::exec::eval_context::RecursionCtx>,
 	/// While a lookup judges a table permission that reads `$parent`: the
-	/// row the lookup is taken over, bound as `$parent`, as the operator
-	/// tree's lookup binds it.
+	/// row the lookup is taken over, bound as `$parent`.
 	pub(super) parent: Option<std::collections::HashMap<surrealdb_strand::Strand, Value>>,
 	/// The degree fast path of each of the program's
 	/// [`DegreeSpec`](super::program::DegreeSpec)s, by index, made on its
 	/// first use in the run.
-	pub(super) degrees:
-		Vec<Option<std::sync::Arc<crate::exec::physical_expr::graph_degree::DegreeCounter>>>,
+	pub(super) degrees: Vec<Option<std::sync::Arc<crate::exec::vm::degree::DegreeCounter>>>,
 	/// The closures the state has linked a unit for, by the frame an
 	/// instruction invokes them in and their digest, most recent last: an
 	/// instruction handing a callee a closure not held here yields
@@ -545,7 +543,7 @@ pub(super) struct RunShare {
 	knn_contexts: Vec<Option<std::sync::Arc<crate::exec::function::KnnContext>>>,
 	knn_queries: Vec<Option<std::sync::Arc<Vec<crate::val::Number>>>>,
 	index_runs: Vec<Option<IndexRun>>,
-	matches_evals: Vec<Option<std::sync::Arc<crate::exec::physical_expr::MatchesEval>>>,
+	matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
 }
 
 /// The aggregate functions a program's aggregates name, with the names they
@@ -714,8 +712,7 @@ pub(super) struct IndexRun {
 /// The query index function call `spec` reads when it runs, taken from the
 /// end of `args`, where the call's clause reads one
 /// ([`super::program::IndexBinding::FullText::query_arg`]). A value that is no
-/// string names no clause the call can report against, as a query the
-/// operator tree finds no string for registers none.
+/// string names no clause the call can report against and registers no query.
 pub(super) fn runtime_query(
 	spec: &super::program::CallSpec,
 	args: &mut Vec<Value>,
@@ -1075,13 +1072,13 @@ impl State {
 		&mut self,
 		index: u32,
 		spec: &super::program::MatchesSpec,
-	) -> std::sync::Arc<crate::exec::physical_expr::MatchesEval> {
+	) -> std::sync::Arc<crate::exec::vm::matches::MatchesEval> {
 		let at = index as usize;
 		if self.matches_evals.len() <= at {
 			self.matches_evals.resize(at + 1, None);
 		}
 		std::sync::Arc::clone(self.matches_evals[at].get_or_insert_with(|| {
-			std::sync::Arc::new(crate::exec::physical_expr::MatchesEval::new(
+			std::sync::Arc::new(crate::exec::vm::matches::MatchesEval::new(
 				spec.operator.clone(),
 				spec.probe.clone(),
 				spec.registered,
@@ -1097,7 +1094,7 @@ impl State {
 		&mut self,
 		index: u32,
 		spec: &super::program::DegreeSpec,
-	) -> anyhow::Result<std::sync::Arc<crate::exec::physical_expr::graph_degree::DegreeCounter>> {
+	) -> anyhow::Result<std::sync::Arc<crate::exec::vm::degree::DegreeCounter>> {
 		let at = index as usize;
 		if self.degrees.len() <= at {
 			self.degrees.resize(at + 1, None);
@@ -1105,11 +1102,10 @@ impl State {
 		if let Some(counter) = &self.degrees[at] {
 			return Ok(std::sync::Arc::clone(counter));
 		}
-		let counter =
-			std::sync::Arc::new(crate::exec::physical_expr::graph_degree::DegreeCounter::new(
-				spec.direction,
-				spec.tables.clone(),
-			)?);
+		let counter = std::sync::Arc::new(crate::exec::vm::degree::DegreeCounter::new(
+			spec.direction,
+			&spec.tables,
+		)?);
 		self.degrees[at] = Some(std::sync::Arc::clone(&counter));
 		Ok(counter)
 	}
@@ -1951,7 +1947,7 @@ pub(super) fn run_row<'r>(
 								}
 								view
 							});
-							Some(std::sync::Arc::new(crate::exec::physical_expr::ComputingRecord {
+							Some(std::sync::Arc::new(crate::exec::eval_context::ComputingRecord {
 								rid: rid.clone(),
 								stored,
 							}))
@@ -2749,8 +2745,7 @@ pub(super) fn run_row<'r>(
 					.iter()
 					.map(|arg| read_value(regs, *arg))
 					.collect::<anyhow::Result<Vec<_>>>()?;
-				let bound =
-					crate::exec::physical_expr::function::bind_closure_args(&spec.args, args)?;
+				let bound = crate::exec::vm::calls::bind_closure_args(&spec.args, args)?;
 				for (i, value) in bound.into_iter().enumerate() {
 					regs[*params as usize + i] = Scalar::Value(std::borrow::Cow::Owned(value));
 				}
@@ -2763,7 +2758,7 @@ pub(super) fn run_row<'r>(
 			} => {
 				let spec = &program.closures[*closure as usize];
 				let value = read_value(regs, *src)?;
-				let value = crate::exec::physical_expr::function::helpers::validate_return(
+				let value = crate::exec::vm::calls::helpers::validate_return(
 					"ANONYMOUS",
 					spec.returns.as_ref(),
 					value,
@@ -3505,8 +3500,8 @@ fn fresh_groups(
 
 /// A row a sort holds: the row, or a record read in place as its stored
 /// bytes, decoded only once the sort hands it on. A record that does not
-/// decode fails the statement only if it keeps its place, as the operator
-/// tree's pushed-down threshold never decodes a record it drops.
+/// decode fails the statement only if it keeps its place: a record the sort
+/// drops is never decoded.
 #[derive(Debug)]
 pub(crate) enum SortRow {
 	Value(Value),

@@ -9,7 +9,7 @@
 //!
 //! This runs synchronously inside [`crate::exec::operators::scan::pipeline::kv_scan_stream`]
 //! **before** [`crate::exec::operators::scan::pipeline::decode_record`]. The scan's pushed-down
-//! [`crate::exec::PhysicalExpr`] predicate (`scan_predicate` on table / dynamic / record-id range
+//! [`crate::exec::Clause`] predicate (`scan_predicate` on table / dynamic / record-id range
 //! scans) still runs **after** decode in
 //! [`crate::exec::operators::scan::pipeline::filter_and_process_batch`], together with table-level
 //! permission filtering, computed fields, and field-level SELECT permissions — that evaluation is
@@ -19,7 +19,7 @@
 //! |--|-------------------|---------------------------|
 //! | Input | Raw KV bytes | Decoded [`crate::val::Value`] |
 //! | Semantics | Conservative; reject-only | Exact (must match `Filter`) |
-//! | Async / params | Literal RHS baked at compile; sync only | Full [`PhysicalExpr`] |
+//! | Async / params | Literal RHS baked at compile; sync only | Full [`Clause`] |
 //!
 //! ## Eligibility
 //!
@@ -44,9 +44,7 @@ pub(crate) mod wire_literal;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub(crate) use compile::{PreDecodeShape, pre_decode_filter_for_execute};
-#[cfg(test)]
-pub(crate) use compile::{field_state_blocks_raw_read, pre_decode_filter_status_at_plan_time};
+pub(crate) use compile::PreDecodeShape;
 use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
 pub(crate) use wire_cmp::{int_on_wire, strand_payload_str_unchecked};
@@ -244,81 +242,19 @@ pub(crate) enum PredNode {
 		evaluator: Arc<dyn StreamingLeafEvaluator>,
 		fallback: LeafFallback,
 	},
-	/// One map scan over a [`Value::Object`] VecMap at the current anchor (`at_record_root`:
-	/// anchored at the table row's root object; otherwise at a nested object).
+	/// One map scan over a [`Value::Object`] VecMap at the current anchor: the table row's root
+	/// object, or the nested object a [`PredNode::NavigatePrefix`] above it descended into.
 	///
 	/// `clauses` is a [`FusedFlatClauses`] which enforces the strictly-ascending,
 	/// deduplicated-by-`key_utf8` invariant at the type level — fused-map evaluation
 	/// pairs the slice with [`scan_record_root_object_for_keys_sorted`] output by position.
 	FusedFlatMapAnd {
-		at_record_root: bool,
 		clauses: FusedFlatClauses,
 	},
 	NavigatePrefix {
 		segment: PathSegment,
 		child: Box<PredNode>,
 	},
-}
-
-/// Why a pre-decode filter cannot be built for a scan.
-// Constructed or read only by the operator-tree oracle, which test builds compile.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum PreDecodeFilterReason {
-	/// The predicate's physical shape is not supported by [`compile::compile_predicate_shape`]
-	/// (e.g. `Outside` / `Intersects` / `AllEqual` / `AnyEqual`, `MATCHES`, or non-static field
-	/// paths).
-	UnsupportedPredicate,
-	/// One of the referenced root field names is computed (`DEFINE FIELD … VALUE …`); the raw
-	/// KV bytes do not necessarily match the value the engine will materialise.
-	ComputedFields,
-	/// One of the referenced root field names has a non-`Allow` SELECT permission, so reading
-	/// it from raw KV bytes would bypass per-field authorisation.
-	FieldPermissions,
-}
-
-/// Plan / execute-time status of the pre-decode filter for a KV scan
-/// ([`TableScan`](crate::exec::operators::scan::table::TableScan),
-/// [`DynamicScan`](crate::exec::operators::scan::dynamic::DynamicScan),
-/// [`RecordIdScan`](crate::exec::operators::scan::record_id::RecordIdScan)).
-// Constructed or read only by the operator-tree oracle, which test builds compile.
-#[cfg_attr(not(test), allow(dead_code))]
-#[derive(Debug, Clone)]
-pub(crate) enum PreDecodeFilterStatus {
-	/// No WHERE predicate pushed into the scan — omit `pre_decode_filter` in EXPLAIN.
-	NotApplicable,
-	/// Predicate compiled and field checks passed at plan time.
-	Active(Arc<PreDecodeFilter>),
-	/// Predicate shape is known; field state or permission checks need runtime context.
-	Deferred(Arc<PredNode>),
-	/// Predicate shape unsupported or field checks failed.
-	Ineligible(PreDecodeFilterReason),
-}
-
-impl PreDecodeFilterStatus {
-	#[cfg(test)]
-	/// Human-readable value for the `pre_decode_filter` attribute in EXPLAIN output.
-	///
-	/// Returns [`None`] when the scan has no WHERE predicate pushed into it, in which case the
-	/// `pre_decode_filter` attribute should be omitted from `attrs()` entirely.
-	///
-	/// Returns `&'static str` rather than `String` — every variant maps to a
-	/// compile-time literal, so callers borrow a static buffer instead of
-	/// paying for a `String::from` per EXPLAIN render.
-	pub(crate) fn explain_text(&self) -> Option<&'static str> {
-		match self {
-			Self::NotApplicable => None,
-			Self::Active(_) => Some("yes"),
-			Self::Deferred(_) => Some("deferred (runtime field state)"),
-			Self::Ineligible(PreDecodeFilterReason::UnsupportedPredicate) => {
-				Some("no (unsupported predicate)")
-			}
-			Self::Ineligible(PreDecodeFilterReason::ComputedFields) => Some("no (computed fields)"),
-			Self::Ineligible(PreDecodeFilterReason::FieldPermissions) => {
-				Some("no (field permissions)")
-			}
-		}
-	}
 }
 
 /// Partial truth status of the predicate from cheap structural inspection.
@@ -1204,122 +1140,6 @@ mod tests {
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
 
-	/// `FusedFlatMapAnd` over a missing scope: each clause reads `Value::None`. With at least
-	/// one clause that compares unequal to `None`, the whole AND is provably false.
-	#[test]
-	fn scoped_missing_intermediate_makes_fused_clauses_provably_false() {
-		let inner = FusedFlatClauses::try_new(vec![
-			fused_clause(
-				b"a".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(1)),
-				false,
-			),
-			fused_clause(
-				b"b".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(2)),
-				false,
-			),
-		])
-		.expect("sorted unique");
-		let root = PredNode::NavigatePrefix {
-			segment: "outer".into(),
-			child: Box::new(PredNode::FusedFlatMapAnd {
-				at_record_root: false,
-				clauses: inner,
-			}),
-		};
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		// Record has no `outer` key.
-		let obj =
-			Object::from(BTreeMap::from([(Strand::from("z"), Value::Number(Number::Int(99)))]));
-		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
-	}
-
-	/// Two-level nested fusion (`outer.inner.{a,b}`): walk through both prefixes, then evaluate
-	/// the fused map at the deepest object. A row whose deepest leaf disagrees with one clause
-	/// is rejected.
-	#[test]
-	fn scoped_two_level_nested_fused_rejects_mismatched_inner() {
-		let inner_clauses = FusedFlatClauses::try_new(vec![
-			fused_clause(
-				b"a".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(1)),
-				false,
-			),
-			fused_clause(
-				b"b".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(2)),
-				false,
-			),
-		])
-		.expect("sorted unique");
-		let root = PredNode::NavigatePrefix {
-			segment: "outer".into(),
-			child: Box::new(PredNode::NavigatePrefix {
-				segment: "inner".into(),
-				child: Box::new(PredNode::FusedFlatMapAnd {
-					at_record_root: false,
-					clauses: inner_clauses,
-				}),
-			}),
-		};
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		// {outer: {inner: {a: 1, b: 99}}} — clause `b == 2` is provably false.
-		let inner = Object::from(BTreeMap::from([
-			(Strand::from("a"), Value::Number(Number::Int(1))),
-			(Strand::from("b"), Value::Number(Number::Int(99))),
-		]));
-		let middle = Object::from(BTreeMap::from([(Strand::from("inner"), Value::Object(inner))]));
-		let outer = Object::from(BTreeMap::from([(Strand::from("outer"), Value::Object(middle))]));
-		let rec = wire_record_plain_object(outer);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
-	}
-
-	/// Same shape as above but the row matches both clauses — pre-decode filter cannot prove
-	/// false, so the row must be passed through to full decode.
-	#[test]
-	fn scoped_two_level_nested_fused_passes_matching_inner() {
-		let inner_clauses = FusedFlatClauses::try_new(vec![
-			fused_clause(
-				b"a".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(1)),
-				false,
-			),
-			fused_clause(
-				b"b".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(2)),
-				false,
-			),
-		])
-		.expect("sorted unique");
-		let root = PredNode::NavigatePrefix {
-			segment: "outer".into(),
-			child: Box::new(PredNode::NavigatePrefix {
-				segment: "inner".into(),
-				child: Box::new(PredNode::FusedFlatMapAnd {
-					at_record_root: false,
-					clauses: inner_clauses,
-				}),
-			}),
-		};
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		let inner = Object::from(BTreeMap::from([
-			(Strand::from("a"), Value::Number(Number::Int(1))),
-			(Strand::from("b"), Value::Number(Number::Int(2))),
-		]));
-		let middle = Object::from(BTreeMap::from([(Strand::from("inner"), Value::Object(inner))]));
-		let outer = Object::from(BTreeMap::from([(Strand::from("outer"), Value::Object(middle))]));
-		let rec = wire_record_plain_object(outer);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
-	}
-
 	/// `FusedFlatClauses::try_new` rejects out-of-order keys.
 	#[test]
 	fn fused_flat_clauses_try_new_rejects_unsorted() {
@@ -1693,81 +1513,5 @@ mod tests {
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
-	}
-
-	/// Regression: an `outer` object that exists but is missing some of the
-	/// fused needles must still be evaluated as if the missing keys read
-	/// `Value::None`, so a row like `{outer: {a: 1}}` is rejected by the
-	/// predicate `outer.a = 1 AND outer.b = 2` rather than falling through
-	/// to full decode.
-	#[test]
-	fn scoped_partial_object_with_missing_inner_keys_rejects() {
-		let clauses = FusedFlatClauses::try_new(vec![
-			fused_clause(
-				b"a".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(1)),
-				false,
-			),
-			fused_clause(
-				b"b".to_vec(),
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(2)),
-				false,
-			),
-		])
-		.expect("sorted unique");
-		let root = PredNode::NavigatePrefix {
-			segment: "outer".into(),
-			child: Box::new(PredNode::FusedFlatMapAnd {
-				at_record_root: false,
-				clauses,
-			}),
-		};
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		// `outer` is present and is an object, but only carries `a`; `b` is
-		// absent. The fused evaluator should treat `b` as `Value::None`,
-		// reduce the AND to ProvablyFalse, and reject the row.
-		let inner =
-			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
-		let outer = Object::from(BTreeMap::from([(Strand::from("outer"), Value::Object(inner))]));
-		let rec = wire_record_plain_object(outer);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
-	}
-
-	/// Exhaustiveness check for [`PreDecodeFilterStatus::explain_text`]: every
-	/// `Ineligible` reason variant must produce an `EXPLAIN` string. Adding a
-	/// new variant breaks the inner `match`, which forces the implementer to
-	/// also extend `explain_text` and the corresponding language tests.
-	#[test]
-	fn explain_text_covers_every_ineligible_reason() {
-		use super::{PreDecodeFilterReason, PreDecodeFilterStatus};
-
-		fn all_reasons() -> impl IntoIterator<Item = PreDecodeFilterReason> {
-			// Adding a new variant fails to compile here, prompting a fix.
-			let probe: [PreDecodeFilterReason; 3] = [
-				PreDecodeFilterReason::UnsupportedPredicate,
-				PreDecodeFilterReason::ComputedFields,
-				PreDecodeFilterReason::FieldPermissions,
-			];
-			for r in probe.iter() {
-				match r {
-					PreDecodeFilterReason::UnsupportedPredicate
-					| PreDecodeFilterReason::ComputedFields
-					| PreDecodeFilterReason::FieldPermissions => {}
-				}
-			}
-			probe
-		}
-
-		for reason in all_reasons() {
-			let status = PreDecodeFilterStatus::Ineligible(reason);
-			assert!(
-				status.explain_text().is_some(),
-				"PreDecodeFilterStatus::Ineligible({:?}).explain_text() returned None",
-				reason
-			);
-		}
-		assert!(PreDecodeFilterStatus::NotApplicable.explain_text().is_none());
 	}
 }

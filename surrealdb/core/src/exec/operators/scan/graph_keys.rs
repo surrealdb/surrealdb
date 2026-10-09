@@ -22,7 +22,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Bound;
-use std::sync::Arc;
 
 use anyhow::Result as AnyResult;
 use surrealdb_datastore::values::graph::GraphFoldScope;
@@ -30,7 +29,7 @@ use surrealdb_datastore::values::graph::GraphFoldScope;
 use super::common::evaluate_bound_key;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
+use crate::exec::{Clause, ControlFlowExt, ExecutionContext};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::adjacency::{
 	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, VertexAdjacency,
@@ -53,9 +52,9 @@ pub struct EdgeTableSpec {
 	/// The edge table name (e.g., `edge`, `knows`)
 	pub table: TableName,
 	/// Range start bound. When `Unbounded`, starts from the table prefix.
-	pub range_start: Bound<Arc<dyn PhysicalExpr>>,
+	pub range_start: Bound<Clause>,
 	/// Range end bound. When `Unbounded`, ends at the table suffix.
-	pub range_end: Bound<Arc<dyn PhysicalExpr>>,
+	pub range_end: Bound<Clause>,
 }
 
 /// One adjacency slice to scan for a single record + direction: the
@@ -344,7 +343,7 @@ pub(crate) fn observe_fold_candidate(
 /// The bound kind carries over unchanged; only the expression inside it is
 /// evaluated, so an inclusive spec bound stays inclusive on the key.
 async fn eval_fk_bound(
-	bound: &Bound<Arc<dyn PhysicalExpr>>,
+	bound: &Bound<Clause>,
 	ctx: &ExecutionContext,
 ) -> Result<Bound<RecordIdKey>, ControlFlow> {
 	Ok(match bound {

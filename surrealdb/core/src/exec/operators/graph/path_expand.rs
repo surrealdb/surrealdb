@@ -1,7 +1,6 @@
-//! The `PathExpand` operator — variable-length / quantified graph traversal
-//! for GQL v2 `MATCH`.
+//! Variable-length / quantified graph traversal for GQL v2 `MATCH`.
 //!
-//! `PathExpand` implements the quantified edge step of a lowered
+//! [`expand_paths`] implements the quantified edge step of a lowered
 //! [`MatchPlan`](crate::expr::match_plan::MatchPlan): patterns such as
 //! `(a)-[:knows]->{1,3}(b)`, `(a)-[:knows]->+(b)`, or `(a)-[:knows]->*(b)`. For
 //! every input binding row it walks the graph from a bound *source* node,
@@ -21,10 +20,10 @@
 //!
 //! ## Traversal: depth-first, edge-unique within a path
 //!
-//! Per source row the operator runs an explicit-stack DFS over partial paths
+//! Per source row the traversal runs an explicit-stack DFS over partial paths
 //! `{ tip, edges, nodes }`. Extension enumerates the adjacency of `tip` via the
 //! shared [`graph_keys`](super::super::scan::graph_keys) machinery (identical
-//! ranges/decode to `GraphEdgeScan` and `Expand`), and:
+//! ranges/decode to the graph scan and [`expand`](super::expand)), and:
 //! - **skips any edge already present in the current path** — DIFFERENT-EDGES within a path. This
 //!   is what makes the unbounded forms (`*`, `+`, `{n,}`) terminate on cyclic graphs: a finite edge
 //!   set bounds the number of distinct simple-edge paths, so the DFS stack cannot grow without
@@ -37,7 +36,7 @@
 //! The target vertex id for each hop is taken from the decoded pointer key
 //! (`decoded.target`, present on new-format keys) and otherwise from the fetched
 //! edge object's `out` (for `Out`) / `in` (for `In`) field — the same priority
-//! the `Expand` operator uses.
+//! [`expand`](super::expand) uses.
 //!
 //! A node is emitted at depth `d` iff `min <= d <= max` (or `d >= min` when
 //! `max` is `None`) and the node's table matches `target_label`. The branch
@@ -74,24 +73,13 @@
 //! emitted before the deeper paths that extend through it.
 
 use std::collections::HashMap;
-#[cfg(test)]
-use std::sync::Arc;
 
-#[cfg(test)]
-use common::future::stream::{self, Yielder};
-#[cfg(test)]
-use futures::StreamExt;
 use futures::future::BoxFuture;
 use tracing::debug;
 
 use super::expand::ExpandDir;
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
 use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, OperatorMetrics, ValueBatch,
-	ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::adjacency::VertexAdjacency;
@@ -99,7 +87,7 @@ use crate::val::{Array, Object, RecordId, TableName, Value};
 
 /// The storage-layer [`Dir`] scanned from a source vertex for an expand
 /// direction. `ExpandDir`'s own mapping is private to `expand.rs`, so
-/// `PathExpand` keeps its own copy of the two trivial mappings.
+/// path expansion keeps its own copy of the two trivial mappings.
 pub(crate) fn scan_dir(direction: ExpandDir) -> Dir {
 	match direction {
 		ExpandDir::Out => Dir::Out,
@@ -124,7 +112,7 @@ pub(crate) fn target_field(direction: ExpandDir) -> &'static str {
 /// the adjacency scan regardless of mode — `Walk` and `Trail` are therefore
 /// identical here. `Acyclic` additionally forbids any repeated node; `Simple`
 /// forbids repeated nodes except a single close back onto the path's start.
-/// Shared by [`PathExpand`] (DFS) and `ShortestPathExpand` (BFS).
+/// Shared by [`expand_paths`] (DFS) and the shortest-path search (BFS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathMode {
 	Walk,
@@ -219,138 +207,6 @@ impl PartialPath {
 	}
 }
 
-#[cfg(test)]
-/// Variable-length quantified expansion from a bound source node.
-///
-/// See the module documentation for the full semantics. Constructed by the GQL
-/// streaming planner from the quantified `EdgeStep` of a `PatternPlan`.
-#[derive(Debug, Clone)]
-pub struct PathExpand {
-	/// Child operator providing the input binding rows.
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// Name of the bound source-node binding in each input row.
-	pub(crate) source: String,
-	/// Direction of every hop in the quantified step.
-	pub(crate) direction: ExpandDir,
-	/// Edge table(s) the quantified step may traverse; empty ⇒ all edge tables
-	/// in `direction`.
-	pub(crate) edge_tables: Vec<TableName>,
-	/// Minimum path length (number of edges). `0` enables the zero-length path.
-	pub(crate) min: u32,
-	/// Maximum path length, or `None` for unbounded (`*`, `+`, `{n,}`).
-	pub(crate) max: Option<u32>,
-	/// Binding name the terminal node is written under.
-	pub(crate) target_binding: String,
-	/// Optional table the terminal node must belong to (label filter).
-	pub(crate) target_label: Option<TableName>,
-	/// Binding name for the edge-group list (kind `EdgeGroup`), when present.
-	pub(crate) group_binding: Option<String>,
-	/// Binding name for the whole-path array (kind `Path`), when present.
-	pub(crate) path_binding: Option<String>,
-	/// The path mode (node/edge repetition discipline). `Walk`/`Trail` keep the
-	/// default edge-unique traversal; `Simple`/`Acyclic` add node-uniqueness.
-	pub(crate) mode: PathMode,
-	/// `true` when the pattern was anchored on its far node, so the traversal runs
-	/// the segment backwards (`source` is the pattern's *end*); the emitted group
-	/// and path arrays are reversed to read in the pattern's written order.
-	pub(crate) reversed: bool,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-#[cfg(test)]
-impl PathExpand {
-	#[cfg(test)]
-	#[allow(clippy::too_many_arguments)]
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		source: String,
-		direction: ExpandDir,
-		edge_tables: Vec<TableName>,
-		min: u32,
-		max: Option<u32>,
-		target_binding: String,
-		target_label: Option<TableName>,
-		group_binding: Option<String>,
-		path_binding: Option<String>,
-		mode: PathMode,
-		reversed: bool,
-	) -> Self {
-		Self {
-			input,
-			source,
-			direction,
-			edge_tables,
-			min,
-			max,
-			target_binding,
-			target_label,
-			group_binding,
-			path_binding,
-			mode,
-			reversed,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	#[cfg(test)]
-	/// Build the `EdgeTableSpec` list (unbounded ranges) for the configured edge
-	/// tables. An empty list yields the all-edges wildcard scan. Mirrors
-	/// `Expand::edge_specs`.
-	fn edge_specs(&self) -> Vec<EdgeTableSpec> {
-		self.edge_tables
-			.iter()
-			.cloned()
-			.map(|table| EdgeTableSpec {
-				table,
-				range_start: std::ops::Bound::Unbounded,
-				range_end: std::ops::Bound::Unbounded,
-			})
-			.collect()
-	}
-
-	#[cfg(test)]
-	/// What the expansion is parameterised by, read from `self` and the
-	/// configuration of `ctx`.
-	pub(crate) fn params(&self, ctx: &ExecutionContext) -> PathParams {
-		let exec = &ctx.root().ctx.config.exec;
-		PathParams {
-			source: self.source.clone(),
-			direction: self.direction,
-			edge_specs: self.edge_specs(),
-			min: self.min,
-			max: self.max,
-			target_binding: self.target_binding.clone(),
-			target_label: self.target_label.clone(),
-			group_binding: self.group_binding.clone(),
-			path_binding: self.path_binding.clone(),
-			mode: self.mode,
-			reversed: self.reversed,
-			scan_batch_size: exec.scan_batch_size,
-			path_row_limit: exec.gql_max_path_rows,
-		}
-	}
-
-	/// `true` if depth `d` is within the emit window `[min, max]` (max unbounded
-	/// when `None`).
-	///
-	/// The streaming `execute` body cannot borrow `self` inside its
-	/// `async_stream`, so it rebuilds this as a local closure over the captured
-	/// `min`/`max` (the production path); this method is the unit-tested form of
-	/// the same window logic, hence `#[cfg(test)]`.
-	#[cfg(test)]
-	fn emits_at(&self, d: u32) -> bool {
-		d >= self.min && self.max.is_none_or(|m| d <= m)
-	}
-
-	/// `true` if the DFS may extend a path that has already reached depth `d`.
-	/// Unit-tested twin of `execute`'s local closure (see [`Self::emits_at`]).
-	#[cfg(test)]
-	fn extends_past(&self, d: u32) -> bool {
-		self.max.is_none_or(|m| d < m)
-	}
-}
-
 /// Extract the source `RecordId` from a binding row's source slot.
 ///
 /// Thin wrapper over the shared [`crate::exec::operators::binding_record_id`]
@@ -391,114 +247,6 @@ pub(crate) fn node_passes_label(node_obj: &Value, target_label: Option<&TableNam
 		return true;
 	};
 	node_id(node_obj).map(|rid| &rid.table == label).unwrap_or(false)
-}
-
-#[cfg(test)]
-impl ExecOperator for PathExpand {
-	fn name(&self) -> &'static str {
-		"PathExpand"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let dir = match self.direction {
-			ExpandDir::Out => "->",
-			ExpandDir::In => "<-",
-		};
-		let tables = if self.edge_tables.is_empty() {
-			"*".to_string()
-		} else {
-			self.edge_tables.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
-		};
-		let max = self.max.map(|m| m.to_string()).unwrap_or_else(|| "∞".to_string());
-		let mut attrs = vec![
-			("source".to_string(), self.source.clone()),
-			("direction".to_string(), dir.to_string()),
-			("tables".to_string(), tables),
-			("min".to_string(), self.min.to_string()),
-			("max".to_string(), max),
-			("target_binding".to_string(), self.target_binding.clone()),
-		];
-		if let Some(label) = self.target_label.as_ref() {
-			attrs.push(("target_label".to_string(), label.as_str().to_string()));
-		}
-		if let Some(group) = self.group_binding.as_ref() {
-			attrs.push(("group".to_string(), group.clone()));
-		}
-		if let Some(path) = self.path_binding.as_ref() {
-			attrs.push(("path".to_string(), path.clone()));
-		}
-		if let Some(mode) = self.mode.attr() {
-			attrs.push(("mode".to_string(), mode.to_string()));
-		}
-		if self.reversed {
-			attrs.push(("reversed".to_string(), "true".to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// Needs a transaction + catalog for adjacency scans and FieldState
-		// fetches, combined with the child's requirement.
-		self.input.required_context().max(ContextLevel::Database)
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// Read-only itself (graph reads + record fetches); inherits the child's
-		// mode. There are no embedded predicate exprs — the planner emits a
-		// separate Filter above PathExpand for clause predicates.
-		self.input.access_mode()
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		// One input row can fan out to many paths.
-		CardinalityHint::Unbounded
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let mut input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-		ctx.database()?;
-		let params = self.params(ctx);
-		let scan_batch_size = params.scan_batch_size;
-		let ctx = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			// FieldState caches shared across every fetch this operator makes,
-			// for every input row and batch — each table's state is built at
-			// most once.
-			let mut caches = PathCaches::new();
-			// Output batch, flushed when it reaches the configured batch size.
-			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
-			let mut flush = StreamFlush(&mut yielder);
-
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				for row in batch.into_values() {
-					expand_paths(&ctx, &params, &mut caches, &row, &mut out, &mut flush).await?;
-				}
-			}
-
-			if !out.is_empty() {
-				yielder.emit(ValueBatch::new(out)).await;
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), "PathExpand", &self.metrics))
-	}
 }
 
 /// What a path expansion is parameterised by, fixed for the whole run.
@@ -559,20 +307,6 @@ pub(crate) trait PathFlush: Send {
 	/// Hand on `rows`, a full batch. `false` once nothing downstream wants
 	/// another row, which ends the expansion.
 	fn flush<'a>(&'a mut self, rows: Vec<Value>) -> BoxFuture<'a, FlowResult<bool>>;
-}
-
-#[cfg(test)]
-/// The stream of an operator as the place its batches go.
-pub(crate) struct StreamFlush<'y, 'a>(pub(crate) &'y mut Yielder<'a, ValueBatch>);
-
-#[cfg(test)]
-impl PathFlush for StreamFlush<'_, '_> {
-	fn flush<'a>(&'a mut self, rows: Vec<Value>) -> BoxFuture<'a, FlowResult<bool>> {
-		Box::pin(async move {
-			self.0.emit(ValueBatch::new(rows)).await;
-			Ok(true)
-		})
-	}
 }
 
 /// Push `row` onto `out`, handing `out` on once it holds a batch. `false`
@@ -898,7 +632,6 @@ pub(crate) fn assemble_row(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::operators::CurrentValueSource;
 	use crate::val::RecordIdKey;
 
 	fn rid(table: &str, key: &str) -> RecordId {
@@ -931,23 +664,6 @@ mod tests {
 
 	fn edge_id(table: &str, key: &str) -> RecordId {
 		rid(table, key)
-	}
-
-	fn sample(min: u32, max: Option<u32>) -> PathExpand {
-		PathExpand::new(
-			Arc::new(CurrentValueSource::new()),
-			"a".to_string(),
-			ExpandDir::Out,
-			vec![TableName::new("knows")],
-			min,
-			max,
-			"b".to_string(),
-			None,
-			None,
-			None,
-			PathMode::Walk,
-			false,
-		)
 	}
 
 	#[test]
@@ -1061,68 +777,6 @@ mod tests {
 	}
 
 	#[test]
-	fn emit_and_extend_windows_bounded() {
-		// {1,3}: depth 0 doesn't emit but extends; 1..=3 emit; depth 3 doesn't
-		// extend further.
-		let pe = sample(1, Some(3));
-		assert!(!pe.emits_at(0));
-		assert!(pe.emits_at(1));
-		assert!(pe.emits_at(3));
-		assert!(!pe.emits_at(4));
-		assert!(pe.extends_past(0));
-		assert!(pe.extends_past(2));
-		assert!(!pe.extends_past(3));
-	}
-
-	#[test]
-	fn unbounded_max_always_extends() {
-		let pe = sample(0, None);
-		assert!(pe.emits_at(0));
-		assert!(pe.emits_at(100));
-		assert!(pe.extends_past(0));
-		assert!(pe.extends_past(1000));
-	}
-
-	#[test]
-	fn exact_quantifier_window() {
-		// {2}: only depth 2 emits; extends through depth 0 and 1, stops at 2.
-		let pe = sample(2, Some(2));
-		assert!(!pe.emits_at(1));
-		assert!(pe.emits_at(2));
-		assert!(!pe.emits_at(3));
-		assert!(pe.extends_past(1));
-		assert!(!pe.extends_past(2));
-	}
-
-	#[test]
-	fn attrs_render_min_max_group_path() {
-		let pe = PathExpand::new(
-			Arc::new(CurrentValueSource::new()),
-			"a".to_string(),
-			ExpandDir::Out,
-			vec![TableName::new("knows")],
-			1,
-			None,
-			"b".to_string(),
-			Some(TableName::new("person")),
-			Some("g".to_string()),
-			Some("p".to_string()),
-			PathMode::Trail,
-			false,
-		);
-		assert_eq!(pe.name(), "PathExpand");
-		let attrs = pe.attrs();
-		assert!(attrs.iter().any(|(k, v)| k == "min" && v == "1"));
-		// Unbounded max renders as ∞.
-		assert!(attrs.iter().any(|(k, v)| k == "max" && v == "∞"));
-		assert!(attrs.iter().any(|(k, v)| k == "tables" && v.contains("knows")));
-		assert!(attrs.iter().any(|(k, v)| k == "group" && v == "g"));
-		assert!(attrs.iter().any(|(k, v)| k == "path" && v == "p"));
-		assert!(attrs.iter().any(|(k, v)| k == "target_label" && v == "person"));
-		assert!(attrs.iter().any(|(k, v)| k == "mode" && v == "trail"));
-	}
-
-	#[test]
 	fn step_kind_enforces_path_modes() {
 		// nodes a -> b; consider a hop landing on various targets.
 		let nodes = vec![node("hub", "a"), node("hub", "b")];
@@ -1140,15 +794,6 @@ mod tests {
 		assert_eq!(step_kind(PathMode::Simple, &nodes, &start), StepKind::EmitOnly);
 		assert_eq!(step_kind(PathMode::Simple, &nodes, &mid), StepKind::Reject);
 		assert_eq!(step_kind(PathMode::Simple, &nodes, &other), StepKind::EmitAndExtend);
-	}
-
-	#[test]
-	fn edge_specs_unbounded_per_table() {
-		let pe = sample(1, Some(2));
-		let specs = pe.edge_specs();
-		assert_eq!(specs.len(), 1);
-		assert_eq!(specs[0].table, TableName::new("knows"));
-		assert!(matches!(specs[0].range_start, std::ops::Bound::Unbounded));
 	}
 
 	#[test]

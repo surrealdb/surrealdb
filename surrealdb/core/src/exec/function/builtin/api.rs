@@ -5,8 +5,8 @@ use anyhow::Result;
 use crate::api::middleware::common::BodyStrategy;
 use crate::api::request::ApiRequest;
 use crate::err::EngineError;
+use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::{FromArgs, FromPublic, Optional};
@@ -133,14 +133,14 @@ macro_rules! define_api_middleware_function {
 
 /// Run `next`, the rest of an API chain, with `req` in `ctx`.
 async fn call_next(next: &Closure, req: Value, ctx: &EvalContext<'_>) -> Result<Value> {
-	crate::exec::physical_expr::function::helpers::invoke_closure(next, vec![req], ctx)
-		.await
-		.map_err(|signal| match signal {
+	crate::exec::vm::calls::helpers::invoke_closure(next, vec![req], ctx).await.map_err(|signal| {
+		match signal {
 			crate::expr::ControlFlow::Err(e) => e,
 			other => anyhow::anyhow!(EngineError::Internal(format!(
 				"unexpected control flow from an API continuation: {other}"
 			))),
-		})
+		}
+	})
 }
 
 async fn req_body(

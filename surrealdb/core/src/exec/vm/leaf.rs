@@ -1,6 +1,5 @@
 //! The leaf profile: what of a program a read-only executor over a snapshot
-//! of storage — a leaf — can run, and what of that it still reads through
-//! code the operator tree owns.
+//! of storage — a leaf — can run, and the native host services it needs.
 //!
 //! Every instruction, source and host step has one [`Class`], stated once in
 //! this module's exhaustive matches: [`step`] for the host steps, [`instr`]
@@ -43,11 +42,6 @@ pub(crate) enum Seam {
 	/// Linking a unit for a closure or a read by a table only the data names,
 	/// which faults to the compiler where no table holds the unit.
 	Link,
-	/// Code of the operator tree's evaluator (`physical_expr`, `parts`,
-	/// `operators`) that the host step calls with an evaluation context: to
-	/// be ported into instructions or behind one of the seams above, not
-	/// served by a trait of its own.
-	TreeCode,
 }
 
 /// Why a leaf never runs an item.
@@ -81,8 +75,8 @@ pub(crate) enum Class {
 	/// The interpreter, or the host from the program and the row alone,
 	/// answers it.
 	Leaf,
-	/// A leaf needs it, and the host answers it through the engine: through
-	/// these seams.
+	/// A leaf needs the native host runtime and the listed interfaces. An
+	/// empty slice still requires the host runtime, as an async pure call does.
 	Kernel(&'static [Seam]),
 	/// A leaf never runs it.
 	NonLeaf(Bar),
@@ -90,7 +84,7 @@ pub(crate) enum Class {
 	ByOperand,
 }
 
-use Seam::{Catalog, Clock, Link, Params, Permissions, Storage, TreeCode};
+use Seam::{Catalog, Clock, Link, Params, Permissions, Storage};
 
 /// The class of every host step: the one table of what the host does for a
 /// running program.
@@ -136,10 +130,10 @@ pub(super) fn step(step: &Step) -> Class {
 		}
 		| Step::Recurse {
 			..
-		} => Class::Kernel(&[Storage, Permissions, TreeCode]),
+		} => Class::Kernel(&[Storage, Permissions]),
 		Step::WriteProjection {
 			..
-		} => Class::Kernel(&[TreeCode]),
+		} => Class::Kernel(&[]),
 		Step::CallAllowed {
 			..
 		} => Class::Kernel(&[Permissions]),
@@ -148,7 +142,7 @@ pub(super) fn step(step: &Step) -> Class {
 		} => Class::Kernel(&[Params]),
 		Step::Closure {
 			..
-		} => Class::Kernel(&[Link, TreeCode]),
+		} => Class::Kernel(&[Link]),
 		Step::NeedUnit {
 			..
 		} => Class::Kernel(&[Link]),
@@ -163,7 +157,7 @@ pub(super) fn step(step: &Step) -> Class {
 		}
 		| Step::Matches {
 			..
-		} => Class::Kernel(&[Storage, TreeCode]),
+		} => Class::Kernel(&[Storage]),
 		Step::Degree {
 			..
 		} => Class::Kernel(&[Storage]),
@@ -228,12 +222,12 @@ fn block(instr: &BlockInstr) -> Class {
 		BlockInstr::Resolve => Class::Kernel(&[Catalog]),
 		BlockInstr::RunAnalyzed {
 			..
-		} => Class::Kernel(&[Clock, TreeCode]),
+		} => Class::Kernel(&[Clock]),
 		// A late-bound statement is served from the compile cache, compiled
 		// there on a miss, and run in the frame.
 		BlockInstr::RunServed {
 			..
-		} => Class::Kernel(&[Catalog, Link, Params, TreeCode]),
+		} => Class::Kernel(&[Catalog, Link, Params]),
 		BlockInstr::Sleep {
 			..
 		} => Class::NonLeaf(Bar::Sleep),
@@ -549,10 +543,10 @@ fn write(instr: &WriteInstr) -> Class {
 /// other is invoked with the evaluation context, for the reads its effects name.
 pub(crate) fn builtin(name: &str, registry: &FunctionRegistry) -> Class {
 	if registry.get_projection(name).is_some() {
-		return Class::Kernel(&[TreeCode]);
+		return Class::Kernel(&[]);
 	}
 	let Some(func) = registry.get(name) else {
-		return Class::Kernel(&[TreeCode]);
+		return Class::Kernel(&[]);
 	};
 	function(func.as_ref())
 }
@@ -576,22 +570,22 @@ fn function(func: &dyn ScalarFunction) -> Class {
 		return Class::Leaf;
 	}
 	const SEAMS: [(EffectSet, &[Seam]); 4] = [
-		(EffectSet::READS_DATA, &[Storage, Permissions, TreeCode]),
-		(EffectSet::READS_CATALOG, &[Catalog, TreeCode]),
-		(EffectSet::READS_SESSION, &[Params, TreeCode]),
-		(EffectSet::CLOCK.union(EffectSet::ENTROPY), &[Clock, TreeCode]),
+		(EffectSet::READS_DATA, &[Storage, Permissions]),
+		(EffectSet::READS_CATALOG, &[Catalog]),
+		(EffectSet::READS_SESSION, &[Params]),
+		(EffectSet::CLOCK.union(EffectSet::ENTROPY), &[Clock]),
 	];
 	SEAMS
 		.iter()
 		.find(|(flag, _)| effects.intersects(*flag))
-		.map_or(Class::Kernel(&[TreeCode]), |(_, seams)| Class::Kernel(seams))
+		.map_or(Class::Kernel(&[]), |(_, seams)| Class::Kernel(seams))
 }
 
 /// The class of a method named `name`: the class of the most constrained
 /// implementation any receiver resolves it to.
 fn method(name: &str, registry: &FunctionRegistry) -> Class {
 	let Some(descriptor) = registry.get_method(name) else {
-		return Class::Kernel(&[TreeCode]);
+		return Class::Kernel(&[]);
 	};
 	descriptor
 		.type_impls

@@ -500,9 +500,8 @@ async fn flat_block_names_bind_in_slots() {
 /// control flow of its physical plan, and its loops lower to jumps inside one
 /// program: every statement is a group of the program, lowered when the query
 /// arrives. A statement reading the clock before the block's first schema
-/// statement is bound then, as the operator tree binds it when it plans the
-/// block; a statement nesting a statement is compiled with the program like
-/// any other, and a `LET` of an expression binds the value the control flow
+/// statement is bound then, when the block is planned; a statement nesting a statement is compiled
+/// with the program like any other, and a `LET` of an expression binds the value the control flow
 /// evaluates.
 #[tokio::test]
 async fn a_block_is_control_flow_over_statements_planned_with_it() {
@@ -562,8 +561,7 @@ async fn a_block_is_control_flow_over_statements_planned_with_it() {
 		"`{sql}`"
 	);
 	// A statement after a schema statement whose binding folds the clock is
-	// bound by the operator tree when the block reaches it: the block is not
-	// mapped.
+	// bound when the block reaches it: the block is not mapped.
 	let sql = "{ DEFINE FIELD m ON t VALUE 1; SELECT * FROM t WHERE n < time::unix() }";
 	let bound = bind(&ctx, sql).await;
 	assert_eq!(

@@ -65,6 +65,7 @@ impl Accumulator for CountAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		self.count += values.len() as i64;
 		Ok(())
@@ -153,6 +154,7 @@ impl Accumulator for CountFieldAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		self.count += values.iter().filter(|v| v.is_truthy()).count() as i64;
 		Ok(())

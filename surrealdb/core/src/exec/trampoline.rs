@@ -27,8 +27,8 @@
 //! Such an operator runs its input under a [`boundary`], a driver of its own
 //! inside its poll, so what nests beneath it stays under its timer.
 //!
-//! Outside any driver — a plan the operator tree runs, a task spawned for a
-//! buffered input — [`nest`] awaits the evaluation in place.
+//! Outside any driver — in a task spawned for a buffered input, say —
+//! [`nest`] awaits the evaluation in place.
 
 use std::cell::RefCell;
 use std::future::Future;

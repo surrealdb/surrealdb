@@ -323,9 +323,9 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   caller's frame; every other statement fails, and nothing falls back to a path
   that enforces at runtime. Each projection layer it
   applies where the plan places it, above the `PermissionFilter` and beneath
-  every user predicate, through the `PreparedLayer` the layer operator
-  applies (`ProjectLayer::prepare` in `exec/operators/layer.rs`), so its
-  guards and computed fields are judged in the frames that operator defines.
+  every user predicate, as instructions that set each column on the row
+  (module docs of `exec/operators/layer.rs`), so its guards and computed
+  fields are judged in the frames the layer defines.
   A
   `PermissionFilter` it applies where the plan places it, beneath every user
   predicate: a predicate reading only the row's own fields and literals as
@@ -401,7 +401,7 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   of the session it was compiled for (`Planner::reading_session_values`; a
   unit planner's `bind_scoped` leaves them unbound). A `PERMISSIONS` predicate
   of a definition that such a unit carries compiled is planned the same way
-  (`exec/physical_expr/planned_guard.rs`), and a verdict it keeps for the rest
+  (`exec/vm/call_unit.rs`), and a verdict it keeps for the rest
   of a statement is kept per principal (`exec/guard_verdicts.rs`).
   The bound plan upholds three rules. The barrier rule (module docs of
   `surrealdb_expr::expr::logical`): a user-written expression never moves
@@ -435,28 +435,22 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   Verified by: `skip_fetch_perms_disables_every_check`,
   `a_record_user_is_confined_to_its_own_namespace_and_database`,
   `record_users_are_always_permission_checked` (`exec/permission.rs`).
-- On the streaming engine each declaration is enforced exactly once per row.
-  A source the analyzer resolved carries the table permission, the computed
-  fields and the field guards as nodes above its scan, and the scan is planned
-  under `EnforcementMode::Planned`, yielding rows as stored: from its
-  `ResolvedTableContext`, or — for a table the catalog lacks at the source's
-  `VERSION` stamp, whose absence the analyzer saw too — from its mode alone,
-  resolving the table when it runs. Such a scan must never enforce at runtime
-  beneath the plan's nodes: that judges the rows twice, a field guard against
-  an already-cut row. When the planner cannot resolve the context — no
-  database selected, a plan-time cycle, a catalog error, a `VERSION` only
-  known at runtime — the source is still a table scan under
-  `EnforcementMode::Planned`: it resolves its table when it runs, at the
-  stamp it reads at, and yields rows as stored for the plan's nodes to
-  enforce (`try_resolve_table_ctx` in `exec/planner/select/mod.rs`). A scan
-  that cannot yield rows as stored without a context — a lightweight
-  relation's edge scan — refuses the plan instead
-  (`lightweight_needs_context`).
-  Verified by: `a_resolved_source_without_a_table_context_is_a_table_scan`
-  (`exec/planner/select/mod.rs`),
-  `a_scan_resolving_its_table_at_runtime_enforces_by_its_planned_mode`
-  (`exec/operators/scan/table.rs`), end to end by
-  `reproductions/planned_source_enforced_once.surql`.
+- Each declaration is enforced exactly once per row. A source the analyzer
+  resolved carries the table permission, the computed fields and the field
+  guards as nodes above its scan, and the scan is planned under
+  `EnforcementMode::Planned`, yielding rows as stored; a table the catalog
+  lacks at the source's `VERSION` stamp, whose absence the analyzer saw too,
+  is scanned under the same mode and resolves the table when it runs. Such a
+  scan must never enforce at runtime beneath the plan's nodes: that judges
+  the rows twice, a field guard against an already-cut row. When the planner
+  cannot resolve the table context — no database selected, a plan-time cycle,
+  a catalog error, a `VERSION` only known at runtime — the source is still a
+  table scan under `EnforcementMode::Planned`: it resolves its table when it
+  runs, at the stamp it reads at, and yields rows as stored for the plan's
+  nodes to enforce. A scan that cannot yield rows as stored without a
+  context, such as a lightweight relation's edge scan, refuses the plan
+  instead.
+  Verified end to end by `reproductions/planned_source_enforced_once.surql`.
 - A `PERMISSIONS` predicate that reads a COMPUTED field of the row it judges —
   a table `select`, `create`, `update` or `delete` clause, or a field `create` or
   `update` clause — reads the value that field computes to: never `NONE`, and
@@ -495,9 +489,7 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   names no field the function's body reads off the row, so every computed field
   is derived for it: `extract_computed_deps` marks such a call opaque, as
   `call_evaluates_against_row` does for a bound plan.
-  Verified by: `a_table_guard_reads_the_computed_fields_it_names`,
-  `a_table_guard_judges_a_batch_on_copies_of_its_rows` (`exec/permission.rs`),
-  `a_permission_membership_reading_a_computed_field_is_not_lifted`
+  Verified by: `a_permission_membership_reading_a_computed_field_is_not_lifted`
   (`exec/logical/rules/decorrelate.rs`),
   `live_select_permission_reads_computed_fields` (`tests/it/live.rs`),
   `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`); end
@@ -607,7 +599,7 @@ Flag for detailed review when changes touch:
   `chain_offer` in `exec/planner/fold.rs`, `exec/operators/layer.rs`,
   `exec/operators/permission_filter.rs`, or `compiles_for_checked_caller` and
   the `EXPLAIN` redaction it drives
-- `try_resolve_table_ctx`, `EnforcementMode`, `RowEnforcement`, or any planner path
+- `try_resolve_table_ctx`, `EnforcementMode`, or any planner path
   that builds a scan for a source whose `schema` is `Some` (the plan enforces above it)
 - `purge_references` or cascade processing logic
 - How `auth_enabled` is evaluated or propagated

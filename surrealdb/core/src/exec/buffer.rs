@@ -32,26 +32,13 @@ use crate::exec::cardinality::CardinalityHint;
 #[cfg(not(target_family = "wasm"))]
 use crate::expr::FlowResult;
 
-/// Value-count threshold for the [`CardinalityHint::Bounded`] short-circuit.
-///
-/// When an operator declares `Bounded(n)` with `n` at or below this limit, the
-/// output fits in roughly one batch, so spawning a dedicated task cannot
-/// overlap meaningful work. Cooperative prefetch is used instead.
-///
-/// This matches the default scan batch size used by most operators (see
-/// [`ExecConfig::scan_batch_size`](crate::exec::config::ExecConfig::scan_batch_size)).
-#[cfg(not(target_family = "wasm"))]
-const SMALL_BOUNDED_THRESHOLD: usize = 1000;
-
 /// Buffer a child operator's stream using the appropriate strategy.
 ///
 /// Strategy selection:
 /// 1. `CardinalityHint::AtMostOne` — no buffering (overhead exceeds benefit)
-/// 2. `CardinalityHint::Bounded(n)` where `n` is small — cooperative prefetch (output fits in ~1
-///    batch; spawn overhead would dominate)
-/// 3. `ReadOnly` — spawned-task buffer (true pipeline parallelism)
-/// 4. `ReadWrite` — cooperative prefetch (preserves mutation ordering)
-/// 5. `buffer_size == 0` — disables buffering entirely
+/// 2. `ReadOnly` — spawned-task buffer (true pipeline parallelism)
+/// 3. `ReadWrite` — cooperative prefetch (preserves mutation ordering)
+/// 4. `buffer_size == 0` — disables buffering entirely
 ///
 /// # The caller's obligation
 ///
@@ -64,7 +51,7 @@ const SMALL_BOUNDED_THRESHOLD: usize = 1000;
 /// buffer_stream(
 ///     self.input.execute(ctx)?,
 ///     self.access_mode().combine(self.input.access_mode()),
-///     self.input.cardinality_hint(),
+///     cardinality,
 ///     buffer_size,
 /// )
 /// ```
@@ -78,11 +65,11 @@ const SMALL_BOUNDED_THRESHOLD: usize = 1000;
 /// the first has left unwinds the wrong one. The combined mode keeps the read
 /// and the write on one task, in the order the plan states.
 ///
-/// The caller that writes is frequently a read-side operator: the `Compute`
-/// that owns a projection's mutation subquery holds the write for a whole
-/// `SELECT`, so the rule cannot be narrowed to the mutation operators. An
-/// operator whose own mode is `ReadOnly` passes its input's mode unchanged,
-/// which the combination does by construction.
+/// The caller that writes is frequently a read-side operator: one that owns a
+/// projection's mutation subquery holds the write for a whole `SELECT`, so
+/// the rule cannot be narrowed to the mutation operators. An operator whose
+/// own mode is `ReadOnly` passes its input's mode unchanged, which the
+/// combination does by construction.
 ///
 /// On WASM targets, returns the stream unchanged regardless of mode.
 #[cfg(not(target_family = "wasm"))]
@@ -99,12 +86,7 @@ pub(crate) fn buffer_stream(
 	// exceeds any possible parallelism benefit.
 	match cardinality {
 		CardinalityHint::AtMostOne => return stream,
-		CardinalityHint::Bounded(n) if n <= SMALL_BOUNDED_THRESHOLD => {
-			// n is a value count, buffer_size is a batch count — use the
-			// batch-denominated buffer_size for the prefetch capacity.
-			return prefetch_buffered(stream, buffer_size);
-		}
-		_ => {}
+		CardinalityHint::Unbounded => {}
 	}
 	match mode {
 		AccessMode::ReadOnly => spawn_buffered(stream, mode, buffer_size),
@@ -202,7 +184,7 @@ impl Stream for SpawnedBufferedStream {
 /// Create a cooperative prefetch buffer for read-write pipelines.
 ///
 /// Eagerly polls the inner stream and caches ready results, reducing poll
-/// round-trips through the operator tree. No tasks are spawned, so mutation
+/// round-trips between operators. No tasks are spawned, so mutation
 /// ordering is preserved.
 #[cfg(not(target_family = "wasm"))]
 fn prefetch_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStream {
@@ -215,7 +197,7 @@ fn prefetch_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatch
 }
 
 /// A stream wrapper that eagerly polls its inner stream and buffers ready
-/// results, reducing poll round-trips through the operator tree.
+/// results, reducing poll round-trips between operators.
 ///
 /// On each poll:
 /// 1. Greedily drain all immediately-ready items from the inner stream into the buffer (up to

@@ -96,7 +96,7 @@ impl BindingBackend for VmBackend<'_, '_> {
 		};
 		let bound = self.planner.bind(op).await?;
 		let physical = map::map(self.planner, &bound).await.map_err(Planning::Decline)?;
-		// A scan the operator tree would refuse is left for it to refuse.
+		// A scan the planner refuses declines the plan.
 		if physical.refused() {
 			return Err(declined("a scan the planner refuses"));
 		}
@@ -273,7 +273,7 @@ impl BindingBackend for VmBackend<'_, '_> {
 		output: &MatchOutput,
 		group_keys: &[LogicalExpr],
 	) -> Result<Plan, Planning> {
-		// The columns the tree answers by their first value: neither a
+		// The columns the aggregate answers by their first value: neither a
 		// grouping key nor a row holding an aggregate.
 		let registry = self.planner.function_registry();
 		let first_value = output

@@ -2,11 +2,10 @@
 
 **Status:** Proposed · **Scope:** `surrealdb/core/src/exec/operators/write/`
 
-> The stage lists below were transcribed from `core/src/doc/` before the logical
-> layer existed, and re-checked against it when this document landed. The
-> re-check moved several stages and added four the first transcription missed;
-> `core/src/doc/{create,upsert,update,delete,relate,insert}.rs` remain the
-> authority, and a stage list here is a summary of them, never a substitute.
+> A stage list below summarises the per-statement orders in
+> `surrealdb/core/src/exec/operators/write/plan.rs` and the stages in
+> `exec/operators/write/stages/`. The code is the authority; a stage list here is
+> a summary of it, never a substitute.
 
 ADRs live in `doc/adr/`, numbered sequentially, and record decisions whose rationale would otherwise
 have to be reconstructed from the code. An ADR states the contract and the constraints that force
@@ -14,18 +13,16 @@ it; it is not a changelog.
 
 ## Context
 
-`surrealdb_core::exec` executes statements as a push-based tree of `ExecOperator`s, each producing
-a `ValueBatchStream`. The engine had no operator that writes, so `Expr::{Create, Update, Upsert,
-Delete, Insert, Relate}` was routed away from the planner and executed instead by the per-record
-pipeline in `core/src/doc/`, driven by `dbs::Iterator`. That routing decision is `engine_for`, and
-the strategy it reads is what this ADR's seam is selected by.
+`surrealdb_core::exec` plans every statement, and the write operator is the plan node that
+executes `Expr::{Create, Update, Upsert, Delete, Insert, Relate}`: it consumes rows from a
+`ValueBatchStream` and writes each through an ordered list of per-record stages.
 
-This ADR fixes the interface by which mutations execute on the streaming engine. Its subject is
+This ADR fixes the interface by which mutations execute. Its subject is
 the seam, not the individual stages: transaction lifecycle, where the KV write sits in the tree,
 the ordering guarantees between reads and writes, and how a mutation nested inside a read query
 behaves.
 
-Four properties of the existing engine and pipeline constrain every decision below, so they are
+Four properties of the engine constrain every decision below, so they are
 stated once here.
 
 **The transaction is chosen before planning.** `dbs::Executor` picks `TransactionType` from
@@ -358,19 +355,11 @@ definer cannot.
 
 ## Decision 2a: A mutation lowers like every other statement
 
-This document was written before `LogicalOp` existed, so it fixed a *physical* interface and said
-nothing about how a mutation reaches it. Lowering now exists, and it changes what a write operator's
-input is.
-
-All six of `Create/Update/Upsert/Delete/Insert/Relate` have a logical form, so no statement kind is
-refused by lowering any more. `engine_for` still refuses a mutation by kind unless the session
-selected the mutation strategy, and emptying that arm is what remains of the end state. Three consequences follow from the
-direction, and they are the amendments this decision records. They bind each form as it lands, not
-only once the last one has.
+All six of `Create/Update/Upsert/Delete/Insert/Relate` have a logical form, and no statement kind
+is refused by lowering. Three consequences follow, and they bind every statement form.
 
 **A mutation's row source is an ordinary `LogicalOp` subtree.** `UPDATE t WHERE …` inherits index
-selection, filter pushdown and the projection-layer encoding from the read side, rather than going
-through `dbs::Iterator` and the separate legacy planner in `idx/planner/`. The condition-pushdown
+selection, filter pushdown and the projection-layer encoding from the read side. The condition-pushdown
 eligibility that Decision 2 describes as "the planner's, per plan" is therefore an ordinary
 planner decision over that subtree, not a mechanism the write operator supplies. This is the
 `Rows` shape below; a creating form has no row source, so it inherits nothing here.
@@ -378,15 +367,12 @@ planner decision over that subtree, not a mechanism the write operator supplies.
 **Four of the stage lists above are already expressible as the layer encoding.**
 `check_where_condition`, computed materialisation, `check_select_permissions` and `output_write`'s
 reduce are the same `ProjectLayer` chain a read gets: a write's post-image projection is a
-projection. Building them as `doc/`-shaped stages would migrate them a second time, which is the
-duplication the milestone before this one was sequenced to prevent. The view-shaped stages consume
-the resolved table view rather than re-deriving it per record.
+projection. Building them as separate write-side stages would duplicate the read side's evaluation. The
+view-shaped stages consume the resolved table view rather than re-deriving it per record.
 
-**No new `legacy_compute` call sites.** The bridge in `exec/operators/legacy_bridge.rs` is what the
-cutover exists to remove; a stage that reaches for it converts a deletion into a migration. Events
-and views become sub-plans of the write operator rather than legacy evaluations. This is a
-constraint on the stages, not on this document's own proof of concept, which may call into `doc/`
-unchanged precisely because it proves the seam rather than the coverage.
+**Events and views are sub-plans of the write operator.** A stage evaluates them as plans and as
+programs the VM runs, and no stage evaluates an `expr::Expr` through a separate per-record
+evaluator.
 
 The stage list stays the write operator's own. Lowering supplies the rows; the per-record order
 above is not expressible as logical algebra, for the reasons Decision 2 gives.
@@ -403,13 +389,10 @@ nor its own fields, because a mutation writes by construction and `read_only()` 
 transaction.
 
 The gate on compiling one is not the operator. It is the write-side table permission check, which
-lives in the legacy `QueryPlanner` and *silently* drops a target the caller may not write, before
-any record is prepared: `prepare_table` and `prepare_record_id` return without ingesting anything
-on `GrantedPermission::None`. An operator that built records without that check would write records
-the legacy path refuses, so the check is ported before the first stage list runs, not after. Two
-smaller obligations sit beside it: the affected-row counter lives in the iterator's per-row
-dispatch rather than in `Document`, and `Document::new` is unreachable for one `Operable` variant
-that the iterator intercepts upstream of it.
+*silently* drops a target the caller may not write, before any record is prepared: a target whose
+table permission is `GrantedPermission::None` ingests nothing. An operator that built records
+without that check would write records the caller may not write, so the check runs before the first
+stage list, not after.
 
 ## Decision 3: Barrier semantics
 
@@ -425,7 +408,7 @@ mechanisms do:
    operator that holds the write is often a read-side one, such as the `Compute` that owns a
    projection's mutation subquery (see Decision 4), and every operator today passes its input's
    mode. An operator whose own mode is `ReadOnly` continues to pass its input's mode.
-2. **Every `PhysicalExpr` fan-out across rows goes through one shared helper** that takes the
+2. **Every `Clause` fan-out across rows goes through one shared helper** that takes the
    fanned-out expression's `AccessMode` as an explicit argument and evaluates sequentially when it
    is `ReadWrite`. Scalar subqueries and graph lookups already do this by hand; routing every site
    through the helper removes the per-site choice. Two sites, field access and `[*]` expansion,
@@ -448,11 +431,10 @@ suite runs on `mem`, `rocksdb` and `surrealkv`, the pin confirms it on those thr
 of each backend's cursor rather than of the engine, and the suite has no `tikv` job, so `tikv`
 remains unconfirmed.
 
-The second limit on the evidence is not a backend question. The property was measured on the
-per-record pipeline that runs mutations today, where one task advances one cursor and performs the
-writes between batches. R3.1 is what reproduces that single-task regime on the streaming engine, so
-R4 is sound only where R3.1 holds; without it the scan can sit on a spawned task and the concurrency
-is not the arrangement that was measured.
+The second limit on the evidence is not a backend question. The property was measured with one
+task advancing one cursor and performing the writes between batches. R3.1 is what guarantees that
+single-task regime, so R4 is sound only where R3.1 holds; without it the scan can sit on a spawned
+task and the concurrency is not the arrangement that was measured.
 
 The GQL mutation operators in `exec/operators/mutate.rs` drain their input fully instead. That is
 correct for them, because a binding table is bounded by the match that produced it, and it is not
@@ -500,9 +482,8 @@ root, and an optional map of block-local parameters.
 
 These bindings are a fixed, known set, and they change per field and per record. They are carried as
 typed optional slots on `EvalContext`. Parameter resolution consults the block-local map first and
-these slots second, which matches how the per-record pipeline binds them today: it adds them to a
-parent context, so a `LET` inside the body being evaluated shadows them, and normal
-innermost-scope shadowing is preserved. Routing them through the block-local map instead would
+these slots second, so a `LET` inside the body being evaluated shadows them, and normal innermost-scope shadowing is
+preserved. Routing them through the block-local map instead would
 allocate a map per field per record, in the write path's innermost loop.
 
 ## Rejected alternatives
@@ -545,29 +526,16 @@ reconstructed inconsistently.
 | R3 | At most one write in flight per transaction | Any `ReadWrite` operator buffers its input with its own mode; every expression fan-out routes through one helper that serialises on a `ReadWrite` argument; debug assertion in `spawn_buffered` |
 | R4 | Reads and writes interleave batch-at-a-time | Write operators consume batch by batch; sound only where R3.1 holds, and depends on the storage property that a cursor does not observe its statement's own writes |
 
-Alongside these, the epic's standing invariants apply: the language-test suite stays green under
-every planner strategy, table and field permission behaviour is unchanged, no wire or SDK behaviour
+Alongside these, the epic's standing invariants apply: the language-test suite stays green, table and field permission behaviour is unchanged, no wire or SDK behaviour
 changes for clients, and `revision.lock` discipline holds for any `#[revisioned]` change.
 
 ## Consequences
 
-Mutations become plannable, which means the planner must be able to see them. `engine_for` rejected
-every DML kind before lowering ran, so no mutation could reach the decline that would report it, and
-the planner-strategy setting distinguished only degrees of read-only coverage. `engine_for` now
-refuses no statement by kind at all: every setting but `ComputeOnly` offers a mutation, a schema
-statement and a read alike to the streaming engine, and the choice is made by attempting it. It is
-best-effort by necessity rather than preference: a statement the planner cannot compile must still
-reach the compute executor rather than fail.
-
-That places mutations on the setting a deployment already selects, which is only sound while no
-stage can refuse a record the compute executor would have written. One such refusal existed — a
-stored `VALUE` or `ASSERT` clause whose text has no logical form, which failed the statement because
-a clause is compiled where it is evaluated and the plan is running by then — and it is gone: all
-three of a field's clauses now take the `DEFAULT`'s route and are carried to the legacy engine when
-the streaming engine cannot compile them. The obligation stands for every stage added after this
-one. A refusal that a running plan cannot turn into a fallback is a table made unwritable by its own
-schema, and the planner declines before it opens the catalog, so it can never see which tables those
-would be.
+Mutations are plannable: no statement kind is refused by lowering, and every statement reaches the
+VM. A statement or a clause the VM cannot lower fails with an error that names the construct
+(ADR 0007), so a stage must be able to compile every clause it evaluates. A refusal that a running
+plan cannot turn into anything else is a table made unwritable by its own schema, and the planner
+declines before it opens the catalog, so it can never see which tables those would be.
 
 The write operator family is the unit of ownership for the rest of the mutation foundation: the
 shared infrastructure builds `WriteCtx`, `WriteRow` and the `WriteStage` seam; the data clause,
@@ -583,15 +551,14 @@ index-backed plans (`where_cond_precedes_data_clause.surql`), a per-record failu
 rolling back the whole statement, and a statement's own inserts not being re-observed by its scan.
 Under `language-tests/tests/access/record/`: `create_permission_vs_data_clause.surql`, which pins
 the `NONE` versus conditional create-permission timing described in the Context section. Those
-tests run under every planner strategy, so they are engine-independent today and become
-differential parity proofs once mutations plan.
+tests pin the behaviour of the one engine through recorded expectations.
 
 Two questions are deliberately left open, because neither blocks the interface.
 
 **R4's storage property is unconfirmed on `tikv`.** The language suite pins it on `mem`, `rocksdb`
 and `surrealkv` but has no `tikv` job, so that backend needs its own check. The property also needs
-re-confirming under R3.1's arrangement rather than the per-record pipeline's, which is a question
-about the engine rather than about any backend.
+confirming under R3.1's single-task arrangement, which is a question about the engine rather than
+about any backend.
 
 **`AccessMode` conflates a storage write with a barrier.** `ReadWrite` means "may write or have
 side effects", which is what makes Decision 1's contract unstatable over the mode itself and forces
@@ -601,6 +568,5 @@ narrow R3.1 to the operators that need it. It is left open because both R2 and R
 the conflation, which is conservative in the safe direction.
 
 **Per-stage dynamic dispatch is unmeasured.** The stage list costs one indirect call per stage per
-record. The alternative the current pipeline uses costs a reblessive scheduler entry per stage. If
-the measured cost matters, the list is type-erased only when the plan is built, so a static
+record. If the measured cost matters, the list is type-erased only when the plan is built, so a static
 dispatch is a mechanical substitution and not a change to this ADR.

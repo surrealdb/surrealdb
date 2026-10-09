@@ -71,6 +71,7 @@ impl Accumulator for SumAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::sum", value) {
@@ -171,6 +172,7 @@ impl Accumulator for MeanAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::mean", value) {
@@ -295,6 +297,7 @@ impl Accumulator for MinAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::min", value) {
@@ -423,6 +426,7 @@ impl Accumulator for MaxAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if let Some(n) = self.rejected.number("math::max", value) {

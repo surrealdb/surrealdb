@@ -144,6 +144,7 @@ impl Accumulator for VectorSumAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			if self.undefined.is_some() {

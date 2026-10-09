@@ -25,9 +25,9 @@ use anyhow::Result;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::exec::EvalContext;
 use crate::exec::api::ApiContinuation;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::physical_expr::function::CompiledClosure;
+use crate::exec::vm::calls::CompiledClosure;
 use crate::expr::{ControlFlow, FlowResult};
 use crate::val::{Closure, Value};
 

@@ -10,9 +10,7 @@
 //! clause by clause.
 
 use super::fields::{field_path_from_expr, idiom_is_id};
-#[cfg(test)]
-use crate::err::Error;
-use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOrdering};
+use crate::expr::logical::LogicalOrdering;
 
 // ============================================================================
 // Pushdown Eligibility
@@ -124,93 +122,13 @@ pub(crate) fn index_covers_ordering(
 }
 
 // ============================================================================
-// LIMIT helpers
-// ============================================================================
-
-/// Try to get the effective limit (start + limit) if both are literals.
-pub(crate) fn get_effective_limit_literal(
-	start: Option<&LogicalExpr>,
-	limit: Option<&LogicalExpr>,
-) -> Option<usize> {
-	let limit_val = limit_expr_as_usize(limit?)?;
-	let start_val = match start {
-		Some(start) => limit_expr_as_usize(start)?,
-		None => 0,
-	};
-
-	start_val.checked_add(limit_val)
-}
-
-/// Resolve an expression to a non-negative `usize` if it is a non-negative
-/// integer or float literal.  Returns `None` for any other shape — including
-/// parameters, function calls, and negative numbers.
-fn limit_expr_as_usize(expr: &LogicalExpr) -> Option<usize> {
-	match expr {
-		LogicalExpr::Literal(LogicalLiteral::Integer(n)) if *n >= 0 => Some(*n as usize),
-		LogicalExpr::Literal(LogicalLiteral::Float(n)) if *n >= 0.0 => Some(*n as usize),
-		_ => None,
-	}
-}
-
-#[cfg(test)]
-/// Returns `true` when the SELECT pipeline's ORDER BY + LIMIT will be served
-/// by a bounded top-k sort (heap of size ≤ `max_order_limit_priority_queue_size`).
-///
-/// Used by source planning to drop eager per-sub-stream prefetch in
-/// upstream scans — the heap discards most rows, so prefetching only wastes
-/// memory under high concurrency.
-///
-/// Returns `false` when:
-/// - no ORDER BY, or ORDER BY RANDOM
-/// - no LIMIT, or LIMIT/START aren't literal non-negative integers
-/// - `start + limit` exceeds the priority-queue threshold
-/// - TEMPFILES is set (disk-backed sort is preferred, top-k path is skipped)
-pub(crate) fn is_bounded_topk_downstream(
-	order: Option<&LogicalOrdering>,
-	start: Option<&LogicalExpr>,
-	limit: Option<&LogicalExpr>,
-	tempfiles: bool,
-	threshold: usize,
-) -> bool {
-	if tempfiles {
-		return false;
-	}
-	match order {
-		Some(LogicalOrdering::Order(_)) => match get_effective_limit_literal(start, limit) {
-			Some(n) => n <= threshold,
-			None => false,
-		},
-		_ => false,
-	}
-}
-
-// ============================================================================
 // VERSION
 // ============================================================================
 
 #[cfg(test)]
-/// Extract version expression from VERSION clause.
-///
-/// Returns a physical expression that, when evaluated at execution time,
-/// produces the version timestamp (u64). A `NONE` literal is no version.
-pub(crate) async fn extract_version(
-	version_expr: LogicalExpr,
-	planner: &super::super::Planner<'_>,
-) -> Result<Option<std::sync::Arc<dyn crate::exec::PhysicalExpr>>, Error> {
-	match version_expr {
-		LogicalExpr::Literal(LogicalLiteral::None) => Ok(None),
-		other => Ok(Some(planner.physical_expr(other).await?)),
-	}
-}
-
-#[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::expr::logical::LogicalOrder;
-
-	fn int_lit(n: i64) -> LogicalExpr {
-		LogicalExpr::Literal(LogicalLiteral::Integer(n))
-	}
+	use crate::expr::logical::{LogicalExpr, LogicalOrder};
 
 	fn order_by_created_at_desc() -> LogicalOrdering {
 		LogicalOrdering::Order(vec![LogicalOrder {
@@ -219,18 +137,6 @@ mod tests {
 			numeric: false,
 			direction: false,
 		}])
-	}
-
-	#[test]
-	fn effective_limit_handles_literals_and_rejects_params() {
-		assert_eq!(get_effective_limit_literal(None, Some(&int_lit(100))), Some(100));
-		assert_eq!(get_effective_limit_literal(Some(&int_lit(20)), Some(&int_lit(100))), Some(120));
-		// Negative integer literal is not accepted as a valid LIMIT.
-		assert_eq!(get_effective_limit_literal(None, Some(&int_lit(-1))), None);
-		// Non-literal LIMIT (param, function call, etc.) returns None so the
-		// caller falls back to the full sort.
-		let param = LogicalExpr::Param(crate::expr::Param::default());
-		assert_eq!(get_effective_limit_literal(None, Some(&param)), None);
 	}
 
 	#[test]
@@ -248,36 +154,5 @@ mod tests {
 		};
 		assert!(order_is_scan_compatible(Some(&id(false))));
 		assert!(!order_is_scan_compatible(Some(&id(true))));
-	}
-
-	#[test]
-	fn topk_downstream_predicate_matches_design_intent() {
-		let order = order_by_created_at_desc();
-		// Standard case: literal LIMIT under threshold → top-k engages.
-		assert!(is_bounded_topk_downstream(Some(&order), None, Some(&int_lit(1000)), false, 1000));
-		// START + LIMIT exactly at threshold still qualifies.
-		assert!(is_bounded_topk_downstream(
-			Some(&order),
-			Some(&int_lit(500)),
-			Some(&int_lit(500)),
-			false,
-			1000,
-		));
-		// Over the threshold → falls back to full sort.
-		assert!(!is_bounded_topk_downstream(Some(&order), None, Some(&int_lit(2000)), false, 1000));
-		// No ORDER BY → no sort to bound.
-		assert!(!is_bounded_topk_downstream(None, None, Some(&int_lit(10)), false, 1000));
-		// ORDER BY RANDOM → no top-k path.
-		assert!(!is_bounded_topk_downstream(
-			Some(&LogicalOrdering::Random),
-			None,
-			Some(&int_lit(10)),
-			false,
-			1000,
-		));
-		// No LIMIT → no top-k.
-		assert!(!is_bounded_topk_downstream(Some(&order), None, None, false, 1000));
-		// TEMPFILES → user opted into disk-backed sort.
-		assert!(!is_bounded_topk_downstream(Some(&order), None, Some(&int_lit(10)), true, 1000));
 	}
 }

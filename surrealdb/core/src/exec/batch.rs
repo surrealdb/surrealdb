@@ -58,11 +58,6 @@ impl ValueBatch {
 		self.encoded.take()
 	}
 
-	/// A batch holding no values.
-	pub(crate) fn empty() -> Self {
-		Self::new(Vec::new())
-	}
-
 	/// The number of values in the batch.
 	pub(crate) fn len(&self) -> usize {
 		self.values.len() + self.encoded.as_ref().map_or(0, surrealdb_rpc::EncodedRows::len)

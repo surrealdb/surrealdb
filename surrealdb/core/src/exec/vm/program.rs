@@ -409,9 +409,8 @@ pub(super) enum Instr {
 		frame: Option<u16>,
 	},
 	/// `dst` = graph lookup [`Program::lookups`]`[lookup]` from the value
-	/// in `src`, as the operator tree's lookup answers it: an array of what
-	/// the hops reach, flattened over an array of origins, or `NONE` from a
-	/// value that is neither a record id nor an object. Read in permission
+	/// in `src`: an array of what the hops reach, flattened over an array of origins, or `NONE`
+	/// from a value that is neither a record id nor an object. Read in permission
 	/// frame `frame` when set, a computed field's frame of the statement's
 	/// own principal.
 	Lookup {
@@ -420,16 +419,14 @@ pub(super) enum Instr {
 		dst: Reg,
 		frame: Option<u16>,
 	},
-	/// Signal `BREAK`, or `CONTINUE` when not `brk`, out of the expression,
-	/// as the operator tree's control-flow expression signals it; in a
-	/// permission frame `frame`, which has nowhere to send it, an error.
+	/// Signal `BREAK`, or `CONTINUE` when not `brk`, out of the expression; in
+	/// a permission frame `frame`, which has nowhere to send it, an error.
 	Signal {
 		brk: bool,
 		frame: Option<u16>,
 	},
 	/// `dst` = the value at [`Program::paths`]`[path]` of the value in `src`,
-	/// read structurally as the operator tree's sort extracts a key
-	/// (`FieldPath::extract`).
+	/// read structurally, as a sort extracts a key.
 	Extract {
 		src: Operand,
 		path: u32,
@@ -446,26 +443,24 @@ pub(super) enum Instr {
 		dst: Reg,
 		none: Label,
 	},
-	/// `dst` = the record ids mock `mock` generates, as the operator tree's
-	/// `MockExpr` generates them: refused when they would take more than
-	/// `limit` bytes.
+	/// `dst` = the record ids mock `mock` generates: refused when they would
+	/// take more than `limit` bytes.
 	Mock {
 		mock: Arc<crate::expr::mock::Mock>,
 		limit: usize,
 		dst: Reg,
 	},
-	/// `dst` = recursion `spec` from the value in `src`, as the operator
-	/// tree's `RecursePart` answers it, the row as its document; a shortest
-	/// path's target is the value in `target`.
+	/// `dst` = recursion `spec` from the value in `src`, the row as its
+	/// document; a shortest path's target is the value in `target`.
 	Recurse {
 		src: Operand,
 		spec: Arc<RecurseSpec>,
 		target: Option<Operand>,
 		dst: Reg,
 	},
-	/// `dst` = the destructure of the value in `src` into `fields`, as the
-	/// operator tree's `DestructurePart` answers it, in `frame` when set:
-	/// the records it fetches are read as the frame reads them.
+	/// `dst` = the destructure of the value in `src` into `fields`, in
+	/// `frame` when set: the records it fetches are read as the frame reads
+	/// them.
 	Destructure {
 		src: Operand,
 		fields: Arc<[DestructureStep]>,
@@ -479,10 +474,9 @@ pub(super) enum Instr {
 		dst: Reg,
 	},
 	/// Resolve method [`Program::methods`]`[method]` on the receiver `recv`,
-	/// as the operator tree's `MethodPart` does before its arguments: fall
-	/// through when a builtin implements it for the receiver's type, jump to
-	/// `closure` when there is one and the receiver is an object whose field
-	/// of the method's name holds a closure, and raise the unknown-method
+	/// before its arguments are evaluated: fall through when a builtin implements it for the
+	/// receiver's type, jump to `closure` when there is one and the receiver is an object whose
+	/// field of the method's name holds a closure, and raise the unknown-method
 	/// error otherwise. `closure` is absent for a method whose builtins
 	/// implement it for an object, which no closure field reaches.
 	MethodResolve {
@@ -575,8 +569,7 @@ pub(super) enum Instr {
 	},
 	/// `dst` = the row, and for a row that is a record id, the record it
 	/// names, read by the host with the caller's permissions and computed
-	/// fields as the operator tree's `SELECT *` reads it; to `none` when no
-	/// record answers.
+	/// fields; to `none` when no record answers.
 	FetchRow {
 		dst: Reg,
 		none: Label,
@@ -809,10 +802,10 @@ pub(super) enum Instr {
 		frame: Option<u16>,
 	},
 	/// `dst` = whether the row satisfies `MATCHES` operator
-	/// [`Program::matches`]`[matches]`, as the operator tree decides it.
+	/// [`Program::matches`]`[matches]`.
 	/// `query` holds the right operand's value for an operator whose probe
 	/// reads its query when it runs
-	/// ([`MatchProbe::query`](crate::exec::physical_expr::MatchProbe::query)), and is `None` for
+	/// ([`MatchProbe::query`](crate::exec::vm::matches::MatchProbe::query)), and is `None` for
 	/// every other.
 	Matches {
 		matches: u32,
@@ -825,7 +818,7 @@ pub(super) enum Instr {
 	/// may call it, and for a model or module read its definition and judge
 	/// its `PERMISSIONS` clause, keeping the definition for
 	/// [`Instr::ExternalCall`]. A build without the callee's runtime fails
-	/// here, as the operator tree's call fails.
+	/// here.
 	ExternalEnter {
 		external: u32,
 		frame: Option<u16>,
@@ -860,7 +853,7 @@ pub(super) enum Instr {
 	/// `.@` recursion whose body the program runs ([`RecurseSpec::repeat`]):
 	/// in discovery, the value's targets handed to the recursion and the value
 	/// itself; in assembly, what the next depth assembled for them. Outside
-	/// such a body, the error the operator tree's marker raises.
+	/// such a body, an error.
 	RepeatRecurse {
 		src: Operand,
 		dst: Reg,
@@ -2664,8 +2657,8 @@ impl IntCmp {
 
 /// A comparison between two values, named after the operator it evaluates.
 ///
-/// The interpreter answers each with the function the operator tree calls for
-/// the same operator, so the two cannot disagree.
+/// The interpreter answers each with the function that evaluates the same
+/// operator wherever it is written, so the answers cannot disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompareOp {
 	Equal,
@@ -2691,8 +2684,7 @@ pub(super) enum CompareOp {
 	Intersects,
 }
 
-/// An operator that computes a value from two operands, as the operator
-/// tree's `BinaryOp` computes it.
+/// An operator that computes a value from two operands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ArithOp {
 	Add,
@@ -2766,8 +2758,7 @@ impl ArithOp {
 	}
 }
 
-/// A prefix or postfix operator, as the operator tree's `UnaryOp` and
-/// `PostfixOp` compute it.
+/// A prefix or postfix operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UnaryOp {
 	Not,
@@ -3211,8 +3202,7 @@ pub(super) struct LimitSpec {
 	pub(super) group: Option<u16>,
 }
 
-/// A path step that is a function of the value it steps from, as the
-/// operator tree's parts compute it.
+/// A path step that is a function of the value it steps from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum NavOp {
 	/// `v[e]` (`evaluate_index`).
@@ -3230,9 +3220,10 @@ pub(super) enum NavOp {
 impl NavOp {
 	pub(super) fn apply(self, value: &Value, index: Option<&Value>) -> anyhow::Result<Value> {
 		Ok(match self {
-			NavOp::Index => {
-				crate::exec::parts::index::evaluate_index(value, index.unwrap_or(&Value::None))?
-			}
+			NavOp::Index => crate::exec::vm::access::index::evaluate_index(
+				value,
+				index.unwrap_or(&Value::None),
+			)?,
 			NavOp::First => match value {
 				Value::Array(array) => array.first().cloned().unwrap_or(Value::None),
 				Value::Set(set) => set.first().cloned().unwrap_or(Value::None),
@@ -3243,8 +3234,8 @@ impl NavOp {
 				Value::Set(set) => set.last().cloned().unwrap_or(Value::None),
 				_ => Value::None,
 			},
-			NavOp::Flatten => crate::exec::parts::array_ops::evaluate_flatten(value)?,
-			NavOp::Identity => crate::exec::parts::doc::record_identity(value),
+			NavOp::Flatten => crate::exec::vm::access::array_ops::evaluate_flatten(value)?,
+			NavOp::Identity => crate::exec::vm::access::doc::record_identity(value),
 		})
 	}
 }
@@ -3276,8 +3267,8 @@ pub(super) struct ClosureSpec {
 ///
 /// With `repeat`, the body re-enters the recursion through `.@`
 /// ([`Instr::RepeatRecurse`]): each depth's targets are discovered breadth
-/// first and the result assembled from the deepest level back, as the
-/// operator tree's `.@` recursion builds it, whatever `collect` says.
+/// first and the result assembled from the deepest level back, whatever
+/// `collect` says.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct RecurseSpec {
 	pub(super) body: Option<UnitId>,
@@ -3442,8 +3433,7 @@ pub(crate) struct UnitHead {
 	pub(super) closure: Option<ClosureHead>,
 }
 
-/// What a recursion collects, as the operator tree's `RecursionOp`
-/// dispatches it.
+/// What a recursion collects.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum RecurseCollect {
 	/// The value the last depth reached.
@@ -3650,8 +3640,7 @@ assert_plain!(ClosureHead);
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct SubquerySpec {
 	pub(super) unit: UnitId,
-	/// Whether the statement reads the enclosing row as its document, as
-	/// the operator tree's `ScalarSubquery::inherits_row` says.
+	/// Whether the statement reads the enclosing row as its document.
 	pub(super) inherits_row: bool,
 	/// What the statement does to the transaction: the unit's own access
 	/// mode, which the program holding the subquery takes too.
@@ -3867,7 +3856,7 @@ assert_plain!(ParamSpec);
 pub(super) struct NestedSpec {
 	pub(super) group: u16,
 	/// Whether the statement reads the row it is evaluated for as its
-	/// document, as the operator tree's `ScalarSubquery::inherits_row` says.
+	/// document.
 	pub(super) inherits_row: bool,
 	/// Whether its value is kept, from the first evaluation that reaches it,
 	/// until the group it is evaluated in — the program's own pipelines for
@@ -4169,7 +4158,7 @@ pub(crate) enum HopPermission {
 	Judged(u16),
 	/// [`Self::Judged`], for a predicate that reads `$parent`: the pipeline
 	/// runs with `$parent` the row the lookup is taken over, where there is
-	/// one, as the operator tree's lookup binds it.
+	/// one.
 	JudgedOverParent(u16),
 }
 
@@ -4181,7 +4170,7 @@ pub(super) struct RecordIdSpec {
 }
 
 impl RecordIdSpec {
-	/// The record id, as the operator tree's `RecordIdExpr` builds it.
+	/// The record id the spec builds, its key read through `read`.
 	pub(super) fn build(
 		&self,
 		read: &mut dyn FnMut(Operand) -> anyhow::Result<Value>,
@@ -4296,17 +4285,17 @@ pub(super) struct CallSpec {
 }
 
 /// A `MATCHES` operator a body evaluates against the row: what it probes
-/// and which rows an index answers for, as the operator tree's planner
-/// decides them for the statement.
+/// and which rows an index answers for, as decided for the statement when it
+/// is planned.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MatchesSpec {
 	pub(super) operator: crate::expr::operator::MatchesOperator,
 	/// The field and query it probes an index with, when it denotes a probe.
-	pub(super) probe: Option<crate::exec::physical_expr::MatchProbe>,
+	pub(super) probe: Option<crate::exec::vm::matches::MatchProbe>,
 	/// Whether the statement's `WHERE` registers this expression.
 	pub(super) registered: bool,
 	/// The tables whose rows an index answers for.
-	pub(super) executor_tables: crate::exec::physical_expr::ExecutorTables,
+	pub(super) executor_tables: crate::exec::vm::matches::ExecutorTables,
 	/// The expression as an error names it.
 	pub(super) sql: String,
 	/// The pipeline of [`Program::host_code`] that reads the left operand off
@@ -4586,7 +4575,7 @@ pub(super) enum Source {
 	/// pipeline opens, read as `read` says ([`super::plan::ValuesRead`]).
 	/// A zero limit of the pipeline reads no record of a record id or table
 	/// a dynamic read finds, and every other row is yielded and judged
-	/// whatever the limit (see `crate::exec::zero_limit`).
+	/// whatever the limit.
 	Values {
 		value: HostScalar,
 		read: super::plan::ValuesRead,
@@ -4936,7 +4925,7 @@ pub(crate) struct Pipeline {
 	/// The paging clauses in the body. A pipeline one of whose limits admits no
 	/// row reads no record: it does not open a source that reads storage, and
 	/// reads no record of a value source's record ids or tables, nor of a
-	/// statement in `FROM` (see `crate::exec::zero_limit`).
+	/// statement in `FROM`.
 	pub(super) limits: Vec<u16>,
 	/// Whether the body may run its rows as a region: batch by batch, each
 	/// batch inline or on a worker of its own, their outputs merged in batch

@@ -16,7 +16,7 @@
 //! # Parity contract
 //!
 //! Folding replaces the per-row runtime walk
-//! ([`evaluate_field`](crate::exec::parts::field)) with one plan-time walk,
+//! ([`evaluate_field`](crate::exec::vm::access::field)) with one plan-time walk,
 //! so it must produce exactly the value the runtime walk would produce. The
 //! fold therefore only runs when the two are provably equivalent; otherwise
 //! it leaves the path unfolded, and the predicate keeps its per-row
@@ -138,7 +138,7 @@ fn literal_if_round_trips(value: &Value) -> Option<LogicalExpr> {
 
 /// Walk `fields` in order from the literal record id `start`,
 /// mirroring the runtime traversal in
-/// [`evaluate_field`](crate::exec::parts::field). Returns `None` when the
+/// [`evaluate_field`](crate::exec::vm::access::field). Returns `None` when the
 /// walk cannot be proven equivalent to the runtime walk (computed fields on a
 /// fetched table, array/geometry pivots, storage errors, exhausted fetch
 /// budget) — the caller leaves the path unfolded.

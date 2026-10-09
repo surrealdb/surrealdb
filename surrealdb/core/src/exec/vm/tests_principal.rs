@@ -393,11 +393,9 @@ async fn an_event_reads_the_callers_auth() {
 
 /// A closure invoked mid-computation of a computed field, or handed to a
 /// function's body, runs a unit the compile cache keeps for the frame's class,
-/// which reads the caller's `$auth` when it runs; no body takes the operator
-/// tree's form.
+/// which reads the caller's `$auth` when it runs.
 #[tokio::test]
 async fn a_closure_unit_reads_the_callers_auth() {
-	let trees = crate::exec::compiles::tree_bodies();
 	alice_bob_alice(
 		SECURED,
 		"RETURN SELECT VALUE mine FROM thing",
@@ -412,5 +410,4 @@ async fn a_closure_unit_reads_the_callers_auth() {
 		Some("[doc:2]"),
 	)
 	.await;
-	assert_eq!(crate::exec::compiles::tree_bodies(), trees, "a closure took the tree's body");
 }

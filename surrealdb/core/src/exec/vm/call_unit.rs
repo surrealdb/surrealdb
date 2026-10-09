@@ -20,9 +20,8 @@
 use std::sync::Arc;
 
 use super::program::Program;
-use crate::exec::physical_expr::EvalContext;
 use crate::exec::planner::Planner;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::{EvalContext, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 

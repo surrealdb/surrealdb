@@ -118,9 +118,7 @@ state, held in a compile cache (§3.4). The objects that get units:
 builds, `UNIQUE` checks, the order of the work, event conditions and bodies, and view deltas are all
 lowered by the one compiler. Algorithmic kernels stay native and are called from the bytecode as
 host instructions, the way builtins are: HNSW graph updates, full-text tokenising and postings,
-geometry. B-tree and `UNIQUE` maintenance already run as VM instructions at parity with the
-operator tree (`VM_REGRESSIONS.md` R7: indexed insert 38.65 ms against 39.11, unique insert 38.57
-against 39.31, release, 1000 rows).
+geometry. B-tree and `UNIQUE` maintenance run as VM instructions (`VM_REGRESSIONS.md` R7).
 
 A table's unit is compiled from the table and everything defined under it: fields, indexes,
 events, views over it. Its version (§3.7) changes when any of those does.
@@ -410,9 +408,8 @@ unit: inside a running program the unit the run holds or links, faulting to the 
 run has not linked, and outside one the unit loaded for the invoking frame from the compile cache.
 A unit is lowered for the invoking frame and the `VERSION` stamp it reads at; an invocation from a
 computed field mid-computation runs with the record being computed, and one with a current value
-and no document runs over the value as no document. No closure body is evaluated as a
-`PhysicalExpr` tree (`vm/closure.rs`, `exec/compiles.rs`). A closure body is still lowered where
-it is first invoked rather than with the query. A stored clause evaluated per row runs as the unit
+and no document runs over the value as no document (`vm/closure.rs`, `exec/compiles.rs`). A
+closure body is lowered where it is first invoked rather than with the query. A stored clause evaluated per row runs as the unit
 of a closure that takes no argument (`exec/scalar_unit.rs`), and a statement a planner with no
 transaction compiles is an inert `UnplannedSubquery` nothing evaluates.
 
@@ -554,7 +551,7 @@ summary names every table its indexes, views and events write.
 ## 12. What gets deleted
 
 - `Control::Deferred`, `BlockInstr::RunDeferred`, `vm/deferred.rs`.
-- `DeferredSubquery` (`physical_expr/subquery.rs`), and transaction-less planners for closure
+- `DeferredSubquery`, and transaction-less planners for closure
   literals, permission predicates and field state.
 - `vm/fault.rs`'s compile paths and closure relinking (`closure.rs` `relink`, `fault_body`).
   `NeedUnit` remains as the request for a unit, served from the compile cache.

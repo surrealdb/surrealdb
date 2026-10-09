@@ -28,26 +28,14 @@ pub(crate) use conditions::{
 	idiom_matches_containment, strip_fts_probes, strip_index_conditions,
 	strip_knn_and_matches_from_condition, strip_knn_from_condition,
 };
-#[cfg(test)]
-pub(crate) use conditions::{
-	has_knn_k_operator, has_top_level_or, strip_fts_condition, strip_union_index_conditions,
-};
 pub(crate) use fields::{
 	check_forbidden_group_by_params, field_path_from_expr, idiom_is_id, path_steps,
 };
-#[cfg(test)]
-pub(crate) use literals::fold_condition_expressions;
 pub(crate) use literals::{
 	RestrictedFields, fold_expressions, key_lit_to_expr, source_field_reads_are_inert,
 	substitution_is_lossy, try_literal_to_value, try_value_to_logical_expr, value_to_logical_expr,
 };
-#[cfg(test)]
-pub(crate) use optimization::{extract_version, is_bounded_topk_downstream};
-pub(crate) use optimization::{
-	get_effective_limit_literal, index_covers_ordering, order_is_scan_compatible,
-};
-#[cfg(test)]
-pub(crate) use params::resolve_condition_params;
+pub(crate) use optimization::{index_covers_ordering, order_is_scan_compatible};
 pub(crate) use params::{
 	ParamBinding, SELECT_ITERATION_PARAMS, bind_param, resolve_param_value,
 	resolve_projection_field_idioms,

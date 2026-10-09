@@ -1,5 +1,4 @@
-//! Code reached through the operator tree's expressions, served from the
-//! compile cache.
+//! Code a program reaches only at run time, served from the compile cache.
 //!
 //! Some code is reached only once a program runs, through an expression the
 //! program did not compile: the body of a user-defined function a compiled
@@ -39,8 +38,7 @@ use std::sync::Arc;
 
 use super::compile_cache::{BuildId, ObjectVersion, UnitKey, UnitObject};
 use super::program::UnitFrame;
-use crate::exec::physical_expr::PhysicalExpr;
-use crate::exec::{ExecOperator, ExecutionContext};
+use crate::exec::{Clause, ExecOperator, ExecutionContext};
 use crate::expr::logical::{LogicalExpr, LogicalOp};
 
 /// The key `object` is kept under for code compiled in `exec`, and the frame
@@ -177,7 +175,7 @@ pub(crate) async fn expr(
 	expr: LogicalExpr,
 	principal: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
-) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
+) -> anyhow::Result<Clause> {
 	expr_binding(exec, expr, principal, depth, Vec::new()).await
 }
 
@@ -191,7 +189,7 @@ pub(crate) async fn expr_binding(
 	principal: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
 	bound: Vec<String>,
-) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
+) -> anyhow::Result<Clause> {
 	let Some(units) = exec.ctx().compiled_units() else {
 		return compile_expr(exec, expr, principal, depth, &bound).await;
 	};
@@ -219,7 +217,7 @@ async fn compile_expr(
 	principal: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
 	bound: &[String],
-) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
+) -> anyhow::Result<Clause> {
 	Ok(crate::exec::planner::compile_unit_expr(expr, exec, principal, depth, bound).await?)
 }
 
@@ -430,9 +428,9 @@ mod tests {
 
 	use crate::exec::operators::test_util::TestDb;
 
-	/// An expression reached through the operator tree's expressions is
-	/// compiled on the compile cache's miss and served to a later
-	/// transaction, while a context value it folds in holds the same value.
+	/// An expression reached at run time is compiled on the compile cache's
+	/// miss and served to a later transaction, while a context value it folds
+	/// in holds the same value.
 	#[tokio::test]
 	async fn an_expression_reached_at_run_time_is_served_from_the_cache() {
 		let db =

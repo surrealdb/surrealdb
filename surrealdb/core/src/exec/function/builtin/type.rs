@@ -2,11 +2,10 @@
 
 use anyhow::Result;
 
-use crate::exec::ContextLevel;
 use crate::exec::function::{FunctionRegistry, ProjectionFunction, Signature};
-use crate::exec::parts::array_ops::evaluate_all;
-use crate::exec::parts::field::evaluate_field;
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::vm::access::array_ops::evaluate_all;
+use crate::exec::vm::access::field::evaluate_field;
+use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;

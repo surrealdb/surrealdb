@@ -3,11 +3,11 @@
 //! A closure literal is an [`Instr::MakeClosure`]: the value is the
 //! `CompiledClosure` a closure value is, made from the literal as written and
 //! what it captures, with no compiled body. What the literal captures is read
-//! where the operator tree's literal reads it: a parameter the program holds
+//! where the literal is evaluated: a parameter the program holds
 //! in a register or a block slot from there, any other from the frame the
 //! literal is evaluated in, when bound there. `$f(args)` is an
 //! [`Instr::Invoke`] of the target's value, checked a closure before the
-//! arguments are evaluated, as the tree's call checks it.
+//! arguments are evaluated.
 //!
 //! The body of a literal is lowered with the program that makes the literal,
 //! as a unit of the root ([`ClosureHead`]), and so is the body of every
@@ -56,17 +56,16 @@ impl Lowering<'_, '_> {
 		let LogicalExpr::Closure(closure) = expr else {
 			return Ok(None);
 		};
-		// The tree's compilation of the literal answers what its body does to
+		// The compilation of the literal answers what its body does to
 		// the transaction; it plans the body's statements over the planner's
 		// catalog, as mapping does, so it is made unsealed
 		// ([`crate::kvs::catalog_reads::sealed`]).
 		let compiled = crate::kvs::catalog_reads::sealed(
 			false,
-			crate::exec::vm::host::out_of_line(|| self.planner.physical_expr(expr.clone())),
+			crate::exec::vm::host::out_of_line(|| self.planner.scalar_metadata(expr.clone())),
 		)
 		.await;
-		// A body the operator tree refuses to compile is refused with its
-		// error, as the tree refuses the literal.
+		// A body the planner refuses to compile is refused with its error.
 		let compiled = compiled.map_err(|e| match super::super::plan::Refusal::of(&e) {
 			Some(refusal) => NotCovered::refused(refusal),
 			None => NotCovered::new(format!("a closure the planner does not compile: {e}")),
@@ -373,8 +372,7 @@ impl Lowering<'_, '_> {
 
 	/// `base.name(args)` for a name no builtin method has: the closure the
 	/// receiver's field of that name holds, checked before the arguments are
-	/// evaluated, invoked with them, as the operator tree's
-	/// `ClosureFieldCallPart` invokes it.
+	/// evaluated, invoked with them.
 	pub(super) async fn closure_field_call(
 		&mut self,
 		base: &LogicalExpr,
@@ -442,7 +440,7 @@ impl Lowering<'_, '_> {
 /// into arrays and objects.
 fn collect_closures<'a>(
 	value: &'a crate::val::Value,
-	out: &mut Vec<&'a crate::exec::physical_expr::function::CompiledClosure>,
+	out: &mut Vec<&'a crate::exec::vm::calls::CompiledClosure>,
 	budget: usize,
 ) {
 	use crate::val::{Closure, Value};
@@ -453,8 +451,7 @@ fn collect_closures<'a>(
 		Value::Closure(closure) => {
 			if let Closure::Builtin(obj) = closure.as_ref()
 				&& let Some(compiled) =
-					obj.as_any()
-						.downcast_ref::<crate::exec::physical_expr::function::CompiledClosure>()
+					obj.as_any().downcast_ref::<crate::exec::vm::calls::CompiledClosure>()
 			{
 				out.push(compiled);
 			}

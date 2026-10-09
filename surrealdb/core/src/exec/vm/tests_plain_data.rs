@@ -1,8 +1,8 @@
 //! Every program is instructions over plain data: a statement holding an
-//! expression the instructions do not answer is declined to the operator
-//! tree, never lowered with that expression in its operator-tree form.
+//! expression the instructions do not answer is declined, never lowered with
+//! that expression left as a tree of nodes.
 
-use super::tests::{SCHEMA, bind, decline_of, planner};
+use super::tests::{SCHEMA, decline_of};
 use crate::exec::operators::test_util::TestDb;
 
 /// Statements the VM lowers: operators, literals, parameters, indexes,
@@ -65,48 +65,4 @@ async fn a_program_is_instructions_over_plain_data() {
 		}
 	}
 	assert!(declined.is_empty(), "{declined:#?}");
-}
-
-/// A computed column whose statement reads the record being computed is
-/// derived where its table's rows are read or written, as the table's scan
-/// derives it, and the program holds none of it. A computed destructure lowers
-/// in the column's frame, and answers as the operator tree does. A column whose
-/// statement reads another table lowers.
-#[tokio::test]
-async fn a_column_with_no_instructions_is_derived_where_its_rows_are_read() {
-	let db = TestDb::new(
-		"
-		DEFINE TABLE q PERMISSIONS FULL;
-		DEFINE FIELD n ON q TYPE int;
-		DEFINE FIELD t ON q COMPUTED (SELECT VALUE n FROM ONLY q:1) * 2;
-		DEFINE TABLE r PERMISSIONS FULL;
-		DEFINE FIELD t ON r COMPUTED (SELECT VALUE n FROM ONLY q:1) * 2;
-		DEFINE TABLE d PERMISSIONS FULL;
-		CREATE q:1 SET n = 5;
-		CREATE r:1;
-		CREATE d:1 SET obj = { a: 1, b: 2 };
-		DEFINE FIELD t ON d COMPUTED obj.{ a };
-	",
-	)
-	.await;
-	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
-	for sql in [
-		"SELECT * FROM q",
-		"UPDATE q:1 SET n = 7 RETURN AFTER",
-		"SELECT * FROM d",
-		"UPDATE d:1 SET obj.a = 3 RETURN AFTER",
-	] {
-		assert_eq!(decline_of(&ctx, sql).await, None, "`{sql}`");
-		let bound = bind(&ctx, sql).await;
-		let tree = planner(&ctx).plan_logical(bound.clone()).await.expect("the tree plans");
-		let vm = super::plan(&planner(&ctx), &bound)
-			.await
-			.unwrap_or_else(|| panic!("`{sql}` does not run on the VM"));
-		assert_eq!(
-			super::tests::outcome(&vm, &ctx).await,
-			super::tests::outcome(&tree, &ctx).await,
-			"`{sql}`"
-		);
-	}
-	assert_eq!(decline_of(&ctx, "SELECT * FROM r").await, None, "`SELECT * FROM r`");
 }

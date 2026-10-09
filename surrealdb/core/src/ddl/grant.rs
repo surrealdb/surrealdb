@@ -24,8 +24,7 @@ use crate::catalog::providers::{
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exe::FlowResultExt as _;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{Error as ExecError, ExecutionContext};
+use crate::exec::{Clause, Error as ExecError, EvalContext, ExecutionContext};
 use crate::expr::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 	AccessStatementShow, GRANT_BEARER_CHARACTER_POOL, GRANT_BEARER_ID_LENGTH,
@@ -50,7 +49,7 @@ use crate::{catalog, val};
 enum GrantFilter {
 	/// No clause: every grant the statement reached.
 	Every,
-	Compiled(Arc<dyn PhysicalExpr>),
+	Compiled(Clause),
 	Uncompiled(Expr),
 }
 

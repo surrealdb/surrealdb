@@ -76,8 +76,6 @@ pub(crate) async fn frame(
 		computing_record: None,
 		no_write: opt.no_write,
 		version_stamp: opt.version,
-		zero_limits: Vec::new(),
-		topk_thresholds: None,
 		guard_verdicts: Default::default(),
 		writing: false,
 	});

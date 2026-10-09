@@ -141,7 +141,7 @@ impl OperatorMetrics {
 
 	/// Enable metrics collection on this instance.
 	///
-	/// Called by `AnalyzePlan` to activate recording before execution.
+	/// Called by `VmAnalysis` to activate recording before the program runs.
 	/// After this call, [`monitor_stream`] will wrap streams with the
 	/// full timing/counting/tracing instrumentation.
 	pub(crate) fn enable(&self) {
@@ -193,11 +193,6 @@ impl OperatorMetrics {
 	/// Graph adjacency entries served from packed blocks so far.
 	pub(crate) fn block_hits(&self) -> u64 {
 		self.block_hits.load(Ordering::Relaxed)
-	}
-
-	/// Record `n` adjacency entries served from packed blocks.
-	pub(crate) fn add_block_hits(&self, n: u64) {
-		self.block_hits.fetch_add(n, Ordering::Relaxed);
 	}
 
 	/// Graph adjacency entries served from per-edge pointer keys so far.

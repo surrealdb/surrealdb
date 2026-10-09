@@ -28,8 +28,7 @@ use anyhow::Result;
 use super::Signature;
 use crate::catalog::Index;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel};
+use crate::exec::{BoxFut, ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::expr::logical::{FieldPath, LogicalExpr};
@@ -421,12 +420,6 @@ impl MatchesContext {
 		}
 	}
 
-	#[cfg(test)]
-	/// Set the table name for index lookup.
-	pub fn set_table(&mut self, table: TableName) {
-		self.table = Some(table);
-	}
-
 	/// Get the table name.
 	pub fn table(&self) -> Option<&TableName> {
 		self.table.as_ref()
@@ -452,12 +445,6 @@ impl MatchesContext {
 		let mut entries: Vec<_> = self.matches.iter().map(|(rf, info)| (*rf, info)).collect();
 		entries.sort_by_key(|(rf, _)| *rf);
 		entries
-	}
-
-	#[cfg(test)]
-	/// Check if the context has no MATCHES entries.
-	pub fn is_empty(&self) -> bool {
-		self.matches.is_empty()
 	}
 
 	/// Create a MatchContext for a given match_ref, resolving against this context.

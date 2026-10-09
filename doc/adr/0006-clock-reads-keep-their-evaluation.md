@@ -9,16 +9,15 @@
 many rows reads it once or once per row is observable: `CREATE |t:50| SET at = time::now()` writes
 either one timestamp or up to fifty.
 
-The language has an answer, and it is the per-record engine's: **every call is evaluated where it
-stands, once per row**. The streaming engine keeps that answer everywhere but one place: in a
+The language has an answer: **every call is evaluated where it
+stands, once per row**. The VM keeps that answer everywhere but one place: in a
 condition it folds `time::now()` to one value for the statement, because `at > time::now() - 1d`
 becomes an index range only once its right side is a literal. That is a deliberate choice — the
-statement's time, as SQL's `NOW()` is — and the streaming engine has made it since it was
-released. It is observable, but only by a condition that reads the clock more finely than the
+statement's time, as SQL's `NOW()` is. It is observable, but only by a condition that reads the clock more finely than the
 statement takes to run; a time-window comparison does not.
 
 A fold that reaches every expression — a projection, a data clause — collapses per-row values the
-language promises into one, and that is observable. Neither engine may do that.
+language promises into one, and that is observable. No rewrite may do that.
 
 The cost of per-row evaluation is not a reason to fold. `Utc::now()` reads `CLOCK_REALTIME` through
 the vDSO on Linux: no system call, no lock, and independent on every thread, so it scales with the
@@ -36,7 +35,7 @@ parallelism would break.
    folded there. A rewrite that duplicates or removes a clock read is removing or adding an
    evaluation, and is held to the evaluation contract like any other.
 2. **In a `WHERE` condition, `time::now()` is one value for the statement.** It is the only position
-   where the streaming engine may fold it, because the fold is what lets an index answer the
+   where a rewrite may fold it, because the fold is what lets an index answer the
    condition.
 3. **Only `time::now()` has a statement-scoped exception, because it is the statement's time.** The
    exception is not a property of the `CLOCK` effect. The `time::*` accessors that read the clock
@@ -52,18 +51,16 @@ parallelism would break.
    plan reads, not written into the plan as a literal. Folding it at plan time is correct only while
    the plan is used once.
 5. **Both positions are pinned by tests**, and no rule may change what either one answers:
-   - `language/functions/time/now_evaluated_per_call.surql`, on every planner strategy: a
+   - `language/functions/time/now_evaluated_per_call.surql`, a
      projection, `SET` and `INSERT` read the clock per row.
    - `exec::logical::fold` unit tests: a `WHERE` folds the call and a projection in the same
      statement does not; a data clause keeps the call; `rand::float()` stays a call in a `WHERE`.
 
 ## Consequences
 
-- The streaming engine's fold of `time::now()` is gated on its position being a condition
-  (`fold::is_condition`). The per-record engine is unchanged.
-- Before the physical plan cache lands, a condition's clock fold becomes a statement-start value.
-  Until it does, a cached plan would serve a stale timestamp, so caching and this change land
-  together.
+- The fold of `time::now()` is gated on its position being a condition (`fold::is_condition`).
+- A condition's clock fold is a statement-start value held in a slot the plan reads (Decision 4), so
+  a cached plan never serves a stale timestamp.
 - The same reasoning applies to every call whose answer depends on when it runs. Entropy
   (`rand::*`, generated record ids) is per call, per row, and never folded in any position. An
   external call (`http::*`) is evaluated exactly where and as often as written, in every position,

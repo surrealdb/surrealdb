@@ -1,277 +1,21 @@
-//! Build [`PreDecodeFilter`](super::PreDecodeFilter) trees from synchronous physical predicates.
+//! Build [`PreDecodeFilter`](super::PreDecodeFilter) trees from logical predicates.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use memchr::memmem;
-use surrealdb_strand::Strand;
 
 use super::streaming::{
 	ArrayElementContains, ArrayOverlapsLiteralSet, OverlapMode, StreamingLeafEvaluator,
 	SubstringMatch, overlap_streaming_from_set,
 };
 use super::wire_literal::{LiteralSet, LiteralWire};
-use super::{
-	FusedFlatClause, FusedFlatClauses, LeafFallback, PreDecodeFilter, PreDecodeFilterReason,
-	PreDecodeFilterStatus, PredNode,
-};
+use super::{FusedFlatClause, FusedFlatClauses, LeafFallback, PreDecodeFilter, PredNode};
 use crate::exec::object_extract::PathSegment;
-use crate::exec::operators::scan::pipeline::FieldState;
-use crate::exec::permission::PhysicalPermission;
-#[cfg(test)]
-use crate::exec::physical_expr::record_id::PhysicalRecordIdKey;
-#[cfg(test)]
-use crate::exec::physical_expr::{
-	ArrayLiteral, BinaryOp, ObjectLiteral, PhysicalExpr, RecordIdExpr, SetLiteral, SimpleBinaryOp,
-	Step, UnaryOp,
-};
 use crate::exec::planner::is_simple_binary_eligible;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::operator::{BinaryOperator, PrefixOperator};
 use crate::val::Value;
-#[cfg(test)]
-use crate::val::{RecordId, RecordIdKey};
-
-#[cfg(test)]
-/// Compile the physical WHERE predicate into a fused predicate tree for KV-byte inspection.
-///
-/// Pure shape compile — does not consult [`FieldState`]. Returns
-/// [`PreDecodeFilterReason::UnsupportedPredicate`] when the predicate cannot be translated
-/// (e.g. uses `Outside` / `Intersects` / `AllEqual` / `AnyEqual`, `MATCHES`, or non-static field
-/// paths).
-pub(crate) fn compile_predicate_shape(
-	pred: &Arc<dyn PhysicalExpr>,
-) -> Result<PredNode, PreDecodeFilterReason> {
-	let root = compile_expr(pred).ok_or(PreDecodeFilterReason::UnsupportedPredicate)?;
-	Ok(fuse_tree(root))
-}
-
-/// Walk a [`PredNode`] tree and collect the set of root field names it references.
-///
-/// Used by [`finalize_pre_decode_filter`] to apply field-state checks only against fields the
-/// predicate actually inspects, rather than rejecting the pre-decode filter for the whole table
-/// when an unrelated field is computed or has restricted permissions.
-fn collect_referenced_root_segments(node: &PredNode, out: &mut BTreeSet<Strand>) {
-	match node {
-		PredNode::And(xs) | PredNode::Or(xs) => {
-			for c in xs {
-				collect_referenced_root_segments(c, out);
-			}
-		}
-		PredNode::Not(inner) => collect_referenced_root_segments(inner, out),
-		PredNode::Leaf {
-			path,
-			..
-		} => {
-			if let Some(seg) = path.first() {
-				out.insert(seg.as_strand().clone());
-			}
-		}
-		PredNode::LeafSetMembership {
-			path,
-			..
-		} => {
-			if let Some(seg) = path.first() {
-				out.insert(seg.as_strand().clone());
-			}
-		}
-		PredNode::LeafStreaming {
-			path,
-			..
-		} => {
-			if let Some(seg) = path.first() {
-				out.insert(seg.as_strand().clone());
-			}
-		}
-		PredNode::FusedFlatMapAnd {
-			at_record_root,
-			clauses,
-		} => {
-			if *at_record_root {
-				for c in clauses.iter() {
-					if let Ok(s) = std::str::from_utf8(&c.key_utf8) {
-						out.insert(Strand::from(s));
-					}
-				}
-			}
-			// When `at_record_root == false`, this fused node is nested under a
-			// `NavigatePrefix` whose top-level segment was already added to
-			// `refs` by the arm below. Adding the full dotted leaves
-			// (`outer.a`, `outer.b`, …) here would be redundant: the
-			// disqualification check (`field_permission_covers`) keys on the
-			// top-level segment, and any `DEFINE FIELD outer.* PERMISSIONS …`
-			// permission's idiom starts with `Part::Field("outer")` — so the
-			// outer `NavigatePrefix(outer)` already triggers the bail-out.
-			// (`filter_fields_by_permission` now enforces nested-path SELECT
-			// permissions correctly at decode time — see issue #83 — but the
-			// pre-decode filter operates on raw bytes and can't do a
-			// per-subpath cut, so disqualifying conservatively at the
-			// top-level segment is the right shape.)
-		}
-		PredNode::NavigatePrefix {
-			segment,
-			child: _,
-		} => {
-			out.insert(segment.as_strand().clone());
-		}
-	}
-}
-
-/// Apply field-state rules to a compiled predicate tree and wrap as [`PreDecodeFilter`].
-///
-/// # Arguments
-/// * `root` — predicate tree from [`compile_predicate_shape`].
-/// * `field_state` — schema-derived field state (computed fields, per-field SELECT permissions) for
-///   the projected fields of the scan's table.
-/// * `check_perms` — when `true`, reject if any referenced field has a non-`Allow` SELECT
-///   permission. Set to `false` to skip that check (e.g. when the caller is the schema owner or
-///   permission enforcement is performed elsewhere).
-///
-/// # Returns
-/// `Ok(pre_decode_filter)` when every referenced root field name is safe to read from raw KV bytes;
-/// otherwise [`PreDecodeFilterReason::ComputedFields`] or
-/// [`PreDecodeFilterReason::FieldPermissions`].
-pub(crate) fn finalize_pre_decode_filter(
-	root: &PredNode,
-	field_state: &FieldState,
-	check_perms: bool,
-	depth_limit: u32,
-) -> Result<Arc<PreDecodeFilter>, PreDecodeFilterReason> {
-	let mut refs: BTreeSet<Strand> = BTreeSet::new();
-	collect_referenced_root_segments(root, &mut refs);
-	for name in &refs {
-		if let Some(reason) = field_state_blocks_raw_read(field_state, name.as_str(), check_perms) {
-			return Err(reason);
-		}
-	}
-	Ok(Arc::new(PreDecodeFilter::new(root.clone(), depth_limit)))
-}
-
-/// Why raw KV bytes reached via top-level field `root` may diverge from the
-/// engine-visible value (or bypass authorisation): the field is read-time
-/// computed (`DEFINE FIELD … COMPUTED …`) — directly or anywhere nested
-/// beneath it — or, when `check_perms`, carries a non-`Allow` SELECT
-/// permission. Returns [`None`] when the field is safe to read raw.
-/// (Write-time `VALUE` clauses are materialised into the stored bytes and do
-/// not populate `computed_fields`.)
-///
-/// Nested computed definitions (`DEFINE FIELD a.b … COMPUTED …`,
-/// `DEFINE FIELD a.*.c … COMPUTED …`) are materialised into the value at read
-/// time, so the raw bytes under root `a` diverge from what the engine
-/// returns; any computed name extending `root` with `.` or `[` blocks the
-/// whole root, mirroring the conservative top-level-segment shape of
-/// [`field_permission_covers`].
-///
-/// Shared by the pre-decode WHERE filter and the TopK threshold probe
-/// ([`crate::exec::topk_pushdown`]), which read ORDER BY / predicate fields
-/// straight from revision-encoded bytes.
-pub(crate) fn field_state_blocks_raw_read(
-	field_state: &FieldState,
-	root: &str,
-	check_perms: bool,
-) -> Option<PreDecodeFilterReason> {
-	let computed_under_root = field_state.computed_fields.iter().any(|c| {
-		let name = c.field_name();
-		name == root
-			|| (name.len() > root.len()
-				&& name.starts_with(root)
-				&& matches!(name.as_bytes()[root.len()], b'.' | b'['))
-	});
-	if computed_under_root {
-		return Some(PreDecodeFilterReason::ComputedFields);
-	}
-	if check_perms && field_permission_covers(field_state, root) {
-		return Some(PreDecodeFilterReason::FieldPermissions);
-	}
-	None
-}
-
-/// Returns `true` if any non-`Allow` field permission could affect a value
-/// reached via top-level field `name`.
-///
-/// Conservative for nested-path permissions (`DEFINE FIELD outer.a …
-/// PERMISSIONS …` — see issue #83): the pre-decode filter operates on
-/// raw bytes and can't enforce a per-subpath cut, so any reference to a
-/// top-level segment that has nested permissions defined under it
-/// disqualifies pre-decode filtering.
-fn field_permission_covers(field_state: &FieldState, name: &str) -> bool {
-	use crate::expr::part::Part;
-	field_state.field_permissions.iter().any(|(idiom, perm)| {
-		if matches!(perm, PhysicalPermission::Allow) {
-			return false;
-		}
-		// Today the parser produces `Part::Field` as the first part of every
-		// `DEFINE FIELD` idiom, so the only interesting comparison is the
-		// name match. Any other shape (wildcard / index root, or an empty
-		// idiom) is treated as covering by default so a future parser
-		// change can't silently let a non-`Allow` permission slip past
-		// pre-decode filtering — the post-decode filter still catches it,
-		// but we'd rather not pretend the field is safe to read raw.
-		match idiom.0.first() {
-			Some(Part::Field(f)) => f.as_str() == name,
-			_ => true,
-		}
-	})
-}
-
-#[cfg(test)]
-/// Resolve pre-decode filter status at plan time, given an optional plan-time [`FieldState`].
-///
-/// * No predicate → [`PreDecodeFilterStatus::NotApplicable`].
-/// * Predicate shape uncompilable → [`PreDecodeFilterStatus::Ineligible`].
-/// * Field state available and full check (with permissions) passes →
-///   [`PreDecodeFilterStatus::Active`].
-/// * Field state available, only the permission check fails, but the field-state check without
-///   permissions would pass → [`PreDecodeFilterStatus::Deferred`] (final permission check happens
-///   at execute time, where the active session permission level is known).
-/// * Field state unavailable at plan time → [`PreDecodeFilterStatus::Deferred`] (full check runs at
-///   execute time, e.g. for [`DynamicScan`](crate::exec::operators::scan::dynamic::DynamicScan)).
-pub(crate) fn pre_decode_filter_status_at_plan_time(
-	predicate: Option<&Arc<dyn PhysicalExpr>>,
-	field_state: Option<&FieldState>,
-	depth_limit: u32,
-) -> PreDecodeFilterStatus {
-	let Some(pred) = predicate else {
-		return PreDecodeFilterStatus::NotApplicable;
-	};
-	let fused = match compile_predicate_shape(pred) {
-		Ok(n) => n,
-		Err(r) => return PreDecodeFilterStatus::Ineligible(r),
-	};
-	match field_state {
-		Some(fs) => match finalize_pre_decode_filter(&fused, fs, true, depth_limit) {
-			Ok(p) => PreDecodeFilterStatus::Active(p),
-			Err(PreDecodeFilterReason::FieldPermissions) => {
-				match finalize_pre_decode_filter(&fused, fs, false, depth_limit) {
-					Ok(_) => PreDecodeFilterStatus::Deferred(Arc::new(fused)),
-					Err(e) => PreDecodeFilterStatus::Ineligible(e),
-				}
-			}
-			Err(e) => PreDecodeFilterStatus::Ineligible(e),
-		},
-		None => PreDecodeFilterStatus::Deferred(Arc::new(fused)),
-	}
-}
-
-/// Resolve the optional pre-decode filter for a KV scan at execution time.
-///
-/// Returns the plan-time [`PreDecodeFilter`] for [`PreDecodeFilterStatus::Active`], finalises a
-/// [`PreDecodeFilterStatus::Deferred`] tree against the runtime [`FieldState`], and yields
-/// [`None`] for [`PreDecodeFilterStatus::NotApplicable`] / [`PreDecodeFilterStatus::Ineligible`].
-pub(crate) fn pre_decode_filter_for_execute(
-	status: &PreDecodeFilterStatus,
-	field_state: &FieldState,
-	check_perms: bool,
-	depth_limit: u32,
-) -> Option<Arc<PreDecodeFilter>> {
-	match status {
-		PreDecodeFilterStatus::NotApplicable | PreDecodeFilterStatus::Ineligible(_) => None,
-		PreDecodeFilterStatus::Active(p) => Some(Arc::clone(p)),
-		PreDecodeFilterStatus::Deferred(node) => {
-			finalize_pre_decode_filter(node.as_ref(), field_state, check_perms, depth_limit).ok()
-		}
-	}
-}
 
 /// Operators the structural KV pre-decode filter cannot compile (geometry, list-equality
 /// shorthands).
@@ -388,241 +132,6 @@ fn try_compile_leaf_streaming(
 		}
 		_ => None,
 	}
-}
-
-#[cfg(test)]
-/// Decode a plan-time [`PhysicalRecordIdKey`] when it uses only static literals, collections, and
-/// nested [`RecordIdExpr`] keys (no `rand()` / ulid / uuid generators or range bounds).
-fn try_static_record_id_key(key: &PhysicalRecordIdKey) -> Option<RecordIdKey> {
-	match key {
-		PhysicalRecordIdKey::Number(n) => Some(RecordIdKey::Number(*n)),
-		PhysicalRecordIdKey::String(s) => Some(RecordIdKey::String(s.clone())),
-		PhysicalRecordIdKey::Uuid(u) => Some(RecordIdKey::Uuid(*u)),
-		PhysicalRecordIdKey::Generate(_) => None,
-		PhysicalRecordIdKey::Array(elements) => {
-			let mut values = Vec::with_capacity(elements.len());
-			for elem in elements {
-				values.push(try_static_literal_value(elem)?);
-			}
-			Some(RecordIdKey::Array(crate::val::Array::from(values)))
-		}
-		PhysicalRecordIdKey::Object(entries) => {
-			let mut obj = crate::val::Object::default();
-			for (k, e) in entries {
-				obj.insert(k.clone(), try_static_literal_value(e)?);
-			}
-			Some(RecordIdKey::Object(obj))
-		}
-		PhysicalRecordIdKey::Range {
-			..
-		} => None,
-	}
-}
-
-#[cfg(test)]
-/// Fold planner [`ArrayLiteral`] / [`SetLiteral`] / [`ObjectLiteral`] trees into a [`Value`] when
-/// every leaf is a static [`Literal`](crate::exec::physical_expr::Literal) (or nested literal
-/// collection). `field INSIDE [1, 2]` lowers to an [`ArrayLiteral`] RHS, so
-/// [`PhysicalExpr::try_literal`] alone is insufficient for the pre-decode compile path.
-fn try_static_literal_value(expr: &Arc<dyn PhysicalExpr>) -> Option<Value> {
-	if let Some(v) = expr.try_literal() {
-		return Some(v.clone());
-	}
-	let e = expr.as_ref();
-	if let Some(arr) = e.downcast_ref::<ArrayLiteral>() {
-		let mut out = Vec::with_capacity(arr.elements.len());
-		for elem in &arr.elements {
-			out.push(try_static_literal_value(elem)?);
-		}
-		return Some(Value::Array(crate::val::Array::from(out)));
-	}
-	if let Some(set) = e.downcast_ref::<SetLiteral>() {
-		let mut acc = crate::val::Set::new();
-		for elem in &set.elements {
-			acc.insert(try_static_literal_value(elem)?);
-		}
-		return Some(Value::Set(acc));
-	}
-	if let Some(obj) = e.downcast_ref::<ObjectLiteral>() {
-		let mut map = BTreeMap::new();
-		for (k, v_expr) in &obj.entries {
-			map.insert(k.clone(), try_static_literal_value(v_expr)?);
-		}
-		return Some(Value::Object(crate::val::Object::from(map)));
-	}
-	if let Some(rid) = e.downcast_ref::<RecordIdExpr>() {
-		let key = try_static_record_id_key(&rid.key)?;
-		return Some(Value::RecordId(RecordId {
-			table: rid.table.clone(),
-			key,
-		}));
-	}
-	None
-}
-
-#[cfg(test)]
-fn compile_expr(expr: &Arc<dyn PhysicalExpr>) -> Option<PredNode> {
-	let expr: &dyn PhysicalExpr = expr.as_ref();
-	if let Some(sb) = expr.downcast_ref::<SimpleBinaryOp>() {
-		return compile_simple_binary(sb);
-	}
-	if let Some(b) = expr.downcast_ref::<BinaryOp>() {
-		return compile_binary(b);
-	}
-	if let Some(u) = expr.downcast_ref::<UnaryOp>() {
-		return compile_unary(u);
-	}
-	None
-}
-
-#[cfg(test)]
-fn compile_simple_binary(sb: &SimpleBinaryOp) -> Option<PredNode> {
-	if !is_simple_binary_eligible(&sb.op) || unsupported_containment_like(&sb.op) {
-		return None;
-	}
-	let path: Vec<PathSegment> = vec![PathSegment::from(sb.field_name.as_str())];
-	if !sb.reversed
-		&& matches!(sb.op, BinaryOperator::Inside | BinaryOperator::NotInside)
-		&& let Some(set) = try_build_inside_literal_hashset(&sb.literal)
-	{
-		let literal_set = Arc::new(LiteralSet::from_set(set.as_ref()));
-		return Some(PredNode::LeafSetMembership {
-			path,
-			op: sb.op.clone(),
-			set,
-			literal_set,
-			reversed: false,
-		});
-	}
-	if let Some(n) = try_compile_leaf_streaming(path.clone(), &sb.op, &sb.literal, sb.reversed) {
-		return Some(n);
-	}
-	let literal_wire = Arc::new(LiteralWire::from_value(&sb.literal));
-	Some(PredNode::Leaf {
-		path,
-		op: sb.op.clone(),
-		literal: sb.literal.clone(),
-		literal_wire,
-		reversed: sb.reversed,
-	})
-}
-
-#[cfg(test)]
-fn compile_binary(b: &BinaryOp) -> Option<PredNode> {
-	match &b.op {
-		BinaryOperator::And => {
-			Some(PredNode::And(vec![compile_expr(&b.left)?, compile_expr(&b.right)?]))
-		}
-		BinaryOperator::Or => {
-			Some(PredNode::Or(vec![compile_expr(&b.left)?, compile_expr(&b.right)?]))
-		}
-		_ => {
-			if !is_simple_binary_eligible(&b.op) || unsupported_containment_like(&b.op) {
-				return None;
-			}
-			// Try the dedicated `array::len(field) <op> N` shape first —
-			// it bypasses every field-value decode by reading just the
-			// array's prologue length.
-			if let Some(n) = try_compile_array_len_pair(&b.left, &b.right, false, &b.op) {
-				return Some(n);
-			}
-			if let Some(n) = try_compile_array_len_pair(&b.right, &b.left, true, &b.op) {
-				return Some(n);
-			}
-			compile_field_lit_pair(&b.left, &b.right, false, &b.op)
-				.or_else(|| compile_field_lit_pair(&b.right, &b.left, true, &b.op))
-		}
-	}
-}
-
-#[cfg(test)]
-/// Recognise `array::len(field) <op> N` and emit a `LeafStreaming` over
-/// [`ArrayLenCompare`] (skips every Strand / Value decode — reads the
-/// array's varint length prologue and compares).
-///
-/// Returns `None` for any other shape; the caller falls back to
-/// [`compile_field_lit_pair`].
-fn try_compile_array_len_pair(
-	function_side: &Arc<dyn PhysicalExpr>,
-	literal_side: &Arc<dyn PhysicalExpr>,
-	reversed: bool,
-	op: &BinaryOperator,
-) -> Option<PredNode> {
-	use super::streaming::ArrayLenCompare;
-	use crate::exec::physical_expr::function::BuiltinFunctionExec;
-	use crate::val::Number;
-
-	let func = function_side.as_ref().downcast_ref::<BuiltinFunctionExec>()?;
-	if func.name != "array::len" || func.arguments.len() != 1 {
-		return None;
-	}
-	let path = resolve_static_path(&func.arguments[0])?;
-	let literal = try_static_literal_value(literal_side)?;
-	let Value::Number(n) = literal.clone() else {
-		return None;
-	};
-	let expected_len: i64 = match n {
-		Number::Int(i) => i,
-		Number::Float(f)
-			if f.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(&f) =>
-		{
-			f as i64
-		}
-		_ => return None,
-	};
-	// `array::len(x) > N` and `N < array::len(x)` are the same predicate;
-	// when `reversed`, flip the operator so the evaluator's comparison
-	// stays "actual <op> expected_len".
-	let effective_op = if reversed {
-		match op {
-			BinaryOperator::LessThan => BinaryOperator::MoreThan,
-			BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
-			BinaryOperator::MoreThan => BinaryOperator::LessThan,
-			BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
-			// Equal / NotEqual / ExactEqual are commutative.
-			BinaryOperator::Equal | BinaryOperator::NotEqual | BinaryOperator::ExactEqual => {
-				op.clone()
-			}
-			_ => return None,
-		}
-	} else {
-		match op {
-			BinaryOperator::Equal
-			| BinaryOperator::ExactEqual
-			| BinaryOperator::NotEqual
-			| BinaryOperator::LessThan
-			| BinaryOperator::LessThanEqual
-			| BinaryOperator::MoreThan
-			| BinaryOperator::MoreThanEqual => op.clone(),
-			_ => return None,
-		}
-	};
-	let fallback = LeafFallback {
-		op: op.clone(),
-		literal,
-		reversed,
-	};
-	let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayLenCompare {
-		expected_len,
-		op: effective_op,
-	});
-	Some(PredNode::LeafStreaming {
-		path,
-		evaluator,
-		fallback,
-	})
-}
-
-#[cfg(test)]
-fn compile_field_lit_pair(
-	field_side: &Arc<dyn PhysicalExpr>,
-	literal_side: &Arc<dyn PhysicalExpr>,
-	reversed: bool,
-	op: &BinaryOperator,
-) -> Option<PredNode> {
-	let path = resolve_static_path(field_side)?;
-	let literal = try_static_literal_value(literal_side)?;
-	Some(leaf_node(path, op, literal, reversed))
 }
 
 /// The leaf judging `path <op> literal` (`literal <op> path` when `reversed`):
@@ -762,29 +271,6 @@ impl PreDecodeShape {
 				reversed,
 			} => leaf_node(path.to_vec(), op, literal.clone(), *reversed),
 		}
-	}
-}
-
-#[cfg(test)]
-fn resolve_static_path(e: &Arc<dyn PhysicalExpr>) -> Option<Vec<PathSegment>> {
-	let e: &dyn PhysicalExpr = e.as_ref();
-	if let Some(id) = e.downcast_ref::<Step>() {
-		id.try_static_object_field_path()
-			.map(|parts| parts.into_iter().map(PathSegment::from).collect())
-	} else {
-		let s = e.try_simple_field()?;
-		Some(vec![PathSegment::from(s)])
-	}
-}
-
-#[cfg(test)]
-fn compile_unary(u: &UnaryOp) -> Option<PredNode> {
-	match u.op {
-		PrefixOperator::Not => {
-			let inner = compile_expr(&u.expr)?;
-			Some(PredNode::Not(Box::new(inner)))
-		}
-		_ => None,
 	}
 }
 
@@ -1073,7 +559,6 @@ fn build_root_fused_flat_map(leaves: &[PredNode]) -> Option<PredNode> {
 	}
 	let clauses = flat_clauses_from_specs(&specs)?;
 	Some(PredNode::FusedFlatMapAnd {
-		at_record_root: true,
 		clauses,
 	})
 }
@@ -1249,7 +734,6 @@ fn fuse_tails_under_segment(tails: &[FuseLeaf]) -> PredNode {
 		&& let Some(clauses) = flat_clauses_from_specs(tails)
 	{
 		return PredNode::FusedFlatMapAnd {
-			at_record_root: false,
 			clauses,
 		};
 	}
@@ -1271,57 +755,65 @@ fn normalize_and(mut xs: Vec<PredNode>) -> PredNode {
 #[cfg(test)]
 mod tests {
 	use std::str::FromStr;
-	use std::sync::Arc;
 
-	use super::{PathSegment, PredNode, compile_expr, compile_predicate_shape};
-	use crate::exec::parts::field::FieldPart;
-	use crate::exec::physical_expr::{
-		ArrayLiteral, BinaryOp, Literal, PhysicalExpr, SimpleBinaryOp, Step, UnaryOp,
-	};
+	use super::{PathSegment, PreDecodeShape, PredNode, fuse_tree};
+	use crate::expr::logical::LogicalExpr;
 	use crate::expr::operator::{BinaryOperator, PrefixOperator};
 	use crate::val::{Number, Object, Value};
 
-	fn sb(field: &str, op: BinaryOperator, literal: Value) -> Arc<dyn crate::exec::PhysicalExpr> {
-		Arc::new(SimpleBinaryOp {
-			field_name: field.into(),
-			op,
-			literal,
-			reversed: false,
-		})
+	fn literal(value: &Value) -> LogicalExpr {
+		crate::exec::planner::util::try_value_to_logical_expr(value.clone())
+			.expect("a test literal has a logical form")
 	}
 
-	/// Computed-field blocking must cover nested definitions: a computed
-	/// `a.b` / `a[*].b` makes the raw bytes under root `a` diverge from the
-	/// engine-visible (read-time materialised) value, so any raw read through
-	/// `a` is unsafe. Prefix matches that aren't path boundaries (`ab`) must
-	/// not block.
-	#[test]
-	fn field_state_blocks_raw_read_covers_nested_computed() {
-		use super::{PreDecodeFilterReason, field_state_blocks_raw_read};
-		use crate::exec::operators::scan::pipeline::{ComputedFieldDef, FieldState};
+	/// `field op literal`, or `literal op field` when `reversed`.
+	fn field_cmp(field: &str, op: BinaryOperator, value: &Value, reversed: bool) -> LogicalExpr {
+		let field = LogicalExpr::Field(surrealdb_strand::Strand::from(field));
+		let (left, right) = if reversed {
+			(literal(value), field)
+		} else {
+			(field, literal(value))
+		};
+		bin(left, op, right)
+	}
 
-		let mut fs = FieldState::empty();
-		fs.computed_fields = vec![
-			ComputedFieldDef::for_test("a.b"),
-			ComputedFieldDef::for_test("c[*].d"),
-			ComputedFieldDef::for_test("plain"),
-		];
-		// Direct and nested matches block.
-		assert_eq!(
-			field_state_blocks_raw_read(&fs, "a", false),
-			Some(PreDecodeFilterReason::ComputedFields)
-		);
-		assert_eq!(
-			field_state_blocks_raw_read(&fs, "c", false),
-			Some(PreDecodeFilterReason::ComputedFields)
-		);
-		assert_eq!(
-			field_state_blocks_raw_read(&fs, "plain", false),
-			Some(PreDecodeFilterReason::ComputedFields)
-		);
-		// Name-prefix without a `.`/`[` boundary is a different field.
-		assert_eq!(field_state_blocks_raw_read(&fs, "pl", false), None);
-		assert_eq!(field_state_blocks_raw_read(&fs, "other", false), None);
+	fn bin(left: LogicalExpr, op: BinaryOperator, right: LogicalExpr) -> LogicalExpr {
+		LogicalExpr::Binary {
+			left: Box::new(left),
+			op,
+			right: Box::new(right),
+		}
+	}
+
+	fn un(op: PrefixOperator, expr: LogicalExpr) -> LogicalExpr {
+		LogicalExpr::Prefix {
+			op,
+			expr: Box::new(expr),
+		}
+	}
+
+	/// A read of the field at `parts`, one segment each, compared for equality with `lit`.
+	fn mk_path_eq(parts: &[&str], lit: i64) -> LogicalExpr {
+		let mut parts = parts.iter();
+		let first = parts.next().expect("a path has a segment");
+		let mut path = LogicalExpr::Field(surrealdb_strand::Strand::from(*first));
+		for part in parts {
+			path = LogicalExpr::Access {
+				base: Box::new(path),
+				field: surrealdb_strand::Strand::from(*part),
+			};
+		}
+		bin(path, BinaryOperator::Equal, literal(&Value::Number(Number::Int(lit))))
+	}
+
+	/// The fused predicate tree of `pred`, or `Err` when its shape is not one the stored bytes
+	/// judge.
+	fn compile_predicate_shape(pred: &LogicalExpr) -> Result<PredNode, ()> {
+		PreDecodeShape::of(pred).map(|shape| fuse_tree(shape.node())).ok_or(())
+	}
+
+	fn sb(field: &str, op: BinaryOperator, value: impl std::borrow::Borrow<Value>) -> LogicalExpr {
+		field_cmp(field, op, value.borrow(), false)
 	}
 
 	#[test]
@@ -1339,12 +831,7 @@ mod tests {
 
 	#[test]
 	fn compile_simple_binary_reversed() {
-		let p = Arc::new(SimpleBinaryOp {
-			field_name: "x".into(),
-			op: BinaryOperator::Equal,
-			literal: Value::Number(Number::Int(1)),
-			reversed: true,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = field_cmp("x", BinaryOperator::Equal, &Value::Number(Number::Int(1)), true);
 		let n = compile_predicate_shape(&p).expect("compile");
 		match n {
 			PredNode::Leaf {
@@ -1363,35 +850,8 @@ mod tests {
 			BinaryOperator::AllEqual,
 			BinaryOperator::AnyEqual,
 		] {
-			let p = Arc::new(SimpleBinaryOp {
-				field_name: "a".into(),
-				op: op.clone(),
-				literal: Value::Number(Number::Int(1)),
-				reversed: false,
-			}) as Arc<dyn crate::exec::PhysicalExpr>;
+			let p = field_cmp("a", op.clone(), &Value::Number(Number::Int(1)), false);
 			assert!(compile_predicate_shape(&p).is_err(), "expected unsupported for {op:?}");
-		}
-	}
-
-	#[test]
-	fn compile_contain_field_literal_pair_via_binary_op() {
-		let left = Arc::new(Step::new(
-			"a".into(),
-			None,
-			vec![Arc::new(FieldPart {
-				name: "a".into(),
-			}) as Arc<dyn PhysicalExpr>],
-		)) as Arc<dyn PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left,
-			op: BinaryOperator::Contain,
-			right: Arc::new(Literal(Value::Number(Number::Int(1)))),
-		}) as Arc<dyn PhysicalExpr>;
-		match compile_predicate_shape(&p).expect("compile") {
-			PredNode::LeafStreaming {
-				..
-			} => {}
-			other => panic!("expected LeafStreaming, got {other:?}"),
 		}
 	}
 
@@ -1415,35 +875,6 @@ mod tests {
 		assert!(!reversed);
 		assert!(set.contains(&Value::Number(Number::Int(1))));
 		assert_eq!(set.len(), 2);
-	}
-
-	#[test]
-	fn compile_in_planner_array_literal_rhs_builds_set_membership() {
-		let left = Arc::new(Step::new(
-			"v".into(),
-			None,
-			vec![Arc::new(FieldPart {
-				name: "v".into(),
-			}) as Arc<dyn PhysicalExpr>],
-		)) as Arc<dyn PhysicalExpr>;
-		let rhs = Arc::new(ArrayLiteral {
-			elements: vec![
-				Arc::new(Literal(Value::Number(Number::Int(1)))),
-				Arc::new(Literal(Value::Number(Number::Int(2)))),
-			],
-		}) as Arc<dyn PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left,
-			op: BinaryOperator::Inside,
-			right: rhs,
-		}) as Arc<dyn PhysicalExpr>;
-		assert!(
-			matches!(
-				compile_predicate_shape(&p).expect("compile"),
-				PredNode::LeafSetMembership { .. }
-			),
-			"ArrayLiteral RHS should fold to Value::Array and use hashset path"
-		);
 	}
 
 	#[test]
@@ -1522,12 +953,7 @@ mod tests {
 	#[test]
 	fn compile_in_reversed_literal_left_falls_back_to_leaf() {
 		let arr = Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]);
-		let p = Arc::new(SimpleBinaryOp {
-			field_name: "x".into(),
-			op: BinaryOperator::Inside,
-			literal: arr,
-			reversed: true,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = field_cmp("x", BinaryOperator::Inside, &arr, true);
 		assert!(
 			matches!(compile_predicate_shape(&p).expect("compile"), PredNode::Leaf { .. }),
 			"reversed IN should use Leaf"
@@ -1548,16 +974,16 @@ mod tests {
 	#[test]
 	fn fused_map_does_not_swallow_leaf_streaming() {
 		let contain_clause = sb("s", BinaryOperator::Contain, Value::String("needle".into()));
-		let and1 = Arc::new(BinaryOp {
-			left: contain_clause,
-			op: BinaryOperator::And,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-		}) as Arc<dyn PhysicalExpr>;
-		let full = Arc::new(BinaryOp {
-			left: and1,
-			op: BinaryOperator::And,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn PhysicalExpr>;
+		let and1 = bin(
+			contain_clause,
+			BinaryOperator::And,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+		);
+		let full = bin(
+			and1,
+			BinaryOperator::And,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&full).expect("compile");
 		let PredNode::And(parts) = n else {
 			panic!("expected And, got {n:?}");
@@ -1572,16 +998,16 @@ mod tests {
 	fn fused_map_does_not_swallow_set_membership() {
 		let arr = Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]);
 		let in_clause = sb("v", BinaryOperator::Inside, arr);
-		let and1 = Arc::new(BinaryOp {
-			left: in_clause,
-			op: BinaryOperator::And,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let full = Arc::new(BinaryOp {
-			left: and1,
-			op: BinaryOperator::And,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let and1 = bin(
+			in_clause,
+			BinaryOperator::And,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+		);
+		let full = bin(
+			and1,
+			BinaryOperator::And,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&full).expect("compile");
 		let PredNode::And(parts) = n else {
 			panic!("expected And, got {n:?}");
@@ -1593,32 +1019,12 @@ mod tests {
 	}
 
 	#[test]
-	fn compile_and_fuses_two_root_leaves() {
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::And,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let n = compile_predicate_shape(&p).expect("compile");
-		assert!(
-			matches!(
-				n,
-				PredNode::FusedFlatMapAnd {
-					at_record_root: true,
-					..
-				}
-			),
-			"expected fused root map, got {n:?}"
-		);
-	}
-
-	#[test]
 	fn compile_or_keeps_disjunction_shape() {
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		match n {
 			PredNode::Or(ch) => assert_eq!(ch.len(), 2),
@@ -1629,11 +1035,11 @@ mod tests {
 	#[test]
 	fn compile_or_eq_same_field_fuses_to_set_membership() {
 		// `a = 1 OR a = 2` -> bare LeafSetMembership { a, {1, 2} }
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::LeafSetMembership {
 			path,
@@ -1656,16 +1062,16 @@ mod tests {
 	#[test]
 	fn compile_or_eq_three_arms_fuses() {
 		// `a = 1 OR a = 2 OR a = 3` (left-assoc) -> LeafSetMembership { a, {1, 2, 3} }
-		let inner = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left: inner,
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(3))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let inner = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
+		let p = bin(
+			inner,
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(3))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::LeafSetMembership {
 			set,
@@ -1683,11 +1089,11 @@ mod tests {
 	#[test]
 	fn compile_or_eq_different_fields_stays_or() {
 		// `a = 1 OR b = 2` -> disjunction preserved (no cross-field fusion).
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		match n {
 			PredNode::Or(ch) => {
@@ -1699,54 +1105,18 @@ mod tests {
 	}
 
 	#[test]
-	fn compile_array_len_eq_n_emits_leaf_streaming() {
-		use crate::exec::ContextLevel;
-		use crate::exec::parts::field::FieldPart;
-		use crate::exec::physical_expr::function::BuiltinFunctionExec;
-		use crate::exec::physical_expr::{Literal, Step};
-
-		let tags_idiom = Arc::new(Step::new(
-			"tags".into(),
-			None,
-			vec![Arc::new(FieldPart {
-				name: "tags".into(),
-			}) as Arc<dyn crate::exec::PhysicalExpr>],
-		)) as Arc<dyn crate::exec::PhysicalExpr>;
-		let array_len = Arc::new(BuiltinFunctionExec {
-			name: "array::len".into(),
-			arguments: vec![tags_idiom],
-			func_required_context: ContextLevel::Root,
-			plan_depth: 0,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left: array_len,
-			op: BinaryOperator::Equal,
-			right: Arc::new(Literal(Value::Number(Number::Int(3)))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		match compile_predicate_shape(&p).expect("compile") {
-			PredNode::LeafStreaming {
-				path,
-				..
-			} => {
-				assert_eq!(path, vec![PathSegment::from("tags")]);
-			}
-			other => panic!("expected LeafStreaming, got {other:?}"),
-		}
-	}
-
-	#[test]
 	fn compile_or_mixed_field_partial_fuse() {
 		// `a = 1 OR a = 2 OR b = 3` -> Or([ LeafSetMembership{a,{1,2}}, Leaf{b=3} ]).
-		let inner = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left: inner,
-			op: BinaryOperator::Or,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(3))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let inner = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
+		let p = bin(
+			inner,
+			BinaryOperator::Or,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(3))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::Or(ch) = n else {
 			panic!("expected Or, got {n:?}");
@@ -1765,11 +1135,11 @@ mod tests {
 	#[test]
 	fn compile_or_exact_equal_not_fused() {
 		// `a == 1 OR a == 2` (ExactEqual) must NOT fuse: the set path is loose-eq.
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::ExactEqual, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::ExactEqual, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::ExactEqual, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::ExactEqual, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		match n {
 			PredNode::Or(ch) => {
@@ -1784,11 +1154,11 @@ mod tests {
 	fn compile_or_absorbs_in_arm() {
 		// `a IN [1, 2] OR a = 3` -> LeafSetMembership { a, {1, 2, 3} }.
 		let arr = Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]);
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Inside, arr),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(3))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Inside, arr),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(3))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::LeafSetMembership {
 			path,
@@ -1812,11 +1182,11 @@ mod tests {
 		// `a IN [1, 2] OR b = 3` -> the lone IN arm stays a LeafSetMembership,
 		// it must not degrade into a single-element Leaf.
 		let arr = Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]);
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Inside, arr),
-			op: BinaryOperator::Or,
-			right: sb("b", BinaryOperator::Equal, Value::Number(Number::Int(3))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Inside, arr),
+			BinaryOperator::Or,
+			sb("b", BinaryOperator::Equal, Value::Number(Number::Int(3))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::Or(ch) = n else {
 			panic!("expected Or, got {n:?}");
@@ -1832,11 +1202,11 @@ mod tests {
 	#[test]
 	fn compile_or_not_equal_not_fused() {
 		// `a != 1 OR a != 2` must NOT fuse (NotEqual is out of scope).
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::NotEqual, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("a", BinaryOperator::NotEqual, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::NotEqual, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("a", BinaryOperator::NotEqual, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		match n {
 			PredNode::Or(ch) => {
@@ -1848,71 +1218,24 @@ mod tests {
 	}
 
 	#[test]
-	fn compile_or_eq_id_field_not_fused() {
+	fn an_id_equality_has_no_shape() {
 		// `id = 1 OR id = 2`: the synthetic `id` field is derived from the KV key,
-		// which only `eval_leaf` can resolve. Fusing into a `LeafSetMembership` would
-		// route it through `eval_set_membership` (body lookup) and wrongly reject every
-		// row — so id equalities must stay an Or of Leaf nodes. (Regression test for the
-		// GraphQL `id: { in: [...] }` filter, which lowers to `id = a OR id = b`.)
-		let p = Arc::new(BinaryOp {
-			left: sb("id", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::Or,
-			right: sb("id", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let n = compile_predicate_shape(&p).expect("compile");
-		match n {
-			PredNode::Or(ch) => {
-				assert_eq!(ch.len(), 2);
-				assert!(ch.iter().all(|c| matches!(c, PredNode::Leaf { .. })));
-			}
-			other => panic!("expected Or, got {other:?}"),
-		}
-	}
-
-	#[test]
-	fn compile_array_len_reversed_swaps_operator() {
-		// `5 < array::len(tags)` reversed becomes `array::len(tags) > 5`.
-		use crate::exec::ContextLevel;
-		use crate::exec::parts::field::FieldPart;
-		use crate::exec::physical_expr::function::BuiltinFunctionExec;
-		use crate::exec::physical_expr::{Literal, Step};
-
-		let tags_idiom = Arc::new(Step::new(
-			"tags".into(),
-			None,
-			vec![Arc::new(FieldPart {
-				name: "tags".into(),
-			}) as Arc<dyn crate::exec::PhysicalExpr>],
-		)) as Arc<dyn crate::exec::PhysicalExpr>;
-		let array_len = Arc::new(BuiltinFunctionExec {
-			name: "array::len".into(),
-			arguments: vec![tags_idiom],
-			func_required_context: ContextLevel::Root,
-			plan_depth: 0,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		// Literal on the left, function on the right → reversed compile.
-		let p = Arc::new(BinaryOp {
-			left: Arc::new(Literal(Value::Number(Number::Int(5)))),
-			op: BinaryOperator::LessThan,
-			right: array_len,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		match compile_predicate_shape(&p).expect("compile") {
-			PredNode::LeafStreaming {
-				path,
-				..
-			} => {
-				assert_eq!(path, vec![PathSegment::from("tags")]);
-			}
-			other => panic!("expected LeafStreaming, got {other:?}"),
-		}
+		// which the stored bytes do not hold, so a predicate over it has no
+		// pre-decode shape at all (and is never fused into a set membership that
+		// would reject every row). Regression test for the GraphQL
+		// `id: { in: [...] }` filter, which lowers to `id = a OR id = b`.
+		let p = bin(
+			sb("id", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::Or,
+			sb("id", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
+		assert!(compile_predicate_shape(&p).is_err(), "an id predicate must not compile");
 	}
 
 	#[test]
 	fn compile_not_inverts_supported_inner() {
-		let p = Arc::new(UnaryOp {
-			op: PrefixOperator::Not,
-			expr: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p =
+			un(PrefixOperator::Not, sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))));
 		let n = compile_predicate_shape(&p).expect("compile");
 		assert!(matches!(n, PredNode::Not(_)), "expected Not, got {n:?}");
 	}
@@ -1920,15 +1243,14 @@ mod tests {
 	#[test]
 	fn repeated_root_key_keeps_both_clauses_in_fusion() {
 		// Range / multi-clause same-field: `a = 1 AND a = 2` (and shapes
-		// like `a > 3 AND a < 7`) used to collapse to last-clause-wins in
-		// `flat_clauses_from_specs`. With multi-clause `FusedFlatClause`,
+		// like `a > 3 AND a < 7`). With multi-clause `FusedFlatClause`,
 		// both clauses are preserved under a single key and evaluated
 		// against the same `value_bytes` after one map lookup.
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::And,
-			right: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
+			BinaryOperator::And,
+			sb("a", BinaryOperator::Equal, Value::Number(Number::Int(2))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::FusedFlatMapAnd {
 			clauses,
@@ -1947,11 +1269,11 @@ mod tests {
 	fn range_same_field_keeps_both_ops() {
 		// `a > 3 AND a < 7` — the bread-and-butter range query — must land
 		// on a single `FusedFlatClause` with both `>` and `<` ops.
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::MoreThan, Value::Number(Number::Int(3))),
-			op: BinaryOperator::And,
-			right: sb("a", BinaryOperator::LessThan, Value::Number(Number::Int(7))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			sb("a", BinaryOperator::MoreThan, Value::Number(Number::Int(3))),
+			BinaryOperator::And,
+			sb("a", BinaryOperator::LessThan, Value::Number(Number::Int(7))),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::FusedFlatMapAnd {
 			clauses,
@@ -1966,171 +1288,12 @@ mod tests {
 		assert_eq!(clauses[0].ops[1].op, BinaryOperator::LessThan);
 	}
 
-	#[test]
-	fn compile_nested_shared_prefix_becomes_navigate_and_fused_inner() {
-		let left_idiom = Arc::new(Step::new(
-			"outer.x".into(),
-			None,
-			vec![
-				Arc::new(FieldPart {
-					name: "outer".into(),
-				}) as Arc<dyn crate::exec::PhysicalExpr>,
-				Arc::new(FieldPart {
-					name: "x".into(),
-				}) as Arc<dyn crate::exec::PhysicalExpr>,
-			],
-		));
-		let right_idiom = Arc::new(Step::new(
-			"outer.y".into(),
-			None,
-			vec![
-				Arc::new(FieldPart {
-					name: "outer".into(),
-				}) as Arc<dyn crate::exec::PhysicalExpr>,
-				Arc::new(FieldPart {
-					name: "y".into(),
-				}) as Arc<dyn crate::exec::PhysicalExpr>,
-			],
-		));
-		let and = Arc::new(BinaryOp {
-			left: Arc::new(BinaryOp {
-				left: left_idiom,
-				op: BinaryOperator::Equal,
-				right: Arc::new(Literal(Value::Number(Number::Int(10)))),
-			}) as Arc<dyn crate::exec::PhysicalExpr>,
-			op: BinaryOperator::And,
-			right: Arc::new(BinaryOp {
-				left: right_idiom,
-				op: BinaryOperator::Equal,
-				right: Arc::new(Literal(Value::Number(Number::Int(20)))),
-			}) as Arc<dyn crate::exec::PhysicalExpr>,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let n = compile_predicate_shape(&and).expect("compile");
-		let PredNode::NavigatePrefix {
-			segment,
-			child,
-		} = n
-		else {
-			panic!("expected NavigatePrefix, got {n:?}");
-		};
-		assert_eq!(segment.as_str(), "outer");
-		assert!(matches!(
-			*child,
-			PredNode::FusedFlatMapAnd {
-				at_record_root: false,
-				..
-			}
-		));
-	}
-
-	#[test]
-	fn compile_expr_skips_unsupported_leaf_in_and() {
-		let bad = Arc::new(BinaryOp {
-			left: Arc::new(Literal(Value::Number(Number::Int(1)))),
-			op: BinaryOperator::Add,
-			right: Arc::new(Literal(Value::Number(Number::Int(2)))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let p = Arc::new(BinaryOp {
-			left: sb("a", BinaryOperator::Equal, Value::Number(Number::Int(1))),
-			op: BinaryOperator::And,
-			right: bad,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		assert!(compile_expr(&p).is_none());
-	}
-
-	/// Three-segment shared prefix (`a.b.c = 1 AND a.b.d = 2`) must compile to two nested
-	/// [`PredNode::NavigatePrefix`] nodes followed by a [`PredNode::FusedFlatMapAnd`] over the
-	/// deepest two leaves.
-	#[test]
-	fn compile_two_level_shared_prefix_nests_navigate_then_fuse() {
-		let mk_idiom = |a: &str, b: &str, c: &str| {
-			Arc::new(Step::new(
-				format!("{a}.{b}.{c}"),
-				None,
-				vec![
-					Arc::new(FieldPart {
-						name: a.into(),
-					}) as Arc<dyn crate::exec::PhysicalExpr>,
-					Arc::new(FieldPart {
-						name: b.into(),
-					}) as Arc<dyn crate::exec::PhysicalExpr>,
-					Arc::new(FieldPart {
-						name: c.into(),
-					}) as Arc<dyn crate::exec::PhysicalExpr>,
-				],
-			))
-		};
-		let left = Arc::new(BinaryOp {
-			left: mk_idiom("a", "b", "c"),
-			op: BinaryOperator::Equal,
-			right: Arc::new(Literal(Value::Number(Number::Int(1)))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let right = Arc::new(BinaryOp {
-			left: mk_idiom("a", "b", "d"),
-			op: BinaryOperator::Equal,
-			right: Arc::new(Literal(Value::Number(Number::Int(2)))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let and = Arc::new(BinaryOp {
-			left,
-			op: BinaryOperator::And,
-			right,
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
-		let n = compile_predicate_shape(&and).expect("compile");
-		let PredNode::NavigatePrefix {
-			segment: outer_seg,
-			child: outer_child,
-		} = n
-		else {
-			panic!("expected outer NavigatePrefix, got {n:?}");
-		};
-		assert_eq!(outer_seg.as_str(), "a");
-		let PredNode::NavigatePrefix {
-			segment: inner_seg,
-			child: inner_child,
-		} = *outer_child
-		else {
-			panic!("expected inner NavigatePrefix, got {outer_child:?}");
-		};
-		assert_eq!(inner_seg.as_str(), "b");
-		let PredNode::FusedFlatMapAnd {
-			at_record_root,
-			clauses,
-		} = *inner_child
-		else {
-			panic!("expected FusedFlatMapAnd, got {inner_child:?}");
-		};
-		assert!(!at_record_root);
-		assert_eq!(clauses.len(), 2);
-		assert_eq!(clauses[0].key_utf8, b"c".to_vec());
-		assert_eq!(clauses[1].key_utf8, b"d".to_vec());
-	}
-
-	fn mk_path_eq(parts: &[&str], lit: i64) -> Arc<dyn crate::exec::PhysicalExpr> {
-		let path_parts: Vec<Arc<dyn crate::exec::PhysicalExpr>> = parts
-			.iter()
-			.map(|n| {
-				Arc::new(FieldPart {
-					name: (*n).to_string(),
-				}) as Arc<dyn crate::exec::PhysicalExpr>
-			})
-			.collect();
-		let joined = parts.join(".");
-		Arc::new(BinaryOp {
-			left: Arc::new(Step::new(joined, None, path_parts)),
-			op: BinaryOperator::Equal,
-			right: Arc::new(Literal(Value::Number(Number::Int(lit)))),
-		}) as Arc<dyn crate::exec::PhysicalExpr>
-	}
-
 	/// `WHERE a.b = … AND a.b.c = …` shares a prefix but one conjunct ends strictly earlier —
 	/// fusion must not strip into empty path segments (would panic in [`cluster_multi_specs`]).
 	#[test]
 	fn compile_strict_prefix_paths_in_and_does_not_panic() {
-		let p = Arc::new(BinaryOp {
-			left: mk_path_eq(&["a", "b"], 1),
-			op: BinaryOperator::And,
-			right: mk_path_eq(&["a", "b", "c"], 2),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p =
+			bin(mk_path_eq(&["a", "b"], 1), BinaryOperator::And, mk_path_eq(&["a", "b", "c"], 2));
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::NavigatePrefix {
 			segment,
@@ -2144,11 +1307,11 @@ mod tests {
 
 	#[test]
 	fn compile_three_level_strict_prefix_paths_in_and_does_not_panic() {
-		let p = Arc::new(BinaryOp {
-			left: mk_path_eq(&["a", "b", "c"], 1),
-			op: BinaryOperator::And,
-			right: mk_path_eq(&["a", "b", "c", "d"], 2),
-		}) as Arc<dyn crate::exec::PhysicalExpr>;
+		let p = bin(
+			mk_path_eq(&["a", "b", "c"], 1),
+			BinaryOperator::And,
+			mk_path_eq(&["a", "b", "c", "d"], 2),
+		);
 		let n = compile_predicate_shape(&p).expect("compile");
 		let PredNode::NavigatePrefix {
 			segment,

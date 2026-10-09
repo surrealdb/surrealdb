@@ -1,22 +1,19 @@
 //! EXPLAIN and EXPLAIN ANALYZE operators.
 //!
 //! - [`ExplainPlan`] formats a query plan without executing it (read-only).
-//! - [`AnalyzePlan`] executes the plan, drains it to completion, then formats the plan tree
-//!   together with collected [`OperatorMetrics`].
+//! - EXPLAIN ANALYZE runs as the VM program: `VmAnalysis` (`exec/vm/explain.rs`) drains the
+//!   program's output to completion and then renders the display tree through
+//!   [`ExplainPlan::render_analyzed`] together with the collected [`OperatorMetrics`].
 
 use std::fmt::Write;
 use std::sync::Arc;
 
-use common::future::stream::{self, Yielder};
-use futures::StreamExt;
-use surrealdb_types::ToSql;
-
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
-	ValueBatch, ValueBatchStream, buffer_stream,
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, OutputShape, ValueBatch,
+	ValueBatchStream,
 };
-use crate::expr::{ControlFlow, ExplainFormat};
+use crate::expr::ExplainFormat;
 use crate::val::{Array, Object, Value};
 
 /// Number of spaces used per indentation level in text plan output.
@@ -72,10 +69,6 @@ impl ExecOperator for ExplainPlan {
 		AccessMode::ReadOnly
 	}
 
-	fn cardinality_hint(&self) -> CardinalityHint {
-		CardinalityHint::AtMostOne
-	}
-
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let output = Self::render(self.plan.as_ref(), self.format);
 		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(vec![output]))))))
@@ -83,130 +76,6 @@ impl ExecOperator for ExplainPlan {
 
 	fn output_shape(&self) -> OutputShape {
 		// EXPLAIN returns a single scalar value (text or JSON)
-		OutputShape::Scalar
-	}
-}
-
-// =========================================================================
-// EXPLAIN ANALYZE
-// =========================================================================
-
-/// EXPLAIN ANALYZE operator - executes the plan, collects metrics, then
-/// formats the plan tree with runtime statistics.
-///
-/// Unlike [`ExplainPlan`], this operator actually executes the inner plan,
-/// draining all batches to completion so that every operator's metrics are
-/// populated. It then walks the operator tree exactly like `ExplainPlan`
-/// but includes elapsed time, row counts, and batch counts.
-#[derive(Debug)]
-pub struct AnalyzePlan {
-	/// The inner statement's planned content
-	pub plan: Arc<dyn ExecOperator>,
-	/// The output format
-	pub format: ExplainFormat,
-	/// When true, elapsed durations are omitted from the output, making
-	/// it deterministic for test assertions.
-	pub redact_volatile_explain_attrs: bool,
-}
-impl ExecOperator for AnalyzePlan {
-	fn name(&self) -> &'static str {
-		"ExplainAnalyze"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		match self.format {
-			ExplainFormat::Text => vec![("format".to_string(), "TEXT".to_string())],
-			ExplainFormat::Json => vec![("format".to_string(), "JSON".to_string())],
-		}
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// We actually execute the inner plan, so inherit its requirements
-		self.plan.required_context()
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// We execute the inner plan, so inherit its access mode
-		self.plan.access_mode()
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		CardinalityHint::AtMostOne
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.plan]
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		// Enable metrics on all operators before execution so that
-		// monitor_stream wraps each stream with timing/counting.
-		self.plan.enable_metrics();
-
-		// Execute the inner plan to get its stream
-		let mut inner_stream = buffer_stream(
-			self.plan.execute(ctx)?,
-			self.access_mode().combine(self.plan.access_mode()),
-			self.plan.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-		let plan = Arc::clone(&self.plan);
-		let format = self.format;
-		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;
-
-		// Create a stream that first drains the inner plan, then formats output
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			// Drain all batches from the inner plan so metrics are populated
-			let mut total_rows: u64 = 0;
-			while let Some(batch_result) = inner_stream.next().await {
-				match batch_result {
-					Ok(batch) => {
-						total_rows += batch.len() as u64;
-					}
-					// Flow control signals mean the inner plan stopped early.
-					// Stop draining and format the metrics we've collected so far.
-					Err(ControlFlow::Break | ControlFlow::Return(_)) => break,
-					// Continue means skip this iteration, keep draining.
-					Err(ControlFlow::Continue) => continue,
-					// Only actual errors should propagate.
-					Err(e @ ControlFlow::Err(_)) => Err(e)?,
-				}
-			}
-
-			// Now format the plan with metrics
-			let output = match format {
-				ExplainFormat::Text => {
-					let mut plan_text = String::new();
-					format_analyze_plan(
-						plan.as_ref(),
-						&mut plan_text,
-						"",
-						redact_volatile_explain_attrs,
-						Redaction::default(),
-					);
-					let _ = writeln!(plan_text);
-					let _ = write!(plan_text, "Total rows: {}", total_rows);
-					Value::String(plan_text.into())
-				}
-				ExplainFormat::Json => {
-					let mut plan_json = format_analyze_plan_json(
-						plan.as_ref(),
-						redact_volatile_explain_attrs,
-						Redaction::default(),
-					);
-					plan_json.insert("total_rows", Value::from(total_rows as i64));
-					Value::Object(plan_json)
-				}
-			};
-
-			yielder.emit(ValueBatch::new(vec![output])).await;
-			Ok(())
-		});
-
-		Ok(Box::pin(stream))
-	}
-
-	fn output_shape(&self) -> OutputShape {
 		OutputShape::Scalar
 	}
 }
@@ -306,23 +175,6 @@ fn format_execution_plan(
 
 	let _ = writeln!(output);
 
-	// Format expressions that contain embedded operators
-	let expressions = plan.expressions();
-	for (role, expr) in &expressions {
-		let embedded = expr.embedded_operators();
-		if !embedded.is_empty() {
-			for (embed_role, embed_plan) in &embedded {
-				let _ = write!(output, "{}  {}.{}: ", prefix, role, embed_role);
-				format_execution_plan(
-					embed_plan.as_ref(),
-					output,
-					&format!("{}  ", prefix),
-					beneath,
-				);
-			}
-		}
-	}
-
 	// Format children with indentation
 	let children = plan.explain_children();
 	if !children.is_empty() {
@@ -361,41 +213,6 @@ fn format_execution_plan_json(plan: &dyn ExecOperator, redaction: Redaction) -> 
 			attrs_obj.insert(key, Value::String(value.into()));
 		}
 		obj.insert("attributes", Value::Object(attrs_obj));
-	}
-
-	let expressions = plan.expressions();
-	if !expressions.is_empty() {
-		let exprs_arr: Vec<Value> = expressions
-			.iter()
-			.map(|(role, expr)| {
-				let mut expr_obj = Object::default();
-				expr_obj.insert("role", Value::String((*role).into()));
-				expr_obj.insert("sql", Value::String(expr.to_sql().into()));
-
-				let embedded = expr.embedded_operators();
-				if !embedded.is_empty() {
-					let embedded_arr: Vec<Value> = embedded
-						.iter()
-						.map(|(embed_role, embed_plan)| {
-							let mut e = Object::default();
-							e.insert("role", Value::String((*embed_role).into()));
-							e.insert(
-								"plan",
-								Value::Object(format_execution_plan_json(
-									embed_plan.as_ref(),
-									beneath,
-								)),
-							);
-							Value::Object(e)
-						})
-						.collect();
-					expr_obj.insert("embedded_operators", Value::Array(Array::from(embedded_arr)));
-				}
-
-				Value::Object(expr_obj)
-			})
-			.collect();
-		obj.insert("expressions", Value::Array(Array::from(exprs_arr)));
 	}
 
 	let children = plan.explain_children();
@@ -694,24 +511,6 @@ fn format_analyze_plan_by(
 
 	let _ = writeln!(output);
 
-	// Format expressions with embedded operators (with metrics)
-	let expressions = plan.expressions();
-	for (role, expr) in &expressions {
-		let embedded = expr.embedded_operators();
-		if !embedded.is_empty() {
-			for (embed_role, embed_plan) in &embedded {
-				let _ = write!(output, "{}  {}.{}: ", prefix, role, embed_role);
-				format_analyze_plan_by(
-					embed_plan.as_ref(),
-					output,
-					&format!("{}  ", prefix),
-					beneath,
-					write_metrics,
-				);
-			}
-		}
-	}
-
 	// Format children with indentation
 	let children = plan.explain_children();
 	if !children.is_empty() {
@@ -759,42 +558,6 @@ fn format_analyze_plan_json(
 		obj.insert("metrics", Value::Object(metrics_json(metrics, redact_volatile_explain_attrs)));
 	}
 
-	let expressions = plan.expressions();
-	if !expressions.is_empty() {
-		let exprs_arr: Vec<Value> = expressions
-			.iter()
-			.map(|(role, expr)| {
-				let mut expr_obj = Object::default();
-				expr_obj.insert("role", Value::String((*role).into()));
-				expr_obj.insert("sql", Value::String(expr.to_sql().into()));
-
-				let embedded = expr.embedded_operators();
-				if !embedded.is_empty() {
-					let embedded_arr: Vec<Value> = embedded
-						.iter()
-						.map(|(embed_role, embed_plan)| {
-							let mut e = Object::default();
-							e.insert("role", Value::String((*embed_role).into()));
-							e.insert(
-								"plan",
-								Value::Object(format_analyze_plan_json(
-									embed_plan.as_ref(),
-									redact_volatile_explain_attrs,
-									beneath,
-								)),
-							);
-							Value::Object(e)
-						})
-						.collect();
-					expr_obj.insert("embedded_operators", Value::Array(Array::from(embedded_arr)));
-				}
-
-				Value::Object(expr_obj)
-			})
-			.collect();
-		obj.insert("expressions", Value::Array(Array::from(exprs_arr)));
-	}
-
 	// Add children if any
 	let children = plan.explain_children();
 	if !children.is_empty() {
@@ -812,4 +575,39 @@ fn format_analyze_plan_json(
 	}
 
 	obj
+}
+
+impl ExplainPlan {
+	/// Render a plan's completed counters with the same permission redaction as EXPLAIN.
+	pub(crate) fn render_analyzed(
+		plan: &dyn ExecOperator,
+		format: ExplainFormat,
+		redact_volatile_explain_attrs: bool,
+		total_rows: u64,
+	) -> Value {
+		match format {
+			ExplainFormat::Text => {
+				let mut plan_text = String::new();
+				format_analyze_plan(
+					plan,
+					&mut plan_text,
+					"",
+					redact_volatile_explain_attrs,
+					Redaction::default(),
+				);
+				let _ = writeln!(plan_text);
+				let _ = write!(plan_text, "Total rows: {}", total_rows);
+				Value::String(plan_text.into())
+			}
+			ExplainFormat::Json => {
+				let mut plan_json = format_analyze_plan_json(
+					plan,
+					redact_volatile_explain_attrs,
+					Redaction::default(),
+				);
+				plan_json.insert("total_rows", Value::from(total_rows as i64));
+				Value::Object(plan_json)
+			}
+		}
+	}
 }

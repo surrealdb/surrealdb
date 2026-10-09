@@ -10,8 +10,9 @@
 //! for a single key of a scalar kind.
 //!
 //! Two rows belong to the same group iff their keys compare equal under
-//! `Value: Ord`, so the key index is ordered (the operator tree's `GroupMap`
-//! says why a hash does not serve), and the groups are finished in key order. A single key is
+//! `Value: Ord`, so the key index is ordered (`GroupMap`, in
+//! `operators/aggregate.rs`, says why a hash does not serve), and the groups
+//! are finished in key order. A single key is
 //! indexed by its value, a compound key by the vector of its values; both order as the
 //! vector of the key's values does.
 

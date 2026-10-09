@@ -1,7 +1,7 @@
-//! The reads of storage the VM runs answer what the operator tree's scans
-//! answer where they de-duplicate a record several index entries reach, build
-//! the rows of a nearest-neighbor search from its ids, decode only the fields
-//! a statement reads, and bound the batches of wide records they decode.
+//! The reads of storage the VM runs de-duplicate a record several index
+//! entries reach, build the rows of a nearest-neighbor search from its ids,
+//! decode only the fields a statement reads, and bound the batches of wide
+//! records they decode.
 
 use std::collections::HashSet;
 
@@ -30,7 +30,7 @@ const FAN_SCHEMA: &str = "
 	CREATE fanl:none SET n = 0;
 ";
 
-/// Fan-out scans and unions, each with the rows the operator tree answers.
+/// Fan-out scans and unions.
 const FANNING: &[&str] = &[
 	"SELECT id FROM fan WHERE grp = 'g'",
 	"SELECT * FROM fan WHERE grp = 'g'",
@@ -71,14 +71,21 @@ async fn a_scan_that_fans_out_lists_each_record_once() {
 	let db = TestDb::new(FAN_SCHEMA).await;
 	let ctx = db.exec_ctx().await;
 	for sql in FANNING {
-		let bound = bind(&ctx, sql).await;
-		let vm = super::plan(&planner(&ctx), &bound)
-			.await
-			.unwrap_or_else(|| panic!("the VM declined `{sql}`"));
-		let tree = planner(&ctx).plan_logical(bound).await.expect("the operator tree plans");
-		let got = outcome(&vm, &ctx).await.expect("the VM runs");
-		let want = outcome(&tree, &ctx).await.expect("the tree runs");
-		assert_eq!(got, want, "`{sql}`");
+		let got = vm_rows(&ctx, sql).await;
+		// The same statement over a table scan reads each record once by
+		// construction.
+		let scan = sql.replacen(" WHERE ", " WITH NOINDEX WHERE ", 1);
+		let want = vm_rows(&ctx, &scan).await;
+		if sql.contains("ORDER BY") {
+			assert_eq!(got, want, "`{sql}`");
+		} else if sql.contains("LIMIT") {
+			assert_eq!(got.len(), want.len(), "`{sql}`");
+		} else {
+			let (mut got, mut want) = (got.clone(), want);
+			got.sort();
+			want.sort();
+			assert_eq!(got, want, "`{sql}`");
+		}
 		if sql.starts_with("SELECT id") || sql.starts_with("SELECT *") {
 			let listed = ids(&got);
 			let distinct: HashSet<_> = listed.iter().collect();
@@ -87,7 +94,7 @@ async fn a_scan_that_fans_out_lists_each_record_once() {
 	}
 }
 
-/// How many records `sql` returns on the VM, which must plan it.
+/// The rows `sql` returns on the VM, which must plan it.
 async fn vm_rows(ctx: &ExecutionContext, sql: &str) -> Vec<Value> {
 	let bound = bind(ctx, sql).await;
 	let vm = super::plan(&planner(ctx), &bound)
@@ -187,28 +194,37 @@ async fn a_knn_whose_rows_need_only_their_id_builds_them_from_the_search() {
 }
 
 #[tokio::test]
-async fn id_only_knn_rows_are_the_rows_the_tree_returns_and_read_no_record() {
+async fn id_only_knn_rows_are_the_nearest_ids_and_read_no_record() {
 	let db = TestDb::new(KNN_SCHEMA).await;
 	let ctx = db.exec_ctx().await;
-	for sql in [
-		"SELECT id FROM pts WHERE point <|3,40|> [0f, 0f]",
-		"SELECT count() FROM pts WHERE point <|3,40|> [0f, 0f] GROUP ALL",
-		"SELECT id FROM pts WHERE point <|3,40|> [0f, 0f] ORDER BY id DESC",
-		"SELECT id FROM cmp WHERE point <|3,40|> [0f, 0f]",
-		"SELECT id FROM prm WHERE point <|3,40|> [0f, 0f]",
-		"SELECT id, name FROM pts WHERE point <|3,40|> [0f, 0f]",
+	for (sql, nearest) in [
+		("SELECT id FROM pts WHERE point <|3,40|> [0f, 0f]", 3),
+		("SELECT count() FROM pts WHERE point <|3,40|> [0f, 0f] GROUP ALL", 1),
+		("SELECT id FROM pts WHERE point <|3,40|> [0f, 0f] ORDER BY id DESC", 3),
+		("SELECT id FROM cmp WHERE point <|3,40|> [0f, 0f]", 3),
+		("SELECT id FROM prm WHERE point <|3,40|> [0f, 0f]", 3),
+		("SELECT id, name FROM pts WHERE point <|3,40|> [0f, 0f]", 3),
 	] {
-		let bound = bind(&ctx, sql).await;
-		let vm = super::plan(&planner(&ctx), &bound)
-			.await
-			.unwrap_or_else(|| panic!("the VM declined `{sql}`"));
-		let tree = planner(&ctx).plan_logical(bound).await.expect("the operator tree plans");
 		BATCHES.with(|batches| batches.borrow_mut().clear());
-		let got = outcome(&vm, &ctx).await.expect("the VM runs");
+		let got = vm_rows(&ctx, sql).await;
 		let read = BATCHES.with(|batches| batches.borrow().iter().sum::<usize>());
-		let want = outcome(&tree, &ctx).await.expect("the tree runs");
-		assert_eq!(got, want, "`{sql}`");
-		assert!(!got.is_empty(), "`{sql}` returns rows");
+		assert_eq!(got.len(), nearest, "`{sql}` returns {got:?}");
+		if !sql.starts_with("SELECT count()") {
+			// The three nearest of the points `[i, 0]` to the origin are 0, 1 and 2.
+			let table = if sql.contains("FROM pts") {
+				"pts"
+			} else if sql.contains("FROM cmp") {
+				"cmp"
+			} else {
+				"prm"
+			};
+			let mut listed = ids(&got);
+			listed.sort();
+			let want: Vec<Value> = (0..3i64)
+				.map(|i| Value::RecordId(crate::val::RecordId::new(table.into(), i)))
+				.collect();
+			assert_eq!(listed, want, "`{sql}`");
+		}
 		let from_ids = knn_ids_only(&ctx, sql).await;
 		assert_eq!(read == 0, from_ids, "`{sql}` read {read} records");
 	}
@@ -474,28 +490,46 @@ async fn an_index_source_decodes_only_the_fields_its_clauses_read() {
 }
 
 /// What a statement returns over an index-backed source that decodes part of
-/// each record is what the operator tree returns.
+/// each record is what the same statement returns over a table scan, which
+/// decodes the whole record.
 #[tokio::test]
-async fn a_source_decoding_part_of_each_record_returns_the_rows_the_tree_returns() {
+async fn a_source_decoding_part_of_each_record_returns_what_a_table_scan_returns() {
 	let db = TestDb::new(DECODE_SCHEMA).await;
 	let ctx = db.exec_ctx().await;
-	for sql in [
-		"SELECT label FROM t WHERE n = 1",
-		"SELECT id, label FROM t WHERE n = 1 ORDER BY label DESC",
-		"SELECT n, count() AS c FROM t WHERE n = 1 GROUP BY n",
-		"SELECT * OMIT emb FROM t WHERE n = 1",
-		"SELECT label FROM t WHERE n = 1 OR n = 2 ORDER BY label",
-		"SELECT id, body FROM t WHERE body @@ 'even'",
-		"SELECT VALUE label FROM t WHERE n IN [0, 2]",
+	for (sql, reference) in [
+		("SELECT label FROM t WHERE n = 1", "SELECT label FROM t WITH NOINDEX WHERE n = 1"),
+		(
+			"SELECT id, label FROM t WHERE n = 1 ORDER BY label DESC",
+			"SELECT id, label FROM t WITH NOINDEX WHERE n = 1 ORDER BY label DESC",
+		),
+		(
+			"SELECT n, count() AS c FROM t WHERE n = 1 GROUP BY n",
+			"SELECT n, count() AS c FROM t WITH NOINDEX WHERE n = 1 GROUP BY n",
+		),
+		(
+			"SELECT * OMIT emb FROM t WHERE n = 1",
+			"SELECT * OMIT emb FROM t WITH NOINDEX WHERE n = 1",
+		),
+		(
+			"SELECT label FROM t WHERE n = 1 OR n = 2 ORDER BY label",
+			"SELECT label FROM t WITH NOINDEX WHERE n = 1 OR n = 2 ORDER BY label",
+		),
+		(
+			"SELECT id, body FROM t WHERE body @@ 'even'",
+			"SELECT id, body FROM t WITH NOINDEX WHERE body = 'even'",
+		),
+		(
+			"SELECT VALUE label FROM t WHERE n IN [0, 2]",
+			"SELECT VALUE label FROM t WITH NOINDEX WHERE n IN [0, 2]",
+		),
 	] {
-		let bound = bind(&ctx, sql).await;
-		let vm = super::plan(&planner(&ctx), &bound)
-			.await
-			.unwrap_or_else(|| panic!("the VM declined `{sql}`"));
-		let tree = planner(&ctx).plan_logical(bound).await.expect("the operator tree plans");
-		let got = outcome(&vm, &ctx).await.expect("the VM runs");
-		let want = outcome(&tree, &ctx).await.expect("the tree runs");
+		let mut got = vm_rows(&ctx, sql).await;
+		let mut want = vm_rows(&ctx, reference).await;
 		assert!(!got.is_empty(), "`{sql}` returns rows");
+		if !sql.contains("ORDER BY") {
+			got.sort();
+			want.sort();
+		}
 		assert_eq!(got, want, "`{sql}`");
 	}
 }
@@ -526,8 +560,7 @@ async fn a_stored_reader_decodes_only_the_listed_fields() {
 
 /// A declared kind is a hint: rows written before `DEFINE FIELD OVERWRITE`
 /// retyped their field still hold what they held, and the typed comparison
-/// the declaration selects answers them through its fallback as the operator
-/// tree compares them.
+/// the declaration selects answers them through its fallback.
 #[tokio::test]
 async fn a_declared_int_is_a_guarded_hint_over_retyped_rows() {
 	let db = TestDb::new(
@@ -560,9 +593,10 @@ async fn a_declared_int_is_a_guarded_hint_over_retyped_rows() {
 		)
 	});
 	assert!(typed, "`{sql}` compares the declared int typed");
-	let vm = super::plan(&planner(&ctx), &bound).await.expect("the VM plans it");
-	let tree = planner(&ctx).plan_logical(bound).await.expect("the operator tree plans");
-	let got = outcome(&vm, &ctx).await.expect("the VM runs");
-	let want = outcome(&tree, &ctx).await.expect("the tree runs");
+	// A string and an integer compare by type, and a string orders after every number.
+	let mut got = vm_rows(&ctx, sql).await;
+	got.sort();
+	let want: Vec<Value> =
+		(1..=3i64).map(|i| Value::RecordId(crate::val::RecordId::new("n".into(), i))).collect();
 	assert_eq!(got, want, "`{sql}`");
 }

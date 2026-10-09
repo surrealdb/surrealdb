@@ -2,7 +2,7 @@
 //! models and module exports.
 //!
 //! A call is [`Instr::ExternalEnter`], its arguments, then
-//! [`Instr::ExternalCall`]: the operator tree's call checks what it may call,
+//! [`Instr::ExternalCall`]: a call checks what it may call,
 //! reads a definition and judges its permission before it evaluates its
 //! arguments, and the two instructions keep that order. A model or module
 //! definition's `PERMISSIONS` predicate is lowered here, from the definition
@@ -145,7 +145,7 @@ impl Lowering<'_, '_> {
 
 	/// The `PERMISSIONS` predicate of the model or module `callee` names, as
 	/// the catalog holds it when the program is planned, lowered as a host
-	/// pipeline in the frame the operator tree's guard is compiled in: the
+	/// pipeline in the frame the call's guard is compiled in: the
 	/// caller's principal, one re-entry deeper. `None` for a script, for a
 	/// build without the callee's runtime, for a clause that is no predicate,
 	/// for a definition the catalog does not hold, and where the call's frame

@@ -111,17 +111,18 @@ pub(crate) enum UnitObject {
 		captured: Vec<String>,
 		depth: u32,
 	},
-	/// An expression reached through the operator tree's expressions,
-	/// compiled at re-entry depth `depth`, with the names `shadowed` read when
-	/// it runs ([`super::serve::expr`]).
+	/// An expression reached at run time through one the program did not
+	/// compile, compiled at re-entry depth `depth`, with the names `shadowed`
+	/// read when it runs ([`super::serve::expr`]).
 	Expr {
 		expr: Arc<crate::expr::logical::LogicalExpr>,
 		depth: u32,
 		shadowed: Vec<String>,
 	},
-	/// A statement reached through the operator tree's expressions — a
-	/// function body, an API handler — planned at re-entry depth `depth`, with
-	/// the names `shadowed` read when it runs ([`super::serve::statement`]).
+	/// A statement reached at run time through an expression the program did
+	/// not compile — a function body, an API handler — planned at re-entry
+	/// depth `depth`, with the names `shadowed` read when it runs
+	/// ([`super::serve::statement`]).
 	Statement {
 		op: Arc<crate::expr::logical::LogicalOp>,
 		depth: u32,

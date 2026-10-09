@@ -798,19 +798,6 @@ pub(super) async fn pairings(
 				emit(&mut out, emitted, max_output_rows, null_filled(&row, &step.null_template))?;
 			}
 		}
-		JoinType::Semi | JoinType::Anti => {
-			let mut matched = false;
-			for build_row in matches {
-				super::fuel::tick(residual.ctx, 1).await?;
-				if residual.truthy(&merge_rows(build_row, &row)).await? {
-					matched = true;
-					break;
-				}
-			}
-			if matched == (step.join_type == JoinType::Semi) {
-				emit(&mut out, emitted, max_output_rows, row)?;
-			}
-		}
 	}
 	Ok(out)
 }
@@ -922,7 +909,7 @@ async fn join_row(
 				}
 			}
 		}
-		JoinType::Inner | JoinType::Left | JoinType::Semi | JoinType::Anti => {
+		JoinType::Inner | JoinType::Left => {
 			let key = join_key(&row, &step.keys);
 			let matches: Vec<&Value> = match &key {
 				Some(key) => table.matches(key).collect(),

@@ -19,12 +19,8 @@
 use surrealdb_strand::TableName;
 
 use super::super::fold::{GroupClause, PipelineClauses};
-#[cfg(test)]
-use super::clause_is_absent;
 use crate::exec::operators::CountOutput;
 use crate::expr::Function;
-#[cfg(test)]
-use crate::expr::logical::LogicalRecordIdLit;
 use crate::expr::logical::{
 	LogicalExpr, LogicalField, LogicalFields, LogicalOp, LogicalPermissionFilter,
 	LogicalRecordIdKey, LogicalSource, OutputPath, SourceRef,
@@ -262,85 +258,6 @@ pub(crate) fn permission_filtered_source(node: &LogicalOp) -> Option<&LogicalOp>
 	}
 }
 
-#[cfg(test)]
-/// `SELECT <fields> FROM <record id>` — a plan of
-///
-/// ```text
-/// Project { fields, omit } ← [Limit] ← Source { RecordId }
-/// ```
-///
-/// One key read answers the statement, so the returned record id is all the
-/// caller needs from the source; the projection and paging clauses it keeps
-/// compiling itself.
-pub(crate) struct SingleRecord<'a> {
-	/// The record, or key range, to read.
-	pub(crate) record: &'a LogicalRecordIdLit,
-	/// Whether the read locks the record.
-	pub(crate) for_update: bool,
-}
-
-#[cfg(test)]
-/// Match [`SingleRecord`], or `None` when the plan carries an operator a
-/// single key read would skip.
-///
-/// A `VERSION` declines the match. This path plans its projections on the
-/// enclosing planner, which carries no version, so a path rewrite that
-/// depends on one would silently miss it — notably `try_fast_path_pair`,
-/// which declines the `TargetVertex` collapse for a versioned read rather
-/// than bypass historical edge SELECT permissions. A versioned read takes the
-/// full pipeline, where projections are planned on a version-aware planner.
-pub(crate) fn match_single_record<'a>(
-	sources: &'a [LogicalOp],
-	clauses: &PipelineClauses,
-) -> Option<SingleRecord<'a>> {
-	let PipelineClauses {
-		cond,
-		split,
-		group,
-		order,
-		fetch,
-		version,
-		// Compiled by the caller: the projection this shape keeps, and the
-		// paging it applies over the single row.
-		project: _,
-		limit: _,
-		start: _,
-		// The tail the caller wraps around whatever this compiles to.
-		only: _,
-		timeout: _,
-		// `ORDER BY` is absent below, so there is no sort to spill.
-		tempfiles: _,
-	} = clauses;
-
-	// Any of these is an operator between the projection and the source that
-	// a single key read would skip.
-	if cond.is_some()
-		|| split.is_some()
-		|| group.is_some()
-		|| order.is_some()
-		|| !fetch.is_empty()
-		|| !clause_is_absent(version.as_ref())
-	{
-		return None;
-	}
-	// `WITH` names an index, and there is no index scan here to constrain.
-	let [
-		LogicalOp::Source(LogicalSource {
-			source: SourceRef::RecordId(record),
-			with: None,
-			for_update,
-			..
-		}),
-	] = sources
-	else {
-		return None;
-	};
-	Some(SingleRecord {
-		record,
-		for_update: *for_update,
-	})
-}
-
 /// Whether every field of a projection is a bare `count()` call, and there is
 /// at least one.
 fn is_count_all_only(fields: &LogicalFields) -> bool {
@@ -414,6 +331,7 @@ fn count_output(fields: &LogicalFields) -> Option<CountOutput> {
 #[cfg(test)]
 mod tests {
 	use super::super::super::fold::{PipelineStop, collect_pipeline};
+	use super::super::clause_is_absent;
 	use super::*;
 	use crate::expr::logical::{
 		EvalFrame, LogicalLiteral, LogicalProject, LogicalUnionAll, lower_select,
@@ -635,48 +553,6 @@ mod tests {
 			shape_of("SELECT count() FROM t WITH NOINDEX WHERE a > 1 GROUP ALL");
 		let matched = match_indexed_count_all(&sources, &clauses).expect("matches");
 		assert!(matches!(matched.with, Some(With::NoIndex)));
-	}
-
-	#[test]
-	fn single_record_matches_a_literal_record_id() {
-		let (sources, clauses) = shape_of("SELECT name FROM person:1");
-		let matched = match_single_record(&sources, &clauses).expect("matches");
-		assert_eq!(matched.record.table.as_str(), "person");
-		assert!(!matched.for_update);
-	}
-
-	#[test]
-	fn single_record_keeps_the_clauses_the_caller_compiles() {
-		for sql in [
-			"SELECT name FROM ONLY person:1",
-			"SELECT * OMIT name FROM person:1",
-			"SELECT * FROM person:1 LIMIT 1 START 0",
-			"SELECT * FROM person:1 TIMEOUT 1s",
-		] {
-			let (sources, clauses) = shape_of(sql);
-			assert!(match_single_record(&sources, &clauses).is_some(), "`{sql}` should match");
-		}
-		let (sources, clauses) = shape_of("SELECT * FROM person:1 FOR UPDATE");
-		let matched = match_single_record(&sources, &clauses).expect("matches");
-		assert!(matched.for_update);
-	}
-
-	#[test]
-	fn single_record_declines_an_operator_it_would_skip() {
-		for sql in [
-			"SELECT * FROM person:1 WHERE age > 1",
-			"SELECT * FROM person:1 SPLIT tags",
-			"SELECT * FROM person:1 GROUP ALL",
-			"SELECT * FROM person:1 ORDER BY name",
-			"SELECT * FROM person:1 FETCH friend",
-			"SELECT * FROM person:1 WITH NOINDEX",
-			"SELECT * FROM person:1 VERSION d'2024-01-01T00:00:00Z'",
-			"SELECT * FROM person:1, person:2",
-			"SELECT * FROM person",
-		] {
-			let (sources, clauses) = shape_of(sql);
-			assert!(match_single_record(&sources, &clauses).is_none(), "`{sql}` should not match");
-		}
 	}
 
 	#[test]

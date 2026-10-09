@@ -1,7 +1,7 @@
 //! Lowering graph lookups into [`Instr::Lookup`] and the hops it takes.
 //!
-//! A run of consecutive lookups is one lookup, its hops grouped as the
-//! operator tree's planner groups them: a `->edge->vertex` pair that planner
+//! A run of consecutive lookups is one lookup, its hops grouped by the
+//! planner: a `->edge->vertex` pair that planner
 //! reads in one scan from the vertex each adjacency key names
 //! (`Planner::try_fast_path_pair`) is one hop through the edge, and every
 //! other lookup is a hop of its own. Each hop's records are read with the
@@ -351,8 +351,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// `call`, a `count(->edge)` of builtin `name` the planner answers from
-	/// the adjacency's cardinality, as the operator tree's degree expression
-	/// answers it: [`Instr::Degree`] over the current value, and where the
+	/// the adjacency's cardinality: [`Instr::Degree`] over the current value, and where the
 	/// storage leaves the count to the call, the call itself.
 	pub(super) async fn degree_count(
 		&mut self,
@@ -390,8 +389,8 @@ impl Lowering<'_, '_> {
 	}
 
 	/// Whether a broadcast of `body` over `base` is lowered to instructions:
-	/// both are, and the body does not read the row where the operator tree
-	/// reads it rather than the element ([`Self::reads_frame_of_element`]). A
+	/// both are, and the body does not read the row in place of the element
+	/// ([`Self::reads_frame_of_element`]). A
 	/// destructure's aliased bodies read the value destructured, which is the
 	/// element's.
 	pub(super) fn is_native_broadcast(&self, base: &LogicalExpr, body: &LogicalExpr) -> bool {
@@ -399,7 +398,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// Whether `body`, evaluated with an element as its current value, reads
-	/// the row where the operator tree reads it rather than the element: in
+	/// the row in place of the element: in
 	/// an index or a method's argument or a statement where the document root
 	/// is not known to be the row, through a projection function, an
 	/// invocation, or a closure that reads more than its parameters.
@@ -433,8 +432,7 @@ impl Lowering<'_, '_> {
 		})
 	}
 
-	/// A path's broadcast of `body` over `base`, as the operator tree's
-	/// `Broadcast` applies it: over an array, `body` once per element with the
+	/// A path's broadcast of `body` over `base`: over an array, `body` once per element with the
 	/// element as the current value, the results flattened one level when
 	/// `flatten` is set; over anything else, `body` once with the value itself
 	/// as the current value. A mapped body whose first step is `.*` takes
@@ -805,7 +803,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// The bounds of key range `range`, each a host scalar the hop evaluates
-	/// with no row, as the operator tree's scan evaluates a range's bounds.
+	/// with no row.
 	async fn key_bounds(
 		&mut self,
 		range: &crate::expr::logical::LogicalRecordIdKeyRange,
@@ -828,7 +826,7 @@ impl Lowering<'_, '_> {
 		};
 		let expr = crate::exec::planner::util::key_lit_to_expr(key).map_err(|e| {
 			match super::super::plan::Refusal::of(&e) {
-				// The operator tree refuses the bound as it plans the lookup.
+				// The planner refuses the bound as it plans the lookup.
 				Some(refusal) => NotCovered::refused(refusal),
 				None => NotCovered::internal(format!("a range bound with no expression: {e}")),
 			}
@@ -875,7 +873,7 @@ impl Lowering<'_, '_> {
 			(Some(cond), LookupKind::Graph(dir)) => {
 				// Compiled only to ask the planner whether it pushes the
 				// `WHERE` into the scan, as it compiles it to ask.
-				let Ok(compiled) = self.planner.physical_expr(cond.clone()).await else {
+				let Ok(compiled) = self.planner.scalar_metadata(cond.clone()).await else {
 					return Ok(None);
 				};
 				let pushed = self.planner.graph_predicate_payload_spec_from(
@@ -1350,7 +1348,7 @@ fn key_checks(cond: &LogicalExpr) -> Option<Vec<KeyCheck>> {
 	Some(checks)
 }
 
-/// Whether `predicate` reads `$parent`, which the operator tree's lookup binds
+/// Whether `predicate` reads `$parent`, which a lookup binds
 /// to the row it is taken over where a table's permission is judged.
 fn reads_parent(predicate: &LogicalExpr) -> bool {
 	predicate.any(|node| matches!(node, LogicalExpr::Param(param) if param.as_str() == "parent"))

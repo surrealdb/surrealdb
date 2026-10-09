@@ -27,8 +27,8 @@ use std::sync::Arc;
 
 use super::closure::{depth_of, names_of};
 use crate::exec::catalog_deps::CatalogDeps;
-use crate::exec::physical_expr::function::CompiledClosure;
 use crate::exec::planner::Planner;
+use crate::exec::vm::calls::CompiledClosure;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 
@@ -89,9 +89,8 @@ async fn failure_of(
 	closure: &crate::expr::logical::LogicalClosure,
 	refused: super::NotCovered,
 ) -> surrealdb_types::Error {
-	crate::exec::compiles::note_tree_body();
 	let args = closure.args.iter().map(|(arg, _)| arg.as_str().to_owned());
-	let compiled = planner.shadowing(args).physical_expr(closure.body.clone()).await;
+	let compiled = planner.shadowing(args).scalar_metadata(closure.body.clone()).await;
 	let error = match compiled {
 		Err(e) => anyhow::Error::new(e),
 		Ok(_) => anyhow::Error::new(super::declined(refused)),
@@ -374,9 +373,9 @@ fn internal(why: String) -> ControlFlow {
 /// `reader` runs in, compiled in one fault where the compile cache held none
 /// ([`super::dispatch::table_unit`]). `None` where the table is not defined
 /// or no planner resolves the read's database, in which case the read is
-/// made by the operator tree's helpers. The error a refusal the planner
-/// raises for the read names, and an internal error where the table's read
-/// does not lower.
+/// made by the record-fetch helpers of `operators::fetch`. The error a refusal
+/// the planner raises for the read names, and an internal error where the
+/// table's read does not lower.
 pub(super) async fn link_read(
 	start: &ExecutionContext,
 	reader: &ExecutionContext,

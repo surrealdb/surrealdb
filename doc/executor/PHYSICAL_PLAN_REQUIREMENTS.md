@@ -219,7 +219,7 @@ as today's fixed scores do, so no answer the suite checks changes.
 |---|---|
 | aborts the statement | any raise in a `WHERE`, projection, sort key, `TIMEOUT`, `VERSION` or source; `TbNotFound`; `NoIndexFoundForMatch`; `SingleOnlyOutput`; `QueryTimedout`; malformed KNN shapes; any failure on a write subject |
 | no row or `NONE` | table permission false; a denied or missing dereferenced record; `record::exists` on a missing table |
-| skipped | a wrong-kind value inside a streaming aggregate, when the group folded a usable value (`ControlFlow::is_ignorable`, `expr/src/expr/error.rs:245`). The per-record engine raises; the pair is pinned (`repro/group_aggregate_wrong_kind_*`) |
+| skipped | a wrong-kind value inside a streaming aggregate, when the group folded a usable value (`ControlFlow::is_ignorable`, `expr/src/expr/error.rs:245`), pinned by `repro/group_aggregate_wrong_kind_*` |
 
 A rule that turns a plan into empty rows (contradiction, `LIMIT 0`, `WHERE false`) keeps the
 source's existence and permission obligations: the result is empty rows from a resolved source, not
@@ -393,15 +393,15 @@ needs no plan property.
 
 ### 9.2 Where the VM must hand back to the host
 
-A VM thread does not await. Every per-row evaluation that awaits today (`PhysicalExpr::evaluate`
-is async only, `exec/physical_expr/mod.rs:414`) becomes a segment cut: the VM yields, the host
+A VM thread does not await. Every per-row evaluation that awaits (`Clause::evaluate`
+is async only, `exec/clause.rs`) becomes a segment cut: the VM yields, the host
 does the work, the VM resumes.
 
 | awaits today | examples | evidence |
 |---|---|---|
 | storage | cursor advance, record fetch and dereference, graph and reference lookups | `exec/operators/fetch.rs:542-575`, `exec/parts/lookup.rs` |
-| a nested plan | scalar subqueries, user functions, closures, event bodies | `exec/physical_expr/subquery.rs:85`, `exec/physical_expr/function/user_defined.rs` |
-| catalog | function and module lookup | `user_defined.rs`, `function/module.rs` |
+| a nested plan | scalar subqueries, user functions, closures, event bodies | `exec/vm/subquery.rs`, `exec/vm/function.rs` |
+| catalog | function and module lookup | `exec/vm/function.rs`, `function/module.rs` |
 | network, CPU offload | `http::*`, `file::*`, password hashing, ML models, scripting | `exec/function/macros.rs`, `function/model.rs:152` |
 
 Permissions and computed fields reach storage through dereference, so any row can reach a cut.

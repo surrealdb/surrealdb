@@ -207,7 +207,7 @@ Conventions for all: `metrics: Arc<OperatorMetrics>` + `monitor_stream`;
 `buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint(),
 ctx.root().ctx.config.exec.operator_buffer_size)`; `access_mode` combines children +
 embedded predicate exprs; `required_context` ≥ Database; WASM cfg patterns as in
-`scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via PhysicalExpr
+`scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via Clause
 ToSql). First: extract `compute_graph_ranges`/`decode_graph_edge`/cursor batching
 from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
 
@@ -217,7 +217,7 @@ from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
   land in `TableScan.predicate` after prefix-strip. Delegates cardinality/ordering.
 - **Expand** (~450L): `{ input, source, direction, edge_tables, edge_binding:
   Full(name)|IdOnly(name), target_binding, target_label, predicate:
-  Option<Arc<dyn PhysicalExpr>>, optional: bool }`. Per row: source id (Null source
+  Option<Clause>, optional: bool }`. Per row: source id (Null source
   → null-row if optional else skip) → adjacency via graph_keys → batch FieldState
   fetch of edges → target rid from edge `out`/`in` per direction → label filter →
   batch FieldState fetch of targets (miss/deny drops candidate) → candidate row =
@@ -229,8 +229,7 @@ from `scan/graph.rs` into `pub(crate)` `scan/graph_keys.rs` (~130 lines moved).
   target_label }` — bind a node from a bound edge's endpoint; FieldState fetch;
   1:≤1, order-preserving.
 - **HashJoin** (~450L, PR-B): `{ build, probe, keys: Vec<String>, join_type:
-  Inner|Left|Cross, null_template: Vec<String>, residual: Option<Arc<dyn
-  PhysicalExpr>> }`. Key = `Vec<Value>` of `<binding>.id` per side (FieldPath
+  Inner|Left|Cross, null_template: Vec<String>, residual: Option<Clause> }`. Key = `Vec<Value>` of `<binding>.id` per side (FieldPath
   extraction, no fetch). Build = GroupMap pattern (hash bucket + linear probe over
   PartialEq, per Aggregate aggregate.rs:~220-299) plus an insertion-ordered
   `Vec<Value>` of build rows so `Cross` emits deterministically (HashMap iteration
@@ -431,7 +430,7 @@ When that frontend lands, the expected shape is:
   (equi-join / cross); the relational planner additionally needs nested-loop (theta joins),
   index-nested-loop, and sort-merge — they belong in `operators/join/` next to `HashJoin`.
 - `HashJoin`'s `keys: Vec<String>` (binding names, `<binding>.id` per side) generalizes to a
-  composite `Vec<(Arc<dyn PhysicalExpr>, Arc<dyn PhysicalExpr>)>` for arbitrary/asymmetric
+  composite `Vec<(Clause, Clause)>` for arbitrary/asymmetric
   equi-join conditions (the only GQL→SQL shape change in the operator). See `operators/join/mod.rs`.
 - The binding-row convention and the FieldState-aware `scan/fetch.rs` helper are the shared
   substrate; a relational frontend reuses both unchanged.

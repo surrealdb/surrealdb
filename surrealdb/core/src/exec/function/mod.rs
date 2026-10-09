@@ -39,8 +39,7 @@ pub use registry::FunctionRegistry;
 pub(crate) use registry::experimental_target;
 pub use signature::{ReturnRule, Signature};
 
-use crate::exec::BoxFut;
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::{BoxFut, EvalContext};
 use crate::expr::Kind;
 pub use crate::expr::logical::EffectSet;
 use crate::val::Value;

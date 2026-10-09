@@ -44,7 +44,7 @@ impl KeyPredicateMatcher {
 	/// the `in`/`out` mapping differs per emitted edge in a way the
 	/// evaluator resolves by falling back, so nothing is compiled.
 	pub(crate) fn compile(cond: &LogicalExpr, direction: LookupDirection) -> Option<Self> {
-		if matches!(direction, LookupDirection::Both | LookupDirection::Reference) {
+		if matches!(direction, LookupDirection::Both) {
 			return None;
 		}
 		let mut tests = Vec::new();
@@ -69,38 +69,6 @@ impl KeyPredicateMatcher {
 		}
 		Some(Self {
 			tests,
-		})
-	}
-
-	/// Evaluates the conjunction against one adjacency entry. `source` is
-	/// the scanned vertex, `edge` the edge id, `target` the far vertex;
-	/// `out_direction` says whether the scan follows `->` (source is `in`)
-	/// or `<-` (source is `out`).
-	pub(crate) fn matches(
-		&self,
-		source: &RecordId,
-		edge: &RecordId,
-		target: &RecordId,
-		out_direction: bool,
-	) -> bool {
-		self.tests.iter().all(|test| {
-			let subject = match test.field {
-				KeyField::Id => edge,
-				KeyField::In if out_direction => source,
-				KeyField::In => target,
-				KeyField::Out if out_direction => target,
-				KeyField::Out => source,
-			};
-			let ordering = subject.cmp(&test.operand);
-			match test.op {
-				BinaryOperator::Equal | BinaryOperator::ExactEqual => ordering.is_eq(),
-				BinaryOperator::NotEqual => ordering.is_ne(),
-				BinaryOperator::LessThan => ordering.is_lt(),
-				BinaryOperator::LessThanEqual => ordering.is_le(),
-				BinaryOperator::MoreThan => ordering.is_gt(),
-				BinaryOperator::MoreThanEqual => ordering.is_ge(),
-				_ => unreachable!("compile admits only the comparison operators"),
-			}
 		})
 	}
 }

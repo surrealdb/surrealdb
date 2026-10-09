@@ -197,5 +197,4 @@ carries the units of its subscriptions at the catalog version it read, and the
 instruction looks each up. A subscription with no unit at that version — its
 stored text no longer compiles, its work has no bytecode form, or neither its
 registration nor the write's planning saw the version, as for a write whose
-stages are lowered per table as its records arrive — is notified by the
-operator tree's computation.
+stages are lowered per table as its records arrive — is not notified.

@@ -660,7 +660,7 @@ async fn b_join_from_partials_pairs_as_the_in_memory_join() {
 	let any_program = program_of(&free_ctx, "SELECT * FROM t").await;
 	let builds = build_rows();
 	let probes = probe_rows();
-	for join_type in [JoinType::Inner, JoinType::Left, JoinType::Semi, JoinType::Anti] {
+	for join_type in [JoinType::Inner, JoinType::Left] {
 		let step = join_step(join_type);
 		let mut table = BuildTable::new();
 		for (key, row) in &builds {

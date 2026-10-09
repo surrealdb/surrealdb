@@ -7,14 +7,12 @@
 ADR 0003 splits planning into a stateless logical plan and a catalog-bound physical plan. This ADR
 decides what executes the physical plan.
 
-ADR 0002 (execution engine direction) decides the opposite of this ADR: the plan layer stays a
-push-based tree of `ExecOperator`s exchanging `ValueBatch`es, there is no plan-level bytecode VM,
-and flat synchronous programs appear only inside the expression layer, for pure subtrees. It
-rejects a synchronous executor rewrite outright, on the grounds that async at the operator
-boundary is paid once per batch.
-
-This ADR diverges from ADR 0002, and ADR 0007 supersedes ADR 0002's position. ADR 0002's objections are answered one by one below, because
-each is a real constraint, and the ones that hold are kept as requirements on the VM.
+The alternative to a plan-level VM is a push-based tree of `ExecOperator`s exchanging
+`ValueBatch`es, with flat synchronous programs only inside the expression layer, for pure subtrees.
+It rejects a synchronous executor on the grounds that async at the operator boundary is paid once
+per batch. That position is ADR 0002's, and ADR 0007 supersedes it. Its objections are answered one
+by one below, because each is a real constraint, and the ones that hold are kept as requirements on
+the VM.
 
 ## Decision
 
@@ -42,7 +40,7 @@ defers its failure, and the lowest failing row's error is raised, which keeps th
 row-at-a-time order raises. Storage reads are batched primitives the host serves (`Scan`,
 `GetMany`, `Count`), issued once per vector.
 
-## ADR 0002's objections
+## Objections to a plan-level VM
 
 **"Flattening the plan to bytecode erases the per-node metadata the optimizer and the write-path
 barrier rules operate on."** It does not, because the program is not what the rules operate on. The
@@ -71,7 +69,7 @@ What it gains is the next point.
 that decides the ADR, and it is an empirical one. The surrealedge experiments behind
 `BYTECODE_VM_DESIGN.md` measured async and coroutine recursion in the execution core at a +257%
 throughput regression, and fused synchronous kernels at 2.6× Apache Arrow's throughput. Neither
-was measured inside this engine, and ADR 0002's own probe measured per-row async at 11.8× a
+was measured inside this engine, and ADR 0002's probe measured per-row async at 11.8× a
 synchronous loop without measuring per-batch async on its own.
 
 ## Questions the measurements answer
@@ -92,10 +90,9 @@ direct the VM's work.
 
 ## Consequences
 
-- The VM is the one executor. It consumes the physical plan (ADR 0003), and ADR 0007 removes the
-  operator tree as an executor and the per-record engine with it.
-- The operator tree's operators remain as host services the program calls: storage scans, index
-  iterators, graph traversal, record fetches. A rule that needs an executor's behaviour reads the
+- The VM is the one executor (ADR 0007). It consumes the physical plan (ADR 0003).
+- Operators are host services the program calls: storage scans, index iterators, graph traversal,
+  record fetches. A rule that needs an executor's behaviour reads the
   physical plan, never a program.
 - A statement the VM cannot lower is an error, so the VM's coverage is a correctness property, and
   the language suite's expectations are the reference its output is checked against.

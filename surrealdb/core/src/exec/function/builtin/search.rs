@@ -13,11 +13,10 @@ use std::collections::{BinaryHeap, HashMap};
 use anyhow::Result;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::exec::ContextLevel;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::logical::EffectSet;
 use crate::expr::{Error, Kind};
 use crate::fnc::args::{FromArgs, Optional};

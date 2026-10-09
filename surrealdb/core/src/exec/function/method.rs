@@ -790,27 +790,4 @@ mod tests {
 			 names registered in `build_method_registry`"
 		);
 	}
-
-	/// `MethodPart::access_mode` derives a call's mode from its arguments
-	/// alone. That is sound only while no registered method resolves to one
-	/// of the statement-evaluating builtins that need a write transaction in
-	/// their own right.
-	#[test]
-	fn no_registered_method_resolves_to_a_writing_builtin() {
-		use crate::exec::physical_expr::function::builtin_can_write;
-
-		let registry = FunctionRegistry::with_builtins();
-		for descriptor in registry.methods().descriptors() {
-			let impls = descriptor.type_impls.iter().map(|(_, f)| f);
-			for func in impls.chain(descriptor.fallback.iter()) {
-				assert!(
-					!builtin_can_write(func.name()),
-					"method '{}' resolves to '{}', which needs a write transaction; \
-					 `MethodPart::access_mode` must combine that in",
-					descriptor.name,
-					func.name(),
-				);
-			}
-		}
-	}
 }

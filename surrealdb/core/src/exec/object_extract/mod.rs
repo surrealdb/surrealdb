@@ -806,7 +806,7 @@ pub(crate) enum SlotScanResult<T> {
 /// instead of being deserialised into [`Value`] per row.
 ///
 /// `needles_sorted` is assumed strictly ascending by UTF-8 bytes (the same
-/// invariant the legacy function expects).
+/// invariant [`scan_record_object_at_path_for_keys_sorted`] expects).
 ///
 /// Lifetime notes: the closure receives a slice of `Option<&[u8]>` whose
 /// borrows are valid only inside the call; evaluation must complete before

@@ -23,26 +23,10 @@
 //! so nothing folded here changes one; what it removes is the per-row clone of
 //! the whole `$session` value.
 
-use std::sync::Arc;
-
-use surrealdb_strand::Strand;
-use surrealdb_types::ToSql;
-
 use super::Planner;
-use crate::err::{EngineError, Error};
-use crate::exec::operators::{CurrentValueSource, RecursionOp};
-use crate::exec::parts::{
-	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, DocPart, FieldPart,
-	FirstPart, FlattenPart, IndexPart, LastPart, LookupDirection, LookupPart, MethodPart,
-	OptionalChainPart, PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
-};
-use crate::exec::physical_expr::{Broadcast, Current, FoldedPath, Step};
-use crate::exec::{Error as ExecError, ExecOperator, PhysicalExpr};
-use crate::expr::logical::{
-	LogicalDestructureField, LogicalExpr, LogicalLookup, LogicalRecurse, LogicalRecurseInstruction,
-	LogicalRecursePath,
-};
-use crate::expr::lookup::LookupKind;
+use crate::err::Error;
+use crate::exec::Error as ExecError;
+use crate::expr::logical::{LogicalDestructureField, LogicalExpr};
 use crate::expr::part::Recurse;
 use crate::val::Value;
 
@@ -51,353 +35,10 @@ use crate::val::Value;
 // ============================================================================
 
 impl<'ctx> Planner<'ctx> {
-	/// Compile a path form of [`LogicalExpr`] into a physical expression.
-	///
-	/// Every path form is accepted; an expression that is not a path is
-	/// compiled as the root of an empty chain, which is itself. Callers
-	/// normally reach this through [`Self::physical_expr`], which dispatches
-	/// the path forms here.
-	pub(crate) fn physical_path(
-		&self,
-		expr: LogicalExpr,
-	) -> crate::exec::BoxFut<'_, Result<Arc<dyn PhysicalExpr>, Error>> {
-		Box::pin(async move {
-			let display = expr.to_sql();
-
-			if let Some((root, fields)) = constant_access_chain(&expr)
-				&& let Some(root) = self.constant_root_value(root)
-				&& let Some(value) = fold_constant_field_chain(&root, &fields)
-			{
-				let folded: Arc<dyn PhysicalExpr> = Arc::new(FoldedPath::new(display, value));
-				return Ok(folded);
-			}
-
-			if let LogicalExpr::Broadcast {
-				base,
-				body,
-				flatten,
-			} = expr
-			{
-				let base = self.physical_expr(*base).await?;
-				let body = self.physical_expr(*body).await?;
-				let broadcast: Arc<dyn PhysicalExpr> =
-					Arc::new(Broadcast::new(display, base, body, flatten));
-				return Ok(broadcast);
-			}
-
-			// Peel the chain from its outermost step down to its root,
-			// compiling each part as it is reached. The parts come out in
-			// reverse application order.
-			let mut parts_rev: Vec<Arc<dyn PhysicalExpr>> = Vec::new();
-			let mut current = expr;
-			let root: Option<Arc<dyn PhysicalExpr>> = loop {
-				current = match current {
-					LogicalExpr::Field(name) => {
-						parts_rev.push(Arc::new(FieldPart {
-							name: name.into_string(),
-						}));
-						break None;
-					}
-					LogicalExpr::Doc => {
-						parts_rev.push(Arc::new(DocPart));
-						break None;
-					}
-					LogicalExpr::Current => break None,
-					LogicalExpr::Access {
-						base,
-						field,
-					} => {
-						parts_rev.push(Arc::new(FieldPart {
-							name: field.into_string(),
-						}));
-						*base
-					}
-					LogicalExpr::Index {
-						base,
-						index,
-					} => {
-						let expr = self.physical_expr(*index).await?;
-						parts_rev.push(Arc::new(IndexPart {
-							expr,
-						}));
-						*base
-					}
-					LogicalExpr::First(base) => {
-						parts_rev.push(Arc::new(FirstPart));
-						*base
-					}
-					LogicalExpr::Last(base) => {
-						parts_rev.push(Arc::new(LastPart));
-						*base
-					}
-					LogicalExpr::Each(base) => {
-						parts_rev.push(Arc::new(AllPart));
-						*base
-					}
-					LogicalExpr::Flatten {
-						base,
-						..
-					} => {
-						parts_rev.push(Arc::new(FlattenPart));
-						*base
-					}
-					LogicalExpr::Filter {
-						base,
-						predicate,
-					} => {
-						let needs_parent = super::row_scope::references_parent(&predicate);
-						let predicate = self.physical_expr(*predicate).await?;
-						parts_rev.push(Arc::new(WherePart {
-							predicate,
-							needs_parent,
-						}));
-						*base
-					}
-					LogicalExpr::Method {
-						base,
-						name,
-						args,
-					} => {
-						parts_rev.push(self.physical_method(name, args).await?);
-						*base
-					}
-					LogicalExpr::Destructure {
-						base,
-						fields,
-					} => {
-						let fields = self.physical_destructure(fields).await?;
-						parts_rev.push(Arc::new(DestructurePart {
-							fields,
-						}));
-						*base
-					}
-					LogicalExpr::Optional {
-						base,
-						then,
-					} => {
-						let then = self.physical_expr(*then).await?;
-						parts_rev.push(Arc::new(OptionalChainPart {
-							then,
-						}));
-						*base
-					}
-					LogicalExpr::Lookup {
-						base,
-						lookup,
-					} => {
-						// Collect the run of consecutive hops, innermost first.
-						let mut run = vec![*lookup];
-						let mut inner = *base;
-						while let LogicalExpr::Lookup {
-							base,
-							lookup,
-						} = inner
-						{
-							run.push(*lookup);
-							inner = *base;
-						}
-						run.reverse();
-						parts_rev.push(self.physical_lookup_run(run).await?);
-						inner
-					}
-					LogicalExpr::Recurse(recurse) => {
-						let LogicalRecurse {
-							base,
-							recurse,
-							path,
-							instruction,
-						} = *recurse;
-						parts_rev.push(self.physical_recurse(recurse, path, instruction).await?);
-						base
-					}
-					LogicalExpr::RepeatRecurse(base) => {
-						parts_rev.push(Arc::new(RepeatRecursePart));
-						*base
-					}
-					// A broadcast reached beneath a step is the expression a
-					// `(e).rest` path started from; it compiles as its own
-					// node, as does any other starting expression.
-					root @ (LogicalExpr::Broadcast {
-						..
-					}
-					| LogicalExpr::Literal(_)
-					| LogicalExpr::Array(_)
-					| LogicalExpr::Set(_)
-					| LogicalExpr::Object(_)
-					| LogicalExpr::RecordId(_)
-					| LogicalExpr::Param(_)
-					| LogicalExpr::Table(_)
-					| LogicalExpr::Mock(_)
-					| LogicalExpr::Constant(_)
-					| LogicalExpr::Prefix {
-						..
-					}
-					| LogicalExpr::SetField {
-						..
-					}
-					| LogicalExpr::Postfix {
-						..
-					}
-					| LogicalExpr::Invoke {
-						..
-					}
-					| LogicalExpr::Binary {
-						..
-					}
-					| LogicalExpr::Call(_)
-					| LogicalExpr::Closure(_)
-					| LogicalExpr::If(_)
-					| LogicalExpr::Throw(_)
-					| LogicalExpr::Break
-					| LogicalExpr::Continue
-					| LogicalExpr::Subquery(_)) => break Some(self.physical_expr(root).await?),
-				};
-			};
-
-			if parts_rev.is_empty() {
-				return Ok(match root {
-					Some(root) => root,
-					None => Arc::new(Current),
-				});
-			}
-			parts_rev.reverse();
-			Ok(Arc::new(Step::new(display, root, parts_rev)))
-		})
-	}
-
-	/// Compile a method step: a registered name dispatches on the receiver's
-	/// type; any other name calls a closure stored under it on the receiver.
-	async fn physical_method(
-		&self,
-		name: Strand,
-		args: Vec<LogicalExpr>,
-	) -> Result<Arc<dyn PhysicalExpr>, Error> {
-		let args = self.physical_args(args).await?;
-		let registry = self.function_registry();
-		match registry.get_method(name.as_str()) {
-			Some(descriptor) => Ok(Arc::new(MethodPart {
-				descriptor: Arc::clone(descriptor),
-				args,
-			})),
-			None => Ok(Arc::new(ClosureFieldCallPart {
-				field: name.into_string(),
-				args,
-			})),
-		}
-	}
-
-	/// Compile a run of consecutive lookup hops, innermost first, into one
-	/// [`LookupPart`].
-	///
-	/// The hops thread into a single operator chain — the output of one scan
-	/// is the input of the next — rather than each running from its own
-	/// `CurrentValueSource`:
-	/// `GraphEdgeScan(->person, GraphEdgeScan(->likes, CurrentValueSource))`.
-	/// A consecutive `->edge->vertex` pair that is fast-path eligible (no
-	/// edge-side filters or projections, edge table with `PERMISSIONS FULL`)
-	/// collapses into a single scan in `TargetVertex` mode that reads the
-	/// target vertex from the adjacency key; see
-	/// [`Planner::try_fast_path_pair`]. The part's metadata is that of the
-	/// last hop, so the result shape matches the two-scan chain's.
-	async fn physical_lookup_run(
-		&self,
-		lookups: Vec<LogicalLookup>,
-	) -> Result<Arc<dyn PhysicalExpr>, Error> {
-		if lookups.is_empty() {
-			return Err(EngineError::Internal(
-				"physical_lookup_run: a lookup run has at least one hop".into(),
-			)
-			.into());
-		}
-		let only = lookups.iter().any(|l| l.only);
-
-		let mut chain: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
-		let mut direction = LookupDirection::Out;
-		let mut extract_id = false;
-
-		let mut idx = 0;
-		while idx < lookups.len() {
-			let advance = if idx + 1 < lookups.len() {
-				self.try_fast_path_pair(&lookups[idx], &lookups[idx + 1]).await?
-			} else {
-				None
-			};
-			if let Some(plan) = advance {
-				chain = self.plan_target_vertex_scan(chain, plan).await?;
-				let (d, e) = lookup_metadata(&lookups[idx + 1]);
-				direction = d;
-				extract_id = e;
-				idx += 2;
-			} else {
-				let lu = lookups[idx].clone();
-				let (d, e) = lookup_metadata(&lu);
-				direction = d;
-				extract_id = e;
-				chain = self.plan_lookup_with_input(chain, lu).await?;
-				idx += 1;
-			}
-		}
-
-		Ok(Arc::new(LookupPart {
-			direction,
-			plan: chain,
-			extract_id,
-			only,
-		}))
-	}
-
-	/// Compile a recursion step.
-	///
-	/// The body is one physical expression over the current value, held by
-	/// the [`RecursionOp`] as its path. A trailing body (`.{n}.rest`) that
-	/// carries both an instruction and a `.@` is rejected: the instruction
-	/// decides what the recursion collects, and `.@` decides where it
-	/// re-enters, and the two cannot be honoured together.
-	async fn physical_recurse(
-		&self,
-		recurse: Recurse,
-		path: Option<LogicalRecursePath>,
-		instruction: Option<LogicalRecurseInstruction>,
-	) -> Result<Arc<dyn PhysicalExpr>, Error> {
-		let (min_depth, max_depth) = self.recurse_bounds(&recurse)?;
-
-		let (path, has_repeat_recurse) = match path {
-			Some(path) => {
-				let has_repeat_recurse = contains_repeat_recurse(path.body());
-				if instruction.is_some()
-					&& has_repeat_recurse
-					&& matches!(path, LogicalRecursePath::Trailing(_))
-				{
-					return Err(Error::Exec(ExecError::RecursionInstructionPlanConflict));
-				}
-				let body = self.physical_expr(recurse_body(path)).await?;
-				(vec![body], has_repeat_recurse)
-			}
-			None => (vec![], false),
-		};
-
-		let inclusive = is_inclusive_recurse(&instruction);
-		let instr = self.physical_recurse_instruction(instruction).await?;
-
-		let body_op = extract_body_operator(&path);
-		let op: Arc<dyn ExecOperator> = Arc::new(RecursionOp::new(
-			body_op,
-			path,
-			min_depth,
-			max_depth,
-			instr,
-			inclusive,
-			has_repeat_recurse,
-		));
-		Ok(Arc::new(RecursePart {
-			op,
-		}))
-	}
-
 	/// The `(min, max)` depth of a recursion, validated against the
 	/// configured idiom recursion limit: the minimum is at least 1 and the
 	/// maximum, when given, no more than `idiom_recursion_limit`.
-	fn recurse_bounds(&self, recurse: &Recurse) -> Result<(u32, Option<u32>), Error> {
+	pub(super) fn recurse_bounds(&self, recurse: &Recurse) -> Result<(u32, Option<u32>), Error> {
 		let system_limit = self.ctx.config.exec.idiom_recursion_limit;
 		let (min_depth, max_depth) = match *recurse {
 			Recurse::Fixed(n) => (n, Some(n)),
@@ -421,120 +62,11 @@ impl<'ctx> Planner<'ctx> {
 		}
 		Ok((min_depth, max_depth))
 	}
-
-	/// Compile destructure fields. An alias body is one physical expression
-	/// evaluated with the destructured value as the current value.
-	pub(crate) fn physical_destructure(
-		&self,
-		fields: Vec<LogicalDestructureField>,
-	) -> crate::exec::BoxFut<'_, Result<Vec<DestructureField>, Error>> {
-		Box::pin(async move {
-			let mut out = Vec::with_capacity(fields.len());
-			for field in fields {
-				let field = match field {
-					LogicalDestructureField::All(name) => DestructureField::All(name),
-					LogicalDestructureField::Field(name) => DestructureField::Field(name),
-					LogicalDestructureField::Aliased(name, body) => DestructureField::Aliased {
-						field: name,
-						body: self.physical_expr(body).await?,
-					},
-					LogicalDestructureField::Destructure(name, nested) => {
-						DestructureField::Nested {
-							field: name,
-							parts: self.physical_destructure(nested).await?,
-						}
-					}
-					LogicalDestructureField::Rest => DestructureField::Rest,
-				};
-				out.push(field);
-			}
-			Ok(out)
-		})
-	}
-
-	/// Compile a [`LogicalRecurseInstruction`] to a [`PhysicalRecurseInstruction`].
-	pub(crate) async fn physical_recurse_instruction(
-		&self,
-		instruction: Option<LogicalRecurseInstruction>,
-	) -> Result<PhysicalRecurseInstruction, Error> {
-		match instruction {
-			None => Ok(PhysicalRecurseInstruction::Default),
-			Some(LogicalRecurseInstruction::Collect {
-				..
-			}) => Ok(PhysicalRecurseInstruction::Collect),
-			Some(LogicalRecurseInstruction::Path {
-				..
-			}) => Ok(PhysicalRecurseInstruction::Path),
-			Some(LogicalRecurseInstruction::Shortest {
-				expects,
-				..
-			}) => {
-				let target = self.physical_expr(expects).await?;
-				Ok(PhysicalRecurseInstruction::Shortest {
-					target,
-				})
-			}
-		}
-	}
 }
 
 // ============================================================================
 // Free Functions
 // ============================================================================
-
-/// The body of a recursion path, however it was written.
-fn recurse_body(path: LogicalRecursePath) -> LogicalExpr {
-	match path {
-		LogicalRecursePath::Nested(body) | LogicalRecursePath::Trailing(body) => body,
-	}
-}
-
-/// The direction and `extract_id` metadata of a lookup.
-///
-/// `extract_id` is set when the scan reads whole edge records for a `WHERE`
-/// or `SPLIT` but no projection is asked for, so the result is projected back
-/// to record ids.
-fn lookup_metadata(lookup: &LogicalLookup) -> (LookupDirection, bool) {
-	let direction = match &lookup.kind {
-		LookupKind::Graph(dir) => LookupDirection::from(dir),
-		LookupKind::Reference => LookupDirection::Reference,
-	};
-	let needs_full_pipeline = lookup.expr.is_some() || lookup.group.is_some();
-	let needs_full_records = needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
-	let extract_id = needs_full_records && !needs_full_pipeline;
-	(direction, extract_id)
-}
-
-/// Whether a recurse instruction has the `inclusive` flag set.
-fn is_inclusive_recurse(instruction: &Option<LogicalRecurseInstruction>) -> bool {
-	matches!(
-		instruction,
-		Some(LogicalRecurseInstruction::Path {
-			inclusive: true,
-			..
-		}) | Some(LogicalRecurseInstruction::Collect {
-			inclusive: true,
-			..
-		}) | Some(LogicalRecurseInstruction::Shortest {
-			inclusive: true,
-			..
-		})
-	)
-}
-
-/// Extract operator chain from body parts for EXPLAIN display.
-///
-/// Collects embedded operators from all path parts (LookupParts expose
-/// their fused chains). Returns the chain if exactly one is found.
-fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecOperator>> {
-	let embedded: Vec<_> =
-		path.iter().flat_map(|p| p.embedded_operators()).map(|(_, op)| Arc::clone(op)).collect();
-	if embedded.len() == 1 {
-		Some(embedded.into_iter().next().expect("embedded operator should be present"))
-	} else {
-		None
-	}
-}
 
 /// Whether a recursion body re-enters through `.@` anywhere along its path:
 /// on the chain of steps itself, inside a broadcast or optional body, inside
@@ -689,7 +221,7 @@ impl Planner<'_> {
 	/// plan cache has to either key on the folded session values or decline to
 	/// cache a plan that carries them; sharing one across sessions would hand
 	/// the first session's `$session` to the second.
-	fn constant_root_value(&self, root: &LogicalExpr) -> Option<Value> {
+	pub(super) fn constant_root_value(&self, root: &LogicalExpr) -> Option<Value> {
 		match root {
 			LogicalExpr::Literal(_) | LogicalExpr::Array(_) | LogicalExpr::Object(_) => {
 				super::util::try_literal_to_value(root)
@@ -711,7 +243,7 @@ impl Planner<'_> {
 /// The root and field names of a path that is a chain of plain field accesses
 /// (`root.a.b`), in application order; `None` for a bare root or for a chain
 /// holding any other step.
-fn constant_access_chain(expr: &LogicalExpr) -> Option<(&LogicalExpr, Vec<&str>)> {
+pub(super) fn constant_access_chain(expr: &LogicalExpr) -> Option<(&LogicalExpr, Vec<&str>)> {
 	let mut fields = Vec::new();
 	let mut current = expr;
 	while let LogicalExpr::Access {
@@ -746,7 +278,7 @@ fn constant_access_chain(expr: &LogicalExpr) -> Option<(&LogicalExpr, Vec<&str>)
 /// literal form is an array literal. Nothing here goes through SQL text — the
 /// folded value is handed back verbatim — so a set folds as a set, which is
 /// the payload shape a `CONTEXT` clause returning a set produces.
-fn fold_constant_field_chain(root: &Value, fields: &[&str]) -> Option<Value> {
+pub(super) fn fold_constant_field_chain(root: &Value, fields: &[&str]) -> Option<Value> {
 	let mut current = root;
 	for (i, name) in fields.iter().enumerate() {
 		let Value::Object(object) = current else {
@@ -838,7 +370,7 @@ mod fold_tests {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::operators::test_util::{TestDb, eval, parse_expr, root_ctx, val};
+	use crate::exec::operators::test_util::parse_expr;
 
 	#[test]
 	fn repeat_recurse_is_found_along_the_path_and_in_alias_bodies_only() {
@@ -852,39 +384,5 @@ mod tests {
 		assert!(!contains_repeat_recurse(&body("a.{..}.b")));
 		// An expression a step holds beside its base is not on the path.
 		assert!(!contains_repeat_recurse(&body("a.{..}.b[WHERE c = (d.@)]")));
-	}
-
-	#[tokio::test]
-	async fn an_instruction_and_a_repeat_recurse_in_one_trailing_body_conflict() {
-		let ctx = root_ctx();
-		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
-		let err = planner
-			.physical_expr(parse_expr("a.{..+collect}.b.@"))
-			.await
-			.expect_err("an instruction and `.@` cannot be honoured together");
-		assert!(
-			matches!(err, Error::Exec(ExecError::RecursionInstructionPlanConflict)),
-			"got {err:?}"
-		);
-	}
-
-	#[tokio::test]
-	async fn a_recursion_body_is_one_expression_over_the_value_at_each_depth() {
-		let db = TestDb::new(
-			"DEFINE TABLE node SCHEMALESS;
-			 INSERT [
-			   { id: node:a, next: node:b },
-			   { id: node:b, next: node:c },
-			   { id: node:c }
-			 ];",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		assert_eq!(eval("node:a.{2}(.next)", &ctx).await.unwrap(), val("node:c").await);
-		assert_eq!(eval("node:a.{2}.next", &ctx).await.unwrap(), val("node:c").await);
-		assert_eq!(
-			eval("node:a.{1}.{ id, next: next.@ }", &ctx).await.unwrap(),
-			val("{ id: node:a, next: node:b }").await
-		);
 	}
 }

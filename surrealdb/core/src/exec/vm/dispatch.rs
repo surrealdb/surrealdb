@@ -33,8 +33,8 @@
 //! holds no unit of it ([`super::fault::link_read`]). Every later read of the
 //! table, by that program or by any other program of the run, finds it
 //! loaded. A read in a frame the unit of its table was not compiled for, or of
-//! a table no unit of whose read is compiled, is made as the operator tree's
-//! helpers make it.
+//! a table no unit of whose read is compiled, is made by the record-fetch
+//! helpers of `operators::fetch`.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -389,7 +389,8 @@ impl Deref {
 	/// The record `rid` names, as its table's unit reads it: `NONE` where no
 	/// record answers or the caller may not select it, and an error where
 	/// the table does not exist. `None` where no unit serves the read
-	/// ([`Self::serving`]), which is then made as the operator tree makes it.
+	/// ([`Self::serving`]), which the caller then makes with the record-fetch
+	/// helpers of `operators::fetch`.
 	///
 	/// With `checked` the caller's table and field permissions apply and the
 	/// caller is confined to its own tenant; without it the record is read

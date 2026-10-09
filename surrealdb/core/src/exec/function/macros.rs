@@ -759,7 +759,7 @@ macro_rules! define_context_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {
@@ -845,7 +845,7 @@ macro_rules! define_async_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {
@@ -904,7 +904,7 @@ macro_rules! define_async_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {
@@ -964,7 +964,7 @@ macro_rules! define_async_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {
@@ -1024,7 +1024,7 @@ macro_rules! define_async_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {
@@ -1085,7 +1085,7 @@ macro_rules! define_async_function {
 
 			fn invoke_async<'a>(
 				&'a self,
-				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				ctx: &'a $crate::exec::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
 				Box::pin(async move {

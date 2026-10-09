@@ -375,18 +375,9 @@ async fn call_middleware(
 			}
 		}
 		crate::expr::Function::Custom(name) => {
-			let call = crate::exec::physical_expr::FunctionCall {
-				name: name.clone(),
-				plan_depth: 0,
-				body_access_mode: crate::exec::AccessMode::ReadWrite,
-				body: None,
-				unchecked_body: None,
-				permission: crate::exec::permission::CompiledGuard::default(),
-				planned_permission: Default::default(),
-			};
-			let entered = call.enter(&eval).await?;
-			call.call(&entered, &eval, args).await
+			crate::exec::vm::invoke_stored_function(name, 0, args, &eval).await
 		}
+
 		other => {
 			// Any other kind of function — a module, a silo package, a script
 			// or a model — is compiled as the call it is, over the arguments

@@ -25,6 +25,12 @@
 #[macro_use]
 pub(crate) mod plain;
 
+pub(crate) mod access;
+pub(crate) mod calls;
+pub(crate) mod degree;
+pub(crate) mod matches;
+pub(crate) mod subquery;
+
 mod binding;
 mod block;
 mod call_unit;
@@ -58,7 +64,6 @@ mod leaf;
 mod ledger;
 pub(crate) mod row_frame;
 mod row_json;
-pub(crate) use subroutine::Subroutine;
 pub(crate) use write::notify_at;
 #[cfg(test)]
 mod golden;
@@ -78,21 +83,29 @@ mod plan;
 pub(crate) mod plan_catalog;
 pub(crate) mod program;
 pub(crate) mod request;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_body_scope;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_catalog_units;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_counts;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_dispatch;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_late_layers;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_principal;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_running_compiles;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_stack;
 // Its golden records a build that runs no script and no model.
 #[cfg(all(test, feature = "kv-mem", not(any(feature = "scripting", feature = "ml"))))]
@@ -123,46 +136,60 @@ mod sort;
 pub(crate) mod speculate;
 mod spill;
 mod store;
-mod subroutine;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_aggregate;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_census;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_closure;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_ctl;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_enforced;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_explain;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_frames;
 #[cfg(all(test, feature = "kv-mem", any(feature = "gql", feature = "postgres")))]
 mod tests_front_end;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_graph;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_index_fns;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_invocations;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_join;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_kept;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_leaf;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_lookups;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_memory;
 #[cfg(test)]
 mod tests_methods;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_needs;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_overlay;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_partials;
@@ -172,13 +199,15 @@ mod tests_partitions;
 mod tests_paths;
 #[cfg(test)]
 mod tests_plain;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_plain_data;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_planner;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_preempt;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_recurse;
 #[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]
 mod tests_scan_parity;
@@ -186,21 +215,29 @@ mod tests_scan_parity;
 mod tests_shared;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_sources;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_subq;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_units;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_wide;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_data;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_gate;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_observe;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_schema;
-#[cfg(all(test, feature = "kv-mem"))]
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
 mod tests_write_storage;
 pub(crate) mod units;
 mod write;
@@ -275,18 +312,14 @@ pub(crate) fn plan_checked<'a>(
 			}
 			// The VM explains a statement it runs: one it cannot lower is declined
 			// as it is when it is run.
-			let inner_exec = match lower_to_program(planner, &planned).await {
-				Ok(program) => wrap_as_operator(planner, program, &planned),
+			let program = match lower_to_program(planner, &planned).await {
+				Ok(program) => program,
 				Err(not_covered) => return Err(declined(not_covered)),
 			};
 			let explain_node = explain::to_explain_operator(
 				&explain.input,
 				&planned,
-				if explain.analyze {
-					Some(&inner_exec)
-				} else {
-					None
-				},
+				explain.analyze,
 				planner.reads_are_checked(),
 			);
 			if !explain.analyze
@@ -295,11 +328,13 @@ pub(crate) fn plan_checked<'a>(
 				speculating.held.release_since(mark);
 			}
 			let plan: Arc<dyn ExecOperator> = if explain.analyze {
-				Arc::new(crate::exec::operators::AnalyzePlan {
-					plan: explain_node,
-					format: explain.format,
-					redact_volatile_explain_attrs: planner.frozen().redact_volatile_explain_attrs(),
-				})
+				Arc::new(program_operator(planner, program, &planned).analyzed(
+					explain::VmAnalysis {
+						plan: explain_node,
+						format: explain.format,
+						redact: planner.frozen().redact_volatile_explain_attrs(),
+					},
+				))
 			} else {
 				Arc::new(crate::exec::operators::ExplainPlan {
 					plan: explain_node,
@@ -597,43 +632,33 @@ async fn lower_to_program(
 	Ok(lowered)
 }
 
-impl Subroutine {
-	/// `bound`, bound by `planner`, as a subroutine whose writes keep what
-	/// they compile in `contexts`, or in contexts of its own. Fails with the
-	/// reason where the VM does not cover `bound`.
-	pub(crate) async fn lower(
-		planner: &Planner<'_>,
-		bound: &LogicalOp,
-		contexts: Option<Arc<crate::exec::operators::write::scope::KeptContexts>>,
-	) -> Result<Arc<Self>, crate::err::Error> {
-		match lower::lower_subroutine(planner, bound).await {
-			Ok(program) => Ok(Arc::new(Self::new(program, contexts))),
-			Err(not_covered) => Err(declined(not_covered)),
-		}
-	}
-}
-
 /// `program`, lowered by `planner`, as the operator the planner and the
-/// executor hold: the one adapter between a program and the operator tree
-/// around it. It keeps the catalog ids the statement's planning held for as
+/// executor hold: the one adapter between a program and its `ExecOperator`
+/// interface. It keeps the catalog ids the statement's planning held for as
 /// long as it or a run of it lasts, since the program's draws take them.
 fn wrap_as_operator(
 	planner: &Planner<'_>,
-	(program, served): (program::Program, Vec<Arc<LogicalOp>>),
+	program: (program::Program, Vec<Arc<LogicalOp>>),
 	physical: &plan::PhysicalPlan,
 ) -> Arc<dyn ExecOperator> {
+	Arc::new(program_operator(planner, program, physical))
+}
+
+fn program_operator(
+	planner: &Planner<'_>,
+	(program, served): (program::Program, Vec<Arc<LogicalOp>>),
+	physical: &plan::PhysicalPlan,
+) -> host::VmOperator {
 	let held = planner
 		.speculation
 		.as_ref()
 		.map(|speculating| &speculating.held)
 		.filter(|held| !held.is_empty())
 		.cloned();
-	Arc::new(
-		host::VmOperator::new(program)
-			.holding(held)
-			.serving(served)
-			.displayed_as(explain::root_name(physical)),
-	)
+	host::VmOperator::new(program)
+		.holding(held)
+		.serving(served)
+		.displayed_as(explain::root_name(physical))
 }
 
 /// Why the VM does not run a statement. The statement fails with it
@@ -692,4 +717,15 @@ impl NotCovered {
 			refusal: None,
 		}
 	}
+}
+
+/// Invoke a stored function from an API stage through its catalog-stamped VM call unit.
+/// The unit applies the function's capability, AUTH LIMIT, argument kinds and permission gate.
+pub(crate) async fn invoke_stored_function(
+	name: &str,
+	depth: u32,
+	args: Vec<crate::val::Value>,
+	ctx: &crate::exec::EvalContext<'_>,
+) -> crate::exec::FlowResult<crate::val::Value> {
+	call_unit::call(name, depth, args, ctx, &mut None).await
 }

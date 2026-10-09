@@ -1,79 +1,6 @@
-use std::sync::Arc;
-
-use futures::StreamExt;
-use surrealdb_types::ToSql as _;
-
-use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, OutputPath, OutputPathPart};
 use crate::val::field_path::{FieldPath, FieldPathPart};
 use crate::val::{Number, Value};
-
-/// Splits values on array/set fields, producing the cartesian product.
-///
-/// For example, if a record has `{ a: [1, 2], b: [3, 4] }` and we split on `a, b`,
-/// we get four records: `{ a: 1, b: 3 }`, `{ a: 1, b: 4 }`, `{ a: 2, b: 3 }`, `{ a: 2, b: 4 }`.
-///
-/// Non-array values pass through unchanged.
-///
-/// Each `SPLIT` target is read per row at the position the target itself
-/// names (see [`split_target`]) to find the collection to split on, and
-/// each element is written back at that same position. Read and write are one
-/// path: splitting `a[0]` replaces the first element of `a` and leaves the
-/// rest of `a` standing.
-///
-/// The read navigates the row and does not dereference — a target crossing a
-/// record link, `link.tags` over `link: cfg:one`, reads `NONE` rather than the
-/// linked record's field, so it is not a collection and the row does not
-/// split. A `SPLIT` names a position on the row to replace, and a field of
-/// another record is not one.
-#[derive(Debug, Clone)]
-pub struct Split {
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// The `SPLIT` targets as written, for EXPLAIN.
-	pub(crate) exprs: Vec<LogicalExpr>,
-	/// The compiled targets, one per entry of `exprs`. They report what the
-	/// operator requires and render it for `EXPLAIN`; the collection to split
-	/// on is read structurally at `paths`, never through these.
-	pub(crate) keys: Vec<Arc<dyn PhysicalExpr>>,
-	/// Where each target's elements are written back, one per entry of `exprs`.
-	targets: Vec<SplitTarget>,
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-impl Split {
-	/// `keys` are the compiled forms of `exprs`, in the same order.
-	///
-	/// Fails only for a target that is not a path over the row, which the
-	/// grammar of `SPLIT` does not produce.
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		exprs: Vec<LogicalExpr>,
-		keys: Vec<Arc<dyn PhysicalExpr>>,
-	) -> Result<Self, crate::exec::Error> {
-		debug_assert_eq!(exprs.len(), keys.len(), "one compiled key per SPLIT target");
-		let targets = exprs
-			.iter()
-			.map(|expr| {
-				split_target(expr).ok_or_else(|| {
-					crate::exec::Error::Unimplemented(format!(
-						"a SPLIT target that is not a path over the row: {}",
-						expr.to_sql()
-					))
-				})
-			})
-			.collect::<Result<Vec<_>, _>>()?;
-		Ok(Self {
-			input,
-			exprs,
-			keys,
-			targets,
-			metrics: Arc::new(OperatorMetrics::new()),
-		})
-	}
-}
 
 /// Where a `SPLIT` writes each element of the collection it read.
 ///
@@ -328,73 +255,6 @@ pub(crate) fn output_field_path(path: &OutputPath) -> FieldPath {
 	)
 }
 
-impl ExecOperator for Split {
-	fn name(&self) -> &'static str {
-		"Split"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		use surrealdb_types::ToSql;
-		vec![(
-			"on".to_string(),
-			self.exprs.iter().map(|e| e.to_sql()).collect::<Vec<_>>().join(", "),
-		)]
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		self.keys
-			.iter()
-			.map(|key| key.required_context())
-			.max()
-			.unwrap_or(ContextLevel::Root)
-			.max(self.input.required_context())
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// Split doesn't modify data, just expands it; the keys it evaluates
-		// may carry their own requirements.
-		self.keys.iter().fold(self.input.access_mode(), |mode, key| mode.combine(key.access_mode()))
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		self.keys.iter().map(|key| ("on", key)).collect()
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-		let targets = self.targets.clone();
-
-		let split_stream = input_stream.then(move |batch_result| {
-			let targets = targets.clone();
-			async move {
-				let batch = batch_result?;
-				let mut expanded_values = Vec::with_capacity(batch.len() * targets.len());
-
-				for value in batch.into_values() {
-					split_row(value, &targets, &mut expanded_values);
-				}
-
-				Ok(ValueBatch::new(expanded_values))
-			}
-		});
-
-		Ok(monitor_stream(Box::pin(split_stream), "Split", &self.metrics))
-	}
-}
-
 /// Split `value` on each of `targets` in turn, appending the rows it becomes
 /// to `output`: the cartesian product of the collections the targets read,
 /// in the order of the targets and of each collection's elements. A target
@@ -477,14 +337,6 @@ mod tests {
 		split_value_on_path(value, on, &target, output);
 	}
 
-	/// The same, for `name[*]`: every position of the collection takes the
-	/// element the row was split on.
-	fn split_on_every(value: Value, name: &str, output: &mut Vec<Value>) {
-		let target = SplitTarget::Every(FieldPath::field(name));
-		let on = target.read(&value);
-		split_value_on_path(value, on, &target, output);
-	}
-
 	/// The logical form of an idiom, as the planner's `SPLIT` targets reach
 	/// this module.
 	fn target_of(sql: &str) -> Option<SplitTarget> {
@@ -524,86 +376,6 @@ mod tests {
 			.expect("lowers");
 			assert!(target_of(sql).is_some(), "`{sql}` names a position: {expr:?}");
 		}
-	}
-
-	/// The split of `sql` over `row`, through the target the planner builds
-	/// for it.
-	fn split_by(sql: &str, row: Value) -> Vec<String> {
-		let target = target_of(sql).expect("a position");
-		let mut out = Vec::new();
-		split_row(row, &[target], &mut out);
-		out.iter().map(|row| row.to_sql()).collect()
-	}
-
-	fn row_of(sql: &str) -> Value {
-		crate::val::convert_public_value_to_internal(crate::syn::value(sql).expect("value"))
-	}
-
-	/// `SPLIT a[*].b` reads the `b` of every element and writes the value the
-	/// row was split on back at the `b` of each one.
-	#[test]
-	fn split_through_every_element_writes_each_elements_position() {
-		assert_eq!(
-			split_by("a[*].b", row_of("{ a: [{ b: 1 }, { b: 2 }], z: 9 }")),
-			["{ a: [{ b: 1 }, { b: 1 }], z: 9 }", "{ a: [{ b: 2 }, { b: 2 }], z: 9 }"]
-		);
-		// Chained: each element of `a` contributes the values at its own
-		// inner positions, and the row is split on those collections.
-		assert_eq!(
-			split_by(
-				"a[*].b[*].c",
-				row_of("{ a: [{ b: [{ c: 1 }, { c: 2 }] }, { b: [{ c: 3 }] }] }")
-			),
-			[
-				"{ a: [{ b: [{ c: [1, 2] }, { c: [1, 2] }] }, { b: [{ c: [1, 2] }] }] }",
-				"{ a: [{ b: [{ c: [3] }, { c: [3] }] }, { b: [{ c: [3] }] }] }",
-			]
-		);
-		// An empty collection, and a value that is not one, do not split.
-		assert_eq!(split_by("a[*].b", row_of("{ a: [] }")), ["{ a: [] }"]);
-		assert_eq!(split_by("a[*].b", row_of("{ a: 5 }")), ["{ a: 5 }"]);
-	}
-
-	/// The values of an object are its elements.
-	#[test]
-	fn split_through_an_objects_values() {
-		assert_eq!(
-			split_by("a[*].b", row_of("{ a: { x: { b: 1 }, y: { b: 2 } } }")),
-			["{ a: { x: { b: 1 }, y: { b: 1 } } }", "{ a: { x: { b: 2 }, y: { b: 2 } } }"]
-		);
-	}
-
-	/// An index no array has names no position: the row is not split.
-	#[test]
-	fn a_fractional_index_splits_nothing() {
-		assert_eq!(split_by("a[1.5]", row_of("{ a: [1, 2] }")), ["{ a: [1, 2] }"]);
-	}
-
-	/// `SPLIT a` replaces the collection with one element; `SPLIT a[*]`
-	/// replaces every position with it, keeping the collection's shape.
-	#[test]
-	fn split_on_every_position_fills_the_collection() {
-		let row = || {
-			Value::Object(Object::from_iter([(
-				"a".to_string(),
-				Value::Array(Array::from(vec![
-					Value::Array(Array::from(vec![1, 2])),
-					Value::Array(Array::from(vec![3, 4])),
-				])),
-			)]))
-		};
-
-		let mut at = Vec::new();
-		split_on_field(row(), "a", &mut at);
-		assert_eq!(at.len(), 2, "one row per element");
-		assert_eq!(at[0].to_sql(), "{ a: [1, 2] }");
-		assert_eq!(at[1].to_sql(), "{ a: [3, 4] }");
-
-		let mut every = Vec::new();
-		split_on_every(row(), "a", &mut every);
-		assert_eq!(every.len(), 2, "the read is the same, so the row count is");
-		assert_eq!(every[0].to_sql(), "{ a: [[1, 2], [1, 2]] }");
-		assert_eq!(every[1].to_sql(), "{ a: [[3, 4], [3, 4]] }");
 	}
 
 	#[test]

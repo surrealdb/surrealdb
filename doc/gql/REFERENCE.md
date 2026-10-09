@@ -529,7 +529,7 @@ Places where Cypher habits would make the parser wrong:
 ## (g) v2 execution semantics (R1–R8)
 
 Sections (a)–(f) describe the *grammar* the parser accepts. This section
-describes the *runtime semantics* the v2 lowering and the streaming engine
+describes the *runtime semantics* the v2 lowering and the VM
 give to that grammar. These eight rules are pinned and normative; the
 authoritative statement is `V2_DESIGN.md` §0 (reproduced here verbatim so the
 grammar reference is self-contained) and they are enforced by the operator
@@ -589,7 +589,7 @@ Two corollaries the rules above imply, restated for searchability:
 
 An earlier draft of the GQL front-end ("v1") lowered each query to a
 SurrealQL `SELECT` and supported only a single linear pattern. v2 replaced that
-with the binding-table `MatchPlan` IR executed by the streaming engine, and in
+with the binding-table `MatchPlan` IR executed by the VM, and in
 doing so **turned 14 former lowering rejections into supported features** and
 **changed the semantics of variable-length edges**. The table below quotes the
 *old v1 error texts* verbatim, so a user who hit one of them (in a tutorial,

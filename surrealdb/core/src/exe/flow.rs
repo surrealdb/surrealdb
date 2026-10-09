@@ -17,6 +17,7 @@ pub(crate) trait FlowResultExt {
 
 	/// Falls back to `Value::None` for ignorable errors (type mismatches, etc.),
 	/// but propagates consequential errors (storage, timeout, permissions).
+	#[cfg(test)]
 	fn or_none(self) -> FlowResult<Value>;
 }
 
@@ -32,6 +33,7 @@ impl FlowResultExt for FlowResult<Value> {
 		}
 	}
 
+	#[cfg(test)]
 	fn or_none(self) -> FlowResult<Value> {
 		match self {
 			Ok(v) => Ok(v),

@@ -1,13 +1,8 @@
 //! Shared helpers for recursion strategies: RecordId enforcement and concurrent evaluation.
 
-use std::sync::Arc;
-
 use futures::{StreamExt, TryStreamExt, stream};
-use surrealdb_types::ToSql;
 
-use crate::exec::parts::{evaluate_physical_path, is_final};
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{BoxFut, ExecOperator, ExecutionContext, FlowResult};
+use crate::exec::{BoxFut, FlowResult};
 use crate::val::Value;
 
 /// Maximum number of concurrent path evaluations per depth level.
@@ -21,19 +16,6 @@ pub(crate) const RECURSION_CONCURRENCY: usize = 16;
 /// reads, so a strategy may run a level's evaluations side by side.
 pub(crate) trait DepthBody: Sync {
 	fn eval<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Value>>;
-}
-
-/// A body that is a path of physical expressions, each evaluated over the
-/// previous part's value with the depth's value as the current value.
-pub(crate) struct PathBody<'p, 'c> {
-	pub(crate) path: &'p [Arc<dyn PhysicalExpr>],
-	pub(crate) ctx: EvalContext<'c>,
-}
-
-impl DepthBody for PathBody<'_, '_> {
-	fn eval<'a>(&'a self, value: &'a Value) -> BoxFut<'a, FlowResult<Value>> {
-		evaluate_physical_path(value, self.path, self.ctx.with_value(value))
-	}
 }
 
 /// The `{min..max}` range of a recursive idiom (`.{min..max}`) plus the resolved
@@ -129,78 +111,12 @@ pub(crate) async fn eval_buffered_all<'a>(
 	}
 }
 
-/// Extract valid recursion target values from a single batch result value.
-///
-/// For array values, iterates elements and appends those that are valid
-/// recursion targets (see [`is_recursion_target`]) and not final. For
-/// non-array values, appends the value if it is a valid target and not
-/// final. Only one level of array is traversed; nested arrays are treated
-/// as single values.
-///
-/// Returns an error if a non-final, non-RecordId value is encountered,
-/// since recursion is only valid for record graph traversal.
-pub(crate) fn collect_discovery_targets(
-	v: Value,
-	out: &mut Vec<Value>,
-) -> crate::exec::FlowResult<()> {
-	match v {
-		Value::Array(arr) => {
-			for inner in arr.0 {
-				if is_final(&inner) {
-					continue;
-				}
-				if !is_recursion_target(&inner) {
-					return Err(crate::exec::Error::InvalidRecursionTarget {
-						value: inner.to_sql(),
-					}
-					.into());
-				}
-				out.push(inner);
-			}
-		}
-		v if is_final(&v) => {}
-		v if is_recursion_target(&v) => {
-			out.push(v);
-		}
-		v => {
-			return Err(crate::exec::Error::InvalidRecursionTarget {
-				value: v.to_sql(),
-			}
-			.into());
-		}
-	}
-	Ok(())
-}
-
-/// Discover recursion targets via the body operator for a single input value.
-///
-/// Executes the fused lookup chain and collects all valid `RecordId` targets
-/// from the resulting stream. Returns a boxed future for use with
-/// [`eval_buffered`].
-pub(crate) fn discover_body_targets<'a>(
-	body_op: &'a Arc<dyn ExecOperator>,
-	body_ctx: ExecutionContext,
-) -> BoxFut<'a, FlowResult<Vec<Value>>> {
-	Box::pin(async move {
-		let mut discovered = Vec::new();
-		let mut body_stream = body_op.execute(&body_ctx)?;
-		while let Some(batch_result) = body_stream.next().await {
-			let batch = batch_result?;
-			for v in batch.into_values() {
-				collect_discovery_targets(v, &mut discovered)?;
-			}
-		}
-		Ok(discovered)
-	})
-}
-
 #[cfg(test)]
 mod tests {
 	use std::time::Duration;
 
-	use super::super::tests::{FIXTURES, SYSTEM_LIMIT, body_operator, body_path, exec_error};
+	use super::super::tests::SYSTEM_LIMIT;
 	use super::*;
-	use crate::exec::operators::test_util::{TestDb, val};
 	use crate::expr::ControlFlow;
 
 	// =========================================================================
@@ -258,25 +174,6 @@ mod tests {
 	// =========================================================================
 	// is_recursion_target
 	// =========================================================================
-
-	#[tokio::test]
-	async fn only_record_ids_and_arrays_holding_one_are_recursion_targets() {
-		assert!(is_recursion_target(&val("link:a").await));
-		assert!(is_recursion_target(&val("[link:a]").await));
-		// `any`, not `all`: one record id in the array is enough.
-		assert!(is_recursion_target(&val("['x', link:a]").await));
-		// The check recurses through nesting.
-		assert!(is_recursion_target(&val("[[link:a]]").await));
-
-		assert!(!is_recursion_target(&val("[]").await));
-		assert!(!is_recursion_target(&val("['a', 'b']").await));
-		assert!(!is_recursion_target(&Value::None));
-		assert!(!is_recursion_target(&Value::Null));
-		assert!(!is_recursion_target(&val("'link:a'").await));
-		assert!(!is_recursion_target(&val("42").await));
-		assert!(!is_recursion_target(&val("{ id: 1 }").await));
-		assert!(!is_recursion_target(&val("u'019a1b2c-0000-7000-8000-000000000000'").await));
-	}
 
 	// =========================================================================
 	// eval_buffered / eval_buffered_all
@@ -352,64 +249,7 @@ mod tests {
 	// collect_discovery_targets
 	// =========================================================================
 
-	#[tokio::test]
-	async fn discovery_targets_from_an_array_skip_dead_ends_and_keep_record_ids() {
-		let mut out = Vec::new();
-		collect_discovery_targets(val("[link:a, NONE, link:b, NULL, []]").await, &mut out)
-			.expect("record ids and dead ends only");
-		assert_eq!(out, vec![val("link:a").await, val("link:b").await]);
-	}
-
-	#[tokio::test]
-	async fn only_one_level_of_array_is_unwrapped_so_a_nested_array_stays_one_target() {
-		let mut out = Vec::new();
-		collect_discovery_targets(val("[[link:a, link:b]]").await, &mut out)
-			.expect("a nested array of record ids is itself a target");
-		assert_eq!(out, vec![val("[link:a, link:b]").await]);
-	}
-
-	#[tokio::test]
-	async fn a_scalar_target_is_kept_a_scalar_dead_end_is_dropped() {
-		let mut out = Vec::new();
-		collect_discovery_targets(val("link:a").await, &mut out).expect("a record id is a target");
-		collect_discovery_targets(Value::None, &mut out).expect("NONE is a dead end");
-		collect_discovery_targets(Value::Null, &mut out).expect("NULL is a dead end");
-		collect_discovery_targets(val("[]").await, &mut out).expect("an empty array is a dead end");
-		assert_eq!(out, vec![val("link:a").await]);
-	}
-
-	#[tokio::test]
-	async fn a_non_record_value_is_rejected_whether_bare_or_inside_an_array() {
-		let mut out = Vec::new();
-		let bare = collect_discovery_targets(val("'sample'").await, &mut out)
-			.expect_err("a string is not a record graph target");
-		assert!(matches!(exec_error(bare), crate::exec::Error::InvalidRecursionTarget { .. }));
-
-		let nested = collect_discovery_targets(val("[link:a, 'sample']").await, &mut out)
-			.expect_err("a string element is not a record graph target");
-		assert!(matches!(exec_error(nested), crate::exec::Error::InvalidRecursionTarget { .. }));
-	}
-
 	// =========================================================================
 	// discover_body_targets
 	// =========================================================================
-
-	#[tokio::test]
-	async fn the_body_operator_discovers_the_targets_of_the_value_it_is_bound_to() {
-		let db = TestDb::new(FIXTURES).await;
-		let ctx = db.exec_ctx().await;
-		let path = body_path("node:a->step->node", &ctx).await;
-		let body = body_operator(&path).expect("a fused graph body exposes one operator chain");
-
-		let from_a = discover_body_targets(&body, ctx.with_current_value(val("node:a").await))
-			.await
-			.unwrap();
-		assert_eq!(from_a, vec![val("node:b").await]);
-
-		// A node with no outgoing edge discovers nothing rather than failing.
-		let from_d = discover_body_targets(&body, ctx.with_current_value(val("node:d").await))
-			.await
-			.unwrap();
-		assert!(from_d.is_empty());
-	}
 }

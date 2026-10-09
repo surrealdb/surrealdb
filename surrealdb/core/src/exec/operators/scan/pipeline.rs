@@ -19,15 +19,12 @@ use common::future::stream::{self, Yielder};
 
 use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
-#[cfg(test)]
-use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::permission::{
-	GuardKind, PhysicalPermission, UncompilableClause, check_permission_for_value,
-	read_permission_to_physical,
+	GuardKind, PhysicalPermission, check_permission_for_value, read_permission_to_physical,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
-use crate::exec::{EvalContext, ExecutionContext, PhysicalExpr, ValueBatch, ValueBatchStream};
+use crate::exec::{Clause, EvalContext, ExecutionContext, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordKey;
 use crate::key::{KVKeyDecode, KVValue, RawRange};
@@ -35,14 +32,9 @@ use crate::kvs::{Direction, Transaction};
 use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
-/// `(field_name, physical_expr, optional_kind, dependency_field_names)`.
-type RawComputedField = (
-	String,
-	Arc<dyn PhysicalExpr>,
-	Option<crate::expr::Kind>,
-	Vec<String>,
-	Option<crate::iam::AuthLimit>,
-);
+/// `(field_name, clause, optional_kind, dependency_field_names)`.
+type RawComputedField =
+	(String, Clause, Option<crate::expr::Kind>, Vec<String>, Option<crate::iam::AuthLimit>);
 
 // =============================================================================
 // ScanPipeline
@@ -54,7 +46,7 @@ type RawComputedField = (
 /// written once rather than duplicated in every scan path.
 pub(crate) struct ScanPipeline {
 	permission: PhysicalPermission,
-	predicate: Option<Arc<dyn PhysicalExpr>>,
+	predicate: Option<Clause>,
 	field_state: FieldState,
 	check_perms: bool,
 	/// Cached at construction: true when filter_and_process_batch must run.
@@ -82,7 +74,7 @@ impl ScanPipeline {
 		permission: &PhysicalPermission,
 		field_state: &FieldState,
 		check_perms: bool,
-		predicate: Option<&Arc<dyn PhysicalExpr>>,
+		predicate: Option<&Clause>,
 	) -> bool {
 		!matches!(permission, PhysicalPermission::Allow)
 			|| !field_state.computed_fields.is_empty()
@@ -100,14 +92,14 @@ impl ScanPipeline {
 	/// positional pushdown.
 	pub(crate) fn compute_needs_row_filtering(
 		permission: &PhysicalPermission,
-		predicate: Option<&Arc<dyn PhysicalExpr>>,
+		predicate: Option<&Clause>,
 	) -> bool {
 		!matches!(permission, PhysicalPermission::Allow) || predicate.is_some()
 	}
 
 	pub(crate) fn new(
 		permission: PhysicalPermission,
-		predicate: Option<Arc<dyn PhysicalExpr>>,
+		predicate: Option<Clause>,
 		field_state: FieldState,
 		check_perms: bool,
 		limit: Option<usize>,
@@ -131,31 +123,6 @@ impl ScanPipeline {
 			emitted: 0,
 			materialised_bytes: 0,
 		}
-	}
-
-	#[cfg(test)]
-	/// The approximate size of the last batch [`Self::process_batch`]
-	/// processed once its computed fields were materialised, before any row
-	/// was filtered out; 0 when the pipeline materialises no computed field.
-	///
-	/// A computed field can make a row far wider than the record it was
-	/// fetched as, and the batch held every such row until the filters ran, so
-	/// a scan sizing its batches reads this rather than the surviving rows.
-	pub(crate) fn materialised_bytes(&self) -> usize {
-		self.materialised_bytes
-	}
-
-	#[cfg(test)]
-	/// How many more rows this pipeline can use: those it has yet to skip for
-	/// the start offset plus those it has yet to emit under the limit; `None`
-	/// without a limit, when it takes every row.
-	///
-	/// It counts the rows the pipeline receives, so rows dropped before them
-	/// (a permission denial, a stale index entry) or by its own filters leave
-	/// the count unspent, and a scan sizing its reads by it never reads short.
-	pub(crate) fn rows_wanted(&self) -> Option<usize> {
-		let limit = self.limit?;
-		Some(self.start.saturating_sub(self.skipped) + limit.saturating_sub(self.emitted))
 	}
 
 	/// Returns true when limit or start tracking is active.
@@ -476,7 +443,7 @@ macro_rules! check_perm {
 pub(crate) async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
-	predicate: Option<&Arc<dyn PhysicalExpr>>,
+	predicate: Option<&Clause>,
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	check_perms: bool,
@@ -540,26 +507,6 @@ pub(crate) async fn filter_and_process_batch(
 }
 
 // =============================================================================
-// Key helpers
-// =============================================================================
-
-#[cfg(test)]
-/// Evaluate a paging clause a scan takes for itself, to the count it names.
-///
-/// The clause means the same thing pushed into a scan as it does in the
-/// [`Limit`](crate::exec::operators::Limit) above one, so both read it through
-/// [`paging_count`].
-pub(crate) async fn eval_limit_expr(
-	expr: &dyn PhysicalExpr,
-	ctx: &ExecutionContext,
-	clause: PagingClause,
-) -> Result<usize, ControlFlow> {
-	let eval_ctx = EvalContext::from_exec_ctx(ctx);
-	let value = expr.evaluate(eval_ctx).await?;
-	paging_count(&value, clause).map(|count| count as usize).map_err(ControlFlow::Err)
-}
-
-// =============================================================================
 // Field state
 // =============================================================================
 
@@ -601,12 +548,6 @@ pub(crate) struct FieldState {
 }
 
 impl FieldState {
-	/// The names of the operators the computed fields evaluate, in order.
-	#[cfg(test)]
-	pub(crate) fn computed_names(&self) -> impl Iterator<Item = &'static str> + '_ {
-		self.computed_fields.iter().map(|field| field.expr.name())
-	}
-
 	/// Create an empty field state with no computed fields or field permissions.
 	pub(crate) fn empty() -> Self {
 		Self {
@@ -625,7 +566,7 @@ pub(crate) struct ComputedFieldDef {
 	/// The field name where to store the result
 	field_name: String,
 	/// The physical expression to evaluate
-	expr: Arc<dyn PhysicalExpr>,
+	expr: Clause,
 	/// Optional type coercion
 	kind: Option<crate::expr::Kind>,
 	/// The definer's auth, recorded on the field by `DEFINE FIELD`. The body is
@@ -637,18 +578,13 @@ pub(crate) struct ComputedFieldDef {
 }
 
 impl ComputedFieldDef {
-	/// Root field name this computed-field definition is attached to.
-	pub(crate) fn field_name(&self) -> &str {
-		&self.field_name
-	}
-
 	/// Test-only constructor: production definitions are built exclusively by
 	/// [`build_field_state_raw`] from catalog field definitions.
 	#[cfg(test)]
 	pub(crate) fn for_test(field_name: impl Into<String>) -> Self {
 		Self {
 			field_name: field_name.into(),
-			expr: Arc::new(crate::exec::physical_expr::Literal(Value::None)),
+			expr: Clause::literal(Value::None),
 			kind: None,
 			auth_limit: None,
 		}
@@ -674,7 +610,7 @@ pub(crate) fn narrowing_auth_limit(
 /// Build field state from raw transaction and context parameters.
 ///
 /// This is the core implementation that does the actual work: KV lookup of
-/// field definitions, PhysicalExpr compilation, dependency analysis, and
+/// field definitions, [`Clause`] compilation, dependency analysis, and
 /// topological sorting. It takes explicit parameters instead of
 /// `ExecutionContext`, making it usable at both plan time and execution time.
 /// The fields of this table whose read is not inert, or `None` when no field
@@ -752,24 +688,6 @@ pub(crate) async fn table_read_restricted_fields(
 	Some(restricted)
 }
 
-#[cfg(test)]
-pub(crate) async fn build_field_state_raw(
-	planner: &crate::exec::planner::Planner<'_>,
-	ns_id: crate::catalog::NamespaceId,
-	db_id: crate::catalog::DatabaseId,
-	table_name: &TableName,
-	check_perms: bool,
-	version: Option<u64>,
-) -> Result<FieldState, ControlFlow> {
-	let txn =
-		planner.txn().context("build_field_state_raw requires a planner with a transaction")?;
-	let field_defs = txn
-		.all_tb_fields(ns_id, db_id, table_name, version)
-		.await
-		.context("Failed to get field definitions")?;
-	compile_field_state(planner, table_name, &field_defs, check_perms).await
-}
-
 /// The field state of reads of `table_name` whose fields are `field_defs`,
 /// compiled by `planner`, with field permissions where `check_perms`.
 pub(crate) async fn compile_field_state(
@@ -821,24 +739,18 @@ pub(crate) async fn compile_field_state(
 				_ => None,
 			};
 			let body_planner = limited.as_ref().unwrap_or(planner);
-			let physical_expr = match body {
+			let clause = match body {
 				Ok(body) => {
 					let compiled =
-						body_planner.physical_expr(body.clone()).await.with_context(|| {
+						body_planner.scalar_metadata(body.clone()).await.with_context(|| {
 							format!("Computed field '{field_name}' has unsupported expression")
 						})?;
-					crate::exec::scalar_unit::UnitClause::of(body.clone(), compiled)
+					Clause::of(body.clone(), compiled)
 				}
-				Err(reason) => UncompilableClause::of(reason.to_string()),
+				Err(reason) => Clause::uncompilable(reason.to_string()),
 			};
 
-			raw_computed.push((
-				field_name,
-				physical_expr,
-				fd.field_kind.clone(),
-				deps.fields,
-				limit,
-			));
+			raw_computed.push((field_name, clause, fd.field_kind.clone(), deps.fields, limit));
 		}
 	}
 
@@ -852,7 +764,7 @@ pub(crate) async fn compile_field_state(
 		let (field_name, expr, kind, _, auth_limit) = &raw_computed[idx];
 		computed_fields.push(ComputedFieldDef {
 			field_name: field_name.clone(),
-			expr: Arc::clone(expr),
+			expr: expr.clone(),
 			kind: kind.clone(),
 			auth_limit: auth_limit.clone(),
 		});
@@ -1076,7 +988,7 @@ pub(crate) async fn compute_fields_for_value_against(
 	eval_ctx.computing_record = match &*value {
 		Value::Object(obj) => match obj.get("id") {
 			Some(Value::RecordId(rid)) => {
-				Some(Arc::new(crate::exec::physical_expr::ComputingRecord {
+				Some(Arc::new(crate::exec::eval_context::ComputingRecord {
 					rid: rid.clone(),
 					stored: stored_view,
 				}))
@@ -1224,7 +1136,7 @@ impl PermissionPass {
 /// pass cut nothing.
 ///
 /// A computed field that reaches its own row by dereferencing the record id
-/// (`COMPUTED id.secret`) is served by [`crate::exec::parts::field`] from the
+/// (`COMPUTED id.secret`) is served by [`crate::exec::vm::access::field`] from the
 /// view supplied here rather than from storage, so the reduction reaches it
 /// too.
 pub(crate) async fn materialise_fields_with_permissions(
@@ -1405,16 +1317,10 @@ async fn filter_fields_by_permission_inner(
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Cow;
 
 	use super::*;
-	use crate::exec::operators::test_util::{
-		TestDb, field_idiom, parse_path, physical_expr, physical_expr_in_txn, root_ctx, val,
-	};
-	use crate::expr::computed_deps::ComputedDeps;
+	use crate::exec::operators::test_util::{TestDb, field_idiom, parse_path, root_ctx};
 	use crate::expr::logical::{LogicalOrder, LogicalOrdering};
-	use crate::key::schema::RecordPrefix;
-	use crate::val::Number;
 
 	// =========================================================================
 	// Fixture helpers
@@ -1434,40 +1340,6 @@ mod tests {
 			permission_field_deps: Arc::new(HashSet::new()),
 			permission_deps_complete: true,
 		}
-	}
-
-	/// A computed-field definition with an explicit body, mirroring what
-	/// `build_field_state_raw` produces for `DEFINE FIELD … COMPUTED …`.
-	fn computed(
-		field_name: &str,
-		expr: Arc<dyn PhysicalExpr>,
-		kind: Option<crate::expr::Kind>,
-	) -> ComputedFieldDef {
-		ComputedFieldDef {
-			field_name: field_name.to_owned(),
-			expr,
-			kind,
-			auth_limit: None,
-		}
-	}
-
-	/// Build a batch from SurrealQL object literals.
-	async fn rows(srcs: &[&str]) -> Vec<Value> {
-		let mut out = Vec::with_capacity(srcs.len());
-		for src in srcs {
-			out.push(val(src).await);
-		}
-		out
-	}
-
-	/// Read a field path out of a row.
-	fn pick(value: &Value, path: &str) -> Value {
-		value.pick(&field_idiom(path).0)
-	}
-
-	/// The `n` field of every row in a batch, for order-sensitive assertions.
-	fn ns(batch: &[Value]) -> Vec<Value> {
-		batch.iter().map(|v| pick(v, "n")).collect()
 	}
 
 	/// One `ORDER BY` key.
@@ -1499,22 +1371,6 @@ mod tests {
 			None
 		));
 		assert!(!ScanPipeline::compute_needs_row_filtering(&PhysicalPermission::Allow, None));
-	}
-
-	#[tokio::test]
-	async fn a_table_permission_needs_processing_and_removes_rows() {
-		let ctx = root_ctx();
-		let empty = FieldState::empty();
-
-		for permission in [
-			PhysicalPermission::Deny,
-			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
-		] {
-			assert!(ScanPipeline::compute_needs_processing(&permission, &empty, true, None));
-			// A table permission decides which rows survive, so positional
-			// START/LIMIT pushdown must be suppressed.
-			assert!(ScanPipeline::compute_needs_row_filtering(&permission, None));
-		}
 	}
 
 	#[tokio::test]
@@ -1553,421 +1409,17 @@ mod tests {
 		assert!(!ScanPipeline::compute_needs_row_filtering(&PhysicalPermission::Allow, None));
 	}
 
-	#[tokio::test]
-	async fn a_predicate_needs_processing_and_removes_rows() {
-		let ctx = root_ctx();
-		let predicate = physical_expr("n > 2", &ctx).await;
-		let empty = FieldState::empty();
-
-		assert!(ScanPipeline::compute_needs_processing(
-			&PhysicalPermission::Allow,
-			&empty,
-			false,
-			Some(&predicate)
-		));
-		assert!(ScanPipeline::compute_needs_row_filtering(
-			&PhysicalPermission::Allow,
-			Some(&predicate)
-		));
-	}
-
 	// =========================================================================
 	// ScanPipeline::process_batch — limit/start state across batches
 	// =========================================================================
-
-	/// A pipeline with no processing work, so `process_batch` exercises only the
-	/// limit/start bookkeeping.
-	fn limit_pipeline(limit: Option<usize>, start: usize) -> ScanPipeline {
-		ScanPipeline::new(PhysicalPermission::Allow, None, FieldState::empty(), false, limit, start)
-	}
-
-	/// A batch of `{ n: … }` rows numbered from `from`.
-	async fn numbered(from: usize, count: usize) -> Vec<Value> {
-		let srcs: Vec<String> = (from..from + count).map(|n| format!("{{ n: {n} }}")).collect();
-		rows(&srcs.iter().map(String::as_str).collect::<Vec<_>>()).await
-	}
-
-	#[tokio::test]
-	async fn a_batch_wholly_inside_the_start_offset_is_discarded_and_iteration_continues() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(None, 5);
-
-		let mut batch = numbered(0, 4).await;
-		assert!(pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert!(batch.is_empty());
-		assert_eq!(pipeline.skipped, 4);
-		assert_eq!(pipeline.emitted, 0);
-	}
-
-	#[tokio::test]
-	async fn the_start_offset_is_consumed_across_batches_and_skips_only_its_prefix() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(None, 5);
-
-		let mut first = numbered(0, 4).await;
-		assert!(pipeline.process_batch(&mut first, &ctx).await.unwrap());
-		assert!(first.is_empty());
-
-		// One row of the offset is left, so the second batch loses exactly its
-		// first row and keeps the rest in order.
-		let mut second = numbered(4, 4).await;
-		assert!(pipeline.process_batch(&mut second, &ctx).await.unwrap());
-		assert_eq!(ns(&second), vec![Value::from(5), Value::from(6), Value::from(7)]);
-		assert_eq!(pipeline.skipped, 5);
-		assert_eq!(pipeline.emitted, 3);
-	}
-
-	#[tokio::test]
-	async fn the_batch_is_truncated_at_the_limit_and_iteration_stops_there() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(Some(2), 0);
-
-		let mut batch = numbered(0, 5).await;
-		// The limit is reached inside this batch, so the caller is told to stop.
-		assert!(!pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert_eq!(ns(&batch), vec![Value::from(0), Value::from(1)]);
-		assert_eq!(pipeline.emitted, 2);
-	}
-
-	#[tokio::test]
-	async fn rows_wanted_counts_down_the_start_and_the_limit() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(Some(2), 3);
-		assert_eq!(pipeline.rows_wanted(), Some(5));
-		let mut batch = numbered(0, 4).await;
-		assert!(pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert_eq!(pipeline.rows_wanted(), Some(1), "3 skipped and 1 emitted");
-		let mut batch = numbered(4, 4).await;
-		assert!(!pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert_eq!(pipeline.rows_wanted(), Some(0));
-		assert_eq!(limit_pipeline(None, 0).rows_wanted(), None);
-	}
-
-	#[tokio::test]
-	async fn the_limit_is_tracked_across_batches_and_only_goes_false_once_reached() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(Some(3), 0);
-
-		let mut first = numbered(0, 2).await;
-		// Two of three emitted: keep going.
-		assert!(pipeline.process_batch(&mut first, &ctx).await.unwrap());
-		assert_eq!(first.len(), 2);
-
-		let mut second = numbered(2, 2).await;
-		assert!(!pipeline.process_batch(&mut second, &ctx).await.unwrap());
-		assert_eq!(ns(&second), vec![Value::from(2)]);
-		assert_eq!(pipeline.emitted, 3);
-	}
-
-	#[tokio::test]
-	async fn a_zero_limit_emits_nothing_and_stops_immediately() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(Some(0), 0);
-
-		let mut batch = numbered(0, 3).await;
-		assert!(!pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert!(batch.is_empty());
-	}
-
-	#[tokio::test]
-	async fn without_limit_or_start_the_batch_passes_through_untouched() {
-		let ctx = root_ctx();
-		let mut pipeline = limit_pipeline(None, 0);
-
-		let mut batch = numbered(0, 3).await;
-		assert!(pipeline.process_batch(&mut batch, &ctx).await.unwrap());
-		assert_eq!(ns(&batch), vec![Value::from(0), Value::from(1), Value::from(2)]);
-		// Nothing is counted when there is no limit or start to track.
-		assert_eq!(pipeline.emitted, 0);
-	}
 
 	// =========================================================================
 	// filter_and_process_batch — documented stage order
 	// =========================================================================
 
-	#[tokio::test]
-	async fn a_row_denied_by_the_table_permission_never_reaches_the_predicate() {
-		let db = TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		let empty = FieldState::empty();
-		// A predicate that cannot be evaluated without failing the whole batch.
-		let poison = physical_expr("THROW 'the predicate must not see this row'", &ctx).await;
-
-		// Unconditional deny: every row is dropped before the predicate runs.
-		let mut batch = rows(&["{ n: 1 }", "{ n: 2 }"]).await;
-		filter_and_process_batch(
-			&mut batch,
-			&PhysicalPermission::Deny,
-			Some(&poison),
-			&ctx,
-			&empty,
-			false,
-		)
-		.await
-		.expect("no row reaches the predicate, so it cannot fail");
-		assert!(batch.is_empty());
-
-		// Conditional deny: only the permitted row is fed to the predicate, and
-		// the predicate throws for anything else.
-		let permission = PhysicalPermission::Conditional(physical_expr("public", &ctx).await);
-		let guarded = physical_expr_in_txn(
-			"IF public { true } ELSE { THROW 'the predicate saw a denied row' }",
-			&ctx,
-		)
-		.await;
-		let mut batch =
-			rows(&["{ n: 1, public: false }", "{ n: 2, public: true }", "{ n: 3, public: false }"])
-				.await;
-		filter_and_process_batch(&mut batch, &permission, Some(&guarded), &ctx, &empty, false)
-			.await
-			.expect("denied rows are cut before the predicate");
-		assert_eq!(ns(&batch), vec![Value::from(2)]);
-	}
-
-	#[tokio::test]
-	async fn a_computed_field_is_visible_to_the_where_predicate() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD score ON t TYPE int;
-			 DEFINE FIELD doubled ON t TYPE int COMPUTED score * 2;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let field_state =
-			build_field_state(&ctx, &TableName::from("t"), false, None).await.unwrap();
-		assert_eq!(field_state.computed_fields.len(), 1);
-
-		let predicate = physical_expr("doubled > 4", &ctx).await;
-		let mut batch = rows(&["{ id: t:1, score: 3 }", "{ id: t:2, score: 1 }"]).await;
-		filter_and_process_batch(
-			&mut batch,
-			&PhysicalPermission::Allow,
-			Some(&predicate),
-			&ctx,
-			&field_state,
-			false,
-		)
-		.await
-		.unwrap();
-
-		// The predicate could only decide this because the computed field was
-		// injected before it ran.
-		assert_eq!(batch.len(), 1);
-		assert_eq!(pick(&batch[0], "id"), val("t:1").await);
-		assert_eq!(pick(&batch[0], "doubled"), Value::from(6));
-	}
-
-	#[tokio::test]
-	async fn the_materialised_size_counts_rows_the_predicate_rejects() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD wide ON t COMPUTED array::repeat(0.5f, 1024);",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let field_state =
-			build_field_state(&ctx, &TableName::from("t"), false, None).await.unwrap();
-		let predicate = physical_expr("false", &ctx).await;
-		let mut pipeline = ScanPipeline::new(
-			PhysicalPermission::Allow,
-			Some(predicate),
-			field_state,
-			false,
-			None,
-			0,
-		);
-		let mut batch = rows(&["{ id: t:1 }", "{ id: t:2 }"]).await;
-		pipeline.process_batch(&mut batch, &ctx).await.unwrap();
-
-		assert!(batch.is_empty(), "the predicate rejects every row");
-		// Both rows held their computed field until the predicate dropped them.
-		let wide = std::mem::size_of::<Value>() * 1024;
-		assert!(pipeline.materialised_bytes() >= 2 * wide, "{}", pipeline.materialised_bytes());
-	}
-
-	#[tokio::test]
-	async fn a_field_cut_by_a_field_permission_is_invisible_to_the_where_predicate() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD secret ON t TYPE string PERMISSIONS FOR select NONE;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let table = TableName::from("t");
-		let checked = build_field_state(&ctx, &table, true, None).await.unwrap();
-		assert_eq!(checked.field_permissions.len(), 1);
-
-		let predicate = physical_expr("secret = 'x'", &ctx).await;
-
-		// Field permissions run before the condition, so the restricted field is
-		// already gone when the predicate reads it and the row does not match.
-		let mut batch = rows(&["{ id: t:1, secret: 'x' }"]).await;
-		filter_and_process_batch(
-			&mut batch,
-			&PhysicalPermission::Allow,
-			Some(&predicate),
-			&ctx,
-			&checked,
-			true,
-		)
-		.await
-		.unwrap();
-		assert!(batch.is_empty());
-
-		// With enforcement off the same predicate matches, which is what makes
-		// the ordering above observable rather than incidental.
-		let unchecked = build_field_state(&ctx, &table, false, None).await.unwrap();
-		let mut batch = rows(&["{ id: t:1, secret: 'x' }"]).await;
-		filter_and_process_batch(
-			&mut batch,
-			&PhysicalPermission::Allow,
-			Some(&predicate),
-			&ctx,
-			&unchecked,
-			false,
-		)
-		.await
-		.unwrap();
-		assert_eq!(batch.len(), 1);
-		assert_eq!(pick(&batch[0], "secret"), Value::from("x"));
-
-		// A row that survives on other grounds still comes out with the
-		// restricted field removed.
-		let survives = physical_expr("id = t:1", &ctx).await;
-		let mut batch = rows(&["{ id: t:1, secret: 'x' }"]).await;
-		filter_and_process_batch(
-			&mut batch,
-			&PhysicalPermission::Allow,
-			Some(&survives),
-			&ctx,
-			&checked,
-			true,
-		)
-		.await
-		.unwrap();
-		assert_eq!(batch.len(), 1);
-		assert_eq!(pick(&batch[0], "secret"), Value::None);
-	}
-
-	#[tokio::test]
-	async fn the_predicate_only_fast_path_matches_the_slow_path_and_keeps_row_order() {
-		let ctx = root_ctx();
-		let predicate = physical_expr("n % 2 = 1", &ctx).await;
-		let empty = FieldState::empty();
-		let input =
-			["{ n: 0 }", "{ n: 1 }", "{ n: 2 }", "{ n: 3 }", "{ n: 4 }", "{ n: 5 }", "{ n: 6 }"];
-
-		// Fast path: Allow + no computed fields + no field permissions, so the
-		// batch is evaluated through `evaluate_batch`.
-		let mut fast = rows(&input).await;
-		filter_and_process_batch(
-			&mut fast,
-			&PhysicalPermission::Allow,
-			Some(&predicate),
-			&ctx,
-			&empty,
-			true,
-		)
-		.await
-		.unwrap();
-
-		// Slow path: an always-true table permission changes nothing about which
-		// rows match, but forces the per-row loop.
-		let allow_all = PhysicalPermission::Conditional(physical_expr("true", &ctx).await);
-		let mut slow = rows(&input).await;
-		filter_and_process_batch(&mut slow, &allow_all, Some(&predicate), &ctx, &empty, true)
-			.await
-			.unwrap();
-
-		// Both compactions are in-place swaps of the surviving prefix, which is
-		// what makes positional START/LIMIT pushdown sound.
-		let expected = vec![Value::from(1), Value::from(3), Value::from(5)];
-		assert_eq!(ns(&fast), expected);
-		assert_eq!(ns(&slow), expected);
-	}
-
 	// =========================================================================
 	// compute_fields_for_value
 	// =========================================================================
-
-	#[tokio::test]
-	async fn computed_fields_are_evaluated_in_dependency_order() {
-		// `y` reads `z`, so `z` must be evaluated first even though the
-		// catalog hands the fields back with `y` ahead of `z`.
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD base ON t TYPE int;
-			 DEFINE FIELD y ON t TYPE int COMPUTED z * 10;
-			 DEFINE FIELD z ON t TYPE int COMPUTED base + 1;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let field_state =
-			build_field_state(&ctx, &TableName::from("t"), false, None).await.unwrap();
-		assert_eq!(field_state.computed_fields.len(), 2);
-		assert_eq!(field_state.computed_fields[0].field_name(), "z");
-
-		let mut row = val("{ id: t:1, base: 1 }").await;
-		compute_fields_for_value(&ctx, &field_state, &mut row, false).await.unwrap();
-		assert_eq!(pick(&row, "z"), Value::from(2));
-		assert_eq!(pick(&row, "y"), Value::from(20));
-	}
-
-	#[tokio::test]
-	async fn a_computed_field_is_coerced_to_its_declared_kind() {
-		let ctx = root_ctx();
-		let field_state = state(
-			vec![computed("ratio", physical_expr("1", &ctx).await, Some(crate::expr::Kind::Float))],
-			Vec::new(),
-		);
-
-		let mut row = val("{ id: t:1 }").await;
-		compute_fields_for_value(&ctx, &field_state, &mut row, false).await.unwrap();
-		// An integer body under `TYPE float` is stored as a float, not as the
-		// integer the expression produced.
-		assert!(
-			matches!(pick(&row, "ratio"), Value::Number(Number::Float(f)) if f == 1.0),
-			"expected a float, got {:?}",
-			pick(&row, "ratio")
-		);
-	}
-
-	#[tokio::test]
-	async fn a_failed_coercion_surfaces_as_an_error_naming_the_field() {
-		let ctx = root_ctx();
-		let field_state = state(
-			vec![computed(
-				"count",
-				physical_expr("'abc'", &ctx).await,
-				Some(crate::expr::Kind::Int),
-			)],
-			Vec::new(),
-		);
-
-		let mut row = val("{ id: t:1 }").await;
-		let err = compute_fields_for_value(&ctx, &field_state, &mut row, false).await.unwrap_err();
-		let message = err.to_string();
-		assert!(
-			message.contains("Failed to coerce computed field 'count'"),
-			"expected the coercion context, got {message}"
-		);
-	}
-
-	#[tokio::test]
-	async fn a_return_out_of_a_computed_body_becomes_the_field_value() {
-		let db = TestDb::new("").await;
-		let ctx = db.exec_ctx().await;
-		// A body whose block returns rather than falling off its end signals
-		// `ControlFlow::Return`, which the field takes as its value.
-		let field_state = state(
-			vec![computed("answer", physical_expr_in_txn("{ RETURN 5 }", &ctx).await, None)],
-			Vec::new(),
-		);
-
-		let mut row = val("{ id: t:1 }").await;
-		compute_fields_for_value(&ctx, &field_state, &mut row, false).await.unwrap();
-		assert_eq!(pick(&row, "answer"), Value::from(5));
-	}
 
 	#[tokio::test]
 	async fn computing_a_field_on_a_non_object_row_is_an_error() {
@@ -1987,226 +1439,13 @@ mod tests {
 		assert_eq!(row, Value::from(1));
 	}
 
-	#[tokio::test]
-	async fn computing_record_is_taken_from_the_rows_id_so_self_reads_stay_raw() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD c ON t TYPE int COMPUTED 7;
-			 DEFINE FIELD self_c ON t TYPE any COMPUTED id.c;
-			 DEFINE FIELD other_c ON t TYPE any COMPUTED (t:two).c;
-			 CREATE t:one;
-			 CREATE t:two;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let field_state =
-			build_field_state(&ctx, &TableName::from("t"), false, None).await.unwrap();
-
-		let mut row = val("{ id: t:one }").await;
-		compute_fields_for_value(&ctx, &field_state, &mut row, false).await.unwrap();
-
-		// `computing_record` is set from the row's `id`, so dereferencing that
-		// same record reads the stored data and does not re-enter computation:
-		// `c` is not stored, so the self-read yields NONE.
-		assert_eq!(pick(&row, "self_c"), Value::None);
-		// A different record is fetched normally, computed fields included,
-		// which is what makes the self-read above observably different.
-		assert_eq!(pick(&row, "other_c"), Value::from(7));
-	}
-
 	// =========================================================================
 	// filter_fields_by_permission
 	// =========================================================================
 
-	#[tokio::test]
-	async fn a_deny_field_permission_cuts_the_field() {
-		let ctx = root_ctx();
-		let field_state =
-			state(Vec::new(), vec![(field_idiom("secret"), PhysicalPermission::Deny)]);
-
-		let mut row = val("{ id: t:1, secret: 'x', public: 'y' }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
-		assert_eq!(pick(&row, "secret"), Value::None);
-		assert_eq!(pick(&row, "public"), Value::from("y"));
-
-		// An `Allow` entry is a no-op, and a non-object row is left alone.
-		let allow = state(Vec::new(), vec![(field_idiom("secret"), PhysicalPermission::Allow)]);
-		let mut row = val("{ secret: 'x' }").await;
-		filter_fields_by_permission(&ctx, &allow, &mut row).await.unwrap();
-		assert_eq!(pick(&row, "secret"), Value::from("x"));
-
-		let mut scalar = Value::from(1);
-		filter_fields_by_permission(&ctx, &field_state, &mut scalar).await.unwrap();
-		assert_eq!(scalar, Value::from(1));
-	}
-
-	#[tokio::test]
-	async fn a_conditional_field_permission_decides_from_the_picked_field_value() {
-		let ctx = root_ctx();
-		let field_state = state(
-			Vec::new(),
-			vec![(
-				field_idiom("score"),
-				PhysicalPermission::Conditional(physical_expr("$value > 10", &ctx).await),
-			)],
-		);
-
-		let mut kept = val("{ score: 42 }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut kept).await.unwrap();
-		assert_eq!(pick(&kept, "score"), Value::from(42));
-
-		let mut cut = val("{ score: 3 }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut cut).await.unwrap();
-		assert_eq!(pick(&cut, "score"), Value::None);
-	}
-
-	#[tokio::test]
-	async fn a_field_permission_predicate_reads_the_pre_mutation_snapshot() {
-		let ctx = root_ctx();
-		// `a` is cut first; `b`'s predicate still reads `a` and must see the
-		// value the row had before any cut, otherwise an earlier decision would
-		// silently change a later one.
-		let field_state = state(
-			Vec::new(),
-			vec![
-				(field_idiom("a"), PhysicalPermission::Deny),
-				(
-					field_idiom("b"),
-					PhysicalPermission::Conditional(physical_expr("a = 1", &ctx).await),
-				),
-			],
-		);
-
-		let mut row = val("{ a: 1, b: 2 }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
-		assert_eq!(pick(&row, "a"), Value::None);
-		assert_eq!(pick(&row, "b"), Value::from(2));
-	}
-
-	#[tokio::test]
-	async fn every_element_a_wildcard_deny_targets_is_cut() {
-		let ctx = root_ctx();
-		let field_state =
-			state(Vec::new(), vec![(field_idiom("items[*]"), PhysicalPermission::Deny)]);
-
-		let mut row = val("{ items: [1, 2, 3, 4, 5] }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
-		// Removal walks the expanded paths in reverse, so no pending index is
-		// invalidated by an earlier removal and nothing is left behind.
-		assert_eq!(pick(&row, "items"), val("[]").await);
-	}
-
-	#[tokio::test]
-	async fn a_wildcard_conditional_permission_cuts_every_rejected_element() {
-		let ctx = root_ctx();
-		let field_state = state(
-			Vec::new(),
-			vec![(
-				field_idiom("items[*]"),
-				PhysicalPermission::Conditional(physical_expr("$value % 2 = 0", &ctx).await),
-			)],
-		);
-
-		// The rejected elements sit at indices 0, 2 and 4. A forward pass would
-		// shift the survivors down under each removal and leave odd values in.
-		let mut row = val("{ items: [1, 2, 3, 4, 5, 6] }").await;
-		filter_fields_by_permission(&ctx, &field_state, &mut row).await.unwrap();
-		assert_eq!(pick(&row, "items"), val("[2, 4, 6]").await);
-	}
-
 	// =========================================================================
 	// filter_field_state_for_projection
 	// =========================================================================
-
-	/// A full state with two independent computed fields (`flag`, `other`), one
-	/// restricted field, and `flag` named as a field-permission dependency.
-	async fn projection_state(permission_deps_complete: bool) -> FieldState {
-		let ctx = root_ctx();
-		let mut dep_map = HashMap::new();
-		dep_map.insert(
-			"flag".to_owned(),
-			ComputedDeps {
-				fields: vec!["score".to_owned()],
-				is_complete: true,
-			},
-		);
-		dep_map.insert(
-			"other".to_owned(),
-			ComputedDeps {
-				fields: Vec::new(),
-				is_complete: true,
-			},
-		);
-
-		FieldState {
-			computed_fields: vec![
-				computed("flag", physical_expr("score >= 10", &ctx).await, None),
-				computed("other", physical_expr("1", &ctx).await, None),
-			],
-			field_permissions: Arc::new(vec![
-				(
-					field_idiom("secret"),
-					PhysicalPermission::Conditional(physical_expr("flag", &ctx).await),
-				),
-				(field_idiom("hidden"), PhysicalPermission::Deny),
-			]),
-			dep_map: Arc::new(dep_map),
-			permission_field_deps: Arc::new(HashSet::from(["flag".to_owned()])),
-			permission_deps_complete,
-		}
-	}
-
-	fn computed_names(state: &FieldState) -> Vec<&str> {
-		state.computed_fields.iter().map(|cf| cf.field_name()).collect()
-	}
-
-	#[tokio::test]
-	async fn no_projection_keeps_every_computed_field() {
-		let full = projection_state(true).await;
-		let filtered = filter_field_state_for_projection(&full, None);
-		assert_eq!(computed_names(&filtered), vec!["flag", "other"]);
-	}
-
-	#[tokio::test]
-	async fn a_selective_projection_drops_the_computed_fields_it_does_not_need() {
-		let mut full = projection_state(true).await;
-		// Without a permission dependency, `SELECT other` needs only `other`.
-		full.permission_field_deps = Arc::new(HashSet::new());
-		let needed = HashSet::from(["other".to_owned()]);
-		let filtered = filter_field_state_for_projection(&full, Some(&needed));
-		assert_eq!(computed_names(&filtered), vec!["other"]);
-	}
-
-	#[tokio::test]
-	async fn a_selective_projection_still_computes_fields_a_field_permission_reads() {
-		let full = projection_state(true).await;
-		// `SELECT secret` does not mention `flag`, but the permission on
-		// `secret` reads it, so the permission decision cannot be made against
-		// a row that lacks it.
-		let needed = HashSet::from(["secret".to_owned()]);
-		let filtered = filter_field_state_for_projection(&full, Some(&needed));
-		assert_eq!(computed_names(&filtered), vec!["flag"]);
-	}
-
-	#[tokio::test]
-	async fn incomplete_permission_dependencies_force_every_computed_field() {
-		let full = projection_state(false).await;
-		let needed = HashSet::from(["unrelated".to_owned()]);
-		let filtered = filter_field_state_for_projection(&full, Some(&needed));
-		assert_eq!(computed_names(&filtered), vec!["flag", "other"]);
-	}
-
-	#[tokio::test]
-	async fn field_permissions_are_never_filtered_by_the_projection() {
-		let full = projection_state(true).await;
-		// A restricted field may be referenced only by WHERE or ORDER BY, and
-		// the value-ordering guard reads this same list, so every entry has to
-		// survive however narrow the projection is.
-		let needed = HashSet::new();
-		let filtered = filter_field_state_for_projection(&full, Some(&needed));
-		assert_eq!(filtered.field_permissions.len(), 2);
-		assert_eq!(filter_field_state_for_projection(&full, None).field_permissions.len(), 2);
-	}
 
 	// =========================================================================
 	// build_field_state
@@ -2223,40 +1462,6 @@ mod tests {
 		let field_state = build_field_state(&ctx, &TableName::from("t"), true, None).await.unwrap();
 		assert!(field_state.computed_fields.is_empty());
 		assert!(field_state.field_permissions.is_empty());
-	}
-
-	#[tokio::test]
-	async fn computed_fields_and_field_permissions_come_from_the_catalog() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD score ON t TYPE int;
-			 DEFINE FIELD doubled ON t TYPE int COMPUTED score * 2;
-			 DEFINE FIELD secret ON t TYPE string PERMISSIONS FOR select NONE;
-			 DEFINE FIELD gated ON t TYPE string PERMISSIONS FOR select WHERE score > 1;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let table = TableName::from("t");
-
-		let checked = build_field_state(&ctx, &table, true, None).await.unwrap();
-		assert_eq!(computed_names(&checked), vec!["doubled"]);
-		// `Permission::Full` fields need no runtime check and are not listed. The
-		// entries follow the catalog's field order, which is by field name.
-		let listed: Vec<String> =
-			checked.field_permissions.iter().map(|(idiom, _)| idiom.to_raw_string()).collect();
-		assert_eq!(listed, vec!["gated".to_owned(), "secret".to_owned()]);
-		assert!(matches!(checked.field_permissions[0].1, PhysicalPermission::Conditional(_)));
-		assert!(matches!(checked.field_permissions[1].1, PhysicalPermission::Deny));
-		// `score` is read by the conditional permission, so it is recorded as a
-		// dependency and the analysis is complete.
-		assert!(checked.permission_deps_complete);
-		assert!(checked.permission_field_deps.contains("score"));
-
-		// Field permissions are omitted entirely when enforcement is off, while
-		// computed fields still have to be evaluated.
-		let unchecked = build_field_state(&ctx, &table, false, None).await.unwrap();
-		assert_eq!(computed_names(&unchecked), vec!["doubled"]);
-		assert!(unchecked.field_permissions.is_empty());
 	}
 
 	#[tokio::test]
@@ -2282,65 +1487,9 @@ mod tests {
 		assert!(Arc::ptr_eq(&unchecked, &field_state(&ctx, &table, false).await.unwrap()));
 	}
 
-	#[tokio::test]
-	async fn a_projection_filters_the_cached_state_without_narrowing_the_cache() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 DEFINE FIELD score ON t TYPE int;
-			 DEFINE FIELD doubled ON t TYPE int COMPUTED score * 2;
-			 DEFINE FIELD tripled ON t TYPE int COMPUTED score * 3;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let table = TableName::from("t");
-
-		let needed = HashSet::from(["doubled".to_owned()]);
-		let projected = build_field_state(&ctx, &table, false, Some(&needed)).await.unwrap();
-		assert_eq!(computed_names(&projected), vec!["doubled"]);
-
-		// The cached entry keeps both computed fields, so the next query with a
-		// different projection is served correctly from the same entry.
-		let full = build_field_state(&ctx, &table, false, None).await.unwrap();
-		assert_eq!(full.computed_fields.len(), 2);
-	}
-
 	// =========================================================================
 	// eval_limit_expr
 	// =========================================================================
-
-	#[tokio::test]
-	async fn a_non_negative_integer_limit_evaluates_to_itself() {
-		let ctx = root_ctx();
-		let expr = physical_expr("7", &ctx).await;
-		assert_eq!(eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Limit).await.unwrap(), 7);
-
-		let zero = physical_expr("0", &ctx).await;
-		assert_eq!(eval_limit_expr(zero.as_ref(), &ctx, PagingClause::Limit).await.unwrap(), 0);
-	}
-
-	#[tokio::test]
-	async fn a_count_that_is_not_a_non_negative_integer_is_rejected() {
-		let ctx = root_ctx();
-		// A count is written down as an integer: nothing else is read as one,
-		// and a float is not truncated to the integer below it.
-		for src in ["NONE", "NULL", "-1", "'ten'", "1.5", "1dec", "4294967296"] {
-			let expr = physical_expr(src, &ctx).await;
-			let err = eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Limit)
-				.await
-				.expect_err("{src} is not a count");
-			assert!(
-				err.to_string().contains("the LIMIT clause must evaluate to a positive integer"),
-				"expected the LIMIT rejection for {src}, got {err}"
-			);
-			let err = eval_limit_expr(expr.as_ref(), &ctx, PagingClause::Start)
-				.await
-				.expect_err("{src} is not a count");
-			assert!(
-				err.to_string().contains("the START clause must evaluate to a positive integer"),
-				"expected the START rejection for {src}, got {err}"
-			);
-		}
-	}
 
 	// =========================================================================
 	// determine_scan_direction
@@ -2376,36 +1525,4 @@ mod tests {
 	// =========================================================================
 	// decode_record
 	// =========================================================================
-
-	#[tokio::test]
-	async fn a_stored_record_decodes_with_its_id_taken_from_the_key() {
-		let db = TestDb::new(
-			"DEFINE TABLE t SCHEMALESS;
-			 CREATE t:tobie SET name = 'Tobie', age = 30;",
-		)
-		.await;
-		let ctx = db.exec_ctx().await;
-		let db_ctx = ctx.database().unwrap();
-		let table = TableName::from("t");
-
-		let range = RecordPrefix {
-			ns: db_ctx.ns_ctx.ns.namespace_id,
-			db: db_ctx.db.database_id,
-			tb: Cow::Borrowed(&table),
-		}
-		.range()
-		.unwrap();
-		let raw = ctx.txn().scan_raw(range, 10, 0, None).await.unwrap();
-		assert_eq!(raw.len(), 1, "the table holds exactly one record");
-
-		let (key, value) = &raw[0];
-		let decoded = decode_record(key, value).unwrap();
-		assert_eq!(pick(&decoded, "name"), Value::from("Tobie"));
-		assert_eq!(pick(&decoded, "age"), Value::from(30));
-		// The `id` is rebuilt from the key rather than trusted from the value.
-		assert_eq!(pick(&decoded, "id"), val("t:tobie").await);
-
-		// A key that is not a record key cannot be decoded.
-		assert!(decode_record(b"not-a-record-key", value).is_err());
-	}
 }

@@ -20,16 +20,15 @@
 //! and [`PLAN_TIME_FUNCTIONS`]. The loader scan holds the interpreter and the
 //! modules facing the host ([`LOADER_FILES`]) to loading and running units:
 //! none names the planner, a compiled expression or a compiler entry point,
-//! none names an item of the operator tree's expression module but those
-//! listed with why each compiles nothing ([`LOADER_PHYSICAL_EXPR`]), and none
+//! none names an item of the call services (`calls`) but those listed with
+//! why each compiles nothing ([`LOADER_CALLS`]), and none
 //! reaches the host's compilation for a fault, imports included, but the
 //! host's answer to the instruction that yields for a unit ([`FAULT_SITES`]).
 //! The scans are lexical: they see what a file names, not what the items it
 //! names reach in turn. That a running program compiles nothing outside a
 //! fault through any of them is asserted where it runs, by the count of
 //! compilations made while a program runs ([`crate::exec::compiles`]). The
-//! operator scan keeps the operator tree's `ExecOperator` to
-//! [`OPERATOR_FILES`].
+//! operator scan keeps `ExecOperator` to [`OPERATOR_FILES`].
 //!
 //! Each scan has a self-test proving it flags the token it forbids, and every
 //! listed exception is checked to be still needed.
@@ -111,7 +110,7 @@ const FORBIDDEN_TOKENS: &[&str] = &[
 
 /// Engine objects no reachable declaration names.
 const FORBIDDEN_TYPES: &[&str] = &[
-	"PhysicalExpr",
+	"Clause",
 	"ExecOperator",
 	"WriteStage",
 	"ClosureExec",
@@ -306,12 +305,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		"descriptor.rs",
 		"unit_planner",
 		"a compile-cache miss: the planner what a table's read applies is compiled with",
-	),
-	(
-		"descriptor.rs",
-		"write_unit_planner",
-		"the descriptor seam: the planner a table's write unit compiles its clauses with, once per \
-		 write context",
 	),
 	(
 		"services.rs",
@@ -901,7 +894,7 @@ fn the_type_scan_reaches_the_whole_program() {
 #[test]
 fn the_type_scan_flags_each_forbidden_token() {
 	let cases: &[(&str, &str)] = &[
-		("pub struct Program { e: Arc<dyn PhysicalExpr> }", "dyn"),
+		("pub struct Program { e: Arc<dyn Evaluate> }", "dyn"),
 		("pub struct Program { e: Box<dyn Send> }", "dyn"),
 		("pub struct Program { c: Mutex<u32> }", "Mutex"),
 		("pub struct Program { c: RwLock<u32> }", "RwLock"),
@@ -934,7 +927,7 @@ fn the_type_scan_flags_each_forbidden_token() {
 	// A token in a comment, a string or a test item is not a field.
 	let clean = "pub struct Program { // dyn Mutex\n n: String, s: Spec }\n\
 	             struct Spec { why: u8 /* RefCell */ }\n\
-	             const NOTE: &str = \"Arc<dyn PhysicalExpr>\";\n\
+	             const NOTE: &str = \"Arc<dyn Evaluate>\";\n\
 	             #[cfg(test)]\nstruct Spec { c: Mutex<u8> }";
 	let files = BTreeMap::from([("synthetic.rs".to_owned(), clean.to_owned())]);
 	assert_eq!(type_scan(&files, "Program"), Vec::<String>::new());
@@ -1012,8 +1005,8 @@ const LOADER_FILES: &[&str] = &["closure.rs", "host.rs", "interp.rs", "scalar.rs
 /// name ending in `(` is rejected as a call.
 const LOADER_FORBIDDEN: &[&str] = &[
 	"Planner",
-	"PhysicalExpr",
-	"physical_expr(",
+	"Clause",
+	"scalar_metadata(",
 	"compile_expr",
 	"plan_logical",
 	"bind_statement",
@@ -1024,48 +1017,42 @@ const LOADER_FORBIDDEN: &[&str] = &[
 	"invoke_closure",
 ];
 
-/// The items of the operator tree's expression module (`physical_expr`) that
-/// [`LOADER_FILES`] may name, each with why it compiles nothing. Every other
-/// path through the module is rejected, imports included, each item of a
+/// The items of the call services (`vm::calls`) that [`LOADER_FILES`] may
+/// name, each with why it compiles nothing. Every other path through the
+/// module is rejected, imports included, each item of a
 /// grouped import on its own; so is a glob import from it, a rename of it or
 /// the module named alone, which the scan could not follow. A listed item is
 /// matched with everything beneath it, so each is an item and none a module;
 /// the closure value and its body, whose members include compilations, are
 /// listed in [`LOADER_CLOSURE_PATHS`] instead.
-const LOADER_PHYSICAL_EXPR: &[(&str, &str)] = &[
-	("EvalContext", "the evaluation context a host step hands a callee"),
-	("ComputingRecord", "the record a computed field is computed for: the cycle guard"),
+const LOADER_CALLS: &[(&str, &str)] = &[
 	("EnteredCall", "the frame of an entered user-defined function call, its auth limit"),
-	("MatchesEval", "the per-run resolution of a `MATCHES` operator's index"),
-	("RecursionCtx", "the depth and path state of a recursion the host steps"),
-	("subquery_context", "the context a statement in scalar position runs in"),
-	("graph_degree::DegreeCounter", "the per-run degree fast path of a lookup count"),
-	("function::bind_closure_args", "binds an invocation's arguments to the declared kinds"),
-	("function::helpers::validate_return", "checks a body's value against the return kind"),
+	("bind_closure_args", "binds an invocation's arguments to the declared kinds"),
+	("helpers::validate_return", "checks a body's value against the return kind"),
 	(
-		"function::helpers::invoke_uncompiled_closure",
+		"helpers::invoke_uncompiled_closure",
 		"a closure value the engine did not compile, which no unit stands for: the rest of an \
 		 API chain, run by its stage, or a value made outside a plan, run by it",
 	),
-	("function::check_script_allowed", "the capability check of an embedded script"),
-	("function::run_script", "the script runtime: an effect, not a compilation"),
-	("function::enter_model", "the frame of a model call"),
-	("function::compute_model", "the model runtime: an effect, not a compilation"),
-	("function::read_module", "reads a Surrealism module's bytes from storage"),
-	("function::module_runtime_missing", "the error of a build with no module runtime"),
-	("function::module_export", "resolves a Surrealism module's export"),
-	("function::ModuleExport", "a resolved Surrealism module export"),
-	("function::run_module_export", "the module runtime: an effect, not a compilation"),
+	("check_script_allowed", "the capability check of an embedded script"),
+	("run_script", "the script runtime: an effect, not a compilation"),
+	("enter_model", "the frame of a model call"),
+	("compute_model", "the model runtime: an effect, not a compilation"),
+	("read_module", "reads a Surrealism module's bytes from storage"),
+	("module_runtime_missing", "the error of a build with no module runtime"),
+	("module_export", "resolves a Surrealism module's export"),
+	("ModuleExport", "a resolved Surrealism module export"),
+	("run_module_export", "the module runtime: an effect, not a compilation"),
 ];
 
-/// The paths through `physical_expr` to the closure value and its body that
+/// The paths through `calls` to the closure value and its body that
 /// [`LOADER_FILES`] may name, each matched exactly, with why it compiles
 /// nothing. The members [`LOADER_FILES`] may call on a value are
 /// [`LOADER_CLOSURE_MEMBERS`].
 const LOADER_CLOSURE_PATHS: &[(&str, &str)] = &[
-	("function::CompiledClosure", "the closure value, named as a type"),
-	("function::CompiledClosure::planned", "makes a value the VM's literal makes, with no body"),
-	("function::CompiledClosure::digest", "the code reference a unit is found by"),
+	("CompiledClosure", "the closure value, named as a type"),
+	("CompiledClosure::planned", "makes a value the VM's literal makes, with no body"),
+	("CompiledClosure::digest", "the code reference a unit is found by"),
 ];
 
 /// The public members of the closure value ([`closure_members`]) that
@@ -1095,8 +1082,8 @@ const LOADER_CLOSURE_MEMBERS: &[(&str, &str)] = &[
 /// The public members of the closure value (`CompiledClosure`), as its impl
 /// blocks declare them.
 fn closure_members() -> Vec<String> {
-	let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("src/exec/physical_expr/function/closure.rs");
+	let path =
+		std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/exec/vm/calls/closure.rs");
 	let text = strip(&std::fs::read_to_string(path).expect("the closure value's source"));
 	let ids = idents(&text);
 	let mut members = Vec::new();
@@ -1127,18 +1114,28 @@ const FAULT_SITES: &[(&str, &str, &str)] = &[(
 		 `Step::NeedUnit` and for an invocation whose link stopped standing during the call",
 )];
 
-/// The paths through `physical_expr` that `text`, stripped, names, with the
+/// The paths through `calls` that `text`, stripped, names, with the
 /// offset of each: the items after the module, joined by `::`, one for each
 /// item a grouped import names, or `None` for a mention of the module the
 /// scan cannot follow — a glob import from it, a rename of it, or the module
 /// named alone.
-fn physical_expr_paths(text: &str) -> Vec<(usize, Option<String>)> {
+fn calls_paths(text: &str) -> Vec<(usize, Option<String>)> {
 	let mut paths = Vec::new();
 	for (at, word) in idents(text) {
 		let rest = &text[at + word.len()..];
-		// `physical_expr(` is the planner's entry, which the forbidden names
-		// reject.
-		if word != "physical_expr" || rest.trim_start().starts_with('(') {
+		if word == "calls" {
+			let before = text[..at].trim_end();
+			let import = text[..at]
+				.rsplit(';')
+				.next()
+				.is_some_and(|item| item.trim_start().starts_with("use "));
+			if before.ends_with('.')
+				|| !(rest.trim_start().starts_with("::") || before.ends_with("::") || import)
+			{
+				continue;
+			}
+		}
+		if word != "calls" || rest.trim_start().starts_with('(') {
 			continue;
 		}
 		let mut named = Vec::new();
@@ -1208,8 +1205,8 @@ fn use_tree<'a>(mut rest: &'a str, prefix: &[&'a str], named: &mut Vec<String>) 
 }
 
 /// What the loader scan finds in `files`: a reference [`LOADER_FORBIDDEN`]
-/// names in one of [`LOADER_FILES`], a path through `physical_expr` to an
-/// item neither [`LOADER_PHYSICAL_EXPR`] nor [`LOADER_CLOSURE_PATHS`] lists,
+/// names in one of [`LOADER_FILES`], a path through `calls` to an
+/// item neither [`LOADER_CALLS`] nor [`LOADER_CLOSURE_PATHS`] lists,
 /// a member of the closure value or its body outside
 /// [`LOADER_CLOSURE_MEMBERS`], and a reference to the fault module, an import
 /// included, outside [`FAULT_SITES`].
@@ -1218,17 +1215,17 @@ fn loader_scan(files: &BTreeMap<String, String>) -> Vec<String> {
 	let members = closure_members();
 	for (file, text) in files.iter().filter(|(file, _)| LOADER_FILES.contains(&file.as_str())) {
 		let mut text = strip(text);
-		for (at, path) in physical_expr_paths(&text) {
+		for (at, path) in calls_paths(&text) {
 			let line = text[..at].matches('\n').count() + 1;
 			let listed = path.as_deref().is_some_and(|path| {
-				LOADER_PHYSICAL_EXPR.iter().any(|(item, _)| {
+				LOADER_CALLS.iter().any(|(item, _)| {
 					path == *item
 						|| path.strip_prefix(item).is_some_and(|below| below.starts_with("::"))
 				}) || LOADER_CLOSURE_PATHS.iter().any(|(item, _)| path == *item)
 			});
 			if !listed {
 				let path = path.unwrap_or_else(|| "a path the scan cannot follow".to_owned());
-				problems.push(format!("{file}:{line} names `physical_expr::{path}`"));
+				problems.push(format!("{file}:{line} names `calls::{path}`"));
 			}
 		}
 		let mut faulting = text.clone();
@@ -1321,13 +1318,13 @@ fn the_loader_scan_flags_each_compiler_reference() {
 	for (source, flagged) in [
 		("fn make() { CompiledClosure::of_stored(args, returns, body, captures) }", "`of_stored`"),
 		(
-			"use crate::exec::physical_expr::function::CompiledClosure;\n\
+			"use crate::exec::vm::calls::CompiledClosure;\n\
 			 fn make() { CompiledClosure::of_stored(args, returns, body, captures) }",
 			"`of_stored`",
 		),
 		(
-			"fn make() { crate::exec::physical_expr::function::CompiledClosure::of_stored(a, r, b, c) }",
-			"`physical_expr::function::CompiledClosure::of_stored`",
+			"fn make() { crate::exec::vm::calls::CompiledClosure::of_stored(a, r, b, c) }",
+			"`calls::CompiledClosure::of_stored`",
 		),
 	] {
 		let files = BTreeMap::from([("closure.rs".to_owned(), source.to_owned())]);
@@ -1354,41 +1351,40 @@ fn the_loader_scan_flags_each_compiler_reference() {
 			.to_owned(),
 	)]);
 	assert_eq!(loader_scan(&files), Vec::<String>::new());
-	// A path through `physical_expr` to an item the list does not hold is
+	// A path through `calls` to an item the list does not hold is
 	// flagged, imported or not, and so is a mention the scan cannot follow.
 	for source in [
-		"async fn step() { crate::exec::physical_expr::function::helpers::invoke_closure(c, a, x).await }",
-		"use crate::exec::physical_expr::function::helpers::invoke_closure as run;",
-		"fn f(e: &crate::exec::physical_expr::Literal) {}",
-		"fn f() { crate::exec::physical_expr::function::CompiledClosureX::new() }",
-		"use crate::exec::physical_expr::{EvalContext, PhysicalExpr};",
-		"use crate::exec::physical_expr::{EvalContext, function::{CompiledClosure, helpers::invoke_closure as run}};",
-		"use crate::exec::physical_expr::{self as expressions, EvalContext};",
-		"use crate::exec::physical_expr::function::*;",
-		"use crate::exec::physical_expr::*;",
-		"use crate::exec::physical_expr as expressions;",
-		"use crate::exec::physical_expr;",
+		"async fn step() { crate::exec::vm::calls::helpers::invoke_closure(c, a, x).await }",
+		"use crate::exec::vm::calls::helpers::invoke_closure as run;",
+		"fn f(e: &crate::exec::vm::calls::Unlisted) {}",
+		"fn f() { crate::exec::vm::calls::CompiledClosureX::new() }",
+		"use crate::exec::vm::calls::{EnteredCall, Unlisted};",
+		"use crate::exec::vm::calls::{CompiledClosure, helpers::{invoke_closure as run}};",
+		"use crate::exec::vm::calls::{self as expressions, EnteredCall};",
+		"use crate::exec::vm::calls::*;",
+		"use crate::exec::vm::calls as expressions;",
+		"use crate::exec::vm::calls;",
 	] {
 		let files = BTreeMap::from([("host.rs".to_owned(), source.to_owned())]);
 		assert!(
-			loader_scan(&files).iter().any(|p| p.contains("names `physical_expr::")),
+			loader_scan(&files).iter().any(|p| p.contains("names `calls::")),
 			"`{source}` is not flagged"
 		);
 	}
 	// A listed item, and anything beneath it, is not.
 	let files = BTreeMap::from([(
 		"host.rs".to_owned(),
-		"fn f(v: &crate::exec::physical_expr::function::CompiledClosure) { \
-		 crate::exec::physical_expr::function::CompiledClosure::planned(a, b, c); \
-		 let _ = crate::exec::physical_expr::subquery_context::<()>; }\n\
-		 use crate::exec::physical_expr::{EvalContext, function::{CompiledClosure as Value}};"
+		"fn f(v: &crate::exec::vm::calls::CompiledClosure) { \
+		 crate::exec::vm::calls::CompiledClosure::planned(a, b, c); \
+		 let _ = crate::exec::vm::subquery::subquery_context::<()>; }\n\
+		 use crate::exec::vm::calls::CompiledClosure as Value;"
 			.to_owned(),
 	)]);
 	assert_eq!(loader_scan(&files), Vec::<String>::new());
 	// A listed path, a file the scan does not hold, imports and comments are
 	// not compiler references.
 	let files = BTreeMap::from([
-		("interp.rs".to_owned(), "fn f(c: &crate::exec::physical_expr::EvalContext) {}".to_owned()),
+		("interp.rs".to_owned(), "fn f(c: &crate::exec::EvalContext) {}".to_owned()),
 		("fault.rs".to_owned(), "fn f() { Planner::new() }".to_owned()),
 		(
 			"services.rs".to_owned(),
@@ -1400,11 +1396,11 @@ fn run() { /* Planner */ }"
 	assert_eq!(loader_scan(&files), Vec::<String>::new());
 }
 
-/// The files that name the operator tree's `ExecOperator`: the adapter a
+/// The files that name `ExecOperator`: the adapter a
 /// program runs behind and the one a request's statement runs behind, the
 /// planner entry that hands it over, `EXPLAIN`, which renders a plan around
-/// it, and the compile cache's keeping of the statements reached through the
-/// operator tree's expressions.
+/// it, and the compile cache's keeping of the statements reached at run time
+/// through an expression a program did not compile.
 const OPERATOR_FILES: &[&str] =
 	&["explain.rs", "host.rs", "mod.rs", "request.rs", "serve.rs", "units.rs"];
 
@@ -1560,15 +1556,15 @@ fn every_audited_exception_is_still_needed() {
 	let named: BTreeSet<String> = stripped
 		.iter()
 		.filter(|(file, _)| LOADER_FILES.contains(&file.as_str()))
-		.flat_map(|(_, text)| physical_expr_paths(text))
+		.flat_map(|(_, text)| calls_paths(text))
 		.filter_map(|(_, path)| path)
 		.collect();
-	for (item, reason) in LOADER_PHYSICAL_EXPR {
+	for (item, reason) in LOADER_CALLS {
 		assert!(!reason.is_empty(), "`{item}` is listed with no reason");
 		assert!(
 			named.iter().any(|path| path == item
 				|| path.strip_prefix(item).is_some_and(|below| below.starts_with("::"))),
-			"`physical_expr::{item}` is listed but no loader file names it"
+			"`calls::{item}` is listed but no loader file names it"
 		);
 	}
 	for (file, name, reason) in FAULT_SITES {
@@ -1583,4 +1579,48 @@ fn every_audited_exception_is_still_needed() {
 		let body = &text[at..item_end(text, at)];
 		assert!(body.contains("fault::serve"), "fault site `{name}` no longer serves a fault");
 	}
+}
+
+/// Host kernels consume values and compiled units and hold no expression-tree evaluator.
+#[test]
+fn host_services_contain_no_tree_evaluator() {
+	let mut files = sources();
+	let exec = vm_dir().parent().expect("VM belongs to exec").to_path_buf();
+	for file in [
+		"operators/fetch.rs",
+		"operators/recursion.rs",
+		"operators/recursion/common.rs",
+		"operators/recursion/default.rs",
+		"operators/recursion/collect.rs",
+		"operators/recursion/path.rs",
+		"operators/recursion/shortest.rs",
+		"operators/recursion/repeat.rs",
+	] {
+		files.insert(file.to_owned(), std::fs::read_to_string(exec.join(file)).expect(file));
+	}
+	let mut problems = Vec::new();
+	let calls = strip(files.get("calls.rs").expect("native call services"));
+	for (file, text) in files.iter().filter(|(file, _)| {
+		if let Some(module) = file.strip_prefix("calls/").and_then(|file| file.strip_suffix(".rs"))
+			&& !calls.contains(&format!("mod {module};"))
+		{
+			return false;
+		}
+		file.starts_with("calls/")
+			|| file.starts_with("access/")
+			|| file.starts_with("operators/")
+			|| matches!(file.as_str(), "matches.rs" | "subquery.rs" | "degree.rs")
+	}) {
+		let text = strip(text);
+		for (at, word) in idents(&text) {
+			if matches!(
+				word,
+				"Clause" | "evaluate_args" | "evaluate_physical_path" | "plan_logical"
+			) {
+				let line = text[..at].matches('\n').count() + 1;
+				problems.push(format!("{file}:{line} reaches tree evaluator `{word}`"));
+			}
+		}
+	}
+	assert!(problems.is_empty(), "{problems:#?}");
 }

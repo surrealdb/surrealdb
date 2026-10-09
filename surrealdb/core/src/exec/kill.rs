@@ -280,10 +280,8 @@ mod tests {
 	/// A database-level user cannot kill a live query created by a different database user.
 	///
 	/// Both users have the *same* role here to ensure the check is driven by identity
-	/// (user ID + level), not by role difference.  Previously `Session::for_level`
-	/// hard-coded `id = "system_auth"` for all system sessions, making the two users
-	/// indistinguishable by identity.  We use `db_session` to give each user a
-	/// distinct ID so the test genuinely exercises identity-based ownership.
+	/// (user ID + level), not by role difference.  `db_session` gives each user a
+	/// distinct ID, so the test genuinely exercises identity-based ownership.
 	#[tokio::test]
 	async fn test_kill_other_db_users_live_query_fails() {
 		let (_, ds) = new_ds_with_auth().await.unwrap();

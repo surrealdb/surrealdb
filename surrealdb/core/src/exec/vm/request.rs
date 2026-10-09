@@ -95,10 +95,6 @@ impl ExecOperator for RequestStatement {
 		Some(&self.metrics)
 	}
 
-	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
-		super::host::cardinality_hint(&self.statement)
-	}
-
 	fn output_shape(&self) -> crate::exec::OutputShape {
 		super::host::output_shape(&self.statement)
 	}

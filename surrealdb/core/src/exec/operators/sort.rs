@@ -1,30 +1,7 @@
-//! Sort operators for ORDER BY processing.
-//!
-//! This module provides multiple sort operator implementations optimized for
-//! different scenarios:
-//!
-//! - [`Sort`]: Full in-memory sort with parallel sorting support (evaluates expressions)
-//! - [`SortByKey`]: In-memory sort by pre-computed field names (new consolidated approach)
-//! - [`SortTopK`]: Heap-based top-k selection for ORDER BY + LIMIT queries
-//! - [`RandomShuffle`]: Random ordering with reservoir sampling optimization
-//! - [`ExternalSort`]: Disk-based external merge sort for large datasets (storage feature)
+//! The ordering the VM's sorts and ordered merges apply to values:
+//! [`SortDirection`] and [`compare_values`], which honour `COLLATE` and
+//! `NUMERIC`.
 
 mod common;
-#[cfg(all(storage, not(target_family = "wasm")))]
-mod external;
-#[cfg(all(storage, not(target_family = "wasm")))]
-mod external_by_key;
-#[cfg(all(storage, not(target_family = "wasm")))]
-mod external_common;
-mod full_sort;
-mod shuffle;
-mod topk;
 
-pub(crate) use common::{OrderByField, SortDirection, SortKey, compare_values};
-#[cfg(all(storage, not(target_family = "wasm")))]
-pub use external::ExternalSort;
-#[cfg(all(storage, not(target_family = "wasm")))]
-pub use external_by_key::ExternalSortByKey;
-pub use full_sort::{Sort, SortByKey};
-pub use shuffle::RandomShuffle;
-pub use topk::{SortTopK, SortTopKByKey};
+pub(crate) use common::{SortDirection, compare_values};

@@ -7192,7 +7192,6 @@ dependencies = [
 name = "surrealdb-core"
 version = "3.4.0-nightly"
 dependencies = [
- "ahash 0.8.12",
  "anyhow",
  "arc-swap",
  "argon2",

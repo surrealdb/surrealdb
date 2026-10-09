@@ -1,135 +1,51 @@
 mod aggregate;
-mod bind;
-mod compute;
-mod current_value_source;
 pub(crate) mod distinct;
-mod distinct_records;
 mod explain;
 pub(crate) mod fetch;
-mod filter;
 pub(crate) mod graph;
 pub(crate) mod join;
 mod knn_topk;
 mod layer;
 pub(crate) mod limit;
 pub(crate) mod mutate;
-mod omit;
 mod permission_filter;
 mod project;
-mod project_value;
 pub(crate) mod recursion;
 pub(crate) mod scan;
 mod sort;
-mod source_expr;
 mod split;
-mod timeout;
-mod union;
-mod unwrap_exactly_one;
-mod version_scope;
 pub(crate) mod write;
 
 #[cfg(test)]
 pub(crate) mod test_util;
 
-pub use aggregate::{
-	Aggregate, AggregateExprInfo, AggregateField, AggregateId, ExtractedAggregate,
-	aggregate_field_name, group_key_field_name,
-};
+pub use aggregate::{AggregateId, aggregate_field_name, group_key_field_name};
 pub(crate) use aggregate::{
 	aggregate_field_key, first_value_needed, group_key_field_key, set_nested_value,
 };
-#[cfg(test)]
-pub use bind::Bind;
-pub use compute::Compute;
-pub use current_value_source::CurrentValueSource;
-#[cfg(test)]
-pub use distinct::Distinct;
 pub(crate) use distinct::SeenSet;
-#[cfg(test)]
-pub use distinct_records::DistinctRecords;
-pub use explain::{AnalyzePlan, ExplainPlan};
+pub use explain::ExplainPlan;
 pub(crate) use explain::{
 	analyze_json_template, analyze_text_pieces, render_analyze_json, render_analyze_text,
 };
-#[cfg(test)]
-pub use fetch::Fetch;
-#[cfg(test)]
-pub(crate) use fetch::FetchStep;
-pub use filter::Filter;
 use futures::StreamExt;
-#[cfg(test)]
-pub use graph::{DistinctEdges, EndpointBind, Expand, PathExpand, ShortestPathExpand};
 pub use graph::{EdgeBinding, EndpointField, ExpandDir, PathMode, ShortestSelector};
-#[cfg(test)]
-pub use join::JoinFrame;
 pub use join::JoinType;
 pub(crate) use join::hash_join::{
 	BuildTable, key_has_regex, keys_equal, with_alias, with_alias_owned,
 };
-#[cfg(test)]
-pub use join::{HashJoin, LookupJoin, RecordBatchFetch};
-#[cfg(test)]
-pub use knn_topk::KnnTopK;
-#[cfg(test)]
-pub(crate) use knn_topk::KnnVectorSource;
 pub(crate) use knn_topk::{KnnTopKHeap, extract_vector};
-#[cfg(test)]
-pub(crate) use layer::LayerColumn;
-#[cfg(test)]
-pub use layer::ProjectLayer;
 pub(crate) use layer::record_of;
-pub use limit::Limit;
-#[cfg(test)]
-pub use mutate::{DeleteBinding, DrainSink, InsertGraph, SingleRowScan, UpdateBinding};
-#[cfg(test)]
-pub(crate) use mutate::{InsertEdgeOp, InsertNodeOp};
-pub(crate) use omit::{OmitAction, OmitPath, OmitStep};
-#[cfg(test)]
-pub use permission_filter::PermissionFilterExec;
 pub(crate) use permission_filter::permission_frame;
-pub use project::{FieldSelection, Project, Projection, SelectProject};
-pub(crate) use project::{evaluate_and_set_field, projection_writes};
-pub use project_value::ProjectValue;
-pub use recursion::RecursionOp;
+pub(crate) use project::projection_writes;
 pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
 pub use scan::CountOutput;
-#[cfg(test)]
-pub use scan::CountScan;
-#[cfg(test)]
-pub(crate) use scan::KnnPrefilter;
-#[cfg(test)]
-pub use scan::{
-	BitmapResolve, DynamicScan, EmptyScan, FullTextScan, IndexScan, KnnScan, LightweightEdgeScan,
-	RecordIdScan, TableScan, UnionIndexScan,
-};
-pub use scan::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput, ReferenceScan, ReferenceScanOutput};
-#[cfg(all(storage, not(target_family = "wasm")))]
-pub use sort::{ExternalSort, ExternalSortByKey};
-pub(crate) use sort::{OrderByField, SortDirection, SortKey, compare_values};
-pub use sort::{RandomShuffle, Sort, SortByKey, SortTopK, SortTopKByKey};
-#[cfg(test)]
-pub use source_expr::SourceExpr;
-pub use split::Split;
+pub use scan::EdgeTableSpec;
+pub(crate) use sort::{SortDirection, compare_values};
 pub(crate) use split::{SplitTarget, split_row, split_target};
-#[cfg(test)]
-pub use timeout::Timeout;
-pub use union::Union;
-#[cfg(test)]
-pub use unwrap_exactly_one::UnwrapExactlyOne;
-#[cfg(test)]
-pub use version_scope::VersionScope;
-// Named here like every other operator. The re-export is part of the seam the
-// write module declares, and carries the module's own dead-code rationale: the
-// operator's stages are the unit of work that follows it.
-#[allow(unused_imports)]
-pub use write::{WriteOperator, WriteSource};
 
 use crate::err::EngineError;
-#[cfg(test)]
-use crate::exe::FlowResultExt as _;
-#[cfg(test)]
-use crate::exec::{EvalContext, PhysicalExpr};
 use crate::exec::{ExecutionContext, FlowResult, OutputShape, ValueBatchStream};
 use crate::val::Value;
 
@@ -142,8 +58,8 @@ use crate::val::Value;
 /// - `OutputShape::Rows` (e.g. an ordinary `SELECT`) → always `Value::Array`, regardless of row
 ///   count. A caller using the result as a `FOR` range, or any other array-shaped context, must see
 ///   `[]` for zero rows and `[x]` for one — never `NONE` or the bare element — the same contract
-///   [`ScalarSubquery`](crate::exec::physical_expr::subquery::ScalarSubquery) already applies to a
-///   subquery expression.
+///   [`ScalarSubquery`](crate::exec::vm::subquery::ScalarSubquery) already applies to a subquery
+///   expression.
 ///
 /// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).
 pub(crate) async fn collect_shaped_value(
@@ -167,30 +83,6 @@ pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<V
 		results.extend(batch_result?.into_values());
 	}
 	Ok(results)
-}
-
-#[cfg(test)]
-/// Evaluate a statement's `FROM` source expression into the value to iterate.
-///
-/// The source is a value position, not a statement body, so a `RETURN` raised
-/// while evaluating it names that value and must not escape as the enclosing
-/// statement's own result: `SELECT * FROM (RETURN t:1)` iterates the record
-/// `t:1` and answers with a row, exactly as `SELECT * FROM t:1` does. The
-/// signal can come from the expression itself, from a block written there, or
-/// from anywhere inside it — a function argument, an array element.
-///
-/// `BREAK` and `CONTINUE` have no enclosing loop to act on in this position and
-/// are rejected as invalid control flow rather than reaching one further out.
-///
-/// This is where the boundary is drawn for a source expression the planner
-/// compiled as one. A record-id source draws its own, per key, because its key
-/// is the only part of it that is an expression.
-#[inline]
-pub(crate) async fn evaluate_from_source(
-	expr: &dyn PhysicalExpr,
-	ctx: EvalContext<'_>,
-) -> FlowResult<Value> {
-	Ok(expr.evaluate(ctx).await.catch_return()?)
 }
 
 /// Cancellation poll shared by the operators' hot loops.

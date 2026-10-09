@@ -216,8 +216,7 @@ impl Lowering<'_, '_> {
 
 	/// The steps a place is walked by, the expressions its path embeds each a
 	/// host pipeline; `None` when an embedded expression has no pipeline. A
-	/// part no place addresses is a step that stops the walk, as it is in the
-	/// operator tree.
+	/// part no place addresses is a step that stops the walk.
 	pub(super) async fn place_steps(&mut self, path: &Idiom) -> Option<Vec<PlaceStepSpec>> {
 		let mut steps = Vec::with_capacity(path.0.len());
 		for part in &path.0 {

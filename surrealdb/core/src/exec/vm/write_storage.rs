@@ -811,7 +811,7 @@ async fn index_step(
 			let computing = match image {
 				Value::Object(object) => match object.get("id") {
 					Some(Value::RecordId(rid)) => {
-						Some(Arc::new(crate::exec::physical_expr::ComputingRecord {
+						Some(Arc::new(crate::exec::eval_context::ComputingRecord {
 							rid: rid.clone(),
 							stored: Some(image.clone()),
 						}))

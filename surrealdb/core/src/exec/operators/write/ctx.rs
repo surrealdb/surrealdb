@@ -8,29 +8,18 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
-use tokio::sync::Mutex;
-
-use super::clauses::WriteClauses;
 use super::scope::WriteScope;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, Error as CatalogError, EventDefinition, FieldDefinition, IndexDefinition,
-	NamespaceDefinition, PermissionKind, SubscriptionDefinition, TableDefinition,
+	NamespaceDefinition, SubscriptionDefinition, TableDefinition,
 };
 use crate::doc::{FieldEvalOrder, NsDbCtx, NsDbTbMutCtx};
 use crate::exec::ExecutionContext;
-use crate::exec::permission::{PhysicalIndexEntry, PhysicalPermission, PhysicalViewKind};
-use crate::exec::table_view::TableViews;
 use crate::expr::computed_deps::ComputedDeps;
-use crate::expr::output::Output;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::kvs::Transaction;
 use crate::val::TableName;
-
-/// A table's index definitions with their expressions compiled, parallel to
-/// the definitions and in the same order; `None` at an index the catalog has
-/// marked for removal, which is never maintained and so never compiled.
-pub(crate) type CompiledIndexes = Arc<[Option<Arc<PhysicalIndexEntry>>]>;
 
 /// Whether the statement's table must already exist.
 ///
@@ -84,74 +73,6 @@ pub(crate) struct WriteCtx {
 	/// obtains it from here and from nowhere else.
 	pub(crate) exec: ExecutionContext,
 
-	/// The statement's `RETURN` clause, dispatched by `output_write`.
-	pub(crate) output: Option<Output>,
-
-	/// The statement's own compiled clauses, shared by every record and by
-	/// every table this statement writes to. A stage is addressed by a `Copy`
-	/// id that can carry no expressions, so this is how a stage reaches the
-	/// `WHERE`, the data clause, or `ON DUPLICATE KEY UPDATE`.
-	pub(crate) clauses: Arc<WriteClauses>,
-
-	/// The post-image projection the caller is shown: the table's
-	/// `PERMISSIONS FOR select`, its per-field select guards, and its
-	/// `COMPUTED` bodies.
-	///
-	/// Behind a mutex because a resolver memoises what it has resolved and
-	/// [`WriteStage::apply`](super::stage::WriteStage::apply) takes `&WriteCtx`.
-	/// It is never contended: at most one record is in flight per transaction.
-	pub(crate) view_checked: Mutex<TableViews>,
-	/// The same machinery with checks bypassed, for the images a stage derives
-	/// rather than shows: the pre-mutation snapshot the data clause reads, and
-	/// the scratch copy a permission predicate is judged against.
-	///
-	/// A separate resolver because whether a view's reads are checked is fixed
-	/// for a resolver's lifetime — it decides whether the views it builds carry
-	/// any field guards at all — so one resolver cannot answer both. It is
-	/// built by [`TableViews::unchecked`], which fixes the bypass up front:
-	/// a plain `TableViews::new()` here would resolve `check_perms` from
-	/// whatever context the first stage happened to hand it, and the two fields
-	/// would name a distinction nothing enforced.
-	///
-	/// Neither resolver can serve the per-subscriber live-query reduction,
-	/// which needs one view per subscription auth; that stage owns its own.
-	pub(crate) view_unchecked: Mutex<TableViews>,
-
-	/// The foreign views this table maintains, with their clauses compiled —
-	/// on first use, and once for the statement.
-	///
-	/// Behind a mutex for the reason the view resolvers above are, and keyed
-	/// by the view table because one source table may feed several views.
-	/// `views` holds the definitions; this holds what the write evaluates.
-	pub(crate) views_compiled: Mutex<Vec<(TableName, Arc<PhysicalViewKind>)>>,
-
-	/// The table's write `PERMISSIONS` clauses, compiled — on first use, and
-	/// once for the statement.
-	///
-	/// Keyed by the clause, of which there are at most three: `create`,
-	/// `update` and `delete`. A clause is a function of the table definition
-	/// and not of the record, so compiling it per record would plan the same
-	/// expression once for every row a statement writes. The `select` clause
-	/// is not here — [`Self::view_checked`] holds its compiled form, so the
-	/// gate on the projected image and the projection itself cannot disagree.
-	pub(crate) permissions_compiled: Mutex<Vec<(PermissionKind, Arc<PhysicalPermission>)>>,
-
-	/// The table's index definitions, with their columns and `COUNT` guards
-	/// compiled — on first use, and once for the statement.
-	///
-	/// Parallel to [`Self::indexes`] and in the same order, so an index's
-	/// entries are read positionally rather than searched for. `None` at a
-	/// position the catalog has marked for removal: such an index is never
-	/// maintained, and compiling its clauses could fail a write over an
-	/// expression it would not have run.
-	///
-	/// An index's expressions are a function of its definition and not of the
-	/// record, and every index the table carries is visited for every record
-	/// the stage processes, so the whole set is compiled in one pass rather
-	/// than one index at a time. Behind a mutex for the reason the view
-	/// resolvers above are.
-	pub(crate) indexes_compiled: Mutex<Option<CompiledIndexes>>,
-
 	/// The statement scope that resolved this context, which is how a stage
 	/// reaches what one statement owns across tables and nesting levels — the
 	/// other tables' contexts, and the compiled plans of the statements the
@@ -187,8 +108,6 @@ impl WriteCtx {
 		exec: &ExecutionContext,
 		table: &TableName,
 		existence: TableExistence,
-		output: Option<Output>,
-		clauses: Arc<WriteClauses>,
 	) -> Result<Self, ControlFlow> {
 		let db_ctx = exec.database().context("a write requires a database context")?;
 		let parent = NsDbCtx {
@@ -201,7 +120,7 @@ impl WriteCtx {
 				db_ctx.get_table_def(table, version).await.map_err(ControlFlow::Err)?.ok_or_else(
 					|| {
 						ControlFlow::Err(anyhow::anyhow!(CatalogError::TbNotFound {
-							name: table.to_owned(),
+							name: table.to_owned()
 						}))
 					},
 				)?
@@ -235,30 +154,17 @@ impl WriteCtx {
 			computed_deps: catalog.computed_deps,
 			id_field: catalog.id_field_idx,
 			exec: exec.clone(),
-			output,
-			clauses,
-			view_checked: Mutex::new(TableViews::new()),
-			view_unchecked: Mutex::new(TableViews::unchecked()),
-			views_compiled: Mutex::new(Vec::new()),
-			indexes_compiled: Mutex::new(None),
-			permissions_compiled: Mutex::new(Vec::new()),
 			scope: Weak::new(),
 			resolved_at: (catalog_version, stamps),
 		})
 	}
 
-	/// This context's catalog reads, with `exec`, `output` and `clauses` in
-	/// place of its own and nothing compiled yet.
+	/// This context's catalog reads, with `exec` in place of its own.
 	///
 	/// Sound only while the catalog this context read is the one `exec`
 	/// reads: the caller guarantees that nothing has changed it since, and
 	/// that `exec` reads it at the same version, namespace and database.
-	pub(crate) fn rebound(
-		&self,
-		exec: &ExecutionContext,
-		output: Option<Output>,
-		clauses: Arc<WriteClauses>,
-	) -> Self {
+	pub(crate) fn rebound(&self, exec: &ExecutionContext) -> Self {
 		Self {
 			ns: Arc::clone(&self.ns),
 			db: Arc::clone(&self.db),
@@ -273,13 +179,6 @@ impl WriteCtx {
 			computed_deps: self.computed_deps.clone(),
 			id_field: self.id_field,
 			exec: exec.clone(),
-			output,
-			clauses,
-			view_checked: Mutex::new(TableViews::new()),
-			view_unchecked: Mutex::new(TableViews::unchecked()),
-			views_compiled: Mutex::new(Vec::new()),
-			indexes_compiled: Mutex::new(None),
-			permissions_compiled: Mutex::new(Vec::new()),
 			scope: Weak::new(),
 			resolved_at: self.resolved_at,
 		}

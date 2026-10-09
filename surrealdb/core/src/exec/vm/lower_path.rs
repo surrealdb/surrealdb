@@ -3,28 +3,28 @@
 //! `v.?rest`.
 //!
 //! A recursion, `v.{min..max+instruction}(body)`, is an [`Instr::Recurse`]
-//! the host takes with the operator tree's recursion strategies, its body a
+//! the host takes, its body a
 //! unit of the root program over each depth's value ([`super::program::UnitId`])
 //! lowered with the statement's planner, its catalog reads the statement's.
 //! The body reads the row only through that value: its dynamic indexes and
-//! method arguments, which the tree evaluates against the row, read nothing
+//! method arguments, which are evaluated against the row, read nothing
 //! of it, and it reads no `$parent`, statement, closure reading more than its
 //! own parameters, or name the pipeline holds in a register or slot. A body
 //! that re-enters through `.@` ([`super::program::RecurseSpec::repeat`]) is
 //! run breadth first in discovery and then assembled from the deepest level
-//! back, as the operator tree runs it, its `.@` markers
+//! back, its `.@` markers
 //! [`Instr::RepeatRecurse`]. A shortest path's target is evaluated where the
 //! recursion is, when it reads no row.
 //!
 //! An optional chain is `NONE` or `NULL` as its base is, and otherwise the rest
-//! of the path with the base as the element it steps from, as the operator
-//! tree's `OptionalChainPart` answers; the rest is lowered where a broadcast's
-//! body would be, reading the row nowhere the tree reads it.
+//! of the path with the base as the element it steps from; the rest is
+//! lowered where a broadcast's body would be, reading the row nowhere the
+//! element is read.
 //!
 //! A destructure is an [`Instr::Destructure`] the host takes: an object has
 //! its listed fields gathered, a record id is fetched and its record
 //! destructured, an array has the destructure mapped over its elements, and
-//! anything else is `NONE`, as the operator tree's `DestructurePart` answers.
+//! anything else is `NONE`.
 //! An aliased field's body is a host pipeline of the program over the value
 //! destructured, which is its current value and its document.
 
@@ -163,7 +163,7 @@ impl Lowering<'_, '_> {
 		};
 		let body = path.body();
 		// An instruction beside a trailing body that re-enters through `.@` is
-		// the operator tree's to refuse.
+		// refused by the planner.
 		if recurse.instruction.is_some()
 			&& matches!(path, crate::expr::logical::LogicalRecursePath::Trailing(_))
 			&& crate::exec::planner::contains_repeat_recurse(body)
@@ -174,7 +174,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// Whether recursion body `expr` reads what the body's unit does not
-	/// hold: the enclosing row the operator tree's recursion carries across,
+	/// hold: the enclosing row a recursion carries across,
 	/// or a name the pipeline holds in a register or slot. Within an aliased
 	/// field of a destructure (`destructured`), the document is the value
 	/// destructured, which the unit holds, so `$parent`, a statement reading
@@ -190,7 +190,7 @@ impl Lowering<'_, '_> {
 					|| self.fields_read_outside(fields);
 			}
 			// A closure the body writes is invoked against the document the
-			// operator tree's recursion carries across, the enclosing row,
+			// recursion carries across, the enclosing row,
 			// which the body's unit does not hold: one reading nothing but its
 			// own parameters reads none of it.
 			LogicalExpr::Closure(closure) => !destructured && !reads_only_its_parameters(closure),

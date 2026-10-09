@@ -250,7 +250,7 @@ async fn a_knn_operator_nothing_consumes_is_refused() {
 }
 
 /// An index function whose statement declares no operator for it is refused
-/// as the statement is planned, with the error the operator tree raises.
+/// as the statement is planned, with an error naming the missing operator.
 #[tokio::test]
 async fn an_index_function_no_operator_answers_is_refused() {
 	let db = TestDb::new_with_auth(&tables()).await;

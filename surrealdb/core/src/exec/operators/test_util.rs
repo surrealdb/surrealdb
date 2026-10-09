@@ -9,10 +9,9 @@
 //!
 //! Two further layers sit on top of that:
 //!
-//! - [`parse_expr`] / [`physical_expr`] lower a SurrealQL fragment into its logical form and
-//!   compile it into a [`PhysicalExpr`], so a test states its predicate as source text rather than
-//!   hand-building node trees. `physical_expr` uses a txn-less planner, which is exactly the
-//!   runtime permission-resolution path. [`plan_statement`] does the same for a whole statement.
+//! - [`parse_expr`] lowers a SurrealQL fragment into its logical form, so a test states its
+//!   predicate as source text rather than hand-building node trees. [`plan_statement`] does the
+//!   same for a whole statement.
 //! - [`TestDb`] wraps an in-memory datastore and hands out a **database-level**
 //!   [`ExecutionContext`]. Anything that reads the catalog (table/field permissions, computed
 //!   fields, index metadata) or dereferences a record needs this rather than [`root_ctx`], because
@@ -27,66 +26,10 @@ use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProv
 use crate::ctx::Context;
 use crate::dbs::Session;
 use crate::exec::context::{DatabaseContext, NamespaceContext, RootContext, SessionInfo};
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream,
-};
+use crate::exec::{ExecOperator, ExecutionContext, FlowResult};
 use crate::iam::Auth;
 use crate::kvs::{Datastore, TransactionType};
 use crate::val::Value;
-
-/// A source operator that yields a fixed list of rows as a single batch.
-///
-/// `cardinality` lets a test pick the buffering strategy `buffer_stream`
-/// applies to the consuming operator; the default is `Unbounded`, matching the
-/// status-quo path most operators see.
-#[derive(Debug)]
-pub(crate) struct ValuesOperator {
-	values: Vec<Value>,
-	cardinality: CardinalityHint,
-	ordering: OutputOrdering,
-}
-
-impl ValuesOperator {
-	/// Build a source over the given rows with conservative `Unbounded`
-	/// cardinality and `Unordered` output. Returns a trait object (the operator
-	/// builders all hand back `Arc<dyn ExecOperator>`), not `Self`.
-	#[allow(clippy::new_ret_no_self)]
-	pub(crate) fn new(values: Vec<Value>) -> Arc<dyn ExecOperator> {
-		Arc::new(Self {
-			values,
-			cardinality: CardinalityHint::Unbounded,
-			ordering: OutputOrdering::Unordered,
-		})
-	}
-}
-
-impl ExecOperator for ValuesOperator {
-	fn name(&self) -> &'static str {
-		"Values"
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Root
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		self.cardinality
-	}
-
-	fn output_ordering(&self) -> OutputOrdering {
-		self.ordering.clone()
-	}
-
-	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let values = self.values.clone();
-		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(values))))))
-	}
-}
 
 /// Build a minimal root-level [`ExecutionContext`] for operator tests.
 ///
@@ -110,26 +53,9 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		computing_record: None,
 		no_write: None,
 		version_stamp: None,
-		zero_limits: Vec::new(),
-		topk_thresholds: None,
 		guard_verdicts: Default::default(),
 		writing: false,
 	})
-}
-
-/// As [`root_ctx`], but with the given auth identity instead of anonymous.
-///
-/// `Context::new_test()` has `auth_enabled` set, so the anonymous identity
-/// [`root_ctx`] carries is subject to permission checks
-/// (`should_check_perms(View)` is true under it). Pass `Auth::for_root(Role::Owner)`
-/// for a context that is exempt, or a narrower identity to exercise a specific
-/// gate.
-pub(crate) fn root_ctx_with_auth(auth: Auth) -> ExecutionContext {
-	let ExecutionContext::Root(mut root) = root_ctx() else {
-		unreachable!("root_ctx builds a Root context")
-	};
-	root.auth = Arc::new(auth);
-	ExecutionContext::Root(root)
 }
 
 /// As [`root_ctx`], but carrying the `Options` a real context carries.
@@ -172,7 +98,7 @@ pub(crate) async fn try_collect(
 }
 
 // =============================================================================
-// SurrealQL -> LogicalExpr -> PhysicalExpr
+// SurrealQL -> LogicalExpr
 // =============================================================================
 
 /// Parse a SurrealQL expression fragment into the surface AST.
@@ -209,82 +135,6 @@ pub(crate) fn field_idiom(src: &str) -> crate::expr::Idiom {
 	}
 }
 
-/// Compile a SurrealQL idiom into the place a data clause writes to, the way
-/// the planner compiles the left-hand side of a `SET` or a path of an `UNSET`.
-///
-/// Uses a txn-less planner, as [`physical_expr`] does. Panics when the idiom
-/// names a part no place can address.
-///
-/// Carries the feature its callers do: a write clause is exercised against a
-/// datastore, so every test that compiles a place needs the in-memory engine,
-/// and under any other the helper would stand unreached.
-#[cfg(feature = "kv-mem")]
-pub(crate) async fn write_place(
-	src: &str,
-	ctx: &ExecutionContext,
-) -> crate::exec::operators::write::place::WritePlace {
-	let planner = crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
-	crate::exec::operators::write::place::WritePlace::compile(&planner, field_idiom(src))
-		.await
-		.expect("idiom should compile to a place")
-}
-
-/// Compile a SurrealQL expression fragment into a [`PhysicalExpr`] against
-/// `ctx`.
-///
-/// Compiled over the transaction `ctx` holds where it holds one, so a
-/// statement the expression holds is planned with it, and with none under
-/// [`root_ctx`].
-pub(crate) async fn physical_expr(src: &str, ctx: &ExecutionContext) -> Arc<dyn PhysicalExpr> {
-	crate::exec::planner::compile_expr_tree(
-		parse_expr(src),
-		ctx.ctx(),
-		ctx.function_registry(),
-		ctx.try_txn(),
-		None,
-		0,
-	)
-	.await
-	.expect("fragment should compile to a physical expression")
-}
-
-/// As [`physical_expr`], but compiled with the transaction and principal of
-/// `ctx`, the way a scalar is compiled inside a running query: a statement the
-/// expression holds is bound and planned as a program when it is compiled.
-///
-/// Needs a context with a transaction ([`TestDb`]).
-pub(crate) async fn physical_expr_in_txn(
-	src: &str,
-	ctx: &ExecutionContext,
-) -> Arc<dyn PhysicalExpr> {
-	crate::exec::planner::compile_expr_tree(
-		parse_expr(src),
-		ctx.ctx(),
-		ctx.function_registry(),
-		Some(ctx.try_txn().expect("physical_expr_in_txn needs a context with a transaction")),
-		Some(Arc::clone(&ctx.root().auth)),
-		0,
-	)
-	.await
-	.expect("fragment should compile to a physical expression")
-}
-
-/// As [`eval_on`], compiled as [`physical_expr_in_txn`] does.
-pub(crate) async fn eval_on_in_txn(
-	src: &str,
-	value: &Value,
-	ctx: &ExecutionContext,
-) -> FlowResult<Value> {
-	let expr = physical_expr_in_txn(src, ctx).await;
-	expr.evaluate(EvalContext::from_exec_ctx(ctx).with_value_and_doc(value)).await
-}
-
-/// As [`eval`], compiled as [`physical_expr_in_txn`] does.
-pub(crate) async fn eval_in_txn(src: &str, ctx: &ExecutionContext) -> FlowResult<Value> {
-	let expr = physical_expr_in_txn(src, ctx).await;
-	expr.evaluate(EvalContext::from_exec_ctx(ctx)).await
-}
-
 /// Lower, bind and plan one SurrealQL statement against `ctx`, the way the
 /// executor does for a top-level statement.
 ///
@@ -313,29 +163,6 @@ fn lower_statement(src: &str) -> crate::expr::logical::LogicalOp {
 		panic!("unexpected statement shape for {src:?}");
 	};
 	crate::expr::logical::lower(expr).expect("statement should lower")
-}
-
-/// Compile and evaluate `src` with `value` bound as both the current value and
-/// the document root.
-pub(crate) async fn eval_on(src: &str, value: &Value, ctx: &ExecutionContext) -> FlowResult<Value> {
-	let expr = physical_expr(src, ctx).await;
-	expr.evaluate(EvalContext::from_exec_ctx(ctx).with_value_and_doc(value)).await
-}
-
-/// Compile and evaluate `src` in scalar context (no current row).
-pub(crate) async fn eval(src: &str, ctx: &ExecutionContext) -> FlowResult<Value> {
-	let expr = physical_expr(src, ctx).await;
-	expr.evaluate(EvalContext::from_exec_ctx(ctx)).await
-}
-
-/// Build a `Value` from a SurrealQL literal — `obj("{ a: 1, b: [2, 3] }")`.
-///
-/// Goes through the planner rather than `syn::value` so that object literals
-/// with computed entries are accepted; the result is asserted to need no
-/// context, which every literal satisfies.
-pub(crate) async fn val(src: &str) -> Value {
-	let ctx = root_ctx();
-	eval(src, &ctx).await.expect("literal should evaluate")
 }
 
 // =============================================================================
@@ -649,8 +476,6 @@ impl TestDb {
 			computing_record: None,
 			no_write: None,
 			version_stamp: None,
-			zero_limits: Vec::new(),
-			topk_thresholds: None,
 			guard_verdicts: Default::default(),
 			writing: false,
 		};
@@ -684,29 +509,5 @@ fn session_info(session: &Session) -> SessionInfo {
 		rd: session.rd.clone().map(convert_public_value_to_internal),
 		token: session.tk.clone().map(convert_public_value_to_internal),
 		exp: None,
-	}
-}
-
-/// Run an operator expected to fail, and return the error it raised.
-///
-/// Covers both places a failure can surface — `execute()` itself and a later
-/// stream item — and panics if the operator instead produces rows. Control-flow
-/// signals other than [`ControlFlow::Err`] are not errors and panic too.
-pub(crate) async fn drain_err(op: &impl ExecOperator, ctx: &ExecutionContext) -> anyhow::Error {
-	use futures::StreamExt;
-
-	let unwrap = |ctrl| match ctrl {
-		crate::expr::ControlFlow::Err(e) => e,
-		other => panic!("expected an error, got the control-flow signal: {other:?}"),
-	};
-
-	let mut stream = match op.execute(ctx) {
-		Ok(stream) => stream,
-		Err(ctrl) => return unwrap(ctrl),
-	};
-	match stream.next().await {
-		Some(Ok(batch)) => panic!("expected an error, got rows: {:?}", batch.values()),
-		Some(Err(ctrl)) => unwrap(ctrl),
-		None => panic!("expected an error, got an empty stream"),
 	}
 }

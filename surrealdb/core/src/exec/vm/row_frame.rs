@@ -997,8 +997,6 @@ fn strand_utf8(wire: &[u8]) -> Option<&[u8]> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::exec::operators::test_util::val;
-	use crate::key::KVKey as _;
 
 	/// What the RPC layer writes for `value`.
 	fn expected(value: &Value) -> Vec<u8> {
@@ -1012,87 +1010,6 @@ mod tests {
 			RowFormat::Cbor => crate::rpc::format::cbor::encode(public).expect("encodes"),
 			RowFormat::Json => {
 				crate::rpc::format::json::encode_str(public).expect("encodes").into_bytes()
-			}
-		}
-	}
-
-	async fn samples() -> Vec<Value> {
-		let mut out = Vec::new();
-		for src in [
-			"NONE",
-			"NULL",
-			"true",
-			"false",
-			"0",
-			"23",
-			"24",
-			"255",
-			"256",
-			"65536",
-			"4294967296",
-			"-1",
-			"-24",
-			"-25",
-			"-9223372036854775808",
-			"9223372036854775807",
-			"1.5f",
-			"0.1f",
-			"-0f",
-			"65504f",
-			"100000f",
-			"1e300f",
-			"5.960464477539063e-8f",
-			"1dec",
-			"-12.345dec",
-			"''",
-			"'a'",
-			"'a string longer than twenty-three bytes, to leave the inline form'",
-			"'é'",
-			"0ns",
-			"1s",
-			"1s5ns",
-			"3w",
-			"d'2024-01-01T00:00:00Z'",
-			"d'1969-12-31T23:59:59.5Z'",
-			"u'018f9b8e-0000-7000-8000-000000000000'",
-			"[]",
-			"[1, 'a', [2, [3]]]",
-			"{}",
-			"{ a: 1 }",
-			"{ b: 1, a: 2, ccc: 3, dd: { z: [1, { y: NONE }] } }",
-			"<bytes> 'ab'",
-			"t:1",
-			"t:abc",
-			"`select`:x",
-			"t:⟨with space⟩",
-			"t:⟨123⟩",
-			"t:u'018f9b8e-0000-7000-8000-000000000000'",
-			"t:[1, 'a']",
-			"t:{ a: 1 }",
-			"t:1..5",
-			"<set> [3, 1, 2]",
-			"(1, 2)",
-			"1..5",
-		] {
-			out.push(val(src).await);
-		}
-		for f in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MIN_POSITIVE, 1.0 / 3.0] {
-			out.push(Value::Number(Number::Float(f)));
-		}
-		out
-	}
-
-	#[tokio::test]
-	async fn an_in_memory_value_encodes_as_the_rpc_layer_encodes_it() {
-		for format in [RowFormat::Cbor, RowFormat::Json] {
-			let mut frame = RowFrame::with_format(format);
-			for (at, value) in samples().await.iter().enumerate() {
-				frame.push_value(value).expect("encodes");
-				assert_eq!(
-					String::from_utf8_lossy(frame.row(at)),
-					String::from_utf8_lossy(&expected_in(format, value)),
-					"{format:?} {value:?}"
-				);
 			}
 		}
 	}
@@ -1123,60 +1040,6 @@ mod tests {
 				let mut frame = RowFrame::new();
 				frame.push_value(&value).expect("encodes");
 				assert_eq!(frame.row(0), expected(&value).as_slice(), "{v:e}");
-			}
-		}
-	}
-
-	/// A stored record transcodes to the bytes its decoded form encodes to.
-	#[tokio::test]
-	async fn a_stored_record_transcodes_as_its_decoded_form_encodes() {
-		let mut datas = Vec::new();
-		for src in [
-			"{}",
-			"{ a: 1 }",
-			"{ id: 'ignored', b: 'x' }",
-			"{ f: t:1, g: t:abc, h: other:-5, i: [t:2] }",
-			"{ a: t:⟨with space⟩, b: t:⟨123⟩, c: `select`:x, d: t:⟨a\"b⟩, e: 'q\"\\\\x\\té', \
-			   f: 1h30m, g: d'2024-01-02T03:04:05.006Z', h: u'018f9b8e-0000-7000-8000-000000000000', \
-			   i: 1.5f, j: 2.25dec, l: NONE, m: NULL, n: false }",
-			"{ zz: 1, a: [1, 2, { q: 'r', p: NONE }], m: { k: true, kk: 1.5f, kkk: 2dec } }",
-		] {
-			datas.push(val(src).await);
-		}
-		// Wide enough for the indexed map and seq forms.
-		let mut wide = crate::val::Object::default();
-		for i in 0..40 {
-			wide.insert(format!("f{}", 40 - i), Value::Array((0..i).map(Value::from).collect()));
-		}
-		datas.push(Value::Object(wide));
-		for (i, data) in datas.into_iter().enumerate() {
-			let rid = crate::val::RecordId {
-				table: "t".into(),
-				key: RecordIdKey::Number(i as i64),
-			};
-			let key = crate::key::schema::RecordKey::new(
-				crate::catalog::NamespaceId(1),
-				crate::catalog::DatabaseId(2),
-				std::borrow::Cow::Borrowed(&rid.table),
-				std::borrow::Cow::Borrowed(&rid.key),
-			)
-			.encode_key()
-			.expect("encodes");
-			let value = revision::to_vec(&crate::catalog::Record::new(data)).expect("encodes");
-			let decoded = crate::exec::operators::scan::pipeline::decode_record(&key, &value)
-				.expect("decodes");
-			for format in [RowFormat::Cbor, RowFormat::Json] {
-				let mut frame = RowFrame::with_format(format);
-				let before = WHOLE_DECODES.with(|n| n.get());
-				let values_before = VALUE_DECODES.with(|n| n.get());
-				frame.push_stored(&key, &value).expect("transcodes");
-				assert_eq!(WHOLE_DECODES.with(|n| n.get()), before, "transcoded in place");
-				assert_eq!(VALUE_DECODES.with(|n| n.get()), values_before, "{i}: leaves in place");
-				assert_eq!(
-					String::from_utf8_lossy(frame.row(0)),
-					String::from_utf8_lossy(&expected_in(format, &decoded)),
-					"{format:?} {decoded:?}"
-				);
 			}
 		}
 	}

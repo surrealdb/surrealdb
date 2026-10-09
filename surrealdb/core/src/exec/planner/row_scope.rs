@@ -19,7 +19,7 @@
 //!   scope and is descended into.
 //!
 //! This module is plan-time only. Runtime sites (`parts/filter.rs`,
-//! `parts/lookup.rs`, `physical_expr/subquery.rs`, etc.) consume the flags
+//! `parts/lookup.rs`, etc.) consume the flags
 //! produced here via `WherePart::needs_parent` and friends; they do their
 //! own per-row binding through `EvalContext::current_value` /
 //! `document_root`.

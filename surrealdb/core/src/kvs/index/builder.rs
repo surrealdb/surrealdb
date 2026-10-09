@@ -573,8 +573,6 @@ impl Building {
 			computing_record: None,
 			no_write: None,
 			version_stamp: None,
-			zero_limits: Vec::new(),
-			topk_thresholds: None,
 			guard_verdicts: Default::default(),
 			writing: false,
 		};

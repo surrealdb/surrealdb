@@ -16,8 +16,7 @@ use std::fmt::Debug;
 use anyhow::Result;
 
 use super::Signature;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel};
+use crate::exec::{BoxFut, ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;

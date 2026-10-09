@@ -227,23 +227,6 @@ impl TableViews {
 		}
 	}
 
-	/// A resolver whose views are built with permission checks bypassed,
-	/// whatever session the caller resolves against.
-	///
-	/// `check_perms` is normally read from the first context a resolver sees
-	/// and remembered, which makes "checked" and "unchecked" a property of the
-	/// caller rather than of the resolver. A caller that derives an image
-	/// rather than showing one — a write's pre-mutation snapshot, the scratch
-	/// copy a permission predicate is judged against — needs the bypass fixed
-	/// up front, so that handing it an ordinary context cannot quietly pin it
-	/// as checked for the rest of its life.
-	pub(crate) fn unchecked() -> Self {
-		Self {
-			check_perms: Some(false),
-			..Self::new()
-		}
-	}
-
 	/// A resolver whose views derive only the `COMPUTED` fields a projection
 	/// requires, plus those any field guard depends on.
 	pub(crate) fn for_projection(needed_fields: Arc<HashSet<String>>) -> Self {

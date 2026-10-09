@@ -572,11 +572,11 @@ pub(crate) struct CompiledUnits {
 	/// the records of a table, by write, table and catalog version
 	/// ([`super::fault::serve_stage_bundle`]).
 	stage_bundles: super::compile_cache::UnitCache<Arc<Program>>,
-	/// Expressions reached through the operator tree's expressions, by text
-	/// ([`super::serve::expr`]).
-	exprs: super::compile_cache::UnitCache<Arc<dyn crate::exec::physical_expr::PhysicalExpr>>,
-	/// Statements reached through the operator tree's expressions, by text
-	/// ([`super::serve::statement`]).
+	/// Expressions reached at run time through one the program did not compile,
+	/// by text ([`super::serve::expr`]).
+	exprs: super::compile_cache::UnitCache<crate::exec::Clause>,
+	/// Statements reached at run time through an expression the program did not
+	/// compile, by text ([`super::serve::statement`]).
 	statements: super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>>,
 	/// Top-level statements of requests served for the session values they
 	/// fold ([`super::serve::request_statement`]), at most
@@ -788,14 +788,13 @@ impl CompiledUnits {
 		&self.stage_bundles
 	}
 
-	/// Expressions reached through the operator tree's expressions.
-	pub(crate) fn exprs(
-		&self,
-	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::physical_expr::PhysicalExpr>> {
+	/// Expressions reached at run time through one the program did not compile.
+	pub(crate) fn exprs(&self) -> &super::compile_cache::UnitCache<crate::exec::Clause> {
 		&self.exprs
 	}
 
-	/// Statements reached through the operator tree's expressions.
+	/// Statements reached at run time through an expression the program did not
+	/// compile.
 	pub(crate) fn statements(
 		&self,
 	) -> &super::compile_cache::UnitCache<Arc<dyn crate::exec::ExecOperator>> {

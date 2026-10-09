@@ -202,11 +202,10 @@ impl Lowering<'_, '_> {
 		let result = self.block_constant(Value::None)?;
 		crate::exec::vm::host::out_of_line(|| self.node(control, result, Collect::Block)).await?;
 		// The program's dispatch reads each table as the catalog held it when
-		// the query arrived, as the operator tree binds a value written in
-		// `FROM`; a value in `FROM` only the data names, and a `FETCH`, the
-		// tree resolves against the catalog the block's schema statements
-		// leave. A block whose schema statements change what such a read of
-		// the block's own may find is not covered.
+		// the query arrived, as a value written in `FROM` is bound; a value in
+		// `FROM` only the data names, and a `FETCH`, are resolved against the
+		// catalog the block's schema statements leave. A block whose schema statements change what
+		// such a read of the block's own may find is not covered.
 		// A block planned late-bound after a change loads every table a
 		// statement after it reads when the statement runs.
 		let late = self.late_reach.clone().unwrap_or_else(crate::exec::vm::dispatch::Reach::none);

@@ -38,8 +38,7 @@ use crate::exec::operators::scan::{
 	open_full_text_hits, record_key_range, resolve_doc_ids,
 };
 use crate::exec::permission::validate_record_user_access;
-use crate::exec::physical_expr::EvalContext;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::{EvalContext, ExecutionContext, FlowResult};
 use crate::expr::logical::LogicalPermissionRef;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
@@ -300,7 +299,7 @@ pub(super) type ModuleDefinition = std::convert::Infallible;
 
 /// A module export as [`Services::module_export`] resolves it.
 #[cfg(feature = "surrealism")]
-pub(super) type ModuleExport = crate::exec::physical_expr::function::ModuleExport;
+pub(super) type ModuleExport = crate::exec::vm::calls::ModuleExport;
 /// A build without the Surrealism runtime resolves no export.
 #[cfg(not(feature = "surrealism"))]
 pub(super) type ModuleExport = std::convert::Infallible;
@@ -611,7 +610,7 @@ impl Services for EngineServices<'_> {
 	}
 
 	fn check_script(&self, ctx: &EvalContext<'_>) -> FlowResult<()> {
-		crate::exec::physical_expr::function::check_script_allowed(ctx)
+		crate::exec::vm::calls::check_script_allowed(ctx)
 	}
 
 	async fn call_script_dynamic(
@@ -621,7 +620,7 @@ impl Services for EngineServices<'_> {
 		args: Vec<Value>,
 		ctx: &EvalContext<'_>,
 	) -> FlowResult<Value> {
-		crate::exec::physical_expr::function::run_script(source, plan_depth, args, ctx).await
+		crate::exec::vm::calls::run_script(source, plan_depth, args, ctx).await
 	}
 
 	async fn read_model(
@@ -630,7 +629,7 @@ impl Services for EngineServices<'_> {
 		version: &str,
 		ctx: &EvalContext<'_>,
 	) -> FlowResult<ModelDefinition> {
-		crate::exec::physical_expr::function::enter_model(name, version, ctx).await
+		crate::exec::vm::calls::enter_model(name, version, ctx).await
 	}
 
 	async fn compute_model(
@@ -641,8 +640,7 @@ impl Services for EngineServices<'_> {
 		args: Vec<Value>,
 		ctx: &EvalContext<'_>,
 	) -> FlowResult<Value> {
-		crate::exec::physical_expr::function::compute_model(name, version, definition, args, ctx)
-			.await
+		crate::exec::vm::calls::compute_model(name, version, definition, args, ctx).await
 	}
 
 	async fn read_module(
@@ -655,7 +653,7 @@ impl Services for EngineServices<'_> {
 		#[cfg(feature = "surrealism")]
 		{
 			let _ = silo;
-			crate::exec::physical_expr::function::read_module(storage, sub, ctx).await
+			crate::exec::vm::calls::read_module(storage, sub, ctx).await
 		}
 		#[cfg(not(feature = "surrealism"))]
 		{
@@ -664,7 +662,7 @@ impl Services for EngineServices<'_> {
 				Some(sub) if !silo => format!("{storage}::{sub}"),
 				_ => storage.to_owned(),
 			};
-			Err(crate::exec::physical_expr::function::module_runtime_missing(&name, silo))
+			Err(crate::exec::vm::calls::module_runtime_missing(&name, silo))
 		}
 	}
 
@@ -676,7 +674,7 @@ impl Services for EngineServices<'_> {
 	) -> FlowResult<ModuleExport> {
 		#[cfg(feature = "surrealism")]
 		{
-			crate::exec::physical_expr::function::module_export(definition, sub, ctx).await
+			crate::exec::vm::calls::module_export(definition, sub, ctx).await
 		}
 		#[cfg(not(feature = "surrealism"))]
 		{
@@ -695,8 +693,7 @@ impl Services for EngineServices<'_> {
 	) -> FlowResult<Value> {
 		#[cfg(feature = "surrealism")]
 		{
-			crate::exec::physical_expr::function::run_module_export(storage, export, sub, args, ctx)
-				.await
+			crate::exec::vm::calls::run_module_export(storage, export, sub, args, ctx).await
 		}
 		#[cfg(not(feature = "surrealism"))]
 		{

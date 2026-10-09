@@ -7,300 +7,18 @@
 
 use std::sync::Arc;
 
-#[cfg(test)]
-use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
-#[cfg(test)]
-use super::common::resolve_version_stamp;
 use super::pipeline::{
 	FieldState, ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream,
 };
-use super::resolved::{EnforcementMode, ResolvedTableContext, planned_select_permission};
+use super::resolved::{EnforcementMode, planned_select_permission};
 use crate::err::EngineError;
 use crate::exec::operators::scan::count::record_key_range;
 use crate::exec::permission::PhysicalPermission;
-#[cfg(test)]
-use crate::exec::permission::{should_check_perms, validate_record_user_access};
-use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, FlowResult, OperatorMetrics,
-	OutputOrdering, ValueBatch, ValueBatchStream, monitor_stream,
-};
-use crate::exec::{ExecutionContext, PhysicalExpr};
+use crate::exec::{Clause, ExecutionContext};
 use crate::expr::{ControlFlow, ControlFlowExt};
-#[cfg(test)]
-use crate::iam::Action;
 use crate::val::{RecordId, RecordIdKey, Value};
-
-#[cfg(test)]
-/// Record lookup and range scan by RecordId.
-///
-/// Handles both single-record point lookups (`person:1`) and RecordId
-/// range scans (`person:1..5`). Unlike [`DynamicScan`](super::DynamicScan),
-/// this operator knows at plan time that its source is a RecordId. It skips:
-/// - Source expression type dispatch (table vs record vs array)
-/// - `IndexAnalyzer` / access path selection
-///
-/// For point lookups, it also skips limit/start tracking and scan pipelines
-/// (always 0 or 1 row).
-///
-/// It reuses `build_field_state` and `filter_and_process_batch` from the
-/// shared pipeline infrastructure for permissions and computed fields.
-#[derive(Debug, Clone)]
-pub struct RecordIdScan {
-	/// Expression that evaluates to a RecordId value.
-	pub(crate) record_id: Arc<dyn PhysicalExpr>,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
-	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
-	/// `None` means all fields are needed (SELECT *).
-	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
-	/// Compiled WHERE predicate pushed down from the Filter operator.
-	/// Applied after computed fields, before field-level permissions.
-	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
-	/// Plan-time resolved table context. When present, `execute_record_lookup`
-	/// skips runtime `get_table_def()` and `build_field_state()` entirely, and
-	/// its enforcement mode says whether the lookup applies the table
-	/// permission, computed fields and field permissions itself or yields the
-	/// record as stored for the plan above it to apply them.
-	pub(crate) resolved: Option<ResolvedTableContext>,
-	/// The mode the lookup was planned under. A resolved context agrees with
-	/// it; without one the lookup resolves its table when it runs and, under
-	/// [`EnforcementMode::Planned`], still yields the record as stored: the
-	/// table was not in the catalog when the plan was made, and the plan above
-	/// the lookup was built from that absence — a permission-checked caller is
-	/// denied there — so nothing is applied here.
-	pub(crate) mode: EnforcementMode,
-	/// Whether the lookup is a locked read (`SELECT ... FOR UPDATE`),
-	/// registering the record key for commit-time conflict detection.
-	pub(crate) for_update: bool,
-	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
-	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
-	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
-	pub(crate) metrics: Arc<OperatorMetrics>,
-	/// The limit this scan is bound to, which spares it its records when it
-	/// evaluates to zero.
-	pub(crate) zero_limit: crate::exec::zero_limit::ZeroLimitBinding,
-}
-
-#[cfg(test)]
-impl RecordIdScan {
-	#[cfg(test)]
-	pub(crate) fn new(
-		record_id: Arc<dyn PhysicalExpr>,
-		version: Option<Arc<dyn PhysicalExpr>>,
-		needed_fields: Option<std::collections::HashSet<String>>,
-		predicate: Option<Arc<dyn PhysicalExpr>>,
-	) -> Self {
-		Self {
-			record_id,
-			version,
-			needed_fields,
-			predicate,
-			resolved: None,
-			mode: EnforcementMode::Runtime,
-			for_update: false,
-			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
-			zero_limit: Default::default(),
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-
-	#[cfg(test)]
-	/// Set the plan-time resolved table context.
-	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
-		self.resolved = Some(resolved);
-		self
-	}
-
-	#[cfg(test)]
-	/// Set the mode the lookup was planned under; see [`Self::mode`].
-	pub(crate) fn with_enforcement_mode(mut self, mode: EnforcementMode) -> Self {
-		self.mode = mode;
-		self
-	}
-
-	#[cfg(test)]
-	/// Set whether the lookup performs a locked read (`FOR UPDATE`).
-	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
-		self.for_update = for_update;
-		self
-	}
-
-	#[cfg(test)]
-	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
-	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
-		self.pre_decode_filter_status = status;
-		self
-	}
-}
-#[cfg(test)]
-impl ExecOperator for RecordIdScan {
-	fn name(&self) -> &'static str {
-		"RecordIdScan"
-	}
-
-	fn zero_limit_binding(&self) -> Option<&crate::exec::zero_limit::ZeroLimitBinding> {
-		Some(&self.zero_limit)
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		let mut attrs = vec![("record_id".to_string(), self.record_id.to_sql())];
-		if let Some(ref version) = self.version {
-			attrs.push(("version".to_string(), version.to_sql()));
-		}
-		if let Some(ref pred) = self.predicate {
-			attrs.push(("predicate".to_string(), pred.to_sql()));
-		}
-		if let Some(s) = self.pre_decode_filter_status.explain_text() {
-			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
-		}
-		if self.for_update {
-			attrs.push(("for_update".to_string(), "true".to_string()));
-		}
-		attrs
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// A locked read registers conflict-detection state on the storage
-		// engine, which requires a writeable transaction.
-		let mut mode = if self.for_update {
-			AccessMode::ReadWrite
-		} else {
-			AccessMode::ReadOnly
-		};
-		mode = mode.combine(self.record_id.access_mode());
-		if let Some(ref version) = self.version {
-			mode = mode.combine(version.access_mode());
-		}
-		if let Some(ref pred) = self.predicate {
-			mode = mode.combine(pred.access_mode());
-		}
-		mode
-	}
-
-	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
-		// RecordIdScan produces at most one row for point lookups.
-		// Range scans could produce more, but the planner only routes
-		// literal RecordId expressions here (ranges go through DynamicScan).
-		crate::exec::CardinalityHint::AtMostOne
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
-		let mut exprs = vec![("record_id", &self.record_id)];
-		if let Some(ref version) = self.version {
-			exprs.push(("version", version));
-		}
-		if let Some(ref pred) = self.predicate {
-			exprs.push(("predicate", pred));
-		}
-		exprs
-	}
-
-	fn output_ordering(&self) -> OutputOrdering {
-		use crate::exec::operators::SortDirection;
-		use crate::exec::ordering::SortProperty;
-
-		// Both point lookups (0-1 rows) and range scans (KV-ordered by id)
-		// produce output sorted by id ASC.
-		OutputOrdering::Sorted(vec![SortProperty {
-			path: crate::exec::field_path::FieldPath::field("id"),
-			direction: SortDirection::Asc,
-			collate: false,
-			numeric: false,
-		}])
-	}
-
-	#[cfg_attr(
-		feature = "observability",
-		tracing::instrument(name = "RecordLookup::execute", level = "trace", skip_all)
-	)]
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let db_ctx = ctx.database()?.clone();
-
-		// Validate record user has access to this namespace/database
-		validate_record_user_access(&db_ctx)?;
-
-		// Check if we need to enforce permissions
-		let check_perms = should_check_perms(&db_ctx, Action::View)?;
-
-		// Clone for the async block
-		let record_id_expr = Arc::clone(&self.record_id);
-		let version_expr = self.version.clone();
-		let needed_fields = self.needed_fields.clone();
-		let predicate = self.predicate.clone();
-		let resolved = self.resolved.clone();
-		let mode = self.mode;
-		let for_update = self.for_update;
-		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
-		let zeroed = self.zero_limit.applies(ctx);
-		let ctx = ctx.clone();
-
-		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
-			// 1. Evaluate the record_id expression to get the RecordId value
-			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-			let rid_value = record_id_expr.evaluate(eval_ctx).await?;
-
-			let rid = match rid_value {
-				Value::RecordId(rid) => rid,
-				other => {
-					// FOR UPDATE targets must resolve to specific record ids
-					// so the locked read is never silently skipped.
-					if for_update {
-						return Err(ControlFlow::Err(anyhow::Error::new(
-							crate::exec::Error::Query {
-								message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
-							},
-						)));
-					}
-					// If the expression didn't produce a RecordId, yield as-is
-					// (defensive fallback — the planner should only route RecordIds here)
-					yielder.emit(ValueBatch::new(vec![other])).await;
-					return Ok(());
-				}
-			};
-
-			// 2. Resolve VERSION timestamp; see [`resolve_version_stamp`] for why we prefer the
-			//    stamp already set by the enclosing `VersionScope` over re-evaluating
-			//    `version_expr` here.
-			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
-
-			// 3. Delegate to the shared lookup helper
-			let results = execute_record_lookup(
-				&rid,
-				version,
-				for_update,
-				check_perms,
-				needed_fields.as_ref(),
-				&ctx,
-				predicate.as_ref(),
-				zeroed.then_some(0),
-				0,
-				resolved.as_ref(),
-				mode,
-				&pre_decode_filter_status,
-			)
-			.await?;
-
-			if !results.is_empty() {
-				yielder.emit(ValueBatch::new(results)).await;
-			}
-			Ok(())
-		});
-
-		Ok(monitor_stream(Box::pin(stream), "RecordLookup", &self.metrics))
-	}
-}
 
 // =============================================================================
 // Shared helper — used by both RecordLookup::execute and DynamicScan
@@ -323,10 +41,9 @@ impl ExecOperator for RecordIdScan {
 /// `version` and with range keys — both are rejected here so a locked read
 /// is never silently downgraded.
 ///
-/// `resolved` is the plan-time table context, when one was resolved; without
-/// one the table is resolved here and `mode` says who enforces what it
-/// declares — the lookup per record under [`EnforcementMode::Runtime`], the
-/// plan above under [`EnforcementMode::Planned`] (see `RecordIdScan::mode`).
+/// `mode` says who enforces what the table declares — the lookup per record
+/// under [`EnforcementMode::Runtime`], the plan above under
+/// [`EnforcementMode::Planned`].
 ///
 /// This is the single implementation of RecordId-based data access, shared
 /// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
@@ -338,14 +55,12 @@ pub(crate) async fn execute_record_lookup(
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 	ctx: &ExecutionContext,
-	predicate: Option<&Arc<dyn PhysicalExpr>>,
+	predicate: Option<&Clause>,
 	// FIXME: We should be consistent on which integer type we use for limit.
 	// Our backend only support u32 so we should use u32 everywhere for limits.
 	limit: Option<usize>,
 	start: usize,
-	resolved: Option<&ResolvedTableContext>,
 	mode: EnforcementMode,
-	pre_decode_filter_status: &PreDecodeFilterStatus,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
 	let txn = ctx.txn();
@@ -366,41 +81,32 @@ pub(crate) async fn execute_record_lookup(
 	}
 
 	// 1. Check table existence and resolve SELECT permission.
-	// Use plan-time resolved context if available, otherwise runtime lookups.
-	let (select_permission, field_state) = if let Some(res) = resolved {
-		let perm = res.select_permission(check_perms);
-		let fs = res.field_state_for_projection(needed_fields);
-		(perm, fs)
-	} else {
-		// Runtime resolution: the table was not in the catalog when the plan
-		// was made, or the record id was only known at runtime.
-		let Some(table_def) =
-			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?
-		else {
-			return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
-				name: rid.table.clone(),
-			})));
-		};
+	let Some(table_def) =
+		db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?
+	else {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
+			name: rid.table.clone(),
+		})));
+	};
 
-		match mode {
-			// The plan above enforces; see `RecordIdScan::mode`.
-			EnforcementMode::Planned => (
-				if check_perms {
-					planned_select_permission(&table_def)
-				} else {
-					PhysicalPermission::Allow
-				},
-				FieldState::empty(),
-			),
-			EnforcementMode::Runtime => {
-				let perm = if check_perms {
-					crate::exec::vm::descriptor::select_permission(ctx, &table_def.name).await?
-				} else {
-					PhysicalPermission::Allow
-				};
-				let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
-				(perm, fs)
-			}
+	let (select_permission, field_state) = match mode {
+		// The plan above enforces.
+		EnforcementMode::Planned => (
+			if check_perms {
+				planned_select_permission(&table_def)
+			} else {
+				PhysicalPermission::Allow
+			},
+			FieldState::empty(),
+		),
+		EnforcementMode::Runtime => {
+			let perm = if check_perms {
+				crate::exec::vm::descriptor::select_permission(ctx, &table_def.name).await?
+			} else {
+				PhysicalPermission::Allow
+			};
+			let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
+			(perm, fs)
 		}
 	};
 
@@ -409,7 +115,7 @@ pub(crate) async fn execute_record_lookup(
 		return Ok(vec![]);
 	}
 
-	// A zero limit reads no record (see `crate::exec::zero_limit`), except a
+	// A zero limit reads no record, except a
 	// locked read: the lock is a side effect of the read whatever rows it
 	// returns, so the point lookup below still registers it.
 	if limit == Some(0) && !for_update {
@@ -447,13 +153,6 @@ pub(crate) async fn execute_record_lookup(
 			};
 			let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
 
-			let pre_decode_filter = pre_decode_filter_for_execute(
-				pre_decode_filter_status,
-				&field_state,
-				check_perms,
-				ctx.ctx().config.exec.idiom_recursion_limit,
-			);
-
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
 				range,
@@ -462,7 +161,7 @@ pub(crate) async fn execute_record_lookup(
 				crate::kvs::Direction::Forward,
 				pre_skip,
 				limit_hint,
-				pre_decode_filter,
+				None,
 				// TopK threshold pushdown targets full table scans only.
 				None,
 			);
@@ -529,58 +228,5 @@ pub(crate) async fn execute_record_lookup(
 			}
 			Ok(batch)
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::exec::operators::scan::resolved::test_support::{
-		RESTRICTED_TABLE, anonymous, assert_as_stored, assert_reduced, contexts,
-	};
-	use crate::exec::operators::test_util::{TestDb, collect};
-	use crate::exec::physical_expr::Literal;
-	use crate::kvs::TransactionType;
-
-	/// Under the plan's enforcement the lookup yields the record as stored,
-	/// for the nodes above it to reduce; under its own it reduces the record
-	/// for a permission-checked caller.
-	#[tokio::test]
-	async fn a_planned_lookup_yields_the_stored_record_and_a_runtime_lookup_reduces_it() {
-		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
-		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
-		let (planned, runtime) = contexts(&ctx, "t").await;
-		let rid = Value::RecordId(RecordId {
-			table: "t".into(),
-			key: RecordIdKey::Number(1),
-		});
-		let scan = |tc: ResolvedTableContext| -> Arc<dyn ExecOperator> {
-			Arc::new(
-				RecordIdScan::new(Arc::new(Literal(rid.clone())), None, None, None)
-					.with_resolved(tc),
-			)
-		};
-		assert_as_stored(&collect(&scan(planned), &ctx).await);
-		assert_reduced(&collect(&scan(runtime), &ctx).await);
-	}
-
-	/// Without a plan-time context the lookup resolves its table when it
-	/// runs, and the mode it was planned under still decides who enforces.
-	#[tokio::test]
-	async fn a_lookup_resolving_its_table_at_runtime_enforces_by_its_planned_mode() {
-		let db = TestDb::new_with_auth(RESTRICTED_TABLE).await;
-		let ctx = db.exec_ctx_as(&anonymous(), TransactionType::Read).await;
-		let rid = Value::RecordId(RecordId {
-			table: "t".into(),
-			key: RecordIdKey::Number(1),
-		});
-		let scan = |mode: EnforcementMode| -> Arc<dyn ExecOperator> {
-			Arc::new(
-				RecordIdScan::new(Arc::new(Literal(rid.clone())), None, None, None)
-					.with_enforcement_mode(mode),
-			)
-		};
-		assert_as_stored(&collect(&scan(EnforcementMode::Planned), &ctx).await);
-		assert_reduced(&collect(&scan(EnforcementMode::Runtime), &ctx).await);
 	}
 }

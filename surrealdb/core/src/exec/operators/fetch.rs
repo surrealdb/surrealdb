@@ -1,8 +1,3 @@
-#[cfg(test)]
-use std::sync::Arc;
-
-#[cfg(test)]
-use futures::StreamExt;
 use surrealdb_strand::Strand;
 
 use crate::catalog::providers::TableProvider;
@@ -11,43 +6,10 @@ use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, should_check_perms, validate_record_user_access,
 };
-#[cfg(test)]
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-#[cfg(test)]
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, FlowResult, OperatorMetrics,
-	OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
-};
 use crate::expr::ControlFlowExt;
 use crate::expr::logical::LogicalExpr;
 use crate::iam::Action;
 use crate::val::{RecordId, TableName, Value};
-
-/// A single step of a FETCH field path, walked structurally through the
-/// row's value.
-///
-/// A computed index or key (`refs[0]`, `refs[$i]`) is compiled into a
-/// `PhysicalExpr` at plan time instead of being compiled on every row. A step
-/// the fetch cannot walk through ends its path: the value reached so far is
-/// left as it is, unfetched.
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) enum FetchStep {
-	/// `.name`: the field of an object, or of every element of an array.
-	Field(Strand),
-	/// `.*`: every element of an array, every value of an object.
-	All,
-	/// The first element of an array.
-	First,
-	/// `[$]`: the last element of an array.
-	Last,
-	/// `[e]`: a computed index into an array or key into an object.
-	Index(Arc<dyn PhysicalExpr>),
-	/// A step the fetch does not walk through (a filter, a flatten, a method,
-	/// a lookup, a destructure, a recursion, an optional chain, a path not
-	/// rooted at a field of the row).
-	Unsupported,
-}
 
 /// A [`FetchStep`] before its computed index is compiled: what
 /// [`fetch_parts`] reads off a FETCH path for the planner to compile.
@@ -126,111 +88,6 @@ pub(crate) fn fetch_parts(expr: &LogicalExpr) -> Vec<FetchPart<'_>> {
 	out
 }
 
-#[cfg(test)]
-/// Fetches related records for specified fields.
-///
-/// The FETCH clause replaces record IDs with their full record data.
-/// For example, if a field contains `author:tobie`, FETCH will replace
-/// it with the full author record `{ id: author:tobie, name: 'Tobie', ... }`.
-#[derive(Debug, Clone)]
-pub struct Fetch {
-	pub(crate) input: Arc<dyn ExecOperator>,
-	/// SQL rendering of the fetch paths, captured at plan time. Kept only for
-	/// EXPLAIN's `attrs()`; execution walks `physical_fields`.
-	pub(crate) fields_sql: String,
-	/// The fetch paths to walk, each a sequence of steps root first (see
-	/// [`fetch_parts`]).
-	pub(crate) physical_fields: Vec<Vec<FetchStep>>,
-	pub(crate) metrics: Arc<OperatorMetrics>,
-}
-
-#[cfg(test)]
-impl Fetch {
-	#[cfg(test)]
-	pub(crate) fn new(
-		input: Arc<dyn ExecOperator>,
-		fields_sql: String,
-		physical_fields: Vec<Vec<FetchStep>>,
-	) -> Self {
-		Self {
-			input,
-			fields_sql,
-			physical_fields,
-			metrics: Arc::new(OperatorMetrics::new()),
-		}
-	}
-}
-#[cfg(test)]
-impl ExecOperator for Fetch {
-	fn name(&self) -> &'static str {
-		"Fetch"
-	}
-
-	fn attrs(&self) -> Vec<(String, String)> {
-		vec![("fields".to_string(), self.fields_sql.clone())]
-	}
-
-	fn required_context(&self) -> ContextLevel {
-		// Fetch needs database context for reading related records
-		ContextLevel::Database.max(self.input.required_context())
-	}
-
-	fn access_mode(&self) -> AccessMode {
-		// Fetch reads related records
-		AccessMode::ReadOnly.combine(self.input.access_mode())
-	}
-
-	fn cardinality_hint(&self) -> CardinalityHint {
-		self.input.cardinality_hint()
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		vec![&self.input]
-	}
-
-	fn metrics(&self) -> Option<&OperatorMetrics> {
-		Some(&self.metrics)
-	}
-
-	fn output_shape(&self) -> OutputShape {
-		self.input.output_shape()
-	}
-
-	fn output_ordering(&self) -> crate::exec::OutputOrdering {
-		self.input.output_ordering()
-	}
-
-	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
-			self.input.execute(ctx)?,
-			self.access_mode().combine(self.input.access_mode()),
-			self.input.cardinality_hint(),
-			ctx.root().ctx.config.exec.operator_buffer_size,
-		);
-		let fields = self.physical_fields.clone();
-		let ctx = ctx.clone();
-
-		let fetch_stream = input_stream.then(move |batch_result| {
-			let fields = fields.clone();
-			let ctx = ctx.clone();
-
-			async move {
-				let batch = batch_result?;
-				let mut fetched_values = Vec::with_capacity(batch.len());
-
-				for value in batch.into_values() {
-					let fetched = fetch_fields(&ctx, value, &fields).await?;
-					fetched_values.push(fetched);
-				}
-
-				Ok(ValueBatch::new(fetched_values))
-			}
-		});
-
-		Ok(monitor_stream(Box::pin(fetch_stream), "Fetch", &self.metrics))
-	}
-}
-
 /// A step of a `FETCH` path as the walk reads it, whatever form the path is
 /// held in.
 pub(crate) enum WalkStep<'a> {
@@ -260,50 +117,6 @@ pub(crate) trait FetchIndex<S>: Sync {
 		ctx: &'a ExecutionContext,
 		step: &'a S,
 	) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<Value>>;
-}
-
-#[cfg(test)]
-impl FetchWalk for FetchStep {
-	fn step(&self) -> WalkStep<'_> {
-		match self {
-			FetchStep::Field(name) => WalkStep::Field(name),
-			FetchStep::All => WalkStep::All,
-			FetchStep::First => WalkStep::First,
-			FetchStep::Last => WalkStep::Last,
-			FetchStep::Index(_) => WalkStep::Index,
-			FetchStep::Unsupported => WalkStep::Unsupported,
-		}
-	}
-}
-
-/// The computed indexes of the operator tree's steps, evaluated as compiled.
-#[cfg(test)]
-struct CompiledIndex;
-
-#[cfg(test)]
-impl FetchIndex<FetchStep> for CompiledIndex {
-	fn index<'a>(
-		&'a self,
-		ctx: &'a ExecutionContext,
-		step: &'a FetchStep,
-	) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<Value>> {
-		Box::pin(async move {
-			match step {
-				FetchStep::Index(expr) => expr.evaluate(EvalContext::from_exec_ctx(ctx)).await,
-				_ => Ok(Value::None),
-			}
-		})
-	}
-}
-
-/// Fetch all specified fields for a value.
-#[cfg(test)]
-pub(crate) async fn fetch_fields(
-	ctx: &ExecutionContext,
-	value: Value,
-	fields: &[Vec<FetchStep>],
-) -> crate::expr::FlowResult<Value> {
-	fetch_fields_with(ctx, value, fields, &CompiledIndex).await
 }
 
 /// Fetch all specified fields for a value, over paths of steps held in any
@@ -833,9 +646,9 @@ pub(crate) async fn require_table(
 
 #[cfg(test)]
 mod tests {
+
 	use super::*;
 	use crate::exec::operators::test_util::{parse_expr, parse_path};
-	use crate::exec::physical_expr::Literal;
 
 	#[test]
 	fn a_fetch_path_is_read_root_first_through_its_broadcasts() {
@@ -899,44 +712,20 @@ mod tests {
 		else {
 			panic!("a conditional guard: {first:?} / {second:?}");
 		};
-		assert!(Arc::ptr_eq(first, second), "the second fetch reuses the compiled guard");
+		assert!(first.ptr_eq(second), "the second fetch reuses the compiled guard");
 		// Another table compiles its own.
 		let other =
 			table_select_permission(&ctx, &TableName::from("other")).await.expect("compiles");
 		let PhysicalPermission::Conditional(other) = &other else {
 			panic!("a conditional guard: {other:?}");
 		};
-		assert!(!Arc::ptr_eq(first, other));
+		assert!(!first.ptr_eq(other));
 		// A context sharing the execution shares the cache.
 		let shared = ctx.with_param("x", Value::from(1));
 		let again = table_select_permission(&shared, &doc).await.expect("cached");
 		let PhysicalPermission::Conditional(again) = &again else {
 			panic!("a conditional guard: {again:?}");
 		};
-		assert!(Arc::ptr_eq(first, again));
-	}
-
-	#[test]
-	fn test_fetch_name() {
-		use crate::exec::operators::scan::DynamicScan;
-
-		let physical_fields = vec![vec![FetchStep::Field(Strand::new_static("author"))]];
-
-		// Create a minimal scan for testing
-		let scan = Arc::new(DynamicScan::new(
-			Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
-			None,
-			None,
-			None,
-			None,
-			None,
-			None,
-			None,
-			None,
-		));
-
-		let fetch = Fetch::new(scan, "author".to_string(), physical_fields);
-
-		assert_eq!(fetch.name(), "Fetch");
+		assert!(first.ptr_eq(again));
 	}
 }

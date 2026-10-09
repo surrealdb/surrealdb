@@ -27,10 +27,9 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::Error as ExecError;
+use crate::exec::eval_context::ComputingRecord;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::permission::action_is_checked;
-use crate::exec::physical_expr::ComputingRecord;
-use crate::exec::topk_pushdown::{TopKThresholdCell, TopKThresholds};
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
 use crate::kvs::index::filter_online_indexes;
@@ -256,13 +255,6 @@ pub struct RootContext {
 	/// that record dereferences and FETCH resolution honour the same version
 	/// as the source scan.
 	pub(crate) version_stamp: Option<u64>,
-	/// The limits, by id, that evaluated to zero around this context: a scan
-	/// bound to one of them reads no record (see [`crate::exec::zero_limit`]).
-	pub(crate) zero_limits: Vec<u64>,
-	/// The top-k thresholds of the sorts executing around this context: a scan
-	/// whose probe names one of their pushdowns reads that execution's
-	/// threshold (see [`crate::exec::topk_pushdown`]).
-	pub(crate) topk_thresholds: Option<Arc<TopKThresholds>>,
 	/// The admissions of definitions' `PERMISSIONS` predicates this
 	/// statement holds, shared by every context derived for it (see
 	/// [`crate::exec::guard_verdicts`]).
@@ -703,8 +695,6 @@ impl ExecutionContext {
 				computing_record: r.computing_record.clone(),
 				no_write: r.no_write,
 				version_stamp: r.version_stamp,
-				zero_limits: r.zero_limits.clone(),
-				topk_thresholds: r.topk_thresholds.clone(),
 				guard_verdicts: Arc::clone(&r.guard_verdicts),
 				writing: r.writing,
 			}),
@@ -724,8 +714,6 @@ impl ExecutionContext {
 					computing_record: n.root.computing_record.clone(),
 					no_write: n.root.no_write,
 					version_stamp: n.root.version_stamp,
-					zero_limits: n.root.zero_limits.clone(),
-					topk_thresholds: n.root.topk_thresholds.clone(),
 					guard_verdicts: Arc::clone(&n.root.guard_verdicts),
 					writing: n.root.writing,
 				},
@@ -748,8 +736,6 @@ impl ExecutionContext {
 						computing_record: d.ns_ctx.root.computing_record.clone(),
 						no_write: d.ns_ctx.root.no_write,
 						version_stamp: d.ns_ctx.root.version_stamp,
-						zero_limits: d.ns_ctx.root.zero_limits.clone(),
-						topk_thresholds: d.ns_ctx.root.topk_thresholds.clone(),
 						guard_verdicts: Arc::clone(&d.ns_ctx.root.guard_verdicts),
 						writing: d.ns_ctx.root.writing,
 					},
@@ -1071,45 +1057,6 @@ impl ExecutionContext {
 		};
 		root.version_stamp = version;
 		new
-	}
-
-	/// Derive a context in which limit `id` has evaluated to zero, so the
-	/// scans bound to it read no record.
-	pub(crate) fn with_zero_limit(&self, id: u64) -> Self {
-		let mut new = self.clone();
-		let root = match &mut new {
-			Self::Root(r) => r,
-			Self::Namespace(n) => &mut n.root,
-			Self::Database(d) => &mut d.ns_ctx.root,
-		};
-		root.zero_limits.push(id);
-		new
-	}
-
-	/// Whether limit `id` has evaluated to zero around this context.
-	pub(crate) fn zero_limited(&self, id: u64) -> bool {
-		self.root().zero_limits.contains(&id)
-	}
-
-	/// Derive a context holding `cell` as the threshold of top-k pushdown
-	/// `pushdown`, for one execution of the sort that publishes it; see
-	/// [`crate::exec::topk_pushdown`].
-	pub(crate) fn with_topk_threshold(&self, pushdown: u64, cell: Arc<TopKThresholdCell>) -> Self {
-		let mut new = self.clone();
-		let root = match &mut new {
-			Self::Root(r) => r,
-			Self::Namespace(n) => &mut n.root,
-			Self::Database(d) => &mut d.ns_ctx.root,
-		};
-		root.topk_thresholds =
-			Some(TopKThresholds::push(root.topk_thresholds.take(), pushdown, cell));
-		new
-	}
-
-	/// The threshold of top-k pushdown `pushdown` for the execution this
-	/// context belongs to, when that pushdown's sort is executing around it.
-	pub(crate) fn topk_threshold(&self, pushdown: u64) -> Option<Arc<TopKThresholdCell>> {
-		self.root().topk_thresholds.as_deref()?.find(pushdown).cloned()
 	}
 
 	/// Get the evaluated VERSION timestamp (if set).

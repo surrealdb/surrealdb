@@ -22,11 +22,12 @@
 //! The ids a statement's planning holds are its [`HeldIds`], which release
 //! every id no run confirmed once nothing may run the draw reserving it: a
 //! speculation that raises, or whose mapping is undone, releases its own ids
-//! there and then; a statement the VM declines releases them all before the
-//! operator tree plans it; and a program releases them when its operator and
+//! there and then; a statement the VM declines releases them all, since it is
+//! not run from its plan; and a program releases them when its operator and
 //! its run are dropped. A block that fails or is cancelled before its
-//! definitions run leaves the sequences where its operator-tree run leaves
-//! them, and one that runs them takes the ids the operator tree would.
+//! definitions run leaves the sequences advanced only by the definitions that
+//! ran, and one that runs them takes the ids it would take with no
+//! speculation.
 //!
 //! A speculation is a view of the transaction (`kvs::Speculation`): the
 //! schema statement's run and the planning of the statements after it are
@@ -374,8 +375,6 @@ async fn frame(
 		computing_record: None,
 		no_write: None,
 		version_stamp: None,
-		zero_limits: Vec::new(),
-		topk_thresholds: None,
 		guard_verdicts: Default::default(),
 		writing: false,
 	});

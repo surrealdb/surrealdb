@@ -1,20 +1,18 @@
 //! Running a call of code the host runs: an embedded script, a model or a
 //! module export ([`ExternalSpec`]).
 //!
-//! [`enter`] makes the checks the operator tree's call makes before it
-//! evaluates its arguments — the capability, the definition, its
-//! `PERMISSIONS` clause — and [`call`] runs the callee with them, both through
-//! [`Services`]. The permission predicate was lowered when the program was
-//! planned; a definition whose clause hashes otherwise than the one it was
-//! lowered from is an internal error and the call fails closed. Nothing here
-//! binds, plans or lowers.
+//! [`enter`] makes the checks a call makes before it evaluates its arguments —
+//! the capability, the definition, its `PERMISSIONS` clause — and [`call`] runs
+//! the callee with them, both through [`Services`]. The permission predicate
+//! was lowered when the program was planned; a definition whose clause hashes
+//! otherwise than the one it was lowered from is an internal error and the
+//! call fails closed. Nothing here binds, plans or lowers.
 
 #[cfg(any(feature = "ml", feature = "surrealism"))]
 use super::program::DefHash;
 use super::program::{ExternalCallee, ExternalSpec, Program};
 use super::services::{EngineServices, ModelDefinition, ModuleExport, Services};
-use crate::exec::FlowResult;
-use crate::exec::physical_expr::EvalContext;
+use crate::exec::{EvalContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 

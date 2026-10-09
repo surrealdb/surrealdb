@@ -454,6 +454,7 @@ impl Accumulator for ExtremumAccumulator {
 		Ok(())
 	}
 
+	#[cfg(test)]
 	fn update_batch(&mut self, values: &[Value]) -> Result<()> {
 		for value in values {
 			self.fold(value);

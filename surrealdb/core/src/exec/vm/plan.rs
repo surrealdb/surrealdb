@@ -33,7 +33,7 @@ pub(crate) struct PhysicalPlan {
 	pub(crate) root: Plan,
 	pub(crate) dependencies: Vec<Dependency>,
 	/// The statement's `TIMEOUT`, `VERSION` and `ONLY`, applied around the
-	/// program by the operators the operator tree applies them with.
+	/// program.
 	pub(crate) tail: Tail,
 	/// The statements a [`Control`] plan runs, as written, each with the names
 	/// bound around it, by [`Control::Statement::source`]: what the lowering
@@ -55,8 +55,8 @@ pub(crate) struct PhysicalPlan {
 }
 
 impl PhysicalPlan {
-	/// The error planning the statement raises, where the operator tree
-	/// refuses it as it plans it ([`Plan::Refused`]).
+	/// The error planning the statement raises, where planning refuses it
+	/// ([`Plan::Refused`]).
 	pub(crate) fn refusal(&self) -> Option<&Refusal> {
 		match &self.root {
 			Plan::Refused {
@@ -66,7 +66,7 @@ impl PhysicalPlan {
 		}
 	}
 
-	/// Whether the operator tree refuses the statement as it plans it.
+	/// Whether planning refuses the statement.
 	pub(crate) fn refused(&self) -> bool {
 		self.refusal().is_some()
 	}
@@ -97,7 +97,7 @@ pub(crate) struct IndexScope {
 	/// clause to answer it.
 	pub(crate) registered: std::collections::HashSet<LogicalExpr>,
 	/// The tables whose rows an index answers a `MATCHES` for.
-	pub(crate) executor_tables: crate::exec::physical_expr::ExecutorTables,
+	pub(crate) executor_tables: crate::exec::vm::matches::ExecutorTables,
 }
 
 /// The field and query of one `MATCHES` clause.
@@ -312,22 +312,21 @@ pub(crate) enum Control {
 	Continue,
 }
 
-/// An error the operator tree raises while it plans a statement, before any
-/// of the statement runs: the statement is answered with the error rather
-/// than run.
+/// An error raised while a statement is planned, before any of the statement
+/// runs: the statement is answered with the error rather than run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Refusal {
 	/// A `LET` of a name no statement may bind.
 	ProtectedParam {
 		name: String,
 	},
-	/// A statement the query's shape makes invalid, with the message the
-	/// operator tree raises for it.
+	/// A statement the query's shape makes invalid, with the message raised
+	/// for it.
 	Query {
 		message: String,
 	},
 	/// A statement written where no statement of its kind may stand, with the
-	/// message the operator tree raises for it.
+	/// message raised for it.
 	InvalidStatement {
 		message: String,
 	},
@@ -919,8 +918,8 @@ pub(crate) enum Plan {
 	Control {
 		control: Control,
 	},
-	/// A statement the operator tree refuses as it plans it, before any of
-	/// it runs: planning it raises `refusal`, and nothing of it is lowered.
+	/// A statement planning refuses, before any of it runs: planning it
+	/// raises `refusal`, and nothing of it is lowered.
 	Refused {
 		refusal: Refusal,
 	},

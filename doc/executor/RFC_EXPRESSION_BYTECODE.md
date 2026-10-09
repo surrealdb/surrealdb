@@ -1,7 +1,7 @@
 # RFC: Expressions as bytecode
 
 Status: draft for review. Scope: how SurrealQL expressions become VM instructions, chosen
-for throughput first, so that a program is self-contained bytecode — no `PhysicalExpr`,
+for throughput first, so that a program is self-contained bytecode — no `Clause`,
 `ExecOperator` or other Rust trait object inside it — and can ship to a Worker.
 
 Companion documents: [`PHYSICAL_PLAN_REQUIREMENTS.md`](PHYSICAL_PLAN_REQUIREMENTS.md) (laws, §9 lowering),
@@ -25,10 +25,9 @@ casts by kind pair), [`RFC_DURABLE_BYTECODE_RUNTIME.md`](RFC_DURABLE_BYTECODE_RU
 
 ## 2. What the programs evaluate today
 
-An expression without a native instruction declines its statement to the operator tree, and a
-program evaluates no expression through its operator-tree form. The census
-below counts, by node kind, the expressions across the language suite with the VM on that had no
-native instruction when the bytecode was planned (static counts, one per compiled expression;
+An expression without a native instruction fails its statement. The census
+below counts, by node kind, the expressions across the language suite with the VM on that have no
+native instruction when the bytecode is planned (static counts, one per compiled expression;
 paging clauses and record-id sources, which are plan-time host work, excluded):
 
 | node kind | count | | node kind | count |
@@ -253,8 +252,8 @@ Still to verify, each with its own language test before its instruction is writt
 
 ## 8. Measurement
 
-Two figures track the work: the number of expressions the suite evaluates through their
-operator-tree form (the census above, rerun per step), and ns/row on a benchmark set that covers filters, projections with builtins,
+Two figures track the work: the number of expressions the suite holds that have no native
+instruction (the census above, rerun per step), and ns/row on a benchmark set that covers filters, projections with builtins,
 record-link and graph navigation, and aggregates, in release on 200k rows. A step lands when the
 suite matches with the VM on and neither figure regresses.
 

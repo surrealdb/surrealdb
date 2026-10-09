@@ -1,8 +1,7 @@
 //! Graph lookups: the hops of `->edge->vertex`, `<-`, `<->` and `<~`, read
 //! from the adjacency and reference keys each record holds.
 //!
-//! A lookup answers what the operator tree's lookup answers
-//! (`exec::parts::lookup`), origin by origin. An array of origins answers the
+//! A lookup answers origin by origin. An array of origins answers the
 //! flattened answers of its elements; a record id is one origin, and an
 //! object is the origin its `id` names; any other value answers `NONE`.
 //!
@@ -335,8 +334,7 @@ impl Run<'_> {
 		})
 	}
 
-	/// `specs` with their bounds evaluated, with no row, as the operator
-	/// tree's scan evaluates a range's bounds.
+	/// `specs` with their bounds evaluated, with no row.
 	async fn key_ranges(&mut self, specs: &[EdgeSpec]) -> FlowResult<Vec<KeyRange>> {
 		let mut ranges = Vec::with_capacity(specs.len());
 		for spec in specs {
@@ -559,7 +557,7 @@ struct At {
 }
 
 /// A signal out of a lookup's hops, which has no statement to leave: an
-/// error, as the operator tree's lookup reports it.
+/// error.
 fn signal_error(signal: ControlFlow) -> anyhow::Error {
 	match signal {
 		ControlFlow::Err(e) => e,

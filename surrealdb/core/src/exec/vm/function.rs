@@ -7,8 +7,7 @@
 //! internal error and the call fails closed. Nothing here binds, plans or
 //! lowers.
 //!
-//! A read of a parameter resolves a name the way the operator tree's
-//! [`Param`](crate::exec::physical_expr::Param) does — the row's `$this`, the
+//! A read of a parameter resolves a name in this order — the row's `$this`, the
 //! frame's bindings, the write bindings, the context, `$parent` — and then
 //! reads `DEFINE PARAM`, judging the definition's `PERMISSIONS` clause with
 //! the predicate the program holds for it, or with the parameter's unit where
@@ -26,13 +25,20 @@ use super::services::{Admission, EngineServices, Services};
 use crate::catalog::FunctionDefinition;
 use crate::dbs::capabilities::Error as CapabilitiesError;
 use crate::exec::operators::permission_frame;
-use crate::exec::physical_expr::function::helpers::{validate_arg_count, validate_return};
-use crate::exec::physical_expr::{EnteredCall, EvalContext};
-use crate::exec::{Error as ExecError, ExecutionContext, FlowResult};
+use crate::exec::vm::calls::helpers::{validate_arg_count, validate_return};
+use crate::exec::{Error as ExecError, EvalContext, ExecutionContext, FlowResult};
 use crate::expr::logical::{GuardKind, LogicalPermissionRef};
 use crate::expr::{ControlFlow, Error as ExprError};
 use crate::iam::Action;
 use crate::val::Value;
+
+/// The function a call has entered: its definition, and the caller's context
+/// capped by the definition's `AUTH LIMIT`, which the arguments are evaluated
+/// in and the body runs under.
+pub(crate) struct EnteredCall {
+	pub(crate) definition: Arc<FunctionDefinition>,
+	pub(crate) limited: ExecutionContext,
+}
 
 thread_local! {
 	/// The hashes of the definitions this thread entered most recently, by

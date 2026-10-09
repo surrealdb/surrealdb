@@ -26,8 +26,7 @@ use surrealdb_strand::Strand;
 
 use crate::catalog::providers::DatabaseProvider as _;
 use crate::exe::FlowResultExt as _;
-use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{Error as ExecError, ExecutionContext};
+use crate::exec::{Clause, Error as ExecError, EvalContext, ExecutionContext};
 use crate::expr::analyzer_function::{function_from_storage, qualified_name};
 use crate::expr::{Expr, FunctionCall};
 use crate::idx::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
@@ -57,7 +56,7 @@ pub(crate) struct StreamingAnalyzerFunction<'a> {
 	/// held across an await — a miss drops it, compiles, and takes it again —
 	/// so a second compile of the same name is possible and writes the same
 	/// expression.
-	compiled: Mutex<HashMap<String, Arc<dyn PhysicalExpr>>>,
+	compiled: Mutex<HashMap<String, Clause>>,
 }
 
 impl<'a> StreamingAnalyzerFunction<'a> {
@@ -74,9 +73,9 @@ impl<'a> StreamingAnalyzerFunction<'a> {
 	/// definition and its permission resolve here rather than per piece of
 	/// text, and under the caller's principal, so the function's own
 	/// `PERMISSIONS` clause is judged for whoever is indexing or querying.
-	async fn call_expr(&self, name: &str) -> anyhow::Result<Arc<dyn PhysicalExpr>> {
+	async fn call_expr(&self, name: &str) -> anyhow::Result<Clause> {
 		if let Some(compiled) = self.locked().get(name) {
-			return Ok(Arc::clone(compiled));
+			return Ok(compiled.clone());
 		}
 		let receiver = function_from_storage(name);
 		// A user-defined function the database does not define is reported as
@@ -106,7 +105,7 @@ impl<'a> StreamingAnalyzerFunction<'a> {
 			0,
 		)
 		.await?;
-		self.locked().insert(name.to_owned(), Arc::clone(&compiled));
+		self.locked().insert(name.to_owned(), compiled.clone());
 		Ok(compiled)
 	}
 
@@ -115,7 +114,7 @@ impl<'a> StreamingAnalyzerFunction<'a> {
 	/// Nothing under the lock can panic — it is taken to read or write one
 	/// entry and released — so poisoning reports a panic elsewhere on this
 	/// task rather than a map left half-written.
-	fn locked(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<dyn PhysicalExpr>>> {
+	fn locked(&self) -> std::sync::MutexGuard<'_, HashMap<String, Clause>> {
 		self.compiled.lock().unwrap_or_else(|e| e.into_inner())
 	}
 }

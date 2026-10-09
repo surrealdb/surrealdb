@@ -49,7 +49,7 @@ documentation; the former is derived from reading the grammar.
   derives from and a v1 -> v2 behaviour-change table (§(h)).
 - `LOWERING.md` — the normative contract for lowering the parsed GQL AST onto
   the `MatchPlan` IR (`surrealdb/core/src/expr/match_plan.rs`), carried by the
-  logical plan as `LogicalOp::Match` and executed by the streaming engine; implemented
+  logical plan as `LogicalOp::Match` and executed by the VM; implemented
   by `surrealdb/core/src/gql/lower/`.
 
 ## Updating
