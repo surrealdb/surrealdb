@@ -3,7 +3,7 @@
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::dbs::QueryType;
-use crate::expr::logical::LogicalOp;
+use crate::expr::logical::{LogicalOp, RequestStatementKind};
 use crate::expr::statements::OptionStatement;
 use crate::observe::StatementType;
 use crate::{expr, sql};
@@ -62,6 +62,26 @@ impl TopLevelStatement {
 			},
 			// A plan is something an engine runs; no driver acts on it first.
 			TopLevelStatement::Plan(_) => Dispatch::Runnable,
+		}
+	}
+
+	/// What request lowering groups this statement as. Matches the variants
+	/// directly so an `OPTION` is not cloned.
+	pub(crate) fn request_kind(&self) -> RequestStatementKind {
+		match self {
+			TopLevelStatement::Ast(stmt) => match stmt {
+				sql::TopLevelExpr::Begin => RequestStatementKind::Begin,
+				sql::TopLevelExpr::Commit => RequestStatementKind::Commit,
+				sql::TopLevelExpr::Cancel => RequestStatementKind::Cancel,
+				sql::TopLevelExpr::Option(_) => RequestStatementKind::Option,
+				sql::TopLevelExpr::Access(_)
+				| sql::TopLevelExpr::Kill(_)
+				| sql::TopLevelExpr::Live(_)
+				| sql::TopLevelExpr::Use(_)
+				| sql::TopLevelExpr::Show(_)
+				| sql::TopLevelExpr::Expr(_) => RequestStatementKind::Run,
+			},
+			TopLevelStatement::Plan(_) => RequestStatementKind::Run,
 		}
 	}
 

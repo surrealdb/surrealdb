@@ -7,14 +7,27 @@
 //! block leaves that block unterminated. The grouping is fixed by the text
 //! alone, so it is known before any statement runs.
 //!
-//! Every statement keeps its position in the request, which is the index of
-//! its result: `BEGIN`, `COMMIT` and `CANCEL` keep their own result slots.
+//! Every statement keeps its position in the request. That is not its response
+//! slot: a `RETURN` that skips the rest of a block, a `CANCEL` after an error
+//! and an import that drops successful results all leave positions without a
+//! slot, so a driver keeps counting its own slots.
 //!
-//! What the driver does with a misplaced transaction statement is part of the
-//! grouping. A `COMMIT` or `CANCEL` outside a block is a transaction of its
-//! own, which fails. A `BEGIN` inside a block does not start another: the
-//! block it is in is aborted there, and the block still ends at the next
-//! `COMMIT` or `CANCEL` ([`LogicalTransaction::aborted_at`]).
+//! A transaction statement that cannot do what it says is marked, not
+//! rejected. A `COMMIT` or `CANCEL` outside a block is a transaction of its
+//! own, marked [`MisplacedControl::CommitOutsideBlock`] or
+//! [`MisplacedControl::CancelOutsideBlock`]. A `BEGIN` inside a block does not
+//! start another: the block it is in is aborted there, and the block still ends
+//! at the next `COMMIT` or `CANCEL` ([`LogicalTransaction::aborted_at`]); it is
+//! marked [`MisplacedControl::NestedBegin`]. In a session transaction, which
+//! the client already holds, every `BEGIN`, `COMMIT` and `CANCEL` is marked.
+//! Marks are recorded in [`LogicalTransaction::misplaced`] and handed out per
+//! statement as [`StatementRole::Misplaced`]. They say where and which, never
+//! how: the driver raises each error when it reaches the statement, after the
+//! earlier statements have run, and decides how a block ends.
+//!
+//! [`RequestGrouper`] places one statement at a time, for a driver that pulls
+//! statements from a stream it cannot read ahead of time. [`lower_request`] is
+//! a fold over it, so the two agree on every request.
 
 /// How a transaction of a request is opened and ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,6 +77,65 @@ pub enum RequestStatementKind {
 	Run,
 }
 
+/// Why a transaction-control statement cannot do what it says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MisplacedControl {
+	/// A `BEGIN` inside an explicit block, which aborts the block.
+	NestedBegin,
+	/// A `BEGIN` in a request that runs in a session transaction.
+	BeginInSession,
+	/// A `COMMIT` with no block to commit.
+	CommitOutsideBlock,
+	/// A `CANCEL` with no block to cancel.
+	CancelOutsideBlock,
+}
+
+impl MisplacedControl {
+	/// The message only; the caller picks the error type.
+	pub fn message(self) -> &'static str {
+		match self {
+			MisplacedControl::NestedBegin => {
+				"Tried to start a transaction while another transaction was open"
+			}
+			MisplacedControl::BeginInSession => "Cannot BEGIN a transaction within a transaction",
+			MisplacedControl::CommitOutsideBlock => "Cannot COMMIT without starting a transaction",
+			MisplacedControl::CancelOutsideBlock => "Cannot CANCEL without starting a transaction",
+		}
+	}
+}
+
+/// What the grouping makes of one statement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StatementRole {
+	/// A statement an engine runs.
+	Run,
+	/// `OPTION`.
+	Option,
+	/// A `BEGIN` that opens a block.
+	Begin,
+	/// A `COMMIT` that ends the open block. Produced only while a block is
+	/// open.
+	Commit,
+	/// A `CANCEL` that ends the open block. Produced only while a block is
+	/// open.
+	Cancel,
+	/// A transaction-control statement that cannot act where it stands.
+	Misplaced(MisplacedControl),
+}
+
+/// Where one statement of a request sits in the grouping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StatementPlace {
+	/// The statement's position in the request, counting every statement the
+	/// grouper has been given. It is not the statement's response slot.
+	pub index: usize,
+	/// The position, in the output of [`lower_request`], of the transaction
+	/// that holds the statement.
+	pub transaction: usize,
+	/// What the grouping makes of the statement.
+	pub role: StatementRole,
+}
+
 /// One transaction of a request.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalTransaction {
@@ -76,63 +148,154 @@ pub struct LogicalTransaction {
 	/// The positions of its statements, in order, its `BEGIN` and the
 	/// `COMMIT` or `CANCEL` that ends it included.
 	pub statements: Vec<usize>,
-	/// For an explicit transaction, the position of a `BEGIN` inside it,
-	/// which aborts it there.
+	/// For an explicit transaction, the position of the first `BEGIN` inside
+	/// it, which aborts it there.
 	pub aborted_at: Option<usize>,
+	/// The positions of its misplaced transaction-control statements, in
+	/// order, with why each is misplaced.
+	pub misplaced: Vec<(usize, MisplacedControl)>,
 }
 
-/// Group the statements of a request, each given by its kind, into the
-/// transactions they run in, in order. `session` says the request runs in a
-/// transaction the client holds across requests, which every statement of it
-/// shares.
-pub fn lower_request(kinds: &[RequestStatementKind], session: bool) -> Vec<LogicalTransaction> {
-	if session {
-		return match kinds.is_empty() {
-			true => Vec::new(),
-			false => vec![LogicalTransaction {
-				mode: TxnMode::Session,
-				emission: Emission::Stream,
-				first_index: 0,
-				statements: (0..kinds.len()).collect(),
-				aborted_at: None,
-			}],
-		};
+impl LogicalTransaction {
+	fn new(mode: TxnMode, first_index: usize) -> Self {
+		LogicalTransaction {
+			mode,
+			emission: Emission::Stream,
+			first_index,
+			statements: vec![first_index],
+			aborted_at: None,
+			misplaced: Vec::new(),
+		}
 	}
-	let mut out = Vec::new();
-	let mut block: Option<LogicalTransaction> = None;
-	for (at, kind) in kinds.iter().enumerate() {
-		match (&mut block, kind) {
+}
+
+/// The role of a statement that is not transaction control: `OPTION` or a
+/// statement an engine runs. Transaction-control kinds are given their roles
+/// by the grouper, which knows the block they stand in.
+fn plain_role(kind: RequestStatementKind) -> StatementRole {
+	match kind {
+		RequestStatementKind::Option => StatementRole::Option,
+		RequestStatementKind::Run
+		| RequestStatementKind::Begin
+		| RequestStatementKind::Commit
+		| RequestStatementKind::Cancel => StatementRole::Run,
+	}
+}
+
+/// Groups the statements of a request into transactions one statement at a
+/// time, in the order the driver reads them.
+///
+/// Every statement the driver reads must be given to [`RequestGrouper::place`]
+/// exactly once and in order, or the grouper's positions fall out of step with
+/// the request. The grouping depends on the kinds of the statements and where
+/// they stand, never on how any statement runs.
+#[derive(Debug)]
+pub struct RequestGrouper {
+	session: bool,
+	next: usize,
+	out: Vec<LogicalTransaction>,
+	/// The explicit block that is open, which is pushed to `out` when it ends.
+	block: Option<LogicalTransaction>,
+	/// The one transaction of a session request.
+	held: Option<LogicalTransaction>,
+}
+
+impl RequestGrouper {
+	/// `session` says the request runs in a transaction the client holds
+	/// across requests, which every statement of it shares.
+	pub fn new(session: bool) -> Self {
+		RequestGrouper {
+			session,
+			next: 0,
+			out: Vec::new(),
+			block: None,
+			held: None,
+		}
+	}
+
+	/// Place the next statement of the request.
+	pub fn place(&mut self, kind: RequestStatementKind) -> StatementPlace {
+		let index = self.next;
+		self.next += 1;
+		if self.session {
+			let role = match kind {
+				RequestStatementKind::Begin => {
+					StatementRole::Misplaced(MisplacedControl::BeginInSession)
+				}
+				RequestStatementKind::Commit => {
+					StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock)
+				}
+				RequestStatementKind::Cancel => {
+					StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock)
+				}
+				RequestStatementKind::Option => StatementRole::Option,
+				RequestStatementKind::Run => StatementRole::Run,
+			};
+			let held = match &mut self.held {
+				Some(held) => {
+					held.statements.push(index);
+					held
+				}
+				none => none.insert(LogicalTransaction::new(TxnMode::Session, index)),
+			};
+			if let StatementRole::Misplaced(m) = role {
+				held.misplaced.push((index, m));
+			}
+			return StatementPlace {
+				index,
+				transaction: 0,
+				role,
+			};
+		}
+		match (&mut self.block, kind) {
 			(Some(open), RequestStatementKind::Commit | RequestStatementKind::Cancel) => {
-				open.statements.push(at);
-				let end = if matches!(kind, RequestStatementKind::Commit) {
-					TxnEnd::Commit
+				open.statements.push(index);
+				let (end, role) = if matches!(kind, RequestStatementKind::Commit) {
+					(TxnEnd::Commit, StatementRole::Commit)
 				} else {
-					TxnEnd::Cancel
+					(TxnEnd::Cancel, StatementRole::Cancel)
 				};
 				open.mode = TxnMode::Explicit {
 					end,
 				};
-				if let Some(closed) = block.take() {
-					out.push(closed);
+				let transaction = self.out.len();
+				self.out.extend(self.block.take());
+				StatementPlace {
+					index,
+					transaction,
+					role,
 				}
 			}
 			(Some(open), RequestStatementKind::Begin) => {
-				open.statements.push(at);
-				open.aborted_at.get_or_insert(at);
+				open.statements.push(index);
+				open.aborted_at.get_or_insert(index);
+				open.misplaced.push((index, MisplacedControl::NestedBegin));
+				StatementPlace {
+					index,
+					transaction: self.out.len(),
+					role: StatementRole::Misplaced(MisplacedControl::NestedBegin),
+				}
 			}
 			(Some(open), RequestStatementKind::Option | RequestStatementKind::Run) => {
-				open.statements.push(at);
+				open.statements.push(index);
+				StatementPlace {
+					index,
+					transaction: self.out.len(),
+					role: plain_role(kind),
+				}
 			}
 			(None, RequestStatementKind::Begin) => {
-				block = Some(LogicalTransaction {
-					mode: TxnMode::Explicit {
+				self.block = Some(LogicalTransaction::new(
+					TxnMode::Explicit {
 						end: TxnEnd::Unterminated,
 					},
-					emission: Emission::Stream,
-					first_index: at,
-					statements: vec![at],
-					aborted_at: None,
-				});
+					index,
+				));
+				StatementPlace {
+					index,
+					transaction: self.out.len(),
+					role: StatementRole::Begin,
+				}
 			}
 			(
 				None,
@@ -140,17 +303,53 @@ pub fn lower_request(kinds: &[RequestStatementKind], session: bool) -> Vec<Logic
 				| RequestStatementKind::Cancel
 				| RequestStatementKind::Option
 				| RequestStatementKind::Run,
-			) => out.push(LogicalTransaction {
-				mode: TxnMode::AutoCommit,
-				emission: Emission::Stream,
-				first_index: at,
-				statements: vec![at],
-				aborted_at: None,
-			}),
+			) => {
+				let mut txn = LogicalTransaction::new(TxnMode::AutoCommit, index);
+				let role = match kind {
+					RequestStatementKind::Commit => {
+						StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock)
+					}
+					RequestStatementKind::Cancel => {
+						StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock)
+					}
+					// A `BEGIN` is handled by its own arm above.
+					RequestStatementKind::Option
+					| RequestStatementKind::Run
+					| RequestStatementKind::Begin => plain_role(kind),
+				};
+				if let StatementRole::Misplaced(m) = role {
+					txn.misplaced.push((index, m));
+				}
+				let transaction = self.out.len();
+				self.out.push(txn);
+				StatementPlace {
+					index,
+					transaction,
+					role,
+				}
+			}
 		}
 	}
-	out.extend(block);
-	out
+
+	/// The transactions of the statements placed so far, in order. A block
+	/// still open ends unterminated; an empty session request has none.
+	pub fn finish(mut self) -> Vec<LogicalTransaction> {
+		self.out.extend(self.block.take());
+		self.out.extend(self.held.take());
+		self.out
+	}
+}
+
+/// Group the statements of a request, each given by its kind, into the
+/// transactions they run in, in order. `session` says the request runs in a
+/// transaction the client holds across requests, which every statement of it
+/// shares.
+pub fn lower_request(kinds: &[RequestStatementKind], session: bool) -> Vec<LogicalTransaction> {
+	let mut grouper = RequestGrouper::new(session);
+	for kind in kinds {
+		grouper.place(*kind);
+	}
+	grouper.finish()
 }
 
 #[cfg(test)]
@@ -225,6 +424,150 @@ mod tests {
 	fn every_transaction_streams_by_default() {
 		for txn in lower_request(&[Run, Begin, Run, Cancel, Begin], false) {
 			assert_eq!(txn.emission, Emission::Stream);
+		}
+	}
+
+	fn roles(kinds: &[RequestStatementKind], session: bool) -> Vec<StatementRole> {
+		let mut grouper = RequestGrouper::new(session);
+		kinds.iter().map(|kind| grouper.place(*kind).role).collect()
+	}
+
+	const NESTED: StatementRole = StatementRole::Misplaced(MisplacedControl::NestedBegin);
+	const STRAY_COMMIT: StatementRole =
+		StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock);
+	const STRAY_CANCEL: StatementRole =
+		StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock);
+
+	#[test]
+	fn a_statement_outside_a_block_has_its_own_role() {
+		assert_eq!(
+			roles(&[Run, RequestStatementKind::Option, Commit, Cancel], false),
+			vec![StatementRole::Run, StatementRole::Option, STRAY_COMMIT, STRAY_CANCEL]
+		);
+	}
+
+	#[test]
+	fn a_block_is_opened_and_ended_by_its_own_statements() {
+		assert_eq!(
+			roles(&[Begin, Run, RequestStatementKind::Option, Commit], false),
+			vec![
+				StatementRole::Begin,
+				StatementRole::Run,
+				StatementRole::Option,
+				StatementRole::Commit
+			]
+		);
+		assert_eq!(
+			roles(&[Begin, Cancel, Begin, Commit], false),
+			vec![
+				StatementRole::Begin,
+				StatementRole::Cancel,
+				StatementRole::Begin,
+				StatementRole::Commit
+			]
+		);
+	}
+
+	#[test]
+	fn a_begin_inside_a_block_is_nested() {
+		assert_eq!(
+			roles(&[Begin, Begin, Commit], false),
+			vec![StatementRole::Begin, NESTED, StatementRole::Commit]
+		);
+	}
+
+	#[test]
+	fn a_session_marks_every_transaction_statement() {
+		assert_eq!(
+			roles(&[Begin, Run, Commit, Cancel, RequestStatementKind::Option], true),
+			vec![
+				StatementRole::Misplaced(MisplacedControl::BeginInSession),
+				StatementRole::Run,
+				STRAY_COMMIT,
+				STRAY_CANCEL,
+				StatementRole::Option,
+			]
+		);
+		let mut grouper = RequestGrouper::new(true);
+		for kind in [Run, Begin, Commit, Cancel] {
+			grouper.place(kind);
+		}
+		let txns = grouper.finish();
+		assert_eq!(txns.len(), 1);
+		assert_eq!(txns[0].mode, TxnMode::Session);
+		assert_eq!(txns[0].aborted_at, None);
+		assert_eq!(
+			txns[0].misplaced,
+			vec![
+				(1, MisplacedControl::BeginInSession),
+				(2, MisplacedControl::CommitOutsideBlock),
+				(3, MisplacedControl::CancelOutsideBlock),
+			]
+		);
+	}
+
+	#[test]
+	fn an_empty_session_request_has_no_transaction() {
+		assert!(RequestGrouper::new(true).finish().is_empty());
+		assert!(RequestGrouper::new(false).finish().is_empty());
+	}
+
+	#[test]
+	fn misplaced_statements_are_recorded_on_their_transaction() {
+		let txns = lower_request(&[Commit, Begin, Begin, Run, Commit, Cancel], false);
+		assert_eq!(txns.len(), 3);
+		assert_eq!(txns[0].misplaced, vec![(0, MisplacedControl::CommitOutsideBlock)]);
+		assert_eq!(txns[1].misplaced, vec![(2, MisplacedControl::NestedBegin)]);
+		assert_eq!(txns[2].misplaced, vec![(5, MisplacedControl::CancelOutsideBlock)]);
+	}
+
+	#[test]
+	fn a_second_nested_begin_is_marked_while_the_abort_keeps_the_first() {
+		let txns = lower_request(&[Begin, Begin, Run, Begin, Commit], false);
+		assert_eq!(txns.len(), 1);
+		assert_eq!(txns[0].aborted_at, Some(1));
+		assert_eq!(
+			txns[0].misplaced,
+			vec![(1, MisplacedControl::NestedBegin), (3, MisplacedControl::NestedBegin)]
+		);
+	}
+
+	#[test]
+	fn places_are_numbered_without_gaps_and_point_at_their_transaction() {
+		let kinds = [Run, Begin, Run, Begin, Commit, Commit, Begin, Run];
+		let mut grouper = RequestGrouper::new(false);
+		let places: Vec<_> = kinds.iter().map(|kind| grouper.place(*kind)).collect();
+		let txns = grouper.finish();
+		assert_eq!(
+			places.iter().map(|p| p.index).collect::<Vec<_>>(),
+			(0..kinds.len()).collect::<Vec<_>>()
+		);
+		for place in &places {
+			assert!(txns[place.transaction].statements.contains(&place.index));
+		}
+		assert_eq!(
+			places.iter().map(|p| p.transaction).collect::<Vec<_>>(),
+			vec![0, 1, 1, 1, 1, 2, 3, 3]
+		);
+	}
+
+	#[test]
+	fn lowering_is_the_fold_of_the_grouper() {
+		let sequences: [&[RequestStatementKind]; 5] = [
+			&[],
+			&[Run, Begin, Run, Commit, Cancel],
+			&[Begin, Begin, Run, Begin],
+			&[Commit, Begin, Cancel, Begin, Run, Commit],
+			&[RequestStatementKind::Option, Begin, RequestStatementKind::Option, Cancel],
+		];
+		for kinds in sequences {
+			for session in [false, true] {
+				let mut grouper = RequestGrouper::new(session);
+				for kind in kinds {
+					grouper.place(*kind);
+				}
+				assert_eq!(lower_request(kinds, session), grouper.finish());
+			}
 		}
 	}
 }

@@ -30,7 +30,10 @@ use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
-use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalSource, SourceRef, lower};
+use crate::expr::logical::{
+	LogicalExpr, LogicalOp, LogicalSource, MisplacedControl, RequestGrouper, SourceRef,
+	StatementPlace, StatementRole, lower,
+};
 use crate::expr::paths::{DB, NS};
 use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::visit::{Visit, Visitor};
@@ -240,6 +243,11 @@ pub struct Executor {
 		crate::expr::statements::LiveStatement,
 		Option<crate::exec::vm::lower_live::Arrived>,
 	)>,
+	/// Why the transaction-control statement about to run cannot act where it
+	/// stands, as request lowering marked it. Set by a driver immediately
+	/// before it hands the statement to [`Executor::run_surface_statement`]
+	/// and taken there; a driver clears it once the statement has run.
+	misplaced_control: Option<MisplacedControl>,
 }
 
 /// What a request's statement needs to be compiled with the rest of the
@@ -485,6 +493,7 @@ impl Executor {
 			request: None,
 			in_block: false,
 			arrived_live: None,
+			misplaced_control: None,
 		}
 	}
 
@@ -1504,14 +1513,14 @@ impl Executor {
 			sql::TopLevelExpr::Use(stmt) => self.run_use(stmt.into(), txn).await,
 			sql::TopLevelExpr::Option(_) => Self::option_reached_an_engine(),
 			sql::TopLevelExpr::Expr(sql::Expr::Let(stmt)) => self.run_let(*stmt, txn, start).await,
-			sql::TopLevelExpr::Begin => {
-				Self::transaction_control_error("Cannot BEGIN a transaction within a transaction")
-			}
-			sql::TopLevelExpr::Commit => {
-				Self::transaction_control_error("Cannot COMMIT without starting a transaction")
-			}
-			sql::TopLevelExpr::Cancel => {
-				Self::transaction_control_error("Cannot CANCEL without starting a transaction")
+			sql::TopLevelExpr::Begin | sql::TopLevelExpr::Commit | sql::TopLevelExpr::Cancel => {
+				match self.misplaced_control.take() {
+					Some(misplaced) => Self::transaction_control_error(misplaced.message()),
+					None => Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
+						"a transaction-control statement reached an engine without a misplaced \
+						 mark from request lowering",
+					)))),
+				}
 			}
 			sql::TopLevelExpr::Kill(stmt) => self.run_kill(stmt.into(), txn).await,
 			sql::TopLevelExpr::Live(stmt) => self.run_live(*stmt, txn).await,
@@ -1523,6 +1532,7 @@ impl Executor {
 
 	/// The error a transaction-control statement raises where no driver acted
 	/// on it: `BEGIN` inside a transaction, `COMMIT` or `CANCEL` outside one.
+	/// Request lowering marks each such statement with its message.
 	fn transaction_control_error(message: &str) -> FlowResult<Value> {
 		Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(message.to_string()))))
 	}
@@ -2249,12 +2259,13 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		stream: Pin<&mut S>,
+		grouper: &mut RequestGrouper,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		self.broker_owned_by_executor = false;
-		let result = self.execute_begin_statement_impl(kvs, stream).await;
+		let result = self.execute_begin_statement_impl(kvs, stream, grouper).await;
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
@@ -2265,6 +2276,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
+		grouper: &mut RequestGrouper,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
@@ -2278,7 +2290,8 @@ impl Executor {
 			while let Some(stmt) = stream.next().await {
 				yield_now!();
 				let stmt = stmt?;
-				if let Dispatch::Cancel | Dispatch::Commit = stmt.dispatch() {
+				let place = place_statement(grouper, &stmt);
+				if let StatementRole::Cancel | StatementRole::Commit = place.role {
 					return Ok(());
 				}
 
@@ -2306,7 +2319,7 @@ impl Executor {
 		};
 		let txn = Arc::new(txn);
 		self.in_block = true;
-		let ran = self.execute_begin_statement_timed(kvs, txn, stream).await;
+		let ran = self.execute_begin_statement_timed(kvs, txn, stream, grouper).await;
 		self.in_block = false;
 		ran
 	}
@@ -2318,6 +2331,7 @@ impl Executor {
 		kvs: &Datastore,
 		txn: Arc<Transaction>,
 		stream: Pin<&mut S>,
+		grouper: &mut RequestGrouper,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
@@ -2327,7 +2341,7 @@ impl Executor {
 				let start_results = self.results.len();
 				match common::time::timeout(
 					timeout,
-					self.execute_begin_statement_inner(kvs, Arc::clone(&txn), stream),
+					self.execute_begin_statement_inner(kvs, Arc::clone(&txn), stream, grouper),
 				)
 				.await
 				{
@@ -2364,7 +2378,7 @@ impl Executor {
 					}
 				}
 			}
-			None => self.execute_begin_statement_inner(kvs, txn, stream).await,
+			None => self.execute_begin_statement_inner(kvs, txn, stream, grouper).await,
 		}
 	}
 
@@ -2373,6 +2387,7 @@ impl Executor {
 		kvs: &Datastore,
 		txn: Arc<Transaction>,
 		mut stream: Pin<&mut S>,
+		grouper: &mut RequestGrouper,
 	) -> Result<()>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
@@ -2402,6 +2417,7 @@ impl Executor {
 					return Err(e);
 				}
 			};
+			let place = place_statement(grouper, &stmt);
 
 			// check for timeout and cancellation.
 			//
@@ -2450,9 +2466,16 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
+					let place = place_statement(grouper, &stmt);
 					let kind = stmt.statement_type();
-					match stmt.dispatch() {
-						Dispatch::Commit => {
+					// The statement that was pulled when `done` was observed may itself
+					// have closed the block in the grouping, and it is dropped here. The
+					// COMMIT or CANCEL that ends this fast-forward is then the next one
+					// in the text, which the grouper sees outside a block, so both of
+					// its roles stand for the end of the block.
+					match place.role {
+						StatementRole::Commit
+						| StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock) => {
 							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
 							// Still emit one `QueryResult` for this COMMIT statement so the batch
 							// has one row per statement (mirrors successful COMMIT, which
@@ -2477,7 +2500,7 @@ impl Executor {
 							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
 							return Ok(());
 						}
-						dispatch => {
+						role => {
 							let result = Err(match done {
 								Reason::Timedout(d) => TypesError::query(
 									format!("Timed out: {d}"),
@@ -2497,7 +2520,13 @@ impl Executor {
 								query_type: QueryType::Other,
 							});
 							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
-							if matches!(dispatch, Dispatch::Cancel) {
+							if matches!(
+								role,
+								StatementRole::Cancel
+									| StatementRole::Misplaced(
+										MisplacedControl::CancelOutsideBlock
+									)
+							) {
 								return Ok(());
 							}
 						}
@@ -2508,8 +2537,12 @@ impl Executor {
 				return Ok(());
 			}
 
-			let dispatch = stmt.dispatch();
-			if skip_remaining && !matches!(dispatch, Dispatch::Cancel | Dispatch::Commit) {
+			// A statement skipped after a `RETURN` is skipped whatever the
+			// grouping made of it, so a `BEGIN` the block never reaches does not
+			// abort it; only the statement that ends the block is still run.
+			if skip_remaining
+				&& !matches!(place.role, StatementRole::Commit | StatementRole::Cancel)
+			{
 				continue;
 			}
 
@@ -2531,8 +2564,18 @@ impl Executor {
 			// match either returns early or contributes a non-DML
 			// statement, so 0 is the right default.
 			let mut stmt_result_rows: u64 = 0;
-			let result = match dispatch {
-				Dispatch::Begin => {
+			let result = match place.role {
+				// An open block holds no `BEGIN` that opens another: the grouping
+				// marks it nested.
+				StatementRole::Begin => {
+					debug_assert!(false, "a BEGIN inside an open block is marked nested");
+					let _ = txn.cancel().await;
+					bail!(EngineError::unreachable(
+						"a BEGIN inside an open block was not marked nested by request lowering"
+					));
+				}
+				StatementRole::Misplaced(misplaced) => {
+					debug_assert_eq!(misplaced, MisplacedControl::NestedBegin);
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
@@ -2546,10 +2589,7 @@ impl Executor {
 
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(TypesError::internal(
-							"Tried to start a transaction while another transaction was open"
-								.to_string(),
-						)),
+						result: Err(TypesError::internal(misplaced.message().to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -2567,8 +2607,9 @@ impl Executor {
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						match stmt.dispatch() {
-							Dispatch::Commit => {
+						let place = place_statement(grouper, &stmt);
+						match place.role {
+							StatementRole::Commit => {
 								self.results.push(QueryResult {
 									time: Duration::ZERO,
 									result: Err(TypesError::query(
@@ -2580,7 +2621,7 @@ impl Executor {
 								});
 								return Ok(());
 							}
-							dispatch => {
+							role => {
 								self.results.push(QueryResult {
 									time: Duration::ZERO,
 									result: Err(TypesError::query(
@@ -2590,7 +2631,7 @@ impl Executor {
 									)),
 									query_type: QueryType::Other,
 								});
-								if matches!(dispatch, Dispatch::Cancel) {
+								if matches!(role, StatementRole::Cancel) {
 									return Ok(());
 								}
 							}
@@ -2600,7 +2641,7 @@ impl Executor {
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
-				Dispatch::Cancel => {
+				StatementRole::Cancel => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
@@ -2632,7 +2673,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				Dispatch::Commit => {
+				StatementRole::Commit => {
 					// Commit the transaction.
 					// If error undo results.
 					let e = if let Err(e) = txn.commit().await {
@@ -2734,29 +2775,37 @@ impl Executor {
 
 					return Ok(());
 				}
-				Dispatch::Option(option) => match self.execute_option_statement(&option) {
-					Ok(_) => {
-						// OPTION returns NONE
-						self.results.push(QueryResult {
-							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
-							query_type: QueryType::Other,
-						});
-						self.emit_statement_event_cached(
-							kvs,
-							statement_type,
-							statement_read_only,
-							sql_text,
-							&before,
-							Outcome::Success,
-							0,
-							None,
-						);
-						continue;
+				StatementRole::Option => {
+					let Dispatch::Option(option) = stmt.dispatch() else {
+						let _ = txn.cancel().await;
+						bail!(EngineError::unreachable(
+							"a statement placed as OPTION did not dispatch as OPTION"
+						));
+					};
+					match self.execute_option_statement(&option) {
+						Ok(_) => {
+							// OPTION returns NONE
+							self.results.push(QueryResult {
+								time: before.elapsed(),
+								result: Ok(convert_value_to_public_value(Value::None)?),
+								query_type: QueryType::Other,
+							});
+							self.emit_statement_event_cached(
+								kvs,
+								statement_type,
+								statement_read_only,
+								sql_text,
+								&before,
+								Outcome::Success,
+								0,
+								None,
+							);
+							continue;
+						}
+						Err(e) => Err(TypesError::internal(e.to_string())),
 					}
-					Err(e) => Err(TypesError::internal(e.to_string())),
-				},
-				Dispatch::Runnable => {
+				}
+				StatementRole::Run => {
 					// Install fresh per-statement counters so DML
 					// iterators inside this BEGIN/COMMIT block can
 					// surface affected-row counts independently of the
@@ -2824,8 +2873,9 @@ impl Executor {
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
 								let stmt = stmt?;
-								match stmt.dispatch() {
-									Dispatch::Commit => {
+								let place = place_statement(grouper, &stmt);
+								match place.role {
+									StatementRole::Commit => {
 										// Aborted txn: COMMIT must error (same intent as
 										// `txn.commit()` failure above — descriptive
 										// `Cannot COMMIT:` prefix) (#7207).
@@ -2840,7 +2890,7 @@ impl Executor {
 											});
 										return Ok(());
 									}
-									Dispatch::Cancel => {
+									StatementRole::Cancel => {
 										return Ok(());
 									}
 									_ => {
@@ -3003,6 +3053,9 @@ impl Executor {
 		}
 		let batch_start = Instant::now();
 		let results_start = self.results.len();
+		// Every statement shares the transaction the caller holds, so each
+		// transaction-control statement is marked misplaced.
+		let mut grouper = RequestGrouper::new(true);
 
 		// Every statement runs in the caller's transaction, as a block's do.
 		self.in_block = true;
@@ -3012,6 +3065,10 @@ impl Executor {
 			// decides whether to commit.
 			if self.consumer_gone() {
 				break;
+			}
+			let place = place_statement(&mut grouper, &stmt);
+			if let StatementRole::Misplaced(misplaced) = place.role {
+				self.misplaced_control = Some(misplaced);
 			}
 			if let Some(request) = &self.request {
 				request.taken.fetch_add(1, Ordering::Relaxed);
@@ -3031,6 +3088,7 @@ impl Executor {
 			let query_type = stmt.query_type();
 			let counters = self.install_statement_counters();
 			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await;
+			self.misplaced_control = None;
 
 			let time = start.elapsed();
 			let query_result = match result {
@@ -3193,12 +3251,20 @@ impl Executor {
 		let batch_start = Instant::now();
 		let batch_results_start = self.results.len();
 		let mut stream = pin!(stream);
+		// Groups the statements as they are pulled: the stream cannot be read
+		// ahead of time, and import cannot be lowered ahead of time.
+		let mut grouper = RequestGrouper::new(false);
 
 		if skip_success_results {
 			// The import path requires OPTION IMPORT as the first statement.
 			// This sets opt.import which skips events, live queries, field
 			// processing, table views, and result output for performance.
-			match stream.as_mut().next().await.map(|stmt| stmt.map(|stmt| stmt.dispatch())) {
+			match stream.as_mut().next().await.map(|stmt| {
+				stmt.map(|stmt| {
+					place_statement(&mut grouper, &stmt);
+					stmt.dispatch()
+				})
+			}) {
 				Some(Ok(Dispatch::Option(ref stmt)))
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
@@ -3249,13 +3315,19 @@ impl Executor {
 			// customer values to an unauthenticated sink -- `StatementType`
 			// is a bounded enum and `to_sql` is only invoked when the
 			// installed observer explicitly opts in.
+			let place = place_statement(&mut grouper, &stmt);
 			let statement_type = stmt.statement_type();
 			let statement_read_only = stmt.read_only();
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 			let start = Instant::now();
 
-			match stmt.dispatch() {
-				Dispatch::Option(stmt) => {
+			match place.role {
+				StatementRole::Option => {
+					let Dispatch::Option(stmt) = stmt.dispatch() else {
+						bail!(EngineError::unreachable(
+							"a statement placed as OPTION did not dispatch as OPTION"
+						));
+					};
 					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
 						bail!(ExecError::InvalidStatement(
 							"Cannot change OPTION IMPORT during an import stream. \
@@ -3291,7 +3363,7 @@ impl Executor {
 						});
 					}
 				}
-				Dispatch::Begin => {
+				StatementRole::Begin => {
 					if !skip_success_results {
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
@@ -3300,7 +3372,8 @@ impl Executor {
 						});
 					}
 
-					let begin_result = self.execute_begin_statement(kvs, stream.as_mut()).await;
+					let begin_result =
+						self.execute_begin_statement(kvs, stream.as_mut(), &mut grouper).await;
 					let outcome = Outcome::from(&begin_result);
 					// `execute_begin_statement` returns `anyhow::Result`; on
 					// failure the result is wrapped via
@@ -3340,7 +3413,16 @@ impl Executor {
 						return Ok(());
 					}
 				}
-				Dispatch::Cancel | Dispatch::Commit | Dispatch::Runnable => {
+				role @ (StatementRole::Misplaced(_)
+				| StatementRole::Commit
+				| StatementRole::Cancel
+				| StatementRole::Run) => {
+					// With no block open, a `COMMIT` or `CANCEL` is marked
+					// misplaced and reaches the engine with its mark.
+					debug_assert!(!matches!(role, StatementRole::Commit | StatementRole::Cancel));
+					if let StatementRole::Misplaced(misplaced) = role {
+						self.misplaced_control = Some(misplaced);
+					}
 					let query_type: QueryType = stmt.query_type();
 
 					// Install fresh per-statement counters so DML
@@ -3349,6 +3431,7 @@ impl Executor {
 					let counters = self.install_statement_counters();
 					let statement_index = self.current_index();
 					let result = self.execute_bare_statement(kvs, &start, stmt).await;
+					self.misplaced_control = None;
 					let outcome = Outcome::from(&result);
 					// A streamed statement's rows never reach its value, so the
 					// count comes from what the sink sent rather than from the
@@ -3910,6 +3993,46 @@ fn reads_any(op: &LogicalOp, names: &std::collections::HashSet<String>) -> bool 
 	.is_err()
 }
 
+/// Place the next statement of a request in `grouper`.
+///
+/// Every statement a driver pulls from its stream passes through here exactly
+/// once and in order, whichever loop pulls it, so the grouping stays in step
+/// with the request.
+fn place_statement(grouper: &mut RequestGrouper, stmt: &TopLevelStatement) -> StatementPlace {
+	let place = grouper.place(stmt.request_kind());
+	debug_assert!(
+		role_agrees_with_dispatch(place.role, &stmt.dispatch()),
+		"the grouping placed a {:?} statement as {:?}",
+		stmt.dispatch(),
+		place.role
+	);
+	place
+}
+
+/// Whether `role` is a role the grouping can give a statement that `dispatch`
+/// classifies. Debug checks only.
+fn role_agrees_with_dispatch(role: StatementRole, dispatch: &Dispatch) -> bool {
+	match dispatch {
+		Dispatch::Begin => matches!(
+			role,
+			StatementRole::Begin
+				| StatementRole::Misplaced(
+					MisplacedControl::NestedBegin | MisplacedControl::BeginInSession
+				)
+		),
+		Dispatch::Commit => matches!(
+			role,
+			StatementRole::Commit | StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock)
+		),
+		Dispatch::Cancel => matches!(
+			role,
+			StatementRole::Cancel | StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock)
+		),
+		Dispatch::Option(_) => matches!(role, StatementRole::Option),
+		Dispatch::Runnable => matches!(role, StatementRole::Run),
+	}
+}
+
 /// The parameters a plan references, as the slow log reads them.
 ///
 /// A plan's scalars are [`LogicalExpr`]s, which the expression-layer visitor
@@ -4123,6 +4246,106 @@ mod tests {
 		assert_eq!(
 			results[3].result.as_ref().expect("the RETURN runs"),
 			&surrealdb_types::Value::Number(surrealdb_types::Number::Int(1))
+		);
+	}
+
+	/// One request holding every kind of misplaced or unterminated
+	/// transaction statement answers, statement for statement, as the same
+	/// pieces run as requests of their own: what the grouping decides depends
+	/// on the request text only, never on what ran before it.
+	#[tokio::test]
+	async fn a_request_groups_each_piece_as_it_would_alone() {
+		use crate::kvs::{QueryRequest, TransactionType};
+
+		async fn run(sql: &str) -> Vec<String> {
+			use crate::catalog::providers::CatalogProvider;
+
+			let ds = Datastore::new("memory").await.expect("a memory datastore");
+			let setup = ds.transaction(TransactionType::Write).await.expect("a transaction");
+			setup.ensure_ns_db(None, "test", "test").await.expect("the namespace and database");
+			setup.commit().await.expect("committing the namespace");
+			let ses = Session::owner().with_ns("test").with_db("test");
+			ds.run(QueryRequest::new(sql, &ses))
+				.await
+				.expect("the request runs")
+				.into_iter()
+				.map(|res| format!("{:?}", res.result))
+				.collect()
+		}
+
+		let pieces = [
+			"BEGIN; CREATE a:1; BEGIN; CREATE a:2; COMMIT; RETURN 'nested';",
+			"BEGIN; RETURN 1; BEGIN; COMMIT; RETURN 2;",
+			"COMMIT; CANCEL; RETURN 3;",
+			"CREATE b:0; BEGIN; CREATE b:1; RETURN 4;",
+		];
+		let mut expected = Vec::new();
+		for piece in pieces {
+			expected.extend(run(piece).await);
+		}
+		let together = pieces.join("\n");
+		assert_eq!(run(&together).await, expected);
+	}
+
+	/// A cancellation observed as a block's own `COMMIT` is pulled drops that
+	/// `COMMIT`, and the fast-forward ends at the next `COMMIT` of the text,
+	/// which the grouping sees outside a block. That one answers as a
+	/// `COMMIT` of the cancelled block, as it does when the cancellation is
+	/// observed at any other statement of the block.
+	#[tokio::test]
+	async fn a_cancellation_at_a_commit_ends_at_the_next_commit() {
+		use futures::StreamExt;
+
+		use crate::catalog::providers::CatalogProvider;
+		use crate::kvs::TransactionType;
+		use crate::sql::TopLevelExpr;
+
+		let ds = Datastore::new("memory").await.expect("a memory datastore");
+		let setup = ds.transaction(TransactionType::Write).await.expect("a transaction");
+		setup.ensure_ns_db(None, "test", "test").await.expect("the namespace and database");
+		setup.commit().await.expect("committing the namespace");
+
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let opt = ds.setup_options(&ses);
+		let mut ctx = ds.setup_ctx().expect("a context");
+		let canceller = ctx.add_cancel();
+		ctx.attach_session(&ses).expect("the session attaches");
+
+		let ast = crate::syn::parse("BEGIN; CREATE a:1; COMMIT; CREATE b:1; COMMIT; RETURN 1;")
+			.expect("the request parses");
+		let mut commits = 0;
+		let stream = futures::stream::iter(ast.expressions).map(move |expr| {
+			if matches!(expr, TopLevelExpr::Commit) {
+				commits += 1;
+				if commits == 1 {
+					canceller.cancel();
+				}
+			}
+			Ok(expr)
+		});
+		let results = super::Executor::execute_stream(&ds, ctx.freeze(), opt, false, stream)
+			.await
+			.expect("the request runs");
+
+		let messages: Vec<String> = results
+			.iter()
+			.map(|res| match &res.result {
+				Ok(value) => format!("{value:?}"),
+				Err(e) => e.to_string(),
+			})
+			.collect();
+		assert_eq!(results.len(), 5, "one result per statement: {messages:?}");
+		for (index, message) in messages[1..3].iter().enumerate() {
+			assert!(
+				message.contains("The query was not executed due to a cancelled transaction"),
+				"statement {}: {message}",
+				index + 1
+			);
+		}
+		assert!(
+			messages[3].contains("Cannot COMMIT: the transaction was cancelled"),
+			"the second COMMIT: {}",
+			messages[3]
 		);
 	}
 

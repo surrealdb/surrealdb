@@ -186,7 +186,8 @@ pub use self::lower::{
 	lower_value_statement,
 };
 pub use self::request::{
-	Emission, LogicalTransaction, RequestStatementKind, TxnEnd, TxnMode, lower_request,
+	Emission, LogicalTransaction, MisplacedControl, RequestGrouper, RequestStatementKind,
+	StatementPlace, StatementRole, TxnEnd, TxnMode, lower_request,
 };
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
