@@ -142,6 +142,12 @@ impl Document {
 		if !self.has_record_observers() {
 			return Ok(());
 		}
+		// An import runs no event, live query or changefeed, so the values they
+		// would read are not derived either. A body reading a table the dump
+		// defines later would otherwise fail the restore.
+		if opt.import {
+			return Ok(());
+		}
 		// The post-write record, absent on a delete, and the pre-write record,
 		// absent on a create
 		self.compute_fields_if_present(stk, ctx, opt, DocKind::Current, None).await?;
