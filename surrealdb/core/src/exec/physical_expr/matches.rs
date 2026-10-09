@@ -40,7 +40,7 @@ use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::idiom::Idiom;
 use crate::expr::logical::{
 	FieldPath, LogicalEval, LogicalExplain, LogicalExpr, LogicalForeach, LogicalLet, LogicalOp,
-	LogicalReturn, LogicalSequence, LogicalSleep,
+	LogicalReturn, LogicalSequence, LogicalSleep, LogicalThrow,
 };
 use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
 use crate::expr::{FlowResult, Kind};
@@ -253,6 +253,17 @@ pub(crate) fn first_unregistered_cond_matches(
 			LogicalOp::Sleep(LogicalSleep {
 				duration,
 			}) => walk_expr(duration, allowlist),
+			// In evaluation order: each condition, then its arm.
+			LogicalOp::If(ifs) => ifs
+				.branches()
+				.find_map(|(condition, arm)| {
+					walk_expr(condition, allowlist).or_else(|| walk_statement(arm, allowlist))
+				})
+				.or_else(|| ifs.otherwise().and_then(|arm| walk_statement(arm, allowlist))),
+			LogicalOp::Throw(LogicalThrow {
+				value,
+			}) => walk_expr(value, allowlist),
+			LogicalOp::Break(_) | LogicalOp::Continue(_) => None,
 			LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Match(_)

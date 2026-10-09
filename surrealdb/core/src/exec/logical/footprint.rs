@@ -27,7 +27,7 @@ use surrealdb_strand::TableName;
 
 use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{
-	EffectSet, LogicalDdlStatement, LogicalExpr, LogicalOp, LogicalWriteSource,
+	EffectSet, LogicalDdlStatement, LogicalExpr, LogicalIfOp, LogicalOp, LogicalWriteSource,
 	LogicalWriteStatement, SourceRef,
 };
 use crate::expr::statements::{AlterStatement, DefineStatement, RemoveStatement};
@@ -212,6 +212,26 @@ impl Footprint {
 pub(crate) fn of(op: &LogicalOp, registry: &FunctionRegistry) -> Footprint {
 	let mut out = Footprint::default();
 	walk(op, registry, &mut out);
+	out
+}
+
+/// The footprint of each arm of the statement `IF` `ifs`, in order, the
+/// `ELSE` arm last: what running that arm touches, with the conditions
+/// evaluated to reach it. The footprint of the whole `IF`, which [`of`]
+/// answers, is their union. A rewrite inside one arm consults that arm's
+/// alone; one that moves a statement across the `IF` consults the union.
+#[cfg_attr(not(test), allow(dead_code, reason = "read by the rewrites inside an arm"))]
+pub(crate) fn of_arms(ifs: &LogicalIfOp, registry: &FunctionRegistry) -> Vec<Footprint> {
+	let mut conditions = Footprint::default();
+	let mut out = Vec::with_capacity(ifs.arms.len());
+	for (at, arm) in ifs.arms.iter().enumerate() {
+		if let Some(condition) = ifs.conditions.get(at) {
+			expr_footprint(condition, registry, &mut conditions);
+		}
+		let mut footprint = conditions.clone();
+		walk(arm, registry, &mut footprint);
+		out.push(footprint);
+	}
 	out
 }
 
@@ -777,6 +797,32 @@ mod tests {
 		assert!(!field.overlaps(&function));
 		assert!(!Resource::table_catalog(TableName::new("t")).overlaps(&function));
 		assert!(!data("t").overlaps(&field));
+	}
+
+	/// Each arm of a statement `IF` has its own footprint: a write in one arm
+	/// is not a write of another, and each arm reads the conditions before it.
+	#[test]
+	fn each_arm_of_an_if_has_its_own_footprint() {
+		let registry = FunctionRegistry::with_builtins();
+		let LogicalOp::If(ifs) = super::super::lower_test(
+			"IF (SELECT * FROM c) { UPDATE a SET x = 1 } ELSE { SELECT * FROM b }",
+		) else {
+			panic!("a statement IF");
+		};
+		let arms = of_arms(&ifs, &registry);
+		assert_eq!(arms.len(), 2);
+		assert!(arms[0].writes_over(&data("a")));
+		assert!(!arms[1].writes_over(&data("a")), "the ELSE arm writes nothing");
+		for arm in &arms {
+			assert!(
+				arm.reads.iter().any(|r| r.overlaps(&data("c"))),
+				"both arms read the condition"
+			);
+		}
+		assert!(!arms[0].reads.iter().any(|r| r.overlaps(&data("b"))));
+		let whole = of(&LogicalOp::If(ifs), &registry);
+		assert!(whole.writes_over(&data("a")));
+		assert!(whole.reads.iter().any(|r| r.overlaps(&data("b"))));
 	}
 
 	#[test]

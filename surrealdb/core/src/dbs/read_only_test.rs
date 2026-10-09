@@ -815,6 +815,7 @@ mod vm {
 		at("projection value", "SELECT VALUE (%%) FROM [1]"),
 		at("returned value", "RETURN (%%)"),
 		at("thrown value", "THROW (%%)"),
+		at("thrown value in value position", "RETURN THROW (%%)"),
 		at("variable value", "{ LET $x = (%%); RETURN $x }"),
 		at("loop source", "FOR $i IN (%%) { RETURN 1 }"),
 		at("loop body", "FOR $i IN [1] { RETURN (%%) }"),

@@ -15,7 +15,8 @@
 //! engine runs is an operator — a `SELECT` pipeline, an [`LogicalOp::Eval`] of
 //! a bare expression, a [`LogicalOp::Sequence`] for a block, a
 //! [`LogicalOp::Let`], [`LogicalOp::Return`], [`LogicalOp::Foreach`],
-//! [`LogicalOp::Info`], [`LogicalOp::Ddl`], [`LogicalOp::Sleep`] or
+//! [`LogicalOp::If`], [`LogicalOp::Throw`], [`LogicalOp::Break`],
+//! [`LogicalOp::Continue`], [`LogicalOp::Info`], [`LogicalOp::Ddl`], [`LogicalOp::Sleep`] or
 //! [`LogicalOp::Explain`] — and the one way a statement appears inside a scalar is
 //! [`LogicalExpr::Subquery`]. A block in scalar position is
 //! `Subquery(Sequence)`; a block as a statement is `Sequence`. One encoding.
@@ -154,6 +155,7 @@
 #![warn(clippy::wildcard_enum_match_arm)]
 
 mod effects;
+mod exits;
 mod expr;
 mod lower;
 pub mod schema;
@@ -170,6 +172,7 @@ pub use self::effects::{
 	EffectOracle, EffectSet, Effects, ITERATION_PARAMS, ROW_PARAMS, effects_of,
 	invokes_unseen_body, key_is_generated, may_dereference,
 };
+pub use self::exits::Exits;
 pub use self::expr::{
 	LogicalCall, LogicalClosure, LogicalDestructureField, LogicalExpr, LogicalField, LogicalFields,
 	LogicalIf, LogicalLiteral, LogicalLookup, LogicalLookupSubject, LogicalOrder, LogicalOrdering,
@@ -179,6 +182,7 @@ pub use self::expr::{
 };
 pub use self::lower::{
 	NoLogicalForm, is_value_literal, lower, lower_expr, lower_fields, lower_select,
+	lower_value_statement,
 };
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
@@ -539,6 +543,14 @@ pub enum LogicalOp {
 	Return(LogicalReturn),
 	/// `FOR … IN`; see [`LogicalForeach`].
 	Foreach(LogicalForeach),
+	/// `IF` in statement position; see [`LogicalIfOp`].
+	If(LogicalIfOp),
+	/// `THROW`; see [`LogicalThrow`].
+	Throw(LogicalThrow),
+	/// `BREAK`; see [`LogicalBreak`].
+	Break(LogicalBreak),
+	/// `CONTINUE`; see [`LogicalContinue`].
+	Continue(LogicalContinue),
 	/// `INFO FOR …`.
 	Info(Box<LogicalInfo>),
 	/// `SLEEP`; see [`LogicalSleep`].
@@ -1290,8 +1302,12 @@ pub struct LogicalExplain {
 	pub format: ExplainFormat,
 }
 
-/// A bare expression as a statement, including a top-level `IF`, `THROW`,
-/// `BREAK` or `CONTINUE`. Yields the expression's value.
+/// A bare expression as a statement. Yields the expression's value.
+///
+/// An `IF`, `THROW`, `BREAK` or `CONTINUE` in statement position is an
+/// operator of its own ([`LogicalIfOp`], [`LogicalThrow`], [`LogicalBreak`],
+/// [`LogicalContinue`]); an `Eval` carries one only where it stands in value
+/// position, as the value of a `RETURN`, or where a pass substituted it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalEval {
 	pub expr: LogicalExpr,
@@ -1327,6 +1343,88 @@ pub struct LogicalForeach {
 	pub range: LogicalExpr,
 	pub body: Box<LogicalOp>,
 }
+
+/// `IF` in statement position: the conditions evaluated in order, and the arm
+/// of the first that is truthy run, or the `ELSE` arm; the value is the arm's,
+/// `NONE` when no arm runs.
+///
+/// Produced where an `IF` stands as a statement: at the top level, in a block
+/// (a `FOR` body and a function body included), as a `LET` value, and as a
+/// statement of another `IF`'s arm. An `IF` in value position stays
+/// [`LogicalExpr::If`].
+///
+/// The arms are held contiguously so they are this node's inputs
+/// ([`LogicalOp::children`]): `arms[i]` is the arm of `conditions[i]`, and an
+/// `arms` one longer than `conditions` ends with the `ELSE` arm. A block arm
+/// is a [`LogicalOp::Sequence`], which runs in a scope of its own; an arm
+/// written as an expression (`IF c THEN 1 END`) is the operator [`lower`]
+/// gives that expression.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalIfOp {
+	pub conditions: Vec<LogicalExpr>,
+	pub arms: Vec<LogicalOp>,
+}
+
+impl LogicalIfOp {
+	/// An `IF` of `(condition, arm)` pairs and an optional `ELSE` arm.
+	pub fn new(branches: Vec<(LogicalExpr, LogicalOp)>, otherwise: Option<LogicalOp>) -> Self {
+		let (conditions, mut arms): (Vec<_>, Vec<_>) = branches.into_iter().unzip();
+		arms.extend(otherwise);
+		Self {
+			conditions,
+			arms,
+		}
+	}
+
+	/// Each condition beside its arm, in order.
+	pub fn branches(&self) -> impl Iterator<Item = (&LogicalExpr, &LogicalOp)> {
+		self.conditions.iter().zip(&self.arms)
+	}
+
+	/// The `ELSE` arm, where one is written.
+	pub fn otherwise(&self) -> Option<&LogicalOp> {
+		self.arms.get(self.conditions.len())
+	}
+
+	/// The pairs and the `ELSE` arm, taken apart.
+	pub fn into_parts(self) -> (Vec<(LogicalExpr, LogicalOp)>, Option<LogicalOp>) {
+		let mut arms = self.arms;
+		let otherwise = (arms.len() > self.conditions.len()).then(|| arms.pop()).flatten();
+		(self.conditions.into_iter().zip(arms).collect(), otherwise)
+	}
+
+	/// The same `IF` in value position: each arm as the scalar it evaluates
+	/// to. An arm that is an expression statement is its expression, and any
+	/// other arm is [`LogicalExpr::Subquery`] of it. Evaluating the result
+	/// yields what running this node yields.
+	pub fn to_scalar(&self) -> LogicalIf {
+		let (branches, otherwise) = self.clone().into_parts();
+		LogicalIf {
+			branches: branches
+				.into_iter()
+				.map(|(condition, arm)| (condition, arm.into_scalar()))
+				.collect(),
+			otherwise: otherwise.map(LogicalOp::into_scalar),
+		}
+	}
+}
+
+/// `THROW value`: the value evaluated and raised as the statement's error.
+/// Control does not continue past it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LogicalThrow {
+	pub value: LogicalExpr,
+}
+
+/// `BREAK`: leave the innermost enclosing loop. Control does not continue past
+/// it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct LogicalBreak;
+
+/// `CONTINUE`: move to the innermost enclosing loop's next element. Control
+/// does not continue past it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct LogicalContinue;
 
 /// `SLEEP duration`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1392,6 +1490,10 @@ op_kinds!(
 	Let,
 	Return,
 	Foreach,
+	If,
+	Throw,
+	Break,
+	Continue,
 	Info,
 	Sleep,
 );
@@ -1426,6 +1528,10 @@ impl LogicalOp {
 			LogicalOp::Let(_) => "Let",
 			LogicalOp::Return(_) => "Return",
 			LogicalOp::Foreach(_) => "Foreach",
+			LogicalOp::If(_) => "If",
+			LogicalOp::Throw(_) => "Throw",
+			LogicalOp::Break(_) => "Break",
+			LogicalOp::Continue(_) => "Continue",
 			LogicalOp::Info(_) => "Info",
 			LogicalOp::Sleep(_) => "Sleep",
 		}
@@ -1438,6 +1544,9 @@ impl LogicalOp {
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => &[],
@@ -1455,6 +1564,10 @@ impl LogicalOp {
 			LogicalOp::Sequence(LogicalSequence {
 				stmts,
 			}) => stmts,
+			LogicalOp::If(LogicalIfOp {
+				arms,
+				..
+			}) => arms,
 			LogicalOp::Join(LogicalJoin {
 				inputs,
 				..
@@ -1535,6 +1648,9 @@ impl LogicalOp {
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => &mut [],
@@ -1552,6 +1668,10 @@ impl LogicalOp {
 			LogicalOp::Sequence(LogicalSequence {
 				stmts,
 			}) => stmts,
+			LogicalOp::If(LogicalIfOp {
+				arms,
+				..
+			}) => arms,
 			LogicalOp::Join(LogicalJoin {
 				inputs,
 				..
@@ -1640,6 +1760,9 @@ impl LogicalOp {
 			| LogicalOp::Values(_)
 			| LogicalOp::Match(_)
 			| LogicalOp::Eval(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)) => leaf,
@@ -1672,6 +1795,13 @@ impl LogicalOp {
 				stmts,
 			}) => LogicalOp::Sequence(LogicalSequence {
 				stmts: stmts.into_iter().map(f).collect::<Result<_, E>>()?,
+			}),
+			LogicalOp::If(LogicalIfOp {
+				conditions,
+				arms,
+			}) => LogicalOp::If(LogicalIfOp {
+				conditions,
+				arms: arms.into_iter().map(f).collect::<Result<_, E>>()?,
 			}),
 			LogicalOp::Join(mut op) => {
 				let [left, right] = *op.inputs;
@@ -1868,7 +1998,18 @@ impl LogicalOp {
 			})
 			| LogicalOp::Sleep(LogicalSleep {
 				duration: expr,
+			})
+			| LogicalOp::Throw(LogicalThrow {
+				value: expr,
 			}) => out(expr),
+			LogicalOp::If(LogicalIfOp {
+				conditions,
+				..
+			}) => {
+				for condition in conditions {
+					out(condition);
+				}
+			}
 			LogicalOp::Match(LogicalMatch {
 				plan,
 			}) => {
@@ -1882,7 +2023,9 @@ impl LogicalOp {
 			| LogicalOp::Only(_)
 			| LogicalOp::Explain(_)
 			| LogicalOp::Sequence(_)
-			| LogicalOp::Let(_) => {}
+			| LogicalOp::Let(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_) => {}
 			LogicalOp::Filter(LogicalFilter {
 				predicate,
 				..
@@ -2032,7 +2175,14 @@ impl LogicalOp {
 			})
 			| LogicalOp::Sleep(LogicalSleep {
 				duration: expr,
+			})
+			| LogicalOp::Throw(LogicalThrow {
+				value: expr,
 			}) => out.push(expr),
+			LogicalOp::If(LogicalIfOp {
+				conditions,
+				..
+			}) => out.extend(conditions),
 			LogicalOp::Match(LogicalMatch {
 				plan,
 			}) => out.extend(plan.scalars_mut()),
@@ -2042,7 +2192,9 @@ impl LogicalOp {
 			| LogicalOp::Only(_)
 			| LogicalOp::Explain(_)
 			| LogicalOp::Sequence(_)
-			| LogicalOp::Let(_) => {}
+			| LogicalOp::Let(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_) => {}
 			LogicalOp::Filter(LogicalFilter {
 				predicate,
 				..
@@ -2235,6 +2387,51 @@ impl LogicalOp {
 		.is_break()
 	}
 
+	/// This statement as the scalar that evaluates to its value: an
+	/// expression statement is its expression, a statement `IF`, `THROW`,
+	/// `BREAK` or `CONTINUE` is its value-position form, and any other
+	/// statement is [`LogicalExpr::Subquery`] of it.
+	pub fn into_scalar(self) -> LogicalExpr {
+		match self {
+			LogicalOp::Eval(LogicalEval {
+				expr,
+			}) => expr,
+			LogicalOp::If(op) => LogicalExpr::If(Box::new(op.to_scalar())),
+			LogicalOp::Throw(LogicalThrow {
+				value,
+			}) => LogicalExpr::Throw(Box::new(value)),
+			LogicalOp::Break(_) => LogicalExpr::Break,
+			LogicalOp::Continue(_) => LogicalExpr::Continue,
+			other @ (LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::Filter(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Split(_)
+			| LogicalOp::Aggregate(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::Sort(_)
+			| LogicalOp::Limit(_)
+			| LogicalOp::Project(_)
+			| LogicalOp::Fetch(_)
+			| LogicalOp::Timeout(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_)) => LogicalExpr::Subquery(Box::new(other)),
+		}
+	}
+
 	/// Whether the plan only reads.
 	///
 	/// A plan writes when one of its scalars does, when a source takes locks,
@@ -2307,6 +2504,10 @@ impl LogicalOp {
 			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Sleep(_) => self.scalars().into_iter().all(LogicalExpr::read_only),
 		}
@@ -2378,6 +2579,10 @@ impl LogicalOp {
 			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => Schema::open(),
@@ -2513,6 +2718,10 @@ impl LogicalOp {
 			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_)
@@ -2577,6 +2786,10 @@ impl LogicalOp {
 			| LogicalOp::Let(_)
 			| LogicalOp::Return(_)
 			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 			| LogicalOp::Info(_)
 			| LogicalOp::Ddl(_)
 			| LogicalOp::Sleep(_) => false,
@@ -2784,6 +2997,19 @@ impl LogicalOp {
 				range,
 				..
 			}) => vec![format!("{} IN {}", param.to_sql(), range.to_sql())],
+			// One attribute per condition, and `ELSE` where the last arm is
+			// one; the arms render as the inputs, in the same order.
+			LogicalOp::If(op) => {
+				let mut out: Vec<String> = op.conditions.iter().map(ToSql::to_sql).collect();
+				if op.otherwise().is_some() {
+					out.push("ELSE".to_string());
+				}
+				out
+			}
+			LogicalOp::Throw(LogicalThrow {
+				value,
+			}) => vec![value.to_sql()],
+			LogicalOp::Break(_) | LogicalOp::Continue(_) => vec![],
 			LogicalOp::Info(info) => vec![info.to_sql()],
 			// The kind alone. A schema statement's text can name a secret the
 			// catalog holds — an access method's signing key, a user's
@@ -2871,6 +3097,10 @@ fn leaf_table(mut op: &LogicalOp) -> Option<&TableName> {
 					| LogicalOp::Let(_)
 					| LogicalOp::Return(_)
 					| LogicalOp::Foreach(_)
+					| LogicalOp::If(_)
+					| LogicalOp::Throw(_)
+					| LogicalOp::Break(_)
+					| LogicalOp::Continue(_)
 					| LogicalOp::Info(_)
 					| LogicalOp::Ddl(_)
 					| LogicalOp::Sleep(_) => None,

@@ -358,11 +358,17 @@ pub enum LogicalExpr {
 	},
 	Call(Box<LogicalCall>),
 	Closure(Box<LogicalClosure>),
-	/// `IF … THEN … ELSE … END` as a value. The one encoding of `IF`: a
-	/// top-level `IF` statement is [`LogicalOp::Eval`] of one of these.
+	/// `IF … THEN … ELSE … END` in value position. An `IF` in statement
+	/// position is [`LogicalOp::If`].
 	If(Box<LogicalIf>),
+	/// `THROW` in value position; in statement position it is
+	/// [`LogicalOp::Throw`].
 	Throw(Box<LogicalExpr>),
+	/// `BREAK` in value position; in statement position it is
+	/// [`LogicalOp::Break`].
 	Break,
+	/// `CONTINUE` in value position; in statement position it is
+	/// [`LogicalOp::Continue`].
 	Continue,
 	/// Any statement in scalar position.
 	Subquery(Box<LogicalOp>),

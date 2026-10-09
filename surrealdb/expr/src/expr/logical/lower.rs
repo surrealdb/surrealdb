@@ -23,12 +23,13 @@ use super::expr::{
 	LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath, OutputPath, SourceRef,
 };
 use super::{
-	LogicalAggregate, LogicalAssignment, LogicalData, LogicalDdl, LogicalDdlStatement, LogicalEval,
-	LogicalExplain, LogicalFetch, LogicalFilter, LogicalForeach, LogicalInfo, LogicalInsertRows,
-	LogicalInserts, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp, LogicalProject,
-	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
-	LogicalSubquery, LogicalTimeout, LogicalUnionAll, LogicalValues, LogicalVersionScope,
-	LogicalWrite, LogicalWriteSource, LogicalWriteStatement,
+	LogicalAggregate, LogicalAssignment, LogicalBreak, LogicalContinue, LogicalData, LogicalDdl,
+	LogicalDdlStatement, LogicalEval, LogicalExplain, LogicalFetch, LogicalFilter, LogicalForeach,
+	LogicalIfOp, LogicalInfo, LogicalInsertRows, LogicalInserts, LogicalLet, LogicalLimit,
+	LogicalOnly, LogicalOp, LogicalProject, LogicalReturn, LogicalSequence, LogicalSleep,
+	LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery, LogicalThrow, LogicalTimeout,
+	LogicalUnionAll, LogicalValues, LogicalVersionScope, LogicalWrite, LogicalWriteSource,
+	LogicalWriteStatement,
 };
 use crate::expr::part::Recurse;
 use crate::sql;
@@ -60,16 +61,29 @@ impl std::error::Error for NoLogicalForm {}
 
 type Lowered<T> = Result<T, NoLogicalForm>;
 
-/// Lower a top-level expression to the operator that runs it.
+/// Lower an expression in statement position to the operator that runs it.
 ///
 /// A `SELECT` lowers to its pipeline; a mutation to a [`LogicalOp::Write`]; a
 /// block to a [`LogicalOp::Sequence`]; `LET`, `RETURN`, `FOR`, `INFO`, `SLEEP`
-/// and `EXPLAIN` to their operators. Any other expression — an `IF`, a
-/// `THROW`, an arithmetic expression, a function call — is a
-/// [`LogicalOp::Eval`] of its scalar form. A schema statement is a
-/// [`LogicalOp::Ddl`] carrying it whole.
+/// and `EXPLAIN` to their operators; `IF`, `THROW`, `BREAK` and `CONTINUE` to
+/// [`LogicalOp::If`], [`LogicalOp::Throw`], [`LogicalOp::Break`] and
+/// [`LogicalOp::Continue`]. Any other expression — an arithmetic expression,
+/// a function call — is a [`LogicalOp::Eval`] of its scalar form. A schema
+/// statement is a [`LogicalOp::Ddl`] carrying it whole.
+///
+/// Statement position is the top level, a statement of a block (a `FOR` body
+/// included), a `LET` value and an arm of a statement `IF`. The value of a
+/// `RETURN` and the statement an `EXPLAIN` describes are lowered by
+/// [`lower_value_statement`], which keeps an `IF`, `THROW`, `BREAK` or
+/// `CONTINUE` there in its scalar form.
 pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 	match expr {
+		sql::Expr::IfElse(stmt) => lower_if_statement(*stmt),
+		sql::Expr::Throw(value) => Ok(LogicalOp::Throw(LogicalThrow {
+			value: lower_expr(*value)?,
+		})),
+		sql::Expr::Break => Ok(LogicalOp::Break(LogicalBreak)),
+		sql::Expr::Continue => Ok(LogicalOp::Continue(LogicalContinue)),
 		sql::Expr::Select(select) => lower_select(*select),
 		sql::Expr::Block(block) => lower_block(*block),
 		sql::Expr::Let(stmt) => Ok(LogicalOp::Let(LogicalLet {
@@ -78,7 +92,7 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 			value: Box::new(lower(stmt.what)?),
 		})),
 		sql::Expr::Return(stmt) => Ok(LogicalOp::Return(LogicalReturn {
-			what: Box::new(lower(stmt.what)?),
+			what: Box::new(lower_value_statement(stmt.what)?),
 			fetch: lower_fetchs(stmt.fetch)?,
 		})),
 		sql::Expr::Foreach(stmt) => Ok(LogicalOp::Foreach(LogicalForeach {
@@ -95,7 +109,7 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 			analyze,
 			statement,
 		} => Ok(LogicalOp::Explain(LogicalExplain {
-			input: Box::new(lower(*statement)?),
+			input: Box::new(lower_value_statement(*statement)?),
 			analyze,
 			format: format.into(),
 		})),
@@ -246,14 +260,39 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 			..
 		}
 		| sql::Expr::FunctionCall(_)
-		| sql::Expr::Closure(_)
-		| sql::Expr::Break
-		| sql::Expr::Continue
-		| sql::Expr::Throw(_)
-		| sql::Expr::IfElse(_)) => Ok(LogicalOp::Eval(LogicalEval {
+		| sql::Expr::Closure(_)) => Ok(LogicalOp::Eval(LogicalEval {
 			expr: lower_expr(scalar)?,
 		})),
 	}
+}
+
+/// [`lower`] for a statement whose value is used where it stands — the value
+/// of a `RETURN`, the statement an `EXPLAIN` describes: an `IF`, `THROW`,
+/// `BREAK` or `CONTINUE` there is a [`LogicalOp::Eval`] of its scalar form,
+/// and anything else lowers as [`lower`] lowers it.
+pub fn lower_value_statement(expr: sql::Expr) -> Lowered<LogicalOp> {
+	if matches!(
+		expr,
+		sql::Expr::IfElse(_) | sql::Expr::Throw(_) | sql::Expr::Break | sql::Expr::Continue
+	) {
+		return Ok(LogicalOp::Eval(LogicalEval {
+			expr: lower_expr(expr)?,
+		}));
+	}
+	lower(expr)
+}
+
+/// An `IF` in statement position: each arm lowered as a statement, so a block
+/// arm is its [`LogicalOp::Sequence`] and a nested `IF` another
+/// [`LogicalOp::If`].
+fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
+	let branches = stmt
+		.exprs
+		.into_iter()
+		.map(|(cond, then)| Ok((lower_expr(cond)?, lower(then)?)))
+		.collect::<Lowered<Vec<_>>>()?;
+	let otherwise = stmt.close.map(lower).transpose()?;
+	Ok(LogicalOp::If(LogicalIfOp::new(branches, otherwise)))
 }
 
 /// Lower an expression in scalar position.
@@ -1526,6 +1565,66 @@ mod tests {
 		lower(parse(sql)).expect("statement should lower")
 	}
 
+	/// An `IF`, `THROW`, `BREAK` and `CONTINUE` in statement position are
+	/// operators of their own: at the top level, in a block, in a `FOR` body,
+	/// as a `LET` value and as an arm of another `IF`.
+	#[test]
+	fn control_flow_in_statement_position_lowers_to_operators() {
+		assert_eq!(
+			lower_sql("IF $a { 1 } ELSE { 2 }").to_string(),
+			"If[$a    ELSE]\n  Sequence\n    Eval[1]\n  Sequence\n    Eval[2]"
+		);
+		assert_eq!(lower_sql("THROW 'x'").to_string(), "Throw['x']");
+		assert_eq!(lower_sql("BREAK").to_string(), "Break");
+		assert_eq!(lower_sql("CONTINUE").to_string(), "Continue");
+		assert_eq!(
+			lower_sql("{ IF $a { BREAK }; CONTINUE; THROW 1 }").to_string(),
+			"Sequence\n  If[$a]\n    Sequence\n      Break\n  Continue\n  Throw[1]"
+		);
+		assert_eq!(
+			lower_sql("FOR $x IN [1] { IF $x { CONTINUE } }").to_string(),
+			"Foreach[$x IN [1]]\n  Sequence\n    If[$x]\n      Sequence\n        Continue"
+		);
+		assert_eq!(
+			lower_sql("LET $v = IF $a THEN 1 END").to_string(),
+			"Let[$v]\n  If[$a]\n    Eval[1]"
+		);
+		assert_eq!(
+			lower_sql("IF $a THEN IF $b THEN 1 ELSE 2 END END").to_string(),
+			"If[$a]\n  If[$b    ELSE]\n    Eval[1]\n    Eval[2]"
+		);
+	}
+
+	/// The value of a `RETURN`, and an `IF` inside an expression, stay in
+	/// value position.
+	#[test]
+	fn control_flow_in_value_position_stays_an_expression() {
+		assert_eq!(
+			lower_sql("RETURN IF $a THEN 1 END").to_string(),
+			"Return\n  Eval[IF $a THEN 1 END]"
+		);
+		assert_eq!(lower_sql("RETURN THROW 'x'").to_string(), "Return\n  Eval[THROW 'x']");
+		assert!(matches!(lower_sql("[IF $a THEN 1 END]"), LogicalOp::Eval(_)));
+	}
+
+	/// The scalar form of a statement `IF` evaluates to what the operator
+	/// yields: a block arm becomes the subquery of its block.
+	#[test]
+	fn a_statement_if_has_its_value_position_form() {
+		let LogicalOp::If(ifs) = lower_sql("IF $a { 1 } ELSE IF $b { 2 }") else {
+			panic!("an IF operator");
+		};
+		let scalar = ifs.to_scalar();
+		assert_eq!(scalar.branches.len(), 2);
+		assert!(
+			scalar.branches.iter().all(
+				|(_, arm)| matches!(arm, LogicalExpr::Subquery(block) if block.name() == "Sequence")
+			),
+			"a block arm is the subquery of its block"
+		);
+		assert!(scalar.otherwise.is_none());
+	}
+
 	fn expr(sql: &str) -> LogicalExpr {
 		let sql::Expr::Return(out) = parse(&format!("RETURN {sql}")) else {
 			panic!("expected a RETURN");
@@ -2448,31 +2547,15 @@ mod tests {
 	}
 
 	#[test]
-	fn control_flow_and_if_have_one_encoding() {
-		// A top-level IF is an evaluation of the scalar IF; a nested one is
-		// the same scalar.
-		let top = lower_sql("IF true THEN 1 ELSE 2 END");
-		let LogicalOp::Eval(LogicalEval {
-			expr: LogicalExpr::If(_),
-		}) = top
-		else {
-			panic!("expected Eval[If]: {top}");
-		};
+	fn control_flow_and_if_have_one_encoding_per_position() {
+		// A top-level IF is the IF operator; one nested in an expression is
+		// the scalar IF.
+		assert!(matches!(lower_sql("IF true THEN 1 ELSE 2 END"), LogicalOp::If(_)));
 		assert!(
 			matches!(expr("[IF true THEN 1 END]"), LogicalExpr::Array(items) if matches!(items[0], LogicalExpr::If(_)))
 		);
-		assert!(matches!(
-			lower_sql("BREAK"),
-			LogicalOp::Eval(LogicalEval {
-				expr: LogicalExpr::Break
-			})
-		));
-		assert!(matches!(
-			lower_sql("THROW 'x'"),
-			LogicalOp::Eval(LogicalEval {
-				expr: LogicalExpr::Throw(_)
-			})
-		));
+		assert!(matches!(lower_sql("BREAK"), LogicalOp::Break(_)));
+		assert!(matches!(lower_sql("THROW 'x'"), LogicalOp::Throw(_)));
 	}
 
 	#[test]
@@ -2512,11 +2595,11 @@ mod tests {
 			}
 			| sql::Expr::FunctionCall(_)
 			| sql::Expr::Closure(_)
-			| sql::Expr::Break
-			| sql::Expr::Continue
-			| sql::Expr::Throw(_)
-			| sql::Expr::IfElse(_)
 			| sql::Expr::Mock(_) => "Eval",
+			sql::Expr::Break => "Break",
+			sql::Expr::Continue => "Continue",
+			sql::Expr::Throw(_) => "Throw",
+			sql::Expr::IfElse(_) => "If",
 			sql::Expr::Block(_) => "Sequence",
 			sql::Expr::Return(_) => "Return",
 			sql::Expr::Select(_) => "Project",

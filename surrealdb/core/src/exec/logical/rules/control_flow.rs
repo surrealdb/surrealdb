@@ -25,9 +25,122 @@
 //! branch holding one is kept, and so is a `true` branch followed by an arm or an `ELSE` holding
 //! one. Any other code an arm that never runs holds — a statement, a closure — goes with it.
 
-use super::ExprContext;
+use super::{ExprContext, RuleContext, RuleDef};
 use crate::exec::logical::{holds_let_expression, holds_protected_let};
-use crate::expr::logical::{LogicalExpr, LogicalIf, LogicalLiteral};
+use crate::expr::logical::{
+	LogicalEval, LogicalExpr, LogicalIf, LogicalIfOp, LogicalLiteral, LogicalOp, OpKind,
+};
+
+/// The same collapse for an `IF` in statement position
+/// ([`LogicalOp::If`]): what is left of it, or — where no condition is left
+/// to evaluate — the expression statement of the arm it falls through to, as
+/// the expression form collapses to that arm's value.
+///
+/// An arm that never runs goes, with the statements and closures it holds,
+/// unless it holds a `LET` planning refuses whether or not it runs
+/// ([`op_holds_refused_let`]): a `false` arm holding one is kept, and so is a
+/// `true` arm followed by a condition, an arm or an `ELSE` holding one.
+pub(super) const RULE: RuleDef = RuleDef {
+	name: "control_flow",
+	kinds: &[OpKind::If],
+	apply: apply_op,
+};
+
+fn apply_op(node: &mut LogicalOp, _cx: &mut RuleContext<'_>) -> bool {
+	let LogicalOp::If(ifs) = node else {
+		return false;
+	};
+	if !foldable_op(ifs) {
+		return false;
+	}
+	let (branches, mut otherwise) = std::mem::replace(
+		ifs,
+		LogicalIfOp {
+			conditions: Vec::new(),
+			arms: Vec::new(),
+		},
+	)
+	.into_parts();
+	let mut kept = Vec::with_capacity(branches.len());
+	let mut arms = branches.into_iter();
+	while let Some((condition, arm)) = arms.next() {
+		match as_literal_bool(&condition) {
+			// Never taken: the arm goes, and so do the statements it holds.
+			Some(false) if !op_holds_refused_let(&arm) => {}
+			// Always taken, given the conditions before it were false: it is the
+			// `ELSE`, and every arm after it is unreachable.
+			Some(true)
+				if !unreached_arms_hold_a_refused_let(arms.as_slice(), otherwise.as_ref()) =>
+			{
+				otherwise = Some(arm);
+				break;
+			}
+			// Undecided, or holding a refused `LET`: kept where it was, so the
+			// order of evaluation stands.
+			_ => kept.push((condition, arm)),
+		}
+	}
+	*node = if kept.is_empty() {
+		match otherwise {
+			// An `ELSE` that writes stays a branch: a write in one spends the
+			// computation-depth budget the branch's nesting spends
+			// ([`crate::exec::vm::depth`]).
+			Some(arm) if writes_op(&arm) => LogicalOp::If(LogicalIfOp::new(Vec::new(), Some(arm))),
+			otherwise => LogicalOp::Eval(LogicalEval {
+				expr: otherwise
+					.map_or(LogicalExpr::Literal(LogicalLiteral::None), LogicalOp::into_scalar),
+			}),
+		}
+	} else {
+		LogicalOp::If(LogicalIfOp::new(kept, otherwise))
+	};
+	true
+}
+
+/// Whether [`apply_op`] removes an arm of `ifs`: a `false` arm holding no
+/// refused `LET`, or a `true` arm whose unreached conditions, arms and `ELSE`
+/// hold none ([`op_holds_refused_let`]).
+fn foldable_op(ifs: &LogicalIfOp) -> bool {
+	let branches: Vec<(&LogicalExpr, &LogicalOp)> = ifs.branches().collect();
+	branches.iter().enumerate().any(|(at, (condition, arm))| match as_literal_bool(condition) {
+		Some(false) => !op_holds_refused_let(arm),
+		Some(true) => {
+			!branches[at + 1..]
+				.iter()
+				.any(|(condition, arm)| holds_refused_let(condition) || op_holds_refused_let(arm))
+				&& !ifs.otherwise().is_some_and(op_holds_refused_let)
+		}
+		None => false,
+	})
+}
+
+/// Whether the arms `after` a `true` arm, or the `otherwise` after them, hold
+/// a refused `LET` ([`op_holds_refused_let`]).
+fn unreached_arms_hold_a_refused_let(
+	after: &[(LogicalExpr, LogicalOp)],
+	otherwise: Option<&LogicalOp>,
+) -> bool {
+	after.iter().any(|(condition, arm)| holds_refused_let(condition) || op_holds_refused_let(arm))
+		|| otherwise.is_some_and(op_holds_refused_let)
+}
+
+/// [`holds_refused_let`] for statement `op`: a `LET` of a protected name
+/// anywhere in it, or a `LET` written as an expression in any of its
+/// expressions or those of the statements it holds.
+fn op_holds_refused_let(op: &LogicalOp) -> bool {
+	use std::ops::ControlFlow;
+	op.visit_ops_deep(&mut |node| {
+		let protected = matches!(
+			node,
+			LogicalOp::Let(stmt) if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stmt.name.as_str())
+		);
+		match protected || node.scalars().into_iter().any(holds_let_expression) {
+			true => ControlFlow::Break(()),
+			false => ControlFlow::Continue(()),
+		}
+	})
+	.is_break()
+}
 
 /// Collapse an `IF` around the conditions the query wrote as literals.
 pub(super) fn apply(expr: &mut LogicalExpr, _cx: &ExprContext<'_>) -> bool {
@@ -83,6 +196,46 @@ fn collapse(conditional: &mut LogicalIf) -> Option<LogicalExpr> {
 	})))
 }
 
+/// Whether statement `op`, or a statement it holds, writes.
+fn writes_op(op: &LogicalOp) -> bool {
+	use std::ops::ControlFlow;
+	op.visit_ops_deep(&mut |node| match node {
+		LogicalOp::Write(_) => ControlFlow::Break(()),
+		LogicalOp::Source(_)
+		| LogicalOp::Values(_)
+		| LogicalOp::Match(_)
+		| LogicalOp::Subquery(_)
+		| LogicalOp::Ddl(_)
+		| LogicalOp::UnionAll(_)
+		| LogicalOp::Join(_)
+		| LogicalOp::Filter(_)
+		| LogicalOp::PermissionFilter(_)
+		| LogicalOp::Split(_)
+		| LogicalOp::Aggregate(_)
+		| LogicalOp::Distinct(_)
+		| LogicalOp::Sort(_)
+		| LogicalOp::Limit(_)
+		| LogicalOp::Project(_)
+		| LogicalOp::Fetch(_)
+		| LogicalOp::Timeout(_)
+		| LogicalOp::VersionScope(_)
+		| LogicalOp::Only(_)
+		| LogicalOp::Explain(_)
+		| LogicalOp::Eval(_)
+		| LogicalOp::Sequence(_)
+		| LogicalOp::Let(_)
+		| LogicalOp::Return(_)
+		| LogicalOp::Foreach(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
+		| LogicalOp::Info(_)
+		| LogicalOp::Sleep(_) => ControlFlow::Continue(()),
+	})
+	.is_break()
+}
+
 /// Whether [`collapse`] removes something from `conditional`: a `false` branch holding no refused
 /// `LET`, or a `true` branch whose unreachable arms and `ELSE` hold none ([`holds_refused_let`]).
 fn foldable(conditional: &LogicalIf) -> bool {
@@ -115,8 +268,6 @@ fn holds_refused_let(expr: &LogicalExpr) -> bool {
 /// Whether `expr` holds a statement that writes.
 fn writes(expr: &LogicalExpr) -> bool {
 	use std::ops::ControlFlow;
-
-	use crate::expr::logical::LogicalOp;
 	expr.visit_deep(&mut |node| {
 		let LogicalExpr::Subquery(plan) = node else {
 			return ControlFlow::Continue(());
@@ -260,5 +411,30 @@ mod tests {
 			"Return\n  Eval[IF $c THEN 1 ELSE 2 END]",
 			"the always-true branch becomes the ELSE, beneath the condition that precedes it"
 		);
+	}
+
+	/// A statement `IF` arm that never runs goes, with the statements it
+	/// holds, and is kept where it holds a `LET` planning refuses.
+	#[test]
+	fn a_statement_arm_that_never_runs_is_kept_only_for_a_refused_let() {
+		for sql in [
+			"IF false { 1 } ELSE { 2 }",
+			"IF false { LET $a = 1 } ELSE { 2 }",
+			"IF false { SELECT * FROM t } ELSE { 2 }",
+			"IF true { 1 } ELSE { LET $a = 1 }",
+			"IF true { 1 } ELSE IF $c { SELECT * FROM t }",
+		] {
+			let folded = rewritten(lower(sql)).to_string();
+			assert!(!folded.contains("If"), "`{sql}`: an arm that never runs was kept: {folded}");
+		}
+		for sql in [
+			"IF false { LET $auth = 1 } ELSE { 2 }",
+			"IF true { 1 } ELSE { LET $session = 1 }",
+			"IF false { SELECT * FROM t WHERE (LET $x = 1) } ELSE { 2 }",
+			"IF true { 1 } ELSE IF $c { [(LET $x = 1)] }",
+		] {
+			let kept = rewritten(lower(sql)).to_string();
+			assert!(kept.contains("If"), "`{sql}`: an arm holding a refused LET went: {kept}");
+		}
 	}
 }

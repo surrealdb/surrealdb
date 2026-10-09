@@ -970,10 +970,15 @@ impl<'ctx> Planner<'ctx> {
 	/// every principal of its frame's class.
 	pub(crate) async fn bind_scoped(
 		&self,
-		op: LogicalOp,
+		mut op: LogicalOp,
 		row_scoped: &[&str],
 	) -> Result<LogicalOp, Error> {
 		crate::exec::compiles::note();
+		// Before the binding passes, so a read of a `LET` of a literal reaches the
+		// rules and the access paths as that literal; an `IF` condition is left as
+		// written. Every statement, nested statement and function body is bound
+		// here, so none is planned without it.
+		crate::exec::logical::constants::propagate(&mut op);
 		let session_values: Vec<&str> = UNIT_RUNTIME_PARAMS
 			.iter()
 			.copied()
@@ -2492,14 +2497,16 @@ impl<'ctx> Planner<'ctx> {
 				// The scalar may be a stored clause, which holds its statements
 				// as written, or part of a bound statement; binding does not
 				// disturb what is bound already.
-				let unbound = matches!(
-					*op,
-					LogicalOp::Sequence(_)
-						| LogicalOp::Foreach(_)
-						| LogicalOp::Let(_)
-						| LogicalOp::Eval(_)
-				)
-				.then(|| (*op).clone());
+				let unbound =
+					matches!(
+						*op,
+						LogicalOp::Sequence(_)
+							| LogicalOp::Foreach(_)
+							| LogicalOp::Let(_) | LogicalOp::Eval(_)
+							| LogicalOp::If(_) | LogicalOp::Throw(_)
+							| LogicalOp::Break(_) | LogicalOp::Continue(_)
+					)
+					.then(|| (*op).clone());
 				// As `plan_statement_with` does: a schema statement the plan
 				// cannot see the effect of is not a refusal here, since
 				// `plan_checked` plans what follows it again late-bound.
@@ -3361,7 +3368,14 @@ async fn plan_statement_with(
 	// planned from the statement as written.
 	let unbound = matches!(
 		op,
-		LogicalOp::Sequence(_) | LogicalOp::Foreach(_) | LogicalOp::Let(_) | LogicalOp::Eval(_)
+		LogicalOp::Sequence(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
 	)
 	.then(|| op.clone());
 	// Boxed for the same reason as `plan_logical_inner`: the bind passes and the

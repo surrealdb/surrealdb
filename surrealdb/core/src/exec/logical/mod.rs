@@ -86,6 +86,7 @@
 // none of them names is left alone rather than mishandled.
 #![warn(clippy::wildcard_enum_match_arm)]
 
+pub(crate) mod constants;
 mod effects;
 mod fold;
 pub(crate) mod footprint;

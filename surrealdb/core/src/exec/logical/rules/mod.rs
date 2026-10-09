@@ -48,6 +48,7 @@
 //! | A membership subquery in a predicate becomes a semi or anti join | [`decorrelate`] |
 //! | A call to a `DEFINE FUNCTION` whose body is one expression is replaced by that expression | [`inline`] |
 //! | A cast to the kind an expression already has, and a broadcast over a value that is not a collection, go | [`kind`] |
+//! | A statement `IF` drops the arms a literal condition rules out, and becomes the arm a literal condition selects | [`control_flow`] |
 //!
 //! And the expression rules:
 //!
@@ -272,6 +273,7 @@ pub(super) fn rewrite_row_positions(
 /// The rule set, in the order the driver tries them at a node. The order
 /// affects only how many passes the fixpoint takes, never what it is.
 pub(super) const RULES: &[RuleDef] = &[
+	control_flow::RULE,
 	filter::RULE,
 	layers::RULE,
 	join::RULE,
@@ -429,6 +431,10 @@ pub(super) fn is_permission_node(node: &LogicalOp) -> bool {
 		| LogicalOp::Only(_)
 		| LogicalOp::Explain(_)
 		| LogicalOp::Eval(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
 		| LogicalOp::Sequence(_)
 		| LogicalOp::Let(_)
 		| LogicalOp::Return(_)
@@ -466,6 +472,10 @@ pub(super) fn row_schema(node: &LogicalOp) -> Schema {
 		| LogicalOp::Join(_)
 		| LogicalOp::Explain(_)
 		| LogicalOp::Eval(_)
+		| LogicalOp::If(_)
+		| LogicalOp::Throw(_)
+		| LogicalOp::Break(_)
+		| LogicalOp::Continue(_)
 		| LogicalOp::Sequence(_)
 		| LogicalOp::Let(_)
 		| LogicalOp::Return(_)

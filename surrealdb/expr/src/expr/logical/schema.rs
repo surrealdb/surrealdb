@@ -831,11 +831,12 @@ mod tests {
 
 	use super::*;
 	use crate::expr::logical::{
-		EvalFrame, GuardKind, JoinKind, LogicalDdl, LogicalDdlStatement, LogicalDistinct,
-		LogicalEval, LogicalExplain, LogicalFetch, LogicalField, LogicalFields, LogicalFilter,
-		LogicalForeach, LogicalInfo, LogicalJoin, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp,
-		LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalReturn, LogicalSequence,
-		LogicalSleep, LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery, LogicalTimeout,
+		EvalFrame, GuardKind, JoinKind, LogicalBreak, LogicalContinue, LogicalDdl,
+		LogicalDdlStatement, LogicalDistinct, LogicalEval, LogicalExplain, LogicalFetch,
+		LogicalField, LogicalFields, LogicalFilter, LogicalForeach, LogicalIfOp, LogicalInfo,
+		LogicalJoin, LogicalLet, LogicalLimit, LogicalOnly, LogicalOp, LogicalOrdering,
+		LogicalPermissionFilter, LogicalProject, LogicalReturn, LogicalSequence, LogicalSleep,
+		LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery, LogicalThrow, LogicalTimeout,
 		LogicalUnionAll, LogicalValues, LogicalVersionScope, RelationAlias, SourceRef, lower_expr,
 	};
 	use crate::expr::{ExplainFormat, Param};
@@ -1511,6 +1512,12 @@ mod tests {
 			LogicalOp::Sleep(LogicalSleep {
 				duration: expr("1ms"),
 			}),
+			LogicalOp::If(LogicalIfOp::new(vec![(expr("true"), bound(closed()))], None)),
+			LogicalOp::Throw(LogicalThrow {
+				value: expr("'x'"),
+			}),
+			LogicalOp::Break(LogicalBreak),
+			LogicalOp::Continue(LogicalContinue),
 			LogicalOp::Ddl(LogicalDdl {
 				statement: LogicalDdlStatement::Rebuild(Box::new(
 					crate::expr::statements::RebuildStatement::Index(

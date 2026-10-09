@@ -920,9 +920,26 @@ fn map_statement<'a>(
 			tail.timeout = Some(timeout.timeout.clone());
 			op = &timeout.input;
 		}
+		// A statement `IF` none of whose arms holds a statement, and a `THROW`,
+		// `BREAK` or `CONTINUE`, is evaluated as the expression it is in value
+		// position.
+		let evaluated;
+		if matches!(
+			op,
+			LogicalOp::If(_) | LogicalOp::Throw(_) | LogicalOp::Break(_) | LogicalOp::Continue(_)
+		) && !maps_as_control(op)
+		{
+			evaluated = LogicalOp::Eval(crate::expr::logical::LogicalEval {
+				expr: op.clone().into_scalar(),
+			});
+			op = &evaluated;
+		}
 		// An `IF` whose branches hold statements is control flow, its statements
 		// compiled with the program.
-		if matches!(op, LogicalOp::Eval(_)) && maps_as_control(op) && tail == Tail::default() {
+		if matches!(op, LogicalOp::Eval(_) | LogicalOp::If(_))
+			&& maps_as_control(op)
+			&& tail == Tail::default()
+		{
 			let mut blocks = Blocks::of(planner);
 			let control =
 				crate::exec::vm::host::out_of_line(|| blocks.control(planner, op)).await?;
@@ -1277,66 +1294,6 @@ fn constant_truth(control: &Control) -> Option<bool> {
 	}
 }
 
-/// `expr` with each read of parameter `name` replaced by `constant`, in the
-/// statements it holds too, but not in a closure's body, which reads the
-/// name where the closure is called, nor in a table permission's predicate
-/// ([`op_with_constant`]).
-fn with_constant(expr: &mut LogicalExpr, name: &str, constant: &LogicalExpr) {
-	match expr {
-		LogicalExpr::Param(param) if param.as_str() == name => *expr = constant.clone(),
-		LogicalExpr::Closure(_) => {}
-		LogicalExpr::Subquery(op) => op_with_constant(op, name, constant),
-		other => {
-			for child in other.children_mut() {
-				with_constant(child, name, constant);
-			}
-		}
-	}
-}
-
-/// Statement `op` with each read of parameter `name` replaced by `constant`,
-/// as [`with_constant`] replaces it, in every scalar but a table permission's
-/// predicate and a layer's columns — a field's permission or `COMPUTED` body
-/// ([`LogicalOp::is_layer`]): those are definer code, run in a privileged
-/// frame that holds none of the caller's bindings, so the caller's `LET`
-/// never reaches them, nor the statements they hold.
-fn op_with_constant(op: &mut LogicalOp, name: &str, constant: &LogicalExpr) {
-	if !matches!(op, LogicalOp::PermissionFilter(_)) && !op.is_layer() {
-		let _ = op.visit_scalars_mut(&mut |scalar| {
-			with_constant(scalar, name, constant);
-			Ok::<(), std::convert::Infallible>(())
-		});
-	}
-	for child in op.children_mut() {
-		op_with_constant(child, name, constant);
-	}
-}
-
-/// Whether statement `op` binds parameter `name` anywhere inside it: a
-/// `LET`, a `FOR`, or a closure's parameter, in the statements its
-/// expressions hold too.
-fn rebinds(op: &LogicalOp, name: &str) -> bool {
-	op.any(|node| {
-		let binds = match node {
-			LogicalOp::Let(stmt) => stmt.name == name,
-			LogicalOp::Foreach(foreach) => foreach.param.as_str() == name,
-			_ => false,
-		};
-		binds || node.scalars().into_iter().any(|scalar| rebinds_in_expr(scalar, name))
-	})
-}
-
-/// [`rebinds`] for an expression.
-fn rebinds_in_expr(expr: &LogicalExpr, name: &str) -> bool {
-	expr.any(|node| match node {
-		LogicalExpr::Closure(closure) => {
-			closure.args.iter().any(|(param, _)| param.as_str() == name)
-		}
-		LogicalExpr::Subquery(op) => rebinds(op, name),
-		_ => false,
-	})
-}
-
 /// Whether statement `op` maps to control flow ([`Plan::Control`]): a block,
 /// `FOR`, `RETURN` or `SLEEP`, an `IF` whose branches hold statements, or a
 /// block binding left of one whose condition it folded.
@@ -1356,7 +1313,19 @@ fn maps_as_control(op: &LogicalOp) -> bool {
 			LogicalExpr::Subquery(inner) => matches!(**inner, LogicalOp::Sequence(_)),
 			_ => false,
 		},
+		LogicalOp::If(ifs) => ifs.arms.iter().any(arm_holds_a_statement),
 		_ => false,
+	}
+}
+
+/// Whether an arm of a statement `IF` holds a statement: one that is not an
+/// expression, or is the expression of a statement in value position.
+fn arm_holds_a_statement(arm: &LogicalOp) -> bool {
+	match arm {
+		LogicalOp::Eval(eval) => matches!(eval.expr, LogicalExpr::Subquery(_)),
+		LogicalOp::If(ifs) => ifs.arms.iter().any(arm_holds_a_statement),
+		LogicalOp::Throw(_) | LogicalOp::Break(_) | LogicalOp::Continue(_) => false,
+		_ => true,
 	}
 }
 
@@ -4276,10 +4245,6 @@ struct BlocksMark {
 /// the statement being mapped bind, and the statements mapped so far.
 struct Blocks {
 	bound: Vec<String>,
-	/// For each name of [`Self::bound`], the constant a `LET` bound it to:
-	/// a literal with no declared kind, which the statements in its scope
-	/// read as written.
-	constants: Vec<Option<LogicalExpr>>,
 	sources: Vec<(LogicalOp, Vec<String>)>,
 	/// The catalog the statements mapped from here on are planned against,
 	/// as the block's schema statements before them leave it: what their
@@ -4350,7 +4315,6 @@ impl Blocks {
 		let speculates = speculates && !super::speculate::WITHOUT_SPECULATION.with(std::cell::Cell::get);
 		Self {
 			bound: Vec::new(),
-			constants: Vec::new(),
 			sources: Vec::new(),
 			overlay: speculates.then(crate::kvs::speculation::Overlay::default),
 			straight: true,
@@ -4464,7 +4428,11 @@ impl Blocks {
 		Ok(match op {
 			Op::Sequence(sequence) => {
 				let outer = self.bound.len();
-				let mut stmts = Vec::with_capacity(sequence.stmts.len());
+				// Only the statements the block reaches have a control in its
+				// sequence. A statement past them never runs: it is planned for the
+				// refusals it raises, which the block raises, and its control is dropped.
+				let reached = sequence.reachable_prefix().len();
+				let mut stmts = Vec::with_capacity(reached);
 				let first_change =
 					sequence.stmts.iter().position(crate::exec::planner::fold::changes_the_catalog);
 				let eager = self.eager;
@@ -4472,7 +4440,14 @@ impl Blocks {
 				// the block cannot know is planned late-bound: it resolves each
 				// catalog object it names when it runs.
 				let late = planner.late_binding();
+				// The state the unreachable statements are planned over, restored
+				// after them: what they would bind, write, define or speculate never
+				// reaches the plan. The refusals they raise stay.
+				let mut unreached = None;
 				for (at, statement) in sequence.stmts.iter().enumerate() {
+					if at == reached {
+						unreached = Some((self.mark(), self.overlay.clone(), self.changed));
+					}
 					self.eager = eager && first_change.is_none_or(|first| at <= first);
 					if self.dead {
 						#[cfg(test)]
@@ -4488,30 +4463,21 @@ impl Blocks {
 							.await?;
 					// A `LET` binds its name for the statements after it.
 					if let Op::Let(stmt) = statement {
-						let constant = match &control {
-							Control::Let {
-								kind: None,
-								value,
-								..
-							} => match value.as_ref() {
-								Control::Value(expr)
-									if crate::exec::planner::util::try_literal_to_value(expr)
-										.is_some() =>
-								{
-									Some(expr.clone())
-								}
-								_ => None,
-							},
-							_ => None,
-						};
 						self.bound.push(stmt.name.clone());
-						self.constants.push(constant);
 					}
-					stmts.push(control);
+					if unreached.is_none() {
+						stmts.push(control);
+					}
+				}
+				if let Some((mark, overlay, changed)) = unreached {
+					let refusal = self.refusal.clone();
+					self.rewind(mark);
+					self.overlay = overlay;
+					self.changed = changed;
+					self.refusal = refusal;
 				}
 				self.eager = eager;
 				self.bound.truncate(outer);
-				self.constants.truncate(outer);
 				Control::Seq(stmts)
 			}
 			Op::Let(stmt) => {
@@ -4546,16 +4512,30 @@ impl Blocks {
 						planner.is_late_bound(),
 					);
 				}
+				// A statement `IF`, `THROW`, `BREAK` or `CONTINUE` as the value
+				// is the value-position expression it evaluates to.
+				let evaluated;
+				let value_op = match stmt.value.as_ref() {
+					value @ (Op::If(_) | Op::Throw(_) | Op::Break(_) | Op::Continue(_))
+						if !maps_as_control(value) =>
+					{
+						evaluated = Op::Eval(crate::expr::logical::LogicalEval {
+							expr: value.clone().into_scalar(),
+						});
+						&evaluated
+					}
+					value => value,
+				};
 				// An expression holding no statement is evaluated where the
 				// block reaches it; anything else runs as a statement, whose
 				// `RETURN` answers the `LET`.
-				let value = match stmt.value.as_ref() {
-					Op::Eval(eval) if self.evaluated_in_place(planner, &stmt.value, &eval.expr) => {
+				let value = match value_op {
+					Op::Eval(eval) if self.evaluated_in_place(planner, value_op, &eval.expr) => {
 						crate::exec::vm::host::out_of_line(|| {
 							self.note_hidden_schema(planner, &eval.expr)
 						})
 						.await;
-						Control::Value(self.with_constants(&eval.expr))
+						Control::Value(eval.expr.clone())
 					}
 					value => {
 						crate::exec::vm::host::out_of_line(|| self.statement(planner, value))
@@ -4577,7 +4557,6 @@ impl Blocks {
 				// leaves the body to be planned when each iteration reaches it.
 				let range_changed = self.late_after && self.changed;
 				self.bound.push(foreach.param.as_str().to_owned());
-				self.constants.push(None);
 				let late = planner.late_binding();
 				let peeled = match range_changed {
 					true => Ok(None),
@@ -4629,7 +4608,6 @@ impl Blocks {
 					Err(why) => (None, Err(why)),
 				};
 				self.bound.pop();
-				self.constants.pop();
 				Control::For {
 					param: foreach.param.clone(),
 					range: Box::new(range),
@@ -4710,6 +4688,22 @@ impl Blocks {
 					duration: *duration,
 				}
 			}
+			Op::If(ifs) => {
+				let straight = std::mem::replace(&mut self.straight, false);
+				let mapped =
+					crate::exec::vm::host::out_of_line(|| self.if_else_op(planner, ifs, straight))
+						.await;
+				self.straight = straight;
+				mapped?
+			}
+			Op::Throw(throw) => Control::Throw {
+				value: Box::new(
+					crate::exec::vm::host::out_of_line(|| self.value(planner, &throw.value))
+						.await?,
+				),
+			},
+			Op::Break(_) => Control::Break,
+			Op::Continue(_) => Control::Continue,
 			Op::Eval(eval) => match &eval.expr {
 				LogicalExpr::If(ifs) => {
 					let straight = std::mem::replace(&mut self.straight, false);
@@ -4734,7 +4728,7 @@ impl Blocks {
 				expr if self.evaluated_in_place(planner, op, expr) => {
 					crate::exec::vm::host::out_of_line(|| self.note_hidden_schema(planner, expr))
 						.await;
-					Control::Value(self.with_constants(expr))
+					Control::Value(expr.clone())
 				}
 				_ => crate::exec::vm::host::out_of_line(|| self.statement(planner, op)).await?,
 			},
@@ -4818,45 +4812,93 @@ impl Blocks {
 		})
 	}
 
-	/// The constants in scope, by name: each name's innermost binding, where
-	/// a `LET` bound it to a constant.
-	fn visible_constants(&self) -> Vec<(&str, &LogicalExpr)> {
-		let mut seen: Vec<&str> = Vec::new();
-		let mut out = Vec::new();
-		for (name, constant) in self.bound.iter().zip(&self.constants).rev() {
-			if seen.contains(&name.as_str()) {
-				continue;
-			}
-			seen.push(name);
-			if let Some(constant) = constant {
-				out.push((name.as_str(), constant));
+	/// A statement `IF` in a statement's place: [`Self::if_else`] for its
+	/// arms, each mapped as [`Self::arm`] maps one.
+	async fn if_else_op(
+		&mut self,
+		planner: &Planner<'_>,
+		ifs: &crate::expr::logical::LogicalIfOp,
+		straight: bool,
+	) -> Mapped<Control> {
+		let mut branches = Vec::with_capacity(ifs.conditions.len());
+		let mut otherwise = None;
+		let mut any_changed = false;
+		let arms = ifs.conditions.len();
+		for (at, (source, arm)) in ifs.branches().enumerate() {
+			let condition =
+				crate::exec::vm::host::out_of_line(|| self.value(planner, source)).await?;
+			let entering = self.changed;
+			// Only a literal `true` that is the last arm, with no `ELSE`, is
+			// folded: its arm is taken whenever the block reaches the `IF`, and
+			// no arm after it exists. Every other arm, including one a literal
+			// `false` or a constant `LET` rules out, is mapped as an ordinary
+			// branch, so its statements are planned and their refusals raised.
+			let literal_true = matches!(
+				crate::exec::planner::util::try_literal_to_value(source),
+				Some(crate::val::Value::Bool(true))
+			);
+			let last = at + 1 == arms && ifs.otherwise().is_none();
+			let folded = match literal_true && last {
+				true => constant_truth(&condition),
+				false => None,
+			};
+			match folded {
+				Some(true) => {
+					let settled = branches.is_empty();
+					let inner = std::mem::replace(&mut self.straight, straight && settled);
+					let taken = crate::exec::vm::host::out_of_line(|| self.arm(planner, arm)).await;
+					self.straight = inner;
+					otherwise = Some(taken?);
+					any_changed |= std::mem::replace(&mut self.changed, entering);
+					break;
+				}
+				_ => {
+					let branch =
+						crate::exec::vm::host::out_of_line(|| self.arm(planner, arm)).await?;
+					any_changed |= std::mem::replace(&mut self.changed, entering);
+					branches.push((condition, branch));
+				}
 			}
 		}
-		out
+		let otherwise = match (otherwise, ifs.otherwise()) {
+			(Some(taken), _) => Some(Box::new(taken)),
+			(None, Some(arm)) => {
+				let entering = self.changed;
+				let inner = std::mem::replace(&mut self.straight, straight && branches.is_empty());
+				let branch = crate::exec::vm::host::out_of_line(|| self.arm(planner, arm)).await;
+				self.straight = inner;
+				let branch = branch?;
+				any_changed |= std::mem::replace(&mut self.changed, entering);
+				Some(Box::new(branch))
+			}
+			(None, None) => None,
+		};
+		self.changed |= any_changed;
+		Ok(Control::If {
+			branches,
+			otherwise,
+		})
 	}
 
-	/// `expr` reading each constant in scope as written; see
-	/// [`with_constant`].
-	fn with_constants(&self, expr: &LogicalExpr) -> LogicalExpr {
-		let mut expr = expr.clone();
-		for (name, constant) in self.visible_constants() {
-			if !rebinds_in_expr(&expr, name) {
-				with_constant(&mut expr, name, constant);
+	/// An arm of a statement `IF`: an expression as [`Self::branch`] maps it,
+	/// a block, loop, `RETURN`, `SLEEP`, `IF`, `THROW`, `BREAK` or `CONTINUE`
+	/// as control flow, and another statement as the block runs one.
+	async fn arm(&mut self, planner: &Planner<'_>, arm: &LogicalOp) -> Mapped<Control> {
+		use crate::expr::logical::LogicalOp as Op;
+		match arm {
+			Op::Eval(eval) => {
+				crate::exec::vm::host::out_of_line(|| self.branch(planner, &eval.expr)).await
 			}
+			Op::Sequence(_)
+			| Op::Foreach(_)
+			| Op::Return(_)
+			| Op::Sleep(_)
+			| Op::If(_)
+			| Op::Throw(_)
+			| Op::Break(_)
+			| Op::Continue(_) => crate::exec::vm::host::out_of_line(|| self.control(planner, arm)).await,
+			other => crate::exec::vm::host::out_of_line(|| self.statement(planner, other)).await,
 		}
-		expr
-	}
-
-	/// Statement `op` reading each constant in scope as written, where
-	/// nothing inside it binds the name again.
-	fn op_with_constants(&self, op: &LogicalOp) -> LogicalOp {
-		let mut op = op.clone();
-		for (name, constant) in self.visible_constants() {
-			if !rebinds(&op, name) {
-				op_with_constant(&mut op, name, constant);
-			}
-		}
-		op
 	}
 
 	/// Whether expression statement `op`, of expression `expr`, is evaluated
@@ -4928,7 +4970,7 @@ impl Blocks {
 	async fn value(&mut self, planner: &Planner<'_>, expr: &LogicalExpr) -> Mapped<Control> {
 		if !holds_a_body(expr) {
 			crate::exec::vm::host::out_of_line(|| self.note_hidden_schema(planner, expr)).await;
-			return Ok(Control::Value(self.with_constants(expr)));
+			return Ok(Control::Value(expr.clone()));
 		}
 		let op = LogicalOp::Eval(crate::expr::logical::LogicalEval {
 			expr: expr.clone(),
@@ -4949,7 +4991,7 @@ impl Blocks {
 	) -> Mapped<Control> {
 		let source = u16::try_from(self.sources.len())
 			.map_err(|_| NotCovered::internal("more statements than a block holds"))?;
-		self.sources.push((self.op_with_constants(fetched), self.bound.clone()));
+		self.sources.push((fetched.clone(), self.bound.clone()));
 		let planned_over = self
 			.overlay
 			.as_ref()
@@ -4960,8 +5002,8 @@ impl Blocks {
 			plan: Box::new(PhysicalPlan {
 				catalog: None,
 				root: Plan::Eval {
-					expr: self.with_constants(expr),
-					fetches: fetches.iter().map(|fetch| self.with_constants(fetch)).collect(),
+					expr: expr.clone(),
+					fetches: fetches.to_vec(),
 				},
 				dependencies: Vec::new(),
 				tail: Tail::default(),
@@ -5001,11 +5043,21 @@ impl Blocks {
 			LogicalOp::Eval(eval) if matches!(eval.expr, LogicalExpr::Continue) => {
 				return Ok(Control::Continue);
 			}
+			LogicalOp::Break(_) => return Ok(Control::Break),
+			LogicalOp::Continue(_) => return Ok(Control::Continue),
+			// Run as a statement, a statement `IF` or `THROW` is the expression
+			// it evaluates to.
+			LogicalOp::If(_) | LogicalOp::Throw(_) => {
+				let evaluated = LogicalOp::Eval(crate::expr::logical::LogicalEval {
+					expr: op.clone().into_scalar(),
+				});
+				return crate::exec::vm::host::out_of_line(|| self.statement(planner, &evaluated))
+					.await;
+			}
 			_ => {}
 		}
 		let source = u16::try_from(self.sources.len())
 			.map_err(|_| NotCovered::internal("more statements than a block holds"))?;
-		let op = &self.op_with_constants(op);
 		self.sources.push((op.clone(), self.bound.clone()));
 		let changes_catalog = crate::exec::planner::fold::changes_the_catalog(op);
 		// A schema statement inside another statement runs when that statement
