@@ -1,5 +1,4 @@
-//! A fixed size token ring buffer, copied from
-//! [`crate::syn::parser::token_buffer`] for the GQL token type.
+//! A fixed size token ring buffer for the GQL token type.
 
 use crate::gql::token::Token;
 

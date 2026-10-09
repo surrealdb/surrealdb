@@ -59,7 +59,7 @@ use crate::val::Value;
 /// matches the rendering that type's wire format has always used), and
 /// `parse_canonical` re-parses it. Every SurrealQL grammar here reads under the
 /// storage wire contract's parser profile,
-/// [`crate::syn::parser::ParserSettings::STORED_TEXT`] — the full grammar with
+/// [`crate::syn::ParserSettings::STORED_TEXT`] — the full grammar with
 /// unbounded limits, deliberately independent of the datastore's live
 /// capabilities and configuration. The text was already validated once, when
 /// the `DEFINE`/`ALTER`/`LIVE` statement that produced it ran; see the
@@ -360,7 +360,7 @@ impl SurqlTarget for Block {
 /// segments, and only a typed segment's `<kind>` annotation goes through the
 /// parser. `Path`'s own `FromStr` owns that grammar, and it settles the limits
 /// question by using the default parser settings rather than
-/// [`ParserSettings::STORED_TEXT`](crate::syn::parser::ParserSettings::STORED_TEXT)
+/// [`ParserSettings::STORED_TEXT`](crate::syn::ParserSettings::STORED_TEXT)
 /// — unchanged from when the path was decoded rather than compiled, so a route
 /// whose kind annotation exceeds the configured depth has always been
 /// unreadable, and this is not the place to start changing that.

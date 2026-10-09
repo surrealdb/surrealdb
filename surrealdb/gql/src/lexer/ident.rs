@@ -1,10 +1,10 @@
 //! Lexing of regular identifiers, keywords and parameter references.
 
+use parse_common::error::syntax_error;
 use unicase::UniCase;
 
 use crate::gql::lexer::{Lexer, keywords};
 use crate::gql::token::{Token, TokenKind};
-use crate::syn::error::syntax_error;
 
 /// Returns if the character can start a regular identifier.
 ///

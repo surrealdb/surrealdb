@@ -24,6 +24,8 @@ mod pattern;
 
 #[cfg(test)]
 mod test;
+use parse_common::error::{SyntaxError, bail, syntax_error};
+use parse_common::span::Span;
 use surrealdb_types::ToSql;
 
 use self::binding::Registry;
@@ -35,8 +37,6 @@ use crate::gql::ast::{
 	GqlExpr, GqlGroupItem, GqlLiteral, GqlQuery, GqlStep, LinearQuery, MatchItem, OrderItem,
 	ReturnClause, ReturnItems, SetQuantifier,
 };
-use crate::syn::error::{SyntaxError, bail, syntax_error};
-use crate::syn::token::Span;
 
 /// Lowers a parsed GQL query into the single already-planned operator it
 /// runs as: [`LogicalOp::Match`].

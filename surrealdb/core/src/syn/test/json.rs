@@ -1,35 +1,46 @@
 use crate::syn::{self, ParserSettings};
 use crate::types::PublicValue;
 
+/// Parses `text` as JSON under the default settings.
+fn json(text: &str) -> Result<PublicValue, surrealdb_parser_next_lower::ParseError> {
+	surrealdb_parser_next_lower::json_with_settings(text, ParserSettings::default())
+}
+
+/// Parses `text` as JSON, reading values out of strings.
+fn json_legacy(text: &str) -> Result<PublicValue, surrealdb_parser_next_lower::ParseError> {
+	surrealdb_parser_next_lower::json_with_settings(
+		text,
+		ParserSettings {
+			legacy_strands: true,
+			..Default::default()
+		},
+	)
+}
+
 #[test]
 fn object_with_negative() {
-	syn::parse_with(r#"{"foo": -1 }"#.as_bytes(), |parser| parser.parse_json()).unwrap();
+	json(r#"{"foo": -1 }"#).unwrap();
 }
 
 #[test]
 fn object_with_trailing_whitespace() {
-	syn::parse_with(r#"{"foo": -1 }\n"#.as_bytes(), |parser| parser.parse_json()).unwrap();
+	json("{\"foo\": -1 }\n").unwrap();
 }
 
 #[test]
 fn array_with_negative() {
-	syn::parse_with(r#"[-1]"#.as_bytes(), |parser| parser.parse_json()).unwrap();
+	json(r#"[-1]"#).unwrap();
 }
 
 #[test]
 fn not_record_id() {
-	let res =
-		syn::parse_with(r#" 'foo:bar-baz'  "#.as_bytes(), |parser| parser.parse_json()).unwrap();
+	let res = json(r#" 'foo:bar-baz'  "#).unwrap();
 	assert_eq!(res, PublicValue::String("foo:bar-baz".to_owned()))
 }
 
 #[test]
 fn not_a_record_id_in_object() {
-	let res = syn::parse_with(r#"{ "data":"focus:outline-none"}"#.as_bytes(), |parser| {
-		parser.parse_json()
-	})
-	.unwrap();
-
+	let res = json(r#"{ "data":"focus:outline-none"}"#).unwrap();
 	let object = res.into_object().unwrap();
 	let data = object.get("data").unwrap();
 	assert_eq!(*data, PublicValue::String("focus:outline-none".to_owned()))
@@ -37,16 +48,7 @@ fn not_a_record_id_in_object() {
 
 #[test]
 fn legacy_uuid() {
-	let v = syn::parse_with_settings(
-		r#" "11111111-1111-1111-1111-111111111111" "#.as_bytes(),
-		ParserSettings {
-			legacy_strands: true,
-			..Default::default()
-		},
-		|parser| parser.parse_json(),
-	)
-	.unwrap();
-
+	let v = json_legacy(r#" "11111111-1111-1111-1111-111111111111" "#).unwrap();
 	let surrealdb_types::Value::Uuid(_) = v else {
 		panic!()
 	};
@@ -54,16 +56,7 @@ fn legacy_uuid() {
 
 #[test]
 fn legacy_datetime() {
-	let v = syn::parse_with_settings(
-		r#" "2024-01-01T00:00:00Z" "#.as_bytes(),
-		ParserSettings {
-			legacy_strands: true,
-			..Default::default()
-		},
-		|parser| parser.parse_json(),
-	)
-	.unwrap();
-
+	let v = json_legacy(r#" "2024-01-01T00:00:00Z" "#).unwrap();
 	let surrealdb_types::Value::Datetime(_) = v else {
 		panic!()
 	};

@@ -18,14 +18,9 @@ categories.workspace = true
 #     --target wasm32-unknown-unknown --profile wasm-release --features next
 [features]
 next = ["dep:surrealdb-parser-next"]
-syn = ["dep:surrealdb-syn"]
-v3 = ["dep:parser", "dep:ast"]
 
 [dependencies]
 surrealdb-parser-next = { path = "..", optional = true }
-surrealdb-syn = { workspace = true, optional = true }
-parser = { workspace = true, optional = true }
-ast = { workspace = true, optional = true }
 
 [lints]
 workspace = true

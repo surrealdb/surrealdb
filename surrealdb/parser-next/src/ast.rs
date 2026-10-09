@@ -239,7 +239,7 @@ pub enum Tag {
 	Alter,
 	/// A clause of a definition: `op` a [`Cl`] code, `a` and `b` its payload as
 	/// documented there. Clauses are kept in source order; a later clause of
-	/// the same kind overrides an earlier one, as in `syn`.
+	/// the same kind overrides an earlier one, as earlier releases read it.
 	Clause,
 }
 
@@ -279,7 +279,8 @@ pub mod define {
 	/// executable (a `Name` list `[org, pkg, major, minor, patch]` as
 	/// `Int`s, or a file string).
 	pub const X1: usize = 3;
-	/// Function: the return kind.
+	/// Function: the return kind. Module: 1 when `X1` is a silo package,
+	/// `NONE` when it is a file string.
 	pub const X2: usize = 4;
 	/// Function: the body block.
 	pub const X3: usize = 5;

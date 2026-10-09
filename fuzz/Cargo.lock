@@ -3907,9 +3907,9 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "thiserror",
  "tracing",
@@ -4010,11 +4010,12 @@ dependencies = [
  "surrealdb-kvs",
  "surrealdb-kvs-any",
  "surrealdb-observe",
+ "surrealdb-parse-common",
+ "surrealdb-parser-next-lower",
  "surrealdb-rpc",
  "surrealdb-runtime",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "sysinfo",
  "tempfile",
@@ -4091,9 +4092,9 @@ dependencies = [
  "surrealdb-common",
  "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "thiserror",
  "tracing",
@@ -4108,8 +4109,8 @@ dependencies = [
  "libfuzzer-sys",
  "surrealdb-core",
  "surrealdb-gql",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
- "surrealdb-syn",
  "surrealdb-types",
  "tokio",
 ]
@@ -4120,8 +4121,8 @@ version = "3.4.0-nightly"
 dependencies = [
  "phf",
  "surrealdb-expr",
+ "surrealdb-parse-common",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "unicase",
 ]
@@ -4252,6 +4253,7 @@ version = "3.4.0-nightly"
 dependencies = [
  "chrono",
  "logos",
+ "thiserror",
  "uuid",
 ]
 
@@ -4263,11 +4265,17 @@ version = "3.4.0-nightly"
 name = "surrealdb-parser-next-lower"
 version = "3.4.0-nightly"
 dependencies = [
+ "bytes",
+ "surrealdb-cnf",
  "surrealdb-common",
+ "surrealdb-iam",
+ "surrealdb-parse-common",
  "surrealdb-parser-next",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-types",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -4338,8 +4346,8 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-expr",
+ "surrealdb-parser-next-lower",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "ulid",
  "url",
@@ -4377,29 +4385,6 @@ dependencies = [
  "revision",
  "serde",
  "storekey",
-]
-
-[[package]]
-name = "surrealdb-syn"
-version = "3.4.0-nightly"
-dependencies = [
- "bytes",
- "chrono",
- "geo-types",
- "phf",
- "rust_decimal",
- "surrealdb-cnf",
- "surrealdb-common",
- "surrealdb-iam",
- "surrealdb-parser-next",
- "surrealdb-parser-next-lower",
- "surrealdb-sql",
- "surrealdb-strand",
- "surrealdb-types",
- "thiserror",
- "tracing",
- "unicase",
- "uuid",
 ]
 
 [[package]]

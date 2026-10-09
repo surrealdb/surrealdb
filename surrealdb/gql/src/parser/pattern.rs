@@ -5,6 +5,8 @@
 //! sequence of element patterns (`pathTerm : pathFactor+`); node-edge-node
 //! alternation is enforced here semantically, with targeted errors.
 
+use parse_common::error::bail;
+
 use crate::gql::ast::{
 	EdgeDirection, EdgePattern, ElementPredicate, Ident, LabelExpr, NodePattern, PathMode,
 	PathPattern, PathPatternPrefix, PathSearchKind, PathStep, Quantifier, QuantifierKind,
@@ -12,7 +14,6 @@ use crate::gql::ast::{
 use crate::gql::parser::mac::{enter_object_recursion, expected, unexpected};
 use crate::gql::parser::{ParseResult, Parser};
 use crate::gql::token::{Keyword, NumberKind, TokenKind, t};
-use crate::syn::error::bail;
 
 impl Parser<'_> {
 	/// Parse a single path pattern: `pathVariableDeclaration?

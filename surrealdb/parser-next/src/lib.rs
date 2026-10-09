@@ -3,7 +3,7 @@
 //! nesting, a flat syntax tree, and statement-at-a-time streaming.
 //!
 //! See `doc/parser/RFC_PARSER_NEXT.md` for the design and how this crate is
-//! measured against `surrealdb-syn`. The crate has no dependencies.
+//! measured. The crate has no dependencies.
 
 pub mod ast;
 pub mod decode;
@@ -14,8 +14,8 @@ pub mod stream;
 
 pub use ast::{Ast, Node, NodeId, Tag};
 pub use parse::{
-	Diag, DiagKind, Entry, Extra, Limits, Scratch, StatementEnd, parse_entry, parse_record_id,
-	parse_record_id_all, parse_script, parse_statement,
+	Diag, DiagKind, Entry, Extra, Limits, PathKind, Scratch, StatementEnd, parse_entry,
+	parse_record_id, parse_record_id_all, parse_script, parse_statement,
 };
 pub use stream::{Statement, Step, StreamError, StreamParser};
 

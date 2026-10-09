@@ -1,7 +1,6 @@
 //! The GQL parser.
 //!
-//! A recursive descent parser over [`crate::gql::lexer::Lexer`] tokens,
-//! mirroring the structure of the SurrealQL parser in [`crate::syn::parser`]:
+//! A recursive descent parser over [`crate::gql::lexer::Lexer`] tokens:
 //! most functions peek a token and decide which production to parse based on
 //! it. Recursive productions recurse on the call stack, so every nesting
 //! construct is charged against [`GqlParserSettings::object_recursion_limit`]
@@ -18,12 +17,13 @@
 //! match modes, `IS [NOT] NULL` postfixes and function calls. The grammar
 //! subset is `LL(3)`; no backtracking is used.
 
+use parse_common::error::{SyntaxError, bail};
+
 use self::token_buffer::TokenBuffer;
 use crate::gql::GqlParserSettings;
 use crate::gql::ast::{GqlQuery, Ident};
 use crate::gql::lexer::Lexer;
 use crate::gql::token::{Span, Token, TokenKind};
-use crate::syn::error::{SyntaxError, bail};
 
 mod expr;
 pub mod mac;

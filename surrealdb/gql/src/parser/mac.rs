@@ -1,4 +1,4 @@
-//! Macros for the GQL parser, adapted from [`crate::syn::parser::mac`].
+//! Macros for the GQL parser.
 
 /// A macro for returning an error when an unexpected token was found.
 ///
@@ -15,16 +15,16 @@ macro_rules! unexpected {
 				// invalid token, but fall back to a generic error rather
 				// than panicking if it somehow did not.
 				let __error = $parser.lexer.error.take().unwrap_or_else(|| {
-					$crate::syn::error::syntax_error!("Invalid token", @__found.span)
+					::parse_common::error::syntax_error!("Invalid token", @__found.span)
 				});
 				return Err(__error);
 			}
 			$crate::gql::token::TokenKind::Eof => {
-				let __error = $crate::syn::error::syntax_error!("Unexpected end of file, expected {}", $expected, @__found.span $( $($t)* )?);
+				let __error = ::parse_common::error::syntax_error!("Unexpected end of file, expected {}", $expected, @__found.span $( $($t)* )?);
 				return Err(__error);
 			}
 			x => {
-				$crate::syn::error::bail!("Unexpected token `{}`, expected {}", x, $expected, @__found.span $( $($t)* )?)
+				::parse_common::error::bail!("Unexpected token `{}`, expected {}", x, $expected, @__found.span $( $($t)* )?)
 			}
 		}
 	}};
@@ -49,10 +49,10 @@ macro_rules! expected {
 macro_rules! enter_object_recursion {
 	($name:ident = $this:expr_2021 => { $($t:tt)* }) => {{
 		if $this.settings.object_recursion_limit == 0 {
-			return Err($crate::syn::error::SyntaxError::new(
+			return Err(::parse_common::error::SyntaxError::new(
 				"Exceeded query expression nesting depth limit",
 			)
-			.with_span($this.last_span(), $crate::syn::error::MessageKind::Error));
+			.with_span($this.last_span(), ::parse_common::error::MessageKind::Error));
 		}
 		struct Dropper<'a, 'b>(&'a mut $crate::gql::parser::Parser<'b>);
 		impl Drop for Dropper<'_, '_> {

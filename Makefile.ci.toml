@@ -226,7 +226,7 @@ args = [
     "--package",
     "surrealdb-core",
     "--package",
-    "surrealdb-syn",
+    "surrealdb-parser-next-lower",
     "--no-default-features",
     "--features",
     "surrealdb-core/kv-mem",
@@ -1197,15 +1197,20 @@ run_task = { name = [
     "test-lang",
 ], fork = true, parallel = false }
 
-[tasks.ci-lang-test-parser-next]
-category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language tests with the front end on parser-next, checking every parse against surrealdb-syn"
-# `check` parses each input with both parsers and fails on any difference in
-# outcome or tree, so a divergence that would not change a result still fails.
-env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "", SURREAL_PARSER_NEXT = "check" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = true }
+[tasks.ci-parser]
+category = "CI - CHECK"
+description = "Run the SurrealQL parser's golden corpus check and its invariant harnesses"
+# The golden check pins every entry point's tree or rendered error on the
+# corpus; the invariant harnesses check streaming, round-tripping, the depth
+# ceilings and the tree invariants under mutation.
+script = """
+#!/bin/bash -ex
+cargo test --locked -p surrealdb-parser-next -p surrealdb-parser-next-lower
+cargo run --locked --release -p surrealdb-parser-next --example golden
+for mode in --fuzz --stream --round-trip --depth-probe; do
+    cargo run --locked --release -p surrealdb-parser-next --example invariants -- "$mode"
+done
+"""
 
 [tasks.ci-lang-test-tikv]
 category = "CI - LANGUAGE TESTS"
@@ -1285,14 +1290,6 @@ echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests with the SurrealKV backend"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade" }
-run_task = "test-lang-upgrade"
-
-[tasks.ci-lang-upgrade-test-parser-next]
-category = "CI - LANGUAGE TESTS"
-description = "Run language upgrade tests with the current checkout's front end on parser-next"
-# Released binaries ignore the variable; the current checkout re-parses every
-# stored definition they wrote through parser-next, checked against syn.
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade", SURREAL_PARSER_NEXT = "check" }
 run_task = "test-lang-upgrade"
 
 [tasks.ci-lang-upgrade-test-rocksdb]
@@ -1496,7 +1493,7 @@ script = """
         surrealdb-gql surrealdb-iam surrealdb-idx surrealdb-kvs \
         surrealdb-kvs-any surrealdb-kvs-mem surrealdb-observe \
         surrealdb-parse-common surrealdb-rpc surrealdb-runtime surrealdb-sql \
-        surrealdb-strand surrealdb-syn surrealdb-types"
+        surrealdb-strand surrealdb-parser-next surrealdb-parser-next-lower surrealdb-types"
     export __CARGO_LLVM_COV_RUSTC_WRAPPER_CRATE_NAMES="surrealql_test,surrealql_test_tests,$(echo $COVERAGE_PACKAGES | tr ' -' ',_')"
 
     # Clean previous coverage artifacts
@@ -1524,10 +1521,11 @@ script = """
     # An instrumentation gap produces a well-formed but empty lcov file, which
     # the upload accepts without complaint. Assert that the crates under test
     # reached the report so the failure surfaces here instead of as a coverage
-    # figure that quietly measures nothing. `syn` is checked alongside the two
-    # largest crates because it sits outside the pair the report is most often
-    # read for, so it also catches the crate list narrowing back to those two.
-    for coverage_anchor in core/src/exec expr/src syn/src; do
+    # figure that quietly measures nothing. The parser is checked alongside the
+    # two largest crates because it sits outside the pair the report is most
+    # often read for, so it also catches the crate list narrowing back to those
+    # two.
+    for coverage_anchor in core/src/exec expr/src parser-next/src; do
         if ! grep -q "surrealdb/$coverage_anchor" ../language-tests-lcov.info; then
             echo "ERROR: no coverage recorded for surrealdb/$coverage_anchor; the crates under test were not instrumented" >&2
             exit 1

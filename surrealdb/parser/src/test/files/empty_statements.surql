@@ -1,5 +1,0 @@
-;;;;;
-/* ===== result =====
-Query
-    .exprs: None
-*/

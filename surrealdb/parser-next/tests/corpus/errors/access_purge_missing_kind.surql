@@ -1,0 +1,1 @@
+ACCESS my_access ON DATABASE PURGE FOR 1h;

@@ -25,14 +25,15 @@
 //! planner compiles its scalars as it compiles every other scalar. No surface
 //! or expression-layer AST is built on the way.
 
+use parse_common::error::{SyntaxError, bail, syntax_error};
+use parse_common::span::Span;
+
 use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalLiteral};
 use crate::expr::match_plan::{BindingId, BindingKind};
 use crate::expr::{BinaryOperator, Function, Param, PrefixOperator};
 use crate::gql::ast::{BinaryOp, GqlExpr, GqlLiteral, Ident, SetQuantifier, TruthValue, UnaryOp};
 use crate::gql::lower::binding::Registry;
 use crate::gql::lower::naming;
-use crate::syn::error::{SyntaxError, bail, syntax_error};
-use crate::syn::token::Span;
 
 /// The binding context an expression is lowered in: the clause registry, used
 /// to resolve variable references to bindings and to reject property access on

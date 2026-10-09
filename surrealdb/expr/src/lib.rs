@@ -26,8 +26,8 @@ pub mod val;
 // The module tree spells intra-layer paths as `crate::<name>`; these aliases
 // keep those paths valid for the layers this crate sits on.
 pub(crate) use surrealdb_iam as iam;
+pub(crate) use surrealdb_parser_next_lower as syn;
 pub(crate) use surrealdb_sql as sql;
-pub(crate) use surrealdb_syn as syn;
 pub(crate) mod types {
 	//! The public type surface, re-exported with `Public` prefixes so internal
 	//! and public forms stay visually distinct at use sites.

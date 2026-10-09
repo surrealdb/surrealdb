@@ -19,8 +19,8 @@ default-features = false
 [dependencies.surrealdb-gql]
 path = "../surrealdb/gql"
 
-[dependencies.surrealdb-syn]
-path = "../surrealdb/syn"
+[dependencies.surrealdb-parser-next-lower]
+path = "../surrealdb/parser-next/lower"
 
 [dependencies.surrealdb-sql]
 path = "../surrealdb/sql"

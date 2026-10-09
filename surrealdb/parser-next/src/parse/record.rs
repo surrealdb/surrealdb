@@ -5,7 +5,7 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// `table:key`, with `table` the current token. With `ranges`, as an
 	/// expression reads it: no whitespace before the `:`, and the key may be a
-	/// range. Without, as `syn`'s `parse_record_id` reads it.
+	/// range. Without, as a record id outside an expression reads it.
 	pub(crate) fn record_id(&mut self, table_tok: Tok, ranges: bool) -> R<NodeId> {
 		self.bump();
 		let colon = self.bump();
@@ -21,6 +21,9 @@ impl<'a, 's> Parser<'a, 's> {
 			return self.record_range(table, start, NONE, 0).map(|v| v.unwrap_or(PUSHED));
 		}
 		if self.tok.ws() {
+			if !ranges {
+				return Err(self.key_after_whitespace());
+			}
 			return Err(self.unexpected("a record-id key"));
 		}
 		match self.tok.kind {
@@ -55,10 +58,12 @@ impl<'a, 's> Parser<'a, 's> {
 					},
 				)
 			}
-			// In an expression `syn` asks what starts a key before reading one.
+			// In an expression what starts a key is checked before reading one.
 			_ if ranges && !self.starts_key() && self.tok.kind != T::Param => {
 				Err(self.unexpected("a record-id key"))
 			}
+			// Outside an expression a key is read with no `$param` hint.
+			T::Param if !ranges => Err(self.unexpected("an identifier")),
 			_ => {
 				let key = self.simple_key()?;
 				self.record_after_key(table, start, key, ranges).map(|v| v.unwrap_or(PUSHED))
@@ -66,9 +71,8 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
-	/// Whether the current token starts a record-id key (`syn`'s
-	/// `kind_starts_record_id_key`): a plain or uuid string does too, though
-	/// only the uuid string makes a valid one.
+	/// Whether the current token starts a record-id key: a plain or uuid
+	/// string does too, though only the uuid string makes a valid one.
 	fn starts_key(&self) -> bool {
 		matches!(
 			self.tok.kind,
@@ -120,7 +124,12 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		if self.tok.ws() || !self.starts_key() {
 			if flags & 2 != 0 {
-				return Err(self.unexpected("a record-id key"));
+				// Any token after `..=` is read as a key, and the established
+				// error names an identifier as what the fallback expects.
+				if self.tok.ws() {
+					return Err(self.key_after_whitespace());
+				}
+				return Err(self.unexpected("an identifier"));
 			}
 			let range = self.node(Tag::KeyRange, flags, lo, NONE, start, 2)?;
 			let d = self.depth_of(range);
@@ -169,8 +178,8 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// Whether `n`, an identifier joined to digits, is only `_` and digits:
-	/// `syn` lexes those as part of the digits token, so even strict keys
-	/// take them.
+	/// they have always lexed as part of the digits token, so even strict
+	/// keys take them.
 	fn digits_continue(&self, n: Tok) -> bool {
 		n.kind == T::Ident
 			&& self.src[n.start as usize..n.end as usize]
@@ -193,7 +202,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.bump();
 					return Ok(self.leaf_span(Tag::KeyStr, 3, 0, 0, t.start, n.end));
 				}
-				// A strict key ends where `syn`'s digits token does, after any
+				// A strict key ends where the digits token does, after any
 				// `_` and digits that open the joined identifier; with an `_`
 				// it is a string key.
 				if let Some(n) = self.adjacent1()
@@ -229,18 +238,24 @@ impl<'a, 's> Parser<'a, 's> {
 				let neg = t.kind == T::Minus;
 				let d = self.tok;
 				// After `+` the digits must follow directly; after `-` they may not.
-				if d.kind != T::Digits || (!neg && d.ws()) {
+				if neg && d.kind != T::Digits {
+					return Err(self.unexpected("a number"));
+				}
+				if !neg && d.ws() {
+					return Err(self.unexpected_at(t, "a record-id key"));
+				}
+				if d.kind != T::Digits {
 					return Err(self.unexpected("an integer"));
 				}
-				// `syn`'s digits token runs on over `_`.
+				// The digits token runs on over `_`, as it always has.
 				let mut dend = d.end as usize;
 				while self.src.get(dend).is_some_and(|&b| b.is_ascii_digit() || b == b'_') {
 					dend += 1;
 				}
 				let dend = dend as u32;
 				if !neg {
-					// `syn` reads the digits after `+` without consuming them,
-					// so the key is their number and they remain the next token.
+					// The digits after `+` are read without consuming them, so
+					// the key is their number and they remain the next token.
 					let text = &self.src[d.start as usize..dend as usize];
 					// Read as written, so `_` makes the key a string.
 					let number = if text.contains(&b'_') {
@@ -265,16 +280,13 @@ impl<'a, 's> Parser<'a, 's> {
 				self.prev_end = dend;
 				let text = &self.src[d.start as usize..dend as usize];
 				if self.src.get(dend as usize).is_some_and(|b| b.is_ascii_alphabetic()) {
-					// `syn` reads a letter after the digits as the end of a
-					// failed integer and drops it: the key is the string
-					// `-digits`.
+					// A letter after the digits ends a failed integer and is
+					// dropped, as earlier releases read it: the key is the
+					// string `-digits`.
 					self.reset_to(dend + 1);
 					self.prev_start = d.start;
 					self.prev_end = dend + 1;
 					return Ok(self.leaf_span(Tag::KeyStr, 2, 0, 0, d.start, dend));
-				}
-				if !self.tok.ws() && (self.tok.kind == T::Dot || self.tok.is_ident()) {
-					return Err(self.unexpected("numeric record-id keys can only be integers"));
 				}
 				let u = crate::lex::decode_uint(text);
 				let v = match u {

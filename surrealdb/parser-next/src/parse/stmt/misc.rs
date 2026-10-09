@@ -210,7 +210,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	pub(crate) fn rebuild_stmt(&mut self, start: u32) -> R<NodeId> {
-		self.expect_kw(Kw::Index, "INDEX")?;
+		self.expect_kw(Kw::Index, "a rebuild statement keyword")?;
 		let mut flags = 0;
 		if self.eat_kw(Kw::If) {
 			self.expect_kw(Kw::Exists, "EXISTS")?;
@@ -308,7 +308,7 @@ impl<'a, 's> Parser<'a, 's> {
 		} else {
 			0
 		};
-		// `syn` reports a bad word after the keyword at the keyword.
+		// A bad word after the keyword is reported at the keyword.
 		let t = self.tok;
 		let (op, x, y) = match t.kw {
 			_ if t.kind != T::Ident => {

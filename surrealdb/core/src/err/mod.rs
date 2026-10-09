@@ -151,11 +151,20 @@ macro_rules! error_registry {
 				// owned by core does, and the layers keep moving downwards.
 				let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
 				let mut implemented = Vec::new();
+				// A crate nested one level down, such as `parser-next/lower`,
+				// counts as a sibling too.
 				let siblings: Vec<_> = std::fs::read_dir(root.join(".."))
 					.expect("read the crate directory")
 					.flatten()
 					.filter(|sibling| sibling.file_name() != "core")
-					.map(|sibling| sibling.path().join("src"))
+					.flat_map(|sibling| {
+						let nested = std::fs::read_dir(sibling.path())
+							.into_iter()
+							.flatten()
+							.flatten()
+							.map(|child| child.path().join("src"));
+						std::iter::once(sibling.path().join("src")).chain(nested)
+					})
 					.filter(|src| src.is_dir())
 					.collect();
 
@@ -168,7 +177,7 @@ macro_rules! error_registry {
 					.iter()
 					.filter_map(|src| src.parent()?.file_name()?.to_str().map(str::to_owned))
 					.collect();
-				for owner in ["common", "syn"] {
+				for owner in ["common", "lower"] {
 					assert!(
 						scanned.contains(owner),
 						"`{owner}` owns a `LeafError` impl but was not scanned; the sibling walk \
@@ -337,11 +346,11 @@ error_registry! {
 		probe: crate::dbs::SortError::Revision(revision::Error::Serialize("sample".to_string())),
 		expect: is_serialization,
 	}
-	// Owned by `surrealdb-syn` rather than by a core module: core raises a parse
+	// Owned by `surrealdb-parser-next-lower` rather than by a core module: core raises a parse
 	// failure exactly as the parser reported it.
 	crate::syn::ParseError {
 		map: LeafError::to_types_error,
-		probe: crate::syn::ParseError::InvalidQuery(surrealdb_syn::error::RenderedError {
+		probe: crate::syn::ParseError::InvalidQuery(parse_common::error::RenderedError {
 			errors: vec!["sample".to_string()],
 			snippets: Vec::new(),
 		}),
@@ -412,7 +421,7 @@ pub fn is_query_timedout(error: &anyhow::Error) -> bool {
 /// Almost certainly not here. A new failure belongs to the layer that raises
 /// it, in that layer's own error type - `catalog`, `doc`, `exec`, `expr`,
 /// `idx`, `key`, `buc`, `iam`, `kvs`, `dbs::capabilities`, `dbs::SortError`,
-/// `api::err::ApiError`, or `surrealdb_syn::ParseError` - which then implements
+/// `api::err::ApiError`, or `surrealdb_parser_next_lower::ParseError` - which then implements
 /// [`common::LeafError`] and joins [`error_registry!`]. If no layer owns the
 /// concept, which layer should is the question to answer first; this enum is
 /// not the answer to it.

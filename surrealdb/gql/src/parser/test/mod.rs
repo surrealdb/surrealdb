@@ -1,5 +1,4 @@
-//! Tests for the GQL parser, mirroring the layout of
-//! [`crate::syn::parser`]'s test module: statement level tests in `stmt`,
+//! Tests for the GQL parser: statement level tests in `stmt`,
 //! pattern tests in `pattern`, expression tests in `expr` and recursion and
 //! pathological input tests in `limits`. The tests below are the original
 //! smoke tests asserting the core parse shapes and targeted errors.

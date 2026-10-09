@@ -1,5 +1,5 @@
 //! Literal tokens in positions that take one kind of literal only: integers,
-//! durations, strings. These follow `syn`'s `next_token_value` rules.
+//! durations, strings. These follow the established literal-token rules.
 
 use super::*;
 
@@ -16,11 +16,16 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				true
 			}
-			T::Minus => return Err(self.unexpected("only positive integers are allowed here")),
+			T::Minus => {
+				return Err(self.diag(
+					Diag::message(t.start, t.end, "Unexpected token `-`")
+						.with_label("Only positive integers allowed here"),
+				));
+			}
 			_ => return Err(self.unexpected("an unsigned integer")),
 		};
 		let n = self.number_with(t.start, signed, true)?;
-		self.only_int(n)
+		self.only_int(n, t.start)
 	}
 
 	/// A signed integer: digits, optionally after an adjacent sign.
@@ -38,25 +43,30 @@ impl<'a, 's> Parser<'a, 's> {
 			_ => return Err(self.unexpected("an signed integer")),
 		};
 		let n = self.number_in(t.start, signed, false, Compound::Integer, t.start)?;
-		self.only_int(n)
+		self.only_int(n, t.start)
 	}
 
-	fn only_int(&mut self, n: NodeId) -> R<NodeId> {
+	/// `n`, the literal read from `origin`, when it is an integer; otherwise
+	/// the established error for reading it as one.
+	fn only_int(&mut self, n: NodeId, origin: u32) -> R<NodeId> {
 		let node = self.ast.nodes[n as usize];
 		if node.tag != Tag::Int {
+			if let Some(d) = crate::lex::compound_error(self.src, origin, Compound::Integer) {
+				return Err(self.diag(d));
+			}
 			return Err(self.error(node.start, node.end, "only integers are allowed here"));
 		}
 		Ok(n)
 	}
 
-	/// A floating-point number (`syn`'s `f32`/`f64` token value): digits with
+	/// A floating-point number (an `f32`/`f64` token value): digits with
 	/// an optional fraction and exponent, an adjacent sign, `NaN` or
 	/// `Infinity`.
 	pub(crate) fn float_lit(&mut self) -> R<NodeId> {
 		self.numeric_lit(false)
 	}
 
-	/// A number (`syn`'s `Number` token value): an integer, float or decimal.
+	/// A number (a `Number` token value): an integer, float or decimal.
 	pub(crate) fn number_lit(&mut self) -> R<NodeId> {
 		self.numeric_lit(true)
 	}
@@ -96,6 +106,11 @@ impl<'a, 's> Parser<'a, 's> {
 		};
 		let n = self.number_in(t.start, signed, false, mode, t.start)?;
 		let node = self.ast.nodes[n as usize];
+		// A float reads on over a `.`, which must start a fraction.
+		if !decimal && let Some(d) = crate::lex::compound_error(self.src, t.start, Compound::Float)
+		{
+			return Err(self.diag(d));
+		}
 		let ok = match node.tag {
 			Tag::Int | Tag::Float => true,
 			Tag::Decimal => decimal,
@@ -116,6 +131,9 @@ impl<'a, 's> Parser<'a, 's> {
 		let n = self.number_in(at, false, false, Compound::Duration, at)?;
 		let node = self.ast.nodes[n as usize];
 		if node.tag != Tag::Duration {
+			if let Some(d) = crate::lex::compound_error(self.src, at, Compound::Duration) {
+				return Err(self.diag(d));
+			}
 			return Err(self.error(node.start, node.end, "expected a duration"));
 		}
 		Ok(n)

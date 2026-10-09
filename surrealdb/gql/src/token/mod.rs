@@ -2,12 +2,12 @@
 //!
 //! The token vocabulary is transcribed from the vendored grammar
 //! `doc/gql/GQL.g4` (sections 21.1-21.4) as distilled in
-//! `doc/gql/REFERENCE.md`. Spans reuse [`crate::syn::token::Span`] so GQL
+//! `doc/gql/REFERENCE.md`. Spans reuse [`parse_common::span::Span`] so GQL
 //! errors render through the same machinery as SurrealQL errors.
 
 use std::fmt;
 
-pub use crate::syn::token::Span;
+pub use parse_common::span::Span;
 
 mod keyword;
 pub use keyword::Keyword;

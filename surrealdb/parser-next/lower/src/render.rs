@@ -1,4 +1,4 @@
-//! Rendering parser-next diagnostics as `syn` words them.
+//! Rendering parser-next diagnostics in the established error wording.
 //!
 //! A [`Diag`] holds static templates and spans; this module substitutes the
 //! source-dependent parts. Spans stay byte offsets: placing them in the
@@ -10,8 +10,8 @@ use surrealdb_parser_next::kw::Kw;
 use surrealdb_parser_next::lex::{Lexer, T};
 use surrealdb_parser_next::{Diag, DiagKind};
 
-/// Words `syn`'s lexer reads as language, algorithm, distance and vector-type
-/// tokens rather than identifiers, with the name `syn` gives each.
+/// Words errors name as language, algorithm, distance and vector-type tokens
+/// rather than identifiers, with the name each is given.
 const WORD_TOKENS: &[(&str, &str)] = &[
 	("AR", "ARABIC"),
 	("ARA", "ARABIC"),
@@ -99,7 +99,7 @@ const WORD_TOKENS: &[(&str, &str)] = &[
 	("U8", "U8"),
 ];
 
-/// The token at `at` as `syn` names it in an error: `an identifier`, a
+/// The token at `at` as an error names it: `an identifier`, a
 /// keyword in upper case, `a strand`, `;`.
 pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 	let mut l = Lexer::new(src.as_bytes());
@@ -112,8 +112,8 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 		T::Ident => {
 			if t.kw != Kw::None {
 				match t.kw {
-					// The keywords `syn` spells in lower case, and `SC`, which
-					// `syn` names after the keyword it abbreviates.
+					// The keywords errors spell in lower case, and `SC`, which
+					// errors name after the keyword it abbreviates.
 					Kw::True => "true",
 					Kw::False => "false",
 					Kw::Fn => "fn",
@@ -172,7 +172,7 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 		T::StarStar => "**",
 		T::Percent => "%",
 		T::Bang => "!",
-		// `syn` has no `??` token: it reads the first `?`.
+		// Errors name only the first `?` of `??`.
 		T::Question | T::QQ => "?",
 		T::QColon => "?:",
 		T::AnyEq => "?=",
@@ -206,8 +206,9 @@ pub fn token_name(src: &str, at: u32) -> Cow<'static, str> {
 }
 
 /// Substitutes `{found}`, `{text}`, `{char}`, `{last}` (the last character of
-/// the text), `{next}` (the character after it) and `{suggest}` (the builtin
-/// path `syn` would suggest for the text) in `template` from the source at
+/// the text), `{next}` (the character after it), `{last_byte}` (its last
+/// byte, as a number) and `{suggest}` (the builtin
+/// path suggested for the text) in `template` from the source at
 /// `start..end`.
 pub fn fill(template: &str, src: &str, start: u32, end: u32) -> String {
 	if !template.contains('{') {
@@ -227,6 +228,12 @@ pub fn fill(template: &str, src: &str, start: u32, end: u32) -> String {
 		.replace("{char}", &first)
 		.replace("{last}", &last)
 		.replace("{next}", &next);
+	if out.contains("{last_byte}") {
+		// The last byte of the span as a number, which the established
+		// wording prints where a character is meant.
+		let byte = end.checked_sub(1).and_then(|i| src.as_bytes().get(i as usize));
+		out = out.replace("{last_byte}", &byte.map_or(String::new(), u8::to_string));
+	}
 	if out.contains("{first}") {
 		let mut l = Lexer::new(src.as_bytes());
 		l.pos = start;
@@ -252,7 +259,7 @@ pub fn fill(template: &str, src: &str, start: u32, end: u32) -> String {
 	out
 }
 
-/// The message of `d` as `syn` words it.
+/// The message of `d` in the established wording.
 pub fn message(src: &str, d: &Diag) -> String {
 	match d.kind {
 		DiagKind::Message => fill(d.msg, src, d.start, d.end),
@@ -267,7 +274,7 @@ pub fn message(src: &str, d: &Diag) -> String {
 	}
 }
 
-/// `d`, a diagnostic against `src`, as a lowering failure in `syn`'s words.
+/// `d`, a diagnostic against `src`, as a lowering failure in the established wording.
 pub fn reject(src: &str, d: &Diag) -> crate::Reject {
 	let mut r = crate::Reject::new(message(src, d)).at(d.start, d.end);
 	if !d.label.is_empty() {

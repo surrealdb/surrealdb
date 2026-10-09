@@ -1,13 +1,9 @@
-//! Parity checks that every builtin path and keyword relate-target parses
-//! in both parsers.
-//!
-//! They live in core because they drive the greenfield parser alongside
-//! `surrealdb-syn`; neither parser crate can see the other.
+//! Every builtin path and keyword relate-target parses.
 
 use surrealdb_sql::builtin_paths::{PATHS, PathKind};
 
 #[test]
-fn paths_parse_in_both_parsers() {
+fn paths_parse() {
 	let mut failures = Vec::new();
 	for (path, (kind, _)) in PATHS.entries() {
 		let path = path.into_inner();
@@ -16,26 +12,18 @@ fn paths_parse_in_both_parsers() {
 			PathKind::Function => format!("RETURN {path}(0);"),
 		};
 		if let Err(e) = crate::syn::parse(&source) {
-			failures.push(format!("`{path}` failed to parse in the core parser: {e}"));
-		}
-		if let Err(e) =
-			parser::Parser::enter_parse::<ast::Query>(&source, parser::Config::all_features())
-		{
-			failures.push(format!(
-				"`{path}` failed to parse in the new parser:\n{}",
-				e.render_char_buffer().write_to_string()
-			));
+			failures.push(format!("`{path}` failed to parse: {e}"));
 		}
 	}
 	assert!(
 		failures.is_empty(),
-		"builtin function/constant paths diverged between the parsers:\n{}",
+		"builtin function/constant paths failed:\n{}",
 		failures.join("\n")
 	);
 }
 
 #[test]
-fn keyword_relate_targets_parse_in_both_parsers() {
+fn keyword_relate_targets_parse() {
 	let mut failures = Vec::new();
 	for source in [
 		"RELATE a:1->edge->sleep:b;",
@@ -45,20 +33,8 @@ fn keyword_relate_targets_parse_in_both_parsers() {
 		"RELATE a:1->edge->SELECT * FROM b;",
 	] {
 		if let Err(e) = crate::syn::parse(source) {
-			failures.push(format!("`{source}` failed to parse in the core parser: {e}"));
-		}
-		if let Err(e) =
-			parser::Parser::enter_parse::<ast::Query>(source, parser::Config::all_features())
-		{
-			failures.push(format!(
-				"`{source}` failed to parse in the new parser:\n{}",
-				e.render_char_buffer().write_to_string()
-			));
+			failures.push(format!("`{source}` failed to parse: {e}"));
 		}
 	}
-	assert!(
-		failures.is_empty(),
-		"RELATE keyword-target parsing diverged between the parsers:\n{}",
-		failures.join("\n")
-	);
+	assert!(failures.is_empty(), "RELATE keyword targets failed:\n{}", failures.join("\n"));
 }

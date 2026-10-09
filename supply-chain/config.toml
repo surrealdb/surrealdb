@@ -34,9 +34,6 @@ audit-as-crates-io = false
 [policy.surrealdb]
 audit-as-crates-io = false
 
-[policy.surrealdb-ast]
-audit-as-crates-io = false
-
 [policy.surrealdb-catalog]
 audit-as-crates-io = false
 
@@ -113,9 +110,6 @@ audit-as-crates-io = false
 [policy.surrealdb-parse-common]
 audit-as-crates-io = false
 
-[policy.surrealdb-parser]
-audit-as-crates-io = false
-
 [policy.surrealdb-pgsql]
 audit-as-crates-io = false
 
@@ -145,12 +139,6 @@ criteria = "safe-to-run"
 audit-as-crates-io = false
 
 [policy.surrealdb-strand]
-audit-as-crates-io = false
-
-[policy.surrealdb-syn]
-audit-as-crates-io = false
-
-[policy.surrealdb-token]
 audit-as-crates-io = false
 
 [policy.surrealdb-types]

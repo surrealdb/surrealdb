@@ -19,10 +19,11 @@
 
 use std::str::CharIndices;
 
+use parse_common::error::{SyntaxError, bail};
+use parse_common::span::Span;
+
 use crate::gql::lexer::Lexer;
 use crate::gql::token::{Token, TokenKind};
-use crate::syn::error::{SyntaxError, bail};
-use crate::syn::token::Span;
 
 impl Lexer<'_> {
 	/// Lex a quoted token. The opening quote, and the `@` prefix if any, must

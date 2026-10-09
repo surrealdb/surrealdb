@@ -1,10 +1,11 @@
-//! Module containing the implementation of the surrealql tokens, lexer, and
-//! parser.
+//! Core's SurrealQL front end: the parser's entry points with settings
+//! derived from the datastore's capabilities and configuration.
 
 use std::collections::HashSet;
 
-pub use surrealdb_syn::next::Mode as ParserNextMode;
-pub(crate) use surrealdb_syn::{ParseError, ParserConfig, lexer, parser};
+pub(crate) use surrealdb_parser_next_lower::{
+	ParseError, ParserConfig, ParserSettings, StatementStream,
+};
 
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -20,31 +21,14 @@ pub trait Parse<T> {
 #[cfg(test)]
 mod test;
 
-use anyhow::{Result, bail, ensure};
-use lexer::Lexer;
-pub(crate) use parser::ParserSettings;
-use parser::{ParseResult, Parser};
+use anyhow::Result;
 
 const TARGET: &str = "surrealdb::core::syn";
 
 /// Takes a string and returns if it could be a reserved keyword in certain
 /// contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
-	surrealdb_syn::could_be_reserved_keyword(s)
-}
-
-pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
-where
-	F: FnOnce(&mut Parser<'_>) -> ParseResult<R>,
-{
-	lift(surrealdb_syn::parse_with(input, f))
-}
-
-pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
-where
-	F: for<'a> FnOnce(&'a mut Parser<'a>) -> ParseResult<R>,
-{
-	lift(surrealdb_syn::parse_with_settings(input, settings, f))
+	surrealdb_parser_next_lower::could_be_reserved_keyword(s)
 }
 
 /// Raises a parse failure into the `anyhow` chain unchanged.
@@ -103,7 +87,7 @@ pub fn parse_with_capabilities(
 ) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
-	lift(surrealdb_syn::query_with_settings(
+	lift(surrealdb_parser_next_lower::query_with_settings(
 		input,
 		settings_from_capabilities_config(capabilities, config),
 	))
@@ -127,7 +111,7 @@ pub(crate) fn expr_with_capabilities(
 ) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	lift(surrealdb_syn::expr_with_settings(
+	lift(surrealdb_parser_next_lower::expr_with_settings(
 		input,
 		settings_from_capabilities_config(capabilities, config),
 		false,
@@ -143,11 +127,10 @@ pub fn function_with_capabilities(
 ) -> Result<Function> {
 	trace!(target: TARGET, "Parsing SurrealQL function name");
 
-	parse_with_settings(
-		input.as_bytes(),
+	lift(surrealdb_parser_next_lower::function_with_settings(
+		input,
 		settings_from_capabilities_config(capabilities, config),
-		|parser| parser.parse_function_name(),
-	)
+	))
 }
 
 /// Parses JSON into an inert SurrealQL [`PublicValue`].
@@ -160,7 +143,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 		..Default::default()
 	};
 
-	lift(surrealdb_syn::json_with_settings(input, settings))
+	lift(surrealdb_parser_next_lower::json_with_settings(input, settings))
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -168,7 +151,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
-	lift(surrealdb_syn::idiom(input))
+	lift(surrealdb_parser_next_lower::idiom(input))
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
@@ -176,14 +159,7 @@ pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 pub fn datetime(input: &str) -> Result<PublicDatetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
-	ensure!(input.len() <= u32::MAX as usize, ParseError::QueryTooLarge);
-
-	match Lexer::lex_datetime(input) {
-		Ok(x) => Ok(x),
-		Err(e) => {
-			bail!(ParseError::InvalidQuery(e.render_on(input)))
-		}
-	}
+	lift(surrealdb_parser_next_lower::datetime(input))
 }
 
 /// Parse a duration from a string.
@@ -191,15 +167,7 @@ pub fn datetime(input: &str) -> Result<PublicDatetime> {
 pub fn duration(input: &str) -> Result<PublicDuration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	ensure!(input.len() <= u32::MAX as usize, ParseError::QueryTooLarge);
-
-	let mut parser = Parser::new(input.as_bytes());
-	parser
-		.next_token_value::<PublicDuration>()
-		.and_then(|e| parser.assert_finished().map(|_| e))
-		.map_err(|e| e.render_on(input))
-		.map_err(ParseError::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	lift(surrealdb_parser_next_lower::duration(input))
 }
 
 /// Parse a record id.
@@ -207,7 +175,7 @@ pub fn duration(input: &str) -> Result<PublicDuration> {
 pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL record id");
 
-	lift(surrealdb_syn::record_id(input))
+	lift(surrealdb_parser_next_lower::record_id(input))
 }
 
 /// Parse a table name from a string.
@@ -215,26 +183,22 @@ pub fn record_id(input: &str) -> Result<PublicRecordId> {
 pub fn table(input: &str) -> Result<surrealdb_strand::TableName> {
 	trace!(target: TARGET, "Parsing SurrealQL table name");
 
-	parse_with(input.as_bytes(), |parser| {
-		let ident = parser.parse_ident()?;
-		Ok(surrealdb_strand::TableName::new(ident))
-	})
+	lift(surrealdb_parser_next_lower::table(input)).map(Into::into)
 }
 
 /// Parses a `{ ... }` block of fresh input, under the configured depth limits.
 ///
-/// Distinct from [`surrealdb_syn::block_for_definition`], which parses under the
-/// stored-text profile, whose ceilings sit far above the configured defaults.
-/// That profile is meant only for text this engine wrote: parsing, the lowering
-/// to `expr::Block` and the value's recursive `Drop` all descend the call stack
-/// per nesting level, and a stack overflow aborts the process instead of
-/// returning an error.
+/// Distinct from [`surrealdb_parser_next_lower::block_for_definition`], which parses under the
+/// bounded stored-text profile. That profile is intended for text this engine
+/// wrote: parsing is heap-stacked and survives arbitrary nesting, but the
+/// lowering to `expr::Block` and the value's recursive `Drop` descend the call
+/// stack, and a stack overflow aborts the process instead of returning an error.
 /// Fresh input therefore keeps the limits, whoever hands it in.
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len())))]
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	lift(surrealdb_syn::block_with_settings(
+	lift(surrealdb_parser_next_lower::block_with_settings(
 		input,
 		ParserSettings::all_features(&ParserConfig::default()),
 		false,
@@ -247,7 +211,7 @@ pub fn block(input: &str) -> Result<Block> {
 pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	lift(surrealdb_syn::expr_legacy_strand(input))
+	lift(surrealdb_parser_next_lower::expr_legacy_strand(input))
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -257,7 +221,7 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
-	lift(surrealdb_syn::value(input))
+	lift(surrealdb_parser_next_lower::value(input))
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
@@ -265,7 +229,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	lift(surrealdb_syn::value_legacy_strand(input, config))
+	lift(surrealdb_parser_next_lower::value_legacy_strand(input, config))
 }
 
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
@@ -284,7 +248,7 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 		..Default::default()
 	};
 
-	lift(surrealdb_syn::json_with_settings(input, settings))
+	lift(surrealdb_parser_next_lower::json_with_settings(input, settings))
 }
 
 /// Parse a kind from a string.
@@ -292,7 +256,7 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL kind");
 
-	lift(surrealdb_syn::kind(input))
+	lift(surrealdb_parser_next_lower::kind(input))
 }
 
 /// Extracts the tables from the given kind definition string.

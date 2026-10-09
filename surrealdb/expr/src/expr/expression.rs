@@ -482,23 +482,11 @@ impl DeserializeRevisioned for Expr {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let query: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 
-		let expr = crate::syn::parse_with_settings(
-			query.as_bytes(),
-			// The wire format is engine-rendered SurrealQL text; see the
-			// constant for why decode is capability- and limit-independent.
-			crate::syn::parser::ParserSettings::STORED_TEXT,
-			// The whole of the stored text must be consumed, for the reason
-			// `syn::expr_for_definition` documents: the Pratt parser stops at
-			// the first token it cannot continue with, so trailing content
-			// would decode to a prefix and be evaluated as if that were the
-			// stored expression.
-			|p| {
-				let expr = p.parse_expr()?;
-				p.assert_finished()?;
-				Ok(expr)
-			},
-		)
-		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
+		// The wire format is engine-rendered SurrealQL text, parsed under the
+		// stored-text profile and consumed whole, for the reasons
+		// `syn::expr_for_definition` documents.
+		let expr = crate::syn::expr_for_definition(&query)
+			.map_err(|err| revision::Error::Conversion(err.to_string()))?;
 		Ok(expr.into())
 	}
 }

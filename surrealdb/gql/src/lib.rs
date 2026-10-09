@@ -18,7 +18,6 @@ pub mod token;
 // The module tree spells intra-layer paths as `crate::gql::<name>` and names
 // its neighbours as `crate::<layer>`; these aliases keep those paths valid.
 pub use surrealdb_expr::{expr, val};
-pub(crate) use surrealdb_syn as syn;
 
 pub use self::lower::PreparedGqlQuery;
 
@@ -36,9 +35,9 @@ impl Default for GqlParserSettings {
 		}
 	}
 }
-use surrealdb_syn::error::SyntaxError;
-use surrealdb_syn::syntax_error;
-use surrealdb_syn::token::Span;
+use parse_common::error::SyntaxError;
+use parse_common::span::Span;
+use parse_common::syntax_error;
 
 /// Settings which control the behaviour of the GQL parser.
 #[derive(Clone, Debug)]
@@ -51,7 +50,7 @@ pub struct GqlParserSettings {
 	/// are otherwise unbounded and overflow the call stack when the lowered
 	/// `LogicalExpr` tree is later walked recursively (dropped, formatted or
 	/// compiled). Mirrors
-	/// [`crate::syn::parser::ParserSettings::expr_recursion_limit`].
+	/// [`GqlParserSettings::expr_recursion_limit`].
 	pub expr_recursion_limit: usize,
 }
 

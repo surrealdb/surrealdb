@@ -114,8 +114,7 @@ use crate::options::EngineOptions;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
-use crate::syn::parser::{ParserSettings, StatementStream};
-use crate::syn::{ParseError, ParserConfig};
+use crate::syn::{ParseError, ParserConfig, ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::{MAX_VALUE_DEPTH, convert_value_to_public_value};
 use crate::{CommunityComposer, syn};
@@ -1003,15 +1002,6 @@ impl Datastore {
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
-		self
-	}
-
-	/// Selects the SurrealQL front end: `syn`'s parser, or parser-next behind
-	/// the same AST. The choice is process-wide, as the parse entry points are
-	/// free functions, and overrides `SURREAL_PARSER_NEXT`; see
-	/// [`crate::syn::ParserNextMode`].
-	pub fn with_parser_next(self, mode: crate::syn::ParserNextMode) -> Self {
-		surrealdb_syn::next::set_mode(mode);
 		self
 	}
 
@@ -5925,10 +5915,9 @@ impl Datastore {
 		// request, and retrying it unchanged cannot succeed. Left to rise as a
 		// bare `ParseError` it reaches every transport as an unclassified
 		// internal fault, which reads as a server problem worth retrying.
-		let ast = syn::parse_with_settings(
-			sql.as_bytes(),
+		let ast = surrealdb_parser_next_lower::query_with_settings(
+			sql,
 			Self::import_parser_settings(&self.capabilities.load()),
-			|parser| parser.parse_query(),
 		)
 		.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Execute the SQL import
@@ -9367,10 +9356,12 @@ mod test {
 	/// and dropped within the call stack a worker thread running statements is
 	/// guaranteed.
 	///
-	/// Parsing, the `sql -> expr` lowering that follows, `ToSql` and the tree's
-	/// own `Drop` all recurse on the call stack, where exhaustion aborts the
-	/// process rather than returning an error. A ceiling raised
-	/// past what those survive fails here instead.
+	/// Parsing keeps its nesting on the heap, so depth alone costs nothing
+	/// there; the lowering of the flat tree into the `sql` AST, the `sql ->
+	/// expr` lowering that follows, `ToSql` and the tree's own `Drop` recurse
+	/// on the call stack, where exhaustion aborts the process rather than
+	/// returning an error. A ceiling raised past what those survive fails here
+	/// instead.
 	///
 	/// The budget is a fraction of `SURREAL_RUNTIME_STACK_SIZE`, which the
 	/// server sizes well above this in both profiles precisely because these
@@ -9393,9 +9384,7 @@ mod test {
 				let settings = Datastore::import_parser_settings(&Capabilities::default());
 				let parse = |depth: usize| {
 					let source = format!("{}'leaf'{}", "{ l: ".repeat(depth), " }".repeat(depth));
-					crate::syn::parse_with_settings(source.as_bytes(), settings.clone(), |parser| {
-						parser.parse_expr_field()
-					})
+					surrealdb_parser_next_lower::expr_with_settings(&source, settings, false)
 				};
 
 				// The deepest literal the profile accepts, so the tree the

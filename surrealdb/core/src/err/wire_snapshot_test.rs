@@ -45,8 +45,8 @@ fn sample_cast_error() -> CastError {
 	}
 }
 
-fn sample_rendered_error() -> surrealdb_syn::error::RenderedError {
-	surrealdb_syn::error::RenderedError {
+fn sample_rendered_error() -> parse_common::error::RenderedError {
+	parse_common::error::RenderedError {
 		errors: vec!["sample".to_string()],
 		snippets: Vec::new(),
 	}
@@ -1283,7 +1283,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_parse_variant().len(),
-			declared_variants(include_str!("../../../syn/src/lib.rs"), "ParseError"),
+			declared_variants(include_str!("../../../parser-next/lower/src/api.rs"), "ParseError"),
 			"syn::ParseError",
 		),
 		(

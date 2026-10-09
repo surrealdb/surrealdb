@@ -5,12 +5,11 @@ use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::syn::{self};
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget,
 };
-use surrealdb_syn::parser::ParserSettings;
+use surrealdb_parser_next_lower::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::Backend;
@@ -295,10 +294,8 @@ impl<'de> Deserialize<'de> for TestDuration {
 					json_string_escapes: false,
 				};
 
-				let v = syn::parse_with_settings(x.as_bytes(), settings, |parser| {
-					parser.parse_value()
-				})
-				.map_err(<D::Error as serde::de::Error>::custom)?;
+				let v = surrealdb_parser_next_lower::value_with_settings(&x, settings)
+					.map_err(<D::Error as serde::de::Error>::custom)?;
 				let Value::Duration(x) = v else {
 					return Err(<D::Error as serde::de::Error>::custom("Invalid duration"));
 				};
@@ -682,10 +679,8 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
-			parser.parse_value()
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		Ok(SurrealConfigValue(v))
 	}
@@ -746,10 +741,8 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
-			parser.parse_value()
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let Value::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
@@ -790,10 +783,8 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			json_string_escapes: false,
 		};
 
-		let v = syn::parse_with_settings(source.as_bytes(), settings, |parser| {
-			parser.parse_value()
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
+		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		v.into_object().map(SurrealObject).map_err(|err| {
 			<D::Error as serde::de::Error>::custom(format_args!(

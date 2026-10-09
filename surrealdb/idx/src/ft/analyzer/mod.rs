@@ -215,10 +215,10 @@ mod tests {
 	use std::sync::Arc;
 
 	use surrealdb_kvs::TransactionType;
+	use surrealdb_parser_next_lower as syn;
 	use surrealdb_sql::Expr;
 	use surrealdb_sql::statements::DefineStatement;
 	use surrealdb_strand::Strand;
-	use surrealdb_syn as syn;
 
 	use super::{Analyzer, AnalyzerFunction, BoxAnalyzerFut};
 	use crate::catalog::AnalyzerDefinition;

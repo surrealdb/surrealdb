@@ -2590,7 +2590,7 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: PublicValue,
 	) {
-		use surrealdb_syn::ParserConfig;
+		use surrealdb_parser_next_lower::ParserConfig;
 
 		let json_value = value.into_json_value();
 		assert_eq!(json_value, expected);

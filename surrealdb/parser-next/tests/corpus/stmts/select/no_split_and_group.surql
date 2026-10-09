@@ -1,0 +1,1 @@
+SELECT a FROM b SPLIT ON a GrOUP BY b;

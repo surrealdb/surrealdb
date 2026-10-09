@@ -16,7 +16,7 @@
 //! each one move with its layer as the crate split proceeds.
 
 use surrealdb_cnf::ConfigMap;
-use surrealdb_syn::ParserConfig;
+use surrealdb_parser_next_lower::ParserConfig;
 
 use crate::exec::config::ExecConfig;
 #[cfg(feature = "scripting")]
@@ -108,7 +108,7 @@ mod tests {
 
 	#[test]
 	fn parser_keys_reach_their_fields() {
-		use surrealdb_syn::ParserConfig;
+		use surrealdb_parser_next_lower::ParserConfig;
 		let c: ParserConfig = map_with("max_object_parsing_depth", "7").load();
 		assert_eq!(c.max_object_parsing_depth, 7);
 		let c: ParserConfig = map_with("max_query_parsing_depth", "7").load();

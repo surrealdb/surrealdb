@@ -1,12 +1,11 @@
-//! `syn`'s literal-value grammars: SurrealQL values (`parse_value`), JSON
-//! (`parse_json`) and record ids (`parse_value_record_id`), parsed straight
-//! into public values.
+//! The literal-value grammars: SurrealQL values ([`value`]), JSON ([`json`])
+//! and record ids ([`record_id`]), parsed straight into public values.
 //!
 //! The grammars nest through arrays, objects, sets, parentheses, ranges and
 //! record-id keys. Nesting is held on an explicit stack and bounded by the
-//! object budget, charged where `syn` charges it, so it costs no native
-//! stack. A failure reports a message only: callers that render errors take
-//! them from `syn`.
+//! object budget, charged where earlier releases charged it, so it costs no
+//! native stack. A failure is returned unrendered: rendering it against the
+//! source is the caller's concern.
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -61,7 +60,7 @@ enum Frame {
 	/// An object, waiting for the value of `key`.
 	Object(BTreeMap<String, Value>, String, u32),
 	/// A set; its length is after deduplication, which decides whether a
-	/// single element needs a trailing comma, as in `syn`.
+	/// single element needs a trailing comma, as earlier releases read it.
 	Set(Set, u32),
 	/// `( value )`.
 	Paren(u32),
@@ -94,7 +93,7 @@ struct Parser<'a> {
 	settings: &'a Settings,
 	json: bool,
 	json_escapes: bool,
-	/// Object levels left (`syn`'s `object_recursion_limit`).
+	/// Object levels left (`object_recursion_limit`).
 	budget: u16,
 	frames: Vec<Frame>,
 	/// Parsing a record id alone: no range follows the outermost one.
@@ -136,8 +135,8 @@ impl<'a> Parser<'a> {
 		Error::Lower(Reject::new(msg).at(start, end))
 	}
 
-	/// `syn`'s unexpected-token error at the current token, with `expected` in
-	/// its words. An invalid token reports why the lexer rejected it.
+	/// The established unexpected-token error at the current token, with
+	/// `expected` in its wording. An invalid token reports why the lexer rejected it.
 	fn unexpected(&self, expected: &str) -> Error {
 		let t = self.tok;
 		if t.kind == T::Invalid {
@@ -168,8 +167,8 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	/// Where `syn`'s token at `t` ends: `??` is two `?` tokens and a digits
-	/// token runs on over `_`.
+	/// Where the token at `t` ends for error spans, as clients have always
+	/// seen them: `??` is two `?` tokens and a digits token runs on over `_`.
 	fn syn_token_end(&self, t: Tok) -> u32 {
 		match t.kind {
 			T::QQ => t.start + 1,
@@ -178,7 +177,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// `syn`'s error for the malformed literal at `start`, read as `mode`.
+	/// The established error for the malformed literal at `start`, read as `mode`.
 	fn number_err(&self, start: u32, mode: Compound) -> Error {
 		match compound_error(self.src.as_bytes(), start, mode) {
 			Some(d) => Error::Syntax(d),
@@ -210,7 +209,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Consumes a token of kind `k`, or fails having consumed the token in
-	/// its place, as `syn`'s `expected!`. `expected` is `k` as `syn` names it.
+	/// its place. `expected` is `k` as the established error names it.
 	fn expect(&mut self, k: T, expected: &'static str) -> R<()> {
 		if self.eat(k) {
 			Ok(())
@@ -235,19 +234,19 @@ impl<'a> Parser<'a> {
 		Err(self.unclosed(closer, open))
 	}
 
-	/// Consumes the token a failure stopped at. `syn` has no `??` token, so
-	/// only its first `?` is consumed.
+	/// Consumes the token a failure stopped at. `??` counts as two tokens
+	/// here, so only its first `?` is consumed.
 	fn consume_failed(&mut self) {
 		if self.tok.kind == T::QQ {
 			let at = self.tok.start + 1;
 			self.reset_to(at);
 		} else if self.tok.kind == T::Digits {
-			// `syn`'s digits token runs on over `_`.
+			// The digits token runs on over `_`, as it always has.
 			let at = self.digits_end(self.tok.start);
 			self.reset_to(at);
 		} else if self.tok.kind == T::Invalid {
-			// `syn` reads an unexpected character, or an unterminated
-			// string, as one token.
+			// An unexpected character, or an unterminated string, is one
+			// token.
 			let mut at = (self.tok.start as usize + 1).max(self.tok.end as usize);
 			while !self.src.is_char_boundary(at) {
 				at += 1;
@@ -259,7 +258,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// An identifier's name at the current token, consumed whether or not it
-	/// is one, as `syn`'s `parse_ident`.
+	/// is one.
 	fn take_ident(&mut self) -> R<String> {
 		let t = self.tok;
 		match self.ident(t) {
@@ -540,7 +539,7 @@ impl<'a> Parser<'a> {
 		Ok(s)
 	}
 
-	/// `syn`'s `parse_object_key`.
+	/// An object key.
 	fn object_key(&mut self) -> R<String> {
 		let t = self.tok;
 		match t.kind {
@@ -570,7 +569,7 @@ impl<'a> Parser<'a> {
 						// number.
 						match kind {
 							NumKind::Int => {
-								// `syn` bounds a key's magnitude by `i64::MIN`'s.
+								// A key's magnitude is bounded by `i64::MIN`'s.
 								let digits: String = text.chars().filter(|&c| c != '_').collect();
 								match digits.parse::<u64>() {
 									Ok(u) if u <= i64::MAX as u64 + 1 => {}
@@ -644,7 +643,7 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	/// Starts a SurrealQL value (`syn`'s `parse_value`).
+	/// Starts a SurrealQL value.
 	fn start(&mut self) -> R<Start> {
 		let t = self.tok;
 		let done = |v| Ok(Start::Done(v, true));
@@ -813,7 +812,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// `syn`'s `f64` token value: a number with an optional adjacent sign,
+	/// An `f64` token value: a number with an optional adjacent sign,
 	/// `NaN` or `Infinity`.
 	fn float(&mut self) -> R<f64> {
 		let t = self.tok;
@@ -827,6 +826,11 @@ impl<'a> Parser<'a> {
 				Ok(f64::INFINITY)
 			}
 			T::Plus | T::Minus | T::Digits => {
+				// A float reads on over a `.`, which must start a
+				// fraction.
+				if compound_error(self.src.as_bytes(), t.start, Compound::Float).is_some() {
+					return Err(self.number_err(t.start, Compound::Float));
+				}
 				let mut l = self.lex;
 				match l.numeric(t.start) {
 					Ok(NumKind::Int | NumKind::Float) => match self.number()? {
@@ -841,7 +845,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Starts a JSON value (`syn`'s `parse_json`).
+	/// Starts a JSON value.
 	fn start_json(&mut self) -> R<Start> {
 		let t = self.tok;
 		let done = |v| Ok(Start::Done(v, false));
@@ -899,7 +903,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// A record id, or else a table name. `syn` reads the table name from
+	/// A record id, or else a table name. The table name is read from
 	/// where the record id failed, past the token it failed on, so the record
 	/// id is parsed whole before falling back: this recurses once per record
 	/// id nested in a key, each of which charges the object budget.
@@ -929,8 +933,7 @@ impl<'a> Parser<'a> {
 		}
 	}
 
-	/// Starts a record id with a value key (`syn`'s
-	/// `parse_value_record_id_inner`).
+	/// Starts a record id with a value key.
 	fn record_id_start(&mut self) -> R<Start> {
 		let table = self.take_ident()?;
 		self.expect(T::Colon, ":")?;
@@ -1028,8 +1031,8 @@ impl<'a> Parser<'a> {
 				let text = &self.src[d.start as usize..end as usize];
 				let next = self.src.as_bytes().get(end as usize).copied();
 				if next.is_some_and(|b| b.is_ascii_alphabetic()) {
-					// `syn` reads the letter as the end of a failed integer and
-					// drops it.
+					// The letter ends a failed integer and is dropped, as
+					// earlier releases read it.
 					self.reset_to(end + 1);
 					RecordIdKey::String(format!("-{text}"))
 				} else if next == Some(b'.')
@@ -1052,7 +1055,7 @@ impl<'a> Parser<'a> {
 				let after = self.token_at(end);
 				let flexible = !self.settings.limits.strict_record_ids;
 				// Unlike in a query, `NaN` or `Infinity` after the digits ends
-				// the key rather than joining it, as in `syn`'s value parser.
+				// the key rather than joining it, as earlier releases read values.
 				if flexible && !after.ws() && matches!(after.kind, T::Ident | T::EscIdent) {
 					self.reset_to(after.end);
 					RecordIdKey::String(self.src[k.start as usize..after.end as usize].to_owned())
@@ -1080,7 +1083,7 @@ impl<'a> Parser<'a> {
 		self.prev.end
 	}
 
-	/// Where `syn`'s digits token starting at `start` ends: digits and `_`.
+	/// Where the digits token starting at `start` ends: digits and `_`.
 	fn digits_end(&self, start: u32) -> u32 {
 		let b = self.src.as_bytes();
 		let mut i = start as usize;

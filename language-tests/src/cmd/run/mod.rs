@@ -14,8 +14,8 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
 use surrealdb_gql as gql;
+use surrealdb_parser_next_lower::ParserSettings;
 use surrealdb_rpc::capabilities::ExperimentalTarget;
-use surrealdb_syn::parser;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
@@ -86,9 +86,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		// A versioned (MVCC time-travel) test can only run where the provisioner
 		// can open the store with versioning; elsewhere the engine rejects the
 		// statement rather than answering it.
-		.with_filter(|x| {
-			!x.test.config.parsed.env.versioned || backend.supports_versioning()
-		})
+		.with_filter(|x| !x.test.config.parsed.env.versioned || backend.supports_versioning())
 		// One run per test.
 		.with_expander(|_| {
 			vec![TestRunConfig {
@@ -478,7 +476,7 @@ async fn run_test_body(
 
 	let (did_timeout, result) = match run.case.test.dialect {
 		Dialect::SurrealQl => {
-			let settings = parser::ParserSettings {
+			let settings = ParserSettings {
 				files_enabled: dbs
 					.get_capabilities()
 					.allows_experimental(&ExperimentalTarget::Files),
@@ -488,23 +486,15 @@ async fn run_test_body(
 				..Default::default()
 			};
 
-			let source = &run.case.test.source.as_bytes();
-			let mut parser = parser::Parser::new_with_settings(source, settings);
-
-			let query = match parser.parse_query() {
-				Ok(x) => {
-					if let Err(e) = parser.assert_finished() {
-						return Ok(BodyOutcome::Early(TestTaskResult::ParserError(
-							e.render_on_bytes(source),
-						)));
-					}
-					x
+			let query = match surrealdb_parser_next_lower::query_with_settings(
+				&run.case.test.source,
+				settings,
+			) {
+				Ok(x) => x,
+				Err(surrealdb_parser_next_lower::ParseError::InvalidQuery(e)) => {
+					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(e)));
 				}
-				Err(e) => {
-					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(
-						e.render_on_bytes(source),
-					)));
-				}
+				Err(e) => return Err(anyhow::anyhow!(e)),
 			};
 
 			let start = Instant::now();
@@ -517,7 +507,7 @@ async fn run_test_body(
 		}
 		Dialect::Gql => {
 			// GQL has no capability-gated syntax; the default recursion
-			// limit matches `parser::ParserSettings::default()` above.
+			// limit matches `ParserSettings::default()` above.
 			// Lowering produces a `PreparedGqlQuery` (the `LogicalOp::Match`
 			// carrying a `MatchPlan`), which is submitted as an already-lowered
 			// `QuerySource::Plan`.
@@ -533,7 +523,8 @@ async fn run_test_body(
 			};
 
 			let start = Instant::now();
-			let result = dbs.run(QueryRequest::new(QuerySource::Plan(vec![query.0]), &*session)).await;
+			let result =
+				dbs.run(QueryRequest::new(QuerySource::Plan(vec![query.0]), &*session)).await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result
 				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
@@ -559,10 +550,7 @@ async fn run_test_body(
 		Dialect::PgSql => {
 			let start = Instant::now();
 			let result = dbs
-				.run(QueryRequest::new(
-					QuerySource::pgsql(&run.case.test.source),
-					&*session,
-				))
+				.run(QueryRequest::new(QuerySource::pgsql(&run.case.test.source), &*session))
 				.await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result
@@ -573,10 +561,7 @@ async fn run_test_body(
 		Dialect::MySql => {
 			let start = Instant::now();
 			let result = dbs
-				.run(QueryRequest::new(
-					QuerySource::mysql(&run.case.test.source),
-					&*session,
-				))
+				.run(QueryRequest::new(QuerySource::mysql(&run.case.test.source), &*session))
 				.await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result

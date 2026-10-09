@@ -7045,9 +7045,9 @@ dependencies = [
  "serde_json",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-parser-next-lower",
  "surrealdb-rpc",
  "surrealdb-server",
- "surrealdb-syn",
  "surrealdb-types",
  "surrealism-runtime",
  "tempfile",
@@ -7099,9 +7099,9 @@ dependencies = [
  "surrealdb-engine-local",
  "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-parser-next-lower",
  "surrealdb-protocol",
  "surrealdb-rpc",
- "surrealdb-syn",
  "surrealdb-types",
  "surrealdb-types-derive",
  "temp-dir",
@@ -7125,16 +7125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-ast"
-version = "3.4.0-nightly"
-dependencies = [
- "chrono",
- "rust_decimal",
- "surrealdb-common",
- "uuid",
-]
-
-[[package]]
 name = "surrealdb-catalog"
 version = "3.4.0-nightly"
 dependencies = [
@@ -7152,9 +7142,9 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "thiserror 2.0.20",
  "tracing",
@@ -7259,7 +7249,6 @@ dependencies = [
  "sha2 0.10.9",
  "storekey",
  "subtle",
- "surrealdb-ast",
  "surrealdb-catalog",
  "surrealdb-cnf",
  "surrealdb-collections",
@@ -7273,14 +7262,14 @@ dependencies = [
  "surrealdb-kvs-any",
  "surrealdb-mysql",
  "surrealdb-observe",
- "surrealdb-parser",
+ "surrealdb-parse-common",
+ "surrealdb-parser-next-lower",
  "surrealdb-pgsql",
  "surrealdb-rpc",
  "surrealdb-runtime",
  "surrealdb-sql",
  "surrealdb-sqlplan",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "surrealism-runtime",
  "surrealml-core",
@@ -7447,9 +7436,9 @@ dependencies = [
  "surrealdb-common",
  "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "thiserror 2.0.20",
  "tokio",
@@ -7465,8 +7454,8 @@ dependencies = [
  "phf",
  "rstest",
  "surrealdb-expr",
+ "surrealdb-parse-common",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "unicase",
 ]
@@ -7525,10 +7514,10 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
+ "surrealdb-parser-next-lower",
  "surrealdb-runtime",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "temp-dir",
  "tempfile",
@@ -7702,8 +7691,8 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-core",
  "surrealdb-iam",
+ "surrealdb-parser-next-lower",
  "surrealdb-rpc",
- "surrealdb-syn",
  "surrealdb-types",
  "thiserror 2.0.20",
  "tokio",
@@ -7769,21 +7758,7 @@ version = "3.4.0-nightly"
 dependencies = [
  "chrono",
  "logos",
- "uuid",
-]
-
-[[package]]
-name = "surrealdb-parser"
-version = "3.4.0-nightly"
-dependencies = [
- "bitflags",
- "criterion",
- "logos",
- "rust_decimal",
- "surrealdb-ast",
- "surrealdb-common",
- "surrealdb-parse-common",
- "surrealdb-token",
+ "thiserror 2.0.20",
  "uuid",
 ]
 
@@ -7791,13 +7766,10 @@ dependencies = [
 name = "surrealdb-parser-next"
 version = "3.4.0-nightly"
 dependencies = [
- "surrealdb-ast",
  "surrealdb-common",
- "surrealdb-parser",
  "surrealdb-parser-next-lower",
  "surrealdb-sql",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "web-time",
 ]
@@ -7806,21 +7778,24 @@ dependencies = [
 name = "surrealdb-parser-next-lower"
 version = "3.4.0-nightly"
 dependencies = [
+ "bytes",
+ "surrealdb-cnf",
  "surrealdb-common",
+ "surrealdb-iam",
+ "surrealdb-parse-common",
  "surrealdb-parser-next",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-types",
+ "thiserror 2.0.20",
+ "tracing",
 ]
 
 [[package]]
 name = "surrealdb-parser-size-probe"
 version = "3.4.0-nightly"
 dependencies = [
- "surrealdb-ast",
- "surrealdb-parser",
  "surrealdb-parser-next",
- "surrealdb-syn",
 ]
 
 [[package]]
@@ -7960,8 +7935,8 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-expr",
+ "surrealdb-parser-next-lower",
  "surrealdb-strand",
- "surrealdb-syn",
  "surrealdb-types",
  "ulid",
  "url",
@@ -8029,11 +8004,11 @@ dependencies = [
  "surrealdb-mywire",
  "surrealdb-observe",
  "surrealdb-parse-common",
+ "surrealdb-parser-next-lower",
  "surrealdb-pgwire",
  "surrealdb-protocol",
  "surrealdb-rpc",
  "surrealdb-sql",
- "surrealdb-syn",
  "surrealdb-types",
  "surrealism-runtime",
  "surrealml-core",
@@ -8146,30 +8121,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "surrealdb-syn"
-version = "3.4.0-nightly"
-dependencies = [
- "bytes",
- "chrono",
- "geo-types",
- "phf",
- "rstest",
- "rust_decimal",
- "surrealdb-cnf",
- "surrealdb-common",
- "surrealdb-iam",
- "surrealdb-parser-next",
- "surrealdb-parser-next-lower",
- "surrealdb-sql",
- "surrealdb-strand",
- "surrealdb-types",
- "thiserror 2.0.20",
- "tracing",
- "unicase",
- "uuid",
-]
-
-[[package]]
 name = "surrealdb-tikv-client"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8195,14 +8146,6 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-prost",
-]
-
-[[package]]
-name = "surrealdb-token"
-version = "3.4.0-nightly"
-dependencies = [
- "logos",
- "surrealdb-common",
 ]
 
 [[package]]

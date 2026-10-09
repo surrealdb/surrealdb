@@ -11,7 +11,7 @@ mod select;
 mod write;
 
 /// Whether `t` starts a statement that is also an expression: the keywords
-/// `syn` parses as primes.
+/// parsed as primes.
 pub(crate) fn is_statement_keyword(p: &Parser<'_, '_>, t: Tok) -> bool {
 	t.kind == T::Ident
 		&& match t.kw {

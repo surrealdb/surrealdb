@@ -4,6 +4,10 @@
 //! multiple SurrealQL dialects and configuration formats: durations, datetimes, uuids, bytes
 //! strings, and the escape sequences of stringly formatted SurrealQL structures.
 //!
+//! It also holds what every SurrealDB front end reports parse failures with: [`span::Span`],
+//! the [`error`] diagnostics and their rendering against the source, and the
+//! [`reader::BytesReader`] the hand-written lexers read source through.
+//!
 //! All functions take the bare content string, i.e. with any surrounding quotes and prefixes
 //! (`d"`, `u"`, etc.) already stripped. Errors carry a message and a byte span relative to that
 //! input string. When the input was produced by unescaping an escaped source string,
@@ -23,7 +27,10 @@ use std::ops::Range;
 mod bytes;
 mod datetime;
 mod duration;
+pub mod error;
 mod escape;
+pub mod reader;
+pub mod span;
 mod uuid;
 
 pub use crate::bytes::bytes;

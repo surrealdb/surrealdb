@@ -443,6 +443,32 @@ jobs:
       - name: Run doctests
         run: cargo make ci-doctests
 
+  parser:
+    name: Check SurrealQL parser
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check the parser's golden corpus and invariants
+        run: cargo make ci-parser
+
   feature-check:
     name: Check feature combinations (${{ matrix.package }})
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
@@ -1322,6 +1348,7 @@ jobs:
       - test-wasm
       - check-revision
       - check-docs
+      - parser
       - feature-check
       - check-tokio-console
       - check-bench
@@ -1373,6 +1400,7 @@ jobs:
             "${{ needs.test-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
+            "${{ needs.parser.result }}"
             "${{ needs.feature-check.result }}"
             "${{ needs.check-tokio-console.result }}"
             "${{ needs.check-bench.result }}"

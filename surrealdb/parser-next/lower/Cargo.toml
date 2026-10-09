@@ -11,14 +11,21 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-# Lowers parser-next's flat tree into the `surrealdb_sql` AST, so the engine
-# can run the new parser behind the existing AST.
+# The SurrealQL front end: parser-next's flat tree lowered into the
+# `surrealdb_sql` AST.
 [dependencies]
 common.workspace = true
+surrealdb-cnf.workspace = true
+parse-common.workspace = true
 surrealdb-parser-next.workspace = true
+surrealdb-iam.workspace = true
 surrealdb-sql.workspace = true
 surrealdb-strand.workspace = true
 surrealdb-types.workspace = true
+
+bytes.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

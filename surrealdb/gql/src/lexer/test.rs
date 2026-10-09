@@ -1,8 +1,8 @@
+use parse_common::error::SyntaxError;
 use unicase::UniCase;
 
 use crate::gql::lexer::{Lexer, keywords};
 use crate::gql::token::{Keyword, NumberKind, NumberSuffix, Span, Token, TokenKind, t};
-use crate::syn::error::SyntaxError;
 
 /// Lexes the source into token kinds, asserting that no token is invalid.
 fn tokens(source: &str) -> Vec<TokenKind> {

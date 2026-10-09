@@ -197,7 +197,7 @@ impl Idiom {
 	/// Shared parse for the two string forms of an idiom: fresh runtime
 	/// strings ([`FromStr`], default limits) and the engine-rendered wire
 	/// encoding ([`DeserializeRevisioned`],
-	/// [`crate::syn::parser::ParserSettings::STORED_TEXT`]).
+	/// [`crate::syn::ParserSettings::STORED_TEXT`]).
 	///
 	/// Parses the idiom grammar, which is what both forms are: a field path.
 	/// It has to be that grammar rather than the expression one, because a
@@ -225,15 +225,10 @@ impl Idiom {
 	/// string at runtime and re-parses it as an idiom.
 	fn parse_str_with_settings(
 		s: &str,
-		settings: crate::syn::parser::ParserSettings,
+		settings: crate::syn::ParserSettings,
 	) -> Result<Self, revision::Error> {
-		let buf = s.as_bytes();
-		let mut parser = crate::syn::parser::Parser::new_with_settings(buf, settings);
-		let idiom = parser
-			.parse_plain_idiom()
+		let idiom = crate::syn::idiom_with_settings(s, settings, true)
 			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		parser.assert_finished().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-
 		Ok(idiom.into())
 	}
 }
@@ -245,7 +240,7 @@ impl FromStr for Idiom {
 		// default limits, not the stored-text profile.
 		Self::parse_str_with_settings(
 			s,
-			crate::syn::parser::ParserSettings::default_with_experimental(true),
+			crate::syn::ParserSettings::default_with_experimental(true),
 		)
 	}
 }
@@ -270,7 +265,7 @@ impl DeserializeRevisioned for Idiom {
 		let s: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 		// The wire format is engine-rendered SurrealQL text; see the constant
 		// for why decode is capability- and limit-independent.
-		Idiom::parse_str_with_settings(&s, crate::syn::parser::ParserSettings::STORED_TEXT)
+		Idiom::parse_str_with_settings(&s, crate::syn::ParserSettings::STORED_TEXT)
 	}
 }
 

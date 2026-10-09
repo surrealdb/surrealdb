@@ -10,6 +10,8 @@
 //! parser here rather than reusing the MATCH pattern parser; only leaf helpers
 //! are shared.
 
+use parse_common::error::bail;
+
 use crate::gql::ast::{
 	DeleteStatement, DetachMode, GqlExpr, Ident, InsertEdge, InsertEdgeDir, InsertNode, InsertPath,
 	InsertStatement, RemoveItem, RemoveStatement, SetItem, SetStatement,
@@ -17,7 +19,6 @@ use crate::gql::ast::{
 use crate::gql::parser::mac::{expected, unexpected};
 use crate::gql::parser::{ParseResult, Parser};
 use crate::gql::token::{Keyword, Span, TokenKind, t};
-use crate::syn::error::bail;
 
 /// An insert element filler: its variable, its label, and its properties.
 type InsertFiller = (Option<Ident>, Option<Ident>, Vec<(Ident, GqlExpr)>);

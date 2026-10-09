@@ -1,0 +1,2 @@
+DEFINE INDEX ix ON tb FIELDS a, b;
+INFO FOR TB tb;

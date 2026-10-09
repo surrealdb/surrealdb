@@ -79,11 +79,27 @@ impl<'a, 's> Parser<'a, 's> {
 						T::Digits | T::Plus => {
 							let v = self.number_lit()?;
 							if self.ast.nodes[v as usize].tag == Tag::NaN {
-								return Err(self.unexpected("`$`, `*` or a number"));
+								return Err(self.unexpected("$, * or a number"));
 							}
 							self.node(Tag::PartIndex, 0, v, 0, open.start, 1)?
 						}
-						_ => return Err(self.unexpected("`$`, `*` or a number")),
+						T::Minus => {
+							let t = self.tok;
+							if let Some(d) = self.adjacent1()
+								&& d.kind == T::Digits
+							{
+								return Err(self.diag(
+									Diag::message(
+										t.start,
+										d.end,
+										"Unexpected token `-` expected $, *, or a number",
+									)
+									.with_label("an index in a basic idiom can't be negative"),
+								));
+							}
+							return Err(self.unexpected("$, * or a number"));
+						}
+						_ => return Err(self.unexpected("$, * or a number")),
 					};
 					self.close(T::RBracket, open.start)?;
 					self.vals.push(p);
@@ -183,8 +199,8 @@ impl<'a, 's> Parser<'a, 's> {
 				self.vals.push(p);
 			}
 			T::QQ => {
-				// `syn` has no `??` token: the first `?` is the part and the
-				// second is the next token.
+				// Here `??` is two tokens, as it has always read: the first
+				// `?` is the part and the second is the next token.
 				let at = n.start + 1;
 				let p = self.leaf_span(Tag::PartOptional, 0, 0, 0, n.start, at);
 				self.reset_to(at);
@@ -250,12 +266,17 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[2] = self.uint_lit()?;
 			}
 		} else if rec[1] == NONE {
-			return Err(self.unexpected("an integer or `..`"));
+			let t = self.tok;
+			let end = self.syn_token_end(t);
+			return Err(self.error(
+				t.start,
+				end,
+				"Unexpected token `{found}` expected an integer or ..",
+			));
 		}
 		if self.eat(T::Plus) {
 			let k = self.ident()?;
-			let text = self.text_of(k);
-			let word = |w: &str| text.eq_ignore_ascii_case(w);
+			let word = |w: &str| self.ident_is(k, w, true);
 			rec[3] = if word("path") {
 				1
 			} else if word("collect") {
@@ -283,7 +304,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			while self.eat(T::Plus) {
 				let o = self.ident()?;
-				if !self.text_of(o).eq_ignore_ascii_case("inclusive") {
+				if !self.ident_is(o, "inclusive", true) {
 					return Err(self.error(
 						o.start,
 						o.end,
@@ -338,11 +359,27 @@ impl<'a, 's> Parser<'a, 's> {
 							self.bump();
 							(2, NONE)
 						}
+						T::LBrace
+							if matches!(self.peek1().kind, T::Star | T::DotDot | T::Digits) =>
+						{
+							// A recursion is read here, then rejected.
+							let s = self.bump().start;
+							self.recurse_part(s)?;
+							return Err(self.error(
+								self.prev_start,
+								self.prev_end,
+								"Unexpected token `{` expected a `*` or a destructuring",
+							));
+						}
 						T::LBrace => {
 							let s = self.bump().start;
 							(3, self.nested(|p| p.destructure(s))?)
 						}
-						_ => {
+						// Any idiom part is read here and all but `*` and a
+						// destructuring rejected once read; what starts no
+						// part fails as the part would.
+						T::Invalid => return Err(self.invalid_token(self.tok)),
+						T::Question | T::At | T::Ident | T::EscIdent => {
 							let t = self.tok;
 							let end = self.syn_token_end(t);
 							return Err(self.diag(Diag::message(
@@ -351,6 +388,7 @@ impl<'a, 's> Parser<'a, 's> {
 								"Unexpected token `{found}` expected a `*` or a destructuring",
 							)));
 						}
+						_ => return Err(self.unexpected("an identifier")),
 					}
 				}
 				_ => (0, NONE),
@@ -383,7 +421,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			T::QQ => {
 				// The first `?` of `??` is the subject; the second is the next
-				// token, as in `syn`, which has no `??` token.
+				// token, as it has always read.
 				let at = t.start + 1;
 				self.reset_to(at);
 				self.prev_start = t.start;
@@ -506,11 +544,27 @@ impl<'a, 's> Parser<'a, 's> {
 	/// One record-id key, with no whitespace before it.
 	pub(crate) fn record_key(&mut self) -> R<NodeId> {
 		if self.tok.ws() {
-			return Err(self.unexpected("unexpected whitespace after record-id table"));
+			return Err(self.key_after_whitespace());
 		}
 		match self.tok.kind {
 			T::LBracket | T::LBrace => {
 				let open = self.tok.kind;
+				if open == T::LBrace {
+					// Only an object can follow, so what is neither a key
+					// nor its end is reported as an object reads it.
+					let n = self.peek1();
+					if !matches!(n.kind, T::RBrace | T::Ident | T::EscIdent | T::Str | T::Digits) {
+						self.bump();
+						return Err(self.unexpected("an object key"));
+					}
+					if matches!(n.kind, T::Ident | T::EscIdent | T::Str)
+						&& self.peek2().kind != T::Colon
+					{
+						self.bump();
+						self.bump();
+						return Err(self.unexpected(":"));
+					}
+				}
 				let k = self.atom(self.table_as_field)?;
 				let tag = self.ast.nodes[k as usize].tag;
 				let ok = match open {
@@ -539,8 +593,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 }
 
-/// Whether `t` can start a record-id key (`syn`'s
-/// `kind_starts_record_id_key`).
+/// Whether `t` can start a record-id key.
 fn starts_record_key(t: Tok) -> bool {
 	t.is_ident()
 		|| matches!(t.kind, T::Digits | T::LBrace | T::LBracket | T::Plus | T::Minus)

@@ -36,7 +36,7 @@ pub fn unescape_with(body: &str, out: &mut String, json: bool) -> bool {
 					if close > 6 || !r[..close].bytes().all(|b| b.is_ascii_hexdigit()) {
 						return false;
 					}
-					// `\u{}` is U+0000, as in `syn`.
+					// `\u{}` is U+0000, as earlier releases read it.
 					match u32::from_str_radix(&r[..close], 16) {
 						Ok(v) => (v, close + 2),
 						Err(_) if close == 0 => (0, 2),
@@ -93,7 +93,7 @@ pub fn strip_delims(text: &str) -> &str {
 	}
 }
 
-/// `syn`'s error for the first invalid escape in a string or escaped
+/// The established error for the first invalid escape in a string or escaped
 /// identifier token, as `(start, end, message, label)` with offsets into
 /// `token`; `None` when every escape is valid. With `json`, a `\uXXXX` high
 /// surrogate must be followed by a low one.

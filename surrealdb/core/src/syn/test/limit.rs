@@ -1,6 +1,6 @@
 use rstest::rstest;
 
-use crate::syn::parser::{Parser, ParserSettings};
+use crate::syn::ParserSettings;
 
 #[rstest]
 #[case::object_depth(
@@ -109,8 +109,7 @@ fn test_parse_depth(
 	#[case] source: &str,
 	#[case] expected: bool,
 ) {
-	let mut parser = Parser::new_with_settings(source.as_bytes(), parser_settings);
-	let result = parser.parse_query();
+	let result = surrealdb_parser_next_lower::query_with_settings(source, parser_settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -134,13 +133,11 @@ fn test_parse_depth(
 #[case::value_range_depth(5, "..=..=..=..=..=null", true)]
 #[case::value_range_depth_fail(5, "..=..=..=..=..=..=null", false)]
 fn test_parse_value_depth(#[case] limit: usize, #[case] source: &str, #[case] expected: bool) {
-	use crate::syn;
 	let settings = ParserSettings {
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result =
-		syn::parse_with_settings(source.as_bytes(), settings, |parser| parser.parse_value());
+	let result = surrealdb_parser_next_lower::value_with_settings(source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -150,13 +147,11 @@ fn test_parse_value_depth(#[case] limit: usize, #[case] source: &str, #[case] ex
 #[case::json_object_depth(5, r#"{"a":{"b":{"c":{"d":{"e":null}}}}}"#, true)]
 #[case::json_object_depth_fail(5, r#"{"a":{"b":{"c":{"d":{"e":{"f":null}}}}}}"#, false)]
 fn test_parse_json_depth(#[case] limit: usize, #[case] source: &str, #[case] expected: bool) {
-	use crate::syn;
 	let settings = ParserSettings {
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result =
-		syn::parse_with_settings(source.as_bytes(), settings, |parser| parser.parse_json());
+	let result = surrealdb_parser_next_lower::json_with_settings(source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -208,8 +203,7 @@ fn test_parse_kind_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let mut parser = Parser::new_with_settings(source.as_bytes(), settings);
-	let result = parser.parse_query();
+	let result = surrealdb_parser_next_lower::query_with_settings(&source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -247,8 +241,7 @@ fn test_parse_expr_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		expr_recursion_limit: limit,
 		..Default::default()
 	};
-	let mut parser = Parser::new_with_settings(source.as_bytes(), settings);
-	let result = parser.parse_query();
+	let result = surrealdb_parser_next_lower::query_with_settings(&source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 

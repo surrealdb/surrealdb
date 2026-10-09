@@ -1,0 +1,57 @@
+# Where parser-next differs from surrealdb-syn on the golden inputs.
+# Each block: the input (Rust string syntax), the entry points that differ,
+# then syn's rendered error and parser-next's. All are rejections by both.
+# Kinds: SPAN syn spans a negative record-id key whose digits overflow from
+# the key; TYPO syn spells CASCADE as CASCASE; ORDER syn reports a chained
+# relational operator before the lone `?` after it; JSON mutants are not
+# compared, as syn panics on some of them.
+
+TYPO "DEFINE FIELD f ON t REFERENCE ON DELETE =JECT"
+  entries: expr expr_for_definition expr_legacy_strand fields_for_definition query_gates_off query_strict_ids
+  syn:  "Unexpected token `=`, expected `REJECT`, `CASCASE`, `IGNORE`, `UNSET` or `THEN`\n --> [1:41]\n  |\n1 | DEFINE FIELD f ON t REFERENCE ON DELETE =JECT\n  |                                         ^\n"
+  next: "Unexpected token `=`, expected `REJECT`, `CASCADE`, `IGNORE`, `UNSET` or `THEN`\n --> [1:41]\n  |\n1 | DEFINE FIELD f ON t REFERENCE ON DELETE =JECT\n  |                                         ^\n"
+
+ORDER "SE=tems = [1, 2]?"
+  entries: expr expr_for_definition expr_legacy_strand fields_for_definition query_gates_off query_strict_ids
+  syn:  "Chained relational operators have no defined associativity.\n --> [1:9]\n  |\n1 | SE=tems = [1, 2]?\n  |         ^^^^^^^^^ Use parens, '()', to specify which operator must be evaluated first\n"
+  next: "Unexpected token `?`, expected `??`\n --> [1:17]\n  |\n1 | SE=tems = [1, 2]?\n  |                 ^\n"
+
+ORDER "array<object> DEF? ALWAYS [ ]"
+  entries: expr expr_for_definition expr_legacy_strand fields_for_definition query_gates_off query_strict_ids
+  syn:  "Chained relational operators have no defined associativity.\n --> [1:13]\n  |\n1 | array<object> DEF? ALWAYS [ ]\n  |             ^^^^^^ Use parens, '()', to specify which operator must be evaluated first\n"
+  next: "Unexpected token `?`, expected `??`\n --> [1:18]\n  |\n1 | array<object> DEF? ALWAYS [ ]\n  |                  ^\n"
+
+ORDER "user> option<REFER?ENCE"
+  entries: expr expr_for_definition expr_legacy_strand fields_for_definition query_gates_off query_strict_ids
+  syn:  "Chained relational operators have no defined associativity.\n --> [1:13]\n  |\n1 | user> option<REFER?ENCE\n  |             ^^^^^^^ Use parens, '()', to specify which operator must be evaluated first\n"
+  next: "Unexpected token `?`, expected `??`\n --> [1:19]\n  |\n1 | user> option<REFER?ENCE\n  |                   ^\n"
+
+SPAN "RELATE person:01GFN1CAV8918AAAHV7E7Z3PJR -> wishlist:01HWB8HSVG8RHT1EZKFAA5JKCB -> product:-1FZMEC16R83AS5CCR7QBVFY9V CONTENT {'id': r'wishlist:01HWB8HSVG8RHT1EZKFAA5JKCB', 'in': r'person:01GFN1CAV8918AAAHV7E7Z3PJR', 'out': r'product:01FZMEC16R83AS5CCR7QBVFY9V', 'colour': 'Heather Grey', 'size': 'unisize', 'time': {'created_at': d'2024-04-25T19:342Z', 'deleted_at': None}}"
+  entries: expr_for_definition fields_for_definition query_gates_off
+  syn:  "Unexpected token `an identifier`, expected no more tokens\n --> [1:93]\n  |\n1 | ... product:-1FZMEC16R83AS5CCR7QBVFY9V CONTENT {'id': r'wishlist:01HWB8HSVG8R...\n  |              ^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `an identifier`, expected no more tokens\n --> [1:95]\n  |\n1 | ...roduct:-1FZMEC16R83AS5CCR7QBVFY9V CONTENT {'id': r'wishlist:01HWB8HSVG8RHT...\n  |              ^^^^^^^^^^^^^^^^^^^^^^^\n"
+
+SPAN "a:-100000000000000000NONE00000"
+  entries: expr_for_definition fields_for_definition query_gates_off query_strict_ids
+  syn:  "Unexpected token `an identifier`, expected no more tokens\n --> [1:4]\n  |\n1 | a:-100000000000000000NONE00000\n  |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `an identifier`, expected no more tokens\n --> [1:23]\n  |\n1 | a:-100000000000000000NONE00000\n  |                       ^^^^^^^^\n"
+
+SPAN "create test:-100000000000000000000;\n    create test:100000000000000000000;\n    create test:[1,2,3];\n    create test:[\"a\"];\n    create test:[NULL];\n    create test:[NONE];\n    create test:{a: 1};\n    create test:{a: \"a\"};\n    create test:{a: NULL};\n    create test:{a: NONE};\n    create test:{z: 1};\n    create test:{z: \"a\"};\n    create test:{z: NULL};\n    create test:{z: NONE};\n    create test:u\"00000000-0000-0000-0000-000000000000\";\n    create test:u\"ffffffff-ffff-ffff-ffff-ffffffffffff\";\n\n    RETURN \"OK\";\n}"
+  entries: expr_for_definition fields_for_definition
+  syn:  "Unexpected token `;`, expected no more tokens\n --> [1:14]\n  |\n1 | create test:-100000000000000000000;\n  |              ^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `;`, expected no more tokens\n --> [1:35]\n  |\n1 | create test:-100000000000000000000;\n  |                                   ^\n"
+
+SPAN "create test:-100000000000000000000;\n    create test:100000000000000000000;\n    create test:[1,2,3];\n    create test:[\"a\"];\n    create test:[NULL];\n    create test:[NONE];\n    create test:{a: 1};\n    create test:{a: \"a\"};\n    create test:{a: NULL};\n    create test:{a: NONE};\n    create test:{WHERE 1};\n    create test:{z: \"a\"};\n    create test:{z: NULL};\n    create test:{z: NONE};\n    create test:u\"00000000-0000-0000-0000-000000000000\";\n    create test:u\"ffffffff-ffff-ffff-ffff-ffffffffffff\";\n\n    RETURN \"OK\";\n}"
+  entries: expr_for_definition fields_for_definition
+  syn:  "Unexpected token `;`, expected no more tokens\n --> [1:14]\n  |\n1 | create test:-100000000000000000000;\n  |              ^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `;`, expected no more tokens\n --> [1:35]\n  |\n1 | create test:-100000000000000000000;\n  |                                   ^\n"
+
+SPAN "test:-100000000000000000000;\n    create test:100000000000000000000;\n    create test:[1,2,3];\n    create test:[\"a\"];\n    create test:[NULL];\n    create test:[NONE];\n    create test:{a: 1};\n    create test:{a: \"a\"};\n    create test:{a: NULL};\n    create test:{a: NONE};\n    create test:{z: 1};\n    create test:{z: \"a\"};\n    create test:{z: NULL};\n    create test:{z: NONE};\n    create test:u\"00000000-0000-0000-0000-000000000000\";\n    create test:u\"ffffffff-ffff-ffff-ffff-ffffffffffff\";\n\n    RETURN \"OK\";\n}"
+  entries: expr_for_definition fields_for_definition
+  syn:  "Unexpected token `;`, expected no more tokens\n --> [1:7]\n  |\n1 | test:-100000000000000000000;\n  |       ^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `;`, expected no more tokens\n --> [1:28]\n  |\n1 | test:-100000000000000000000;\n  |                            ^\n"
+
+SPAN "test:-100000000000000000000;\n    create test:100000000000000000000;\n    create test:[1,2,3];\n    create test:[\"a\"];\n    create test:[NULL];\n    create test:[NONE];\n    create test:{a: 1};\n    create test:{a: \"a\"};\n    create test:{a: NULL};\n    create test:{a: NONE};\n    create test:{z: 1};\n    cretest:{z: \"a\"};\n    create test:{z: NULL};\n    create test:{z: NONE};\n    create test:u\"00000000-0000-0000-0000-000000000000\";\n    create test:u\"ffffffff-ffff-ffff-ffff-ffffffffffff\";\n\n    RETURN \"OK\";\n}"
+  entries: expr_for_definition fields_for_definition
+  syn:  "Unexpected token `;`, expected no more tokens\n --> [1:7]\n  |\n1 | test:-100000000000000000000;\n  |       ^^^^^^^^^^^^^^^^^^^^^^\n"
+  next: "Unexpected token `;`, expected no more tokens\n --> [1:28]\n  |\n1 | test:-100000000000000000000;\n  |                            ^\n"

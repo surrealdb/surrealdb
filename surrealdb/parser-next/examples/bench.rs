@@ -1,17 +1,13 @@
-//! Measures the new parser against `surrealdb-syn` (the parser in use) and
-//! `surrealdb-parser` (the arena-based successor in the tree) on the corpus
-//! statements all three parse and that lower to `surrealdb-syn`'s tree.
+//! Measures parser-next on the language-test corpus statements it accepts:
+//! parsing alone, parsing and lowering, and the engine's entry point.
 //!
 //! ```text
 //! cargo run --locked --release -p surrealdb-parser-next --example bench
 //! ```
 //!
 //! Reports throughput, heap allocations per statement (a counting global
-//! allocator), and the native stack each parser needs on deeply nested input
+//! allocator), and the native stack the parser needs on deeply nested input
 //! (found by bisecting the stack size of a child process).
-
-// The successor parser's async state machines need it when monomorphised here.
-#![recursion_limit = "256"]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
@@ -22,8 +18,6 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use surrealdb_parser_next::{Ast, Limits, Scratch, Step, StreamParser, Tag, parse_script};
 use surrealdb_parser_next_lower::{CHECK_NAMES, Lower};
-use surrealdb_syn::ParserSettings;
-use surrealdb_syn::config::ParserConfig;
 use web_time::Instant;
 
 struct Counting;
@@ -73,31 +67,12 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 	}
 }
 
-fn old(s: &str) -> bool {
-	surrealdb_syn::parse(black_box(s)).is_ok()
+/// The engine's entry point: parse, lower and drop.
+fn engine(s: &str) -> bool {
+	surrealdb_parser_next_lower::parse(black_box(s)).is_ok()
 }
 
-struct V3 {
-	ast: ast::Ast,
-}
-
-impl V3 {
-	fn new() -> Self {
-		V3 {
-			ast: ast::Ast::empty(),
-		}
-	}
-	fn parse(&mut self, s: &str, depth_limit: usize) -> bool {
-		let config = parser::Config {
-			depth_limit,
-			..Default::default()
-		};
-		parser::Parser::enter_parse_reuse::<ast::Query>(black_box(s), &mut self.ast, config).is_ok()
-	}
-}
-
-/// The statements every parser accepts and the new parser lowers to the
-/// same tree as `surrealdb-syn`.
+/// The statements parser-next accepts and lowers.
 fn corpus() -> Vec<String> {
 	let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../language-tests/tests");
 	let mut files = Vec::new();
@@ -106,7 +81,6 @@ fn corpus() -> Vec<String> {
 	let mut out = Vec::new();
 	let mut ast = Ast::new();
 	let mut scratch = Scratch::default();
-	let mut v3 = V3::new();
 	for f in files {
 		let Ok(src) = std::fs::read_to_string(&f) else {
 			continue;
@@ -118,12 +92,7 @@ fn corpus() -> Vec<String> {
 			}
 			let (a, b) = ast.spans[i];
 			let text = &src[a as usize..b as usize];
-			let new = Lower::new(&ast, &src).top(s);
-			let Ok(old_ast) = surrealdb_syn::parse(text) else {
-				continue;
-			};
-			let same = matches!((&new, old_ast.expressions.first()), (Ok(n), Some(o)) if n == o);
-			if same && v3.parse(text, 1024) {
+			if Lower::new(&ast, &src).top(s).is_ok() {
 				out.push(text.to_owned());
 			}
 		}
@@ -208,17 +177,6 @@ fn probe(parser: &str, family: &str, depth: usize, stack: usize) -> ! {
 				parse_script(&src, limits, &mut ast, &mut scratch);
 				scratch.diags.is_empty()
 			}
-			"syn" => {
-				let settings = ParserSettings {
-					object_recursion_limit: 1 << 20,
-					query_recursion_limit: 1 << 20,
-					expr_recursion_limit: 1 << 20,
-					..ParserSettings::all_features(&ParserConfig::default())
-				};
-				surrealdb_syn::parse_with_settings(src.as_bytes(), settings, |p| p.parse_query())
-					.is_ok()
-			}
-			"v3" => V3::new().parse(&src, 1 << 20),
 			_ => unreachable!(),
 		})
 		.expect("spawn")
@@ -413,20 +371,7 @@ fn main() {
 	let rounds = 20;
 	let mut ast = Ast::new();
 	let mut scratch = Scratch::default();
-	let mut v3 = V3::new();
-	let rows: [(&str, f64); 4] = [
-		(
-			"surrealdb-syn parse",
-			time(&stmts, rounds, |s| {
-				black_box(old(s));
-			}),
-		),
-		(
-			"surrealdb-parser (v3) parse",
-			time(&stmts, rounds, |s| {
-				black_box(v3.parse(s, 1024));
-			}),
-		),
+	let rows: [(&str, f64); 3] = [
 		(
 			"parser-next parse",
 			time(&stmts, rounds, |s| {
@@ -441,27 +386,25 @@ fn main() {
 				black_box(l.top(ast.stmts[0]).is_ok());
 			}),
 		),
+		(
+			"engine entry point (`parse`)",
+			time(&stmts, rounds, |s| {
+				black_box(engine(s));
+			}),
+		),
 	];
-	println!("\n{:40} {:>10} {:>12} {:>9}", "throughput", "MB/s", "stmts/s", "vs syn");
-	let base = rows[0].1;
+	println!("\n{:40} {:>10} {:>12}", "throughput", "MB/s", "stmts/s");
 	for (name, secs) in rows {
 		println!(
-			"{name:40} {:>10.1} {:>12.0} {:>8.2}x",
+			"{name:40} {:>10.1} {:>12.0}",
 			bytes as f64 / secs / 1e6,
-			stmts.len() as f64 / secs,
-			base / secs
+			stmts.len() as f64 / secs
 		);
 	}
 
 	println!("\n{:40} {:>10}", "heap allocations per statement", "allocs");
-	let a_old = allocs(&stmts, |s| {
-		black_box(old(s));
-	});
-	let a_v3_cold = allocs(&stmts, |s| {
-		black_box(V3::new().parse(s, 1024));
-	});
-	let a_v3 = allocs(&stmts, |s| {
-		black_box(v3.parse(s, 1024));
+	let a_engine = allocs(&stmts, |s| {
+		black_box(engine(s));
 	});
 	let a_cold = allocs(&stmts, |s| {
 		let mut ast = Ast::new();
@@ -477,18 +420,16 @@ fn main() {
 		black_box(l.top(ast.stmts[0]).is_ok());
 	});
 	for (name, v) in [
-		("surrealdb-syn parse (incl. drop)", a_old),
-		("surrealdb-parser (v3), fresh arena", a_v3_cold),
-		("surrealdb-parser (v3), reused arena", a_v3),
 		("parser-next, fresh arena", a_cold),
 		("parser-next, reused arena", a_warm),
 		("parser-next + lower to sql AST", a_lower),
+		("engine entry point (incl. drop)", a_engine),
 	] {
 		println!("{name:40} {v:>10.2}");
 	}
 
 	println!("\nminimum native stack (KiB) on nested input, limits lifted");
-	println!("{:12} {:>6} {:>10} {:>10} {:>10}", "family", "depth", "syn", "v3", "next");
+	println!("{:12} {:>6} {:>10}", "family", "depth", "KiB");
 	for family in ["parens", "arrays", "objects", "prefix", "calls", "subqueries"] {
 		for depth in [100usize, 1_000, 10_000] {
 			if family == "subqueries" && depth > 1_000 {
@@ -498,12 +439,7 @@ fn main() {
 				Some(k) => k.to_string(),
 				None => "fail".to_owned(),
 			};
-			println!(
-				"{family:12} {depth:>6} {:>10} {:>10} {:>10}",
-				cell("syn"),
-				cell("v3"),
-				cell("new")
-			);
+			println!("{family:12} {depth:>6} {:>10}", cell("new"));
 		}
 	}
 
@@ -512,53 +448,29 @@ fn main() {
 	println!("\npeak heap bytes on nested parens, limits lifted");
 	for depth in [1_000usize, 10_000] {
 		let src = nested("parens", depth);
-		let mut row = Vec::new();
-		for p in ["syn", "v3", "new"] {
-			PEAK.store(LIVE.load(Relaxed), Relaxed);
-			let base = LIVE.load(Relaxed);
-			let src = src.clone();
-			let p2 = p.to_owned();
-			std::thread::Builder::new()
-				.stack_size(64 << 20)
-				.spawn(move || match p2.as_str() {
-					"syn" => {
-						let settings = ParserSettings {
-							object_recursion_limit: 1 << 20,
-							query_recursion_limit: 1 << 20,
-							expr_recursion_limit: 1 << 20,
-							..ParserSettings::default()
-						};
-						let _ = black_box(surrealdb_syn::parse_with_settings(
-							src.as_bytes(),
-							settings,
-							|p| p.parse_query(),
-						));
-					}
-					"v3" => {
-						black_box(V3::new().parse(&src, 1 << 20));
-					}
-					_ => {
-						let mut ast = Ast::new();
-						let mut scratch = Scratch::default();
-						let limits = Limits {
-							expr_depth: u16::MAX,
-							query_depth: u16::MAX,
-							object_depth: u16::MAX,
-							strict_record_ids: false,
-							builtin: None,
-							regex: None,
-							no_files: false,
-							no_surrealism: false,
-						};
-						parse_script(&src, limits, &mut ast, &mut scratch);
-						black_box(&ast);
-					}
-				})
-				.expect("spawn")
-				.join()
-				.expect("join");
-			row.push(format!("{p}={}", PEAK.load(Relaxed).saturating_sub(base)));
-		}
-		println!("  depth {depth:>6}: {}", row.join("  "));
+		PEAK.store(LIVE.load(Relaxed), Relaxed);
+		let base = LIVE.load(Relaxed);
+		std::thread::Builder::new()
+			.stack_size(64 << 20)
+			.spawn(move || {
+				let mut ast = Ast::new();
+				let mut scratch = Scratch::default();
+				let limits = Limits {
+					expr_depth: u16::MAX,
+					query_depth: u16::MAX,
+					object_depth: u16::MAX,
+					strict_record_ids: false,
+					builtin: None,
+					regex: None,
+					no_files: false,
+					no_surrealism: false,
+				};
+				parse_script(&src, limits, &mut ast, &mut scratch);
+				black_box(&ast);
+			})
+			.expect("spawn")
+			.join()
+			.expect("join");
+		println!("  depth {depth:>6}: {}", PEAK.load(Relaxed).saturating_sub(base));
 	}
 }

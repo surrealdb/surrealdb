@@ -1578,7 +1578,7 @@ mod tests {
 	}
 
 	fn parse(sql: &str) -> sql::Expr {
-		let ast = surrealdb_syn::parse(sql).expect("test statement should parse");
+		let ast = surrealdb_parser_next_lower::parse(sql).expect("test statement should parse");
 		let top = ast.expressions.into_iter().next().expect("one statement");
 		let sql::TopLevelExpr::Expr(expr) = top else {
 			panic!("expected a bare expression");

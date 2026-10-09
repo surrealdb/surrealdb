@@ -11,8 +11,8 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification, Stats};
+use surrealdb_parser_next_lower::ParserConfig;
 use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
-use surrealdb_syn::ParserConfig;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};

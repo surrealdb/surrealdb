@@ -6,9 +6,10 @@
 //! its explicit alias or, failing that, by the verbatim source text of its
 //! expression. The validations are unchanged from v1.
 
+use parse_common::error::{SyntaxError, bail};
+use parse_common::span::Span;
+
 use crate::gql::ast::{Ident, ReturnItem};
-use crate::syn::error::{SyntaxError, bail};
-use crate::syn::token::Span;
 
 /// Parameter names which the engine binds itself and which therefore cannot
 /// be supplied as GQL parameters.

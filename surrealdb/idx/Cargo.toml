@@ -128,7 +128,7 @@ surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
 # The analyzer helper parses a `DEFINE ANALYZER` statement rather than building
 # the definition by hand, so the tests keep the parser.
 surrealdb-sql.workspace = true
-surrealdb-syn.workspace = true
+surrealdb-parser-next-lower.workspace = true
 temp-dir.workspace = true
 tempfile.workspace = true
 test-log = { workspace = true, features = ["trace"] }

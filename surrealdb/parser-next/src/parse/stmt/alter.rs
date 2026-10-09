@@ -58,10 +58,15 @@ impl<'a, 's> Parser<'a, 's> {
 				if self.at_kw(Kw::Comment) {
 					self.string_clause(Cl::Comment)?;
 				} else if self.at_kw(Kw::Drop) {
-					self.alter_drop(&[(Kw::Comment, Cl::Comment)])?;
+					self.alter_drop(&[(Kw::Comment, Cl::Comment)], "COMMENT")?;
 				}
 			} else {
+				let clauses = self.vals.len();
 				self.alter_clauses(kind)?;
+				// `ALTER INDEX` must change something.
+				if kind == DefineKind::Index as u8 && self.vals.len() == clauses {
+					return Err(self.unexpected("`PREPARE`, `DROP` or `COMMENT`"));
+				}
 			}
 		}
 		rec[3] = self.list_from(mark).0;
@@ -77,9 +82,8 @@ impl<'a, 's> Parser<'a, 's> {
 				Kw::Drop => {
 					self.bump();
 					let n = self.tok;
-					if n.kind != T::Ident || n.kw != Kw::None || self.text_of(n) != "QUERY_TIMEOUT"
-					{
-						return Err(self.unexpected("QUERY_TIMEOUT"));
+					if n.kw != Kw::None || !self.ident_is(n, "QUERY_TIMEOUT", false) {
+						return Err(self.unexpected("`QUERY_TIMEOUT`"));
 					}
 					self.bump();
 					self.push_clause(
@@ -92,13 +96,10 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 				Kw::Compact => self.flag_clause(Cl::Compact)?,
 				Kw::None if t.kind == T::Ident || t.kind == T::EscIdent => {
-					let text = self.text_of(t);
-					if (t.kind == T::Ident && text == "QUERY_TIMEOUT")
-						|| (t.kind == T::EscIdent && text == "`QUERY_TIMEOUT`")
-					{
+					if self.ident_is(t, "QUERY_TIMEOUT", false) {
 						self.expr_clause(Cl::QueryTimeout)?;
 					} else {
-						return Err(self.unexpected("QUERY_TIMEOUT"));
+						return Err(self.unexpected("`QUERY_TIMEOUT`"));
 					}
 				}
 				_ => break,
@@ -209,12 +210,13 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	/// A `DROP x` clause, where `x` must be one of `allowed`.
-	fn alter_drop(&mut self, allowed: &[(Kw, Cl)]) -> R<()> {
+	/// A `DROP x` clause, where `x` must be one of `allowed`; anything else
+	/// is reported as not the `expected` clauses.
+	fn alter_drop(&mut self, allowed: &[(Kw, Cl)], expected: &'static str) -> R<()> {
 		let t = self.bump();
 		let n = self.tok;
 		let Some(&(_, cl)) = allowed.iter().find(|(k, _)| n.kind == T::Ident && n.kw == *k) else {
-			return Err(self.unexpected("unexpected clause to drop"));
+			return Err(self.unexpected(expected));
 		};
 		self.bump();
 		let cl = if cl == Cl::InlineEdges {
@@ -235,14 +237,15 @@ impl<'a, 's> Parser<'a, 's> {
 		self.push_clause(Cl::AlterDrop, cl as u32, 0, t.start, self.ast.nodes.len())
 	}
 
-	/// `DURATION FOR x NONE|duration, …`, with `fors` the accepted `x`s.
-	fn alter_durations(&mut self, fors: &[(Kw, Cl)]) -> R<()> {
+	/// `DURATION FOR x NONE|duration, …`, with `fors` the accepted `x`s and
+	/// `expected` naming them.
+	fn alter_durations(&mut self, fors: &[(Kw, Cl)], expected: &'static str) -> R<()> {
 		self.bump();
 		loop {
 			self.expect_kw(Kw::For, "FOR")?;
 			let t = self.tok;
 			let Some(&(_, cl)) = fors.iter().find(|(k, _)| t.kind == T::Ident && t.kw == *k) else {
-				return Err(self.unexpected("a duration target"));
+				return Err(self.unexpected(expected));
 			};
 			self.bump();
 			let first = self.ast.nodes.len();
@@ -273,49 +276,68 @@ impl<'a, 's> Parser<'a, 's> {
 			match t.kw {
 				Kw::Comment => self.string_clause(Cl::Comment)?,
 				Kw::Drop => {
-					let allowed: &[(Kw, Cl)] = match kind {
-						x if x == k(D::Table) => &[
-							(Kw::Comment, Cl::Comment),
-							(Kw::ChangeFeed, Cl::Changefeed),
-							(Kw::Inline, Cl::InlineEdges),
-						],
-						x if x == k(D::Event) => &[
-							(Kw::When, Cl::When),
-							(Kw::Then, Cl::Then),
-							(Kw::Comment, Cl::Comment),
-							(Kw::Async, Cl::Async),
-						],
-						x if x == k(D::Field) => &[
-							(Kw::Type, Cl::FieldType),
-							(Kw::Flexible, Cl::Flexible),
-							(Kw::Readonly, Cl::Readonly),
-							(Kw::Inline, Cl::Inline),
-							(Kw::Value, Cl::Value),
-							(Kw::Assert, Cl::Assert),
-							(Kw::Default, Cl::Default),
-							(Kw::Comment, Cl::Comment),
-							(Kw::Reference, Cl::Reference),
-						],
-						x if x == k(D::Bucket) => &[
-							(Kw::Readonly, Cl::Readonly),
-							(Kw::Backend, Cl::Backend),
-							(Kw::Comment, Cl::Comment),
-						],
-						x if x == k(D::Analyzer) => &[
-							(Kw::Function, Cl::Function),
-							(Kw::Tokenizers, Cl::Tokenizers),
-							(Kw::Filters, Cl::Filters),
-							(Kw::Comment, Cl::Comment),
-						],
-						x if x == k(D::Access) => &[
-							(Kw::Authenticate, Cl::Authenticate),
-							(Kw::Context, Cl::Context),
-							(Kw::Comment, Cl::Comment),
-						],
+					let (allowed, expected): (&[(Kw, Cl)], &str) = match kind {
+						x if x == k(D::Table) => (
+							&[
+								(Kw::Comment, Cl::Comment),
+								(Kw::ChangeFeed, Cl::Changefeed),
+								(Kw::Inline, Cl::InlineEdges),
+							],
+							"`COMMENT`, `CHANGEFEED` or `INLINE`",
+						),
+						x if x == k(D::Event) => (
+							&[
+								(Kw::When, Cl::When),
+								(Kw::Then, Cl::Then),
+								(Kw::Comment, Cl::Comment),
+								(Kw::Async, Cl::Async),
+							],
+							"`WHEN`, `THEN`, `COMMENT`, or `ASYNC`",
+						),
+						x if x == k(D::Field) => (
+							&[
+								(Kw::Type, Cl::FieldType),
+								(Kw::Flexible, Cl::Flexible),
+								(Kw::Readonly, Cl::Readonly),
+								(Kw::Inline, Cl::Inline),
+								(Kw::Value, Cl::Value),
+								(Kw::Assert, Cl::Assert),
+								(Kw::Default, Cl::Default),
+								(Kw::Comment, Cl::Comment),
+								(Kw::Reference, Cl::Reference),
+							],
+							"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`",
+						),
+						x if x == k(D::Bucket) => (
+							&[
+								(Kw::Readonly, Cl::Readonly),
+								(Kw::Backend, Cl::Backend),
+								(Kw::Comment, Cl::Comment),
+							],
+							"`READONLY`, `BACKEND`, or `COMMENT`",
+						),
+						x if x == k(D::Analyzer) => (
+							&[
+								(Kw::Function, Cl::Function),
+								(Kw::Tokenizers, Cl::Tokenizers),
+								(Kw::Filters, Cl::Filters),
+								(Kw::Comment, Cl::Comment),
+							],
+							"`FUNCTION`, `TOKENIZERS`, `FILTERS`, or `COMMENT`",
+						),
+						x if x == k(D::Access) => (
+							&[
+								(Kw::Authenticate, Cl::Authenticate),
+								(Kw::Context, Cl::Context),
+								(Kw::Comment, Cl::Comment),
+							],
+							"`AUTHENTICATE`, `CONTEXT` or `COMMENT`",
+						),
 						x if x == k(D::Sequence) => return Ok(()),
-						_ => &[(Kw::Comment, Cl::Comment)],
+						x if x == k(D::Api) => (&[(Kw::Comment, Cl::Comment)], "COMMENT"),
+						_ => (&[(Kw::Comment, Cl::Comment)], "`COMMENT`"),
 					};
-					self.alter_drop(allowed)?;
+					self.alter_drop(allowed, expected)?;
 				}
 				_ => {
 					if !self.alter_clause(kind, t)? {
@@ -413,14 +435,18 @@ impl<'a, 's> Parser<'a, 's> {
 				let list = self.list_from(mark).0;
 				self.push_clause(Cl::Roles, list, 0, t.start, first)?;
 			}
-			Kw::Duration if is(D::User) => {
-				self.alter_durations(&[(Kw::Token, Cl::DurToken), (Kw::Session, Cl::DurSession)])?
-			}
-			Kw::Duration if is(D::Access) => self.alter_durations(&[
-				(Kw::Grant, Cl::DurGrant),
-				(Kw::Token, Cl::DurToken),
-				(Kw::Session, Cl::DurSession),
-			])?,
+			Kw::Duration if is(D::User) => self.alter_durations(
+				&[(Kw::Token, Cl::DurToken), (Kw::Session, Cl::DurSession)],
+				"`TOKEN` or `SESSION`",
+			)?,
+			Kw::Duration if is(D::Access) => self.alter_durations(
+				&[
+					(Kw::Grant, Cl::DurGrant),
+					(Kw::Token, Cl::DurToken),
+					(Kw::Session, Cl::DurSession),
+				],
+				"`GRANT`, `TOKEN`, or `SESSION`",
+			)?,
 			Kw::Authenticate if is(D::Access) => self.expr_clause(Cl::Authenticate)?,
 			Kw::Context if is(D::Access) => self.expr_clause(Cl::Context)?,
 			Kw::Timeout if is(D::Sequence) => {
@@ -488,10 +514,9 @@ impl<'a, 's> Parser<'a, 's> {
 					Kw::Delete | Kw::Get | Kw::Patch | Kw::Post | Kw::Put | Kw::Trace
 				);
 			if !ok {
-				return Err(self.error(
-					m.start,
-					m.end,
-					"expected `any`, `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`",
+				return Err(self.unexpected_at(
+					m,
+					"`any`, `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`",
 				));
 			}
 			self.bump();

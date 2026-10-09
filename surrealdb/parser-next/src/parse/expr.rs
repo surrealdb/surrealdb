@@ -72,7 +72,7 @@ pub(crate) const BINARY_BP: [u8; Binary::COUNT] = {
 
 /// The binding power the chained-operator check compares, which differs
 /// from the parsing binding power for `@@`: it parses at equality but is
-/// checked as a relation, as in `syn`.
+/// checked as a relation, as earlier releases check it.
 pub(crate) fn check_bp(op: Binary) -> u8 {
 	if op == Binary::Matches {
 		BP_REL
@@ -133,8 +133,8 @@ pub(crate) enum Frame {
 		op: Binary,
 		start: u32,
 		/// The operator token, and whether its left operand already chains
-		/// a non-associative operator of the same power: an error `syn`
-		/// reports once the right operand is parsed.
+		/// a non-associative operator of the same power: an error reported
+		/// once the right operand is parsed, as it always has been.
 		op_start: u32,
 		chain: bool,
 		/// For `@…@` and `<|…|>`, the index into `extra` of the operator's
@@ -284,7 +284,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// A record id at an identifier followed by `:`, with nothing after it
-	/// and no range key (`syn`'s `parse_record_id`).
+	/// and no range key.
 	pub(crate) fn record_id_atom(&mut self) -> R<NodeId> {
 		let base = self.frames.len();
 		self.push_frame(Frame::Atom {
@@ -300,8 +300,8 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// A top-level expression whose first operand, when not `NONE`, is
 	/// `first`, already parsed: the rest of a statement that starts with a
-	/// statement keyword. Charges no query level, as `syn`'s
-	/// `parse_expr_start`.
+	/// statement keyword. Charges no query level, as earlier releases
+	/// charge none here.
 	pub(crate) fn expr_from(&mut self, first: NodeId, table_as_field: bool) -> R<NodeId> {
 		self.expr_in(first, table_as_field, false)
 	}
@@ -346,8 +346,8 @@ impl<'a, 's> Parser<'a, 's> {
 			// ---- have an operand: postfix, idiom parts and infix operators,
 			// reducing frames whose binding power is not lower. Idiom parts
 			// continue only a prime value, never a postfix call or range
-			// (`syn` checks for them only right after a prime).
-			// `..` alone is parsed by `syn` as a prefix operator, not a prime.
+			// (they are checked for only right after a prime).
+			// `..` alone is parsed as a prefix operator, not a prime.
 			let mut prime = !(from_operand
 				&& self.ast.nodes.get(v as usize).is_some_and(|n| n.tag == Tag::UnboundedRange));
 			loop {
@@ -408,7 +408,7 @@ impl<'a, 's> Parser<'a, 's> {
 							let (parts, d) = self.list_from(mark);
 							let d = d.max(self.depth_of(head)) + n;
 							v = self.node(Tag::Idiom, 0, head, parts, start, d)?;
-							// The idiom ended where `syn` stops looking for parts.
+							// The idiom ended where parts are no longer looked for.
 							prime = false;
 						}
 					}
@@ -790,8 +790,8 @@ impl<'a, 's> Parser<'a, 's> {
 
 	/// A non-associative operator chained without parentheses, over the
 	/// operator at `op_start` through the token after its right operand.
-	/// `lhs` when the left operand is the chained one; `syn` words the two
-	/// cases slightly differently.
+	/// `lhs` when the left operand is the chained one; the established
+	/// wording differs slightly between the two cases.
 	pub(crate) fn chain_error(&mut self, op: Binary, op_start: u32, lhs: bool) -> Stop {
 		let range = BINARY_BP[op as usize] == BP_RANGE;
 		let (msg, label) = match (range, lhs) {
@@ -928,7 +928,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		}
 		if !self.at(T::Pipe) || self.adjacent1().is_none_or(|t| t.kind != T::Gt) {
-			// `syn` names the token after a `|` it consumed.
+			// The error names the token after a consumed `|`.
 			if self.at(T::Pipe) {
 				self.bump();
 			}
@@ -977,8 +977,8 @@ impl<'a, 's> Parser<'a, 's> {
 			T::AndAnd => Binary::And,
 			T::QColon => Binary::Tco,
 			T::QQ => Binary::Nco,
-			// `syn` binds a lone `?` as the start of `??`, so an expression
-			// never ends at one.
+			// A lone `?` binds as the start of `??`, so an expression never
+			// ends at one.
 			T::Question => return Err(self.unexpected("`??`")),
 			T::EqEq => Binary::ExactEq,
 			T::Ne => Binary::Ne,
@@ -1064,10 +1064,9 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(Some((op, 0)))
 	}
 
-	/// Whether an idiom continues at the cursor (`syn`'s
-	/// `peek_continues_idiom`). For `<` the next token may follow whitespace,
-	/// though a lookup needs it adjacent: `1 < -2` makes `1` an idiom with no
-	/// parts, as in `syn`.
+	/// Whether an idiom continues at the cursor. For `<` the next token may
+	/// follow whitespace, though a lookup needs it adjacent: `1 < -2` makes
+	/// `1` an idiom with no parts, as earlier releases read it.
 	pub(crate) fn continues_idiom(&self) -> bool {
 		match self.tok.kind {
 			T::Arrow | T::LBracket | T::Dot | T::DotDotDot => true,
@@ -1100,7 +1099,7 @@ impl<'a, 's> Parser<'a, 's> {
 					&& n.kind == T::Digits
 				{
 					self.bump();
-					// `syn` reads the digits alone and applies the sign.
+					// The digits are read alone and the sign applied to them.
 					return self
 						.number_in(t.start, true, false, Compound::Numeric, n.start)
 						.map(Some);
@@ -1139,7 +1138,7 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			T::Lt => {
 				// `<-` starts a lookup, except `<-` and digits: a cast to a
-				// negative literal kind, as `syn` decides it.
+				// negative literal kind, as earlier releases decide it.
 				if let Some(n) = self.adjacent1()
 					&& matches!(n.kind, T::Minus | T::Arrow | T::Tilde)
 					&& !(n.kind == T::Minus && self.peek2().kind == T::Digits)
@@ -1212,7 +1211,13 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			T::LBracket => {
 				self.bump();
-				if self.eat(T::RBracket) {
+				if self.at(T::RBracket) {
+					// An empty array costs the level a full one does.
+					let b = self.budgets();
+					self.enter_o()?;
+					self.enter_e()?;
+					self.set_budgets(b);
+					self.bump();
 					let idx = self.empty_list();
 					return self.node(Tag::Array, 0, idx, 0, t.start, 0);
 				}
@@ -1400,6 +1405,26 @@ impl<'a, 's> Parser<'a, 's> {
 	/// at its first keyword: a call whose callee is a `Name` with `op` 2, 3 or
 	/// 4 and `a` an index into `extra` of its parts.
 	fn special_call(&mut self, t: Tok) -> R<NodeId> {
+		let callee = self.special_callee(t)?;
+		let op = self.ast.nodes[callee as usize].op;
+		self.expect(T::LParen, "(")?;
+		if self.eat(T::RParen) {
+			let idx = self.empty_list();
+			return self.node(Tag::Call, op, callee, idx, t.start, 1);
+		}
+		self.push_frame(Frame::Args {
+			start: t.start,
+			open: self.prev_end - 1,
+			mark: self.vals.len() as u32,
+			callee,
+			tag: Tag::Call,
+		})?;
+		Ok(PUSHED)
+	}
+
+	/// The callee of [`Self::special_call`]: a `Name` with `op` 2 (`mod`), 3
+	/// (`silo`) or 4 (`ml`) whose `a` indexes its parts in `extra`.
+	fn special_callee(&mut self, t: Tok) -> R<NodeId> {
 		self.bump();
 		if self.limits.no_surrealism {
 			match t.kw {
@@ -1465,20 +1490,30 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 		};
 		let parts = self.list_from_raw(mark);
-		let callee = self.leaf_span(Tag::Name, op, parts, 0, t.start, self.prev_end);
-		self.expect(T::LParen, "(")?;
-		if self.eat(T::RParen) {
-			let idx = self.empty_list();
-			return self.node(Tag::Call, op, callee, idx, t.start, 1);
+		Ok(self.leaf_span(Tag::Name, op, parts, 0, t.start, self.prev_end))
+	}
+
+	/// A function name without arguments, read as the function-name entry
+	/// point reads it: a `Name` with `op` 0 (a builtin path, not checked against
+	/// the registry), 1 (`fn::…`) or that of [`Self::special_callee`].
+	pub(crate) fn function_name(&mut self) -> R<NodeId> {
+		let t = self.tok;
+		let custom = match t.kw {
+			Kw::Fn => {
+				self.bump();
+				self.expect(T::PathSep, "::")?;
+				true
+			}
+			Kw::Mod | Kw::Silo | Kw::Ml if t.is_ident() => return self.special_callee(t),
+			_ if t.is_ident() => false,
+			_ => return Err(self.unexpected("a function name")),
+		};
+		let first = self.ident()?;
+		let mut end = first.end;
+		while self.eat(T::PathSep) {
+			end = self.ident()?.end;
 		}
-		self.push_frame(Frame::Args {
-			start: t.start,
-			open: self.prev_end - 1,
-			mark: self.vals.len() as u32,
-			callee,
-			tag: Tag::Call,
-		})?;
-		Ok(PUSHED)
+		Ok(self.leaf_span(Tag::Name, custom as u8, 0, 0, first.start, end))
 	}
 
 	/// `function(args) { javascript }` at `function`.
@@ -1590,16 +1625,17 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			end = self.ident()?.end;
 		}
-		if !custom
-			&& !any_path
-			&& let Some(known) = self.limits.builtin
-			&& !known(self.text, first.start, end)
-		{
+		// Without the hook, the consumer checks the path.
+		let kind = match self.limits.builtin {
+			Some(kind) if !custom && !any_path => Some(kind(self.text, first.start, end)),
+			_ => None,
+		};
+		if kind == Some(PathKind::Unknown) {
 			return Err(self.error(first.start, end, "Invalid function/constant path{suggest}"));
 		}
 		let name = self.leaf_span(Tag::Name, custom as u8, 0, 0, first.start, end);
 		if !self.at(T::LParen) {
-			if custom {
+			if custom || kind == Some(PathKind::Function) {
 				return Err(self.unexpected("("));
 			}
 			return Ok(self.leaf_span(Tag::Path, 0, 0, 0, start, end));
@@ -1630,7 +1666,9 @@ impl<'a, 's> Parser<'a, 's> {
 				None => Ok(PUSHED),
 			};
 		}
-		if self.at_object_key() {
+		// Where only an object can follow, its first key is read as one,
+		// so a key without its `:` fails at the `:`, as it always has.
+		if self.at_object_key() || !matches!(wrap, Wrap::None) {
 			self.push_frame(Frame::Object {
 				start,
 				mark: self.vals.len() as u32,
@@ -1638,9 +1676,6 @@ impl<'a, 's> Parser<'a, 's> {
 			})?;
 			self.object_key()?;
 			return Ok(PUSHED);
-		}
-		if !matches!(wrap, Wrap::None) {
-			return Err(self.unexpected("an object key"));
 		}
 		if self.eat(T::Comma) {
 			// `{,}`: the empty set.
@@ -1729,7 +1764,7 @@ impl<'a, 's> Parser<'a, 's> {
 			let num = self.number_in(k.start, false, false, Compound::Number, k.start)?;
 			let nn = self.ast.nodes[num as usize];
 			if nn.tag == Tag::Duration {
-				// `syn` reads the key as a number, which a duration is not.
+				// The key is read as a number, which a duration is not.
 				return Err(self.number_error(
 					k.start,
 					LexError::InvalidNumber,
@@ -1753,8 +1788,8 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	/// A malformed numeric literal at `start`: `syn`'s error when its lexer
-	/// rejects the literal too, else the lexer's own.
+	/// A malformed numeric literal at `start`: the compound-literal error
+	/// when there is one, else the lexer's own.
 	pub(crate) fn number_error(
 		&mut self,
 		start: u32,
@@ -1790,8 +1825,8 @@ impl<'a, 's> Parser<'a, 's> {
 		self.number_in(start, signed, unsigned, Compound::Integer, start)
 	}
 
-	/// [`Self::number_with`], reporting a malformed literal as `syn` does when
-	/// it reads the literal with `mode` from `origin`.
+	/// [`Self::number_with`], reporting a malformed literal with the
+	/// established error for reading it with `mode` from `origin`.
 	pub(crate) fn number_in(
 		&mut self,
 		start: u32,
@@ -1885,17 +1920,17 @@ pub(crate) enum PartStep {
 /// Parses a float literal span: digits with `_` separators, an optional
 /// fraction and exponent, and an optional `f` suffix.
 pub(crate) fn parse_float(text: &[u8]) -> f64 {
+	let digits = |b: &&u8| **b != b'_' && **b != b'f';
 	let mut buf = [0u8; 64];
-	let mut n = 0;
-	for &b in text {
-		if b == b'_' || b == b'f' {
-			continue;
-		}
-		if n == buf.len() {
-			break;
-		}
-		buf[n] = b;
-		n += 1;
+	let n = text.iter().filter(digits).count();
+	if n > buf.len() {
+		// A literal written out in full, such as `f64::MAX` without an
+		// exponent, is read whole; only these allocate.
+		let s: String = text.iter().filter(digits).map(|&b| b as char).collect();
+		return s.parse().unwrap_or(f64::NAN);
+	}
+	for (slot, &b) in buf.iter_mut().zip(text.iter().filter(digits)) {
+		*slot = b;
 	}
 	core::str::from_utf8(&buf[..n]).ok().and_then(|s| s.parse().ok()).unwrap_or(f64::NAN)
 }

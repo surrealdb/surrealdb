@@ -130,8 +130,8 @@ impl<'a, 's> Parser<'a, 's> {
 			let mark = self.vals.len() as u32;
 			if self.at_kw(Kw::Rand) {
 				let t = self.bump();
-				self.expect(T::LParen, "(")?;
-				self.expect(T::RParen, ")")?;
+				let open = self.expect(T::LParen, "(")?;
+				self.close(T::RParen, open.start)?;
 				let n = self.leaf_span(Tag::OrderRand, 0, 0, 0, t.start, self.prev_end);
 				self.vals.push(n);
 			} else {

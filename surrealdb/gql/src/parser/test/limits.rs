@@ -5,7 +5,7 @@
 //!
 //! Operator chains (binary spines, `NOT`/sign prefixes, `IS` postfixes) and
 //! property-access chains are bounded by `expr_recursion_limit` (default
-//! 128, mirroring `syn`), because they lower one-to-one onto `LogicalExpr`
+//! 128, matching the SurrealQL parser), because they lower one-to-one onto `LogicalExpr`
 //! nests whose downstream recursive walks (drop, compilation, planning) must
 //! stay within the machine stack. Label chains are *not* charged: labels
 //! never reach `LogicalExpr`, so their ASTs can be arbitrarily deep, and the
@@ -96,8 +96,8 @@ fn pathological_open_brackets_fail_fast() {
 
 /// Flat operator spines and prefix chains are bounded by the expression
 /// depth budget: parsing must fail fast with a clean error (never build the
-/// tree, never touch the machine stack), exactly like `syn` after its
-/// expression-depth limit. 200k-term inputs double as fail-fast checks.
+/// tree, never touch the machine stack), exactly like the SurrealQL parser at
+/// its expression-depth limit. 200k-term inputs double as fail-fast checks.
 #[rstest]
 #[case::or_spine(format!("RETURN a{}", " OR a".repeat(200_000)))]
 #[case::and_spine(format!("RETURN a{}", " AND a".repeat(200_000)))]

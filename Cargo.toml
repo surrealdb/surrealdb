@@ -5,7 +5,6 @@ members = [
     ".",
     # SurrealDB crates
     "surrealdb",
-    "surrealdb/ast",
     "surrealdb/cnf",
     "surrealdb/collections",
     "surrealdb/common",
@@ -35,7 +34,6 @@ members = [
     "surrealdb/node",
     "surrealdb/observe",
     "surrealdb/parse-common",
-    "surrealdb/parser",
     "surrealdb/parser-next",
     "surrealdb/parser-next/lower",
     "surrealdb/parser-next/size-probe",
@@ -50,8 +48,6 @@ members = [
     "surrealdb/sqlfront-spec",
     "surrealdb/sqon",
     "surrealdb/strand",
-    "surrealdb/syn",
-    "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
     "surrealdb/wasm",
@@ -95,7 +91,6 @@ surrealdb-sql = { version = "3.4.0-nightly", path = "surrealdb/sql" }
 surrealdb-parser-next = { version = "3.4.0-nightly", path = "surrealdb/parser-next" }
 surrealdb-parser-next-lower = { version = "3.4.0-nightly", path = "surrealdb/parser-next/lower" }
 surrealdb-strand = { version = "3.4.0-nightly", path = "surrealdb/strand", default-features = false }
-surrealdb-syn = { version = "3.4.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.4.0-nightly", path = "surrealdb/core", default-features = false }
 surrealdb-embedded = { version = "3.4.0-nightly", path = "surrealdb/embedded", default-features = false }
 surrealdb-datastore = { version = "3.4.0-nightly", path = "surrealdb/datastore" }
@@ -107,9 +102,6 @@ surrealdb-mywire = { version = "3.4.0-nightly", path = "surrealdb/mywire", defau
 surrealdb-pgwire = { version = "3.4.0-nightly", path = "surrealdb/pgwire", default-features = false }
 surrealdb-types = { version = "3.4.0-nightly", path = "surrealdb/types", default-features = false }
 surrealdb-types-derive = { version = "3.4.0-nightly", path = "surrealdb/types/derive" }
-ast = { version = "3.4.0-nightly", package = "surrealdb-ast", path = "surrealdb/ast" }
-token = { version = "3.4.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
-parser = { version = "3.4.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
 parse-common = { version = "3.4.0-nightly", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
 sqon = { version = "3.4.0-nightly", package = "surrealdb-sqon", path = "surrealdb/sqon" }
 common = { version = "3.4.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
@@ -413,7 +405,7 @@ surrealdb-core = { workspace = true, features = [
 ] }
 surrealdb-rpc.workspace = true
 surrealdb-server.workspace = true
-surrealdb-syn.workspace = true
+surrealdb-parser-next-lower.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "user"] }

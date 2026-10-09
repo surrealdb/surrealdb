@@ -1290,9 +1290,12 @@ Flag when changes touch:
 
 ## 15. Query Parser and Front-Ends
 
-**Files**: the `surrealdb/syn` crate (SurrealQL lexer/parser, the bulk of the
-grammar), `surrealdb/parser`, `surrealdb/sql` and `surrealdb/expr` (AST and
-expression construction), the `surrealdb/gql` crate (GQL front-end), and
+**Files**: `surrealdb/parser-next` (the SurrealQL lexer and parser),
+`surrealdb/parser-next/lower` (its lowering into the `sql` AST, the semantic
+checks made there, and the entry points every caller uses),
+`surrealdb/parse-common` (diagnostics and error rendering, shared with the GQL
+front-end), `surrealdb/sql` and `surrealdb/expr` (AST and expression
+construction), the `surrealdb/gql` crate (GQL front-end), and
 `surrealdb/pgsql` and `surrealdb/mysql` (PostgreSQL and MySQL front-ends). The
 same-named modules under `core/src/` are thin
 remnants of the pre-crate-split layout and are not where the grammar lives.

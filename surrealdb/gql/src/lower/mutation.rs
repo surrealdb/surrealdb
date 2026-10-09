@@ -13,6 +13,7 @@
 //! variable, mutating an unbound variable, deleting a non-variable expression,
 //! `SET a = {…}` that sets the reserved `id`/`in`/`out` keys, and an `INSERT`
 //! node that is neither a labelled new node nor a bound-variable reference.
+use parse_common::error::{SyntaxError, bail, syntax_error};
 use surrealdb_strand::TableName;
 
 use crate::expr::logical::LogicalExpr;
@@ -26,7 +27,6 @@ use crate::gql::ast::{
 };
 use crate::gql::lower::binding::Registry;
 use crate::gql::lower::expr::{Scope, lower_value};
-use crate::syn::error::{SyntaxError, bail, syntax_error};
 
 /// A new `INSERT` node awaiting property lowering: `(binding, table, raw props)`.
 type PendingNode<'ast> = (BindingId, TableName, &'ast [(Ident, GqlExpr)]);
@@ -321,7 +321,7 @@ fn classify_node<'ast>(
 /// is evaluated against the binding row at write time).
 fn lower_props(props: &[(Ident, GqlExpr)], scope: &Scope<'_>) -> Result<LogicalExpr, SyntaxError> {
 	// Reuse the value lowering's object handling by lowering a synthetic map.
-	let map = GqlExpr::Map(props.to_vec(), crate::syn::token::Span::empty());
+	let map = GqlExpr::Map(props.to_vec(), parse_common::span::Span::empty());
 	lower_value(&map, scope)
 }
 
@@ -349,7 +349,7 @@ fn reject_reserved_key(key: &Ident) -> Result<(), SyntaxError> {
 }
 
 /// The label-mutation rejection (`SET a:Label` / `REMOVE a:Label`).
-fn label_mutation_rejected(span: crate::syn::token::Span) -> SyntaxError {
+fn label_mutation_rejected(span: parse_common::span::Span) -> SyntaxError {
 	syntax_error!(
 		"Label mutation is not supported: a record belongs to exactly one table",
 		@span => "SurrealDB has no multi-label model; create the record in the target table instead"

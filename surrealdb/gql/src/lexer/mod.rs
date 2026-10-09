@@ -2,8 +2,7 @@
 //!
 //! Implements the lexical rules of `doc/gql/REFERENCE.md` section (a),
 //! transcribed from the vendored grammar `doc/gql/GQL.g4` (sections
-//! 21.1-21.4). The lexer mirrors the design of the SurrealQL lexer in
-//! [`crate::syn::lexer`] and reuses its [`BytesReader`].
+//! 21.1-21.4). The lexer reads its source through [`BytesReader`].
 //!
 //! Notable lexical properties, all per the grammar:
 //!
@@ -26,10 +25,11 @@ mod strings;
 #[cfg(test)]
 mod test;
 
+use parse_common::error::{SyntaxError, bail, syntax_error};
+use parse_common::reader::BytesReader;
+use parse_common::span::Span;
+
 use crate::gql::token::{Token, TokenKind, t};
-use crate::syn::error::{SyntaxError, bail, syntax_error};
-use crate::syn::lexer::BytesReader;
-use crate::syn::token::Span;
 
 /// The GQL lexer.
 ///

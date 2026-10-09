@@ -266,7 +266,7 @@ pub(super) mod tests {
 	use rand::rngs::SmallRng;
 	use rand::{Rng, SeedableRng};
 	use rust_decimal::prelude::Zero;
-	use surrealdb_syn as syn;
+	use surrealdb_parser_next_lower as syn;
 	use test_log::test;
 	use tracing::info;
 	use web_time::SystemTime;

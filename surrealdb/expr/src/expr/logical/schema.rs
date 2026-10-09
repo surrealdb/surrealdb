@@ -983,7 +983,8 @@ mod tests {
 	use crate::expr::{ExplainFormat, Param};
 
 	fn expr(sql: &str) -> LogicalExpr {
-		let ast = surrealdb_syn::parse(&format!("RETURN {sql}")).expect("expression should parse");
+		let ast = surrealdb_parser_next_lower::parse(&format!("RETURN {sql}"))
+			.expect("expression should parse");
 		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {

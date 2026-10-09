@@ -17,7 +17,7 @@ categories.workspace = true
 phf = { workspace = true, features = ["macros", "unicase"] }
 surrealdb-expr = { workspace = true }
 surrealdb-strand = { workspace = true }
-surrealdb-syn = { workspace = true }
+parse-common.workspace = true
 surrealdb-types = { workspace = true }
 unicase.workspace = true
 

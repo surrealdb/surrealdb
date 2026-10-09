@@ -37,8 +37,8 @@ use std::time::{Duration, Instant};
 use bytes::{Bytes, BytesMut};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_parser_next_lower::{ParserSettings, StatementStream};
 use surrealdb_rpc::capabilities::Capabilities;
-use surrealdb_syn::parser::{ParserSettings, StatementStream};
 
 // ---------------------------------------------------------------------------
 // Configuration

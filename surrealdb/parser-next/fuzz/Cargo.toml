@@ -1,0 +1,27 @@
+[package]
+name = "surrealdb-parser-next-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+bytes = "1"
+libfuzzer-sys = "0.4.12"
+surrealdb-parser-next-lower = { path = "../lower" }
+surrealdb-types = { path = "../../types", default-features = false }
+
+# Kept out of the main workspace, as cargo-fuzz builds with its own flags.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "consistency"
+path = "fuzz_targets/consistency.rs"
+test = false
+doc = false

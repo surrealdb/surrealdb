@@ -20,9 +20,7 @@ default = ["protocol-ws", "rustls", "parse", "regex-unicode"]
 # selecting one brings the engine (and with it the database core) into the
 # build even without a `kv-*` backend, as they always have.
 allocator = ["surrealdb-engine-local/allocator"]
-parse = ["dep:surrealdb-syn"]
-# Regex values match with full Unicode support (see the same feature on
-# `surrealdb-core`).
+parse = ["dep:surrealdb-parser-next-lower"]
 regex-unicode = ["surrealdb-types/regex-unicode"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
@@ -88,7 +86,7 @@ surrealdb-engine-local = { workspace = true, default-features = false, optional 
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true, optional = true }
 surrealdb-rpc = { workspace = true }
-surrealdb-syn = { workspace = true, optional = true }
+surrealdb-parser-next-lower = { workspace = true, optional = true }
 surrealdb-types = { workspace = true, features = ["convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
@@ -151,7 +149,7 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 [dev-dependencies]
 ciborium.workspace = true
 surrealdb-cnf = { workspace = true }
-surrealdb-syn = { workspace = true }
+surrealdb-parser-next-lower = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true

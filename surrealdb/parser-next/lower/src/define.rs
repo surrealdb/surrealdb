@@ -1,9 +1,10 @@
 //! Lowering of `DEFINE` statements: replays each definition's clauses in
-//! source order onto the `surrealdb_sql` statement, and makes the checks the
-//! old parser makes on combinations of clauses.
+//! source order onto the `surrealdb_sql` statement, and makes the parse-time
+//! checks on combinations of clauses.
 
 use std::time::Duration;
 
+use surrealdb_iam::scram::ScramCredential;
 use surrealdb_parser_next::ast::{
 	ALTER_SYSTEM, Ast, Cl, DefineKind as K, NONE, Node, NodeId, Tag, define, jwt, vector,
 };
@@ -139,6 +140,16 @@ impl Lower<'_> {
 		Ok(p)
 	}
 
+	/// Checks a `PASSSCRAM` verifier, the clause starting at `start`, as the
+	/// credential store will parse it.
+	fn scram_verifier(&self, v: &str, start: u32) -> R<()> {
+		ScramCredential::from_verifier_string(v).map(|_| ()).map_err(|e| {
+			Reject::new(format!("Invalid SCRAM verifier: {e}"))
+				.at(start, start + "PASSSCRAM".len() as u32)
+				.with_label("Expected a valid `SCRAM-SHA-256$...` verifier string")
+		})
+	}
+
 	fn changefeed(&self, c: &Node) -> R<ChangeFeed> {
 		Ok(ChangeFeed {
 			expiry: self.duration(c.a)?,
@@ -146,9 +157,10 @@ impl Lower<'_> {
 		})
 	}
 
-	/// The `fn::` path of a `Name`, without `fn::`.
-	fn path(&self, id: NodeId) -> String {
-		self.text(id).split("::").map(str::trim).collect::<Vec<_>>().join("::")
+	/// The `fn::` path of a `Name`, without `fn::`, its escaped segments
+	/// decoded.
+	fn path(&self, id: NodeId) -> R<String> {
+		self.path_name(id)
 	}
 
 	pub fn define(&self, n: &Node) -> R<DefineStatement> {
@@ -202,7 +214,7 @@ impl Lower<'_> {
 					_ => return Err(Reject::new("not a block")),
 				};
 				let mut s = DefineFunctionStatement {
-					name: Strand::new(self.path(rec[define::NAME])),
+					name: Strand::new(self.path(rec[define::NAME])?),
 					args,
 					block,
 					kind,
@@ -251,9 +263,7 @@ impl Lower<'_> {
 						}
 						Cl::Passscram => {
 							let v = self.string(c.a)?;
-							if !super::lit::scram_verifier(&v) {
-								return Err(Reject::new("invalid SCRAM verifier"));
-							}
+							self.scram_verifier(&v, c.start)?;
 							s.scram = Some(v);
 						}
 						Cl::Roles => {
@@ -487,9 +497,7 @@ impl Lower<'_> {
 				}
 				DefineStatement::Field(Box::new(s))
 			}
-			x if x == K::Index as u8 => {
-				DefineStatement::Index(self.index(kind, rec, &clauses, n.end)?)
-			}
+			x if x == K::Index as u8 => DefineStatement::Index(self.index(kind, rec, &clauses)?),
 			x if x == K::Analyzer as u8 => {
 				let mut s = DefineAnalyzerStatement {
 					name: name()?,
@@ -561,7 +569,8 @@ impl Lower<'_> {
 			}
 			_ => {
 				let exe = rec[define::X1];
-				let executable = if self.n(exe).tag == Tag::Str {
+				// `X1` is a list index for a silo package, a node otherwise.
+				let executable = if rec[define::X2] != 1 {
 					match self.expr(exe)? {
 						Expr::Literal(Literal::File(f)) => {
 							ModuleExecutable::Surrealism(SurrealismExecutable(f))
@@ -635,7 +644,7 @@ impl Lower<'_> {
 			let mut mw = Vec::new();
 			for &call in self.list(c.a) {
 				let call = self.n(call);
-				let name = self.path(call.a);
+				let name = self.path(call.a)?;
 				let name = if self.n(call.a).op == 1 {
 					format!("fn::{name}")
 				} else {
@@ -687,14 +696,14 @@ impl Lower<'_> {
 					});
 				}
 				Cl::GqlFunctions => {
-					let names = || -> Vec<Strand> {
-						self.list(c.b).iter().map(|&t| Strand::new(self.path(t))).collect()
+					let names = || -> R<Vec<Strand>> {
+						self.list(c.b).iter().map(|&t| Ok(Strand::new(self.path(t)?))).collect()
 					};
 					fncs = Some(match c.a {
 						0 => FunctionsConfig::None,
 						1 => FunctionsConfig::Auto,
-						2 => FunctionsConfig::Include(names()),
-						_ => FunctionsConfig::Exclude(names()),
+						2 => FunctionsConfig::Include(names()?),
+						_ => FunctionsConfig::Exclude(names()?),
 					});
 				}
 				Cl::GqlDepth => depth = Some(self.uint(c.a)?),
@@ -717,14 +726,7 @@ impl Lower<'_> {
 		})
 	}
 
-	/// `end` is where the statement ends.
-	fn index(
-		&self,
-		kind: DefineKind,
-		rec: &[u32],
-		clauses: &[&Node],
-		end: u32,
-	) -> R<DefineIndexStatement> {
+	fn index(&self, kind: DefineKind, rec: &[u32], clauses: &[&Node]) -> R<DefineIndexStatement> {
 		let mut s = DefineIndexStatement {
 			name: self.expr(rec[define::NAME])?,
 			what: self.expr(rec[define::ON])?,
@@ -734,8 +736,8 @@ impl Lower<'_> {
 			comment: Expr::Literal(Literal::None),
 			concurrently: false,
 		};
-		// The last token of the column list, where `syn` reports a column
-		// count that does not fit the index.
+		// The last token of the column list, where a column count that does
+		// not fit the index is reported.
 		let mut fields = None;
 		for c in clauses {
 			match unsafe_cl(c.op) {
@@ -776,28 +778,18 @@ impl Lower<'_> {
 				_ => s.comment = self.expr(c.a)?,
 			}
 		}
-		// The token after the statement.
-		let next = || {
-			let t = self.tok_at(end);
-			(t.start, t.end)
-		};
+		// An index without a `FIELDS` clause that needs columns is rejected
+		// while parsing.
 		match (&s.index, fields) {
 			(Index::Count(_), Some((a, b))) if !s.cols.is_empty() => {
 				return Err(Reject::new("Cannot create a count index with fields").at(a, b));
 			}
-			(Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_), _) if s.cols.len() != 1 => {
-				let (msg, (a, b)) = match fields {
-					Some(span) => (format!("Expected one column, found {}", s.cols.len()), span),
-					None => ("Expected one column, found none".to_owned(), next()),
-				};
-				return Err(Reject::new(msg).at(a, b));
-			}
-			(Index::Uniq | Index::Idx, None) if s.cols.is_empty() => {
-				let (a, b) = next();
-				return Err(Reject::new(
-					"Expected at least one column - Use FIELDS to define columns",
-				)
-				.at(a, b));
+			(Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_), Some((a, b)))
+				if s.cols.len() != 1 =>
+			{
+				return Err(
+					Reject::new(format!("Expected one column, found {}", s.cols.len())).at(a, b)
+				);
 			}
 			_ => {}
 		}
@@ -948,7 +940,7 @@ impl Lower<'_> {
 		}
 	}
 
-	/// A JWT definition, as `syn` builds it: a symmetric verification key
+	/// A JWT definition, as earlier releases build it: a symmetric verification key
 	/// doubles as the issuer key.
 	fn jwt(&self, id: NodeId) -> R<JwtAccess> {
 		let r = self.rec(self.n(id).a, jwt::LEN);
@@ -1078,7 +1070,7 @@ impl Lower<'_> {
 	}
 }
 
-/// `syn`'s error for a `RETRY` or `MAXDEPTH` clause `c` before `ASYNC`.
+/// The established error for a `RETRY` or `MAXDEPTH` clause `c` before `ASYNC`.
 fn after_async(c: &Node, kw: &'static str) -> Reject {
 	let end = c.start + kw.len() as u32;
 	Reject::new(format!("Unexpected token `{kw}`"))
@@ -1144,7 +1136,7 @@ impl Lower<'_> {
 				expunge,
 			}),
 			x if x == K::Function as u8 => RemoveStatement::Function(RemoveFunctionStatement {
-				name: Strand::new(self.path(rec[rm::NAME])),
+				name: Strand::new(self.path(rec[rm::NAME])?),
 				if_exists,
 			}),
 			x if x == K::Module as u8 => RemoveStatement::Module(RemoveModuleStatement {
@@ -1270,7 +1262,7 @@ impl Lower<'_> {
 
 	fn analyzer_function(&self, c: &Node) -> R<String> {
 		let f = self.n(c.a);
-		let path = self.path(c.a);
+		let path = self.path(c.a)?;
 		if f.op == 1 {
 			Ok(path)
 		} else {
@@ -1584,7 +1576,7 @@ impl Lower<'_> {
 			}
 			x if x == K::Function as u8 => {
 				let mut s = AlterFunctionStatement {
-					name: Strand::new(self.path(rec[1])),
+					name: Strand::new(self.path(rec[1])?),
 					if_exists,
 					..Default::default()
 				};
@@ -1629,9 +1621,7 @@ impl Lower<'_> {
 						(Cl::Passhash, _) => s.pass_type = Some(PassType::Hash(self.string(c.a)?)),
 						(Cl::Passscram, _) => {
 							let v = self.string(c.a)?;
-							if !super::lit::scram_verifier(&v) {
-								return Err(Reject::new("invalid SCRAM verifier"));
-							}
+							self.scram_verifier(&v, c.start)?;
 							s.scram = Some(v);
 						}
 						(Cl::Roles, _) => {

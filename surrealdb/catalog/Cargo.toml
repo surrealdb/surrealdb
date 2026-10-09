@@ -41,7 +41,7 @@ surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
 surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
-surrealdb-syn = { workspace = true }
+surrealdb-parser-next-lower = { workspace = true }
 surrealdb-types = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true

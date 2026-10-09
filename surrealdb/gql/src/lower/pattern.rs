@@ -18,6 +18,8 @@
 //! edge group (R4) and may carry an inline predicate that references that edge
 //! alone — a cross-variable reference is rejected because the per-path
 //! traversal has no place to evaluate it.
+use parse_common::error::{SyntaxError, bail};
+use parse_common::span::Span;
 use surrealdb_strand::TableName;
 
 use crate::expr::BinaryOperator;
@@ -32,8 +34,6 @@ use crate::gql::ast::{
 };
 use crate::gql::lower::binding::{ClauseBindings, PatternBindings, Registry};
 use crate::gql::lower::expr::{self, Scope};
-use crate::syn::error::{SyntaxError, bail};
-use crate::syn::token::Span;
 
 /// Lowers one (flattened) MATCH clause into its [`MatchClausePlan`].
 ///

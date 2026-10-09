@@ -21,10 +21,11 @@
 //! underscore separator (`1__2`, `1_`, `0x1_`) is a lexical error rather than
 //! a token split, for better error messages.
 
+use parse_common::error::{SyntaxError, syntax_error};
+use parse_common::span::Span;
+
 use crate::gql::lexer::Lexer;
 use crate::gql::token::{NumberKind, NumberSuffix, Token, TokenKind};
-use crate::syn::error::{SyntaxError, syntax_error};
-use crate::syn::token::Span;
 
 impl Lexer<'_> {
 	/// Lex a numeric literal. The starting digit must already be consumed.

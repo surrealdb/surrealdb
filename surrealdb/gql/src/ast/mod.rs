@@ -14,7 +14,7 @@
 //!
 //! Every node carries (or can produce) a [`Span`] into the source text.
 
-use crate::syn::token::Span;
+use parse_common::span::Span;
 
 /// A complete GQL query: a linear program.
 #[derive(Clone, Debug, PartialEq)]

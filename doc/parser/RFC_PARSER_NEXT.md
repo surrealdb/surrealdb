@@ -1,11 +1,14 @@
 # RFC: a size-first SurrealQL front end
 
-Status: accepted direction. The new parser replaces both `surrealdb-syn`
-(`surrealdb/syn`) and the v3 parser (`surrealdb-parser`, `surrealdb-ast`,
-`surrealdb-token`) once it reaches parity; until then `syn` is the
-differential oracle. Milestones M1 (full grammar) and M3 (side by side behind
-a switch) are met (§8). M2's error-message differential is at parity on the
-corpus (§7.8); its fuzz target and recovery remain.
+Status: accepted direction. parser-next is the only SurrealQL parser:
+`surrealdb-syn` and the v3 parser (`surrealdb-parser`, `surrealdb-ast`,
+`surrealdb-token`) are deleted. The entry points the engine calls live in
+`surrealdb-parser-next-lower`, which lowers the flat tree into the
+`surrealdb_sql` AST (Phase A, §6.4); diagnostics, spans and their rendering
+live in `surrealdb-parse-common`. Milestones M1–M3 are met, M2's fuzz target
+exists, and M6's deletion of `syn` and v3 is done; M4 (the printer), M5
+(Phase B lowering, which deletes `surrealdb-sql`) and list/clause recovery
+remain (§8).
 
 ## 1. Summary
 
@@ -1190,43 +1193,19 @@ mirrored deliberately and covered by a differential mode:
   modelling which failures consume their token (`expected!` and
   `parse_ident` do, closing delimiters do not).
 
-### 7.7 Side by side
+### 7.7 Default, then sole parser
 
-`surrealdb_syn::next` holds a process-wide mode, read from
-`SURREAL_PARSER_NEXT` on first use or set by `Datastore::with_parser_next`:
-
-- `off` (default): `syn` alone.
-- `on`: every routed entry point parses with parser-next and lowers into the
-  same `surrealdb_sql` tree. A rejected input reports parser-next's own
-  diagnostic, rendered by `syn`'s renderer (§7.8).
-- `check`: both parsers on every input; any difference in outcome, tree
-  (masking random access keys) or rendered error text is an error. Test
-  lanes use this.
-
-Routed: `parse` and `query_with_settings` (core's `parse_with_capabilities`,
-so every query a datastore executes), `expr`, `expr_legacy_strand`, `block`,
-`idiom`, `kind`, every `*_for_definition` decoder (stored catalog text),
-`value`, `value_legacy_strand`, `record_id`, JSON (core's `json` and
-`json_legacy_strand`), and `StatementStream` (imports). The mode is
-process-wide because these are free functions that callers reach without a
-datastore.
-
-Both lanes are cargo-make tasks: `ci-lang-test-parser-next` (the language
-suite with `SURREAL_PARSER_NEXT=check`) and
-`ci-lang-upgrade-test-parser-next` (the upgrade suite, where only the current
-checkout reads the variable, so every definition a released binary stored is
-re-parsed through parser-next and checked).
-
-| Run (memory backend unless noted) | `off` | `on` | `check` |
-|---|---|---|---|
-| Language suite, 3 planner strategies | 6,681 passed | 6,685 passed, 0 divergences | 6,691 passed, 0 divergences in outcome, tree or error text |
-| Upgrade suite, every seed to the current checkout (SurrealKV) | 533 passed | — | 533 passed, 0 divergences |
-
-The few runs the totals differ by are tests that hit the suite's timeout
-under load (reported as warnings, not failures). The `syn` integration test
-`next_switch` parses the same queries, definitions, values and a split
-statement stream in all three modes and requires identical trees and error
-text.
+parser-next ran beside `syn` behind a process-wide switch (`off`, `on`,
+`check`) until the language suite, the upgrade suite's seed axis and every
+entry point's differential agreed; the switch then defaulted to parser-next
+and `syn` was deleted. Before the deletion every entry point's output on the
+corpus, its token suffixes and one mutant of each was frozen as a digest per
+corpus file (`tests/golden/entries.txt`, checked by `--example golden`); at
+that point the digests were `syn`'s outputs except the inputs listed in
+`tests/golden/known_differences.txt` (a span `syn` miscomputed, a typo in one
+of its messages, and an error-ordering corner). The nesting ceilings of the
+48 depth-probe templates were frozen the same way (`--example invariants --
+--depth-probe`).
 
 ### 7.8 Error parity
 
@@ -1314,9 +1293,10 @@ assume one engineer.
   coordinating with those owners.
 
 **M6. Delete** (1 week).
-- Delete `surrealdb-syn`, `surrealdb-sql` and the `sql`↔`expr` conversions.
-- Retire v3, or keep its useful pieces (`parse-common`, the snapshot harness,
-  the stream-consistency test) under the new crate.
+- Delete `surrealdb-syn` — done (§7.7) — then `surrealdb-sql` and the
+  `sql`↔`expr` conversions once Phase B lands.
+- Retire v3 — done: `parse-common` stays, and v3's snapshot inputs are the
+  whole-script corpus under `surrealdb/parser-next/tests/`.
 - Put a size budget for the front end in CI.
 
 **Remaining: about 3 months for one engineer.** M4 and M5 can overlap once

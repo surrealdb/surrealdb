@@ -1,6 +1,5 @@
-//! Parser tests that need core: the facade entry points (which translate
-//! capabilities into parser settings) and, for the parity cases, the
-//! greenfield parser. `surrealdb-syn` sits below both.
+//! Parser tests that need core: the facade entry points, which translate
+//! capabilities into settings for `surrealdb-parser-next-lower`.
 
 mod builtin_paths;
 mod json;

@@ -12,12 +12,13 @@
 //! primary postfix; `a.x + 1 IS NULL` is a syntax error which must be written
 //! `(a.x + 1) IS NULL`.
 
+use parse_common::error::{bail, syntax_error};
+
 use crate::gql::ast::{BinaryOp, GqlExpr, GqlLiteral, Ident, SetQuantifier, TruthValue, UnaryOp};
 use crate::gql::lexer::Lexer;
 use crate::gql::parser::mac::{enter_object_recursion, unexpected};
 use crate::gql::parser::{ParseResult, Parser};
 use crate::gql::token::{Keyword, NumberKind, NumberSuffix, Span, Token, TokenKind, t};
-use crate::syn::error::{bail, syntax_error};
 
 impl Parser<'_> {
 	/// Charges one level of the expression-depth budget, returning a syntax

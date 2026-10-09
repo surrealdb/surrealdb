@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::syn;
-use crate::syn::parser::ParserSettings;
+use crate::syn::ParserSettings;
 use crate::types::{PublicArray, PublicNumber, PublicObject, PublicValue};
 
 pub fn encode(value: PublicValue) -> anyhow::Result<Vec<u8>> {
@@ -25,7 +24,8 @@ pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 		..Default::default()
 	};
 
-	syn::parse_with_settings(value, settings, |parser| parser.parse_value())
+	let value = std::str::from_utf8(value).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+	surrealdb_parser_next_lower::value_with_settings(value, settings)
 		.map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 

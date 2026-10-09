@@ -16,7 +16,7 @@ cargo make ci-clippy
 ## Testing Conventions
 
 Language tests, upgrade tests, and benchmarks: `language-tests/CLAUDE.md`.
-Parser tests: `surrealdb/parser/CLAUDE.md`.
+Parser tests: `surrealdb/parser-next/CLAUDE.md`.
 
 ### Keep the upgrade tests current
 

@@ -24,8 +24,8 @@
 //! code generation; the lexer and parser here are hand-written, mirroring the
 //! conventions of the SurrealQL parser in [`crate::syn`].
 //!
-//! Error reporting reuses [`crate::syn::error::SyntaxError`] and
-//! [`crate::syn::token::Span`] so GQL errors render identically to SurrealQL
+//! Error reporting reuses [`parse_common::error::SyntaxError`] and
+//! [`parse_common::span::Span`] so GQL errors render identically to SurrealQL
 //! errors.
 
 use anyhow::{Result, ensure};
@@ -63,7 +63,7 @@ pub fn settings_from_capabilities_config(
 /// During parsing the nesting depth of expressions counts against the
 /// configured limit; exceeding it is a parse error rather than unbounded
 /// recursion. Errors render exactly like SurrealQL parse errors
-/// ([`ParseError::InvalidQuery`] with a [`crate::syn::error::RenderedError`]).
+/// ([`ParseError::InvalidQuery`] with a [`parse_common::error::RenderedError`]).
 #[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::gql", fields(length = input.len())))]
 pub fn parse_with_capabilities(
 	input: &str,

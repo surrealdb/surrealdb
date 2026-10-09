@@ -7,8 +7,8 @@
 //! an explicit heap stack (`Frame`) instead of the native call stack. The
 //! native stack grows only for a statement inside an expression
 //! (`(SELECT …)`), a lookup with clauses and destructuring, and every such
-//! level charges one of the depth budgets ([`Limits`]), which `syn` charges at
-//! the same places.
+//! level charges one of the depth budgets ([`Limits`]), at the places earlier
+//! releases charged them.
 //!
 //! Errors are collected, not returned. The first error in a statement is
 //! recorded, the statement becomes a [`Tag::Error`] node, and parsing resumes
@@ -29,15 +29,14 @@ mod stmt;
 use expr::*;
 use stmt::is_statement_keyword;
 
-/// Depth budgets: `syn`'s three recursion limits, charged where `syn`
-/// charges them, so that the same inputs are rejected for nesting too deeply.
-/// Defaults are `syn`'s defaults for queries.
+/// Depth budgets: the three established recursion limits, charged where
+/// earlier releases charged them, so that the same inputs are rejected for
+/// nesting too deeply. Defaults are the established defaults for queries.
 ///
 /// - `expr_depth` (`expr_recursion_limit`): one level per expression entered, per operator appended
 ///   to an expression's spine, per idiom part and per destructuring level.
-/// - `query_depth` (`query_recursion_limit`): one level per nested expression context `syn` enters
-///   through `parse_expr_field`, `parse_expr_table` or `parse_expr_inherit`: statement clauses,
-///   parentheses, arguments, index parts, block statements, closure bodies.
+/// - `query_depth` (`query_recursion_limit`): one level per nested expression context: statement
+///   clauses, parentheses, arguments, index parts, block statements, closure bodies.
 /// - `object_depth` (`object_recursion_limit`): one level per array, object or set literal and per
 ///   nested kind.
 ///
@@ -50,28 +49,39 @@ pub struct Limits {
 	pub query_depth: u16,
 	pub object_depth: u16,
 	/// Record-id keys follow identifier rules, so `a:1b` is not one key
-	/// (`syn`'s `flexible_record_id` off).
+	/// (`flexible_record_id` off).
 	pub strict_record_ids: bool,
-	/// Whether the builtin function or constant path written at
-	/// `start..end` of the source exists. With it, an unknown path is an
-	/// error where `syn` reports it, before any arguments are parsed;
+	/// What the builtin path written at `start..end` of the source names.
+	/// With it, an unknown path, and a function path not followed by `(`,
+	/// is an error at the established position, before any arguments are parsed;
 	/// without it, paths are left to the consumer.
 	///
 	/// The hooks take the source and a span rather than a `&str`: a wasm
 	/// indirect call of the `(&str) -> bool` shape keeps alive every table
 	/// entry of that shape, `core`'s formatting impls among them.
-	pub builtin: Option<fn(&str, u32, u32) -> bool>,
+	pub builtin: Option<fn(&str, u32, u32) -> PathKind>,
 	/// Whether the regex literal at `start..end` of the source, with its
 	/// `/` delimiters, compiles. With it, a pattern that does not is an error
-	/// where `syn` reports it; without it, patterns are left to the
+	/// at the established position; without it, patterns are left to the
 	/// consumer.
 	pub regex: Option<fn(&str, u32, u32) -> bool>,
-	/// File literals and buckets are rejected where `syn` rejects them with
-	/// the files feature off.
+	/// File literals and buckets are rejected, at the established positions,
+	/// with the files feature off.
 	pub no_files: bool,
-	/// Surrealism modules are rejected where `syn` rejects them with the
-	/// feature off.
+	/// Surrealism modules are rejected, at the established positions, with
+	/// the feature off.
 	pub no_surrealism: bool,
+}
+
+/// What a builtin path names, as [`Limits::builtin`] reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathKind {
+	/// No builtin has this path.
+	Unknown,
+	/// A function, which must be called.
+	Function,
+	/// A constant.
+	Constant,
 }
 
 impl Default for Limits {
@@ -105,8 +115,8 @@ impl Limits {
 		self.backstop().saturating_mul(2)
 	}
 
-	/// The budgets for re-parsing stored catalog text (`syn`'s
-	/// `ParserSettings::STORED_TEXT`).
+	/// The budgets for re-parsing stored catalog text
+	/// (`ParserSettings::STORED_TEXT`).
 	pub fn stored_text() -> Self {
 		Limits {
 			expr_depth: 512,
@@ -127,7 +137,7 @@ impl Limits {
 ///
 /// Message and label templates may name parts of the source, which the
 /// renderer substitutes: `{found}` is the token at the primary span as
-/// `syn` names it (`an identifier`, `FROM`, `;`), `{text}` the source text of
+/// errors name it (`an identifier`, `FROM`, `;`), `{text}` the source text of
 /// the primary span and `{char}` its first character.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Diag {
@@ -319,27 +329,33 @@ pub fn parse_statement(
 	}
 }
 
-/// What [`parse_entry`] parses: the parts of the grammar `syn` exposes as
-/// entry points of their own.
+/// What [`parse_entry`] parses: the parts of the grammar exposed as entry
+/// points of their own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
-	/// An expression in which a bare identifier is a field (`syn`'s
-	/// `parse_expr_field`).
+	/// An expression in which a bare identifier is a field.
 	Expr,
 	/// A `{ … }` block.
 	Block,
-	/// An idiom without a leading value (`syn`'s `parse_plain_idiom`).
+	/// An idiom without a leading value.
 	Idiom,
-	/// A kind without the enclosing `<` `>` (`syn`'s `parse_inner_kind`).
+	/// A kind without the enclosing `<` `>`.
 	Kind,
 	/// A projection list, or `VALUE` and one selector, as a [`Tag::Fields`]
 	/// node.
 	Fields,
+	/// A duration literal alone, as a [`Tag::Duration`] leaf.
+	Duration,
+	/// An identifier naming a table, as a [`Tag::Name`] leaf.
+	Table,
+	/// A function name without arguments, as a [`Tag::Name`] node whose `op`
+	/// says which kind of function it names.
+	Function,
 }
 
 /// Parses one `entry` from the start of `src`. With `require_all`, anything
-/// after it is an error; without, parsing stops where the entry ends, as
-/// `syn`'s non-definition entry points do. Returns the root, or `None` with a
+/// after it is an error; without, parsing stops where the entry ends, as the
+/// established non-definition entry points do. Returns the root, or `None` with a
 /// diagnostic in `scratch.diags`.
 pub fn parse_entry(
 	src: &str,
@@ -369,10 +385,13 @@ pub fn parse_entry(
 		Entry::Idiom => p.plain_idiom(),
 		Entry::Kind => p.kind(),
 		Entry::Fields => p.fields_entry(),
+		Entry::Duration => p.duration_lit(),
+		Entry::Table => p.name(),
+		Entry::Function => p.function_name(),
 	};
 	let res = res.and_then(|id| {
 		if require_all && p.at(T::Invalid) {
-			// `syn` names an invalid token here rather than say why it is.
+			// The established error names an invalid token here rather than say why it is.
 			let t = p.tok;
 			Err(p.error(t.start, t.end, "Unexpected token `Invalid`, expected no more tokens"))
 		} else if require_all && !p.at(T::Eof) {
@@ -535,8 +554,8 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// Consumes the closing delimiter `closer` of the opener at `open`, or
-	/// reports it missing with the opener marked, as `syn`'s
-	/// `expect_closing_delimiter` does.
+	/// reports it missing with the opener marked, in the established
+	/// wording.
 	fn close(&mut self, closer: T, open: u32) -> R<Tok> {
 		if self.at(closer) {
 			return Ok(self.bump());
@@ -573,14 +592,14 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// `Unexpected token …, expected {expected}` at the current token, with
-	/// `expected` in `syn`'s words. An invalid token reports why the lexer
+	/// `expected` in the established wording. An invalid token reports why the lexer
 	/// rejected it instead.
 	fn unexpected(&mut self, expected: &'static str) -> Stop {
 		self.unexpected_at(self.tok, expected)
 	}
 
-	/// [`Self::unexpected`] at the token `t`, which `syn` names in place of
-	/// the current one where it reuses an earlier peek.
+	/// [`Self::unexpected`] at the token `t`, named in place of the current
+	/// one where the established error names an earlier peeked token.
 	fn unexpected_at(&mut self, t: Tok, expected: &'static str) -> Stop {
 		if t.kind == T::Invalid {
 			return self.invalid_token(t);
@@ -596,8 +615,9 @@ impl<'a, 's> Parser<'a, 's> {
 		})
 	}
 
-	/// Where `syn`'s token at `t` ends, where its lexer splits differently:
-	/// `??` is two `?` tokens and a digits token runs on over `_`.
+	/// Where the token at `t` ends for error spans, which split as clients
+	/// have always seen them: `??` is two `?` tokens and a digits token runs
+	/// on over `_`.
 	fn syn_token_end(&self, t: Tok) -> u32 {
 		match t.kind {
 			T::QQ => t.start + 1,
@@ -612,7 +632,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
-	/// `syn`'s error for a Surrealism construct with the feature off, at the
+	/// The established error for a Surrealism construct with the feature off, at the
 	/// keyword `t` it follows; `what` names the construct.
 	fn surrealism_off(&mut self, t: Tok, label: &'static str) -> Stop {
 		self.diag(
@@ -620,7 +640,7 @@ impl<'a, 's> Parser<'a, 's> {
 		)
 	}
 
-	/// `syn`'s error for a files construct with the feature off, at `t`.
+	/// The established error for a files construct with the feature off, at `t`.
 	fn files_off(&mut self, t: Tok) -> Stop {
 		self.diag(Diag {
 			start: t.start,
@@ -632,8 +652,8 @@ impl<'a, 's> Parser<'a, 's> {
 		})
 	}
 
-	/// Consumes `kind` directly after the previous token, as `syn`'s
-	/// `expected_whitespace!`: whitespace before it is its own error.
+	/// Consumes `kind` directly after the previous token: whitespace before
+	/// it is its own error, in the established wording.
 	fn expect_adjacent(&mut self, kind: T, expected: &'static str) -> R<Tok> {
 		if self.tok.ws() {
 			let d = Diag::message(self.prev_start, self.prev_end, "Unexpected whitespace")
@@ -689,7 +709,7 @@ impl<'a, 's> Parser<'a, 's> {
 			LexError::InvalidNumber => "invalid number",
 			LexError::InvalidDuration => "invalid duration",
 			LexError::InvalidRegex => {
-				// `syn` points from the `/` to the end of input.
+				// The established error points from the `/` to the end of input.
 				let end = self.src.len() as u32;
 				self.saw_end.set(true);
 				return self.error(start, end, "Failed to lex regex, unexpected eof");
@@ -833,7 +853,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// A depth budget exhausted, reported over the last consumed token as
-	/// `syn` reports it.
+	/// earlier releases report it.
 	fn depth_error(&mut self, msg: &'static str, label: &'static str) -> Stop {
 		self.diag(Diag::message(self.prev_start, self.prev_end, msg).with_label(label))
 	}
@@ -856,8 +876,8 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	/// Pushes a frame, charging the budgets the context it opens costs in
-	/// `syn`; popping it restores them.
+	/// Pushes a frame, charging the budgets the context it opens has always
+	/// cost; popping it restores them.
 	fn push_frame(&mut self, f: Frame) -> R<()> {
 		self.saved.push(self.budgets());
 		self.frames.push(f);
@@ -1048,7 +1068,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// A top-level statement. Statements other than the top-level-only ones
-	/// are expressions, so an operator may follow one, as in `syn`.
+	/// are expressions, so an operator may follow one, as earlier releases allow.
 	fn statement(&mut self) -> R<NodeId> {
 		let t = self.tok;
 		if t.kind == T::Ident {
@@ -1058,7 +1078,7 @@ impl<'a, 's> Parser<'a, 's> {
 			if is_statement_keyword(self, t) {
 				self.bump();
 				// The statement is the first operand of the top expression,
-				// which `syn` charges one expression level.
+				// which is charged one expression level, as it always has been.
 				self.e += 1;
 				let s = self.statement_body(t)?;
 				self.e -= 1;
@@ -1125,7 +1145,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// `FETCH` targets: parameters and plain idioms, or at `type`, a field
-	/// list whose expressions are the targets (as in `syn`).
+	/// list whose expressions are the targets (as earlier releases read it).
 	fn fetch_list(&mut self) -> R<u32> {
 		let mark = self.vals.len() as u32;
 		loop {
@@ -1300,6 +1320,35 @@ impl<'a, 's> Parser<'a, 's> {
 		&self.text[t.start as usize..t.end as usize]
 	}
 
+	/// The established error for whitespace where a record-id key must follow
+	/// directly, at the token after it.
+	fn key_after_whitespace(&mut self) -> Stop {
+		let t = self.tok;
+		let end = self.syn_token_end(t);
+		self.error(t.start, end, "Unexpected whitespace after record-id table")
+	}
+
+	/// Whether the identifier `t`, its escapes decoded as earlier releases read it,
+	/// is `word`, ignoring ASCII case when `any_case`.
+	fn ident_is(&self, t: Tok, word: &str, any_case: bool) -> bool {
+		let is = |s: &str| {
+			if any_case {
+				s.eq_ignore_ascii_case(word)
+			} else {
+				s == word
+			}
+		};
+		let text = self.text_of(t);
+		match t.kind {
+			T::Ident => is(text),
+			T::EscIdent => {
+				let mut name = String::new();
+				crate::decode::unescape(crate::decode::strip_delims(text), &mut name) && is(&name)
+			}
+			_ => false,
+		}
+	}
+
 	/// An identifier as a `Name` leaf.
 	fn name(&mut self) -> R<NodeId> {
 		let t = self.ident()?;
@@ -1338,7 +1387,7 @@ fn starts_prime(t: &Tok) -> bool {
 	)
 }
 
-/// Whether `t` can start an expression (`syn`'s `kind_starts_expression`).
+/// Whether `t` can start an expression.
 pub fn starts_expression(t: &Tok) -> bool {
 	starts_prime(t)
 }

@@ -24,8 +24,8 @@ extern crate tracing;
 // valid for the layers this crate sits on.
 pub use surrealdb_expr::{expr, val};
 pub use surrealdb_iam as iam;
+pub use surrealdb_parser_next_lower as syn;
 pub use surrealdb_sql as sql;
-pub use surrealdb_syn as syn;
 
 pub(crate) mod types {
 	//! The public type surface, re-exported with `Public` prefixes so internal

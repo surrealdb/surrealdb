@@ -3,6 +3,7 @@ use std::fmt::{self};
 use common::fmt::Fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::operator::BinaryOperator;
 use crate::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
@@ -207,6 +208,20 @@ impl ToSql for TopLevelExpr {
 			TopLevelExpr::Option(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Use(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
+			// `$p = 1` alone is the deprecated `LET` without `let`, so an
+			// equality on a parameter keeps the parentheses that make it a
+			// comparison.
+			TopLevelExpr::Expr(
+				e @ Expr::Binary {
+					left,
+					op: BinaryOperator::Equal,
+					..
+				},
+			) if matches!(**left, Expr::Param(_)) => {
+				f.push('(');
+				e.fmt_sql(f, fmt);
+				f.push(')');
+			}
 			TopLevelExpr::Expr(e) => e.fmt_sql(f, fmt),
 		}
 	}

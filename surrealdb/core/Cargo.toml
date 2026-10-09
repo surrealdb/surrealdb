@@ -103,7 +103,6 @@ observability = [
     "surrealdb-datastore/observability",
     "surrealdb-kvs/observability",
     "surrealdb-kvs-any/observability",
-    "surrealdb-syn/observability",
 ]
 # `ORDER BY … COLLATE`, `array::sort_lexical`, `array::sort_natural_lexical`
 # and `string::slug`, which transliterate to ASCII with a table of roughly
@@ -202,7 +201,8 @@ surrealdb-mysql = { workspace = true, optional = true }
 surrealdb-sqlplan = { workspace = true, optional = true }
 surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
-surrealdb-syn = { workspace = true }
+parse-common.workspace = true
+surrealdb-parser-next-lower = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-runtime = { workspace = true }
@@ -343,8 +343,6 @@ regex.workspace = true
 surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
 fst.workspace = true
 surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
-ast = { workspace = true }
-parser = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true

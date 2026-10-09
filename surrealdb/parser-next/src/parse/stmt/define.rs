@@ -2,9 +2,9 @@
 //!
 //! Each definition is a [`Tag::Define`] node over a fixed record (name, `ON`
 //! target, kind-specific slots) and a list of [`Tag::Clause`] nodes in source
-//! order. Which clauses a definition accepts, and in what combination, follows
-//! `syn` exactly; what a clause means, including the checks `syn` makes on
-//! combinations of clauses, is left to lowering, which replays them in order.
+//! order. Which clauses a definition accepts, and in what combination, is
+//! fixed by the established grammar; what a clause means, including the checks
+//! on combinations of clauses, is left to lowering, which replays them in order.
 
 use crate::ast::{Cl, DefineKind, define, jwt, vector};
 use crate::parse::*;
@@ -130,8 +130,9 @@ impl<'a, 's> Parser<'a, 's> {
 			DefineKind::Access => {
 				rec[define::NAME] = self.expr(true)?;
 				self.expect_kw(Kw::On, "ON")?;
+				let base_tok = self.tok;
 				rec[define::ON] = self.base()?;
-				self.access_clauses()?;
+				self.access_clauses(rec[define::ON], base_tok)?;
 			}
 			DefineKind::Param => {
 				let p = self.expect(T::Param, "a parameter")?;
@@ -365,7 +366,7 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn define_function(&mut self, rec: &mut [u32]) -> R<()> {
 		rec[define::NAME] = self.custom_function_name()?;
-		self.expect(T::LParen, "(")?;
+		let open = self.expect(T::LParen, "(")?;
 		let mark = self.vals.len() as u32;
 		loop {
 			if self.eat(T::RParen) {
@@ -378,7 +379,7 @@ impl<'a, 's> Parser<'a, 's> {
 			let k = self.kind()?;
 			self.vals.push(k);
 			if !self.eat(T::Comma) {
-				self.expect(T::RParen, ")")?;
+				self.close(T::RParen, open.start)?;
 				break;
 			}
 		}
@@ -411,7 +412,12 @@ impl<'a, 's> Parser<'a, 's> {
 					let first = self.ast.nodes.len();
 					let mark = self.vals.len() as u32;
 					loop {
+						let r = self.tok;
 						let n = self.name()?;
+						if !["viewer", "editor", "owner"].iter().any(|w| self.ident_is(r, w, true))
+						{
+							return Err(self.unexpected_at(r, "an existent role"));
+						}
 						self.vals.push(n);
 						if !self.eat(T::Comma) {
 							break;
@@ -444,8 +450,13 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
-	pub(crate) fn access_clauses(&mut self) -> R<()> {
-		loop {
+	/// The clauses of `DEFINE ACCESS` on `base`, written as the token
+	/// `base_tok`. Only a database takes the default `TYPE RECORD`, so
+	/// elsewhere a missing type is an error at the base, reported once the
+	/// clauses end.
+	pub(crate) fn access_clauses(&mut self, base: u32, base_tok: Tok) -> R<()> {
+		let mut typed = false;
+		'clauses: loop {
 			match self.tok.kw {
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
 				Kw::Type => {
@@ -456,6 +467,10 @@ impl<'a, 's> Parser<'a, 's> {
 							self.bump();
 							let j = self.jwt()?;
 							self.push_clause(Cl::AccessJwt, j, 0, t.start, first)?;
+							typed = true;
+						}
+						Kw::Record if self.tok.kind == T::Ident && base != crate::ast::BASE_DB => {
+							return Err(self.unexpected("a valid access type at this level"));
 						}
 						Kw::Record if self.tok.kind == T::Ident => {
 							self.bump();
@@ -479,20 +494,34 @@ impl<'a, 's> Parser<'a, 's> {
 									Kw::Refresh if w.kind == T::Ident => {
 										self.flag_clause(Cl::WithRefresh)?;
 									}
-									_ => return Err(self.unexpected("`JWT` or `REFRESH`")),
+									_ => return Err(self.unexpected("JWT or REFRESH")),
 								}
 								self.eat(T::Comma);
 							}
 							let list = self.list_from(mark).0;
 							self.push_clause(Cl::AccessRecord, list, 0, t.start, first)?;
+							typed = true;
 						}
 						Kw::Bearer if self.tok.kind == T::Ident => {
 							self.bump();
 							self.expect_kw(Kw::For, "FOR")?;
+							let on_db = base == crate::ast::BASE_DB;
 							let subject = match self.tok.kw {
 								Kw::User if self.tok.kind == T::Ident => 0,
-								Kw::Record if self.tok.kind == T::Ident => 1,
-								_ => return Err(self.unexpected("`USER` or `RECORD`")),
+								Kw::Record if self.tok.kind == T::Ident && on_db => 1,
+								Kw::Record if self.tok.kind == T::Ident => {
+									let t = self.tok;
+									return Err(self.diag(Diag {
+										start: t.start,
+										end: t.end,
+										kind: DiagKind::Unexpected,
+										msg: "USER",
+										label: "`RECORD` bearer can only be defined on a database",
+										extra: None,
+									}));
+								}
+								_ if on_db => return Err(self.unexpected("USER or RECORD")),
+								_ => return Err(self.unexpected("USER")),
 							};
 							self.bump();
 							let j = if self.eat_kw(Kw::With) {
@@ -502,9 +531,10 @@ impl<'a, 's> Parser<'a, 's> {
 								NONE
 							};
 							self.push_clause(Cl::AccessBearer, subject, j, t.start, first)?;
+							typed = true;
 						}
-						// `syn` ends the clause list here with `TYPE` consumed.
-						_ => return Ok(()),
+						// The clause list ends here with `TYPE` consumed.
+						_ => break 'clauses,
 					}
 				}
 				Kw::Authenticate => self.expr_clause(Cl::Authenticate)?,
@@ -523,15 +553,22 @@ impl<'a, 's> Parser<'a, 's> {
 								self.expr_clause(Cl::DurSession)?
 							}
 							_ => {
-								return Err(self.unexpected("`GRANT`, `TOKEN` or `SESSION`"));
+								return Err(self.unexpected("GRANT, TOKEN or SESSIONS"));
 							}
 						}
 						self.eat(T::Comma);
 					}
 				}
-				_ => return Ok(()),
+				_ => break,
 			}
 		}
+		if !typed && base != crate::ast::BASE_DB {
+			return Err(self.diag(
+				Diag::message(base_tok.start, base_tok.end, "Missing access type")
+					.with_label("An access defined at this level must specify a TYPE"),
+			));
+		}
+		Ok(())
 	}
 
 	/// An algorithm name: `HS256`, `EDDSA`, …
@@ -560,7 +597,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.bump();
 				rec[jwt::KEY] = self.expr(true)?;
 			}
-			_ => return Err(self.unexpected("`ALGORITHM` or `URL`")),
+			_ => return Err(self.unexpected("`ALGORITHM`, or `URL`")),
 		}
 		if self.eat_kw(Kw::Audience) {
 			let mark = self.vals.len() as u32;
@@ -607,14 +644,15 @@ impl<'a, 's> Parser<'a, 's> {
 				Kw::As => {
 					let t = self.bump();
 					let first = self.ast.nodes.len();
-					let v = if self.eat(T::LParen) {
+					let v = if self.at(T::LParen) {
+						let open = self.bump();
 						let v = self.view()?;
-						self.expect(T::RParen, ")")?;
+						self.close(T::RParen, open.start)?;
 						v
 					} else if self.at_kw(Kw::Select) {
 						self.view()?
 					} else {
-						return Err(self.unexpected("SELECT"));
+						return Err(self.unexpected("`SELECT`"));
 					};
 					self.push_clause(Cl::View, v, 0, t.start, first)?;
 				}
@@ -777,10 +815,9 @@ impl<'a, 's> Parser<'a, 's> {
 						Kw::Delete | Kw::Get | Kw::Patch | Kw::Post | Kw::Put | Kw::Trace
 					);
 				if !ok {
-					return Err(self.error(
-						m.start,
-						m.end,
-						"expected one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`",
+					return Err(self.unexpected_at(
+						m,
+						"one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`",
 					));
 				}
 				self.bump();
@@ -837,10 +874,27 @@ impl<'a, 's> Parser<'a, 's> {
 	/// after the closing `)`.
 	pub(crate) fn middleware_call(&mut self) -> R<NodeId> {
 		let t = self.tok;
-		if !(t.kind == T::Ident || t.kind == T::EscIdent) || self.peek1().kind == T::Colon {
+		if !(t.kind == T::Ident || t.kind == T::EscIdent) {
 			return Err(self.unexpected("a function name"));
 		}
-		// `syn` takes any name here, builtin or not.
+		// The name is read, then `(` demanded.
+		let cp = self.checkpoint();
+		self.bump();
+		if t.kw == Kw::Fn && t.kind == T::Ident && !self.at(T::PathSep) {
+			return Err(self.unexpected("::"));
+		}
+		while self.at(T::PathSep) {
+			self.bump();
+			if !self.tok.is_ident() {
+				return Err(self.unexpected("an identifier"));
+			}
+			self.bump();
+		}
+		if !self.at(T::PathSep) && !self.at(T::LParen) {
+			return Err(self.unexpected("("));
+		}
+		self.restore(cp);
+		// Any name is taken here, builtin or not.
 		self.any_path = true;
 		let call = self.atom(true);
 		self.any_path = false;
@@ -931,6 +985,7 @@ impl<'a, 's> Parser<'a, 's> {
 
 	pub(crate) fn event_clauses(&mut self) -> R<()> {
 		let mut then = false;
+		let mut asynchronous = false;
 		loop {
 			match self.tok.kw {
 				Kw::When => self.expr_clause(Cl::When)?,
@@ -942,7 +997,19 @@ impl<'a, 's> Parser<'a, 's> {
 					then = true;
 				}
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
-				Kw::Async => self.flag_clause(Cl::Async)?,
+				Kw::Async => {
+					self.flag_clause(Cl::Async)?;
+					asynchronous = true;
+				}
+				Kw::Retry | Kw::MaxDepth if !asynchronous => {
+					let t = self.tok;
+					let (msg, label) = if t.kw == Kw::Retry {
+						("Unexpected token `RETRY`", "RETRY must be set after ASYNC")
+					} else {
+						("Unexpected token `MAXDEPTH`", "MAXDEPTH must be set after ASYNC")
+					};
+					return Err(self.diag(Diag::message(t.start, t.end, msg).with_label(label)));
+				}
 				Kw::Retry => self.uint_clause(Cl::Retry)?,
 				Kw::MaxDepth => self.uint_clause(Cl::MaxDepth)?,
 				_ => break,
@@ -1005,7 +1072,16 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
+	/// The clauses of `DEFINE INDEX`. Without a `FIELDS` clause, an index
+	/// that needs columns is an error at the token after the clauses, as
+	/// earlier releases report it; a column count that does not fit the index is left
+	/// to the lowering, which knows the count.
 	pub(crate) fn index_clauses(&mut self) -> R<()> {
+		// Whether the index kind in force needs exactly one column, and
+		// whether it needs any.
+		let mut one_column = false;
+		let mut needs_columns = true;
+		let mut fields = false;
 		loop {
 			let t = self.tok;
 			match t.kw {
@@ -1014,9 +1090,14 @@ impl<'a, 's> Parser<'a, 's> {
 					let first = self.ast.nodes.len();
 					let list = self.expr_list(true)?;
 					self.push_clause(Cl::Fields, list, 0, t.start, first)?;
+					fields = true;
 				}
-				Kw::Unique => self.flag_clause(Cl::Unique)?,
+				Kw::Unique => {
+					self.flag_clause(Cl::Unique)?;
+					(one_column, needs_columns) = (false, true);
+				}
 				Kw::Count => {
+					(one_column, needs_columns) = (false, false);
 					self.bump();
 					let first = self.ast.nodes.len();
 					let cond = if self.eat_kw(Kw::Where) {
@@ -1061,16 +1142,37 @@ impl<'a, 's> Parser<'a, 's> {
 					if highlights {
 						self.push_clause(Cl::Highlights, 0, 0, t.start, self.ast.nodes.len())?;
 					}
+					one_column = true;
 				}
-				Kw::Hnsw => self.vector_index(Cl::Hnsw)?,
+				Kw::Hnsw => {
+					self.vector_index(Cl::Hnsw)?;
+					one_column = true;
+				}
 				Kw::Concurrently => self.flag_clause(Cl::Concurrently)?,
 				Kw::Comment => self.expr_clause(Cl::Comment)?,
 				Kw::None
 					if t.kind == T::Ident && self.text_of(t).eq_ignore_ascii_case("DISKANN") =>
 				{
-					self.vector_index(Cl::Diskann)?
+					self.vector_index(Cl::Diskann)?;
+					one_column = true;
 				}
-				_ => return Ok(()),
+				_ => {
+					if fields {
+						return Ok(());
+					}
+					let end = self.syn_token_end(t);
+					if one_column {
+						return Err(self.error(t.start, end, "Expected one column, found none"));
+					}
+					if needs_columns {
+						return Err(self.error(
+							t.start,
+							end,
+							"Expected at least one column - Use FIELDS to define columns",
+						));
+					}
+					return Ok(());
+				}
 			}
 		}
 	}
@@ -1200,28 +1302,28 @@ impl<'a, 's> Parser<'a, 's> {
 			self.bump();
 			let b = match code {
 				3 | 4 => {
-					self.expect(T::LParen, "(")?;
+					let open = self.expect(T::LParen, "(")?;
 					let x = self.uint_lit()?;
 					self.expect(T::Comma, ",")?;
 					let y = self.uint_lit()?;
-					self.expect(T::RParen, ")")?;
+					self.close(T::RParen, open.start)?;
 					self.record(&[x, y])
 				}
 				5 => {
-					self.expect(T::LParen, "(")?;
+					let open = self.expect(T::LParen, "(")?;
 					let l = self.tok;
 					if l.kind != T::Ident || !(is_language(self.text_of(l)) || l.kw == Kw::No) {
 						return Err(self.unexpected("a language"));
 					}
 					self.bump();
 					let n = self.leaf(Tag::Name, 0, l);
-					self.expect(T::RParen, ")")?;
+					self.close(T::RParen, open.start)?;
 					n
 				}
 				6 => {
-					self.expect(T::LParen, "(")?;
+					let open = self.expect(T::LParen, "(")?;
 					let p = self.string_lit()?;
-					self.expect(T::RParen, ")")?;
+					self.close(T::RParen, open.start)?;
 					p
 				}
 				_ => NONE,
@@ -1345,6 +1447,7 @@ impl<'a, 's> Parser<'a, 's> {
 				self.vals.push(pkg);
 				self.expect(T::PathSep, "::")?;
 				self.model_version()?;
+				rec[define::X2] = 1;
 				self.list_from(mark).0
 			}
 			T::Str if t.aux() == b'f' => {
@@ -1389,10 +1492,21 @@ impl<'a, 's> Parser<'a, 's> {
 			if i > 0 {
 				self.bump();
 			}
-			let d = self.expect(T::Digits, "a version number")?;
-			let v = crate::lex::decode_uint(&self.src[d.start as usize..d.end as usize])
-				.filter(|v| *v <= u32::MAX as u64)
-				.ok_or_else(|| self.error(d.start, d.end, "invalid version number"))?;
+			let d = self.expect(T::Digits, "an integer")?;
+			let text = &self.src[d.start as usize..d.end as usize];
+			let v = if text.contains(&b'_') {
+				None
+			} else {
+				crate::lex::decode_uint(text).filter(|v| *v <= u32::MAX as u64)
+			};
+			let Some(v) = v else {
+				let msg = if text.contains(&b'_') {
+					"Failed to parse model version: invalid digit found in string"
+				} else {
+					"Failed to parse model version: number too large to fit in target type"
+				};
+				return Err(self.error(d.start, d.end, msg));
+			};
 			let n = self.leaf_span(Tag::Int, 0, v as u32, 0, d.start, d.end);
 			self.vals.push(n);
 		}

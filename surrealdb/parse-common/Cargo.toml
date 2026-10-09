@@ -15,6 +15,7 @@ categories.workspace = true
 [dependencies]
 chrono.workspace = true
 logos.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 
 [lints]

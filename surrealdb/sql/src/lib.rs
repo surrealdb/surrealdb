@@ -6,7 +6,7 @@
 //!
 //! # Layer
 //!
-//! The AST is the bottom of the language stack. `surrealdb-syn` builds it and
+//! The AST is the bottom of the language stack. `surrealdb-parser-next-lower` builds it and
 //! `surrealdb-core` lowers it into the expression layer, so everything this
 //! crate names sits below it: `surrealdb-strand`, `surrealdb-common`,
 //! `surrealdb-types`, `surrealdb-iam`, and the upstream scalar crates

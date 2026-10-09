@@ -21,7 +21,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		self.output_clause(&mut rec)?;
 		if tag == Tag::Create && self.eat_kw(Kw::Version) {
-			// Accepted and ignored, as by `syn`.
+			// Accepted and ignored, for compatibility with existing queries.
 			self.expr(true)?;
 		}
 		if self.eat_kw(Kw::Timeout) {
@@ -195,7 +195,7 @@ impl<'a, 's> Parser<'a, 's> {
 			self.expect(T::Arrow, "->")?;
 		} else {
 			if !self.at(T::Lt) {
-				return Err(self.unexpected("<-"));
+				return Err(self.unexpected("<"));
 			}
 			self.relate_in_arrow()?;
 		}
@@ -236,9 +236,9 @@ impl<'a, 's> Parser<'a, 's> {
 				Ok(self.leaf(Tag::Param, 0, t))
 			}
 			T::LParen => {
-				self.bump();
+				let open = self.bump();
 				let e = self.expr(true)?;
-				self.expect(T::RParen, ")")?;
+				self.close(T::RParen, open.start)?;
 				self.ast.nodes[e as usize].depth |= COVERED;
 				Ok(e)
 			}
@@ -286,9 +286,9 @@ impl<'a, 's> Parser<'a, 's> {
 				Ok(self.leaf(Tag::Param, 0, t))
 			}
 			T::LParen => {
-				self.bump();
+				let open = self.bump();
 				let e = self.expr(self.table_as_field)?;
-				self.expect(T::RParen, ")")?;
+				self.close(T::RParen, open.start)?;
 				self.ast.nodes[e as usize].depth |= COVERED;
 				Ok(e)
 			}
@@ -347,7 +347,7 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 		self.output_clause(&mut rec)?;
 		if self.eat_kw(Kw::Version) {
-			// Accepted and ignored, as by `syn`.
+			// Accepted and ignored, for compatibility with existing queries.
 			self.expr(true)?;
 		}
 		if self.eat_kw(Kw::Timeout) {
@@ -428,7 +428,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 }
 
-/// Whether `t` starts a statement (`syn`'s `kind_starts_statement`).
+/// Whether `t` starts a statement.
 fn is_statement_start(t: Tok) -> bool {
 	t.kind == T::Ident
 		&& matches!(

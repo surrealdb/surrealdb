@@ -1,12 +1,23 @@
-//! Lowers the flat tree into the existing `surrealdb_sql` AST, so the
-//! new parser's output can be compared with `surrealdb-syn`'s by `==`.
+//! The SurrealQL front end the engine calls: parser-next's flat tree lowered
+//! into the `surrealdb_sql` AST.
 //!
-//! This is also the shape of the migration adapter the RFC proposes: the new
-//! parser behind the old AST, until the logical planner reads the flat tree.
+//! [`api`] holds the entry points (`parse`, `expr_for_definition`, `value`,
+//! …) with their [`ParserSettings`] and [`ParseError`]; [`StatementStream`]
+//! parses imports statement by statement. Underneath, [`entry`] parses with
+//! parser-next and lowers the tree, and [`render`] words a rejection.
 //!
 //! Leaves are decoded here, not in the parser: numbers, durations, strings,
-//! datetimes, uuids, bytes, regexes, files, builtin paths and kinds, as the
-//! engine's lowering will (`lower_lit.rs`).
+//! datetimes, uuids, bytes, regexes, files, builtin paths and kinds. So are
+//! the semantic checks a flat tree cannot make on its own, such as builtin
+//! names and `GROUP BY` against the selection.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to SemVer and its API is
+//! free to change and break code even between patch versions. If you are looking for a stable
+//! interface to the SurrealDB library please have a look at
+//! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
+//! </section>
 
 use std::cell::Cell;
 use std::ops::Bound;
@@ -47,12 +58,18 @@ use surrealdb_sql::{
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
+pub mod api;
 mod define;
 pub mod entry;
 mod lit;
 pub mod render;
+pub mod settings;
+mod stream;
 
+pub use api::*;
 pub use lit::{is_builtin, is_regex};
+pub use settings::{ParserConfig, ParserSettings};
+pub use stream::StatementStream;
 pub mod value;
 
 thread_local! {
@@ -68,12 +85,12 @@ pub struct Lower<'a> {
 }
 
 /// The parser settings that the lowering applies: parser-next accepts the
-/// whole grammar, and these narrow or reinterpret it as `syn`'s
-/// `ParserSettings` do.
+/// whole grammar, and these narrow or reinterpret it as the
+/// `ParserSettings` ask.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
 	/// A plain string that reads as a uuid, datetime or record id is that
-	/// value (`syn`'s `legacy_strands`).
+	/// value (`legacy_strands`).
 	pub legacy_strands: bool,
 	/// File literals and buckets are allowed (`files_enabled`).
 	pub files: bool,
@@ -93,8 +110,8 @@ impl Options {
 pub(crate) const FILES_DISABLED: &str = "the experimental files feature to be enabled";
 pub(crate) const SURREALISM_DISABLED: &str = "Surrealism modules are not enabled";
 
-/// A lowering failure: a semantic check the old parser makes at parse time,
-/// worded as `syn` words it, with the span it points at when it has one.
+/// A lowering failure: a semantic check made at parse time, in the
+/// established wording, with the span it points at when it has one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reject {
 	pub msg: std::borrow::Cow<'static, str>,
@@ -141,7 +158,7 @@ impl<'a> Lower<'a> {
 		&self.ast.nodes[id as usize]
 	}
 
-	fn text(&self, id: NodeId) -> &'a str {
+	pub(crate) fn text(&self, id: NodeId) -> &'a str {
 		Ast::text(self.n(id), self.src)
 	}
 
@@ -163,7 +180,7 @@ impl<'a> Lower<'a> {
 	}
 
 	/// An identifier's name: unescaped when quoted.
-	fn name(&self, id: NodeId) -> R<String> {
+	pub(crate) fn name(&self, id: NodeId) -> R<String> {
 		let t = self.text(id);
 		let quoted = t.starts_with(['`', '⟨', '\'', '"'])
 			|| (t.starts_with('s') && t[1..].starts_with(['\'', '"']));
@@ -322,7 +339,65 @@ impl<'a> Lower<'a> {
 		}
 	}
 
+	/// Lowers the expression at `id`.
+	///
+	/// Values, blocks and operators lower in a function of their own, so each
+	/// level of their nesting costs a small frame on the call stack rather
+	/// than the frame of every construct: stored values are lowered at the
+	/// full depth the storage layer accepts.
 	pub fn expr(&self, id: NodeId) -> R<Expr> {
+		let n = self.n(id);
+		match n.tag {
+			Tag::Array
+			| Tag::Object
+			| Tag::Prefix
+			| Tag::Cast
+			| Tag::Binary
+			| Tag::Block
+			| Tag::Set => self.nesting(n),
+			_ => self.other(id),
+		}
+	}
+
+	/// [`Self::expr`] for the constructs that nest.
+	#[inline(never)]
+	fn nesting(&self, n: &Node) -> R<Expr> {
+		Ok(match n.tag {
+			Tag::Array => Expr::Literal(Literal::Array(
+				self.list(n.a).iter().map(|&e| self.expr(e)).collect::<R<_>>()?,
+			)),
+			Tag::Object => Expr::Literal(Literal::Object(self.entries(n)?)),
+			Tag::Prefix => {
+				let op = match n.op {
+					x if x == Prefix::Not as u8 => PrefixOperator::Not,
+					x if x == Prefix::Neg as u8 => PrefixOperator::Negate,
+					x if x == Prefix::Pos as u8 => PrefixOperator::Positive,
+					x if x == Prefix::Range as u8 => PrefixOperator::Range,
+					_ => PrefixOperator::RangeInclusive,
+				};
+				Expr::Prefix {
+					op,
+					expr: Box::new(self.expr(n.a)?),
+				}
+			}
+			Tag::Cast => Expr::Prefix {
+				op: PrefixOperator::Cast(self.kind(n.a)?),
+				expr: Box::new(self.expr(n.b)?),
+			},
+			Tag::Binary => Expr::Binary {
+				left: Box::new(self.expr(n.a)?),
+				op: binary(Binary::from_u8(n.op)),
+				right: Box::new(self.expr(n.b)?),
+			},
+			Tag::Block => Expr::Block(Box::new(Block(self.exprs(n.a)?))),
+			Tag::Set => Expr::Literal(Literal::Set(self.exprs(n.a)?)),
+			_ => unreachable!("only nesting constructs are lowered here"),
+		})
+	}
+
+	/// [`Self::expr`] for everything else.
+	#[inline(never)]
+	fn other(&self, id: NodeId) -> R<Expr> {
 		let n = self.n(id);
 		Ok(match n.tag {
 			Tag::None => Expr::Literal(Literal::None),
@@ -373,32 +448,6 @@ impl<'a> Lower<'a> {
 			Tag::Field => Expr::Idiom(Idiom(vec![Part::Field(Strand::new(self.name(id)?))])),
 			Tag::Table => Expr::Table(TableName::new(Strand::new(self.name(id)?))),
 			Tag::RecordId => Expr::Literal(Literal::RecordId(self.record_id(id)?)),
-			Tag::Array => Expr::Literal(Literal::Array(
-				self.list(n.a).iter().map(|&e| self.expr(e)).collect::<R<_>>()?,
-			)),
-			Tag::Object => Expr::Literal(Literal::Object(self.entries(n)?)),
-			Tag::Prefix => {
-				let op = match n.op {
-					x if x == Prefix::Not as u8 => PrefixOperator::Not,
-					x if x == Prefix::Neg as u8 => PrefixOperator::Negate,
-					x if x == Prefix::Pos as u8 => PrefixOperator::Positive,
-					x if x == Prefix::Range as u8 => PrefixOperator::Range,
-					_ => PrefixOperator::RangeInclusive,
-				};
-				Expr::Prefix {
-					op,
-					expr: Box::new(self.expr(n.a)?),
-				}
-			}
-			Tag::Cast => Expr::Prefix {
-				op: PrefixOperator::Cast(self.kind(n.a)?),
-				expr: Box::new(self.expr(n.b)?),
-			},
-			Tag::Binary => Expr::Binary {
-				left: Box::new(self.expr(n.a)?),
-				op: binary(Binary::from_u8(n.op)),
-				right: Box::new(self.expr(n.b)?),
-			},
 			Tag::BinaryX => {
 				let r = &self.ast.extra[n.b as usize..];
 				let op = if Binary::from_u8(n.op) == Binary::Matches {
@@ -467,50 +516,7 @@ impl<'a> Lower<'a> {
 							}
 						}
 					}
-					1 => Function::Custom(self.path_name(n.a)?),
-					2 => {
-						if !self.opts.surrealism {
-							return Err(Reject::new(SURREALISM_DISABLED));
-						}
-						let p = &self.ast.extra[callee.a as usize + 1..];
-						Function::Module(
-							self.name(p[0])?,
-							if p[1] == NONE {
-								None
-							} else {
-								Some(self.path_name(p[1])?)
-							},
-						)
-					}
-					3 => {
-						if !self.opts.surrealism {
-							return Err(Reject::new(SURREALISM_DISABLED));
-						}
-						let p = &self.ast.extra[callee.a as usize + 1..];
-						let v = |i: usize| {
-							u32::try_from(Ast::int(self.n(p[i]))).map_err(|_| Reject::new("u32"))
-						};
-						Function::Silo {
-							org: self.name(p[0])?,
-							pkg: self.name(p[1])?,
-							major: v(2)?,
-							minor: v(3)?,
-							patch: v(4)?,
-							sub: if p[5] == NONE {
-								None
-							} else {
-								Some(self.path_name(p[5])?)
-							},
-						}
-					}
-					_ => {
-						let p = &self.ast.extra[callee.a as usize + 1..];
-						let v = |i: usize| Ast::int(self.n(p[i]));
-						Function::Model(Model {
-							name: Strand::new(self.path_name(p[0])?),
-							version: Strand::new(format!("{}.{}.{}", v(1), v(2), v(3))),
-						})
-					}
+					_ => self.function_ref(n.a)?,
 				};
 				Expr::FunctionCall(Box::new(FunctionCall {
 					receiver,
@@ -666,8 +672,6 @@ impl<'a> Lower<'a> {
 					)
 				})
 			}
-			Tag::Block => Expr::Block(Box::new(Block(self.exprs(n.a)?))),
-			Tag::Set => Expr::Literal(Literal::Set(self.exprs(n.a)?)),
 			Tag::Sleep => {
 				let (s, ns) = decode_duration(self.text(n.a).as_bytes())
 					.ok_or(Reject::new("duration overflow"))?;
@@ -812,7 +816,7 @@ impl<'a> Lower<'a> {
 	}
 
 	/// A `::` path `Name` as the joined, unescaped segment names.
-	/// `syn`'s unexpected-token error for the token after byte `at`.
+	/// The established unexpected-token error for the token after byte `at`.
 	fn unexpected_after(&self, at: u32, expected: &str) -> Reject {
 		let mut l = Lexer::new(self.src.as_bytes());
 		l.pos = at;
@@ -864,22 +868,62 @@ impl<'a> Lower<'a> {
 		}
 	}
 
-	fn path_name(&self, id: NodeId) -> R<String> {
-		let mut out = String::new();
-		for (i, seg) in self.text(id).split("::").enumerate() {
-			if i > 0 {
-				out.push_str("::");
-			}
-			let seg = seg.trim();
-			if seg.starts_with('`') || seg.starts_with('⟨') {
-				if !decode::unescape(decode::strip_delims(seg), &mut out) {
-					return Err(Reject::new("invalid escape"));
+	/// The function a `Name` callee names, its arguments aside. A builtin path
+	/// (`op` 0) is returned as written, unchecked against the registry, as
+	/// the function-name entry point returns it.
+	pub(crate) fn function_ref(&self, id: NodeId) -> R<Function> {
+		let callee = self.n(id);
+		Ok(match callee.op {
+			0 => Function::Normal(self.path_name(id)?),
+			1 => Function::Custom(self.path_name(id)?),
+			2 => {
+				if !self.opts.surrealism {
+					return Err(Reject::new(SURREALISM_DISABLED));
 				}
-			} else {
-				out.push_str(seg);
+				let p = &self.ast.extra[callee.a as usize + 1..];
+				Function::Module(
+					self.name(p[0])?,
+					if p[1] == NONE {
+						None
+					} else {
+						Some(self.path_name(p[1])?)
+					},
+				)
 			}
-		}
-		Ok(out)
+			3 => {
+				if !self.opts.surrealism {
+					return Err(Reject::new(SURREALISM_DISABLED));
+				}
+				let p = &self.ast.extra[callee.a as usize + 1..];
+				let v = |i: usize| {
+					u32::try_from(Ast::int(self.n(p[i]))).map_err(|_| Reject::new("u32"))
+				};
+				Function::Silo {
+					org: self.name(p[0])?,
+					pkg: self.name(p[1])?,
+					major: v(2)?,
+					minor: v(3)?,
+					patch: v(4)?,
+					sub: if p[5] == NONE {
+						None
+					} else {
+						Some(self.path_name(p[5])?)
+					},
+				}
+			}
+			_ => {
+				let p = &self.ast.extra[callee.a as usize + 1..];
+				let v = |i: usize| Ast::int(self.n(p[i]));
+				Function::Model(Model {
+					name: Strand::new(self.path_name(p[0])?),
+					version: Strand::new(format!("{}.{}.{}", v(1), v(2), v(3))),
+				})
+			}
+		})
+	}
+
+	pub(crate) fn path_name(&self, id: NodeId) -> R<String> {
+		lit::path(self.text(id)).ok_or_else(|| Reject::new("invalid escape"))
 	}
 
 	/// A point coordinate: a float, integer, `NaN` or `Infinity` node.
@@ -1242,8 +1286,8 @@ impl<'a> Lower<'a> {
 
 	/// The `GROUP` clause of a `SELECT` record, checked against its fields.
 	/// The `SPLIT` and `GROUP` clauses of a select-shaped record, checked
-	/// against the projection `fields` as `syn` checks them while parsing,
-	/// with its spans. `from` is at or before the `SELECT` keyword; in a
+	/// against the projection `fields` as the parse-time checks do, with
+	/// their spans. `from` is at or before the `SELECT` keyword; in a
 	/// view the projection's span runs to the `FROM` keyword.
 	fn split_group(
 		&self,

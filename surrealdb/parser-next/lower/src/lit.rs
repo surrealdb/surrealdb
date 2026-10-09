@@ -1,6 +1,6 @@
 //! Decoding of literal leaves at lowering: decimals, regexes, datetimes,
 //! uuids, byte strings, record-id strings and builtin paths, following the
-//! rules `syn` applies at parse time.
+//! rules earlier releases applied at parse time.
 //!
 //! The values are built through the engine's own types. Where the harness
 //! cannot name a third-party type (`rust_decimal::Decimal`, `regex::Regex`,
@@ -126,14 +126,14 @@ fn body_err(msg: impl Into<std::borrow::Cow<'static, str>>, start: usize, end: u
 	Reject::new(msg).at(start as u32, end as u32)
 }
 
-/// `syn`'s error for the unexpected character at byte `at` of `s`: `msg`
+/// The established error for the unexpected character at byte `at` of `s`: `msg`
 /// with `{c}` replaced by it, over the whole character.
 fn char_err(s: &str, at: usize, msg: &str) -> Reject {
 	let c = s.get(at..).and_then(|r| r.chars().next()).unwrap_or('\0');
 	body_err(msg.replace("{c}", c.encode_utf8(&mut [0; 4])), at, at + c.len_utf8())
 }
 
-/// Reads `min` digits and up to `max - min + 1` more, as `syn` does, and
+/// Reads `min` digits and up to `max - min + 1` more, as earlier releases do, and
 /// checks the value against `range`.
 fn digits(
 	s: &str,
@@ -236,7 +236,7 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 	}
 }
 
-/// A datetime string body, as `syn`'s `lex_datetime` reads it. Error spans
+/// A datetime string body, as earlier releases read it. Error spans
 /// are byte offsets into `s`.
 pub fn datetime(s: &str) -> R<Literal> {
 	let b = s.as_bytes();
@@ -279,7 +279,7 @@ pub fn datetime(s: &str) -> R<Literal> {
 				while let Some(d) = b.get(at).filter(|d| d.is_ascii_digit()) {
 					at += 1;
 					// Past nine digits each digit of five or more rounds up,
-					// as in `syn`.
+					// as earlier releases round them.
 					if count == 9 {
 						if d - b'0' >= 5 {
 							nanos += 1;
@@ -332,7 +332,7 @@ pub fn datetime(s: &str) -> R<Literal> {
 					0
 				}
 				Some(_) => {
-					// `syn` spans from the time separator.
+					// The established error spans from the time separator.
 					let mut r = char_err(
 						s,
 						at,
@@ -372,7 +372,7 @@ pub fn datetime(s: &str) -> R<Literal> {
 }
 
 /// A uuid string body: 8-4-4-4-12 hexadecimal digits, anything after them
-/// ignored, as `syn`'s `lex_uuid` reads it. Error spans are byte offsets
+/// ignored, as earlier releases read it. Error spans are byte offsets
 /// into `s`.
 pub fn uuid(s: &str) -> R<Literal> {
 	const END: &str = "Unexpected end of string, expected UUID token to finish";
@@ -413,8 +413,8 @@ pub fn uuid(s: &str) -> R<Literal> {
 	parse_as(Literal::Uuid, &hex).map(Literal::Uuid).ok_or(Reject::new("invalid uuid"))
 }
 
-/// A byte-string body: pairs of hexadecimal digits, as `syn`'s `lex_bytes`
-/// reads it. Error spans are byte offsets into `s`.
+/// A byte-string body: pairs of hexadecimal digits, as earlier releases read
+/// it. Error spans are byte offsets into `s`.
 pub fn bytes(s: &str) -> R<Literal> {
 	const NOT_HEX: &str = "Unexpected character `{c}`, expected a hexidecimal digit";
 	let b = s.as_bytes();
@@ -439,7 +439,7 @@ pub fn bytes(s: &str) -> R<Literal> {
 	Ok(Literal::Bytes(from_vec_as(Literal::Bytes, v)))
 }
 
-/// A file string body, `bucket:/key`, as `syn`'s `lex_file` reads it: the
+/// A file string body, `bucket:/key`, as earlier releases read it: the
 /// key ends at a `:`. Error spans are byte offsets into `s`.
 pub fn file(s: &str) -> R<surrealdb_types::File> {
 	let b = s.as_bytes();
@@ -496,7 +496,7 @@ pub fn file(s: &str) -> R<surrealdb_types::File> {
 }
 
 /// `r`, a failure in the decoded body of the string token `token` at byte
-/// `start`, with its spans moved onto the token as `syn` moves them.
+/// `start`, with its spans moved onto the token as the established errors place them.
 pub fn in_token(mut r: Reject, token: &str, start: u32) -> Reject {
 	let at = |o: u32| start + escaped_offset(token, o);
 	r.span = r.span.map(|(a, b)| (at(a), at(b)));
@@ -505,7 +505,7 @@ pub fn in_token(mut r: Reject, token: &str, start: u32) -> Reject {
 }
 
 /// Where byte `offset` of the decoded body of the string token `token` lies
-/// in the token (`syn`'s `escaped_string_offset`).
+/// in the token.
 fn escaped_offset(token: &str, offset: u32) -> u32 {
 	let b = token.as_bytes();
 	let mut i = if matches!(b.first(), Some(b'"' | b'\'')) {
@@ -580,33 +580,48 @@ pub fn builtin(path: &str, start: u32, end: u32) -> R<Builtin> {
 }
 
 /// A path as written (segments separated by `::`, possibly escaped),
-/// decoded and lower-cased as `syn` looks it up.
+/// decoded and lower-cased for lookup.
 pub fn decode_path(text: &str) -> Option<String> {
-	let mut out = String::new();
-	for (i, seg) in text.split("::").enumerate() {
-		if i > 0 {
-			out.push_str("::");
-		}
-		let seg = seg.trim();
-		if seg.starts_with('`') || seg.starts_with('⟨') {
-			let mut s = String::new();
-			if !decode::unescape(decode::strip_delims(seg), &mut s) {
-				return None;
-			}
-			out.push_str(&s);
-		} else {
-			out.push_str(seg);
-		}
-	}
-	Some(out.to_lowercase())
+	path(text).map(|p| p.to_lowercase())
 }
 
-/// Whether the builtin path written at `start..end` of `src` exists
+/// A path as written, its escaped segments decoded and its segments joined
+/// by `::`. A segment is read as a token, so an escaped segment may itself
+/// hold `::`.
+pub(crate) fn path(text: &str) -> Option<String> {
+	use surrealdb_parser_next::lex::{Lexer, T};
+	let mut out = String::new();
+	let mut l = Lexer::new(text.as_bytes());
+	loop {
+		let t = l.next_token();
+		let seg = text.get(t.start as usize..t.end as usize)?;
+		match t.kind {
+			T::Eof => return Some(out),
+			T::PathSep => out.push_str("::"),
+			T::Ident => out.push_str(seg),
+			T::EscIdent => {
+				if !decode::unescape(decode::strip_delims(seg), &mut out) {
+					return None;
+				}
+			}
+			_ => return None,
+		}
+	}
+}
+
+/// What the builtin path written at `start..end` of `src` names
 /// ([`surrealdb_parser_next::Limits::builtin`]).
-pub fn is_builtin(src: &str, start: u32, end: u32) -> bool {
-	src.get(start as usize..end as usize)
+pub fn is_builtin(src: &str, start: u32, end: u32) -> surrealdb_parser_next::PathKind {
+	use surrealdb_parser_next::PathKind as K;
+	match src
+		.get(start as usize..end as usize)
 		.and_then(decode_path)
-		.is_some_and(|p| builtin_paths::lookup(&p).is_some())
+		.and_then(|p| builtin_paths::lookup(&p).map(|k| matches!(k, PathKind::Function)))
+	{
+		None => K::Unknown,
+		Some(true) => K::Function,
+		Some(false) => K::Constant,
+	}
 }
 
 /// `, did you maybe mean `…`` for an unknown builtin path written as
@@ -650,7 +665,7 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	rows[b.len() & 1][a.len()]
 }
 
-/// The path `syn` suggests for an unknown one: the current name of a
+/// The path suggested for an unknown one: the current name of a
 /// deprecated path, or else the nearest path within edit distance 3.
 fn find_suggestion(got: &str) -> Option<&'static str> {
 	if let Some(p) = PATHS.entries().find_map(|(path, (_, old))| match old {
@@ -687,8 +702,8 @@ pub fn legacy_strand(s: String) -> Literal {
 	let mut ast = Ast::new();
 	let mut scratch = surrealdb_parser_next::Scratch::default();
 	if let Some(root) = surrealdb_parser_next::parse_record_id_all(&s, &mut ast, &mut scratch) {
-		// The contents are read with `syn`'s default settings, which leave
-		// the optional grammars off.
+		// The contents are read with the default settings, which leave the
+		// optional grammars off.
 		let inner = Lower {
 			ast: &ast,
 			src: &s,
@@ -737,7 +752,7 @@ impl Lower<'_> {
 	}
 }
 
-/// `syn`'s error for the string token `text` at `start` with prefix
+/// The established error for the string token `text` at `start` with prefix
 /// `prefix` whose contents do not decode, if they do not.
 pub fn prefixed_error(text: &str, prefix: u8, start: u32) -> Option<Reject> {
 	if !matches!(prefix, b'd' | b'u' | b'b' | b'f' | b'r') {
@@ -765,64 +780,4 @@ pub fn prefixed_error(text: &str, prefix: u8, start: u32) -> Option<Reject> {
 		}
 	}?;
 	Some(in_token(r, text, start))
-}
-
-/// Decodes standard padded base64.
-fn base64(s: &str) -> Option<Vec<u8>> {
-	let b = s.as_bytes();
-	if !b.len().is_multiple_of(4) {
-		return None;
-	}
-	let val = |c: u8| -> Option<u32> {
-		Some(match c {
-			b'A'..=b'Z' => c - b'A',
-			b'a'..=b'z' => c - b'a' + 26,
-			b'0'..=b'9' => c - b'0' + 52,
-			b'+' => 62,
-			b'/' => 63,
-			_ => return None,
-		} as u32)
-	};
-	let mut out = Vec::with_capacity(b.len() / 4 * 3);
-	for (i, chunk) in b.chunks(4).enumerate() {
-		let last = i == b.len() / 4 - 1;
-		let pad = chunk.iter().rev().take_while(|c| **c == b'=').count();
-		if pad > 2 || (pad > 0 && !last) {
-			return None;
-		}
-		let mut n = 0u32;
-		for &c in &chunk[..4 - pad] {
-			n = n << 6 | val(c)?;
-		}
-		n <<= 6 * pad as u32;
-		let bytes = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
-		// Padding bits must be zero.
-		let keep = 3 - pad;
-		if pad > 0 && bytes[keep..].iter().any(|b| *b != 0) {
-			return None;
-		}
-		out.extend_from_slice(&bytes[..keep]);
-	}
-	Some(out)
-}
-
-/// Whether `s` is a valid `SCRAM-SHA-256$<iterations>:<salt>$<stored>:<server>`
-/// verifier, as the engine's credential parser requires.
-pub fn scram_verifier(s: &str) -> bool {
-	let check = || -> Option<()> {
-		let (mechanism, rest) = s.split_once('$')?;
-		if mechanism != "SCRAM-SHA-256" {
-			return None;
-		}
-		let (iter_salt, keys) = rest.split_once('$')?;
-		let (iterations, salt) = iter_salt.split_once(':')?;
-		let (stored, server) = keys.split_once(':')?;
-		let iterations: u32 = iterations.parse().ok()?;
-		if !(4096..=1 << 24).contains(&iterations) {
-			return None;
-		}
-		let (salt, stored, server) = (base64(salt)?, base64(stored)?, base64(server)?);
-		(!salt.is_empty() && stored.len() == 32 && server.len() == 32).then_some(())
-	};
-	check().is_some()
 }

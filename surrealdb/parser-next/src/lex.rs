@@ -299,7 +299,7 @@ impl<'a> Lexer<'a> {
 					self.pos += 2;
 					T::PlusQEq
 				}
-				// `syn` lexes `+?` without `=` as one invalid token.
+				// `+?` without `=` is one invalid token, as it has always lexed.
 				(b'?', _) => {
 					self.pos += 1;
 					T::Invalid
@@ -485,7 +485,13 @@ impl<'a> Lexer<'a> {
 				// from `self.pos`, which is where it stopped.
 				return t.kind;
 			}
-			_ => return T::Invalid,
+			_ => {
+				// The token covers the whole character, so it can be sliced.
+				while (0x80..0xC0).contains(&self.peek_at(0)) {
+					self.pos += 1;
+				}
+				return T::Invalid;
+			}
 		};
 		self.pos += len;
 		kind
@@ -535,10 +541,11 @@ impl<'a> Lexer<'a> {
 			self.pos += 1;
 		}
 		self.digits();
-		// Any other character outside ASCII directly after the digits starts
-		// a duration whose unit is not `µs`, as `syn` reads it.
+		// A character whose UTF-8 starts like `µ`'s directly after the digits
+		// starts a duration whose unit is not `µs`, as earlier releases read it; any
+		// other character outside ASCII ends the number.
 		if self.src[start as usize].is_ascii_digit()
-			&& self.peek_at(0) >= 0x80
+			&& self.peek_at(0) == 0xC2
 			&& self.duration_unit_len() == 0
 		{
 			return Err(LexError::InvalidDuration);
@@ -712,11 +719,11 @@ impl<'a> Lexer<'a> {
 	}
 }
 
-/// Which of `syn`'s compound number lexers reads a literal, which decides how
-/// a malformed one is reported.
+/// Which compound number grammar reads a literal, which decides how a
+/// malformed one is reported.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Compound {
-	/// A number or a duration (`syn`'s `numeric`).
+	/// A number or a duration (`numeric`).
 	Numeric,
 	/// A number, after a sign or as an object key (`number`).
 	Number,
@@ -728,10 +735,10 @@ pub enum Compound {
 	Duration,
 }
 
-/// `syn`'s error for the malformed literal at `start` read as `mode`, or
-/// `None` when `syn`'s lexer accepts it. `start` is where `syn`'s compound
-/// token starts: the sign for a signed literal it lexes whole, the digits
-/// otherwise.
+/// The established error for the malformed literal at `start` read as
+/// `mode`, or `None` when the literal is well formed. `start` is where the
+/// compound token starts: the sign for a signed literal lexed whole, the
+/// digits otherwise.
 pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::parse::Diag> {
 	use crate::parse::Diag;
 	let at = |i: u32| src.get(i as usize).copied();
@@ -797,7 +804,30 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 	if signed {
 		pos += 1;
 		if at(pos) == Some(b'I') {
-			// `-Infinity` and `+Infinity`.
+			// `-Infinity` and `+Infinity`, spelled exactly so.
+			const MISSING: [&str; 7] = [
+				"Invalid number token, expected `n` found: {last_byte}",
+				"Invalid number token, expected `f` found: {last_byte}",
+				"Invalid number token, expected `i` found: {last_byte}",
+				"Invalid number token, expected `n` found: {last_byte}",
+				"Invalid number token, expected `i` found: {last_byte}",
+				"Invalid number token, expected `t` found: {last_byte}",
+				"Invalid number token, expected `y` found: {last_byte}",
+			];
+			pos += 1;
+			for (i, &c) in b"nfinity".iter().enumerate() {
+				match at(pos) {
+					Some(x) if x == c => pos += 1,
+					Some(_) => return Some(Diag::message(start, pos + 1, MISSING[i])),
+					None => {
+						return Some(Diag::message(
+							start,
+							pos,
+							"Unexpected end of file, expected a number token digit",
+						));
+					}
+				}
+			}
 			return None;
 		}
 	} else {
@@ -820,7 +850,8 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 				let mut v: u128 = 0;
 				for &b in digits_text {
 					if b != b'_' {
-						v = v * 10 + (b - b'0') as u128;
+						// Saturates: anything past `u64::MAX` is reported below.
+						v = v.saturating_mul(10).saturating_add((b - b'0') as u128);
 					}
 				}
 				v
@@ -914,8 +945,8 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 					"Invalid token, failed to parse duration digits: number too large to fit in target type",
 				));
 			}
-			// Units of a minute and more are whole seconds in `syn`, which
-			// checks them against `u64` seconds.
+			// Units of a minute and more are whole seconds, checked against
+			// `u64` seconds as earlier releases check them.
 			if unit >= 60_000_000_000 && value * (unit / 1_000_000_000) > u64::MAX as u128 {
 				return Some(Diag::message(
 					start,
@@ -1033,7 +1064,7 @@ pub fn compound_error(src: &[u8], start: u32, mode: Compound) -> Option<crate::p
 }
 
 /// Why the lexer produced an invalid token at `start`, worded and spanned as
-/// `syn`'s lexer reports it.
+/// clients have always seen it.
 pub fn invalid_reason(src: &[u8], start: u32) -> crate::parse::Diag {
 	use crate::parse::Diag;
 	let s = start as usize;
@@ -1054,16 +1085,11 @@ pub fn invalid_reason(src: &[u8], start: u32) -> crate::parse::Diag {
 			Diag::message(start, start + 2, "Unexpected end of file, expected string to end.")
 				.with_label("String starting here.")
 		}
-		b'`' => {
-			Diag::message(start, end, "Unexpected end of file, expected identifier to end with ```")
-		}
-		b'$' if at(1) == b'`' => Diag::message(
-			start + 1,
-			end,
-			"Unexpected end of file, expected identifier to end with ```",
-		),
-		0xE2 if at(1) == 0x9F && at(2) == 0xA8 => {
-			Diag::message(start, end, "Unexpected end of file, expected identifier to end with `⟩`")
+		b'`' => unterminated_ident(src, start, 1, BACKTICK_END),
+		b'$' if at(1) == b'`' => unterminated_ident(src, start, 2, BACKTICK_END),
+		0xE2 if at(1) == 0x9F && at(2) == 0xA8 => unterminated_ident(src, start, 3, ANGLE_END),
+		b'$' if at(1) == 0xE2 && at(2) == 0x9F && at(3) == 0xA8 => {
+			unterminated_ident(src, start, 4, ANGLE_END)
 		}
 		b'&' => Diag::message(
 			start,
@@ -1083,6 +1109,39 @@ pub fn invalid_reason(src: &[u8], start: u32) -> crate::parse::Diag {
 			Diag::message(start, (start + len).min(end), "Invalid token `{char}`")
 		}
 	}
+}
+
+const BACKTICK_END: &str = "Unexpected end of file, expected identifier to end with ```";
+const ANGLE_END: &str = "Unexpected end of file, expected identifier to end with `⟩`";
+
+/// The established error for an escaped identifier at `start` that runs to the end
+/// of `src`, whose opening (`$` included) is `open` bytes long. An escape cut
+/// off by the end is reported at the opening; otherwise the whole identifier
+/// is, with the message `closer` naming the delimiter it lacks.
+fn unterminated_ident(
+	src: &[u8],
+	start: u32,
+	open: u32,
+	closer: &'static str,
+) -> crate::parse::Diag {
+	let body = src.get((start + open) as usize..).unwrap_or_default();
+	let mut i = 0;
+	while i < body.len() {
+		if body[i] == b'\\' && i + 1 == body.len() {
+			return crate::parse::Diag::message(
+				start,
+				start + open,
+				"Unexpected end of file, expected identifier to end.",
+			)
+			.with_label("Identifier starting here.");
+		}
+		i += if body[i] == b'\\' {
+			2
+		} else {
+			1
+		};
+	}
+	crate::parse::Diag::message(start, src.len() as u32, closer)
 }
 
 /// Decodes a lexed integer span. Underscores are separators.

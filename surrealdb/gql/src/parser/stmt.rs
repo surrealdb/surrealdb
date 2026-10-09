@@ -8,6 +8,8 @@
 //! constructs which share grammar real estate with this subset but are not
 //! supported are recognised and rejected with precise spans.
 
+use parse_common::error::bail;
+
 use crate::gql::ast::{
 	DetachMode, GqlExpr, GqlGroupItem, GqlLiteral, GqlStep, LinearQuery, MatchClause, MatchItem,
 	MutationStatement, OptionalBlock, OrderItem, ReturnClause, ReturnItem, ReturnItems,
@@ -16,7 +18,6 @@ use crate::gql::ast::{
 use crate::gql::parser::mac::{enter_object_recursion, expected, unexpected};
 use crate::gql::parser::{ParseResult, Parser};
 use crate::gql::token::{NumberKind, Span, TokenKind, t};
-use crate::syn::error::bail;
 
 impl Parser<'_> {
 	/// Parse a top level linear query: a sequence of `MATCH`/`OPTIONAL` reads and

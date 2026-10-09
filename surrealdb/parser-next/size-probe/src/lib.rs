@@ -4,9 +4,6 @@
 //! parses it and returns a count derived from the result, so the optimiser
 //! keeps the whole parser reachable.
 
-// The successor parser's async state machines need it when monomorphised here.
-#![recursion_limit = "256"]
-
 /// Returns a buffer of `len` bytes the host writes the source into.
 #[unsafe(no_mangle)]
 pub extern "C" fn probe_alloc(len: usize) -> *mut u8 {
@@ -16,7 +13,7 @@ pub extern "C" fn probe_alloc(len: usize) -> *mut u8 {
 	p
 }
 
-#[cfg_attr(not(any(feature = "next", feature = "syn", feature = "v3")), allow(dead_code))]
+#[cfg_attr(not(feature = "next"), allow(dead_code))]
 fn source<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
 	// SAFETY: the host passes a buffer from `probe_alloc` holding `len`
 	// initialised bytes, which stays alive for the call.
@@ -64,33 +61,5 @@ pub extern "C" fn probe_stream(ptr: *const u8, len: usize) -> u32 {
 				Err(_) => return u32::MAX,
 			}
 		}
-	}
-}
-
-/// Parses the source and returns the number of top-level statements, or
-/// `u32::MAX` on a parse error.
-#[cfg(feature = "syn")]
-#[unsafe(no_mangle)]
-pub extern "C" fn probe_parse(ptr: *const u8, len: usize) -> u32 {
-	let Some(src) = source(ptr, len) else {
-		return u32::MAX;
-	};
-	match surrealdb_syn::parse(src) {
-		Ok(ast) => ast.expressions.len() as u32,
-		Err(e) => u32::MAX - e.to_string().len() as u32,
-	}
-}
-
-/// Parses the source and returns the number of arena nodes, or `u32::MAX`
-/// on a parse error.
-#[cfg(feature = "v3")]
-#[unsafe(no_mangle)]
-pub extern "C" fn probe_parse(ptr: *const u8, len: usize) -> u32 {
-	let Some(src) = source(ptr, len) else {
-		return u32::MAX;
-	};
-	match parser::Parser::enter_parse::<ast::Query>(src, Default::default()) {
-		Ok((q, _)) => q.exprs.is_some() as u32,
-		Err(e) => u32::MAX - format!("{e:?}").len() as u32,
 	}
 }

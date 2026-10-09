@@ -1,20 +1,23 @@
-//! `syn`'s entry points over parser-next: parse into a flat tree, then lower
+//! The parser entry points over parser-next: parse into a flat tree, then lower
 //! into the `surrealdb_sql` AST.
 //!
-//! Each function parses with the given [`Settings`] and returns the same tree
-//! `syn` would, or an [`Error`] where `syn` would reject the input. An error
+//! Each function parses with the given [`Settings`] and returns the tree
+//! earlier releases built, or an [`Error`] where they rejected the input. An error
 //! carries the first diagnostic only; rendering it against the source is the
 //! caller's concern.
 
+use surrealdb_parser_next::lex::decode_duration;
 use surrealdb_parser_next::{
 	Ast, Diag, Entry, Limits, Scratch, StatementEnd, Tag, parse_entry, parse_script,
 	parse_statement,
 };
-use surrealdb_sql::{Ast as SqlAst, Block, Expr, Fields, Idiom, Kind, TopLevelExpr};
+use surrealdb_sql::{
+	Ast as SqlAst, Block, Expr, Fields, Function, Idiom, Kind, Literal, TableName, TopLevelExpr,
+};
 
 use crate::{Lower, Options, Reject};
 
-/// The settings `syn`'s `ParserSettings` carry that parser-next reads.
+/// The parts of `ParserSettings` that parser-next reads.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
 	pub limits: Limits,
@@ -26,22 +29,51 @@ pub struct Settings {
 pub enum Error {
 	/// The parser rejected the input.
 	Syntax(Diag),
-	/// The input parsed, but a check `syn` makes while parsing failed in the
-	/// lowering.
+	/// The input parsed, but a parse-time check, made in the lowering,
+	/// failed.
 	Lower(Reject),
+}
+
+/// The most nodes, and twice that many `extra` slots, an arena keeps between
+/// parses on one thread. A parse that grew it further hands the memory back.
+const KEEP_NODES: usize = 1 << 16;
+
+std::thread_local! {
+	static ARENA: std::cell::RefCell<Option<(Ast, Scratch)>> =
+		const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `f` on this thread's arena, so that parsing allocates nothing once
+/// the arena has grown to the size of the statements it sees. A call made
+/// while the arena is in use, from inside `f`, gets a fresh one.
+fn with_arena<T>(f: impl FnOnce(&mut Ast, &mut Scratch) -> T) -> T {
+	let (mut ast, mut scratch) = ARENA.with(|a| a.borrow_mut().take()).unwrap_or_default();
+	let out = f(&mut ast, &mut scratch);
+	if ast.nodes.capacity() <= KEEP_NODES && ast.extra.capacity() <= 2 * KEEP_NODES {
+		ARENA.with(|a| *a.borrow_mut() = Some((ast, scratch)));
+	}
+	out
 }
 
 /// Parses a whole query.
 pub fn query(src: &str, settings: &Settings) -> Result<SqlAst, Error> {
-	let mut ast = Ast::new();
-	let mut scratch = Scratch::default();
-	parse_script(src, settings.limits, &mut ast, &mut scratch);
+	with_arena(|ast, scratch| query_in(src, settings, ast, scratch))
+}
+
+fn query_in(
+	src: &str,
+	settings: &Settings,
+	ast: &mut Ast,
+	scratch: &mut Scratch,
+) -> Result<SqlAst, Error> {
+	parse_script(src, settings.limits, ast, scratch);
+	let ast = &*ast;
 	let lower = Lower {
-		ast: &ast,
+		ast,
 		src,
 		opts: settings.opts,
 	};
-	// Statement by statement, as `syn` reports the first failure it meets.
+	// Statement by statement, reporting the first failure in reading order.
 	let mut diags = scratch.diags.iter();
 	let mut expressions = Vec::with_capacity(ast.stmts.len());
 	for (i, &s) in ast.stmts.iter().enumerate() {
@@ -69,28 +101,42 @@ fn entry<T>(
 	require_all: bool,
 	f: impl Fn(&Lower<'_>, u32) -> crate::R<T>,
 ) -> Result<T, Error> {
-	let mut ast = Ast::new();
-	let mut scratch = Scratch::default();
-	let Some(root) = parse_entry(src, which, settings.limits, require_all, &mut ast, &mut scratch)
-	else {
+	with_arena(|ast, scratch| entry_in(src, settings, which, require_all, f, ast, scratch))
+}
+
+fn entry_in<T>(
+	src: &str,
+	settings: &Settings,
+	which: Entry,
+	require_all: bool,
+	f: impl Fn(&Lower<'_>, u32) -> crate::R<T>,
+	ast: &mut Ast,
+	scratch: &mut Scratch,
+) -> Result<T, Error> {
+	let Some(root) = parse_entry(src, which, settings.limits, require_all, ast, scratch) else {
 		let d = scratch.diags.first().copied().expect("a failed parse records a diagnostic");
 		// The same check on the input before the syntax error.
-		let eager = src.get(..d.start as usize).and_then(|prefix| {
-			let mut ast = Ast::new();
-			let mut scratch = Scratch::default();
-			let root = parse_entry(prefix, which, settings.limits, false, &mut ast, &mut scratch)?;
-			let lower = Lower {
-				ast: &ast,
-				src: prefix,
-				opts: settings.opts,
-			};
-			eager(f(&lower, root).err()?, d.start)
-		});
+		let eager = cuts(src, 0, d.start)
+			.into_iter()
+			.find_map(|cut| {
+				let prefix = src.get(..cut as usize)?;
+				let mut ast = Ast::new();
+				let mut scratch = Scratch::default();
+				let root =
+					parse_entry(prefix, which, settings.limits, false, &mut ast, &mut scratch)?;
+				let lower = Lower {
+					ast: &ast,
+					src: prefix,
+					opts: settings.opts,
+				};
+				Some(eager(f(&lower, root).err()?, d.start))
+			})
+			.flatten();
 		let e = eager.map_or(Error::Syntax(d), Error::Lower);
 		return Err(first_error(src, 0, e, false));
 	};
 	let lower = Lower {
-		ast: &ast,
+		ast,
 		src,
 		opts: settings.opts,
 	};
@@ -129,6 +175,34 @@ pub fn fields(src: &str, settings: &Settings, require_all: bool) -> Result<Field
 	})
 }
 
+/// Parses a duration literal and nothing after it.
+pub fn duration(src: &str, settings: &Settings) -> Result<std::time::Duration, Error> {
+	entry(src, settings, Entry::Duration, true, |l, root| {
+		let (s, ns) = decode_duration(l.text(root).as_bytes())
+			.ok_or(Reject::new("Invalid duration, value overflowed maximum allowed value"))?;
+		Ok(std::time::Duration::new(s, ns))
+	})
+}
+
+/// Parses an identifier naming a table. Anything after it is ignored.
+pub fn table(src: &str, settings: &Settings) -> Result<TableName, Error> {
+	entry(src, settings, Entry::Table, false, |l, root| Ok(TableName::new(l.name(root)?)))
+}
+
+/// Parses a function name without arguments. Anything after it is ignored.
+pub fn function(src: &str, settings: &Settings) -> Result<Function, Error> {
+	entry(src, settings, Entry::Function, false, |l, root| l.function_ref(root))
+}
+
+/// Parses a datetime written without its `d"…"` delimiters; the whole of
+/// `src` is the datetime.
+pub fn datetime(src: &str) -> Result<surrealdb_types::Datetime, Error> {
+	match crate::lit::datetime(src).map_err(Error::Lower)? {
+		Literal::Datetime(d) => Ok(d.into()),
+		_ => unreachable!("a datetime body decodes to a datetime"),
+	}
+}
+
 /// Where [`statement`] stopped.
 #[derive(Debug)]
 pub enum Statement {
@@ -151,9 +225,17 @@ pub enum Statement {
 /// Parses the first statement of `src`, for input that arrives in pieces.
 /// With `complete`, no more input follows.
 pub fn statement(src: &str, settings: &Settings, complete: bool) -> Statement {
-	let mut ast = Ast::new();
-	let mut scratch = Scratch::default();
-	match parse_statement(src, settings.limits, &mut ast, &mut scratch) {
+	with_arena(|ast, scratch| statement_in(src, settings, complete, ast, scratch))
+}
+
+fn statement_in(
+	src: &str,
+	settings: &Settings,
+	complete: bool,
+	ast: &mut Ast,
+	scratch: &mut Scratch,
+) -> Statement {
+	match parse_statement(src, settings.limits, ast, scratch) {
 		StatementEnd::Empty {
 			consumed,
 		} => {
@@ -181,7 +263,7 @@ pub fn statement(src: &str, settings: &Settings, complete: bool) -> Statement {
 				return Statement::Rejected(first_error(src, 0, e, false));
 			}
 			let lower = Lower {
-				ast: &ast,
+				ast,
 				src,
 				opts: settings.opts,
 			};
@@ -196,52 +278,115 @@ pub fn statement(src: &str, settings: &Settings, complete: bool) -> Statement {
 	}
 }
 
-/// The checks `syn` makes partway through a statement, once the part they
-/// look at is read, by the start of their message.
+/// The checks made partway through a statement, once the part they
+/// look at is read, by the start of their message. Clients have always been
+/// told about these before any syntax error later in the statement, so they
+/// are reported first.
 const EAGER: &[&str] = &[
 	"Missing split idiom",
 	"Missing group idiom",
 	"SPLIT and GROUP are mutually exclusive",
 	"FLEXIBLE can only be used",
+	"Expected one column, found",
+	"Cannot create a count index with fields",
+	"Invalid numbers of values to insert",
+	"Invalid SCRAM verifier",
 ];
 
-/// `r` when it is a check `syn` makes partway through a statement, failing
+/// `r` when it is a check made partway through a statement, failing
 /// before byte `at`.
 fn eager(r: Reject, at: u32) -> Option<Reject> {
 	let early = r.span.is_some_and(|(s, _)| s < at);
 	(early && EAGER.iter().any(|m| r.msg.starts_with(m))).then_some(r)
 }
 
-/// A check `syn` makes partway through the statement at `from` that fails
-/// on its text before the syntax error at `at`, so before `syn` meets that
-/// error.
+/// A check made partway through the statement at `from` that fails on its
+/// text before the syntax error at `at`, and so is the error reported
+/// first. The statement is read up to each of [`cuts`] in turn, until a
+/// prefix parses.
 fn eager_in_statement(src: &str, settings: &Settings, from: u32, at: u32) -> Option<Reject> {
-	let prefix = src.get(..at as usize)?;
-	let mut ast = Ast::new();
-	let mut scratch = Scratch::default();
-	parse_script(prefix, settings.limits, &mut ast, &mut scratch);
-	let i = ast.spans.iter().position(|&(s, _)| s == from)?;
-	let s = ast.stmts[i];
-	if ast.node(s).tag == Tag::Error {
-		return None;
+	let cuts = cuts(src, from, at);
+	for cut in cuts {
+		let prefix = src.get(..cut as usize)?;
+		let mut ast = Ast::new();
+		let mut scratch = Scratch::default();
+		parse_script(prefix, settings.limits, &mut ast, &mut scratch);
+		let i = ast.spans.iter().position(|&(s, _)| s == from)?;
+		let s = ast.stmts[i];
+		if ast.node(s).tag == Tag::Error {
+			continue;
+		}
+		let lower = Lower {
+			ast: &ast,
+			src: prefix,
+			opts: settings.opts,
+		};
+		return eager(lower.top(s).err()?, at);
 	}
-	let lower = Lower {
-		ast: &ast,
-		src: prefix,
-		opts: settings.opts,
-	};
-	eager(lower.top(s).err()?, at)
+	None
 }
 
-/// The error `syn` reports for input parser-next rejected with `e`, reading
-/// from `from`: `syn` decodes escapes in strings and escaped identifiers, and
-/// the contents of prefixed strings, as it consumes them, so an invalid one
-/// before `e` is the error it meets first.
+/// Where to cut the input reading from `from` to look for a check made
+/// before the syntax error at `at`: at `at`, then before each of the
+/// few tokens before it, nearest first, that cannot continue what precedes
+/// them (an operator, `;` or a closing delimiter), so that a clause already
+/// finished and checked counts even when the error follows it directly.
+fn cuts(src: &str, from: u32, at: u32) -> Vec<u32> {
+	use surrealdb_parser_next::lex::{Lexer, T};
+	let mut tokens = Vec::new();
+	let mut l = Lexer::new(src.as_bytes());
+	l.pos = from;
+	loop {
+		let t = l.next_token();
+		if t.kind == T::Eof || t.start >= at {
+			break;
+		}
+		tokens.push(t);
+	}
+	let ends =
+		|k: T| {
+			matches!(
+				k,
+				T::Semi
+					| T::Lt | T::RParen
+					| T::RBracket | T::RBrace
+					| T::Plus | T::Minus
+					| T::Star | T::StarStar
+					| T::Slash | T::Percent
+					| T::Eq | T::EqEq
+					| T::Ne | T::Gt | T::Ge
+					| T::Le | T::AndAnd
+					| T::OrOr | T::Times
+					| T::Divide | T::Contains
+					| T::NotContains
+					| T::ContainsAll
+					| T::ContainsAny
+					| T::ContainsNone
+					| T::Inside | T::NotInside
+					| T::AllInside | T::AnyInside
+					| T::NoneInside
+			)
+		};
+	std::iter::once(at)
+		.chain(tokens.iter().rev().take(4).filter(|t| ends(t.kind)).map(|t| t.start))
+		.collect()
+}
+
+/// The error reported for input parser-next rejected with `e`, reading from
+/// `from`: escapes in strings and escaped identifiers, and the contents of
+/// prefixed strings, are decoded as they are read, so an invalid one before
+/// `e` is the error reported first.
 pub(crate) fn first_error(src: &str, from: u32, e: Error, json: bool) -> Error {
 	// A path is checked once all of it is read, its escapes decoded.
 	const PATH: &str = "Invalid function/constant path";
 	let at = match &e {
 		Error::Syntax(d) if d.msg.starts_with(PATH) => d.end,
+		// Detected at the second operator, after both operands are read.
+		Error::Syntax(d) if d.msg.starts_with("Chained relational") => d.end,
+		// Checked once the whole statement is read.
+		Error::Syntax(d) if d.msg.starts_with("Parameter declarations without `let`") => d.end,
+		// Reported over the module source, once it is decoded.
+		Error::Syntax(d) if d.msg.starts_with("Expected the `UNSIGNED` keyword") => d.end,
 		Error::Syntax(d) => d.start,
 		Error::Lower(r) if r.msg.starts_with(PATH) => r.span.map_or(u32::MAX, |(_, e)| e),
 		Error::Lower(r) => r.span.map_or(u32::MAX, |(s, _)| s),
@@ -255,7 +400,7 @@ pub(crate) fn first_error(src: &str, from: u32, e: Error, json: bool) -> Error {
 /// The first invalid escape in a string, escaped-identifier or escaped
 /// parameter token that starts in `from..before`, or the first prefixed
 /// string there whose contents do not decode, skipping JavaScript function
-/// bodies, whose strings `syn` does not decode.
+/// bodies, whose strings are not decoded.
 pub(crate) fn first_escape_error(src: &str, from: u32, before: u32, json: bool) -> Option<Reject> {
 	use surrealdb_parser_next::decode::escape_error;
 	use surrealdb_parser_next::kw::Kw;
@@ -286,6 +431,23 @@ pub(crate) fn first_escape_error(src: &str, from: u32, before: u32, json: bool) 
 					&& let Some(r) = crate::lit::prefixed_error(text, t.aux(), t.start)
 				{
 					return Some(r);
+				}
+			}
+			T::Digits => {
+				// A number or duration runs on over letters and quotes the
+				// token lexer splits off, so `1d'x'` holds no `d'…'` string.
+				// Where it does not lex as one (a record-id key such as
+				// `01GE6…`, or `10u'`), its letters still belong to it.
+				let mut n = l;
+				if n.numeric(t.start).is_ok() {
+					l = n;
+				} else {
+					let b = src.as_bytes();
+					let mut end = t.end as usize;
+					while b.get(end).is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_') {
+						end += 1;
+					}
+					l.pos = end as u32;
 				}
 			}
 			T::Ident if t.kw == Kw::Function => {

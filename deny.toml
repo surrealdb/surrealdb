@@ -250,22 +250,6 @@ name = "surrealdb-sql"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-syn"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
-name = "surrealdb-ast"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
-name = "surrealdb-parse-common"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
-name = "surrealdb-parser"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
 name = "surrealdb-parser-next"
 allow = ["BUSL-1.1"]
 
@@ -274,7 +258,7 @@ name = "surrealdb-parser-next-lower"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-token"
+name = "surrealdb-parse-common"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -432,26 +416,6 @@ expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
-name = "surrealdb-syn"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-ast"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-parse-common"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-parser"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
 name = "surrealdb-parser-next"
 expression = "BUSL-1.1"
 license-files = []
@@ -462,7 +426,7 @@ expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
-name = "surrealdb-token"
+name = "surrealdb-parse-common"
 expression = "BUSL-1.1"
 license-files = []
 

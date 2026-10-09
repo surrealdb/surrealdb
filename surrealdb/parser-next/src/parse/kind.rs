@@ -9,14 +9,13 @@ use super::*;
 use crate::ast::kind as k;
 
 impl<'a, 's> Parser<'a, 's> {
-	/// A kind without enclosing `<` `>` (`syn`'s `parse_inner_kind`): `any`, or
-	/// one kind or `option<…>` optionally followed by `| kind …`.
+	/// A kind without enclosing `<` `>`: `any`, or one kind or `option<…>`
+	/// optionally followed by `| kind …`.
 	pub(crate) fn kind(&mut self) -> R<NodeId> {
 		self.kind_with(false)
 	}
 
-	/// `any`, `option<…>` or one concrete kind, with no `| kind` after it
-	/// (`syn`'s `parse_inner_single_kind`).
+	/// `any`, `option<…>` or one concrete kind, with no `| kind` after it.
 	pub(crate) fn single_kind(&mut self) -> R<NodeId> {
 		self.kind_with(true)
 	}
@@ -177,7 +176,8 @@ impl<'a, 's> Parser<'a, 's> {
 	/// A kind other than `any` and `option<…>`. Returns `None` when it pushed a
 	/// frame and wants an inner kind.
 	fn concrete_kind(&mut self) -> R<Option<NodeId>> {
-		// Every concrete kind is one object level in `syn`, even a leaf.
+		// Every concrete kind is one object level, even a leaf, as earlier
+		// releases charge it.
 		if self.o >= self.limits.object_depth {
 			return Err(self.depth_error("Exceeded object recursion depth limit", ""));
 		}
@@ -234,6 +234,10 @@ impl<'a, 's> Parser<'a, 's> {
 				let n = self.ast.nodes[lit as usize];
 				if signed && n.tag == Tag::Prefix {
 					// A signed literal kind is a number, never a duration.
+					if let Some(d) = crate::lex::compound_error(self.src, t.start, Compound::Number)
+					{
+						return Err(self.diag(d));
+					}
 					return Err(self.error(n.start, n.end, "expected a number"));
 				}
 				return self.node(Tag::Kind, k::LITERAL, lit, 0, t.start, 1).map(Some);
@@ -305,14 +309,12 @@ impl<'a, 's> Parser<'a, 's> {
 						let open = self.prev_start;
 						let mark = self.vals.len() as u32;
 						loop {
-							let n = self.ident()?;
-							if code == k::GEOMETRY && !is_geometry_kind(n.kw) {
-								return Err(self.error(
-									n.start,
-									n.end,
-									"expected a geometry kind name",
-								));
+							if code == k::GEOMETRY
+								&& !(self.tok.kind == T::Ident && is_geometry_kind(self.tok.kw))
+							{
+								return Err(self.unexpected("a geometry kind name"));
 							}
+							let n = self.ident()?;
 							let name = self.leaf(Tag::Name, 0, n);
 							self.vals.push(name);
 							if !self.eat(T::Pipe) {

@@ -32,13 +32,14 @@
 //! ≥1 labelled element OR ≥1 variable already bound by an earlier pattern /
 //! clause. Name validation reuses [`naming`] verbatim.
 
+use parse_common::error::{SyntaxError, bail, syntax_error};
+
 use crate::expr::match_plan::{BindingDef, BindingId, BindingKind};
 use crate::gql::ast::{
 	EdgePattern, Ident, MatchClause, MatchItem, NodePattern, OptionalBlock, PathPattern,
 	PathSearchKind,
 };
 use crate::gql::lower::naming;
-use crate::syn::error::{SyntaxError, bail, syntax_error};
 
 /// One declared binding plus the bookkeeping the semantic pass needs but the
 /// final [`BindingDef`] does not carry.

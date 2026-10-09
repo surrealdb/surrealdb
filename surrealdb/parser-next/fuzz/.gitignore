@@ -1,0 +1,5 @@
+target
+corpus
+artifacts
+coverage
+fuzz-*.log

@@ -12,7 +12,7 @@ stability guarantee and may change or disappear in any release. Depend on
 ```
 surrealdb-sql  (this crate: the AST)
       ^
-surrealdb-syn  (the parser that builds it)
+surrealdb-parser-next-lower  (the parser that builds it)
       ^
 surrealdb-core (lowers the AST into the expression layer and executes it)
 ```
@@ -35,6 +35,6 @@ direction of every dependency pointing down.
 
 ## Lifetime
 
-This crate is scheduled for deletion once the greenfield parser
-(`surrealdb-ast` + `surrealdb-parser`) reaches parity and takes over the same
-layer. Do not grow its API surface.
+This crate is scheduled for deletion once parser-next lowers directly into
+`expr` (milestone M5 in `doc/parser/RFC_PARSER_NEXT.md`). Do not grow its API
+surface.

@@ -8,7 +8,7 @@
 //! The lookup table is an open-addressed hash table built by a `const fn`, so
 //! it costs about a kilobyte of data and one small probe loop of code.
 //!
-//! The list is `surrealdb-syn`'s keyword list. `NaN` and `Infinity` are not
+//! The list is SurrealQL's established keyword set. `NaN` and `Infinity` are not
 //! keywords: they are spelled case-sensitively and are not identifiers, so the
 //! lexer gives them token kinds of their own.
 

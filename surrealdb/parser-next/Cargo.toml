@@ -22,12 +22,9 @@ wasm-probe = []
 surrealdb-parser-next-lower = { path = "lower" }
 # Workspace crates only: the harness builds the old AST to compare with.
 common.workspace = true
-surrealdb-syn.workspace = true
 surrealdb-sql.workspace = true
 surrealdb-types.workspace = true
 surrealdb-strand.workspace = true
-parser.workspace = true
-ast.workspace = true
 web-time.workspace = true
 
 [lints]
