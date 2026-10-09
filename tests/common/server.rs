@@ -159,8 +159,13 @@ pub fn run_in_dir<P: AsRef<Path>>(args: &str, current_dir: P) -> Child {
 	run_internal(args, Some(current_dir), None)
 }
 
+/// A unique path under the system temp directory, resolved at run time.
+///
+/// The directory must not be a compile-time path such as `env!("OUT_DIR")`:
+/// CI runs these tests from a nextest archive on runners that never built
+/// them, so the build's target directory does not exist there.
 pub fn tmp_file(name: &str) -> String {
-	let path = Path::new(env!("OUT_DIR")).join(format!("{}-{}", rand::random::<u32>(), name));
+	let path = std::env::temp_dir().join(format!("{}-{}", rand::random::<u32>(), name));
 	path.to_string_lossy().into_owned()
 }
 

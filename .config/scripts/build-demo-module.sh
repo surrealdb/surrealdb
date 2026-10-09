@@ -17,14 +17,21 @@ warn() { echo "build-demo-module: $*" >&2; }
 root="${NEXTEST_WORKSPACE_ROOT:-$PWD}"
 
 # The `surreal` binary the tests were built against sits in the cargo profile
-# directory, which nextest puts first on the dynamic library search path.
+# directory, which nextest puts on the dynamic library search path. That entry
+# is not the first one: build-script link-search paths precede it. Under
+# `cargo nextest run --archive-file` the profile directory is the extracted
+# archive, so `$root/target` is only a fallback for in-place runs.
 bin="${SURREAL_BIN:-}"
 if [ -z "$bin" ]; then
 	libpath="${NEXTEST_DYLD_FALLBACK_LIBRARY_PATH:-${NEXTEST_LD_LIBRARY_PATH:-${NEXTEST_DYLD_LIBRARY_PATH:-}}}"
-	profile_dir="${libpath%%:*}"
-	if [ -n "$profile_dir" ] && [ -x "$profile_dir/surreal" ]; then
-		bin="$profile_dir/surreal"
-	elif [ -x "$root/target/debug/surreal" ]; then
+	IFS=: read -r -a libdirs <<< "$libpath"
+	for dir in ${libdirs[@]+"${libdirs[@]}"}; do
+		if [ -n "$dir" ] && [ -f "$dir/surreal" ] && [ -x "$dir/surreal" ]; then
+			bin="$dir/surreal"
+			break
+		fi
+	done
+	if [ -z "$bin" ] && [ -x "$root/target/debug/surreal" ]; then
 		bin="$root/target/debug/surreal"
 	fi
 fi
