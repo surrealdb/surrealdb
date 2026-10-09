@@ -88,7 +88,8 @@ impl std::fmt::Debug for Partial {
 pub(crate) struct PartialCounts {
 	/// For a join build, the build rows the producer read, regex rows
 	/// included; for a distinct, the rows it took; otherwise the records the
-	/// partial holds.
+	/// partial holds. A piece of a split partial instead counts the records
+	/// routed to it, duplicates a distinct dropped not among them.
 	pub taken: u64,
 }
 

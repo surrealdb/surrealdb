@@ -51,7 +51,7 @@ const NS: [usize; 3] = [1, 3, 8];
 
 /// A configuration for a small budget: parts of 1 KiB, a merge of `fan_in`
 /// runs at once, and a floor and chunk of a few KiB.
-fn small(fan_in: usize) -> surrealdb_cnf::ConfigMap {
+pub(super) fn small(fan_in: usize) -> surrealdb_cnf::ConfigMap {
 	surrealdb_cnf::ConfigMap::empty()
 		.with_key_value("spill_part_size", "1024")
 		.with_key_value("spill_merge_fan_in", fan_in.to_string())
@@ -82,7 +82,7 @@ async fn scan_rows(free: &TestDb) -> Vec<Value> {
 }
 
 /// The pipeline of `program` that scans.
-fn scan_pipeline(program: &Program) -> usize {
+pub(super) fn scan_pipeline(program: &Program) -> usize {
 	program
 		.pipelines
 		.iter()
@@ -91,17 +91,17 @@ fn scan_pipeline(program: &Program) -> usize {
 }
 
 /// `rows` in `n` contiguous parts, in order.
-fn morsels<T: Clone>(rows: &[T], n: usize) -> Vec<Vec<T>> {
+pub(super) fn morsels<T: Clone>(rows: &[T], n: usize) -> Vec<Vec<T>> {
 	rows.chunks(rows.len().div_ceil(n)).map(<[T]>::to_vec).collect()
 }
 
 /// The memory of `ctx`'s query.
-fn memory_of(ctx: &ExecutionContext) -> Arc<QueryMemory> {
+pub(super) fn memory_of(ctx: &ExecutionContext) -> Arc<QueryMemory> {
 	ctx.ctx().memory().cloned().expect("a query with memory")
 }
 
 /// Every record `merge` answers.
-async fn drained(mut merge: Merge, ctx: &ExecutionContext) -> Vec<Record> {
+pub(super) async fn drained(mut merge: Merge, ctx: &ExecutionContext) -> Vec<Record> {
 	let mut all = Vec::new();
 	loop {
 		let chunk = merge.next_chunk(1000, ctx).await.expect("a chunk");
@@ -112,14 +112,14 @@ async fn drained(mut merge: Merge, ctx: &ExecutionContext) -> Vec<Record> {
 	}
 }
 
-fn records_of(merged: Merged) -> Merge {
+pub(super) fn records_of(merged: Merged) -> Merge {
 	match merged {
 		Merged::Records(merge) => merge,
 		Merged::Join(_) => panic!("a join where records were merged"),
 	}
 }
 
-fn text(flow: ControlFlow) -> String {
+pub(super) fn text(flow: ControlFlow) -> String {
 	match flow {
 		ControlFlow::Err(error) => error.to_string(),
 		_ => panic!("a control flow that is no error"),
@@ -128,7 +128,7 @@ fn text(flow: ControlFlow) -> String {
 
 /// Every end of a test leaves no run behind and reads no more runs at once
 /// than the fan-in.
-fn assert_tidy(store: &MemTempStore) {
+pub(super) fn assert_tidy(store: &MemTempStore) {
 	assert_eq!(store.runs(), 0, "a spilled run outlived its query");
 	assert!(store.most_read_at_once() <= 4, "read {} runs at once", store.most_read_at_once());
 }
@@ -517,7 +517,7 @@ fn distinct_rows() -> Vec<Value> {
 }
 
 /// The rows a serial distinct keeps, or the error it raises past `max_rows`.
-fn serial_distinct(rows: &[Value], max_rows: usize) -> Result<Vec<Value>, String> {
+pub(super) fn serial_distinct(rows: &[Value], max_rows: usize) -> Result<Vec<Value>, String> {
 	let mut seen = SeenSet::new();
 	let mut kept = Vec::new();
 	for row in rows {
@@ -612,7 +612,7 @@ fn key_of(i: usize, numbers: usize) -> Value {
 	}
 }
 
-fn object_of(field: &str, i: usize, pad: bool) -> Value {
+pub(super) fn object_of(field: &str, i: usize, pad: bool) -> Value {
 	let mut object = Object::default();
 	object.insert(field.to_owned(), Value::from(i as i64));
 	if pad {
@@ -640,7 +640,7 @@ fn probe_rows() -> Vec<(Option<JoinKey>, Value)> {
 		.collect()
 }
 
-fn join_step(join_type: JoinType) -> JoinStep<u16, super::program::HostScalar> {
+pub(super) fn join_step(join_type: JoinType) -> JoinStep<u16, super::program::HostScalar> {
 	JoinStep {
 		build: 0u16,
 		keys: vec!["k".into()],

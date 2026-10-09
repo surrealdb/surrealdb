@@ -376,6 +376,67 @@ impl SpilledJoin {
 	}
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+impl SpilledJoin {
+	/// One spilled join holding every build run, deferred probe and yielded row
+	/// of `parts`, partitions of one join whose probes were numbered across all
+	/// of them ([`Self::defer_at`]). Every `parts` holds the same regex build
+	/// rows; the union keeps the first's. Every record a part holds is keyed by
+	/// a unique (key, producer, arrival) or (arrival, place), so the union's
+	/// merges answer what one unpartitioned join's do.
+	pub(super) fn union(parts: Vec<SpilledJoin>) -> FlowResult<SpilledJoin> {
+		let mut parts = parts.into_iter();
+		let Some(mut all) = parts.next() else {
+			return Err(ControlFlow::Err(anyhow::anyhow!("Internal error: a union of no joins")));
+		};
+		for part in parts {
+			if part.width != all.width || part.index != all.index {
+				return Err(ControlFlow::Err(anyhow::anyhow!(
+					"Internal error: joins of two breakers were united"
+				)));
+			}
+			let SpilledJoin {
+				width: _,
+				index: _,
+				memory: _,
+				account,
+				build,
+				regex: _,
+				_regex_account: _,
+				regex_probe_account: mut probe_account,
+				probes,
+				probe_runs,
+				regex_probes,
+				out,
+				out_runs,
+				arrivals,
+			} = part;
+			all.build.append(build)?;
+			all.probe_runs.append(probe_runs)?;
+			all.out_runs.append(out_runs)?;
+			all.probes.extend(probes);
+			all.out.extend(out);
+			all.regex_probes.extend(regex_probes);
+			all.arrivals = all.arrivals.max(arrivals);
+			// The part's lease already admitted these rows, so the verdict is
+			// not acted on.
+			let used = account.used();
+			drop(account);
+			let _ = all.account.charge(used);
+			// The regex probes moved to the union are held as bytes the query
+			// cannot spill, so they stay charged, through the reservation the
+			// part's account held for them.
+			let held = probe_account.used();
+			all.regex_probe_account.adopt(&mut probe_account);
+			drop(probe_account);
+			if all.regex_probe_account.charge(held) == Verdict::Spill {
+				all.regex_probe_account.insist_now()?;
+			}
+		}
+		Ok(all)
+	}
+}
+
 /// What a join yields for a probe row given its matches: the in-memory
 /// join's own pairing, for a spilled join to apply to its deferred rows.
 pub(super) trait Pairer: Send {
@@ -469,10 +530,22 @@ impl SpilledJoin {
 		row: Value,
 		with: &mut dyn Pairer,
 	) -> FlowResult<()> {
+		let arrival = self.arrivals;
+		self.defer_at(arrival, key, row, with).await
+	}
+
+	/// Defer probe `row`, keyed `key`, as the probe that arrived `arrival`th
+	/// among every probe of the join; arrivals are unique per join.
+	pub(super) async fn defer_at(
+		&mut self,
+		arrival: i64,
+		key: Option<JoinKey>,
+		row: Value,
+		with: &mut dyn Pairer,
+	) -> FlowResult<()> {
 		let ctx = with.ctx().clone();
 		let ctx = &ctx;
-		let arrival = self.arrivals;
-		self.arrivals += 1;
+		self.arrivals = self.arrivals.max(arrival + 1);
 		let Some(key) = key else {
 			let rows = with.pair(&[], row).await?;
 			return self.yielded(arrival, rows, ctx).await;

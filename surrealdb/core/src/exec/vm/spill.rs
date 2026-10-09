@@ -121,6 +121,27 @@ pub(crate) async fn write_run_as(
 	Ok(run)
 }
 
+/// Write every record `merge` still answers, in its order, as one run
+/// written for `spec` and readable as `sharing` says. Holds the query's run
+/// writer while the merge's runs are read, so the caller opens no other run.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) async fn write_merge(
+	memory: &Arc<QueryMemory>,
+	spec: RunSpec,
+	merge: &mut Merge,
+	sharing: Sharing,
+	ctx: &ExecutionContext,
+) -> FlowResult<Run> {
+	let mut sink = RunSink::open(memory, spec, sharing).await.map_err(err)?;
+	while let Some((keys, row)) = merge.next(ctx).await? {
+		sink.push(&keys, &row).await.map_err(err)?;
+	}
+	let run = sink.finish().await.map_err(err)?;
+	#[cfg(test)]
+	RUNS_WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	Ok(run)
+}
+
 /// The runs one breaker has written, in the order it wrote them.
 #[derive(Debug, Default)]
 pub(crate) struct Runs {

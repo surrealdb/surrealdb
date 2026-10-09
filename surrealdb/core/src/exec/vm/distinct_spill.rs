@@ -39,7 +39,7 @@ use crate::val::Value;
 
 /// The order of records by their keys: a seen row, a deferred row and its
 /// arrival, or a kept row's arrival.
-fn by_keys() -> RecordOrder {
+pub(super) fn by_keys() -> RecordOrder {
 	Arc::new(|(a, _), (b, _)| a.cmp(b))
 }
 
@@ -317,6 +317,17 @@ pub(super) async fn merge_distinct(
 	max_rows: usize,
 	ctx: &ExecutionContext,
 ) -> FlowResult<super::spill::Merge> {
+	merge_distinct_counted(memory, partials, max_rows, ctx).await.map(|(merge, _)| merge)
+}
+
+/// [`merge_distinct`], also answering how many rows it kept.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) async fn merge_distinct_counted(
+	memory: &Arc<QueryMemory>,
+	partials: Vec<Partial>,
+	max_rows: usize,
+	ctx: &ExecutionContext,
+) -> FlowResult<(super::spill::Merge, usize)> {
 	let (runs, held, _) = concat(memory, partials, None, false, ctx).await?;
 	// One reader is left free for the run of kept rows being written.
 	let order = by_keys();
@@ -356,5 +367,6 @@ pub(super) async fn merge_distinct(
 	drop(input);
 	kept.sort_by(|(a, _), (b, _)| a.cmp(b));
 	account.clear();
-	kept_runs.merge(memory, kept, by_keys(), None, ctx).await
+	let merge = kept_runs.merge(memory, kept, by_keys(), None, ctx).await?;
+	Ok((merge, kept_count))
 }

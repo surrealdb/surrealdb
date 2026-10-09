@@ -34,8 +34,12 @@ Four rules fix the boundaries of this design:
    whose implementations may be files, memory, a Durable Object, or an object
    store.
 4. **Main's results do not change.** Every merge preserves main's order,
-   stability, first-value, and error semantics exactly; where an exact
-   equivalence cannot be proven the design falls back to the unpartitioned path.
+   stability, first-value, and error semantics exactly. Where an exact
+   equivalence cannot be proven the design falls back to the unpartitioned path
+   (a join probe key holding a regex, C.3). The one place partitioning cannot
+   promise main's grouping is keys on which `Value::cmp` is not transitive, which
+   are routed like any other key, where main's own grouping depends on its tree's
+   shape (C.1).
 
 Temporary runs are not durable state: they never outlive the process that
 wrote them (or the session sweep), and no released binary reads a run another
@@ -462,9 +466,10 @@ fans out and spills only as it does today.
 
 ### C.1 Decision: range partitioning by sampled splitters
 
-A keyed breaker (aggregate with keys, GQL distinct, equi-join build and probe)
-is divided into N partitions by **range**: N−1 splitter keys
-`s_1 ≤ … ≤ s_{N−1}`, and a record with key `k` goes to partition
+Partitioning applies to partials; a live breaker is never partitioned. A keyed
+breaker (aggregate with keys, GQL distinct, equi-join build) is divided into N
+partitions by **range**: N−1 splitter keys `s_1 < … < s_{N−1}`, strictly
+ascending by `Ord for [Value]`, and a record with key `k` goes to partition
 
 ```
 p(k) = |{ i : s_i < k }|      // partition_point over the splitters, by Value::cmp on the key vector
@@ -477,6 +482,7 @@ and so does every record that could join, group, or deduplicate with it. No
 property of the values beyond the order the breaker already uses is needed:
 cross-type numeric equality (`1`, `1.0f`, `1dec`), strings, record ids, nested
 arrays and objects all route by the same comparison that decides equality.
+Splitters and routes use `cmp` alone, never `PartialEq` or `PartialOrd`.
 
 Why not a hash: a partition hash must satisfy `a == b ⇒ h(a) == h(b)` for
 `Value::cmp` equality. `Value: Hash` does not (`0.1f == 0.1dec`, different
@@ -487,74 +493,127 @@ neither exact nor transitive, so no canonical form provably agrees with it. No
 existing dependency supplies one either. Range partitioning needs no hash at
 all.
 
-Residual: `Value::cmp` is not transitive where a `Float` and a `Decimal`
-agree to about sixteen significant digits without being equal, so for such
-keys there can be a splitter `s` with `s < a` and `!(s < b)` although
-`a == b`. Main's `BTreeMap` is itself insertion-order dependent for such keys
-(which of several mutually "equal" keys it finds depends on the tree's shape),
-so no partitioning can promise main's exact grouping there, and a hash would
-fare no better. The guarantee is exact wherever the keys present are totally
-preordered by `Value::cmp`, which covers every `Int`/`Float`, `Int`/`Decimal`
-and same-variant comparison. The equivalence tests pin `1`, `1.0f`, `1dec`,
-`-0.0f`/`0.0f`, `0.1f`/`0.1dec` (equal, and routed together when no splitter
-lies between them), and keys equal under `collate`/`numeric` sort flags but
-distinct under `Value::cmp` (which group apart, as in main).
+Residual: `Value::cmp` is `partial_cmp().unwrap_or(Equal)`, which is not
+transitive in two places:
+
+- a `Float` and a `Decimal` that agree to about sixteen significant digits
+  without being equal;
+- a `Geometry` with a NaN coordinate, whose `partial_cmp` with a geometry of
+  its kind answers `None`.
+
+A `Closure` is not a third case: every closure compares `Equal` to every other,
+whatever it holds, which is a total preorder, so closures always route together
+and form one group, one distinct row or one join key, as they do unpartitioned.
+
+For the two non-transitive cases there can be a splitter `s` with `s < a` and
+`!(s < b)` although `a == b`, so two `cmp`-equal keys may route apart. Such a
+key is routed by `Splitters::route` like any other and never sent to an
+unpartitioned path. Main's `BTreeMap` is itself insertion-order dependent for
+such keys (which of several mutually "equal" keys it finds depends on the tree's
+shape), so no partitioning can promise main's exact grouping there, and a hash
+would fare no better. The guarantee is exact wherever the keys present are
+totally preordered by `Value::cmp`: every key set holding neither a
+`Float`/`Decimal` pair of that kind nor a `Geometry` with a NaN coordinate, at
+any depth. A container (`Array`, `Set`, `Object`) passes an element's `None`
+straight up, so a key such as `[loc]` with a NaN-coordinate point is
+non-transitive too. The
+equivalence tests pin `1`, `1.0f`, `1dec`, `-0.0f`/`0.0f`, `0.1f`/`0.1dec`
+(equal, and routed together when no splitter lies between them), and keys
+equal under `collate`/`numeric` sort flags but distinct under `Value::cmp`
+(which group apart, as in main; grouping, distinct and join never apply
+`collate` or `numeric`).
 
 ### C.2 Splitters
 
-Splitters are drawn from **sorted runs**, which the breakers already write in
-key order:
+`Splitters` is a strictly ascending list of key vectors: sorted by `cmp`, with
+every key that compares `Equal` to the one before it dropped. Splitters are
+drawn from **sorted runs**, which the breakers already write in key order:
 
-- a breaker that has spilled has runs in key order; the sampler reads every
-  `stride`-th record's key while the runs are merged (or from the first run of
-  each producer), yielding an ordered sample with no extra sort;
-- a breaker that has not spilled samples its in-memory index (a `BTreeMap`/
-  `BTreeSet` in key order) by stride;
-- the coordinator merges producers' samples (each sorted) and picks N−1
-  equally spaced keys, dropping duplicates (fewer partitions when the key space
-  is narrow).
+- `Partial::sample(stride)` reads every `stride`-th route key of a producer's
+  first run and of its held records, and answers them sorted;
+- `Splitters::from_samples(samples, n)` concatenates the producers' samples,
+  sorts and deduplicates them by `cmp`, and picks the keys at `i * len / n` for
+  `i` in `1..n`, skipping the first key and repeats. The result has at most `n`
+  partitions: fewer where the key space is narrow, one where `n <= 1`.
 
 Splitter choice affects balance only, never correctness.
 
-### C.3 Per breaker
+Only the equality prefix of a record's keys is routed on (`route_width`): a
+group's whole key (`arity`), a distinct's row (the first of three keys), a
+join's key columns (`arity - 2`). A producer's index and a record's arrival,
+which follow those columns, never decide a partition. A run of any other kind,
+a sort's among them, is refused as an internal error.
 
-- **Aggregate**: `Partitioned<Groups>`; partition `i` holds the groups whose
-  keys route to `i`. Finishing partitions in index order answers the groups in
-  key order, which is the order main finishes them in, so the output is the
-  concatenation of the partitions' outputs.
-- **GQL distinct**: a row's partition is its row's route. Partition `i` keeps
-  each row's first arrival; output order is global arrival order, so the
-  partitions' kept rows are merged by `(producer, arrival)` at the end (each
-  partition's kept rows are written sorted by arrival, so this is a k-way
-  merge, not a sort). The distinct-row cap is checked on the sum of the
-  partitions' kept counts.
-- **Equi-join**: build and probe rows route by the first `width` key columns
-  (the arrival column appended to a build key is not routed on). Partition `i`
-  joins its build rows with its probe rows; output order is
-  `(probe arrival, place)`, restored by a k-way merge of the partitions'
-  outputs, each written in that order.
-  - Build rows whose key holds a regex are **replicated** to every partition:
-    `=` matches them against string keys of any partition, after the equal-key
+### C.3 Splitting and finishing
+
+`Partial::split(splitters)` answers one partial per partition, in partition
+order. Each source run is read once, in order, and deleted as soon as it has
+been read. The records that route to one partition are written as a piece of
+that partition's run; the query has one run writer, so one piece is open at a
+time and stays open while consecutive records route to the same partition.
+Held records are routed in memory, a stable partition of a sorted vector. A
+join's `side` records are replicated to every partition. A split partial's
+`counts.taken` is the records routed to it plus, on partition 0 only, its side
+records, so the partitions' counts sum to the unsplit partial's records.
+
+`Partitioned::split` splits every producer's partial, in producer order, so
+partition `i` holds one partial per producer: producer `p`'s share of
+partition `i`. Partition `i` is then finished by the machinery that finishes
+unpartitioned partials, over those shares in producer order, so every tie is
+decided by source order exactly as in the unpartitioned merge.
+
+- **Aggregate**: each partition is `merge_partials(KeyedFold)` followed by
+  `SavedFold`. Partitions finish in index order, which is key order, so the
+  chunks of groups in order are the unpartitioned aggregate's
+  (`PartitionedFold`); at most one partition's merge is open at a time.
+  `GROUP ALL` has the empty key, which orders before or equal to every
+  splitter, so its one group routes to partition 0 and the other partitions
+  finish to no rows.
+- **GQL distinct**: a row's partition is its row's route. Each partition runs
+  `merge_distinct_counted`, which answers its kept count and checks it against
+  `max_rows`, and writes its kept rows as one run keyed `[producer, arrival]`.
+  The coordinator checks the sum of the partitions' kept counts against
+  `max_rows` before it reads any run, then merges the runs by key into global
+  arrival order. Both checks raise the unpartitioned distinct's error, and the
+  sum is over the limit exactly when the unpartitioned count is.
+- **Equi-join**: build rows route by the key columns. `PartitionedJoin` numbers
+  probe arrivals across every partition, routes a probe row by its key to the
+  partition holding every build row of an equal key, and defers it there under
+  its global arrival. Each partition finishes as a spilled join and writes its
+  output as one run keyed `[probe arrival, place]`; one merge by key restores
+  the order the in-memory join yields. The build-row cap is checked once, on
+  the sum of the unsplit producers' counts, before anything is split; the
+  partitions open with no cap of their own. The pairing's output counter is
+  shared by every partition, so the output cap fails as the unpartitioned join
+  does.
+  - Build rows whose key holds a regex are replicated to every partition: `=`
+    matches them against string keys of any partition, after the equal-key
     matches, which is the order `BuildTable::matches` gives.
+  - A probe row with no key yields at once, and is deferred in partition 0.
   - A probe row whose key holds a regex matches build rows of every partition,
-    so a partition set that sees one marks itself `needs_global`, and the
-    coordinator runs the unpartitioned spilled finish over the union of the
-    partitions' build runs (the runs already exist; nothing is re-read from
-    the source).
-  - A cross join is not partitioned.
-- **Sort**: not partitioned by this step. A sort's partials merge by step B.
-  (Range partitioning a sort by its `KeyOrder` order is correct by the same
-  argument and is left for a later parallel final merge.)
+    so it is deferred in partition 0 and marks the join `needs_global`; at
+    finish, the partitions are united into one spilled join
+    (`SpilledJoin::union`) and its ordinary finish answers.
+  - A cross join (a join with no key columns) is not partitioned.
+- **Sort**: not partitioned. A sort's partials merge as in B. (Range
+  partitioning a sort by its `KeyOrder` order is correct by the same argument
+  and is left for a later parallel final merge.)
+
+Partition outputs of a distinct or a join are sealed as partials of one run
+each, and the coordinator merges them with one `Runs::merge` by key, so every
+reader count stays within the query's fan-in.
 
 ### C.4 Scope
 
-Partitions are an API and a test-proven equivalence: `Partitioned<T>` with
-`route`, `finish_in_order`, and the per-breaker merges above, exercised by
-property tests that compare a serial run with an N-partition run over
-generated inputs (mixed numeric variants, strings under every `KeyOrder`,
-record ids with numeric and array keys, nested values, regex keys, ties, caps).
-No runtime path partitions by default; single-node behaviour is unchanged. A
-fan dispatcher that routes partitions to fans is the consumer.
+Partitions are an API and a test-proven equivalence: `Splitters`, `Partial::sample`,
+`Partial::split`, `Partitioned`, `PartitionedFold`, `PartitionedJoin` and the
+distinct partition finishes, exercised by tests that compare the unpartitioned
+finish with the finish over 1, 2 and 7 partitions and over explicit splitters
+that are class members in other representations than most rows' own (mixed
+numeric variants, strings in two cases, record ids with numeric and array keys,
+nested values, regex keys, ties, caps). No runtime path partitions by default;
+single-node behaviour is unchanged. A fan dispatcher that routes partitions to
+fans is the consumer.
 
 ## Backends
 
@@ -582,4 +641,8 @@ uploads parts however its storage requires; nothing in the VM depends on how.
   (`array::group`), first values, and `GROUP ALL`; the no-spill region path
   allocates as before (`vm_alloc` tests); N simulated fans over a shared store
   answer the serial result for every breaker, including caps' errors.
-- **C**: the property tests of C.4.
+- **C**: the equivalence tests of C.4: split partials hold only their
+  partition's records and every record once; aggregates, `GROUP ALL`, distinct
+  and joins finished over partitions answer the unpartitioned result; the
+  distinct and build-row caps fail with the unpartitioned errors; a sort is
+  refused.
