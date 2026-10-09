@@ -158,6 +158,7 @@ mod effects;
 mod exits;
 mod expr;
 mod lower;
+mod request;
 pub mod schema;
 
 use std::fmt::{self, Display, Formatter};
@@ -183,6 +184,9 @@ pub use self::expr::{
 pub use self::lower::{
 	NoLogicalForm, is_value_literal, lower, lower_expr, lower_fields, lower_select,
 	lower_value_statement,
+};
+pub use self::request::{
+	Emission, LogicalTransaction, RequestStatementKind, TxnEnd, TxnMode, lower_request,
 };
 pub use self::schema::{
 	ComputedBody, FieldPath, FieldSchema, FieldSegment, LogicalPermission, LogicalPermissionRef,
