@@ -493,8 +493,8 @@ pub mod is {
 	use chrono::NaiveDateTime;
 	use semver::Version;
 	use surrealdb_expr::expr::Error;
+	use surrealdb_expr::parser as syn;
 	use surrealdb_expr::val::{Datetime, Value};
-	use surrealdb_parser_next_lower as syn;
 	use surrealdb_types::regex_engine::Regex;
 	use ulid::Ulid;
 	use url::Url;

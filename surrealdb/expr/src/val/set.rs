@@ -94,12 +94,6 @@ impl Set {
 		self.0.into_iter().map(Value::into_literal).collect()
 	}
 
-	/// The surface-syntax counterpart of [`Self::into_literal`]; see
-	/// [`Value::into_sql_literal`].
-	pub fn into_sql_literal(self) -> Vec<crate::sql::Expr> {
-		self.0.into_iter().map(Value::into_sql_literal).collect()
-	}
-
 	/// Return the union of this set with another (A ∪ B)
 	pub fn union(&self, other: &Set) -> Set {
 		Set(self.0.union(&other.0))

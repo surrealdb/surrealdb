@@ -1,5 +1,5 @@
 //! Parser tests that need core: the facade entry points, which translate
-//! capabilities into settings for `surrealdb-parser-next-lower`.
+//! capabilities into settings for `surrealdb_expr::parser`.
 
 mod builtin_paths;
 mod json;

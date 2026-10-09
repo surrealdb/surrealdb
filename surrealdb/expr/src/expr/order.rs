@@ -1,7 +1,8 @@
 use std::cmp;
 use std::ops::Deref;
 
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Value;
 use crate::expr::idiom::Idiom;
@@ -22,10 +23,14 @@ impl Ordering {
 	}
 }
 
-impl ToSql for Ordering {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_ordering: crate::sql::order::Ordering = self.clone().into();
-		sql_ordering.fmt_sql(f, sql_fmt);
+impl surrealdb_types::ToSql for Ordering {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		match self {
+			Ordering::Random => f.push_str("ORDER BY RAND()"),
+			Ordering::Order(list) => {
+				write_sql!(f, fmt, "ORDER BY {}", list);
+			}
+		}
 	}
 }
 
@@ -48,9 +53,8 @@ impl Deref for OrderList {
 }
 
 impl ToSql for OrderList {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_order_list: crate::sql::order::OrderList = self.clone().into();
-		sql_order_list.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -93,8 +97,16 @@ pub struct Order {
 }
 
 impl ToSql for Order {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_order: crate::sql::Order = self.clone().into();
-		sql_order.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.value.fmt_sql(f, fmt);
+		if self.collate {
+			f.push_str(" COLLATE");
+		}
+		if self.numeric {
+			f.push_str(" NUMERIC");
+		}
+		if !self.direction {
+			f.push_str(" DESC");
+		}
 	}
 }

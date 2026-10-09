@@ -488,7 +488,7 @@ mod tests {
 	/// The logical form of an idiom, as the planner's `SPLIT` targets reach
 	/// this module.
 	fn target_of(sql: &str) -> Option<SplitTarget> {
-		let expr = crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(
+		let expr = crate::expr::logical::lower_expr(crate::expr::Expr::Idiom(
 			crate::syn::idiom(sql).expect("idiom"),
 		))
 		.expect("lowers");
@@ -518,7 +518,7 @@ mod tests {
 			"a[*][0]",
 			"a[1.5]",
 		] {
-			let expr = crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(
+			let expr = crate::expr::logical::lower_expr(crate::expr::Expr::Idiom(
 				crate::syn::idiom(sql).expect("idiom"),
 			))
 			.expect("lowers");

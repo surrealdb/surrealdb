@@ -208,7 +208,7 @@ async fn compile_embedded(
 	planner: &Planner<'_>,
 	expr: &Expr,
 ) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = lower_expr(expr.clone().into()).map_err(|why| {
+	let logical = lower_expr(expr.clone()).map_err(|why| {
 		Error::from(EngineError::unreachable(format!(
 			"a place cannot hold {}: {why}",
 			expr.to_sql()

@@ -36,7 +36,6 @@ collate = []
 scripting = ["dep:js"]
 arbitrary = [
     "dep:arbitrary",
-    "surrealdb-sql/arbitrary",
     "surrealdb-types/arbitrary",
     "surrealdb-strand/arbitrary",
     "common/arbitrary",
@@ -78,9 +77,11 @@ surrealdb-cnf = { workspace = true }
 surrealdb-collections = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
-surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
-surrealdb-parser-next-lower = { workspace = true }
+surrealdb-parser-next.workspace = true
+parse-common.workspace = true
+phf = { workspace = true, features = ["macros", "unicase"] }
+unicase.workspace = true
 surrealdb-types = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true
@@ -88,8 +89,8 @@ ulid = { workspace = true, features = ["serde"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
-# Tests run against the Unicode regex engine whatever the build selects.
 surrealdb-types = { workspace = true, features = ["regex-unicode"] }
+web-time.workspace = true
 ahash.workspace = true
 rstest.workspace = true
 serial_test.workspace = true

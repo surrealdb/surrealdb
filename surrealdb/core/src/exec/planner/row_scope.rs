@@ -241,7 +241,9 @@ mod tests {
 		let ast = crate::syn::parse(&format!("RETURN {src};")).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) = exprs.remove(0) else {
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
+			exprs.remove(0)
+		else {
 			panic!("unexpected statement shape");
 		};
 		lower_expr(out.what).expect("lowers")

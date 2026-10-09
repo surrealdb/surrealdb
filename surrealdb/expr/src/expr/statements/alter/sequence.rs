@@ -1,6 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, Literal};
+use crate::expr::{CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AlterSequenceStatement {
@@ -21,7 +21,13 @@ impl Default for AlterSequenceStatement {
 
 impl ToSql for AlterSequenceStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterSequenceStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER SEQUENCE");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {}", CoverStmts(&self.name));
+		if let Some(timeout) = &self.timeout {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(timeout));
+		}
 	}
 }

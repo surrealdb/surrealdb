@@ -1,14 +1,15 @@
 # RFC: a size-first SurrealQL front end
 
-Status: accepted direction. parser-next is the only SurrealQL parser:
-`surrealdb-syn` and the v3 parser (`surrealdb-parser`, `surrealdb-ast`,
-`surrealdb-token`) are deleted. The entry points the engine calls live in
-`surrealdb-parser-next-lower`, which lowers the flat tree into the
-`surrealdb_sql` AST (Phase A, §6.4); diagnostics, spans and their rendering
-live in `surrealdb-parse-common`. Milestones M1–M3 are met, M2's fuzz target
-exists, and M6's deletion of `syn` and v3 is done; M4 (the printer), M5
-(Phase B lowering, which deletes `surrealdb-sql`) and list/clause recovery
-remain (§8).
+Status: accepted direction. `surrealdb-parser-next` owns the SurrealQL grammar;
+`surrealdb_expr::parser` owns decoding, semantic checks and public entry points.
+Core supplies datastore capabilities and parser limits. Request statements and
+catalog logical expressions compile from the flat tree; driver directives,
+schema statements and lock admission retain native payloads. Stored text uses
+the native canonical formatter and frozen compact and pretty corpus outputs.
+
+The workspace uses native expression types without a `surrealdb-sql` AST or
+SQL↔expr conversion layer. The complete flat canonical printer, remaining
+native compilation paths, and front-end size budget are outstanding (§8).
 
 ## 1. Summary
 
@@ -694,21 +695,21 @@ budgets combined.
 
 ### 6.4 Lowering instead of a second AST
 
-The flat tree reaches the plan in two phases.
+The flat tree is consumed by `surrealdb_expr::parser`:
 
-**Phase A (migration).** An adapter lowers the flat tree into today's
-`surrealdb_sql` types. The differential harness *is* this adapter
-(`examples/support/lower*.rs`). Cutting over behind it
-changes nothing downstream.
+- `parser::logical` constructs logical scalars, paths and relational pipelines.
+- `parser::execution` retains statement categories and redacted observer text;
+  the executor handles request bindings, transaction controls and reached
+  credential preparation.
+- Catalog logical expression and function-body caches compile stored text
+  directly under the storage parser profile.
+- Driver directives, schema writes and mutation payloads use native types
+  required by their execution boundary. Public programmatic query APIs also
+  accept native expressions.
 
-**Phase B (target).**
-- `expr::logical::lower` reads the flat tree directly.
-- The paths that use `From<sql::Expr> for expr::Expr` (permissions, grants,
-  catalog compile) lower from the flat tree.
-- `INFO`'s use of the sql AST is replaced by the printer (§6.6).
-
-`surrealdb-sql`, its 186K of `Clone` code and the sql↔expr conversion layer
-are then deleted.
+Leaf decoding, semantic checks and SELECT pipeline assembly are shared with
+native entry points. The target is complete direct compilation and a flat
+canonical printer, preserving the stored-text and execution contracts below.
 
 **Semantic checks** the current parser makes move to lowering:
 - builtin-name validation, including deprecation and typo hints;
@@ -717,8 +718,8 @@ are then deleted.
 - letless-`LET` deprecation stays in the parser, because it is purely
   syntactic.
 
-The differential harness already runs the moved checks in its lowering and
-matches `syn`'s accept/reject decisions on the whole corpus.
+The invariant harness compares direct and native request admission, logical
+forms, transaction modes and canonical observer text across the corpus.
 
 ### 6.5 Errors and recovery
 
@@ -759,16 +760,17 @@ can be persisted.
 That guarantee is enforced three ways:
 1. **A differential printer test.** For every corpus statement and every fuzz
    input `x` that `syn` accepts, `print(parse_next(x))` must equal
-   `syn::parse(x).to_sql()`. The adapter gives this today by
-   construction, by printing the lowered `sql` tree.
+   the frozen canonical output produced by the reference formatter. Compact
+   and pretty output are independent fixtures; neither is regenerated to
+   accommodate a formatter change.
 2. **A round-trip test.** `parse(print(t)) == t` holds on the flat tree, which
    is the property `fuzz_format` checks today.
 3. **The upgrade suite** (`language-tests/tests/upgrade/`). It runs unchanged
    under the new parser, both as the reader of old text and as the writer of
    new text.
 
-Until Phase B, stored text keeps coming from `sql::ToSql` via the adapter. The
-printer replaces it only once test 1 passes on the whole corpus.
+Stored text comes from the native formatter. A flat printer can produce it
+only when byte identity, round trips and released-binary upgrade tests pass.
 
 ### 6.7 Depth limits and the stack bound
 
@@ -925,10 +927,9 @@ the end of the buffer as incomplete. §6.9 differs in three ways:
 ### 7.1 What exists
 
 `surrealdb/parser-next` (crate `surrealdb-parser-next`) has no dependencies.
-`surrealdb/parser-next/lower` (crate `surrealdb-parser-next-lower`) is the
-migration adapter of §6.4: it lowers the flat tree into `surrealdb_sql` and
-parses `syn`'s literal-value grammars, depending only on workspace crates.
-`surrealdb-syn` routes its entry points through both behind a switch (§7.7).
+`surrealdb/expr/src/parser` provides native entry points, logical compilation,
+literal-value grammars and semantic checks. Core's `syn` module supplies
+capabilities and settings to those entry points.
 
 | File | Contents |
 |---|---|
@@ -942,20 +943,16 @@ parses `syn`'s literal-value grammars, depending only on workspace crates.
 | `src/stream.rs` | Streaming (§6.9) |
 | `src/decode.rs` | Escape decoding |
 
-The examples:
-- `examples/differential.rs` is the differential harness (§7.2).
-- `examples/bench.rs` reports throughput, allocations, the stack probe and the
-  streamed import.
-- `examples/entries.rs` is the differential harness for `syn`'s other entry
-  points and settings (§7.2).
-- `lower/src/{lib,define,lit}.rs` lower the tree into `surrealdb_sql`,
-  including literal decoding, the semantic checks moved out of the parser and
-  the parser settings (`legacy_strands`, the files and Surrealism gates);
-  `lower/src/entry.rs` mirrors `syn`'s entry points; `lower/src/value.rs`
-  parses `syn`'s value, JSON and record-id grammars into public values.
+The expression crate's examples provide validation:
 
-`surrealdb/parser-next/size-probe` builds `next`, `syn` or `v3` alone as a wasm
-module.
+- `examples/golden.rs` checks frozen compact and pretty canonical output.
+- `examples/invariants.rs` checks mutation and streaming invariants, nesting
+  limits, round trips, direct logical lowering and request metadata.
+- `examples/bench.rs` measures parser and lowering costs.
+
+`expr/src/parser/{mod,define,lit}.rs` decode native payloads;
+`logical.rs` constructs logical operators. `entry.rs` manages reusable flat
+arenas and diagnostic ordering; `value.rs` parses inert public values.
 
 **Modelled:** the whole grammar `syn::parse` accepts with every optional
 grammar enabled: all statements, all expression forms (closures, mocks,
@@ -1269,43 +1266,38 @@ assume one engineer.
   `fuzz_sql_parser`'s dictionary.
 - Add list- and clause-level recovery.
 
-**M3. Side by side** — met (§7.7).
-- Entry points for expressions, blocks, idioms, kinds, field lists, values,
-  JSON and record ids; `legacy_strands`, strict record ids and the files and
-  Surrealism gates (§7.1, §7.2).
-- A process-wide switch (`SURREAL_PARSER_NEXT`, `Datastore::with_parser_next`)
-  routes `syn`'s entry points and `StatementStream` through parser-next.
-- The language suite passes in `off`, `on` and `check`; the upgrade suite's
-  seed axis passes in `check`. Both have cargo-make lanes.
-- Still on `syn` alone: `duration`, `datetime`, `table`,
-  `function_with_capabilities`, and every error message (M2).
+**M3. Engine entry points.**
+- The engine uses parser-next for queries, expressions, blocks, idioms, kinds,
+  field lists, inert values, JSON, record ids, durations, datetimes, table
+  identifiers and function names.
+- Datastore capabilities and fresh-input limits apply at admission. Stored
+  text has its own bounded profile, independent of live configuration.
+- Credential preparation belongs to reached execution; parsing and observer
+  rendering leave request credentials inert.
 
-**M4. Canonical printer** (2 weeks).
-- Write a printer over the flat tree.
-- Prove byte-for-byte equality with `sql::ToSql` across the corpus and the
-  fuzz corpus (§6.6), plus the round-trip property and the upgrade suite.
+**M4. Canonical printer.**
+- Native compact and pretty output must match frozen reference output.
+- A complete printer over flat syntax remains a target.
+- Byte identity, round trips and released-binary upgrades are mandatory
+  before a flat printer becomes the writer of stored definitions.
 
-**M5. Phase B lowering** (4–6 weeks).
-- `expr::logical::lower`, permissions, grants, catalog compile and `INFO` read
-  the flat tree.
-- Delete the adapter.
-- This is the step that overlaps the planner and VM work most, and needs
-  coordinating with those owners.
+**M5. Direct lowering.**
+- Request engine statements and catalog logical caches read the flat tree.
+- Native payloads remain at driver, schema and mutation boundaries; lock
+  admission and observer formatting also retain native representation.
+- Complete the remaining compilation and printing paths without changing
+  permission order, request binding scope, error timing or stored text.
 
-**M6. Delete** (1 week).
-- Delete `surrealdb-syn` — done (§7.7) — then `surrealdb-sql` and the
-  `sql`↔`expr` conversions once Phase B lands.
-- Retire v3 — done: `parse-common` stays, and v3's snapshot inputs are the
-  whole-script corpus under `surrealdb/parser-next/tests/`.
-- Put a size budget for the front end in CI.
+**M6. Workspace and size budget.**
+- Workspace APIs use native representations; SQL frontends lower their own
+  syntax without a `surrealdb-sql` adapter or SQL↔expr conversions.
+- `parse-common` provides diagnostics; parser-next owns the whole grammar.
+- The front-end size budget is outstanding. Measure the reachable wasm
+  module with the lean-nightly tooling and enforce the measured budget in CI.
 
-**Remaining: about 3 months for one engineer.** M4 and M5 can overlap once
-M3 has landed.
-
-Until M3 ships behind the switch, no persisted format and no query behaviour
-changes. The upgrade tests need no new pair until M4 makes the new printer the
-writer of stored text. At that point the existing pairs are the guard,
-because the text must be byte-identical.
+Persisted revision layouts and canonical definition text are compatibility
+contracts. Existing upgrade pairs must remain readable from released writers;
+new durable constructs require pairs once a released writer can produce them.
 
 ## 9. Risks
 
@@ -1340,10 +1332,9 @@ example builtin names or GROUP BY).
 standalone; the printer is still to come.
 - Mitigation: the size probe runs at each milestone, with a CI budget from M6.
 
-**Phase B scope.** Lowering from the flat tree touches the planner,
-permissions and catalog compile. It can slip without blocking M1–M4, which
-already remove `reblessive` from the parser and most of `syn`'s size. The
-adapter keeps `surrealdb-sql` alive until Phase B lands.
+**Direct lowering scope.** Flat-tree consumers share the logical planner
+and catalog permission contracts. Native schema payloads, lock admission and
+canonical printing must remain valid while direct compilation is extended.
 
 ## 10. Open questions
 

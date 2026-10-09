@@ -1,6 +1,6 @@
 //! Every builtin path and keyword relate-target parses.
 
-use surrealdb_sql::builtin_paths::{PATHS, PathKind};
+use surrealdb_expr::expr::builtin_paths::{PATHS, PathKind};
 
 #[test]
 fn paths_parse() {

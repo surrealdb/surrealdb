@@ -8,7 +8,7 @@
 
 use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
-use surrealdb_parser_next_lower::{
+use surrealdb_expr::parser::{
 	ParserConfig, ParserSettings, StatementStream, parse, query_with_settings,
 };
 use surrealdb_types::ToSql;

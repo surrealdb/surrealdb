@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
+use common::fmt::Fmt;
 use surrealdb_strand::TableName;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
@@ -16,8 +17,19 @@ pub struct View {
 
 impl ToSql for View {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_view: crate::sql::View = self.clone().into();
-		sql_view.fmt_sql(f, fmt);
+		write_sql!(
+			f,
+			fmt,
+			"AS SELECT {} FROM {}",
+			self.expr,
+			Fmt::comma_separated(self.what.iter().map(|x| common::fmt::EscapeIdent(x.as_str())))
+		);
+		if let Some(ref v) = self.cond {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.group {
+			write_sql!(f, fmt, " {v}");
+		}
 	}
 }
 impl InfoStructure for View {

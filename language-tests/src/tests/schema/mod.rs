@@ -9,7 +9,7 @@ use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget,
 };
-use surrealdb_parser_next_lower::ParserSettings;
+use surrealdb_core::syn::runtime::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::Backend;
@@ -294,7 +294,7 @@ impl<'de> Deserialize<'de> for TestDuration {
 					json_string_escapes: false,
 				};
 
-				let v = surrealdb_parser_next_lower::value_with_settings(&x, settings)
+				let v = surrealdb_core::syn::runtime::value_with_settings(&x, settings)
 					.map_err(<D::Error as serde::de::Error>::custom)?;
 				let Value::Duration(x) = v else {
 					return Err(<D::Error as serde::de::Error>::custom("Invalid duration"));
@@ -679,7 +679,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			json_string_escapes: false,
 		};
 
-		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
 			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		Ok(SurrealConfigValue(v))
@@ -741,7 +741,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			json_string_escapes: false,
 		};
 
-		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
 			.map_err(<D::Error as serde::de::Error>::custom)?;
 		if let Value::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
@@ -783,7 +783,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			json_string_escapes: false,
 		};
 
-		let v = surrealdb_parser_next_lower::value_with_settings(&source, settings)
+		let v = surrealdb_core::syn::runtime::value_with_settings(&source, settings)
 			.map_err(<D::Error as serde::de::Error>::custom)?;
 
 		v.into_object().map(SurrealObject).map_err(|err| {

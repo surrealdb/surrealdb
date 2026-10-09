@@ -266,7 +266,7 @@ pub async fn retrieve_version_from_path(path: &str) -> anyhow::Result<Version> {
 pub async fn prepare_path(path: &str) -> anyhow::Result<()> {
 	let mut child = Command::new("cargo")
 		.current_dir(path)
-		.args(["build", "--bin", "surreal"])
+		.args(["build", "--locked", "--bin", "surreal"])
 		.stderr(Stdio::inherit())
 		.stdout(Stdio::inherit())
 		.spawn()

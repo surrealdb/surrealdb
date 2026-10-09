@@ -150,7 +150,7 @@ async fn fixture(schema: &str) -> TestDb {
 		.expect("the field reads")
 		.expect("the field is defined"))
 	.clone();
-	let value: crate::expr::Expr = crate::exec::operators::test_util::parse_sql_expr("a").into();
+	let value: crate::expr::Expr = crate::exec::operators::test_util::parse_sql_expr("a");
 	field.value_body = Some(crate::catalog::LogicalBody::of(&value));
 	field.value = Some(value);
 	txn.put_tb_field(ns, dbid, &table, &field).await.expect("the field is stored");

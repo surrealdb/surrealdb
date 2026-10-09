@@ -1,10 +1,12 @@
 use std::hash::{Hash, Hasher};
+use std::iter::once;
 
+use common::fmt::{EscapeObjectKey, Float, Fmt, QuoteStr, SqlDatetime, SqlDuration};
 use rust_decimal::Decimal;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, RecordIdLit};
+use crate::expr::{CoverStmts, Expr, RecordIdLit};
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
 
 // Note: Literal uses `Strand` (not `String`) for the inner value of
@@ -166,6 +168,9 @@ impl Literal {
 			// Built through a sorted map, exactly as evaluation builds it, so
 			// key ordering and duplicate-key resolution cannot drift apart.
 			Literal::Object(items) => {
+				if let Some(geometry) = crate::parser::geometry::collect_geometry(items) {
+					return Some(Value::Geometry(geometry));
+				}
 				let mut map = std::collections::BTreeMap::new();
 				for i in items {
 					map.insert(i.key.clone(), i.value.as_static_value()?);
@@ -239,8 +244,143 @@ impl Hash for Literal {
 
 impl ToSql for Literal {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let lit: crate::sql::Literal = self.clone().into();
-		lit.fmt_sql(f, fmt);
+		match self {
+			Literal::None => f.push_str("NONE"),
+			Literal::Null => f.push_str("NULL"),
+			Literal::UnboundedRange => f.push_str(".."),
+			Literal::Bool(x) => {
+				if *x {
+					f.push_str("true");
+				} else {
+					f.push_str("false");
+				}
+			}
+			Literal::Float(float) => write_sql!(f, fmt, "{}", Float(*float)),
+			Literal::Integer(x) => f.push_str(&x.to_string()),
+			Literal::Decimal(d) => d.fmt_sql(f, fmt),
+			Literal::String(strand) => write_sql!(f, fmt, "{}", QuoteStr(strand)),
+			Literal::Bytes(bytes) => write_sql!(f, fmt, "b\"{}\"", hex::encode_upper(&bytes.0)),
+			Literal::Regex(regex) => {
+				let pattern = regex.to_string().replace('/', "\\/");
+				write_sql!(f, fmt, "/{}/", &pattern);
+			}
+			Literal::RecordId(record_id_lit) => record_id_lit.fmt_sql(f, fmt),
+			Literal::Array(exprs) => {
+				f.push('[');
+				if !exprs.is_empty() {
+					let fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						}
+						CoverStmts(expr).fmt_sql(f, fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
+							}
+						}
+					}
+				}
+				f.push(']');
+			}
+			Literal::Set(exprs) => {
+				f.push('{');
+				if !exprs.is_empty() {
+					let fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						} else if let Expr::Literal(Literal::RecordId(_)) = *expr {
+							f.push('(');
+							expr.fmt_sql(f, fmt);
+							f.push(')');
+							continue;
+						}
+						CoverStmts(expr).fmt_sql(f, fmt);
+					}
+
+					if exprs.len() == 1 {
+						f.push(',');
+					}
+
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
+							}
+						}
+					}
+				} else {
+					f.push(',');
+				}
+				f.push('}');
+			}
+			Literal::Object(items) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !items.is_empty() {
+					let fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, entry) in items.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						}
+						write_sql!(
+							f,
+							fmt,
+							"{}: {}",
+							EscapeObjectKey(&entry.key),
+							CoverStmts(&entry.value)
+						);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
+							}
+						}
+					}
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Literal::Duration(duration) => SqlDuration(duration.0).fmt_sql(f, fmt),
+			Literal::Datetime(datetime) => SqlDatetime(datetime.0).fmt_sql(f, fmt),
+			Literal::Uuid(uuid) => write_sql!(f, fmt, "u{}", QuoteStr(&uuid.to_string())),
+			Literal::Geometry(geometry) => SqlGeometry(geometry).fmt_sql(f, fmt),
+			Literal::File(file) => file.fmt_sql(f, fmt),
+		}
 	}
 }
 
@@ -252,8 +392,7 @@ pub struct ObjectEntry {
 
 impl ToSql for ObjectEntry {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let entry: crate::sql::literal::ObjectEntry = self.clone().into();
-		entry.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(self.key.as_str()), self.value);
 	}
 }
 
@@ -422,6 +561,116 @@ mod static_value_tests {
 				key,
 			});
 			assert!(matches!(lit.as_static_value(), Some(Value::RecordId(_))));
+		}
+	}
+}
+
+struct SqlGeometry<'a>(&'a Geometry);
+impl ToSql for SqlGeometry<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		let sql_fmt = SqlFormat::SingleLine;
+		match self.0 {
+			Geometry::Point(v) => {
+				write_sql!(f, sql_fmt, "({}, {})", Float(v.x()), Float(v.y()))
+			}
+			Geometry::Line(v) => write_sql!(
+				f,
+				sql_fmt,
+				"{{ type: 'LineString', coordinates: [{}] }}",
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
+					f,
+					fmt,
+					"[{}, {}]",
+					Float(v.x()),
+					Float(v.y())
+				))))
+			),
+			Geometry::Polygon(v) => write_sql!(
+				f,
+				sql_fmt,
+				"{{ type: 'Polygon', coordinates: [{}] }}",
+				Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(|v| Fmt::new(
+					v,
+					|v, f, fmt| write_sql!(
+						f,
+						fmt,
+						"[{}]",
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", Float(v.x()), Float(v.y()))
+						)))
+					)
+				)))
+			),
+			Geometry::MultiPoint(v) => {
+				write_sql!(
+					f,
+					sql_fmt,
+					"{{ type: 'MultiPoint', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
+						f,
+						fmt,
+						"[{}, {}]",
+						Float(v.x()),
+						Float(v.y())
+					))))
+				)
+			}
+			Geometry::MultiLine(v) => {
+				write_sql!(
+					f,
+					sql_fmt,
+					"{{ type: 'MultiLineString', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
+						f,
+						fmt,
+						"[{}]",
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", Float(v.x()), Float(v.y()))
+						)))
+					))))
+				)
+			}
+			Geometry::MultiPolygon(v) => {
+				write_sql!(
+					f,
+					sql_fmt,
+					"{{ type: 'MultiPolygon', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| {
+						write_sql!(
+							f,
+							fmt,
+							"[{}]",
+							Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(
+								|v| Fmt::new(v, |v, f, fmt| write_sql!(
+									f,
+									fmt,
+									"[{}]",
+									Fmt::comma_separated(v.points().map(|v| Fmt::new(
+										v,
+										|v, f, fmt| write_sql!(
+											f,
+											fmt,
+											"[{}, {}]",
+											Float(v.x()),
+											Float(v.y())
+										)
+									)))
+								))
+							))
+						)
+					}))),
+				)
+			}
+			Geometry::Collection(v) => {
+				write_sql!(
+					f,
+					sql_fmt,
+					"{{ type: 'GeometryCollection', geometries: [{}] }}",
+					Fmt::comma_separated(v.iter().map(SqlGeometry))
+				)
+			}
 		}
 	}
 }

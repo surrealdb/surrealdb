@@ -18,14 +18,5 @@ wasm-probe = []
 
 [dependencies]
 
-[dev-dependencies]
-surrealdb-parser-next-lower = { path = "lower" }
-# Workspace crates only: the harness builds the old AST to compare with.
-common.workspace = true
-surrealdb-sql.workspace = true
-surrealdb-types.workspace = true
-surrealdb-strand.workspace = true
-web-time.workspace = true
-
 [lints]
 workspace = true

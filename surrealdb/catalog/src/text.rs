@@ -45,10 +45,11 @@ use std::sync::OnceLock;
 use revision::{
 	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, WalkRevisioned,
 };
+use surrealdb_expr::parser;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::api_path::Path;
-use crate::expr::logical::{LogicalExpr, LogicalOp, lower, lower_expr};
+use crate::expr::logical::{LogicalExpr, LogicalOp};
 use crate::expr::{Block, Cond, Expr, Fields, Idiom, Kind};
 use crate::val::Value;
 
@@ -59,8 +60,8 @@ use crate::val::Value;
 /// matches the rendering that type's wire format has always used), and
 /// `parse_canonical` re-parses it. Every SurrealQL grammar here reads under the
 /// storage wire contract's parser profile,
-/// [`crate::syn::ParserSettings::STORED_TEXT`] — the full grammar with
-/// unbounded limits, deliberately independent of the datastore's live
+/// [`parser::ParserSettings::STORED_TEXT`] — the full grammar with
+/// bounded storage limits, independent of the datastore's live
 /// capabilities and configuration. The text was already validated once, when
 /// the `DEFINE`/`ALTER`/`LIVE` statement that produced it ran; see the
 /// constant's documentation for the full reasoning. [`Path`] is the one target
@@ -266,7 +267,7 @@ impl SurqlTarget for Expr {
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(crate::syn::expr_for_definition(text)?.into())
+		Ok(parser::expr_for_definition(text)?)
 	}
 }
 
@@ -276,14 +277,14 @@ impl SurqlTarget for Cond {
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(Cond(crate::syn::expr_for_definition(text)?.into()))
+		Ok(Cond(parser::expr_for_definition(text)?))
 	}
 }
 
-/// The logical form of expression text. Parses under the same stored-text
-/// profile as [`Expr`] and lowers the parse to the streaming engine's scalar,
-/// so a clause that has no logical form (a write statement in scalar position)
-/// fails to compile here and compiles as an [`Expr`] as before.
+/// The logical form of expression text. Reads the flat parse under the same
+/// stored-text profile as [`Expr`], with identical complete-input checks and
+/// credential preparation. Collections, operators and relational reads are
+/// built in their logical representation.
 ///
 /// Definitions are never rendered from this target: the `DEFINE`/`ALTER` path
 /// renders the [`Expr`] it parsed, and a [`LogicalExprText`] is only ever
@@ -296,23 +297,20 @@ impl SurqlTarget for LogicalExpr {
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(lower_expr(crate::syn::expr_for_definition(text)?)?)
+		Ok(parser::logical_expr_for_definition(text)?)
 	}
 }
 
-/// The logical form of block text: the block parses under the stored-text
-/// profile and lowers to the [`LogicalOp::Sequence`] that runs it. A block
-/// with no logical form (one that writes) fails to compile here and compiles
-/// as a [`Block`] as before. Only obtained from a [`BlockText`] through
-/// [`SurqlText::<Block>::to_logical`]; definitions are never rendered from it.
+/// The logical form of block text: the flat parse is read under the stored-text
+/// profile into the [`LogicalOp::Sequence`] that runs it. Only obtained from a [`BlockText`]
+/// through [`SurqlText::<Block>::to_logical`]; definitions are never rendered from it.
 impl SurqlTarget for LogicalOp {
 	fn render_canonical(&self) -> String {
 		self.to_sql()
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		let block = crate::syn::block_for_definition(text)?;
-		Ok(lower(crate::sql::Expr::Block(Box::new(block)))?)
+		Ok(parser::logical_block_for_definition(text)?)
 	}
 }
 
@@ -322,37 +320,37 @@ impl SurqlTarget for Kind {
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(crate::syn::kind_for_definition(text)?.into())
+		Ok(parser::kind_for_definition(text)?)
 	}
 }
 
 impl SurqlTarget for Idiom {
 	fn render_canonical(&self) -> String {
-		self.to_raw_string()
+		self.to_stored_sql()
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(crate::syn::idiom_for_definition(text)?.into())
+		Ok(parser::idiom_for_definition(text)?)
 	}
 }
 
 impl SurqlTarget for Fields {
 	fn render_canonical(&self) -> String {
-		self.to_sql()
+		self.to_stored_sql()
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(crate::syn::fields_for_definition(text)?.into())
+		Ok(parser::fields_for_definition(text)?)
 	}
 }
 
 impl SurqlTarget for Block {
 	fn render_canonical(&self) -> String {
-		self.to_sql()
+		self.to_stored_sql()
 	}
 
 	fn parse_canonical(text: &str) -> anyhow::Result<Self> {
-		Ok(crate::syn::block_for_definition(text)?.into())
+		Ok(parser::block_for_definition(text)?)
 	}
 }
 
@@ -360,7 +358,7 @@ impl SurqlTarget for Block {
 /// segments, and only a typed segment's `<kind>` annotation goes through the
 /// parser. `Path`'s own `FromStr` owns that grammar, and it settles the limits
 /// question by using the default parser settings rather than
-/// [`ParserSettings::STORED_TEXT`](crate::syn::ParserSettings::STORED_TEXT)
+/// [`ParserSettings::STORED_TEXT`](parser::ParserSettings::STORED_TEXT)
 /// — unchanged from when the path was decoded rather than compiled, so a route
 /// whose kind annotation exceeds the configured depth has always been
 /// unreadable, and this is not the place to start changing that.
@@ -720,7 +718,12 @@ mod tests {
 	#[test]
 	fn compile_is_bounded_so_it_cannot_overflow_the_stack() {
 		let past_ceiling = format!("{}1{}", "[".repeat(5_000), "]".repeat(5_000));
-		let compiled = ExprText::from_raw(past_ceiling).compile();
+		let text = ExprText::from_raw(past_ceiling);
+		assert!(
+			text.to_logical().compile().is_err(),
+			"logical compilation rejects excessive depth"
+		);
+		let compiled = text.compile();
 		assert!(
 			compiled.is_err(),
 			"stored text past the ceiling must fail to compile rather than recurse into it"
@@ -729,18 +732,11 @@ mod tests {
 
 	#[test]
 	fn compile_is_not_bound_by_fresh_input_limits() {
-		// The parser depth limits are env-tunable (SURREAL_MAX_*_PARSING_DEPTH),
-		// so a definition legally written under raised limits can exceed the
-		// defaults. Stored text parses under `ParserSettings::STORED_TEXT`
-		// (ceilings far above the defaults), matching `Expr`'s wire decode;
-		// only fresh input is bounded by the configured limits.
-		//
-		// The fresh-input rejections run on the test thread (the parser fails
-		// fast at the depth limit). The deep compiles run on a thread with an
-		// explicit large stack: parsing and the `sql -> expr` lowering after
-		// it recurse per node on the call stack, and a definition this deep
-		// would only ever have been written by a server whose statement
-		// execution performed that same parse and lowering.
+		// A definition written under raised fresh-input limits can exceed the
+		// defaults. Both runtime and logical compilation use the bounded
+		// stored-text profile independently of the reader's configuration.
+		// Admitted deep trees are materialized and dropped on an explicit
+		// stack; rejection beyond the ceiling is tested on a default stack.
 
 		// 200-deep array nesting: past the default object_recursion_limit (100).
 		let deep_array = format!("{}1{}", "[".repeat(200), "]".repeat(200));
@@ -748,28 +744,38 @@ mod tests {
 		let deep_chain = format!("{}1", "1 + ".repeat(300));
 
 		assert!(
-			crate::syn::expr(&deep_array).is_err(),
+			parser::expr(&deep_array).is_err(),
 			"fresh-input parsing should still enforce the default depth limits"
 		);
 		assert!(
-			crate::syn::expr(&deep_chain).is_err(),
+			parser::expr(&deep_chain).is_err(),
 			"fresh-input parsing should still enforce the default expression depth limit"
 		);
 
 		std::thread::Builder::new()
 			.stack_size(16 * 1024 * 1024)
 			.spawn(move || {
-				let compiled = ExprText::from_raw(deep_array).compile();
+				let text = ExprText::from_raw(deep_array);
+				assert!(
+					text.to_logical().compile().is_ok(),
+					"logical arrays use the stored-text ceiling"
+				);
+				let compiled = text.compile();
 				assert!(
 					compiled.is_ok(),
-					"stored-text compile must not be depth-limited: {:?}",
+					"stored-text compile admits depth within its ceiling: {:?}",
 					compiled.err()
 				);
 
-				let compiled = ExprText::from_raw(deep_chain).compile();
+				let text = ExprText::from_raw(deep_chain);
+				assert!(
+					text.to_logical().compile().is_ok(),
+					"logical operators use the stored-text ceiling"
+				);
+				let compiled = text.compile();
 				assert!(
 					compiled.is_ok(),
-					"stored-text compile must not be expression-depth-limited: {:?}",
+					"stored-text compile admits expressions within its ceiling: {:?}",
 					compiled.err()
 				);
 			})

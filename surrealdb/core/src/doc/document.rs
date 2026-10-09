@@ -504,8 +504,8 @@ mod tests {
 
 	fn field(name: &str, computed: Option<&str>) -> FieldDefinition {
 		FieldDefinition {
-			name: syn::idiom(name).unwrap().into(),
-			computed: computed.map(|c| syn::expr(c).unwrap().into()),
+			name: syn::idiom(name).unwrap(),
+			computed: computed.map(|c| syn::expr(c).unwrap()),
 			..Default::default()
 		}
 	}

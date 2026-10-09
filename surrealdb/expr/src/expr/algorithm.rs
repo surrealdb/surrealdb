@@ -1,5 +1,7 @@
 use std::fmt;
 
+use surrealdb_types::{SqlFormat, ToSql};
+
 use crate::expr::Value;
 use crate::expr::statements::info::InfoStructure;
 
@@ -71,5 +73,11 @@ impl fmt::Display for Algorithm {
 impl InfoStructure for Algorithm {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+impl ToSql for Algorithm {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.to_string())
 	}
 }

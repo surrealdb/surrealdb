@@ -9,11 +9,12 @@ use crate::catalog::{
 	BlockText, FromStored, KindText, LogicalBlockBody, LogicalPermissionBody, Permission,
 	StoredPermission,
 };
+use crate::expr as runtime;
 use crate::expr::logical::{LogicalOp, LogicalPermission};
+use crate::expr::statements::DefineFunctionStatement;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Block, Kind};
-use crate::sql::statements::define::DefineKind;
-use crate::sql::{self, DefineFunctionStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 4)]
@@ -77,19 +78,19 @@ impl StoredFunctionDefinition {
 impl_kv_value_revisioned!(StoredFunctionDefinition);
 
 impl FunctionDefinition {
-	fn to_sql_definition(&self) -> DefineFunctionStatement {
+	fn to_runtime_definition(&self) -> DefineFunctionStatement {
 		DefineFunctionStatement {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
-			args: self.args.iter().map(|(n, k)| (n.clone(), sql::Kind::from(k.clone()))).collect(),
-			block: self.block.clone().into(),
-			permissions: self.permissions.to_sql_permission(),
-			returns: self.returns.as_ref().map(|k| sql::Kind::from(k.clone())),
+			args: self.args.iter().map(|(n, k)| (n.clone(), k.clone())).collect(),
+			block: self.block.clone(),
+			permissions: self.permissions.clone(),
+			returns: self.returns.clone(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 		}
@@ -117,7 +118,7 @@ impl InfoStructure for FunctionDefinition {
 
 impl ToSql for FunctionDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

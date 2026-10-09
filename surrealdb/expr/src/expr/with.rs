@@ -1,5 +1,5 @@
 use common::fmt::{EscapeKwFreeIdent, Fmt};
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum With {
@@ -14,8 +14,12 @@ impl ToSql for With {
 			With::NoIndex => f.push_str(" NOINDEX"),
 			With::Index(i) => {
 				f.push_str(" INDEX ");
-				Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x.as_str())))
-					.fmt_sql(f, fmt)
+				write_sql!(
+					f,
+					fmt,
+					"{}",
+					Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x)))
+				);
 			}
 		}
 	}

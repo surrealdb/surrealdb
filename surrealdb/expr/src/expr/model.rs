@@ -1,5 +1,6 @@
+use common::fmt::EscapeKwFreeIdent;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
@@ -14,8 +15,13 @@ pub struct Model {
 }
 
 impl ToSql for Model {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let stmt: crate::sql::model::Model = self.clone().into();
-		stmt.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("ml");
+		for s in self.name.as_str().split("::") {
+			f.push_str("::");
+			write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
+		}
+
+		write_sql!(f, fmt, "<{}>", self.version.as_str());
 	}
 }

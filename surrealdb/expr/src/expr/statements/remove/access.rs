@@ -1,4 +1,6 @@
-use crate::expr::{Base, Expr, Literal};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::{Base, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveAccessStatement {
@@ -14,5 +16,15 @@ impl Default for RemoveAccessStatement {
 			base: Base::default(),
 			if_exists: false,
 		}
+	}
+}
+
+impl ToSql for RemoveAccessStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE ACCESS");
+		if self.if_exists {
+			write_sql!(f, sql_fmt, " IF EXISTS");
+		}
+		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), self.base);
 	}
 }

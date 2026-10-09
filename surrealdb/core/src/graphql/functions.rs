@@ -11,16 +11,16 @@
 use std::sync::Arc;
 
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
+use surrealdb_expr::parser::TopLevelExpr;
 
 use super::GraphqlError;
 use super::schema::{graphql_to_sql_kind_with_scope, sql_value_to_graphql_value_with_kind};
 use super::utils::execute_statement;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
-use crate::expr::Kind;
+use crate::expr::{Expr, Function, FunctionCall, Kind};
 use crate::graphql::schema::kind_to_type_with_enum_prefix;
 use crate::kvs::Datastore;
-use crate::sql::{Expr, Function, FunctionCall, TopLevelExpr};
 use crate::val::Value;
 
 /// Process all exposed functions and add them as Query root fields.
@@ -90,10 +90,10 @@ pub async fn process_fns(
 								arg_kind.clone(),
 								Some(&scope),
 							)?;
-							args.push(arg_val.into_sql_literal());
+							args.push(arg_val.into_literal());
 						} else {
 							// Missing arguments default to None
-							args.push(Value::None.into_sql_literal());
+							args.push(Value::None.into_literal());
 						}
 					}
 

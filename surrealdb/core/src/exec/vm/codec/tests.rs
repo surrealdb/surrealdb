@@ -457,10 +457,11 @@ fn an_aggregated_view_matches_its_revisioned_encoding() {
 		"SELECT count() AS total, math::sum(n) AS sum, b FROM x WHERE n > 1 GROUP BY b",
 	)
 	.unwrap();
-	let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next() else {
+	let Some(surrealdb_expr::parser::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next()
+	else {
 		panic!("a select statement");
 	};
-	let crate::expr::Expr::Select(select) = crate::expr::Expr::from(expr) else {
+	let crate::expr::Expr::Select(select) = expr else {
 		panic!("a select statement");
 	};
 	let groups = select.group.clone().unwrap();

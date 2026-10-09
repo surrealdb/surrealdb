@@ -1,8 +1,9 @@
+use common::fmt::EscapeKwFreeIdent;
 use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, Kind};
+use crate::expr::{CoverStmts, Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SetStatement {
@@ -25,8 +26,11 @@ impl SetStatement {
 
 impl ToSql for SetStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_stmt: crate::sql::statements::SetStatement = self.clone().into();
-		sql_stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "LET ${}", EscapeKwFreeIdent(self.name.as_str()));
+		if let Some(ref kind) = self.kind {
+			write_sql!(f, fmt, ": {}", kind);
+		}
+		write_sql!(f, fmt, " = {}", CoverStmts(&self.what));
 	}
 }
 

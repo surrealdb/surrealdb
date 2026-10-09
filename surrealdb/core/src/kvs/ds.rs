@@ -29,6 +29,7 @@ use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::values::graph::GraphFoldScope;
+use surrealdb_expr::parser::Query as Ast;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
@@ -111,7 +112,6 @@ use crate::kvs::{
 use crate::lq::LiveQueryRouter;
 use crate::observe::ExecutionObserver;
 use crate::options::EngineOptions;
-use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::{ParseError, ParserConfig, ParserSettings, StatementStream};
@@ -5492,8 +5492,26 @@ impl Datastore {
 			QuerySource::Text {
 				text,
 				dialect: Dialect::SurrealQl,
-			} => syn::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
-				.map_err(|e| TypesError::validation(e.to_string(), None))?,
+			} => {
+				let settings = syn::settings_from_capabilities_config(
+					&self.capabilities.load(),
+					&self.parser_config,
+				);
+				let statements =
+					surrealdb_expr::parser::execution_query_with_settings(text, settings)
+						.map_err(|e| TypesError::validation(e.to_string(), None))?;
+				return Ok(statements
+					.into_iter()
+					.map(|statement| match statement {
+						surrealdb_expr::parser::ExecutionStatement::Surface(stmt) => {
+							TopLevelStatement::Ast(stmt)
+						}
+						surrealdb_expr::parser::ExecutionStatement::Logical(stmt) => {
+							TopLevelStatement::Surreal(stmt)
+						}
+					})
+					.collect());
+			}
 			QuerySource::Text {
 				text,
 				dialect: Dialect::Gql,
@@ -5689,11 +5707,11 @@ impl Datastore {
 	)]
 	pub async fn process(
 		&self,
-		ast: Ast,
+		ast: impl Into<Ast>,
 		sess: &Session,
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.run(QueryRequest::new(ast, sess).with_variables(vars)).await
+		self.run(QueryRequest::new(ast.into(), sess).with_variables(vars)).await
 	}
 
 	/// The parser settings an import is read under.
@@ -5915,7 +5933,7 @@ impl Datastore {
 		// request, and retrying it unchanged cannot succeed. Left to rise as a
 		// bare `ParseError` it reaches every transport as an unclassified
 		// internal fault, which reads as a server problem worth retrying.
-		let ast = surrealdb_parser_next_lower::query_with_settings(
+		let ast = surrealdb_expr::parser::query_with_settings(
 			sql,
 			Self::import_parser_settings(&self.capabilities.load()),
 		)
@@ -6471,16 +6489,16 @@ impl Datastore {
 		// Insert the model in to the database. The statement is built in the
 		// form the parser produces, so it runs exactly as the same `DEFINE
 		// MODEL` typed by a user would.
-		let model = crate::sql::DefineModelStatement {
+		let model = crate::expr::statements::DefineModelStatement {
 			name: name.to_string().into(),
 			version: version.to_string().into(),
-			comment: crate::sql::Expr::Literal(crate::sql::Literal::String(description.into())),
+			comment: crate::expr::Expr::Literal(crate::expr::Literal::String(description.into())),
 			hash: hash.into(),
 			kind: Default::default(),
 			permissions: Default::default(),
 		};
-		let ast = crate::sql::Ast::single_expr(crate::sql::Expr::Define(Box::new(
-			crate::sql::statements::DefineStatement::Model(model),
+		let ast = surrealdb_expr::parser::Query::single_expr(crate::expr::Expr::Define(Box::new(
+			crate::expr::statements::DefineStatement::Model(model),
 		)));
 
 		self.run(QueryRequest::new(ast, session)).await.map_err(|e| anyhow::anyhow!(e))?;
@@ -6588,6 +6606,8 @@ pub(crate) fn define_user_statement_new_with_password(
 		kind: DefineKind::Default,
 		base,
 		name: Expr::Idiom(Idiom::field(user)),
+		pending_password: None,
+		hash_is_set: true,
 		hash: crate::iam::hash_password(pass),
 		code: Alphanumeric.sample_string(&mut rand::rng(), 128),
 		roles: vec![role],
@@ -9384,7 +9404,7 @@ mod test {
 				let settings = Datastore::import_parser_settings(&Capabilities::default());
 				let parse = |depth: usize| {
 					let source = format!("{}'leaf'{}", "{ l: ".repeat(depth), " }".repeat(depth));
-					surrealdb_parser_next_lower::expr_with_settings(&source, settings, false)
+					surrealdb_expr::parser::expr_with_settings(&source, settings, false)
 				};
 
 				// The deepest literal the profile accepts, so the tree the
@@ -9402,9 +9422,8 @@ mod test {
 				let expr = parse(depth).expect("the deepest accepted literal parses");
 				// `ToSql` recurses once per node.
 				assert!(surrealdb_types::ToSql::to_sql(&expr).contains("leaf"));
-				// The lowering recurses once per node, and dropping what it
-				// produces recurses once per node again.
-				drop(crate::expr::Expr::from(expr));
+				// Dropping the runtime tree recurses once per node.
+				drop(expr);
 			})
 			.unwrap()
 			.join()

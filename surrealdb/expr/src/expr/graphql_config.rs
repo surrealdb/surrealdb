@@ -5,11 +5,12 @@
 //! the catalog's config definition; both planes persist it, so the revisioned
 //! shapes here are storage-stable.
 
+use common::fmt::EscapeKwFreeIdent;
 use revision::revisioned;
 use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 3)]
@@ -41,30 +42,6 @@ impl InfoStructure for GraphQLConfig {
 	}
 }
 
-impl From<sql::statements::define::config::graphql::GraphQLConfig> for GraphQLConfig {
-	fn from(v: sql::statements::define::config::graphql::GraphQLConfig) -> Self {
-		GraphQLConfig {
-			tables: v.tables.into(),
-			functions: v.functions.into(),
-			depth_limit: v.depth_limit,
-			complexity_limit: v.complexity_limit,
-			introspection: v.introspection.into(),
-		}
-	}
-}
-
-impl From<GraphQLConfig> for sql::statements::define::config::graphql::GraphQLConfig {
-	fn from(v: GraphQLConfig) -> Self {
-		Self {
-			tables: v.tables.into(),
-			functions: v.functions.into(),
-			depth_limit: v.depth_limit,
-			complexity_limit: v.complexity_limit,
-			introspection: v.introspection.into(),
-		}
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum GraphQLTablesConfig {
@@ -86,46 +63,6 @@ impl InfoStructure for GraphQLTablesConfig {
 			GraphQLTablesConfig::Exclude(ts) => Value::from(map!(
 				"exclude" => Value::Array(ts.into_iter().map(Value::Table).collect()),
 			)),
-		}
-	}
-}
-
-impl From<sql::statements::define::config::graphql::TablesConfig> for GraphQLTablesConfig {
-	fn from(v: sql::statements::define::config::graphql::TablesConfig) -> Self {
-		use sql::statements::define::config::graphql::TablesConfig;
-		match v {
-			TablesConfig::None => Self::None,
-			TablesConfig::Auto => Self::Auto,
-			TablesConfig::Include(cs) => {
-				Self::Include(cs.into_iter().map(|t| t.name.into()).collect())
-			}
-			TablesConfig::Exclude(cs) => {
-				Self::Exclude(cs.into_iter().map(|t| t.name.into()).collect())
-			}
-		}
-	}
-}
-
-impl From<GraphQLTablesConfig> for sql::statements::define::config::graphql::TablesConfig {
-	fn from(v: GraphQLTablesConfig) -> Self {
-		use sql::statements::define::config::graphql::TableConfig;
-		match v {
-			GraphQLTablesConfig::None => Self::None,
-			GraphQLTablesConfig::Auto => Self::Auto,
-			GraphQLTablesConfig::Include(cs) => Self::Include(
-				cs.into_iter()
-					.map(|t| TableConfig {
-						name: t.into(),
-					})
-					.collect(),
-			),
-			GraphQLTablesConfig::Exclude(cs) => Self::Exclude(
-				cs.into_iter()
-					.map(|t| TableConfig {
-						name: t.into(),
-					})
-					.collect(),
-			),
 		}
 	}
 }
@@ -155,29 +92,6 @@ impl InfoStructure for GraphQLFunctionsConfig {
 	}
 }
 
-impl From<sql::statements::define::config::graphql::FunctionsConfig> for GraphQLFunctionsConfig {
-	fn from(v: sql::statements::define::config::graphql::FunctionsConfig) -> Self {
-		use sql::statements::define::config::graphql::FunctionsConfig;
-		match v {
-			FunctionsConfig::None => Self::None,
-			FunctionsConfig::Auto => Self::Auto,
-			FunctionsConfig::Include(cs) => Self::Include(cs),
-			FunctionsConfig::Exclude(cs) => Self::Exclude(cs),
-		}
-	}
-}
-
-impl From<GraphQLFunctionsConfig> for sql::statements::define::config::graphql::FunctionsConfig {
-	fn from(v: GraphQLFunctionsConfig) -> Self {
-		match v {
-			GraphQLFunctionsConfig::None => Self::None,
-			GraphQLFunctionsConfig::Auto => Self::Auto,
-			GraphQLFunctionsConfig::Include(cs) => Self::Include(cs),
-			GraphQLFunctionsConfig::Exclude(cs) => Self::Exclude(cs),
-		}
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum GraphQLIntrospectionConfig {
@@ -195,24 +109,89 @@ impl InfoStructure for GraphQLIntrospectionConfig {
 	}
 }
 
-impl From<sql::statements::define::config::graphql::IntrospectionConfig>
-	for GraphQLIntrospectionConfig
-{
-	fn from(v: sql::statements::define::config::graphql::IntrospectionConfig) -> Self {
-		match v {
-			sql::statements::define::config::graphql::IntrospectionConfig::Auto => Self::Auto,
-			sql::statements::define::config::graphql::IntrospectionConfig::None => Self::None,
+impl ToSql for GraphQLIntrospectionConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			GraphQLIntrospectionConfig::Auto => f.push_str("AUTO"),
+			GraphQLIntrospectionConfig::None => f.push_str("NONE"),
 		}
 	}
 }
-
-impl From<GraphQLIntrospectionConfig>
-	for sql::statements::define::config::graphql::IntrospectionConfig
-{
-	fn from(v: GraphQLIntrospectionConfig) -> Self {
-		match v {
-			GraphQLIntrospectionConfig::Auto => Self::Auto,
-			GraphQLIntrospectionConfig::None => Self::None,
+impl ToSql for GraphQLConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("GRAPHQL");
+		f.push_str(" TABLES ");
+		self.tables.fmt_sql(f, fmt);
+		f.push_str(" FUNCTIONS ");
+		self.functions.fmt_sql(f, fmt);
+		if let Some(depth) = self.depth_limit {
+			f.push_str(&format!(" DEPTH {depth}"));
+		}
+		if let Some(complexity) = self.complexity_limit {
+			f.push_str(&format!(" COMPLEXITY {complexity}"));
+		}
+		// Only emit INTROSPECTION clause when it differs from the default (AUTO)
+		if matches!(self.introspection, GraphQLIntrospectionConfig::None) {
+			f.push_str(" INTROSPECTION ");
+			self.introspection.fmt_sql(f, fmt);
+		}
+	}
+}
+impl ToSql for GraphQLTablesConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			GraphQLTablesConfig::Auto => f.push_str("AUTO"),
+			GraphQLTablesConfig::None => f.push_str("NONE"),
+			GraphQLTablesConfig::Include(cs) => {
+				f.push_str("INCLUDE ");
+				for (i, table) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					common::fmt::EscapeIdent(table.as_str()).fmt_sql(f, fmt);
+				}
+			}
+			GraphQLTablesConfig::Exclude(cs) => {
+				f.push_str("EXCLUDE ");
+				for (i, table) in cs.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					common::fmt::EscapeIdent(table.as_str()).fmt_sql(f, fmt);
+				}
+			}
+		}
+	}
+}
+impl ToSql for GraphQLFunctionsConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			GraphQLFunctionsConfig::Auto => f.push_str("AUTO"),
+			GraphQLFunctionsConfig::None => f.push_str("NONE"),
+			GraphQLFunctionsConfig::Include(cs) => {
+				f.push_str("INCLUDE ");
+				fmt_function_name_list(f, fmt, cs);
+			}
+			GraphQLFunctionsConfig::Exclude(cs) => {
+				f.push_str("EXCLUDE ");
+				fmt_function_name_list(f, fmt, cs);
+			}
+		}
+	}
+}
+fn fmt_function_name_list(f: &mut String, fmt: SqlFormat, names: &[Strand]) {
+	for (i, name) in names.iter().enumerate() {
+		if i > 0 {
+			f.push_str(", ");
+		}
+		f.push_str("fn::");
+		let mut first = true;
+		for segment in name.as_str().split("::") {
+			if !first {
+				f.push_str("::");
+			}
+			first = false;
+			EscapeKwFreeIdent(segment).fmt_sql(f, fmt);
 		}
 	}
 }

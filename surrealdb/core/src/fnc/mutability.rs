@@ -160,7 +160,7 @@ mod tests {
 
 	/// Parse a standalone expression and resolve it against the datastore.
 	async fn resolve(ds: &Datastore, expression: &str) -> ResolvedMutability {
-		let expr: Expr = crate::syn::expr(expression).unwrap().into();
+		let expr: Expr = crate::syn::expr(expression).unwrap();
 		let facts = expr.function_facts();
 		let txn = ds.transaction(TransactionType::Read).await.unwrap();
 		let db = txn.get_db_by_name("test", "test", None).await.unwrap().unwrap();
@@ -185,7 +185,7 @@ mod tests {
 	#[test]
 	fn facts_classify_each_callable_kind() {
 		let facts = |expression: &str| {
-			let expr: Expr = crate::syn::expr(expression).unwrap().into();
+			let expr: Expr = crate::syn::expr(expression).unwrap();
 			expr.function_facts()
 		};
 

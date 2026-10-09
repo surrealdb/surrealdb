@@ -192,7 +192,7 @@ pub(crate) fn resolve_projection_field_idioms(expr: &mut LogicalExpr, registry: 
 			&& registry.is_projection(name)
 			&& let [LogicalExpr::Literal(LogicalLiteral::String(s))] = call.args.as_slice()
 			&& let Ok(idiom) = crate::syn::idiom(s.as_str())
-			&& let Ok(field) = lower_expr(crate::sql::Expr::Idiom(idiom))
+			&& let Ok(field) = lower_expr(crate::expr::Expr::Idiom(idiom))
 			&& field.is_path()
 		{
 			*e = field;
@@ -209,7 +209,7 @@ mod tests {
 
 	pub(super) fn expr(sql: &str) -> LogicalExpr {
 		let ast = crate::syn::parse(&format!("RETURN {sql}")).expect("expression should parse");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) =
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected a RETURN");

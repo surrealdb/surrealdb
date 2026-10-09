@@ -1,8 +1,9 @@
 use anyhow::Result;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::visit::{Visit, Visitor};
-use crate::expr::{Cond, Expr, Fetchs, Fields, Idiom, Param};
+use crate::expr::{Cond, CoverStmts, Expr, Fetchs, Fields, Idiom, Param};
 
 /// The set of parameter names that carry per-event document data and are therefore
 /// only meaningful at notification time, not at LIVE query registration time.
@@ -62,4 +63,21 @@ pub struct LiveStatement {
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
+}
+
+impl ToSql for LiveStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("LIVE SELECT");
+		match &self.fields {
+			LiveFields::Diff => write_sql!(f, fmt, " DIFF"),
+			LiveFields::Select(x) => write_sql!(f, fmt, " {}", x),
+		}
+		write_sql!(f, fmt, " FROM {}", CoverStmts(&self.what));
+		if let Some(ref v) = self.cond {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.fetch {
+			write_sql!(f, fmt, " {v}");
+		}
+	}
 }

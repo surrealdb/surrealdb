@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{QuoteStr, SqlDuration};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::expr::{Base, Expr, Literal};
+use crate::expr::{Base, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AlterAccessStatement {
@@ -36,7 +37,78 @@ impl Default for AlterAccessStatement {
 
 impl ToSql for AlterAccessStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterAccessStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER ACCESS");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
+
+		match self.authenticate {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " AUTHENTICATE {}", CoverStmts(v)),
+			AlterKind::Drop => f.push_str(" DROP AUTHENTICATE"),
+			AlterKind::None => {}
+		}
+
+		match self.context {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " CONTEXT {}", CoverStmts(v)),
+			AlterKind::Drop => f.push_str(" DROP CONTEXT"),
+			AlterKind::None => {}
+		}
+
+		let has_duration = !matches!(
+			(&self.grant_duration, &self.token_duration, &self.session_duration),
+			(AlterKind::None, AlterKind::None, AlterKind::None)
+		);
+		if has_duration {
+			f.push_str(" DURATION");
+			// Each altered clause is separated from the previous one, never
+			// terminated: a trailing comma leaves the parser expecting a
+			// fourth `FOR`.
+			let mut written = false;
+			let mut separate = |f: &mut String| {
+				if std::mem::replace(&mut written, true) {
+					f.push(',');
+				}
+			};
+			match self.grant_duration {
+				AlterKind::Set(Some(d)) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR GRANT {}", SqlDuration(d))
+				}
+				AlterKind::Set(None) | AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR GRANT NONE")
+				}
+				AlterKind::None => {}
+			}
+			match self.token_duration {
+				AlterKind::Set(Some(d)) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR TOKEN {}", SqlDuration(d))
+				}
+				AlterKind::Set(None) | AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR TOKEN NONE")
+				}
+				AlterKind::None => {}
+			}
+			match self.session_duration {
+				AlterKind::Set(Some(d)) => {
+					separate(f);
+					write_sql!(f, fmt, " FOR SESSION {}", SqlDuration(d))
+				}
+				AlterKind::Set(None) | AlterKind::Drop => {
+					separate(f);
+					f.push_str(" FOR SESSION NONE")
+				}
+				AlterKind::None => {}
+			}
+		}
+
+		match self.comment {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
 	}
 }

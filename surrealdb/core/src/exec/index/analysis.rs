@@ -2606,7 +2606,7 @@ mod tests {
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
 		let plan = match exprs.remove(0) {
-			crate::sql::TopLevelExpr::Expr(select @ crate::sql::Expr::Select(_)) => {
+			surrealdb_expr::parser::TopLevelExpr::Expr(select @ crate::expr::Expr::Select(_)) => {
 				lower(select).expect("SELECT lowers")
 			}
 			other => panic!("expected SELECT, got {other:?}"),

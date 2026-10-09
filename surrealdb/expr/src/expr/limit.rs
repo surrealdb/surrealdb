@@ -1,6 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::Expr;
+use crate::expr::{CoverStmts, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Limit(pub Expr);
@@ -14,8 +14,7 @@ impl Limit {
 }
 
 impl ToSql for Limit {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let stmt: crate::sql::limit::Limit = self.clone().into();
-		stmt.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "LIMIT {}", CoverStmts(&self.0))
 	}
 }

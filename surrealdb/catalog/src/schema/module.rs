@@ -6,10 +6,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::{
 	FromStored, LogicalPermissionBody, ModuleExecutable, Permission, StoredPermission,
 };
+use crate::expr as runtime;
 use crate::expr::logical::LogicalPermission;
+use crate::expr::statements::DefineModuleStatement;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql::statements::define::DefineKind;
-use crate::sql::{self, DefineModuleStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 2)]
@@ -52,18 +53,18 @@ impl StoredModuleDefinition {
 }
 
 impl ModuleDefinition {
-	fn to_sql_definition(&self) -> DefineModuleStatement {
+	fn to_runtime_definition(&self) -> DefineModuleStatement {
 		DefineModuleStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone().map(Into::into),
+			name: self.name.clone(),
 			executable: self.executable.clone().into(),
 			unsigned: self.unsigned,
-			permissions: self.permissions.to_sql_permission(),
+			permissions: self.permissions.clone(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 		}
 	}
 
@@ -97,7 +98,7 @@ impl InfoStructure for ModuleDefinition {
 
 impl ToSql for ModuleDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

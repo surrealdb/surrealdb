@@ -8,11 +8,11 @@ use crate::catalog::auth::AuthLimit;
 use crate::catalog::{
 	ExprText, FromStored, IdiomText, KindText, LogicalBody, Permission, reference_to_stored,
 };
+use crate::expr as runtime;
 use crate::expr::logical::{LogicalExpr, LogicalPermission};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
-use crate::sql;
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
@@ -184,48 +184,42 @@ impl InfoStructure for FieldDefinition {
 }
 
 impl FieldDefinition {
-	/// Lowers to the sql-side statement, which is what renders.
-	///
-	/// One renderer, not two: a clause added to `sql::DefineFieldStatement`
-	/// alone would otherwise be echoed back for a user-typed statement but
-	/// silently dropped from `INFO` and from export, which renders the catalog
-	/// type — so the dump would no longer reproduce the schema.
-	pub fn to_sql_definition(
+	/// Builds the runtime statement rendered by both INFO and schema export.
+	/// Its clauses use the same canonical printer as parsed definitions.
+	pub fn to_runtime_definition(
 		&self,
-		kind: sql::statements::define::DefineKind,
-	) -> sql::statements::define::DefineFieldStatement {
-		sql::statements::define::DefineFieldStatement {
+		kind: runtime::statements::define::DefineKind,
+	) -> runtime::statements::define::DefineFieldStatement {
+		runtime::statements::define::DefineFieldStatement {
 			kind,
-			name: crate::expr::Expr::Idiom(self.name.clone()).into(),
-			what: sql::Expr::Table(self.table.clone().into()),
-			field_kind: self.field_kind.clone().map(|x| x.into()),
+			name: crate::expr::Expr::Idiom(self.name.clone()),
+			what: runtime::Expr::Table(self.table.clone()),
+			field_kind: self.field_kind.clone(),
 			flexible: self.flexible,
 			readonly: self.readonly,
 			inline: self.inline,
-			value: self.value.clone().map(|x| x.into()),
-			assert: self.assert.clone().map(|x| x.into()),
-			computed: self.computed.clone().map(|x| x.into()),
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			computed: self.computed.clone(),
 			default: match &self.default {
-				DefineDefault::None => sql::statements::define::DefineDefault::None,
-				DefineDefault::Set(x) => {
-					sql::statements::define::DefineDefault::Set(x.clone().into())
-				}
+				DefineDefault::None => runtime::statements::define::DefineDefault::None,
+				DefineDefault::Set(x) => runtime::statements::define::DefineDefault::Set(x.clone()),
 				DefineDefault::Always(x) => {
-					sql::statements::define::DefineDefault::Always(x.clone().into())
+					runtime::statements::define::DefineDefault::Always(x.clone())
 				}
 			},
-			permissions: sql::Permissions {
-				select: self.select_permission.to_sql_permission(),
-				create: self.create_permission.to_sql_permission(),
-				update: self.update_permission.to_sql_permission(),
-				delete: sql::Permission::Full,
+			permissions: runtime::permission::Permissions {
+				select: self.select_permission.clone(),
+				create: self.create_permission.clone(),
+				update: self.update_permission.clone(),
+				delete: runtime::permission::Permission::Full,
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
-			reference: self.reference.clone().map(|x| x.into()),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
+			reference: self.reference.clone(),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 		}
@@ -235,13 +229,13 @@ impl FieldDefinition {
 	/// export (relation tables auto-generate in/out fields, and array types
 	/// generate sub-field definitions that would conflict on plain re-DEFINE).
 	pub fn to_sql_overwrite(&self) -> String {
-		self.to_sql_definition(sql::statements::define::DefineKind::Overwrite).to_sql()
+		self.to_runtime_definition(runtime::statements::define::DefineKind::Overwrite).to_sql()
 	}
 }
 
 impl ToSql for FieldDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition(sql::statements::define::DefineKind::Default).fmt_sql(f, fmt)
+		self.to_runtime_definition(runtime::statements::define::DefineKind::Default).fmt_sql(f, fmt)
 	}
 }
 

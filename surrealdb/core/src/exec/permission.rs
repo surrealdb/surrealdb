@@ -1021,7 +1021,7 @@ async fn view_expr_physical(
 	expr: &Expr,
 	planner: &Planner<'_>,
 ) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = crate::expr::logical::lower_expr(expr.clone().into());
+	let logical = crate::expr::logical::lower_expr(expr.clone());
 	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
 	clause_to_physical(logical, planner).await
 }
@@ -1082,7 +1082,7 @@ pub(crate) async fn reference_custom_physical(
 	expr: &Expr,
 	planner: &Planner<'_>,
 ) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = crate::expr::logical::lower_expr(expr.clone().into());
+	let logical = crate::expr::logical::lower_expr(expr.clone());
 	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
 	clause_to_physical(logical, planner).await
 }
@@ -1182,7 +1182,7 @@ async fn index_expr_physical(
 	expr: &Expr,
 	planner: &Planner<'_>,
 ) -> Result<Arc<dyn PhysicalExpr>, Error> {
-	let logical = crate::expr::logical::lower_expr(expr.clone().into());
+	let logical = crate::expr::logical::lower_expr(expr.clone());
 	let logical = logical.as_ref().map_err(|err| anyhow::Error::new(err.clone()));
 	clause_to_physical(logical, planner).await
 }
@@ -1809,8 +1809,7 @@ mod tests {
 		let full = table_select_permission_physical(Some(&full), &planner).await.unwrap();
 		assert!(matches!(full, PhysicalPermission::Allow));
 
-		let specific =
-			table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id").into()));
+		let specific = table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id")));
 		let conditional =
 			table_select_permission_physical(Some(&specific), &planner).await.unwrap();
 		assert!(matches!(conditional, PhysicalPermission::Conditional(_)));
@@ -1829,8 +1828,8 @@ mod tests {
 		let ctx = root_ctx();
 		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
 		let def = table_with_disagreeing_halves(
-			Permission::Specific(parse_sql_expr("false").into()),
-			&Permission::Specific(parse_sql_expr("true").into()),
+			Permission::Specific(parse_sql_expr("false")),
+			&Permission::Specific(parse_sql_expr("true")),
 		);
 		let permission = table_select_permission_physical(Some(&def), &planner).await.unwrap();
 		let allowed =
@@ -1844,7 +1843,7 @@ mod tests {
 		// guard reading a field resolves the table's field definitions there.
 		let db = TestDb::new("").await;
 		let ctx = db.exec_ctx().await;
-		let def = table_with_select(Permission::Specific(parse_sql_expr("age > 18").into()));
+		let def = table_with_select(Permission::Specific(parse_sql_expr("age > 18")));
 
 		let resolved = table_select_permission_physical_runtime(Some(&def), &ctx).await.unwrap();
 		let PhysicalPermission::Conditional(expr) = resolved else {
@@ -1929,7 +1928,7 @@ mod tests {
 		let ctx = root_ctx();
 		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
 		for clause in ["true", "$auth.admin = true", "$session.ns = 'test'"] {
-			let def = table_with_select(Permission::Specific(parse_sql_expr(clause).into()));
+			let def = table_with_select(Permission::Specific(parse_sql_expr(clause)));
 			let PhysicalPermission::Conditional(guard) =
 				table_select_permission_physical(Some(&def), &planner).await.unwrap()
 			else {
@@ -1937,8 +1936,7 @@ mod tests {
 			};
 			assert_ne!(guard.name(), "ComputedFieldGuard", "`{clause}` reads no field");
 		}
-		let def =
-			table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id").into()));
+		let def = table_with_select(Permission::Specific(parse_sql_expr("owner = $auth.id")));
 		let PhysicalPermission::Conditional(guard) =
 			table_select_permission_physical(Some(&def), &planner).await.unwrap()
 		else {
@@ -2442,7 +2440,7 @@ mod tests {
 	/// and what one written before `AUTH LIMIT` existed decodes to;
 	/// `FieldDefinition`'s `Default` is not that stamp.
 	fn field_with_default(src: &str) -> FieldDefinition {
-		let expr: Expr = parse_sql_expr(src).into();
+		let expr: Expr = parse_sql_expr(src);
 		FieldDefinition {
 			name: field_idiom("id"),
 			table: "t".into(),
@@ -2459,8 +2457,8 @@ mod tests {
 		EventDefinition::new(
 			"ev".into(),
 			"t".into(),
-			parse_sql_expr(when).into(),
-			then.iter().map(|t| parse_sql_expr(t).into()).collect(),
+			parse_sql_expr(when),
+			then.iter().map(|t| parse_sql_expr(t)).collect(),
 			crate::catalog::EventKind::Sync,
 			crate::catalog::auth::AuthLimit::new_no_limit(),
 			None,
@@ -2475,7 +2473,7 @@ mod tests {
 				.compile()
 				.expect("the field list should compile"),
 			what: vec!["source".into()],
-			cond: condition.map(|c| crate::expr::Cond(parse_sql_expr(c).into())),
+			cond: condition.map(|c| crate::expr::Cond(parse_sql_expr(c))),
 			group: groups,
 		};
 		crate::catalog::view_to_definition(&view).expect("the view should classify")

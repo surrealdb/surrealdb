@@ -14,8 +14,8 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
 use surrealdb_gql as gql;
-use surrealdb_parser_next_lower::ParserSettings;
 use surrealdb_rpc::capabilities::ExperimentalTarget;
+use surrealdb_expr::parser::ParserSettings;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
@@ -486,12 +486,9 @@ async fn run_test_body(
 				..Default::default()
 			};
 
-			let query = match surrealdb_parser_next_lower::query_with_settings(
-				&run.case.test.source,
-				settings,
-			) {
+			let query = match surrealdb_expr::parser::query_with_settings(&run.case.test.source, settings) {
 				Ok(x) => x,
-				Err(surrealdb_parser_next_lower::ParseError::InvalidQuery(e)) => {
+				Err(surrealdb_expr::parser::ParseError::InvalidQuery(e)) => {
 					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(e)));
 				}
 				Err(e) => return Err(anyhow::anyhow!(e)),

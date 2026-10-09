@@ -1,7 +1,8 @@
 use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::expr::{Expr, Literal};
+use crate::expr::{CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineNamespaceStatement {
@@ -18,6 +19,21 @@ impl Default for DefineNamespaceStatement {
 			id: None,
 			name: Expr::Literal(Literal::String(Strand::default())),
 			comment: Expr::Literal(Literal::None),
+		}
+	}
+}
+
+impl ToSql for DefineNamespaceStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE NAMESPACE");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
+		}
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
 	}
 }

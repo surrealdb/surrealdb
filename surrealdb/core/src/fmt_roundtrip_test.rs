@@ -18,8 +18,8 @@ pub fn ensure_formats(s: &str) {
 		.expressions
 		.iter()
 		.map(|stmt| match stmt {
-			crate::sql::TopLevelExpr::Expr(expr) => {
-				format!("{};", crate::expr::Expr::from(expr.clone()).to_sql())
+			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => {
+				format!("{};", expr.to_sql())
 			}
 			other => format!("{};", other.to_sql()),
 		})
@@ -79,7 +79,7 @@ test_case!(remove_database_expunge => "REMOVE DATABASE AND EXPUNGE d");
 test_case!(remove_namespace_expunge => "REMOVE NAMESPACE AND EXPUNGE IF EXISTS n");
 test_case!(remove_table_expunge => "REMOVE TABLE AND EXPUNGE t");
 
-/// SECURITY: see `sql::AccessType::fmt_sql`. The render that produces a
+/// SECURITY: see `expr::AccessType::fmt_sql`. The render that produces a
 /// definition's text also feeds export, which redacts symmetric keys first, so
 /// a rendered bearer key is either a real secret written into a dump or
 /// `[REDACTED]` installed as the signing secret of the database restored from

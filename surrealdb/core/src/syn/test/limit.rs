@@ -109,7 +109,7 @@ fn test_parse_depth(
 	#[case] source: &str,
 	#[case] expected: bool,
 ) {
-	let result = surrealdb_parser_next_lower::query_with_settings(source, parser_settings);
+	let result = surrealdb_expr::parser::query_with_settings(source, parser_settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -137,7 +137,7 @@ fn test_parse_value_depth(#[case] limit: usize, #[case] source: &str, #[case] ex
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = surrealdb_parser_next_lower::value_with_settings(source, settings);
+	let result = surrealdb_expr::parser::value_with_settings(source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -151,7 +151,7 @@ fn test_parse_json_depth(#[case] limit: usize, #[case] source: &str, #[case] exp
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = surrealdb_parser_next_lower::json_with_settings(source, settings);
+	let result = surrealdb_expr::parser::json_with_settings(source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -203,7 +203,7 @@ fn test_parse_kind_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		object_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = surrealdb_parser_next_lower::query_with_settings(&source, settings);
+	let result = surrealdb_expr::parser::query_with_settings(&source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -241,7 +241,7 @@ fn test_parse_expr_depth(#[case] limit: usize, #[case] source: String, #[case] e
 		expr_recursion_limit: limit,
 		..Default::default()
 	};
-	let result = surrealdb_parser_next_lower::query_with_settings(&source, settings);
+	let result = surrealdb_expr::parser::query_with_settings(&source, settings);
 	assert_eq!(result.is_ok(), expected);
 }
 
@@ -359,8 +359,8 @@ fn expr_depth_default_limit_is_stack_safe() {
 			// `ToSql` recurses once per node.
 			let formatted = surrealdb_types::ToSql::to_sql(&expr);
 			assert!(formatted.contains('+'));
-			// `sql::Expr -> expr::Expr` lowering recurses once per node.
-			let lowered = crate::expr::Expr::from(expr);
+			// Flat-tree to runtime-expression lowering recurses once per node.
+			let lowered = expr;
 			// Dropping the lowered tree recurses once per node.
 			drop(lowered);
 
@@ -372,7 +372,7 @@ fn expr_depth_default_limit_is_stack_safe() {
 			let expr = crate::syn::expr(&nested_object(depth)).expect("a near-limit object parses");
 			let formatted = surrealdb_types::ToSql::to_sql(&expr);
 			assert!(formatted.contains("a:"));
-			let lowered = crate::expr::Expr::from(expr);
+			let lowered = expr;
 			drop(lowered);
 		})
 		.unwrap()

@@ -122,10 +122,10 @@ mod tests {
 	fn every_with_empty_objects_arrays() {
 		let val = parse_val!("{ test: {}, status: false, something: {age: 45}, tags: []}");
 		let res: Vec<Idiom> = vec![
-			syn::idiom("something.age").unwrap().into(),
-			syn::idiom("status").unwrap().into(),
-			syn::idiom("tags").unwrap().into(),
-			syn::idiom("test").unwrap().into(),
+			syn::idiom("something.age").unwrap(),
+			syn::idiom("status").unwrap(),
+			syn::idiom("tags").unwrap(),
+			syn::idiom("test").unwrap(),
 		];
 		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
@@ -135,7 +135,7 @@ mod tests {
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
-		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap()];
 		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
@@ -145,15 +145,15 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
+			syn::idiom("test.something").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
 		];
 		assert_eq!(res, val.every(None, false, ArrayBehaviour::Full));
 	}
@@ -164,7 +164,7 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> =
-			vec![syn::idiom("test").unwrap().into(), syn::idiom("test.something").unwrap().into()];
+			vec![syn::idiom("test").unwrap(), syn::idiom("test.something").unwrap()];
 		assert_eq!(res, val.every(None, true, ArrayBehaviour::Ignore));
 	}
 
@@ -174,18 +174,18 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test").unwrap().into(),
-			syn::idiom("test.something").unwrap().into(),
-			syn::idiom("test.something[1]").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0]").unwrap().into(),
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
+			syn::idiom("test").unwrap(),
+			syn::idiom("test.something").unwrap(),
+			syn::idiom("test.something[1]").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[0]").unwrap(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
 		];
 		assert_eq!(res, val.every(None, true, ArrayBehaviour::Full));
 	}
@@ -196,25 +196,24 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 
-		let val =
-			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full);
+		let val = val.every(Some(&syn::idiom("test").unwrap()), true, ArrayBehaviour::Full);
 		for v in val.iter() {
 			println!("{}", v.to_sql());
 		}
 
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test").unwrap().into(),
-			syn::idiom("test.something").unwrap().into(),
-			syn::idiom("test.something[1]").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0]").unwrap().into(),
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
+			syn::idiom("test").unwrap(),
+			syn::idiom("test.something").unwrap(),
+			syn::idiom("test.something[1]").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[0]").unwrap(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
 		];
 		assert_eq!(res, val,);
 	}
@@ -225,25 +224,21 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something").unwrap().into(),
-			syn::idiom("test.something[1]").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0]").unwrap().into(),
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
+			syn::idiom("test.something").unwrap(),
+			syn::idiom("test.something[1]").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[0]").unwrap(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
 		];
 		assert_eq!(
 			res,
-			val.every(
-				Some(&Idiom::from(syn::idiom("test.something").unwrap())),
-				true,
-				ArrayBehaviour::Full
-			)
+			val.every(Some(&syn::idiom("test.something").unwrap()), true, ArrayBehaviour::Full)
 		);
 	}
 
@@ -253,25 +248,21 @@ mod tests {
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something").unwrap().into(),
-			syn::idiom("test.something[1]").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0]").unwrap().into(),
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
+			syn::idiom("test.something").unwrap(),
+			syn::idiom("test.something[1]").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[0]").unwrap(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
 		];
 		assert_eq!(
 			res,
-			val.every(
-				Some(&Idiom::from(syn::idiom("test.something.*").unwrap())),
-				true,
-				ArrayBehaviour::Full
-			)
+			val.every(Some(&syn::idiom("test.something.*").unwrap()), true, ArrayBehaviour::Full)
 		);
 	}
 
@@ -282,19 +273,15 @@ mod tests {
 		);
 
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.*.color").unwrap().into(),
-			syn::idiom("test.*.color[2]").unwrap().into(),
-			syn::idiom("test.*.color[1]").unwrap().into(),
-			syn::idiom("test.*.color[0]").unwrap().into(),
+			syn::idiom("test.*.color").unwrap(),
+			syn::idiom("test.*.color[2]").unwrap(),
+			syn::idiom("test.*.color[1]").unwrap(),
+			syn::idiom("test.*.color[0]").unwrap(),
 		];
 
 		assert_eq!(
 			res,
-			val.every(
-				Some(&Idiom::from(syn::idiom("test.*.color").unwrap())),
-				true,
-				ArrayBehaviour::Full
-			)
+			val.every(Some(&syn::idiom("test.*.color").unwrap()), true, ArrayBehaviour::Full)
 		);
 	}
 }

@@ -1,6 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Data, Expr, Output};
+use crate::expr::{CoverStmts, Data, Expr, Literal, Output};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct InsertStatement {
@@ -16,7 +16,25 @@ pub struct InsertStatement {
 
 impl ToSql for InsertStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::insert::InsertStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		f.push_str("INSERT");
+		if self.relation {
+			f.push_str(" RELATION");
+		}
+		if self.ignore {
+			f.push_str(" IGNORE");
+		}
+		if let Some(ref v) = self.into {
+			write_sql!(f, fmt, " INTO {}", CoverStmts(v));
+		}
+		write_sql!(f, fmt, " {}", self.data);
+		if let Some(ref v) = self.update {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, fmt, " {v}");
+		}
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
+		}
 	}
 }

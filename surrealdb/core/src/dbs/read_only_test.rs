@@ -8,41 +8,30 @@
 //! depending on whether the caller wrapped it in `BEGIN`, which opens a write
 //! transaction unconditionally.
 //!
-//! The predicate exists twice — over the surface AST (`sql::Expr`), which
-//! chooses the transaction mode, and over the expression tree it converts to
-//! (`expr::Expr`), whose answer a logical plan's scalars carry. The two enums
-//! evolve separately, so every fixture here answers through both and the
-//! answers must match: a variant handled on one side and not the other
-//! surfaces as a disagreement rather than as a mutation reaching a read-only
-//! transaction.
-//!
 //! The predicate is judged against the engine that runs the statement. The
 //! bytecode VM plans every statement to a program whose `access_mode()` is
 //! `ReadWrite` when the program may write or has a side effect, and the
 //! fixtures in the [`vm`] module plan each statement as the executor does,
 //! in the transaction `read_only()` selects, and compare the two answers.
 
-/// Parse one statement and report whether it claims to be read-only, asserting
-/// the surface AST and the expression tree agree on the answer.
+/// Parse one statement and check its top-level and expression predicates agree.
 fn read_only(sql: &str) -> bool {
 	let mut ast = crate::syn::parse(sql).expect("fixture should parse");
 	assert_eq!(ast.expressions.len(), 1, "expected exactly one statement in {sql:?}");
 	assert_agree(&ast.expressions.remove(0), sql)
 }
 
-/// Answer through both implementations and require them to match. Only a bare
-/// expression has an expression-layer twin to compare against; every fixture
-/// here is one.
-fn assert_agree(surface: &crate::sql::TopLevelExpr, context: &str) -> bool {
-	let answer = surface.read_only();
-	let crate::sql::TopLevelExpr::Expr(expr) = surface else {
+/// Check the top-level transaction predicate against its expression payload.
+fn assert_agree(runtime: &surrealdb_expr::parser::TopLevelExpr, context: &str) -> bool {
+	let answer = runtime.read_only();
+	let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = runtime else {
 		panic!("fixture is not a bare expression: {context}");
 	};
-	let converted: crate::expr::Expr = expr.clone().into();
+	let converted = expr;
 	assert_eq!(
 		answer,
 		converted.read_only(),
-		"`sql::Expr::read_only` and `expr::Expr::read_only` disagree on {context}"
+		"top-level and expression read-only predicates disagree on {context}"
 	);
 	answer
 }
@@ -340,9 +329,9 @@ mod vm {
 
 		/// Lower a bare expression as the executor does
 		/// (`Executor::lower_bare_expression`).
-		fn lower(expr: &crate::sql::Expr) -> Result<LogicalOp, Error> {
-			if let crate::sql::Expr::Select(select) = expr {
-				crate::dbs::validate_for_update_ast(select)?;
+		fn lower(expr: &crate::expr::Expr) -> Result<LogicalOp, Error> {
+			if let crate::expr::Expr::Select(select) = expr {
+				crate::dbs::validate_for_update(select)?;
 			}
 			crate::expr::logical::lower(expr.clone()).map_err(|reason| {
 				crate::exec::Error::PlannerUnsupported {
@@ -380,7 +369,7 @@ mod vm {
 			assert_eq!(ast.expressions.len(), 1, "expected exactly one statement in {sql:?}");
 			let top = ast.expressions.remove(0);
 			let read_only = super::assert_agree(&top, sql);
-			let crate::sql::TopLevelExpr::Expr(expr) = top else {
+			let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
 				panic!("fixture is not a bare expression: {sql}");
 			};
 			let outcome = match Self::lower(&expr) {
@@ -1056,7 +1045,8 @@ mod vm {
 			let Ok(mut ast) = crate::syn::parse(sql) else {
 				continue;
 			};
-			let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.pop() else {
+			let Some(surrealdb_expr::parser::TopLevelExpr::Expr(expr)) = ast.expressions.pop()
+			else {
 				continue;
 			};
 			let Ok(op) = Harness::lower(&expr) else {
@@ -1180,7 +1170,8 @@ mod vm {
 		let h = Harness::new("").await;
 		let explained = |sql: &'static str| {
 			let mut ast = crate::syn::parse(sql).expect("fixture should parse");
-			let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.pop() else {
+			let Some(surrealdb_expr::parser::TopLevelExpr::Expr(expr)) = ast.expressions.pop()
+			else {
 				panic!("fixture is not a bare expression: {sql}");
 			};
 			let op = Harness::lower(&expr).expect("fixture should lower");
@@ -1284,7 +1275,7 @@ mod vm {
 			};
 			for top in ast.expressions {
 				let read_only = top.read_only();
-				let crate::sql::TopLevelExpr::Expr(expr) = top else {
+				let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
 					// A `BEGIN`/`COMMIT`/`USE` has no expression to lower; the
 					// transaction-control statements are not part of the property.
 					continue;

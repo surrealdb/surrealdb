@@ -1,4 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use std::ops::Bound;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::range::{IntegerRangeIter, TypedRange};
 use crate::val::{RecordId, RecordIdKey, TableName};
@@ -97,8 +99,24 @@ impl IntoIterator for Mock {
 }
 
 impl ToSql for Mock {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let mock: crate::sql::Mock = self.clone().into();
-		mock.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Mock::Count(tb, c) => {
+				write_sql!(f, fmt, "|{}:{}|", common::fmt::EscapeKwFreeIdent(tb.as_str()), c);
+			}
+			Mock::Range(tb, r) => {
+				write_sql!(f, fmt, "|{}:", common::fmt::EscapeKwFreeIdent(tb.as_str()));
+				match r.start {
+					Bound::Included(x) => write_sql!(f, fmt, "{x}.."),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}>.."),
+					Bound::Unbounded => f.push_str(".."),
+				}
+				match r.end {
+					Bound::Included(x) => write_sql!(f, fmt, "={x}|"),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}|"),
+					Bound::Unbounded => f.push('|'),
+				}
+			}
+		}
 	}
 }

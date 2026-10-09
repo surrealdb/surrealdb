@@ -48,7 +48,7 @@ pub mod parse {
 
 	/// Parses a SurrealQL value from its textual representation.
 	pub fn value(input: &str) -> anyhow::Result<crate::types::Value> {
-		surrealdb_parser_next_lower::value(input).map_err(anyhow::Error::new)
+		surrealdb_expr::parser::value(input).map_err(anyhow::Error::new)
 	}
 }
 

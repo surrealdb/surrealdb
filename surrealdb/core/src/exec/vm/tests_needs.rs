@@ -108,7 +108,9 @@ async fn an_expression_needs_what_its_compiled_form_declares() {
 		let Ok(ast) = crate::syn::parse(sql) else {
 			continue;
 		};
-		let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next() else {
+		let Some(surrealdb_expr::parser::TopLevelExpr::Expr(expr)) =
+			ast.expressions.into_iter().next()
+		else {
 			continue;
 		};
 		let Ok(op) = crate::expr::logical::lower(expr) else {

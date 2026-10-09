@@ -1,6 +1,7 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Cond, Explain, Expr, Literal, Output, With};
+use crate::expr::{Cond, CoverStmts, Explain, Expr, Literal, Output, With};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DeleteStatement {
@@ -29,7 +30,27 @@ impl Default for DeleteStatement {
 
 impl ToSql for DeleteStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::delete::DeleteStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "DELETE");
+		if self.only {
+			f.push_str(" ONLY")
+		}
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
+		if let Some(ref v) = self.with {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.cond {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, fmt, " {v}");
+		}
+
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
+		}
+
+		if let Some(ref v) = self.explain {
+			write_sql!(f, fmt, " {v}");
+		}
 	}
 }

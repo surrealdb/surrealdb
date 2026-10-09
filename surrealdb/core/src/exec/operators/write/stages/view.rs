@@ -672,7 +672,7 @@ pub(crate) fn recalculation_of(
 		tempfiles: false,
 		for_update: false,
 	};
-	crate::expr::logical::lower_select(statement.into())
+	crate::expr::logical::lower_select(statement)
 		.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))
 }
 

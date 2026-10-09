@@ -1283,7 +1283,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_parse_variant().len(),
-			declared_variants(include_str!("../../../parser-next/lower/src/api.rs"), "ParseError"),
+			declared_variants(include_str!("../../../expr/src/parser/api.rs"), "ParseError"),
 			"syn::ParseError",
 		),
 		(

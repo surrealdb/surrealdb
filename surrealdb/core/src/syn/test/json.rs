@@ -2,13 +2,13 @@ use crate::syn::{self, ParserSettings};
 use crate::types::PublicValue;
 
 /// Parses `text` as JSON under the default settings.
-fn json(text: &str) -> Result<PublicValue, surrealdb_parser_next_lower::ParseError> {
-	surrealdb_parser_next_lower::json_with_settings(text, ParserSettings::default())
+fn json(text: &str) -> Result<PublicValue, surrealdb_expr::parser::ParseError> {
+	surrealdb_expr::parser::json_with_settings(text, ParserSettings::default())
 }
 
 /// Parses `text` as JSON, reading values out of strings.
-fn json_legacy(text: &str) -> Result<PublicValue, surrealdb_parser_next_lower::ParseError> {
-	surrealdb_parser_next_lower::json_with_settings(
+fn json_legacy(text: &str) -> Result<PublicValue, surrealdb_expr::parser::ParseError> {
+	surrealdb_expr::parser::json_with_settings(
 		text,
 		ParserSettings {
 			legacy_strands: true,

@@ -6,9 +6,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{FromStored, Permission, StoredPermission};
+use crate::expr as runtime;
+use crate::expr::statements::define::{DefineBucketStatement, DefineKind};
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
-use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -29,18 +29,21 @@ pub struct StoredBucketDefinition {
 impl_kv_value_revisioned!(StoredBucketDefinition);
 
 impl BucketDefinition {
-	fn to_sql_definition(&self) -> DefineBucketStatement {
+	fn to_runtime_definition(&self) -> DefineBucketStatement {
 		DefineBucketStatement {
 			kind: DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			backend: self.backend.clone().map(|v| sql::Expr::Literal(sql::Literal::String(v))),
-			permissions: self.permissions.to_sql_permission(),
+			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
+			backend: self
+				.backend
+				.clone()
+				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v))),
+			permissions: self.permissions.clone(),
 			readonly: self.readonly,
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 		}
 	}
 }
@@ -59,7 +62,7 @@ impl InfoStructure for BucketDefinition {
 
 impl ToSql for BucketDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

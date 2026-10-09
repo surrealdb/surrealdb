@@ -3129,7 +3129,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// The host pipeline of a `RETURN <fields>` projection over the shown
 	/// post-image, or `None` for `RETURN *` alone, which is the image.
 	async fn return_projection(&mut self, fields: &crate::expr::Fields) -> Lowered<Option<u16>> {
-		let fields = crate::expr::logical::lower_fields(fields.clone().into()).map_err(|e| {
+		let fields = crate::expr::logical::lower_fields(fields.clone()).map_err(|e| {
 			NotCovered::internal(format!("the RETURN clause has no logical form: {e}"))
 		})?;
 		let projection = super::map::projection(&fields, Vec::new())?;

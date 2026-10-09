@@ -19,15 +19,15 @@ extern crate tracing;
 pub mod expr;
 #[cfg(feature = "scripting")]
 pub mod js;
+pub mod parser;
 pub use val::rnd;
 pub mod scram;
 pub mod val;
 
 // The module tree spells intra-layer paths as `crate::<name>`; these aliases
 // keep those paths valid for the layers this crate sits on.
+pub(crate) use parser as syn;
 pub(crate) use surrealdb_iam as iam;
-pub(crate) use surrealdb_parser_next_lower as syn;
-pub(crate) use surrealdb_sql as sql;
 pub(crate) mod types {
 	//! The public type surface, re-exported with `Public` prefixes so internal
 	//! and public forms stay visually distinct at use sites.

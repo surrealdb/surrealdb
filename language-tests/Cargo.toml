@@ -27,7 +27,6 @@ surrealdb-rpc = { path = "../surrealdb/rpc" }
 surrealdb-expr = { path = "../surrealdb/expr" }
 surrealdb-gql = { path = "../surrealdb/gql" }
 surrealdb-kvs = { path = "../surrealdb/kvs" }
-surrealdb-parser-next-lower = { path = "../surrealdb/parser-next/lower" }
 parse-common = { package = "surrealdb-parse-common", path = "../surrealdb/parse-common" }
 surrealdb-types = { path = "../surrealdb/types" }
 # Used to execute GraphQL (.graphql) test cases against the dynamic schema.

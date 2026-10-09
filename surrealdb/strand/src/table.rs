@@ -11,7 +11,7 @@ use crate::Strand;
 ///
 /// Deliberately carries no rendering and no conversion to the public wire type.
 /// Both belong to the language layer, where a name is escaped if it would
-/// otherwise read back as a reserved word — see `surrealdb_sql::TableName`.
+/// otherwise read back as a reserved word using the canonical identifier escaper.
 /// Keeping them off this type is what lets this crate stay a string primitive
 /// rather than depending on the formatting and public-type crates.
 ///

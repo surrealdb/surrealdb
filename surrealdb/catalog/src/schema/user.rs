@@ -8,7 +8,6 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::base::Base;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 2)]
@@ -55,36 +54,39 @@ impl UserDefinition {
 		self
 	}
 
-	fn to_sql_definition(&self) -> sql::statements::define::DefineUserStatement {
+	fn to_runtime_definition(&self) -> crate::expr::statements::DefineUserStatement {
 		let this = self.clone().redacted();
-		sql::statements::define::DefineUserStatement {
-			kind: sql::statements::define::DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(this.name)),
-			base: sql::Base::from(crate::expr::Base::from(this.base)),
-			pass_type: sql::statements::define::user::PassType::Hash(this.hash),
-			// The verifier is structured (`ScramCredential`) and never rendered as a
-			// string here, so only its presence is signalled as redacted.
-			scram: this.scram.map(|_| super::REDACTED.to_string()),
+		crate::expr::statements::DefineUserStatement {
+			kind: crate::expr::statements::define::DefineKind::Default,
+			name: crate::expr::Expr::Idiom(crate::expr::Idiom::field(this.name)),
+			base: this.base.into(),
+			pending_password: None,
+			hash_is_set: true,
+			hash: this.hash,
+			code: String::new(),
+			scram: this.scram,
 			roles: this.roles,
-			token_duration: this
-				.token_duration
-				.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
-				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
-			session_duration: this
-				.session_duration
-				.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
-				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
+			duration: crate::expr::user::UserDuration {
+				token: this
+					.token_duration
+					.map(|d| Value::from(d).into_literal())
+					.unwrap_or(crate::expr::Expr::Literal(crate::expr::Literal::None)),
+				session: this
+					.session_duration
+					.map(|d| Value::from(d).into_literal())
+					.unwrap_or(crate::expr::Expr::Literal(crate::expr::Literal::None)),
+			},
 			comment: this
 				.comment
-				.map(|c| sql::Expr::Literal(sql::Literal::String(c.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|c| Value::from(c).into_literal())
+				.unwrap_or(crate::expr::Expr::Literal(crate::expr::Literal::None)),
 		}
 	}
 }
 
 impl ToSql for &UserDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_redacted_sql(f, fmt)
 	}
 }
 

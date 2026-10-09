@@ -19,7 +19,7 @@ use std::str::FromStr;
 use rmcp::ErrorData;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use surrealdb_parser_next_lower::ParserConfig;
+use surrealdb_core::syn::runtime::ParserConfig;
 use surrealdb_types::{Decimal, Number, SurrealValue, Value, Variables};
 
 pub(crate) use self::output::{

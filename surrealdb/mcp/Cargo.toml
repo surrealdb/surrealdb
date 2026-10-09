@@ -23,7 +23,6 @@ surrealdb-core = { workspace = true, features = ["graphql", "gql"] }
 surrealdb-cnf = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-rpc = { workspace = true }
-surrealdb-parser-next-lower = { workspace = true }
 surrealdb-types = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

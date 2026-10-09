@@ -84,7 +84,7 @@ pub(crate) enum Prepared {
 	/// the result. At most one: the dialect restricts `eval::surql` to a single
 	/// statement, and an empty query evaluates to `NONE`. A statement is
 	/// converted the way any surface statement is, by lowering.
-	Statements(Vec<crate::sql::Expr>),
+	Statements(Vec<crate::expr::Expr>),
 	/// A query whose front end emits a plan rather than statements. GQL is the
 	/// one front end that emits a plan, so without it nothing constructs this
 	/// variant.
@@ -118,7 +118,7 @@ pub(crate) fn prepare(
 	// --- Parse with the live capabilities (so any SurrealQL experimental
 	// gates are honoured) and default parser limits (matching the
 	// embedded-scripting `surrealdb.query()` bridge). SurrealQL parses to a
-	// `sql::Ast`. GQL lowers straight to the plan it runs as, which has no
+	// `parser::Query`. GQL lowers straight to the plan it runs as, which has no
 	// statements to interleave, so it is answered here.
 	let config = crate::syn::ParserConfig::default();
 	let ast =
@@ -187,7 +187,7 @@ pub(crate) fn prepare(
 	let mut statements = Vec::with_capacity(ast.expressions.len());
 	for expr in ast.expressions {
 		match expr {
-			crate::sql::TopLevelExpr::Expr(expr) => statements.push(expr),
+			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => statements.push(expr),
 			_ => bail!(ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: "only query statements may be evaluated; transaction-control and \

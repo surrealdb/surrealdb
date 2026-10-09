@@ -10,10 +10,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::NamespaceId;
-use crate::expr::ChangeFeed;
+use crate::expr::statements::define::DefineDatabaseStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::{Expr, Idiom, Literal};
+use crate::expr::{ChangeFeed, Expr, Idiom, Literal};
 use crate::val::Value;
 
 #[derive(
@@ -101,7 +100,7 @@ pub struct DatabaseDefinition {
 impl_kv_value_revisioned!(DatabaseDefinition);
 
 impl DatabaseDefinition {
-	fn to_sql_definition(&self) -> DefineDatabaseStatement {
+	fn to_runtime_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
 			name: Expr::Idiom(Idiom::field(self.name.clone())),
 			strict: self.strict,
@@ -110,7 +109,7 @@ impl DatabaseDefinition {
 				.clone()
 				.map(|v| Expr::Literal(Literal::String(v.into())))
 				.unwrap_or(Expr::Literal(Literal::None)),
-			changefeed: self.changefeed.map(|v| v.into()),
+			changefeed: self.changefeed,
 			..Default::default()
 		}
 	}
@@ -118,7 +117,7 @@ impl DatabaseDefinition {
 
 impl ToSql for DatabaseDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

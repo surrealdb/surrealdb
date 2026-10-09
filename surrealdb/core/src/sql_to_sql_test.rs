@@ -1,7 +1,4 @@
-//! `ToSql` rendering tests covering both the AST and the value layer.
-//!
-//! They live in core rather than in `surrealdb-sql` because the same cases
-//! assert the rendering of `val::Value`, which sits above the AST.
+//! Canonical rendering of runtime expressions and values.
 
 use common::range::TypedRange;
 use geo_types::Point;
@@ -9,24 +6,26 @@ use rstest::rstest;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
-use crate::sql::literal::ObjectEntry;
-use crate::sql::statements::access::{AccessStatementGrant, Subject};
-use crate::sql::statements::alter::AlterKind;
-use crate::sql::statements::live::LiveFields;
-use crate::sql::statements::rebuild::RebuildIndexStatement;
-use crate::sql::statements::show::ShowSince;
-use crate::sql::statements::{
-	AccessStatement, AlterStatement, AlterTableStatement, CreateStatement, DefineStatement,
-	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, OptionStatement, OutputStatement, RebuildStatement, RelateStatement,
-	RemoveStatement, RemoveTableStatement, SelectStatement, SetStatement, ShowStatement,
-	SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
+use crate::expr::literal::ObjectEntry;
+use crate::expr::permission::{Permission, Permissions};
+use crate::expr::statements::access::{AccessStatementGrant, Subject};
+use crate::expr::statements::alter::{AlterKind, AlterTableStatement};
+use crate::expr::statements::live::LiveFields;
+use crate::expr::statements::rebuild::RebuildIndexStatement;
+use crate::expr::statements::show::ShowSince;
+use crate::expr::statements::{
+	AccessStatement, AlterStatement, CreateStatement, DefineStatement, DefineTableStatement,
+	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
+	KillStatement, LiveStatement, OptionStatement, OutputStatement, RebuildStatement,
+	RelateStatement, RemoveStatement, RemoveTableStatement, SelectStatement, SetStatement,
+	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
-use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, Data, Expr, Fields, Function, FunctionCall, Idiom,
-	KillStatement, Literal, LiveStatement, Mock, Param, PostfixOperator, PrefixOperator,
-	RecordIdKeyLit, RecordIdLit, TopLevelExpr,
+use crate::expr::{
+	BinaryOperator, Block, ClosureExpr as Closure, Constant, Data, Expr, Fields, Function,
+	FunctionCall, Idiom, Literal, Mock, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit,
+	RecordIdLit,
 };
+use crate::syn::TopLevelExpr;
 use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set, Value};
 
 #[rstest]
@@ -78,25 +77,21 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
     }
 ])), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::expr_lit_geometry(
-	Expr::Literal(Literal::Geometry(geo_types::Geometry::Point(Point::new(1.0, 2.0)))),
+	Expr::Literal(Literal::Geometry(Geometry::Point(Point::new(1.0, 2.0)))),
 	"(1f, 2f)",
 	"(1f, 2f)"
 )]
-#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(::bytes::Bytes::from(b"hello".to_vec()))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
+#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(Bytes(::bytes::Bytes::from(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::expr_lit_datetime(Expr::Literal(Literal::Datetime("1970-01-01T00:00:00Z".parse().unwrap())), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
-#[case::expr_lit_duration(
-	Expr::Literal(Literal::Duration(std::time::Duration::from_secs(1))),
-	"1s",
-	"1s"
-)]
-#[case::expr_lit_file(Expr::Literal(Literal::File(crate::val::File::new("bucket".to_string(), "path/to/file.txt".to_string()).into())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
+#[case::expr_lit_duration(Expr::Literal(Literal::Duration(Duration::from_secs(1))), "1s", "1s")]
+#[case::expr_lit_file(Expr::Literal(Literal::File(File::new("bucket".to_string(), "path/to/file.txt".to_string()))), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
 #[case::expr_lit_record_id(Expr::Literal(Literal::RecordId(RecordIdLit {
     table: "table".into(),
     key: RecordIdKeyLit::Number(123)
 })), "`table`:123", "`table`:123")]
 #[case::expr_lit_regex(Expr::Literal(Literal::Regex("hello".parse().unwrap())), "/hello/", "/hello/")]
 // Expression: Params
-#[case::expr_param(Expr::Param(Param::new("x".to_string())), "$x", "$x")]
+#[case::expr_param(Expr::Param(Param::from("x".to_string())), "$x", "$x")]
 // Expression: Idioms
 #[case::expr_idiom_field(Expr::Idiom(Idiom::field("x".to_string())), "x", "x")]
 // Expression: Tables
@@ -119,10 +114,10 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_postfix_range(Expr::Postfix { expr: Box::new(Expr::Literal(Literal::Integer(1))), op: PostfixOperator::Range }, "1..", "1..")]
 // Expression: Binary
 #[case::expr_binary_add(Expr::Binary { left: Box::new(Expr::Literal(Literal::Integer(1))), op: BinaryOperator::Add, right: Box::new(Expr::Literal(Literal::Integer(2))) }, "1 + 2", "1 + 2")]
-#[case::expr_binary_equal(Expr::Binary { left: Box::new(Expr::Param(Param::new("x".to_string()))), op: BinaryOperator::Equal, right: Box::new(Expr::Literal(Literal::Integer(5))) }, "$x = 5", "$x = 5")]
+#[case::expr_binary_equal(Expr::Binary { left: Box::new(Expr::Param(Param::from("x".to_string()))), op: BinaryOperator::Equal, right: Box::new(Expr::Literal(Literal::Integer(5))) }, "$x = 5", "$x = 5")]
 // Expression: FunctionCall
 #[case::expr_function_call(Expr::FunctionCall(Box::new(FunctionCall { receiver: Function::Normal("count".to_string()), arguments: vec![] })), "count()", "count()")]
-#[case::expr_function_call_args(Expr::FunctionCall(Box::new(FunctionCall { receiver: Function::Normal("array::len".to_string()), arguments: vec![Expr::Param(Param::new("arr".to_string()))] })), "array::len($arr)", "array::len($arr)")]
+#[case::expr_function_call_args(Expr::FunctionCall(Box::new(FunctionCall { receiver: Function::Normal("array::len".to_string()), arguments: vec![Expr::Param(Param::from("arr".to_string()))] })), "array::len($arr)", "array::len($arr)")]
 // Expression: Closure
 #[case::expr_closure(Expr::Closure(Box::new(Closure { args: vec![], returns: None, body: Expr::Literal(Literal::Integer(1)) })), "|| 1", "|| 1")]
 // Expression: Break
@@ -158,14 +153,23 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Delete
 #[case::expr_delete(Expr::Delete(Box::new(DeleteStatement { only: false, what: vec![Expr::Table("user".into())], with: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), explain: None })), "DELETE user", "DELETE user")]
 // Expression: Relate
-#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, or_update: false, through: Expr::Table("likes".into()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
+#[case::expr_relate(Expr::Relate(Box::new(RelateStatement { only: false, or_update: false, through: Expr::Table("likes".into()), from: Expr::Param(Param::from("from".to_string())), to: Expr::Param(Param::from("to".to_string())), data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE $from -> likes -> $to", "RELATE $from -> likes -> $to")]
 // Expression: Relate OR UPDATE
-#[case::expr_relate_or_update(Expr::Relate(Box::new(RelateStatement { only: false, or_update: true, through: Expr::Table("likes".into()), from: Expr::Param(Param::new("from".to_string())), to: Expr::Param(Param::new("to".to_string())), data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE OR UPDATE $from -> likes -> $to", "RELATE OR UPDATE $from -> likes -> $to")]
+#[case::expr_relate_or_update(Expr::Relate(Box::new(RelateStatement { only: false, or_update: true, through: Expr::Table("likes".into()), from: Expr::Param(Param::from("from".to_string())), to: Expr::Param(Param::from("to".to_string())), data: None, output: None, timeout: Expr::Literal(Literal::None) })), "RELATE OR UPDATE $from -> likes -> $to", "RELATE OR UPDATE $from -> likes -> $to")]
 // Expression: Insert
 #[case::expr_insert(Expr::Insert(Box::new(InsertStatement { into: Some(Expr::Table("user".into())), data: Data::SingleExpression(Expr::Literal(Literal::Object(vec![ObjectEntry { key: "name".into(), value: Expr::Literal(Literal::String(Strand::new_static("test"))) }]))), ignore: false, update: None, output: None, timeout: Expr::Literal(Literal::None), relation: false})), "INSERT INTO user { name: 'test' }", "INSERT INTO user {\n\tname: 'test'\n}")]
 // Expression: Define
 #[case::expr_define(
-	Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement::default()))),
+	Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement {
+		name: Expr::Literal(Literal::None),
+		permissions: Permissions {
+			select: Permission::None,
+			create: Permission::None,
+			update: Permission::None,
+			delete: Permission::None,
+		},
+		..Default::default()
+	}))),
 	"DEFINE TABLE NONE TYPE ANY SCHEMALESS PERMISSIONS NONE",
 	"DEFINE TABLE NONE TYPE ANY SCHEMALESS\n\tPERMISSIONS NONE"
 )]
@@ -176,7 +180,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 	"REMOVE TABLE NONE"
 )]
 // Expression: Rebuild
-#[case::expr_rebuild(Expr::Rebuild(Box::new(RebuildStatement::Index(RebuildIndexStatement { name: "idx".into(), what: "user".into(), if_exists: false, concurrently: false }))), "REBUILD INDEX idx ON user", "REBUILD INDEX idx ON user")]
+#[case::expr_rebuild(Expr::Rebuild(Box::new(RebuildStatement::Index(RebuildIndexStatement { name: "idx".into(), table: "user".into(), if_exists: false, concurrently: false }))), "REBUILD INDEX idx ON user", "REBUILD INDEX idx ON user")]
 // Expression: Upsert
 #[case::expr_upsert(Expr::Upsert(Box::new(UpsertStatement { only: false, what: vec![Expr::Table("user".into())], with: None, data: None, cond: None, output: None, timeout: Expr::Literal(Literal::None), explain: None })), "UPSERT user", "UPSERT user")]
 // Expression: Alter
@@ -188,18 +192,18 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 	"INFO FOR ROOT"
 )]
 // Expression: Foreach
-#[case::expr_foreach(Expr::Foreach(Box::new(ForeachStatement { param: Param::new("item".to_string()), range: Expr::Literal(Literal::Array(vec![Expr::Literal(Literal::Integer(1)), Expr::Literal(Literal::Integer(2))])), block: Block(vec![Expr::Literal(Literal::Integer(1))]) })), "FOR $item IN [1, 2] { 1 }", "FOR $item IN [\n\t1,\n\t2\n] {\n\n\t1\n}")]
+#[case::expr_foreach(Expr::Foreach(Box::new(ForeachStatement { param: Param::from("item".to_string()), range: Expr::Literal(Literal::Array(vec![Expr::Literal(Literal::Integer(1)), Expr::Literal(Literal::Integer(2))])), block: Block(vec![Expr::Literal(Literal::Integer(1))]) })), "FOR $item IN [1, 2] { 1 }", "FOR $item IN [\n\t1,\n\t2\n] {\n\n\t1\n}")]
 // Expression: Let
 #[case::expr_let(Expr::Let(Box::new(SetStatement { name: "x".into(), what: Expr::Literal(Literal::Integer(5)), kind: None })), "LET $x = 5", "LET $x = 5")]
 // Expression: Sleep
-#[case::expr_sleep(Expr::Sleep(Box::new(SleepStatement { duration: std::time::Duration::from_secs(1) })), "SLEEP 1s", "SLEEP 1s")]
+#[case::expr_sleep(Expr::Sleep(Box::new(SleepStatement { duration: Duration::from_secs(1) })), "SLEEP 1s", "SLEEP 1s")]
 // Complex nested expressions
 #[case::nested_if_else(
     Expr::IfElse(Box::new(IfelseStatement {
         exprs: vec![
             (
                 Expr::Binary {
-                    left: Box::new(Expr::Param(Param::new("x".to_string()))),
+                    left: Box::new(Expr::Param(Param::from("x".to_string()))),
                     op: BinaryOperator::MoreThan,
                     right: Box::new(Expr::Literal(Literal::Integer(10)))
                 },
@@ -210,14 +214,14 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
                         kind: None
                     })),
                     Expr::Return(Box::new(OutputStatement {
-                        what: Expr::Param(Param::new("result".to_string())),
+                        what: Expr::Param(Param::from("result".to_string())),
                         fetch: None
                     }))
                 ])))
             ),
             (
                 Expr::Binary {
-                    left: Box::new(Expr::Param(Param::new("x".to_string()))),
+                    left: Box::new(Expr::Param(Param::from("x".to_string()))),
                     op: BinaryOperator::MoreThan,
                     right: Box::new(Expr::Literal(Literal::Integer(5)))
                 },
@@ -241,7 +245,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 )]
 #[case::nested_foreach_with_select(
     Expr::Foreach(Box::new(ForeachStatement {
-        param: Param::new("user".to_string()),
+        param: Param::from("user".to_string()),
         range: Expr::Select(Box::new(SelectStatement {
             fields: Fields::all(),
             omit: vec![],
@@ -266,8 +270,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
                 exprs: vec![(
                     Expr::Binary {
                         left: Box::new(Expr::Idiom(Idiom(vec![
-                            crate::sql::Part::Field(Strand::new_static("user")),
-                            crate::sql::Part::Field(Strand::new_static("active"))
+                            crate::expr::Part::Field(Strand::new_static("user")),
+                            crate::expr::Part::Field(Strand::new_static("active"))
                         ]))),
                         op: BinaryOperator::Equal,
                         right: Box::new(Expr::Literal(Literal::Bool(true)))
@@ -276,7 +280,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
                         Expr::Create(Box::new(CreateStatement {
                             only: false,
                             what: vec![Expr::Table("active_users".into())],
-                            data: Some(Data::ContentExpression(Expr::Param(Param::new("user".to_string())))),
+                            data: Some(Data::ContentExpression(Expr::Param(Param::from("user".to_string())))),
                             output: None,
                             timeout: Expr::Literal(Literal::None),
                         }))
@@ -342,9 +346,9 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
         base: None,
         subject: Subject::Record(RecordIdLit { table: "user".into(), key: RecordIdKeyLit::Number(123) }),
     }))), "ACCESS user GRANT FOR RECORD user:123", "ACCESS user GRANT FOR RECORD user:123")]
-#[case::top_level_kill(TopLevelExpr::Kill(KillStatement { id: Expr::Param(Param::new("id".to_string())) }), "KILL $id", "KILL $id")]
-#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Select(Fields::all()), what: Expr::Table("user".into()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
-#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Diff, what: Expr::Table("user".into()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
+#[case::top_level_kill(TopLevelExpr::Kill(KillStatement { id: Expr::Param(Param::from("id".to_string())) }), "KILL $id", "KILL $id")]
+#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { id: uuid::Uuid::nil(), node: uuid::Uuid::nil(), fields: LiveFields::Select(Fields::all()), what: Expr::Table("user".into()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
+#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { id: uuid::Uuid::nil(), node: uuid::Uuid::nil(), fields: LiveFields::Diff, what: Expr::Table("user".into()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".into(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
 #[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("ns".to_string())), Expr::Idiom(Idiom::field("db".to_string())))), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".into()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]

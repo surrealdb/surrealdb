@@ -8,9 +8,9 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
+surrealdb-expr = { path = "../../expr" }
 bytes = "1"
 libfuzzer-sys = "0.4.12"
-surrealdb-parser-next-lower = { path = "../lower" }
 surrealdb-types = { path = "../../types", default-features = false }
 
 # Kept out of the main workspace, as cargo-fuzz builds with its own flags.

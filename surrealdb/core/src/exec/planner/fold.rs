@@ -1800,7 +1800,8 @@ mod tests {
 		let ast = syn::parse(sql).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement in {sql:?}");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(select)) =
+			exprs.remove(0)
 		else {
 			panic!("`{sql}` is not a SELECT");
 		};
@@ -2343,7 +2344,8 @@ mod planned_tests {
 	fn lower(sql: &str) -> LogicalOp {
 		let ast = syn::parse(sql).expect("parse");
 		let mut exprs = ast.expressions;
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(select)) =
+			exprs.remove(0)
 		else {
 			panic!("`{sql}` is not a SELECT");
 		};

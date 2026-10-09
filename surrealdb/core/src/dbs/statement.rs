@@ -28,7 +28,7 @@ pub(crate) const FOR_UPDATE_LIMIT_ERROR: &str =
 /// `FOR UPDATE` locks the selected records for the duration of the
 /// enclosing transaction, so it only supports plain reads of specific
 /// records: VERSION, GROUP BY, and SPLIT are rejected, and every FROM
-/// target must be a record id (see [`check_for_update_targets_ast`]).
+/// target must be a record id (see [`check_for_update_targets`]).
 ///
 /// LIMIT is also rejected alongside more than one FROM target: the executor
 /// stops pulling from the sources once the limit is filled, so the targets
@@ -44,13 +44,13 @@ pub(crate) const FOR_UPDATE_LIMIT_ERROR: &str =
 /// leaves no trace of the clause in the plan.
 ///
 /// A no-op when the statement does not carry `FOR UPDATE`.
-pub(crate) fn validate_for_update_ast(
-	stm: &crate::sql::statements::SelectStatement,
+pub(crate) fn validate_for_update(
+	stm: &crate::expr::statements::SelectStatement,
 ) -> std::result::Result<(), crate::exec::Error> {
-	use crate::sql::{Expr, Literal};
+	use crate::expr::{Expr, Literal};
 	for expr in &stm.what {
 		if let Expr::Select(inner) = expr {
-			validate_for_update_ast(inner)?;
+			validate_for_update(inner)?;
 		}
 	}
 	if !stm.for_update {
@@ -71,7 +71,7 @@ pub(crate) fn validate_for_update_ast(
 			message: FOR_UPDATE_LIMIT_ERROR.to_string(),
 		});
 	}
-	check_for_update_targets_ast(&stm.what)
+	check_for_update_targets(&stm.what)
 }
 
 /// Check that every statically-classifiable FROM target of a `FOR UPDATE`
@@ -80,11 +80,11 @@ pub(crate) fn validate_for_update_ast(
 /// Targets whose shape is only known at runtime — params, function calls, and
 /// call/method postfix expressions — pass this check and must be re-validated
 /// at the site where they resolve to a value.
-fn check_for_update_targets_ast<'a>(
-	what: impl IntoIterator<Item = &'a crate::sql::Expr>,
+fn check_for_update_targets<'a>(
+	what: impl IntoIterator<Item = &'a crate::expr::Expr>,
 ) -> std::result::Result<(), crate::exec::Error> {
-	use crate::sql::operator::PostfixOperator;
-	use crate::sql::{Expr, Literal, RecordIdKeyLit};
+	use crate::expr::operator::PostfixOperator;
+	use crate::expr::{Expr, Literal, RecordIdKeyLit};
 	for expr in what {
 		match expr {
 			Expr::Literal(Literal::RecordId(rid))

@@ -4989,8 +4989,6 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-iam",
  "surrealdb-kvs",
- "surrealdb-parser-next-lower",
- "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-types",
  "thiserror",
@@ -5098,11 +5096,9 @@ dependencies = [
  "surrealdb-mysql",
  "surrealdb-observe",
  "surrealdb-parse-common",
- "surrealdb-parser-next-lower",
  "surrealdb-pgsql",
  "surrealdb-rpc",
  "surrealdb-runtime",
- "surrealdb-sql",
  "surrealdb-sqlplan",
  "surrealdb-strand",
  "surrealdb-types",
@@ -5170,6 +5166,7 @@ dependencies = [
  "http",
  "jsonwebtoken",
  "lexicmp",
+ "phf",
  "quick_cache",
  "rand 0.9.4",
  "revision 0.30.0",
@@ -5183,13 +5180,14 @@ dependencies = [
  "surrealdb-common",
  "surrealdb-iam",
  "surrealdb-kvs",
- "surrealdb-parser-next-lower",
- "surrealdb-sql",
+ "surrealdb-parse-common",
+ "surrealdb-parser-next",
  "surrealdb-strand",
  "surrealdb-types",
  "thiserror",
  "tracing",
  "ulid",
+ "unicase",
  "uuid",
 ]
 
@@ -5409,23 +5407,6 @@ name = "surrealdb-parser-next"
 version = "3.4.0-nightly"
 
 [[package]]
-name = "surrealdb-parser-next-lower"
-version = "3.4.0-nightly"
-dependencies = [
- "bytes",
- "surrealdb-cnf",
- "surrealdb-common",
- "surrealdb-iam",
- "surrealdb-parse-common",
- "surrealdb-parser-next",
- "surrealdb-sql",
- "surrealdb-strand",
- "surrealdb-types",
- "thiserror",
- "tracing",
-]
-
-[[package]]
 name = "surrealdb-pgsql"
 version = "3.4.0-nightly"
 dependencies = [
@@ -5510,32 +5491,10 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-expr",
- "surrealdb-parser-next-lower",
  "surrealdb-strand",
  "surrealdb-types",
  "ulid",
  "url",
- "uuid",
-]
-
-[[package]]
-name = "surrealdb-sql"
-version = "3.4.0-nightly"
-dependencies = [
- "bytes",
- "chrono",
- "geo-types",
- "getrandom 0.3.4",
- "hex",
- "phf",
- "rand 0.9.4",
- "rust_decimal",
- "serde",
- "surrealdb-common",
- "surrealdb-iam",
- "surrealdb-strand",
- "surrealdb-types",
- "unicase",
  "uuid",
 ]
 
@@ -5713,7 +5672,6 @@ dependencies = [
  "surrealdb-gql",
  "surrealdb-kvs",
  "surrealdb-parse-common",
- "surrealdb-parser-next-lower",
  "surrealdb-rpc",
  "surrealdb-types",
  "tokio",

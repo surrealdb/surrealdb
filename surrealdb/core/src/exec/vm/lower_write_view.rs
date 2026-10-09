@@ -106,8 +106,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 						}
 						_ => None,
 					};
-					let logical = crate::expr::logical::lower_fields(fields.clone().into())
-						.map_err(|e| {
+					let logical =
+						crate::expr::logical::lower_fields(fields.clone()).map_err(|e| {
 							NotCovered::internal(format!(
 								"a view's fields have no logical form: {e}"
 							))
@@ -353,6 +353,6 @@ fn extremes_of(analysis: &AggregationAnalysis) -> Vec<(String, usize)> {
 
 /// The logical form of a stored view clause.
 fn logical_of(expr: &crate::expr::Expr) -> Lowered<LogicalExpr> {
-	crate::expr::logical::lower_expr(expr.clone().into())
+	crate::expr::logical::lower_expr(expr.clone())
 		.map_err(|e| NotCovered::internal(format!("a view's clause has no logical form: {e}")))
 }

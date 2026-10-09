@@ -129,8 +129,7 @@ impl ProjectionFunction for TypeField {
 			let (path,): (String,) = FromArgs::from_args("type::field", args)?;
 
 			let idiom: Idiom = syn::idiom(&path)
-				.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
-				.into();
+				.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?;
 
 			let value = if let Some(current) = ctx.current_value {
 				evaluate_idiom_on_value(current, &idiom.0, ctx.clone()).await?
@@ -175,8 +174,7 @@ impl ProjectionFunction for TypeFields {
 
 			for path in paths {
 				let idiom: Idiom = syn::idiom(&path)
-					.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
-					.into();
+					.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?;
 
 				let value = if let Some(current) = ctx.current_value {
 					evaluate_idiom_on_value(current, &idiom.0, ctx.clone()).await?

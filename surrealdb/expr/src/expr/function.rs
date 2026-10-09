@@ -1,6 +1,7 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, Idiom, Model, Script};
+use crate::expr::{CoverStmts, Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Function {
@@ -57,7 +58,7 @@ impl Function {
 			| Self::Silo {
 				..
 			} => false,
-			Self::Normal(f) => !crate::sql::method::is_writer_builtin(f),
+			Self::Normal(f) => !crate::expr::method::is_writer_builtin(f),
 			Self::Model(_) => true,
 		}
 	}
@@ -78,7 +79,68 @@ impl FunctionCall {
 
 impl ToSql for FunctionCall {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let fnc: crate::sql::FunctionCall = self.clone().into();
-		fnc.fmt_sql(f, fmt);
+		match self.receiver {
+			Function::Normal(ref s) => {
+				for (idx, s) in s.split("::").enumerate() {
+					if idx != 0 {
+						f.push_str("::");
+					} else {
+						write_sql!(f, fmt, "{}", EscapeIdent(s));
+						continue;
+					}
+					s.fmt_sql(f, fmt);
+				}
+			}
+			Function::Custom(ref s) => {
+				f.push_str("fn");
+				for s in s.split("::") {
+					f.push_str("::");
+					write_sql!(f, fmt, "{}", EscapeKwFreeIdent(s));
+				}
+			}
+			Function::Script(ref s) => {
+				write_sql!(
+					f,
+					fmt,
+					"function({}) {{{s}}}",
+					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
+				);
+				return;
+			}
+			Function::Model(ref m) => {
+				write_sql!(f, fmt, "{m}");
+			}
+			Function::Module(ref m, ref s) => {
+				f.push_str("mod::");
+				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(m));
+				if let Some(s) = s {
+					for segment in s.split("::") {
+						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
+					}
+				}
+			}
+			Function::Silo {
+				ref org,
+				ref pkg,
+				ref major,
+				ref minor,
+				ref patch,
+				ref sub,
+			} => {
+				write_sql!(
+					f,
+					fmt,
+					"silo::{}::{}::<{major}.{minor}.{patch}>",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg),
+				);
+				if let Some(s) = sub {
+					for segment in s.split("::") {
+						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
+					}
+				}
+			}
+		}
+		write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}
 }

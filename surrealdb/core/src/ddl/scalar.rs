@@ -127,13 +127,13 @@ pub(crate) fn type_fields_paths(value: Value) -> Result<Vec<Idiom>> {
 	let raws = value
 		.coerce_to::<Vec<String>>()
 		.map_err(|_| anyhow::anyhow!("Expected an array of strings"))?;
-	raws.into_iter().map(|raw| Ok(crate::syn::idiom(&raw)?.into())).collect()
+	raws.into_iter().map(|raw| crate::syn::idiom(&raw)).collect()
 }
 
 /// Read an evaluated `type::field` argument as the path it names.
 pub(crate) fn type_field_path(value: Value) -> Result<Idiom> {
 	let raw = value.coerce_to::<String>().map_err(|_| anyhow::anyhow!("Expected a string"))?;
-	Ok(crate::syn::idiom(&raw)?.into())
+	crate::syn::idiom(&raw)
 }
 
 #[cfg(test)]
@@ -271,12 +271,12 @@ mod tests {
 	use crate::expr::statements::{DefineStatement, RemoveStatement};
 
 	/// Parse exactly one statement and hand back its surface form.
-	fn parse_one(src: &str) -> crate::sql::Expr {
+	fn parse_one(src: &str) -> crate::expr::Expr {
 		let ast = crate::syn::parse(src).expect("statement should parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
 		match exprs.remove(0) {
-			crate::sql::TopLevelExpr::Expr(expr) => expr,
+			surrealdb_expr::parser::TopLevelExpr::Expr(expr) => expr,
 			other => panic!("expected a plain statement for {src:?}, got {other:?}"),
 		}
 	}
@@ -285,7 +285,7 @@ mod tests {
 	/// carried and executed as.
 	fn define(src: &str) -> DefineStatement {
 		match parse_one(src) {
-			crate::sql::Expr::Define(stmt) => (*stmt).into(),
+			crate::expr::Expr::Define(stmt) => (*stmt).into(),
 			other => panic!("expected a DEFINE for {src:?}, got {other:?}"),
 		}
 	}
@@ -293,7 +293,7 @@ mod tests {
 	/// Parse a `REMOVE`, as [`define`] does.
 	fn remove(src: &str) -> RemoveStatement {
 		match parse_one(src) {
-			crate::sql::Expr::Remove(stmt) => (*stmt).into(),
+			crate::expr::Expr::Remove(stmt) => (*stmt).into(),
 			other => panic!("expected a REMOVE for {src:?}, got {other:?}"),
 		}
 	}

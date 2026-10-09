@@ -1,10 +1,11 @@
 use std::ops::Bound;
 
+use common::fmt::{EscapeObjectKey, EscapeRidKey, Fmt, QuoteStr};
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, Kind, KindLiteral, RecordIdKeyRangeLit};
+use crate::expr::{CoverStmts, Expr, Kind, KindLiteral, RecordIdKeyRangeLit};
 use crate::val::{RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -66,8 +67,55 @@ impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 
 impl ToSql for RecordIdKeyLit {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_record_id_key_lit: crate::sql::RecordIdKeyLit = self.clone().into();
-		sql_record_id_key_lit.fmt_sql(f, fmt);
+		match self {
+			Self::Number(v) => write_sql!(f, fmt, "{v}"),
+			Self::String(v) => EscapeRidKey(v).fmt_sql(f, fmt),
+			Self::Uuid(v) => write_sql!(f, fmt, "u{}", QuoteStr(&v.to_string())),
+			Self::Array(v) => {
+				f.push('[');
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v.iter().map(CoverStmts)));
+				}
+				f.push(']');
+			}
+			Self::Object(v) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
+							args,
+							|entry, f, fmt| write_sql!(
+								f,
+								fmt,
+								"{}: {}",
+								EscapeObjectKey(&entry.key),
+								CoverStmts(&entry.value)
+							)
+						)),)
+					);
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Self::Generate(v) => match v {
+				RecordIdKeyGen::Rand => f.push_str("rand()"),
+				RecordIdKeyGen::Ulid => f.push_str("ulid()"),
+				RecordIdKeyGen::Uuid => f.push_str("uuid()"),
+			},
+			Self::Range(v) => v.fmt_sql(f, fmt),
+		}
 	}
 }
 

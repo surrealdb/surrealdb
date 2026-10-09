@@ -1,5 +1,8 @@
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::expr::statements::DefineAccessStatement;
-use crate::expr::{Algorithm, Expr, Literal};
+use crate::expr::{Algorithm, CoverStmts, Expr, Literal};
 
 /// The type of access methods available
 
@@ -189,4 +192,74 @@ impl BearerAccessType {
 pub enum BearerAccessSubject {
 	Record,
 	User,
+}
+
+impl ToSql for JwtAccess {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match &self.verify {
+			JwtAccessVerify::Key(v) => {
+				write_sql!(f, sql_fmt, "ALGORITHM {} KEY {}", v.alg, CoverStmts(&v.key));
+			}
+			JwtAccessVerify::Jwks(v) => {
+				write_sql!(f, sql_fmt, "URL {}", CoverStmts(&v.url));
+			}
+		}
+		if let Some(aud) = &self.audience {
+			write_sql!(
+				f,
+				sql_fmt,
+				" AUDIENCE {}",
+				Fmt::comma_separated(aud.iter().map(CoverStmts))
+			);
+		}
+		if let Some(iss) = &self.issue {
+			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", CoverStmts(&iss.key));
+		}
+	}
+}
+
+impl ToSql for AccessType {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			AccessType::Jwt(ac) => {
+				write_sql!(f, sql_fmt, "JWT {}", ac);
+			}
+			AccessType::Record(ac) => {
+				write_sql!(f, sql_fmt, "RECORD");
+				if let Some(ref v) = ac.signup {
+					write_sql!(f, sql_fmt, " SIGNUP {}", CoverStmts(v));
+				}
+				if let Some(ref v) = ac.signin {
+					write_sql!(f, sql_fmt, " SIGNIN {}", CoverStmts(v));
+				}
+				if ac.bearer.is_some() {
+					write_sql!(f, sql_fmt, " WITH REFRESH")
+				}
+				write_sql!(f, sql_fmt, " WITH JWT {}", ac.jwt);
+			}
+			AccessType::Bearer(ac) => {
+				write_sql!(f, sql_fmt, "BEARER");
+				match ac.subject {
+					BearerAccessSubject::User => write_sql!(f, sql_fmt, " FOR USER"),
+					BearerAccessSubject::Record => write_sql!(f, sql_fmt, " FOR RECORD"),
+				}
+				// `ac.jwt` is deliberately not rendered, which makes this the
+				// one access type whose text does not round-trip: reparsing it
+				// mints a fresh key rather than restoring this one.
+				//
+				// SECURITY: the alternative is worse. Every surface that
+				// renders an access redacts its symmetric keys first
+				// (`DefineAccessStatement::redact`), export included, so
+				// rendering the clause emits executable SurrealQL that names
+				// `[REDACTED]` as the signing secret — and a database restored
+				// from that dump verifies tokens anyone can forge. A random key
+				// is unusable; a published one is worse than unusable. The same
+				// render reaches the tracing span, the slow log and observers,
+				// where a real key does not belong either.
+				//
+				// Rendering this clause is correct only once redaction and
+				// restorability stop being the same code path.
+			}
+		}
+	}
 }

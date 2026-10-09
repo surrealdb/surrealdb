@@ -1,33 +1,29 @@
 //! The executor's unit of work.
 
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::dbs::QueryType;
+use crate::expr;
 use crate::expr::logical::{LogicalOp, RequestStatementKind};
 use crate::expr::statements::OptionStatement;
 use crate::observe::StatementType;
-use crate::{expr, sql};
 
-/// One top-level statement, in the form it arrived in.
+/// One runtime statement or logical plan supplied by a frontend.
 ///
-/// SurrealQL reaches the executor as the parser produced it and is converted
-/// to the expression layer one statement at a time, at the point an engine
-/// needs it. A batch that ends early never converts the statements it did not
-/// reach, and a streamed batch converts nothing before its first statement
-/// runs.
-///
-/// A front end that emits a plan rather than a statement hands the plan in
-/// directly: GQL lowers a `MATCH` query to a [`LogicalOp::Match`]. There is no
-/// surface syntax behind a plan, so nothing converts it, and it runs on the
-/// engine or fails.
+/// Parsed statements carry inert credentials and generated identities until
+/// execution reaches them. Frontends may instead supply a logical plan, which
+/// runs on the streaming engine.
 pub(crate) enum TopLevelStatement {
-	/// A statement in surface form, as the parser produced it.
-	Ast(sql::TopLevelExpr),
+	/// A runtime statement, as the parser produced it.
+	Ast(TopLevelExpr),
 	/// A plan that arrived already lowered.
 	Plan(Box<LogicalOp>),
+	/// SurrealQL compiled directly from flat syntax, retaining observer metadata.
+	Surreal(Box<surrealdb_expr::parser::LogicalStatement>),
 }
 
-/// What the executor's drivers act on before a statement is converted.
+/// What the executor's drivers act on before a statement runs.
 ///
 /// A [`TopLevelStatement`] collapses to this, so a driver matches one small
 /// enum rather than the surface statement's. Only what a driver has to
@@ -45,23 +41,23 @@ pub(crate) enum Dispatch {
 }
 
 impl TopLevelStatement {
-	/// What a driver acts on before anything is converted.
+	/// What a driver acts on before statement execution.
 	pub(crate) fn dispatch(&self) -> Dispatch {
 		match self {
 			TopLevelStatement::Ast(stmt) => match stmt {
-				sql::TopLevelExpr::Begin => Dispatch::Begin,
-				sql::TopLevelExpr::Cancel => Dispatch::Cancel,
-				sql::TopLevelExpr::Commit => Dispatch::Commit,
-				sql::TopLevelExpr::Option(stmt) => Dispatch::Option(stmt.clone().into()),
-				sql::TopLevelExpr::Access(_)
-				| sql::TopLevelExpr::Kill(_)
-				| sql::TopLevelExpr::Live(_)
-				| sql::TopLevelExpr::Use(_)
-				| sql::TopLevelExpr::Show(_)
-				| sql::TopLevelExpr::Expr(_) => Dispatch::Runnable,
+				TopLevelExpr::Begin => Dispatch::Begin,
+				TopLevelExpr::Cancel => Dispatch::Cancel,
+				TopLevelExpr::Commit => Dispatch::Commit,
+				TopLevelExpr::Option(stmt) => Dispatch::Option(stmt.clone()),
+				TopLevelExpr::Access(_)
+				| TopLevelExpr::Kill(_)
+				| TopLevelExpr::Live(_)
+				| TopLevelExpr::Use(_)
+				| TopLevelExpr::Show(_)
+				| TopLevelExpr::Expr(_) => Dispatch::Runnable,
 			},
 			// A plan is something an engine runs; no driver acts on it first.
-			TopLevelStatement::Plan(_) => Dispatch::Runnable,
+			TopLevelStatement::Plan(_) | TopLevelStatement::Surreal(_) => Dispatch::Runnable,
 		}
 	}
 
@@ -70,29 +66,30 @@ impl TopLevelStatement {
 	pub(crate) fn request_kind(&self) -> RequestStatementKind {
 		match self {
 			TopLevelStatement::Ast(stmt) => match stmt {
-				sql::TopLevelExpr::Begin => RequestStatementKind::Begin,
-				sql::TopLevelExpr::Commit => RequestStatementKind::Commit,
-				sql::TopLevelExpr::Cancel => RequestStatementKind::Cancel,
-				sql::TopLevelExpr::Option(_) => RequestStatementKind::Option,
-				sql::TopLevelExpr::Access(_)
-				| sql::TopLevelExpr::Kill(_)
-				| sql::TopLevelExpr::Live(_)
-				| sql::TopLevelExpr::Use(_)
-				| sql::TopLevelExpr::Show(_)
-				| sql::TopLevelExpr::Expr(_) => RequestStatementKind::Run,
+				TopLevelExpr::Begin => RequestStatementKind::Begin,
+				TopLevelExpr::Commit => RequestStatementKind::Commit,
+				TopLevelExpr::Cancel => RequestStatementKind::Cancel,
+				TopLevelExpr::Option(_) => RequestStatementKind::Option,
+				TopLevelExpr::Access(_)
+				| TopLevelExpr::Kill(_)
+				| TopLevelExpr::Live(_)
+				| TopLevelExpr::Use(_)
+				| TopLevelExpr::Show(_)
+				| TopLevelExpr::Expr(_) => RequestStatementKind::Run,
 			},
-			TopLevelStatement::Plan(_) => RequestStatementKind::Run,
+			TopLevelStatement::Plan(_) | TopLevelStatement::Surreal(_) => RequestStatementKind::Run,
 		}
 	}
 
 	/// Whether this statement can run inside a read-only transaction. See
-	/// [`sql::read_only`](crate::sql::read_only) for the one-sided contract
+	/// [`TopLevelExpr::read_only`] for the one-sided contract
 	/// the predicate upholds; [`LogicalOp::read_only`] upholds the same one
 	/// for a plan.
 	pub(crate) fn read_only(&self) -> bool {
 		match self {
 			TopLevelStatement::Ast(stmt) => stmt.read_only(),
 			TopLevelStatement::Plan(op) => op.read_only(),
+			TopLevelStatement::Surreal(stmt) => stmt.plan.read_only(),
 		}
 	}
 
@@ -116,9 +113,10 @@ impl TopLevelStatement {
 	/// This statement's bounded [`StatementType`] category.
 	pub(crate) fn statement_type(&self) -> StatementType {
 		match self {
-			TopLevelStatement::Ast(stmt) => sql_statement_type(stmt),
+			TopLevelStatement::Ast(stmt) => statement_type(stmt),
 			// A plan carries no statement kind to classify.
 			TopLevelStatement::Plan(_) => StatementType::Other,
+			TopLevelStatement::Surreal(stmt) => flat_statement_type(stmt.kind),
 		}
 	}
 
@@ -129,80 +127,16 @@ impl TopLevelStatement {
 	}
 }
 
-/// Statement text describes what will run, not what was typed.
-///
-/// SECURITY: a surface statement is rendered through its lowered form, never
-/// directly. Lowering `DEFINE USER ... PASSWORD 'secret'` replaces the
-/// password with the Argon2 hash and SCRAM verifier derived from it, so the
-/// lowered form carries no plaintext credential. Statement text reaches the
-/// tracing span and any observer that asks for it; rendering the surface form
-/// would put the plaintext password in both. The slow log prints a statement
-/// the engine ran in this form: a statement holds either no schema statement
-/// or is one, and the plan carries that statement in the same lowered form.
-/// A `DEFINE USER`
-/// nested inside a block, a function body or an `IF` branch is reached the
-/// same way, which is why this is a property of the whole render rather than a
-/// carve-out for one statement kind: every top-level kind that carries an
-/// expression goes through its lowered form, whatever position the credential
-/// sits in.
-///
-/// Rendering costs a lowering, and lowering a `PASSWORD` derives its Argon2
-/// hash and SCRAM verifier under a fresh salt. So the text names a credential
-/// equivalent to the stored one rather than the stored one itself, and a
-/// statement rendered at several sites derives one per site. Both follow from
-/// rendering through a form the surface statement does not itself hold; a
-/// render that redacted the credential instead would need neither.
-///
-/// A plan has no surface form and holds no credential; it renders as the plan
-/// it is.
+/// Observer text redacts password hashes, plaintext passwords and SCRAM
+/// verifiers throughout nested expressions without preparing credentials.
 impl ToSql for TopLevelStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			TopLevelStatement::Ast(stmt) => match stmt {
-				// No payload, so nothing to lower.
-				sql::TopLevelExpr::Begin
-				| sql::TopLevelExpr::Cancel
-				| sql::TopLevelExpr::Commit => stmt.fmt_sql(f, fmt),
-				sql::TopLevelExpr::Access(stmt) => {
-					render_lowered::<_, expr::statements::AccessStatement>(&**stmt, f, fmt)
-				}
-				sql::TopLevelExpr::Kill(stmt) => {
-					render_lowered::<_, expr::statements::KillStatement>(stmt, f, fmt)
-				}
-				sql::TopLevelExpr::Live(stmt) => {
-					render_lowered::<_, expr::statements::LiveStatement>(&**stmt, f, fmt)
-				}
-				sql::TopLevelExpr::Option(stmt) => {
-					render_lowered::<_, OptionStatement>(stmt, f, fmt)
-				}
-				sql::TopLevelExpr::Use(stmt) => {
-					render_lowered::<_, expr::statements::UseStatement>(stmt, f, fmt)
-				}
-				sql::TopLevelExpr::Show(stmt) => {
-					render_lowered::<_, expr::statements::ShowStatement>(stmt, f, fmt)
-				}
-				// The expression layer renders a bare expression itself.
-				sql::TopLevelExpr::Expr(expr) => expr::Expr::from(expr.clone()).fmt_sql(f, fmt),
-			},
-			TopLevelStatement::Plan(op) => op.fmt_sql(f, fmt),
+			Self::Ast(stmt) => stmt.fmt_redacted_sql(f, fmt),
+			Self::Plan(op) => op.fmt_sql(f, fmt),
+			Self::Surreal(stmt) => stmt.text.fmt_sql(f, fmt),
 		}
 	}
-}
-
-/// Render a statement through its lowered form: convert it to the expression
-/// layer and back, and render the surface form that returns. The lowering is
-/// what replaces a plaintext credential with the derived hash and verifier,
-/// and the expression layer renders these statement kinds by converting back
-/// to the surface form, so the round trip yields the text the lowered form
-/// renders.
-fn render_lowered<S, L>(stmt: &S, f: &mut String, fmt: SqlFormat)
-where
-	S: Clone + Into<L> + ToSql,
-	L: Into<S>,
-{
-	let lowered: L = stmt.clone().into();
-	let surface: S = lowered.into();
-	surface.fmt_sql(f, fmt);
 }
 
 /// The statement kinds that only read.
@@ -231,69 +165,95 @@ fn query_type(kind: StatementType) -> QueryType {
 	}
 }
 
-/// Classify a surface [`sql::TopLevelExpr`] into its bounded
+/// Classify a runtime [`TopLevelExpr`] into its bounded
 /// [`StatementType`] category.
-fn sql_statement_type(expr: &sql::TopLevelExpr) -> StatementType {
+fn statement_type(expr: &TopLevelExpr) -> StatementType {
 	match expr {
-		sql::TopLevelExpr::Begin => StatementType::Begin,
-		sql::TopLevelExpr::Cancel => StatementType::Cancel,
-		sql::TopLevelExpr::Commit => StatementType::Commit,
-		sql::TopLevelExpr::Access(_) => StatementType::Access,
-		sql::TopLevelExpr::Kill(_) => StatementType::Kill,
-		sql::TopLevelExpr::Live(_) => StatementType::Live,
-		sql::TopLevelExpr::Option(_) => StatementType::Option,
-		sql::TopLevelExpr::Use(_) => StatementType::Use,
-		sql::TopLevelExpr::Show(_) => StatementType::Show,
-		sql::TopLevelExpr::Expr(expr) => sql_expr_statement_type(expr),
+		TopLevelExpr::Begin => StatementType::Begin,
+		TopLevelExpr::Cancel => StatementType::Cancel,
+		TopLevelExpr::Commit => StatementType::Commit,
+		TopLevelExpr::Access(_) => StatementType::Access,
+		TopLevelExpr::Kill(_) => StatementType::Kill,
+		TopLevelExpr::Live(_) => StatementType::Live,
+		TopLevelExpr::Option(_) => StatementType::Option,
+		TopLevelExpr::Use(_) => StatementType::Use,
+		TopLevelExpr::Show(_) => StatementType::Show,
+		TopLevelExpr::Expr(expr) => expr_statement_type(expr),
 	}
 }
 
-/// Classify a bare [`sql::Expr`] into its bounded [`StatementType`] category.
-fn sql_expr_statement_type(expr: &sql::Expr) -> StatementType {
+/// Classify a bare [`expr::Expr`] into its bounded [`StatementType`] category.
+fn expr_statement_type(expr: &expr::Expr) -> StatementType {
 	match expr {
-		sql::Expr::Select(_) => StatementType::Select,
-		sql::Expr::Create(_) => StatementType::Create,
-		sql::Expr::Update(_) => StatementType::Update,
-		sql::Expr::Upsert(_) => StatementType::Upsert,
-		sql::Expr::Delete(_) => StatementType::Delete,
-		sql::Expr::Relate(_) => StatementType::Relate,
-		sql::Expr::Insert(_) => StatementType::Insert,
-		sql::Expr::Define(_) => StatementType::Define,
-		sql::Expr::Remove(_) => StatementType::Remove,
-		sql::Expr::Rebuild(_) => StatementType::Rebuild,
-		sql::Expr::Alter(_) => StatementType::Alter,
-		sql::Expr::Info(_) => StatementType::Info,
-		sql::Expr::Foreach(_) => StatementType::Foreach,
-		sql::Expr::IfElse(_) => StatementType::IfElse,
-		sql::Expr::Sleep(_) => StatementType::Sleep,
-		sql::Expr::Explain {
+		expr::Expr::Select(_) => StatementType::Select,
+		expr::Expr::Create(_) => StatementType::Create,
+		expr::Expr::Update(_) => StatementType::Update,
+		expr::Expr::Upsert(_) => StatementType::Upsert,
+		expr::Expr::Delete(_) => StatementType::Delete,
+		expr::Expr::Relate(_) => StatementType::Relate,
+		expr::Expr::Insert(_) => StatementType::Insert,
+		expr::Expr::Define(_) => StatementType::Define,
+		expr::Expr::Remove(_) => StatementType::Remove,
+		expr::Expr::Rebuild(_) => StatementType::Rebuild,
+		expr::Expr::Alter(_) => StatementType::Alter,
+		expr::Expr::Info(_) => StatementType::Info,
+		expr::Expr::Foreach(_) => StatementType::Foreach,
+		expr::Expr::IfElse(_) => StatementType::IfElse,
+		expr::Expr::Sleep(_) => StatementType::Sleep,
+		expr::Expr::Explain {
 			..
 		} => StatementType::Explain,
-		sql::Expr::Let(_) => StatementType::Let,
-		sql::Expr::Return(_) => StatementType::Return,
-		sql::Expr::Break => StatementType::Break,
-		sql::Expr::Continue => StatementType::Continue,
-		sql::Expr::Throw(_) => StatementType::Throw,
-		sql::Expr::Block(_) => StatementType::Block,
+		expr::Expr::Let(_) => StatementType::Let,
+		expr::Expr::Return(_) => StatementType::Return,
+		expr::Expr::Break => StatementType::Break,
+		expr::Expr::Continue => StatementType::Continue,
+		expr::Expr::Throw(_) => StatementType::Throw,
+		expr::Expr::Block(_) => StatementType::Block,
 		// Anything that isn't a recognised statement-shaped expression
 		// collapses to `Other`. Enumerated rather than using a wildcard so a
 		// new `Expr` variant forces a classification decision at compile time.
-		sql::Expr::Literal(_)
-		| sql::Expr::Param(_)
-		| sql::Expr::Idiom(_)
-		| sql::Expr::Table(_)
-		| sql::Expr::Mock(_)
-		| sql::Expr::Constant(_)
-		| sql::Expr::Prefix {
+		expr::Expr::Literal(_)
+		| expr::Expr::Param(_)
+		| expr::Expr::Idiom(_)
+		| expr::Expr::Table(_)
+		| expr::Expr::Mock(_)
+		| expr::Expr::Constant(_)
+		| expr::Expr::Prefix {
 			..
 		}
-		| sql::Expr::Postfix {
+		| expr::Expr::Postfix {
 			..
 		}
-		| sql::Expr::Binary {
+		| expr::Expr::Binary {
 			..
 		}
-		| sql::Expr::FunctionCall(_)
-		| sql::Expr::Closure(_) => StatementType::Other,
+		| expr::Expr::FunctionCall(_)
+		| expr::Expr::Closure(_) => StatementType::Other,
+	}
+}
+
+/// Observer categories are derived from syntax independently of plan shape.
+fn flat_statement_type(kind: surrealdb_expr::parser::StatementKind) -> StatementType {
+	use surrealdb_expr::parser::StatementKind as Kind;
+	match kind {
+		Kind::Select => StatementType::Select,
+		Kind::Create => StatementType::Create,
+		Kind::Update => StatementType::Update,
+		Kind::Upsert => StatementType::Upsert,
+		Kind::Delete => StatementType::Delete,
+		Kind::Relate => StatementType::Relate,
+		Kind::Insert => StatementType::Insert,
+		Kind::Info => StatementType::Info,
+		Kind::Foreach => StatementType::Foreach,
+		Kind::IfElse => StatementType::IfElse,
+		Kind::Sleep => StatementType::Sleep,
+		Kind::Explain => StatementType::Explain,
+		Kind::Let => StatementType::Let,
+		Kind::Return => StatementType::Return,
+		Kind::Break => StatementType::Break,
+		Kind::Continue => StatementType::Continue,
+		Kind::Throw => StatementType::Throw,
+		Kind::Block => StatementType::Block,
+		Kind::Other => StatementType::Other,
 	}
 }

@@ -3061,7 +3061,7 @@ pub(super) async fn bind(ctx: &ExecutionContext, sql: &str) -> LogicalOp {
 /// The one statement `sql` holds, parsed and lowered.
 pub(super) fn parse(sql: &str) -> LogicalOp {
 	let ast = crate::syn::parse(sql).expect("statement parses");
-	let crate::sql::TopLevelExpr::Expr(expr) =
+	let surrealdb_expr::parser::TopLevelExpr::Expr(expr) =
 		ast.expressions.into_iter().next().expect("one statement")
 	else {
 		panic!("not an expression statement: {sql}");

@@ -246,15 +246,7 @@ name = "surrealdb-gql"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-sql"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
 name = "surrealdb-parser-next"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
-name = "surrealdb-parser-next-lower"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -411,17 +403,7 @@ expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
-name = "surrealdb-sql"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
 name = "surrealdb-parser-next"
-expression = "BUSL-1.1"
-license-files = []
-
-[[licenses.clarify]]
-name = "surrealdb-parser-next-lower"
 expression = "BUSL-1.1"
 license-files = []
 

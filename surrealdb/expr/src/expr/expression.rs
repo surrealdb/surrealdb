@@ -1,8 +1,10 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{RecordId, SqlFormat, ToSql};
+use surrealdb_types::{RecordId, SqlFormat, ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::expr::closure::ClosureExpr;
+use crate::expr::lookup::LookupKind;
+use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -11,8 +13,8 @@ use crate::expr::statements::{
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, FunctionCall, Idiom, Literal, Mock, ObjectEntry, Param,
-	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+	BinaryOperator, Block, Constant, CoverStmts, Dir, FunctionCall, Idiom, Literal, Mock,
+	ObjectEntry, Param, Part, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::PublicValue;
 use crate::val::table_name_public::IntoTableName;
@@ -83,6 +85,24 @@ pub enum Expr {
 }
 
 impl Expr {
+	/// Prepare reached credentials and report whether a cached lowering needs
+	/// the resulting payload. Already-prepared expressions return `false`.
+	pub fn prepare_credentials_changed(&mut self) -> bool {
+		super::credentials::prepare_changed(self)
+	}
+
+	/// Prepare credentials once, when a statement is admitted for execution.
+	pub fn prepare_credentials(&mut self) {
+		super::credentials::prepare(self);
+	}
+
+	/// Render statement text with credential material removed.
+	pub fn to_redacted_sql(&self) -> String {
+		let mut value = self.clone();
+		super::credentials::redact(&mut value);
+		value.to_sql()
+	}
+
 	/// Check if this expression does only reads.
 	pub fn read_only(&self) -> bool {
 		match self {
@@ -383,11 +403,8 @@ impl Expr {
 		}
 	}
 
-	// NOTE: Changes to this function also likely require changes to
-	// crate::sql::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
-	#[allow(dead_code)]
-	fn needs_parentheses(&self) -> bool {
+	pub fn needs_parentheses(&self) -> bool {
 		match self {
 			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
 			| Expr::Closure(_)
@@ -415,6 +432,17 @@ impl Expr {
 				..
 			} => true,
 
+			Expr::Postfix {
+				op,
+				..
+			} => matches!(
+				op,
+				PostfixOperator::Range
+					| PostfixOperator::RangeSkip
+					| PostfixOperator::MethodCall(_, _)
+					| PostfixOperator::Call(_)
+			),
+
 			Expr::Literal(_)
 			| Expr::Param(_)
 			| Expr::Idiom(_)
@@ -425,35 +453,246 @@ impl Expr {
 			| Expr::Prefix {
 				..
 			}
-			| Expr::Postfix {
-				..
-			}
 			| Expr::Binary {
 				..
 			}
 			| Expr::FunctionCall(_) => false,
 		}
 	}
+
+	/// Returns true if there is a `NONE` or `NULL` value in the left most spot when formatting.
+	/// returns true for `NONE + 1`, `NULL()`, `NONE`, `NULL..` etc.
+	///
+	/// Required for proper formatting when `NONE` can conflict with a clause.
+	pub fn has_left_none_null(&self) -> bool {
+		match self {
+			Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => true,
+			Expr::Binary {
+				left: expr,
+				..
+			}
+			| Expr::Postfix {
+				expr,
+				..
+			} => expr.has_left_none_null(),
+			Expr::Idiom(x) => {
+				if let Some(Part::Start(x)) = x.0.first() {
+					x.has_left_none_null()
+				} else {
+					false
+				}
+			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_minus(&self) -> bool {
+		match self {
+			Expr::Prefix {
+				op: PrefixOperator::Negate,
+				..
+			} => true,
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_minus(),
+			Expr::Literal(Literal::Integer(x)) => x.is_negative(),
+			Expr::Literal(Literal::Float(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::Decimal(x)) => x.is_sign_negative(),
+			Expr::Idiom(x) => {
+				if let Some(x) = x.0.first()
+					&& let Part::Lookup(lookup) = x
+					&& let LookupKind::Graph(Dir::Out) = lookup.kind
+				{
+					return true;
+				}
+				false
+			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_idiom(&self) -> bool {
+		match self {
+			Expr::Idiom(_) => true,
+
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_idiom(),
+			_ => false,
+		}
+	}
 }
 
 impl ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_expr: crate::sql::Expr = self.clone().into();
-		sql_expr.fmt_sql(f, fmt);
+		match self {
+			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
+			Expr::Param(param) => param.fmt_sql(f, fmt),
+			Expr::Idiom(idiom) => idiom.fmt_sql(f, fmt),
+			Expr::Table(ident) => {
+				write_sql!(f, fmt, "{}", common::fmt::EscapeIdent(ident.as_str()))
+			}
+			Expr::Mock(mock) => mock.fmt_sql(f, fmt),
+			Expr::Block(block) => block.fmt_sql(f, fmt),
+			Expr::Constant(constant) => constant.fmt_sql(f, fmt),
+			Expr::Prefix {
+				op,
+				expr,
+			} => {
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_prefix_operator(op);
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					// We need to avoid `--` from showing up so we need to cover if the expression
+					// has a left minus
+					|| *op == PrefixOperator::Negate && expr.has_left_minus()
+				{
+					write_sql!(f, fmt, "{op}({expr})");
+				} else {
+					write_sql!(f, fmt, "{op}{expr}");
+				}
+			}
+			Expr::Postfix {
+				expr,
+				op,
+			} => {
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_postfix_operator(op);
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					|| matches!(op, PostfixOperator::Call(_))
+				{
+					write_sql!(f, fmt, "({expr}){op}");
+				} else {
+					write_sql!(f, fmt, "{expr}{op}");
+				}
+			}
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				let op_bp = BindingPower::for_binary_operator(op);
+				let left_bp = BindingPower::for_expr(left);
+				let right_bp = BindingPower::for_expr(right);
+
+				// A left-associative operator's default nesting already puts a
+				// same-power child on the left (`a - b + c` parses as
+				// `(a - b) + c`), so equal power there needs no parentheses.
+				// `Power` is right-associative, so the opposite holds: a
+				// same-power left child only exists because it was explicitly
+				// parenthesised (`(a ** b) ** c`), and dropping the parens
+				// would reparse it right-associatively instead.
+				if left.needs_parentheses()
+					|| left_bp < op_bp
+					|| left_bp == op_bp
+						&& matches!(
+							left_bp,
+							BindingPower::Range
+								| BindingPower::Relation | BindingPower::Equality
+								| BindingPower::Power
+						) {
+					write_sql!(f, fmt, "({left})");
+				} else {
+					write_sql!(f, fmt, "{left}");
+				}
+
+				if matches!(
+					op,
+					BinaryOperator::Range
+						| BinaryOperator::RangeSkip
+						| BinaryOperator::RangeInclusive
+						| BinaryOperator::RangeSkipInclusive
+				) {
+					op.fmt_sql(f, fmt);
+				} else {
+					f.push(' ');
+					op.fmt_sql(f, fmt);
+					f.push(' ');
+				}
+
+				// Mirror image of the left operand: a same-power right child
+				// under a left-associative operator only exists because it
+				// was explicitly parenthesised (`a - (b + c)`, `a / (b * c)`),
+				// since default left-associative nesting never produces one.
+				// Dropping the parentheses would reparse it left-associatively
+				// instead, changing the value for any non-associative pairing
+				// within the group (`-` vs `+`, `/` vs `*`). `Power` is
+				// right-associative, so its default nesting already matches
+				// and needs no parentheses here.
+				if right.needs_parentheses()
+					|| right_bp < op_bp
+					|| right_bp == op_bp
+						&& matches!(
+							right_bp,
+							BindingPower::Range
+								| BindingPower::Relation | BindingPower::Equality
+								| BindingPower::AddSub | BindingPower::MulDiv
+						) {
+					write_sql!(f, fmt, "({right})");
+				} else {
+					write_sql!(f, fmt, "{right}");
+				}
+			}
+			Expr::FunctionCall(function_call) => function_call.fmt_sql(f, fmt),
+			Expr::Closure(closure) => closure.fmt_sql(f, fmt),
+			Expr::Break => f.push_str("BREAK"),
+			Expr::Continue => f.push_str("CONTINUE"),
+			Expr::Return(x) => x.fmt_sql(f, fmt),
+			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {}", CoverStmts(expr.as_ref())),
+			Expr::IfElse(s) => s.fmt_sql(f, fmt),
+			Expr::Select(s) => s.fmt_sql(f, fmt),
+			Expr::Create(s) => s.fmt_sql(f, fmt),
+			Expr::Update(s) => s.fmt_sql(f, fmt),
+			Expr::Delete(s) => s.fmt_sql(f, fmt),
+			Expr::Relate(s) => s.fmt_sql(f, fmt),
+			Expr::Insert(s) => s.fmt_sql(f, fmt),
+			Expr::Define(s) => s.fmt_sql(f, fmt),
+			Expr::Remove(s) => s.fmt_sql(f, fmt),
+			Expr::Rebuild(s) => s.fmt_sql(f, fmt),
+			Expr::Upsert(s) => s.fmt_sql(f, fmt),
+			Expr::Alter(s) => s.fmt_sql(f, fmt),
+			Expr::Info(s) => s.fmt_sql(f, fmt),
+			Expr::Foreach(s) => s.fmt_sql(f, fmt),
+			Expr::Let(s) => s.fmt_sql(f, fmt),
+			Expr::Sleep(s) => s.fmt_sql(f, fmt),
+			Expr::Explain {
+				format: explain_format,
+				analyze,
+				statement,
+			} => {
+				f.push_str("EXPLAIN");
+				if *analyze {
+					f.push_str(" ANALYZE");
+				}
+				match explain_format {
+					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
+					ExplainFormat::Json => f.push_str(" FORMAT JSON"),
+				}
+				f.push(' ');
+				statement.fmt_sql(f, fmt);
+			}
+		}
 	}
 }
 
 impl Expr {
-	/// Renders the canonical SurrealQL text a catalog definition stores for
-	/// this expression (e.g. a `StoredFieldDefinition.value`), matching exactly
-	/// what the old `sql::Expr`-embedding definition used to render when
-	/// nested after a clause keyword (`VALUE`, `ASSERT`, `WHEN`, ...) —
-	/// including the parenthesization `CoverStmts` applies to statement-shaped
-	/// sub-expressions (e.g. a nested `SELECT`), so the stored text is safe to
-	/// splice back in after that keyword with no further wrapping.
+	/// Renders canonical catalog text, wrapping statement-shaped subexpressions
+	/// for use after a clause keyword and deriving any unprepared credentials.
 	pub fn to_stored_sql(&self) -> String {
-		let sql_expr: crate::sql::Expr = self.clone().into();
-		crate::sql::CoverStmts(&sql_expr).to_sql()
+		crate::expr::CoverStmts(&super::credentials::for_storage(self)).to_sql()
 	}
 }
 
@@ -474,7 +713,10 @@ impl SerializeRevisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
+		SerializeRevisioned::serialize_revisioned(
+			&super::credentials::for_storage(self).to_sql(),
+			writer,
+		)
 	}
 }
 
@@ -484,10 +726,10 @@ impl DeserializeRevisioned for Expr {
 
 		// The wire format is engine-rendered SurrealQL text, parsed under the
 		// stored-text profile and consumed whole, for the reasons
-		// `syn::expr_for_definition` documents.
-		let expr = crate::syn::expr_for_definition(&query)
+		// `parser::expr_for_definition` documents.
+		let expr = crate::parser::expr_for_definition(&query)
 			.map_err(|err| revision::Error::Conversion(err.to_string()))?;
-		Ok(expr.into())
+		Ok(expr)
 	}
 }
 

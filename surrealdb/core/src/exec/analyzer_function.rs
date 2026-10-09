@@ -28,10 +28,9 @@ use crate::catalog::providers::DatabaseProvider as _;
 use crate::exe::FlowResultExt as _;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{Error as ExecError, ExecutionContext};
-use crate::expr::convert::analyzer_function::function_from_storage;
+use crate::expr::analyzer_function::{function_from_storage, qualified_name};
 use crate::expr::{Expr, FunctionCall};
 use crate::idx::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
-use crate::sql::analyzer_function::qualified_name;
 use crate::val::Value;
 
 /// The parameter the text is bound to.
@@ -97,7 +96,7 @@ impl<'a> StreamingAnalyzerFunction<'a> {
 			receiver,
 			arguments: vec![Expr::Param(INPUT.to_owned().into())],
 		}));
-		let logical = crate::expr::logical::lower_expr(expr.into())?;
+		let logical = crate::expr::logical::lower_expr(expr)?;
 		// Served from the compile cache by the call as written
 		// ([`crate::exec::vm::serve`]).
 		let compiled = crate::exec::vm::serve::expr(

@@ -126,7 +126,8 @@ async fn evaluate_nested(
 	match prepared {
 		Prepared::Statements(statements) => {
 			let mut result = Value::None;
-			for stmt in statements {
+			for mut stmt in statements {
+				stmt.prepare_credentials();
 				let op = lower(stmt).map_err(|reason| ExecError::PlannerUnsupported {
 					reason: reason.to_string(),
 				})?;

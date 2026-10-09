@@ -4317,7 +4317,7 @@ impl<'ctx> Planner<'ctx> {
 /// is not a path.
 fn parse_field_path(text: &str) -> Option<LogicalExpr> {
 	let idiom = crate::syn::idiom(text).ok()?;
-	let path = lower_expr(crate::sql::Expr::Idiom(idiom)).ok()?;
+	let path = lower_expr(crate::expr::Expr::Idiom(idiom)).ok()?;
 	path.is_path().then_some(path)
 }
 
@@ -5317,7 +5317,8 @@ mod tests {
 		let ast = syn::parse(sql).expect("parse");
 		let mut exprs = ast.expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement in {sql:?}");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(select)) =
+			exprs.remove(0)
 		else {
 			panic!("`{sql}` is not a SELECT");
 		};
@@ -5565,7 +5566,8 @@ mod tests {
 		fn sources_of(sql: &str) -> Vec<LogicalOp> {
 			let ast = syn::parse(sql).expect("parse");
 			let mut exprs = ast.expressions;
-			let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(select)) = exprs.remove(0)
+			let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(select)) =
+				exprs.remove(0)
 			else {
 				panic!("`{sql}` is not a SELECT");
 			};
@@ -5600,7 +5602,7 @@ mod tests {
 
 	#[test]
 	fn restricted_prefix_matches_by_leading_parts() {
-		let secret: Idiom = crate::syn::idiom("meta.secret").expect("idiom").into();
+		let secret: Idiom = crate::syn::idiom("meta.secret").expect("idiom");
 		let restricted = RestrictedPrefixes::Some(vec![
 			crate::expr::logical::FieldPath::from_idiom(&secret).expect("field path"),
 		]);

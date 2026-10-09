@@ -1,3 +1,5 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::expr::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -12,5 +14,13 @@ impl Default for DefaultConfig {
 			namespace: Expr::Literal(Literal::None),
 			database: Expr::Literal(Literal::None),
 		}
+	}
+}
+
+impl ToSql for DefaultConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, " DEFAULT");
+		write_sql!(f, fmt, " NAMESPACE {}", self.namespace);
+		write_sql!(f, fmt, " DATABASE {}", self.database);
 	}
 }

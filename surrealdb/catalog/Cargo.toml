@@ -18,7 +18,6 @@ graphql = []
 arbitrary = [
     "dep:arbitrary",
     "surrealdb-expr/arbitrary",
-    "surrealdb-sql/arbitrary",
     "surrealdb-types/arbitrary",
     "surrealdb-strand/arbitrary",
     "common/arbitrary",
@@ -39,9 +38,7 @@ storekey.workspace = true
 surrealdb-expr = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
-surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
-surrealdb-parser-next-lower = { workspace = true }
 surrealdb-types = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true

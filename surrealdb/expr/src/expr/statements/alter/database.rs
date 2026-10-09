@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Executes `ALTER DATABASE` operations.
@@ -10,8 +10,10 @@ pub struct AlterDatabaseStatement {
 }
 
 impl ToSql for AlterDatabaseStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterDatabaseStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, _fmt, "ALTER DATABASE");
+		if self.compact {
+			write_sql!(f, _fmt, " COMPACT");
+		}
 	}
 }

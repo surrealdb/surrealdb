@@ -9,6 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use surrealdb_datastore::close::CommitAction;
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 use web_time::Instant;
 
@@ -21,6 +22,7 @@ use crate::dbs::{
 	DefaultBroker, Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem,
 	QueryType, RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
 };
+use crate::err;
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::plan_statement_inner;
@@ -42,7 +44,6 @@ use crate::observe::{
 };
 use crate::rpc::types_error_from_anyhow;
 use crate::val::{Array, Value, convert_result_rows_to_public, convert_value_to_public_value};
-use crate::{err, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -1355,7 +1356,7 @@ impl Executor {
 	/// error: `PlannerUnsupported`, carrying the reason.
 	async fn run_on_streaming_engine(
 		&mut self,
-		expr: sql::Expr,
+		expr: Expr,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
@@ -1385,17 +1386,11 @@ impl Executor {
 				let stream_rows = self.streams_rows();
 				let exec_result =
 					self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
-				// Logged through the lowered form, never the surface text: a
-				// schema statement's surface text names the credential the
-				// conversion has already replaced with its derivation
-				// (`DEFINE USER ... PASSWORD`), and one can sit anywhere an
-				// expression can: inside a block, an `IF` branch, a function
-				// body. Converting here makes the entry safe wherever it sits
-				// rather than only where the statement is one. The parameters
-				// are read from the plan, whose scalars name every `$param`
-				// the statement references.
+				// Statement rendering redacts credentials in every nested position;
+				// the plan supplies the parameters referenced by the statement.
 				if let Some(op) = logged {
-					self.check_slow_log(start, &Expr::from(expr.clone()), &PlanParams(&op));
+					let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(expr));
+					self.check_slow_log(start, &statement, &PlanParams(&op));
 				}
 				exec_result
 			}
@@ -1430,10 +1425,10 @@ impl Executor {
 	/// [`crate::exec::logical::unplannable_write`] inside `plan_statement_inner`.
 	///
 	/// A `SELECT` is checked against the `FOR UPDATE` rules before lowering,
-	/// on the surface form the parser produced.
-	fn lower_bare_expression(&self, expr: &sql::Expr) -> Result<LogicalOp, Error> {
-		if let sql::Expr::Select(select) = expr {
-			crate::dbs::validate_for_update_ast(select)?;
+	/// on the runtime syntax the parser produced.
+	fn lower_bare_expression(&self, expr: &Expr) -> Result<LogicalOp, Error> {
+		if let Expr::Select(select) = expr {
+			crate::dbs::validate_for_update(select)?;
 		}
 		lower(expr.clone()).map_err(|reason| {
 			ExecError::PlannerUnsupported {
@@ -1462,22 +1457,9 @@ impl Executor {
 		.await
 	}
 
-	/// Executes a statement which needs a transaction with the supplied
-	/// transaction.
-	///
-	/// A statement is converted no further than it requires, and only once it
-	/// is about to run: a batch that ends before reaching a statement converts
-	/// nothing of it, and a statement the engine plans is never
-	/// converted whole. What a surface statement converts is stated on
-	/// [`Self::run_surface_statement`]; a plan converts nothing and goes to
-	/// [`Self::run_logical_plan`].
-	///
-	/// The transaction is already open by the time this runs, so whatever does
-	/// convert converts inside it and counts against the transaction timeout.
-	/// That is free for most statements and is not for
-	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
-	/// Argon2 hash and a SCRAM verifier: deliberately expensive, and with no
-	/// yield point. A schema statement converts once, during lowering.
+	/// Execute one statement using an open transaction.
+	/// Credentials are prepared when execution reaches the statement, inside
+	/// the transaction timeout. Rendering does not prepare credentials.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -1501,6 +1483,7 @@ impl Executor {
 		let res = match stmt {
 			TopLevelStatement::Ast(stmt) => self.run_surface_statement(stmt, txn, start).await,
 			TopLevelStatement::Plan(op) => self.run_logical_plan(op, txn, start).await,
+			TopLevelStatement::Surreal(stmt) => self.run_flat_statement(*stmt, txn, start).await,
 		};
 
 		// Catch cancellation during running.
@@ -1515,23 +1498,22 @@ impl Executor {
 		}
 	}
 
-	/// Run a statement in the form the parser produced it.
-	///
-	/// Each arm converts its own payload and nothing else, so a statement pays
-	/// only for the conversion it needs: `KILL` converts a `KillStatement`
-	/// rather than the statement enclosing it, and a bare expression is
-	/// lowered by the engine without being converted whole.
+	/// Run a parsed runtime statement, preparing identities and credentials
+	/// only when execution reaches the corresponding payload.
 	async fn run_surface_statement(
 		&mut self,
-		stmt: sql::TopLevelExpr,
+		mut stmt: TopLevelExpr,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
+		if !matches!(stmt, TopLevelExpr::Expr(_)) {
+			stmt.prepare_credentials();
+		}
 		match stmt {
-			sql::TopLevelExpr::Use(stmt) => self.run_use(stmt.into(), txn).await,
-			sql::TopLevelExpr::Option(_) => Self::option_reached_an_engine(),
-			sql::TopLevelExpr::Expr(sql::Expr::Let(stmt)) => self.run_let(*stmt, txn, start).await,
-			sql::TopLevelExpr::Begin | sql::TopLevelExpr::Commit | sql::TopLevelExpr::Cancel => {
+			TopLevelExpr::Use(stmt) => self.run_use(stmt, txn).await,
+			TopLevelExpr::Option(_) => Self::option_reached_an_engine(),
+			TopLevelExpr::Expr(Expr::Let(stmt)) => self.run_let(*stmt, txn, start).await,
+			TopLevelExpr::Begin | TopLevelExpr::Commit | TopLevelExpr::Cancel => {
 				match self.misplaced_control.take() {
 					Some(misplaced) => Self::transaction_control_error(misplaced.message()),
 					None => Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
@@ -1540,11 +1522,11 @@ impl Executor {
 					)))),
 				}
 			}
-			sql::TopLevelExpr::Kill(stmt) => self.run_kill(stmt.into(), txn).await,
-			sql::TopLevelExpr::Live(stmt) => self.run_live(*stmt, txn).await,
-			sql::TopLevelExpr::Show(stmt) => self.run_show(stmt.into(), txn).await,
-			sql::TopLevelExpr::Access(stmt) => self.run_access((*stmt).into(), txn).await,
-			sql::TopLevelExpr::Expr(expr) => self.run_bare_expression(expr, txn, start).await,
+			TopLevelExpr::Kill(stmt) => self.run_kill(stmt, txn).await,
+			TopLevelExpr::Live(stmt) => self.run_live(*stmt, txn).await,
+			TopLevelExpr::Show(stmt) => self.run_show(stmt, txn).await,
+			TopLevelExpr::Access(stmt) => self.run_access(*stmt, txn).await,
+			TopLevelExpr::Expr(expr) => self.run_bare_expression(expr, txn, start).await,
 		}
 	}
 
@@ -1566,10 +1548,16 @@ impl Executor {
 	/// Run a bare expression on the engine.
 	async fn run_bare_expression(
 		&mut self,
-		expr: sql::Expr,
+		mut expr: Expr,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
+		let credentials_changed = expr.prepare_credentials_changed();
+		if credentials_changed {
+			self.refresh_reached_statement(&TopLevelStatement::Ast(TopLevelExpr::Expr(
+				expr.clone(),
+			)));
+		}
 		self.run_on_streaming_engine(expr, txn, start).await
 	}
 
@@ -1609,6 +1597,48 @@ impl Executor {
 					self.check_slow_log(start, &op, &PlanParams(&op));
 				}
 				exec_result
+			}
+			Err(e) => Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
+		}
+	}
+
+	/// Execute the SurrealQL plan under the statement's request options and
+	/// observer identity. A top-level binding lives in the request context.
+	async fn run_flat_statement(
+		&mut self,
+		stmt: surrealdb_expr::parser::LogicalStatement,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		if let LogicalOp::Let(binding) = stmt.plan {
+			return self
+				.run_binding(
+					binding.name,
+					binding.kind,
+					&stmt.text,
+					|| Ok(*binding.value),
+					txn,
+					start,
+				)
+				.await;
+		}
+		let (planned, logged) = match self.compiled_statement(&txn).await {
+			Some(compiled) => (compiled.plan, compiled.logged),
+			None => {
+				let logged = self.ctx.slow_log().is_some().then(|| stmt.plan.clone());
+				let planned = self.plan_bare_expression(stmt.plan, Arc::clone(&txn)).await;
+				(planned.map(StatementPlan::Ready), logged)
+			}
+		};
+		match planned {
+			Ok(plan) => {
+				context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
+				let stream_rows = self.streams_rows();
+				let result = self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
+				if let Some(op) = logged {
+					self.check_slow_log(start, &stmt.text, &PlanParams(&op));
+				}
+				result
 			}
 			Err(e) => Err(ControlFlow::Err(self.planning_failed(&txn, e).await)),
 		}
@@ -1805,7 +1835,7 @@ impl Executor {
 	/// side the planner refuses fails the statement with `PlannerUnsupported`.
 	async fn run_let(
 		&mut self,
-		stm: sql::statements::SetStatement,
+		mut stm: crate::expr::statements::SetStatement,
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
@@ -1816,6 +1846,51 @@ impl Executor {
 				name: stm.name.to_string(),
 			})));
 		}
+		let credentials_changed = stm.what.prepare_credentials_changed();
+		if credentials_changed {
+			self.refresh_reached_statement(&TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(
+				Box::new(stm.clone()),
+			))));
+		}
+		let name = stm.name.to_string();
+		let kind = stm.kind.clone();
+		let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(Box::new(stm))));
+		self.run_binding(
+			name,
+			kind,
+			&statement,
+			|| {
+				let TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(stm))) = &statement else {
+					unreachable!("binding statement carries LET syntax");
+				};
+				lower(stm.what.clone()).map_err(|reason| {
+					ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
+						reason: reason.to_string(),
+					}))
+				})
+			},
+			txn,
+			start,
+		)
+		.await
+	}
+
+	/// Bind an evaluated right-hand side into request scope, enforcing
+	/// protected names, coercion, and the bound value's depth before publication.
+	async fn run_binding(
+		&mut self,
+		name: String,
+		kind: Option<crate::expr::Kind>,
+		statement: &impl ToSql,
+		lower_value: impl FnOnce() -> FlowResult<LogicalOp>,
+		txn: Arc<Transaction>,
+		start: &Instant,
+	) -> FlowResult<Value> {
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
+				name: name.clone(),
+			})));
+		}
 		context_mut(&mut self.ctx)?.set_transaction(Arc::clone(&txn));
 
 		let (planned, logged) = match self.compiled_statement(&txn).await {
@@ -1824,11 +1899,7 @@ impl Executor {
 				// The slow log reads the statement's parameters from the plan,
 				// which planning consumes; a copy is kept only when a slow log
 				// is configured.
-				let op = lower(stm.what.clone()).map_err(|reason| {
-					ControlFlow::Err(anyhow::Error::new(ExecError::PlannerUnsupported {
-						reason: reason.to_string(),
-					}))
-				})?;
+				let op = lower_value()?;
 				let logged = self.ctx.slow_log().is_some().then(|| op.clone());
 				(
 					self.plan_bare_expression(op, Arc::clone(&txn)).await.map(StatementPlan::Ready),
@@ -1845,12 +1916,12 @@ impl Executor {
 		let res = self.execute_operator_plan(plan, Arc::clone(&txn), false).await;
 
 		let res = res?;
-		let result = match &stm.kind {
+		let result = match &kind {
 			Some(kind) => {
-				let kind = crate::expr::Kind::from(kind.clone());
+				let kind = kind.clone();
 				res.coerce_to_kind(&kind)
 					.map_err(|e| ExecError::SetCoerce {
-						name: stm.name.to_string(),
+						name: name.clone(),
 						error: Box::new(e),
 					})
 					.map_err(anyhow::Error::new)?
@@ -1868,15 +1939,12 @@ impl Executor {
 		crate::val::check_value_depth(&result)?;
 
 		// Set the parameter
-		context_mut(&mut self.ctx)?.add_value(stm.name.clone(), result.into());
+		context_mut(&mut self.ctx)?.add_value(name, result.into());
 
-		// Logged through the expression layer, for the reason the statement
-		// path is: a `DEFINE USER ... PASSWORD` in the value names a credential
-		// the conversion has already replaced with its derivation. The plan
-		// names every `$param` the statement references.
+		// The runtime formatter redacts credentials, including nested user
+		// definitions. The plan names every parameter the statement references.
 		if let Some(op) = logged {
-			let stm = crate::expr::statements::SetStatement::from(stm);
-			self.check_slow_log(start, &stm, &PlanParams(&op));
+			self.check_slow_log(start, statement, &PlanParams(&op));
 		}
 		// Finalise transaction, returning nothing unless it couldn't commit
 		Ok(Value::None)
@@ -1906,12 +1974,12 @@ impl Executor {
 	/// none, and registers without a unit.
 	async fn run_live(
 		&mut self,
-		stmt: sql::statements::LiveStatement,
+		stmt: crate::expr::statements::LiveStatement,
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
 		let (s, arrived) = match self.arrived_live.take() {
 			Some((s, arrived)) => (s, arrived),
-			None => (stmt.into(), None),
+			None => (stmt, None),
 		};
 		context_mut(&mut self.ctx)?.set_transaction(txn);
 		crate::exec::live::live_statement_compute(&s, &self.ctx, &self.opt, arrived)
@@ -2053,7 +2121,7 @@ impl Executor {
 		// point, and the conflict surfaces to the caller. The last conflict is
 		// returned unchanged when the attempts run out.
 		match &stmt {
-			TopLevelStatement::Ast(sql::TopLevelExpr::Live(live)) => {
+			TopLevelStatement::Ast(TopLevelExpr::Live(live)) => {
 				match self.ctx.done(true)? {
 					None => {}
 					Some(Reason::Timedout(d)) => {
@@ -2063,9 +2131,13 @@ impl Executor {
 						bail!(EngineError::QueryCancelled);
 					}
 				}
-				// The id is minted by this conversion, so every attempt
-				// registers a clone of the one converted statement.
-				let converted: crate::expr::statements::LiveStatement = (**live).clone().into();
+				// Prepare the subscription id once so every retry registers
+				// the same subscription.
+				let mut prepared = TopLevelExpr::Live(live.clone());
+				prepared.prepare_credentials();
+				let TopLevelExpr::Live(converted) = prepared else {
+					unreachable!()
+				};
 				let mut attempt = 1;
 				loop {
 					if attempt > 1 {
@@ -2074,9 +2146,9 @@ impl Executor {
 					// Each attempt compiles its unit in a read transaction of
 					// its own, since an arrival is pinned to the catalog
 					// version it compiled against.
-					self.arrive_live(kvs, converted.clone()).await;
+					self.arrive_live(kvs, (*converted).clone()).await;
 					let attempt_stmt =
-						TopLevelStatement::Ast(sql::TopLevelExpr::Live(live.clone()));
+						TopLevelStatement::Ast(TopLevelExpr::Live(converted.clone()));
 					// A `LIVE` registration's write transaction runs without
 					// cooperative yields: the statements of one connection share
 					// a task and its coop budget, so a budget-forced yield
@@ -2102,14 +2174,13 @@ impl Executor {
 					}
 				}
 			}
-			TopLevelStatement::Ast(sql::TopLevelExpr::Kill(kill)) => {
+			TopLevelStatement::Ast(TopLevelExpr::Kill(kill)) => {
 				let mut attempt = 1;
 				loop {
 					if attempt > 1 {
 						self.before_conflict_retry(attempt).await?;
 					}
-					let attempt_stmt =
-						TopLevelStatement::Ast(sql::TopLevelExpr::Kill(kill.clone()));
+					let attempt_stmt = TopLevelStatement::Ast(TopLevelExpr::Kill(kill.clone()));
 					let result = self
 						.execute_in_own_transaction(kvs, start, attempt_stmt, transaction_type)
 						.await;
@@ -2178,10 +2249,8 @@ impl Executor {
 		transaction_type: TransactionType,
 	) -> Result<Value> {
 		#[cfg(test)]
-		let live_or_kill = matches!(
-			&stmt,
-			TopLevelStatement::Ast(sql::TopLevelExpr::Live(_) | sql::TopLevelExpr::Kill(_))
-		);
+		let live_or_kill =
+			matches!(&stmt, TopLevelStatement::Ast(TopLevelExpr::Live(_) | TopLevelExpr::Kill(_)));
 		let txn = Arc::new(
 			kvs.transaction(transaction_type)
 				.await?
@@ -3207,7 +3276,7 @@ impl Executor {
 		stream: S,
 	) -> Result<Vec<QueryResult>>
 	where
-		S: Stream<Item = Result<sql::TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		Self::execute_statement_stream(
 			kvs,
@@ -3576,33 +3645,39 @@ impl Executor {
 				op: Some(op.as_ref().clone()),
 				read_only,
 			},
+			TopLevelStatement::Surreal(stmt) => match &stmt.plan {
+				LogicalOp::Let(binding) => RequestEntry::Let {
+					name: binding.name.clone(),
+					kind: binding.kind.clone(),
+					read_only,
+					value: Some(Ok(*binding.value.clone())),
+				},
+				op => RequestEntry::Run {
+					op: Some(Ok(op.clone())),
+					read_only,
+				},
+			},
 			TopLevelStatement::Ast(stmt) => match stmt {
-				sql::TopLevelExpr::Begin => RequestEntry::Begin,
-				sql::TopLevelExpr::Commit => RequestEntry::Commit,
-				sql::TopLevelExpr::Cancel => RequestEntry::Cancel,
-				sql::TopLevelExpr::Option(option) => RequestEntry::Option(option.clone().into()),
-				sql::TopLevelExpr::Use(stmt) => {
-					let name = |expr: &sql::Expr| {
-						crate::ddl::scalar::written_name(&crate::expr::Expr::from(expr.clone()))
-					};
+				TopLevelExpr::Begin => RequestEntry::Begin,
+				TopLevelExpr::Commit => RequestEntry::Commit,
+				TopLevelExpr::Cancel => RequestEntry::Cancel,
+				TopLevelExpr::Option(option) => RequestEntry::Option(option.clone()),
+				TopLevelExpr::Use(stmt) => {
+					let name = |expr: &Expr| crate::ddl::scalar::written_name(expr);
 					RequestEntry::Use(match stmt {
-						sql::statements::UseStatement::Ns(ns) => {
-							name(ns).map(|ns| (Some(ns), None))
-						}
-						sql::statements::UseStatement::Db(db) => {
-							name(db).map(|db| (None, Some(db)))
-						}
-						sql::statements::UseStatement::NsDb(ns, db) => {
+						UseStatement::Ns(ns) => name(ns).map(|ns| (Some(ns), None)),
+						UseStatement::Db(db) => name(db).map(|db| (None, Some(db))),
+						UseStatement::NsDb(ns, db) => {
 							name(ns).zip(name(db)).map(|(ns, db)| (Some(ns), Some(db)))
 						}
-						sql::statements::UseStatement::Default => None,
+						UseStatement::Default => None,
 					})
 				}
-				sql::TopLevelExpr::Live(_) | sql::TopLevelExpr::Access(_) => RequestEntry::Stores,
-				sql::TopLevelExpr::Kill(_) | sql::TopLevelExpr::Show(_) => RequestEntry::Inert,
-				sql::TopLevelExpr::Expr(sql::Expr::Let(stmt)) => RequestEntry::Let {
+				TopLevelExpr::Live(_) | TopLevelExpr::Access(_) => RequestEntry::Stores,
+				TopLevelExpr::Kill(_) | TopLevelExpr::Show(_) => RequestEntry::Inert,
+				TopLevelExpr::Expr(Expr::Let(stmt)) => RequestEntry::Let {
 					name: stmt.name.to_string(),
-					kind: stmt.kind.clone().map(Into::into),
+					kind: stmt.kind.clone(),
 					read_only,
 					value: Some(lower(stmt.what.clone()).map_err(|reason| {
 						ExecError::PlannerUnsupported {
@@ -3611,7 +3686,7 @@ impl Executor {
 						.into()
 					})),
 				},
-				sql::TopLevelExpr::Expr(expr) => RequestEntry::Run {
+				TopLevelExpr::Expr(expr) => RequestEntry::Run {
 					op: Some(self.lower_bare_expression(expr)),
 					read_only,
 				},
@@ -3637,6 +3712,26 @@ impl Executor {
 	fn position(&self) -> Option<usize> {
 		let request = self.request.as_ref()?;
 		request.taken.load(Ordering::Relaxed).checked_sub(1)
+	}
+
+	/// A reached statement's credentials belong to its execution payload. A
+	/// request records inert syntax before execution, so its cached lowering
+	/// must be replaced after preparation. Later statements stay inert.
+	fn refresh_reached_statement(&mut self, statement: &TopLevelStatement) {
+		let Some(position) = self.position() else {
+			return;
+		};
+		let entry = self.request_entry(statement);
+		if let Some(request) = self.request.as_mut() {
+			if let Some(slot) = request.entries.get_mut(position) {
+				*slot = entry;
+			}
+			if let Some(compiled) = request.compiled.as_mut()
+				&& let Some(slot) = compiled.get_mut(position)
+			{
+				*slot = None;
+			}
+		}
 	}
 
 	/// The compiled form of the statement running, compiling the request in
@@ -4159,14 +4254,27 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::val::{Array, Value};
 
-	/// The slow log renders a statement the engine ran through its
-	/// lowered form, so a credential is replaced by its derivation wherever in
-	/// the statement it sits.
-	///
-	/// `DEFINE USER … PASSWORD` is the shape that carries one, and a schema
-	/// statement can sit anywhere an expression can. Rendering the surface
-	/// text instead would put the password in the log for every position but
-	/// the top level, which is the position a reader is least likely to check.
+	#[tokio::test]
+	async fn reached_credentials_replace_inert_request_payloads() {
+		for source in [
+			"DEFINE USER fresh ON ROOT PASSWORD 'secret' ROLES OWNER",
+			"RETURN 1; DEFINE USER fresh ON ROOT PASSWORD 'secret' ROLES OWNER",
+			"LET $out = (DEFINE USER fresh ON ROOT PASSWORD 'secret' ROLES OWNER); RETURN $out",
+			"RETURN 1; LET $out = (DEFINE USER fresh ON ROOT PASSWORD 'secret' ROLES OWNER)",
+			"{ DEFINE USER fresh ON ROOT PASSWORD 'secret' ROLES OWNER }",
+		] {
+			let ds = Datastore::new("memory").await.expect("memory datastore");
+			let results =
+				ds.execute(source, &Session::owner(), None).await.expect("execute request");
+			assert!(results.iter().all(|result| result.result.is_ok()), "statement failed");
+			crate::iam::verify::verify_root_creds(&ds, "fresh", "secret")
+				.await
+				.expect("reached user has its prepared password hash");
+			assert!(crate::iam::verify::verify_root_creds(&ds, "fresh", "wrong").await.is_err());
+		}
+	}
+
+	/// Slow-log statement formatting redacts credentials in every nested position.
 	#[test]
 	fn the_slow_log_renders_no_plaintext_credential_wherever_the_statement_sits() {
 		for src in [
@@ -4177,11 +4285,19 @@ mod tests {
 			"FOR $i IN [1] { DEFINE USER bob ON ROOT PASSWORD 'hunter2' ROLES OWNER }",
 		] {
 			let surface = crate::syn::expr(src).expect("statement should parse");
-			let rendered = crate::expr::Expr::from(surface).to_sql();
+			assert!(surface.to_sql().contains("hunter2"), "fixture must contain a password");
+			let rendered = crate::dbs::TopLevelStatement::Ast(
+				surrealdb_expr::parser::TopLevelExpr::Expr(surface),
+			)
+			.to_sql();
 			assert!(!rendered.contains("hunter2"), "`{src}` rendered its password: {rendered}");
 			assert!(
+				rendered.contains("[REDACTED]"),
+				"`{src}` should redact credentials: {rendered}"
+			);
+			assert!(
 				rendered.contains("PASSHASH"),
-				"`{src}` should render the derivation: {rendered}"
+				"`{src}` should retain the credential clause: {rendered}"
 			);
 		}
 	}
@@ -4354,10 +4470,10 @@ mod tests {
 	#[tokio::test]
 	async fn a_cancellation_at_a_commit_ends_at_the_next_commit() {
 		use futures::StreamExt;
+		use surrealdb_expr::parser::TopLevelExpr;
 
 		use crate::catalog::providers::CatalogProvider;
 		use crate::kvs::TransactionType;
-		use crate::sql::TopLevelExpr;
 
 		let ds = Datastore::new("memory").await.expect("a memory datastore");
 		let setup = ds.transaction(TransactionType::Write).await.expect("a transaction");

@@ -1,5 +1,10 @@
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::expr::order::Ordering;
-use crate::expr::{Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, With};
+use crate::expr::{
+	Cond, CoverStmts, Explain, Expr, Fetchs, Fields, Groups, Limit, Literal, Splits, Start, With,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SelectStatement {
@@ -69,5 +74,58 @@ impl SelectStatement {
 			&& self.fetch.as_ref().map(|x| x.read_only()).unwrap_or(true)
 			&& self.version.read_only()
 			&& self.timeout.read_only()
+	}
+}
+
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "SELECT {}", self.fields);
+		if !self.omit.is_empty() {
+			write_sql!(f, fmt, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmts)));
+		}
+		write_sql!(f, fmt, " FROM");
+		if self.only {
+			write_sql!(f, fmt, " ONLY");
+		}
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
+		if let Some(ref v) = self.with {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.cond {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.split {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.group {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.order {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.limit {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.start {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.fetch {
+			write_sql!(f, fmt, " {v}");
+		}
+		if !matches!(self.version, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
+		}
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
+		}
+		if self.for_update {
+			write_sql!(f, fmt, " FOR UPDATE");
+		}
+		if self.tempfiles {
+			write_sql!(f, fmt, " TEMPFILES");
+		}
+		if let Some(ref v) = self.explain {
+			write_sql!(f, fmt, " {v}");
+		}
 	}
 }

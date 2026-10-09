@@ -4,11 +4,12 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
+use common::fmt::{EscapeKwFreeIdent, EscapeObjectKey, Float, Fmt, QuoteStr, SqlDuration};
 use geo_types::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
@@ -185,7 +186,7 @@ impl Kind {
 	/// per-record reference scan when they provably cannot.
 	///
 	/// The matched shapes mirror exactly the kinds accepted for reference
-	/// fields by [`crate::sql::statements::DefineFieldStatement::validate_reference_options`]:
+	/// fields by [`crate::expr::statements::DefineFieldStatement::validate_reference_options`]:
 	/// `record<..>`, `array`/`set` of those, `option<..>` (an `Either`
 	/// containing `None`), and literal arrays of those. An untyped `record`
 	/// (`Kind::Record` with an empty table list) can hold a record of *any*
@@ -536,8 +537,84 @@ impl From<&Kind> for Box<Kind> {
 
 impl ToSql for Kind {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let kind: crate::sql::Kind = self.clone().into();
-		kind.fmt_sql(f, fmt);
+		match self {
+			Kind::Any => f.push_str("any"),
+			Kind::None => f.push_str("none"),
+			Kind::Null => f.push_str("null"),
+			Kind::Bool => f.push_str("bool"),
+			Kind::Bytes => f.push_str("bytes"),
+			Kind::Datetime => f.push_str("datetime"),
+			Kind::Decimal => f.push_str("decimal"),
+			Kind::Duration => f.push_str("duration"),
+			Kind::Float => f.push_str("float"),
+			Kind::Int => f.push_str("int"),
+			Kind::Number => f.push_str("number"),
+			Kind::Object => f.push_str("object"),
+			Kind::String => f.push_str("string"),
+			Kind::Uuid => f.push_str("uuid"),
+			Kind::Regex => f.push_str("regex"),
+			Kind::Function(_, _) => f.push_str("function"),
+			Kind::Table(k) => {
+				if k.is_empty() {
+					f.push_str("table");
+				} else {
+					write_sql!(
+						f,
+						fmt,
+						"table<{}>",
+						Fmt::verbar_separated(
+							k.iter().map(|x| common::fmt::EscapeIdent(x.as_str()))
+						)
+					);
+				}
+			}
+			Kind::Record(k) => {
+				if k.is_empty() {
+					f.push_str("record");
+				} else {
+					write_sql!(
+						f,
+						fmt,
+						"record<{}>",
+						Fmt::verbar_separated(
+							k.iter().map(|x| common::fmt::EscapeIdent(x.as_str()))
+						)
+					);
+				}
+			}
+			Kind::Geometry(k) => {
+				if k.is_empty() {
+					f.push_str("geometry");
+				} else {
+					write_sql!(f, fmt, "geometry<{}>", Fmt::verbar_separated(k));
+				}
+			}
+			Kind::Set(k, l) => match (k, l) {
+				(k, None) if matches!(**k, Kind::Any) => f.push_str("set"),
+				(k, None) => write_sql!(f, fmt, "set<{k}>"),
+				(k, Some(l)) => write_sql!(f, fmt, "set<{k}, {l}>"),
+			},
+			Kind::Array(k, l) => match (k, l) {
+				(k, None) if matches!(**k, Kind::Any) => f.push_str("array"),
+				(k, None) => write_sql!(f, fmt, "array<{k}>"),
+				(k, Some(l)) => write_sql!(f, fmt, "array<{k}, {l}>"),
+			},
+			Kind::Either(k) => write_sql!(f, fmt, "{}", Fmt::verbar_separated(k)),
+			Kind::Range => f.push_str("range"),
+			Kind::Literal(l) => l.fmt_sql(f, fmt),
+			Kind::File(k) => {
+				if k.is_empty() {
+					f.push_str("file");
+				} else {
+					write_sql!(
+						f,
+						fmt,
+						"file<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					);
+				}
+			}
+		}
 	}
 }
 
@@ -1008,8 +1085,48 @@ impl KindLiteral {
 
 impl ToSql for KindLiteral {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let lit: crate::sql::kind::KindLiteral = self.clone().into();
-		lit.fmt_sql(f, fmt)
+		match self {
+			KindLiteral::String(s) => write_sql!(f, fmt, "{}", QuoteStr(s)),
+			KindLiteral::Integer(n) => write_sql!(f, fmt, "{}", n),
+			KindLiteral::Float(n) => write_sql!(f, fmt, " {}", Float(*n)),
+			KindLiteral::Decimal(n) => write_sql!(f, fmt, " {}", n),
+			KindLiteral::Duration(d) => write_sql!(f, fmt, "{}", SqlDuration(d.0)),
+			KindLiteral::Bool(b) => write_sql!(f, fmt, "{}", b),
+			KindLiteral::Array(a) => {
+				f.push('[');
+				if !a.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(a.as_slice()));
+				}
+				f.push(']');
+			}
+			KindLiteral::Object(o) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !o.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
+							args,
+							|(k, v), f, fmt| {
+								write_sql!(f, fmt, "{}: {}", EscapeObjectKey(k), v)
+							}
+						)),)
+					);
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+		}
 	}
 }
 
@@ -1175,9 +1292,8 @@ mod round_trip_tests {
 
 	fn round_trip(k: &Kind) {
 		let text = k.to_sql();
-		let reparsed: Kind = crate::syn::kind_for_definition(&text)
-			.unwrap_or_else(|e| panic!("failed to reparse kind text {text:?}: {e}"))
-			.into();
+		let reparsed: Kind = crate::parser::kind_for_definition(&text)
+			.unwrap_or_else(|e| panic!("failed to reparse kind text {text:?}: {e}"));
 		assert_eq!(&reparsed, k, "round trip mismatch via text {text:?}");
 	}
 

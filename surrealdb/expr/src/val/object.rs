@@ -238,18 +238,6 @@ impl Object {
 			})
 			.collect()
 	}
-
-	/// The surface-syntax counterpart of [`Self::into_literal`]; see
-	/// [`Value::into_sql_literal`].
-	pub fn into_sql_literal(self) -> Vec<crate::sql::literal::ObjectEntry> {
-		self.0
-			.into_iter()
-			.map(|(k, v)| crate::sql::literal::ObjectEntry {
-				key: k,
-				value: v.into_sql_literal(),
-			})
-			.collect()
-	}
 }
 
 impl std::ops::Add for Object {

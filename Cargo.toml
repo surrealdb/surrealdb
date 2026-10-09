@@ -35,14 +35,12 @@ members = [
     "surrealdb/observe",
     "surrealdb/parse-common",
     "surrealdb/parser-next",
-    "surrealdb/parser-next/lower",
     "surrealdb/parser-next/size-probe",
     "surrealdb/pgsql",
     "surrealdb/pgwire",
     "surrealdb/rpc",
     "surrealdb/runtime",
     "surrealdb/server",
-    "surrealdb/sql",
     "surrealdb/sqlplan",
     "surrealdb/sqlfront-derive",
     "surrealdb/sqlfront-spec",
@@ -87,9 +85,7 @@ surrealdb = { version = "3.4.0-nightly", path = "surrealdb", default-features = 
 surrealdb-catalog = { version = "3.4.0-nightly", path = "surrealdb/catalog" }
 surrealdb-expr = { version = "3.4.0-nightly", path = "surrealdb/expr", default-features = false }
 surrealdb-gql = { version = "3.4.0-nightly", path = "surrealdb/gql" }
-surrealdb-sql = { version = "3.4.0-nightly", path = "surrealdb/sql" }
 surrealdb-parser-next = { version = "3.4.0-nightly", path = "surrealdb/parser-next" }
-surrealdb-parser-next-lower = { version = "3.4.0-nightly", path = "surrealdb/parser-next/lower" }
 surrealdb-strand = { version = "3.4.0-nightly", path = "surrealdb/strand", default-features = false }
 surrealdb-core = { version = "3.4.0-nightly", path = "surrealdb/core", default-features = false }
 surrealdb-embedded = { version = "3.4.0-nightly", path = "surrealdb/embedded", default-features = false }
@@ -405,7 +401,6 @@ surrealdb-core = { workspace = true, features = [
 ] }
 surrealdb-rpc.workspace = true
 surrealdb-server.workspace = true
-surrealdb-parser-next-lower.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "user"] }

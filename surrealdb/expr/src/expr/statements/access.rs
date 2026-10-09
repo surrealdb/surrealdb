@@ -1,5 +1,6 @@
+use common::fmt::{EscapeIdent, EscapeKwFreeIdent, SqlDuration};
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::{Base, Cond, RecordIdLit};
 use crate::val::Duration;
@@ -72,7 +73,61 @@ pub enum Subject {
 
 impl ToSql for AccessStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_stmt: crate::sql::statements::AccessStatement = self.clone().into();
-		sql_stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Grant(stmt) => {
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
+				if let Some(ref v) = stmt.base {
+					write_sql!(f, fmt, " ON {v}");
+				}
+				write_sql!(f, fmt, " GRANT");
+				match &stmt.subject {
+					Subject::User(x) => write_sql!(f, fmt, " FOR USER {}", EscapeIdent(x.as_str())),
+					Subject::Record(x) => write_sql!(f, fmt, " FOR RECORD {}", x),
+				}
+			}
+			Self::Show(stmt) => {
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
+				if let Some(ref v) = stmt.base {
+					write_sql!(f, fmt, " ON {v}");
+				}
+				write_sql!(f, fmt, " SHOW");
+				match &stmt.gr {
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v.as_str())),
+					None => match &stmt.cond {
+						Some(v) => write_sql!(f, fmt, " {v}"),
+						None => write_sql!(f, fmt, " ALL"),
+					},
+				};
+			}
+			Self::Revoke(stmt) => {
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
+				if let Some(ref v) = stmt.base {
+					write_sql!(f, fmt, " ON {v}");
+				}
+				write_sql!(f, fmt, " REVOKE");
+				match &stmt.gr {
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v.as_str())),
+					None => match &stmt.cond {
+						Some(v) => write_sql!(f, fmt, " {v}"),
+						None => write_sql!(f, fmt, " ALL"),
+					},
+				};
+			}
+			Self::Purge(stmt) => {
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
+				if let Some(ref v) = stmt.base {
+					write_sql!(f, fmt, " ON {v}");
+				}
+				f.push_str(" PURGE");
+				match stmt.kind {
+					PurgeKind::Expired => f.push_str(" EXPIRED"),
+					PurgeKind::Revoked => f.push_str(" REVOKED"),
+					PurgeKind::Both => f.push_str(" EXPIRED, REVOKED"),
+				}
+				if !stmt.grace.is_zero() {
+					write_sql!(f, fmt, " FOR {}", SqlDuration(stmt.grace.0));
+				}
+			}
+		}
 	}
 }

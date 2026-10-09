@@ -104,7 +104,7 @@ mod tests {
 		Closure::Expr {
 			args: vec![(Param::from("x".to_string()), Kind::Number)],
 			returns,
-			body: crate::syn::expr("$x * 2").unwrap().into(),
+			body: crate::syn::expr("$x * 2").unwrap(),
 			captures: Variables::default(),
 		}
 	}
@@ -132,7 +132,7 @@ mod tests {
 		let closure = Closure::Expr {
 			args: vec![(Param::from("x".to_string()), Kind::Number)],
 			returns: None,
-			body: crate::syn::expr("$x * $by").unwrap().into(),
+			body: crate::syn::expr("$x * $by").unwrap(),
 			captures,
 		};
 		assert_eq!(call(&closure, vec![Value::from(5)]).await.unwrap(), Value::from(15));

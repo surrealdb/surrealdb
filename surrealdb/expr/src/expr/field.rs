@@ -1,10 +1,11 @@
 use std::slice::Iter;
 
+use common::fmt::Fmt;
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::paths::ID;
-use crate::expr::{Expr, Function, Idiom};
+use crate::expr::{CoverStmts, Expr, Function, Idiom};
 
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
@@ -21,8 +22,13 @@ pub enum Fields {
 
 impl ToSql for Fields {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let fields: crate::sql::field::Fields = self.clone().into();
-		fields.fmt_sql(f, fmt);
+		match self {
+			Fields::Value(v) => {
+				f.push_str("VALUE ");
+				v.fmt_sql(f, fmt);
+			}
+			Fields::Select(x) => write_sql!(f, fmt, "{}", Fmt::comma_separated(x)),
+		}
 	}
 }
 
@@ -175,7 +181,7 @@ impl Selector {
 
 impl ToSql for Selector {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.expr.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "{}", CoverStmts(&self.expr));
 		if let Some(alias) = &self.alias {
 			f.push_str(" AS ");
 			alias.fmt_sql(f, fmt);

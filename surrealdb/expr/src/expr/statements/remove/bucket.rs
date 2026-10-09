@@ -1,4 +1,6 @@
-use crate::expr::{Expr, Literal};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::{CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveBucketStatement {
@@ -12,5 +14,15 @@ impl Default for RemoveBucketStatement {
 			name: Expr::Literal(Literal::None),
 			if_exists: false,
 		}
+	}
+}
+
+impl ToSql for RemoveBucketStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE BUCKET");
+		if self.if_exists {
+			write_sql!(f, sql_fmt, " IF EXISTS");
+		}
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 	}
 }

@@ -20,17 +20,21 @@ use crate::expr::access_type::{
 	JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
 };
 use crate::expr::paths::{IN, OUT};
-use crate::expr::statements::define::{DefineAccessStatement, DefineKind, DefineUserStatement};
+use crate::expr::statements::OptionStatement;
+use crate::expr::statements::define::{
+	DefineAccessStatement, DefineDatabaseStatement, DefineKind, DefineKind as SqlDefineKind,
+	DefineUserStatement,
+};
 use crate::expr::user::UserDuration;
-use crate::expr::{Algorithm, Base, DefineAnalyzerStatement, Expr, Idiom, Literal};
+use crate::expr::{
+	Algorithm, Base, DefineAnalyzerStatement, Expr, Expr as SqlExpr, Idiom, Idiom as SqlIdiom,
+	Literal, Literal as SqlLiteral, Param, Part,
+};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::mean_tokens_per_document;
 use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue};
 use crate::kvs::sequences::next_unissued_value;
-use crate::sql::statements::OptionStatement;
-use crate::sql::statements::define::{DefineDatabaseStatement, DefineKind as SqlDefineKind};
-use crate::sql::{Expr as SqlExpr, Idiom as SqlIdiom, Literal as SqlLiteral, Param, Part};
 use crate::val::TableName;
 use crate::{catalog, val};
 
@@ -144,7 +148,7 @@ fn define_database_statement_from_definition(
 		kind: SqlDefineKind::Overwrite,
 		id: None,
 		name: SqlExpr::Idiom(SqlIdiom(vec![
-			Part::Start(SqlExpr::Param(Param::new("session"))),
+			Part::Start(SqlExpr::Param(Param::from("session".to_owned()))),
 			Part::Field("db".into()),
 		])),
 		strict: def.strict,
@@ -153,7 +157,7 @@ fn define_database_statement_from_definition(
 			.clone()
 			.map(|v| SqlExpr::Literal(SqlLiteral::String(v.into())))
 			.unwrap_or(SqlExpr::Literal(SqlLiteral::None)),
-		changefeed: def.changefeed.map(|v| v.into()),
+		changefeed: def.changefeed,
 	})
 }
 
@@ -1319,6 +1323,8 @@ pub(crate) fn define_user_statement_from_definition(
 		kind: DefineKind::Default,
 		base,
 		name: Expr::Idiom(Idiom::field(def.name.clone())),
+		pending_password: None,
+		hash_is_set: true,
 		hash: def.hash.clone(),
 		code: def.code.clone(),
 		roles: def.roles.clone(),

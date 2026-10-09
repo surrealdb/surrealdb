@@ -24,3 +24,13 @@ impl Default for UserDuration {
 		}
 	}
 }
+
+/// A password that has not yet been hashed. Debug output never exposes it.
+#[derive(Hash, Clone, Eq, PartialEq)]
+pub struct PendingPassword(pub String);
+
+impl std::fmt::Debug for PendingPassword {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str("[REDACTED]")
+	}
+}

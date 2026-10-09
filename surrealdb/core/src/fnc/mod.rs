@@ -626,7 +626,7 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::sql::{Expr, Function};
+	use crate::expr::{Expr, Function};
 	use crate::syn::ParserConfig;
 
 	#[tokio::test]

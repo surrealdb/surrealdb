@@ -9,14 +9,14 @@ use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::catalog::auth::AuthLimit;
 use crate::catalog::{ExprText, FromStored, PathText, Permission, StoredPermission};
+use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::{Array, Object, Value};
 
 /// REST API method.
 ///
-/// The stored twin of [`sql::ApiMethod`]. The AST form renders back to
+/// The stored twin of [`runtime::ApiMethod`]. The AST form renders back to
 /// SurrealQL; this form is persisted inside API definitions and is exposed to
 /// handlers as `$request.method`, so it owns both the revision encoding and
 /// the `SurrealValue` mapping and must not change shape or variant order
@@ -54,20 +54,20 @@ impl fmt::Display for ApiMethod {
 	}
 }
 
-impl From<sql::ApiMethod> for ApiMethod {
-	fn from(v: sql::ApiMethod) -> Self {
+impl From<runtime::ApiMethod> for ApiMethod {
+	fn from(v: runtime::ApiMethod) -> Self {
 		match v {
-			sql::ApiMethod::Delete => Self::Delete,
-			sql::ApiMethod::Get => Self::Get,
-			sql::ApiMethod::Patch => Self::Patch,
-			sql::ApiMethod::Post => Self::Post,
-			sql::ApiMethod::Put => Self::Put,
-			sql::ApiMethod::Trace => Self::Trace,
+			runtime::ApiMethod::Delete => Self::Delete,
+			runtime::ApiMethod::Get => Self::Get,
+			runtime::ApiMethod::Patch => Self::Patch,
+			runtime::ApiMethod::Post => Self::Post,
+			runtime::ApiMethod::Put => Self::Put,
+			runtime::ApiMethod::Trace => Self::Trace,
 		}
 	}
 }
 
-impl From<ApiMethod> for sql::ApiMethod {
+impl From<ApiMethod> for runtime::ApiMethod {
 	fn from(v: ApiMethod) -> Self {
 		match v {
 			ApiMethod::Delete => Self::Delete,
@@ -141,25 +141,25 @@ impl StoredApiDefinition {
 impl_kv_value_revisioned!(StoredApiDefinition);
 
 impl ApiDefinition {
-	fn to_sql_definition(&self) -> sql::statements::DefineApiStatement {
-		sql::statements::DefineApiStatement {
-			kind: sql::statements::define::DefineKind::Default,
-			path: sql::Expr::Literal(sql::Literal::String(self.path.to_string().into())),
-			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
-			fallback: self.fallback.as_ref().map(|e| sql::Expr::from(e.clone())),
-			config: self.config.to_sql_config(),
+	fn to_runtime_definition(&self) -> runtime::statements::DefineApiStatement {
+		runtime::statements::DefineApiStatement {
+			kind: runtime::statements::define::DefineKind::Default,
+			path: runtime::Expr::Literal(runtime::Literal::String(self.path.to_string().into())),
+			actions: self.actions.iter().map(|x| x.to_runtime_action()).collect(),
+			fallback: self.fallback.clone(),
+			config: self.config.to_runtime_config(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 		}
 	}
 }
 
 impl ToSql for ApiDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -194,11 +194,11 @@ pub struct StoredApiActionDefinition {
 impl_kv_value_revisioned!(StoredApiActionDefinition);
 
 impl ApiAction {
-	fn to_sql_action(&self) -> sql::statements::define::ApiAction {
-		sql::statements::define::ApiAction {
+	fn to_runtime_action(&self) -> runtime::statements::define::ApiAction {
+		runtime::statements::define::ApiAction {
 			methods: self.methods.iter().copied().map(Into::into).collect(),
-			action: sql::Expr::from(self.action.clone()),
-			config: self.config.to_sql_config(),
+			action: self.action.clone(),
+			config: self.config.to_runtime_config(),
 		}
 	}
 }
@@ -225,10 +225,10 @@ pub struct StoredApiConfigDefinition {
 
 impl ApiConfig {
 	/// Convert the API config into a SQL config.
-	pub fn to_sql_config(&self) -> sql::statements::define::config::api::ApiConfig {
-		sql::statements::define::config::api::ApiConfig {
-			middleware: self.middleware.iter().map(|mw| mw.to_sql_middleware()).collect(),
-			permissions: self.permissions.to_sql_permission(),
+	pub fn to_runtime_config(&self) -> runtime::statements::define::config::api::ApiConfig {
+		runtime::statements::define::config::api::ApiConfig {
+			middleware: self.middleware.iter().map(|mw| mw.to_runtime_middleware()).collect(),
+			permissions: self.permissions.clone(),
 		}
 	}
 }
@@ -307,8 +307,8 @@ pub struct MiddlewareDefinition {
 }
 
 impl MiddlewareDefinition {
-	fn to_sql_middleware(&self) -> sql::statements::define::config::api::Middleware {
-		sql::statements::define::config::api::Middleware {
+	fn to_runtime_middleware(&self) -> runtime::statements::define::config::api::Middleware {
+		runtime::statements::define::config::api::Middleware {
 			name: self.name.clone(),
 			args: self
 				.args
@@ -317,7 +317,7 @@ impl MiddlewareDefinition {
 				.map(|v| {
 					let public_val: crate::types::PublicValue =
 						v.try_into().expect("value conversion should succeed");
-					sql::Expr::from_public_value(public_val)
+					runtime::Expr::from_surface_value(public_val)
 				})
 				.collect(),
 		}

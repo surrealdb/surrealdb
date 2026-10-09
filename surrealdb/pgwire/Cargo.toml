@@ -16,7 +16,6 @@ surrealdb-datastore = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
 surrealdb-rpc = { workspace = true }
-surrealdb-sql = { workspace = true }
 surrealdb-types = { workspace = true }
 surrealdb-pgsql = { workspace = true }
 surrealdb-sqlplan = { workspace = true }

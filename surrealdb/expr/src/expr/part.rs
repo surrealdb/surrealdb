@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 
-use common::fmt::EscapeKwFreeIdent;
+use common::fmt::{EscapeKwFreeIdent, Fmt};
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::method::is_builtin_method;
-use crate::expr::{Expr, Idiom, Literal, Lookup};
+use crate::expr::{CoverStmts, Expr, Idiom, Literal, Lookup};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Part {
@@ -184,8 +184,59 @@ impl Part {
 
 impl ToSql for Part {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let part: crate::sql::part::Part = self.clone().into();
-		part.fmt_sql(f, fmt);
+		match self {
+			Part::All => f.push_str(".*"),
+			Part::Last => f.push_str("[$]"),
+			Part::First => f.push_str("[0]"),
+			Part::Start(v) => v.fmt_sql(f, fmt),
+			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v.as_str())),
+			Part::Flatten => f.push('…'),
+			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),
+			Part::Lookup(v) => v.fmt_sql(f, fmt),
+			Part::Value(v) => write_sql!(f, fmt, "[{v}]"),
+			Part::Method(v, a) => {
+				write_sql!(
+					f,
+					fmt,
+					".{}({})",
+					EscapeKwFreeIdent(v.as_str()),
+					Fmt::comma_separated(a.iter().map(CoverStmts))
+				)
+			}
+			Part::Destructure(v) => {
+				f.push_str(".{");
+				if !fmt.is_pretty() {
+					f.push(' ');
+				}
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v));
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Part::Optional => f.push_str(".?"),
+			Part::Recurse(v, nest, instruction) => {
+				write_sql!(f, fmt, ".{{{v}");
+				if let Some(instruction) = instruction {
+					write_sql!(f, fmt, "+{instruction}");
+				}
+				f.push('}');
+
+				if let Some(nest) = nest {
+					f.push('(');
+					for p in nest.0.iter() {
+						p.fmt_sql(f, fmt);
+					}
+					f.push(')');
+				}
+			}
+			Part::Doc => f.push('@'),
+			Part::RepeatRecurse => f.push_str(".@"),
+		}
 	}
 }
 
@@ -412,8 +463,23 @@ impl DestructurePart {
 
 impl ToSql for DestructurePart {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::part::DestructurePart = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			DestructurePart::All(fd) => write_sql!(f, fmt, "{}.*", EscapeKwFreeIdent(fd.as_str())),
+			DestructurePart::Field(fd) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(fd.as_str())),
+			DestructurePart::Aliased(fd, v) => {
+				write_sql!(f, fmt, "{}: {v}", EscapeKwFreeIdent(fd.as_str()))
+			}
+			DestructurePart::Destructure(fd, d) => {
+				write_sql!(
+					f,
+					fmt,
+					"{}{}",
+					EscapeKwFreeIdent(fd.as_str()),
+					Part::Destructure(d.clone())
+				)
+			}
+			DestructurePart::Rest => f.push_str("..."),
+		}
 	}
 }
 
@@ -426,9 +492,26 @@ pub enum Recurse {
 }
 
 impl ToSql for Recurse {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let recurse: crate::sql::part::Recurse = self.clone().into();
-		recurse.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			Recurse::Fixed(v) => f.push_str(&v.to_string()),
+			Recurse::Range(beg, end) => match (beg, end) {
+				(None, None) => f.push_str(".."),
+				(Some(beg), None) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+				}
+				(None, Some(end)) => {
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
+				(Some(beg), Some(end)) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
+			},
+		}
 	}
 }
 
@@ -473,7 +556,35 @@ impl RecurseInstruction {
 
 impl ToSql for RecurseInstruction {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::part::RecurseInstruction = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Path {
+				inclusive,
+			} => {
+				f.push_str("path");
+
+				if *inclusive {
+					f.push_str("+inclusive");
+				}
+			}
+			Self::Collect {
+				inclusive,
+			} => {
+				f.push_str("collect");
+
+				if *inclusive {
+					f.push_str("+inclusive");
+				}
+			}
+			Self::Shortest {
+				expects,
+				inclusive,
+			} => {
+				write_sql!(f, fmt, "shortest={expects}");
+
+				if *inclusive {
+					f.push_str("+inclusive");
+				}
+			}
+		}
 	}
 }

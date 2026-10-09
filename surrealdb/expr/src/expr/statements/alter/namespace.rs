@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Executes `ALTER NAMESPACE` operations for the current namespace.
@@ -11,8 +11,10 @@ pub struct AlterNamespaceStatement {
 }
 
 impl ToSql for AlterNamespaceStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterNamespaceStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, _fmt, "ALTER NAMESPACE");
+		if self.compact {
+			write_sql!(f, _fmt, " COMPACT");
+		}
 	}
 }

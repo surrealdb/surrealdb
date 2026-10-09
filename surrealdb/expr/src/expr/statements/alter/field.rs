@@ -1,9 +1,10 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::QuoteStr;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::expr::permission::Permissions;
+use crate::expr::permission::{FieldPermissions, Permissions};
 use crate::expr::reference::Reference;
-use crate::expr::{Expr, Kind, Literal};
+use crate::expr::{CoverStmts, Expr, Kind, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
@@ -54,7 +55,62 @@ impl Default for AlterFieldStatement {
 
 impl ToSql for AlterFieldStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::field::AlterFieldStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER FIELD");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
+		match self.kind {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " TYPE {x}"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP TYPE"),
+			AlterKind::None => {}
+		}
+		match self.flexible {
+			AlterKind::Set(_) => write_sql!(f, fmt, " FLEXIBLE"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP FLEXIBLE"),
+			AlterKind::None => {}
+		}
+		match self.readonly {
+			AlterKind::Set(_) => write_sql!(f, fmt, " READONLY"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP READONLY"),
+			AlterKind::None => {}
+		}
+		match self.inline {
+			AlterKind::Set(_) => write_sql!(f, fmt, " INLINE"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP INLINE"),
+			AlterKind::None => {}
+		}
+		match self.value {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " VALUE {}", CoverStmts(x)),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP VALUE"),
+			AlterKind::None => {}
+		}
+		match self.assert {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " ASSERT {}", CoverStmts(x)),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP ASSERT"),
+			AlterKind::None => {}
+		}
+
+		match self.default {
+			AlterDefault::None => {}
+			AlterDefault::Drop => write_sql!(f, fmt, " DROP DEFAULT"),
+			AlterDefault::Always(ref d) => write_sql!(f, fmt, " DEFAULT ALWAYS {}", CoverStmts(d)),
+			AlterDefault::Set(ref d) => write_sql!(f, fmt, " DEFAULT {}", CoverStmts(d)),
+		}
+
+		if let Some(permissions) = &self.permissions {
+			write_sql!(f, fmt, " {}", FieldPermissions(permissions));
+		}
+
+		match self.comment {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(x)),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP COMMENT"),
+			AlterKind::None => {}
+		}
+		match self.reference {
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " REFERENCE {x}"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP REFERENCE"),
+			AlterKind::None => {}
+		}
 	}
 }

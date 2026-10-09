@@ -1,4 +1,7 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use std::ops::Bound;
+
+use common::fmt::{EscapeKwFreeIdent, Fmt};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
@@ -41,6 +44,18 @@ impl Lookup {
 }
 
 impl LookupSubject {
+	pub fn referencing_field(&self) -> Option<&str> {
+		match self {
+			Self::Table {
+				referencing_field,
+				..
+			}
+			| Self::Range {
+				referencing_field,
+				..
+			} => referencing_field.as_deref(),
+		}
+	}
 	/// A range subject's bounds are record-id keys, which carry arbitrary
 	/// expressions in their array and object forms.
 	pub fn read_only(&self) -> bool {
@@ -58,8 +73,68 @@ impl LookupSubject {
 
 impl ToSql for Lookup {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::lookup::Lookup = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		if self.what.len() <= 1
+			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
+			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
+			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
+			//
+			// Further more `<-foo:a..` can lead to issues when the next part of the idiom starts
+			// with a `.`
+			&& self.what.iter().all(|v| {
+				if v.referencing_field().is_some() {
+					return false
+				}
+				if let LookupSubject::Range { range: RecordIdKeyRangeLit{ end: Bound::Unbounded, .. }, ..} = v {
+					return false
+				}
+				true
+			})
+			&& self.cond.is_none()
+			&& self.alias.is_none()
+			&& self.expr.is_none()
+		{
+			self.kind.fmt_sql(f, fmt);
+			if self.what.is_empty() {
+				f.push('?');
+			} else {
+				write_sql!(f, fmt, "{}", Fmt::comma_separated(self.what.iter()));
+			}
+		} else {
+			write_sql!(f, fmt, "{}(", self.kind);
+			if let Some(ref expr) = self.expr {
+				write_sql!(f, fmt, "SELECT {} FROM ", expr);
+				if self.only {
+					f.push_str("ONLY ");
+				}
+			}
+			if self.what.is_empty() {
+				f.push('?');
+			} else {
+				write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.what));
+			}
+			if let Some(ref v) = self.cond {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.split {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.group {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.order {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.limit {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.start {
+				write_sql!(f, fmt, " {v}");
+			}
+			if let Some(ref v) = self.alias {
+				write_sql!(f, fmt, " AS {v}");
+			}
+			f.push(')');
+		}
 	}
 }
 
@@ -138,7 +213,26 @@ impl ComputedLookupSubject {
 
 impl ToSql for LookupSubject {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::lookup::LookupSubject = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Table {
+				table,
+				referencing_field,
+			} => {
+				write_sql!(f, fmt, "{}", EscapeKwFreeIdent(table.as_str()));
+				if let Some(referencing_field) = referencing_field {
+					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
+				}
+			}
+			Self::Range {
+				table,
+				range,
+				referencing_field,
+			} => {
+				write_sql!(f, fmt, "{}:{range}", EscapeKwFreeIdent(table.as_str()));
+				if let Some(referencing_field) = referencing_field {
+					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
+				}
+			}
+		}
 	}
 }

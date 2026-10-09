@@ -1,4 +1,5 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::QuoteStr;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::expr::statements::define::config::ConfigInner;
@@ -22,7 +23,17 @@ impl Default for AlterConfigStatement {
 
 impl ToSql for AlterConfigStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterConfigStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER CONFIG");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		f.push(' ');
+		self.inner.fmt_sql(f, fmt);
+
+		match self.comment {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
 	}
 }

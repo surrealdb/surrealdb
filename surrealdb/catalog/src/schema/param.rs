@@ -5,10 +5,10 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{FromStored, LogicalPermissionBody, Permission, StoredPermission};
+use crate::expr as runtime;
 use crate::expr::logical::LogicalPermission;
+use crate::expr::statements::define::{DefineKind, DefineParamStatement};
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
-use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -22,29 +22,29 @@ pub struct StoredParamDefinition {
 impl_kv_value_revisioned!(StoredParamDefinition);
 
 impl ParamDefinition {
-	fn to_sql_definition(&self) -> DefineParamStatement {
+	fn to_runtime_definition(&self) -> DefineParamStatement {
 		DefineParamStatement {
 			kind: DefineKind::Default,
-			name: self.name.clone().into(),
+			name: self.name.clone(),
 			value: {
 				let public_val: crate::types::PublicValue =
 					self.value.clone().try_into().expect("value conversion should succeed");
-				sql::Expr::from_public_value(public_val)
+				runtime::Expr::from_surface_value(public_val)
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 
-			permissions: self.permissions.to_sql_permission(),
+			permissions: self.permissions.clone(),
 		}
 	}
 }
 
 impl ToSql for ParamDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

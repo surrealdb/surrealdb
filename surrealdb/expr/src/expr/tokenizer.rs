@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Display;
 
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 /// The language a [`Tokenizer::Segment`] segments with.
 ///
@@ -62,5 +63,36 @@ impl Display for Tokenizer {
 			Self::Punct => f.write_str("PUNCT"),
 			Self::Segment(l) => write!(f, "SEGMENT({l})"),
 		}
+	}
+}
+
+impl ToSql for Tokenizer {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Self::Blank => f.push_str("BLANK"),
+			Self::Camel => f.push_str("CAMEL"),
+			Self::Class => f.push_str("CLASS"),
+			Self::Punct => f.push_str("PUNCT"),
+			Self::Segment(l) => write_sql!(f, sql_fmt, "SEGMENT({})", l),
+		}
+	}
+}
+
+impl ToSql for SegmentLanguage {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self.as_str())
+	}
+}
+
+/// Writes tokenizer keywords separated by commas (no spaces), as in `TOKENIZERS BLANK,CAMEL`.
+pub fn write_tokenizers_sql<I>(f: &mut String, sql_fmt: SqlFormat, tokenizers: I)
+where
+	I: IntoIterator<Item = Tokenizer>,
+{
+	for (i, t) in tokenizers.into_iter().enumerate() {
+		if i > 0 {
+			f.push(',');
+		}
+		t.fmt_sql(f, sql_fmt);
 	}
 }

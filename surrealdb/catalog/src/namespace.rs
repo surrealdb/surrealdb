@@ -9,9 +9,9 @@ use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::expr::statements::DefineNamespaceStatement;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::{Expr, Literal};
+use crate::expr::{Expr, Literal};
 use crate::val::Value;
 
 #[derive(
@@ -97,9 +97,9 @@ pub struct NamespaceDefinition {
 impl_kv_value_revisioned!(NamespaceDefinition);
 
 impl NamespaceDefinition {
-	fn to_sql_definition(&self) -> DefineNamespaceStatement {
+	fn to_runtime_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			name: crate::expr::Expr::Idiom(crate::expr::Idiom::field(self.name.clone())),
 			comment: self
 				.comment
 				.clone()
@@ -112,7 +112,7 @@ impl NamespaceDefinition {
 
 impl ToSql for NamespaceDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

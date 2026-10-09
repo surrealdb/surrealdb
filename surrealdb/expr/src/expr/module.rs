@@ -2,10 +2,10 @@ use std::fmt::{self, Display};
 
 use anyhow::Result;
 use common::fail;
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::EscapeKwFreeIdent;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Kind;
-use crate::sql;
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -15,9 +15,11 @@ pub enum ModuleExecutable {
 }
 
 impl ToSql for ModuleExecutable {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let module_executable: crate::sql::ModuleExecutable = self.clone().into();
-		module_executable.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			ModuleExecutable::Surrealism(surrealism) => surrealism.fmt_sql(f, fmt),
+			ModuleExecutable::Silo(silo) => silo.fmt_sql(f, fmt),
+		}
 	}
 }
 
@@ -32,9 +34,8 @@ pub struct Signature {
 pub struct SurrealismExecutable(pub File);
 
 impl ToSql for SurrealismExecutable {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let surrealism_executable: crate::sql::SurrealismExecutable = self.clone().into();
-		surrealism_executable.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
 	}
 }
 
@@ -48,9 +49,17 @@ pub struct SiloExecutable {
 }
 
 impl ToSql for SiloExecutable {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let silo_executable: crate::sql::SiloExecutable = self.clone().into();
-		silo_executable.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(
+			f,
+			fmt,
+			"silo::{}::{}::<{}.{}.{}>",
+			self.organisation,
+			self.package,
+			self.major,
+			self.minor,
+			self.patch
+		)
 	}
 }
 
@@ -70,28 +79,6 @@ impl ModuleName {
 			ModuleName::Module(name) => format!("mod::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
 				format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
-			}
-		}
-	}
-}
-
-impl From<sql::module::ModuleName> for ModuleName {
-	fn from(v: sql::module::ModuleName) -> Self {
-		match v {
-			sql::module::ModuleName::Module(name) => ModuleName::Module(name),
-			sql::module::ModuleName::Silo(org, pkg, major, minor, patch) => {
-				ModuleName::Silo(org, pkg, major, minor, patch)
-			}
-		}
-	}
-}
-
-impl From<ModuleName> for sql::module::ModuleName {
-	fn from(v: ModuleName) -> Self {
-		match v {
-			ModuleName::Module(name) => sql::module::ModuleName::Module(name),
-			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				sql::module::ModuleName::Silo(org, pkg, major, minor, patch)
 			}
 		}
 	}
@@ -126,6 +113,23 @@ impl Display for ModuleName {
 			ModuleName::Module(name) => write!(f, "mod::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
 				write!(f, "silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
+			}
+		}
+	}
+}
+
+impl ToSql for ModuleName {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			ModuleName::Module(name) => write_sql!(f, fmt, "mod::{}", EscapeKwFreeIdent(name)),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				write_sql!(
+					f,
+					fmt,
+					"silo::{}::{}::<{major}.{minor}.{patch}>",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg)
+				);
 			}
 		}
 	}

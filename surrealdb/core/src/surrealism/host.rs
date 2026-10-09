@@ -107,7 +107,7 @@ impl Host {
 	/// only two calls to `new_save_point` are in `doc::insert` and
 	/// `doc::upsert`, and both are reachable only through a data-modifying
 	/// statement form or through a builtin that evaluates a nested one
-	/// (`sql::method::is_writer_builtin`). `Expr::read_only` reports both as
+	/// (`expr::method::is_writer_builtin`). `Expr::read_only` reports both as
 	/// writable, so both take the exclusive lock.
 	///
 	/// Builtins that change state *without* a statement — `sequence::nextval`
@@ -289,8 +289,7 @@ impl InvocationContext for Host {
 			&self.ctx.get_capabilities(),
 			&self.ctx.config.parser,
 		)
-		.map_err(|e| HostCallError::InvalidRequest(e.to_string()))?
-		.into();
+		.map_err(|e| HostCallError::InvalidRequest(e.to_string()))?;
 		// Held for the rest of the call: a statement that may write runs alone
 		// on the caller's transaction, a read shares it with other reads.
 		let _order = self.order(expr.read_only()).await;
@@ -363,14 +362,11 @@ impl InvocationContext for Host {
 					version: version.into(),
 				})
 			}
-			_ => {
-				let f: crate::sql::function::Function = syn::function_with_capabilities(
-					&fnc,
-					&self.ctx.get_capabilities(),
-					&self.ctx.config.parser,
-				)?;
-				f.into()
-			}
+			_ => syn::function_with_capabilities(
+				&fnc,
+				&self.ctx.get_capabilities(),
+				&self.ctx.config.parser,
+			)?,
 		};
 
 		let expr = Expr::FunctionCall(Box::new(FunctionCall {
@@ -469,7 +465,7 @@ mod tests {
 			// A write buried in a subquery is still a write.
 			"SELECT * FROM (CREATE t:1)",
 		] {
-			let expr: Expr = crate::syn::expr(query).expect(query).into();
+			let expr: Expr = crate::syn::expr(query).expect(query);
 			assert!(!expr.read_only(), "{query} must run alone");
 		}
 	}
@@ -479,7 +475,7 @@ mod tests {
 		for query in
 			["SELECT * FROM t", "RETURN 1 + 1", "SLEEP 1ms", "INFO FOR DB", "string::len('abc')"]
 		{
-			let expr: Expr = crate::syn::expr(query).expect(query).into();
+			let expr: Expr = crate::syn::expr(query).expect(query);
 			assert!(expr.read_only(), "{query} must be allowed to overlap");
 		}
 	}
@@ -497,7 +493,7 @@ mod tests {
 		// `file::*` belongs here too, but its argument is a file literal, which
 		// needs the `files` experimental target to parse.
 		for query in ["sequence::nextval('n')", "http::post('https://example.com/', {})"] {
-			let expr: Expr = crate::syn::expr(query).expect(query).into();
+			let expr: Expr = crate::syn::expr(query).expect(query);
 			assert!(expr.read_only(), "{query} takes no savepoint, so it may overlap");
 		}
 	}

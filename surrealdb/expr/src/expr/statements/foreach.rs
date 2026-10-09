@@ -1,6 +1,7 @@
 use common::range::IntegerRangeIter;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Block, Expr, Param, Value};
+use crate::expr::{Block, CoverStmts, Expr, Param, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ForeachStatement {
@@ -29,5 +30,11 @@ impl ForeachStatement {
 	/// Check if we require a writeable transaction
 	pub fn read_only(&self) -> bool {
 		self.range.read_only() && self.block.read_only()
+	}
+}
+
+impl ToSql for ForeachStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "FOR {} IN {} {}", self.param, CoverStmts(&self.range), self.block)
 	}
 }

@@ -35,7 +35,7 @@ async fn planned_before(db: &TestDb, session: &Session, sql: &str, change: &str)
 	let plan_ctx = db.exec_ctx_as(session, TransactionType::Read).await;
 	let ast = crate::syn::parse(sql).expect("parses");
 	let mut exprs = ast.expressions;
-	let crate::sql::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
+	let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
 		panic!("a statement");
 	};
 	let op = crate::expr::logical::lower(expr).expect("lowers");

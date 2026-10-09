@@ -1,6 +1,7 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Data, Expr, Literal, Output};
+use crate::expr::{CoverStmts, Data, Expr, Literal, Output};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct CreateStatement {
@@ -30,7 +31,19 @@ impl Default for CreateStatement {
 
 impl ToSql for CreateStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::create::CreateStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "CREATE");
+		if self.only {
+			write_sql!(f, fmt, " ONLY");
+		}
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)));
+		if let Some(ref v) = self.data {
+			write_sql!(f, fmt, " {v}");
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, fmt, " {v}");
+		}
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
+		}
 	}
 }

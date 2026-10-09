@@ -1,9 +1,9 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::Fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use super::config::api::ApiConfig;
-use crate::expr::Expr;
-use crate::sql::ApiMethod;
+use crate::expr::{ApiMethod, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineApiStatement {
@@ -23,7 +23,45 @@ pub struct ApiAction {
 
 impl ToSql for ApiAction {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let stmt: crate::sql::statements::define::ApiAction = self.clone().into();
-		stmt.fmt_sql(f, sql_fmt);
+		f.push_str("FOR ");
+		f.push_str(&Fmt::comma_separated(self.methods.iter()).to_sql());
+		if sql_fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = sql_fmt.increment();
+			inner_fmt.write_indent(f);
+		}
+		write_sql!(f, sql_fmt, "{} THEN {}", self.config, self.action);
+	}
+}
+
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE API");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
+		}
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.path));
+		let sql_fmt = sql_fmt.increment();
+
+		write_sql!(f, sql_fmt, " FOR any");
+		{
+			let sql_fmt = sql_fmt.increment();
+
+			write_sql!(f, sql_fmt, "{}", self.config);
+
+			if let Some(fallback) = &self.fallback {
+				write_sql!(f, sql_fmt, " THEN {}", CoverStmts(fallback));
+			}
+		}
+
+		for action in &self.actions {
+			write_sql!(f, sql_fmt, " {}", action);
+		}
+
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
+		}
 	}
 }

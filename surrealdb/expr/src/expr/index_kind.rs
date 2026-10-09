@@ -4,11 +4,11 @@
 //! expression rather than canonical text; lowering to a definition renders it
 //! through the catalog's stored-text funnel.
 
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::EscapeKwFreeIdent;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Cond;
-use crate::sql;
-use crate::sql::index::{DiskAnnParams, FullTextParams, HnswParams};
+use crate::expr::index::{DiskAnnParams, FullTextParams, HnswParams};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Index {
@@ -27,35 +27,62 @@ pub enum Index {
 	DiskAnn(DiskAnnParams),
 }
 
-impl From<sql::index::Index> for Index {
-	fn from(v: sql::index::Index) -> Self {
-		match v {
-			sql::index::Index::Idx => Self::Idx,
-			sql::index::Index::Uniq => Self::Uniq,
-			sql::index::Index::Hnsw(p) => Self::Hnsw(p),
-			sql::index::Index::FullText(p) => Self::FullText(p),
-			sql::index::Index::Count(c) => Self::Count(c.map(Into::into)),
-			sql::index::Index::DiskAnn(p) => Self::DiskAnn(p),
-		}
-	}
-}
-
-impl From<Index> for sql::index::Index {
-	fn from(v: Index) -> Self {
-		match v {
-			Index::Idx => Self::Idx,
-			Index::Uniq => Self::Uniq,
-			Index::Hnsw(p) => Self::Hnsw(p),
-			Index::FullText(p) => Self::FullText(p),
-			Index::Count(c) => Self::Count(c.map(Into::into)),
-			Index::DiskAnn(p) => Self::DiskAnn(p),
-		}
-	}
-}
-
 impl ToSql for Index {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: sql::index::Index = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Idx => {}
+			Self::Uniq => f.push_str("UNIQUE"),
+			Self::Count(c) => {
+				f.push_str("COUNT");
+				if let Some(v) = c {
+					write_sql!(f, fmt, " {}", v)
+				}
+			}
+			Self::FullText(p) => {
+				write_sql!(f, fmt, "FULLTEXT ANALYZER {} {}", EscapeKwFreeIdent(&p.az), p.sc);
+				if p.hl {
+					f.push_str(" HIGHLIGHTS")
+				}
+			}
+			Self::Hnsw(p) => {
+				write_sql!(
+					f,
+					fmt,
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} LM {}",
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.ef_construction,
+					p.m,
+					p.m0,
+					p.ml
+				);
+				if p.extend_candidates {
+					f.push_str(" EXTEND_CANDIDATES")
+				}
+				if p.keep_pruned_connections {
+					f.push_str(" KEEP_PRUNED_CONNECTIONS")
+				}
+				if p.use_hashed_vector {
+					f.push_str(" HASHED_VECTOR")
+				}
+			}
+			Self::DiskAnn(p) => {
+				write_sql!(
+					f,
+					fmt,
+					"DISKANN DIMENSION {} DIST {} TYPE {} DEGREE {} L_BUILD {} ALPHA {}",
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.degree,
+					p.l_build,
+					p.alpha
+				);
+				if p.use_hashed_vector {
+					f.push_str(" HASHED_VECTOR")
+				}
+			}
+		}
 	}
 }

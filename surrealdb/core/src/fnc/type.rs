@@ -23,7 +23,7 @@ pub async fn field(
 		Some(opt) => {
 			let exec = crate::exec::entry::frame(ctx, opt, doc).await;
 			// Parse the string as an Idiom
-			let idi: Idiom = syn::idiom(&val)?.into();
+			let idi: Idiom = syn::idiom(&val)?;
 			// Return the Idiom or fetch the field
 			crate::exec::entry::scalar(&exec, &Expr::Idiom(idi)).await
 		}
@@ -41,7 +41,7 @@ pub async fn fields(
 			let mut args: Vec<Value> = Vec::with_capacity(val.len());
 			for v in val {
 				// Parse the string as an Idiom
-				let idi: Idiom = syn::idiom(&v)?.into();
+				let idi: Idiom = syn::idiom(&v)?;
 				// Return the Idiom or fetch the field
 				args.push(crate::exec::entry::scalar(&exec, &Expr::Idiom(idi)).await?);
 			}

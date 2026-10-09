@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use surrealdb_parser_next_lower::ParserSettings;
+use surrealdb_core::syn::runtime::ParserSettings;
 use surrealdb_types::Value;
 
 #[derive(Default, Deserialize, Debug, Clone)]
@@ -21,7 +21,7 @@ impl From<Params> for BTreeMap<String, Value> {
 		v.inner
 			.into_iter()
 			.map(|(k, v)| {
-				let value = surrealdb_parser_next_lower::json_with_settings(
+				let value = surrealdb_core::syn::runtime::json_with_settings(
 					&v,
 					ParserSettings {
 						legacy_strands: true,

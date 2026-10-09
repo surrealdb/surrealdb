@@ -74,9 +74,9 @@ impl GraphqlValueUtils for GraphqlValue {
 pub(crate) async fn execute_statement(
 	ds: &Datastore,
 	sess: &Session,
-	stmt: crate::sql::TopLevelExpr,
+	stmt: surrealdb_expr::parser::TopLevelExpr,
 ) -> Result<SqlValue, GraphqlError> {
-	let ast = crate::sql::Ast {
+	let ast = surrealdb_expr::parser::Query {
 		expressions: vec![stmt],
 	};
 	let results = ds

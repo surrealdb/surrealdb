@@ -7,14 +7,17 @@ use crate::val::Value;
 pub mod access;
 pub mod access_type;
 pub mod algorithm;
+pub mod analyzer_function;
 pub mod base;
 pub mod block;
 pub mod bytesize;
 pub mod changefeed;
 pub mod computed_deps;
+mod cover;
+pub(crate) mod credentials;
+pub use cover::CoverStmts;
 pub mod cond;
 pub mod constant;
-pub mod convert;
 pub mod data;
 pub mod dir;
 pub mod error;
@@ -36,10 +39,7 @@ pub mod literal;
 pub mod logical;
 pub mod lookup;
 pub mod match_plan;
-// The builtin-method name table lives one layer down, in `surrealdb-sql`, so
-// that the surface AST can classify a method call the same way this layer
-// does. Re-exported here to keep the `crate::expr::method::…` paths intact.
-pub use crate::sql::method;
+pub mod method;
 pub mod mock;
 pub mod model;
 pub mod mutation;
@@ -51,6 +51,7 @@ pub mod param;
 pub mod part;
 pub mod paths;
 pub mod permission;
+mod public_value;
 pub mod record_id;
 pub mod reference;
 pub mod script;
@@ -248,3 +249,13 @@ impl<T> ControlFlowExt<T> for Option<T> {
 		self.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("{}", f())))
 	}
 }
+
+pub mod api_method;
+pub mod binding_power;
+pub mod builtin_paths;
+pub mod event_kind;
+pub mod index;
+pub mod scoring;
+pub use api_method::ApiMethod;
+pub use event_kind::EventKind;
+pub use scoring::Scoring;

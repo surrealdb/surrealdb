@@ -36,6 +36,7 @@ use crate::exec::operators::write::scope::{
 use crate::exec::operators::write::stage::{StageId, StageOutcome, WriteStage};
 use crate::exec::permission::reference_custom_physical;
 use crate::exec::{BoxFut, EvalContext};
+use crate::expr;
 use crate::expr::data::Assignment;
 use crate::expr::logical::{LogicalOp, LogicalSubquery, lower_select};
 use crate::expr::lookup::LookupKind;
@@ -53,7 +54,6 @@ use crate::key::schema::{
 	GraphIdPrefix, GraphKey, GraphPointerKey, ReferenceIdPrefix, ReferenceKey,
 };
 use crate::kvs::{Direction, NORMAL_BATCH_SIZE, Transaction};
-use crate::sql;
 use crate::val::{RecordId, TableName, Value};
 
 /// This module's stages, by id.
@@ -816,7 +816,7 @@ pub(crate) fn delete_of(what: Expr) -> Result<LogicalOp, ControlFlow> {
 		what: vec![what],
 		..Default::default()
 	};
-	lowered(sql::Expr::Delete(Box::new(statement.into())))
+	lowered(expr::Expr::Delete(Box::new(statement)))
 }
 
 /// `UPDATE <what> <data>`, as a plan.
@@ -826,7 +826,7 @@ pub(crate) fn update_of(what: Expr, data: Data) -> Result<LogicalOp, ControlFlow
 		data: Some(data),
 		..Default::default()
 	};
-	lowered(sql::Expr::Update(Box::new(statement.into())))
+	lowered(expr::Expr::Update(Box::new(statement)))
 }
 
 /// `SELECT * FROM <what>`, as a plan.
@@ -852,7 +852,7 @@ pub(crate) fn select_all_of(what: Expr) -> LogicalOp {
 	};
 	LogicalOp::Subquery(LogicalSubquery {
 		input: Box::new(
-			lower_select(statement.into()).expect("a SELECT of all fields has a logical form"),
+			lower_select(statement).expect("a SELECT of all fields has a logical form"),
 		),
 	})
 }
@@ -863,7 +863,7 @@ pub(crate) fn select_all_of(what: Expr) -> LogicalOp {
 /// rather than formatted and re-parsed: a field name reaches them as the
 /// catalog holds it, and nothing depends on that name surviving a round trip
 /// through text.
-fn lowered(statement: sql::Expr) -> Result<LogicalOp, ControlFlow> {
+fn lowered(statement: expr::Expr) -> Result<LogicalOp, ControlFlow> {
 	crate::expr::logical::lower(statement).map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))
 }
 

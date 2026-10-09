@@ -25,7 +25,7 @@ pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 	};
 
 	let value = std::str::from_utf8(value).map_err(|err| anyhow::anyhow!(err.to_string()))?;
-	surrealdb_parser_next_lower::value_with_settings(value, settings)
+	surrealdb_expr::parser::value_with_settings(value, settings)
 		.map_err(|err| anyhow::anyhow!(err.to_string()))
 }
 

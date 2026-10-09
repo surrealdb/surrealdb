@@ -1,18 +1,18 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::ToSql;
 
 use super::Value;
 use super::statements::info::InfoStructure;
-use crate::expr::Expr;
+use crate::expr::{CoverStmts, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
 
-impl ToSql for Reference {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_reference: crate::sql::reference::Reference = self.clone().into();
-		sql_reference.fmt_sql(f, sql_fmt);
+impl surrealdb_types::ToSql for Reference {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("ON DELETE ");
+		self.on_delete.fmt_sql(f, fmt);
 	}
 }
 
@@ -34,11 +34,18 @@ pub enum ReferenceDeleteStrategy {
 	Custom(Expr),
 }
 
-impl ToSql for ReferenceDeleteStrategy {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_reference_delete_strategy: crate::sql::reference::ReferenceDeleteStrategy =
-			self.clone().into();
-		sql_reference_delete_strategy.fmt_sql(f, sql_fmt);
+impl surrealdb_types::ToSql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		match self {
+			ReferenceDeleteStrategy::Reject => f.push_str("REJECT"),
+			ReferenceDeleteStrategy::Ignore => f.push_str("IGNORE"),
+			ReferenceDeleteStrategy::Cascade => f.push_str("CASCADE"),
+			ReferenceDeleteStrategy::Unset => f.push_str("UNSET"),
+			ReferenceDeleteStrategy::Custom(v) => {
+				f.push_str("THEN ");
+				CoverStmts(v).fmt_sql(f, fmt);
+			}
+		}
 	}
 }
 

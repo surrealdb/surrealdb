@@ -179,7 +179,7 @@ pub(crate) async fn try_collect(
 ///
 /// Panics on a parse error — a test fixture that does not parse is a broken
 /// fixture, not a failed assertion.
-pub(crate) fn parse_sql_expr(src: &str) -> crate::sql::Expr {
+pub(crate) fn parse_sql_expr(src: &str) -> crate::expr::Expr {
 	crate::syn::expr(src).expect("fragment should parse")
 }
 
@@ -204,7 +204,7 @@ pub(crate) fn parse_path(src: &str) -> crate::expr::logical::LogicalExpr {
 /// (`Value::pick`, `Value::each`) takes.
 pub(crate) fn field_idiom(src: &str) -> crate::expr::Idiom {
 	match parse_sql_expr(src) {
-		crate::sql::Expr::Idiom(idiom) => idiom.into(),
+		crate::expr::Expr::Idiom(idiom) => idiom,
 		other => panic!("expected an idiom for {src:?}, got {other:?}"),
 	}
 }
@@ -309,7 +309,7 @@ fn lower_statement(src: &str) -> crate::expr::logical::LogicalOp {
 	let ast = crate::syn::parse(src).expect("statement should parse");
 	let mut exprs = ast.expressions;
 	assert_eq!(exprs.len(), 1, "expected exactly one statement in {src:?}");
-	let crate::sql::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
+	let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = exprs.remove(0) else {
 		panic!("unexpected statement shape for {src:?}");
 	};
 	crate::expr::logical::lower(expr).expect("statement should lower")

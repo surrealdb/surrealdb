@@ -1199,7 +1199,7 @@ mod tests {
 
 	fn expr(sql: &str) -> LogicalExpr {
 		let ast = crate::syn::parse(&format!("RETURN {sql}")).expect("expression should parse");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) =
+		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected a RETURN");

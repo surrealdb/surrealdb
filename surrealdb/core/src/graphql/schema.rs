@@ -1047,7 +1047,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				if let Ok(d) = s.parse::<Decimal>() {
 					return Ok(SurValue::Number(SurNumber::Decimal(d)));
 				}
-				let decimal_expr: Expr = syn::expr(s)?.into();
+				let decimal_expr: Expr = syn::expr(s)?;
 
 				match decimal_expr {
 					Expr::Literal(Literal::Decimal(d)) => {
@@ -1078,7 +1078,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				}
 			}
 			GraphqlValue::String(s) => {
-				let float_expr: Expr = syn::expr(s)?.into();
+				let float_expr: Expr = syn::expr(s)?;
 
 				match float_expr {
 					Expr::Literal(Literal::Float(f)) => Ok(SurValue::Number(SurNumber::Float(f))),
@@ -1096,7 +1096,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				}
 			}
 			GraphqlValue::String(s) => {
-				let int_expr: Expr = syn::expr(s)?.into();
+				let int_expr: Expr = syn::expr(s)?;
 
 				match int_expr {
 					Expr::Literal(Literal::Integer(i)) => Ok(SurValue::Number(SurNumber::Int(i))),
@@ -1118,7 +1118,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 				}
 			}
 			GraphqlValue::String(s) => {
-				let number_expr: Expr = syn::expr(s)?.into();
+				let number_expr: Expr = syn::expr(s)?;
 
 				match number_expr {
 					Expr::Literal(Literal::Integer(i)) => Ok(SurValue::Number(SurNumber::Int(i))),
@@ -1143,7 +1143,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 			}
 			GraphqlValue::String(s) => {
 				let expr = syn::expr_legacy_strand(s.as_str())?;
-				let expr: Expr = expr.into();
+				let expr: Expr = expr;
 
 				match expr {
 					Expr::Literal(Literal::Object(o)) => {
@@ -1183,7 +1183,7 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 		Kind::Record(ref ts) => match val {
 			GraphqlValue::String(s) => {
 				let record_id_expr = syn::expr(s)?;
-				let record_id_expr: Expr = record_id_expr.into();
+				let record_id_expr: Expr = record_id_expr;
 
 				match record_id_expr {
 					Expr::Literal(Literal::RecordId(t)) => {

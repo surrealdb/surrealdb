@@ -3,7 +3,7 @@ use std::str;
 
 use common::fmt::EscapeKwFreeIdent;
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Param(Strand);
@@ -42,7 +42,6 @@ impl Deref for Param {
 
 impl ToSql for Param {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push('$');
-		EscapeKwFreeIdent(self.as_str()).fmt_sql(f, fmt);
+		write_sql!(f, fmt, "${}", EscapeKwFreeIdent(self.as_str()))
 	}
 }

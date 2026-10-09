@@ -191,7 +191,7 @@ async fn write_guard_applies_to_record_access_clauses() {
 	let (ds, ses) = guarded_ds(5).await;
 	run(&ds, &ses, "DEFINE TABLE t;").await;
 	let clause: crate::expr::Expr =
-		crate::syn::expr("{ CREATE |t:50| RETURN NONE; RETURN 1; }").unwrap().into();
+		crate::syn::expr("{ CREATE |t:50| RETURN NONE; RETURN 1; }").unwrap();
 	let err =
 		ds.evaluate(&clause, &ses, None).await.expect_err("an over-limit access clause must fail");
 	assert!(

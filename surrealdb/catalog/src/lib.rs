@@ -22,10 +22,8 @@ extern crate tracing;
 // The module tree spells intra-layer paths as `crate::catalog::<name>` and
 // names its neighbours as `crate::<layer>`; these aliases keep those paths
 // valid for the layers this crate sits on.
-pub use surrealdb_expr::{expr, val};
+pub use surrealdb_expr::{expr, parser as syn, val};
 pub use surrealdb_iam as iam;
-pub use surrealdb_parser_next_lower as syn;
-pub use surrealdb_sql as sql;
 
 pub(crate) mod types {
 	//! The public type surface, re-exported with `Public` prefixes so internal

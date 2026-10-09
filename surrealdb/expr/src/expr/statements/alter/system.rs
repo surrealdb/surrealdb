@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Expr;
 use crate::expr::statements::alter::AlterKind;
@@ -20,7 +20,18 @@ pub struct AlterSystemStatement {
 
 impl ToSql for AlterSystemStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterSystemStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER SYSTEM");
+		match &self.query_timeout {
+			AlterKind::None => {}
+			AlterKind::Set(duration) => {
+				write_sql!(f, fmt, " QUERY_TIMEOUT {}", duration);
+			}
+			AlterKind::Drop => {
+				write_sql!(f, fmt, " DROP QUERY_TIMEOUT");
+			}
+		}
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
 	}
 }

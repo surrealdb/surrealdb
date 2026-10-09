@@ -1,9 +1,10 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::QuoteStr;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::expr::permission::Permissions;
 use crate::expr::table_type::TableType;
-use crate::expr::{ChangeFeed, Expr, Literal};
+use crate::expr::{ChangeFeed, CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 /// Executes `ALTER TABLE` operations against an existing table.
@@ -62,7 +63,79 @@ impl Default for AlterTableStatement {
 
 impl ToSql for AlterTableStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterTableStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER TABLE");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {}", CoverStmts(&self.name));
+		if let Some(kind) = &self.kind {
+			write_sql!(f, fmt, " TYPE");
+			match &kind {
+				TableType::Normal => {
+					write_sql!(f, fmt, " NORMAL");
+				}
+				TableType::Relation(rel) => {
+					write_sql!(f, fmt, " RELATION");
+					if !rel.from.is_empty() {
+						f.push_str(" IN ");
+						for (idx, k) in rel.from.iter().enumerate() {
+							if idx != 0 {
+								f.push_str(" | ");
+							}
+							write_sql!(f, fmt, "{}", common::fmt::EscapeIdent(k.as_str()));
+						}
+					}
+					if !rel.to.is_empty() {
+						f.push_str(" OUT ");
+						for (idx, k) in rel.to.iter().enumerate() {
+							if idx != 0 {
+								f.push_str(" | ");
+							}
+							write_sql!(f, fmt, "{}", common::fmt::EscapeIdent(k.as_str()));
+						}
+					}
+				}
+				TableType::Any => {
+					write_sql!(f, fmt, " ANY");
+				}
+			}
+		}
+
+		match self.schemafull {
+			AlterKind::Set(_) => write_sql!(f, fmt, " SCHEMAFULL"),
+			AlterKind::Drop => write_sql!(f, fmt, " SCHEMALESS"),
+			AlterKind::None => {}
+		}
+
+		match self.comment {
+			AlterKind::Set(ref comment) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(comment)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
+
+		match self.changefeed {
+			AlterKind::Set(ref changefeed) => write_sql!(f, fmt, " {}", changefeed),
+			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
+			AlterKind::None => {}
+		}
+		match self.inline_edges_cap {
+			AlterKind::Set(cap) => write_sql!(f, fmt, " INLINE EDGES {}", cap),
+			AlterKind::Drop => f.push_str(" DROP INLINE EDGES"),
+			AlterKind::None => {}
+		}
+
+		match self.inline_refs_cap {
+			AlterKind::Set(cap) => write_sql!(f, fmt, " INLINE REFERENCES {}", cap),
+			AlterKind::Drop => f.push_str(" DROP INLINE REFERENCES"),
+			AlterKind::None => {}
+		}
+
+		if let Some(permissions) = &self.permissions {
+			write_sql!(f, fmt, " {permissions}");
+		}
+
+		if self.compact {
+			write_sql!(f, fmt, " COMPACT");
+		}
 	}
 }

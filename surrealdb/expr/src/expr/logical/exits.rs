@@ -247,12 +247,12 @@ fn expr_exits(expr: &LogicalExpr) -> Exits {
 mod tests {
 	use super::*;
 	use crate::expr::logical::lower;
-	use crate::sql;
+	use crate::parser::TopLevelExpr;
 
 	fn exits(sql: &str) -> Exits {
-		let ast = surrealdb_syn::parse(sql).expect("test statement should parse");
+		let ast = crate::parser::parse(sql).expect("test statement should parse");
 		let top = ast.expressions.into_iter().next().expect("one statement");
-		let sql::TopLevelExpr::Expr(expr) = top else {
+		let TopLevelExpr::Expr(expr) = top else {
 			panic!("expected a bare expression");
 		};
 		lower(expr).expect("statement should lower").exits()
@@ -305,9 +305,9 @@ mod tests {
 	#[test]
 	fn a_block_reaches_its_statements_up_to_the_first_that_exits() {
 		fn reached(sql: &str) -> usize {
-			let ast = surrealdb_syn::parse(sql).expect("test statement should parse");
+			let ast = crate::parser::parse(sql).expect("test statement should parse");
 			let top = ast.expressions.into_iter().next().expect("one statement");
-			let sql::TopLevelExpr::Expr(expr) = top else {
+			let TopLevelExpr::Expr(expr) = top else {
 				panic!("expected a bare expression");
 			};
 			let LogicalOp::Sequence(sequence) = lower(expr).expect("block should lower") else {

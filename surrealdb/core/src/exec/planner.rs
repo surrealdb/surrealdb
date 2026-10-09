@@ -14,8 +14,8 @@
 //!
 //! ```text
 //! ┌────────────┐  lower  ┌───────────┐  bind  ┌───────────┐  fold  ┌────────────────┐
-//! │  sql::Expr │ ──────► │ LogicalOp │ ─────► │ LogicalOp │ ─────► │  ExecOperator  │
-//! │ (surface)  │         │ (unbound) │        │  (bound)  │        │      tree      │
+//! │ expr::Expr │ ──────► │ LogicalOp │ ─────► │ LogicalOp │ ─────► │  ExecOperator  │
+//! │  (syntax)  │         │ (unbound) │        │  (bound)  │        │      tree      │
 //! └────────────┘         └───────────┘        └───────────┘        └────────────────┘
 //! ```
 //!

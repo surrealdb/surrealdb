@@ -40,7 +40,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn increment_none() {
-		let idi: Idiom = syn::idiom("other").unwrap().into();
+		let idi: Idiom = syn::idiom("other").unwrap();
 		let mut val = parse_val!("{ test: 100 }");
 		let res = parse_val!("{ test: 100, other: +10 }");
 		val.inc(&idi, Value::from(10)).unwrap();
@@ -49,7 +49,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn increment_number() {
-		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let idi: Idiom = syn::idiom("test").unwrap();
 		let mut val = parse_val!("{ test: 100 }");
 		let res = parse_val!("{ test: 110 }");
 		val.inc(&idi, Value::from(10)).unwrap();
@@ -58,14 +58,14 @@ mod tests {
 
 	#[tokio::test]
 	async fn increment_object_number_errors() {
-		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let idi: Idiom = syn::idiom("test").unwrap();
 		let mut val = parse_val!("{ test: { a: 1 } }");
 		assert!(val.inc(&idi, Value::from(10)).is_err());
 	}
 
 	#[tokio::test]
 	async fn increment_array_number() {
-		let idi: Idiom = syn::idiom("test[1]").unwrap().into();
+		let idi: Idiom = syn::idiom("test[1]").unwrap();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 210, 300] }");
 		val.inc(&idi, Value::from(10)).unwrap();
@@ -74,7 +74,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn increment_array_value() {
-		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let idi: Idiom = syn::idiom("test").unwrap();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 200, 300, 200] }");
 		val.inc(&idi, Value::from(200)).unwrap();
@@ -83,7 +83,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn increment_array_array() {
-		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let idi: Idiom = syn::idiom("test").unwrap();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 200, 300, 100, 300, 400, 500] }");
 		val.inc(&idi, parse_val!("[100, 300, 400, 500]")).unwrap();

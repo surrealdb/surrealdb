@@ -45,11 +45,7 @@ impl ToSql for StoredConfigDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
 			StoredConfigDefinition::Default(v) => v.fmt_sql(f, fmt),
-			StoredConfigDefinition::GraphQL(v) => {
-				let sql_config: crate::sql::statements::define::config::GraphQLConfig =
-					v.clone().into();
-				sql_config.fmt_sql(f, fmt)
-			}
+			StoredConfigDefinition::GraphQL(v) => v.fmt_sql(f, fmt),
 			StoredConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
 		}
 	}
@@ -71,11 +67,7 @@ impl ToSql for ConfigDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
 			ConfigDefinition::Default(v) => v.fmt_sql(f, fmt),
-			ConfigDefinition::GraphQL(v) => {
-				let sql_config: crate::sql::statements::define::config::GraphQLConfig =
-					v.clone().into();
-				sql_config.fmt_sql(f, fmt)
-			}
+			ConfigDefinition::GraphQL(v) => v.fmt_sql(f, fmt),
 			ConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
 		}
 	}

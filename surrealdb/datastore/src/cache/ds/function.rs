@@ -365,7 +365,7 @@ fn visit_scalars_deep(op: &LogicalOp, f: &mut impl FnMut(&LogicalExpr)) {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_catalog::{sql, syn};
+	use surrealdb_catalog::syn;
 	use surrealdb_expr::expr::logical::lower;
 
 	use super::*;
@@ -373,7 +373,7 @@ mod tests {
 	/// The logical form of a `{ … }` block.
 	fn block(text: &str) -> LogicalOp {
 		let ast = syn::parse(text).expect("block should parse");
-		let sql::TopLevelExpr::Expr(expr) =
+		let syn::TopLevelExpr::Expr(expr) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected an expression");

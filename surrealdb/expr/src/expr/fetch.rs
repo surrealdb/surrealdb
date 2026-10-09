@@ -1,4 +1,6 @@
+use common::fmt::Fmt;
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
@@ -56,13 +58,6 @@ impl IntoIterator for Fetchs {
 	}
 }
 
-impl surrealdb_types::ToSql for Fetchs {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_fetchs: crate::sql::Fetchs = self.clone().into();
-		sql_fetchs.fmt_sql(f, fmt);
-	}
-}
-
 impl InfoStructure for Fetchs {
 	fn structure(self) -> Value {
 		self.into_iter().map(Fetch::structure).collect::<Vec<_>>().into()
@@ -81,16 +76,21 @@ impl Fetch {
 	}
 }
 
-impl surrealdb_types::ToSql for Fetch {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_fetch: crate::sql::Fetch = self.clone().into();
-		sql_fetch.fmt_sql(f, fmt);
-	}
-}
-
 impl InfoStructure for Fetch {
 	fn structure(self) -> Value {
 		use surrealdb_types::ToSql;
 		self.to_sql().into()
+	}
+}
+
+impl ToSql for Fetch {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt);
+	}
+}
+
+impl ToSql for Fetchs {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "FETCH {}", Fmt::comma_separated(&self.0))
 	}
 }

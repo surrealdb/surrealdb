@@ -113,9 +113,7 @@ surrealdb-iam.workspace = true
 surrealdb-kvs.workspace = true
 surrealdb-observe.workspace = true
 surrealdb-rpc.workspace = true
-surrealdb-sql.workspace = true
 surrealml-core = { workspace = true, optional = true }
-surrealdb-parser-next-lower.workspace = true
 surrealdb-protocol = { workspace = true, features = ["rpc"] }
 surrealdb-types = { workspace = true, features = ["proto"] }
 surrealdb-pgwire = { workspace = true, optional = true }

@@ -11,12 +11,12 @@ use crate::catalog::{
 	DatabaseId, FromStored, LogicalPermissions, NamespaceId, Permission, PermissionKind,
 	Permissions, StoredPermissions, StoredViewDefinition, ViewDefinition,
 };
+use crate::expr as runtime;
 use crate::expr::ChangeFeed;
 use crate::expr::logical::LogicalPermission;
+use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 pub use crate::expr::table_type::{Relation, TableType};
-use crate::sql;
-use crate::sql::statements::DefineTableStatement;
 use crate::val::{TableName, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,21 +216,21 @@ impl StoredTableDefinition {
 }
 
 impl TableDefinition {
-	fn to_sql_definition(&self) -> DefineTableStatement {
+	fn to_runtime_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: sql::Expr::Table(self.name.clone().into()),
+			name: runtime::Expr::Table(self.name.clone()),
 			drop: self.drop,
 			full: self.schemafull,
-			view: self.view.as_ref().map(|v| v.to_sql_definition()),
-			permissions: self.permissions.to_sql_permissions(),
-			changefeed: self.changefeed.map(|v| v.into()),
+			view: self.view.as_ref().map(|v| v.to_runtime_definition()),
+			permissions: self.permissions.clone(),
+			changefeed: self.changefeed,
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
-			table_type: self.table_type.clone().into(),
+				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
+			table_type: self.table_type.clone(),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 			inline_edges_cap: self.inline_edges_cap,
@@ -242,7 +242,7 @@ impl TableDefinition {
 
 impl ToSql for TableDefinition {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, sql_fmt)
+		self.to_runtime_definition().fmt_sql(f, sql_fmt)
 	}
 }
 

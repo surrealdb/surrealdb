@@ -1,5 +1,6 @@
+use common::fmt::{EscapeKwFreeIdent, EscapeKwIdent};
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::TableName;
 
@@ -10,8 +11,9 @@ pub enum RebuildStatement {
 
 impl ToSql for RebuildStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::rebuild::RebuildStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Index(v) => v.fmt_sql(f, fmt),
+		}
 	}
 }
 
@@ -25,7 +27,19 @@ pub struct RebuildIndexStatement {
 
 impl ToSql for RebuildIndexStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::rebuild::RebuildIndexStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "REBUILD INDEX");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(
+			f,
+			fmt,
+			" {} ON {}",
+			EscapeKwIdent(self.name.as_str(), &["IF"]),
+			EscapeKwFreeIdent(self.table.as_str())
+		);
+		if self.concurrently {
+			write_sql!(f, fmt, " CONCURRENTLY");
+		}
 	}
 }

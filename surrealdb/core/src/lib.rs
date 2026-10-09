@@ -64,7 +64,6 @@ mod sys;
 pub mod api;
 pub(crate) use surrealdb_catalog as catalog;
 /// The SurrealQL abstract syntax tree, as produced by [`syn`].
-pub(crate) use surrealdb_sql as sql;
 mod config;
 pub mod ctx;
 pub mod dbs;

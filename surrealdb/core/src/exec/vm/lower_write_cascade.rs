@@ -344,7 +344,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 		planner: &Planner<'ctx>,
 		expr: &crate::expr::Expr,
 	) -> Lowered<u16> {
-		let logical = crate::expr::logical::lower_expr(expr.clone().into())
+		let logical = crate::expr::logical::lower_expr(expr.clone())
 			.map_err(|e| NotCovered::internal(format!("a THEN repair has no logical form: {e}")))?;
 		crate::exec::vm::host::out_of_line(|| {
 			self.clause_in(planner, None, ClauseCode::Expr(&logical), false)

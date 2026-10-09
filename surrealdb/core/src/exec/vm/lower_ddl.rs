@@ -1434,7 +1434,7 @@ impl Lowering<'_, '_> {
 				// aggregates make.
 				let mut fields = Vec::with_capacity(items.len());
 				for (path, expr) in items {
-					let logical = crate::expr::logical::lower_expr(expr.clone().into())
+					let logical = crate::expr::logical::lower_expr(expr.clone())
 						.map_err(|_| NotCovered::internal("a view field with no logical form"))?;
 					fields.push((
 						path.clone(),
@@ -1447,8 +1447,7 @@ impl Lowering<'_, '_> {
 		let speculating = self.store(StoreInstr::JumpIfSpeculating {
 			target: 0,
 		});
-		let surface: crate::sql::statements::SelectStatement = select.into();
-		let op = crate::expr::logical::lower_select(surface)
+		let op = crate::expr::logical::lower_select(select)
 			.map_err(|_| NotCovered::internal("a view's select with no logical form"))?;
 		let rows = self
 			.once_value(&crate::expr::logical::LogicalExpr::Subquery(Box::new(op)), false)
@@ -3998,7 +3997,7 @@ impl Lowering<'_, '_> {
 	async fn evaluated(&mut self, expr: &Expr) -> Lowered<Reg> {
 		// What has no logical form, or writes where the engine has no plan,
 		// is not lowered: the statement is refused.
-		let Ok(logical) = crate::expr::logical::lower_expr(expr.clone().into()) else {
+		let Ok(logical) = crate::expr::logical::lower_expr(expr.clone()) else {
 			return Err(NotCovered::internal("an expression with no logical form"));
 		};
 		if crate::exec::logical::unplannable_write_in_expr(&logical).is_some() {
@@ -5288,7 +5287,7 @@ pub(in crate::exec::vm) fn plan_time_name(
 			planner.frozen().value(param.as_str())?.clone()
 		}
 		_ => {
-			let mut logical = crate::expr::logical::lower_expr(expr.clone().into()).ok()?;
+			let mut logical = crate::expr::logical::lower_expr(expr.clone()).ok()?;
 			let capabilities = planner.frozen().get_capabilities();
 			crate::exec::planner::util::fold_expressions(
 				&mut logical,

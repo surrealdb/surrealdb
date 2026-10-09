@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use common::fmt::EscapeKwFreeIdent;
+use common::fmt::{EscapeIdent, EscapeKwFreeIdent};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_strand::Strand;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
@@ -186,10 +186,47 @@ impl Ord for Idiom {
 	}
 }
 
-impl ToSql for Idiom {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_idiom: crate::sql::Idiom = self.clone().into();
-		sql_idiom.fmt_sql(f, sql_fmt);
+impl surrealdb_types::ToSql for Idiom {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => EscapeIdent(v).fmt_sql(f, fmt),
+			Some(Part::Start(x)) => {
+				// A nested idiom must keep its parentheses: the parts that
+				// follow would otherwise extend the inner path instead of
+				// applying to its result, and `([{ a: [1] }, { a: [2] }].a)[0]`
+				// would reparse as `[{ a: [1] }, { a: [2] }].a[0]` — a
+				// different value.
+				if x.needs_parentheses()
+					|| matches!(
+						x,
+						Expr::Binary { .. }
+							| Expr::Prefix { .. } | Expr::Postfix { .. }
+							| Expr::Idiom(_)
+					) {
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Decimal(d)) = x
+					&& d.is_sign_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Integer(i)) = x
+					&& i.is_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else if let Expr::Literal(Literal::Float(float)) = x
+					&& float.is_sign_negative()
+				{
+					write_sql!(f, fmt, "({x})");
+				} else {
+					write_sql!(f, fmt, "{x}");
+				}
+			}
+			Some(x) => x.fmt_sql(f, fmt),
+			None => {}
+		};
+		for p in iter {
+			p.fmt_sql(f, fmt);
+		}
 	}
 }
 
@@ -229,7 +266,7 @@ impl Idiom {
 	) -> Result<Self, revision::Error> {
 		let idiom = crate::syn::idiom_with_settings(s, settings, true)
 			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		Ok(idiom.into())
+		Ok(idiom)
 	}
 }
 
@@ -256,7 +293,7 @@ impl SerializeRevisioned for Idiom {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_raw_string(), writer)
+		SerializeRevisioned::serialize_revisioned(&self.to_stored_sql(), writer)
 	}
 }
 

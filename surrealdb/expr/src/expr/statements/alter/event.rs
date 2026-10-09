@@ -1,8 +1,8 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{Fmt, QuoteStr};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::expr::{Expr, Literal};
-use crate::sql::EventKind;
+use crate::expr::{CoverStmts, EventKind, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AlterEventStatement {
@@ -31,7 +31,44 @@ impl Default for AlterEventStatement {
 
 impl ToSql for AlterEventStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterEventStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER EVENT");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
+
+		match self.kind {
+			AlterKind::Set(ref k) => match k {
+				EventKind::Sync => {}
+				EventKind::Async {
+					retry,
+					max_depth,
+				} => {
+					write_sql!(f, fmt, " ASYNC RETRY {} MAXDEPTH {}", retry, max_depth);
+				}
+			},
+			AlterKind::Drop => f.push_str(" DROP ASYNC"),
+			AlterKind::None => {}
+		}
+
+		match self.when {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " WHEN {}", CoverStmts(v)),
+			AlterKind::Drop => f.push_str(" DROP WHEN"),
+			AlterKind::None => {}
+		}
+
+		match self.then {
+			AlterKind::Set(ref v) => {
+				write_sql!(f, fmt, " THEN {}", Fmt::comma_separated(v.iter().map(CoverStmts)));
+			}
+			AlterKind::Drop => f.push_str(" DROP THEN"),
+			AlterKind::None => {}
+		}
+
+		match self.comment {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
 	}
 }

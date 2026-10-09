@@ -17,6 +17,7 @@ use async_graphql::dynamic::{
 	Field, FieldFuture, FieldValue, InputObject, InputValue, Object, Type, TypeRef,
 };
 use async_graphql::{Name, Value as GraphqlValue};
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_strand::Strand;
 
 use super::error::{GraphqlError, resolver_error};
@@ -28,13 +29,12 @@ use super::utils::{GraphqlValueUtils, execute_statement};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition, TableType};
 use crate::dbs::Session;
-use crate::expr::Kind;
 use crate::expr::part::Part;
-use crate::kvs::Datastore;
-use crate::sql::statements::{
+use crate::expr::statements::{
 	CreateStatement, DeleteStatement, RelateStatement, UpdateStatement, UpsertStatement,
 };
-use crate::sql::{Cond, Data, Expr, Literal, Output, TopLevelExpr};
+use crate::expr::{Cond, Data, Expr, Kind, Literal, Output};
+use crate::kvs::Datastore;
 use crate::val::{Object as SurObject, RecordId, TableName, Value};
 
 /// Capitalize the first character of a string.
@@ -470,12 +470,12 @@ fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 					let data = if content.0.is_empty() {
 						None
 					} else {
-						Some(Data::MergeExpression(Value::Object(content).into_sql_literal()))
+						Some(Data::MergeExpression(Value::Object(content).into_literal()))
 					};
 
 					let stmt = UpdateStatement {
 						only: true,
-						what: vec![Value::RecordId(rid).into_sql_literal()],
+						what: vec![Value::RecordId(rid).into_literal()],
 						data,
 						cond: None,
 						output: None,
@@ -525,12 +525,12 @@ fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 					let data = if content.0.is_empty() {
 						None
 					} else {
-						Some(Data::ContentExpression(Value::Object(content).into_sql_literal()))
+						Some(Data::ContentExpression(Value::Object(content).into_literal()))
 					};
 
 					let stmt = UpsertStatement {
 						only: true,
-						what: vec![Value::RecordId(rid).into_sql_literal()],
+						what: vec![Value::RecordId(rid).into_literal()],
 						data,
 						cond: None,
 						output: None,
@@ -576,7 +576,7 @@ fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
 
 					let stmt = DeleteStatement {
 						only: false,
-						what: vec![Value::RecordId(rid).into_sql_literal()],
+						what: vec![Value::RecordId(rid).into_literal()],
 						cond: None,
 						output: None,
 						timeout: Expr::Literal(Literal::None),
@@ -682,14 +682,14 @@ fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name
 					let data = if content.0.is_empty() {
 						None
 					} else {
-						Some(Data::MergeExpression(Value::Object(content).into_sql_literal()))
+						Some(Data::MergeExpression(Value::Object(content).into_literal()))
 					};
 
 					let cond = parse_where_arg(args, &fds, tb_name.as_str())?;
 
 					let stmt = UpdateStatement {
 						only: false,
-						what: vec![Expr::Table(tb_name.into())],
+						what: vec![Expr::Table(tb_name)],
 						data,
 						cond,
 						output: None,
@@ -738,14 +738,14 @@ fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name
 					let data = if content.0.is_empty() {
 						None
 					} else {
-						Some(Data::ContentExpression(Value::Object(content).into_sql_literal()))
+						Some(Data::ContentExpression(Value::Object(content).into_literal()))
 					};
 
 					let cond = parse_where_arg(args, &fds, tb_name.as_str())?;
 
 					let stmt = UpsertStatement {
 						only: false,
-						what: vec![Expr::Table(tb_name.into())],
+						what: vec![Expr::Table(tb_name)],
 						data,
 						cond,
 						output: None,
@@ -793,7 +793,7 @@ fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object 
 					// Use RETURN BEFORE to count deleted records
 					let stmt = DeleteStatement {
 						only: false,
-						what: vec![Expr::Table(tb_name.into())],
+						what: vec![Expr::Table(tb_name)],
 						cond,
 						output: Some(Output::Before),
 						timeout: Expr::Literal(Literal::None),
@@ -871,15 +871,15 @@ async fn execute_normal_create(
 	let what = match id_opt {
 		Some(id_str) => {
 			let rid = parse_record_id(tb_name, &id_str)?;
-			vec![Value::RecordId(rid).into_sql_literal()]
+			vec![Value::RecordId(rid).into_literal()]
 		}
-		None => vec![Expr::Table(tb_name.clone().into())],
+		None => vec![Expr::Table(tb_name.clone())],
 	};
 
 	let data = if content.0.is_empty() {
 		None
 	} else {
-		Some(Data::ContentExpression(Value::Object(content).into_sql_literal()))
+		Some(Data::ContentExpression(Value::Object(content).into_literal()))
 	};
 
 	let stmt = CreateStatement {
@@ -922,23 +922,23 @@ async fn execute_relate_create(
 	let through = match id_opt {
 		Some(id_str) => {
 			let rid = parse_record_id(tb_name, &id_str)?;
-			Value::RecordId(rid).into_sql_literal()
+			Value::RecordId(rid).into_literal()
 		}
-		None => Expr::Table(tb_name.clone().into()),
+		None => Expr::Table(tb_name.clone()),
 	};
 
 	let data = if content.0.is_empty() {
 		None
 	} else {
-		Some(Data::ContentExpression(Value::Object(content).into_sql_literal()))
+		Some(Data::ContentExpression(Value::Object(content).into_literal()))
 	};
 
 	let stmt = RelateStatement {
 		only: true,
 		or_update: false,
 		through,
-		from: Value::RecordId(from_rid).into_sql_literal(),
-		to: Value::RecordId(to_rid).into_sql_literal(),
+		from: Value::RecordId(from_rid).into_literal(),
+		to: Value::RecordId(to_rid).into_literal(),
 		data,
 		output: None,
 		timeout: Expr::Literal(Literal::None),

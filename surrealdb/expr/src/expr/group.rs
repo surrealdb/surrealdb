@@ -52,14 +52,22 @@ impl Deref for Group {
 
 impl surrealdb_types::ToSql for Groups {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_groups: crate::sql::Groups = self.clone().into();
-		sql_groups.fmt_sql(f, fmt);
+		if self.0.is_empty() {
+			f.push_str("GROUP ALL");
+		} else {
+			f.push_str("GROUP BY ");
+			for (i, item) in self.0.iter().enumerate() {
+				if i > 0 {
+					fmt.write_separator(f);
+				}
+				item.fmt_sql(f, fmt);
+			}
+		}
 	}
 }
 
 impl surrealdb_types::ToSql for Group {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_group: crate::sql::Group = self.clone().into();
-		sql_group.fmt_sql(f, fmt);
+		self.0.fmt_sql(f, fmt);
 	}
 }

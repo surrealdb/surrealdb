@@ -1,10 +1,10 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{Fmt, QuoteStr};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
-use crate::expr::{Expr, Literal};
-use crate::sql::ApiMethod;
+use crate::expr::{ApiMethod, CoverStmts, Expr, Literal};
 
 /// A single `FOR` clause within an `ALTER API` statement.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -43,7 +43,51 @@ impl Default for AlterApiStatement {
 
 impl ToSql for AlterApiStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterApiStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER API");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {}", CoverStmts(&self.path));
+
+		for clause in &self.clauses {
+			clause.fmt_sql(f, fmt);
+		}
+
+		match self.comment {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
+	}
+}
+
+impl ToSql for AlterApiClause {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			AlterApiClause::ForAny {
+				config,
+				fallback,
+			} => {
+				f.push_str(" FOR any");
+				if let Some(c) = config {
+					write_sql!(f, fmt, "{}", c);
+				}
+				match fallback {
+					AlterKind::Set(v) => write_sql!(f, fmt, " THEN {}", CoverStmts(v)),
+					AlterKind::Drop => f.push_str(" DROP THEN"),
+					AlterKind::None => {}
+				}
+			}
+			AlterApiClause::SetAction(action) => {
+				write_sql!(f, fmt, " {}", action);
+			}
+			AlterApiClause::DropAction {
+				methods,
+			} => {
+				f.push_str(" FOR ");
+				f.push_str(&Fmt::comma_separated(methods.iter()).to_sql());
+				f.push_str(" DROP THEN");
+			}
+		}
 	}
 }

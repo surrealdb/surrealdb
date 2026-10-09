@@ -1078,7 +1078,7 @@ mod tests {
 		let mut exprs = crate::syn::parse(&src).expect("parse").expressions;
 		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
 		match exprs.remove(0) {
-			crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Select(s)) => {
+			surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(s)) => {
 				lower_expr(s.cond.expect("WHERE").0).expect("lowers")
 			}
 			other => panic!("expected SELECT, got {other:?}"),
@@ -1204,7 +1204,7 @@ mod tests {
 	fn index_columns_compare_against_logical_paths() {
 		let col = |s: &str| Idiom::from_str(s).expect("valid idiom");
 		let path = |s: &str| {
-			lower_expr(crate::sql::Expr::Idiom(crate::syn::idiom(s).expect("idiom")))
+			lower_expr(crate::expr::Expr::Idiom(crate::syn::idiom(s).expect("idiom")))
 				.expect("lowers")
 		};
 		let a_b = path("a.b");

@@ -1,4 +1,6 @@
-use crate::expr::{Expr, Literal};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::expr::{CoverStmts, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveDatabaseStatement {
@@ -14,5 +16,18 @@ impl Default for RemoveDatabaseStatement {
 			if_exists: false,
 			expunge: false,
 		}
+	}
+}
+
+impl ToSql for RemoveDatabaseStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE DATABASE");
+		if self.expunge {
+			write_sql!(f, sql_fmt, " AND EXPUNGE");
+		}
+		if self.if_exists {
+			write_sql!(f, sql_fmt, " IF EXISTS");
+		}
+		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 	}
 }

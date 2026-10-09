@@ -1,5 +1,6 @@
+use common::fmt::QuoteStr;
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::language::Language;
 
@@ -17,7 +18,14 @@ pub enum Filter {
 
 impl ToSql for Filter {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::filter::Filter = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		match self {
+			Self::Ascii => f.push_str("ASCII"),
+			Self::EdgeNgram(min, max) => write_sql!(f, fmt, "EDGENGRAM({min},{max})"),
+			Self::Lowercase => f.push_str("LOWERCASE"),
+			Self::Ngram(min, max) => write_sql!(f, fmt, "NGRAM({min},{max})"),
+			Self::Snowball(lang) => write_sql!(f, fmt, "SNOWBALL({lang})"),
+			Self::Uppercase => f.push_str("UPPERCASE"),
+			Self::Mapper(path) => write_sql!(f, fmt, "MAPPER({})", QuoteStr(path)),
+		}
 	}
 }

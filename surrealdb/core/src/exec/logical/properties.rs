@@ -90,7 +90,7 @@ async fn both(fixture: &Fixture, sql: &str) -> (LogicalOp, LogicalOp) {
 	let lowered = || {
 		let ast = crate::syn::parse(sql).expect("corpus statement parses");
 		let top = ast.expressions.into_iter().next().expect("one statement");
-		let crate::sql::TopLevelExpr::Expr(expr) = top else {
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
 			panic!("corpus statement is a bare expression: {sql}");
 		};
 		crate::expr::logical::lower(expr).expect("corpus statement lowers")

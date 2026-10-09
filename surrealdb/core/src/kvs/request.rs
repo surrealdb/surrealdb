@@ -13,11 +13,12 @@
 
 use std::sync::Arc;
 
+use surrealdb_expr::parser::Query as Ast;
+
 use crate::ctx::CancelHandle;
 use crate::dbs::Session;
 use crate::expr::logical::LogicalOp;
 use crate::kvs::Transaction;
-use crate::sql::Ast;
 use crate::types::PublicVariables;
 
 /// The language a query's text is written in.
@@ -47,9 +48,8 @@ pub enum Dialect {
 ///
 /// The runner splits every variant into its statements before the session
 /// preflight runs, so a caller that submits unparsable text learns that from
-/// the call rather than from a later stage. SurrealQL keeps its surface form
-/// from there on: the executor converts each statement to the expression layer
-/// when it is about to run it.
+/// the call rather than from a later stage. SurrealQL statements carry runtime
+/// expressions with inert credentials; execution prepares each reached statement.
 pub enum QuerySource<'src> {
 	/// Query text, in `dialect`. Parsed with the datastore's capabilities and
 	/// parser configuration.

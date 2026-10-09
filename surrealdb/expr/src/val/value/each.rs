@@ -161,18 +161,18 @@ mod tests {
 
 	#[test]
 	fn each_basic() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let val = parse_val!("{ test: { other: null, something: 123 } }");
-		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(123));
 	}
 
 	#[test]
 	fn each_array() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), parse_val!("[{ age: 34 }, { age: 36 }]"));
 	}
@@ -183,11 +183,11 @@ mod tests {
 		// inside each element, so it widens the same way `pick` and `cut`
 		// distribute it — never to the elements' own paths, which a caller
 		// cutting the result would remove whole.
-		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
 		];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(34));
@@ -199,7 +199,7 @@ mod tests {
 		// A part no element carries matches nothing at all. Yielding the
 		// elements' paths here is what let a field-permission pass erase an
 		// entire array for a field none of its objects even define.
-		let idi: Idiom = syn::idiom("test.something.missing").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.missing").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		assert_eq!(Vec::<Idiom>::new(), val.each(&idi));
 	}
@@ -207,20 +207,20 @@ mod tests {
 	#[test]
 	fn each_array_implicit_field_partial() {
 		// Only the elements that carry the part are addressed.
-		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { name: 'tobie' }] } }");
-		let res: Vec<Idiom> = vec![syn::idiom("test.something[0].age").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("test.something[0].age").unwrap()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(34));
 	}
 
 	#[test]
 	fn each_array_field() {
-		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something[0].age").unwrap().into(),
-			syn::idiom("test.something[1].age").unwrap().into(),
+			syn::idiom("test.something[0].age").unwrap(),
+			syn::idiom("test.something[1].age").unwrap(),
 		];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(34));
@@ -229,13 +229,13 @@ mod tests {
 
 	#[test]
 	fn each_array_field_embedded() {
-		let idi: Idiom = syn::idiom("test.something[*].tags").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something[0].tags").unwrap().into(),
-			syn::idiom("test.something[1].tags").unwrap().into(),
+			syn::idiom("test.something[0].tags").unwrap(),
+			syn::idiom("test.something[1].tags").unwrap(),
 		];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), parse_val!("['code', 'databases']"));
@@ -244,13 +244,13 @@ mod tests {
 
 	#[test]
 	fn each_array_field_embedded_index() {
-		let idi: Idiom = syn::idiom("test.something[*].tags[1]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags[1]").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
 		];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from("databases"));
@@ -259,15 +259,15 @@ mod tests {
 
 	#[test]
 	fn each_array_field_embedded_index_all() {
-		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.something[0].tags[0]").unwrap().into(),
-			syn::idiom("test.something[0].tags[1]").unwrap().into(),
-			syn::idiom("test.something[1].tags[0]").unwrap().into(),
-			syn::idiom("test.something[1].tags[1]").unwrap().into(),
+			syn::idiom("test.something[0].tags[0]").unwrap(),
+			syn::idiom("test.something[0].tags[1]").unwrap(),
+			syn::idiom("test.something[1].tags[0]").unwrap(),
+			syn::idiom("test.something[1].tags[1]").unwrap(),
 		];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from("code"));
@@ -283,12 +283,12 @@ mod tests {
 		);
 
 		let res: Vec<Idiom> = vec![
-			syn::idiom("test.a.color").unwrap().into(),
-			syn::idiom("test.b.color").unwrap().into(),
-			syn::idiom("test.c.color").unwrap().into(),
+			syn::idiom("test.a.color").unwrap(),
+			syn::idiom("test.b.color").unwrap(),
+			syn::idiom("test.c.color").unwrap(),
 		];
 
-		assert_eq!(res, val.each(&Idiom::from(syn::idiom("test.*.color").unwrap())));
+		assert_eq!(res, val.each(&syn::idiom("test.*.color").unwrap()));
 	}
 
 	/// Regression test for an off-by-one in the `Part::Last` arm of the array branch: the earlier
@@ -297,9 +297,9 @@ mod tests {
 	/// idiom pointing at the final element.
 	#[test]
 	fn each_array_last() {
-		let idi: Idiom = syn::idiom("test.something[$]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[$]").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }, { age: 42 }] } }");
-		let res: Vec<Idiom> = vec![syn::idiom("test.something[2]").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("test.something[2]").unwrap()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), parse_val!("{ age: 42 }"));
 	}
@@ -307,16 +307,16 @@ mod tests {
 	/// `Part::Last` on an empty array must resolve to no idioms and must not panic.
 	#[test]
 	fn each_array_last_empty() {
-		let idi: Idiom = syn::idiom("test.something[$]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[$]").unwrap();
 		let val = parse_val!("{ test: { something: [] } }");
 		assert_eq!(val.each(&idi), Vec::<Idiom>::new());
 	}
 
 	#[test]
 	fn each_set_last() {
-		let idi: Idiom = syn::idiom("tags[$]").unwrap().into();
+		let idi: Idiom = syn::idiom("tags[$]").unwrap();
 		let val = parse_val!("{ tags: {1, 3, 5} }");
-		let res: Vec<Idiom> = vec![syn::idiom("tags[$]").unwrap().into()];
+		let res: Vec<Idiom> = vec![syn::idiom("tags[$]").unwrap()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(5));
 	}

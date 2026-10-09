@@ -1,6 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::Expr;
+use crate::expr::{CoverStmts, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Start(pub Expr);
@@ -15,7 +15,6 @@ impl Start {
 
 impl ToSql for Start {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_start: crate::sql::Start = self.clone().into();
-		sql_start.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "START {}", CoverStmts(&self.0));
 	}
 }

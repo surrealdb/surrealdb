@@ -4,8 +4,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 pub struct Explain(pub bool);
 
 impl ToSql for Explain {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let explain: crate::sql::Explain = (*self).into();
-		explain.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str("EXPLAIN");
+		if self.0 {
+			f.push_str(" FULL");
+		}
 	}
 }

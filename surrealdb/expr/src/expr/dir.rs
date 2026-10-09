@@ -27,8 +27,11 @@ pub enum Dir {
 }
 
 impl ToSql for Dir {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let dir: crate::sql::Dir = (*self).into();
-		dir.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(match self {
+			Self::In => "<-",
+			Self::Out => "->",
+			Self::Both => "<->",
+		})
 	}
 }

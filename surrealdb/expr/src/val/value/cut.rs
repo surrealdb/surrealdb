@@ -129,7 +129,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_reset() {
-		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let idi: Idiom = syn::idiom("test").unwrap();
 		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = parse_val!("{ }");
 		val.cut(&idi);
@@ -138,7 +138,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_basic() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = parse_val!("{ test: { other: null } }");
 		val.cut(&idi);
@@ -147,7 +147,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_wrong() {
-		let idi: Idiom = syn::idiom("test.something.wrong").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.wrong").unwrap();
 		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = parse_val!("{ test: { other: null, something: 123 } }");
 		val.cut(&idi);
@@ -156,7 +156,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_other() {
-		let idi: Idiom = syn::idiom("test.other.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.other.something").unwrap();
 		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = parse_val!("{ test: { other: null, something: 123 } }");
 		val.cut(&idi);
@@ -165,7 +165,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_array() {
-		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[1]").unwrap();
 		let mut val = parse_val!("{ test: { something: [123, 456, 789] } }");
 		let res = parse_val!("{ test: { something: [123, 789] } }");
 		val.cut(&idi);
@@ -174,7 +174,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_array_field() {
-		let idi: Idiom = syn::idiom("test.something[1].age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[1].age").unwrap();
 		let mut val =
 			parse_val!("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }");
 		let res = parse_val!("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B' }] } }");
@@ -184,7 +184,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_array_fields() {
-		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].age").unwrap();
 		let mut val =
 			parse_val!("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }");
 		let res = parse_val!("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");
@@ -194,7 +194,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn cut_array_fields_flat() {
-		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.age").unwrap();
 		let mut val =
 			parse_val!("{ test: { something: [{ name: 'A', age: 34 }, { name: 'B', age: 36 }] } }");
 		let res = parse_val!("{ test: { something: [{ name: 'A' }, { name: 'B' }] } }");

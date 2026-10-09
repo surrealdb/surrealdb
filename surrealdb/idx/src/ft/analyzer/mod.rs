@@ -214,15 +214,14 @@ impl Analyzer {
 mod tests {
 	use std::sync::Arc;
 
+	use surrealdb_expr::expr::Expr;
+	use surrealdb_expr::expr::statements::DefineStatement;
+	use surrealdb_expr::parser as syn;
 	use surrealdb_kvs::TransactionType;
-	use surrealdb_parser_next_lower as syn;
-	use surrealdb_sql::Expr;
-	use surrealdb_sql::statements::DefineStatement;
 	use surrealdb_strand::Strand;
 
 	use super::{Analyzer, AnalyzerFunction, BoxAnalyzerFut};
 	use crate::catalog::AnalyzerDefinition;
-	use crate::expr::DefineAnalyzerStatement;
 	use crate::ft::analyzer::filter::FilteringStage;
 	use crate::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::test_env::TestIndexStore;
@@ -251,7 +250,6 @@ mod tests {
 		let DefineStatement::Analyzer(az) = *d else {
 			panic!()
 		};
-		let az = DefineAnalyzerStatement::from(az);
 		AnalyzerDefinition {
 			name: "test".into(),
 			function: az.function,

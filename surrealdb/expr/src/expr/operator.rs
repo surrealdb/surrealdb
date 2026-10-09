@@ -1,7 +1,8 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{EscapeKwFreeIdent, Fmt};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, Kind};
-use crate::sql::index::Distance;
+use crate::expr::index::Distance;
+use crate::expr::{CoverStmts, Expr, Kind};
 /// A reference number tying a MATCHES operator to its statement-local index.
 pub type MatchRef = u8;
 
@@ -21,9 +22,15 @@ pub enum PrefixOperator {
 }
 
 impl ToSql for PrefixOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let prefix_operator: crate::sql::PrefixOperator = self.clone().into();
-		prefix_operator.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Not => f.push('!'),
+			Self::Positive => f.push('+'),
+			Self::Negate => f.push('-'),
+			Self::Range => f.push_str(".."),
+			Self::RangeInclusive => f.push_str("..="),
+			Self::Cast(kind) => write_sql!(f, fmt, "<{kind}> "),
+		}
 	}
 }
 
@@ -37,9 +44,23 @@ pub enum PostfixOperator {
 }
 
 impl ToSql for PostfixOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let postfix_operator: crate::sql::PostfixOperator = self.clone().into();
-		postfix_operator.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Range => f.push_str(".."),
+			Self::RangeSkip => f.push_str(">.."),
+			Self::MethodCall(name, x) => {
+				write_sql!(
+					f,
+					fmt,
+					".{}({})",
+					EscapeKwFreeIdent(name),
+					Fmt::comma_separated(x.iter().map(CoverStmts))
+				);
+			}
+			Self::Call(args) => {
+				write_sql!(f, fmt, "({})", Fmt::comma_separated(args.iter().map(CoverStmts)))
+			}
+		}
 	}
 }
 
@@ -134,9 +155,13 @@ pub struct MatchesOperator {
 }
 
 impl ToSql for MatchesOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let matches_operator: crate::sql::operator::MatchesOperator = self.clone().into();
-		matches_operator.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match (self.rf, &self.operator) {
+			(Some(r), BooleanOperator::And) => write_sql!(f, fmt, "@{r}@"),
+			(Some(r), op) => write_sql!(f, fmt, "@{r},{op}@"),
+			(None, BooleanOperator::And) => f.push_str("@@"),
+			(None, op) => write_sql!(f, fmt, "@{op}@"),
+		}
 	}
 }
 
@@ -168,16 +193,66 @@ pub enum NearestNeighbor {
 }
 
 impl ToSql for NearestNeighbor {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let nn: crate::sql::operator::NearestNeighbor = self.clone().into();
-		nn.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::K(k, d) => write_sql!(f, fmt, "<|{k},{d}|>"),
+			Self::KTree(k) => write_sql!(f, fmt, "<|{k}|>"),
+			Self::Approximate(k, ef) => write_sql!(f, fmt, "<|{k},{ef}|>"),
+		}
 	}
 }
 
 impl ToSql for BinaryOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let binary_operator: crate::sql::BinaryOperator = self.clone().into();
-		binary_operator.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Or => f.push_str("OR"),
+			Self::And => f.push_str("AND"),
+			Self::NullCoalescing => f.push_str("??"),
+			Self::TenaryCondition => f.push_str("?:"),
+			Self::Add => f.push('+'),
+			Self::Subtract => f.push('-'),
+			Self::Multiply => f.push('*'),
+			Self::Divide => f.push('/'),
+			Self::Remainder => f.push('%'),
+			Self::Power => f.push_str("**"),
+			Self::Equal => f.push('='),
+			Self::ExactEqual => f.push_str("=="),
+			Self::NotEqual => f.push_str("!="),
+			Self::AllEqual => f.push_str("*="),
+			Self::AnyEqual => f.push_str("?="),
+			Self::LessThan => f.push('<'),
+			Self::LessThanEqual => f.push_str("<="),
+			Self::MoreThan => f.push('>'),
+			Self::MoreThanEqual => f.push_str(">="),
+			Self::Contain => f.push_str("CONTAINS"),
+			Self::NotContain => f.push_str("CONTAINSNOT"),
+			Self::ContainAll => f.push_str("CONTAINSALL"),
+			Self::ContainAny => f.push_str("CONTAINSANY"),
+			Self::ContainNone => f.push_str("CONTAINSNONE"),
+			Self::Inside => f.push_str("INSIDE"),
+			Self::NotInside => f.push_str("NOTINSIDE"),
+			Self::AllInside => f.push_str("ALLINSIDE"),
+			Self::AnyInside => f.push_str("ANYINSIDE"),
+			Self::NoneInside => f.push_str("NONEINSIDE"),
+			Self::Outside => f.push_str("OUTSIDE"),
+			Self::Intersects => f.push_str("INTERSECTS"),
+			Self::Matches(m) => m.fmt_sql(f, fmt),
+			Self::Range => f.push_str(".."),
+			Self::RangeInclusive => f.push_str("..="),
+			Self::RangeSkip => f.push_str(">.."),
+			Self::RangeSkipInclusive => f.push_str(">..="),
+			Self::NearestNeighbor(n) => match &**n {
+				NearestNeighbor::KTree(k) => {
+					write_sql!(f, fmt, "<|{k}|>");
+				}
+				NearestNeighbor::K(k, distance) => {
+					write_sql!(f, fmt, "<|{k},{distance}|>");
+				}
+				NearestNeighbor::Approximate(k, ef) => {
+					write_sql!(f, fmt, "<|{k},{ef}|>");
+				}
+			},
+		}
 	}
 }
 
@@ -190,9 +265,13 @@ pub enum AssignOperator {
 }
 
 impl ToSql for AssignOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let op: crate::sql::AssignOperator = self.clone().into();
-		op.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		match self {
+			Self::Assign => f.push('='),
+			Self::Add => f.push_str("+="),
+			Self::Subtract => f.push_str("-="),
+			Self::Extend => f.push_str("+?="),
+		}
 	}
 }
 
@@ -203,6 +282,7 @@ impl ToSql for AssignOperator {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub enum BindingPower {
+	Base,
 	Nullish,
 	Or,
 	And,
@@ -211,9 +291,9 @@ pub enum BindingPower {
 	AddSub,
 	MulDiv,
 	Power,
-	Range,
 	Prefix,
-	Postfix,
+	Range,
+	Call,
 	Prime,
 }
 
@@ -280,7 +360,7 @@ impl BindingPower {
 	pub fn for_postfix_operator(op: &PostfixOperator) -> Self {
 		match op {
 			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
-			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Postfix,
+			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Call,
 		}
 	}
 
@@ -293,6 +373,7 @@ impl BindingPower {
 			| PrefixOperator::Cast(_) => BindingPower::Prefix,
 		}
 	}
+
 	/// Returns the binding power for this expression. This is generally
 	/// `BindingPower::Prime` as most value variants are prime expressions,
 	/// however some like Value::Expression and Value::Range have a different
@@ -302,7 +383,13 @@ impl BindingPower {
 			Expr::Prefix {
 				op,
 				..
-			} => Self::for_prefix_operator(op),
+			} => {
+				if let PrefixOperator::Range | PrefixOperator::RangeInclusive = *op {
+					BindingPower::Range
+				} else {
+					BindingPower::Prefix
+				}
+			}
 			Expr::Postfix {
 				op,
 				..

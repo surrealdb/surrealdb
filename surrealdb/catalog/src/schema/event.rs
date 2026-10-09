@@ -8,16 +8,16 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::auth::AuthLimit;
 use crate::catalog::{ExprText, FromStored, LogicalBody};
+use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::{TableName, Value};
 
 /// Whether a stored event runs inline with the triggering write or is
 /// dispatched asynchronously, and the retry/nesting budget when async.
 ///
-/// The stored twin of [`sql::EventKind`]. The AST carries the parsed form and
+/// The stored twin of [`runtime::EventKind`]. The AST carries the parsed form and
 /// the parser's defaults; this carries the persisted form, so it is the one
 /// that owns the encoding and must not change shape without a revision bump.
 #[revisioned(revision = 1)]
@@ -32,11 +32,11 @@ pub enum EventKind {
 	},
 }
 
-impl From<sql::EventKind> for EventKind {
-	fn from(v: sql::EventKind) -> Self {
+impl From<runtime::EventKind> for EventKind {
+	fn from(v: runtime::EventKind) -> Self {
 		match v {
-			sql::EventKind::Sync => Self::Sync,
-			sql::EventKind::Async {
+			runtime::EventKind::Sync => Self::Sync,
+			runtime::EventKind::Async {
 				retry,
 				max_depth,
 			} => Self::Async {
@@ -47,7 +47,7 @@ impl From<sql::EventKind> for EventKind {
 	}
 }
 
-impl From<EventKind> for sql::EventKind {
+impl From<EventKind> for runtime::EventKind {
 	fn from(v: EventKind) -> Self {
 		match v {
 			EventKind::Sync => Self::Sync,
@@ -139,20 +139,19 @@ impl InfoStructure for EventDefinition {
 }
 
 impl EventDefinition {
-	/// Lowers to the sql-side statement, which is what renders. One renderer,
-	/// not two: see `FieldDefinition::to_sql_definition`.
-	pub fn to_sql_definition(&self) -> sql::statements::define::DefineEventStatement {
-		sql::statements::define::DefineEventStatement {
-			kind: sql::statements::define::DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			target_table: sql::Expr::Table(self.target_table.clone().into()),
-			when: self.when.clone().into(),
-			then: self.then.iter().cloned().map(Into::into).collect(),
+	/// Builds the runtime definition used by the canonical schema printer.
+	pub fn to_runtime_definition(&self) -> runtime::statements::define::DefineEventStatement {
+		runtime::statements::define::DefineEventStatement {
+			kind: runtime::statements::define::DefineKind::Default,
+			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
+			target_table: runtime::Expr::Table(self.target_table.clone()),
+			when: self.when.clone(),
+			then: self.then.clone(),
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|v| runtime::Expr::Literal(runtime::Literal::String(v.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 			event_kind: self.kind.clone().into(),
 		}
 	}
@@ -160,7 +159,7 @@ impl EventDefinition {
 
 impl ToSql for EventDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

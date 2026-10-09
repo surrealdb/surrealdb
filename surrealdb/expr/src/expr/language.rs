@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Display;
 
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -57,8 +58,8 @@ impl Display for Language {
 	}
 }
 
-impl surrealdb_types::ToSql for Language {
-	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+impl ToSql for Language {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self.as_str())
 	}
 }

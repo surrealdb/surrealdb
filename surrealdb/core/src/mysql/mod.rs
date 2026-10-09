@@ -55,54 +55,47 @@ pub(crate) fn parse_to_statements(
 			surrealdb_mysql::ast::stmt::Statement::Insert(insert) => {
 				let expr = surrealdb_sqlplan::lower_mysql_insert(insert)
 					.map_err(|e| anyhow::anyhow!("MySQL INSERT lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Replace(replace) => {
 				let expr = surrealdb_sqlplan::lower_mysql_replace(replace)
 					.map_err(|e| anyhow::anyhow!("MySQL REPLACE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Update(update) => {
 				let expr = surrealdb_sqlplan::lower_mysql_update(update)
 					.map_err(|e| anyhow::anyhow!("MySQL UPDATE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Delete(delete) => {
 				let expr = surrealdb_sqlplan::lower_mysql_delete(delete)
 					.map_err(|e| anyhow::anyhow!("MySQL DELETE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::Truncate(truncate) => {
 				let expr = surrealdb_sqlplan::lower_mysql_truncate(truncate)
 					.map_err(|e| anyhow::anyhow!("MySQL TRUNCATE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_mysql::ast::stmt::Statement::CreateTable(_)
 			| surrealdb_mysql::ast::stmt::Statement::DropTable(_) => {
 				let exprs = surrealdb_sqlplan::lower_mysql_ddl(&stmt)
 					.map_err(|e| anyhow::anyhow!("MySQL DDL lowering error: {e}"))?;
 				for expr in exprs {
-					statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-						crate::sql::Expr::from(expr),
-					)));
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 				}
 			}
 			surrealdb_mysql::ast::stmt::Statement::Use(use_stmt) => {
 				let use_expr = surrealdb_sqlplan::lower_mysql_use(use_stmt)
 					.map_err(|e| anyhow::anyhow!("MySQL USE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Use(
-					crate::sql::statements::UseStatement::from(use_expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Use(use_expr)));
 			}
 			_ => {
 				let mut surql_text = String::new();
@@ -116,10 +109,14 @@ pub(crate) fn parse_to_statements(
 				let ast = syn::parse_with_capabilities(&surql_text, capabilities, config)
 					.map_err(|e| anyhow::anyhow!("Failed to parse translated SurrealQL: {e}"))?;
 				for expr in ast.expressions {
-					statements.push(TopLevelStatement::Ast(expr));
+					statements.push(surface_statement(expr));
 				}
 			}
 		}
 	}
 	Ok(statements)
+}
+
+fn surface_statement(stmt: impl Into<surrealdb_expr::parser::TopLevelExpr>) -> TopLevelStatement {
+	TopLevelStatement::Ast(stmt.into())
 }

@@ -1,3 +1,4 @@
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod access;
 pub mod analyzer;
 pub mod api;
@@ -51,8 +52,8 @@ pub enum DefineStatement {
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
-	/// Boxed, like its `sql` twin: it is by far the largest variant, so an
-	/// unboxed one sizes every `DefineStatement` allocation to it.
+	/// Boxed because this is the largest variant; keeping it out of line
+	/// bounds every `DefineStatement` allocation.
 	Field(Box<DefineFieldStatement>),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
@@ -63,4 +64,28 @@ pub enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
+}
+
+impl ToSql for DefineStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::Model(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
+		}
+	}
 }

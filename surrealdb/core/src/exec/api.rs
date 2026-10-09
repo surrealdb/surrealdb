@@ -294,7 +294,7 @@ async fn run_middleware(
 		exec.ctx().get_capabilities().as_ref(),
 		&exec.ctx().config.parser,
 	) {
-		Ok(function) => function.into(),
+		Ok(function) => function,
 		Err(_) => {
 			return Err(ControlFlow::Err(
 				ApiError::MiddlewareFunctionNotFound {
@@ -453,7 +453,7 @@ async fn evaluate_handler(handler: &Expr, exec: &ExecutionContext) -> Result<Val
 	let clamp = |n: u32| u8::try_from(n).unwrap_or(u8::MAX);
 	exec.check_dive_by(clamp(depth.deepest))?;
 	let exec = &exec.dive_by(clamp(depth.handler_charged()))?.entering_stored_code(0, true);
-	let logical = crate::expr::logical::lower_expr(handler.clone().into());
+	let logical = crate::expr::logical::lower_expr(handler.clone());
 	if let Ok(LogicalExpr::Subquery(op)) = &logical
 		&& crate::exec::logical::unplannable_write_in_expr(logical.as_ref().expect("matched"))
 			.is_none()

@@ -5,10 +5,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::catalog::{Error, ExprText, FieldsText, FromStored, IdiomText, LogicalBody};
+use crate::expr as runtime;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fields, Group, Groups, View};
-use crate::sql;
 use crate::val::Value;
 
 /// Stored form of [`ViewDefinition`].
@@ -393,17 +393,17 @@ impl ViewDefinition {
 		}
 	}
 
-	pub fn to_sql_definition(&self) -> sql::View {
+	pub fn to_runtime_definition(&self) -> runtime::View {
 		match self {
 			ViewDefinition::Materialized {
 				fields,
 				tables,
 				condition,
 				..
-			} => sql::View {
-				expr: fields.clone().into(),
-				what: tables.clone().into_iter().map(Into::into).collect(),
-				cond: condition.clone().map(|x| sql::Cond(x.into())),
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
 				group: None,
 			},
 			ViewDefinition::Aggregated {
@@ -412,22 +412,22 @@ impl ViewDefinition {
 				groups,
 				fields,
 				..
-			} => sql::View {
-				expr: fields.clone().into(),
-				what: tables.clone().into_iter().map(Into::into).collect(),
-				cond: condition.clone().map(|x| sql::Cond(x.into())),
-				group: Some(groups.clone().into()),
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
+				group: Some(groups.clone()),
 			},
 			ViewDefinition::Select {
 				fields,
 				tables,
 				condition,
 				groups,
-			} => sql::View {
-				expr: fields.clone().into(),
-				what: tables.clone().into_iter().map(Into::into).collect(),
-				cond: condition.clone().map(|x| sql::Cond(x.into())),
-				group: groups.clone().map(|x| x.into()),
+			} => runtime::View {
+				expr: fields.clone(),
+				what: tables.clone(),
+				cond: condition.clone().map(runtime::Cond),
+				group: groups.clone(),
 			},
 		}
 	}
@@ -435,7 +435,7 @@ impl ViewDefinition {
 
 impl ToSql for ViewDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 impl InfoStructure for ViewDefinition {

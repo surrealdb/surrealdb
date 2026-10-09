@@ -376,7 +376,7 @@ impl Lowering<'_, '_> {
 
 	/// The logical form of a stored expression of an index.
 	fn index_body(&self, expr: crate::expr::Expr) -> Lowered<crate::expr::logical::LogicalExpr> {
-		let body = crate::expr::logical::lower_expr(expr.into()).map_err(|e| {
+		let body = crate::expr::logical::lower_expr(expr).map_err(|e| {
 			NotCovered::internal(format!("an index expression has no logical form: {e}"))
 		})?;
 		if crate::exec::logical::unplannable_write_in_expr(&body).is_some() {

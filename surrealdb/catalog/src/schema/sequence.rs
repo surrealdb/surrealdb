@@ -5,9 +5,9 @@ use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::expr as runtime;
+use crate::expr::statements::define::{DefineKind, DefineSequenceStatement};
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
-use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -22,14 +22,16 @@ pub struct SequenceDefinition {
 impl_kv_value_revisioned!(SequenceDefinition);
 
 impl SequenceDefinition {
-	fn to_sql_definition(&self) -> DefineSequenceStatement {
+	fn to_runtime_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			batch: sql::Expr::Literal(sql::Literal::Integer(self.batch as i64)),
-			start: sql::Expr::Literal(sql::Literal::Integer(self.start)),
-			timeout: sql::Expr::Literal(
-				self.timeout.map(sql::Literal::Duration).unwrap_or(sql::Literal::None),
+			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
+			batch: runtime::Expr::Literal(runtime::Literal::Integer(self.batch as i64)),
+			start: runtime::Expr::Literal(runtime::Literal::Integer(self.start)),
+			timeout: runtime::Expr::Literal(
+				self.timeout
+					.map(|d| runtime::Literal::Duration(d.into()))
+					.unwrap_or(runtime::Literal::None),
 			),
 		}
 	}
@@ -50,6 +52,6 @@ impl InfoStructure for SequenceDefinition {
 
 impl ToSql for &SequenceDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }

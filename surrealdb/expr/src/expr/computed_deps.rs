@@ -331,7 +331,7 @@ impl FieldDependencyExtractor {
 /// and for idioms whose first part is not a static field reference
 /// (e.g. `$this.x`, `[0]`, function-call roots).
 fn parse_idiom_root(s: &str) -> Option<String> {
-	let idi: Idiom = crate::syn::idiom(s).ok()?.into();
+	let idi: Idiom = crate::parser::idiom(s).ok()?;
 	match idi.0.first()? {
 		Part::Field(name) => Some(name.as_str().to_owned()),
 		_ => None,
@@ -812,7 +812,7 @@ mod tests {
 	/// Using the parser keeps the tests resilient to small AST struct
 	/// shape changes — they exercise the same surface a user would write.
 	fn parse(s: &str) -> Expr {
-		crate::syn::expr(s).expect("test expression must parse").into()
+		crate::syn::expr(s).expect("test expression must parse")
 	}
 
 	#[test]

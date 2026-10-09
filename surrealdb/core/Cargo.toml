@@ -167,7 +167,6 @@ arbitrary = [
     "uuid/arbitrary",
     "surrealdb-types/arbitrary",
     "common/arbitrary",
-    "surrealdb-sql/arbitrary",
     "surrealdb-strand/arbitrary",
     "surrealdb-iam/arbitrary",
     "surrealdb-rpc/arbitrary",
@@ -199,10 +198,8 @@ surrealdb-gql = { workspace = true, optional = true }
 surrealdb-pgsql = { workspace = true, optional = true }
 surrealdb-mysql = { workspace = true, optional = true }
 surrealdb-sqlplan = { workspace = true, optional = true }
-surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
 parse-common.workspace = true
-surrealdb-parser-next-lower = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-runtime = { workspace = true }

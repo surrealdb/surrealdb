@@ -9,9 +9,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::catalog::{ExprText, FromStored};
+use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::Value;
 
 /// The type of access methods available
@@ -269,7 +269,7 @@ pub struct StoredAccessDefinition {
 impl_kv_value_revisioned!(StoredAccessDefinition);
 
 impl AccessDefinition {
-	fn to_sql_definition(&self) -> sql::statements::define::DefineAccessStatement {
+	fn to_runtime_definition(&self) -> runtime::statements::define::DefineAccessStatement {
 		// Redact and lower the stored-form structure; the record-access
 		// signup/signin expressions come from the compiled side fields (the
 		// stored texts inside `access_type` are cleared first so the lowering
@@ -285,32 +285,32 @@ impl AccessDefinition {
 			rec.signin.clone_from(&self.signin);
 		}
 
-		sql::statements::define::DefineAccessStatement {
-			kind: sql::statements::define::DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			access_type: sql::AccessType::from(access_type),
-			authenticate: self.authenticate.clone().map(Into::into),
-			context: self.context.clone().map(Into::into),
-			duration: sql::access::AccessDuration {
+		runtime::statements::define::DefineAccessStatement {
+			kind: runtime::statements::define::DefineKind::Default,
+			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
+			access_type,
+			authenticate: self.authenticate.clone(),
+			context: self.context.clone(),
+			duration: runtime::access::AccessDuration {
 				grant: self
 					.grant_duration
-					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
-					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+					.map(|d| runtime::Expr::Literal(runtime::Literal::Duration(d.into())))
+					.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 				token: self
 					.token_duration
-					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
-					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+					.map(|d| runtime::Expr::Literal(runtime::Literal::Duration(d.into())))
+					.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 				session: self
 					.session_duration
-					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
-					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+					.map(|d| runtime::Expr::Literal(runtime::Literal::Duration(d.into())))
+					.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|c| sql::Expr::Literal(sql::Literal::String(c.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
-			base: sql::Base::from(crate::expr::Base::from(self.base.clone())),
+				.map(|c| runtime::Expr::Literal(runtime::Literal::String(c.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
+			base: crate::expr::Base::from(self.base.clone()),
 		}
 	}
 }
@@ -408,7 +408,7 @@ impl InfoStructure for AccessDefinition {
 
 impl ToSql for AccessDefinition {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, sql_fmt)
+		self.to_runtime_definition().fmt_sql(f, sql_fmt)
 	}
 }
 

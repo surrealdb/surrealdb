@@ -276,7 +276,7 @@ mod tests {
 	fn clause(src: &str) -> Output {
 		let mut ast = crate::syn::parse(src).expect("the statement parses").expressions;
 		assert_eq!(ast.len(), 1, "expected exactly one statement in {src:?}");
-		let crate::sql::TopLevelExpr::Expr(expr) = ast.remove(0) else {
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = ast.remove(0) else {
 			panic!("expected a statement in {src:?}");
 		};
 		let LogicalOp::Write(write) =

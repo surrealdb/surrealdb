@@ -1,6 +1,8 @@
 use std::ops::Deref;
 use std::str;
 
+use surrealdb_types::{SqlFormat, ToSql};
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Script(pub String);
 
@@ -24,9 +26,8 @@ impl Deref for Script {
 	}
 }
 
-impl surrealdb_types::ToSql for Script {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_script: crate::sql::Script = self.clone().into();
-		sql_script.fmt_sql(f, fmt);
+impl ToSql for Script {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.0.fmt_sql(f, fmt)
 	}
 }

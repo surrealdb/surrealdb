@@ -1,15 +1,11 @@
-//! Tests for the `surrealdb-sql` AST that need layers sitting above it.
-//!
-//! `surrealdb-sql` is the bottom of the language stack, so it cannot reach the
-//! parser or the expression layer even as a dev-dependency without inverting
-//! the crate graph. Cases that assert round-tripping through either of those
-//! live here instead.
+//! Runtime expression round trips and kind rendering through the native parser.
 
 use rstest::rstest;
+use surrealdb_expr::parser::kind_for_definition;
 use surrealdb_types::ToSql;
 
-use crate::sql::Kind;
-use crate::sql::kind::GeometryKind;
+use crate::expr::Kind;
+use crate::expr::kind::GeometryKind;
 use crate::syn;
 
 /// Statement counts per execution unit for a parsed query.
@@ -18,7 +14,7 @@ fn unit_sizes(query: &str) -> Vec<usize> {
 		.unwrap()
 		.into_execution_units()
 		.iter()
-		.map(crate::sql::Ast::num_statements)
+		.map(surrealdb_expr::parser::Query::num_statements)
 		.collect()
 }
 
@@ -90,15 +86,14 @@ fn set_check_type() {
 #[case::array(Kind::Array(Box::new(Kind::String), None))]
 #[case::either(Kind::Either(vec![Kind::String, Kind::Int]))]
 #[case::file(Kind::File(vec!["bucket".to_string()]))]
-fn test_kind_conversions_expr(#[case] sql_kind: Kind) {
-	let expr_kind: crate::expr::Kind = sql_kind.clone().into();
-	let back_to_sql: Kind = expr_kind.into();
-	assert_eq!(sql_kind, back_to_sql);
+fn kind_canonical_text_round_trips(#[case] kind: Kind) {
+	assert_eq!(kind, kind_for_definition(&kind.to_sql()).unwrap());
+	assert_eq!(kind, kind_for_definition(&kind.to_sql_pretty()).unwrap());
 }
 
 /// Parses `query` with every experimental capability on, so statements behind a
 /// stability gate are reachable.
-fn parse_experimental(query: &str) -> crate::sql::Ast {
+fn parse_experimental(query: &str) -> surrealdb_expr::parser::Query {
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::Targets;
 	syn::parse_with_capabilities(

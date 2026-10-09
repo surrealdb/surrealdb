@@ -307,7 +307,7 @@ impl CompiledClosure {
 		let logical = Arc::new(LogicalClosure {
 			args: args.to_vec(),
 			returns: returns.cloned(),
-			body: lower_expr(body.clone().into())?,
+			body: lower_expr(body.clone())?,
 			body_sql,
 		});
 		let digest = ClosureDigest::of(&logical);

@@ -1282,6 +1282,31 @@ async fn test_prepared_statement_lifecycle_and_caching() {
 }
 
 #[tokio::test]
+async fn surrealql_prepared_queries_reuse_the_parse_with_fresh_bindings() {
+	let (addr, shutdown) = start_test_pg_server().await;
+	let mut stream = connect_and_handshake_with_options(addr, Some("-c dialect=surrealql")).await;
+	let parse = build_parse("add", "RETURN $1 + $2", &[23, 23]);
+	let bind = build_bind("first", "add", &[], &[Some(b"10"), Some(b"20")]);
+	let execute = build_exec("first", 0);
+	let sync = build_sync();
+	let (rows, messages) = run_extended_batch(&mut stream, &[parse, bind, execute, sync]).await;
+	assert!(messages.contains(&b'1'));
+	assert!(messages.contains(&b'C'));
+	assert_eq!(rows.len(), 1);
+	assert_eq!(decode_data_row(&rows[0])[0].as_deref(), Some("30"));
+
+	let bind = build_bind("second", "add", &[], &[Some(b"100"), Some(b"250")]);
+	let execute = build_exec("second", 0);
+	let sync = build_sync();
+	let (rows, messages) = run_extended_batch(&mut stream, &[bind, execute, sync]).await;
+	assert!(!messages.contains(&b'1'));
+	assert!(messages.contains(&b'C'));
+	assert_eq!(rows.len(), 1);
+	assert_eq!(decode_data_row(&rows[0])[0].as_deref(), Some("350"));
+	shutdown.cancel();
+}
+
+#[tokio::test]
 async fn test_observability_metrics_and_redaction() {
 	let (addr, shutdown) = start_test_pg_server().await;
 	let mut stream = connect_and_handshake(addr).await;

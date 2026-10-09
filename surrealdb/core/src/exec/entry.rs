@@ -130,7 +130,7 @@ pub(crate) fn eval_frame(exec: &ExecutionContext) -> EvalContext<'_> {
 /// reached through here accepts what an expression accepts and nothing wider.
 pub(crate) async fn evaluate(expr: &Expr, frame: &EvalContext<'_>) -> Result<Value> {
 	let exec = frame.exec_ctx;
-	let logical = crate::expr::logical::lower_expr(expr.clone().into()).map_err(|e| {
+	let logical = crate::expr::logical::lower_expr(expr.clone()).map_err(|e| {
 		ExecError::PlannerUnsupported {
 			reason: e.to_string(),
 		}

@@ -66,7 +66,8 @@ async fn fate_of(ctx: &crate::exec::ExecutionContext, sql: &str) -> Fate {
 	let Ok(ast) = crate::syn::parse(sql) else {
 		return Fate::Unparsed;
 	};
-	let Some(crate::sql::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next() else {
+	let Some(surrealdb_expr::parser::TopLevelExpr::Expr(expr)) = ast.expressions.into_iter().next()
+	else {
 		return Fate::Unparsed;
 	};
 	let Ok(op) = crate::expr::logical::lower(expr) else {

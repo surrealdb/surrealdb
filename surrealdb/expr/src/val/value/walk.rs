@@ -231,34 +231,33 @@ mod tests {
 
 	#[test]
 	fn walk_basic() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res: Vec<(Idiom, Value)> =
-			vec![(syn::idiom("test.something").unwrap().into(), Value::from(123))];
+			vec![(syn::idiom("test.something").unwrap(), Value::from(123))];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_empty() {
-		let idi: Idiom = syn::idiom("test.missing").unwrap().into();
+		let idi: Idiom = syn::idiom("test.missing").unwrap();
 		let val = parse_val!("{ test: { other: null, something: 123 } }");
-		let res: Vec<(Idiom, Value)> =
-			vec![(syn::idiom("test.missing").unwrap().into(), Value::None)];
+		let res: Vec<(Idiom, Value)> = vec![(syn::idiom("test.missing").unwrap(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_empty_object() {
-		let idi: Idiom = syn::idiom("none.something.age").unwrap().into();
+		let idi: Idiom = syn::idiom("none.something.age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> =
-			vec![(syn::idiom("none.something.age").unwrap().into(), Value::None)];
+			vec![(syn::idiom("none.something.age").unwrap(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_empty_array() {
-		let idi: Idiom = syn::idiom("none.something.*.age").unwrap().into();
+		let idi: Idiom = syn::idiom("none.something.*.age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> = vec![];
 		assert_eq!(res, val.walk(&idi));
@@ -266,87 +265,79 @@ mod tests {
 
 	#[test]
 	fn walk_empty_array_index() {
-		let idi: Idiom = syn::idiom("none.something[0].age").unwrap().into();
+		let idi: Idiom = syn::idiom("none.something[0].age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> =
-			vec![(syn::idiom("none.something[0].age").unwrap().into(), Value::None)];
+			vec![(syn::idiom("none.something[0].age").unwrap(), Value::None)];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_array() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
-		let res = vec![(
-			syn::idiom("test.something").unwrap().into(),
-			parse_val!("[{ age: 34 }, { age: 36 }]"),
-		)];
+		let res =
+			vec![(syn::idiom("test.something").unwrap(), parse_val!("[{ age: 34 }, { age: 36 }]"))];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_array_field() {
-		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].age").unwrap();
 		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<(Idiom, Value)> = vec![
-			(syn::idiom("test.something[0].age").unwrap().into(), Value::from(34)),
-			(syn::idiom("test.something[1].age").unwrap().into(), Value::from(36)),
+			(syn::idiom("test.something[0].age").unwrap(), Value::from(34)),
+			(syn::idiom("test.something[1].age").unwrap(), Value::from(36)),
 		];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_array_field_embedded() {
-		let idi: Idiom = syn::idiom("test.something[*].tags").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<(Idiom, Value)> = vec![
-			(
-				syn::idiom("test.something[0].tags").unwrap().into(),
-				parse_val!("['code', 'databases']"),
-			),
-			(
-				syn::idiom("test.something[1].tags").unwrap().into(),
-				parse_val!("['design', 'operations']"),
-			),
+			(syn::idiom("test.something[0].tags").unwrap(), parse_val!("['code', 'databases']")),
+			(syn::idiom("test.something[1].tags").unwrap(), parse_val!("['design', 'operations']")),
 		];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_array_field_embedded_index() {
-		let idi: Idiom = syn::idiom("test.something[*].tags[1]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags[1]").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<(Idiom, Value)> = vec![
-			(syn::idiom("test.something[0].tags[1]").unwrap().into(), Value::from("databases")),
-			(syn::idiom("test.something[1].tags[1]").unwrap().into(), Value::from("operations")),
+			(syn::idiom("test.something[0].tags[1]").unwrap(), Value::from("databases")),
+			(syn::idiom("test.something[1].tags[1]").unwrap(), Value::from("operations")),
 		];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_set_field_all() {
-		let idi: Idiom = syn::idiom("test.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.*").unwrap();
 		let val = parse_val!("{ test: { ' hello ', } }");
 		let res: Vec<(Idiom, Value)> =
-			vec![(syn::idiom("test[0]").unwrap().into(), Value::from(" hello "))];
+			vec![(syn::idiom("test[0]").unwrap(), Value::from(" hello "))];
 		assert_eq!(res, val.walk(&idi));
 	}
 
 	#[test]
 	fn walk_array_field_embedded_index_all() {
-		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap();
 		let val = parse_val!(
 			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
 		);
 		let res: Vec<(Idiom, Value)> = vec![
-			(syn::idiom("test.something[0].tags[0]").unwrap().into(), Value::from("code")),
-			(syn::idiom("test.something[0].tags[1]").unwrap().into(), Value::from("databases")),
-			(syn::idiom("test.something[1].tags[0]").unwrap().into(), Value::from("design")),
-			(syn::idiom("test.something[1].tags[1]").unwrap().into(), Value::from("operations")),
+			(syn::idiom("test.something[0].tags[0]").unwrap(), Value::from("code")),
+			(syn::idiom("test.something[0].tags[1]").unwrap(), Value::from("databases")),
+			(syn::idiom("test.something[1].tags[0]").unwrap(), Value::from("design")),
+			(syn::idiom("test.something[1].tags[1]").unwrap(), Value::from("operations")),
 		];
 		assert_eq!(res, val.walk(&idi));
 	}
@@ -382,7 +373,7 @@ mod tests {
 			"n.missing",
 			"missing.deep[*]",
 		] {
-			let idi: Idiom = syn::idiom(path).unwrap().into();
+			let idi: Idiom = syn::idiom(path).unwrap();
 			let mut visited = Vec::new();
 			val.walk_ref(&idi, &mut |v| visited.push(v.clone()));
 			let walked: Vec<Value> = val.walk(&idi).into_iter().map(|(_, v)| v).collect();

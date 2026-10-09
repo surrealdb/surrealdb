@@ -12,11 +12,11 @@ use surrealdb_core::iam::verify::{self, ScramAuth, basic};
 use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_core::pgsql::lower::lower_stmt;
 use surrealdb_core::syn;
+use surrealdb_core::syn::{Query as Ast, TopLevelExpr};
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
 use surrealdb_pgsql::ast::stmt::Statement as PgStatement;
 use surrealdb_rpc::capabilities::RouteTarget;
-use surrealdb_sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_sqlplan::binder::pgsql::bind_select;
 use surrealdb_sqlplan::catalog::MemoryCatalog;
 use surrealdb_sqlplan::dialect::DialectPolicy;
@@ -74,7 +74,7 @@ const MAX_PARAMS: usize = i16::MAX as usize;
 /// Pre-parsed and pre-bound plan execution artifact.
 #[derive(Clone)]
 enum CachedPlan {
-	SurrealQl(Ast),
+	SurrealQl(syn::Query),
 	PgSelect {
 		plan: Box<LogicalOp>,
 	},
@@ -1117,28 +1117,28 @@ impl Connection {
 						PgStatement::Insert(insert) => {
 							if let Ok(expr) = lower_pgsql_insert(insert) {
 								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+									expressions: vec![TopLevelExpr::Expr(expr)],
 								}));
 							}
 						}
 						PgStatement::Update(update) => {
 							if let Ok(expr) = lower_pgsql_update(update) {
 								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+									expressions: vec![TopLevelExpr::Expr(expr)],
 								}));
 							}
 						}
 						PgStatement::Delete(delete) => {
 							if let Ok(expr) = lower_pgsql_delete(delete) {
 								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+									expressions: vec![TopLevelExpr::Expr(expr)],
 								}));
 							}
 						}
 						PgStatement::Truncate(truncate) => {
 							if let Ok(expr) = lower_pgsql_truncate(truncate) {
 								cached_plan = Some(CachedPlan::PgAst(Ast {
-									expressions: vec![TopLevelExpr::Expr(Expr::from(expr))],
+									expressions: vec![TopLevelExpr::Expr(expr)],
 								}));
 							}
 						}
@@ -1151,7 +1151,7 @@ impl Connection {
 								cached_plan = Some(CachedPlan::PgAst(Ast {
 									expressions: exprs
 										.into_iter()
-										.map(|e| TopLevelExpr::Expr(Expr::from(e)))
+										.map(TopLevelExpr::Expr)
 										.collect(),
 								}));
 							}

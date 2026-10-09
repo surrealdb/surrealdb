@@ -1200,10 +1200,10 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::expr::statements::define::DefineKind;
+	use crate::expr::{Expr, Literal};
 	use crate::iam::Role;
-	use crate::sql::statements::define::DefineKind;
-	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Expr, Literal, TopLevelExpr};
+	use crate::syn::{Query as Ast, TopLevelExpr};
 	use crate::types::PublicObject;
 
 	struct TestLevel {
@@ -3357,9 +3357,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
+		use crate::expr::Base;
+		use crate::expr::statements::define::{DefineStatement, DefineUserStatement};
 		use crate::iam::PolicyError;
-		use crate::sql::Base;
-		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
@@ -3392,17 +3392,20 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: crate::sql::Expr::Idiom(crate::sql::Idiom::field("user".to_string())),
+				name: crate::expr::Expr::Idiom(crate::expr::Idiom::field("user".to_string())),
 				// This is the Argon2id hash for "pass" with a random salt.
-				pass_type: PassType::Hash(
-					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
-						.to_string(),
-				),
+				hash: "$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
+					.to_string(),
+				hash_is_set: true,
 				scram: None,
 				roles: vec!["nonexistent".to_owned()],
-				session_duration: Expr::Literal(Literal::None),
-				token_duration: Expr::Literal(Literal::None),
+				duration: crate::expr::user::UserDuration {
+					token: Expr::Literal(Literal::None),
+					session: Expr::Literal(Literal::None),
+				},
+
 				comment: Expr::Literal(Literal::None),
+				..Default::default()
 			};
 
 			let ast = Ast {

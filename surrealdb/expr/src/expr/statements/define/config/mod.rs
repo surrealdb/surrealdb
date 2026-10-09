@@ -1,3 +1,4 @@
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod api;
 pub mod defaults;
 
@@ -30,5 +31,32 @@ impl ConfigInner {
 			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
 			ConfigInner::Api(_) => ConfigKind::Api,
 		}
+	}
+}
+
+impl ToSql for ConfigInner {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match &self {
+			ConfigInner::GraphQL(v) => v.fmt_sql(f, fmt),
+			ConfigInner::Api(v) => {
+				f.push_str("API");
+				v.fmt_sql(f, fmt);
+			}
+			ConfigInner::Default(v) => v.fmt_sql(f, fmt),
+		}
+	}
+}
+
+impl ToSql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE CONFIG");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
+		}
+
+		f.push(' ');
+		self.inner.fmt_sql(f, fmt);
 	}
 }

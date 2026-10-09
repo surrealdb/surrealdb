@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use bytes::{Bytes, BytesMut};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_parser_next_lower::{ParserSettings, StatementStream};
+use surrealdb_expr::parser::{ParserSettings, StatementStream};
 use surrealdb_rpc::capabilities::Capabilities;
 
 // ---------------------------------------------------------------------------
@@ -279,18 +279,15 @@ async fn run_import(ds: &Datastore, ses: &Session, statements: Vec<String>) {
 	assert!(errors.is_empty(), "import errors: {:?}", errors.first().map(|e| &e.result));
 }
 
-/// The conversion the executor performs on a bare expression before the legacy
-/// engine runs it, so a parse-only run prices the same work as an import.
-fn price_conversion(stmt: surrealdb_sql::TopLevelExpr) {
-	if let surrealdb_sql::TopLevelExpr::Expr(expr) = stmt {
-		std::hint::black_box(surrealdb_expr::expr::Expr::from(expr));
+/// Lower bare expressions to logical plans, as import dispatch does.
+fn price_lowering(stmt: surrealdb_expr::parser::TopLevelExpr) {
+	if let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = stmt {
+		std::hint::black_box(surrealdb_expr::expr::logical::lower(expr).unwrap());
 	}
 }
 
-/// Parse and convert every statement without executing any of them.
-///
-/// Mirrors `Datastore::execute_import`'s incremental buffering so the measured
-/// work is the same tokenise/parse/convert the import performs.
+/// Parse and lower every statement without executing any of them.
+/// Mirrors import's incremental buffering and logical planning.
 fn run_parse_only(statements: &[String]) -> usize {
 	let mut stream = StatementStream::new_with_settings(ParserSettings::default());
 	let mut buffer = BytesMut::new();
@@ -298,14 +295,12 @@ fn run_parse_only(statements: &[String]) -> usize {
 	for s in statements {
 		buffer.extend_from_slice(s.as_bytes());
 		while let Some(stmt) = stream.parse_partial(&mut buffer).unwrap() {
-			// The executor converts a bare expression into the execution AST
-			// when it dispatches it, so price that here too.
-			price_conversion(stmt);
+			price_lowering(stmt);
 			parsed += 1;
 		}
 	}
 	while let Some(stmt) = stream.parse_complete(&mut buffer).unwrap() {
-		price_conversion(stmt);
+		price_lowering(stmt);
 		parsed += 1;
 	}
 	parsed
@@ -698,10 +693,9 @@ fn main() {
 		std::mem::size_of::<surrealdb_expr::val::RecordId>(),
 	);
 	eprintln!(
-		"  size_of: expr::Expr={} expr::Literal={} sql::Expr={}",
+		"  size_of: expr::Expr={} expr::Literal={}",
 		std::mem::size_of::<surrealdb_expr::expr::Expr>(),
 		std::mem::size_of::<surrealdb_expr::expr::Literal>(),
-		std::mem::size_of::<surrealdb_sql::Expr>(),
 	);
 	eprintln!("  shape:              {}", *SHAPE);
 	eprintln!("  backend:            {backend}");

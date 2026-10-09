@@ -11,10 +11,10 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{FromStored, IdiomText, SurqlText};
+use crate::expr as runtime;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
-use crate::sql;
-use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, TableName, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
@@ -113,28 +113,28 @@ pub struct StoredIndexDefinition {
 impl_kv_value_revisioned!(StoredIndexDefinition);
 
 impl IndexDefinition {
-	/// Lowers `index` to its sql-side form. The count index's guard condition
+	/// Builds the runtime index. The count index's guard condition
 	/// comes from the compiled `count_cond`; every other kind is plain data
-	/// and lowers via [`Index::to_sql_definition`].
-	fn index_to_sql_definition(&self) -> sql::index::Index {
+	/// and lowers via [`Index::to_runtime_definition`].
+	fn index_to_runtime_definition(&self) -> runtime::index_kind::Index {
 		match &self.index {
-			Index::Count(_) => sql::index::Index::Count(self.count_cond.clone().map(Into::into)),
-			other => other.to_sql_definition(),
+			Index::Count(_) => runtime::index_kind::Index::Count(self.count_cond.clone()),
+			other => other.to_runtime_definition(),
 		}
 	}
 
-	fn to_sql_definition(&self) -> sql::DefineIndexStatement {
-		sql::DefineIndexStatement {
+	fn to_runtime_definition(&self) -> runtime::statements::DefineIndexStatement {
+		runtime::statements::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			what: sql::Expr::Table(self.table_name.clone().into()),
-			cols: self.cols.iter().map(|i| sql::Expr::Idiom(i.clone().into())).collect(),
-			index: self.index_to_sql_definition(),
+			name: runtime::Expr::Idiom(runtime::Idiom::field(self.name.clone())),
+			what: runtime::Expr::Table(self.table_name.clone()),
+			cols: self.cols.iter().map(|i| runtime::Expr::Idiom(i.clone())).collect(),
+			index: self.index_to_runtime_definition(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 			concurrently: false,
 		}
 	}
@@ -142,7 +142,7 @@ impl IndexDefinition {
 
 impl InfoStructure for IndexDefinition {
 	fn structure(self) -> Value {
-		let index = Value::from(self.index_to_sql_definition().to_sql());
+		let index = Value::from(self.index_to_runtime_definition().to_sql());
 		Value::from(map! {
 			"name" => self.name.into(),
 			"table" => Value::String(self.table_name.into()),
@@ -161,7 +161,7 @@ impl InfoStructure for IndexDefinition {
 
 impl ToSql for IndexDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -175,17 +175,9 @@ impl ToSql for IndexDefinition {
 pub struct CondText(pub SurqlText<Cond>);
 
 impl CondText {
-	/// Compiles the stored condition text into a `sql::Cond` AST node, for
-	/// handing to `sql::index::Index::Count` at the INFO/export rendering
-	/// boundary. The text was already parsed successfully once, when the
-	/// `DEFINE INDEX` statement that produced it was executed, so a failure
-	/// here is a stored-catalog invariant violation, not bad user input.
-	/// This path is only reachable from cold, informational rendering;
-	/// query execution reads the stored text directly and never goes
-	/// through this conversion.
-	fn to_ast(&self) -> Option<sql::Cond> {
+	fn compile_condition(&self) -> Option<Cond> {
 		match self.0.compile() {
-			Ok(cond) => Some(cond.into()),
+			Ok(cond) => Some(cond),
 			Err(err) => {
 				debug_assert!(false, "stored count-index condition failed to parse: {:?}", self.0);
 				// Warn, not silence: the rendered `DEFINE INDEX` loses its
@@ -226,14 +218,16 @@ pub enum Index {
 }
 
 impl Index {
-	pub fn to_sql_definition(&self) -> sql::index::Index {
+	pub fn to_runtime_definition(&self) -> runtime::index_kind::Index {
 		match self {
-			Self::Idx => sql::index::Index::Idx,
-			Self::Uniq => sql::index::Index::Uniq,
-			Self::Hnsw(params) => sql::index::Index::Hnsw(params.clone().into()),
-			Self::DiskAnn(params) => sql::index::Index::DiskAnn(params.clone().into()),
-			Self::FullText(params) => sql::index::Index::FullText(params.clone().into()),
-			Self::Count(cond) => sql::index::Index::Count(cond.as_ref().and_then(CondText::to_ast)),
+			Self::Idx => runtime::index_kind::Index::Idx,
+			Self::Uniq => runtime::index_kind::Index::Uniq,
+			Self::Hnsw(params) => runtime::index_kind::Index::Hnsw(params.clone().into()),
+			Self::DiskAnn(params) => runtime::index_kind::Index::DiskAnn(params.clone().into()),
+			Self::FullText(params) => runtime::index_kind::Index::FullText(params.clone().into()),
+			Self::Count(cond) => runtime::index_kind::Index::Count(
+				cond.as_ref().and_then(CondText::compile_condition),
+			),
 		}
 	}
 
@@ -252,27 +246,11 @@ impl InfoStructure for Index {
 
 impl ToSql for Index {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 
-impl From<sql::index::Index> for Index {
-	fn from(v: sql::index::Index) -> Self {
-		match v {
-			sql::index::Index::Idx => Self::Idx,
-			sql::index::Index::Uniq => Self::Uniq,
-			sql::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
-			sql::index::Index::DiskAnn(p) => Self::DiskAnn(p.into()),
-			sql::index::Index::FullText(p) => Self::FullText(p.into()),
-			sql::index::Index::Count(c) => Self::Count(c.map(|cond| {
-				let cond: Cond = cond.into();
-				CondText(SurqlText::new(&cond))
-			})),
-		}
-	}
-}
-
-impl From<Index> for sql::index::Index {
+impl From<Index> for runtime::index_kind::Index {
 	fn from(v: Index) -> Self {
 		match v {
 			Index::Idx => Self::Idx,
@@ -280,7 +258,7 @@ impl From<Index> for sql::index::Index {
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
-			Index::Count(c) => Self::Count(c.as_ref().and_then(CondText::to_ast)),
+			Index::Count(c) => Self::Count(c.as_ref().and_then(CondText::compile_condition)),
 		}
 	}
 }
@@ -297,8 +275,8 @@ pub struct FullTextParams {
 	pub scoring: Scoring,
 }
 
-impl From<sql::index::FullTextParams> for FullTextParams {
-	fn from(v: sql::index::FullTextParams) -> Self {
+impl From<runtime::index::FullTextParams> for FullTextParams {
+	fn from(v: runtime::index::FullTextParams) -> Self {
 		FullTextParams {
 			analyzer: v.az.clone(),
 			highlight: v.hl,
@@ -307,7 +285,7 @@ impl From<sql::index::FullTextParams> for FullTextParams {
 	}
 }
 
-impl From<FullTextParams> for sql::index::FullTextParams {
+impl From<FullTextParams> for runtime::index::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
 		Self {
 			az: v.analyzer.clone(),
@@ -379,32 +357,32 @@ impl Default for Scoring {
 	}
 }
 
-impl From<sql::scoring::Scoring> for Scoring {
-	fn from(v: sql::scoring::Scoring) -> Self {
+impl From<runtime::scoring::Scoring> for Scoring {
+	fn from(v: runtime::scoring::Scoring) -> Self {
 		match v {
-			sql::scoring::Scoring::Bm {
+			runtime::scoring::Scoring::Bm {
 				k1,
 				b,
 			} => Self::Bm {
 				k1,
 				b,
 			},
-			sql::scoring::Scoring::Vs => Self::Vs,
+			runtime::scoring::Scoring::Vs => Self::Vs,
 		}
 	}
 }
 
-impl From<Scoring> for sql::scoring::Scoring {
+impl From<Scoring> for runtime::scoring::Scoring {
 	fn from(v: Scoring) -> Self {
 		match v {
 			Scoring::Bm {
 				k1,
 				b,
-			} => sql::scoring::Scoring::Bm {
+			} => runtime::scoring::Scoring::Bm {
 				k1,
 				b,
 			},
-			Scoring::Vs => sql::scoring::Scoring::Vs,
+			Scoring::Vs => runtime::scoring::Scoring::Vs,
 		}
 	}
 }
@@ -471,36 +449,36 @@ impl ToSql for Distance {
 	}
 }
 
-impl From<sql::index::Distance> for Distance {
-	fn from(v: sql::index::Distance) -> Self {
+impl From<runtime::index::Distance> for Distance {
+	fn from(v: runtime::index::Distance) -> Self {
 		match v {
-			sql::index::Distance::Chebyshev => Self::Chebyshev,
-			sql::index::Distance::Cosine => Self::Cosine,
-			sql::index::Distance::CosineNormalized => Self::CosineNormalized,
-			sql::index::Distance::Euclidean => Self::Euclidean,
-			sql::index::Distance::Hamming => Self::Hamming,
-			sql::index::Distance::InnerProduct => Self::InnerProduct,
-			sql::index::Distance::Jaccard => Self::Jaccard,
-			sql::index::Distance::Manhattan => Self::Manhattan,
-			sql::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
-			sql::index::Distance::Pearson => Self::Pearson,
+			runtime::index::Distance::Chebyshev => Self::Chebyshev,
+			runtime::index::Distance::Cosine => Self::Cosine,
+			runtime::index::Distance::CosineNormalized => Self::CosineNormalized,
+			runtime::index::Distance::Euclidean => Self::Euclidean,
+			runtime::index::Distance::Hamming => Self::Hamming,
+			runtime::index::Distance::InnerProduct => Self::InnerProduct,
+			runtime::index::Distance::Jaccard => Self::Jaccard,
+			runtime::index::Distance::Manhattan => Self::Manhattan,
+			runtime::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			runtime::index::Distance::Pearson => Self::Pearson,
 		}
 	}
 }
 
-impl From<Distance> for sql::index::Distance {
+impl From<Distance> for runtime::index::Distance {
 	fn from(v: Distance) -> Self {
 		match v {
-			Distance::Chebyshev => sql::index::Distance::Chebyshev,
-			Distance::Cosine => sql::index::Distance::Cosine,
-			Distance::CosineNormalized => sql::index::Distance::CosineNormalized,
-			Distance::Euclidean => sql::index::Distance::Euclidean,
-			Distance::Hamming => sql::index::Distance::Hamming,
-			Distance::InnerProduct => sql::index::Distance::InnerProduct,
-			Distance::Jaccard => sql::index::Distance::Jaccard,
-			Distance::Manhattan => sql::index::Distance::Manhattan,
-			Distance::Minkowski(n) => sql::index::Distance::Minkowski(n.into()),
-			Distance::Pearson => sql::index::Distance::Pearson,
+			Distance::Chebyshev => runtime::index::Distance::Chebyshev,
+			Distance::Cosine => runtime::index::Distance::Cosine,
+			Distance::CosineNormalized => runtime::index::Distance::CosineNormalized,
+			Distance::Euclidean => runtime::index::Distance::Euclidean,
+			Distance::Hamming => runtime::index::Distance::Hamming,
+			Distance::InnerProduct => runtime::index::Distance::InnerProduct,
+			Distance::Jaccard => runtime::index::Distance::Jaccard,
+			Distance::Manhattan => runtime::index::Distance::Manhattan,
+			Distance::Minkowski(n) => runtime::index::Distance::Minkowski(n.into()),
+			Distance::Pearson => runtime::index::Distance::Pearson,
 		}
 	}
 }
@@ -546,22 +524,22 @@ impl Display for VectorType {
 	}
 }
 
-impl From<sql::index::VectorType> for VectorType {
-	fn from(v: sql::index::VectorType) -> Self {
+impl From<runtime::index::VectorType> for VectorType {
+	fn from(v: runtime::index::VectorType) -> Self {
 		match v {
-			sql::index::VectorType::F64 => Self::F64,
-			sql::index::VectorType::F16 => Self::F16,
-			sql::index::VectorType::F32 => Self::F32,
-			sql::index::VectorType::I64 => Self::I64,
-			sql::index::VectorType::I32 => Self::I32,
-			sql::index::VectorType::I16 => Self::I16,
-			sql::index::VectorType::I8 => Self::I8,
-			sql::index::VectorType::U8 => Self::U8,
+			runtime::index::VectorType::F64 => Self::F64,
+			runtime::index::VectorType::F16 => Self::F16,
+			runtime::index::VectorType::F32 => Self::F32,
+			runtime::index::VectorType::I64 => Self::I64,
+			runtime::index::VectorType::I32 => Self::I32,
+			runtime::index::VectorType::I16 => Self::I16,
+			runtime::index::VectorType::I8 => Self::I8,
+			runtime::index::VectorType::U8 => Self::U8,
 		}
 	}
 }
 
-impl From<VectorType> for sql::index::VectorType {
+impl From<VectorType> for runtime::index::VectorType {
 	fn from(v: VectorType) -> Self {
 		match v {
 			VectorType::F64 => Self::F64,
@@ -603,8 +581,8 @@ pub struct HnswParams {
 	pub use_hashed_vector: bool,
 }
 
-impl From<sql::index::HnswParams> for HnswParams {
-	fn from(v: sql::index::HnswParams) -> Self {
+impl From<runtime::index::HnswParams> for HnswParams {
+	fn from(v: runtime::index::HnswParams) -> Self {
 		HnswParams {
 			dimension: v.dimension,
 			distance: v.distance.into(),
@@ -620,7 +598,7 @@ impl From<sql::index::HnswParams> for HnswParams {
 	}
 }
 
-impl From<HnswParams> for sql::index::HnswParams {
+impl From<HnswParams> for runtime::index::HnswParams {
 	fn from(v: HnswParams) -> Self {
 		Self {
 			dimension: v.dimension,
@@ -657,8 +635,8 @@ pub struct DiskAnnParams {
 	pub use_hashed_vector: bool,
 }
 
-impl From<sql::index::DiskAnnParams> for DiskAnnParams {
-	fn from(v: sql::index::DiskAnnParams) -> Self {
+impl From<runtime::index::DiskAnnParams> for DiskAnnParams {
+	fn from(v: runtime::index::DiskAnnParams) -> Self {
 		DiskAnnParams {
 			dimension: v.dimension,
 			distance: v.distance.into(),
@@ -671,7 +649,7 @@ impl From<sql::index::DiskAnnParams> for DiskAnnParams {
 	}
 }
 
-impl From<DiskAnnParams> for sql::index::DiskAnnParams {
+impl From<DiskAnnParams> for runtime::index::DiskAnnParams {
 	fn from(v: DiskAnnParams) -> Self {
 		Self {
 			dimension: v.dimension,

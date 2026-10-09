@@ -6,6 +6,7 @@ use async_graphql::dynamic::{
 	FieldValue, InputValue, Subscription, SubscriptionField, SubscriptionFieldFuture, TypeRef,
 };
 use async_graphql::{Name, Value as GraphqlValue};
+use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_types::{Action as PublicAction, Notification as PublicNotification, ToSql};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -15,14 +16,11 @@ use super::tables::{CachedRecord, filter_name_from_table, parse_filter_arg};
 use super::utils::{GraphqlValueUtils, execute_statement};
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
-use crate::expr::Part;
+use crate::expr::field::Selector;
+use crate::expr::statements::live::LiveFields;
+use crate::expr::statements::{KillStatement, LiveStatement};
+use crate::expr::{BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, Part};
 use crate::kvs::Datastore;
-use crate::sql::field::Selector;
-use crate::sql::statements::live::LiveFields;
-use crate::sql::statements::{KillStatement, LiveStatement};
-use crate::sql::{
-	BinaryOperator, Cond, Expr, Fetch, Fetchs, Field, Fields, Idiom, Literal, TopLevelExpr,
-};
 use crate::val::{RecordId, TableName, Value};
 
 /// Routes LIVE query notifications to their specific GraphQL subscribers.
@@ -242,7 +240,7 @@ fn parse_id_cond(
 	Ok(Some(Cond(Expr::Binary {
 		left: Box::new(Expr::Idiom(Idiom::field("id".to_string()))),
 		op: BinaryOperator::Equal,
-		right: Box::new(Value::RecordId(rid).into_sql_literal()),
+		right: Box::new(Value::RecordId(rid).into_literal()),
 	})))
 }
 
@@ -296,7 +294,7 @@ fn parse_fetch_arg(
 		fetches.push(Fetch(Expr::Idiom(idiom)));
 	}
 
-	Ok(Some(Fetchs(fetches)))
+	Ok(Some(Fetchs::new(fetches)))
 }
 
 fn notification_to_field_value(notification: PublicNotification) -> Option<FieldValue<'static>> {
@@ -334,8 +332,10 @@ async fn start_table_live_query(
 	fetch: Option<Fetchs>,
 ) -> Result<Uuid, async_graphql::Error> {
 	let stmt = LiveStatement {
+		id: Uuid::nil(),
+		node: Uuid::nil(),
 		fields,
-		what: Expr::Table(table.clone().into()),
+		what: Expr::Table(table.clone()),
 		cond,
 		fetch,
 	};
@@ -356,7 +356,7 @@ async fn kill_live_query(
 	live_id: Uuid,
 ) -> Result<(), GraphqlError> {
 	let stmt = KillStatement {
-		id: Expr::Literal(Literal::Uuid(live_id)),
+		id: Expr::Literal(Literal::Uuid(live_id.into())),
 	};
 	let _ = execute_statement(ds, sess, TopLevelExpr::Kill(stmt)).await?;
 	Ok(())

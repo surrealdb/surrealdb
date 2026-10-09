@@ -108,15 +108,6 @@ impl RecordIdKeyRange {
 		}
 	}
 
-	/// The surface-syntax counterpart of [`Self::into_literal`]; see
-	/// [`Value::into_sql_literal`].
-	pub fn into_sql_literal(self) -> crate::sql::RecordIdKeyRangeLit {
-		crate::sql::RecordIdKeyRangeLit {
-			start: self.start.map(|x| x.into_sql_literal()),
-			end: self.end.map(|x| x.into_sql_literal()),
-		}
-	}
-
 	/// Convertes a record id key range into the range from a normal value.
 	pub fn into_value_range(self) -> Range {
 		Range {
@@ -419,20 +410,6 @@ impl RecordIdKey {
 			}
 		}
 	}
-
-	/// The surface-syntax counterpart of [`Self::into_literal`]; see
-	/// [`Value::into_sql_literal`].
-	pub fn into_sql_literal(self) -> crate::sql::RecordIdKeyLit {
-		use crate::sql::RecordIdKeyLit;
-		match self {
-			RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-			RecordIdKey::String(s) => RecordIdKeyLit::String(s),
-			RecordIdKey::Uuid(uuid) => RecordIdKeyLit::Uuid(uuid.0),
-			RecordIdKey::Object(object) => RecordIdKeyLit::Object(object.into_sql_literal()),
-			RecordIdKey::Array(array) => RecordIdKeyLit::Array(array.into_sql_literal()),
-			RecordIdKey::Range(range) => RecordIdKeyLit::Range(Box::new(range.into_sql_literal())),
-		}
-	}
 }
 
 impl From<i64> for RecordIdKey {
@@ -587,15 +564,6 @@ impl RecordId {
 		}
 	}
 
-	/// The surface-syntax counterpart of [`Self::into_literal`]; see
-	/// [`Value::into_sql_literal`].
-	pub fn into_sql_literal(self) -> crate::sql::RecordIdLit {
-		crate::sql::RecordIdLit {
-			table: self.table.into(),
-			key: self.key.into_sql_literal(),
-		}
-	}
-
 	pub fn is_table_type(&self, tables: &[TableName]) -> bool {
 		tables.is_empty() || tables.contains(&self.table)
 	}
@@ -657,7 +625,7 @@ mod tests {
 			let rendered = rid.to_sql();
 			let reparsed = crate::syn::expr(&rendered)
 				.unwrap_or_else(|e| panic!("{rendered} does not parse back: {e}"));
-			let crate::sql::Expr::Literal(crate::sql::Literal::RecordId(lit)) = &reparsed else {
+			let crate::expr::Expr::Literal(crate::expr::Literal::RecordId(lit)) = &reparsed else {
 				panic!("{rendered} parsed as {reparsed:?}, not a record id");
 			};
 			assert_eq!(lit.table.as_str(), name, "{rendered} round-tripped to a different table");

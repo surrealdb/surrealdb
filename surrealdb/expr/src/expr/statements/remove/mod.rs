@@ -1,3 +1,4 @@
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod access;
 pub mod analyzer;
 pub mod api;
@@ -53,4 +54,28 @@ pub enum RemoveStatement {
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
 	Config(RemoveConfigStatement),
+}
+
+impl ToSql for RemoveStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Model(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
+		}
+	}
 }

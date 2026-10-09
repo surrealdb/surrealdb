@@ -6,11 +6,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, ExprText, FieldsText, FromStored, NamespaceId};
+use crate::expr as runtime;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::statements::live::LiveFields;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
-use crate::sql;
-use crate::sql::statements::live::LiveFields;
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 2)]
@@ -160,7 +160,7 @@ pub const INERT_SUBSCRIPTION_MARKER: &str =
 impl ToSql for SubscriptionDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self.query {
-			SubscriptionQuery::Compiled(q) => q.to_sql_definition().fmt_sql(f, fmt),
+			SubscriptionQuery::Compiled(q) => q.to_runtime_definition().fmt_sql(f, fmt),
 			SubscriptionQuery::Uncompilable {
 				fields,
 				what,
@@ -253,21 +253,23 @@ pub struct CompiledSubscription {
 }
 
 impl CompiledSubscription {
-	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
+	fn to_runtime_definition(&self) -> runtime::statements::LiveStatement {
 		let fields = match &self.fields {
 			SubscriptionFields::Diff => LiveFields::Diff,
-			SubscriptionFields::Select(fields) => {
-				LiveFields::Select(sql::Fields::from(fields.clone()))
-			}
+			SubscriptionFields::Select(fields) => LiveFields::Select(fields.clone()),
 		};
 		let fetch = self.fetch.as_ref().map(|exprs| {
-			sql::Fetchs(exprs.iter().map(|e| sql::Fetch(sql::Expr::from(e.clone()))).collect())
+			runtime::Fetchs::new(
+				exprs.iter().map(|e| runtime::Fetch(e.clone())).collect::<Vec<_>>(),
+			)
 		});
 
-		crate::sql::LiveStatement {
+		runtime::statements::LiveStatement {
+			id: uuid::Uuid::nil(),
+			node: uuid::Uuid::nil(),
 			fields,
-			what: self.what.clone().into(),
-			cond: self.cond.clone().map(|c| crate::sql::Cond(c.into())),
+			what: self.what.clone(),
+			cond: self.cond.clone().map(crate::expr::Cond),
 			fetch,
 		}
 	}
@@ -487,7 +489,7 @@ mod tests {
 			"LIVE SELECT * FROM `select`",
 		] {
 			let ast = crate::syn::parse(query).unwrap_or_else(|e| panic!("{query}: {e}"));
-			let crate::sql::TopLevelExpr::Live(live) = &ast.expressions[0] else {
+			let surrealdb_expr::parser::TopLevelExpr::Live(live) = &ast.expressions[0] else {
 				panic!("{query} did not parse as a LIVE statement");
 			};
 
@@ -495,17 +497,19 @@ mod tests {
 				id: Uuid::from_u128(1),
 				node: Uuid::from_u128(2),
 				fields: match &live.fields {
-					LiveFields::Diff => StoredSubscriptionFields::Diff,
-					LiveFields::Select(f) => {
-						StoredSubscriptionFields::Select(FieldsText::new(&f.clone().into()))
+					surrealdb_expr::expr::statements::LiveFields::Diff => {
+						StoredSubscriptionFields::Diff
+					}
+					surrealdb_expr::expr::statements::LiveFields::Select(f) => {
+						StoredSubscriptionFields::Select(FieldsText::new(&f.clone()))
 					}
 				},
-				what: ExprText::new(&Expr::from(live.what.clone())),
-				cond: live.cond.as_ref().map(|c| ExprText::new(&Expr::from(c.0.clone()))),
+				what: ExprText::new(&live.what.clone()),
+				cond: live.cond.as_ref().map(|c| ExprText::new(&c.0.clone())),
 				fetch: live
 					.fetch
 					.as_ref()
-					.map(|fs| fs.iter().map(|f| ExprText::new(&Expr::from(f.0.clone()))).collect()),
+					.map(|fs| fs.iter().map(|f| ExprText::new(&f.0.clone())).collect()),
 				auth: None,
 				session: None,
 				vars: BTreeMap::new(),

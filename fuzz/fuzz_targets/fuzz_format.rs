@@ -1,13 +1,13 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use surrealdb_parser_next_lower::ParserSettings;
-use surrealdb_sql::Ast;
+use surrealdb_core::syn::runtime::ParserSettings;
+use surrealdb_core::syn::Query as Ast;
 use surrealdb_types::ToSql;
 
 fuzz_target!(|query: Ast| {
 	let format = query.to_sql();
-	let res = surrealdb_parser_next_lower::query_with_settings(
+	let res = surrealdb_core::syn::runtime::query_with_settings(
 		&format,
 		ParserSettings {
 			object_recursion_limit: ParserSettings::STORED_TEXT.object_recursion_limit,

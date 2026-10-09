@@ -773,7 +773,7 @@ mod tests {
 	/// closure stored on the receiver, whose body is invisible at that point,
 	/// and must be classified writable. Both the surface AST and the
 	/// expression tree read that distinction from
-	/// `surrealdb_sql::method::BUILTIN_METHOD_NAMES`, a static mirror of this
+	/// `surrealdb_expr::expr::method::BUILTIN_METHOD_NAMES`, a static mirror of this
 	/// registry (the layers below cannot depend on this one). The two must
 	/// stay identical: a name missing from the mirror costs every use of that
 	/// method its read transaction, and a stale extra name lets a writing
@@ -785,8 +785,8 @@ mod tests {
 		registered.sort_unstable();
 		assert_eq!(
 			registered,
-			crate::sql::method::BUILTIN_METHOD_NAMES,
-			"keep `surrealdb_sql::method::BUILTIN_METHOD_NAMES` identical to the \
+			crate::expr::method::BUILTIN_METHOD_NAMES,
+			"keep `surrealdb_expr::expr::method::BUILTIN_METHOD_NAMES` identical to the \
 			 names registered in `build_method_registry`"
 		);
 	}

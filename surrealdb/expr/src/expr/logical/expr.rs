@@ -64,12 +64,12 @@ use surrealdb_strand::{Strand, TableName};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::{EvalFrame, LogicalOp};
+use crate::expr::binding_power::BindingPower;
 use crate::expr::lookup::LookupKind;
 use crate::expr::method::is_builtin_method;
 use crate::expr::part::Recurse;
 use crate::expr::record_id::RecordIdKeyGen;
 use crate::expr::{BinaryOperator, Constant, Function, Kind, Literal, Mock, Param, PrefixOperator};
-use crate::sql::operator::BindingPower;
 use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
 
 /// A leaf literal: a value that needs no evaluation and holds no expression.
@@ -3141,10 +3141,7 @@ impl LogicalExpr {
 			LogicalExpr::Binary {
 				op,
 				..
-			} => {
-				let op: crate::sql::BinaryOperator = op.clone().into();
-				BindingPower::for_binary_operator(&op)
-			}
+			} => BindingPower::for_binary_operator(op),
 			LogicalExpr::Literal(_)
 			| LogicalExpr::Array(_)
 			| LogicalExpr::Set(_)
@@ -4267,9 +4264,8 @@ mod tests {
 	use super::*;
 
 	fn expr(sql: &str) -> LogicalExpr {
-		let ast = surrealdb_parser_next_lower::parse(&format!("RETURN {sql}"))
-			.expect("expression should parse");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) =
+		let ast = crate::parser::parse(&format!("RETURN {sql}")).expect("expression should parse");
+		let crate::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected a RETURN");

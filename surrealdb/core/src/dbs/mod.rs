@@ -37,7 +37,7 @@ pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::{
 	FOR_UPDATE_GROUP_ERROR, FOR_UPDATE_LIMIT_ERROR, FOR_UPDATE_TARGETS_ERROR,
-	FOR_UPDATE_VERSION_ERROR, validate_for_update_ast,
+	FOR_UPDATE_VERSION_ERROR, validate_for_update,
 };
 pub(crate) use self::statement_counters::StatementCounters;
 pub use self::stream::{QueryItemStream, QueryStreamJob};

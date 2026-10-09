@@ -125,9 +125,6 @@ audit-as-crates-io = false
 [policy.surrealdb-server]
 audit-as-crates-io = false
 
-[policy.surrealdb-sql]
-audit-as-crates-io = false
-
 [policy.surrealdb-sqlfront-derive]
 audit-as-crates-io = false
 

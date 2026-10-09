@@ -41,7 +41,24 @@ impl RecordIdKeyRangeLit {
 
 impl ToSql for RecordIdKeyRangeLit {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let range: crate::sql::record_id::range::RecordIdKeyRangeLit = self.clone().into();
-		range.fmt_sql(f, fmt);
+		match &self.start {
+			Bound::Unbounded => {}
+			Bound::Included(v) => v.fmt_sql(f, fmt),
+			Bound::Excluded(v) => {
+				v.fmt_sql(f, fmt);
+				f.push('>');
+			}
+		}
+		match &self.end {
+			Bound::Unbounded => f.push_str(".."),
+			Bound::Excluded(v) => {
+				f.push_str("..");
+				v.fmt_sql(f, fmt);
+			}
+			Bound::Included(v) => {
+				f.push_str("..=");
+				v.fmt_sql(f, fmt);
+			}
+		}
 	}
 }

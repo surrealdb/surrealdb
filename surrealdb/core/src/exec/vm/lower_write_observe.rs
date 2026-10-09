@@ -700,7 +700,7 @@ async fn lower_subscription_from(
 	}
 	let cond = match &compiled.cond {
 		Some(expr) => {
-			let logical = crate::expr::logical::lower_expr(expr.clone().into()).map_err(|e| {
+			let logical = crate::expr::logical::lower_expr(expr.clone()).map_err(|e| {
 				NotCovered::new(format!("the subscription's WHERE has no logical form: {e}"))
 			})?;
 			Some(
@@ -715,12 +715,9 @@ async fn lower_subscription_from(
 	let fields = match &compiled.fields {
 		SubscriptionFields::Diff => SubscriptionFieldsLowered::Diff,
 		SubscriptionFields::Select(fields) => {
-			let logical =
-				crate::expr::logical::lower_fields(fields.clone().into()).map_err(|e| {
-					NotCovered::new(format!(
-						"the subscription's projection has no logical form: {e}"
-					))
-				})?;
+			let logical = crate::expr::logical::lower_fields(fields.clone()).map_err(|e| {
+				NotCovered::new(format!("the subscription's projection has no logical form: {e}"))
+			})?;
 			let projection = crate::exec::vm::map::projection(&logical, Vec::new())?;
 			if matches!(projection, Projection::All) {
 				SubscriptionFieldsLowered::Subject
@@ -735,7 +732,7 @@ async fn lower_subscription_from(
 	// captured variables, as the planner on the subscriber's frame reads it.
 	let mut paths = Vec::new();
 	for expr in compiled.fetch.iter().flatten() {
-		let logical = crate::expr::logical::lower_expr(expr.clone().into())
+		let logical = crate::expr::logical::lower_expr(expr.clone())
 			.map_err(|e| NotCovered::new(format!("a FETCH path has no logical form: {e}")))?;
 		paths.append(
 			&mut planner

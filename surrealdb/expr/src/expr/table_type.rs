@@ -10,7 +10,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Kind;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::{TableName, Value};
 
 /// The type of records stored by a table
@@ -81,26 +80,6 @@ impl InfoStructure for TableType {
 	}
 }
 
-impl From<sql::table_type::TableType> for TableType {
-	fn from(v: sql::table_type::TableType) -> Self {
-		match v {
-			sql::table_type::TableType::Any => Self::Any,
-			sql::table_type::TableType::Normal => Self::Normal,
-			sql::table_type::TableType::Relation(rel) => Self::Relation(rel.into()),
-		}
-	}
-}
-
-impl From<TableType> for sql::table_type::TableType {
-	fn from(v: TableType) -> Self {
-		match v {
-			TableType::Any => Self::Any,
-			TableType::Normal => Self::Normal,
-			TableType::Relation(rel) => Self::Relation(rel.into()),
-		}
-	}
-}
-
 #[revisioned(revision = 3)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
@@ -151,27 +130,5 @@ impl Relation {
 			self.to = x
 		}
 		Ok(())
-	}
-}
-
-impl From<sql::table_type::Relation> for Relation {
-	fn from(v: sql::table_type::Relation) -> Self {
-		Self {
-			from: v.from.into_iter().map(Into::into).collect(),
-			to: v.to.into_iter().map(Into::into).collect(),
-			enforced: v.enforced,
-			lightweight: v.lightweight,
-		}
-	}
-}
-
-impl From<Relation> for sql::table_type::Relation {
-	fn from(v: Relation) -> Self {
-		Self {
-			from: v.from.into_iter().map(Into::into).collect(),
-			to: v.to.into_iter().map(Into::into).collect(),
-			enforced: v.enforced,
-			lightweight: v.lightweight,
-		}
 	}
 }

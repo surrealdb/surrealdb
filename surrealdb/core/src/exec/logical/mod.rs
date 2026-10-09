@@ -313,7 +313,7 @@ fn element_field_paths(op: LogicalOp) -> LogicalOp {
 						] = call.args.as_slice()
 						&& let Ok(idiom) = crate::syn::idiom(path.as_str())
 						&& let Ok(field) =
-							crate::expr::logical::lower_expr(crate::sql::Expr::Idiom(idiom))
+							crate::expr::logical::lower_expr(crate::expr::Expr::Idiom(idiom))
 						&& field.is_path()
 					{
 						*inner = field;
@@ -869,7 +869,7 @@ mod write_walk {
 
 	/// Why one clause expression has no logical form, if it has none.
 	fn unlowerable(expr: &Expr, role: &str) -> Option<String> {
-		crate::expr::logical::lower_expr(expr.clone().into())
+		crate::expr::logical::lower_expr(expr.clone())
 			.err()
 			.map(|why| format!("{role} cannot hold {}: {why}", expr.to_sql()))
 	}
@@ -966,7 +966,7 @@ fn classify_source(
 fn lower_test(sql: &str) -> LogicalOp {
 	let ast = crate::syn::parse(sql).expect("statement should parse");
 	let top = ast.expressions.into_iter().next().expect("one statement");
-	let crate::sql::TopLevelExpr::Expr(expr) = top else {
+	let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
 		panic!("expected a bare expression");
 	};
 	crate::expr::logical::lower(expr).expect("statement should lower")
@@ -1298,7 +1298,7 @@ mod tests {
 	fn lower_opt(sql: &str) -> Option<LogicalOp> {
 		let ast = crate::syn::parse(sql).ok()?;
 		let top = ast.expressions.into_iter().next()?;
-		let crate::sql::TopLevelExpr::Expr(expr) = top else {
+		let surrealdb_expr::parser::TopLevelExpr::Expr(expr) = top else {
 			return None;
 		};
 		crate::expr::logical::lower(expr).ok()

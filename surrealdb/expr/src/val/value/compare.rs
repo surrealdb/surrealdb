@@ -141,7 +141,7 @@ mod tests {
 
 	#[rstest]
 	#[case::none_eq_none(Value::None, Value::None, Idiom::default(), Some(Ordering::Equal))]
-	#[case::none_eq_none(parse_val!("{ test: { other: null, something: 456 } }"), parse_val!("{ test: { other: null, something: 123 } }"), syn::idiom("test.something").unwrap().into(), Some(Ordering::Greater))]
+	#[case::none_eq_none(parse_val!("{ test: { other: null, something: 456 } }"), parse_val!("{ test: { other: null, something: 123 } }"), syn::idiom("test.something").unwrap(), Some(Ordering::Greater))]
 	fn test_compare(
 		#[case] a: Value,
 		#[case] b: Value,
@@ -163,7 +163,7 @@ mod tests {
 
 	#[test]
 	fn compare_basic() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let one = parse_val!("{ test: { other: null, something: 456 } }");
 		let two = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -172,7 +172,7 @@ mod tests {
 
 	#[test]
 	fn compare_basic_missing_left() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let one = parse_val!("{ test: { other: null } }");
 		let two = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -181,7 +181,7 @@ mod tests {
 
 	#[test]
 	fn compare_basic_missing_right() {
-		let idi: Idiom = syn::idiom("test.something").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something").unwrap();
 		let one = parse_val!("{ test: { other: null, something: 456 } }");
 		let two = parse_val!("{ test: { other: null } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -190,7 +190,7 @@ mod tests {
 
 	#[test]
 	fn compare_array() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [4, 5, 6] } }");
 		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -199,7 +199,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_longer_left() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
 		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -208,7 +208,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_longer_right() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let two = parse_val!("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -217,7 +217,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_missing_left() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: null } }");
 		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -226,7 +226,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_missing_right() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [4, 5, 6] } }");
 		let two = parse_val!("{ test: { other: null, something: null } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -235,7 +235,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_missing_value_left() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [1, null, 3] } }");
 		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -244,7 +244,7 @@ mod tests {
 
 	#[test]
 	fn compare_array_missing_value_right() {
-		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
+		let idi: Idiom = syn::idiom("test.something.*").unwrap();
 		let one = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let two = parse_val!("{ test: { other: null, something: [1, null, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -253,7 +253,7 @@ mod tests {
 
 	#[test]
 	fn compare_last() {
-		let idi: Idiom = syn::idiom("test[$]").unwrap().into();
+		let idi: Idiom = syn::idiom("test[$]").unwrap();
 		let one = parse_val!("{ test: [1,5] }");
 		let two = parse_val!("{ test: [2,4] }");
 		let res = one.compare(&two, &idi, false, false);
@@ -263,7 +263,7 @@ mod tests {
 	#[test]
 	fn compare_field_on_record_id() {
 		// Both are RecordIds, trying to access a field should be Equal (both missing field)
-		let idi: Idiom = syn::idiom("city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("city.name").unwrap();
 		let one = parse_val!("{ city: city:1 }");
 		let two = parse_val!("{ city: city:2 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -273,7 +273,7 @@ mod tests {
 	#[test]
 	fn compare_field_on_record_id_different_order() {
 		// Even with different record IDs, field access should treat them as equal (both missing)
-		let idi: Idiom = syn::idiom("city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("city.name").unwrap();
 		let one = parse_val!("{ city: city:100 }");
 		let two = parse_val!("{ city: city:1 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -283,7 +283,7 @@ mod tests {
 	#[test]
 	fn compare_field_object_vs_record_id() {
 		// Object with field vs RecordId without field
-		let idi: Idiom = syn::idiom("city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("city.name").unwrap();
 		let one = parse_val!("{ city: { name: 'San Francisco' } }");
 		let two = parse_val!("{ city: city:1 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -294,7 +294,7 @@ mod tests {
 	#[test]
 	fn compare_field_record_id_vs_object() {
 		// RecordId without field vs Object with field
-		let idi: Idiom = syn::idiom("city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("city.name").unwrap();
 		let one = parse_val!("{ city: city:1 }");
 		let two = parse_val!("{ city: { name: 'San Francisco' } }");
 		let res = one.compare(&two, &idi, false, false);
@@ -305,7 +305,7 @@ mod tests {
 	#[test]
 	fn compare_field_object_missing_vs_record_id() {
 		// Object without the specific field vs RecordId
-		let idi: Idiom = syn::idiom("city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("city.name").unwrap();
 		let one = parse_val!("{ city: { country: 'USA' } }");
 		let two = parse_val!("{ city: city:1 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -316,7 +316,7 @@ mod tests {
 	#[test]
 	fn compare_field_on_string() {
 		// Both are Strings, trying to access a field should be Equal (both missing field)
-		let idi: Idiom = syn::idiom("value.nested").unwrap().into();
+		let idi: Idiom = syn::idiom("value.nested").unwrap();
 		let one = parse_val!("{ value: 'hello' }");
 		let two = parse_val!("{ value: 'world' }");
 		let res = one.compare(&two, &idi, false, false);
@@ -326,7 +326,7 @@ mod tests {
 	#[test]
 	fn compare_field_on_number() {
 		// Both are Numbers, trying to access a field should be Equal (both missing field)
-		let idi: Idiom = syn::idiom("value.nested").unwrap().into();
+		let idi: Idiom = syn::idiom("value.nested").unwrap();
 		let one = parse_val!("{ value: 42 }");
 		let two = parse_val!("{ value: 100 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -336,7 +336,7 @@ mod tests {
 	#[test]
 	fn compare_field_mixed_types() {
 		// String vs Number, both can't access field, should be Equal
-		let idi: Idiom = syn::idiom("value.nested").unwrap().into();
+		let idi: Idiom = syn::idiom("value.nested").unwrap();
 		let one = parse_val!("{ value: 'hello' }");
 		let two = parse_val!("{ value: 42 }");
 		let res = one.compare(&two, &idi, false, false);
@@ -346,7 +346,7 @@ mod tests {
 	#[test]
 	fn compare_nested_field_on_record_id() {
 		// Deeply nested field access on RecordId
-		let idi: Idiom = syn::idiom("user.city.name").unwrap().into();
+		let idi: Idiom = syn::idiom("user.city.name").unwrap();
 		let one = parse_val!("{ user: user:1 }");
 		let two = parse_val!("{ user: user:2 }");
 		let res = one.compare(&two, &idi, false, false);

@@ -1,7 +1,10 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use common::fmt::{Fmt, QuoteStr};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::expr::{Expr, Filter, Literal, Tokenizer};
+use crate::expr::analyzer_function::fmt_analyzer_function;
+use crate::expr::tokenizer::write_tokenizers_sql;
+use crate::expr::{CoverStmts, Expr, Filter, Literal, Tokenizer};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AlterAnalyzerStatement {
@@ -28,7 +31,39 @@ impl Default for AlterAnalyzerStatement {
 
 impl ToSql for AlterAnalyzerStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::alter::AlterAnalyzerStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "ALTER ANALYZER");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {}", CoverStmts(&self.name));
+
+		match self.function {
+			AlterKind::Set(ref v) => fmt_analyzer_function(f, fmt, v),
+			AlterKind::Drop => f.push_str(" DROP FUNCTION"),
+			AlterKind::None => {}
+		}
+
+		match self.tokenizers {
+			AlterKind::Set(ref v) => {
+				write_sql!(f, fmt, " TOKENIZERS ");
+				write_tokenizers_sql(f, fmt, v.iter().copied());
+			}
+			AlterKind::Drop => f.push_str(" DROP TOKENIZERS"),
+			AlterKind::None => {}
+		}
+
+		match self.filters {
+			AlterKind::Set(ref v) => {
+				write_sql!(f, fmt, " FILTERS {}", Fmt::comma_separated(v.iter()));
+			}
+			AlterKind::Drop => f.push_str(" DROP FILTERS"),
+			AlterKind::None => {}
+		}
+
+		match self.comment {
+			AlterKind::Set(ref v) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(v)),
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::None => {}
+		}
 	}
 }

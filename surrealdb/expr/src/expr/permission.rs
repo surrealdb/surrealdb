@@ -4,11 +4,10 @@
 //! or a guard expression evaluated per row. `Permissions` groups the four
 //! CRUD clauses. The stored (text) twins live in the catalog schema layer.
 
-use surrealdb_types::ToSql;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
+use crate::expr::{CoverStmts, Expr};
 use crate::val::Value;
 
 /// Runtime form of [`StoredPermission`]: the guard expression parsed.
@@ -18,18 +17,6 @@ pub enum Permission {
 	#[default]
 	Full,
 	Specific(Expr),
-}
-
-impl Permission {
-	/// Lowers to the sql-side permission for embedding in a
-	/// `sql::Define*Statement` at the INFO/export rendering boundary.
-	pub fn to_sql_permission(&self) -> sql::Permission {
-		match self {
-			Permission::None => sql::Permission::None,
-			Permission::Full => sql::Permission::Full,
-			Permission::Specific(e) => sql::Permission::Specific(e.clone().into()),
-		}
-	}
 }
 
 impl InfoStructure for Permission {
@@ -46,14 +33,11 @@ impl InfoStructure for Permission {
 /// its canonical stored text carries (`Expr::to_stored_sql`), so the output is
 /// byte-identical to the stored form's splice.
 impl ToSql for Permission {
-	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::None => f.push_str("NONE"),
 			Self::Full => f.push_str("FULL"),
-			Self::Specific(e) => {
-				f.push_str("WHERE ");
-				f.push_str(&e.to_stored_sql());
-			}
+			Self::Specific(v) => write_sql!(f, sql_fmt, "WHERE {}", CoverStmts(v)),
 		}
 	}
 }
@@ -68,15 +52,17 @@ pub struct Permissions {
 }
 
 impl Permissions {
-	/// Lowers to the sql-side permissions for embedding in a
-	/// `sql::Define*Statement` at the INFO/export rendering boundary.
-	pub fn to_sql_permissions(&self) -> sql::Permissions {
-		sql::Permissions {
-			select: self.select.to_sql_permission(),
-			create: self.create.to_sql_permission(),
-			update: self.update.to_sql_permission(),
-			delete: self.delete.to_sql_permission(),
-		}
+	pub fn is_none(&self) -> bool {
+		matches!(
+			(&self.select, &self.create, &self.update, &self.delete),
+			(Permission::None, Permission::None, Permission::None, Permission::None)
+		)
+	}
+	pub fn is_full(&self) -> bool {
+		matches!(
+			(&self.select, &self.create, &self.update, &self.delete),
+			(Permission::Full, Permission::Full, Permission::Full, Permission::Full)
+		)
 	}
 }
 
@@ -91,10 +77,9 @@ impl InfoStructure for Permissions {
 	}
 }
 
-impl ToSql for Permissions {
+impl surrealdb_types::ToSql for Permissions {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		// One renderer, not two: see `FieldDefinition::to_sql_definition`.
-		self.to_sql_permissions().fmt_sql(f, fmt)
+		self.fmt_sql_actions(f, fmt, true)
 	}
 }
 
@@ -108,5 +93,103 @@ impl Permission {
 	/// form.
 	pub fn is_specific(&self) -> bool {
 		matches!(self, Self::Specific(_))
+	}
+}
+
+pub struct FieldPermissions<'a>(pub &'a Permissions);
+
+impl surrealdb_types::ToSql for FieldPermissions<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		self.0.fmt_sql_actions(f, fmt, false)
+	}
+}
+#[derive(Clone, Copy)]
+pub enum PermissionKind {
+	Select,
+	Create,
+	Update,
+	Delete,
+}
+impl PermissionKind {
+	fn as_str(&self) -> &str {
+		match self {
+			PermissionKind::Select => "select",
+			PermissionKind::Create => "create",
+			PermissionKind::Update => "update",
+			PermissionKind::Delete => "delete",
+		}
+	}
+}
+impl Permissions {
+	/// Writes the `PERMISSIONS` clause, covering `delete` only when the owner
+	/// can express it. See [`FieldPermissions`].
+	fn fmt_sql_actions(&self, f: &mut String, fmt: surrealdb_types::SqlFormat, delete: bool) {
+		f.push_str("PERMISSIONS");
+		if self.is_none() {
+			f.push_str(" NONE");
+			return;
+		}
+		if self.is_full() {
+			f.push_str(" FULL");
+			return;
+		}
+		let mut lines = Vec::<(Vec<PermissionKind>, &Permission)>::new();
+		for (c, permission) in [
+			PermissionKind::Select,
+			PermissionKind::Create,
+			PermissionKind::Update,
+			PermissionKind::Delete,
+		]
+		.into_iter()
+		.zip([&self.select, &self.create, &self.update, &self.delete])
+		{
+			if matches!(c, PermissionKind::Delete) && !delete {
+				continue;
+			}
+
+			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
+				existing.push(c);
+			} else {
+				lines.push((vec![c], permission));
+			}
+		}
+		if fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = fmt.increment();
+			inner_fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
+			if i > 0 {
+				if fmt.is_pretty() {
+					f.push(',');
+					f.push('\n');
+					let inner_fmt = fmt.increment();
+					inner_fmt.write_indent(f);
+				} else {
+					f.push_str(", ");
+				}
+			}
+			f.push_str("FOR ");
+			for (i, kind) in kinds.into_iter().enumerate() {
+				if i > 0 {
+					f.push_str(", ");
+				}
+				f.push_str(kind.as_str());
+			}
+			match permission {
+				Permission::Specific(v) if fmt.is_pretty() => {
+					f.push_str(" WHERE ");
+					CoverStmts(v).fmt_sql(f, fmt);
+				}
+				Permission::None => f.push_str(" NONE"),
+				Permission::Full => f.push_str(" FULL"),
+				Permission::Specific(v) => {
+					f.push_str(" WHERE ");
+					CoverStmts(v).fmt_sql(f, fmt);
+				}
+			}
+		}
 	}
 }

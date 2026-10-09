@@ -3,7 +3,6 @@ use revision::revisioned;
 use crate::catalog::StoredModuleDefinition;
 pub use crate::expr::module::ModuleName;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -22,17 +21,6 @@ impl InfoStructure for ModuleExecutable {
 	}
 }
 
-impl From<ModuleExecutable> for sql::module::ModuleExecutable {
-	fn from(executable: ModuleExecutable) -> Self {
-		match executable {
-			ModuleExecutable::Surrealism(surrealism) => {
-				sql::module::ModuleExecutable::Surrealism(surrealism.into())
-			}
-			ModuleExecutable::Silo(silo) => sql::module::ModuleExecutable::Silo(silo.into()),
-		}
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SurrealismExecutable {
@@ -46,15 +34,6 @@ impl InfoStructure for SurrealismExecutable {
 			"type" => Value::from("surrealism"),
 			"bucket" => self.bucket.into(),
 			"key" => self.key.into(),
-		})
-	}
-}
-
-impl From<SurrealismExecutable> for sql::module::SurrealismExecutable {
-	fn from(executable: SurrealismExecutable) -> Self {
-		Self(sql::file::File {
-			bucket: executable.bucket,
-			key: executable.key,
 		})
 	}
 }
@@ -79,18 +58,6 @@ impl InfoStructure for SiloExecutable {
 			"minor" => self.minor.into(),
 			"patch" => self.patch.into(),
 		})
-	}
-}
-
-impl From<SiloExecutable> for sql::module::SiloExecutable {
-	fn from(executable: SiloExecutable) -> Self {
-		Self {
-			organisation: executable.organisation,
-			package: executable.package,
-			major: executable.major,
-			minor: executable.minor,
-			patch: executable.patch,
-		}
 	}
 }
 

@@ -382,13 +382,11 @@ async fn run_write(
 	let plan = match plans.plans.iter().find(|(held, _)| *held == write) {
 		Some((_, plan)) => Arc::clone(plan),
 		None => {
-			let op = crate::expr::logical::lower(crate::sql::Expr::from(write.clone())).map_err(
-				|e| {
-					ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
-						format!("a mutation's write did not lower: {e}")
-					)))
-				},
-			)?;
+			let op = crate::expr::logical::lower(write.clone()).map_err(|e| {
+				ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
+					"a mutation's write did not lower: {e}"
+				))))
+			})?;
 			// Every per-row value is read when the plan runs.
 			let shadowed: Vec<String> = values.iter().map(|(param, _)| param.name()).collect();
 			// Served from the compile cache by the statement as written, the

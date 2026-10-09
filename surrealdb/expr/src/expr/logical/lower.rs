@@ -1,11 +1,11 @@
-//! Lowering from the surface AST to the logical plan.
+//! Lowering from runtime syntax to the logical plan.
 //!
 //! Pure and schema-free: no transaction, no catalog, no authority. A statement
 //! lowers to the same tree for every caller, and everything that depends on
 //! *who is asking* or *what the schema says* is added later by a pass over the
 //! result.
 //!
-//! Lowering takes the surface AST only. A construct with no logical form is
+//! Lowering takes runtime syntax only. A construct with no logical form is
 //! reported as [`NoLogicalForm`] before any transaction is touched, and the
 //! statement fails.
 
@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Bound;
 
-use surrealdb_strand::{Strand, TableName};
+use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use super::expr::{
@@ -31,9 +31,9 @@ use super::{
 	LogicalUnionAll, LogicalValues, LogicalVersionScope, LogicalWrite, LogicalWriteSource,
 	LogicalWriteStatement,
 };
+use crate::expr as surface;
 use crate::expr::part::Recurse;
-use crate::sql;
-use crate::sql::statements::{IfelseStatement, InfoStatement, SelectStatement};
+use crate::expr::statements::{IfelseStatement, InfoStatement, SelectStatement};
 
 /// Why a tree has no logical plan.
 ///
@@ -76,44 +76,44 @@ type Lowered<T> = Result<T, NoLogicalForm>;
 /// `RETURN` and the statement an `EXPLAIN` describes are lowered by
 /// [`lower_value_statement`], which keeps an `IF`, `THROW`, `BREAK` or
 /// `CONTINUE` there in its scalar form.
-pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
-	match expr {
-		sql::Expr::IfElse(stmt) => lower_if_statement(*stmt),
-		sql::Expr::Throw(value) => Ok(LogicalOp::Throw(LogicalThrow {
+pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
+	match expr.into() {
+		surface::Expr::IfElse(stmt) => lower_if_statement(*stmt),
+		surface::Expr::Throw(value) => Ok(LogicalOp::Throw(LogicalThrow {
 			value: lower_expr(*value)?,
 		})),
-		sql::Expr::Break => Ok(LogicalOp::Break(LogicalBreak)),
-		sql::Expr::Continue => Ok(LogicalOp::Continue(LogicalContinue)),
-		sql::Expr::Select(select) => lower_select(*select),
-		sql::Expr::Block(block) => lower_block(*block),
-		sql::Expr::Let(stmt) => Ok(LogicalOp::Let(LogicalLet {
+		surface::Expr::Break => Ok(LogicalOp::Break(LogicalBreak)),
+		surface::Expr::Continue => Ok(LogicalOp::Continue(LogicalContinue)),
+		surface::Expr::Select(select) => lower_select(*select),
+		surface::Expr::Block(block) => lower_block(*block),
+		surface::Expr::Let(stmt) => Ok(LogicalOp::Let(LogicalLet {
 			name: stmt.name.into_string(),
-			kind: stmt.kind.map(Into::into),
+			kind: stmt.kind,
 			value: Box::new(lower(stmt.what)?),
 		})),
-		sql::Expr::Return(stmt) => Ok(LogicalOp::Return(LogicalReturn {
+		surface::Expr::Return(stmt) => Ok(LogicalOp::Return(LogicalReturn {
 			what: Box::new(lower_value_statement(stmt.what)?),
 			fetch: lower_fetchs(stmt.fetch)?,
 		})),
-		sql::Expr::Foreach(stmt) => Ok(LogicalOp::Foreach(LogicalForeach {
-			param: stmt.param.into(),
+		surface::Expr::Foreach(stmt) => Ok(LogicalOp::Foreach(LogicalForeach {
+			param: stmt.param,
 			range: lower_expr(stmt.range)?,
 			body: Box::new(lower_block(stmt.block)?),
 		})),
-		sql::Expr::Info(info) => Ok(LogicalOp::Info(Box::new(lower_info(*info)?))),
-		sql::Expr::Sleep(stmt) => Ok(LogicalOp::Sleep(LogicalSleep {
-			duration: LogicalExpr::Literal(LogicalLiteral::Duration(stmt.duration.into())),
+		surface::Expr::Info(info) => Ok(LogicalOp::Info(Box::new(lower_info(*info)?))),
+		surface::Expr::Sleep(stmt) => Ok(LogicalOp::Sleep(LogicalSleep {
+			duration: LogicalExpr::Literal(LogicalLiteral::Duration(stmt.duration)),
 		})),
-		sql::Expr::Explain {
+		surface::Expr::Explain {
 			format,
 			analyze,
 			statement,
 		} => Ok(LogicalOp::Explain(LogicalExplain {
 			input: Box::new(lower_value_statement(*statement)?),
 			analyze,
-			format: format.into(),
+			format,
 		})),
-		sql::Expr::Create(stmt) => {
+		surface::Expr::Create(stmt) => {
 			// Targets, not rows read from storage. A creating statement's
 			// subject does not exist yet, so the target is carried as the
 			// value it evaluates to — a table to generate an id in, or a
@@ -126,31 +126,31 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
 					duplicate_update: None,
 					cond: None,
-					statement: LogicalWriteStatement::Create(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Create(stmt),
 					source: LogicalWriteSource::Targets(targets),
 				}),
 				timeout,
 			)
 		}
-		sql::Expr::Update(stmt) => {
+		surface::Expr::Update(stmt) => {
 			// Rows: `UPDATE` writes records that already exist, so its targets
 			// are read exactly as the same targets in a `FROM` clause are.
-			let rows = lower_write_rows(stmt.what.clone(), stmt.with.clone())?;
+			let rows = lower_write_rows(stmt.what.clone(), stmt.with.as_ref())?;
 			let timeout = stmt.timeout.clone();
-			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let explain = stmt.explain.as_ref().map(|surface::Explain(analyze)| *analyze);
 			let op = with_timeout(
 				LogicalOp::Write(LogicalWrite {
 					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
 					duplicate_update: None,
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
-					statement: LogicalWriteStatement::Update(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Update(stmt),
 					source: LogicalWriteSource::Rows(Box::new(rows)),
 				}),
 				timeout,
 			)?;
 			Ok(with_explain(op, explain))
 		}
-		sql::Expr::Upsert(stmt) => {
+		surface::Expr::Upsert(stmt) => {
 			// Targets, as for `CREATE`: an `UPSERT` subject need not exist, and
 			// a reading source yields nothing for one that does not, which
 			// would silently drop the write the statement exists to perform.
@@ -159,38 +159,38 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 			// update.
 			let targets = lower_exprs(stmt.what.clone())?;
 			let timeout = stmt.timeout.clone();
-			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let explain = stmt.explain.as_ref().map(|surface::Explain(analyze)| *analyze);
 			let op = with_timeout(
 				LogicalOp::Write(LogicalWrite {
 					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
 					duplicate_update: None,
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
-					statement: LogicalWriteStatement::Upsert(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Upsert(stmt),
 					source: LogicalWriteSource::Targets(targets),
 				}),
 				timeout,
 			)?;
 			Ok(with_explain(op, explain))
 		}
-		sql::Expr::Delete(stmt) => {
+		surface::Expr::Delete(stmt) => {
 			// Rows, as for `UPDATE`: a record must be read before it can be
 			// removed.
-			let rows = lower_write_rows(stmt.what.clone(), stmt.with.clone())?;
+			let rows = lower_write_rows(stmt.what.clone(), stmt.with.as_ref())?;
 			let timeout = stmt.timeout.clone();
-			let explain = stmt.explain.as_ref().map(|sql::Explain(analyze)| *analyze);
+			let explain = stmt.explain.as_ref().map(|surface::Explain(analyze)| *analyze);
 			let op = with_timeout(
 				LogicalOp::Write(LogicalWrite {
 					data: None,
 					duplicate_update: None,
 					cond: stmt.cond.clone().map(|c| lower_expr(c.0)).transpose()?,
-					statement: LogicalWriteStatement::Delete(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Delete(stmt),
 					source: LogicalWriteSource::Rows(Box::new(rows)),
 				}),
 				timeout,
 			)?;
 			Ok(with_explain(op, explain))
 		}
-		sql::Expr::Insert(stmt) => {
+		surface::Expr::Insert(stmt) => {
 			// `INSERT` names no subjects to read: its rows *are* its subjects,
 			// so they are the source. Nothing applies them to a record the
 			// statement named elsewhere, which is what separates them from
@@ -202,13 +202,13 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 					data: None,
 					duplicate_update: stmt.update.clone().map(lower_data).transpose()?.flatten(),
 					cond: None,
-					statement: LogicalWriteStatement::Insert(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Insert(stmt),
 					source: LogicalWriteSource::Inserts(inserts),
 				}),
 				timeout,
 			)
 		}
-		sql::Expr::Relate(stmt) => {
+		surface::Expr::Relate(stmt) => {
 			// Targets: the edge record `RELATE` writes does not exist yet, and
 			// its endpoints are used as the ids they evaluate to rather than
 			// read as documents. The list is `[from, through, to]`,
@@ -221,7 +221,7 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 					data: stmt.data.clone().map(lower_data).transpose()?.flatten(),
 					duplicate_update: None,
 					cond: None,
-					statement: LogicalWriteStatement::Relate(Box::new((*stmt).into())),
+					statement: LogicalWriteStatement::Relate(stmt),
 					source: LogicalWriteSource::Targets(targets),
 				}),
 				timeout,
@@ -232,35 +232,35 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 		// lowered here: a bare name in a DDL name position denotes itself, and
 		// lowering it would make it a read of the row the statement runs
 		// under.
-		sql::Expr::Define(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
-			statement: LogicalDdlStatement::Define(Box::new((*stmt).into())),
+		surface::Expr::Define(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Define(stmt),
 		})),
-		sql::Expr::Remove(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
-			statement: LogicalDdlStatement::Remove(Box::new((*stmt).into())),
+		surface::Expr::Remove(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Remove(stmt),
 		})),
-		sql::Expr::Rebuild(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
-			statement: LogicalDdlStatement::Rebuild(Box::new((*stmt).into())),
+		surface::Expr::Rebuild(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Rebuild(stmt),
 		})),
-		sql::Expr::Alter(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
-			statement: LogicalDdlStatement::Alter(Box::new((*stmt).into())),
+		surface::Expr::Alter(stmt) => Ok(LogicalOp::Ddl(LogicalDdl {
+			statement: LogicalDdlStatement::Alter(stmt),
 		})),
-		scalar @ (sql::Expr::Literal(_)
-		| sql::Expr::Param(_)
-		| sql::Expr::Idiom(_)
-		| sql::Expr::Table(_)
-		| sql::Expr::Mock(_)
-		| sql::Expr::Constant(_)
-		| sql::Expr::Prefix {
+		scalar @ (surface::Expr::Literal(_)
+		| surface::Expr::Param(_)
+		| surface::Expr::Idiom(_)
+		| surface::Expr::Table(_)
+		| surface::Expr::Mock(_)
+		| surface::Expr::Constant(_)
+		| surface::Expr::Prefix {
 			..
 		}
-		| sql::Expr::Postfix {
+		| surface::Expr::Postfix {
 			..
 		}
-		| sql::Expr::Binary {
+		| surface::Expr::Binary {
 			..
 		}
-		| sql::Expr::FunctionCall(_)
-		| sql::Expr::Closure(_)) => Ok(LogicalOp::Eval(LogicalEval {
+		| surface::Expr::FunctionCall(_)
+		| surface::Expr::Closure(_)) => Ok(LogicalOp::Eval(LogicalEval {
 			expr: lower_expr(scalar)?,
 		})),
 	}
@@ -270,10 +270,14 @@ pub fn lower(expr: sql::Expr) -> Lowered<LogicalOp> {
 /// of a `RETURN`, the statement an `EXPLAIN` describes: an `IF`, `THROW`,
 /// `BREAK` or `CONTINUE` there is a [`LogicalOp::Eval`] of its scalar form,
 /// and anything else lowers as [`lower`] lowers it.
-pub fn lower_value_statement(expr: sql::Expr) -> Lowered<LogicalOp> {
+pub fn lower_value_statement(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
+	let expr = expr.into();
 	if matches!(
 		expr,
-		sql::Expr::IfElse(_) | sql::Expr::Throw(_) | sql::Expr::Break | sql::Expr::Continue
+		surface::Expr::IfElse(_)
+			| surface::Expr::Throw(_)
+			| surface::Expr::Break
+			| surface::Expr::Continue
 	) {
 		return Ok(LogicalOp::Eval(LogicalEval {
 			expr: lower_expr(expr)?,
@@ -293,7 +297,7 @@ pub fn lower_value_statement(expr: sql::Expr) -> Lowered<LogicalOp> {
 fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
 	if if_arm_is_a_let(&stmt) {
 		return Ok(LogicalOp::Eval(LogicalEval {
-			expr: lower_expr(sql::Expr::IfElse(Box::new(stmt)))?,
+			expr: lower_expr(surface::Expr::IfElse(Box::new(stmt)))?,
 		}));
 	}
 	let branches = stmt
@@ -310,10 +314,10 @@ fn lower_if_statement(stmt: IfelseStatement) -> Lowered<LogicalOp> {
 /// the `LET` is a statement of the block.
 fn if_arm_is_a_let(stmt: &IfelseStatement) -> bool {
 	#[expect(clippy::wildcard_enum_match_arm, reason = "any other arm is a value or a statement")]
-	fn is_a_let(arm: &sql::Expr) -> bool {
+	fn is_a_let(arm: &surface::Expr) -> bool {
 		match arm {
-			sql::Expr::Let(_) => true,
-			sql::Expr::IfElse(nested) => if_arm_is_a_let(nested),
+			surface::Expr::Let(_) => true,
+			surface::Expr::IfElse(nested) => if_arm_is_a_let(nested),
 			_ => false,
 		}
 	}
@@ -326,71 +330,71 @@ fn if_arm_is_a_let(stmt: &IfelseStatement) -> bool {
 /// a `SELECT`, a mutation, a block, a `RETURN`, a `LET` — becomes
 /// [`LogicalExpr::Subquery`] of the operator [`lower`] produces for it. DDL
 /// statements have no logical form.
-pub fn lower_expr(expr: sql::Expr) -> Lowered<LogicalExpr> {
-	Ok(match expr {
-		sql::Expr::Literal(literal) => lower_literal(literal)?,
-		sql::Expr::Param(param) => LogicalExpr::Param(param.into()),
-		sql::Expr::Idiom(idiom) => lower_idiom(idiom)?,
-		sql::Expr::Table(table) => LogicalExpr::Table(table.into()),
-		sql::Expr::Mock(mock) => LogicalExpr::Mock(mock.into()),
-		sql::Expr::Constant(constant) => LogicalExpr::Constant(constant.into()),
-		sql::Expr::Prefix {
+pub fn lower_expr(expr: impl Into<surface::Expr>) -> Lowered<LogicalExpr> {
+	Ok(match expr.into() {
+		surface::Expr::Literal(literal) => lower_literal(literal)?,
+		surface::Expr::Param(param) => LogicalExpr::Param(param),
+		surface::Expr::Idiom(idiom) => lower_idiom(idiom)?,
+		surface::Expr::Table(table) => LogicalExpr::Table(table),
+		surface::Expr::Mock(mock) => LogicalExpr::Mock(mock),
+		surface::Expr::Constant(constant) => LogicalExpr::Constant(constant),
+		surface::Expr::Prefix {
 			op,
 			expr,
 		} => LogicalExpr::Prefix {
-			op: op.into(),
+			op,
 			expr: Box::new(lower_expr(*expr)?),
 		},
-		sql::Expr::Postfix {
+		surface::Expr::Postfix {
 			expr,
 			op,
 		} => lower_postfix(lower_expr(*expr)?, op)?,
-		sql::Expr::Binary {
+		surface::Expr::Binary {
 			left,
 			op,
 			right,
 		} => LogicalExpr::Binary {
 			left: Box::new(lower_expr(*left)?),
-			op: op.into(),
+			op,
 			right: Box::new(lower_expr(*right)?),
 		},
-		sql::Expr::FunctionCall(call) => LogicalExpr::Call(Box::new(LogicalCall {
-			receiver: call.receiver.into(),
+		surface::Expr::FunctionCall(call) => LogicalExpr::Call(Box::new(LogicalCall {
+			receiver: call.receiver,
 			args: lower_exprs(call.arguments)?,
 		})),
-		sql::Expr::Closure(closure) => {
+		surface::Expr::Closure(closure) => {
 			let body_sql = std::sync::Arc::from(closure.body.to_sql());
 			LogicalExpr::Closure(Box::new(LogicalClosure {
-				args: closure.args.into_iter().map(|(p, k)| (p.into(), k.into())).collect(),
-				returns: closure.returns.map(Into::into),
+				args: closure.args,
+				returns: closure.returns,
 				body: lower_expr(closure.body)?,
 				body_sql,
 			}))
 		}
-		sql::Expr::Break => LogicalExpr::Break,
-		sql::Expr::Continue => LogicalExpr::Continue,
-		sql::Expr::Throw(expr) => LogicalExpr::Throw(Box::new(lower_expr(*expr)?)),
-		sql::Expr::IfElse(stmt) => LogicalExpr::If(Box::new(lower_if(*stmt)?)),
-		statement @ (sql::Expr::Block(_)
-		| sql::Expr::Return(_)
-		| sql::Expr::Select(_)
-		| sql::Expr::Info(_)
-		| sql::Expr::Foreach(_)
-		| sql::Expr::Let(_)
-		| sql::Expr::Sleep(_)
-		| sql::Expr::Explain {
+		surface::Expr::Break => LogicalExpr::Break,
+		surface::Expr::Continue => LogicalExpr::Continue,
+		surface::Expr::Throw(expr) => LogicalExpr::Throw(Box::new(lower_expr(*expr)?)),
+		surface::Expr::IfElse(stmt) => LogicalExpr::If(Box::new(lower_if(*stmt)?)),
+		statement @ (surface::Expr::Block(_)
+		| surface::Expr::Return(_)
+		| surface::Expr::Select(_)
+		| surface::Expr::Info(_)
+		| surface::Expr::Foreach(_)
+		| surface::Expr::Let(_)
+		| surface::Expr::Sleep(_)
+		| surface::Expr::Explain {
 			..
 		}
-		| sql::Expr::Create(_)
-		| sql::Expr::Update(_)
-		| sql::Expr::Upsert(_)
-		| sql::Expr::Delete(_)
-		| sql::Expr::Insert(_)
-		| sql::Expr::Relate(_)
-		| sql::Expr::Define(_)
-		| sql::Expr::Remove(_)
-		| sql::Expr::Rebuild(_)
-		| sql::Expr::Alter(_)) => LogicalExpr::Subquery(Box::new(lower(statement)?)),
+		| surface::Expr::Create(_)
+		| surface::Expr::Update(_)
+		| surface::Expr::Upsert(_)
+		| surface::Expr::Delete(_)
+		| surface::Expr::Insert(_)
+		| surface::Expr::Relate(_)
+		| surface::Expr::Define(_)
+		| surface::Expr::Remove(_)
+		| surface::Expr::Rebuild(_)
+		| surface::Expr::Alter(_)) => LogicalExpr::Subquery(Box::new(lower(statement)?)),
 	})
 }
 
@@ -406,7 +410,8 @@ pub fn lower_expr(expr: sql::Expr) -> Lowered<LogicalExpr> {
 /// read outermost-first; the tree below is written with the leaves last.
 /// Clauses that are absent contribute no operator, so a bare
 /// `SELECT * FROM t` lowers to `Project` over `Source`.
-pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
+pub fn lower_select(select: impl Into<SelectStatement>) -> Lowered<LogicalOp> {
+	let select = select.into();
 	let SelectStatement {
 		fields,
 		omit,
@@ -427,14 +432,95 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 		for_update,
 	} = select;
 
+	let input = lower_sources(what, with.as_ref(), for_update)?;
+	let cond = cond.map(|c| lower_expr(c.0)).transpose()?;
+	let split = split
+		.map(|splits| splits.into_iter().map(|s| lower_idiom(s.0)).collect::<Lowered<_>>())
+		.transpose()?;
+	let fields = lower_fields(fields)?;
+	let group = group
+		.map(|groups| groups.0.into_iter().map(|g| lower_idiom(g.0)).collect::<Lowered<_>>())
+		.transpose()?;
+	let order = order.map(lower_ordering).transpose()?;
+	let limit = limit.map(|l| lower_expr(l.0)).transpose()?;
+	let start = start.map(|s| lower_expr(s.0)).transpose()?;
+	let omit = lower_exprs(omit)?;
+	let fetch = lower_fetchs(fetch)?;
+	let timeout = if is_absent(&timeout) {
+		None
+	} else {
+		Some(lower_expr(timeout)?)
+	};
+	let version = if is_absent(&version) {
+		None
+	} else {
+		Some(lower_expr(version)?)
+	};
+	Ok(select_pipeline(SelectClauses {
+		input,
+		fields,
+		omit,
+		only,
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		fetch,
+		version,
+		timeout,
+		explain: explain.map(|surface::Explain(analyze)| analyze),
+		tempfiles,
+	}))
+}
+
+/// Decoded clauses shared by surface and flat-tree front ends.
+pub(crate) struct SelectClauses {
+	pub input: LogicalOp,
+	pub fields: LogicalFields,
+	pub omit: Vec<LogicalExpr>,
+	pub only: bool,
+	pub cond: Option<LogicalExpr>,
+	pub split: Option<Vec<LogicalExpr>>,
+	pub group: Option<Vec<LogicalExpr>>,
+	pub order: Option<LogicalOrdering>,
+	pub limit: Option<LogicalExpr>,
+	pub start: Option<LogicalExpr>,
+	pub fetch: Vec<LogicalExpr>,
+	pub version: Option<LogicalExpr>,
+	pub timeout: Option<LogicalExpr>,
+	pub explain: Option<bool>,
+	pub tempfiles: bool,
+}
+
+/// Assemble the relational pipeline after each clause has been decoded.
+pub(crate) fn select_pipeline(clauses: SelectClauses) -> LogicalOp {
+	let SelectClauses {
+		input,
+		fields,
+		omit,
+		only,
+		cond,
+		split,
+		group,
+		order,
+		limit,
+		start,
+		fetch,
+		version,
+		timeout,
+		explain,
+		tempfiles,
+	} = clauses;
 	// FROM.
-	let mut op = lower_sources(what, with, for_update)?;
+	let mut op = input;
 
 	// WHERE.
 	if let Some(cond) = cond {
 		op = LogicalOp::Filter(LogicalFilter {
 			input: Box::new(op),
-			predicate: lower_expr(cond.0)?,
+			predicate: cond,
 		});
 	}
 
@@ -442,18 +528,17 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 	if let Some(splits) = split {
 		op = LogicalOp::Split(LogicalSplit {
 			input: Box::new(op),
-			exprs: splits.0.into_iter().map(|s| lower_idiom(s.0)).collect::<Lowered<_>>()?,
+			exprs: splits,
 		});
 	}
 
 	// GROUP BY. The aggregation evaluates the projection itself, so the
 	// projection below is reduced to a pass-through carrying only OMIT.
-	let fields = lower_fields(fields)?;
 	let grouped = group.is_some();
 	if let Some(groups) = group {
 		op = LogicalOp::Aggregate(LogicalAggregate {
 			input: Box::new(op),
-			group: groups.0.into_iter().map(|g| lower_idiom(g.0)).collect::<Lowered<_>>()?,
+			group: groups,
 			fields: fields.clone(),
 		});
 	}
@@ -462,7 +547,7 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 	if let Some(ordering) = order {
 		op = LogicalOp::Sort(LogicalSort {
 			input: Box::new(op),
-			ordering: lower_ordering(ordering)?,
+			ordering,
 			tempfiles,
 		});
 	}
@@ -471,8 +556,8 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 	if limit.is_some() || start.is_some() {
 		op = LogicalOp::Limit(LogicalLimit {
 			input: Box::new(op),
-			limit: limit.map(|l| lower_expr(l.0)).transpose()?,
-			start: start.map(|s| lower_expr(s.0)).transpose()?,
+			limit,
+			start,
 		});
 	}
 
@@ -486,12 +571,12 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 			} else {
 				fields
 			},
-			omit: lower_exprs(omit)?,
+			omit,
 		});
 	}
 
 	// FETCH.
-	let fetches = lower_fetchs(fetch)?;
+	let fetches = fetch;
 	if !fetches.is_empty() {
 		op = LogicalOp::Fetch(LogicalFetch {
 			input: Box::new(op),
@@ -501,16 +586,16 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 
 	// TIMEOUT, VERSION and ONLY. The first two are absent as a `NONE` literal
 	// rather than as an `Option`.
-	if !is_absent(&timeout) {
+	if let Some(timeout) = timeout {
 		op = LogicalOp::Timeout(LogicalTimeout {
 			input: Box::new(op),
-			timeout: lower_expr(timeout)?,
+			timeout,
 		});
 	}
-	if !is_absent(&version) {
+	if let Some(version) = version {
 		op = LogicalOp::VersionScope(LogicalVersionScope {
 			input: Box::new(op),
-			version: lower_expr(version)?,
+			version,
 		});
 	}
 	if only {
@@ -522,7 +607,7 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 	// EXPLAIN describes everything below it, so it wraps last. The clause form
 	// has no FORMAT and answers with the structured plan; only the statement
 	// form (`EXPLAIN [FORMAT ...] SELECT ...`) chooses text.
-	if let Some(sql::Explain(analyze)) = explain {
+	if let Some(analyze) = explain {
 		op = LogicalOp::Explain(LogicalExplain {
 			input: Box::new(op),
 			analyze,
@@ -530,7 +615,7 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 		});
 	}
 
-	Ok(op)
+	op
 }
 
 /// Lower a statement's list of targets to the subtree that reads them.
@@ -540,14 +625,13 @@ pub fn lower_select(select: SelectStatement) -> Lowered<LogicalOp> {
 /// per source. The same list means the same subtree wherever it is written, so
 /// a `SELECT`'s `FROM` and an updating mutation's targets share this lowering.
 fn lower_sources(
-	what: Vec<sql::Expr>,
-	with: Option<sql::With>,
+	what: Vec<surface::Expr>,
+	with: Option<&surface::With>,
 	for_update: bool,
 ) -> Lowered<LogicalOp> {
-	let with = with.map(crate::expr::With::from);
 	let leaves = what
 		.into_iter()
-		.map(|source| lower_source(source, with.as_ref(), for_update))
+		.map(|source| lower_source(source, with, for_update))
 		.collect::<Lowered<Vec<_>>>()?;
 	Ok(match leaves.len() {
 		1 => leaves.into_iter().next().expect("length checked"),
@@ -571,7 +655,7 @@ fn lower_sources(
 /// the scan — would be evaluated before that gate. The condition stays a
 /// clause of the statement, which the write operator's `CheckWhereCondition`
 /// stage evaluates in its place in the order.
-fn lower_write_rows(what: Vec<sql::Expr>, with: Option<sql::With>) -> Lowered<LogicalOp> {
+fn lower_write_rows(what: Vec<surface::Expr>, with: Option<&surface::With>) -> Lowered<LogicalOp> {
 	lower_sources(what, with, false)
 }
 
@@ -583,36 +667,33 @@ fn lower_write_rows(what: Vec<sql::Expr>, with: Option<sql::With>) -> Lowered<Lo
 /// has no form — there is nothing to evaluate — and the `INSERT` spellings
 /// that name rows rather than a clause are carried by
 /// [`LogicalWriteSource::Inserts`] instead.
-fn lower_data(data: sql::Data) -> Lowered<Option<LogicalData>> {
+fn lower_data(data: surface::Data) -> Lowered<Option<LogicalData>> {
 	Ok(Some(match data {
-		sql::Data::EmptyExpression => return Ok(None),
-		sql::Data::SetExpression(assignments) | sql::Data::UpdateExpression(assignments) => {
-			LogicalData::Set(
-				assignments
-					.into_iter()
-					.map(|a| {
-						Ok(LogicalAssignment {
-							place: a.place.into(),
-							operator: a.operator.into(),
-							value: lower_expr(a.value)?,
-						})
+		surface::Data::EmptyExpression => return Ok(None),
+		surface::Data::SetExpression(assignments)
+		| surface::Data::UpdateExpression(assignments) => LogicalData::Set(
+			assignments
+				.into_iter()
+				.map(|a| {
+					Ok(LogicalAssignment {
+						place: a.place,
+						operator: a.operator,
+						value: lower_expr(a.value)?,
 					})
-					.collect::<Lowered<Vec<_>>>()?,
-			)
-		}
-		sql::Data::UnsetExpression(paths) => {
-			LogicalData::Unset(paths.into_iter().map(Into::into).collect())
-		}
-		sql::Data::PatchExpression(expr) => LogicalData::Patch(lower_expr(expr)?),
-		sql::Data::MergeExpression(expr) => LogicalData::Merge(lower_expr(expr)?),
-		sql::Data::ReplaceExpression(expr) => LogicalData::Replace(lower_expr(expr)?),
-		sql::Data::ContentExpression(expr) => LogicalData::Content(lower_expr(expr)?),
-		sql::Data::SingleExpression(expr) => LogicalData::Single(lower_expr(expr)?),
-		sql::Data::ValuesExpression(rows) => LogicalData::Values(
+				})
+				.collect::<Lowered<Vec<_>>>()?,
+		),
+		surface::Data::UnsetExpression(paths) => LogicalData::Unset(paths),
+		surface::Data::PatchExpression(expr) => LogicalData::Patch(lower_expr(expr)?),
+		surface::Data::MergeExpression(expr) => LogicalData::Merge(lower_expr(expr)?),
+		surface::Data::ReplaceExpression(expr) => LogicalData::Replace(lower_expr(expr)?),
+		surface::Data::ContentExpression(expr) => LogicalData::Content(lower_expr(expr)?),
+		surface::Data::SingleExpression(expr) => LogicalData::Single(lower_expr(expr)?),
+		surface::Data::ValuesExpression(rows) => LogicalData::Values(
 			rows.into_iter()
 				.map(|row| {
 					row.into_iter()
-						.map(|(path, value)| Ok((path.into(), lower_expr(value)?)))
+						.map(|(path, value)| Ok((path, lower_expr(value)?)))
 						.collect::<Lowered<Vec<_>>>()
 				})
 				.collect::<Lowered<Vec<_>>>()?,
@@ -630,28 +711,28 @@ fn lower_data(data: sql::Data) -> Lowered<Option<LogicalData>> {
 /// Only the two spellings that name rows have a form here. Any other data
 /// clause on an `INSERT` names none, and lowering declines rather than
 /// silently writing records the statement did not describe.
-fn lower_inserts(into: Option<sql::Expr>, data: sql::Data) -> Lowered<LogicalInserts> {
+fn lower_inserts(into: Option<surface::Expr>, data: surface::Data) -> Lowered<LogicalInserts> {
 	let rows = match data {
-		sql::Data::ValuesExpression(tuples) => LogicalInsertRows::Tuples(
+		surface::Data::ValuesExpression(tuples) => LogicalInsertRows::Tuples(
 			tuples
 				.into_iter()
 				.map(|tuple| {
 					tuple
 						.into_iter()
-						.map(|(path, value)| Ok((path.into(), lower_expr(value)?)))
+						.map(|(path, value)| Ok((path, lower_expr(value)?)))
 						.collect::<Lowered<Vec<_>>>()
 				})
 				.collect::<Lowered<Vec<_>>>()?,
 		),
-		sql::Data::SingleExpression(expr) => LogicalInsertRows::Value(lower_expr(expr)?),
-		sql::Data::EmptyExpression
-		| sql::Data::SetExpression(_)
-		| sql::Data::UnsetExpression(_)
-		| sql::Data::PatchExpression(_)
-		| sql::Data::MergeExpression(_)
-		| sql::Data::ReplaceExpression(_)
-		| sql::Data::ContentExpression(_)
-		| sql::Data::UpdateExpression(_) => {
+		surface::Data::SingleExpression(expr) => LogicalInsertRows::Value(lower_expr(expr)?),
+		surface::Data::EmptyExpression
+		| surface::Data::SetExpression(_)
+		| surface::Data::UnsetExpression(_)
+		| surface::Data::PatchExpression(_)
+		| surface::Data::MergeExpression(_)
+		| surface::Data::ReplaceExpression(_)
+		| surface::Data::ContentExpression(_)
+		| surface::Data::UpdateExpression(_) => {
 			return Err(NoLogicalForm::Unsupported(
 				"an INSERT whose data clause names no rows".to_string(),
 			));
@@ -678,11 +759,11 @@ fn lower_inserts(into: Option<sql::Expr>, data: sql::Data) -> Lowered<LogicalIns
 /// [`SourceRef::Dynamic`] — which the planner rejects as it rejects any other
 /// target that is not a record.
 fn lower_source(
-	source: sql::Expr,
+	source: surface::Expr,
 	with: Option<&crate::expr::With>,
 	for_update: bool,
 ) -> Lowered<LogicalOp> {
-	if let sql::Expr::Select(inner) = source {
+	if let surface::Expr::Select(inner) = source {
 		let inner = lower_select(*inner)?;
 		return Ok(if for_update {
 			LogicalOp::Source(LogicalSource {
@@ -837,7 +918,7 @@ fn with_explain(op: LogicalOp, analyze: Option<bool>) -> LogicalOp {
 /// A mutation carries the clause on the statement rather than on a source, so
 /// it becomes the node above the write operator — the same node a `SELECT`'s
 /// `TIMEOUT` lowers to, holding the same budget over everything beneath it.
-fn with_timeout(op: LogicalOp, timeout: sql::Expr) -> Lowered<LogicalOp> {
+fn with_timeout(op: LogicalOp, timeout: surface::Expr) -> Lowered<LogicalOp> {
 	if is_absent(&timeout) {
 		return Ok(op);
 	}
@@ -847,22 +928,22 @@ fn with_timeout(op: LogicalOp, timeout: sql::Expr) -> Lowered<LogicalOp> {
 	}))
 }
 
-fn is_absent(expr: &sql::Expr) -> bool {
-	matches!(expr, sql::Expr::Literal(sql::Literal::None))
+fn is_absent(expr: &surface::Expr) -> bool {
+	matches!(expr, surface::Expr::Literal(surface::Literal::None))
 }
 
-fn lower_block(block: sql::Block) -> Lowered<LogicalOp> {
+fn lower_block(block: surface::Block) -> Lowered<LogicalOp> {
 	Ok(LogicalOp::Sequence(LogicalSequence {
 		stmts: block.0.into_iter().map(lower).collect::<Lowered<_>>()?,
 	}))
 }
 
-fn lower_exprs(exprs: Vec<sql::Expr>) -> Lowered<Vec<LogicalExpr>> {
+fn lower_exprs(exprs: Vec<surface::Expr>) -> Lowered<Vec<LogicalExpr>> {
 	exprs.into_iter().map(lower_expr).collect()
 }
 
-fn lower_fetchs(fetch: Option<sql::Fetchs>) -> Lowered<Vec<LogicalExpr>> {
-	fetch.map_or(Ok(Vec::new()), |fetchs| fetchs.0.into_iter().map(|f| lower_expr(f.0)).collect())
+fn lower_fetchs(fetch: Option<surface::Fetchs>) -> Lowered<Vec<LogicalExpr>> {
+	fetch.map_or(Ok(Vec::new()), |fetchs| fetchs.into_iter().map(|f| lower_expr(f.0)).collect())
 }
 
 fn lower_if(stmt: IfelseStatement) -> Lowered<LogicalIf> {
@@ -877,7 +958,7 @@ fn lower_if(stmt: IfelseStatement) -> Lowered<LogicalIf> {
 }
 
 fn lower_info(info: InfoStatement) -> Lowered<LogicalInfo> {
-	let version = |v: Option<sql::Expr>| v.map(lower_expr).transpose();
+	let version = |v: Option<surface::Expr>| v.map(lower_expr).transpose();
 	Ok(match info {
 		InfoStatement::Root(structure, v) => LogicalInfo::Root {
 			structure,
@@ -898,7 +979,7 @@ fn lower_info(info: InfoStatement) -> Lowered<LogicalInfo> {
 		},
 		InfoStatement::User(user, base, structure) => LogicalInfo::User {
 			user: lower_expr(user)?,
-			base: base.map(Into::into),
+			base,
 			structure,
 		},
 		InfoStatement::Index(index, table, structure) => LogicalInfo::Index {
@@ -909,45 +990,33 @@ fn lower_info(info: InfoStatement) -> Lowered<LogicalInfo> {
 	})
 }
 
-/// Whether an object literal has the two-entry `{ type: "…", … }` shape a
-/// GeoJSON geometry takes. Only such an object is offered to the geometry
-/// conversion; every other object is an object.
-fn looks_like_geometry(entries: &[sql::literal::ObjectEntry]) -> bool {
-	entries.len() == 2
-		&& entries.iter().any(|entry| {
-			entry.key == "type"
-				&& matches!(entry.value, sql::Expr::Literal(sql::Literal::String(_)))
-		})
-}
-
-fn lower_literal(literal: sql::Literal) -> Lowered<LogicalExpr> {
+fn lower_literal(literal: surface::Literal) -> Lowered<LogicalExpr> {
 	let leaf = |literal| Ok(LogicalExpr::Literal(literal));
 	match literal {
-		sql::Literal::None => leaf(LogicalLiteral::None),
-		sql::Literal::Null => leaf(LogicalLiteral::Null),
-		sql::Literal::UnboundedRange => leaf(LogicalLiteral::UnboundedRange),
-		sql::Literal::Bool(x) => leaf(LogicalLiteral::Bool(x)),
-		sql::Literal::Float(x) => leaf(LogicalLiteral::Float(x)),
-		sql::Literal::Integer(x) => leaf(LogicalLiteral::Integer(x)),
-		sql::Literal::Decimal(x) => leaf(LogicalLiteral::Decimal(x)),
-		sql::Literal::Duration(x) => leaf(LogicalLiteral::Duration(x.into())),
-		sql::Literal::String(x) => leaf(LogicalLiteral::String(x)),
-		sql::Literal::Datetime(x) => leaf(LogicalLiteral::Datetime(x.into())),
-		sql::Literal::Uuid(x) => leaf(LogicalLiteral::Uuid(x.into())),
-		sql::Literal::Regex(x) => leaf(LogicalLiteral::Regex(x.into())),
-		sql::Literal::Geometry(x) => leaf(LogicalLiteral::Geometry(x.into())),
-		sql::Literal::File(x) => leaf(LogicalLiteral::File(x.into())),
-		sql::Literal::Bytes(x) => leaf(LogicalLiteral::Bytes(x.into())),
-		sql::Literal::RecordId(rid) => Ok(LogicalExpr::RecordId(Box::new(lower_record_id(rid)?))),
-		sql::Literal::Array(items) => Ok(LogicalExpr::Array(lower_exprs(items)?)),
-		sql::Literal::Set(items) => Ok(LogicalExpr::Set(lower_exprs(items)?)),
-		sql::Literal::Object(entries) => {
+		surface::Literal::None => leaf(LogicalLiteral::None),
+		surface::Literal::Null => leaf(LogicalLiteral::Null),
+		surface::Literal::UnboundedRange => leaf(LogicalLiteral::UnboundedRange),
+		surface::Literal::Bool(x) => leaf(LogicalLiteral::Bool(x)),
+		surface::Literal::Float(x) => leaf(LogicalLiteral::Float(x)),
+		surface::Literal::Integer(x) => leaf(LogicalLiteral::Integer(x)),
+		surface::Literal::Decimal(x) => leaf(LogicalLiteral::Decimal(x)),
+		surface::Literal::Duration(x) => leaf(LogicalLiteral::Duration(x)),
+		surface::Literal::String(x) => leaf(LogicalLiteral::String(x)),
+		surface::Literal::Datetime(x) => leaf(LogicalLiteral::Datetime(x)),
+		surface::Literal::Uuid(x) => leaf(LogicalLiteral::Uuid(x)),
+		surface::Literal::Regex(x) => leaf(LogicalLiteral::Regex(x)),
+		surface::Literal::Geometry(x) => leaf(LogicalLiteral::Geometry(x)),
+		surface::Literal::File(x) => leaf(LogicalLiteral::File(x)),
+		surface::Literal::Bytes(x) => leaf(LogicalLiteral::Bytes(x)),
+		surface::Literal::RecordId(rid) => {
+			Ok(LogicalExpr::RecordId(Box::new(lower_record_id(rid)?)))
+		}
+		surface::Literal::Array(items) => Ok(LogicalExpr::Array(lower_exprs(items)?)),
+		surface::Literal::Set(items) => Ok(LogicalExpr::Set(lower_exprs(items)?)),
+		surface::Literal::Object(entries) => {
 			// An object literal in GeoJSON shape denotes a geometry; the
 			// shared conversion decides.
-			if looks_like_geometry(&entries)
-				&& let crate::expr::Literal::Geometry(geometry) =
-					crate::expr::Literal::from(sql::Literal::Object(entries.clone()))
-			{
+			if let Some(geometry) = crate::parser::geometry::collect_geometry(&entries) {
 				return leaf(LogicalLiteral::Geometry(geometry));
 			}
 			Ok(LogicalExpr::Object(lower_entries(entries)?))
@@ -955,33 +1024,37 @@ fn lower_literal(literal: sql::Literal) -> Lowered<LogicalExpr> {
 	}
 }
 
-fn lower_entries(entries: Vec<sql::literal::ObjectEntry>) -> Lowered<Vec<(String, LogicalExpr)>> {
+fn lower_entries(
+	entries: Vec<surface::literal::ObjectEntry>,
+) -> Lowered<Vec<(String, LogicalExpr)>> {
 	entries.into_iter().map(|e| Ok((e.key.into_string(), lower_expr(e.value)?))).collect()
 }
 
-fn lower_record_id(rid: sql::RecordIdLit) -> Lowered<LogicalRecordIdLit> {
+fn lower_record_id(rid: surface::RecordIdLit) -> Lowered<LogicalRecordIdLit> {
 	Ok(LogicalRecordIdLit {
-		table: rid.table.into(),
+		table: rid.table,
 		key: lower_record_id_key(rid.key)?,
 	})
 }
 
-fn lower_record_id_key(key: sql::RecordIdKeyLit) -> Lowered<LogicalRecordIdKey> {
+fn lower_record_id_key(key: surface::RecordIdKeyLit) -> Lowered<LogicalRecordIdKey> {
 	Ok(match key {
-		sql::RecordIdKeyLit::Number(x) => LogicalRecordIdKey::Number(x),
-		sql::RecordIdKeyLit::String(x) => LogicalRecordIdKey::String(x),
-		sql::RecordIdKeyLit::Uuid(x) => LogicalRecordIdKey::Uuid(x.into()),
-		sql::RecordIdKeyLit::Array(items) => LogicalRecordIdKey::Array(lower_exprs(items)?),
-		sql::RecordIdKeyLit::Object(entries) => LogicalRecordIdKey::Object(lower_entries(entries)?),
-		sql::RecordIdKeyLit::Generate(generator) => LogicalRecordIdKey::Generate(generator.into()),
-		sql::RecordIdKeyLit::Range(range) => {
+		surface::RecordIdKeyLit::Number(x) => LogicalRecordIdKey::Number(x),
+		surface::RecordIdKeyLit::String(x) => LogicalRecordIdKey::String(x),
+		surface::RecordIdKeyLit::Uuid(x) => LogicalRecordIdKey::Uuid(x),
+		surface::RecordIdKeyLit::Array(items) => LogicalRecordIdKey::Array(lower_exprs(items)?),
+		surface::RecordIdKeyLit::Object(entries) => {
+			LogicalRecordIdKey::Object(lower_entries(entries)?)
+		}
+		surface::RecordIdKeyLit::Generate(generator) => LogicalRecordIdKey::Generate(generator),
+		surface::RecordIdKeyLit::Range(range) => {
 			LogicalRecordIdKey::Range(Box::new(lower_record_id_range(*range)?))
 		}
 	})
 }
 
-fn lower_record_id_range(range: sql::RecordIdKeyRangeLit) -> Lowered<LogicalRecordIdKeyRange> {
-	let bound = |b: Bound<sql::RecordIdKeyLit>| {
+fn lower_record_id_range(range: surface::RecordIdKeyRangeLit) -> Lowered<LogicalRecordIdKeyRange> {
+	let bound = |b: Bound<surface::RecordIdKeyLit>| {
 		Ok(match b {
 			Bound::Included(key) => Bound::Included(lower_record_id_key(key)?),
 			Bound::Excluded(key) => Bound::Excluded(lower_record_id_key(key)?),
@@ -999,7 +1072,7 @@ fn lower_record_id_range(range: sql::RecordIdKeyRangeLit) -> Lowered<LogicalReco
 // ---------------------------------------------------------------------------
 
 /// One step of a surface idiom, with the expressions it holds lowered.
-enum Step {
+pub(crate) enum Step {
 	Access(Strand),
 	Index(LogicalExpr),
 	First,
@@ -1027,7 +1100,7 @@ impl Step {
 /// Whether the array-continuation rule applies while folding a sequence of
 /// steps.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum PathMode {
+pub(crate) enum PathMode {
 	/// The path as written: a mapping step or a lookup over an array applies
 	/// the rest of the path to each element ([`LogicalExpr::Broadcast`]).
 	Continuation,
@@ -1055,18 +1128,18 @@ enum Prev {
 /// folded onto the root by [`fold_steps`] in [`PathMode::Continuation`].
 ///
 /// A root written after the first part restarts the path ([`restart_at_root`]).
-fn lower_idiom(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
+fn lower_idiom(idiom: surface::Idiom) -> Lowered<LogicalExpr> {
 	let mut parts = restart_at_root(idiom.0).into_iter().peekable();
 	let base = match parts.peek() {
-		Some(sql::Part::Field(_)) => match parts.next() {
-			Some(sql::Part::Field(name)) => LogicalExpr::Field(name),
+		Some(surface::Part::Field(_)) => match parts.next() {
+			Some(surface::Part::Field(name)) => LogicalExpr::Field(name),
 			_ => unreachable!("peeked a field"),
 		},
-		Some(sql::Part::Start(_)) => match parts.next() {
-			Some(sql::Part::Start(start)) => lower_expr(start)?,
+		Some(surface::Part::Start(_)) => match parts.next() {
+			Some(surface::Part::Start(start)) => lower_expr(start)?,
 			_ => unreachable!("peeked a start"),
 		},
-		Some(sql::Part::Doc) => {
+		Some(surface::Part::Doc) => {
 			parts.next();
 			LogicalExpr::Doc
 		}
@@ -1080,14 +1153,14 @@ fn lower_idiom(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
 /// path of a recursion, or the path of a destructure alias. Every part is a
 /// step, a leading field included; a leading starting expression or `@`
 /// replaces `Current` as the base. Bodies fold in [`PathMode::Plain`].
-fn lower_body(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
+fn lower_body(idiom: surface::Idiom) -> Lowered<LogicalExpr> {
 	let mut parts = restart_at_root(idiom.0).into_iter().peekable();
 	let base = match parts.peek() {
-		Some(sql::Part::Start(_)) => match parts.next() {
-			Some(sql::Part::Start(start)) => lower_expr(start)?,
+		Some(surface::Part::Start(_)) => match parts.next() {
+			Some(surface::Part::Start(start)) => lower_expr(start)?,
 			_ => unreachable!("peeked a start"),
 		},
-		Some(sql::Part::Doc) => {
+		Some(surface::Part::Doc) => {
 			parts.next();
 			LogicalExpr::Doc
 		}
@@ -1104,38 +1177,41 @@ fn lower_body(idiom: sql::Idiom) -> Lowered<LogicalExpr> {
 /// path holding one later is a tree built without it, and the parts before the
 /// root are the value it replaces: they are not read, which is what a root
 /// means rather than a step applied to what precedes it.
-fn restart_at_root(mut parts: Vec<sql::Part>) -> Vec<sql::Part> {
-	match parts.iter().rposition(|part| matches!(part, sql::Part::Start(_) | sql::Part::Doc)) {
+fn restart_at_root(mut parts: Vec<surface::Part>) -> Vec<surface::Part> {
+	match parts
+		.iter()
+		.rposition(|part| matches!(part, surface::Part::Start(_) | surface::Part::Doc))
+	{
 		Some(at) if at > 0 => parts.split_off(at),
 		_ => parts,
 	}
 }
 
-fn lower_steps(parts: impl Iterator<Item = sql::Part>) -> Lowered<VecDeque<Step>> {
+fn lower_steps(parts: impl Iterator<Item = surface::Part>) -> Lowered<VecDeque<Step>> {
 	parts
 		.map(|part| {
 			Ok(match part {
-				sql::Part::All => Step::Each,
-				sql::Part::Flatten => Step::Flatten,
-				sql::Part::Last => Step::Last,
-				sql::Part::First => Step::First,
-				sql::Part::Field(name) => Step::Access(name),
-				sql::Part::Where(expr) => Step::Filter(lower_expr(expr)?),
-				sql::Part::Graph(lookup) => Step::Lookup(Box::new(lower_lookup(*lookup)?)),
-				sql::Part::Value(expr) => Step::Index(lower_expr(expr)?),
-				sql::Part::Method(name, args) => Step::Method(name, lower_exprs(args)?),
-				sql::Part::Destructure(parts) => Step::Destructure(lower_destructure(parts)?),
-				sql::Part::Optional => Step::Optional,
-				sql::Part::Recurse(recurse, nested, instruction) => Step::Recurse(
-					recurse.into(),
+				surface::Part::All => Step::Each,
+				surface::Part::Flatten => Step::Flatten,
+				surface::Part::Last => Step::Last,
+				surface::Part::First => Step::First,
+				surface::Part::Field(name) => Step::Access(name),
+				surface::Part::Where(expr) => Step::Filter(lower_expr(expr)?),
+				surface::Part::Lookup(lookup) => Step::Lookup(Box::new(lower_lookup(*lookup)?)),
+				surface::Part::Value(expr) => Step::Index(lower_expr(expr)?),
+				surface::Part::Method(name, args) => Step::Method(name, lower_exprs(args)?),
+				surface::Part::Destructure(parts) => Step::Destructure(lower_destructure(parts)?),
+				surface::Part::Optional => Step::Optional,
+				surface::Part::Recurse(recurse, nested, instruction) => Step::Recurse(
+					recurse,
 					nested.map(lower_body).transpose()?,
 					instruction.map(lower_instruction).transpose()?,
 				),
-				sql::Part::RepeatRecurse => Step::RepeatRecurse,
+				surface::Part::RepeatRecurse => Step::RepeatRecurse,
 				// A root is consumed before the steps are lowered
 				// ([`restart_at_root`]): only the first part of a path can be
 				// one by the time it gets here.
-				sql::Part::Start(_) | sql::Part::Doc => {
+				surface::Part::Start(_) | surface::Part::Doc => {
 					return Err(NoLogicalForm::Unsupported(
 						"a root part that is not the first of its path".to_string(),
 					));
@@ -1167,7 +1243,7 @@ fn lower_steps(parts: impl Iterator<Item = sql::Part>) -> Lowered<VecDeque<Step>
 /// continues in the mode it was reached in: when the base is not an array,
 /// the rest of the path is evaluated as the path it is, continuation
 /// included.
-fn fold_steps(base: LogicalExpr, steps: VecDeque<Step>, mode: PathMode) -> LogicalExpr {
+pub(crate) fn fold_steps(base: LogicalExpr, steps: VecDeque<Step>, mode: PathMode) -> LogicalExpr {
 	fold_from(base, steps, mode, Prev::Other, false)
 }
 
@@ -1377,46 +1453,46 @@ fn apply_step(base: LogicalExpr, step: Step) -> LogicalExpr {
 
 /// Lower an idiom that names an output position: a projection alias, a
 /// lookup alias.
-fn lower_output_path(idiom: sql::Idiom) -> Lowered<OutputPath> {
+fn lower_output_path(idiom: surface::Idiom) -> Lowered<OutputPath> {
 	Ok(lower_idiom(idiom)?.output_path())
 }
 
-fn lower_destructure(
-	parts: Vec<sql::part::DestructurePart>,
+pub(crate) fn lower_destructure(
+	parts: Vec<surface::part::DestructurePart>,
 ) -> Lowered<Vec<LogicalDestructureField>> {
 	parts
 		.into_iter()
 		.map(|part| {
 			Ok(match part {
-				sql::part::DestructurePart::All(name) => LogicalDestructureField::All(name),
-				sql::part::DestructurePart::Field(name) => LogicalDestructureField::Field(name),
-				sql::part::DestructurePart::Aliased(name, idiom) => {
+				surface::part::DestructurePart::All(name) => LogicalDestructureField::All(name),
+				surface::part::DestructurePart::Field(name) => LogicalDestructureField::Field(name),
+				surface::part::DestructurePart::Aliased(name, idiom) => {
 					LogicalDestructureField::Aliased(name, lower_body(idiom)?)
 				}
-				sql::part::DestructurePart::Destructure(name, parts) => {
+				surface::part::DestructurePart::Destructure(name, parts) => {
 					LogicalDestructureField::Destructure(name, lower_destructure(parts)?)
 				}
-				sql::part::DestructurePart::Rest => LogicalDestructureField::Rest,
+				surface::part::DestructurePart::Rest => LogicalDestructureField::Rest,
 			})
 		})
 		.collect()
 }
 
-fn lower_instruction(
-	instruction: sql::part::RecurseInstruction,
+pub(crate) fn lower_instruction(
+	instruction: surface::part::RecurseInstruction,
 ) -> Lowered<LogicalRecurseInstruction> {
 	Ok(match instruction {
-		sql::part::RecurseInstruction::Path {
+		surface::part::RecurseInstruction::Path {
 			inclusive,
 		} => LogicalRecurseInstruction::Path {
 			inclusive,
 		},
-		sql::part::RecurseInstruction::Collect {
+		surface::part::RecurseInstruction::Collect {
 			inclusive,
 		} => LogicalRecurseInstruction::Collect {
 			inclusive,
 		},
-		sql::part::RecurseInstruction::Shortest {
+		surface::part::RecurseInstruction::Shortest {
 			expects,
 			inclusive,
 		} => LogicalRecurseInstruction::Shortest {
@@ -1426,9 +1502,9 @@ fn lower_instruction(
 	})
 }
 
-fn lower_lookup(lookup: sql::lookup::Lookup) -> Lowered<LogicalLookup> {
+pub(crate) fn lower_lookup(lookup: surface::lookup::Lookup) -> Lowered<LogicalLookup> {
 	Ok(LogicalLookup {
-		kind: lookup.kind.into(),
+		kind: lookup.kind,
 		expr: lookup.expr.map(lower_fields).transpose()?,
 		only: lookup.only,
 		what: lookup.what.into_iter().map(lower_lookup_subject).collect::<Lowered<_>>()?,
@@ -1448,21 +1524,21 @@ fn lower_lookup(lookup: sql::lookup::Lookup) -> Lowered<LogicalLookup> {
 	})
 }
 
-fn lower_lookup_subject(subject: sql::lookup::LookupSubject) -> Lowered<LogicalLookupSubject> {
+fn lower_lookup_subject(subject: surface::lookup::LookupSubject) -> Lowered<LogicalLookupSubject> {
 	Ok(match subject {
-		sql::lookup::LookupSubject::Table {
+		surface::lookup::LookupSubject::Table {
 			table,
 			referencing_field,
 		} => LogicalLookupSubject::Table {
-			table: TableName::from(table),
+			table,
 			referencing_field,
 		},
-		sql::lookup::LookupSubject::Range {
+		surface::lookup::LookupSubject::Range {
 			table,
 			range,
 			referencing_field,
 		} => LogicalLookupSubject::Range {
-			table: TableName::from(table),
+			table,
 			range: lower_record_id_range(range)?,
 			referencing_field,
 		},
@@ -1470,19 +1546,19 @@ fn lower_lookup_subject(subject: sql::lookup::LookupSubject) -> Lowered<LogicalL
 }
 
 /// A projection's fields, as a `SELECT` or a `RETURN` clause writes them.
-pub fn lower_fields(fields: sql::Fields) -> Lowered<LogicalFields> {
-	Ok(match fields {
-		sql::Fields::Value(selector) => LogicalFields::Value {
+pub fn lower_fields(fields: impl Into<surface::Fields>) -> Lowered<LogicalFields> {
+	Ok(match fields.into() {
+		surface::Fields::Value(selector) => LogicalFields::Value {
 			expr: lower_expr(selector.expr)?,
 			alias: selector.alias.map(lower_output_path).transpose()?,
 		},
-		sql::Fields::Select(fields) => LogicalFields::Select(
+		surface::Fields::Select(fields) => LogicalFields::Select(
 			fields
 				.into_iter()
 				.map(|field| {
 					Ok(match field {
-						sql::Field::All => LogicalField::All,
-						sql::Field::Single(selector) => lower_field(selector)?,
+						surface::Field::All => LogicalField::All,
+						surface::Field::Single(selector) => lower_field(selector)?,
 					})
 				})
 				.collect::<Lowered<_>>()?,
@@ -1495,7 +1571,7 @@ pub fn lower_fields(fields: sql::Fields) -> Lowered<LogicalFields> {
 /// SurrealQL text of the expression as written, which is the key such a
 /// projection takes; every other field keeps the alias the user
 /// wrote, or none, and is named by [`LogicalExpr::output_path`].
-fn lower_field(selector: sql::field::Selector) -> Lowered<LogicalField> {
+fn lower_field(selector: surface::field::Selector) -> Lowered<LogicalField> {
 	let written = match &selector.alias {
 		Some(_) => None,
 		None => Some(selector.expr.to_sql()),
@@ -1509,10 +1585,10 @@ fn lower_field(selector: sql::field::Selector) -> Lowered<LogicalField> {
 	Ok(LogicalField::user(expr, alias))
 }
 
-fn lower_ordering(ordering: sql::order::Ordering) -> Lowered<LogicalOrdering> {
+fn lower_ordering(ordering: surface::order::Ordering) -> Lowered<LogicalOrdering> {
 	Ok(match ordering {
-		sql::order::Ordering::Random => LogicalOrdering::Random,
-		sql::order::Ordering::Order(list) => LogicalOrdering::Order(
+		surface::order::Ordering::Random => LogicalOrdering::Random,
+		surface::order::Ordering::Order(list) => LogicalOrdering::Order(
 			list.0
 				.into_iter()
 				.map(|order| {
@@ -1533,23 +1609,23 @@ fn lower_ordering(ordering: sql::order::Ordering) -> Lowered<LogicalOrdering> {
 /// expression lowers to the node the idiom lowering builds for the same
 /// construct — [`LogicalExpr::Method`] and [`LogicalExpr::Invoke`] — so every
 /// pass meets one node per construct whichever way it was spelled.
-fn lower_postfix(expr: LogicalExpr, op: sql::PostfixOperator) -> Lowered<LogicalExpr> {
+fn lower_postfix(expr: LogicalExpr, op: surface::PostfixOperator) -> Lowered<LogicalExpr> {
 	let expr = Box::new(expr);
 	Ok(match op {
-		sql::PostfixOperator::Range => LogicalExpr::Postfix {
+		surface::PostfixOperator::Range => LogicalExpr::Postfix {
 			expr,
 			op: LogicalPostfixOperator::Range,
 		},
-		sql::PostfixOperator::RangeSkip => LogicalExpr::Postfix {
+		surface::PostfixOperator::RangeSkip => LogicalExpr::Postfix {
 			expr,
 			op: LogicalPostfixOperator::RangeSkip,
 		},
-		sql::PostfixOperator::MethodCall(name, args) => LogicalExpr::Method {
+		surface::PostfixOperator::MethodCall(name, args) => LogicalExpr::Method {
 			base: expr,
 			name: name.into(),
 			args: lower_exprs(args)?,
 		},
-		sql::PostfixOperator::Call(args) => LogicalExpr::Invoke {
+		surface::PostfixOperator::Call(args) => LogicalExpr::Invoke {
 			target: expr,
 			args: lower_exprs(args)?,
 		},
@@ -1563,7 +1639,9 @@ mod tests {
 	use surrealdb_types::ToSql;
 
 	use super::*;
+	use crate::expr as sql;
 	use crate::expr::logical::LogicalRecursePath;
+	use crate::parser::TopLevelExpr;
 
 	/// The shape of a lowered tree, outermost operator first, so a test can
 	/// state the pipeline it expects without matching on every field.
@@ -1578,9 +1656,9 @@ mod tests {
 	}
 
 	fn parse(sql: &str) -> sql::Expr {
-		let ast = surrealdb_parser_next_lower::parse(sql).expect("test statement should parse");
+		let ast = crate::parser::parse(sql).expect("test statement should parse");
 		let top = ast.expressions.into_iter().next().expect("one statement");
-		let sql::TopLevelExpr::Expr(expr) = top else {
+		let TopLevelExpr::Expr(expr) = top else {
 			panic!("expected a bare expression");
 		};
 		expr
@@ -2034,12 +2112,17 @@ mod tests {
 	];
 
 	#[test]
-	fn a_scalar_renders_as_the_expression_layer_renders_it() {
+	fn scalar_rendering_preserves_precedence_and_normalized_geometry() {
 		for sql in SCALAR_CORPUS {
 			let sql::Expr::Return(out) = parse(&format!("RETURN {sql}")) else {
 				panic!("expected a RETURN");
 			};
-			let expected = crate::expr::Expr::from(out.what.clone()).to_sql();
+			let expected = match out.what.as_static_value() {
+				Some(crate::val::Value::Geometry(geometry)) => {
+					surface::Literal::Geometry(geometry).to_sql()
+				}
+				_ => out.what.to_sql(),
+			};
 			let lowered = lower_expr(out.what).expect("expression should lower");
 			assert_eq!(
 				lowered.to_sql(),
@@ -2315,31 +2398,35 @@ mod tests {
 	/// before it are replaced, not read.
 	#[test]
 	fn a_root_inside_a_path_restarts_it() {
-		let field = |name: &str| sql::Part::Field(name.into());
+		let field = |name: &str| surface::Part::Field(name.into());
 		let doc_then_b =
-			super::lower_idiom(sql::Idiom(vec![field("a"), sql::Part::Doc, field("b")]))
+			super::lower_idiom(surface::Idiom(vec![field("a"), surface::Part::Doc, field("b")]))
 				.expect("lowers");
 		assert_eq!(shape_of(&doc_then_b), shape_of(&lower_idiom("@.b")));
 
-		let start = sql::Expr::Param(sql::Param::new("p".to_owned()));
-		let start_then_b =
-			super::lower_idiom(sql::Idiom(vec![field("a"), sql::Part::Start(start), field("b")]))
-				.expect("lowers");
+		let start = surface::Expr::Param(surface::Param::from("p".to_owned()));
+		let start_then_b = super::lower_idiom(surface::Idiom(vec![
+			field("a"),
+			surface::Part::Start(start),
+			field("b"),
+		]))
+		.expect("lowers");
 		assert_eq!(shape_of(&start_then_b), shape_of(&lower_idiom("$p.b")));
 
 		// The last root wins when several are written.
-		let twice = super::lower_idiom(sql::Idiom(vec![
-			sql::Part::Doc,
+		let twice = super::lower_idiom(surface::Idiom(vec![
+			surface::Part::Doc,
 			field("a"),
-			sql::Part::Doc,
+			surface::Part::Doc,
 			field("b"),
 		]))
 		.expect("lowers");
 		assert_eq!(shape_of(&twice), shape_of(&lower_idiom("@.b")));
 
 		// A recursion body takes a root the same way.
-		let body = super::lower_body(sql::Idiom(vec![field("a"), sql::Part::Doc, field("b")]))
-			.expect("lowers");
+		let body =
+			super::lower_body(surface::Idiom(vec![field("a"), surface::Part::Doc, field("b")]))
+				.expect("lowers");
 		assert_eq!(shape_of(&body), shape_of(&lower_idiom("@.b")));
 	}
 
@@ -2712,7 +2799,7 @@ mod tests {
 	/// one inside `FROM`, so that variant is built directly.
 	fn corpus() -> Vec<sql::Expr> {
 		let mut out: Vec<sql::Expr> = CORPUS.iter().map(|sql| parse(sql)).collect();
-		out.push(sql::Expr::Table(sql::TableName::new("t")));
+		out.push(sql::Expr::Table("t".into()));
 		out
 	}
 

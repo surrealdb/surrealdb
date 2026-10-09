@@ -299,7 +299,7 @@ impl Lowering<'_, '_> {
 
 	/// The host pipeline of one expression a place embeds.
 	async fn place_pipeline(&mut self, expr: &Expr) -> Option<u16> {
-		let lowered = match lower_expr(expr.clone().into()) {
+		let lowered = match lower_expr(expr.clone()) {
 			Ok(logical) => {
 				crate::exec::vm::host::out_of_line(|| {
 					self.data_clause_pipeline(std::slice::from_ref(&logical), false)

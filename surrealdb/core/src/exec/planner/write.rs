@@ -426,7 +426,7 @@ impl Planner<'_> {
 /// the statement at plan time rather than once records are already being
 /// written.
 fn lower_write_expr(expr: &Expr, role: &str) -> Result<LogicalExpr, Error> {
-	lower_expr(expr.clone().into()).map_err(|why| {
+	lower_expr(expr.clone()).map_err(|why| {
 		Error::from(EngineError::unreachable(format!(
 			"{role} cannot hold {}: {why}",
 			expr.to_sql()

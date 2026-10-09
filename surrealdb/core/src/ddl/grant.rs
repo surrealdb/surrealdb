@@ -59,7 +59,7 @@ impl GrantFilter {
 		let Some(cond) = cond else {
 			return Ok(Self::Every);
 		};
-		let Ok(logical) = crate::expr::logical::lower_expr(cond.0.clone().into()) else {
+		let Ok(logical) = crate::expr::logical::lower_expr(cond.0.clone()) else {
 			return Ok(Self::Uncompiled(cond.0.clone()));
 		};
 		let compiled =

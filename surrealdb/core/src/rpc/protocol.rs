@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_channel::Sender;
+use surrealdb_expr::parser::{Query as Ast, TopLevelExpr};
 use surrealdb_rpc::args::extract_args;
 use surrealdb_rpc::error::{
 	bad_lq_config, invalid_params, method_not_allowed, method_not_found, session_exists,
@@ -20,18 +21,18 @@ use crate::dbs::{
 	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
 };
 use crate::exec::Error as ExecError;
+use crate::expr::statements::live::LiveFields;
+use crate::expr::statements::{
+	CreateStatement, DeleteStatement, InsertStatement, KillStatement, LiveStatement,
+	RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
+};
+use crate::expr::{Data as SqlData, Expr, Fields, Function, FunctionCall, Literal, Model, Output};
 use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
 };
 use crate::rpc::error::{query_timeout_error, types_error_from_anyhow};
-use crate::sql::statements::live::LiveFields;
-use crate::sql::{
-	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, Literal, LiveStatement, Model, Output, RelateStatement,
-	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
-};
 use crate::types::{
 	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
 };
@@ -39,8 +40,8 @@ use crate::types::{
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		PublicValue::String(s) => Expr::Table(surrealdb_strand::TableName::new(s).into()),
-		x => Expr::from_public_value(x),
+		PublicValue::String(s) => Expr::Table(surrealdb_strand::TableName::new(s)),
+		x => Expr::from_surface_value(x),
 	}
 }
 
@@ -1298,10 +1299,10 @@ pub trait RpcProtocol {
 		let (id,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(invalid_params("Expected (id)".to_string()))?;
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let ast = Ast {
 			expressions: vec![TopLevelExpr::Kill(KillStatement {
-				id: Expr::from_public_value(id),
+				id: Expr::from_surface_value(id),
 			})],
 		};
 		// Specify the query parameters
@@ -1332,8 +1333,8 @@ pub trait RpcProtocol {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
-			x => Expr::from_public_value(x),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x)),
+			x => Expr::from_surface_value(x),
 		};
 
 		let fields = if diff.unwrap_or_default().is_true() {
@@ -1342,8 +1343,10 @@ pub trait RpcProtocol {
 			LiveFields::Select(Fields::all())
 		};
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = LiveStatement {
+			id: Uuid::nil(),
+			node: Uuid::nil(),
 			fields,
 			what,
 			cond: None,
@@ -1393,11 +1396,11 @@ pub trait RpcProtocol {
 
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
-			x => Expr::from_public_value(x),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x)),
+			x => Expr::from_surface_value(x),
 		};
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = SelectStatement {
 			only,
 			fields: Fields::all(),
@@ -1453,16 +1456,16 @@ pub trait RpcProtocol {
 		let into = match what {
 			PublicValue::Null | PublicValue::None => None,
 			PublicValue::Table(x) => {
-				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
 			}
-			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
-			x => Some(Expr::from_public_value(x)),
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x))),
+			x => Some(Expr::from_surface_value(x)),
 		};
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = InsertStatement {
 			into,
-			data: SqlData::SingleExpression(Expr::from_public_value(data)),
+			data: SqlData::SingleExpression(Expr::from_surface_value(data)),
 			output: Some(Output::After),
 			ignore: false,
 			update: None,
@@ -1500,15 +1503,15 @@ pub trait RpcProtocol {
 		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
 			PublicValue::Table(x) => {
-				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string())))
 			}
-			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
-			x => Some(Expr::from_public_value(x)),
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x))),
+			x => Some(Expr::from_surface_value(x)),
 		};
 
-		let data = SqlData::SingleExpression(Expr::from_public_value(data));
+		let data = SqlData::SingleExpression(Expr::from_surface_value(data));
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = InsertStatement {
 			relation: true,
 			into: table_name,
@@ -1564,9 +1567,9 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
+			.map(|x| SqlData::ContentExpression(Expr::from_surface_value(x)));
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = CreateStatement {
 			only,
 			what: vec![value_to_table(what)],
@@ -1617,9 +1620,9 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
+			.map(|x| SqlData::ContentExpression(Expr::from_surface_value(x)));
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = UpsertStatement {
 			only,
 			what: vec![value_to_table(what)],
@@ -1675,8 +1678,8 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
-		// Specify the SQL query string
+			.map(|x| SqlData::ContentExpression(Expr::from_surface_value(x)));
+		// Build the runtime statement.
 		let sql = UpdateStatement {
 			only,
 			what: vec![value_to_table(what)],
@@ -1730,8 +1733,8 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::MergeExpression(Expr::from_public_value(x)));
-		// Specify the SQL query string
+			.map(|x| SqlData::MergeExpression(Expr::from_surface_value(x)));
+		// Build the runtime statement.
 		let sql = UpdateStatement {
 			only,
 			what: vec![value_to_table(what)],
@@ -1788,11 +1791,11 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::PatchExpression(Expr::from_public_value(x)));
+			.map(|x| SqlData::PatchExpression(Expr::from_surface_value(x)));
 
 		let diff = matches!(diff, Some(PublicValue::Bool(true)));
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let expr = Expr::Update(Box::new(UpdateStatement {
 			only,
 			what: vec![value_to_table(what)],
@@ -1852,15 +1855,15 @@ pub trait RpcProtocol {
 					Some(x)
 				}
 			})
-			.map(|x| SqlData::ContentExpression(Expr::from_public_value(x)));
+			.map(|x| SqlData::ContentExpression(Expr::from_surface_value(x)));
 
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let expr = Expr::Relate(Box::new(RelateStatement {
 			only,
 			or_update: false,
-			from: Expr::from_public_value(from),
+			from: Expr::from_surface_value(from),
 			through: value_to_table(kind),
-			to: Expr::from_public_value(with),
+			to: Expr::from_surface_value(with),
 			data,
 			output: Some(Output::After),
 			timeout: Expr::Literal(Literal::None),
@@ -1893,7 +1896,7 @@ pub trait RpcProtocol {
 		// Process the method arguments
 		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value)".to_string()))?;
-		// Specify the SQL query string
+		// Build the runtime statement.
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: singular(&what),
 			what: vec![value_to_table(what)],

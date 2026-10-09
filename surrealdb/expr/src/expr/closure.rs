@@ -1,8 +1,8 @@
 use std::cmp::Ordering;
 
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::{Expr, Kind, Param};
+use crate::expr::{CoverStmts, Expr, Kind, Param};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ClosureExpr {
@@ -23,8 +23,28 @@ impl Ord for ClosureExpr {
 }
 
 impl ToSql for ClosureExpr {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let closure: crate::sql::Closure = self.clone().into();
-		closure.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "|");
+		for (i, (name, kind)) in self.args.iter().enumerate() {
+			if i > 0 {
+				write_sql!(f, fmt, ", ");
+			}
+			write_sql!(f, fmt, "{name}: ");
+			match kind {
+				k @ Kind::Either(_) => write_sql!(f, fmt, "<{}>", k),
+				k => write_sql!(f, fmt, "{}", k),
+			}
+		}
+		write_sql!(f, fmt, "|");
+		if let Some(returns) = &self.returns {
+			write_sql!(f, fmt, " -> {returns}");
+		}
+		//  To avoid for example || ->? where ->? is a graph from failing to parse because the
+		//  parser expects a kind after ->
+		if self.body.has_left_idiom() {
+			write_sql!(f, fmt, " ({})", &self.body)
+		} else {
+			write_sql!(f, fmt, " {}", CoverStmts(&self.body))
+		}
 	}
 }

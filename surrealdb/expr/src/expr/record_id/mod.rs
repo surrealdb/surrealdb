@@ -29,6 +29,6 @@ impl RecordIdLit {
 
 impl ToSql for RecordIdLit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(&self.table), self.key)
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(self.table.as_str()), self.key);
 	}
 }

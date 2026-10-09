@@ -55,30 +55,26 @@ pub(crate) fn parse_to_statements(
 			surrealdb_pgsql::ast::stmt::Statement::Insert(insert) => {
 				let expr = surrealdb_sqlplan::lower_pgsql_insert(insert)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL INSERT lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Update(update) => {
 				let expr = surrealdb_sqlplan::lower_pgsql_update(update)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL UPDATE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Delete(delete) => {
 				let expr = surrealdb_sqlplan::lower_pgsql_delete(delete)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DELETE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::Truncate(truncate) => {
 				let expr = surrealdb_sqlplan::lower_pgsql_truncate(truncate)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL TRUNCATE lowering error: {e}"))?;
-				statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-					crate::sql::Expr::from(expr),
-				)));
+				statements
+					.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 			}
 			surrealdb_pgsql::ast::stmt::Statement::CreateTable(_)
 			| surrealdb_pgsql::ast::stmt::Statement::CreateIndex(_)
@@ -88,9 +84,8 @@ pub(crate) fn parse_to_statements(
 				let exprs = surrealdb_sqlplan::lower_pgsql_ddl(&stmt)
 					.map_err(|e| anyhow::anyhow!("PostgreSQL DDL lowering error: {e}"))?;
 				for expr in exprs {
-					statements.push(TopLevelStatement::Ast(crate::sql::TopLevelExpr::Expr(
-						crate::sql::Expr::from(expr),
-					)));
+					statements
+						.push(surface_statement(surrealdb_expr::parser::TopLevelExpr::Expr(expr)));
 				}
 			}
 			_ => {
@@ -105,10 +100,14 @@ pub(crate) fn parse_to_statements(
 				let ast = syn::parse_with_capabilities(&surql_text, capabilities, config)
 					.map_err(|e| anyhow::anyhow!("Failed to parse translated SurrealQL: {e}"))?;
 				for expr in ast.expressions {
-					statements.push(TopLevelStatement::Ast(expr));
+					statements.push(surface_statement(expr));
 				}
 			}
 		}
 	}
 	Ok(statements)
+}
+
+fn surface_statement(stmt: impl Into<surrealdb_expr::parser::TopLevelExpr>) -> TopLevelStatement {
+	TopLevelStatement::Ast(stmt.into())
 }

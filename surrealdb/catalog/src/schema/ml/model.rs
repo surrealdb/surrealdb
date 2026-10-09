@@ -5,10 +5,10 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{FromStored, LogicalPermissionBody, Permission, StoredPermission};
+use crate::expr as runtime;
 use crate::expr::logical::LogicalPermission;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::sql;
-use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -24,18 +24,18 @@ pub struct StoredMlModelDefinition {
 impl_kv_value_revisioned!(StoredMlModelDefinition);
 
 impl MlModelDefinition {
-	fn to_sql_definition(&self) -> sql::DefineModelStatement {
-		sql::DefineModelStatement {
+	fn to_runtime_definition(&self) -> runtime::statements::DefineModelStatement {
+		runtime::statements::DefineModelStatement {
 			kind: DefineKind::Default,
 			hash: self.hash.clone(),
-			name: self.name.clone().into(),
+			name: self.name.clone(),
 			version: self.version.clone(),
-			permissions: self.permissions.to_sql_permission(),
+			permissions: self.permissions.clone(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
-				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+				.map(|x| runtime::Expr::Literal(runtime::Literal::String(x.into())))
+				.unwrap_or(runtime::Expr::Literal(runtime::Literal::None)),
 		}
 	}
 }
@@ -53,7 +53,7 @@ impl InfoStructure for MlModelDefinition {
 
 impl ToSql for MlModelDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.to_sql_definition().fmt_sql(f, fmt)
+		self.to_runtime_definition().fmt_sql(f, fmt)
 	}
 }
 

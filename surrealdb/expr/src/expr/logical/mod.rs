@@ -158,7 +158,7 @@ pub mod dag;
 mod effects;
 mod exits;
 mod expr;
-mod lower;
+pub(crate) mod lower;
 mod request;
 pub mod schema;
 
@@ -3337,10 +3337,9 @@ mod tests {
 	};
 	use crate::expr::operator::BinaryOperator;
 
-	fn parse_expr(sql: &str) -> crate::sql::Expr {
-		let ast = surrealdb_parser_next_lower::parse(&format!("RETURN {sql}"))
-			.expect("expression should parse");
-		let crate::sql::TopLevelExpr::Expr(crate::sql::Expr::Return(out)) =
+	fn parse_expr(sql: &str) -> crate::expr::Expr {
+		let ast = crate::parser::parse(&format!("RETURN {sql}")).expect("expression should parse");
+		let crate::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected a RETURN");
@@ -3354,8 +3353,8 @@ mod tests {
 
 	/// Lowers a whole statement, as a pass sees it before any rule runs.
 	fn lower_sql(sql: &str) -> LogicalOp {
-		let ast = surrealdb_parser_next_lower::parse(sql).expect("statement should parse");
-		let crate::sql::TopLevelExpr::Expr(top) =
+		let ast = crate::parser::parse(sql).expect("statement should parse");
+		let crate::parser::TopLevelExpr::Expr(top) =
 			ast.expressions.into_iter().next().expect("one statement")
 		else {
 			panic!("expected a bare expression");
