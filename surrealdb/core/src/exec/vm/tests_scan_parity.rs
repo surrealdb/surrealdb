@@ -176,14 +176,17 @@ async fn a_knn_whose_rows_need_only_their_id_builds_them_from_the_search() {
 		"SELECT id FROM pts WHERE point <|3,40|> [0f, 0f]",
 		"SELECT count() FROM pts WHERE point <|3,40|> [0f, 0f] GROUP ALL",
 		"SELECT id FROM pts WHERE point <|3,40|> [0f, 0f] ORDER BY id DESC",
+		// A `COMPUTED` field or a field permission the rows do not read is not
+		// evaluated for a row that holds only `id`.
+		"SELECT id FROM cmp WHERE point <|3,40|> [0f, 0f]",
+		"SELECT id FROM prm WHERE point <|3,40|> [0f, 0f]",
 	];
 	let records = [
 		"SELECT id, name FROM pts WHERE point <|3,40|> [0f, 0f]",
 		"SELECT * FROM pts WHERE point <|3,40|> [0f, 0f]",
 		"SELECT id FROM pts WHERE point <|3,40|> [0f, 0f] ORDER BY name",
 		"SELECT id FROM pts WHERE name != 'p9' AND point <|3,40|> [0f, 0f]",
-		"SELECT id FROM cmp WHERE point <|3,40|> [0f, 0f]",
-		"SELECT id FROM prm WHERE point <|3,40|> [0f, 0f]",
+		"SELECT id, label FROM cmp WHERE point <|3,40|> [0f, 0f]",
 	];
 	for sql in ids_only {
 		assert!(knn_ids_only(&ctx, sql).await, "`{sql}` reads its records");

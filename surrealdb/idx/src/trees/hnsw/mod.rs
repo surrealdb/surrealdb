@@ -627,6 +627,15 @@ where
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
+
+	/// Retrieves the vectors of several element IDs, in input order.
+	async fn get_vectors(
+		&self,
+		tx: &Transaction,
+		e_ids: &[ElementId],
+	) -> Result<Vec<Option<SharedVector>>> {
+		self.elements.get_vectors(tx, e_ids).await
+	}
 	#[cfg(test)]
 	async fn check_hnsw_properties(&self, expected_count: usize) {
 		check_hnsw_props(self, expected_count).await;
@@ -675,6 +684,7 @@ mod tests {
 	use anyhow::Result;
 	use common::EngineError;
 	use ndarray::Array1;
+	use rand::Rng as _;
 	use rand::rngs::SmallRng;
 	use roaring::RoaringTreemap;
 	use surrealdb_kvs::TransactionType;
@@ -685,7 +695,7 @@ mod tests {
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
 		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
-		StoredTableDefinition, TableId, VectorType,
+		StoredTableDefinition, TableId, VECTOR_DOC_ELEMENTS_FORMAT_VERSION, VectorType,
 	};
 	use crate::config::BuildParallelism;
 	use crate::docids::{DocId, TableDocIds};
@@ -878,10 +888,10 @@ mod tests {
 			(Distance::Cosine, 5),
 			(Distance::Euclidean, 5),
 			(Distance::Hamming, 20),
-			// (Distance::Jaccard, 100),
+			(Distance::Jaccard, 100),
 			(Distance::Manhattan, 5),
 			(Distance::Minkowski(2.into()), 5),
-			// (Distance::Pearson, 5),
+			(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
@@ -1172,7 +1182,7 @@ mod tests {
 			(Distance::Cosine, 5),
 			(Distance::Euclidean, 5),
 			(Distance::Hamming, 20),
-			// (Distance::Jaccard, 100),
+			(Distance::Jaccard, 100),
 			(Distance::Manhattan, 5),
 			(Distance::Minkowski(2.into()), 5),
 			(Distance::Pearson, 5),
@@ -3900,6 +3910,563 @@ mod tests {
 			}
 		}
 		found as f64 / docs.len() as f64
+	}
+
+	/// Checks one [`HnswIndex::exact_knn_search`] against brute force over the
+	/// records' current vectors: every returned record is allowed and carries
+	/// its true distance, and the returned distances are exactly the `k`
+	/// smallest among the allowed records.
+	async fn assert_exact_matches_brute_force(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		live: &HashMap<i64, (DocId, SharedVector)>,
+		allow: &RoaringTreemap,
+		pt: &[Number],
+		k: usize,
+		tt: TransactionType,
+	) -> Result<()> {
+		let ctx = new_ctx(ds, tt).await;
+		let res =
+			h.exact_knn_search(&ctx, pt, k, allow).await?.expect("a read-only snapshot is served");
+		ctx.tx().cancel().await?;
+		let q: SharedVector = Vector::try_from_vector(VectorType::I16, pt)?.into();
+		let mut truth: Vec<f64> = live
+			.values()
+			.filter(|(doc, _)| allow.contains(*doc))
+			.map(|(_, v)| Distance::Euclidean.calculate(&q, v))
+			.collect();
+		truth.sort_by(f64::total_cmp);
+		truth.truncate(k);
+		let mut seen = HashSet::new();
+		let mut got = Vec::with_capacity(res.len());
+		for (rid, dist, _) in &res {
+			let RecordIdKey::Number(key) = rid.key else {
+				panic!("unexpected record key: {:?}", rid.key);
+			};
+			assert!(seen.insert(key), "record {key} returned twice");
+			let (doc, v) = live.get(&key).unwrap_or_else(|| panic!("record {key} is not live"));
+			assert!(allow.contains(*doc), "record {key} is not in the allow-list");
+			assert_eq!(*dist, Distance::Euclidean.calculate(&q, v), "distance of record {key}");
+			got.push(*dist);
+		}
+		assert!(got.is_sorted_by(|a, b| a <= b), "results not nearest first: {got:?}");
+		assert_eq!(got, truth, "k = {k}, allow = {allow:?}");
+		Ok(())
+	}
+
+	/// Queries every combination of a few allow-lists and `k`s against the
+	/// current state of `live`.
+	async fn assert_exact_round(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		live: &HashMap<i64, (DocId, SharedVector)>,
+		rng: &mut SmallRng,
+	) -> Result<()> {
+		let docs: Vec<DocId> = live.values().map(|(d, _)| *d).collect();
+		for share in [0.05, 0.3, 1.0] {
+			let mut allow: RoaringTreemap =
+				docs.iter().copied().filter(|_| rng.random_bool(share)).collect();
+			// A doc-ID with no live record must be ignored.
+			allow.insert(1_000_000);
+			for k in [1, 5, 500] {
+				let pt: Vec<Number> = (0..3).map(|_| Number::Int(rng.random_range(0..8))).collect();
+				assert_exact_matches_brute_force(
+					ds,
+					h,
+					live,
+					&allow,
+					&pt,
+					k,
+					TransactionType::Read,
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// An environment that records, at every counted check, whether the
+	/// index's resident graph could be taken for writing at that moment.
+	struct GraphLockProbe<'a> {
+		inner: TestIndexEnv,
+		index: &'a HnswIndex,
+		checks: std::sync::atomic::AtomicUsize,
+		held: std::sync::atomic::AtomicUsize,
+	}
+
+	impl crate::catalog::providers::CancellationProbe for GraphLockProbe<'_> {
+		fn expect_not_timedout(&self) -> crate::catalog::providers::BoxProviderFut<'_, Result<()>> {
+			self.inner.expect_not_timedout()
+		}
+	}
+
+	impl crate::env::IndexEnv for GraphLockProbe<'_> {
+		fn tx(&self) -> Arc<surrealdb_datastore::Transaction> {
+			crate::env::IndexEnv::tx(&self.inner)
+		}
+
+		fn is_done(&self, count: Option<usize>) -> crate::env::BoxEnvFut<'_> {
+			if count.is_some() {
+				use std::sync::atomic::Ordering::Relaxed;
+				self.checks.fetch_add(1, Relaxed);
+				if !self.index.graph_lock_is_free() {
+					self.held.fetch_add(1, Relaxed);
+				}
+			}
+			self.inner.is_done(count)
+		}
+
+		fn index_stores(&self) -> &crate::trees::store::IndexStores {
+			self.inner.index_stores()
+		}
+
+		fn node_id(&self) -> uuid::Uuid {
+			self.inner.node_id()
+		}
+
+		fn sequences(&self) -> Result<&surrealdb_datastore::sequences::Sequences> {
+			self.inner.sequences()
+		}
+
+		fn config(&self) -> &crate::config::IdxConfig {
+			self.inner.config()
+		}
+	}
+
+	/// With the resident graph current, the exact tier reads member vectors
+	/// through it one batch at a time: the graph is free at every checkpoint
+	/// around the doc → elements reads and the scoring, so a compaction never
+	/// waits for the whole scoring.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_exact_knn_search_holds_the_graph_only_per_vector_batch() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let v = |c: [i16; 3]| -> SharedVector { Vector::I16(Array1::from_vec(c.to_vec())).into() };
+		let mut allow = RoaringTreemap::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			for (key, c) in [(1i64, [5, 5, 5]), (2, [4, 4, 4]), (3, [1, 1, 1])] {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(&ctx, &id, None, Some(vec![Value::from(v(c).deref())])).await?;
+			}
+			ctx.tx().commit().await?;
+			h
+		};
+		compact_committed(&ds, &h).await;
+		let probe = GraphLockProbe {
+			inner: new_ctx(&ds, TransactionType::Read).await,
+			index: &h,
+			checks: Default::default(),
+			held: Default::default(),
+		};
+		assert!(h.resident_graph_is_current(&probe.inner).await?, "the cached path is exercised");
+		let pt = vec![Number::Int(5); 3];
+		let res = h
+			.exact_knn_search(&probe, &pt, 2, &allow)
+			.await?
+			.expect("a read-only snapshot is served");
+		probe.inner.tx().cancel().await?;
+		let got: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)]);
+		use std::sync::atomic::Ordering::Relaxed;
+		assert!(probe.checks.load(Relaxed) > 0, "scoring checks for cancellation");
+		assert_eq!(probe.held.load(Relaxed), 0, "the graph is not held across the scoring");
+		Ok(())
+	}
+
+	/// On a node whose resident graph is not loaded, the exact tier scores its
+	/// members from the vectors this snapshot stores and leaves the graph
+	/// unloaded: a selective search does not read every layer of a graph it
+	/// never walks. It answers what a node with the graph loaded answers.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_exact_knn_search_does_not_load_a_cold_graph() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let v = |c: [i16; 3]| -> SharedVector { Vector::I16(Array1::from_vec(c.to_vec())).into() };
+		let mut allow = RoaringTreemap::new();
+		let warm = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			for (key, c) in [(1i64, [5, 5, 5]), (2, [4, 4, 4]), (3, [1, 1, 1]), (4, [9, 9, 9])] {
+				let id = RecordIdKey::Number(key);
+				let doc = docids.resolve_or_assign(&ctx, &id).await?;
+				if key != 4 {
+					allow.insert(doc);
+				}
+				h.index(&ctx, &id, None, Some(vec![Value::from(v(c).deref())])).await?;
+			}
+			ctx.tx().commit().await?;
+			h
+		};
+		compact_committed(&ds, &warm).await;
+		let pt = vec![Number::Int(5); 3];
+		let search = async |h: &HnswIndex| {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = h
+				.exact_knn_search(&ctx, &pt, 2, &allow)
+				.await?
+				.expect("a read-only snapshot is served");
+			let current = h.resident_graph_is_current(&ctx).await?;
+			ctx.tx().cancel().await?;
+			let got: Vec<(RecordIdKey, f64)> =
+				res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+			anyhow::Ok((got, current))
+		};
+		// A second index instance over the same store: its resident graph has
+		// never been loaded, as on a node that has not served this index yet.
+		let cold = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			ctx.tx().cancel().await?;
+			h
+		};
+		assert!(!cold.resident_graph_is_current(&new_ctx(&ds, TransactionType::Read).await).await?);
+		let (cold_got, cold_current) = search(&cold).await?;
+		assert!(!cold_current, "the exact tier loaded the cold graph");
+		let (warm_got, _) = search(&warm).await?;
+		assert_eq!(cold_got, warm_got);
+		assert_eq!(
+			cold_got,
+			[(RecordIdKey::Number(1), 0.0), (RecordIdKey::Number(2), 3f64.sqrt())]
+		);
+		Ok(())
+	}
+
+	/// Exact allow-list scoring from index-stored vectors returns exactly the
+	/// brute-force top-k over the records' current vectors — across a
+	/// compacted graph, uncompacted updates, deletions, delete → re-create
+	/// under a new doc-ID, vectors shared by several records, and a doc→element
+	/// map that must be re-derived after each compaction.
+	/// A document indexing several vectors takes one slot in the exact tier,
+	/// at its nearest vector, whether its vectors are still pending or
+	/// compacted into the graph. `k` leaves room for both of record 1's
+	/// vectors, so a second slot for it would show.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_exact_knn_search_offers_a_multi_vector_document_once() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let v = |c: [i16; 3]| -> SharedVector { Vector::I16(Array1::from_vec(c.to_vec())).into() };
+		let mut allow = RoaringTreemap::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			// Record 1 holds the query point and a far vector; records 2 and 3
+			// one vector each.
+			let records: [(i64, Vec<SharedVector>); 3] = [
+				(1, vec![v([5, 5, 5]), v([0, 0, 0])]),
+				(2, vec![v([4, 4, 4])]),
+				(3, vec![v([1, 1, 1])]),
+			];
+			for (key, vectors) in records {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				let content = vectors.iter().map(|v| Value::from(v.deref())).collect();
+				h.index(&ctx, &id, None, Some(content)).await?;
+			}
+			ctx.tx().commit().await?;
+			h
+		};
+		let pt = vec![Number::Int(5); 3];
+		for state in ["pending", "compacted"] {
+			if state == "compacted" {
+				compact_committed(&ds, &h).await;
+			}
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = h
+				.exact_knn_search(&ctx, &pt, 4, &allow)
+				.await?
+				.expect("a read-only snapshot is served");
+			ctx.tx().cancel().await?;
+			let got: Vec<(RecordIdKey, f64)> =
+				res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+			let expected = vec![
+				(RecordIdKey::Number(1), 0.0),
+				(RecordIdKey::Number(2), 3f64.sqrt()),
+				(RecordIdKey::Number(3), 48f64.sqrt()),
+			];
+			assert_eq!(got, expected, "{state}");
+			// The graph search gives the record one slot too, pending or
+			// compacted alike, so neither path returns it twice.
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = h.knn_search(&ctx, &pt, 4, 40, None, Some(&allow)).await?;
+			ctx.tx().cancel().await?;
+			let got: Vec<(RecordIdKey, f64)> =
+				res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+			assert_eq!(got, expected, "graph search, {state}");
+		}
+		Ok(())
+	}
+
+	/// A graph search returns `k` distinct records when the elements nearest
+	/// the query belong to fewer: record 1's two vectors are the two nearest
+	/// elements, so the `k` nearest elements name only two records, and the
+	/// third result is the next record the walk reached, also when `ef` is
+	/// `k` and the walk's own candidate list names only two records. Pending
+	/// vectors are scored without the walk, so the compacted graph is what
+	/// this pins.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_graph_search_fills_k_distinct_records() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let v = |c: [i16; 3]| -> SharedVector { Vector::I16(Array1::from_vec(c.to_vec())).into() };
+		let mut allow = RoaringTreemap::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			let records: [(i64, Vec<SharedVector>); 3] = [
+				(1, vec![v([5, 5, 5]), v([5, 5, 4])]),
+				(2, vec![v([4, 4, 4])]),
+				(3, vec![v([1, 1, 1])]),
+			];
+			for (key, vectors) in records {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				let content = vectors.iter().map(|v| Value::from(v.deref())).collect();
+				h.index(&ctx, &id, None, Some(content)).await?;
+			}
+			ctx.tx().commit().await?;
+			h
+		};
+		compact_committed(&ds, &h).await;
+		let pt = vec![Number::Int(5); 3];
+		let expected = vec![
+			(RecordIdKey::Number(1), 0.0),
+			(RecordIdKey::Number(2), 3f64.sqrt()),
+			(RecordIdKey::Number(3), 48f64.sqrt()),
+		];
+		for ef in [40, 3] {
+			for (label, allow) in [("unfiltered", None), ("allow-list", Some(&allow))] {
+				let ctx = new_ctx(&ds, TransactionType::Read).await;
+				let res = h.knn_search(&ctx, &pt, 3, ef, None, allow).await?;
+				ctx.tx().cancel().await?;
+				let got: Vec<(RecordIdKey, f64)> =
+					res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+				assert_eq!(got, expected, "{label}, ef {ef}");
+			}
+		}
+		Ok(())
+	}
+
+	/// With no member to offer (an empty allow-list or `k = 0`) the exact
+	/// tier answers no neighbours without reading the index, but only once
+	/// the query vector has been checked: a vector of the wrong dimension
+	/// still fails.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_exact_knn_search_with_nothing_to_offer() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			ctx.tx().commit().await?;
+			h
+		};
+		let some: RoaringTreemap = [1u64, 2, 3].into_iter().collect();
+		let none = RoaringTreemap::new();
+		let pt = vec![Number::Int(1); 3];
+		let wrong = vec![Number::Int(1); 2];
+		for (pt, k, allow, ok) in
+			[(&pt, 3, &none, true), (&pt, 0, &some, true), (&wrong, 3, &none, false)]
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = h.exact_knn_search(&ctx, pt, k, allow).await;
+			ctx.tx().cancel().await?;
+			match (res, ok) {
+				(Ok(Some(r)), true) => assert!(r.is_empty(), "k = {k}"),
+				(Err(_), false) => {}
+				(other, _) => panic!("k = {k}, dimension {}: {other:?}", pt.len()),
+			}
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_exact_knn_search_matches_brute_force() -> Result<()> {
+		for hashed in [false, true] {
+			let ds = TestIndexStore::new().await;
+			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+			let p =
+				new_params(3, VectorType::I16, Distance::Euclidean, 8, 100, false, true, hashed);
+			let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+			let mut rng = get_seed_rnd();
+			// A small component range makes many records share a vector.
+			let random_vec = |rng: &mut SmallRng| -> SharedVector {
+				let values: Vec<i16> = (0..3).map(|_| rng.random_range(0..6)).collect();
+				Vector::I16(Array1::from_vec(values)).into()
+			};
+			let mut live: HashMap<i64, (DocId, SharedVector)> = HashMap::default();
+			let h = {
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let h = HnswIndex::new(
+					ds.index_stores().vector_cache().clone(),
+					&ctx.tx(),
+					ikb.clone(),
+					TableId(3),
+					&p,
+					VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+				)
+				.await?;
+				for key in 0..150 {
+					let id = RecordIdKey::Number(key);
+					let doc = docids.resolve_or_assign(&ctx, &id).await?;
+					let v = random_vec(&mut rng);
+					h.index(&ctx, &id, None, Some(vector_content(&v))).await?;
+					live.insert(key, (doc, v));
+				}
+				ctx.tx().commit().await?;
+				h
+			};
+			// Everything pending.
+			assert_exact_round(&ds, &h, &live, &mut rng).await?;
+			compact_committed(&ds, &h).await;
+			// Everything compacted.
+			assert_exact_round(&ds, &h, &live, &mut rng).await?;
+			// A write transaction reads the mapping through itself.
+			{
+				let allow: RoaringTreemap = live.values().map(|(d, _)| *d).collect();
+				let pt = vec![Number::Int(1); 3];
+				assert_exact_matches_brute_force(
+					&ds,
+					&h,
+					&live,
+					&allow,
+					&pt,
+					7,
+					TransactionType::Write,
+				)
+				.await?;
+			}
+			for _ in 0..3 {
+				// Updates, deletions and re-creations on top of the compacted
+				// graph, queried before and after they are compacted.
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let mut deleted = Vec::new();
+				for key in 0..150 {
+					let id = RecordIdKey::Number(key);
+					match (live.get(&key).cloned(), rng.random_range(0..10)) {
+						(Some((doc, old)), 0..=1) => {
+							let v = random_vec(&mut rng);
+							h.index(
+								&ctx,
+								&id,
+								Some(vector_content(&old)),
+								Some(vector_content(&v)),
+							)
+							.await?;
+							live.insert(key, (doc, v));
+						}
+						(Some((_, old)), 2) => {
+							h.index(&ctx, &id, Some(vector_content(&old)), None).await?;
+							docids.remove(&ctx.tx(), &id).await?;
+							live.remove(&key);
+							deleted.push(key);
+						}
+						(None, 3..=5) => {
+							let doc = docids.resolve_or_assign(&ctx, &id).await?;
+							let v = random_vec(&mut rng);
+							h.index(&ctx, &id, None, Some(vector_content(&v))).await?;
+							live.insert(key, (doc, v));
+						}
+						_ => {}
+					}
+				}
+				ctx.tx().commit().await?;
+				assert_exact_round(&ds, &h, &live, &mut rng).await?;
+				// Re-create some of this round's deletions under new doc-IDs
+				// before compaction.
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for key in deleted.into_iter().step_by(2) {
+					let id = RecordIdKey::Number(key);
+					let doc = docids.resolve_or_assign(&ctx, &id).await?;
+					let v = random_vec(&mut rng);
+					h.index(&ctx, &id, None, Some(vector_content(&v))).await?;
+					live.insert(key, (doc, v));
+				}
+				ctx.tx().commit().await?;
+				assert_exact_round(&ds, &h, &live, &mut rng).await?;
+				compact_committed(&ds, &h).await;
+				assert_exact_round(&ds, &h, &live, &mut rng).await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// An index stamped before the doc-ID → elements mapping keeps none of its
+	/// keys, so the exact search declines it and the caller reads the records.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_exact_knn_search_declines_an_index_without_the_mapping() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 8, true).await?;
+		assert!(h.format_version() < VECTOR_DOC_ELEMENTS_FORMAT_VERSION);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let hk = ikb.new_hk_key(docs[0]);
+		assert!(ctx.tx().get_key(&hk, None).await?.is_none(), "an older index writes no `!hk`");
+		let allow = RoaringTreemap::from_iter(docs);
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let res = h.exact_knn_search(&ctx, &pt, 3, &allow).await?;
+		ctx.tx().cancel().await?;
+		assert!(res.is_none(), "an index without the mapping must be declined");
+		Ok(())
 	}
 
 	/// The keys of the records a KNN over `h` returns for `pt`, sorted.

@@ -29,7 +29,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ distance: 0.0034970067397347426f, ft_score: 0.5366538763046265f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.05639380312223785f, id: test:3, rrf_score: 0.016129032258064516f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.056393806565797844f, id: test:3, rrf_score: 0.016129032258064516f }]"
 
 [[test.results]]
 value = "[{ id: r:1, rrf_score: 1.5f }, { id: r:3, rrf_score: 1.3333333333333333f }, { id: r:2, rrf_score: 0.75f }]"
@@ -46,8 +46,10 @@ DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
 -- Full‑text index
 DEFINE INDEX idx_text ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
 
--- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance
-DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE;
+-- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance.
+-- F64: an F32 distance's low digits depend on the CPU's SIMD kernel, and the
+-- fused scores below print every digit.
+DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE TYPE F64;
 
 -- Query vector (whatever your embedding model produced for "graph databases")
 LET $qvec = [0.12, 0.18, 0.27];

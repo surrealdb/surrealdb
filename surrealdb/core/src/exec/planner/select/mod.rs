@@ -57,11 +57,11 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path_paged,
 };
-use crate::exec::index::analysis::IndexAnalyzer;
-use crate::exec::logical::named_reads;
+use crate::exec::index::analysis::{IndexAnalyzer, KnnQueryVectors};
 use crate::exec::logical::reads::{
 	declared_read_prefix, paths_overlap, reads_at_or_beneath, reads_row_opaquely,
 };
+use crate::exec::logical::{Descend, named_reads, visit_binding_pruning};
 use crate::exec::operators::scan::MergeMode;
 use crate::exec::operators::scan::common::DecodeFields;
 use crate::exec::operators::scan::pipeline::{
@@ -205,9 +205,63 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Delegates to [`resolve_param_value`] with the planner's context and
 	/// namespace/database IDs (looked up from the transaction when available).
+	/// A name an enclosing `FOR`, closure, user-defined function or block
+	/// `LET` binds has no plan-time value: the ambient one it shadows is not
+	/// the one the statement reads.
 	async fn resolve_param(&self, name: &str) -> Option<crate::val::Value> {
 		let ns_db = self.definition_ids().await;
 		resolve_param_value(name, &self.ctx, self.txn.as_ref(), ns_db, &self.row_scoped()).await
+	}
+
+	/// The query vectors of the KNN operators in `cond` whose right operand
+	/// is a parameter holding an array of numbers, each resolved once. A
+	/// closure body is not entered: its parameters are bound where it is
+	/// invoked.
+	async fn knn_query_vectors(&self, cond: Option<&LogicalExpr>) -> KnnQueryVectors {
+		let mut names: HashSet<&str> = HashSet::new();
+		if let Some(cond) = cond {
+			visit_binding_pruning(cond, &mut |e| {
+				if let LogicalExpr::Binary {
+					op: crate::expr::operator::BinaryOperator::NearestNeighbor(_),
+					right,
+					..
+				} = e && let LogicalExpr::Param(param) = right.as_ref()
+				{
+					names.insert(param.as_str());
+				}
+				Descend::Into
+			});
+		}
+		let mut vectors = KnnQueryVectors::new();
+		for name in names {
+			if let Some(vector) = self.resolve_query_vector(name).await {
+				vectors.insert(name.to_owned(), vector);
+			}
+		}
+		vectors
+	}
+
+	/// The value of parameter `name` as a KNN query vector, when it is an
+	/// array of numbers at plan time ([`Self::resolve_param`]).
+	pub(crate) async fn resolve_query_vector(
+		&self,
+		name: &str,
+	) -> Option<Arc<[crate::val::Number]>> {
+		let Some(crate::val::Value::Array(array)) = self.resolve_param(name).await else {
+			return None;
+		};
+		// As binding's own test of a query vector: a vector has at least one
+		// component.
+		if array.is_empty() {
+			return None;
+		}
+		array
+			.iter()
+			.map(|v| match v {
+				crate::val::Value::Number(n) => Some(*n),
+				_ => None,
+			})
+			.collect()
 	}
 
 	// ========================================================================
@@ -649,11 +703,22 @@ impl<'ctx> Planner<'ctx> {
 	// Per-access-path source planners (called by plan_source)
 	// ========================================================================
 
-	/// Whether every field of `table` reads as stored for every caller: none
-	/// is `COMPUTED`, and none carries a field `SELECT` permission other than
-	/// `FULL`. `false` without catalog access, or when the field list cannot
-	/// be read.
-	async fn fields_read_as_stored(&self, table: &TableName) -> bool {
+	/// Whether `id` reads as stored on `table` for every caller: no definition
+	/// that may cover it is `COMPUTED` or carries a field `SELECT` permission
+	/// other than `FULL`. The rows a KNN search builds from record ids hold
+	/// `id` and nothing else, so `id` is checked whatever the pipeline reads
+	/// of them, `count()` included.
+	///
+	/// The plan enforces the table's schema on those rows, through the
+	/// projection layers above the search, which the binding has pruned to
+	/// what the pipeline reads. A definition named by a plain field path
+	/// (fields and `[*]`) rooted elsewhere than `id` is evaluated for no row
+	/// the pipeline reads only the `id` of, and is not consulted. Any other
+	/// name is consulted.
+	///
+	/// `false` without catalog access, or when the field list cannot be read.
+	async fn id_reads_as_stored(&self, table: &TableName) -> bool {
+		use crate::expr::part::Part;
 		let Some(txn) = self.txn.as_ref() else {
 			return false;
 		};
@@ -661,15 +726,25 @@ impl<'ctx> Planner<'ctx> {
 			return false;
 		};
 		match txn.all_tb_fields(ns_id, db_id, table, None).await {
-			Ok(fields) => fields.iter().all(|fd| {
-				fd.computed.is_none()
-					&& matches!(fd.select_permission, crate::catalog::Permission::Full)
-			}),
+			Ok(fields) => fields
+				.iter()
+				.filter(|fd| match fd.name.0.as_slice() {
+					[Part::Field(root), rest @ ..]
+						if rest.iter().all(|p| matches!(p, Part::Field(_) | Part::All)) =>
+					{
+						root.as_str() == "id"
+					}
+					_ => true,
+				})
+				.all(|fd| {
+					fd.computed.is_none()
+						&& matches!(fd.select_permission, crate::catalog::Permission::Full)
+				}),
 			Err(e) => {
 				tracing::warn!(
 					table = %table,
 					error = %e,
-					"plan-time field list failed in fields_read_as_stored; \
+					"plan-time field list failed in id_reads_as_stored; \
 					 KNN rows will be read from their records",
 				);
 				false
@@ -736,8 +811,10 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// That holds when the clauses read no field but `id` (an index-backed
 	/// KNN operator reads only the id it tests for membership), none of them
-	/// reads the row other than by a field's name, and every field of
-	/// `table` reads as stored for every caller. The table's permission and
+	/// reads the row other than by a field's name, and `id` reads as stored
+	/// for every caller ([`Self::id_reads_as_stored`]). The plan enforces the
+	/// table's schema on the rows of every KNN search it maps, so a definition
+	/// the clauses do not read is not consulted. The table's permission and
 	/// the version of the read are the caller's to judge. `fields` is the
 	/// statement's selection, `None` for a read that selects the whole row.
 	pub(crate) async fn knn_rows_need_only_ids(
@@ -760,7 +837,7 @@ impl<'ctx> Planner<'ctx> {
 				group,
 				None,
 				self.function_registry(),
-			) && self.fields_read_as_stored(table).await
+			) && self.id_reads_as_stored(table).await
 	}
 
 	/// The table or record a call source denotes, when that is known at plan
@@ -1468,6 +1545,14 @@ impl<'ctx> Planner<'ctx> {
 		if indexes.is_empty() {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
+		// Only an ANN index reads a KNN query vector; without one, a
+		// brute-force source resolves its own.
+		let knn_query_vectors =
+			if indexes.iter().any(|ix| matches!(ix.index, Index::Hnsw(_) | Index::DiskAnn(_))) {
+				self.knn_query_vectors(analysis_cond).await
+			} else {
+				KnnQueryVectors::new()
+			};
 		let Some(columns) = self
 			.with_array_columns_as_elements(
 				txn,
@@ -1481,7 +1566,7 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(None);
 		};
 
-		let analyzer = columns.analyzer(with);
+		let analyzer = columns.analyzer(with).with_knn_query_vectors(&knn_query_vectors);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
 		// Bitmap candidate fusion: when the WHERE clause is an AND of several

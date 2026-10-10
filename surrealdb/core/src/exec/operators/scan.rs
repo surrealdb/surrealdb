@@ -30,7 +30,10 @@ pub(crate) use count::record_key_range;
 pub(crate) use fulltext::{FULL_TEXT_BATCH_SIZE, FullTextHits, open_full_text_index};
 pub use graph::EdgeTableSpec;
 pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec, payload_fields};
-pub(crate) use knn::{PrefilterTier, boosted_ef, choose_prefilter_tier, knn_candidates};
+pub(crate) use knn::{
+	AnnTarget, PrefilterTier, boosted_ef, choose_prefilter_tier, exact_from_index_vectors,
+	knn_candidates,
+};
 pub(crate) use record_id::execute_record_lookup;
 pub(crate) use reference::ref_key_range;
 pub(crate) use union_index::MergeMode;

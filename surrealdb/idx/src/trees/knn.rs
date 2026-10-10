@@ -160,15 +160,24 @@ impl Ord for FloatKey {
 
 pub(super) type KnnResult = BTreeSet<(FloatKey, VectorId)>;
 
+/// Ceiling for a graph search's over-query retries, as a multiple of its
+/// initial (already ef-boosted) candidate list. The list doubles per retry, so
+/// the worst case is three extra graph searches — bounded work that converts
+/// "the nearest candidates named fewer than k admissible records" (a selective
+/// allow-list or filter, or records indexing several vectors) from a truncated
+/// result into a converging one.
+pub(super) const OVERQUERY_CEILING_FACTOR: usize = 8;
+
 pub(super) struct KnnResultBuilder {
 	/// The number of expected results
 	knn: usize,
-	/// The sorted results
+	/// The sorted results: each id at most once, at the nearest distance it
+	/// was offered.
 	priority_list: KnnResult,
-	/// The number of slots each vector id holds in `priority_list`. An id that
+	/// The distance each id holds its slot in `priority_list` at. An id that
 	/// holds no slot is absent from the map, which is what makes `contains` a
 	/// faithful answer for the callers that release per-candidate state on it.
-	vector_id_count: BTreeMap<VectorId, usize>,
+	slots: BTreeMap<VectorId, FloatKey>,
 }
 
 impl KnnResultBuilder {
@@ -176,7 +185,7 @@ impl KnnResultBuilder {
 		Self {
 			knn,
 			priority_list: BTreeSet::new(),
-			vector_id_count: BTreeMap::new(),
+			slots: BTreeMap::new(),
 		}
 	}
 
@@ -207,36 +216,41 @@ impl KnnResultBuilder {
 
 	/// Add the result to the priority list.
 	/// Returns any evicted id, so any filter cache can be freed
+	///
+	/// An id holds one slot, at the nearest distance it is offered: a record
+	/// indexing several vectors, which the graph reaches through each of them,
+	/// is one result, as the pending scan and the exact tier offer it. A
+	/// nearer offer for an id already holding a slot moves that slot and
+	/// evicts nothing; a farther or equal one changes nothing.
 	pub(super) fn add_vector_id_result(&mut self, dist: f64, id: VectorId) -> Option<VectorId> {
-		// The list is a set, so an identical (distance, id) pair — one id reached
-		// at the same distance twice, which two equidistant vectors of the same
-		// record produce — takes no additional slot. Counting it would leave the
-		// id one above its slots, and a count that never reaches zero keeps the
-		// id in the map after its last slot is evicted: `contains` would then
-		// report a slot the id no longer holds, and the caller would never
-		// release the state it keeps alongside it.
-		if !self.priority_list.insert((FloatKey(dist), id.clone())) {
-			return None;
+		let dist = FloatKey(dist);
+		match self.slots.entry(id) {
+			Entry::Occupied(mut slot) => {
+				if dist < *slot.get() {
+					self.priority_list.remove(&(*slot.get(), slot.key().clone()));
+					self.priority_list.insert((dist, slot.key().clone()));
+					slot.insert(dist);
+				}
+				return None;
+			}
+			Entry::Vacant(slot) => {
+				self.priority_list.insert((dist, slot.key().clone()));
+				slot.insert(dist);
+			}
 		}
-		// Update the vector count
-		self.vector_id_count.entry(id).and_modify(|c| *c += 1).or_insert(1);
 		// Is the priority list full?
 		if self.priority_list.len() <= self.knn {
 			return None;
 		}
-		// We remove the last element
-		if let Some((_, id)) = self.priority_list.pop_last()
-			&& let Entry::Occupied(mut e) = self.vector_id_count.entry(id)
-		{
-			let c = e.get_mut();
-			if *c <= 1 {
-				// This entry does not exist anymore in the result list, it can be evicted
-				let (id, _) = e.remove_entry();
-				return Some(id);
-			}
-			*c -= 1;
-		}
-		None
+		// The farthest slot leaves the result, and its id with it.
+		let (_, id) = self.priority_list.pop_last()?;
+		self.slots.remove(&id);
+		Some(id)
+	}
+
+	/// The number of distinct ids the result holds.
+	pub(super) fn len(&self) -> usize {
+		self.priority_list.len()
 	}
 
 	/// Returns whether the id currently holds at least one slot in the result.
@@ -245,7 +259,7 @@ impl KnnResultBuilder {
 	/// that was scored and rejected, so per-candidate state kept alongside the
 	/// builder can be released for the latter.
 	pub(super) fn contains(&self, id: &VectorId) -> bool {
-		self.vector_id_count.contains_key(id)
+		self.slots.contains_key(id)
 	}
 
 	pub(super) fn collect(self) -> KnnResult {
@@ -528,18 +542,43 @@ pub(super) mod tests {
 	}
 
 	#[test]
-	fn knn_result_builder_distinct_distances_hold_distinct_slots() {
-		// One id reached at two distances holds two slots: evicting the farther
-		// leaves the id in the result, and only the second eviction releases it.
+	fn knn_result_builder_holds_one_slot_per_id_at_its_nearest() {
+		// One id reached at several distances, as a record indexing several
+		// vectors is, holds one slot at the nearest: a farther offer changes
+		// nothing, and a nearer one moves the slot without evicting anyone.
 		let mut b = KnnResultBuilder::new(2);
 		assert_eq!(b.add_vector_id_result(0.2, VectorId::DocId(1)), None);
 		assert_eq!(b.add_vector_id_result(0.3, VectorId::DocId(1)), None);
+		assert_eq!(b.add_vector_id_result(0.4, VectorId::DocId(2)), None);
+		assert_eq!(b.add_vector_id_result(0.1, VectorId::DocId(1)), None);
+		assert!(b.contains(&VectorId::DocId(2)));
 
-		assert_eq!(b.add_vector_id_result(0.1, VectorId::DocId(2)), None);
-		assert!(b.contains(&VectorId::DocId(1)));
+		// A third id evicts the farthest, a whole id with its single slot.
+		assert_eq!(b.add_vector_id_result(0.05, VectorId::DocId(3)), Some(VectorId::DocId(2)));
+		assert!(!b.contains(&VectorId::DocId(2)));
+		assert_eq!(
+			b.collect(),
+			BTreeSet::from([
+				(FloatKey(0.05), VectorId::DocId(3)),
+				(FloatKey(0.1), VectorId::DocId(1))
+			])
+		);
+	}
 
-		assert_eq!(b.add_vector_id_result(0.05, VectorId::DocId(3)), Some(VectorId::DocId(1)));
-		assert!(!b.contains(&VectorId::DocId(1)));
+	#[test]
+	fn knn_result_builder_bounds_ids_not_offers() {
+		// A bound built on the builder counts ids: one id offered through any
+		// number of elements leaves room for the others, so a filtered walk
+		// that bounds its admissions this way keeps admitting other records.
+		let mut b = KnnResultBuilder::new(2);
+		for d in [0.1, 0.2, 0.3, 0.4] {
+			b.add_vector_id_result(d, VectorId::DocId(1));
+		}
+		assert_eq!(b.len(), 1);
+		assert!(b.check_add(5.0), "a second id still places");
+		b.add_vector_id_result(5.0, VectorId::DocId(2));
+		assert!(!b.check_add(6.0), "with k ids held, a farther offer is turned away");
+		assert!(b.check_add(4.0), "a nearer offer still places");
 	}
 
 	#[test]

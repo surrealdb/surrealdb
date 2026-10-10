@@ -15,7 +15,9 @@ per element, and is planned as the element column it behaves as: a count, an equ
 do not hold the value they compare. Nor are `CONTAINS` and `CONTAINSANY`: the
 kind does not show that every stored value is an array, and a string stored
 whole holds substrings no element seek reaches, so the scan answers them. A
-field whose kind excludes arrays keeps every index path.
+field whose kind excludes arrays keeps every index path, and so does one
+whose kind is unknown because an untyped child definition produces its own
+value over its parent's object literal type.
 """
 
 [[test.results]]
@@ -96,6 +98,24 @@ value = '''
 'ProjectValue [ctx: Db] [expr: id]
     IndexScan [ctx: Db] [table: s, index: s_name, direction: Forward, limit: 2]
 ''''
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+"ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: ov, index: ov_mt, access: = 'scalar', direction: Forward]
+"'''
 */
 
 DEFINE TABLE s SCHEMAFULL;
@@ -115,3 +135,12 @@ EXPLAIN SELECT VALUE id FROM s ORDER BY acl LIMIT 2;
 EXPLAIN SELECT count() FROM s WHERE name = 'a' GROUP ALL;
 EXPLAIN SELECT VALUE id FROM s WHERE name > 'a';
 EXPLAIN SELECT VALUE id FROM s ORDER BY name LIMIT 2;
+
+-- An untyped child definition that produces its own value replaces what its
+-- parent's object literal type coerced, so its kind is unknown: the column is
+-- planned as written and keeps its scalar index paths.
+DEFINE TABLE ov SCHEMAFULL;
+DEFINE FIELD metadata ON ov TYPE { tags: array<string> };
+DEFINE FIELD metadata.tags ON ov VALUE 'scalar';
+DEFINE INDEX ov_mt ON ov FIELDS metadata.tags;
+EXPLAIN SELECT VALUE id FROM ov WHERE metadata.tags = 'scalar';

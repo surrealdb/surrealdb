@@ -29,10 +29,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ distance: 0.0034970067397347426f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 2f }, { distance: 0.05639380312223785f, id: test:3, linear_score: 0f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 2f }, { distance: 0.056393806565797844f, id: test:3, linear_score: 0f }]"
 
 [[test.results]]
-value = "[{ distance: 0.0034970067397347426f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 1.9999999999999953f }, { distance: 0.05639380312223785f, id: test:3, linear_score: -2.000000000000004f }]"
+value = "[{ distance: 0.0034969844824588314f, ft_score: 0.5366538763046265f, id: test:1, linear_score: 1.9999999999999956f }, { distance: 0.056393806565797844f, id: test:3, linear_score: -2.0000000000000044f }]"
 
 [[test.results]]
 value = "[{ id: l:1, linear_score: 1f, score: 10 }, { id: l:3, linear_score: 0.7777777777777778f, score: 8 }, { id: l:2, linear_score: 0.1111111111111111f, score: 2 }]"
@@ -49,8 +49,10 @@ DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase, ascii;
 -- Full‑text index
 DEFINE INDEX idx_text ON TABLE test FIELDS text FULLTEXT ANALYZER simple BM25;
 
--- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance
-DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE HASHED_VECTOR;
+-- Vector index (HNSW) on a 3‑dimensional embedding, using cosine distance.
+-- F64: an F32 distance's low digits depend on the CPU's SIMD kernel, and the
+-- fused scores below print every digit.
+DEFINE INDEX idx_embedding ON TABLE test FIELDS embedding HNSW DIMENSION 3 DIST COSINE TYPE F64 HASHED_VECTOR;
 
 -- Query vector (whatever your embedding model produced for "graph databases")
 LET $qvec = [0.12, 0.18, 0.27];

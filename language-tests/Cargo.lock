@@ -1249,9 +1249,9 @@ dependencies = [
 
 [[package]]
 name = "diskann"
-version = "0.56.0"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ead115d8a4f3917c1ae9c3db0aa4dd56251841864ef8637329969f8e5145dd3"
+checksum = "e04719f08c5cdc954cba48e92db4103f1f7f695de6b28fb33f4c0c78e07565e4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1269,9 +1269,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-utils"
-version = "0.56.0"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac627181d402b5dd63318e434fc2e7107843be0a10cf0a6a99a24666453239bc"
+checksum = "d3e0ab6823002c60ca2036152a29debefe522aca4c583a17c2bfc16f8bdfa678"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -1286,9 +1286,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-vector"
-version = "0.56.0"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ee9ba401eba2a12cea01aba7ee2ba7c755019f2b73c2417fecc49a2da26dd4c"
+checksum = "286850b97ce1ca68dd66d7ebf250666ec83a2e44a171f1d975abd77d9796d9fc"
 dependencies = [
  "cfg-if",
  "diskann-wide",
@@ -1297,9 +1297,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-wide"
-version = "0.56.0"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343f4ea154bad7f8a9c6936746379faa880899165740a20092775bec97c9a141"
+checksum = "abdaf4a0e2bbf3c6dd72c88a210628ac616d43cb4905c048845f7bb21696e754"
 dependencies = [
  "cfg-if",
  "half",

@@ -11,6 +11,7 @@
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
+use surrealdb_kvs::impl_kv_value_revisioned;
 
 /// A compact, internal document identifier for a record within a table's shared
 /// doc-ID space. Allocated monotonically and never reused.
@@ -38,6 +39,8 @@ pub enum Ids64 {
 	Vec8([u64; 8]),
 	Bits(RoaringTreemap),
 }
+
+impl_kv_value_revisioned!(Ids64);
 
 impl Ids64 {
 	pub fn len(&self) -> u64 {

@@ -20,6 +20,9 @@ use crate::trees::hnsw::{ElementId, HnswElements, HnswSearch, VectorId};
 use crate::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::trees::vector::SharedVector;
 
+/// How many neighbours ahead of the one being scored a search prefetches.
+const PREFETCH_AHEAD: usize = 2;
+
 /// What [`HnswLayer::load`] re-read from the store.
 ///
 /// A reload drops the layer's resident graph and streams its whole `Hn` range
@@ -292,29 +295,53 @@ where
 		pending: Option<PendingDocs<'_>>,
 	) -> Result<DoublePriorityQueue> {
 		let mut fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
+		// The unvisited neighbours of the node being expanded, with their
+		// vectors, in neighbourhood order.
+		let mut unvisited: Vec<(ElementId, SharedVector)> = Vec::new();
+		// The unvisited neighbours' ids, read in one batch.
+		let mut to_fetch: Vec<ElementId> = Vec::new();
 		while let Some((cq_dist, doc)) = candidates.pop_first() {
 			if cq_dist > fq_dist {
 				break;
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(doc) {
-				for &e_id in neighbourhood.iter() {
-					// Did we already visit it?
-					if !visited.insert(e_id) {
-						continue;
+				// The vectors are fetched first, in one batch, then scored in
+				// order while the next few are prefetched: each distance's loads
+				// overlap the one before it rather than waiting on memory. More
+				// in flight would outrun the lines the CPU can track and stall
+				// the loads behind them.
+				to_fetch.clear();
+				to_fetch.extend(neighbourhood.iter().copied().filter(|e_id| visited.insert(*e_id)));
+				unvisited.clear();
+				if !to_fetch.is_empty() {
+					let vectors = elements.get_vectors(tx, &to_fetch).await?;
+					unvisited.extend(
+						to_fetch
+							.iter()
+							.copied()
+							.zip(vectors)
+							.filter_map(|(e_id, v)| Some((e_id, v?))),
+					);
+				}
+				for (_, e_pt) in unvisited.iter().take(PREFETCH_AHEAD) {
+					e_pt.prefetch();
+				}
+				for i in 0..unvisited.len() {
+					if let Some((_, next)) = unvisited.get(i + PREFETCH_AHEAD) {
+						next.prefetch();
 					}
-					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
-						let e_dist = elements.distance(&e_pt, q);
-						if e_dist < fq_dist || w.len() < ef {
-							if Self::are_all_docs_in_pending(tx, pending, e_id, &e_pt).await? {
-								continue;
-							}
-							candidates.push(e_dist, e_id);
-							w.push(e_dist, e_id);
-							if w.len() > ef {
-								w.pop_last();
-							}
-							fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
+					let (e_id, e_pt) = (unvisited[i].0, &unvisited[i].1);
+					let e_dist = elements.distance(e_pt, q);
+					if e_dist < fq_dist || w.len() < ef {
+						if Self::are_all_docs_in_pending(tx, pending, e_id, e_pt).await? {
+							continue;
 						}
+						candidates.push(e_dist, e_id);
+						w.push(e_dist, e_id);
+						if w.len() > ef {
+							w.pop_last();
+						}
+						fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 					}
 				}
 			}

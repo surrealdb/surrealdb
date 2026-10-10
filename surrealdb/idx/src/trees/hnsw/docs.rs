@@ -7,9 +7,10 @@ use surrealdb_datastore::Transaction;
 pub(crate) use surrealdb_datastore::values::hnsw::{ElementDocs, ElementHashedDocs, RemoveResult};
 
 use crate::IndexKeyBase;
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId, keeps_vector_doc_elements};
 use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
+use crate::trees::doc_elements;
 use crate::trees::hnsw::ElementId;
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::flavor::HnswFlavor;
@@ -253,6 +254,37 @@ impl VecDocs {
 		self.cache.remove_doc_set(index, element_id).await;
 	}
 
+	/// Records that `doc` holds a vector in `element`, in the doc-ID →
+	/// elements mapping of an index that keeps one.
+	async fn link_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::link(tx, &self.ikb.new_hk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// Records that `doc` no longer holds a vector in `element`, in the doc-ID
+	/// → elements mapping of an index that keeps one.
+	async fn unlink_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::unlink(tx, &self.ikb.new_hk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// The elements holding each of `docs`' vectors, in input order, read in
+	/// one multi-get from the doc-ID → elements mapping. Only meaningful for an
+	/// index that keeps the mapping, which answers `None` for every document
+	/// otherwise.
+	pub(super) async fn elements_of(
+		&self,
+		tx: &Transaction,
+		docs: &[DocId],
+	) -> Result<Vec<Option<Ids64>>> {
+		let keys = docs.iter().map(|doc| self.ikb.new_hk_key(*doc)).collect();
+		tx.get_many_key(keys, None).await
+	}
+
 	/// Retrieves document IDs for a given vector using its hash.
 	async fn get_docs_hashed(
 		&self,
@@ -318,6 +350,7 @@ impl VecDocs {
 				let docs = Ids64::One(doc_id);
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
 				ctx.tx.set_key(&key, &ehd).await?;
+				self.link_doc(&ctx.tx, doc_id, element_id).await?;
 				sink.record_doc_set(self, element_id, docs).await;
 			}
 			Some(mut ehd) => {
@@ -328,6 +361,7 @@ impl VecDocs {
 						let element_id = ed.e_id;
 						let docs = ed.docs.clone();
 						ctx.tx.set_key(&key, &ehd).await?;
+						self.link_doc(&ctx.tx, doc_id, element_id).await?;
 						sink.record_doc_set(self, element_id, docs).await;
 					};
 				} else {
@@ -336,6 +370,7 @@ impl VecDocs {
 					let docs = Ids64::One(doc_id);
 					ehd.add(element_id, ser_vec, doc_id);
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.link_doc(&ctx.tx, doc_id, element_id).await?;
 					sink.record_doc_set(self, element_id, docs).await;
 				}
 			}
@@ -376,6 +411,7 @@ impl VecDocs {
 			}
 		} {
 			ctx.tx.set_key(&key, &ed).await?;
+			self.link_doc(&ctx.tx, doc_id, ed.e_id).await?;
 			sink.record_doc_set(self, ed.e_id, ed.docs.clone()).await;
 		}
 		Ok(())
@@ -394,15 +430,18 @@ impl VecDocs {
 			match ehd.remove(&ser_vec, d) {
 				RemoveResult::Empty(deleted_element_id) => {
 					ctx.tx.del_key(&key).await?;
+					self.unlink_doc(&ctx.tx, d, deleted_element_id).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(element_id, docs) => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.unlink_doc(&ctx.tx, d, element_id).await?;
 					self.insert_cached_doc_set(element_id, docs).await;
 				}
 				RemoveResult::RemovedElement(deleted_element_id) => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.unlink_doc(&ctx.tx, d, deleted_element_id).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
@@ -430,6 +469,7 @@ impl VecDocs {
 		if let Some(mut ed) = ctx.tx.get_key(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(d)
 		{
+			self.unlink_doc(&ctx.tx, d, ed.e_id).await?;
 			if new_docs.is_empty() {
 				ctx.tx.del_key(&key).await?;
 				self.remove_cached_doc_set(ed.e_id).await;

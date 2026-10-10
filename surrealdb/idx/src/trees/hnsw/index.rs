@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ahash::HashMap;
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use common::EngineError;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
@@ -15,9 +15,9 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tracing::debug;
 use web_time::Instant;
 
-use crate::catalog::{Distance, HnswParams, TableId, VectorType};
+use crate::catalog::{Distance, HnswParams, TableId, VectorType, keeps_vector_doc_elements};
 use crate::config::BuildParallelism;
-use crate::docids::{LegacyVectorDocIds, TableDocIds};
+use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 use crate::key::schema::{HnswRecordPendingKey, HnswRecordPendingPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
@@ -26,13 +26,13 @@ use crate::trees::hnsw::batch::{
 };
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::docs::{ElementSink, HnswDocs, InPlace, VecDocs};
-use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
+use crate::trees::hnsw::filter::{FilterCache, HnswTruthyDocumentFilter};
 use crate::trees::hnsw::flavor::{HnswFlavor, with_hnsw};
 pub use crate::trees::hnsw::outcome::HnswCompactionOutcome;
 use crate::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
-use crate::trees::knn::KnnResultBuilder;
+use crate::trees::knn::{KnnResultBuilder, OVERQUERY_CEILING_FACTOR};
 use crate::trees::pending::{
 	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
 	take_pending_record_id,
@@ -40,7 +40,7 @@ use crate::trees::pending::{
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
 };
-use crate::trees::{KnnCondFilter, KnnIteratorResult};
+use crate::trees::{KnnCondFilter, KnnIteratorResult, doc_elements};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 use crate::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
@@ -976,22 +976,27 @@ impl HnswIndex {
 		self.search_graph(&ctx, &search, pending_docs, &mut filter, allow_list, &mut builder)
 			.await?;
 
-		// We build the final result: replacing DocId with RecordIds
-		let result = builder.collect();
+		let cache = filter.map(|filter| filter.release());
+		self.resolve_results(&ctx, builder, cache.as_ref(), compaction_generation).await
+	}
 
-		let cache = if let Some(filter) = filter {
-			// If there is a filter, retrieve the record cache
-			let cache = filter.release();
-			Some(cache)
-		} else {
-			None
-		};
+	/// Replaces the doc-IDs of a finished result with their record IDs,
+	/// nearest first, taking the records a truthy filter already fetched from
+	/// its `cache`. A doc-ID that no longer resolves takes no result slot.
+	async fn resolve_results(
+		&self,
+		ctx: &HnswContext<'_>,
+		builder: KnnResultBuilder,
+		cache: Option<&FilterCache>,
+		compaction_generation: Option<u64>,
+	) -> Result<VecDeque<KnnIteratorResult>> {
+		let result = builder.collect();
 		let mut res_by_pos = vec![None; result.len()];
 		let mut doc_misses = Vec::new();
 		for (pos, (dist, id)) in result.into_iter().enumerate() {
 			let dist: f64 = dist.into();
 			// Do we have it from the cache?
-			if let Some(cache) = &cache
+			if let Some(cache) = cache
 				&& let Some(Some((rid, record))) = cache.get(&id)
 			{
 				res_by_pos[pos] = Some((Arc::clone(rid), dist, Some(Arc::clone(record))));
@@ -1031,6 +1036,130 @@ impl HnswIndex {
 		Ok(res)
 	}
 
+	/// Exact k-nearest neighbours among the `allow_list` members, scored from
+	/// the vectors the index stores rather than from the records.
+	///
+	/// Every member is scored: pending (not yet compacted) vectors by the same
+	/// pending scan the graph search runs, and committed vectors through the
+	/// doc-ID → elements mapping, with every doc-ID the pending queue names
+	/// suppressed from the committed side. No graph is walked and no record is
+	/// fetched; only the final `k` doc-IDs are resolved to record IDs. A
+	/// document indexing several vectors takes one slot, at its nearest vector.
+	///
+	/// Candidates are admitted on allow-list membership alone, so the caller is
+	/// responsible for anything a record would have to be read for — a residual
+	/// condition, or a table permission evaluated per record.
+	///
+	/// Returns `None`, having read nothing, for an index stamped before the
+	/// mapping was kept (see [`crate::catalog::keeps_vector_doc_elements`]).
+	pub async fn exact_knn_search(
+		&self,
+		env: &dyn IndexEnv,
+		pt: &[Number],
+		k: usize,
+		allow_list: &RoaringTreemap,
+	) -> Result<Option<VecDeque<KnnIteratorResult>>> {
+		if !keeps_vector_doc_elements(self.format_version) {
+			return Ok(None);
+		}
+		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
+		vector.check_dimension(self.dim)?;
+		// No member can be offered: answered before any read, once the query
+		// vector has been checked.
+		if allow_list.is_empty() || k == 0 {
+			return Ok(Some(VecDeque::new()));
+		}
+		let tx = env.tx();
+		let compaction_generation = read_compaction_generation(&tx, &self.ikb.new_hg_key()).await?;
+		let search = HnswSearch::new(vector, k, k);
+		let ctx = self.new_hnsw_context(env);
+		let mut builder = KnnResultBuilder::new(k);
+		let pending_docs =
+			self.search_pendings(&ctx, &search, &mut None, Some(allow_list), &mut builder).await?;
+		// The members the pendings did not already score: the allow-list itself
+		// when nothing is pending, else the set difference, taken over roaring
+		// containers rather than by a lookup per member.
+		let unpending = pending_docs.as_ref().filter(|p| !p.is_empty()).map(|p| allow_list - p);
+		let members = unpending.as_ref().unwrap_or(allow_list);
+		if !members.is_empty() {
+			// Element vectors come through the resident graph, whose vector
+			// cache is scoped to the element ids it holds, only when that graph
+			// is already level with this snapshot. Otherwise they are read from
+			// the snapshot directly: a search over a few members does not load
+			// every layer of a graph it never walks. The graph is held for one
+			// batch of vector reads at a time, never across the doc → elements
+			// reads or the scoring, so a compaction waiting for it waits for a
+			// batch at most. With every member pending, no vector is read and
+			// the graph is not taken.
+			let (this, tx, pt) = (self, &tx, &search.pt);
+			doc_elements::score_members(
+				env,
+				members.iter(),
+				move |docs: Vec<DocId>| async move {
+					let sets = this.vec_docs.elements_of(tx, &docs).await?;
+					Ok((docs, sets))
+				},
+				move |elements: Vec<ElementId>| async move {
+					let vectors = {
+						let resident = this.hnsw.read().await;
+						if resident.reconciled_at == this.invalidations.load(Ordering::Acquire)
+							&& !resident.needs_state_reload(env).await?
+						{
+							resident.get_vectors(tx, &elements).await?
+						} else {
+							drop(resident);
+							this.read_vectors(tx, &elements).await?
+						}
+					};
+					let distances = vectors
+						.into_iter()
+						.map(|v| v.map(|v| this.distance.calculate_shared(pt, &v)))
+						.collect();
+					Ok((elements, distances))
+				},
+				&mut builder,
+			)
+			.await?;
+		}
+		self.resolve_results(&ctx, builder, None, compaction_generation).await.map(Some)
+	}
+
+	/// The vectors of several elements as `tx`'s snapshot stores them, in
+	/// input order, read in one multi-get past the vector cache. `None` for an
+	/// element the snapshot no longer holds.
+	async fn read_vectors(
+		&self,
+		tx: &Transaction,
+		e_ids: &[ElementId],
+	) -> Result<Vec<Option<SharedVector>>> {
+		let keys = e_ids.iter().map(|e_id| self.ikb.new_he_key(*e_id)).collect();
+		let fetched: Vec<Option<SerializedVector>> = tx.get_many_key(keys, None).await?;
+		// A short answer would leave the trailing elements unscored, silently.
+		ensure!(
+			fetched.len() == e_ids.len(),
+			"{} vectors read for {} elements",
+			fetched.len(),
+			e_ids.len()
+		);
+		Ok(fetched.into_iter().map(|v| v.map(|v| Vector::from(v).into())).collect())
+	}
+
+	/// Whether the resident graph's lock is free at this instant: nothing
+	/// holds it, so a compaction could take it for writing.
+	#[cfg(test)]
+	pub(super) fn graph_lock_is_free(&self) -> bool {
+		self.hnsw.try_write().is_ok()
+	}
+
+	/// Whether the resident graph is level with `env`'s view of the store, so
+	/// a search would not reload it.
+	#[cfg(test)]
+	pub(super) async fn resident_graph_is_current(&self, env: &dyn IndexEnv) -> Result<bool> {
+		let resident = self.hnsw.read().await;
+		Ok(resident.reconciled_at == self.invalidations.load(Ordering::Acquire)
+			&& !resident.needs_state_reload(env).await?)
+	}
+
 	/// Searches for nearest neighbors in the committed HNSW graph.
 	///
 	/// Acquires a read lock on the graph and performs KNN search, optionally
@@ -1046,14 +1175,37 @@ impl HnswIndex {
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
 		let hnsw = self.reconciled(ctx.env).await?;
-		// Do the search. The allow-list routes through the filtered chain even
-		// without a truthy filter: the unfiltered chain suppresses elements
-		// from the traversal frontier itself, which is fine for a handful of
-		// pending docs but would disconnect the walk under a selective bitmap.
-		if filter.is_some() || allow_list.is_some() {
-			let neighbours = hnsw
-				.knn_search_with_filter(ctx, search, filter, pending_docs.as_ref(), allow_list)
-				.await?;
+		// The builder holds one slot per record, and a record indexing several
+		// vectors is reached through each of them, so the `k` nearest elements
+		// can name fewer than `k` records. The walk hands over every candidate
+		// it kept (up to `ef`) and the builder takes the `k` nearest distinct
+		// records; an element farther than the builder's last slot is skipped
+		// before its documents are read. Where the `ef` candidates still name
+		// fewer than `k` records, the walk is retried with a doubled `ef` until
+		// the builder holds `k`, the walk keeps fewer candidates than asked, or
+		// the retry ceiling is reached. A walk that keeps fewer than `ef` never
+		// evicted one, so a wider pass would repeat it: the unfiltered walk
+		// has reached every element it can, and the filtered walk, which keeps
+		// admitted elements only, stops once its next candidate is farther than
+		// its farthest admission, a rule that does not involve `ef` while it
+		// holds fewer than `ef`. A retry re-offers the earlier candidates, which
+		// the builder and the filter's verdict cache absorb without a second
+		// slot or a second evaluation.
+		let ceiling = search.ef.saturating_mul(OVERQUERY_CEILING_FACTOR);
+		let mut ef = search.ef;
+		loop {
+			let pass = HnswSearch::new(search.pt.clone(), search.k.max(ef), ef);
+			// The allow-list routes through the filtered chain even without a
+			// truthy filter: the unfiltered chain suppresses elements from the
+			// traversal frontier itself, which is fine for a handful of pending
+			// docs but would disconnect the walk under a selective bitmap.
+			let neighbours = if filter.is_some() || allow_list.is_some() {
+				hnsw.knn_search_with_filter(ctx, &pass, filter, pending_docs.as_ref(), allow_list)
+					.await?
+			} else {
+				hnsw.knn_search(ctx, &pass, pending_docs.as_ref()).await?
+			};
+			let exhausted = neighbours.len() < ef;
 			self.add_graph_results(
 				ctx,
 				&hnsw,
@@ -1063,19 +1215,11 @@ impl HnswIndex {
 				filter,
 				builder,
 			)
-			.await
-		} else {
-			let neighbours = hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?;
-			self.add_graph_results(
-				ctx,
-				&hnsw,
-				neighbours,
-				pending_docs.as_ref(),
-				None,
-				filter,
-				builder,
-			)
-			.await
+			.await?;
+			if builder.len() >= search.k || exhausted || ef >= ceiling {
+				return Ok(());
+			}
+			ef = ef.saturating_mul(2).min(ceiling);
 		}
 	}
 
@@ -1463,15 +1607,20 @@ impl HnswIndex {
 				None => true,
 			};
 			if truthy {
-				for vector in vectors {
-					let vector = Vector::from(vector);
-					let d = self.distance.calculate(&search.pt, &vector);
-					if builder.check_add(d)
-						&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
-						&& let Some(filter) = filter.as_mut()
-					{
-						filter.expire(&evicted_id);
-					}
+				// A document indexing several vectors takes one slot, at its
+				// nearest, as the exact tier offers a compacted one.
+				let nearest = vectors
+					.into_iter()
+					.map(|vector| {
+						self.distance.calculate_against(&search.pt, &Vector::from(vector))
+					})
+					.min_by(f64::total_cmp);
+				if let Some(d) = nearest
+					&& builder.check_add(d)
+					&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
+					&& let Some(filter) = filter.as_mut()
+				{
+					filter.expire(&evicted_id);
 				}
 			}
 			if let Some(filter) = filter.as_mut()

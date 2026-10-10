@@ -3529,9 +3529,9 @@ async fn function_vector_similarity_jaccard() -> Result<()> {
 		RETURN vector::similarity::jaccard([1, 2, 3], [-3, -2, -1]);
 		RETURN vector::similarity::jaccard([1, -2, 3, -4], [4, 3, 2, 1]);
 		RETURN vector::similarity::jaccard([NaN, 1, 2, 3], [NaN, 2, 3, 4]);
-		RETURN vector::similarity::jaccard([0,1,2,5,6], [0,2,3,4,5,7,9]);
+		RETURN vector::similarity::jaccard([0,1,2,5,6], [0,2,3,4,5]);
 	"#,
-		&["1.0", "0f", "0.3333333333333333", "0.6", "0.3333333333333333"],
+		&["0.5", "0f", "0.2727272727272727", "0.6666666666666666", "0.75"],
 	)
 	.await
 }

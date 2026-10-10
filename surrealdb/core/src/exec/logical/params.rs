@@ -34,6 +34,11 @@
 //!   included.
 //! - **Lossy values:** a value whose literal form evaluates to something else
 //!   (`substitution_is_lossy`) stays a parameter.
+//! - **KNN query vectors:** where a name holding an array of numbers is the query vector of a KNN
+//!   operator (`<|k, …|>`), it stays a parameter there, and only there. The operator is evaluated
+//!   as membership of the row's id in its source's result, never from its operands, and the
+//!   physical planner resolves the vector once for the source; as a literal it would be a node per
+//!   component for every later pass to walk.
 //!
 //! A scalar subquery is part of the statement — it runs in the same
 //! transaction with the same context — so its plan is resolved with the
@@ -47,7 +52,10 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::ops::ControlFlow;
 
-use super::{BindContext, classify_source, visit_binding, visit_binding_mut, visit_deep};
+use super::{
+	BindContext, Descend, classify_source, visit_binding, visit_binding_mut, visit_binding_pruning,
+	visit_binding_pruning_mut, visit_deep,
+};
 use crate::exec::planner::util::{
 	ParamBinding, bind_param, substitution_is_lossy, value_to_logical_expr,
 };
@@ -55,6 +63,7 @@ use crate::expr::logical::{
 	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalFilter, LogicalForeach,
 	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, SourceRef,
 };
+use crate::expr::operator::BinaryOperator;
 use crate::val::Value;
 
 /// Resolve every statement-scoped parameter in `op`. Names that cannot or
@@ -62,47 +71,77 @@ use crate::val::Value;
 pub(super) async fn resolve_params(op: LogicalOp, bx: &BindContext<'_>) -> LogicalOp {
 	// Phase 1: the names the plan references in a resolvable position, and
 	// the names it binds itself.
-	let (names, bound) = referenced_and_bound(&op);
+	let ReferencedNames {
+		names,
+		bound,
+		outside_query_vectors,
+	} = referenced_and_bound(&op);
 	// The names a table permission predicate reads: a privileged frame holds
 	// none of the caller's bindings, so those are looked up in the isolated
 	// view rather than the caller's.
 	let guarded = permission_names(&op, &bound);
 
 	// Phase 2: look each name up once.
-	let mut literals: HashMap<String, LogicalExpr> = HashMap::new();
+	let mut subs = Substitutions::default();
 	for name in names {
 		if bound.contains(&name) {
 			continue;
 		}
-		if let Some(literal) = resolved_literal(&name, bx, bx.ctx).await {
-			literals.insert(name, literal);
+		let Some(value) = resolved_value(&name, bx, bx.ctx).await else {
+			continue;
+		};
+		if is_query_vector(&value) {
+			subs.query_vectors.insert(name.clone());
+			// Read only as a query vector, it stays a parameter everywhere:
+			// no literal is built for it.
+			if !outside_query_vectors.contains(&name) {
+				continue;
+			}
 		}
+		subs.literals.insert(name, value_to_logical_expr(value));
 	}
-	let mut privileged: HashMap<String, LogicalExpr> = HashMap::new();
+	// A permission predicate is definer code, compiled apart from the
+	// statement: every name it reads is substituted, the query vector of a KNN
+	// operator included.
+	let mut privileged = Substitutions::default();
 	if !guarded.is_empty() {
 		let isolated = crate::ctx::Context::new_isolated(bx.ctx).freeze();
 		for name in guarded {
-			if let Some(literal) = resolved_literal(&name, bx, &isolated).await {
-				privileged.insert(name, literal);
+			if let Some(value) = resolved_value(&name, bx, &isolated).await {
+				privileged.literals.insert(name, value_to_logical_expr(value));
 			}
 		}
 	}
-	if literals.is_empty() && privileged.is_empty() {
+	if subs.literals.is_empty() && privileged.literals.is_empty() {
 		return op;
 	}
 
 	// Phase 3: substitute, then re-derive each leaf's kind from its new
 	// expression.
-	substitute_all(op, &literals, &privileged)
+	substitute_all(op, &subs, &privileged)
 }
 
-/// The literal `name` takes in the context `ctx`, or `None` where the name is
-/// read when the statement runs.
-async fn resolved_literal(
+/// The literals [`resolve_params`] substitutes, and the names among them it
+/// leaves in place as the query vector of a KNN operator.
+#[derive(Default)]
+struct Substitutions {
+	literals: HashMap<String, LogicalExpr>,
+	query_vectors: HashSet<String>,
+}
+
+/// Whether `value` can be a KNN query vector: a non-empty array of numbers.
+fn is_query_vector(value: &Value) -> bool {
+	matches!(value, Value::Array(a) if !a.is_empty() && a.iter().all(|v| matches!(v, Value::Number(_))))
+}
+
+/// The value `name` takes in the context `ctx`, or `None` where the name is
+/// read when the statement runs or its literal form would evaluate to
+/// something else.
+async fn resolved_value(
 	name: &str,
 	bx: &BindContext<'_>,
 	ctx: &crate::ctx::FrozenContext,
-) -> Option<LogicalExpr> {
+) -> Option<Value> {
 	// A statement that inlines no catalog definition reads a `DEFINE PARAM`
 	// when it runs: only the context's values are taken.
 	let (txn, ns_db) = match bx.inlines_definitions {
@@ -117,7 +156,7 @@ async fn resolved_literal(
 	if substitution_is_lossy(&value) {
 		return None;
 	}
-	Some(value_to_logical_expr(value))
+	Some(value)
 }
 
 /// The names read by the predicate of a table permission in `op`, or of a
@@ -134,7 +173,7 @@ fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> 
 			collect_names(predicate, &mut names);
 			let _ = visit_binding(predicate, &mut |expr| {
 				if let LogicalExpr::Subquery(plan) = expr {
-					names.extend(referenced_and_bound(plan).0);
+					names.extend(referenced_and_bound(plan).names);
 				}
 				ControlFlow::<()>::Continue(())
 			});
@@ -149,14 +188,29 @@ fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> 
 /// residual, a source expression — in `op` or in a plan nested in it, and is
 /// not a name the plan binds itself.
 pub(super) fn reads_in_resolvable_position(op: &LogicalOp, names: &[&str]) -> bool {
-	let (referenced, bound) = referenced_and_bound(op);
+	let ReferencedNames {
+		names: referenced,
+		bound,
+		..
+	} = referenced_and_bound(op);
 	names.iter().any(|name| referenced.contains(*name) && !bound.contains(*name))
+}
+
+/// The names a plan references in a position [`resolve_params`] substitutes.
+struct ReferencedNames {
+	/// Every name read there.
+	names: HashSet<String>,
+	/// The names the plan binds itself.
+	bound: HashSet<String>,
+	/// The names read there other than as the query vector of a KNN operator.
+	outside_query_vectors: HashSet<String>,
 }
 
 /// The names `op` references in a position [`resolve_params`] substitutes,
 /// and the names it binds itself, in `op` and every plan nested in it.
-fn referenced_and_bound(op: &LogicalOp) -> (HashSet<String>, HashSet<String>) {
+fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 	let mut names: HashSet<String> = HashSet::new();
+	let mut outside_query_vectors: HashSet<String> = HashSet::new();
 	let mut bound: HashSet<String> = HashSet::new();
 	visit_deep(op, &mut |node| {
 		match node {
@@ -185,18 +239,18 @@ fn referenced_and_bound(op: &LogicalOp) -> (HashSet<String>, HashSet<String>) {
 			| LogicalOp::PermissionFilter(LogicalPermissionFilter {
 				predicate,
 				..
-			}) => collect_names(predicate, &mut names),
+			}) => collect_resolvable_names(predicate, &mut names, &mut outside_query_vectors),
 			LogicalOp::Join(LogicalJoin {
 				on,
 				filter,
 				..
 			}) => {
 				for (left, right) in on {
-					collect_names(left, &mut names);
-					collect_names(right, &mut names);
+					collect_resolvable_names(left, &mut names, &mut outside_query_vectors);
+					collect_resolvable_names(right, &mut names, &mut outside_query_vectors);
 				}
 				if let Some(filter) = filter {
-					collect_names(filter, &mut names);
+					collect_resolvable_names(filter, &mut names, &mut outside_query_vectors);
 				}
 			}
 			LogicalOp::Source(LogicalSource {
@@ -205,12 +259,13 @@ fn referenced_and_bound(op: &LogicalOp) -> (HashSet<String>, HashSet<String>) {
 			}) => match source {
 				SourceRef::Param(param) => {
 					names.insert(param.as_str().to_owned());
+					outside_query_vectors.insert(param.as_str().to_owned());
 				}
 				SourceRef::RecordId(_) | SourceRef::Dynamic(_) => {
 					let mut exprs = Vec::new();
 					source.exprs(&mut exprs);
 					for expr in exprs {
-						collect_names(expr, &mut names);
+						collect_resolvable_names(expr, &mut names, &mut outside_query_vectors);
 					}
 				}
 				SourceRef::Table(_) | SourceRef::Mock(_) => {}
@@ -255,7 +310,11 @@ fn referenced_and_bound(op: &LogicalOp) -> (HashSet<String>, HashSet<String>) {
 			}
 		}
 	});
-	(names, bound)
+	ReferencedNames {
+		names,
+		bound,
+		outside_query_vectors,
+	}
 }
 
 /// The parameter a schema statement defines, redefines or removes.
@@ -280,21 +339,17 @@ pub(super) fn changed_param(statement: &LogicalDdlStatement) -> Option<&str> {
 	}
 }
 
-/// `op` with `literals` substituted for the parameters in every resolvable
+/// `op` with `subs` substituted for the parameters in every resolvable
 /// position, and `privileged` for those in a table permission predicate and
 /// throughout every plan such a predicate holds, each leaf's kind re-derived
 /// from its new expression. A plan inside a closure body is not reached.
-fn substitute_all(
-	op: LogicalOp,
-	literals: &HashMap<String, LogicalExpr>,
-	privileged: &HashMap<String, LogicalExpr>,
-) -> LogicalOp {
+fn substitute_all(op: LogicalOp, subs: &Substitutions, privileged: &Substitutions) -> LogicalOp {
 	let Ok(op) = op.transform_up(&mut |mut node| {
 		// A permission predicate is definer code: the plans it holds read the
 		// values a privileged frame holds, as the predicate itself does.
 		let nested = match matches!(node, LogicalOp::PermissionFilter(_)) {
 			true => privileged,
-			false => literals,
+			false => subs,
 		};
 		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
 			visit_binding_mut(scalar, &mut |expr| {
@@ -310,25 +365,21 @@ fn substitute_all(
 				Ok::<_, Infallible>(())
 			})
 		});
-		Ok::<_, Infallible>(substitute_node(node, literals, privileged))
+		Ok::<_, Infallible>(substitute_node(node, subs, privileged))
 	});
 	op
 }
 
-/// `node` with `literals` substituted for the parameters in its own
-/// resolvable positions, and `privileged` for those of a table permission
-/// predicate; the plans its scalars hold are [`substitute_all`]'s.
-fn substitute_node(
-	node: LogicalOp,
-	literals: &HashMap<String, LogicalExpr>,
-	privileged: &HashMap<String, LogicalExpr>,
-) -> LogicalOp {
+/// `node` with `subs` substituted for the parameters in its own resolvable
+/// positions, and `privileged` for those of a table permission predicate; the
+/// plans its scalars hold are [`substitute_all`]'s.
+fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitutions) -> LogicalOp {
 	match node {
 		LogicalOp::Filter(LogicalFilter {
 			input,
 			mut predicate,
 		}) => {
-			substitute(&mut predicate, literals);
+			substitute(&mut predicate, subs);
 			LogicalOp::Filter(LogicalFilter {
 				input,
 				predicate,
@@ -350,11 +401,11 @@ fn substitute_node(
 		}
 		LogicalOp::Join(mut join) => {
 			for (left, right) in &mut join.on {
-				substitute(left, literals);
-				substitute(right, literals);
+				substitute(left, subs);
+				substitute(right, subs);
 			}
 			if let Some(filter) = &mut join.filter {
-				substitute(filter, literals);
+				substitute(filter, subs);
 			}
 			LogicalOp::Join(join)
 		}
@@ -364,7 +415,7 @@ fn substitute_node(
 			with,
 			for_update,
 		}) => match source {
-			SourceRef::Param(param) => match literals.get(param.as_str()) {
+			SourceRef::Param(param) => match subs.literals.get(param.as_str()) {
 				Some(literal) => classify_source(literal.clone(), None, with, for_update),
 				None => LogicalOp::Source(LogicalSource {
 					source: SourceRef::Param(param),
@@ -377,7 +428,7 @@ fn substitute_node(
 				let mut exprs = Vec::new();
 				source.exprs_mut(&mut exprs);
 				for expr in exprs {
-					substitute(expr, literals);
+					substitute(expr, subs);
 				}
 				LogicalOp::Source(LogicalSource {
 					source,
@@ -387,7 +438,7 @@ fn substitute_node(
 				})
 			}
 			SourceRef::Dynamic(mut expr) => {
-				substitute(&mut expr, literals);
+				substitute(&mut expr, subs);
 				classify_source(expr, None, with, for_update)
 			}
 			source @ (SourceRef::Table(_) | SourceRef::Mock(_)) => {
@@ -501,16 +552,55 @@ fn collect_names(expr: &LogicalExpr, names: &mut HashSet<String>) {
 	});
 }
 
-/// Replaces parameter references with the literals in `literals`, not
-/// entering a nested plan or a closure body.
-fn substitute(expr: &mut LogicalExpr, literals: &HashMap<String, LogicalExpr>) {
-	let Ok(()) = visit_binding_mut(expr, &mut |e| {
+/// Adds the names `expr` reads to `names`, and those it reads other than as a
+/// KNN operator's query vector to `outside_query_vectors`, in one walk; a
+/// nested plan and a closure body are not entered.
+fn collect_resolvable_names(
+	expr: &LogicalExpr,
+	names: &mut HashSet<String>,
+	outside_query_vectors: &mut HashSet<String>,
+) {
+	visit_binding_pruning(expr, &mut |e| {
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(_),
+			right,
+		} = e && let LogicalExpr::Param(param) = right.as_ref()
+		{
+			names.insert(param.as_str().to_owned());
+			collect_resolvable_names(left, names, outside_query_vectors);
+			return Descend::Over;
+		}
+		if let LogicalExpr::Param(param) = e {
+			names.insert(param.as_str().to_owned());
+			outside_query_vectors.insert(param.as_str().to_owned());
+		}
+		Descend::Into
+	});
+}
+
+/// Replaces parameter references with their literals in `subs`, not entering
+/// a nested plan or a closure body, and leaving a query-vector name in place
+/// as the right operand of a KNN operator.
+fn substitute(expr: &mut LogicalExpr, subs: &Substitutions) {
+	visit_binding_pruning_mut(expr, &mut |e| {
+		if let LogicalExpr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(_),
+			right,
+		} = e && let LogicalExpr::Param(param) = right.as_ref()
+			&& subs.query_vectors.contains(param.as_str())
+		{
+			substitute(left, subs);
+			return Descend::Over;
+		}
 		if let LogicalExpr::Param(param) = e
-			&& let Some(literal) = literals.get(param.as_str())
+			&& let Some(literal) = subs.literals.get(param.as_str())
 		{
 			*e = literal.clone();
+			return Descend::Over;
 		}
-		Ok::<_, Infallible>(())
+		Descend::Into
 	});
 }
 
@@ -577,6 +667,38 @@ mod tests {
 		let plan =
 			bound(lower("SELECT * FROM t WHERE a > $p"), vec![("p", int(5))]).await.to_string();
 		assert!(plan.contains("Filter[a > 5]"), "{plan}");
+	}
+
+	fn vector(components: &[f64]) -> Value {
+		Value::from(components.iter().map(|c| Value::from(*c)).collect::<Vec<_>>())
+	}
+
+	/// A parameter read only as a KNN operator's query vector stays one
+	/// parameter node, and no literal is built for it.
+	#[tokio::test]
+	async fn a_query_vector_param_stays_a_parameter() {
+		let plan = bound(
+			lower("SELECT id FROM t WHERE v <|3,40|> $q"),
+			vec![("q", vector(&[1.0, 2.0, 3.0]))],
+		)
+		.await
+		.to_string();
+		assert!(plan.contains("v <|3,40|> $q"), "{plan}");
+		assert!(!plan.contains("[1f, 2f, 3f]"), "{plan}");
+	}
+
+	/// The same parameter read elsewhere in the predicate is substituted
+	/// there, and stays a parameter as the query vector.
+	#[tokio::test]
+	async fn a_query_vector_param_read_elsewhere_is_substituted_there() {
+		let plan = bound(
+			lower("SELECT id FROM t WHERE v <|3,40|> $q AND w = $q"),
+			vec![("q", vector(&[1.0, 2.0, 3.0]))],
+		)
+		.await
+		.to_string();
+		assert!(plan.contains("v <|3,40|> $q"), "{plan}");
+		assert!(plan.contains("w = [1f, 2f, 3f]"), "{plan}");
 	}
 
 	#[tokio::test]

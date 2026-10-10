@@ -18,7 +18,7 @@ pub(crate) use surrealdb_datastore::values::diskann::{
 
 use crate::IndexKeyBase;
 #[cfg(not(target_family = "wasm"))]
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId, keeps_vector_doc_elements};
 use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 #[cfg(not(target_family = "wasm"))]
@@ -26,6 +26,7 @@ use crate::trees::diskann::cache::{CacheView, DiskAnnCache};
 #[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
 use crate::trees::diskann::{DiskAnnElement, ElementId};
+use crate::trees::doc_elements;
 use crate::trees::knn::Ids64;
 use crate::trees::vector::{SerializedVector, Vector};
 use crate::val::{RecordId, RecordIdKey};
@@ -218,6 +219,37 @@ impl DiskAnnVecDocs {
 		}
 	}
 
+	/// Records that `doc` holds a vector in `element`, in the doc-ID →
+	/// elements mapping of an index that keeps one.
+	async fn link_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::link(tx, &self.ikb.new_dk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// Records that `doc` no longer holds a vector in `element`, in the doc-ID
+	/// → elements mapping of an index that keeps one.
+	async fn unlink_doc(&self, tx: &Transaction, doc: DocId, element: ElementId) -> Result<()> {
+		if keeps_vector_doc_elements(self.format_version) {
+			doc_elements::unlink(tx, &self.ikb.new_dk_key(doc), element).await?;
+		}
+		Ok(())
+	}
+
+	/// The elements holding each of `docs`' vectors, in input order, read in
+	/// one multi-get from the doc-ID → elements mapping. Only meaningful for an
+	/// index that keeps the mapping, which answers `None` for every document
+	/// otherwise.
+	pub(super) async fn elements_of(
+		&self,
+		tx: &Transaction,
+		docs: &[DocId],
+	) -> Result<Vec<Option<Ids64>>> {
+		let keys = docs.iter().map(|doc| self.ikb.new_dk_key(*doc)).collect();
+		tx.get_many_key(keys, None).await
+	}
+
 	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
 		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
@@ -406,6 +438,7 @@ impl DiskAnnVecDocs {
 				ctx.tx
 					.set_key(&key, &DiskAnnElementHashedDocs::new(element_id, ser_vec, doc_id))
 					.await?;
+				self.link_doc(&ctx.tx, doc_id, element_id).await?;
 				self.evict_cached_doc_set(element_id);
 			}
 			Some(mut ehd) => {
@@ -414,12 +447,14 @@ impl DiskAnnVecDocs {
 						let element_id = ed.e_id;
 						ed.docs = docs;
 						ctx.tx.set_key(&key, &ehd).await?;
+						self.link_doc(&ctx.tx, doc_id, element_id).await?;
 						self.evict_cached_doc_set(element_id);
 					}
 				} else {
 					let element_id = graph.insert(ctx, vec).await?;
 					ehd.add(element_id, ser_vec, doc_id);
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.link_doc(&ctx.tx, doc_id, element_id).await?;
 					self.evict_cached_doc_set(element_id);
 				}
 			}
@@ -453,6 +488,7 @@ impl DiskAnnVecDocs {
 		} {
 			self.evict_cached_doc_set(ed.e_id);
 			ctx.tx.set_key(&key, &ed).await?;
+			self.link_doc(&ctx.tx, doc_id, ed.e_id).await?;
 		}
 		Ok(())
 	}
@@ -470,6 +506,7 @@ impl DiskAnnVecDocs {
 			match ehd.remove(&ser_vec, doc_id) {
 				RemoveResult::Empty(e_id) => {
 					ctx.tx.del_key(&key).await?;
+					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
@@ -477,12 +514,14 @@ impl DiskAnnVecDocs {
 					e_id,
 				} => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 				}
 				RemoveResult::EntryRemoved {
 					e_id,
 				} => {
 					ctx.tx.set_key(&key, &ehd).await?;
+					self.unlink_doc(&ctx.tx, doc_id, e_id).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
@@ -508,6 +547,7 @@ impl DiskAnnVecDocs {
 		if let Some(mut ed) = ctx.tx.get_key(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(doc_id)
 		{
+			self.unlink_doc(&ctx.tx, doc_id, ed.e_id).await?;
 			if new_docs.is_empty() {
 				ctx.tx.del_key(&key).await?;
 				self.evict_cached_doc_set(ed.e_id);

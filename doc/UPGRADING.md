@@ -10,7 +10,7 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.4.0 — export/import contract changes, and vector indexes that lost records sharing a vector
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, and JACCARD/PEARSON as distances
 
 **Impact**:
 
@@ -33,6 +33,20 @@ For the release **process** (how releases are cut and shipped), see
   vector is missing those records from KNN results, and may keep returning
   fewer than `k` rows after such records are deleted. This release stops the
   loss; an index already affected keeps it until `REBUILD INDEX`.
+- HNSW and DiskANN indexes defined or rebuilt on this release keep a doc-ID →
+  elements mapping, which lets a highly selective filtered KNN score its
+  candidates from the index instead of reading every matching record. An index
+  defined before the upgrade has no mapping and keeps answering from the
+  records, correctly but more slowly, until `REBUILD INDEX`.
+- `vector::similarity::jaccard` is now the weighted Jaccard similarity of vector
+  search, `Σ min(aᵢ, bᵢ) / Σ max(aᵢ, bᵢ)`, compared position by position; it
+  was a Jaccard over the *sets of values* in the two arrays. Its results change,
+  and vectors of different dimensions are now refused, as by every other
+  `vector::similarity::*` function.
+- KNN under `JACCARD` and `PEARSON` now ranks by a distance, `1 − similarity`
+  and `1 − r`, so the most similar vectors come first; it ranked the least
+  similar first. `vector::distance::knn()` values change accordingly, and an
+  HNSW index defined with either metric needs `REBUILD INDEX`.
 - A value containing a deeply nested `GeometryCollection` that was stored by an
   earlier release may now return `The value is nested too deeply` when read. It
   can be repaired in place by overwriting the field; see below.
@@ -145,6 +159,52 @@ was gone. This release writes every change.
 than nine records with an identical value in the indexed field — duplicated
 embeddings, placeholder or default vectors — with `REBUILD INDEX`. An index
 where every vector is shared by at most nine records was never affected.
+
+### Vector indexes gain a doc-ID → elements mapping
+
+A filtered KNN whose filter is covered by other indexes and matches few rows
+(the exact prefilter tier) used to read every matching record to score its
+vector. An HNSW or DiskANN index stamped with this release's index format keeps
+a reverse mapping from each document to the graph elements holding its vectors
+(`!hk` / `!dk`), maintained in the same transaction as the index's vector →
+documents mapping, and that tier now scores from the index.
+
+An index defined on an earlier release is still read as it is: it has no
+mapping, and the exact tier keeps reading its records. Nothing fails and no
+result changes.
+
+**What to do**: once every node runs this release, `REBUILD INDEX` the HNSW and
+DiskANN indexes that serve selective filtered KNN queries. Do not define or
+rebuild a vector index while nodes of an earlier release are still running: an
+older node that compacts the index's pending updates does not maintain the
+mapping, and filtered queries on the new nodes would then miss or mis-rank the
+records it wrote.
+
+### JACCARD and PEARSON rank by distance
+
+KNN orders candidates by ascending distance, but `JACCARD` and `PEARSON` were
+passed through as similarities, where higher means closer. A filtered or
+unfiltered KNN under either metric, brute force or through an HNSW index,
+therefore returned the *least* similar vectors first: the vector identical to
+the query came last. (An HNSW index over `F64` vectors happened to use the
+Jaccard distance and was the one exception.) Both are now distances in every
+KNN path: `1 − J` for Jaccard, lying in `[0, 1]`, and the correlation distance
+`1 − r` for Pearson, lying in `[0, 2]`.
+
+Jaccard itself changes meaning. It was computed over the sets of *values* in the
+two arrays, ignoring their positions, so `[1, 2, 3]` and `[3, 2, 1]` scored as
+identical. It is now the weighted (Ruzicka) Jaccard used for vector search,
+`Σ min(aᵢ, bᵢ) / Σ max(aᵢ, bᵢ)` over aligned components, which on 0/1 vectors
+is the binary Jaccard of other vector databases. It is defined for non-negative
+components: a negative component counts as `0`. `vector::similarity::jaccard`
+returns this similarity, `JACCARD` KNN ranks by `1 −` it, and two vectors of
+different dimensions are refused.
+
+**What to do**: `REBUILD INDEX` every HNSW index defined with `DIST JACCARD` or
+`DIST PEARSON`; its graph was built by the inverted metric and does not serve
+nearest-first searches until it is. Review stored or compared results of
+`vector::similarity::jaccard` and of `vector::distance::knn()` under either
+metric, whose values change.
 
 ### A deeply nested value stored by an older release can error on read
 

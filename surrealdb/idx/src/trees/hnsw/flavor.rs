@@ -359,6 +359,15 @@ impl HnswFlavor {
 			}
 		}
 	}
+	/// Retrieves the vectors of several element IDs, in input order.
+	pub(super) async fn get_vectors(
+		&self,
+		tx: &Transaction,
+		e_ids: &[ElementId],
+	) -> Result<Vec<Option<SharedVector>>> {
+		with_hnsw!(self, h => h.get_vectors(tx, e_ids).await)
+	}
+
 	/// Retrieves the vector associated with the given element ID.
 	pub(super) async fn get_vector(
 		&self,

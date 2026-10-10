@@ -653,16 +653,16 @@ pub(crate) enum Plan {
 	KnnScan {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		vector: Vec<crate::val::Number>,
+		/// The query vector, resolved once when the statement is planned.
+		vector: std::sync::Arc<[crate::val::Number]>,
 		k: u32,
 		ef: u32,
 		/// What the search gates each candidate on, where the statement's
 		/// conditions or the table's permission narrow the candidates.
 		filter: Option<KnnFilter>,
 		/// Whether nothing above the scan reads more of a row than its `id`
-		/// and every field of the table reads as stored, so a read at the
-		/// current version builds its rows from the ids the search returned
-		/// and reads no record.
+		/// and `id` reads as stored, so a read at the current version builds
+		/// its rows from the ids the search returned and reads no record.
 		ids_only: bool,
 		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
 	},

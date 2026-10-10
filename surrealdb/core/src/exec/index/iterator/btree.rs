@@ -1384,7 +1384,7 @@ mod tests {
 			},
 		};
 		let knn = BTreeAccess::Knn {
-			vector: Vec::new(),
+			vector: Arc::from([]),
 			k: 1,
 			ef: 1,
 		};
@@ -1644,7 +1644,7 @@ mod tests {
 		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &full_text).is_err());
 
 		let knn = BTreeAccess::Knn {
-			vector: vec![Number::Int(1)],
+			vector: vec![Number::Int(1)].into(),
 			k: 3,
 			ef: 10,
 		};

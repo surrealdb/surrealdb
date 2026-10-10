@@ -2598,16 +2598,21 @@ pub(super) fn run_row<'r>(
 							)
 						})?,
 				};
-				let ranked =
-					crate::exec::operators::extract_vector(&value, &program.paths[*path as usize])
-						.and_then(|record| {
-							crate::idx::kernels::vector::distance_compute(
-								&rank.distance,
-								&record,
-								query,
-							)
-							.ok()
-						});
+				// A row ranks only with a vector of the query's dimension:
+				// `extract_vector` refuses a longer one, and a shorter one is
+				// refused here, before a distance could only fail on it.
+				let mut record = Vec::with_capacity(query.len());
+				let ranked = (crate::exec::operators::extract_vector(
+					&value,
+					&program.paths[*path as usize],
+					&mut record,
+					query.len(),
+				) && record.len() == query.len())
+				.then(|| {
+					crate::idx::kernels::vector::distance_compute(&rank.distance, &record, query)
+						.ok()
+				})
+				.flatten();
 				match ranked {
 					Some(distance) => {
 						regs[*dst as usize] =

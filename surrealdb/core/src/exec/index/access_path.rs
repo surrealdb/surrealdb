@@ -7,7 +7,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use super::IndexCandidate;
-use crate::catalog::{FieldDefinition, Index, IndexDefinition};
+use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition};
 use crate::expr::logical::LogicalExpr;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
@@ -122,7 +122,7 @@ pub enum AccessPath {
 	KnnSearch {
 		index_ref: IndexRef,
 		/// The query vector to search for nearest neighbors of
-		vector: Vec<Number>,
+		vector: Arc<[Number]>,
 		/// Number of nearest neighbors to return
 		k: u32,
 		/// ANN search expansion factor
@@ -313,7 +313,7 @@ pub enum BTreeAccess {
 	/// KNN vector search access via ANN index.
 	Knn {
 		/// The query vector
-		vector: Vec<Number>,
+		vector: Arc<[Number]>,
 		/// Number of nearest neighbors
 		k: u32,
 		/// ANN search expansion factor
@@ -1177,27 +1177,42 @@ fn view_source_path(
 	}
 }
 
-/// The kind declared for the value at `col`: the kind of the field named
-/// `col`, or, when only an ancestor is declared, the kind its object literal,
-/// tuple or collection (`.*`) type gives the remaining path. `None` when no
-/// declaration reaches it.
+/// The kind declared for the value at `col`, found by walking from the
+/// column up through its ancestors' definitions.
+///
+/// The nearest definition that declares a kind settles it — directly for the
+/// column itself, or for the rest of the path through its object literal,
+/// tuple or collection (`.*`) type — since a field's own type is applied after
+/// its parent's. An untyped definition passed on the way leaves the
+/// ancestor's type in force, unless it produces a value of its own (`VALUE`,
+/// `DEFAULT` or `COMPUTED`): that value replaces what the ancestor's type
+/// coerced and is checked against nothing, so the kind is unknown. `None` when
+/// no declaration settles it.
 fn declared_kind<'a>(col: &[Part], fields: &'a [FieldDefinition]) -> Option<&'a Kind> {
-	if let Some(fd) = fields.iter().find(|fd| fd.name.0.as_slice() == col) {
-		return fd.field_kind.as_ref();
+	let produces_value = |fd: &FieldDefinition| {
+		fd.value.is_some() || fd.computed.is_some() || !matches!(fd.default, DefineDefault::None)
+	};
+	for len in (1..=col.len()).rev() {
+		let Some(fd) = fields.iter().find(|fd| fd.name.0.as_slice() == &col[..len]) else {
+			continue;
+		};
+		if let Some(kind) = fd.field_kind.as_ref() {
+			return col[len..].iter().try_fold(kind, |kind, part| match part {
+				Part::Field(name) => object_literal_field(kind, name.as_str()),
+				Part::First => tuple_element(kind, |_| Some(0)),
+				Part::Last => tuple_element(kind, |len| len.checked_sub(1)),
+				Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::Integer(i))) => {
+					tuple_element(kind, |_| usize::try_from(*i).ok())
+				}
+				Part::All => collection_element(kind),
+				_ => None,
+			});
+		}
+		if produces_value(fd) {
+			return None;
+		}
 	}
-	(1..col.len()).rev().find_map(|n| {
-		let fd = fields.iter().find(|fd| fd.name.0.as_slice() == &col[..n])?;
-		col[n..].iter().try_fold(fd.field_kind.as_ref()?, |kind, part| match part {
-			Part::Field(name) => object_literal_field(kind, name.as_str()),
-			Part::First => tuple_element(kind, |_| Some(0)),
-			Part::Last => tuple_element(kind, |len| len.checked_sub(1)),
-			Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::Integer(i))) => {
-				tuple_element(kind, |_| usize::try_from(*i).ok())
-			}
-			Part::All => collection_element(kind),
-			_ => None,
-		})
-	})
+	None
 }
 
 /// The element kind of an array or set type (or one made optional), which
@@ -1690,7 +1705,7 @@ mod tests {
 				},
 				AccessPath::KnnSearch {
 					index_ref: ft,
-					vector: vec![Number::Int(1)],
+					vector: vec![Number::Int(1)].into(),
 					k: 3,
 					ef: 10,
 					prefilter: None,
@@ -1771,7 +1786,7 @@ mod tests {
 			);
 			assert_eq!(
 				BTreeAccess::Knn {
-					vector: vec![Number::Int(1), Number::Int(2)],
+					vector: vec![Number::Int(1), Number::Int(2)].into(),
 					k: 4,
 					ef: 40,
 				}
@@ -1924,7 +1939,7 @@ mod tests {
 				ft_defs,
 				0,
 				BTreeAccess::Knn {
-					vector: vec![Number::Int(1)],
+					vector: vec![Number::Int(1)].into(),
 					k: 3,
 					ef: 10,
 				},
@@ -2095,7 +2110,7 @@ mod tests {
 			assert_eq!(residual("a = 5", &ft, &["a"]), Some("a = 5".to_owned()));
 
 			let knn = BTreeAccess::Knn {
-				vector: vec![Number::Int(1)],
+				vector: vec![Number::Int(1)].into(),
 				k: 3,
 				ef: 10,
 			};
@@ -2234,6 +2249,48 @@ mod tests {
 				field("metadata.tags", Some(Kind::String)),
 			];
 			assert_eq!(planned(&["metadata.tags"], Index::Idx, &both), ["metadata.tags"]);
+			// A definition of the column that declares no kind leaves the
+			// ancestor's literal in force.
+			let untyped_child =
+				[field("metadata", Some(object(array_of_strings()))), field("metadata.tags", None)];
+			assert_eq!(
+				planned(&["metadata.tags"], Index::Idx, &untyped_child),
+				["metadata.tags.*"]
+			);
+			// An untyped definition that produces its own value replaces what
+			// the ancestor's type coerced, unchecked: the kind is unknown.
+			let value = |fd: FieldDefinition| FieldDefinition {
+				value: Some(crate::syn::expr("'scalar'").expect("expr")),
+				..fd
+			};
+			let default = |fd: FieldDefinition| FieldDefinition {
+				default: DefineDefault::Set(crate::syn::expr("'scalar'").expect("expr")),
+				..fd
+			};
+			for produce in [value, default] {
+				let child = [
+					field("metadata", Some(object(array_of_strings()))),
+					produce(field("metadata.tags", None)),
+				];
+				assert_eq!(planned(&["metadata.tags"], Index::Idx, &child), ["metadata.tags"]);
+			}
+			// The same holds for one on the way between the ancestor and the
+			// column.
+			let nested = Kind::Literal(KindLiteral::Object(
+				[(Strand::from("inner"), object(array_of_strings()))].into_iter().collect(),
+			));
+			let between = [field("metadata", Some(nested)), value(field("metadata.inner", None))];
+			assert_eq!(
+				planned(&["metadata.inner.tags"], Index::Idx, &between),
+				["metadata.inner.tags"]
+			);
+			// The nearest typed definition settles it, even when its type is
+			// not a literal that reaches the column.
+			let nearer = [
+				field("metadata", Some(object(array_of_strings()))),
+				field("metadata.tags", Some(Kind::Any)),
+			];
+			assert_eq!(planned(&["metadata.tags"], Index::Idx, &nearer), ["metadata.tags"]);
 		}
 
 		#[test]

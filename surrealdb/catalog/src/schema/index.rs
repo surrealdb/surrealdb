@@ -75,7 +75,7 @@ impl From<u32> for IndexId {
 /// Bump when any index kind's persisted layout changes. Existing indexes keep
 /// their original version and are read through their legacy doc-ID layout until
 /// explicitly rebuilt.
-pub const INDEX_FORMAT_VERSION: u16 = 2;
+pub const INDEX_FORMAT_VERSION: u16 = 3;
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
 /// the shared table-level doc-ID space.
@@ -87,6 +87,13 @@ pub const DOC_IDS_FORMAT_VERSION: u16 = 1;
 /// this version only gates eligibility for doc-ID-based plans such as roaring
 /// bitmap candidate fusion.
 pub const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
+
+/// Format version at which HNSW and DiskANN indexes keep a doc-ID → elements
+/// mapping (`!hk` / `!dk`) alongside their vector → elements + doc-IDs mapping,
+/// so an allow-list of doc-IDs can be scored from the index's own vectors.
+/// Older vector indexes stay fully readable; they lack the mapping, so exact
+/// allow-list scoring reads the records instead until the index is rebuilt.
+pub const VECTOR_DOC_ELEMENTS_FORMAT_VERSION: u16 = 3;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -709,6 +716,12 @@ impl IndexDefinition {
 /// keep their private per-index layouts until explicitly rebuilt.
 pub fn uses_shared_doc_ids(format_version: u16) -> bool {
 	format_version >= DOC_IDS_FORMAT_VERSION
+}
+
+/// Whether a vector index with the given stored format version keeps the
+/// doc-ID → elements mapping. See [`VECTOR_DOC_ELEMENTS_FORMAT_VERSION`].
+pub fn keeps_vector_doc_elements(format_version: u16) -> bool {
+	format_version >= VECTOR_DOC_ELEMENTS_FORMAT_VERSION
 }
 
 impl FromStored for IndexDefinition {

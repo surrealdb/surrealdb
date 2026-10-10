@@ -1137,13 +1137,21 @@ pub(super) async fn run_pipelines(
 				// them finds them.
 				if let Some(slot) = spec.knn_slot {
 					let published = state.knn_context(slot);
-					for (keys, row) in &rows {
-						if let (Some(Value::Number(distance)), Value::Object(object)) =
-							(keys.first(), row) && let Some(Value::RecordId(rid)) = object.get("id")
-						{
-							published.insert(rid.clone(), *distance).await;
-						}
-					}
+					published
+						.insert_all(rows.iter().filter_map(|(keys, row)| {
+							match (keys.first(), row) {
+								(Some(Value::Number(distance)), Value::Object(object)) => {
+									match object.get("id") {
+										Some(Value::RecordId(rid)) => {
+											Some((rid.clone(), *distance))
+										}
+										_ => None,
+									}
+								}
+								_ => None,
+							}
+						}))
+						.await;
 				}
 				out_of_line(|| run_rows(program, pipeline, rows, state, ctx, yielder, flush_at))
 					.await?;
@@ -1774,10 +1782,14 @@ pub(super) async fn run_storage_source(
 			// The distances are published before any record is yielded, so
 			// a projection reading them finds them.
 			if let Some(slot) = slot {
-				let published = state.knn_context(*slot);
-				for (rid, distance) in &candidates {
-					published.insert(rid.clone(), crate::val::Number::Float(*distance)).await;
-				}
+				state
+					.knn_context(*slot)
+					.insert_all(
+						candidates.iter().map(|(rid, distance)| {
+							(rid.clone(), crate::val::Number::Float(*distance))
+						}),
+					)
+					.await;
 			}
 			let rids: Vec<crate::val::RecordId> =
 				candidates.into_iter().map(|(rid, _distance)| rid).collect();
@@ -1786,8 +1798,11 @@ pub(super) async fn run_storage_source(
 			// a row nothing reads more of than its id is built from the id.
 			if *ids_only && version.is_none() {
 				for rid in rids {
-					let mut row = crate::val::Object::default();
-					row.insert("id".to_string(), Value::RecordId(rid));
+					// A single entry is sorted by construction.
+					let row = crate::val::Object(crate::VecMap::from_sorted_vec_unchecked(vec![(
+						"id".into(),
+						Value::RecordId(rid),
+					)]));
 					if rows
 						.row(program, pipeline, Value::Object(row), state, ctx, yielder, flush_at)
 						.await?

@@ -3,6 +3,7 @@
 //! The [`IndexAnalyzer`] examines query conditions and ORDER BY clauses to find
 //! indexes that can accelerate the query.
 
+use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -26,6 +27,9 @@ pub struct IndexAnalyzer<'a> {
 	pub indexes: Arc<[IndexDefinition]>,
 	/// Optional WITH INDEX/NOINDEX hints
 	pub with_hints: Option<&'a With>,
+	/// The values of the parameters a KNN operator names as its query vector
+	/// (see [`KnnQueryVectors`]).
+	knn_query_vectors: Option<&'a KnnQueryVectors>,
 	/// Per index of `indexes`, whether a containment leaf may not seek each
 	/// column; a column past the end of its index's flags may be sought.
 	/// `None` withholds nothing.
@@ -36,12 +40,19 @@ pub struct IndexAnalyzer<'a> {
 	scalar: Option<Arc<[super::access_path::ColumnFlags]>>,
 }
 
+/// The query vectors of the KNN operators whose right operand is a parameter,
+/// by parameter name. Binding leaves such a parameter in place instead of
+/// substituting a literal node per component; the planner resolves each one
+/// once, and a KNN operator naming one reads its vector here.
+pub type KnnQueryVectors = HashMap<String, Arc<[Number]>>;
+
 impl<'a> IndexAnalyzer<'a> {
 	/// Create a new analyzer for the given table and indexes.
 	pub fn new(indexes: Arc<[IndexDefinition]>, with_hints: Option<&'a With>) -> Self {
 		Self {
 			indexes,
 			with_hints,
+			knn_query_vectors: None,
 			no_containment: None,
 			scalar: None,
 		}
@@ -87,6 +98,13 @@ impl<'a> IndexAnalyzer<'a> {
 			.is_some_and(|flags| flags.get(idx).and_then(|f| f.get(col)).copied().unwrap_or(false));
 		!withheld
 			&& self.indexes[idx].cols.get(col).is_some_and(|c| path_matches_containment(path, c))
+	}
+
+	/// The analyzer reading the query vector of a KNN operator whose right
+	/// operand is a parameter from `vectors`.
+	pub fn with_knn_query_vectors(mut self, vectors: &'a KnnQueryVectors) -> Self {
+		self.knn_query_vectors = Some(vectors);
+		self
 	}
 
 	/// Analyze conditions and ORDER BY to find candidate access paths.
@@ -2125,23 +2143,29 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		let path = left;
 
-		// Extract numeric vector from right side
-		let vector = match try_literal_to_value(right) {
-			Some(Value::Array(arr)) => {
-				let nums: Vec<Number> = arr
-					.iter()
-					.filter_map(|v| match v {
-						Value::Number(n) => Some(*n),
-						_ => None,
-					})
-					.collect();
-				if nums.len() != arr.len() {
-					// Not all elements are numbers
-					return;
+		// Extract numeric vector from right side: a parameter's resolved value,
+		// or a literal.
+		let vector = match right {
+			LogicalExpr::Param(param) => {
+				match self.knn_query_vectors.and_then(|v| v.get(param.as_str())) {
+					Some(vector) => Arc::clone(vector),
+					None => return,
 				}
-				nums
 			}
-			_ => return,
+			right => match try_literal_to_value(right) {
+				Some(Value::Array(arr)) => {
+					let mut nums: Vec<Number> = Vec::with_capacity(arr.len());
+					for v in arr.iter() {
+						match v {
+							Value::Number(n) => nums.push(*n),
+							// Not every element is a number.
+							_ => return,
+						}
+					}
+					Arc::from(nums)
+				}
+				_ => return,
+			},
 		};
 
 		// Find ANN indexes that match this path
@@ -2177,7 +2201,7 @@ impl<'a> IndexAnalyzer<'a> {
 				candidates.push(IndexCandidate::new(
 					index_ref,
 					BTreeAccess::Knn {
-						vector: vector.clone(),
+						vector: Arc::clone(&vector),
 						k,
 						ef,
 					},
@@ -2427,7 +2451,7 @@ impl IndexCandidate {
 				ef,
 			} => AccessPath::KnnSearch {
 				index_ref: self.index_ref.clone(),
-				vector: vector.clone(),
+				vector: Arc::clone(vector),
 				k: *k,
 				ef: *ef,
 				// The prefilter is a plan-level concern; the SELECT planner

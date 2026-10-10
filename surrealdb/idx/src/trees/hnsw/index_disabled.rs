@@ -112,4 +112,15 @@ impl HnswIndex {
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		match self.0 {}
 	}
+
+	/// Unreachable, as no value of this type exists.
+	pub async fn exact_knn_search(
+		&self,
+		_env: &dyn IndexEnv,
+		_pt: &[Number],
+		_k: usize,
+		_allow_list: &RoaringTreemap,
+	) -> Result<Option<VecDeque<KnnIteratorResult>>> {
+		match self.0 {}
+	}
 }

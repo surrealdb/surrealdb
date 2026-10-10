@@ -2,7 +2,7 @@
 [env]
 
 [test]
-reason = "The plans of knn_index_record_id_rows. `records: not read` on the KnnScan (EXPLAIN ANALYZE) says its rows were built from the record ids the search returned: only when nothing reads more of a row than its id. A projected field, a COMPUTED field on the table, or a field SELECT permission on it — even one that does not restrict the caller — keeps the records read, and a condition the search filters candidates with reads them inside the search."
+reason = "The plans of knn_index_record_id_rows. `records: not read` on the KnnScan (EXPLAIN ANALYZE) says its rows were built from the record ids the search returned: only when nothing reads more of a row than its id. A projected field keeps the records read, and so does a COMPUTED field or a field SELECT permission on `id`, which every row built from a record id holds, `count()` included; one on a field the rows do not need does not. A condition the search filters candidates with reads them inside the search."
 
 [[test.results]]
 value = "NONE"
@@ -55,7 +55,31 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 3}
-    KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2] {rows: 3}
+    KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2, records: not read] {rows: 3}
+
+Total rows: 3''''
+
+[[test.results]]
+value = '''
+"SelectProject [ctx: Db] [projections: id, label] {rows: 3}
+    ProjectLayer [ctx: Db] [columns: label = 'c' + <string> n : string @computed] {rows: 3}
+        KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2] {rows: 3}
+
+Total rows: 3"'''
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: id] {rows: 3}
+    KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2, records: not read] {rows: 3}
 
 Total rows: 3''''
 
@@ -75,6 +99,13 @@ value = '''
 
 Total rows: 3''''
 
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+        KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2] {rows: 1}
+
+Total rows: 1''''
 */
 
 DEFINE INDEX hn ON pts FIELDS point HNSW DIMENSION 2;
@@ -95,6 +126,7 @@ FOR $i IN 0..6 {
 	CREATE type::record('cmp', $i) SET point = [<float> $i, 0f], n = $i;
 };
 EXPLAIN ANALYZE SELECT id FROM cmp WHERE point <|3,40|> $q;
+EXPLAIN ANALYZE SELECT id, label FROM cmp WHERE point <|3,40|> $q;
 
 DEFINE INDEX hn ON prm FIELDS point HNSW DIMENSION 2;
 DEFINE FIELD secret ON prm PERMISSIONS FOR select NONE;
@@ -102,3 +134,12 @@ FOR $i IN 0..6 {
 	CREATE type::record('prm', $i) SET point = [<float> $i, 0f], secret = $i;
 };
 EXPLAIN ANALYZE SELECT id FROM prm WHERE point <|3,40|> $q;
+
+DEFINE INDEX hn ON rid FIELDS point HNSW DIMENSION 2;
+DEFINE FIELD id ON rid PERMISSIONS FOR select NONE;
+FOR $i IN 0..6 {
+	CREATE type::record('rid', $i) SET point = [<float> $i, 0f];
+};
+EXPLAIN ANALYZE SELECT id FROM rid WHERE point <|3,40|> $q;
+-- `count()` reads no field, but its rows are built holding `id`.
+EXPLAIN ANALYZE SELECT count() FROM rid WHERE point <|3,40|> $q GROUP ALL;

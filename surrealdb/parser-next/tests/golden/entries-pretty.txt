@@ -695,9 +695,9 @@ f781fc0d6cdce169 language-tests/tests/language/functions/record/exists_undefined
 98517aa1db251a0f language-tests/tests/language/functions/record/table.surql
 a9e138d7d583d4e2 language-tests/tests/language/functions/schema/table/exists.surql
 a9c2ddd0428bebe6 language-tests/tests/language/functions/search/search-linear-errors.surql
-60f7b59fdb92dcb3 language-tests/tests/language/functions/search/search-linear.surql
+f19223e0c43cc37b language-tests/tests/language/functions/search/search-linear.surql
 5bd27fb93a107e88 language-tests/tests/language/functions/search/search-rrf-errors.surql
-488140f45ca925a7 language-tests/tests/language/functions/search/search-rrf.surql
+8f0e9234fa7af1d9 language-tests/tests/language/functions/search/search-rrf.surql
 a6f59431cbec05fb language-tests/tests/language/functions/sequence/nextval.surql
 097e4c32f3e9d4d0 language-tests/tests/language/functions/session.surql
 6c3b18955ed25704 language-tests/tests/language/functions/set/add.surql
@@ -954,7 +954,9 @@ b646f84eb77373fb language-tests/tests/language/indexes/full_text/order_by_fullte
 36a483e5372de99f language-tests/tests/language/indexes/fulltext_reads_a_transactions_own_changes.surql
 8d815d9006409d45 language-tests/tests/language/indexes/in_right_position_not_stripped.surql
 a0b78a14df5c6ff3 language-tests/tests/language/indexes/is_not_null_uses_index.surql
+9aafd82662f285c7 language-tests/tests/language/indexes/knn/bruteforce_knn_incomparable_vectors.surql
 22922104093c2126 language-tests/tests/language/indexes/knn/bruteforce_knn_multisource_filter_new_executor.surql
+f6f599ef27e02d7c language-tests/tests/language/indexes/knn/bruteforce_knn_nested_vector_arrays.surql
 fdc2398e816a5992 language-tests/tests/language/indexes/knn/bruteforce_knn_new_executor.surql
 5013fd372881fe93 language-tests/tests/language/indexes/knn/bruteforce_knn_runtime_vector_layers.surql
 6e6dc3909aac5ab3 language-tests/tests/language/indexes/knn/bruteforce_knn_with_filter_new_executor.surql
@@ -965,8 +967,9 @@ ca03e574f616678c language-tests/tests/language/indexes/knn/hnsw_knn_new_executor
 91e62313fefafd74 language-tests/tests/language/indexes/knn/hnsw_knn_with_condition.surql
 07a72d7c3cfa3dd9 language-tests/tests/language/indexes/knn/hnsw_knn_with_condition_new_executor.surql
 82340fb9accb4897 language-tests/tests/language/indexes/knn/knn_bruteforce_nonliteral_vector.surql
+6b4f787abefada23 language-tests/tests/language/indexes/knn/knn_index_query_vector_bound_per_call.surql
 2be28f959a448fd1 language-tests/tests/language/indexes/knn/knn_index_record_id_rows.surql
-322e0762133920dd language-tests/tests/language/indexes/knn/knn_index_record_id_rows_plan.surql
+a9fb561e323165bf language-tests/tests/language/indexes/knn/knn_index_record_id_rows_plan.surql
 c165c597a9760625 language-tests/tests/language/indexes/knn/knn_index_record_id_rows_version.surql
 7d96adedcb8b5212 language-tests/tests/language/indexes/knn/knn_nested_or_not.surql
 3e17c919c36277e1 language-tests/tests/language/indexes/knn/knn_prefilter_differential.surql
@@ -978,6 +981,7 @@ d90a521d1845af8f language-tests/tests/language/indexes/knn/knn_prefilter_hybrid_
 66e96427319b295e language-tests/tests/language/indexes/knn/knn_prefilter_plan_shapes.surql
 d1667ff06f5cc8ec language-tests/tests/language/indexes/knn/knn_prefilter_tier_graph.surql
 2f1644b703412b24 language-tests/tests/language/indexes/knn/knn_prefilter_version.surql
+22fc05ac4097500e language-tests/tests/language/indexes/knn/knn_query_vector_param.surql
 a44be6d09b4f6932 language-tests/tests/language/indexes/maintenance_by_kind.surql
 b6ac9f6d89ec9fd0 language-tests/tests/language/indexes/or_with_empty_branch.surql
 7de961ea090e23f4 language-tests/tests/language/indexes/order_by_past_index_keeps_sort.surql
@@ -2259,8 +2263,8 @@ dd9f7b2e9b9ddffa language-tests/tests/reproductions/7460_set_containment_reads_t
 900d48cd00f9ca57 language-tests/tests/reproductions/7537_matches_auth_operand.surql
 5d3fc5f0b96d0d8b language-tests/tests/reproductions/7537_matches_auth_operand_import.surql
 170e037947ade779 language-tests/tests/reproductions/7537_matches_non_constant_operand.surql
-15bcb883673613e8 language-tests/tests/reproductions/7539_plain_index_on_array_field_keeps_whole_value_semantics.surql
-b11727494bc6cf30 language-tests/tests/reproductions/7539_plain_index_on_array_field_keeps_whole_value_semantics_plan.surql
+5abdd17785f9de99 language-tests/tests/reproductions/7539_plain_index_on_array_field_keeps_whole_value_semantics.surql
+095d401943e611e6 language-tests/tests/reproductions/7539_plain_index_on_array_field_keeps_whole_value_semantics_plan.surql
 ccb8c084edafefc9 language-tests/tests/reproductions/7539_restricted_array_elements_stay_out_of_index_answers.surql
 1ff89943cd189c75 language-tests/tests/reproductions/7539_restricted_array_elements_stay_out_of_index_answers_import.surql
 176f41c7d4986084 language-tests/tests/reproductions/754_committed_index_retirement.surql
@@ -3090,6 +3094,9 @@ a65617a64fd32f02 language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound
 ba07d46cc8277feb language-tests/tests/upgrade/define/3.01.00_index_hnsw_compound_id_rebuild.surql
 e340f6a1748387c5 language-tests/tests/upgrade/define/3.03.00_function_eval.surql
 0fecb5ca9da2ebd8 language-tests/tests/upgrade/define/3.03.00_function_eval_import.surql
+8ac0c2555720453f language-tests/tests/upgrade/define/3.03.00_index_vector_prefilter.surql
+ec2cc20d68aba604 language-tests/tests/upgrade/define/3.03.00_index_vector_prefilter_current.surql
+2988392753d38c77 language-tests/tests/upgrade/define/3.03.00_index_vector_prefilter_import.surql
 5597b63fda548255 language-tests/tests/upgrade/value/3.00.00_geometry.surql
 04aa746e20aee659 language-tests/tests/upgrade/value/3.00.00_geometry_import.surql
 4c41a525e4440783 language-tests/tests/upgrade/value/3.00.00_none_null_array.surql

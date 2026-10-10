@@ -185,7 +185,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: point <|2,40|> [22f, 2f]]
+    Filter [ctx: Db] [predicate: point <|2,40|> $q]
         TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 
@@ -238,7 +238,7 @@ value = "[pt:2, pt:3]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: point <|2,40|> [22f, 2f]]
+    Filter [ctx: Db] [predicate: point <|2,40|> $q]
         TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 
@@ -278,7 +278,7 @@ value = "[{ grp: 'a', id: pt:5, point: [21f, 2f] }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: point <|2,40|> [22f, 2f]]
+    Filter [ctx: Db] [predicate: point <|2,40|> $q]
         TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 

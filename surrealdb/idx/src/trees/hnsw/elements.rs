@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use ahash::HashMap;
+use anyhow::{Result, ensure};
 use surrealdb_datastore::Transaction;
 
 use crate::IndexKeyBase;
@@ -259,6 +260,92 @@ impl HnswElements {
 		}
 	}
 
+	/// [`Self::get_vector`] for several element IDs, in input order, reading
+	/// every distinct cache miss from the store once, in one multi-get.
+	pub(super) async fn get_vectors(
+		&self,
+		tx: &Transaction,
+		e_ids: &[ElementId],
+	) -> Result<Vec<Option<SharedVector>>> {
+		let mut vectors = Vec::with_capacity(e_ids.len());
+		// Each distinct missing element, at the first position asking for it.
+		let mut misses: Vec<(ElementId, usize)> = Vec::new();
+		// Each later position asking for an element already known missing,
+		// with that element's index in `misses`: it skips the cache lookup.
+		// Repeated cache hits are deliberately not tracked: the graph search,
+		// the hottest caller, passes ids its visited set has already made
+		// distinct, so recording every element to spare a repeated hit its one
+		// cache lookup would add a map insert per element there and save
+		// nothing. Only a repeated miss, which would cost a store read, is
+		// worth remembering.
+		let mut repeats: Vec<(usize, usize)> = Vec::new();
+		let mut miss_slot: HashMap<ElementId, usize> = HashMap::default();
+		for (pos, e_id) in e_ids.iter().enumerate() {
+			// With no miss yet, as on a warm graph search, nothing is hashed.
+			if !miss_slot.is_empty()
+				&& let Some(&slot) = miss_slot.get(e_id)
+			{
+				repeats.push((slot, pos));
+				vectors.push(None);
+				continue;
+			}
+			let hit = match self.overlay.as_ref().and_then(|o| o.get(*e_id)) {
+				Some(v) => Some(v.clone()),
+				None => {
+					self.vector_cache
+						.get(
+							self.ikb.ns(),
+							self.ikb.db(),
+							self.table_id,
+							self.index_id,
+							self.format_version,
+							*e_id,
+						)
+						.await
+				}
+			};
+			if hit.is_none() {
+				miss_slot.insert(*e_id, misses.len());
+				misses.push((*e_id, pos));
+			}
+			vectors.push(hit);
+		}
+		if misses.is_empty() {
+			return Ok(vectors);
+		}
+		let keys = misses.iter().map(|(e_id, _)| self.ikb.new_he_key(*e_id)).collect();
+		let fetched: Vec<Option<SerializedVector>> = tx.get_many_key(keys, None).await?;
+		// A short answer would leave the trailing misses unread, silently.
+		ensure!(
+			fetched.len() == misses.len(),
+			"{} vectors read for {} elements",
+			fetched.len(),
+			misses.len()
+		);
+		for ((e_id, pos), vec) in misses.iter().copied().zip(fetched) {
+			if let Some(vec) = vec {
+				let vec: SharedVector = Vector::from(vec).into();
+				self.vector_cache
+					.insert(
+						self.ikb.ns(),
+						self.ikb.db(),
+						self.table_id,
+						self.index_id,
+						self.format_version,
+						e_id,
+						vec.clone(),
+					)
+					.await;
+				vectors[pos] = Some(vec);
+			}
+		}
+		for (slot, pos) in repeats {
+			let fetched = vectors[misses[slot].1].clone();
+			vectors[pos] = fetched;
+		}
+		Ok(vectors)
+	}
+
 	/// Computes the distance between two vectors using the configured distance metric.
 	pub(super) fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
 		self.dist.calculate_shared(a, b)
@@ -288,6 +375,79 @@ impl HnswElements {
 			.await;
 		let key = self.ikb.new_he_key(e_id);
 		tx.del_key(&key).await?;
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use anyhow::Result;
+	use ndarray::Array1;
+	use surrealdb_kvs::TransactionType;
+
+	use super::{ElementOverlay, HnswElements};
+	use crate::IndexKeyBase;
+	use crate::catalog::{DatabaseId, Distance, IndexId, NamespaceId, TableId};
+	use crate::test_env::TestIndexStore;
+	use crate::trees::vector::{SerializedVector, SharedVector, Vector};
+
+	fn vector(c: f32) -> Vector {
+		Vector::F32(Array1::from_vec(vec![c, c + 1.0]))
+	}
+
+	/// `get_vectors` answers each position as `get_vector` would, in input
+	/// order: a cached element, an element only in the store (read once,
+	/// however often it is asked for, and cached after), an element the index
+	/// does not hold, and an element a staged batch's overlay supplies.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn get_vectors_answers_every_position_in_order() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let mut elements = HnswElements::new(
+			TableId(3),
+			ikb.clone(),
+			Distance::Euclidean,
+			ds.index_stores().vector_cache().clone(),
+			crate::catalog::VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		);
+		let (cached, stored) = (vector(1.0), vector(2.0));
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			let tx = ctx.tx();
+			// Element 1 through the cache; element 2 only into the store.
+			elements.insert(&tx, 1, cached.clone(), &SerializedVector::from(&cached)).await?;
+			tx.set_key(&ikb.new_he_key(2), &SerializedVector::from(&stored)).await?;
+			tx.commit().await?;
+		}
+		let expect = |v: &Vector| Some(SharedVector::from(v.clone()));
+		let ids = [2, 1, 2, 9, 1, 2];
+		let want = [
+			expect(&stored),
+			expect(&cached),
+			expect(&stored),
+			None,
+			expect(&cached),
+			expect(&stored),
+		];
+		for round in ["store read", "cached"] {
+			let ctx = ds.env(TransactionType::Read).await;
+			let got = elements.get_vectors(&ctx.tx(), &ids).await?;
+			assert_eq!(got, want, "{round}");
+			for (id, v) in ids.iter().zip(&got) {
+				assert_eq!(&elements.get_vector(&ctx.tx(), id).await?, v, "{round}: element {id}");
+			}
+			ctx.tx().cancel().await?;
+		}
+		// A staged batch's elements answer from its overlay, ahead of the store.
+		let batch = vector(10.0);
+		let view =
+			elements.view(Some(Arc::new(ElementOverlay::new(10, vec![batch.clone().into()]))));
+		let ctx = ds.env(TransactionType::Read).await;
+		let got = view.get_vectors(&ctx.tx(), &[10, 2, 10]).await?;
+		assert_eq!(got, [expect(&batch), expect(&stored), expect(&batch)]);
+		ctx.tx().cancel().await?;
 		Ok(())
 	}
 }

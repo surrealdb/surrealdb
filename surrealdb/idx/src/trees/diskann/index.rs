@@ -40,8 +40,8 @@ use surrealdb_kvs::api::ValsBatch;
 use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
-use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
-use crate::docids::{LegacyVectorDocIds, TableDocIds};
+use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType, keeps_vector_doc_elements};
+use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::{IndexEnv, expect_not_done};
 use crate::key::schema::{
 	DiskannRecordPendingKey, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
@@ -51,25 +51,25 @@ use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, TypedRange};
 use crate::trees::diskann::cache::CacheView;
 use crate::trees::diskann::cache::{Continuity, DiskAnnCache};
 use crate::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
-use crate::trees::diskann::filter::DiskAnnTruthyDocumentFilter;
+use crate::trees::diskann::filter::{DiskAnnTruthyDocumentFilter, FilterCache};
 use crate::trees::diskann::provider::{
 	DiskAnnProvider, DiskAnnProviderContext, DiskAnnSearchAccessor, DiskAnnStrategy,
 	DiskAnnVectorElement,
 };
 use crate::trees::diskann::{
-	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind,
+	DISKANN_PENDING_STATE_SHARDS, DiskAnnElement, DiskAnnPendingState, DiskAnnPendingStateKind,
 	DiskAnnRecordPendingUpdate, ElementId,
 };
 use crate::trees::hnsw::VectorId;
-use crate::trees::knn::{Ids64, KnnResultBuilder};
+use crate::trees::knn::{Ids64, KnnResultBuilder, OVERQUERY_CEILING_FACTOR};
 use crate::trees::pending::{
 	PendingBacklogReport, PendingScan, PendingScanStats, take_compacted_record_id,
 	take_pending_record_id,
 };
 use crate::trees::vector::{
-	DistanceExt as _, SerializedVector, Vector, serialized_vector_from_value,
+	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
 };
-use crate::trees::{KnnCondFilter, KnnIteratorResult};
+use crate::trees::{KnnCondFilter, KnnIteratorResult, doc_elements};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 use crate::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
@@ -86,13 +86,6 @@ use crate::{
 /// set on every query.
 const DISKANN_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
-
-/// Ceiling for the allow-list over-query retries in [`DiskAnnIndex::search_graph`],
-/// as a multiple of the initial (already ef-boosted) search list. The list
-/// doubles per retry, so the worst case is three extra graph searches —
-/// bounded work that converts "the top-`l` overall contained too few allow-list
-/// members" from a truncated result into a converging one.
-const ALLOWLIST_OVERQUERY_CEILING_FACTOR: usize = 8;
 
 /// Exact pending key/value observed by a DiskANN compaction read phase.
 ///
@@ -455,6 +448,16 @@ impl DiskAnnGraph {
 		})
 	}
 
+	/// Reads the stored elements (vector and tombstone) of `element_ids`, in input order, through
+	/// `context`'s view of the cache. A missing element is `None`.
+	pub(super) async fn read_elements(
+		&self,
+		context: &DiskAnnProviderContext,
+		element_ids: &[ElementId],
+	) -> Result<Vec<Option<Arc<DiskAnnElement>>>> {
+		self.index.provider().read_elements(context, element_ids).await
+	}
+
 	/// The provider context for a transaction that reads the graph, whose snapshot holds `!dg` at
 	/// `generation`. Taken, and used, under the graph lock.
 	pub(super) fn context(
@@ -785,8 +788,9 @@ enum DiskAnnQuery {
 
 /// Prepared typed query used by one DiskANN lookup.
 struct DiskAnnSearch {
-	/// Query vector in the shared SurrealDB representation, used for exact pending scoring.
-	pt: Vector,
+	/// Query vector in the shared SurrealDB representation, used for exact pending scoring. Shared
+	/// so its cosine norm is computed once per search.
+	pt: SharedVector,
 	/// Query vector converted to the type expected by the upstream DiskANN graph.
 	query: DiskAnnQuery,
 	/// Result limit.
@@ -806,7 +810,7 @@ impl DiskAnnSearch {
 		};
 		Ok(Self {
 			query,
-			pt,
+			pt: pt.into(),
 			k,
 			l,
 		})
@@ -837,8 +841,10 @@ struct DiskAnnGraphSearch<'a, 'b> {
 /// SELECT permission, then any residual condition) accepts it.
 ///
 /// Elements that cannot place in the top k are rejected without evaluating
-/// the filter: those farther than the k nearest admitted so far, or than
-/// the result builder already holds from the pending scan.
+/// the filter: those farther than the k nearest documents admitted so far, or
+/// than the result builder already holds from the pending scan. The bound
+/// counts documents, each at its nearest admitted element, as the result does,
+/// so a document reached through several elements holds one place in it.
 struct GraphCandidateClassifier<'s, 'a, 'b> {
 	/// Index the search runs on, for document lookup and distance conversion.
 	index: &'s DiskAnnIndex,
@@ -852,10 +858,9 @@ struct GraphCandidateClassifier<'s, 'a, 'b> {
 	allow_list: Option<&'s RoaringTreemap>,
 	/// The result builder, holding the pending scan's candidates.
 	builder: &'s KnnResultBuilder,
-	/// Result limit.
-	k: usize,
-	/// Public distances of the k nearest elements admitted so far.
-	admitted: Vec<f64>,
+	/// The k nearest documents admitted so far, each at the public distance of
+	/// its nearest admitted element.
+	admitted: KnnResultBuilder,
 	/// Document sets of the admitted elements, resolved during classification
 	/// and handed to the result admission so it resolves none again.
 	docs: HashMap<ElementId, Ids64>,
@@ -865,27 +870,13 @@ impl GraphCandidateClassifier<'_, '_, '_> {
 	/// Whether an element at public distance `distance` can still place in the
 	/// top k.
 	fn can_place(&self, distance: f64) -> bool {
-		if !self.builder.check_add(distance) {
-			return false;
-		}
-		self.admitted.len() < self.k
-			|| self.admitted.iter().copied().fold(f64::NEG_INFINITY, f64::max) >= distance
+		self.builder.check_add(distance) && self.admitted.check_add(distance)
 	}
 
-	/// Records an admission at public distance `distance`, keeping the k nearest.
-	fn record(&mut self, distance: f64) {
-		if self.admitted.len() < self.k {
-			self.admitted.push(distance);
-		} else if let Some((pos, _)) = self
-			.admitted
-			.iter()
-			.copied()
-			.enumerate()
-			.max_by(|a, b| a.1.total_cmp(&b.1))
-			.filter(|(_, max)| distance < *max)
-		{
-			self.admitted[pos] = distance;
-		}
+	/// Records the admission of `doc_id` at public distance `distance`, keeping
+	/// the k nearest documents.
+	fn record(&mut self, doc_id: u64, distance: f64) {
+		self.admitted.add_vector_id_result(distance, VectorId::DocId(doc_id));
 	}
 
 	/// Whether a document passes the gates that need no record.
@@ -939,7 +930,7 @@ impl ElementClassifier for GraphCandidateClassifier<'_, '_, '_> {
 				}
 				if self.filter.check_vector_id_truthy(self.ctx, VectorId::DocId(doc_id)).await? {
 					verdicts[pos] = true;
-					self.record(distance);
+					self.record(doc_id, distance);
 					self.docs.insert(id, docs.clone());
 					break;
 				}
@@ -1901,8 +1892,21 @@ impl DiskAnnIndex {
 			},
 		)
 		.await?;
-		let result = builder.collect();
 		let cache = filter.map(DiskAnnTruthyDocumentFilter::release);
+		self.resolve_results(&ctx, builder, cache.as_ref(), compaction_generation).await
+	}
+
+	/// Replaces the doc-IDs of a finished result with their record IDs,
+	/// nearest first, taking the records a truthy filter already fetched from
+	/// its `cache`. A doc-ID that no longer resolves takes no result slot.
+	async fn resolve_results(
+		&self,
+		ctx: &DiskAnnContext<'_>,
+		builder: KnnResultBuilder,
+		cache: Option<&FilterCache>,
+		compaction_generation: Option<u64>,
+	) -> Result<VecDeque<KnnIteratorResult>> {
+		let result = builder.collect();
 		let doc_ids: Vec<_> = result
 			.iter()
 			.filter_map(|(_, id)| match id {
@@ -1924,7 +1928,7 @@ impl DiskAnnIndex {
 		let mut res = VecDeque::with_capacity(result.len());
 		for (dist, id) in result {
 			let dist: f64 = dist.into();
-			let cached = cache.as_ref().and_then(|cache| cache.get(&id)).cloned();
+			let cached = cache.and_then(|cache| cache.get(&id)).cloned();
 			match id {
 				VectorId::DocId(_) => {
 					let rid = doc_rids.next().unwrap_or(None);
@@ -1947,6 +1951,129 @@ impl DiskAnnIndex {
 		Ok(res)
 	}
 
+	/// Exact k-nearest neighbours among the `allow_list` members, scored from
+	/// the vectors the index stores rather than from the records.
+	///
+	/// Every member is scored: pending (not yet compacted) vectors by the same
+	/// pending scan the graph search runs, and committed vectors through the
+	/// doc-ID → elements mapping, with every doc-ID the pending queue names
+	/// suppressed from the committed side. Distances use the index's public
+	/// distance semantics, as pending scoring does. No graph is walked and no
+	/// record is fetched; only the final `k` doc-IDs are resolved to record IDs.
+	/// A document indexing several vectors takes one slot, at its nearest
+	/// vector.
+	///
+	/// Candidates are admitted on allow-list membership alone, so the caller is
+	/// responsible for anything a record would have to be read for — a residual
+	/// condition, or a table permission evaluated per record.
+	///
+	/// Returns `None`, having read nothing, for an index stamped before the
+	/// mapping was kept (see [`crate::catalog::keeps_vector_doc_elements`]).
+	pub async fn exact_knn_search(
+		&self,
+		env: &dyn IndexEnv,
+		pt: &[Number],
+		k: usize,
+		allow_list: &RoaringTreemap,
+	) -> Result<Option<VecDeque<KnnIteratorResult>>> {
+		if !keeps_vector_doc_elements(self.format_version) {
+			return Ok(None);
+		}
+		let vector = Vector::try_from_vector(self.vector_type, pt)?;
+		vector.check_dimension(self.dim)?;
+		// No member can be offered: answered before any read, once the query
+		// vector has been checked.
+		if allow_list.is_empty() || k == 0 {
+			return Ok(Some(VecDeque::new()));
+		}
+		let tx = env.tx();
+		let pending_state = Self::read_pending_state(&tx, &self.ikb).await?;
+		let compaction_generation = read_compaction_generation(&tx, &self.ikb.new_dg_key()).await?;
+		let search = DiskAnnSearch::new(vector, k, k)?;
+		// The pending scan and the result resolution read only the transaction:
+		// the graph is held to build their context, and again only while member
+		// elements are read through it, so a long pending backlog does not keep
+		// a compaction waiting on the graph.
+		let ctx = self.new_diskann_context(
+			env,
+			self.graph.read().await.context(Arc::clone(&tx), compaction_generation),
+		);
+		let mut builder = KnnResultBuilder::new(k);
+		let pending_docs = self
+			.search_pendings(
+				&ctx,
+				&search,
+				&mut None,
+				Some(allow_list),
+				&mut builder,
+				&pending_state,
+			)
+			.await?;
+		// The members the pendings did not already score: the allow-list itself
+		// when nothing is pending, else the set difference, taken over roaring
+		// containers rather than by a lookup per member.
+		let unpending = pending_docs.as_ref().filter(|p| !p.is_empty()).map(|p| allow_list - p);
+		let members = unpending.as_ref().unwrap_or(allow_list);
+		// With every member pending, there is nothing left to score, and the
+		// graph is not taken.
+		if !members.is_empty() {
+			let (this, tx, pt) = (self, &tx, &search.pt);
+			doc_elements::score_members(
+				env,
+				members.iter(),
+				move |docs: Vec<DocId>| async move {
+					let sets = this.vec_docs.elements_of(tx, &docs).await?;
+					Ok((docs, sets))
+				},
+				move |elements: Vec<ElementId>| async move {
+					// Each batch's elements are read under one guard, through a
+					// context built under it, and the guard is released before
+					// they are scored: the graph is never held across the
+					// doc → elements reads or the scoring.
+					let read = {
+						let graph = this.graph.read().await;
+						let provider_context = graph.context(Arc::clone(tx), compaction_generation);
+						graph.read_elements(&provider_context, &elements).await?
+					};
+					// An element read from the store is owned, and its vector is
+					// scored as it is: `Vector::from` adopts the decoded buffer
+					// without allocating or copying (F16 alone converts). A cached
+					// element is shared with the cache: it is copied into one scratch
+					// vector rather than cloned into a vector of its own. Routing
+					// owned elements through the scratch vector too would add a full
+					// copy per candidate and save no allocation.
+					let mut scratch: Option<Vector> = None;
+					let distances = read
+						.into_iter()
+						.map(|element| {
+							let element = element.filter(|e| !e.deleted)?;
+							let d = match Arc::try_unwrap(element) {
+								Ok(owned) => {
+									this.distance.calculate_against(pt, &Vector::from(owned.vector))
+								}
+								Err(shared) => {
+									let vector = match scratch.as_mut() {
+										Some(v) => {
+											v.assign(&shared.vector);
+											v
+										}
+										None => scratch.insert(Vector::from(shared.vector.clone())),
+									};
+									this.distance.calculate_against(pt, vector)
+								}
+							};
+							Some(d)
+						})
+						.collect();
+					Ok((elements, distances))
+				},
+				&mut builder,
+			)
+			.await?;
+		}
+		self.resolve_results(&ctx, builder, None, compaction_generation).await.map(Some)
+	}
+
 	/// Searches the compacted graph and adds visible candidate documents to the result builder.
 	async fn search_graph(
 		&self,
@@ -1965,16 +2092,21 @@ impl DiskAnnIndex {
 		// so a selective allow-list can leave fewer than k admissible docs in that
 		// list even when the graph holds plenty.
 		//
-		// Either way, over-query: retry with a doubled search list until k docs
-		// have been admitted, the graph is exhausted, the builder's distance gate
-		// closes (every remaining candidate is farther than the k already held), or
-		// the retry ceiling is reached. `admitted` guards retries against
-		// re-adding docs the builder already holds; the filter's verdict cache
-		// spares a retry re-evaluating the elements an earlier pass reached.
+		// Without either, the top-`l` elements can still name fewer than k
+		// records: the builder holds one slot per record, and a record indexing
+		// several vectors is reached through each of them.
+		//
+		// In every case, over-query: retry with a doubled search list until the
+		// builder holds k records, the graph is exhausted, the builder's distance
+		// gate closes (every remaining candidate is farther than the k already
+		// held), or the retry ceiling is reached. A retry offers again the docs an
+		// earlier pass admitted: the builder keeps each at its nearest offer, so a
+		// wider list that reaches a closer element of one moves it there. `admitted`
+		// only spares prefetching their records; the filter's verdict cache spares
+		// evaluating them again.
 		let mut l = state.search.l;
-		let retry_ceiling = l.saturating_mul(ALLOWLIST_OVERQUERY_CEILING_FACTOR);
+		let retry_ceiling = l.saturating_mul(OVERQUERY_CEILING_FACTOR);
 		let mut admitted: HashSet<u64> = HashSet::default();
-		let over_query = state.filter.is_some() || state.allow_list.is_some();
 		loop {
 			// A truthy filter (a SELECT permission or a residual condition) is
 			// applied inside the walk, which returns only admitted elements; the
@@ -1990,8 +2122,7 @@ impl DiskAnnIndex {
 						pending_docs: state.pending_docs.as_ref(),
 						allow_list: state.allow_list,
 						builder: state.builder,
-						k: state.search.k,
-						admitted: Vec::new(),
+						admitted: KnnResultBuilder::new(state.search.k),
 						docs: HashMap::default(),
 					};
 					let walk = state
@@ -2125,11 +2256,8 @@ impl DiskAnnIndex {
 							// rejected before any record fetch. DiskANN admission is
 							// per-doc (unlike HNSW's per-element queue), so this gate
 							// alone keeps disallowed sibling docs of a shared vector out
-							// of the result builder. A doc admitted by an earlier
-							// over-query pass is already in the builder.
-							if state.allow_list.is_some_and(|allow| !allow.contains(doc_id))
-								|| admitted.contains(&doc_id)
-							{
+							// of the result builder.
+							if state.allow_list.is_some_and(|allow| !allow.contains(doc_id)) {
 								continue;
 							}
 							let id = VectorId::DocId(doc_id);
@@ -2138,9 +2266,7 @@ impl DiskAnnIndex {
 							{
 								continue;
 							}
-							if over_query {
-								admitted.insert(doc_id);
-							}
+							admitted.insert(doc_id);
 							if let Some(evicted_id) =
 								state.builder.add_vector_id_result(*distance, id)
 								&& let Some(filter) = state.filter.as_mut()
@@ -2155,10 +2281,8 @@ impl DiskAnnIndex {
 						.min(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
 				}
 			}
-			// Over-query only applies to filtered or allow-list-gated searches, and
-			// stops as soon as retrying cannot improve the result set.
-			if !over_query
-				|| admitted.len() >= state.search.k
+			// Stop as soon as retrying cannot improve the result set.
+			if state.builder.len() >= state.search.k
 				|| gate_closed
 				|| graph_exhausted
 				|| l >= retry_ceiling
@@ -2487,15 +2611,20 @@ impl DiskAnnIndex {
 				None => true,
 			};
 			if truthy {
-				for vector in vectors {
-					let vector = Vector::from(vector);
-					let d = self.distance.calculate(&scan.search.pt, &vector);
-					if scan.builder.check_add(d)
-						&& let Some(evicted_id) = scan.builder.add_vector_id_result(d, id.clone())
-						&& let Some(filter) = scan.filter.as_mut()
-					{
-						filter.expire(&evicted_id);
-					}
+				// A document indexing several vectors takes one slot, at its
+				// nearest, as the exact tier offers a compacted one.
+				let nearest = vectors
+					.into_iter()
+					.map(|vector| {
+						self.distance.calculate_against(&scan.search.pt, &Vector::from(vector))
+					})
+					.min_by(f64::total_cmp);
+				if let Some(d) = nearest
+					&& scan.builder.check_add(d)
+					&& let Some(evicted_id) = scan.builder.add_vector_id_result(d, id.clone())
+					&& let Some(filter) = scan.filter.as_mut()
+				{
+					filter.expire(&evicted_id);
 				}
 			}
 			if let Some(filter) = scan.filter.as_mut()
@@ -2521,7 +2650,10 @@ mod tests {
 	use tracing::info;
 
 	use super::*;
-	use crate::catalog::{DOC_IDS_FORMAT_VERSION, DatabaseId, IndexId, NamespaceId};
+	use crate::catalog::{
+		DOC_IDS_FORMAT_VERSION, DatabaseId, IndexId, NamespaceId,
+		VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+	};
 	use crate::docids::TableDocIds;
 	use crate::test_env::{CancelAtCheckpoint, TestIndexEnv, TestIndexStore};
 	use crate::trees::diskann::cache::DiskAnnCache;
@@ -6828,6 +6960,487 @@ mod tests {
 				vec![100],
 				"{case}"
 			);
+		}
+		Ok(())
+	}
+
+	/// Checks one [`DiskAnnIndex::exact_knn_search`] against brute force over
+	/// the records' current vectors: every returned record is allowed and
+	/// carries its true distance, and the returned distances are exactly the
+	/// `k` smallest among the allowed records.
+	async fn assert_exact_matches_brute_force(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		live: &BTreeMap<i64, (DocId, [f32; 4])>,
+		allow: &RoaringTreemap,
+		query: [f32; 4],
+		k: usize,
+		tt: TransactionType,
+	) -> Result<()> {
+		let ctx = new_ctx(ds, tt).await;
+		let pt = f32_query(&query);
+		let res = index
+			.exact_knn_search(&ctx, &pt, k, allow)
+			.await?
+			.expect("a read-only snapshot is served");
+		ctx.tx().cancel().await?;
+		let q = Vector::try_from_vector(VectorType::F32, &pt)?;
+		let dist = |v: &[f32; 4]| {
+			Distance::Euclidean
+				.calculate(&q, &Vector::try_from_vector(VectorType::F32, &f32_query(v)).unwrap())
+		};
+		let mut truth: Vec<f64> =
+			live.values().filter(|(doc, _)| allow.contains(*doc)).map(|(_, v)| dist(v)).collect();
+		truth.sort_by(f64::total_cmp);
+		truth.truncate(k);
+		let mut seen = HashSet::new();
+		let mut got = Vec::with_capacity(res.len());
+		for (rid, d, _) in &res {
+			let RecordIdKey::Number(key) = rid.key else {
+				panic!("unexpected record key: {:?}", rid.key);
+			};
+			assert!(seen.insert(key), "record {key} returned twice");
+			let (doc, v) = live.get(&key).unwrap_or_else(|| panic!("record {key} is not live"));
+			assert!(allow.contains(*doc), "record {key} is not in the allow-list");
+			assert_eq!(*d, dist(v), "distance of record {key}");
+			got.push(*d);
+		}
+		assert!(got.is_sorted_by(|a, b| a <= b), "results not nearest first: {got:?}");
+		assert_eq!(got, truth, "k = {k}, allow = {allow:?}");
+		Ok(())
+	}
+
+	/// Queries a few allow-lists and `k`s against the current state of `live`.
+	async fn assert_exact_round(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		live: &BTreeMap<i64, (DocId, [f32; 4])>,
+		rng: &mut SmallRng,
+	) -> Result<()> {
+		let docs: Vec<DocId> = live.values().map(|(d, _)| *d).collect();
+		for share in [0.05, 0.3, 1.0] {
+			let mut allow: RoaringTreemap =
+				docs.iter().copied().filter(|_| rng.random_bool(share)).collect();
+			// A doc-ID with no live record must be ignored.
+			allow.insert(1_000_000);
+			for k in [1, 5, 500] {
+				let query = [0; 4].map(|_: u8| rng.random_range(0..8) as f32);
+				assert_exact_matches_brute_force(
+					index,
+					ds,
+					live,
+					&allow,
+					query,
+					k,
+					TransactionType::Read,
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
+
+	/// With no member to offer (an empty allow-list or `k = 0`) the exact
+	/// tier answers no neighbours without reading the index, but only once
+	/// the query vector has been checked: a vector of the wrong dimension
+	/// still fails.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_with_nothing_to_offer() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index =
+			DiskAnnIndex::new(ikb(), TableId(4), &p, cache(), VECTOR_DOC_ELEMENTS_FORMAT_VERSION)
+				.await?;
+		let some: RoaringTreemap = [1u64, 2, 3].into_iter().collect();
+		let none = RoaringTreemap::new();
+		let pt = f32_query(&[1.0; 4]);
+		let wrong = f32_query(&[1.0; 3]);
+		for (pt, k, allow, ok) in
+			[(&pt, 3, &none, true), (&pt, 0, &some, true), (&wrong, 3, &none, false)]
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = index.exact_knn_search(&ctx, pt, k, allow).await;
+			ctx.tx().cancel().await?;
+			match (res, ok) {
+				(Ok(Some(r)), true) => assert!(r.is_empty(), "k = {k}"),
+				(Err(_), false) => {}
+				(other, _) => panic!("k = {k}, dimension {}: {other:?}", pt.len()),
+			}
+		}
+		Ok(())
+	}
+
+	/// An environment that records, at every counted check, whether the
+	/// index's graph lock could be taken for writing at that moment.
+	struct GraphLockProbe<'a> {
+		inner: TestIndexEnv,
+		graph: &'a RwLock<DiskAnnGraph>,
+		checks: std::sync::atomic::AtomicUsize,
+		held: std::sync::atomic::AtomicUsize,
+	}
+
+	impl crate::catalog::providers::CancellationProbe for GraphLockProbe<'_> {
+		fn expect_not_timedout(&self) -> crate::catalog::providers::BoxProviderFut<'_, Result<()>> {
+			self.inner.expect_not_timedout()
+		}
+	}
+
+	impl IndexEnv for GraphLockProbe<'_> {
+		fn tx(&self) -> Arc<Transaction> {
+			IndexEnv::tx(&self.inner)
+		}
+
+		fn is_done(&self, count: Option<usize>) -> crate::env::BoxEnvFut<'_> {
+			if count.is_some() {
+				use std::sync::atomic::Ordering::Relaxed;
+				self.checks.fetch_add(1, Relaxed);
+				if self.graph.try_write().is_err() {
+					self.held.fetch_add(1, Relaxed);
+				}
+			}
+			self.inner.is_done(count)
+		}
+
+		fn index_stores(&self) -> &crate::trees::store::IndexStores {
+			self.inner.index_stores()
+		}
+
+		fn node_id(&self) -> uuid::Uuid {
+			self.inner.node_id()
+		}
+
+		fn sequences(&self) -> Result<&surrealdb_datastore::sequences::Sequences> {
+			self.inner.sequences()
+		}
+
+		fn config(&self) -> &crate::config::IdxConfig {
+			self.inner.config()
+		}
+	}
+
+	/// The exact tier holds the graph only while it reads a batch of element
+	/// vectors: not while it scans pendings, reads doc → elements mappings or
+	/// scores, so a compaction could take the graph at any of those checks,
+	/// pending or compacted, and the members are still scored.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_leaves_the_graph_free_while_scanning_pendings() -> Result<()>
+	{
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut allow = RoaringTreemap::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (key, v) in [(1i64, [5.0f32; 4]), (2, [4.0; 4]), (3, [1.0; 4])] {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				index.index(&ctx, &id, None, Some(f32_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let probe = GraphLockProbe {
+			inner: new_ctx(&ds, TransactionType::Read).await,
+			graph: &index.graph,
+			checks: Default::default(),
+			held: Default::default(),
+		};
+		let pt = f32_query(&[5.0; 4]);
+		let res = index
+			.exact_knn_search(&probe, &pt, 2, &allow)
+			.await?
+			.expect("a read-only snapshot is served");
+		probe.inner.tx().cancel().await?;
+		let got: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)]);
+		use std::sync::atomic::Ordering::Relaxed;
+		assert!(probe.checks.load(Relaxed) > 0, "the pending scan checks for cancellation");
+		assert_eq!(probe.held.load(Relaxed), 0, "the graph is not held while scanning pendings");
+		// Compacted, the members are scored from the graph's elements: the
+		// graph is taken per batch of element reads, and is free at every
+		// checkpoint around the doc → elements reads and the scoring.
+		compact_all(&index, &ds, &ikb).await?;
+		let probe = GraphLockProbe {
+			inner: new_ctx(&ds, TransactionType::Read).await,
+			graph: &index.graph,
+			checks: Default::default(),
+			held: Default::default(),
+		};
+		let res = index
+			.exact_knn_search(&probe, &pt, 2, &allow)
+			.await?
+			.expect("a read-only snapshot is served");
+		probe.inner.tx().cancel().await?;
+		let got: Vec<RecordIdKey> = res.iter().map(|(rid, _, _)| rid.key.clone()).collect();
+		assert_eq!(got, [RecordIdKey::Number(1), RecordIdKey::Number(2)], "compacted");
+		assert!(probe.checks.load(Relaxed) > 0, "scoring checks for cancellation");
+		assert_eq!(probe.held.load(Relaxed), 0, "the graph is not held across the scoring");
+		Ok(())
+	}
+
+	/// An index stamped before the doc-ID → elements mapping keeps no `!dk`
+	/// entries, and its exact tier declines (`None`) instead of scoring from a
+	/// mapping it never wrote, so the caller scores the members' records.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_declines_an_index_without_the_mapping() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let older = VECTOR_DOC_ELEMENTS_FORMAT_VERSION - 1;
+		let index = DiskAnnIndex::new(ikb.clone(), TableId(4), &p, cache(), older).await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut allow = RoaringTreemap::new();
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		for key in 0..4i64 {
+			let id = RecordIdKey::Number(key);
+			allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+			index.index(&ctx, &id, None, Some(f32_content(&[key as f32; 4]))).await?;
+		}
+		ctx.tx().commit().await?;
+		compact_all(&index, &ds, &ikb).await?;
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		for doc in &allow {
+			let dk = ikb.new_dk_key(doc);
+			assert!(ctx.tx().get_key(&dk, None).await?.is_none(), "an older index writes no `!dk`");
+		}
+		let pt = f32_query(&[0.0; 4]);
+		let res = index.exact_knn_search(&ctx, &pt, 3, &allow).await?;
+		ctx.tx().cancel().await?;
+		assert!(res.is_none(), "an index without the mapping must be declined");
+		Ok(())
+	}
+
+	/// A document indexing several vectors takes one slot in the exact tier,
+	/// at its nearest vector, whether its vectors are still pending or
+	/// compacted into the graph. `k` leaves room for both of record 1's
+	/// vectors, so a second slot for it would show.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_offers_a_multi_vector_document_once() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut allow = RoaringTreemap::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			// Record 1 holds the query point and a far vector; records 2 and 3
+			// one vector each.
+			let records: [(i64, Vec<[f32; 4]>); 3] =
+				[(1, vec![[5.0; 4], [0.0; 4]]), (2, vec![[4.0; 4]]), (3, vec![[1.0; 4]])];
+			for (key, vectors) in records {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				let content = vectors.iter().flat_map(|v| f32_content(v)).collect();
+				index.index(&ctx, &id, None, Some(content)).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let pt = f32_query(&[5.0; 4]);
+		for state in ["pending", "compacted"] {
+			if state == "compacted" {
+				compact_all(&index, &ds, &ikb).await?;
+			}
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = index
+				.exact_knn_search(&ctx, &pt, 4, &allow)
+				.await?
+				.expect("a read-only snapshot is served");
+			ctx.tx().cancel().await?;
+			let got: Vec<(RecordIdKey, f64)> =
+				res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+			let expected = vec![
+				(RecordIdKey::Number(1), 0.0),
+				(RecordIdKey::Number(2), 2.0),
+				(RecordIdKey::Number(3), 8.0),
+			];
+			assert_eq!(got, expected, "{state}");
+			// The graph search gives the record one slot too, pending or
+			// compacted alike, so neither path returns it twice.
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let res = index.knn_search(&ctx, &pt, 4, 40, None, Some(&allow)).await?;
+			ctx.tx().cancel().await?;
+			let got: Vec<(RecordIdKey, f64)> =
+				res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+			assert_eq!(got, expected, "graph search, {state}");
+		}
+		Ok(())
+	}
+
+	/// A graph search returns `k` distinct records when the elements nearest
+	/// the query belong to fewer: record 1's two vectors are the two nearest
+	/// elements, so the `k` nearest elements name only two records, and the
+	/// third result is the next record the walk reached, also when `ef` is `k`
+	/// and the search list itself names only two records.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_graph_search_fills_k_distinct_records() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&p,
+			cache(),
+			VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut allow = RoaringTreemap::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let records: [(i64, Vec<[f32; 4]>); 3] = [
+				(1, vec![[5.0; 4], [5.0, 5.0, 5.0, 4.0]]),
+				(2, vec![[4.0; 4]]),
+				(3, vec![[1.0; 4]]),
+			];
+			for (key, vectors) in records {
+				let id = RecordIdKey::Number(key);
+				allow.insert(docids.resolve_or_assign(&ctx, &id).await?);
+				let content = vectors.iter().flat_map(|v| f32_content(v)).collect();
+				index.index(&ctx, &id, None, Some(content)).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		let pt = f32_query(&[5.0; 4]);
+		let expected = vec![
+			(RecordIdKey::Number(1), 0.0),
+			(RecordIdKey::Number(2), 2.0),
+			(RecordIdKey::Number(3), 8.0),
+		];
+		for ef in [40, 3] {
+			for (label, allow) in [("unfiltered", None), ("allow-list", Some(&allow))] {
+				let ctx = new_ctx(&ds, TransactionType::Read).await;
+				let res = index.knn_search(&ctx, &pt, 3, ef, None, allow).await?;
+				ctx.tx().cancel().await?;
+				let got: Vec<(RecordIdKey, f64)> =
+					res.iter().map(|(rid, d, _)| (rid.key.clone(), *d)).collect();
+				assert_eq!(got, expected, "{label}, ef {ef}");
+			}
+		}
+		Ok(())
+	}
+
+	/// Exact allow-list scoring from index-stored vectors returns exactly the
+	/// brute-force top-k over the records' current vectors — across a
+	/// compacted graph, uncompacted updates, deletions, delete → re-create
+	/// under a new doc-ID, vectors shared by several records, and a doc→element
+	/// map that must be re-derived after each compaction.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn diskann_exact_knn_search_matches_brute_force() -> Result<()> {
+		for hashed in [false, true] {
+			let ds = TestIndexStore::new().await;
+			let ikb = ikb();
+			let mut p = params(VectorType::F32, Distance::Euclidean);
+			p.use_hashed_vector = hashed;
+			let index = DiskAnnIndex::new(
+				ikb.clone(),
+				TableId(4),
+				&p,
+				cache(),
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+			let seed: u64 = rand::random();
+			info!("Seed: {seed}");
+			let mut rng = SmallRng::seed_from_u64(seed);
+			// A small component range makes many records share a vector.
+			let random_vec = |rng: &mut SmallRng| [0; 4].map(|_: u8| rng.random_range(0..5) as f32);
+			let mut live: BTreeMap<i64, (DocId, [f32; 4])> = BTreeMap::new();
+			{
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for key in 0..150 {
+					let id = RecordIdKey::Number(key);
+					let doc = docids.resolve_or_assign(&ctx, &id).await?;
+					let v = random_vec(&mut rng);
+					index.index(&ctx, &id, None, Some(f32_content(&v))).await?;
+					live.insert(key, (doc, v));
+				}
+				ctx.tx().commit().await?;
+			}
+			// Everything pending.
+			assert_exact_round(&index, &ds, &live, &mut rng).await?;
+			compact_all(&index, &ds, &ikb).await?;
+			// Everything compacted.
+			assert_exact_round(&index, &ds, &live, &mut rng).await?;
+			// A write transaction reads the mapping through itself.
+			{
+				let allow: RoaringTreemap = live.values().map(|(d, _)| *d).collect();
+				assert_exact_matches_brute_force(
+					&index,
+					&ds,
+					&live,
+					&allow,
+					[1.0; 4],
+					7,
+					TransactionType::Write,
+				)
+				.await?;
+			}
+			for _ in 0..3 {
+				// Updates, deletions and re-creations on top of the compacted
+				// graph, queried before and after they are compacted.
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				let mut deleted = Vec::new();
+				for key in 0..150 {
+					let id = RecordIdKey::Number(key);
+					match (live.get(&key).copied(), rng.random_range(0..10)) {
+						(Some((doc, old)), 0..=1) => {
+							let v = random_vec(&mut rng);
+							index
+								.index(&ctx, &id, Some(f32_content(&old)), Some(f32_content(&v)))
+								.await?;
+							live.insert(key, (doc, v));
+						}
+						(Some((_, old)), 2) => {
+							index.index(&ctx, &id, Some(f32_content(&old)), None).await?;
+							docids.remove(&ctx.tx(), &id).await?;
+							live.remove(&key);
+							deleted.push(key);
+						}
+						(None, 3..=5) => {
+							let doc = docids.resolve_or_assign(&ctx, &id).await?;
+							let v = random_vec(&mut rng);
+							index.index(&ctx, &id, None, Some(f32_content(&v))).await?;
+							live.insert(key, (doc, v));
+						}
+						_ => {}
+					}
+				}
+				ctx.tx().commit().await?;
+				assert_exact_round(&index, &ds, &live, &mut rng).await?;
+				// Re-create some of this round's deletions under new doc-IDs
+				// before compaction.
+				let ctx = new_ctx(&ds, TransactionType::Write).await;
+				for key in deleted.into_iter().step_by(2) {
+					let id = RecordIdKey::Number(key);
+					let doc = docids.resolve_or_assign(&ctx, &id).await?;
+					let v = random_vec(&mut rng);
+					index.index(&ctx, &id, None, Some(f32_content(&v))).await?;
+					live.insert(key, (doc, v));
+				}
+				ctx.tx().commit().await?;
+				assert_exact_round(&index, &ds, &live, &mut rng).await?;
+				compact_all(&index, &ds, &ikb).await?;
+				assert_exact_round(&index, &ds, &live, &mut rng).await?;
+			}
 		}
 		Ok(())
 	}

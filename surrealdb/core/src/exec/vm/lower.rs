@@ -4770,7 +4770,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				Ok(Source::Knn {
 					table: table.clone(),
 					index: index.clone(),
-					vector: vector.clone(),
+					vector: Arc::clone(vector),
 					k: *k,
 					ef: *ef,
 					slot: self.index_scope.knn.then(|| self.knn_slot()),

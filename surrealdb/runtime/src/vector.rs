@@ -162,27 +162,20 @@ pub mod distance {
 
 pub mod similarity {
 
-	use std::collections::HashSet;
-
 	use anyhow::{Result, ensure};
 	use surrealdb_expr::expr::Error;
 	use surrealdb_expr::val::{Number, Value};
 
-	use crate::util::math::vector::{CosineSimilarity, check_same_dimension, deviation};
+	use crate::util::math::vector::{
+		CosineSimilarity, JaccardSimilarity, check_same_dimension, deviation,
+	};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 		Ok(a.cosine_similarity(&b)?.into())
 	}
 
 	pub fn jaccard((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-		let a: HashSet<&Number> = HashSet::from_iter(a.iter());
-		let b: HashSet<&Number> = HashSet::from_iter(b.iter());
-		let union = a.union(&b).count();
-		if union == 0 {
-			return Ok(1.0.into());
-		}
-		let intersection = a.intersection(&b).count();
-		Ok((intersection as f64 / union as f64).into())
+		Ok(a.jaccard_similarity(&b)?.into())
 	}
 
 	pub fn pearson((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {

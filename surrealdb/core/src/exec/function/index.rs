@@ -358,9 +358,13 @@ impl KnnContext {
 		}
 	}
 
-	/// Record the distance for a record. Called by KnnScan after HNSW search.
-	pub async fn insert(&self, rid: RecordId, dist: Number) {
-		self.distances.write().await.insert((rid.table, RecordIdentity(rid.key)), dist);
+	/// Record the distance of every record in `entries`, under one acquisition
+	/// of the lock. Called by the KNN operators once their results are known.
+	pub async fn insert_all(&self, entries: impl IntoIterator<Item = (RecordId, Number)>) {
+		let mut distances = self.distances.write().await;
+		for (rid, dist) in entries {
+			distances.insert((rid.table, RecordIdentity(rid.key)), dist);
+		}
 	}
 
 	/// Look up the distance for a record. Called by vector::distance::knn().

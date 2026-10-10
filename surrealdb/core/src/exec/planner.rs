@@ -249,14 +249,15 @@ pub struct Planner<'ctx> {
 	/// it exceeds `max_computation_depth` is what stops `eval`/UDF recursion from
 	/// growing the native stack without limit.
 	depth: u32,
-	/// Parameter names an enclosing `FOR`, closure or user-defined function
-	/// binds around the expression being compiled.
+	/// Parameter names an enclosing `FOR`, closure, user-defined function or
+	/// block `LET` binds around the expression being compiled.
 	///
 	/// Those constructs bind a user-chosen name unchecked, so a read of one
 	/// inside their body is the value they bind and not the ambient planning
-	/// context's. The planner folds a parameter only where the name is absent
-	/// here — today that is `$session` alone
-	/// ([`Self::constant_root_value`](super::planner::path)).
+	/// context's. The planner reads a parameter's plan-time value only where
+	/// the name is absent here, as for `$session`
+	/// ([`Self::constant_root_value`](super::planner::path)) and a KNN query
+	/// vector.
 	shadowed_params: Arc<[String]>,
 	/// The session's options and the catalog ids the statement's planning
 	/// holds, on the executor's planner for a statement it is about to run.
@@ -1426,7 +1427,7 @@ impl<'ctx> Planner<'ctx> {
 
 	/// This planner with `names` added to [`Self::shadowed_params`]: the
 	/// planner for the body of a `FOR`, a closure or a user-defined function,
-	/// which binds those names around it.
+	/// or for a block whose `LET`s bind those names.
 	///
 	/// Every other part of the planning scope is carried through unchanged —
 	/// a `FOR` inside a `VERSION` is still a versioned read — except the
@@ -1615,8 +1616,9 @@ impl<'ctx> Planner<'ctx> {
 		self.shadowing(std::iter::empty()).with_perms_suppressed(true)
 	}
 
-	/// Whether an enclosing `FOR`, closure or user-defined function binds
-	/// `name`, so that a read of it is not the ambient context's value.
+	/// Whether an enclosing `FOR`, closure, user-defined function or block
+	/// `LET` binds `name`, so that a read of it is not the ambient context's
+	/// value.
 	pub(crate) fn param_is_shadowed(&self, name: &str) -> bool {
 		self.shadowed_params.iter().any(|shadowed| shadowed == name)
 	}

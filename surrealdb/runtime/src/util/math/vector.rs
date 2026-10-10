@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::{Result, ensure};
 use surrealdb_expr::expr::Error;
 use surrealdb_expr::val::Number;
@@ -139,10 +137,72 @@ pub trait JaccardSimilarity {
 
 impl JaccardSimilarity for [Number] {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number> {
-		let mut union: HashSet<&Number> = HashSet::from_iter(self.iter());
-		let intersection_size = other.iter().filter(|n| !union.insert(n)).count() as f64;
-		Ok((intersection_size / union.len() as f64).into())
+		check_same_dimension("vector::similarity::jaccard", self, other)?;
+		Ok(weighted_jaccard_similarity(
+			self.iter().zip(other.iter()).map(|(a, b)| (a.to_float(), b.to_float())),
+		)
+		.into())
 	}
+}
+
+/// Weighted (Ruzicka) Jaccard similarity over pairs of components,
+/// `Σ min(aᵢ, bᵢ) / Σ max(aᵢ, bᵢ)`: the Jaccard measure of vector search,
+/// equal on 0/1 vectors to the binary `|a ∧ b| / |a ∨ b|`, and the
+/// complement of the Jaccard distance a vector index ranks by.
+///
+/// Positional: component `i` of one vector is only compared with component
+/// `i` of the other. The measure is defined for non-negative weights, so a
+/// negative (or NaN) component counts as `0`, and two vectors with no positive
+/// component are identical (similarity `1`). The result lies in `[0, 1]`.
+///
+/// Finite components whose sums overflow are summed again scaled by the
+/// largest of them, which leaves the ratio unchanged. Infinite components
+/// dominate every finite one, so the ratio is then their limit: the share of
+/// the infinite maxima that are infinite minima too.
+pub fn weighted_jaccard_similarity(pairs: impl Iterator<Item = (f64, f64)> + Clone) -> f64 {
+	let (mut shared, mut total) = jaccard_sums(pairs.clone(), 1.0);
+	if total.is_infinite() {
+		let largest = pairs.clone().fold(0.0_f64, |m, (a, b)| m.max(a).max(b));
+		(shared, total) = if largest.is_finite() {
+			jaccard_sums(pairs, 1.0 / largest)
+		} else {
+			infinite_jaccard_counts(pairs)
+		};
+	}
+	if total == 0.0 {
+		1.0
+	} else {
+		shared / total
+	}
+}
+
+/// `(Σ min(aᵢ, bᵢ), Σ max(aᵢ, bᵢ))` over the components scaled by `scale`,
+/// a negative (or NaN) component counting as `0`.
+fn jaccard_sums(pairs: impl Iterator<Item = (f64, f64)>, scale: f64) -> (f64, f64) {
+	let (mut shared, mut total) = (0.0, 0.0);
+	for (a, b) in pairs {
+		let (a, b) = ((a * scale).max(0.0), (b * scale).max(0.0));
+		shared += a.min(b);
+		total += a.max(b);
+	}
+	(shared, total)
+}
+
+/// `(n, m)`: of the components whose maximum is infinite (`m`), those whose
+/// minimum is infinite too (`n`), a negative (or NaN) component counting as
+/// `0`.
+fn infinite_jaccard_counts(pairs: impl Iterator<Item = (f64, f64)>) -> (f64, f64) {
+	let (mut shared, mut total) = (0.0, 0.0);
+	for (a, b) in pairs {
+		let (a, b) = (a.max(0.0), b.max(0.0));
+		if a.max(b).is_infinite() {
+			total += 1.0;
+			if a.min(b).is_infinite() {
+				shared += 1.0;
+			}
+		}
+	}
+	(shared, total)
 }
 
 pub trait PearsonSimilarity {
@@ -162,8 +222,49 @@ impl PearsonSimilarity for [Number] {
 		let covar = covar / self.len() as f64;
 		let std_dev1 = deviation(self, m1, false);
 		let std_dev2 = deviation(other, m2, false);
+		if !(m1.is_finite()
+			&& m2.is_finite()
+			&& covar.is_finite()
+			&& (std_dev1 * std_dev2).is_finite())
+		{
+			return Ok(pearson_rescaled(
+				self.iter().zip(other.iter()).map(|(a, b)| (a.to_float(), b.to_float())),
+			)
+			.into());
+		}
 		Ok((covar / (std_dev1 * std_dev2)).into())
 	}
+}
+
+/// Pearson's correlation coefficient of paired components whose plain sums
+/// overflow `f64`: the correlation is unchanged by scaling either side by a
+/// positive factor, so each side is divided by its largest magnitude first,
+/// which keeps every deviation within `[-2, 2]` and every sum finite.
+///
+/// `NaN` where no correlation is defined: an empty input, a side with zero
+/// variance, or a non-finite component.
+pub fn pearson_rescaled(pairs: impl Iterator<Item = (f64, f64)> + Clone) -> f64 {
+	let (sx, sy) = pairs
+		.clone()
+		.fold((0.0_f64, 0.0_f64), |(sx, sy), (x, y)| (sx.max(x.abs()), sy.max(y.abs())));
+	if !(sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0) {
+		return f64::NAN;
+	}
+	let (mut n, mut tx, mut ty) = (0_usize, 0.0, 0.0);
+	for (x, y) in pairs.clone() {
+		n += 1;
+		tx += x / sx;
+		ty += y / sy;
+	}
+	let (mx, my) = (tx / n as f64, ty / n as f64);
+	let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+	for (x, y) in pairs {
+		let (dx, dy) = (x / sx - mx, y / sy - my);
+		sxy += dx * dy;
+		sxx += dx * dx;
+		syy += dy * dy;
+	}
+	sxy / (sxx * syy).sqrt()
 }
 
 pub trait ManhattanDistance {
@@ -173,7 +274,29 @@ pub trait ManhattanDistance {
 impl ManhattanDistance for [Number] {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::manhattan", self, other)?;
-		Ok(self.iter().zip(other.iter()).map(|(a, b)| (a - b).abs()).sum())
+		Ok(self.iter().zip(other.iter()).fold(Number::Int(0), |acc, (a, b)| {
+			match (acc, int_abs_diff(a, b)) {
+				// An integer sum stays an integer while it fits in an `i64`.
+				(Number::Int(acc), Some(d)) => {
+					match i64::try_from(d).ok().and_then(|d| acc.checked_add(d)) {
+						Some(sum) => Number::Int(sum),
+						None => Number::Float(acc as f64 + d as f64),
+					}
+				}
+				(acc, Some(d)) => acc + Number::Float(d as f64),
+				(acc, None) => acc + (a - b).abs(),
+			}
+		}))
+	}
+}
+
+/// The exact absolute difference of two integers, which an `i64`
+/// subtraction overflows and an `f64` subtraction rounds above 2^53; `None`
+/// unless both are integers.
+fn int_abs_diff(a: &Number, b: &Number) -> Option<u64> {
+	match (a, b) {
+		(Number::Int(a), Number::Int(b)) => Some(a.abs_diff(*b)),
+		_ => None,
 	}
 }
 
@@ -188,7 +311,11 @@ impl MinkowskiDistance for [Number] {
 		let dist: f64 = self
 			.iter()
 			.zip(other.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).abs().powf(p))
+			.map(|(a, b)| {
+				int_abs_diff(a, b)
+					.map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64)
+					.powf(p)
+			})
 			.sum();
 		Ok(dist.powf(1.0 / p).into())
 	}
@@ -248,7 +375,9 @@ impl ChebyshevDistance for [Number] {
 		Ok(self
 			.iter()
 			.zip(other.iter())
-			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
+			.map(|(a, b)| {
+				int_abs_diff(a, b).map_or_else(|| (a.to_float() - b.to_float()).abs(), |d| d as f64)
+			})
 			.fold(0.0, f64::max)
 			.into())
 	}
@@ -318,7 +447,9 @@ impl EuclideanDistance for [Number] {
 		Ok(self
 			.iter()
 			.zip(other.iter())
-			.map(|(a, b)| (a - b).to_float().powi(2))
+			.map(|(a, b)| {
+				int_abs_diff(a, b).map_or_else(|| (a - b).to_float(), |d| d as f64).powi(2)
+			})
 			.sum::<f64>()
 			.sqrt()
 			.into())

@@ -4555,7 +4555,8 @@ pub(super) enum Source {
 	Knn {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		vector: Vec<crate::val::Number>,
+		/// The query vector, shared with the plan it was lowered from.
+		vector: std::sync::Arc<[crate::val::Number]>,
 		k: u32,
 		ef: u32,
 		/// Where the distance of each record found is published for

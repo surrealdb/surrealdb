@@ -537,6 +537,51 @@ pub(super) fn visit_binding_mut<E>(
 	f(expr)
 }
 
+/// Whether a pruning walk enters the expressions nested in the one it has
+/// just visited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Descend {
+	/// Visit the nested expressions next.
+	Into,
+	/// Skip them: the visitor has handled, or deliberately left, the whole
+	/// subtree.
+	Over,
+}
+
+/// [`visit_binding`] with pruning: `f` sees an expression before the
+/// expressions nested in it and decides whether the walk enters them. A
+/// closure body is never entered.
+pub(crate) fn visit_binding_pruning<'a>(
+	expr: &'a LogicalExpr,
+	f: &mut impl FnMut(&'a LogicalExpr) -> Descend,
+) {
+	// Over `dyn FnMut` for the reason [`visit_binding`] gives. The visitor
+	// sees each expression for the tree's lifetime, so it may keep borrows of
+	// it.
+	fn walk<'a>(expr: &'a LogicalExpr, f: &mut dyn FnMut(&'a LogicalExpr) -> Descend) {
+		if f(expr) == Descend::Over || matches!(expr, LogicalExpr::Closure(_)) {
+			return;
+		}
+		expr.for_each_child(&mut |child| walk(child, &mut *f));
+	}
+	walk(expr, f)
+}
+
+/// [`visit_binding_pruning`], rewriting in place: `f` may replace the
+/// expression it sees, and the walk then enters what `f` left, unless `f`
+/// answers [`Descend::Over`]. A closure body is never entered.
+pub(super) fn visit_binding_pruning_mut(
+	expr: &mut LogicalExpr,
+	f: &mut impl FnMut(&mut LogicalExpr) -> Descend,
+) {
+	if f(expr) == Descend::Over || matches!(expr, LogicalExpr::Closure(_)) {
+		return;
+	}
+	for child in expr.children_mut() {
+		visit_binding_pruning_mut(child, f);
+	}
+}
+
 /// One index past the highest index any name of the minted form carries in
 /// `op` — the alias of a join, and any field a scalar reads or names — so a
 /// pass adding joins continues the plan's numbering and mints no alias the

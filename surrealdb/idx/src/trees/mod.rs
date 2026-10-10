@@ -6,10 +6,12 @@ use crate::val::RecordId;
 
 #[cfg(diskann)]
 pub mod diskann;
+mod doc_elements;
 pub mod dynamicset;
 pub mod gate;
 mod graph;
 pub mod hnsw;
+pub(crate) mod kernels;
 pub(crate) mod knn;
 pub(crate) mod pending;
 pub mod store;

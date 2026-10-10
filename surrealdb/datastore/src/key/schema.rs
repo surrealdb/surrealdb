@@ -679,6 +679,12 @@ keyspace! {
 							=> crate::values::hnsw::ElementDocs (derive(-Eq, -PartialOrd));
 						hnsw_element_hashed = ["!hh", @, hash: Hash32]
 							=> crate::values::hnsw::ElementHashedDocs;
+						/// The elements holding each document's vectors: the reverse
+						/// of `!hv`/`!hh`, written in the same transaction as every
+						/// change to them. Kept only by indexes stamped with the
+						/// vector doc-elements format version or later.
+						hnsw_doc_elements = ["!hk", @, doc_id: DocId]
+							=> crate::values::ids::Ids64;
 						hnsw_layer = ["!hl", layer: u16, @, chunk: u32] => Vec<u8>;
 						hnsw_node = ["!hn", layer: u16, @, node: ElementId] => Vec<u8>;
 
@@ -736,6 +742,13 @@ keyspace! {
 						#[cfg(diskann)]
 						diskann_element_hashed = ["!dh", @, hash: Hash32]
 							=> crate::values::diskann::DiskAnnElementHashedDocs;
+						/// The elements holding each document's vectors: the reverse
+						/// of `!dq`/`!dh`, written in the same transaction as every
+						/// change to them. Kept only by indexes stamped with the
+						/// vector doc-elements format version or later.
+						#[cfg(diskann)]
+						diskann_doc_elements = ["!dk", @, doc_id: DocId]
+							=> crate::values::ids::Ids64;
 						#[cfg(diskann)]
 						diskann_pending_legacy = ["!dp", @, shard: u16]
 							=> crate::values::diskann::DiskAnnPendingState;
@@ -2399,6 +2412,7 @@ mod tests {
 			"/***+!dv",
 			"/***+!hh",
 			"/***+!he",
+			"/***+!hk",
 			"/***+!hg",
 			"/***+!hl",
 			"/***+!hn",
@@ -2423,8 +2437,8 @@ mod tests {
 		// condition the declarations carry.
 		#[cfg(diskann)]
 		stored_tags.extend_from_slice(&[
-			"/***+!de", "/***+!dg", "/***+!dh", "/***+!dn", "/***+!dp", "/***+!dq", "/***+!dr",
-			"/***+!ds", "/***+!dw", "/***+!dy",
+			"/***+!de", "/***+!dg", "/***+!dh", "/***+!dk", "/***+!dn", "/***+!dp", "/***+!dq",
+			"/***+!dr", "/***+!ds", "/***+!dw", "/***+!dy",
 		]);
 
 		// Reduce every declared route the same way: drop field placeholders.

@@ -114,19 +114,19 @@ use crate::key::schema::{
 	BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
-	DocStatsKey, DocTermsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey,
-	HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingLegacyPrefix,
-	HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot,
-	IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey,
-	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey,
-	TermDocsKey, TermDocsResidualKey, TermGenerationKey, TermPostingKey,
+	DocStatsKey, DocTermsKey, HnswDocElementsKey, HnswElementHashedKey, HnswElementKey,
+	HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix,
+	HnswPendingLegacyPrefix, HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey,
+	HnswVectorKey, IdxRoot, IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey,
+	IndexVersionKey, TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey,
+	TermChangesKey, TermDocsKey, TermDocsResidualKey, TermGenerationKey, TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
-	DiskannElementDocsKey, DiskannElementHashedKey, DiskannElementKey, DiskannGenerationKey,
-	DiskannNodeKey, DiskannPendingKey, DiskannPendingLegacyKey, DiskannRecordPendingKey,
-	DiskannRecordPendingPrefix, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
-	DiskannStateKey,
+	DiskannDocElementsKey, DiskannElementDocsKey, DiskannElementHashedKey, DiskannElementKey,
+	DiskannGenerationKey, DiskannNodeKey, DiskannPendingKey, DiskannPendingLegacyKey,
+	DiskannRecordPendingKey, DiskannRecordPendingPrefix, DiskannRecordPendingShardKey,
+	DiskannRecordPendingShardShardPrefix, DiskannStateKey,
 };
 use crate::key::{KVKey, KVSubspace, TypedRange};
 use crate::trees::hnsw::{ElementId, VectorPendingUpdate};
@@ -472,6 +472,17 @@ impl IndexKeyBase {
 		}
 	}
 
+	/// Key mapping a document to the HNSW elements holding its vectors.
+	fn new_hk_key(&self, doc_id: DocId) -> HnswDocElementsKey<'_> {
+		HnswDocElementsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			doc_id,
+		}
+	}
+
 	fn new_hh_key(&self, hash: [u8; 32]) -> HnswElementHashedKey<'_> {
 		HnswElementHashedKey {
 			ns: self.0.ns,
@@ -525,6 +536,18 @@ impl IndexKeyBase {
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
+		}
+	}
+
+	/// Key mapping a document to the DiskANN elements holding its vectors.
+	#[cfg(diskann)]
+	fn new_dk_key(&self, doc_id: DocId) -> DiskannDocElementsKey<'_> {
+		DiskannDocElementsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			doc_id,
 		}
 	}
 

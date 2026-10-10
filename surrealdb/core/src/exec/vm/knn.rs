@@ -30,14 +30,15 @@ use crate::catalog::{Index, Record};
 use crate::exe::FlowResultExt as _;
 use crate::exec::field_path_convert::field_path_from_idiom;
 use crate::exec::index::access_path::IndexRef;
+use crate::exec::operators::KnnTopKHeap;
 use crate::exec::operators::scan::{
-	PrefilterTier, boosted_ef, choose_prefilter_tier, knn_allow_list,
+	AnnTarget, PrefilterTier, boosted_ef, choose_prefilter_tier, exact_from_index_vectors,
+	knn_allow_list,
 };
-use crate::exec::operators::{KnnTopKHeap, extract_vector};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::{ExecutionContext, FlowResult};
-use crate::expr::ControlFlow;
-use crate::idx::kernels::vector::{query as typed_query_vector, score as score_raw_vector};
+use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::idx::kernels::vector::{query as typed_query_vector, score as score_raw_values};
 use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::gate::{
 	BoxGateFut, CachedTableSelect, CandidateCondition, CandidateFetchCounter,
@@ -158,9 +159,15 @@ pub(super) async fn search(
 	services.knn_candidates(table, index, vector, k, ef, version, cond_filter, search_allow).await
 }
 
-/// Exact scoring of the members of `allow`, without the graph: each is read,
-/// judged by `per_row` where there is one, and scored against `vector` into a
-/// bounded heap, so a record that is rejected takes no slot.
+/// Exact scoring of the members of `allow`, without the graph, into a
+/// bounded heap, nearest first.
+///
+/// With nothing to judge per record (`per_row` is `None`), the members are
+/// scored from the vectors the index stores, and no record is read here: the
+/// caller reads only the `k` winners. An index that keeps no doc-ID →
+/// elements mapping is scored as one with a `per_row` judge is: each member
+/// is read, judged by `per_row` where there is one, and scored against
+/// `vector`, so a record that is rejected takes no slot.
 #[expect(clippy::too_many_arguments)]
 async fn exact(
 	program: &Program,
@@ -192,6 +199,11 @@ async fn exact(
 			)));
 		}
 	};
+	if per_row.is_none()
+		&& let Some(scored) = from_index_vectors(ctx, table, index_def, vector, k, allow).await?
+	{
+		return Ok(scored);
+	}
 	// The indexed column is a stored field, read off each record as a pure
 	// path.
 	let field = match index_def.cols.first() {
@@ -207,6 +219,11 @@ async fn exact(
 	};
 	let query = typed_query_vector(vector_type, dimension, vector)
 		.map_err(|e| ControlFlow::Err(e.context("Invalid KNN query vector")))?;
+	// No member can be offered: answered before any record is read, once the
+	// query vector has been checked.
+	if allow.is_empty() || k == 0 {
+		return Ok(Vec::new());
+	}
 	let mut heap: KnnTopKHeap<RecordId> = KnnTopKHeap::new(k as usize);
 	let mut members = allow.iter();
 	let mut sizer = BatchSizer::new(ctx, EXACT_BATCH_SIZE);
@@ -218,34 +235,89 @@ async fn exact(
 		// A unit per member resolved, read and ranked.
 		super::fuel::tick(ctx, super::fuel::units(chunk.len())).await?;
 		let rids = services.resolve_doc_ids(table, &chunk).await?;
-		let rows = read_sized(ctx, &mut sizer, &rids, None, CachePolicy::ReadWrite).await?;
+		// The fetch does not populate the transaction record cache: a cached
+		// record is shared, so each row read would be a deep copy of it rather
+		// than a move, while only the k winners are read again.
+		let rows = read_sized(ctx, &mut sizer, &rids, None, CachePolicy::ReadOnly).await?;
 		for row in rows {
 			if let Some(pipeline) = per_row
 				&& !admits(program, pipeline, ctx, &row).await.catch_return()?.is_truthy()
 			{
 				continue;
 			}
-			let Some(record) = extract_vector(&row, &field) else {
+			// The record's vector is scored in place.
+			let scored = match field.extract(&row).as_ref() {
+				Value::Array(record) => {
+					score_raw_values(&distance, vector_type, dimension, &query, &record.0)
+				}
+				_ => None,
+			};
+			let Some(scored) = scored else {
 				continue;
 			};
-			let Some(scored) = score_raw_vector(&distance, vector_type, dimension, &query, &record)
-			else {
+			let scored = Number::Float(scored);
+			// A candidate the full heap would turn away takes no entry.
+			if !heap.admits(&scored) {
+				continue;
+			}
+			let Value::Object(mut object) = row else {
 				continue;
 			};
-			let Value::Object(object) = &row else {
+			let Some(Value::RecordId(rid)) = object.remove("id") else {
 				continue;
 			};
-			let Some(Value::RecordId(rid)) = object.get("id") else {
-				continue;
-			};
-			heap.offer(Number::Float(scored), rid.clone());
+			heap.offer(scored, rid);
 		}
 	}
-	Ok(heap
-		.into_sorted_nearest_first()
-		.into_iter()
-		.map(|(distance, rid)| (rid, distance.to_float()))
-		.collect())
+	// Sized by the neighbours found, not by `k`, which is the user's.
+	Ok(heap.into_sorted_nearest_first().map(|(distance, rid)| (rid, distance.to_float())).collect())
+}
+
+/// The members of `allow` nearest `vector` as [`exact`] answers them, scored
+/// from the vectors ANN index `index_def` stores; `None` where the index keeps
+/// no doc-ID → elements mapping and the members' records must be scored.
+async fn from_index_vectors(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &crate::catalog::IndexDefinition,
+	vector: &[Number],
+	k: u32,
+	allow: &RoaringTreemap,
+) -> FlowResult<Option<Vec<(RecordId, f64)>>> {
+	if !crate::catalog::keeps_vector_doc_elements(index_def.format_version) {
+		return Ok(None);
+	}
+	let db_ctx = ctx.database()?;
+	let Some(table_def) = db_ctx.get_table_def(table, None).await.context("Failed to get table")?
+	else {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
+			name: table.clone(),
+		})));
+	};
+	let ikb = crate::idx::IndexKeyBase::new(
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		index_def.table_name.clone(),
+		index_def.index_id,
+	);
+	let scored = exact_from_index_vectors(
+		&AnnTarget {
+			frozen_ctx: &ctx.root().ctx,
+			index_def,
+			ikb: &ikb,
+			table_id: table_def.table_id,
+		},
+		vector,
+		k,
+		allow,
+	)
+	.await?;
+	Ok(scored.map(|results| {
+		results
+			.into_iter()
+			.map(|(rid, distance, _)| (Arc::unwrap_or_clone(rid), distance))
+			.collect()
+	}))
 }
 
 /// The condition a search judges each candidate on: pipeline `pipeline` of

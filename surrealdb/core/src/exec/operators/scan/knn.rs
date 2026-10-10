@@ -5,10 +5,11 @@
 //! distance (nearest first).
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use roaring::RoaringTreemap;
 
-use crate::catalog::{Error, Index};
+use crate::catalog::{Error, Index, keeps_vector_doc_elements};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
@@ -171,6 +172,58 @@ pub(crate) async fn ann_search(
 	})
 }
 
+/// The `k` members of `allow` nearest `vector`, nearest first, each with its
+/// distance, scored from the vectors ANN index `target` stores: no member's
+/// record is read, and no permission or condition is judged, so this answers
+/// only a search with nothing to evaluate per record.
+///
+/// `None` where the index keeps no doc-ID → elements mapping (an index
+/// stamped before it kept one): the members' records are scored instead. Such
+/// an index is not opened, so its store is not loaded for a search it would
+/// decline.
+pub(crate) async fn exact_from_index_vectors(
+	target: &AnnTarget<'_>,
+	vector: &[Number],
+	k: u32,
+	allow: &RoaringTreemap,
+) -> Result<Option<VecDeque<KnnIteratorResult>>, ControlFlow> {
+	let AnnTarget {
+		frozen_ctx,
+		index_def,
+		ikb,
+		table_id,
+	} = *target;
+	if !keeps_vector_doc_elements(index_def.format_version) {
+		return Ok(None);
+	}
+	Ok(match &index_def.index {
+		Index::Hnsw(hnsw_params) => {
+			let hnsw_index = frozen_ctx
+				.get_index_stores()
+				.get_index_hnsw(frozen_ctx, table_id, ikb, hnsw_params, index_def.format_version)
+				.await
+				.context("Failed to get HNSW index")?;
+			hnsw_index
+				.exact_knn_search(frozen_ctx, vector, k as usize, allow)
+				.await
+				.context("HNSW exact KNN search failed")?
+		}
+		#[cfg(diskann)]
+		Index::DiskAnn(diskann_params) => {
+			let diskann_index = frozen_ctx
+				.get_index_stores()
+				.get_index_diskann(index_def.format_version, table_id, ikb, diskann_params)
+				.await
+				.context("Failed to get DiskANN index")?;
+			diskann_index
+				.exact_knn_search(frozen_ctx, vector, k as usize, allow)
+				.await
+				.context("DiskANN exact KNN search failed")?
+		}
+		_ => None,
+	})
+}
+
 /// The records ANN index `index_def` of `table` ranks nearest to `vector`,
 /// at most `k`, nearest first, each with its distance; the table's definition
 /// is read as of `version`.
@@ -221,7 +274,11 @@ pub(crate) async fn knn_candidates(
 		allow,
 	)
 	.await?;
-	Ok(results.into_iter().map(|(rid, distance, _)| (rid.as_ref().clone(), distance)).collect())
+	// A record id the search alone holds is moved out, not cloned.
+	Ok(results
+		.into_iter()
+		.map(|(rid, distance, _)| (Arc::unwrap_or_clone(rid), distance))
+		.collect())
 }
 
 #[cfg(test)]

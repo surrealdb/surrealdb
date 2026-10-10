@@ -57,10 +57,11 @@
 //! served only the entries it published.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use diskann::graph::glue::{
 	CopyIds, DefaultPostProcessor, HybridPredicate, InsertStrategy, PruneAccessor, PruneStrategy,
 	SearchAccessor, SearchStrategy,
@@ -374,36 +375,58 @@ impl DiskAnnProvider {
 
 	/// Reads element vector/status pairs in input order.
 	///
-	/// Cached entries are returned immediately; only misses are sent to KV through `getm`. Missing
+	/// Cached entries are returned immediately; each distinct miss is sent to KV once, through
+	/// `getm`. Missing
 	/// elements remain `None` so callers can preserve the previous single-read behavior.
-	async fn read_elements(
+	pub(super) async fn read_elements(
 		&self,
 		context: &DiskAnnProviderContext,
 		element_ids: &[ElementId],
 	) -> Result<Vec<Option<Arc<DiskAnnElement>>>> {
 		let index = self.cache_index();
 		let mut elements = vec![None; element_ids.len()];
-		let mut miss_positions = Vec::new();
-		let mut miss_keys = Vec::new();
+		// Each distinct missing element, at the first position asking for it.
+		let mut misses: Vec<(ElementId, usize)> = Vec::new();
+		// Each later position asking for an element already known missing,
+		// with that element's index in `misses`.
+		let mut repeats: Vec<(usize, usize)> = Vec::new();
+		let mut miss_slot: HashMap<ElementId, usize> = HashMap::default();
 		for (pos, element_id) in element_ids.iter().copied().enumerate() {
 			if let Some(element) = self.cache.get_element(index, element_id, &context.view) {
 				elements[pos] = Some(element);
 			} else {
-				miss_positions.push((pos, element_id));
-				miss_keys.push(context.ikb.new_de_key(element_id));
+				match miss_slot.entry(element_id) {
+					Entry::Occupied(slot) => repeats.push((*slot.get(), pos)),
+					Entry::Vacant(slot) => {
+						slot.insert(misses.len());
+						misses.push((element_id, pos));
+					}
+				}
 			}
 		}
-		if !miss_keys.is_empty() {
-			let fetched: Vec<Option<DiskAnnElement>> =
-				context.tx.get_many_key(miss_keys, None).await?;
+		if !misses.is_empty() {
+			let keys = misses.iter().map(|(id, _)| context.ikb.new_de_key(*id)).collect();
+			let fetched: Vec<Option<DiskAnnElement>> = context.tx.get_many_key(keys, None).await?;
+			// A short answer would leave the trailing misses unread, silently.
+			ensure!(
+				fetched.len() == misses.len(),
+				"{} elements read for {} requested",
+				fetched.len(),
+				misses.len()
+			);
 			let publish = context.publication();
-			for ((pos, element_id), element) in miss_positions.into_iter().zip(fetched) {
+			for ((element_id, pos), element) in misses.iter().copied().zip(fetched) {
 				if let Some(element) = element {
-					elements[pos] = Some(match publish {
+					let element = match publish {
 						Some(stamp) => self.cache.insert_element(index, element_id, stamp, element),
 						None => Arc::new(element),
-					});
+					};
+					elements[pos] = Some(element);
 				}
+			}
+			for (slot, pos) in repeats {
+				let fetched = elements[misses[slot].1].clone();
+				elements[pos] = fetched;
 			}
 		}
 		Ok(elements)

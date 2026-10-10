@@ -2585,7 +2585,10 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 			RowStage::Layer(..) | RowStage::Permission(..) => None,
 		}),
 	};
-	let brute = brute.map(|params| brute_force_search(planner, params));
+	let brute = match brute {
+		Some(params) => Some(brute_force_search(planner, params).await),
+		None => None,
+	};
 	// The stage the search ranks the rows beneath: the innermost predicate
 	// holding it. Predicates and layers beneath that stage are applied before
 	// the ranking, and those above it after.
@@ -3038,9 +3041,11 @@ fn knn_placement_refusal(stages: &[RowStage]) -> Option<super::plan::Refusal> {
 }
 
 /// The brute-force search `params` name: the field it ranks, the query
-/// vector, how many rows it keeps and the distance. A query vector the
-/// statement's parameters do not hold is computed when the statement runs.
-fn brute_force_search(
+/// vector, how many rows it keeps and the distance. A query-vector parameter
+/// binding leaves in place is resolved here, once
+/// ([`Planner::resolve_query_vector`]); a query vector the statement's
+/// parameters do not hold is computed when the statement runs.
+async fn brute_force_search(
 	planner: &Planner<'_>,
 	params: crate::exec::planner::util::BruteForceKnnParams,
 ) -> (LogicalExpr, super::plan::KnnTarget, u32, crate::catalog::Distance) {
@@ -3048,13 +3053,14 @@ fn brute_force_search(
 	let vector = match params.vector {
 		BruteForceKnnVector::Literal(vector) => super::plan::KnnTarget::Literal(vector),
 		BruteForceKnnVector::Deferred(expr) => {
-			let value = match &expr {
-				LogicalExpr::Param(param) if !planner.param_is_shadowed(param.as_str()) => {
-					planner.frozen().value(param.as_str()).cloned()
+			let vector = match &expr {
+				LogicalExpr::Param(param) => {
+					planner.resolve_query_vector(param.as_str()).await.map(|v| v.to_vec())
 				}
-				other => crate::exec::planner::static_value(other),
+				other => crate::exec::planner::static_value(other)
+					.and_then(|value| value.coerce_to::<Vec<crate::val::Number>>().ok()),
 			};
-			match value.and_then(|value| value.coerce_to::<Vec<crate::val::Number>>().ok()) {
+			match vector {
 				Some(vector) => super::plan::KnnTarget::Literal(vector),
 				None => super::plan::KnnTarget::Deferred(expr),
 			}

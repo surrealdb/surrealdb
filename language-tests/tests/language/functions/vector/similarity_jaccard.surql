@@ -1,24 +1,24 @@
 /**
 [test]
-reason = "Tests the vector::similarity::jaccard function"
+reason = "Tests the vector::similarity::jaccard function: the weighted (Ruzicka) Jaccard similarity Σmin/Σmax, positional, over vectors of equal dimension"
 
 [[test.results]]
 value = "1f"
 
 [[test.results]]
-value = "0f"
+value = "0.4f"
 
 [[test.results]]
-value = "0.5f"
+value = "0.6666666666666666f"
 
 [[test.results]]
-value = "0.2f"
+error = "Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension."
 
 [[test.results]]
-value = "0.5f"
+value = "0.75f"
 
 [[test.results]]
-value = "0f"
+error = "Incorrect arguments for function vector::similarity::jaccard(). The two vectors must be of the same dimension."
 
 [[test.results]]
 value = "1f"

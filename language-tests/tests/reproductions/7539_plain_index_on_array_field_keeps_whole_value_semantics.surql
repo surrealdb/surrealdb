@@ -205,6 +205,27 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: ou:1, metadata: { tags: ['a', 'b'] } }]"
+
+[[test.results]]
+value = "[{ count: 0 }]"
+
+[[test.results]]
+value = "[ou:1]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ acl: 'alphabet', id: p:1 }]"
 
 [[test.results]]
@@ -311,6 +332,16 @@ CREATE o:2 SET metadata = { tags: ['c'] };
 SELECT count() FROM o WHERE metadata.tags = 'a' GROUP ALL;
 SELECT VALUE id FROM o WHERE metadata.tags = ['a', 'b'];
 SELECT VALUE id FROM o WHERE metadata.tags CONTAINS 'a';
+
+-- A definition of the column itself that declares no kind leaves its parent's
+-- object literal type in force: the value is still coerced to an array.
+DEFINE TABLE ou SCHEMAFULL;
+DEFINE FIELD metadata ON ou TYPE { tags: array<string> };
+DEFINE FIELD metadata.tags ON ou PERMISSIONS FULL;
+DEFINE INDEX ou_mt ON ou FIELDS metadata.tags;
+CREATE ou:1 SET metadata = { tags: ['a', 'b'] };
+SELECT count() FROM ou WHERE metadata.tags = 'a' GROUP ALL;
+SELECT VALUE id FROM ou WHERE metadata.tags = ['a', 'b'];
 
 -- A kind declared after a string is stored does not rewrite it: `p:1` stays
 -- indexed whole, and holds the substring an element seek would miss.
