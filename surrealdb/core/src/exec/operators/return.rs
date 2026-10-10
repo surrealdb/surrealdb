@@ -10,8 +10,8 @@ use futures::StreamExt;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream,
-	buffer_stream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatchStream, buffer_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -57,6 +57,17 @@ impl ExecOperator for ReturnPlan {
 
 	fn cardinality_hint(&self) -> CardinalityHint {
 		self.inner.cardinality_hint()
+	}
+
+	fn output_shape(&self) -> OutputShape {
+		// A RETURN's value is its inner plan's value: a scalar inner (`RETURN
+		// 1 + 2`, `RETURN [1, 2]`) is unwrapped to the single value by `execute`
+		// below, and a query inner (`RETURN SELECT ...`) stays the array of rows.
+		// The shape must match that so the result is converted to public at the
+		// right anchor - a scalar as its own root, rows each as their own root -
+		// rather than inheriting the trait default and charging a scalar array an
+		// extra nesting level.
+		self.inner.output_shape()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -280,6 +291,19 @@ mod tests {
 			Arc::new(ExprPlan::new(physical_expr("1 + 2", &ctx).await));
 		let plan: Arc<dyn ExecOperator> = Arc::new(ReturnPlan::new(inner));
 		assert_eq!(returned(plan, &ctx).await, Value::from(3i64));
+	}
+
+	#[test]
+	fn output_shape_delegates_to_the_inner_plan() {
+		// A RETURN's public conversion anchor must follow its inner value: a
+		// scalar inner (`RETURN 1 + 2`, `RETURN [1, 2]`) is unwrapped to the
+		// single value, a query inner (`RETURN SELECT ...`) stays the array of
+		// rows. Inheriting the trait default (`Rows`) would charge a scalar array
+		// result an extra depth level against the value-nesting cap.
+		let scalar = ReturnPlan::new(Stub::new(vec![]).scalar().op());
+		assert_eq!(scalar.output_shape(), OutputShape::Scalar);
+		let rows = ReturnPlan::new(Stub::new(vec![Value::from(1i64)]).op());
+		assert_eq!(rows.output_shape(), OutputShape::Rows);
 	}
 
 	#[tokio::test]

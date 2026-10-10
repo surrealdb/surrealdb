@@ -42,7 +42,7 @@ use crate::observe::{
 	StatementEventSafe, StatementType,
 };
 use crate::rpc::types_error_from_anyhow;
-use crate::val::{Array, Value, convert_value_to_public_value};
+use crate::val::{Array, Value, convert_result_rows_to_public, convert_value_to_public_value};
 use crate::{err, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -103,6 +103,42 @@ fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<V
 			values.len()
 		)))),
 		OutputShape::Rows => Ok(Value::Array(Array::from(values))),
+	}
+}
+
+/// The result shape of a statement handled by the compute fallback rather than a
+/// streaming plan. A statement reaches the fallback either because the planner
+/// does not plan its kind (all DML, DDL) or because the whole execution runs in
+/// compute-only mode, so this must classify every row-returning statement, not
+/// only DML. A non-`ONLY` row-returning statement (`SELECT` and the DML family)
+/// yields the array of rows (`Rows`), `ONLY` yields the single row, and
+/// everything else (DDL, INFO, a scalar expression) yields a single value
+/// (`Scalar`). It mirrors what the planner declares for the same statement, so a
+/// result is converted to public at the per-row anchor the storage guard uses
+/// rather than charging the array-of-rows envelope a nesting level, whichever
+/// path ran it.
+fn fallback_result_shape(expr: &crate::expr::Expr) -> OutputShape {
+	use crate::expr::Expr;
+	let only = match expr {
+		Expr::Select(s) => s.only,
+		Expr::Create(s) => s.only,
+		Expr::Update(s) => s.only,
+		Expr::Upsert(s) => s.only,
+		Expr::Delete(s) => s.only,
+		Expr::Relate(s) => s.only,
+		// INSERT has no `ONLY` form; it always yields the array of inserted rows.
+		Expr::Insert(_) => false,
+		// A RETURN's shape is its returned expression's shape, mirroring the
+		// planned `ReturnPlan` (a scalar inner is unwrapped to the single value;
+		// a query inner stays the array of rows).
+		Expr::Return(s) => return fallback_result_shape(&s.what),
+		// DDL, INFO and any other fallback statement is a single value.
+		_ => return OutputShape::Scalar,
+	};
+	if only {
+		OutputShape::Scalar
+	} else {
+		OutputShape::Rows
 	}
 }
 
@@ -171,6 +207,14 @@ pub struct Executor {
 	broker_owned_by_executor: bool,
 	/// Present when this execution streams its results.
 	stream: Option<StreamSink>,
+	/// The output shape of the statement currently being finalised, recorded from
+	/// the plan that ran it. It drives how the result is converted to a public
+	/// value: a `Rows` result is an array-of-rows envelope whose rows are each
+	/// converted as their own root (matching the storage guard and the streaming
+	/// read path), a `Scalar` result is converted as a single value. Reset per
+	/// statement in `execute_plan_in_transaction` and set in
+	/// `execute_operator_plan`; statements that never reach a plan stay `Scalar`.
+	result_shape: OutputShape,
 }
 
 impl Executor {
@@ -257,6 +301,7 @@ impl Executor {
 			cached_session: None,
 			broker_owned_by_executor: false,
 			stream: None,
+			result_shape: OutputShape::Scalar,
 		}
 	}
 
@@ -313,6 +358,19 @@ impl Executor {
 	/// statement's value is empty precisely because the rows went elsewhere.
 	fn streamed_rows(&self, index: usize) -> Option<u64> {
 		self.stream.as_ref().and_then(|sink| sink.streamed.get(&index).copied())
+	}
+
+	/// Converts a finished statement's internal result value to a public value,
+	/// honouring the shape recorded for it in [`Executor::result_shape`]. A
+	/// `Rows` result is an array-of-rows envelope, so each row is converted as
+	/// its own root at depth 1 - the same anchor the storage write guard and the
+	/// streaming read path use - rather than charging the envelope a nesting
+	/// level. A `Scalar` result is the single value and is converted whole.
+	fn convert_statement_result(&self, value: Value) -> Result<surrealdb_types::Value> {
+		match self.result_shape {
+			OutputShape::Rows => convert_result_rows_to_public(value),
+			OutputShape::Scalar => convert_value_to_public_value(value),
+		}
 	}
 
 	/// Send the results that have become final, in order.
@@ -878,6 +936,11 @@ impl Executor {
 			}
 		};
 
+		// Record the shape so the collected result is converted to public with
+		// the same per-row anchor the streaming branch below uses, rather than
+		// charging the result-array envelope a nesting level.
+		self.result_shape = plan.output_shape();
+
 		// A row-shaped statement whose rows nothing is waiting to collect can
 		// send each batch onward as it arrives, rather than building the whole
 		// array first. A scalar one cannot: its value IS the single row, so
@@ -977,6 +1040,11 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 			};
 		}
+		// A statement's result shape defaults to scalar; a statement that reaches
+		// a plan (`execute_operator_plan`) or the compute fallback overrides it. It
+		// selects how the result is converted to a public value, so it is reset per
+		// statement here rather than inherited from the previous one.
+		self.result_shape = OutputShape::Scalar;
 		let res = match stmt.into_expr() {
 			TopLevelExpr::Use(stmt) => {
 				// The namespace and database arguments are expressions, and an
@@ -1248,6 +1316,15 @@ impl Executor {
 					None => res,
 				};
 
+				// SECURITY: a top-level LET binds into the request-scoped context and is
+				// not reset between statements, so a `LET $a = [$a]` chain across
+				// statements grows the bound value's nesting without bound - the same
+				// accumulation vector as fold/reduce (a body LET inside a FOR is
+				// iteration-scoped and does not), and equally fatal on the recursive clone
+				// that reads `$a` back. Cap it here, as the storage guard caps a written
+				// value.
+				crate::val::check_value_depth(&result)?;
+
 				// Set the parameter
 				ctx_mut!().add_value(stm.name.clone(), result.into());
 
@@ -1349,6 +1426,12 @@ impl Executor {
 						}
 						// Fallback to existing compute path
 						ctx_mut!().set_transaction(txn);
+						// The compute path does not run through `execute_operator_plan`, so
+						// record the result shape here as that path does: a non-`ONLY`
+						// row-returning statement is converted to public per row rather than
+						// charging the array-of-rows envelope a nesting level (which would
+						// error a cap-depth record's own result).
+						self.result_shape = fallback_result_shape(&e);
 						let res = self
 							.stack
 							.enter(|stk| {
@@ -2122,7 +2205,7 @@ impl Executor {
 					stmt_result_rows = rows;
 
 					match r {
-						Ok(value) => match convert_value_to_public_value(value) {
+						Ok(value) => match self.convert_statement_result(value) {
 							Ok(value) => Ok(value),
 							Err(err) => {
 								// This returns from the function with the
@@ -2256,7 +2339,8 @@ impl Executor {
 			let query_result = match result {
 				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
 					time,
-					result: crate::val::convert_value_to_public_value(value)
+					result: self
+						.convert_statement_result(value)
 						.map_err(|e| TypesError::internal(e.to_string())),
 					query_type,
 				},
@@ -2599,7 +2683,12 @@ impl Executor {
 						}
 					} else {
 						let result = match result {
-							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							// A conversion failure lands in this statement's own
+							// result slot, so one bad result does not propagate out
+							// and wipe the sibling statements' results too.
+							Ok(value) => self
+								.convert_statement_result(value)
+								.map_err(types_error_from_anyhow),
 							Err(err) => Err(types_error_from_anyhow(err)),
 						};
 						self.results.push(QueryResult {
@@ -2652,6 +2741,31 @@ mod tests {
 		let shaped = shape_statement_value(OutputShape::Scalar, vec![Value::from(42i64)])
 			.expect("one value is what Scalar promises");
 		assert_eq!(shaped, Value::from(42i64));
+	}
+
+	/// The compute fallback (all DML, and everything in compute-only mode)
+	/// classifies a statement's result shape the same way the planner would, so a
+	/// non-`ONLY` row-returning statement is converted to public per row rather
+	/// than charging the array-of-rows envelope a depth level. Dropping a
+	/// row-returning arm here would make a record at exactly the depth cap fail
+	/// its own result on the fallback path while the planned path reads it fine.
+	#[test]
+	fn fallback_result_shape_classifies_row_returning_statements() {
+		use super::fallback_result_shape;
+		use crate::exec::operators::test_util::parse_expr;
+
+		// The fallback receives the lowered `crate::expr::Expr`, the form the
+		// legacy engine runs.
+		let expr = |src: &str| parse_expr(src);
+
+		// Row-returning, non-`ONLY`: the array of rows.
+		assert_eq!(fallback_result_shape(&expr("SELECT * FROM t")), OutputShape::Rows);
+		assert_eq!(fallback_result_shape(&expr("CREATE t")), OutputShape::Rows);
+		// `ONLY`: the single row.
+		assert_eq!(fallback_result_shape(&expr("SELECT * FROM ONLY t:1")), OutputShape::Scalar);
+		assert_eq!(fallback_result_shape(&expr("CREATE ONLY t:1")), OutputShape::Scalar);
+		// A scalar expression is a single value.
+		assert_eq!(fallback_result_shape(&expr("1 + 2")), OutputShape::Scalar);
 	}
 
 	/// The declared shape is authoritative: a `Scalar` plan that emits the wrong

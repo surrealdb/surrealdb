@@ -51,6 +51,14 @@ pub(crate) async fn set_statement_compute(
 		None => result,
 	};
 
+	// SECURITY: a block threads one child context through every statement it runs,
+	// so a LET that rebinds its own parameter (`{ LET $a = 1; LET $a = [$a]; ... }`)
+	// accumulates nesting across statements without any storage write to catch it,
+	// bypassing the top-level LET guard in the executor. Cap it here, where a block
+	// LET binds, so a binding cannot grow deep enough to overflow the stack on a
+	// later recursive clone/drop that reads the parameter back.
+	crate::val::check_value_depth(&result)?;
+
 	let mut c = Context::unfreeze(ctx.take().expect("context should be initialized"))?;
 	c.add_value(this.name.clone(), result.into());
 	*ctx = Some(c.freeze());

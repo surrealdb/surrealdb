@@ -88,6 +88,42 @@ fn reject_nested_destination(op: &str, path: &[Strand], from: &[Strand]) -> Resu
 }
 
 impl Operation {
+	/// The longest JSON-Pointer path this operation carries. Applying an
+	/// operation drives `Value::put` / `cut` / `pick` once per path segment, and
+	/// those are natively recursive, so a caller bounds this against the value
+	/// depth cap before applying to keep the recursion off the host stack.
+	pub fn max_path_len(&self) -> usize {
+		match self {
+			Operation::Add {
+				path,
+				..
+			}
+			| Operation::Remove {
+				path,
+			}
+			| Operation::Replace {
+				path,
+				..
+			}
+			| Operation::Change {
+				path,
+				..
+			}
+			| Operation::Test {
+				path,
+				..
+			} => path.len(),
+			Operation::Copy {
+				path,
+				from,
+			}
+			| Operation::Move {
+				path,
+				from,
+			} => path.len().max(from.len()),
+		}
+	}
+
 	/// The array index a JSON Pointer reference token names, if it names one.
 	///
 	/// RFC 6901 §4 spells an array index as `0` or `[1-9][0-9]*`. `str::parse`

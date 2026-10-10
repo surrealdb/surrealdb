@@ -15,6 +15,17 @@ use crate::expr::{ClosureExpr, Expr, Kind, Param};
 /// concrete type it constructed in order to invoke the closure.
 pub trait BuiltinClosureObj: Send + Sync + 'static {
 	fn as_any(&self) -> &dyn std::any::Any;
+
+	/// The values this closure captured by value, exposed so the value-depth
+	/// guard can walk them. A closure that captures a value deep-clones it, so a
+	/// closure capturing a closure nests exactly as a `Closure::Expr` does and
+	/// must be counted the same way, or an accumulator that wraps itself in a
+	/// closure each turn escapes the cap and overflows the stack on its own
+	/// recursive clone or drop. A closure that captures nothing by value (it
+	/// wraps a function pointer, say) returns an empty list, the default.
+	fn captured_values(&self) -> Vec<&crate::val::Value> {
+		Vec::new()
+	}
 }
 
 #[derive(Clone)]

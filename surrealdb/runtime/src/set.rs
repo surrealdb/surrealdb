@@ -4,7 +4,7 @@ use anyhow::Result;
 use common::range::TypedRange;
 use reblessive::tree::Stk;
 use surrealdb_expr::expr::Error;
-use surrealdb_expr::val::{Closure, ClosureEvaluator, Set, Value};
+use surrealdb_expr::val::{Closure, ClosureEvaluator, Set, Value, check_value_depth};
 
 use crate::args::Optional;
 
@@ -212,7 +212,13 @@ pub async fn fold(
 	if let Some(ev) = ev {
 		let mut accum = init;
 		for val in set {
-			accum = ev.invoke(stk, &mapper, vec![accum, val]).await?
+			accum = ev.invoke(stk, &mapper, vec![accum, val]).await?;
+			// SECURITY: bound the accumulator's nesting depth. Like `array::fold`,
+			// this threads a caller-controlled accumulator through a flat loop, so
+			// a wrapping closure grows its depth without bound and overflows the
+			// stack on the value's recursive drop/clone/encode. See
+			// `crate::array::fold` for the full rationale.
+			check_value_depth(&accum)?;
 		}
 		Ok(accum)
 	} else {
@@ -282,6 +288,9 @@ pub async fn reduce(
 				};
 				for val in iter {
 					accum = ev.invoke(stk, &mapper, vec![accum, val]).await?;
+					// SECURITY: bound the accumulator's nesting depth, as in
+					// `crate::array::fold`.
+					check_value_depth(&accum)?;
 				}
 				Ok(accum)
 			}

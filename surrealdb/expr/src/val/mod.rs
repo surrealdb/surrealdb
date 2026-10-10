@@ -1242,12 +1242,15 @@ impl FromIterator<(String, Value)> for Value {
 /// the recursive walks approach a thread stack.
 pub const MAX_VALUE_DEPTH: usize = 256;
 
-/// A node in the iterative depth walk: a [`Value`] or a [`RecordIdKey`]. A
-/// record id nests through its key, which is not itself a `Value`, so the
-/// worklist has to carry either.
+/// A node in the iterative depth walk. Nesting reaches a `Value` through several
+/// wrappers that are not themselves `Value`s - a record id's key, a
+/// `GeometryCollection`, and a closure's captured variables - so the worklist
+/// carries any of them.
 enum DepthNode<'a> {
 	Value(&'a Value),
 	Key(&'a crate::val::RecordIdKey),
+	Geo(&'a crate::val::Geometry),
+	Closure(&'a crate::val::Closure),
 }
 
 /// Rejects a [`Value`] nested deeper than [`MAX_VALUE_DEPTH`].
@@ -1257,12 +1260,31 @@ enum DepthNode<'a> {
 /// past the cap, so a deeply-nested value is rejected without being walked in
 /// full.
 ///
-/// A record id's key is walked too. The derived storage codec, the SQL
-/// formatter and the recursive drop all descend into a compound key
-/// (`t:[[[...]]]`), so a key deep enough to overflow them must be rejected at
-/// the same point a deep field value is.
+/// A record id's key is walked too, and a geometry's `GeometryCollection`
+/// nesting. The derived storage codec, the SQL formatter and the recursive drop
+/// all descend into a compound key (`t:[[[...]]]`) and into a nested collection,
+/// so anything deep enough to overflow them must be rejected at the same point a
+/// deep field value is.
 pub fn check_value_depth(value: &Value) -> Result<()> {
 	use crate::val::RecordIdKey;
+	// Fast path: a value that nests nothing is depth 1 and cannot exceed the
+	// cap, so skip allocating the traversal stack. This keeps the check
+	// allocation-free for the common scalar case - e.g. a `fold` / `reduce`
+	// accumulator that reduces to a number, which is checked every iteration.
+	// `Geometry` (a `GeometryCollection` nests) and `Closure` (its captures hold
+	// values) are containers here.
+	if !matches!(
+		value,
+		Value::Array(_)
+			| Value::Set(_)
+			| Value::Object(_)
+			| Value::Range(_)
+			| Value::RecordId(_)
+			| Value::Geometry(_)
+			| Value::Closure(_)
+	) {
+		return Ok(());
+	}
 	// (node, depth of that node)
 	let mut stack: Vec<(DepthNode<'_>, usize)> = vec![(DepthNode::Value(value), 1)];
 	while let Some((node, depth)) = stack.pop() {
@@ -1291,10 +1313,25 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 					}
 				}
 				Value::RecordId(v) => stack.push((DepthNode::Key(&v.key), depth + 1)),
-				// Every other variant is a leaf as far as `Value` nesting goes.
-				// `Geometry` nests within itself rather than within `Value`, and
-				// is bounded by the parser when it is read.
-				_ => {}
+				// A geometry and a closure nest within themselves, not within
+				// `Value`, so the wrapper is pushed at `depth` (it is not itself a
+				// level) and recurses via its own node below.
+				Value::Geometry(g) => stack.push((DepthNode::Geo(g), depth)),
+				Value::Closure(c) => stack.push((DepthNode::Closure(c), depth)),
+				// Leaves, listed explicitly so a new nesting `Value` variant is a
+				// compile error here rather than a silent hole.
+				Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::File(_)
+				| Value::Regex(_) => {}
 			},
 			DepthNode::Key(key) => match key {
 				RecordIdKey::Array(a) => {
@@ -1313,9 +1350,39 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 						}
 					}
 				}
-				// Number / String / Uuid are leaves.
-				_ => {}
+				RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => {}
 			},
+			DepthNode::Geo(geo) => {
+				// Only a `GeometryCollection` nests further geometries; the
+				// point/line/polygon variants are bounded-depth primitives.
+				if let crate::val::Geometry::Collection(geoms) = geo {
+					stack.extend(geoms.iter().map(|g| (DepthNode::Geo(g), depth + 1)));
+				}
+			}
+			DepthNode::Closure(closure) => {
+				// A closure captures the values it references, so a closure
+				// capturing a closure nests. The `body` / `args` are parse-bounded
+				// AST, not runtime values; only the captures grow. A `Builtin`
+				// closure (the compiled form the streaming engine produces) holds
+				// its captures behind the trait, so walk them through
+				// `captured_values` rather than treating it as a leaf.
+				match closure {
+					crate::val::Closure::Expr {
+						captures,
+						..
+					} => {
+						stack.extend(captures.0.values().map(|v| (DepthNode::Value(v), depth + 1)));
+					}
+					crate::val::Closure::Builtin(builtin) => {
+						stack.extend(
+							builtin
+								.captured_values()
+								.into_iter()
+								.map(|v| (DepthNode::Value(v), depth + 1)),
+						);
+					}
+				}
+			}
 		}
 	}
 	Ok(())
@@ -1323,6 +1390,30 @@ pub fn check_value_depth(value: &Value) -> Result<()> {
 
 pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surrealdb_types::Value> {
 	convert_value_to_public_value_at(value, 1)
+}
+
+/// Converts a row-shaped statement result (the array of rows a non-`ONLY`
+/// `SELECT` and friends emit) to a public value, treating the enclosing array as
+/// a transport envelope rather than a nesting level: each row is converted as
+/// its own root at depth 1.
+///
+/// This is the anchor the storage write guard uses - `check_value_depth` runs on
+/// a record's value with the record at depth 1 - and the one the streaming read
+/// path already uses (it converts each row as it is emitted). Converting the
+/// whole result array at depth 1 instead would charge every row an extra level,
+/// so a record whose deepest field sits exactly at [`MAX_VALUE_DEPTH`] would
+/// store and stream fine yet fail a collected read. A `Scalar` result (a single
+/// value, e.g. `SELECT ... ONLY` or `RETURN`) is its own root and must go
+/// through [`convert_value_to_public_value`] instead.
+pub fn convert_result_rows_to_public(value: crate::val::Value) -> Result<surrealdb_types::Value> {
+	let crate::val::Value::Array(rows) = value else {
+		// A row-shaped result is always the array of emitted rows; any other
+		// shape is converted as its own root (defensive - not expected).
+		return convert_value_to_public_value(value);
+	};
+	let converted =
+		rows.0.into_iter().map(convert_value_to_public_value).collect::<Result<Vec<_>>>()?;
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted)))
 }
 
 /// [`convert_value_to_public_value`] carrying the depth of `value`.
@@ -1352,11 +1443,11 @@ fn convert_value_to_public_value_at(
 		crate::val::Value::Array(value) => convert_array_to_public(value, depth),
 		crate::val::Value::Set(value) => convert_set_to_public(value, depth),
 		crate::val::Value::Object(value) => convert_object_to_public(value, depth),
-		crate::val::Value::Geometry(value) => convert_geometry_to_public(value),
+		crate::val::Value::Geometry(value) => convert_geometry_to_public(value, depth),
 		crate::val::Value::Bytes(value) => convert_bytes_to_public(value),
 		crate::val::Value::RecordId(value) => convert_record_id_to_public(value, depth),
 		crate::val::Value::File(value) => convert_file_to_public(value),
-		crate::val::Value::Range(value) => convert_range_to_public(*value),
+		crate::val::Value::Range(value) => convert_range_to_public(*value, depth),
 		crate::val::Value::Regex(value) => convert_regex_to_public(value),
 		crate::val::Value::Table(value) => {
 			Ok(surrealdb_types::Value::Table(value.into_public_table()))
@@ -1400,7 +1491,18 @@ fn convert_file_to_public(value: crate::val::File) -> Result<surrealdb_types::Va
 	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(value.bucket, value.key)))
 }
 
-fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_types::Value> {
+fn convert_geometry_to_public(
+	value: crate::val::Geometry,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	// A `GeometryCollection` nests, so carry the depth through it as the other
+	// container arms do; the storage guard (`check_value_depth`) rejects a deep
+	// geometry at write, and this keeps the read path in step.
+	if depth > MAX_VALUE_DEPTH {
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
 	use surrealdb_types::Geometry as PublicGeometry;
 	let geometry = match value {
 		crate::val::Geometry::Point(p) => PublicGeometry::Point(p),
@@ -1413,7 +1515,9 @@ fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_t
 			let converted: Result<Vec<_>> = c
 				.into_iter()
 				.map(|g| {
-					if let surrealdb_types::Value::Geometry(g) = convert_geometry_to_public(g)? {
+					if let surrealdb_types::Value::Geometry(g) =
+						convert_geometry_to_public(g, depth + 1)?
+					{
 						Ok(g)
 					} else {
 						Err(anyhow::anyhow!("Failed to convert geometry collection item"))
@@ -1471,7 +1575,10 @@ fn convert_record_id_to_public(
 	value: crate::val::RecordId,
 	depth: usize,
 ) -> Result<surrealdb_types::Value> {
-	let key = convert_record_id_key_to_public(value.key, depth)?;
+	// A record id's key nests one level under it, matching `check_value_depth`'s
+	// `Key` node at `depth + 1`, so continue the count there. Without the `+ 1`
+	// the read path accepts ~2x the record-id nesting the storage guard rejects.
+	let key = convert_record_id_key_to_public(value.key, depth + 1)?;
 	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
 		table: value.table.into_public_table(),
 		key,
@@ -1534,16 +1641,24 @@ fn convert_record_id_key_to_public(
 	}
 }
 
-fn convert_range_to_public(value: crate::val::Range) -> Result<surrealdb_types::Value> {
+fn convert_range_to_public(
+	value: crate::val::Range,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	// A range's bounds nest one level under it, so continue the depth count
+	// through them (`depth + 1`) as the array/object arms do. This keeps the read
+	// path in agreement with `check_value_depth`, which also descends into range
+	// bounds, so a bound whose value sits at the cap makes the range one past it
+	// and is rejected rather than converted through a deeper recursion.
 	Ok(surrealdb_types::Value::Range(Box::new(surrealdb_types::Range {
 		start: match value.start {
-			Bound::Included(v) => Bound::Included(convert_value_to_public_value(v)?),
-			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value(v)?),
+			Bound::Included(v) => Bound::Included(convert_value_to_public_value_at(v, depth + 1)?),
+			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value_at(v, depth + 1)?),
 			Bound::Unbounded => Bound::Unbounded,
 		},
 		end: match value.end {
-			Bound::Included(v) => Bound::Included(convert_value_to_public_value(v)?),
-			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value(v)?),
+			Bound::Included(v) => Bound::Included(convert_value_to_public_value_at(v, depth + 1)?),
+			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value_at(v, depth + 1)?),
 			Bound::Unbounded => Bound::Unbounded,
 		},
 	})))
@@ -1629,10 +1744,101 @@ mod tests {
 		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
 	}
 
+	// A collected row-shaped result is an array of rows, each its own root at the
+	// depth the storage guard used (a record at depth 1). Converting the whole
+	// result array charges every row an extra level, so a row at exactly the cap
+	// fails that way but must convert when treated as a row - the collected-read
+	// half of the storage/read agreement.
+	#[test]
+	fn result_rows_conversion_does_not_charge_the_envelope() {
+		use super::convert_result_rows_to_public;
+
+		let row = nested_array(MAX_VALUE_DEPTH);
+		let result = Value::Array(Array::from(vec![row]));
+
+		// Whole-array conversion puts the row at depth 2 and rejects it.
+		assert!(
+			convert_value_to_public_value(result.clone()).is_err(),
+			"the envelope-charging path must reject a row at the cap"
+		);
+		// Per-row conversion accepts it, matching storage and the streaming path.
+		convert_result_rows_to_public(result).expect("a row at the cap must convert as a row");
+	}
+
+	// A range's bounds nest one level under it, so the conversion carries the
+	// depth through them: a bound holding a value already at the cap makes the
+	// whole value one past it and must be rejected rather than converted through
+	// a deeper recursion.
+	#[test]
+	fn public_value_conversion_threads_depth_through_ranges() {
+		use std::ops::Bound;
+
+		use crate::val::Range;
+
+		let range_bound = |v: Value| {
+			Value::Range(Box::new(Range {
+				start: Bound::Included(v),
+				end: Bound::Unbounded,
+			}))
+		};
+
+		// A shallow value inside a range still converts.
+		convert_value_to_public_value(range_bound(nested_array(8)))
+			.expect("a shallow range-nested value must convert");
+		// A range whose bound is at the cap makes the whole value one past it.
+		let err = convert_value_to_public_value(range_bound(nested_array(MAX_VALUE_DEPTH)))
+			.expect_err("a range-nested value past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// A `GeometryCollection` nests further geometries, and both the SQL
+	/// formatter and the derived `Drop` recurse into it, so the depth guard must
+	/// walk it rather than treat a `Geometry` as a leaf, and the conversion must
+	/// carry the depth through it.
+	#[test]
+	fn geometry_collection_depth_is_walked() {
+		use crate::val::Geometry;
+
+		// `depth` collections deep, innermost an empty collection.
+		fn nested_geometry(depth: usize) -> Value {
+			let mut g = Geometry::Collection(vec![]);
+			for _ in 1..depth {
+				g = Geometry::Collection(vec![g]);
+			}
+			Value::Geometry(g)
+		}
+
+		// The `Value::Geometry` wrapper and its outermost collection share a level
+		// (the geometry nests within itself, not within `Value`), so `depth`
+		// collections deep is exactly `depth` levels: the cap is the boundary for
+		// both the walk and the conversion, and they must agree to the level.
+		check_value_depth(&nested_geometry(MAX_VALUE_DEPTH))
+			.expect("a geometry collection exactly at the cap must be accepted");
+		convert_value_to_public_value(nested_geometry(MAX_VALUE_DEPTH))
+			.expect("a geometry collection at the cap must also convert");
+		let err = check_value_depth(&nested_geometry(MAX_VALUE_DEPTH + 1))
+			.expect_err("a geometry one level past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		let err = convert_value_to_public_value(nested_geometry(MAX_VALUE_DEPTH + 1))
+			.expect_err("a geometry one level past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+
+		// The walk stays iterative: a geometry too deep to drop recursively is
+		// still rejected rather than overflowing the checker. Leaked because its
+		// own `Drop` is recursive.
+		let deep = std::mem::ManuallyDrop::new(nested_geometry(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deep geometry must be rejected, not overflow the stack"
+		);
+	}
+
 	/// A record id nests through its key, which the storage codec and the
-	/// recursive drop both descend into. Treating a record id as a leaf let a
-	/// compound key (`t:[[[...]]]`) past the cap through; the key must be walked
-	/// like any other nested value.
+	/// recursive drop both descend into, so the key must be walked like any other
+	/// nested value rather than treated as a leaf. The walk and the conversion
+	/// must agree on the boundary: a record id counts one level for the id itself
+	/// and one for the key array before its nested contents, so a key holding a
+	/// value nested `MAX_VALUE_DEPTH - 2` levels sits exactly at the cap.
 	#[test]
 	fn record_id_key_depth_is_walked() {
 		use crate::val::{RecordId, RecordIdKey};
@@ -1645,10 +1851,91 @@ mod tests {
 			})
 		}
 
-		check_value_depth(&record_id_with_nested_key(8))
-			.expect("a shallow compound key must be accepted");
-		let err = check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH + 8))
-			.expect_err("a record id whose key nests past the cap must be rejected");
+		check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH - 2))
+			.expect("a compound key exactly at the cap must be accepted");
+		convert_value_to_public_value(record_id_with_nested_key(MAX_VALUE_DEPTH - 2))
+			.expect("a compound key at the cap must also convert");
+		let err = check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH - 1))
+			.expect_err("a record id whose key nests one past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		let err = convert_value_to_public_value(record_id_with_nested_key(MAX_VALUE_DEPTH - 1))
+			.expect_err("a record id whose key nests one past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// `array::fold` can thread a closure-valued accumulator that captures itself
+	/// each turn (`|$a, $_| |$x| $a`), growing the closure's capture nesting
+	/// without bound, so the walk must descend into a closure's captures rather
+	/// than treat it as a leaf. A closure cannot be converted to a public value
+	/// or stored, so the walk the fold cap runs is the only guard on this shape.
+	#[test]
+	fn closure_capture_depth_is_walked() {
+		use crate::expr::Expr;
+		use crate::expr::variables::Variables;
+		use crate::val::Closure;
+
+		// A closure whose single capture holds a value nested `inner` levels. The
+		// closure shares a level with its `Value` wrapper and the capture nests
+		// one under it, so a capture at `MAX_VALUE_DEPTH - 1` sits at the cap.
+		fn closure_with_nested_capture(inner: usize) -> Value {
+			let mut captures = Variables::default();
+			captures.insert("a", nested_array(inner));
+			Value::Closure(Box::new(Closure::Expr {
+				args: vec![],
+				returns: None,
+				body: Expr::Break,
+				captures,
+			}))
+		}
+
+		check_value_depth(&closure_with_nested_capture(MAX_VALUE_DEPTH - 1))
+			.expect("a closure whose capture sits at the cap must be accepted");
+		let err = check_value_depth(&closure_with_nested_capture(MAX_VALUE_DEPTH))
+			.expect_err("a closure whose capture nests past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+
+		// The walk stays iterative on a closure too deep to drop recursively.
+		let deep = std::mem::ManuallyDrop::new(closure_with_nested_capture(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deep closure capture must be rejected, not overflow the stack"
+		);
+	}
+
+	/// The streaming engine represents a runtime closure as a `Closure::Builtin`
+	/// whose captures live behind the `BuiltinClosureObj` trait, not a
+	/// `Closure::Expr`, so the walk must reach them through `captured_values` or a
+	/// closure-valued accumulator escapes the cap on that engine. The captures
+	/// nest exactly as `Closure::Expr`'s do, so the boundary is the same.
+	#[test]
+	fn builtin_closure_captures_are_walked() {
+		use std::sync::Arc;
+
+		use crate::val::Closure;
+		use crate::val::closure::BuiltinClosureObj;
+
+		// A builtin closure that captured `values` by cloning them, the shape a
+		// compiled closure takes.
+		#[derive(Debug)]
+		struct Captured(Vec<Value>);
+		impl BuiltinClosureObj for Captured {
+			fn as_any(&self) -> &dyn std::any::Any {
+				self
+			}
+			fn captured_values(&self) -> Vec<&Value> {
+				self.0.iter().collect()
+			}
+		}
+		fn builtin_capturing(inner: usize) -> Value {
+			Value::Closure(Box::new(Closure::Builtin(Arc::new(Captured(vec![nested_array(
+				inner,
+			)])))))
+		}
+
+		check_value_depth(&builtin_capturing(MAX_VALUE_DEPTH - 1))
+			.expect("a builtin closure whose capture sits at the cap must be accepted");
+		let err = check_value_depth(&builtin_capturing(MAX_VALUE_DEPTH))
+			.expect_err("a builtin closure whose capture nests past the cap must be rejected");
 		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
 	}
 

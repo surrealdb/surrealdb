@@ -18,6 +18,9 @@ For the release **process** (how releases are cut and shipped), see
   vector is missing those records from KNN results, and may keep returning
   fewer than `k` rows after such records are deleted. This release stops the
   loss; an index already affected keeps it until `REBUILD INDEX`.
+- A value containing a deeply nested `GeometryCollection` that was stored by an
+  earlier release may now return `The value is nested too deeply` when read. It
+  can be repaired in place by overwriting the field; see below.
 
 ### Vector indexes that lost records sharing a vector
 
@@ -34,6 +37,38 @@ was gone. This release writes every change.
 than nine records with an identical value in the indexed field — duplicated
 embeddings, placeholder or default vectors — with `REBUILD INDEX`. An index
 where every vector is shared by at most nine records was never affected.
+
+### A deeply nested value stored by an older release can error on read
+
+v3.3.0 began rejecting a value nested past the depth cap (256 levels) when
+it is written. This release extends the same cap to a `GeometryCollection`, whose
+nesting a record's write guard did not previously count, and applies it on the
+read path (the public-value conversion every result passes through) as well.
+
+An earlier release could therefore store a value whose overall nesting exceeds
+the cap once its `GeometryCollection` is counted, for example a record field grown
+by a read-modify-write loop that wraps a collection. Reading such a value back
+under this release returns
+
+```
+The value is nested too deeply. A value may be nested at most 256 levels; reduce the nesting or split the data across records
+```
+
+The check runs per request, so a single such row makes every statement that reads
+it, including a `SELECT` that scans the table it lives in, return that error until
+the row is repaired.
+
+Repair is in place and does not require deleting the row. The write guard checks
+the value being written rather than the one already stored, so overwriting the
+offending field with a shallower value clears it:
+
+```
+UPDATE deep:1 SET g = NONE;
+```
+
+Nothing a current release stores can newly reach this state: the write guard now
+counts the same `GeometryCollection` nesting the read path does, so a value that
+would be unreadable is rejected at the write instead.
 
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, ANN pending entries at a new revision, and export/import contract changes
 
