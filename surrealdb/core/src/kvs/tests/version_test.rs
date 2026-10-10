@@ -354,11 +354,18 @@ async fn a_default_datastore_is_stamped_before_its_writers_start() {
 		"a default-built datastore was handed over with no version marker"
 	);
 
-	// Let the writers run, then confirm the gate still passes: what they wrote
-	// cannot be read as storage from before the marker, because the marker
-	// predates all of it.
-	tokio::time::sleep(Duration::from_millis(50)).await;
-	assert!(count_node_rows(&ds).await > 0, "the maintenance tasks never wrote");
+	// Wait for the writers' first write, then confirm the gate still passes:
+	// what they wrote cannot be read as storage from before the marker, because
+	// the marker predates all of it. The first write lands one refresh interval
+	// after construction at the earliest, and later on a loaded scheduler, so
+	// the wait polls up to a deadline rather than sleeping a fixed span.
+	tokio::time::timeout(Duration::from_secs(30), async {
+		while count_node_rows(&ds).await == 0 {
+			tokio::time::sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.expect("the maintenance tasks never wrote");
 	assert_eq!(ds.check_version().await.unwrap().0, MajorVersion::latest());
 
 	ds.shutdown().await.unwrap();
