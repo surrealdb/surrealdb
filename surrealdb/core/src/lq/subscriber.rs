@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use surrealdb_strand::TableName;
 
 use crate::dbs::{MessageBroker, Session};
@@ -39,74 +39,94 @@ fn into_error(flow: ControlFlow) -> anyhow::Error {
 	}
 }
 
-/// Compute and deliver live-query notifications for a batch of captured
-/// [`LiveEvent`]s on a single table, entirely off the write path.
+/// A table's live subscriptions, resolved once per router pass, that captured
+/// [`LiveEvent`]s are replayed against entirely off the write path.
 ///
-/// The caller supplies the read `txn` — which must be at-or-after the events'
-/// commit so any permission / computed-field / FETCH reads observe the
-/// committed state — and the `broker` that receives the produced
-/// notifications. This resolves the table's catalog context (including its live
-/// subscriptions and their units) once, then replays every event against each
-/// subscription through [`crate::exec::vm::notify_at`], so all of the inline
-/// pipeline's security guarantees hold
-/// unchanged: field-permission and computed-field filtering, DIFF leakage
-/// protection, session-expiry suppression and per-subscriber error isolation.
-///
-/// `ns_name`/`db_name`/`table` identify the table whose events these are; the
-/// router resolves them from the `lqe` key and value before calling in.
-pub(crate) async fn replay_table_live_events(
-	ds: &Datastore,
-	txn: Arc<Transaction>,
-	ns_name: &str,
-	db_name: &str,
-	table: &TableName,
-	events: &[LiveEvent],
+/// Replay runs every event against each subscription through
+/// [`crate::exec::vm::notify_at`], so all of the inline pipeline's security
+/// guarantees hold unchanged: field-permission and computed-field filtering,
+/// DIFF leakage protection, session-expiry suppression and per-subscriber error
+/// isolation.
+pub(crate) struct TableReplay {
+	write_ctx: WriteCtx,
 	broker: Arc<dyn MessageBroker>,
-) -> Result<()> {
-	if events.is_empty() {
-		return Ok(());
-	}
-	// Build a background context carrying the read transaction and the broker
-	// that the replayed notifications are sent through.
-	let mut ctx = ds.setup_ctx()?;
-	ctx.set_transaction(Arc::clone(&txn));
-	ctx.set_broker(Some(Arc::clone(&broker)));
-	let ctx = ctx.freeze();
-	// Base options scoped to this namespace/database. The auth is anonymous and
-	// irrelevant: the pipeline applies each subscription's own stored auth
-	// snapshot before evaluating any permission.
-	let opt = ds.setup_options(&Session::default().with_ns(ns_name).with_db(db_name));
-	let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
-	// The table's definitions, including the live subscriptions each event is
-	// replayed against.
-	let write_ctx =
-		WriteCtx::resolve(&exec, table, TableExistence::Required).await.map_err(into_error)?;
-	for event in events {
-		// The action selects the same source image and emits the same
-		// notification action the inline engine does.
-		let images = Images {
-			initial: Arc::new(event.before.clone()),
-			current: Arc::new(event.after.clone()),
-			action: match event.action {
-				LiveAction::Create => Action::Create,
-				LiveAction::Update => Action::Update,
-				LiveAction::Delete => Action::Delete,
-			},
-		};
-		for at in 0..write_ctx.lives.len() {
-			let Notify::Deliver(notification) =
-				crate::exec::vm::notify_at(&write_ctx, at, &event.id, &images)
-					.await
-					.map_err(into_error)?
-			else {
-				continue;
-			};
-			deliver(&broker, &write_ctx, &write_ctx.lives[at], notification)
-				.await
-				.map_err(into_error)?;
+}
+
+impl TableReplay {
+	/// Resolve `table`'s catalog context, including its live subscriptions,
+	/// from the read `txn`. That transaction must be at-or-after the commit of
+	/// every event replayed through the result, so any permission /
+	/// computed-field / FETCH reads observe the committed state.
+	///
+	/// Returns `None` when the table no longer exists. Removing a table kills
+	/// its subscriptions, so events captured for it before the removal have no
+	/// one left to notify and are dropped rather than failing the replay.
+	pub(crate) async fn resolve(
+		ds: &Datastore,
+		txn: Arc<Transaction>,
+		ns_name: &str,
+		db_name: &str,
+		table: &TableName,
+		broker: Arc<dyn MessageBroker>,
+	) -> Result<Option<Self>> {
+		// Build a background context carrying the read transaction and the broker
+		// that the replayed notifications are sent through.
+		let mut ctx = ds.setup_ctx()?;
+		ctx.set_transaction(txn);
+		ctx.set_broker(Some(Arc::clone(&broker)));
+		let ctx = ctx.freeze();
+		// Base options scoped to this namespace/database. The auth is anonymous and
+		// irrelevant: the pipeline applies each subscription's own stored auth
+		// snapshot before evaluating any permission.
+		let opt = ds.setup_options(&Session::default().with_ns(ns_name).with_db(db_name));
+		let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
+		// The lookup is cached on the frame, so resolving the context below
+		// reads the definition again for free.
+		let db_ctx = exec.database().context("a live-query replay requires a database context")?;
+		if db_ctx.get_table_def(table, None).await?.is_none() {
+			return Ok(None);
 		}
+		let write_ctx =
+			WriteCtx::resolve(&exec, table, TableExistence::Required).await.map_err(into_error)?;
+		Ok(Some(Self {
+			write_ctx,
+			broker,
+		}))
 	}
-	Ok(())
+
+	/// Compute and deliver the notifications for `events`, in order.
+	///
+	/// An error leaves the events before the failing one delivered, and the
+	/// failing event delivered to the subscriptions before the failing one.
+	pub(crate) async fn replay(&self, events: &[LiveEvent]) -> Result<()> {
+		let write_ctx = &self.write_ctx;
+		for event in events {
+			// The action selects the same source image and emits the same
+			// notification action the inline engine does.
+			let images = Images {
+				initial: Arc::new(event.before.clone()),
+				current: Arc::new(event.after.clone()),
+				action: match event.action {
+					LiveAction::Create => Action::Create,
+					LiveAction::Update => Action::Update,
+					LiveAction::Delete => Action::Delete,
+				},
+			};
+			for at in 0..write_ctx.lives.len() {
+				let Notify::Deliver(notification) =
+					crate::exec::vm::notify_at(write_ctx, at, &event.id, &images)
+						.await
+						.map_err(into_error)?
+				else {
+					continue;
+				};
+				deliver(&self.broker, write_ctx, &write_ctx.lives[at], notification)
+					.await
+					.map_err(into_error)?;
+			}
+		}
+		Ok(())
+	}
 }
 
 #[cfg(test)]
@@ -300,5 +320,56 @@ mod tests {
 		ds.live_query_router_process().await.unwrap();
 		let notifs = drain(&recv).await;
 		assert_eq!(notifs.len(), 1, "first router pass must deliver the startup-window event");
+	}
+
+	/// A captured event whose table is removed before the router replays it is
+	/// dropped, and neither blocks nor re-delivers any other database's events.
+	/// The databases are named so the removed table's database is visited
+	/// between the other two.
+	#[tokio::test]
+	async fn router_drops_events_for_a_removed_table() {
+		use crate::types::{PublicAction, PublicNotification, PublicValue};
+
+		fn creates(notifs: &[PublicNotification], table: &str) -> usize {
+			notifs
+				.iter()
+				.filter(|n| {
+					matches!(n.action, PublicAction::Create)
+						&& matches!(&n.record, PublicValue::RecordId(r) if r.table.as_str() == table)
+				})
+				.count()
+		}
+
+		let (recv, ds) = new_ds("router").await;
+		ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
+		for (db, tb) in [("aa", "ta"), ("bb", "tb"), ("cc", "tc")] {
+			let sess = Session::owner().with_ns("test").with_db(db);
+			ds.execute(&format!("DEFINE DATABASE {db}; DEFINE TABLE {tb}"), &sess, None)
+				.await
+				.unwrap();
+			let live = Session::owner().with_ns("test").with_db(db).with_rt(true);
+			ds.execute(&format!("LIVE SELECT * FROM {tb}"), &live, None).await.unwrap();
+			ds.execute(&format!("CREATE {tb}:1"), &sess, None).await.unwrap();
+		}
+		let bb = Session::owner().with_ns("test").with_db("bb");
+		ds.execute("REMOVE TABLE tb", &bb, None).await.unwrap();
+		// The removal's `Killed` notification is sent directly, not by the router.
+		while recv.try_recv().is_ok() {}
+
+		for _ in 0..3 {
+			ds.live_query_router_process().await.unwrap();
+		}
+		let notifs = drain(&recv).await;
+		assert_eq!(creates(&notifs, "ta"), 1, "a database before the removed table: {notifs:?}");
+		assert_eq!(creates(&notifs, "tb"), 0, "the removed table: {notifs:?}");
+		assert_eq!(creates(&notifs, "tc"), 1, "a database after the removed table: {notifs:?}");
+
+		// Delivery continues past the removal on later passes.
+		let aa = Session::owner().with_ns("test").with_db("aa");
+		ds.execute("CREATE ta:2", &aa, None).await.unwrap();
+		ds.live_query_router_process().await.unwrap();
+		ds.live_query_router_process().await.unwrap();
+		let notifs = drain(&recv).await;
+		assert_eq!(creates(&notifs, "ta"), 1, "a later write is delivered once: {notifs:?}");
 	}
 }
