@@ -803,8 +803,9 @@ impl LogicalExpr {
 			// `base.*` over an array yields the array itself, its record-id
 			// elements dereferenced, so it is typed as an array of the kind the
 			// schema declares at `base.*` — when the base is declared an array
-			// and the element kind is one no dereference can change. Over an
-			// object it yields the object, and over anything else `NONE`.
+			// and the element kind is one no dereference can change. Over a set
+			// it yields a set, over an object the object, and over anything
+			// else `NONE`.
 			LogicalExpr::Each(base) => {
 				let element = self
 					.field_path()

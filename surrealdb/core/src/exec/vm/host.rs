@@ -6115,11 +6115,14 @@ async fn destructure(
 	ctx: &ExecutionContext,
 ) -> FlowResult<Value> {
 	use super::program::DestructureStep;
+	// A fetch spends a unit of the computation-depth budget, as a field read
+	// through a link does.
 	let fetch = async |rid: &crate::val::RecordId| {
+		let ctx = ctx.dive()?;
 		if skip {
-			crate::exec::operators::fetch::fetch_record_no_perms(ctx, rid).await
+			crate::exec::operators::fetch::fetch_record_no_perms(&ctx, rid).await
 		} else {
-			crate::exec::operators::fetch::fetch_record(ctx, rid).await
+			crate::exec::operators::fetch::fetch_record(&ctx, rid).await
 		}
 	};
 	match value {
@@ -6179,6 +6182,11 @@ async fn destructure(
 			.await
 		}
 		Value::Array(items) => {
+			// A collection spends a unit of the computation-depth budget on
+			// top of each element's fetch: a destructure through a cycle of
+			// links nests more frames per level than a field read does, and
+			// the extra unit ends the cycle within the worker's stack.
+			let ctx = &ctx.dive()?;
 			let mut results = Vec::with_capacity(items.len());
 			for item in items {
 				results.push(
@@ -6189,6 +6197,25 @@ async fn destructure(
 				);
 			}
 			Ok(Value::Array(results.into()))
+		}
+		// A set is destructured element by element as an array is, its
+		// results collected back into a set.
+		Value::Set(items) => {
+			// A collection spends a unit of the computation-depth budget on
+			// top of each element's fetch: a destructure through a cycle of
+			// links nests more frames per level than a field read does, and
+			// the extra unit ends the cycle within the worker's stack.
+			let ctx = &ctx.dive()?;
+			let mut results = Vec::with_capacity(items.len());
+			for item in items {
+				results.push(
+					crate::exec::vm::host::out_of_line(|| {
+						destructure(program, fields, item, skip, state, ctx)
+					})
+					.await?,
+				);
+			}
+			Ok(Value::Set(results.into_iter().collect()))
 		}
 		_ => Ok(Value::None),
 	}

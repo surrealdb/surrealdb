@@ -227,8 +227,9 @@ pub enum LogicalExpr {
 	/// (`->likes->person`). Renders as nothing.
 	Current,
 	/// `v.f`: the field `f` of `base`. On an object, the field; on a record
-	/// id, the field of the fetched record; on an array, the access mapped
-	/// over the elements; on a geometry, its GeoJSON field. A mapping step.
+	/// id, the field of the fetched record; on an array or a set, the access
+	/// mapped over the elements into the same kind of collection; on a
+	/// geometry, its GeoJSON field. A mapping step.
 	Access {
 		base: Box<LogicalExpr>,
 		field: Strand,
@@ -245,8 +246,8 @@ pub enum LogicalExpr {
 	/// `v[$]`: the last element of an array or set; any other value passes
 	/// through.
 	Last(Box<LogicalExpr>),
-	/// `v.*`: every element. A record id is fetched; an array has each
-	/// record-id element fetched and every other element kept; an object
+	/// `v.*`: every element. A record id is fetched; an array or a set has
+	/// each record-id element fetched and every other element kept; an object
 	/// passes through; anything else is `NONE`. A mapping step.
 	Each(Box<LogicalExpr>),
 	/// `v…`: one level of nesting removed from an array; any other value
@@ -273,8 +274,8 @@ pub enum LogicalExpr {
 		args: Vec<LogicalExpr>,
 	},
 	/// `v.{ … }`: an object of the listed fields of `base`. A record id is
-	/// fetched first; an array has the destructure mapped over its elements.
-	/// A mapping step.
+	/// fetched first; an array or a set has the destructure mapped over its
+	/// elements into the same kind of collection. A mapping step.
 	Destructure {
 		base: Box<LogicalExpr>,
 		fields: Vec<LogicalDestructureField>,
@@ -299,12 +300,12 @@ pub enum LogicalExpr {
 	/// `v.@`: the marker inside a recursion body at which the recursion
 	/// re-enters. A step on the value the body has produced so far.
 	RepeatRecurse(Box<LogicalExpr>),
-	/// The array-continuation rule made explicit. When `base` is an array,
-	/// `body` is evaluated once per element with the element as
-	/// [`Self::Current`], and the results form the array; when `base` is
-	/// anything else, `body` is evaluated once with `base` as `Current`.
-	/// `flatten` asks for the per-element results to be flattened one level,
-	/// and applies only when `base` is an array.
+	/// The array-continuation rule made explicit. When `base` is an array or
+	/// a set, `body` is evaluated once per element with the element as
+	/// [`Self::Current`], and the results form an array or a set as `base`
+	/// is; when `base` is anything else, `body` is evaluated once with `base`
+	/// as `Current`. `flatten` asks for the per-element results to be
+	/// flattened one level, and applies only when `base` is an array.
 	///
 	/// A `Broadcast` nested inside the body of a `Broadcast` that is mapping
 	/// does not map again: it evaluates its base, then its body against that

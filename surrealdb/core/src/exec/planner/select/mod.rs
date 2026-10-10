@@ -911,8 +911,11 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// `indexes` with every b-tree column that stores array elements spelled
-	/// as an element column, resolved against `table_name`'s declared fields;
-	/// see [`with_array_columns_as_elements`](crate::exec::index::access_path::with_array_columns_as_elements).
+	/// as an element column, and every one that flattens a set withheld from
+	/// containment, resolved against `table_name`'s declared fields and those
+	/// of the tables they link to or a view reads; see
+	/// [`with_array_columns_as_elements`](crate::exec::index::access_path::with_array_columns_as_elements)
+	/// and [`foreign_set_prefixes`](crate::exec::index::access_path::foreign_set_prefixes).
 	///
 	/// `None` when the field list cannot be read: without it a column's
 	/// fan-out is unknown, so the caller declines its plan-time index path
@@ -943,7 +946,26 @@ impl<'ctx> Planner<'ctx> {
 				return None;
 			}
 		};
-		Some(crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields))
+		let sets = match crate::exec::index::access_path::foreign_set_prefixes(
+			txn, ns_id, db_id, table_name, &indexes, &fields, None,
+		)
+		.await
+		{
+			Ok(sets) => sets,
+			Err(e) => {
+				tracing::warn!(
+					table = %table_name,
+					error = %e,
+					"plan-time linked field list failed in with_array_columns_as_elements; \
+					 falling back to runtime",
+				);
+				return None;
+			}
+		};
+		Some(
+			crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields)
+				.withholding_sets_at(&sets),
+		)
 	}
 
 	/// Resolve a B-tree index access path covering the WHERE condition for
@@ -1058,7 +1080,7 @@ impl<'ctx> Planner<'ctx> {
 			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
 		let columns =
-			crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields);
+			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
 		let analyzer = columns.analyzer(with);
 		analyzer.try_bitmap_count_fusion(cond, &exact_col)

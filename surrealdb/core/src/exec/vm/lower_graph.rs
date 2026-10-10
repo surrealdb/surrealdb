@@ -432,10 +432,11 @@ impl Lowering<'_, '_> {
 		})
 	}
 
-	/// A path's broadcast of `body` over `base`: over an array, `body` once per element with the
-	/// element as the current value, the results flattened one level when
-	/// `flatten` is set; over anything else, `body` once with the value itself
-	/// as the current value. A mapped body whose first step is `.*` takes
+	/// A path's broadcast of `body` over `base`: over an array or a set, `body`
+	/// once per element with the element as the current value, the results
+	/// collected into the same kind of collection and, for an array, flattened
+	/// one level when `flatten` is set; over anything else, `body` once with
+	/// the value itself as the current value. A mapped body whose first step is `.*` takes
 	/// that step only over an element that is a record id; any other element
 	/// is its own first step's value.
 	pub(super) async fn broadcast(
@@ -452,7 +453,7 @@ impl Lowering<'_, '_> {
 			.await;
 		}
 		// The body is lowered once, in the loop: a value that is not an
-		// array enters the body directly as its one element, and that one
+		// array or a set enters the body directly as its one element, and that one
 		// result is the broadcast's. Lowering it once per branch would double
 		// the program at each broadcast a path nests in another.
 		let src = crate::exec::vm::host::out_of_line(|| self.value(base)).await?;
@@ -474,6 +475,7 @@ impl Lowering<'_, '_> {
 			items,
 			dst,
 			other: 0,
+			sets: true,
 		});
 		let pos = self.register()?;
 		let zero = self.constant(Value::from(0i64));
@@ -520,7 +522,8 @@ impl Lowering<'_, '_> {
 		let over = self.emit(Instr::Jump {
 			target: 0,
 		});
-		// Anything but an array: the body runs once, over the value itself.
+		// Anything but an array or a set: the body runs once, over the value
+		// itself.
 		let other = self.here();
 		self.patch(begin, other);
 		let yes = self.constant(Value::from(true));
@@ -544,7 +547,7 @@ impl Lowering<'_, '_> {
 	}
 
 	/// [`Self::broadcast`] of a body whose first step is `.*`, `stripped` the
-	/// body without it: over an array, that step is taken only over an
+	/// body without it: over an array or a set, that step is taken only over an
 	/// element that is a record id, and any other element is its own first
 	/// step's value; over anything else, `body` runs once over the value.
 	async fn broadcast_each(
@@ -567,6 +570,7 @@ impl Lowering<'_, '_> {
 			items,
 			dst,
 			other: 0,
+			sets: true,
 		});
 		let pos = self.register()?;
 		let zero = self.constant(Value::from(0i64));

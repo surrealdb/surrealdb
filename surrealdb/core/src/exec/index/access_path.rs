@@ -474,6 +474,17 @@ pub(crate) fn field_kind_excludes_arrays(kind: &Kind) -> bool {
 /// containment over them by scan; an index declared over elements (`tags.*`)
 /// is what serves containment from the index.
 ///
+/// A column that flattens a value declared a set (`tags.*` over `TYPE
+/// set<string>`, or `meta.tags.*` where `meta` is `TYPE { tags: set<string>
+/// }`) is not one a containment leaf may seek either, and is reported in
+/// [`ElementColumns::sets`]. The writer stores a set whole under such a column,
+/// one entry per record keyed by the entire set, so an element seek meets no
+/// key. The column, and the index, still serve every other access: a compound
+/// index's columns before it keep answering their own predicates. Only the
+/// declared kind identifies the set, so one stored in a field declared `any`,
+/// not declared at all, or redeclared as another kind after it was written is
+/// not detected.
+///
 /// The rewrite is for planning only. Scans encode their keys from the index id
 /// and the query's values; the column idioms reach execution only as the
 /// ordering and constant-field claims, which this makes accurate. Returns
@@ -484,7 +495,7 @@ pub(crate) fn with_array_columns_as_elements(
 ) -> ElementColumns {
 	let as_elements = |col: &Idiom| -> bool {
 		!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
-			&& declared_kind(col, fields).is_some_and(kind_holds_only_arrays)
+			&& declared_kind(&col.0, fields).is_some_and(kind_holds_only_arrays)
 	};
 	// Built only once a column changes, so an unchanged list is neither
 	// cloned nor reallocated. The definitions and their rewritten-column flags
@@ -523,22 +534,197 @@ pub(crate) fn with_array_columns_as_elements(
 				.iter()
 				.map(|col| {
 					!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
-						&& declared_kind(col, fields).is_some_and(field_kind_excludes_arrays)
+						&& declared_kind(&col.0, fields).is_some_and(field_kind_excludes_arrays)
 				})
 				.collect()
 		})
 		.collect();
 	let scalar = scalar.iter().any(|flags| flags.contains(&true)).then(|| scalar.into());
+	let sets: Vec<ColumnFlags> = indexes
+		.iter()
+		.map(|ix| {
+			if matches!(ix.index, Index::Idx | Index::Uniq) {
+				ix.cols.iter().map(|col| flattens_a_set(col, fields)).collect()
+			} else {
+				Box::default()
+			}
+		})
+		.collect();
+	let sets = sets.iter().any(|flags| flags.contains(&true)).then(|| sets.into());
 	match changed {
 		Some((defs, masks)) => ElementColumns {
 			indexes: defs.into(),
 			rewritten: Some(masks.into()),
 			scalar,
+			sets,
 		},
 		None => ElementColumns {
 			scalar,
+			sets,
 			..ElementColumns::unchanged(indexes)
 		},
+	}
+}
+
+/// Whether `col` flattens (`*`) a value that may be a set: one whose declared
+/// kind admits a set, or one a computed step produces.
+fn flattens_a_set(col: &Idiom, fields: &[FieldDefinition]) -> bool {
+	col.0.iter().enumerate().any(|(i, part)| {
+		matches!(part, Part::All)
+			&& (computes(&col.0[..i]) || declared_admits_set(&col.0[..i], fields))
+	})
+}
+
+/// Whether `path` holds a step whose result no declaration describes: a
+/// method call (`.to_set()`), a graph lookup, a recursion, a destructure or
+/// an expression start. Its value may be a set whatever the fields declare.
+fn computes(path: &[Part]) -> bool {
+	path.iter().any(|part| {
+		matches!(
+			part,
+			Part::Method(..)
+				| Part::Lookup(_)
+				| Part::Recurse(..)
+				| Part::RepeatRecurse
+				| Part::Destructure(_)
+				| Part::Start(_)
+		)
+	})
+}
+
+/// Whether the value at `path` may be a set by what `fields` declare: the
+/// kind of the field named `path`, or any alternative of an ancestor's type
+/// that reaches `path` (see [`kind_at_admits_set`]). Every declaration is
+/// read: a field's own kind (`any`, or none) does not override an ancestor
+/// declaring a set at the path, since the ancestor's kind is applied to the
+/// value too. Unlike [`declared_kind`], a union of literal types is read
+/// through every alternative.
+fn declared_admits_set(path: &[Part], fields: &[FieldDefinition]) -> bool {
+	(1..=path.len()).rev().any(|n| {
+		fields
+			.iter()
+			.find(|fd| names_path(fd, &path[..n]))
+			.and_then(|fd| fd.field_kind.as_ref())
+			.is_some_and(|kind| kind_at_admits_set(kind, &path[n..]))
+	})
+}
+
+/// Whether `fd` is declared at `path`. An optional part (`.?`) reads the value
+/// it follows unchanged, so it is skipped: `meta.?.tags` is declared by a
+/// field named `meta.tags`.
+fn names_path(fd: &FieldDefinition, path: &[Part]) -> bool {
+	fd.name.0.iter().eq(path.iter().filter(|part| !matches!(part, Part::Optional)))
+}
+
+/// Whether some value of `kind`, read at `path` through object literal,
+/// tuple and collection types, is a set; every alternative of a union is
+/// read. An optional part (`.?`) reads the value it follows unchanged. A
+/// field read on an array is read on its elements, and any part read through a
+/// set yields a set, since paths map over a set's elements and collect the
+/// results back into a set. A part not read here may yield anything, so it is
+/// taken to yield a set: a seek it would allow could miss rows.
+fn kind_at_admits_set(kind: &Kind, path: &[Part]) -> bool {
+	let Some((part, rest)) = path.split_first() else {
+		return kind_admits_set(kind);
+	};
+	if matches!(part, Part::Optional) {
+		return kind_at_admits_set(kind, rest);
+	}
+	match kind {
+		Kind::Either(kinds) => kinds.iter().any(|kind| kind_at_admits_set(kind, path)),
+		// A field read yields that field's value; `.*` leaves an object
+		// unchanged.
+		Kind::Literal(KindLiteral::Object(fields)) => match part {
+			Part::Field(name) => {
+				fields.get(name.as_str()).is_some_and(|kind| kind_at_admits_set(kind, rest))
+			}
+			Part::All => kind_at_admits_set(kind, rest),
+			_ => true,
+		},
+		// A position (`[0]`, `[$]`, a number) selects one element. Any other
+		// part read through a set is read on each element and the results are
+		// collected back into a set, so the value is a set.
+		Kind::Set(element, _) => match part {
+			Part::First | Part::Last => kind_at_admits_set(element, rest),
+			Part::Value(crate::expr::Expr::Literal(
+				crate::expr::Literal::Integer(_)
+				| crate::expr::Literal::Float(_)
+				| crate::expr::Literal::Decimal(_),
+			)) => kind_at_admits_set(element, rest),
+			_ => true,
+		},
+		// `.*` and a position (any index expression, `[0]`, `[0.0]` or a
+		// computed one) yield elements; a field read maps over them; a filter
+		// keeps the array.
+		Kind::Array(element, _) => match part {
+			Part::All | Part::First | Part::Last | Part::Value(_) => {
+				kind_at_admits_set(element, rest)
+			}
+			Part::Field(_) => kind_at_admits_set(element, path),
+			Part::Where(_) => kind_at_admits_set(kind, rest),
+			_ => true,
+		},
+		// A tuple reads its declared element at a known position, and may
+		// yield any element at a position known only when the query runs.
+		Kind::Literal(KindLiteral::Array(kinds)) => match tuple_position(part, kinds.len()) {
+			Some(Some(position)) => {
+				kinds.get(position).is_some_and(|kind| kind_at_admits_set(kind, rest))
+			}
+			Some(None) => kinds.iter().any(|kind| kind_at_admits_set(kind, rest)),
+			None => match part {
+				Part::Field(_) => kinds.iter().any(|kind| kind_at_admits_set(kind, path)),
+				Part::Where(_) => kind_at_admits_set(kind, rest),
+				_ => true,
+			},
+		},
+		_ => false,
+	}
+}
+
+/// The position `part` reads in a tuple of `len` elements: `Some(Some(n))`
+/// for a literal position, `Some(None)` for one known only when the query
+/// runs (`.*`, a computed or non-integer index), `None` when `part` reads no
+/// position.
+fn tuple_position(part: &Part, len: usize) -> Option<Option<usize>> {
+	use crate::expr::{Expr, Literal};
+	match part {
+		Part::First => Some(Some(0)),
+		Part::Last => Some(len.checked_sub(1)),
+		Part::Value(Expr::Literal(Literal::Integer(i))) => Some(usize::try_from(*i).ok()),
+		Part::All | Part::Value(_) => Some(None),
+		_ => None,
+	}
+}
+
+/// Whether some value of `kind` is a set. Unions are read through at any
+/// depth.
+fn kind_admits_set(kind: &Kind) -> bool {
+	match kind {
+		Kind::Set(..) => true,
+		Kind::Either(kinds) => kinds.iter().any(kind_admits_set),
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Range
+		| Kind::Table(_)
+		| Kind::Record(_)
+		| Kind::Geometry(_)
+		| Kind::File(_)
+		| Kind::Function(..)
+		| Kind::Array(..)
+		| Kind::Literal(_) => false,
 	}
 }
 
@@ -555,6 +741,10 @@ pub(crate) struct ElementColumns {
 	/// Per index, in order, whether each column is declared a kind that holds
 	/// no array. `None` when none is, or when the fields were not read.
 	pub(crate) scalar: Option<Arc<[ColumnFlags]>>,
+	/// Per index, in order, whether each column flattens a value declared a
+	/// set; a column past the end of its index's flags does not. `None` when
+	/// none does, or when the fields were not read.
+	pub(crate) sets: Option<Arc<[ColumnFlags]>>,
 }
 
 impl ElementColumns {
@@ -564,11 +754,47 @@ impl ElementColumns {
 			indexes,
 			rewritten: None,
 			scalar: None,
+			sets: None,
 		}
 	}
 
-	/// An analyzer over these indexes that does not seek a rewritten column
-	/// for containment.
+	/// These columns with every b-tree column that flattens one of
+	/// `prefixes` also reported in [`Self::sets`]: a column holding `*` right
+	/// after a path in `prefixes`. The prefixes are those
+	/// [`foreign_set_prefixes`] finds declared a set on another table.
+	pub(crate) fn withholding_sets_at(mut self, prefixes: &[Vec<Part>]) -> Self {
+		if prefixes.is_empty() {
+			return self;
+		}
+		let at = |col: &Idiom| {
+			col.0.iter().enumerate().any(|(i, part)| {
+				matches!(part, Part::All) && prefixes.iter().any(|p| p.as_slice() == &col.0[..i])
+			})
+		};
+		let sets: Vec<ColumnFlags> = self
+			.indexes
+			.iter()
+			.enumerate()
+			.map(|(i, ix)| {
+				if !matches!(ix.index, Index::Idx | Index::Uniq) {
+					return Box::default();
+				}
+				let known = self.sets.as_ref().and_then(|sets| sets.get(i));
+				ix.cols
+					.iter()
+					.enumerate()
+					.map(|(c, col)| {
+						known.and_then(|flags| flags.get(c)).copied().unwrap_or(false) || at(col)
+					})
+					.collect()
+			})
+			.collect();
+		self.sets = sets.iter().any(|flags| flags.contains(&true)).then(|| sets.into());
+		self
+	}
+
+	/// An analyzer over these indexes that does not seek a rewritten column,
+	/// or one that flattens a set, for containment.
 	pub(crate) fn analyzer<'a>(
 		&self,
 		with: Option<&'a With>,
@@ -579,20 +805,38 @@ impl ElementColumns {
 			Some(scalar) => analyzer.with_scalar_columns(Arc::clone(scalar)),
 			None => analyzer,
 		};
-		match &self.rewritten {
-			Some(rewritten) => analyzer.without_containment_on(Arc::clone(rewritten)),
-			None => analyzer,
+		match (&self.rewritten, &self.sets) {
+			(Some(rewritten), Some(sets)) => {
+				let either = |a: &ColumnFlags, b: &ColumnFlags| -> ColumnFlags {
+					(0..a.len().max(b.len()))
+						.map(|c| {
+							a.get(c).copied().unwrap_or(false) || b.get(c).copied().unwrap_or(false)
+						})
+						.collect()
+				};
+				let merged: Vec<ColumnFlags> =
+					rewritten.iter().zip(sets.iter()).map(|(a, b)| either(a, b)).collect();
+				analyzer.without_containment_on(merged.into())
+			}
+			(Some(flags), None) | (None, Some(flags)) => {
+				analyzer.without_containment_on(Arc::clone(flags))
+			}
+			(None, None) => analyzer,
 		}
 	}
 }
 
-/// Whether [`with_array_columns_as_elements`] could change any of `indexes`:
-/// some b-tree index has a column holding neither `*` nor a flatten. Callers
-/// skip reading the field list when it could not.
+/// Whether [`with_array_columns_as_elements`] could change or withhold any
+/// column of `indexes`: some b-tree index has a column holding no flatten,
+/// which may be rewritten, or one holding `*`, which may flatten a set.
+/// Callers skip reading the field list when it could not.
 pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
 	indexes.iter().any(|ix| {
 		matches!(ix.index, Index::Idx | Index::Uniq)
-			&& ix.cols.iter().any(|c| !c.0.iter().any(|p| matches!(p, Part::All | Part::Flatten)))
+			&& ix.cols.iter().any(|c| {
+				c.0.iter().any(|p| matches!(p, Part::All))
+					|| !c.0.iter().any(|p| matches!(p, Part::Flatten))
+			})
 	})
 }
 
@@ -608,20 +852,386 @@ pub(crate) fn without_btree_indexes(indexes: Arc<[IndexDefinition]>) -> Arc<[Ind
 	indexes.iter().filter(|ix| !matches!(ix.index, Index::Idx | Index::Uniq)).cloned().collect()
 }
 
+/// How many record links, and views over a source table, the search for a set
+/// declared on another table follows from one column. A column whose path
+/// reaches past that many is taken to flatten a set.
+const FOREIGN_SET_DEPTH: usize = 4;
+
+/// The paths before a `*` in the b-tree columns of `indexes` whose value is
+/// declared a set on another table: a path that reads through a field
+/// declared a record link (`r.tags.*` with `r: record<o>` and `tags` on `o`
+/// declared `set<…>`), or a field of a view that projects a source table's
+/// field under that name (`s.*` on `v` for `DEFINE TABLE v AS SELECT s FROM
+/// src`). A declaration of the path on `table` itself does not end the
+/// search, since it does not change the value read through the link or view.
+///
+/// [`with_array_columns_as_elements`] reads only `table`'s own fields; this
+/// reads `table`'s definition and the linked and source tables' definitions,
+/// for each `*` column whose path `table`'s fields do not already declare a
+/// set. The result goes to [`ElementColumns::withholding_sets_at`].
+pub(crate) async fn foreign_set_prefixes(
+	txn: &crate::kvs::Transaction,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	table: &crate::val::TableName,
+	indexes: &[IndexDefinition],
+	fields: &[FieldDefinition],
+	version: Option<u64>,
+) -> anyhow::Result<Vec<Vec<Part>>> {
+	let mut found: Vec<Vec<Part>> = Vec::new();
+	let mut checked: Vec<&[Part]> = Vec::new();
+	let mut reach = Reach {
+		txn,
+		ns,
+		db,
+		version,
+		fields: std::collections::HashMap::new(),
+		definitions: std::collections::HashMap::new(),
+	};
+	for ix in indexes.iter().filter(|ix| matches!(ix.index, Index::Idx | Index::Uniq)) {
+		for col in &ix.cols {
+			for (i, part) in col.0.iter().enumerate() {
+				let prefix = &col.0[..i];
+				if !matches!(part, Part::All)
+					|| prefix.is_empty()
+					|| checked.contains(&prefix)
+					|| declared_admits_set(prefix, fields)
+				{
+					continue;
+				}
+				checked.push(prefix);
+				if reach.admits_set_elsewhere(table, prefix, fields, FOREIGN_SET_DEPTH).await? {
+					found.push(prefix.to_vec());
+				}
+			}
+		}
+	}
+	Ok(found)
+}
+
+/// The catalog [`foreign_set_prefixes`] reads other tables' definitions from,
+/// each table's field list and definition read at most once per run.
+struct Reach<'a> {
+	txn: &'a crate::kvs::Transaction,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	version: Option<u64>,
+	fields: std::collections::HashMap<crate::val::TableName, Arc<[FieldDefinition]>>,
+	definitions: std::collections::HashMap<
+		crate::val::TableName,
+		Option<Arc<crate::catalog::TableDefinition>>,
+	>,
+}
+
+impl Reach<'_> {
+	/// The field list of `table`.
+	async fn fields(
+		&mut self,
+		table: &crate::val::TableName,
+	) -> anyhow::Result<Arc<[FieldDefinition]>> {
+		use crate::catalog::providers::TableProvider;
+		if let Some(fields) = self.fields.get(table) {
+			return Ok(Arc::clone(fields));
+		}
+		let fields = self.txn.all_tb_fields(self.ns, self.db, table, self.version).await?;
+		self.fields.insert(table.clone(), Arc::clone(&fields));
+		Ok(fields)
+	}
+
+	/// The definition of `table`, `None` when the catalog holds none.
+	async fn definition(
+		&mut self,
+		table: &crate::val::TableName,
+	) -> anyhow::Result<Option<Arc<crate::catalog::TableDefinition>>> {
+		use crate::catalog::providers::TableProvider;
+		if let Some(definition) = self.definitions.get(table) {
+			return Ok(definition.clone());
+		}
+		let definition = self.txn.get_tb(self.ns, self.db, table, self.version).await?;
+		self.definitions.insert(table.clone(), definition.clone());
+		Ok(definition)
+	}
+
+	/// Whether the value at `path` on `table`, whose fields are `fields`, is
+	/// declared a set: on `table` itself, through a record link, or through
+	/// the source field of a view. `depth` bounds the links and views
+	/// followed.
+	async fn admits_set(
+		&mut self,
+		table: &crate::val::TableName,
+		path: &[Part],
+		fields: &[FieldDefinition],
+		depth: usize,
+	) -> anyhow::Result<bool> {
+		if declared_admits_set(path, fields) {
+			return Ok(true);
+		}
+		// A declaration on the path itself does not change a value read
+		// through a record link or a view's projection, so those are always
+		// followed.
+		Box::pin(self.admits_set_elsewhere(table, path, fields, depth)).await
+	}
+
+	/// [`Self::admits_set`] for a `path` whose declarations on `table` do not
+	/// say it is a set: through a record link or a view's source field.
+	async fn admits_set_elsewhere(
+		&mut self,
+		table: &crate::val::TableName,
+		path: &[Part],
+		fields: &[FieldDefinition],
+		depth: usize,
+	) -> anyhow::Result<bool> {
+		// Past the last link or view followed, the kind is unknown, and the
+		// column is taken to flatten a set: the containment it declines is
+		// answered by a scan, while a seek it allowed could miss rows.
+		let Some(depth) = depth.checked_sub(1) else {
+			return Ok(true);
+		};
+		// The record links every declared ancestor's type reaches along the
+		// path, longest ancestor first, through every union alternative and
+		// object literal, tuple and collection type: the rest of the path past
+		// each link is read on every table it links to. Each ancestor's kind is
+		// applied to the value, so each one's links are followed. A link that
+		// names no table may reach any, so its value may be a set.
+		for n in (1..path.len()).rev() {
+			let Some(kind) = fields
+				.iter()
+				.find(|fd| names_path(fd, &path[..n]))
+				.and_then(|fd| fd.field_kind.as_ref())
+			else {
+				continue;
+			};
+			let mut links = Vec::new();
+			links_along(kind, &path[n..], &mut links);
+			for (tables, rest) in links {
+				if tables.is_empty() {
+					return Ok(true);
+				}
+				for target in tables {
+					let target_fields = self.fields(target).await?;
+					if self.admits_set(target, rest, &target_fields, depth).await? {
+						return Ok(true);
+					}
+				}
+			}
+		}
+		// A view's field is the source field its projection reads.
+		let definition = self.definition(table).await?;
+		let Some(view) = definition.as_ref().and_then(|definition| definition.view.as_ref()) else {
+			return Ok(false);
+		};
+		// A computed projection's value is not traced to a source field, so
+		// it may be a set.
+		let source_path = match view_source_path(view, path) {
+			None => return Ok(false),
+			Some(None) => return Ok(true),
+			Some(Some(source_path)) => source_path,
+		};
+		for source in view.source_tables() {
+			let source_fields = self.fields(source).await?;
+			if self.admits_set(source, &source_path, &source_fields, depth).await? {
+				return Ok(true);
+			}
+		}
+		Ok(false)
+	}
+}
+
+/// The record links a value of `kind` reaches when read at `path`, added to
+/// `links` as the tables each may link to and the part of `path` read on
+/// them. The type is read through every union alternative and through object
+/// literal, tuple and collection types; an optional part (`.?`) reads the
+/// value it follows unchanged, and a field read on a collection is read on its
+/// elements. A `.*` read on a link dereferences it, so it is not part of the
+/// path read on the linked table. A link whose table list is empty may link to
+/// any table.
+fn links_along<'a>(
+	kind: &'a Kind,
+	path: &'a [Part],
+	links: &mut Vec<(&'a [crate::val::TableName], &'a [Part])>,
+) {
+	let Some((part, rest)) = path.split_first() else {
+		return;
+	};
+	if matches!(part, Part::Optional) {
+		return links_along(kind, rest, links);
+	}
+	match kind {
+		// `.*` on a link fetches the record, so the path after it is read on
+		// the linked table; a link read by any other part reads that part there.
+		Kind::Record(tables) => match part {
+			Part::All if rest.is_empty() => {}
+			Part::All => links.push((tables.as_slice(), rest)),
+			_ => links.push((tables.as_slice(), path)),
+		},
+		Kind::Either(kinds) => kinds.iter().for_each(|kind| links_along(kind, path, links)),
+		// A field read reads that field; `.*` leaves an object unchanged.
+		Kind::Literal(KindLiteral::Object(fields)) => match part {
+			Part::Field(name) => {
+				if let Some(kind) = fields.get(name.as_str()) {
+					links_along(kind, rest, links);
+				}
+			}
+			Part::All => links_along(kind, rest, links),
+			_ => {}
+		},
+		// `.*` and a position (any index expression) yield elements; a field
+		// read maps over them; a filter keeps the collection.
+		Kind::Array(element, _) | Kind::Set(element, _) => match part {
+			Part::All | Part::First | Part::Last | Part::Value(_) => {
+				links_along(element, rest, links)
+			}
+			Part::Field(_) => links_along(element, path, links),
+			Part::Where(_) => links_along(kind, rest, links),
+			_ => {}
+		},
+		Kind::Literal(KindLiteral::Array(kinds)) => match tuple_position(part, kinds.len()) {
+			Some(Some(position)) => {
+				if let Some(kind) = kinds.get(position) {
+					links_along(kind, rest, links);
+				}
+			}
+			Some(None) => kinds.iter().for_each(|kind| links_along(kind, rest, links)),
+			None => match part {
+				Part::Field(_) => kinds.iter().for_each(|kind| links_along(kind, path, links)),
+				Part::Where(_) => links_along(kind, rest, links),
+				_ => {}
+			},
+		},
+		_ => {}
+	}
+}
+
+/// `path` past a prefix naming `name`, with optional parts (`.?`) skipped in
+/// both; `None` when `path` does not start with `name`.
+fn strip_name<'a>(name: &[Part], path: &'a [Part]) -> Option<&'a [Part]> {
+	let mut name = name.iter().filter(|part| !matches!(part, Part::Optional));
+	let mut at = 0;
+	let mut next = name.next();
+	while let Some(part) = next {
+		match path.get(at)? {
+			Part::Optional => {}
+			p if p == part => next = name.next(),
+			_ => return None,
+		}
+		at += 1;
+	}
+	Some(&path[at..])
+}
+
+/// The path on a view's source table that the view's field at `path` is
+/// read from: under a projection of a plain path (`SELECT s`, `SELECT a.b AS
+/// s`, or `SELECT s.*`, whose output field is `s`), the projected path
+/// followed by the rest of `path`; otherwise, under `SELECT *`, `path`
+/// itself. Of several projections naming the field, the last one written
+/// decides. `Some(None)` when that projection is computed rather than a plain
+/// path, so its value is not traceable to a source field; `None` when nothing
+/// names the field. An optional part (`.?`) reads the value it follows
+/// unchanged, so names are matched with it skipped on both sides:
+/// `meta.?.tags` is the field a `SELECT meta.tags` projection names.
+fn view_source_path(
+	view: &crate::catalog::ViewDefinition,
+	path: &[Part],
+) -> Option<Option<Vec<Part>>> {
+	use crate::catalog::ViewDefinition;
+	use crate::expr::{Expr, Field, Fields};
+	let fields = match view {
+		ViewDefinition::Materialized {
+			fields,
+			..
+		}
+		| ViewDefinition::Aggregated {
+			fields,
+			..
+		}
+		| ViewDefinition::Select {
+			fields,
+			..
+		} => fields,
+	};
+	let Fields::Select(list) = fields else {
+		return None;
+	};
+	// A projection naming the field wins over `*`, wherever each is written.
+	// When several name it, the last one written is the value the view holds,
+	// so they are read in reverse; a computed one names no source path. A
+	// projection is named as its output field is: its alias, or else its
+	// expression's simplified idiom (`tags.*` is stored under `tags`).
+	let named = list.iter().rev().find_map(|field| {
+		let Field::Single(selector) = field else {
+			return None;
+		};
+		let name = match &selector.alias {
+			Some(alias) => alias.clone(),
+			None => selector.expr.to_idiom(),
+		};
+		let rest = strip_name(&name.0, path)?;
+		Some(match &selector.expr {
+			Expr::Idiom(source) => Some(source.0.iter().chain(rest).cloned().collect()),
+			_ => None,
+		})
+	});
+	match named {
+		Some(traced) => Some(traced),
+		None => list.iter().any(|field| matches!(field, Field::All)).then(|| Some(path.to_vec())),
+	}
+}
+
 /// The kind declared for the value at `col`: the kind of the field named
-/// `col`, or, when only an ancestor is declared, the kind its object literal
-/// type gives the remaining path. `None` when no declaration reaches it.
-fn declared_kind<'a>(col: &Idiom, fields: &'a [FieldDefinition]) -> Option<&'a Kind> {
-	if let Some(fd) = fields.iter().find(|fd| &fd.name == col) {
+/// `col`, or, when only an ancestor is declared, the kind its object literal,
+/// tuple or collection (`.*`) type gives the remaining path. `None` when no
+/// declaration reaches it.
+fn declared_kind<'a>(col: &[Part], fields: &'a [FieldDefinition]) -> Option<&'a Kind> {
+	if let Some(fd) = fields.iter().find(|fd| fd.name.0.as_slice() == col) {
 		return fd.field_kind.as_ref();
 	}
-	(1..col.0.len()).rev().find_map(|n| {
-		let fd = fields.iter().find(|fd| fd.name.0.as_slice() == &col.0[..n])?;
-		col.0[n..].iter().try_fold(fd.field_kind.as_ref()?, |kind, part| match part {
+	(1..col.len()).rev().find_map(|n| {
+		let fd = fields.iter().find(|fd| fd.name.0.as_slice() == &col[..n])?;
+		col[n..].iter().try_fold(fd.field_kind.as_ref()?, |kind, part| match part {
 			Part::Field(name) => object_literal_field(kind, name.as_str()),
+			Part::First => tuple_element(kind, |_| Some(0)),
+			Part::Last => tuple_element(kind, |len| len.checked_sub(1)),
+			Part::Value(crate::expr::Expr::Literal(crate::expr::Literal::Integer(i))) => {
+				tuple_element(kind, |_| usize::try_from(*i).ok())
+			}
+			Part::All => collection_element(kind),
 			_ => None,
 		})
 	})
+}
+
+/// The element kind of an array or set type (or one made optional), which
+/// `.*` reads. As for [`object_literal_field`], only one collection
+/// alternative is read.
+fn collection_element(kind: &Kind) -> Option<&Kind> {
+	match kind {
+		Kind::Array(element, _) | Kind::Set(element, _) => Some(element),
+		Kind::Either(kinds) => {
+			let mut collections = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+			match (collections.next(), collections.next()) {
+				(Some(collection), None) => collection_element(collection),
+				_ => None,
+			}
+		}
+		_ => None,
+	}
+}
+
+/// The kind a tuple type (or one made optional) declares for the element
+/// `position` picks out of its length. As for [`object_literal_field`], only
+/// the tuple's declaration is returned.
+fn tuple_element(kind: &Kind, position: impl Fn(usize) -> Option<usize>) -> Option<&Kind> {
+	match kind {
+		Kind::Literal(KindLiteral::Array(kinds)) => kinds.get(position(kinds.len())?),
+		Kind::Either(kinds) => {
+			let mut tuples = kinds.iter().filter(|k| !matches!(k, Kind::None | Kind::Null));
+			match (tuples.next(), tuples.next()) {
+				(Some(tuple), None) => tuple_element(tuple, position),
+				_ => None,
+			}
+		}
+		_ => None,
+	}
 }
 
 /// The kind an object literal type (or one made optional) declares for
@@ -1657,14 +2267,157 @@ mod tests {
 		}
 
 		#[test]
-		fn the_field_list_is_needed_only_for_a_btree_column_without_elements() {
+		fn the_field_list_is_needed_only_for_a_btree_column_without_a_flatten_or_with_elements() {
 			let with = |cols: &[&str], kind: Index| {
 				may_have_array_columns(&[idx_def(1, "ix", cols, kind)])
 			};
 			assert!(with(&["acl"], Index::Idx));
 			assert!(with(&["acl.*", "name"], Index::Uniq));
-			assert!(!with(&["acl.*"], Index::Idx));
+			// A column over elements may flatten a set.
+			assert!(with(&["acl.*"], Index::Idx));
+			assert!(!with(&["acl…"], Index::Idx));
 			assert!(!with(&["acl"], Index::Count(None)));
+		}
+
+		fn set_of_strings() -> Kind {
+			Kind::Set(Box::new(Kind::String), None)
+		}
+
+		/// Per index, whether each column flattens a set.
+		fn set_flags(columns: &ElementColumns) -> Vec<Vec<bool>> {
+			columns
+				.sets
+				.as_deref()
+				.map(|sets| sets.iter().map(|f| f.to_vec()).collect())
+				.unwrap_or_default()
+		}
+
+		#[test]
+		fn a_column_that_flattens_a_set_is_reported_and_kept() {
+			let indexes: Arc<[IndexDefinition]> = vec![
+				idx_def(1, "a", &["account", "tags.*"], Index::Idx),
+				idx_def(2, "b", &["acl.*"], Index::Uniq),
+				idx_def(3, "c", &["tags.*"], Index::Count(None)),
+			]
+			.into();
+			let fields = [
+				field("tags", Some(Kind::Either(vec![Kind::None, set_of_strings()]))),
+				field("acl", Some(array_of_strings())),
+			];
+			let out = with_array_columns_as_elements(Arc::clone(&indexes), &fields);
+			// The index stays in the list, in place: only its set column is
+			// reported.
+			assert!(Arc::ptr_eq(&indexes, &out.indexes));
+			assert_eq!(set_flags(&out), [vec![false, true], vec![false], vec![]]);
+		}
+
+		#[test]
+		fn a_set_declared_by_an_ancestor_literal_or_tuple_is_found() {
+			let object = Kind::Literal(KindLiteral::Object(
+				[(Strand::from("tags"), set_of_strings())].into_iter().collect(),
+			));
+			let tuple = Kind::Literal(KindLiteral::Array(vec![set_of_strings(), Kind::Int]));
+			let fields = [field("meta", Some(object)), field("pair", Some(tuple))];
+			for (col, sets) in [
+				("meta.tags.*", true),
+				("pair[0].*", true),
+				("pair[$].*", false),
+				("pair[1].*", false),
+				("meta.other.*", false),
+			] {
+				let indexes: Arc<[IndexDefinition]> =
+					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
+				let out = with_array_columns_as_elements(indexes, &fields);
+				assert_eq!(
+					set_flags(&out),
+					if sets {
+						vec![vec![true]]
+					} else {
+						vec![]
+					},
+					"{col}"
+				);
+			}
+		}
+
+		#[test]
+		fn any_alternative_of_a_union_of_literals_may_declare_the_set() {
+			let object = |kind: Kind| {
+				Kind::Literal(KindLiteral::Object(
+					[(Strand::from("tags"), kind)].into_iter().collect(),
+				))
+			};
+			let union = Kind::Either(vec![
+				Kind::None,
+				object(set_of_strings()),
+				object(array_of_strings()),
+			]);
+			let tuples = Kind::Either(vec![
+				Kind::Literal(KindLiteral::Array(vec![array_of_strings()])),
+				Kind::Literal(KindLiteral::Array(vec![set_of_strings()])),
+			]);
+			let fields = [field("meta", Some(union)), field("pair", Some(tuples))];
+			for (col, sets) in [("meta.tags.*", true), ("pair[0].*", true), ("meta.other.*", false)]
+			{
+				let indexes: Arc<[IndexDefinition]> =
+					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
+				let out = with_array_columns_as_elements(indexes, &fields);
+				assert_eq!(
+					set_flags(&out),
+					if sets {
+						vec![vec![true]]
+					} else {
+						vec![]
+					},
+					"{col}"
+				);
+			}
+		}
+
+		#[test]
+		fn a_set_reached_through_the_elements_of_a_collection_is_found() {
+			let object = Kind::Literal(KindLiteral::Object(
+				[(Strand::from("tags"), set_of_strings())].into_iter().collect(),
+			));
+			let fields = [
+				field("items", Some(Kind::Array(Box::new(object.clone()), None))),
+				field("groups", Some(Kind::Set(Box::new(object), None))),
+			];
+			for (col, sets) in
+				[("items.*.tags.*", true), ("groups.*.tags.*", true), ("items.*.other.*", false)]
+			{
+				let indexes: Arc<[IndexDefinition]> =
+					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
+				let out = with_array_columns_as_elements(indexes, &fields);
+				assert_eq!(
+					set_flags(&out),
+					if sets {
+						vec![vec![true]]
+					} else {
+						vec![]
+					},
+					"{col}"
+				);
+			}
+		}
+
+		#[test]
+		fn a_set_found_on_another_table_is_reported_at_its_prefix() {
+			let indexes: Arc<[IndexDefinition]> = vec![
+				idx_def(1, "a", &["r.tags.*"], Index::Idx),
+				idx_def(2, "b", &["name", "r.tags.*.x"], Index::Uniq),
+				idx_def(3, "c", &["r.other.*"], Index::Idx),
+			]
+			.into();
+			let out = with_array_columns_as_elements(indexes, &[])
+				.withholding_sets_at(&[Idiom::from_str("r.tags").expect("valid idiom").0]);
+			assert_eq!(set_flags(&out), [vec![true], vec![false, true], vec![false]]);
+			let none = with_array_columns_as_elements(
+				vec![idx_def(1, "a", &["r.tags.*"], Index::Idx)].into(),
+				&[],
+			)
+			.withholding_sets_at(&[]);
+			assert!(none.sets.is_none());
 		}
 
 		#[test]

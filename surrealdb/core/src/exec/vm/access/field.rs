@@ -63,10 +63,15 @@ pub(crate) async fn evaluate_field(
 					_ => Ok(Value::None),
 				};
 			}
+			// The fetch computes the record's COMPUTED fields, which may read
+			// a field through a link again, so it spends a unit of the
+			// computation-depth budget: a cycle of links fails with
+			// `ComputationDepthExceeded` rather than recursing without bound.
+			let exec_ctx = ctx.exec_ctx.dive()?;
 			let fetched = if ctx.skip_fetch_perms {
-				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await?
+				crate::exec::operators::fetch::fetch_record_no_perms(&exec_ctx, rid).await?
 			} else {
-				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?
+				crate::exec::operators::fetch::fetch_record(&exec_ctx, rid).await?
 			};
 			match fetched {
 				Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
@@ -81,6 +86,16 @@ pub(crate) async fn evaluate_field(
 				results.push(Box::pin(evaluate_field(v, name, ctx.clone())).await?);
 			}
 			Ok(Value::Array(results.into()))
+		}
+
+		// A set is read element by element as an array is, its results
+		// collected back into a set.
+		Value::Set(set) => {
+			let mut results = Vec::with_capacity(set.len());
+			for v in set.iter() {
+				results.push(Box::pin(evaluate_field(v, name, ctx.clone())).await?);
+			}
+			Ok(Value::Set(results.into_iter().collect()))
 		}
 
 		Value::Geometry(geo) => {

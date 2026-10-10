@@ -218,8 +218,8 @@ pub(super) enum Instr {
 	},
 	/// `dst` = field [`Program::fields`]`[field]` of the value in `src`, read
 	/// in permission frame `frame` when set, as a path step reads it: an object's field, `NONE`
-	/// past anything that is not an object, record id, array or geometry; a record id fetched, an
-	/// array read element by element, by the host.
+	/// past anything that is not an object, record id, array, set or geometry; a record id
+	/// fetched, an array or a set read element by element, by the host.
 	Access {
 		src: Operand,
 		field: u32,
@@ -227,9 +227,9 @@ pub(super) enum Instr {
 		frame: Option<u16>,
 	},
 	/// `dst` = every element of the value in `src` (`.*`), read in
-	/// permission frame `frame` when set: an object as it is, an array with
-	/// each record-id element fetched and every other kept, a record id
-	/// fetched, anything else `NONE`; a fetch by the host.
+	/// permission frame `frame` when set: an object as it is, an array or a
+	/// set with each record-id element fetched and every other kept, a record
+	/// id fetched, anything else `NONE`; a fetch by the host.
 	Each {
 		src: Operand,
 		dst: Reg,
@@ -249,14 +249,18 @@ pub(super) enum Instr {
 		dst: Reg,
 		none: Label,
 	},
-	/// Begin a path's broadcast over the value in `src`: for an array,
-	/// `dst` = an empty array and `items` = the array; for anything else, a
-	/// jump to `other`, where the body is applied to the value itself.
+	/// Begin a loop over the elements of the value in `src`: for an array,
+	/// `dst` = an empty array and `items` = the array; where `sets`, for a
+	/// set, `dst` = an empty set and `items` = the set's elements in order;
+	/// for anything else, a jump to `other`. A path's broadcast maps sets
+	/// (`sets`), where the body is applied to any other value itself; a
+	/// builtin's loop run in place over an array receiver does not.
 	MapBegin {
 		src: Operand,
 		items: Reg,
 		dst: Reg,
 		other: Label,
+		sets: bool,
 	},
 	/// Add `value` to the collection in `collection`: pushed onto an array,
 	/// inserted into a set.

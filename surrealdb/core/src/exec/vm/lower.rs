@@ -7432,6 +7432,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			items,
 			dst: scratch,
 			other: 0,
+			sets: false,
 		});
 		self.calls.push(super::program::CallSpec {
 			name: builtin,
@@ -9809,10 +9810,10 @@ fn chain_roots<'p>(chain: &[&'p Plan], roots: &mut Vec<crate::expr::logical::dag
 }
 
 /// Whether a base proven to be of `kind` never makes [`Instr::Access`] take
-/// the host step: the interpreter hands a record id, an array or a geometry to
-/// the host to read a field of, and answers every other value itself. A kind
-/// that may be any of those, as `any`, an either and a literal may be, does not
-/// stay.
+/// the host step: the interpreter hands a record id, an array, a set or a
+/// geometry to the host to read a field of, and answers every other value
+/// itself. A kind that may be any of those, as `any`, an either and a literal
+/// may be, does not stay.
 fn access_stays_in_vm(kind: &crate::expr::Kind) -> bool {
 	use crate::expr::Kind;
 	match kind {
@@ -9833,11 +9834,11 @@ fn access_stays_in_vm(kind: &crate::expr::Kind) -> bool {
 		| Kind::Range
 		| Kind::Table(_)
 		| Kind::File(_)
-		| Kind::Function(..)
-		| Kind::Set(..) => true,
+		| Kind::Function(..) => true,
 		Kind::Any
 		| Kind::Record(_)
 		| Kind::Array(..)
+		| Kind::Set(..)
 		| Kind::Geometry(_)
 		| Kind::Either(_)
 		| Kind::Literal(_) => false,

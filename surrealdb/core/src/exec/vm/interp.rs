@@ -2228,14 +2228,20 @@ pub(super) fn run_row<'r>(
 						Value::Object(object) => {
 							Some(Scalar::of(object.get(name).unwrap_or(&Value::None)))
 						}
-						Value::RecordId(_) | Value::Array(_) | Value::Geometry(_) => None,
+						Value::RecordId(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Geometry(_) => None,
 						_ => Some(Scalar::None),
 					},
 					Scalar::Value(value) => match value.as_ref() {
 						Value::Object(object) => Some(Scalar::Value(std::borrow::Cow::Owned(
 							object.get(name).cloned().unwrap_or(Value::None),
 						))),
-						Value::RecordId(_) | Value::Array(_) | Value::Geometry(_) => None,
+						Value::RecordId(_)
+						| Value::Array(_)
+						| Value::Set(_)
+						| Value::Geometry(_) => None,
 						_ => Some(Scalar::None),
 					},
 					_ => Some(Scalar::None),
@@ -2281,6 +2287,24 @@ pub(super) fn run_row<'r>(
 							matches!(item, Value::RecordId(_))
 						}) {
 							Copied::Done(values) => Some(Value::Array(values.into())),
+							Copied::Spent => {
+								return Ok(Step::Yield {
+									resume: pc,
+								});
+							}
+							Copied::Refused => None,
+						}
+					}
+					Some(Value::Set(set)) => {
+						let elements = set.0.iter().as_slice();
+						match copied(state, Bulk::at(pipeline, pc, elements), elements, |item| {
+							matches!(item, Value::RecordId(_))
+						}) {
+							// No element is a record id, so the copy is the set
+							// itself, in its order.
+							Copied::Done(values) => Some(Value::Set(crate::val::Set::from(
+								surrealdb_collections::VecSet::from_sorted_vec_unchecked(values),
+							))),
 							Copied::Spent => {
 								return Ok(Step::Yield {
 									resume: pc,
@@ -2348,19 +2372,26 @@ pub(super) fn run_row<'r>(
 				items,
 				dst,
 				other,
+				sets,
 			} => {
-				// As `FilterBegin`: the array is copied a stretch at a time.
+				// As `FilterBegin`: the elements are copied a stretch at a time.
 				let field;
 				let base = peek!(*src, field);
-				let Some(Value::Array(array)) = base else {
-					jump!(*other as usize);
-					continue;
+				let (elements, empty) = match base {
+					Some(Value::Array(array)) => {
+						(&array.0[..], Value::Array(crate::val::Array::new()))
+					}
+					Some(Value::Set(set)) if *sets => {
+						(set.0.iter().as_slice(), Value::Set(crate::val::Set::new()))
+					}
+					_ => {
+						jump!(*other as usize);
+						continue;
+					}
 				};
-				match copied(state, Bulk::at(pipeline, pc, &array.0), &array.0, |_| false) {
+				match copied(state, Bulk::at(pipeline, pc, elements), elements, |_| false) {
 					Copied::Done(elements) => {
-						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(Value::Array(
-							crate::val::Array::new(),
-						)));
+						regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(empty));
 						regs[*items as usize] =
 							Scalar::Value(std::borrow::Cow::Owned(Value::Array(elements.into())));
 						pc += 1;
