@@ -452,6 +452,85 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 	Ok(())
 }
 
+/// A kNN query answers with `k` distinct rows at every point while the
+/// compactor folds a bulk load into the HNSW graph. Each query reads part of
+/// the load from the pending queue and part from the graph, and compaction
+/// batches commit between and during the queries.
+// Regression test for https://github.com/surrealdb/surrealdb/issues/7543
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[test_log::test]
+async fn hnsw_knn_returns_k_rows_while_compaction_drains() -> Result<()> {
+	let (_, dbs) = new_ds("test", "test", false).await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(
+		"DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8;",
+		&session,
+		None,
+	)
+	.await?;
+
+	// Load in batches, as a bulk INSERT does: every record lands as a pending.
+	let vectors = new_vectors_from_file(INGESTING_SOURCE, 3000)?;
+	for chunk in vectors.chunks(500) {
+		let rows: Vec<String> =
+			chunk.iter().map(|(r, v)| format!("{{ id: {}, v: {v} }}", r.to_sql())).collect();
+		let mut res =
+			dbs.execute(&format!("INSERT INTO t [{}];", rows.join(",")), &session, None).await?;
+		res.remove(0).result?;
+	}
+
+	let cancellation = CancellationToken::new();
+	let compaction_loop = start_compaction_loop(Arc::clone(&dbs), cancellation.clone()).await;
+
+	let queries = Arc::new(new_vectors_from_file(QUERYING_SOURCE, 20)?);
+	let mut readers = Vec::new();
+	for reader in 0..4 {
+		let dbs = Arc::clone(&dbs);
+		let session = session.clone();
+		let queries = Arc::clone(&queries);
+		readers.push(tokio::spawn(async move {
+			// Queries answered while the compactor still had work queued.
+			let mut during = 0;
+			for round in 0.. {
+				let compacting = {
+					let mut res = dbs.execute("INFO FOR INDEX ix ON t;", &session, None).await?;
+					let info = res.remove(0).result?.into_json_value();
+					info["building"]["compacting"].as_bool() == Some(true)
+				};
+				let (_, q) = &queries[(reader * 5 + round) % queries.len()];
+				let mut res = dbs
+					.execute(&format!("SELECT VALUE id FROM t WHERE v <|10,150|> {q};"), &session, None)
+					.await?;
+				let Value::Array(ids) = res.remove(0).result? else {
+					bail!("expected an array");
+				};
+				let distinct: std::collections::HashSet<String> =
+					ids.iter().map(|v| v.to_sql()).collect();
+				if ids.len() != 10 || distinct.len() != 10 {
+					bail!(
+						"reader {reader}, round {round} (compacting: {compacting}): expected 10 distinct rows, got {}",
+						ids.to_sql()
+					);
+				}
+				if !compacting {
+					break;
+				}
+				during += 1;
+			}
+			Ok::<usize, anyhow::Error>(during)
+		}));
+	}
+	let mut during = 0;
+	for reader in readers {
+		during += timeout(Duration::from_secs(600), reader).await???;
+	}
+	cancellation.cancel();
+	compaction_loop.await??;
+	// Without queries that overlapped the drain, the test proved nothing.
+	assert!(during > 0, "no query ran while the compactor still had work queued");
+	Ok(())
+}
+
 /// Continuously executes write queries against the datastore until the cancellation token
 /// is triggered. This helper is used to generate sustained write pressure during stress tests.
 ///
