@@ -21,6 +21,7 @@ use crate::expr::Error;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::table_name_public::IntoPublicTable;
+use crate::val::teardown::{Discard, Node, discard_all, discard_node};
 
 pub mod array;
 pub mod bytes;
@@ -40,10 +41,12 @@ pub mod regex;
 pub mod rnd;
 pub mod set;
 pub mod table_name_public;
+mod teardown;
 pub mod uuid;
 pub mod value;
 
 pub use surrealdb_strand::TableName;
+pub use teardown::discard_value;
 
 pub use self::array::Array;
 pub use self::bytes::Bytes;
@@ -1506,6 +1509,7 @@ fn convert_value_to_public_value_at(
 	depth: usize,
 ) -> Result<surrealdb_types::Value> {
 	if depth > MAX_VALUE_DEPTH {
+		discard_value(value);
 		bail!(Error::ValueTooDeep {
 			max: MAX_VALUE_DEPTH,
 		});
@@ -1531,7 +1535,8 @@ fn convert_value_to_public_value_at(
 		crate::val::Value::Table(value) => {
 			Ok(surrealdb_types::Value::Table(value.into_public_table()))
 		}
-		crate::val::Value::Closure(_) => {
+		crate::val::Value::Closure(value) => {
+			discard_value(crate::val::Value::Closure(value));
 			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
 		}
 	}
@@ -1578,6 +1583,7 @@ fn convert_geometry_to_public(
 	// container arms do; the storage guard (`check_value_depth`) rejects a deep
 	// geometry at write, and this keeps the read path in step.
 	if depth > MAX_VALUE_DEPTH {
+		discard_node(Node::Geo(value));
 		bail!(Error::ValueTooDeep {
 			max: MAX_VALUE_DEPTH,
 		});
@@ -1591,19 +1597,16 @@ fn convert_geometry_to_public(
 		crate::val::Geometry::MultiLine(ml) => PublicGeometry::MultiLine(ml),
 		crate::val::Geometry::MultiPolygon(mp) => PublicGeometry::MultiPolygon(mp),
 		crate::val::Geometry::Collection(c) => {
-			let converted: Result<Vec<_>> = c
-				.into_iter()
-				.map(|g| {
-					if let surrealdb_types::Value::Geometry(g) =
-						convert_geometry_to_public(g, depth + 1)?
-					{
-						Ok(g)
-					} else {
-						Err(anyhow::anyhow!("Failed to convert geometry collection item"))
-					}
-				})
-				.collect();
-			PublicGeometry::Collection(converted?)
+			let converted: Vec<_> = collect_or_discard(c, |g| {
+				if let surrealdb_types::Value::Geometry(g) =
+					convert_geometry_to_public(g, depth + 1)?
+				{
+					Ok(g)
+				} else {
+					Err(anyhow::anyhow!("Failed to convert geometry collection item"))
+				}
+			})?;
+			PublicGeometry::Collection(converted)
 		}
 	};
 	Ok(surrealdb_types::Value::Geometry(geometry))
@@ -1613,16 +1616,16 @@ fn convert_array_to_public(
 	value: crate::val::Array,
 	depth: usize,
 ) -> Result<surrealdb_types::Value> {
-	let converted: Result<Vec<_>> =
-		value.0.into_iter().map(|v| convert_value_to_public_value_at(v, depth + 1)).collect();
-	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted?)))
+	let converted: Vec<_> =
+		collect_or_discard(value.0, |v| convert_value_to_public_value_at(v, depth + 1))?;
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted)))
 }
 
 fn convert_set_to_public(value: crate::val::Set, depth: usize) -> Result<surrealdb_types::Value> {
 	// Set is stored as a sorted Vec internally
-	let converted: Result<Vec<surrealdb_types::Value>> =
-		value.0.into_iter().map(|v| convert_value_to_public_value_at(v, depth + 1)).collect();
-	Ok(surrealdb_types::Value::Set(surrealdb_types::Set::from(converted?)))
+	let converted: Vec<surrealdb_types::Value> =
+		collect_or_discard(value.0, |v| convert_value_to_public_value_at(v, depth + 1))?;
+	Ok(surrealdb_types::Value::Set(surrealdb_types::Set::from(converted)))
 }
 
 fn convert_object_to_public(
@@ -1643,11 +1646,9 @@ fn convert_object_to_public_map_at(
 	value: crate::val::Object,
 	depth: usize,
 ) -> Result<BTreeMap<String, surrealdb_types::Value>> {
-	value
-		.0
-		.into_iter()
-		.map(|(k, v)| convert_value_to_public_value_at(v, depth + 1).map(|v| (k.into_string(), v)))
-		.collect()
+	collect_or_discard(value.0, |(k, v)| {
+		convert_value_to_public_value_at(v, depth + 1).map(|v| (k.into_string(), v))
+	})
 }
 
 fn convert_record_id_to_public(
@@ -1669,6 +1670,7 @@ fn convert_record_id_key_to_public(
 	depth: usize,
 ) -> Result<surrealdb_types::RecordIdKey> {
 	if depth > MAX_VALUE_DEPTH {
+		discard_node(Node::Key(key));
 		bail!(Error::ValueTooDeep {
 			max: MAX_VALUE_DEPTH,
 		});
@@ -1696,25 +1698,16 @@ fn convert_record_id_key_to_public(
 			}
 		}
 		crate::val::RecordIdKey::Range(r) => {
+			let crate::val::record_id::RecordIdKeyRange {
+				start,
+				end,
+			} = *r;
+			let (start, end) = convert_bounds_or_discard(start, end, |k| {
+				convert_record_id_key_to_public(k, depth + 1)
+			})?;
 			Ok(surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
-				start: match r.start {
-					Bound::Included(k) => {
-						Bound::Included(convert_record_id_key_to_public(k, depth + 1)?)
-					}
-					Bound::Excluded(k) => {
-						Bound::Excluded(convert_record_id_key_to_public(k, depth + 1)?)
-					}
-					Bound::Unbounded => Bound::Unbounded,
-				},
-				end: match r.end {
-					Bound::Included(k) => {
-						Bound::Included(convert_record_id_key_to_public(k, depth + 1)?)
-					}
-					Bound::Excluded(k) => {
-						Bound::Excluded(convert_record_id_key_to_public(k, depth + 1)?)
-					}
-					Bound::Unbounded => Bound::Unbounded,
-				},
+				start,
+				end,
 			})))
 		}
 	}
@@ -1729,18 +1722,73 @@ fn convert_range_to_public(
 	// path in agreement with `check_value_depth`, which also descends into range
 	// bounds, so a bound whose value sits at the cap makes the range one past it
 	// and is rejected rather than converted through a deeper recursion.
+	let (start, end) = convert_bounds_or_discard(value.start, value.end, |v| {
+		convert_value_to_public_value_at(v, depth + 1)
+	})?;
 	Ok(surrealdb_types::Value::Range(Box::new(surrealdb_types::Range {
-		start: match value.start {
-			Bound::Included(v) => Bound::Included(convert_value_to_public_value_at(v, depth + 1)?),
-			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value_at(v, depth + 1)?),
-			Bound::Unbounded => Bound::Unbounded,
-		},
-		end: match value.end {
-			Bound::Included(v) => Bound::Included(convert_value_to_public_value_at(v, depth + 1)?),
-			Bound::Excluded(v) => Bound::Excluded(convert_value_to_public_value_at(v, depth + 1)?),
-			Bound::Unbounded => Bound::Unbounded,
-		},
+		start,
+		end,
 	})))
+}
+
+/// Converts the two bounds of a range with `convert`, `start` first.
+///
+/// When `start` fails to convert, `end` has not been consumed yet and is torn
+/// down without recursing into its nesting; the failed `start` is `convert`'s
+/// to dispose of.
+fn convert_bounds_or_discard<T: Discard, U>(
+	start: Bound<T>,
+	end: Bound<T>,
+	mut convert: impl FnMut(T) -> Result<U>,
+) -> Result<(Bound<U>, Bound<U>)> {
+	let mut convert_bound = |bound: Bound<T>| -> Result<Bound<U>> {
+		Ok(match bound {
+			Bound::Included(v) => Bound::Included(convert(v)?),
+			Bound::Excluded(v) => Bound::Excluded(convert(v)?),
+			Bound::Unbounded => Bound::Unbounded,
+		})
+	};
+	let start = match convert_bound(start) {
+		Ok(start) => start,
+		Err(e) => {
+			discard_node(end.into_node());
+			return Err(e);
+		}
+	};
+	Ok((start, convert_bound(end)?))
+}
+
+/// Maps `items` through `convert` into a collection, stopping at the first
+/// error.
+///
+/// On failure the items not yet converted are torn down without recursing into
+/// their nesting, so a deep sibling of the failing item cannot overflow the
+/// stack as the iterator unwinds. Collecting costs the same as collecting a
+/// `Result`: the adapter reports no size hint either way.
+fn collect_or_discard<T: Discard, U, C: FromIterator<U>>(
+	items: impl IntoIterator<Item = T>,
+	mut convert: impl FnMut(T) -> Result<U>,
+) -> Result<C> {
+	let mut items = items.into_iter();
+	let mut failure = None;
+	let collected: C = std::iter::from_fn(|| {
+		let item = items.next()?;
+		match convert(item) {
+			Ok(converted) => Some(converted),
+			Err(e) => {
+				failure = Some(e);
+				None
+			}
+		}
+	})
+	.collect();
+	match failure {
+		None => Ok(collected),
+		Some(e) => {
+			discard_all(items);
+			Err(e)
+		}
+	}
 }
 
 #[cfg(test)]
