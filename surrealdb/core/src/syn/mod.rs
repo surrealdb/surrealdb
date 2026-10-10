@@ -241,6 +241,9 @@ pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicVa
 	// The settings below are fixed; `config` does not shape this parse.
 	let _ = config;
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
+	// Inert JSON parsing takes no limits from the config; only the
+	// observability build's instrument attribute reads it.
+	let _ = config;
 
 	let settings = ParserSettings {
 		// Values are unused on the value parsing path.
