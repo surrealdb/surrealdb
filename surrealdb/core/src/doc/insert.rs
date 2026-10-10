@@ -46,7 +46,7 @@ impl Document {
 			Err(IgnoreError::Error(e)) if !retryable => {
 				ctx.tx().rollback_to_save_point().await?;
 				self.mutated = false;
-				if stm.is_ignore() {
+				if stm.is_ignore() && is_conflict(&e) {
 					return Err(IgnoreError::Ignore);
 				} else {
 					return Err(IgnoreError::Error(e));
@@ -74,22 +74,15 @@ impl Document {
 				};
 				match conflict {
 					Some(record) => record,
-					// Every other create failure belongs to this row whichever
-					// layer raised it, so `INSERT IGNORE` skips the row exactly
-					// as it does when there is no `ON DUPLICATE KEY UPDATE`
-					// clause. Classifying by error type instead would silently
-					// stop ignoring a failure the moment it moved layers, which
-					// `reproductions/insert_ignore_on_duplicate_key_leaf_error`
-					// pins: a `VALUE (THROW ...)` is raised outside the document
-					// layer and must still be skipped.
-					//
-					// This is wider than the pre-split behaviour, which surfaced
-					// anything that did not downcast to `err::Error`. That is a
-					// deliberate behaviour change, not an oversight.
+					// `INSERT IGNORE` skips only a conflict that is not retried:
+					// an index conflict against a record id the statement named
+					// itself. Every other create failure — a field coercion, an
+					// `ASSERT`, a `VALUE` clause or an event that throws — is
+					// raised: the row was rejected, not found to exist already.
 					None => {
 						ctx.tx().rollback_to_save_point().await?;
 						self.mutated = false;
-						if stm.is_ignore() {
+						if stm.is_ignore() && is_conflict(&e) {
 							return Err(IgnoreError::Ignore);
 						} else {
 							return Err(IgnoreError::Error(e));
@@ -221,4 +214,12 @@ impl Document {
 		// Process the projected output document
 		self.output_write(stk, ctx, opt, stm.output(), stm).await
 	}
+}
+
+/// Whether a create failure is a conflict with a record that already exists: a
+/// duplicate record id, raised by the document layer, or a unique-index entry,
+/// raised by the index layer. These are the failures `INSERT IGNORE` skips.
+fn is_conflict(err: &anyhow::Error) -> bool {
+	crate::idx::index_exists_record(err).is_some()
+		|| matches!(err.downcast_ref::<DocError>(), Some(DocError::RecordExists { .. }))
 }

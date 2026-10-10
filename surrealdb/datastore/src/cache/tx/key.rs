@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::lookup::Lookup;
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub enum Key {
 	/// A cache key for nodes
 	Nds,

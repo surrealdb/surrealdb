@@ -27,6 +27,13 @@ pub type Cache = quick_cache::sync::Cache<key::Key, Entry, weight::Weight>;
 pub struct TransactionCache {
 	/// Store the cache entries
 	cache: Cache,
+	/// One frame per open save point, innermost last, each holding the keys
+	/// inserted while it was the innermost. An entry inserted inside a save
+	/// point may describe a write the save point's rollback undoes, so
+	/// [`Self::rollback_save_point`] evicts every key in the frame it closes.
+	save_points: std::sync::Mutex<Vec<Vec<key::Key>>>,
+	/// Whether any save point is open, so an insert outside one takes no lock.
+	journaling: std::sync::atomic::AtomicBool,
 }
 
 impl TransactionCache {
@@ -52,6 +59,45 @@ impl TransactionCache {
 		);
 		Self {
 			cache,
+			save_points: std::sync::Mutex::new(Vec::new()),
+			journaling: std::sync::atomic::AtomicBool::new(false),
+		}
+	}
+
+	/// Open a save point: the entries inserted from here until it is released
+	/// or rolled back are recorded in a frame of their own.
+	pub(crate) fn push_save_point(&self) {
+		let mut frames = self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		frames.push(Vec::new());
+		self.journaling.store(true, std::sync::atomic::Ordering::Release);
+	}
+
+	/// Release the innermost save point. Its writes now belong to the
+	/// enclosing save point, so its entries join the enclosing frame, where an
+	/// outer rollback still reaches them.
+	pub(crate) fn release_save_point(&self) {
+		let mut frames = self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		if let Some(frame) = frames.pop()
+			&& let Some(outer) = frames.last_mut()
+		{
+			outer.extend(frame);
+		}
+		self.journaling.store(!frames.is_empty(), std::sync::atomic::Ordering::Release);
+	}
+
+	/// Roll back the innermost save point, evicting every entry inserted while
+	/// it was open. An evicted entry is read again from storage, which the
+	/// rollback has already returned to its state at the save point.
+	pub(crate) fn rollback_save_point(&self) {
+		let frame = {
+			let mut frames =
+				self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+			let frame = frames.pop();
+			self.journaling.store(!frames.is_empty(), std::sync::atomic::Ordering::Release);
+			frame
+		};
+		for key in frame.into_iter().flatten() {
+			self.cache.remove(&key);
 		}
 	}
 
@@ -62,7 +108,15 @@ impl TransactionCache {
 
 	/// Insert an item into the datastore cache
 	pub fn insert(&self, lookup: Lookup, entry: Entry) {
-		self.cache.insert(lookup.into(), entry);
+		let key = key::Key::from(lookup);
+		if self.journaling.load(std::sync::atomic::Ordering::Acquire) {
+			let mut frames =
+				self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+			if let Some(frame) = frames.last_mut() {
+				frame.push(key.clone());
+			}
+		}
+		self.cache.insert(key, entry);
 	}
 
 	/// Remove an item from the datastore cache

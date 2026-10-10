@@ -3001,6 +3001,7 @@ impl Transaction {
 		// would leave the first mutation in the transaction's own frame, where a
 		// rollback cannot reach it.
 		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
+		self.cache.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
 		self.provisional_save_points.lock().await.push(snapshot);
 		Ok(())
@@ -3015,6 +3016,7 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.release_save_point();
 		}
+		self.cache.release_save_point();
 		// Released, the scope folds into the enclosing one, whose snapshot
 		// still describes the state an outer rollback returns to.
 		self.provisional_save_points.lock().await.pop();
@@ -3030,6 +3032,9 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.rollback_save_point();
 		}
+		// A record or definition cached since the save point may describe a
+		// write the rollback undid, and a read must not be answered from it.
+		self.cache.rollback_save_point();
 		// Whether a locked read's conflict registration survives a savepoint
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.
