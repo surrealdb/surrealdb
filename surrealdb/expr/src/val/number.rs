@@ -724,15 +724,20 @@ impl Number {
 
 impl Eq for Number {}
 
+/// Numbers of every kind order as one line. Every NaN, whatever its sign
+/// and payload, is one value above every other number, `+inf` included:
+/// the place an index key gives it, so an indexed range and a scan admit the
+/// same NaNs.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
-			if a == 0.0 && b == 0.0 {
+			match (a.is_nan(), b.is_nan()) {
+				(true, true) => Ordering::Equal,
+				(true, false) => Ordering::Greater,
+				(false, true) => Ordering::Less,
 				// -0.0 = 0.0
-				Ordering::Equal
-			} else {
-				// Handles NaN's
-				a.total_cmp(&b)
+				(false, false) if a == 0.0 && b == 0.0 => Ordering::Equal,
+				(false, false) => a.total_cmp(&b),
 			}
 		}
 
@@ -753,6 +758,10 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
+				// A NaN is above every integer.
+				if w.is_nan() {
+					return Ordering::Less;
+				}
 				// If the float is not finite, we don't need to compare it to the integer.
 				if !w.is_finite() {
 					return greater!(w).reverse();
@@ -797,6 +806,10 @@ impl Ord for Number {
 							}
 						}
 					};
+				}
+				// A NaN is above every decimal.
+				if v.is_nan() {
+					return Ordering::Greater;
 				}
 				// If the float is not finite, we don't need to compare it to the decimal
 				if !v.is_finite() {
@@ -910,8 +923,9 @@ impl hash::Hash for Number {
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
+		// Every NaN is one value, as `Ord` orders it.
 		fn total_eq_f64(a: f64, b: f64) -> bool {
-			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0)
+			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0) || (a.is_nan() && b.is_nan())
 		}
 
 		match (self, other) {
@@ -1388,8 +1402,8 @@ mod tests {
 
 	#[test]
 	fn ord_test() {
-		let a = Number::Float(-f64::NAN);
-		let b = Number::Float(-f64::INFINITY);
+		let a = Number::Float(-f64::INFINITY);
+		let b = Number::Float(-1f64);
 		let c = Number::Float(1f64);
 		let d = Number::Decimal(
 			Decimal::from_str_normalized("1.0000000000000000000000000002").unwrap(),
@@ -1400,12 +1414,40 @@ mod tests {
 		let h = Number::Decimal(Decimal::from_str_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
-		let original = vec![a, b, c, d, e, f, g, h, i, j];
+		let k = Number::Float(-f64::NAN);
+		let original = vec![a, b, c, d, e, f, g, h, i, j, k];
 		let mut copy = original.clone();
 		let mut rng = rand::rng();
 		copy.shuffle(&mut rng);
 		copy.sort();
 		assert_eq!(original, copy);
+	}
+
+	#[test]
+	fn every_nan_is_one_value_above_every_number() {
+		let nans = [f64::NAN, -f64::NAN, f64::from_bits(0x7ff0_0000_0000_0001)];
+		let numbers = [
+			Number::Float(f64::INFINITY),
+			Number::Float(-f64::INFINITY),
+			Number::Float(0.0),
+			Number::Int(i64::MAX),
+			Number::Int(i64::MIN),
+			Number::Decimal(Decimal::MAX),
+			Number::Decimal(Decimal::MIN),
+		];
+		for x in nans {
+			let x = Number::Float(x);
+			for y in nans {
+				assert_eq!(x, Number::Float(y));
+				assert_eq!(x.cmp(&Number::Float(y)), Ordering::Equal);
+			}
+			for n in &numbers {
+				assert_eq!(x.cmp(n), Ordering::Greater, "{x:?} against {n:?}");
+				assert_eq!(n.cmp(&x), Ordering::Less, "{n:?} against {x:?}");
+				assert_ne!(&x, n);
+			}
+			assert_eq!(x.as_decimal_buf(), Number::Float(f64::NAN).as_decimal_buf());
+		}
 	}
 
 	#[test]

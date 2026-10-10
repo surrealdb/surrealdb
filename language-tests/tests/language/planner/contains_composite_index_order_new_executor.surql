@@ -13,9 +13,7 @@ value = "[{ age: 90, id: record:5 }, { age: 50, id: record:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, age] {rows: 2}
-    Limit [ctx: Db] [limit: 2] {rows: 2}
-        DistinctRecords [ctx: Db] {rows: 2}
-            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward, limit: 2] {rows: 2}
 
 Total rows: 2"'''
 
@@ -25,9 +23,7 @@ value = "[{ age: 10, id: record:6 }, { age: 20, id: record:1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, age] {rows: 2}
-    Limit [ctx: Db] [limit: 2] {rows: 2}
-        DistinctRecords [ctx: Db] {rows: 2}
-            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Forward, limit: 2] {rows: 2}
 
 Total rows: 2"'''
 
@@ -40,9 +36,7 @@ value = "[{ age: 10, id: entry:3, score: 99 }, { age: 20, id: entry:2, score: 30
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}
-    Limit [ctx: Db] [limit: 3] {rows: 3}
-        DistinctRecords [ctx: Db] {rows: 3}
-            IndexScan [ctx: Db] [table: entry, index: tag_age_score, access: ['omicron'], direction: Forward] {rows: 3}
+    IndexScan [ctx: Db] [table: entry, index: tag_age_score, access: ['omicron'], direction: Forward, limit: 3] {rows: 3}
 
 Total rows: 3"'''
 
@@ -52,9 +46,7 @@ value = "[{ age: 30, id: entry:4, score: 70 }, { age: 20, id: entry:1, score: 50
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id, age, score] {rows: 3}
-    Limit [ctx: Db] [limit: 3] {rows: 3}
-        DistinctRecords [ctx: Db] {rows: 3}
-            IndexScan [ctx: Db] [table: entry, index: tag_age_score, access: ['omicron'], direction: Backward] {rows: 3}
+    IndexScan [ctx: Db] [table: entry, index: tag_age_score, access: ['omicron'], direction: Backward, limit: 3] {rows: 3}
 
 Total rows: 3"'''
 
@@ -72,10 +64,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id, age] {rows: 5}
     Filter [ctx: Db] [predicate: tags CONTAINSANY ['omicron', 'beta']] {rows: 5}
         UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 5}
-            DistinctRecords [ctx: Db] {rows: 5}
-                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}
-            DistinctRecords [ctx: Db] {rows: 5}
-                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Backward] {rows: 5}
+            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 5}
+            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Backward] {rows: 5}
 
 Total rows: 5"'''
 
@@ -84,10 +74,8 @@ value = '''
 "SelectProject [ctx: Db] [projections: id, age] {rows: 5}
     Filter [ctx: Db] [predicate: ['omicron', 'beta'] ANYINSIDE tags] {rows: 5}
         UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Asc] {rows: 5}
-            DistinctRecords [ctx: Db] {rows: 5}
-                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Forward] {rows: 5}
-            DistinctRecords [ctx: Db] {rows: 5}
-                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Forward] {rows: 5}
+            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Forward] {rows: 5}
+            IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Forward] {rows: 5}
 
 Total rows: 5"'''
 
@@ -100,10 +88,8 @@ value = '''
     Limit [ctx: Db] [limit: 3] {rows: 1}
         Filter [ctx: Db] [predicate: tags CONTAINSALL ['omicron', 'beta']] {rows: 1}
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key_dedup: age Desc] {rows: 1}
-                DistinctRecords [ctx: Db] {rows: 1}
-                    IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 1}
-                DistinctRecords [ctx: Db] {rows: 1}
-                    IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Backward] {rows: 1}
+                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 1}
+                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['beta'], direction: Backward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -116,8 +102,7 @@ value = '''
     Limit [ctx: Db] [limit: 3] {rows: 0}
         Filter [ctx: Db] [predicate: tags CONTAINSANY [] AND tags CONTAINSANY ['omicron']] {rows: 0}
             UnionIndexScan [ctx: Db] [table: record, branches: 1, merge_by_index_key_dedup: age Desc] {rows: 0}
-                DistinctRecords [ctx: Db] {rows: 0}
-                    IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 0}
+                IndexScan [ctx: Db] [table: record, index: tag_age, access: ['omicron'], direction: Backward] {rows: 0}
 
 Total rows: 0"'''
 
@@ -127,6 +112,10 @@ Total rows: 0"'''
 {
     DEFINE TABLE OVERWRITE record SCHEMALESS;
     DEFINE INDEX OVERWRITE tag_age ON record FIELDS tags.*, age;
+    -- The trailing indexed columns are declared scalar kinds, so a scan of the
+    -- index delivers their order: a plain column that may hold an array is
+    -- stored once per element and orders nothing.
+    DEFINE FIELD OVERWRITE age ON record TYPE option<int>;
     CREATE record:1 SET tags = ['alpha', 'omicron'], age = 20;
     CREATE record:2 SET tags = ['omicron', 'beta'], age = 50;
     CREATE record:3 SET tags = ['gamma'], age = 70;
@@ -153,6 +142,11 @@ EXPLAIN ANALYZE SELECT id, age FROM record WHERE 'omicron' INSIDE tags ORDER BY 
 {
     DEFINE TABLE OVERWRITE entry SCHEMALESS;
     DEFINE INDEX OVERWRITE tag_age_score ON entry FIELDS tags.*, age, score;
+    -- The trailing indexed columns are declared scalar kinds, so a scan of the
+    -- index delivers their order: a plain column that may hold an array is
+    -- stored once per element and orders nothing.
+    DEFINE FIELD OVERWRITE age ON entry TYPE option<int>;
+    DEFINE FIELD OVERWRITE score ON entry TYPE option<int>;
     CREATE entry:1 SET tags = ['omicron'], age = 20, score = 50;
     CREATE entry:2 SET tags = ['omicron'], age = 20, score = 30;
     CREATE entry:3 SET tags = ['omicron'], age = 10, score = 99;

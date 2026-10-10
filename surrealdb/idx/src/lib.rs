@@ -6,6 +6,12 @@
 //! engine is reached downward — through a transaction and an [`env::IndexEnv`]
 //! handle — and answers from the keyspace alone.
 //!
+//! The pure computations those engines and the executor share — index key
+//! encoding and decoding, full-text term resolution and scoring, vector
+//! scoring — are [`kernels`]: functions over values and bytes that touch no
+//! storage, named in a registry. An executor that does its own reads hands
+//! what it read to them.
+//!
 //! Choosing an index for a query, and iterating one on behalf of a statement,
 //! is not here: that is the planner's job, and it lives above this crate with
 //! the executor that drives it.
@@ -58,7 +64,7 @@ pub mod file;
 pub mod ft;
 pub mod index;
 pub mod inline_cache;
-pub mod keys;
+pub mod kernels;
 pub(crate) mod parallel;
 #[cfg(test)]
 pub(crate) mod test_env;

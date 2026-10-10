@@ -893,13 +893,13 @@ NONE
 { age: 0, id: indexed:27 }
 { age: 0, id: indexed:36 }
 { age: 0, id: indexed:45 }
-... 62 rows, digest bd99a984fc4fc4ec ...
-{ age: 8, id: indexed:8 }
+... 62 rows, digest ff249cd244ca4c90 ...
 { age: 8, id: indexed:17 }
 { age: 8, id: indexed:26 }
 { age: 8, id: indexed:35 }
 { age: 8, id: indexed:44 }
 { age: 8, id: indexed:53 }
+{ age: [3, 4], id: indexed:tags }
 ### SELECT kind AS age, id FROM indexed ORDER BY age, id
 { age: NONE, id: indexed:tags }
 { age: 0, id: indexed:3 }
@@ -915,33 +915,33 @@ NONE
 { age: 2, id: indexed:56 }
 { age: 2, id: indexed:59 }
 ### SELECT age AS age, id FROM indexed ORDER BY age DESC
-{ age: 8, id: indexed:53 }
-{ age: 8, id: indexed:44 }
-{ age: 8, id: indexed:35 }
-{ age: 8, id: indexed:26 }
-{ age: 8, id: indexed:17 }
+{ age: [3, 4], id: indexed:tags }
 { age: 8, id: indexed:8 }
-... 62 rows, digest 9915699993942ad4 ...
-{ age: 0, id: indexed:45 }
-{ age: 0, id: indexed:36 }
-{ age: 0, id: indexed:27 }
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+... 62 rows, digest 5f80f16fcad4ab8e ...
 { age: 0, id: indexed:18 }
-{ age: 0, id: indexed:9 }
+{ age: 0, id: indexed:27 }
+{ age: 0, id: indexed:36 }
+{ age: 0, id: indexed:45 }
+{ age: 0, id: indexed:54 }
 { age: NONE, id: indexed:none }
 ### SELECT id, age FROM indexed ORDER BY age DESC LIMIT 7
+{ age: [3, 4], id: indexed:tags }
+{ age: 8, id: indexed:8 }
+{ age: 8, id: indexed:17 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
 { age: 8, id: indexed:53 }
+### SELECT id, age FROM indexed WHERE age > 2 ORDER BY age DESC LIMIT 5 START 2
 { age: 8, id: indexed:44 }
 { age: 8, id: indexed:35 }
 { age: 8, id: indexed:26 }
 { age: 8, id: indexed:17 }
 { age: 8, id: indexed:8 }
-{ age: 7, id: indexed:52 }
-### SELECT id, age FROM indexed WHERE age > 2 ORDER BY age DESC LIMIT 5 START 2
-{ age: 8, id: indexed:35 }
-{ age: 8, id: indexed:26 }
-{ age: 8, id: indexed:17 }
-{ age: 8, id: indexed:8 }
-{ age: 7, id: indexed:52 }
 ### SELECT id FROM indexed WHERE kind = 1 ORDER BY age DESC
 { id: indexed:52 }
 { id: indexed:43 }

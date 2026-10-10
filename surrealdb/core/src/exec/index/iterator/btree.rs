@@ -1,7 +1,10 @@
 //! B-tree index iterators for `Idx` (non-unique) and `Uniq` (unique) indexes.
 //!
-//! These iterators provide efficient, batched record retrieval using B-tree
-//! index structures.  They support:
+//! A program reads a B-tree index through the VM's entry scan
+//! (`exec::vm::entries`); the iterators here serve the operator tree, which
+//! test builds keep as the oracle the VM is compared against, and the range
+//! helpers serve the bitmap candidate scans. These iterators provide efficient, batched record
+//! retrieval using B-tree index structures.  They support:
 //!
 //! - **Equality lookups** – [`IndexEqualIterator`] / [`UniqueEqualIterator`]
 //! - **Range scans** – [`IndexRangeIterator`] / [`UniqueRangeIterator`]
@@ -36,22 +39,26 @@
 //! - **Trailing-edge** boundary (the last key that might appear, relevant for backward scans where
 //!   `beg` stays fixed): filtered on *every* batch because the cursor never moves past it.
 
-use std::borrow::Cow;
+#[cfg(test)]
 use std::ops::Bound;
-use std::slice;
 
 use anyhow::Result;
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
+#[cfg(test)]
 use crate::exec::index::access_path::BTreeAccess;
 use crate::expr::BinaryOperator;
 use crate::idx::entry::IndexEntryValue;
-use crate::idx::keys::{compute_index_range, entry_range};
-use crate::key::schema::{DbRoot, EntryFdOpenPrefix, EntryFdPrefix, EntryPrefix, UniqueKey};
-use crate::key::{KVKey, KVSubspace, KeyRange, TypedRange};
+use crate::idx::kernels::btree::IndexKeyspace;
+#[cfg(test)]
+use crate::idx::kernels::btree::decode_record_id;
+use crate::key::TypedRange;
+use crate::kvs::Val;
+#[cfg(test)]
 use crate::kvs::util::{scan, scanr};
-use crate::kvs::{Direction, Transaction, Val};
-use crate::val::{Array, RecordId, Value};
+#[cfg(test)]
+use crate::kvs::{Direction, Transaction};
+use crate::val::{RecordId, Value};
 
 /// Maximum number of KV entries fetched per batch in index scans.
 ///
@@ -63,16 +70,14 @@ pub(crate) const INDEX_BATCH_SIZE: u32 = 1000;
 
 /// Decode a batch of KV pairs into [`RecordId`]s.
 ///
-/// The key is ignored; only the value is deserialized: a revision-encoded
-/// `RecordId`, optionally followed by an appended doc-ID which
-/// `revision::from_slice` ignores (see
-/// [`crate::idx::entry::IndexEntryValue`]).  Used by iterators that do not
-/// need per-key filtering.
+/// The key is ignored; each value is decoded by the entry kernel
+/// ([`decode_record_id`]), which reads the record id an entry of either
+/// format names.
+#[cfg(test)]
 fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 	let mut records = Vec::with_capacity(res.len());
 	for (_, val) in res {
-		let rid: RecordId = revision::from_slice(&val)?;
-		records.push(rid);
+		records.push(decode_record_id(&val)?);
 	}
 	Ok(records)
 }
@@ -110,6 +115,7 @@ pub(crate) fn decode_entry_doc_ids(
 /// equality lookup may match many entries.  This iterator scans the
 /// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward or
 /// backward order, advancing/retreating the cursor after each batch.
+#[cfg(test)]
 pub(crate) struct IndexEqualIterator {
 	/// The entries not yet returned, narrowed after each batch.
 	range: TypedRange<IndexEntryValue>,
@@ -117,8 +123,10 @@ pub(crate) struct IndexEqualIterator {
 	reverse: bool,
 }
 
+#[cfg(test)]
 impl IndexEqualIterator {
 	/// Create a new equality iterator for the given index value (always forward).
+	#[cfg(test)]
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -139,14 +147,7 @@ impl IndexEqualIterator {
 		value: &Value,
 		reverse: bool,
 	) -> Result<Self> {
-		let range = EntryFdPrefix {
-			ns,
-			db,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(slice::from_ref(value)),
-		}
-		.range()?;
+		let range = IndexKeyspace::of(ns, db, ix).equality(false, value)?;
 		Ok(Self {
 			range,
 			reverse,
@@ -180,10 +181,12 @@ impl IndexEqualIterator {
 /// For non-nullish values this is a single point-get (one KV entry per
 /// value).  NONE/NULL tuples are stored with the non-unique key format
 /// (record-ID suffix) so they require a prefix range scan instead.
+#[cfg(test)]
 pub(crate) struct UniqueEqualIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl UniqueEqualIterator {
 	pub(crate) fn new(
 		ns: NamespaceId,
@@ -191,30 +194,7 @@ impl UniqueEqualIterator {
 		ix: &IndexDefinition,
 		value: &Value,
 	) -> Result<Self> {
-		let array = Array::from(vec![value.clone()]);
-		let range = if array.is_any_none_or_null() {
-			EntryFdPrefix {
-				ns,
-				db,
-				tb: Cow::Borrowed(&ix.table_name),
-				ix: ix.index_id,
-				fd: Cow::Borrowed(&array),
-			}
-			.range()?
-		} else {
-			let key = UniqueKey {
-				ns,
-				db,
-				tb: Cow::Borrowed(&ix.table_name),
-				ix: ix.index_id,
-				fd: Cow::Borrowed(&array),
-			}
-			.encode_key()?;
-			// A unique key is a complete key, so the range covering it alone ends at
-			// its immediate successor.
-			let end = key.as_borrowed().next();
-			entry_range(ns, db, ix, (key..end).into())
-		};
+		let range = IndexKeyspace::of(ns, db, ix).equality(true, value)?;
 		Ok(Self {
 			range,
 		})
@@ -236,10 +216,12 @@ impl UniqueEqualIterator {
 /// Once that first batch is processed, `beg_checked` is set to `true` and
 /// no further filtering is needed because `beg` has already been advanced
 /// past the excluded key.
+#[cfg(test)]
 pub(crate) struct IndexRangeForwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl IndexRangeForwardIterator {
 	pub(crate) fn new(
 		ns: NamespaceId,
@@ -248,7 +230,7 @@ impl IndexRangeForwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = compute_index_range(ns, db, ix, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(false, from, to)?;
 
 		Ok(Self {
 			range,
@@ -284,10 +266,12 @@ impl IndexRangeForwardIterator {
 /// 2. **Trailing-edge (`beg`)**: When the lower bound is exclusive, `beg` remains fixed throughout
 ///    iteration (only `end` moves).  Therefore the excluded key can appear in *any* batch and must
 ///    be filtered on *every* call.  `exclude_beg_key` holds the key to filter.
+#[cfg(test)]
 pub(crate) struct IndexRangeBackwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl IndexRangeBackwardIterator {
 	pub(crate) fn new(
 		ns: NamespaceId,
@@ -296,7 +280,7 @@ impl IndexRangeBackwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = compute_index_range(ns, db, ix, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(false, from, to)?;
 
 		Ok(Self {
 			range,
@@ -326,11 +310,13 @@ impl IndexRangeBackwardIterator {
 /// Delegates to [`IndexRangeForwardIterator`] or
 /// [`IndexRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
+#[cfg(test)]
 pub(crate) enum IndexRangeIterator {
 	Forward(IndexRangeForwardIterator),
 	Backward(IndexRangeBackwardIterator),
 }
 
+#[cfg(test)]
 impl IndexRangeIterator {
 	/// Create a new range iterator for the given direction.
 	pub(crate) fn new(
@@ -370,139 +356,6 @@ impl IndexRangeIterator {
 // Unique-index range helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the range of entries covered by a unique index range scan.
-///
-/// Non-nullish values use the exact encoded unique key (no record-ID
-/// suffix).  NONE/NULL values are stored with the non-unique key format
-/// (record-ID suffix), so we use prefix-based bounds to match them.
-fn compute_unique_range(
-	ns: NamespaceId,
-	db: DatabaseId,
-	ix: &IndexDefinition,
-	from: Bound<&Value>,
-	to: Bound<&Value>,
-) -> Result<TypedRange<IndexEntryValue>> {
-	let prefix = DbRoot {
-		ns,
-		db,
-	};
-	let start = match from {
-		Bound::Included(x) => {
-			let slice = slice::from_ref(x);
-			// These two keys have semantically (when considering the stored index keys) the same
-			// meaning when used as a range bound.
-			// However, for clearity, and because the end bound do have to be different we do use a
-			// different key type to create the bound.
-			if x.is_nullish() {
-				EntryFdOpenPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_bound()?
-			} else {
-				UniqueKey {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_key()?
-			}
-		}
-		Bound::Excluded(x) => {
-			let slice = slice::from_ref(x);
-			if x.is_nullish() {
-				EntryFdOpenPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.skip_extensions()?
-			} else {
-				UniqueKey {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_key()?
-				.next_neighbour_expect()
-			}
-		}
-		Bound::Unbounded => EntryPrefix {
-			ns: prefix.ns,
-			db: prefix.db,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-		}
-		.encode_bound()?,
-	};
-
-	let end = match to {
-		Bound::Included(x) => {
-			let slice = slice::from_ref(x);
-			if x.is_nullish() {
-				EntryFdOpenPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.skip_extensions()?
-			} else {
-				UniqueKey {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_key()?
-				.next_neighbour_expect()
-			}
-		}
-		Bound::Excluded(x) => {
-			let slice = slice::from_ref(x);
-			if x.is_nullish() {
-				EntryFdOpenPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_bound()?
-			} else {
-				UniqueKey {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(slice),
-				}
-				.encode_key()?
-			}
-		}
-		Bound::Unbounded => EntryPrefix {
-			ns: prefix.ns,
-			db: prefix.db,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-		}
-		.skip_extensions()?,
-	};
-
-	Ok(entry_range(ns, db, ix, (start..end).into()))
-}
-
 /// Forward iterator for range scans on unique (`Uniq`) indexes.
 ///
 /// Works similarly to [`IndexRangeForwardIterator`] but operates on unique
@@ -514,10 +367,12 @@ fn compute_unique_range(
 /// an **inclusive** upper bound needs special treatment: when the scan is
 /// exhausted (empty result), a final `tx.get(end)` is issued to retrieve
 /// the boundary value that the half-open range missed.
+#[cfg(test)]
 pub(crate) struct UniqueRangeForwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl UniqueRangeForwardIterator {
 	pub(crate) fn new(
 		ns: NamespaceId,
@@ -526,7 +381,7 @@ impl UniqueRangeForwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = compute_unique_range(ns, db, ix, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(true, from, to)?;
 
 		Ok(Self {
 			range,
@@ -560,10 +415,12 @@ impl UniqueRangeForwardIterator {
 /// pattern described on [`IndexRangeBackwardIterator`]:
 /// - `end_checked` guards the first-batch-only filter for an exclusive `end`.
 /// - `exclude_beg_key` is checked on every batch for an exclusive `beg`.
+#[cfg(test)]
 pub(crate) struct UniqueRangeBackwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl UniqueRangeBackwardIterator {
 	pub(crate) fn new(
 		ns: NamespaceId,
@@ -572,7 +429,7 @@ impl UniqueRangeBackwardIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<Self> {
-		let range = compute_unique_range(ns, db, ix, from, to)?;
+		let range = IndexKeyspace::of(ns, db, ix).range(true, from, to)?;
 
 		Ok(Self {
 			range,
@@ -603,11 +460,13 @@ impl UniqueRangeBackwardIterator {
 /// Delegates to [`UniqueRangeForwardIterator`] or
 /// [`UniqueRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
+#[cfg(test)]
 pub(crate) enum UniqueRangeIterator {
 	Forward(UniqueRangeForwardIterator),
 	Backward(UniqueRangeBackwardIterator),
 }
 
+#[cfg(test)]
 impl UniqueRangeIterator {
 	/// Create a new unique range iterator for the given direction.
 	pub(crate) fn new(
@@ -652,12 +511,14 @@ impl UniqueRangeIterator {
 /// Supports both forward and backward scanning, controlled by [`Direction`].
 /// Forward scans use `tx.scan()` and advance the `beg` cursor;
 /// backward scans use `tx.scanr()` and retreat the `end` cursor.
+#[cfg(test)]
 pub(crate) struct CompoundEqualIterator {
 	range: TypedRange<IndexEntryValue>,
 	/// Scan direction
 	direction: Direction,
 }
 
+#[cfg(test)]
 impl CompoundEqualIterator {
 	/// Create a new compound equality iterator.
 	///
@@ -705,10 +566,12 @@ impl CompoundEqualIterator {
 /// next column has a range condition (e.g. `WHERE a = 1 AND b > 5`).
 /// The key boundaries are computed by [`compute_compound_key_range`],
 /// which encodes the equality prefix together with the range value.
+#[cfg(test)]
 pub(crate) struct CompoundRangeForwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl CompoundRangeForwardIterator {
 	/// Create a new compound range iterator.
 	pub(crate) fn new(
@@ -743,11 +606,13 @@ impl CompoundRangeForwardIterator {
 /// Delegates to [`CompoundRangeForwardIterator`] or
 /// [`CompoundRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
+#[cfg(test)]
 pub(crate) enum CompoundRangeIterator {
 	Forward(CompoundRangeForwardIterator),
 	Backward(CompoundRangeBackwardIterator),
 }
 
+#[cfg(test)]
 impl CompoundRangeIterator {
 	/// Create a new compound range iterator for the given direction.
 	pub(crate) fn new(
@@ -785,11 +650,13 @@ impl CompoundRangeIterator {
 
 /// A compound-index lookup: an equality prefix alone, or with a range on the
 /// next column, so a scan drives either through one loop.
+#[cfg(test)]
 pub(crate) enum CompoundIterator {
 	Equal(CompoundEqualIterator),
 	Range(CompoundRangeIterator),
 }
 
+#[cfg(test)]
 impl CompoundIterator {
 	/// An iterator over the entries matching `prefix`, and `range` on the next
 	/// column when it is given, in `direction`.
@@ -825,6 +692,7 @@ impl CompoundIterator {
 
 /// The iterator a B-tree lookup takes for its access shape, so a caller drives
 /// every shape through one loop.
+#[cfg(test)]
 pub(crate) enum BTreeIterator {
 	UniqueEqual(UniqueEqualIterator),
 	Equal(IndexEqualIterator),
@@ -833,6 +701,7 @@ pub(crate) enum BTreeIterator {
 	Compound(CompoundIterator),
 }
 
+#[cfg(test)]
 impl BTreeIterator {
 	/// The iterator for `access` on `ix`, a unique index when `unique`, in
 	/// `direction`; `None` for an access no B-tree iterator serves (full-text,
@@ -928,10 +797,12 @@ impl BTreeIterator {
 /// order using `tx.scanr()`.  The `end` cursor retreats after each batch
 /// while `beg` stays fixed, following the same pattern as
 /// [`IndexRangeBackwardIterator`].
+#[cfg(test)]
 pub(crate) struct CompoundRangeBackwardIterator {
 	range: TypedRange<IndexEntryValue>,
 }
 
+#[cfg(test)]
 impl CompoundRangeBackwardIterator {
 	/// Create a new backward compound range iterator.
 	pub(crate) fn new(
@@ -978,21 +849,11 @@ pub(crate) fn bitmap_scan_range(
 	use crate::exec::index::access_path::BTreeAccess;
 	let unique = matches!(ix.index, crate::catalog::Index::Uniq);
 	Ok(match access {
-		BTreeAccess::Equality(v) => {
-			if unique {
-				UniqueEqualIterator::new(ns, db, ix, v)?.range
-			} else {
-				IndexEqualIterator::new(ns, db, ix, v)?.range
-			}
-		}
+		BTreeAccess::Equality(v) => IndexKeyspace::of(ns, db, ix).equality(unique, v)?,
 		BTreeAccess::Range {
 			range,
 		} => {
-			if unique {
-				compute_unique_range(ns, db, ix, range.start.as_ref(), range.end.as_ref())?
-			} else {
-				compute_index_range(ns, db, ix, range.start.as_ref(), range.end.as_ref())?
-			}
+			IndexKeyspace::of(ns, db, ix).range(unique, range.start.as_ref(), range.end.as_ref())?
 		}
 		BTreeAccess::Compound {
 			prefix,
@@ -1013,24 +874,8 @@ pub(crate) fn bitmap_scan_range(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the range of entries covered by a compound index scan.
-///
-/// The boundaries come from two bounds over the open field prefix: `prefix`, the
-/// equality values of the leading columns, and — where a range condition on the
-/// next column is present — `prefix ++ val`, those values followed by the range
-/// value.  A boundary is then the bound's own bytes (*at*), the first key
-/// strictly beneath it (*beneath*), or the first key after it and everything
-/// that extends it (*past*):
-///
-/// | Operator | start                   | end                  |
-/// |----------|-------------------------|----------------------|
-/// | `=`      | beneath `prefix ++ val` | past `prefix ++ val` |
-/// | `>`      | past `prefix ++ val`    | past `prefix`        |
-/// | `>=`     | at `prefix ++ val`      | past `prefix`        |
-/// | `<`      | at `prefix`             | at `prefix ++ val`   |
-/// | `<=`     | at `prefix`             | past `prefix ++ val` |
-///
-/// When no range is present, the scan covers everything beneath `prefix`.
+/// The entries of compound index `ix` under `prefix`, narrowed by `range`
+/// ([`IndexKeyspace::compound`]).
 fn compute_compound_key_range(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -1038,67 +883,7 @@ fn compute_compound_key_range(
 	prefix: &[Value],
 	range: Option<&(BinaryOperator, Value)>,
 ) -> Result<TypedRange<IndexEntryValue>> {
-	let db_prefix = DbRoot {
-		ns,
-		db,
-	};
-
-	// Returns a key which constains the prefix values, without the searched for value
-	let without_bound = || {
-		EntryFdOpenPrefix {
-			ns: db_prefix.ns,
-			db: db_prefix.db,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(prefix),
-		}
-		.encode_bound()
-	};
-
-	if let Some((op, val)) = range {
-		// Returns a key which constains the prefix values, with the searched for value
-		let with_bound = || {
-			let mut key_values: Vec<Value> = prefix.to_vec();
-			key_values.push(val.clone());
-			EntryFdOpenPrefix {
-				ns: db_prefix.ns,
-				db: db_prefix.db,
-				tb: Cow::Borrowed(&ix.table_name),
-				ix: ix.index_id,
-				fd: Cow::Borrowed(&key_values),
-			}
-			.encode_bound()
-		};
-
-		let key_range: KeyRange<'static> = match op {
-			BinaryOperator::Equal | BinaryOperator::ExactEqual => with_bound()?.prefix_expect(),
-			BinaryOperator::MoreThan => {
-				let start = with_bound()?.next_neighbour_expect();
-				let end = without_bound()?.next_neighbour_expect();
-
-				(start..end).into()
-			}
-			BinaryOperator::MoreThanEqual => {
-				let start = with_bound()?;
-				let end = without_bound()?.next_neighbour_expect();
-				(start..end).into()
-			}
-			BinaryOperator::LessThan => {
-				let start = without_bound()?;
-				let end = with_bound()?;
-				(start..end).into()
-			}
-			BinaryOperator::LessThanEqual => {
-				let start = without_bound()?;
-				let end = with_bound()?.next_neighbour_expect();
-				(start..end).into()
-			}
-			_ => without_bound()?.prefix_expect(),
-		};
-		Ok(entry_range(ns, db, ix, key_range))
-	} else {
-		Ok(entry_range(ns, db, ix, without_bound()?.prefix_expect()))
-	}
+	IndexKeyspace::of(ns, db, ix).compound(prefix, range.map(|(op, v)| (op, v)))
 }
 
 #[cfg(test)]
@@ -1722,25 +1507,23 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn unsupported_range_operator_widens_to_the_whole_prefix() {
-		// Any operator outside the documented table degrades to the prefix
-		// range: an over-approximation the residual filter has to narrow.
+	async fn an_operator_that_is_no_comparison_is_refused() {
+		// No key range answers an operator outside the comparisons, so the
+		// iterator is refused rather than widened to every entry under the
+		// prefix.
 		let db = compound_db().await;
 		let fx = Fixture::new(&db, "c").await;
-		let tx = fx.tx();
 		let prefix = vec![Value::from(1i64)];
 		let range = (BinaryOperator::NotEqual, Value::from(2i64));
-		let mut it = CompoundRangeIterator::new(
+		let it = CompoundRangeIterator::new(
 			fx.ns,
 			fx.db,
 			fx.ix("iab"),
 			&prefix,
 			&range,
 			Direction::Forward,
-		)
-		.expect("compound range iterator");
-		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
-		assert_eq!(ids, owned(&["c:1", "c:2", "c:3"]), "c:2 is not excluded by the key range");
+		);
+		assert!(it.is_err(), "`!=` must not answer the whole prefix");
 	}
 
 	#[tokio::test]

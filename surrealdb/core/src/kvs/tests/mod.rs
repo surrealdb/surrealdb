@@ -29,6 +29,8 @@ mod graph_ordered_limit_test;
 #[cfg(feature = "kv-mem")]
 mod graph_semijoin_test;
 #[cfg(feature = "kv-mem")]
+mod index_key_kernel_test;
+#[cfg(feature = "kv-mem")]
 mod inline_cache_test;
 #[cfg(feature = "kv-mem")]
 mod inline_props_test;

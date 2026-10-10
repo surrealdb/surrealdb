@@ -24,7 +24,7 @@ impl HighlightParams {
 	}
 }
 
-pub(super) struct Highlighter {
+pub(crate) struct Highlighter {
 	prefix: Vec<char>,
 	suffix: Vec<char>,
 	fields: Vec<(Idiom, Value)>,
@@ -32,7 +32,7 @@ pub(super) struct Highlighter {
 }
 
 impl Highlighter {
-	pub(super) fn new(hlp: &HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
+	pub(crate) fn new(hlp: &HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
 		let prefix = hlp.prefix.to_raw_string().chars().collect();
 		let suffix = hlp.suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
@@ -45,7 +45,7 @@ impl Highlighter {
 		}
 	}
 
-	pub(super) fn highlight(&mut self, term_len: u32, os: Vec<Offset>) {
+	pub(crate) fn highlight(&mut self, term_len: u32, os: &[Offset]) {
 		self.offseter.highlight(term_len, os);
 	}
 
@@ -120,20 +120,20 @@ impl TryFrom<Highlighter> for Value {
 	}
 }
 
-pub(super) struct Offseter {
+pub(crate) struct Offseter {
 	partial: bool,
 	offsets: HashMap<u32, BTreeMap<Position, Position>>,
 }
 
 impl Offseter {
-	pub(super) fn new(partial: bool) -> Self {
+	pub(crate) fn new(partial: bool) -> Self {
 		Self {
 			partial,
 			offsets: Default::default(),
 		}
 	}
 
-	pub(super) fn highlight(&mut self, term_len: u32, os: Vec<Offset>) {
+	pub(crate) fn highlight(&mut self, term_len: u32, os: &[Offset]) {
 		for o in os {
 			let (start, end) = if self.partial {
 				let start = o.gen_start.min(o.end);

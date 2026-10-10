@@ -14,8 +14,10 @@
 //! and layer instructions its lowering planned, to the rows it reads for what
 //! a method names. Each is therefore applied exactly once, in the program.
 //!
-//! The index reads are the one place a program calls an iterator over index
-//! storage: a B-tree cursor, a bitmap evaluation and the two candidate
+//! A B-tree index is read through [`Services::read_range`] like any other
+//! range of the keyspace; its keys and entries are encoded and decoded by the
+//! kernels the index write path shares (see `super::entries`). The index
+//! reads that remain services are a bitmap evaluation and the two candidate
 //! searches.
 
 use std::borrow::Cow;
@@ -26,22 +28,22 @@ use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, Error as CatalogError, FunctionDefinition, IndexId, NamespaceId, TableDefinition,
 };
-use crate::exec::index::access_path::{BTreeAccess, BitmapPlan, IndexRef};
-use crate::exec::index::iterator::btree::{BTreeIterator, INDEX_BATCH_SIZE};
+use crate::exec::index::access_path::{BitmapPlan, IndexRef};
 use crate::exec::operators::check_cancelled;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::scan::common::{ReadAhead, ensure_below_memory_threshold};
-use crate::exec::operators::scan::index_count::{count_btree_index_keys, sum_index_count_deltas};
+use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::operators::scan::lightweight::{EdgeIdStream, lightweight_edge_ids};
 use crate::exec::operators::scan::{
-	FullTextHits, FusedCandidates, evaluate_fusion_plan, exact_bitmap_cardinality, knn_candidates,
-	open_full_text_hits, record_key_range, resolve_doc_ids,
+	FusedCandidates, evaluate_fusion_plan, exact_bitmap_cardinality, knn_candidates,
+	open_full_text_index, record_key_range,
 };
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::{EvalContext, ExecutionContext, FlowResult};
 use crate::expr::logical::LogicalPermissionRef;
-use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::kernels::docids;
 use crate::key::RawRange;
 use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::kvs::{CachePolicy, Direction};
@@ -50,18 +52,26 @@ use crate::val::{Number, RecordId, RecordIdKey, RecordIdKeyRange, TableName, Val
 /// The reads of storage and index structures a program runs under, for one
 /// database.
 pub(super) trait Services {
-	/// A cursor over the record ids B-tree index `index` lists under
-	/// `access`, in its key order along `direction`. Fails when `access` is
-	/// not one a B-tree index answers.
-	fn index_rids(
+	/// The next at most `limit` entries of `range` along `direction`, as
+	/// stored keys and values, narrowing `range` to what is left to read; none
+	/// once it is read. A read of the keyspace alone: what the keys hold is the
+	/// caller's to decode.
+	async fn read_range(
 		&self,
-		index: &IndexRef,
-		access: &BTreeAccess,
+		range: &mut RawRange,
 		direction: Direction,
-	) -> FlowResult<BTreeIterator>;
+		limit: u32,
+	) -> FlowResult<Vec<(Vec<u8>, Vec<u8>)>>;
 
-	/// The next batch of record ids of `cursor`; empty once it is exhausted.
-	async fn next_index_rids(&self, cursor: &mut BTreeIterator) -> FlowResult<Vec<RecordId>>;
+	/// As [`Services::read_range`], answering the stored keys alone: no value
+	/// is read, for a caller that needs only what the keys spell or how many
+	/// there are.
+	async fn read_range_keys(
+		&self,
+		range: &mut RawRange,
+		direction: Direction,
+		limit: u32,
+	) -> FlowResult<Vec<Vec<u8>>>;
 
 	/// The doc-IDs of `table` that bitmap plan `plan` leaves, or an overflow
 	/// of its branch budget.
@@ -85,16 +95,29 @@ pub(super) trait Services {
 		doc_ids: &[u64],
 	) -> FlowResult<Vec<RecordId>>;
 
-	/// The hits of `query` against full-text index `index` of `table` under
-	/// `operator`, or `None` when no record can match. The caller takes them
-	/// a batch at a time.
-	async fn full_text_candidates(
+	/// The values stored at `keys`, in their order; `None` where no value
+	/// is stored. A read of the keyspace alone.
+	async fn read_values(
+		&self,
+		keys: Vec<crate::key::Key<'static>>,
+	) -> FlowResult<Vec<Option<Vec<u8>>>>;
+
+	/// Full-text index `index` of `table`, opened for a query: its analyzer
+	/// and the doc-id layout its postings resolve through.
+	async fn open_full_text(
 		&self,
 		table: &TableName,
 		index: &IndexRef,
-		query: &str,
-		operator: &MatchesOperator,
-	) -> FlowResult<Option<FullTextHits>>;
+	) -> FlowResult<FullTextIndex>;
+
+	/// The changes to `term` of full-text index `index` the transaction
+	/// buffered and has not yet written: the documents it added and those it
+	/// removed.
+	fn pending_term_changes(
+		&self,
+		index: &FullTextIndex,
+		term: &str,
+	) -> (roaring::RoaringTreemap, roaring::RoaringTreemap);
 
 	/// The `k` records ANN index `index` of `table` ranks nearest to
 	/// `vector`, nearest first, each with its distance; `ef` is the number of
@@ -179,10 +202,6 @@ pub(super) trait Services {
 	/// The number of records of `table` that `COUNT` index `index` holds: the
 	/// sum of its stored deltas and those the transaction has buffered.
 	async fn count_index_deltas(&self, table: &TableName, index: IndexId) -> FlowResult<usize>;
-
-	/// The number of entries of B-tree index `index` under `access`, counted
-	/// by the index keys alone.
-	async fn count_btree_keys(&self, index: &IndexRef, access: &BTreeAccess) -> FlowResult<usize>;
 
 	/// The cardinality of the exact fused bitmap `plan` over `table`, with no
 	/// record read. The plan reads the current state only, so a versioned
@@ -340,31 +359,34 @@ impl<'a> EngineServices<'a> {
 }
 
 impl Services for EngineServices<'_> {
-	fn index_rids(
+	async fn read_range(
 		&self,
-		index: &IndexRef,
-		access: &BTreeAccess,
+		range: &mut RawRange,
 		direction: Direction,
-	) -> FlowResult<BTreeIterator> {
-		let db_ctx = self.ctx.database().context("the VM requires a database context")?;
-		let Some(rids) = BTreeIterator::new(
-			db_ctx.ns_ctx.ns.namespace_id,
-			db_ctx.db.database_id,
-			index.definition(),
-			index.is_unique(),
-			access,
-			direction,
-		)
-		.map_err(ControlFlow::Err)?
-		else {
-			return Err(ControlFlow::Err(anyhow::anyhow!("an index source with no B-tree access")));
-		};
-		Ok(rids)
+		limit: u32,
+	) -> FlowResult<Vec<(Vec<u8>, Vec<u8>)>> {
+		check_cancelled(self.ctx)?;
+		let txn = self.ctx.txn();
+		match direction {
+			Direction::Forward => crate::kvs::util::scan(range, &txn, limit).await,
+			Direction::Backward => crate::kvs::util::scanr(range, &txn, limit).await,
+		}
+		.map_err(ControlFlow::Err)
 	}
 
-	async fn next_index_rids(&self, cursor: &mut BTreeIterator) -> FlowResult<Vec<RecordId>> {
+	async fn read_range_keys(
+		&self,
+		range: &mut RawRange,
+		direction: Direction,
+		limit: u32,
+	) -> FlowResult<Vec<Vec<u8>>> {
+		check_cancelled(self.ctx)?;
 		let txn = self.ctx.txn();
-		cursor.next_batch(&txn, INDEX_BATCH_SIZE).await.map_err(ControlFlow::Err)
+		match direction {
+			Direction::Forward => crate::kvs::util::scan_keys(range, &txn, limit).await,
+			Direction::Backward => crate::kvs::util::scanr_keys(range, &txn, limit).await,
+		}
+		.map_err(ControlFlow::Err)
 	}
 
 	async fn evaluate_bitmap(
@@ -381,18 +403,53 @@ impl Services for EngineServices<'_> {
 		table: &TableName,
 		doc_ids: &[u64],
 	) -> FlowResult<Vec<RecordId>> {
-		resolve_doc_ids(self.ctx, table, doc_ids).await
+		let db_ctx = self.ctx.database()?;
+		let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+		let keys = doc_ids
+			.iter()
+			.map(|&doc_id| docids::record_key(ns, db, table, doc_id))
+			.collect::<anyhow::Result<Vec<_>>>()
+			.map_err(ControlFlow::Err)?;
+		let values = self.read_values(keys).await?;
+		values
+			.into_iter()
+			.flatten()
+			.map(|bytes| {
+				let key = docids::decode_record_key(&bytes)
+					.map_err(|e| e.context("Failed to resolve doc-IDs to record IDs"))?;
+				Ok(RecordId {
+					table: table.clone(),
+					key,
+				})
+			})
+			.collect::<anyhow::Result<Vec<_>>>()
+			.map_err(ControlFlow::Err)
 	}
 
-	async fn full_text_candidates(
+	async fn read_values(
+		&self,
+		keys: Vec<crate::key::Key<'static>>,
+	) -> FlowResult<Vec<Option<Vec<u8>>>> {
+		check_cancelled(self.ctx)?;
+		let keys = keys.into_iter().map(StoredAt).collect();
+		self.ctx.txn().getm_raw(keys, None).await.map_err(ControlFlow::Err)
+	}
+
+	async fn open_full_text(
 		&self,
 		table: &TableName,
 		index: &IndexRef,
-		query: &str,
-		operator: &MatchesOperator,
-	) -> FlowResult<Option<FullTextHits>> {
+	) -> FlowResult<FullTextIndex> {
 		validate_record_user_access(self.ctx.database()?)?;
-		open_full_text_hits(self.ctx, table, index.definition(), query, operator).await
+		open_full_text_index(self.ctx, table, index.definition()).await
+	}
+
+	fn pending_term_changes(
+		&self,
+		index: &FullTextIndex,
+		term: &str,
+	) -> (roaring::RoaringTreemap, roaring::RoaringTreemap) {
+		index.pending_term_changes(&self.ctx.txn(), term)
 	}
 
 	#[allow(clippy::too_many_arguments)]
@@ -543,20 +600,6 @@ impl Services for EngineServices<'_> {
 		.await
 	}
 
-	async fn count_btree_keys(&self, index: &IndexRef, access: &BTreeAccess) -> FlowResult<usize> {
-		let db_ctx = self.ctx.database().context("the VM requires a database context")?;
-		let txn = self.ctx.txn();
-		count_btree_index_keys(
-			self.ctx,
-			&txn,
-			db_ctx.ns_ctx.ns.namespace_id,
-			db_ctx.db.database_id,
-			index,
-			access,
-		)
-		.await
-	}
-
 	async fn bitmap_cardinality(&self, table: &TableName, plan: &BitmapPlan) -> FlowResult<usize> {
 		Ok(exact_bitmap_cardinality(self.ctx, table, plan).await? as usize)
 	}
@@ -701,4 +744,20 @@ impl Services for EngineServices<'_> {
 			match *export {}
 		}
 	}
+}
+
+/// A key whose bytes are already encoded, for a read of the value stored at
+/// it as bytes.
+#[derive(Debug)]
+struct StoredAt(crate::key::Key<'static>);
+
+impl surrealdb_kvs::key::KVKey for StoredAt {
+	type Value = ();
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> anyhow::Result<()> {
+		buffer.extend_from_slice(self.0.as_slice());
+		Ok(())
+	}
+
+	fn value_context(&self) {}
 }

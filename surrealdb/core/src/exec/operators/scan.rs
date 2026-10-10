@@ -23,11 +23,11 @@ mod union_index;
 
 pub(crate) use bitmap::{
 	BitmapNode, FusedCandidates, RESOLVE_BATCH_SIZE, evaluate_fusion_plan,
-	exact_bitmap_cardinality, knn_allow_list, resolve_doc_ids,
+	exact_bitmap_cardinality, knn_allow_list,
 };
 pub use count::CountOutput;
 pub(crate) use count::record_key_range;
-pub(crate) use fulltext::{FULL_TEXT_BATCH_SIZE, FullTextHits, open_full_text_hits};
+pub(crate) use fulltext::{FULL_TEXT_BATCH_SIZE, FullTextHits, open_full_text_index};
 pub use graph::EdgeTableSpec;
 pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec, payload_fields};
 pub(crate) use knn::{PrefilterTier, boosted_ef, choose_prefilter_tier, knn_candidates};

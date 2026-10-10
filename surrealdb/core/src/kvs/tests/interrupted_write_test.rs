@@ -14,7 +14,6 @@
 //! are the consistency the commit must preserve rather than where the deadline
 //! landed, which a loaded machine can move.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, TableProvider};
@@ -55,14 +54,10 @@ async fn committed(ds: &Datastore) -> (usize, usize) {
 	let db = tx.expect_db_by_name("test", "test").await.unwrap();
 	let tb = TableName::from("t");
 	let ix = tx.expect_tb_index(db.namespace_id, db.database_id, &tb, "ab").await.unwrap();
-	let entries = crate::idx::keys::compute_index_range(
-		db.namespace_id,
-		db.database_id,
-		&ix,
-		Bound::Unbounded,
-		Bound::Unbounded,
-	)
-	.unwrap();
+	let entries =
+		crate::idx::kernels::btree::IndexKeyspace::of(db.namespace_id, db.database_id, &ix)
+			.all()
+			.unwrap();
 	let entries = tx.count(entries, None).await.unwrap();
 	let record = tx
 		.get_record(db.namespace_id, db.database_id, &tb, &RecordIdKey::Number(1), None)

@@ -27,7 +27,6 @@ use super::services::{EngineServices, Services};
 use super::write;
 use crate::exec::function::AccumulatorState;
 use crate::exec::index::access_path::access_repeats_records;
-use crate::exec::index::iterator::btree::BTreeIterator;
 use crate::exec::memory::runs::{BreakerKind, RunOrder, RunSpec};
 use crate::exec::operators::SortDirection;
 use crate::exec::operators::fetch::fetch_raw_record;
@@ -1446,7 +1445,9 @@ pub(super) async fn run_storage_source(
 				decode.as_ref(),
 			)?;
 			let mut rows = Rows::of(program, pipeline, ctx);
+			let paged = super::region::body_breakers(&pipeline.code).paged;
 			loop {
+				records.paged = rows.wanted(paged, state);
 				let row = match records.next(ctx).await {
 					Ok(Some(row)) => row,
 					Ok(None) => break,
@@ -1711,9 +1712,9 @@ pub(super) async fn run_storage_source(
 					}
 				};
 			}
-			let Some(mut hits) =
-				read!(services.full_text_candidates(table, index, query, operator).await)
-			else {
+			let Some(mut hits) = read!(
+				super::fulltext::candidates(ctx, &services, table, index, query, operator).await
+			) else {
 				return rows.finish(state, ctx, yielder, flush_at).await;
 			};
 			let txn = ctx.txn();
@@ -1993,12 +1994,16 @@ struct IndexRecords {
 	/// The ids listed so far, kept only by a scan that can name a record more
 	/// than once.
 	seen: Option<HashSet<crate::val::RecordId>>,
+	/// The most rows the pipeline reading these records still takes under
+	/// its own paging, so that a B-tree read asks for no more entries than
+	/// that; `usize::MAX` where it pages nothing.
+	paged: usize,
 }
 
 /// What an index lists.
 enum Listing {
 	/// The entries of a B-tree index under an access.
-	BTree(BTreeIterator),
+	BTree(super::entries::EntryScan),
 	/// The hits of a full-text query, opened when the first is asked for.
 	FullText {
 		index: crate::exec::index::access_path::IndexRef,
@@ -2021,11 +2026,14 @@ impl IndexRecords {
 		decode: Option<&DecodeFields>,
 	) -> FlowResult<Self> {
 		Ok(Self {
-			listing: Listing::BTree(EngineServices::new(ctx).index_rids(index, access, direction)?),
+			listing: Listing::BTree(super::entries::EntryScan::open(
+				ctx, index, access, direction,
+			)?),
 			reader: RecordReader::stored(ctx, RESOLVE_BATCH_SIZE, version, decode.cloned()),
 			rows: Default::default(),
 			exhausted: false,
 			seen: distinct.then(HashSet::new),
+			paged: usize::MAX,
 		})
 	}
 
@@ -2048,6 +2056,7 @@ impl IndexRecords {
 			rows: Default::default(),
 			exhausted: false,
 			seen: None,
+			paged: usize::MAX,
 		}
 	}
 
@@ -2055,7 +2064,9 @@ impl IndexRecords {
 	async fn next_rids(&mut self, ctx: &ExecutionContext) -> FlowResult<Vec<crate::val::RecordId>> {
 		let services = EngineServices::new(ctx);
 		match &mut self.listing {
-			Listing::BTree(rids) => services.next_index_rids(rids).await,
+			Listing::BTree(entries) => {
+				entries.next_batch(ctx, &services, self.reader.read_len(), self.paged).await
+			}
 			Listing::FullText {
 				index,
 				query,
@@ -2065,8 +2076,7 @@ impl IndexRecords {
 				if hits.is_none() {
 					let table = index.definition().table_name.clone();
 					*hits = Some(
-						services
-							.full_text_candidates(&table, index, query, operator)
+						super::fulltext::candidates(ctx, &services, &table, index, query, operator)
 							.await?
 							.map(Box::new),
 					);

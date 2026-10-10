@@ -13,6 +13,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ a: 3, id: t:a }]"
 
 [[test.results]]
@@ -30,9 +33,8 @@ value = "[{ a: 12, id: t:c }, { a: 50, id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a > 5 AND a > 10]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: t, index: idx_a, access: >10, direction: Forward]
+    Filter [ctx: Db] [predicate: a > 5]
+        IndexScan [ctx: Db] [table: t, index: idx_a, access: >10, direction: Forward]
 ''''
 
 [[test.results]]
@@ -41,9 +43,8 @@ value = "[{ a: 3, id: t:a }, { a: 7, id: t:b }, { a: 12, id: t:c }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a < 50 AND a < 20]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: t, index: idx_a, access: <20, direction: Forward]
+    Filter [ctx: Db] [predicate: a < 50]
+        IndexScan [ctx: Db] [table: t, index: idx_a, access: <20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -52,13 +53,16 @@ value = "[{ a: 7, id: t:b }, { a: 12, id: t:c }, { a: 50, id: t:d }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Filter [ctx: Db] [predicate: a > 5 AND a >= 5]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: t, index: idx_a, access: >5, direction: Forward]
+    Filter [ctx: Db] [predicate: a >= 5]
+        IndexScan [ctx: Db] [table: t, index: idx_a, access: >5, direction: Forward]
 ''''
 */
 DEFINE TABLE t;
 DEFINE INDEX idx_a ON t FIELDS a;
+-- The indexed column is declared a scalar kind, so its index holds one entry
+-- per record and a scan of it delivers its order: a plain column that may hold
+-- an array is stored once per element and orders nothing.
+DEFINE FIELD a ON t TYPE option<int>;
 
 CREATE t:a SET a = 3;
 CREATE t:b SET a = 7;

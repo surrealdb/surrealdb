@@ -124,7 +124,7 @@ pub(super) async fn count(
 				CountVia::BTreeKeys {
 					index,
 					access,
-				} => services.count_btree_keys(index, access).await?,
+				} => super::entries::count(ctx, &services, index, access).await?,
 				CountVia::Bitmap(plan) => services.bitmap_cardinality(table, plan).await?,
 			};
 			Ok(Counted::Count(count))

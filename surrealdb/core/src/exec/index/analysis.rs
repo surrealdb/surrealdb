@@ -1138,6 +1138,11 @@ impl<'a> IndexAnalyzer<'a> {
 			if values.len() < 2 || values.len() > Self::MAX_IN_EXPANSION_SIZE {
 				continue; // Single-element handled by match_operator_to_access; too-large skipped
 			}
+			// No key is a whole array (see `match_operator_to_access`), so a
+			// list holding one cannot be answered branch by branch.
+			if values.iter().any(|v| matches!(v, Value::Array(_))) {
+				continue;
+			}
 
 			// Track best candidate: prefer single-column indexes (fewer
 			// columns) because they produce BTreeAccess::Equality sub-paths
@@ -1836,8 +1841,12 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		// An index stores an array one entry per element, so no key is a
 		// whole array: a comparison to one is not answered by a key or a
-		// range of keys. `IN` reads the array's elements as its keys.
-		if matches!(value, Value::Array(_)) && !matches!(op, BinaryOperator::Inside) {
+		// range of keys. `IN` reads the array's elements as its keys, so an
+		// element that is itself an array is no key either.
+		if let Value::Array(arr) = value
+			&& (!matches!(op, BinaryOperator::Inside)
+				|| arr.iter().any(|v| matches!(v, Value::Array(_))))
+		{
 			return None;
 		}
 
@@ -2592,6 +2601,18 @@ mod tests {
 
 	fn analyzer<'a>(defs: Vec<IndexDefinition>, with: Option<&'a With>) -> IndexAnalyzer<'a> {
 		IndexAnalyzer::new(Arc::<[_]>::from(defs.into_boxed_slice()), with)
+	}
+
+	/// An analyzer that knows every column of `defs` to be declared a kind
+	/// holding no array, as a table defining its indexed fields with scalar
+	/// types offers it.
+	fn scalar_analyzer<'a>(
+		defs: Vec<IndexDefinition>,
+		with: Option<&'a With>,
+	) -> IndexAnalyzer<'a> {
+		let flags: Arc<[crate::exec::index::access_path::ColumnFlags]> =
+			defs.iter().map(|ix| ix.cols.iter().map(|_| true).collect()).collect();
+		analyzer(defs, with).with_scalar_columns(flags)
 	}
 
 	/// Parse a snippet wrapped in `SELECT * FROM t <snippet>`, lower it, and
@@ -3458,7 +3479,7 @@ mod tests {
 
 		#[test]
 		fn equality_then_order_by_id_covers() {
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let (cond, order) = parse_cond_order("a = 1", "id");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3469,7 +3490,7 @@ mod tests {
 		fn equality_then_unrelated_order_not_covered() {
 			// WHERE a = 1 ORDER BY b on INDEX(a) — the index can't satisfy
 			// the requested ordering.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let (cond, order) = parse_cond_order("a = 1", "b");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3481,7 +3502,7 @@ mod tests {
 			// WHERE a = 1 ORDER BY a, b, c on INDEX(a, b). The index
 			// only guarantees (b, id) ordering once a is pinned; the trailing
 			// `c` is not in the index, so sort elimination is unsafe.
-			let a = analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
 			let (cond, order) = parse_cond_order("a = 1", "a, b, c");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_ab").expect("ix_ab");
@@ -3496,7 +3517,7 @@ mod tests {
 			// WHERE a > 5 ORDER BY a, b on INDEX(a). The Range candidate
 			// only delivers (a, id) order; `b` is unindexed and not in the
 			// scan output ordering.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let (cond, order) = parse_cond_order("a > 5", "a, b");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3513,7 +3534,7 @@ mod tests {
 			// satisfied, but the remaining `b DESC` requirement still has
 			// to match the scan direction. A forward scan gives `b ASC`;
 			// neither direction can mix.
-			let a = analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_ab", &["a", "b"])], None);
 			let (cond, order) = parse_cond_order("a = 1", "a ASC, b DESC");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_ab").expect("ix_ab");
@@ -3531,7 +3552,7 @@ mod tests {
 			// WHERE a > 5 ORDER BY a DESC on INDEX(a). The analyzer
 			// shouldn't lock the direction yet, but should report that
 			// some scan direction (Backward here) covers the order.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let (cond, order) = parse_cond_order("a > 5", "a DESC");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3542,7 +3563,7 @@ mod tests {
 		fn order_by_only_no_where() {
 			// ORDER BY a (no WHERE) on INDEX(a) should synthesize a
 			// full-range scan with covers_order = true.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let (_, order, _) = parse_select_parts("ORDER BY a");
 			let order = order.expect("ORDER BY");
 			let cands = a.analyze(None, Some(&order));
@@ -3557,6 +3578,24 @@ mod tests {
 					}
 				}
 			));
+		}
+
+		#[test]
+		fn order_by_a_column_that_may_hold_an_array_is_not_covered() {
+			// ORDER BY a on INDEX(a) where `a` is declared no kind: a record
+			// holding an array is stored once per element, so the index's key
+			// order is element order and covers no ORDER BY on the column.
+			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let (cond, order) = parse_cond_order("a > 5", "a");
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "ix_a").expect("ix_a");
+			assert!(!c.covers_order, "a column that may hold an array delivers no order");
+			let (_, order, _) = parse_select_parts("ORDER BY a");
+			let cands = a.analyze(None, order.as_ref());
+			assert!(
+				find_for(&cands, "ix_a").is_none_or(|c| !c.covers_order),
+				"no order-covering scan is synthesized over such a column"
+			);
 		}
 	}
 

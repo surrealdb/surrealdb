@@ -29,6 +29,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 2}
     Sort [ctx: Db] [sort_keys: name ASC] {rows: 2}
@@ -45,7 +51,7 @@ value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
         IndexScan [ctx: Db] [table: person, index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
@@ -71,7 +77,7 @@ value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
         IndexScan [ctx: Db] [table: person, index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
@@ -161,6 +167,11 @@ DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 DEFINE INDEX ft_company ON person FIELDS company FULLTEXT ANALYZER simple BM25;
 DEFINE INDEX uniq_name ON TABLE person COLUMNS name UNIQUE;
 DEFINE INDEX idx_genre ON TABLE person COLUMNS genre;
+-- The indexed columns are declared scalar kinds, so their index holds one entry
+-- per record and its equality scans answer their conjuncts exactly: a plain
+-- column that may hold an array is stored once per element.
+DEFINE FIELD name ON person TYPE option<string>;
+DEFINE FIELD genre ON person TYPE option<string>;
 
 -- Two-index OR
 EXPLAIN ANALYZE SELECT name FROM person WHERE name = 'Jaime' OR genre = 'm' ORDER BY name;

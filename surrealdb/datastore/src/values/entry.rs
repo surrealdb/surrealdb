@@ -26,6 +26,15 @@ pub struct IndexEntryValue {
 	pub doc_id: Option<DocId>,
 }
 
+impl IndexEntryValue {
+	/// The record id an entry's stored bytes name, read without the doc-id
+	/// that may follow it.
+	pub fn decode_record_id(bytes: &[u8]) -> Result<RecordId> {
+		revision::from_slice(bytes)
+			.map_err(|e| anyhow::anyhow!("Failed to decode index entry value: {e}"))
+	}
+}
+
 impl KVValue for IndexEntryValue {
 	type KeyContext = ();
 

@@ -4,9 +4,7 @@
 //! supporting the MATCHES operator with BM25 or VS scoring.
 
 use crate::catalog::{Index, IndexDefinition};
-use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::{ExecutionContext, FlowResult};
-use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchesHitsIterator;
@@ -32,6 +30,12 @@ pub(crate) struct FullTextHits {
 }
 
 impl FullTextHits {
+	pub(crate) fn new(iter: FullTextHitsIterator) -> Self {
+		Self {
+			iter,
+		}
+	}
+
 	/// The next `limit` record IDs the query matches, fewer only when the
 	/// hits run out; empty once they have. A hit whose record ID no longer
 	/// resolves is passed over.
@@ -51,26 +55,19 @@ impl FullTextHits {
 	}
 }
 
-/// Open the hits of `query` against full-text index `index_def` of `table`,
-/// or `None` when no record can match: the query yields no terms, or a term
-/// has no document.
-///
-/// The hits are the index's own: no table permission or version applies to
-/// them, which the caller applies to the records the hits name.
-pub(crate) async fn open_full_text_hits(
+/// The full-text index `index_def` of `table`, opened for a query in `ctx`.
+pub(crate) async fn open_full_text_index(
 	ctx: &ExecutionContext,
 	table: &TableName,
 	index_def: &IndexDefinition,
-	query: &str,
-	operator: &MatchesOperator,
-) -> FlowResult<Option<FullTextHits>> {
+) -> FlowResult<FullTextIndex> {
 	let db_ctx = ctx.database().context("a full-text scan requires database context")?;
 	let txn = ctx.txn();
 	let root = ctx.root();
 	let frozen_ctx = &root.ctx;
 	// Legacy (pre-shared-doc-ID) indexes resolve postings through their
 	// historical private doc-ID layout until explicitly rebuilt; the format
-	// version selects the resolver used below.
+	// version selects the resolver.
 	let ft_params = match &index_def.index {
 		Index::FullText(params) => params,
 		_ => Err(ControlFlow::Err(anyhow::anyhow!(
@@ -84,7 +81,7 @@ pub(crate) async fn open_full_text_hits(
 		table.clone(),
 		index_def.index_id,
 	);
-	let fti = crate::exec::vm::descriptor::object(FullTextIndex::new(
+	crate::exec::vm::descriptor::object(FullTextIndex::new(
 		frozen_ctx.get_index_stores(),
 		txn.as_ref(),
 		ikb,
@@ -93,17 +90,5 @@ pub(crate) async fn open_full_text_hits(
 		index_def.format_version,
 	))
 	.await
-	.context("Failed to open full-text index")?;
-	let query_terms = {
-		let az_fn = StreamingAnalyzerFunction::new(ctx);
-		fti.extract_querying_terms(frozen_ctx, &az_fn, query.to_owned())
-			.await
-			.context("Failed to extract query terms")?
-	};
-	if query_terms.is_empty() {
-		return Ok(None);
-	}
-	Ok(fti.new_hits_iterator(&query_terms, operator.operator).map(|iter| FullTextHits {
-		iter,
-	}))
+	.context("Failed to open full-text index")
 }

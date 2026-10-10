@@ -1217,11 +1217,13 @@ fn visit_source(of: &Source, profile: &mut Profile) {
 /// holds it to the trait.
 #[cfg(test)]
 pub(crate) const SERVICES: &[(&str, Class)] = &[
-	("index_rids", Class::Kernel(&[Storage])),
-	("next_index_rids", Class::Kernel(&[Storage])),
+	("read_range", Class::Kernel(&[Storage])),
+	("read_range_keys", Class::Kernel(&[Storage])),
 	("evaluate_bitmap", Class::Kernel(&[Storage])),
 	("resolve_doc_ids", Class::Kernel(&[Storage])),
-	("full_text_candidates", Class::Kernel(&[Storage])),
+	("read_values", Class::Kernel(&[Storage])),
+	("open_full_text", Class::Kernel(&[Storage])),
+	("pending_term_changes", Class::Kernel(&[Storage])),
 	("knn_candidates", Class::Kernel(&[Storage])),
 	("scan_lightweight_edges", Class::Kernel(&[Storage])),
 	("read_records", Class::Kernel(&[Storage])),
@@ -1232,7 +1234,6 @@ pub(crate) const SERVICES: &[(&str, Class)] = &[
 	("count_keys", Class::Kernel(&[Storage])),
 	("record_exists", Class::Kernel(&[Storage])),
 	("count_index_deltas", Class::Kernel(&[Storage])),
-	("count_btree_keys", Class::Kernel(&[Storage])),
 	("bitmap_cardinality", Class::Kernel(&[Storage])),
 	("read_table", Class::Kernel(&[Catalog])),
 	("read_function", Class::Kernel(&[Catalog])),

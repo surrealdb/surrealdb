@@ -552,6 +552,24 @@ impl<'p> Rows<'p> {
 		self
 	}
 
+	/// The most rows the body's own paging clause `paged` still takes from
+	/// the source: what `START` still skips plus what `LIMIT` still admits,
+	/// less the rows a region holds that its merge has not counted; at least
+	/// one, and `usize::MAX` for a body that pages nothing. A limit applied
+	/// past a sort, an aggregate or a join this pipeline feeds is not the
+	/// body's own and bounds nothing here: such a pipeline takes every row.
+	pub(super) fn wanted(&self, paged: Option<u16>, state: &State) -> usize {
+		match self {
+			Rows::Serial => paged
+				.and_then(|limit| {
+					let paging = state.paging[limit as usize];
+					paging.remaining.map(|remaining| paging.skip.saturating_add(remaining))
+				})
+				.map_or(usize::MAX, |wanted| wanted.max(1)),
+			Rows::Region(region) => region.wanted(state),
+		}
+	}
+
 	/// The source has no more rows: merge every batch still out; `true` when
 	/// the pipeline takes no more.
 	pub(super) async fn finish(
@@ -730,6 +748,14 @@ impl<'p> Region<'p> {
 		}
 		let scaled = needed as u128 * self.merged as u128 / self.reached as u128;
 		Some(usize::try_from(scaled).unwrap_or(usize::MAX))
+	}
+
+	/// The rows the window leaves past those in flight and being filled, at
+	/// least one; `usize::MAX` without a window.
+	fn wanted(&self, state: &State) -> usize {
+		self.window(state).map_or(usize::MAX, |window| {
+			window.saturating_sub(self.in_flight + self.filling.len()).max(1)
+		})
 	}
 
 	/// The rows a batch run in `budget` is sized to, from the cost measured

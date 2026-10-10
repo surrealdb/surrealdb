@@ -899,39 +899,21 @@ async fn move_entries(
 		doc_id,
 	};
 	let txn = ctx.txn();
-	let key = |values: &[Value], unique: bool| -> FlowResult<Encoded<IndexEntryValue>> {
-		let head = [
-			("ns", KeyField::Int(ns.0 as i64)),
-			("db", KeyField::Int(db.0 as i64)),
-			("tb", KeyField::Str(ix.table_name.as_str())),
-			("ix", KeyField::Int(ix.index_id.0 as i64)),
-			("fd", KeyField::Values(values)),
-		];
-		let bytes = if unique {
-			codec::key::encode_fields("UniqueKey", &head)
-		} else {
-			let [ns, db, tb, index, fd] = head;
-			codec::key::encode_fields(
-				"EntryKey",
-				&[ns, db, tb, index, fd, ("id", KeyField::Id(&rid.key))],
-			)
-		}
-		.map_err(ControlFlow::Err)?;
-		Ok(Encoded::new(bytes))
-	};
+	let keyspace = crate::idx::kernels::btree::IndexKeyspace::of(ns, db, ix);
+	let key =
+		|values: &[Value]| keyspace.stored_key(unique, values, &rid.key).map_err(ControlFlow::Err);
 	if let Some(o) = o {
 		for o in Indexable::new(o, ix) {
-			let key = key(&o, unique && !o.is_any_none_or_null())?;
-			delete_entry(&txn, &key, &value).await?;
+			delete_entry(&txn, &key(&o)?, &value).await?;
 		}
 	}
 	if let Some(n) = n {
 		for n in Indexable::new(n, ix) {
-			if !unique || n.is_any_none_or_null() {
-				txn.set_key(&key(&n, false)?, &value).await.map_err(ControlFlow::Err)?;
+			let key = key(&n)?;
+			if !key.unique {
+				txn.set_key(&key, &value).await.map_err(ControlFlow::Err)?;
 				continue;
 			}
-			let key = key(&n, true)?;
 			if txn.put_compare_key(&key, &value, None).await.is_err() {
 				let held: IndexEntryValue =
 					txn.get_key(&key, None).await.map_err(ControlFlow::Err)?.ok_or_else(|| {
@@ -957,7 +939,7 @@ async fn move_entries(
 /// doc-id format may be stored without its doc-id, and is deleted too.
 async fn delete_entry(
 	txn: &crate::kvs::Transaction,
-	key: &Encoded<IndexEntryValue>,
+	key: &crate::idx::kernels::btree::StoredKey,
 	expected: &IndexEntryValue,
 ) -> FlowResult<()> {
 	fn condition_not_met(e: &anyhow::Error) -> bool {

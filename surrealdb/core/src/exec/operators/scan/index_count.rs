@@ -27,8 +27,6 @@ use std::borrow::Cow;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::err::EngineError;
 use crate::exec::ExecutionContext;
-use crate::exec::index::access_path::{BTreeAccess, IndexRef};
-use crate::exec::index::iterator::btree::INDEX_BATCH_SIZE;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::KVKeyDecode;
 use crate::key::schema::{IndexCountKey, IndexCountPrefix};
@@ -87,50 +85,6 @@ pub(crate) async fn sum_index_count_deltas(
 	// made earlier in its own transaction.
 	count += txn.pending_count_delta(ns, db, tb, ix);
 	Ok(count.max(0) as usize)
-}
-
-/// Count matching records by iterating B-tree index keys only.
-///
-/// This is much faster than the full-scan fallback because it avoids
-/// reading and deserializing record values.  Each index entry corresponds
-/// to exactly one matching record, so we simply count entries in the
-/// appropriate key range.
-pub(crate) async fn count_btree_index_keys(
-	ctx: &ExecutionContext,
-	txn: &crate::kvs::Transaction,
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	index_ref: &IndexRef,
-	access: &BTreeAccess,
-) -> Result<usize, ControlFlow> {
-	use crate::exec::index::iterator::btree::BTreeIterator;
-	use crate::kvs::Direction;
-
-	let ix = index_ref.definition();
-	let Some(mut iter) =
-		BTreeIterator::new(ns_id, db_id, ix, index_ref.is_unique(), access, Direction::Forward)
-			.context("Failed to create index iterator")?
-	else {
-		// FullText and Knn are not supported for counting.
-		return Err(ControlFlow::Err(anyhow::anyhow!(
-			"Unsupported BTreeAccess type for index key counting"
-		)));
-	};
-	let mut count = 0usize;
-	loop {
-		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
-		}
-		let rids =
-			iter.next_batch(txn, INDEX_BATCH_SIZE).await.context("Failed to iterate index")?;
-		if rids.is_empty() {
-			break;
-		}
-		count += rids.len();
-		// The index entries a batch read, charged once it returns.
-		crate::exec::vm::fuel::tick(ctx, crate::exec::vm::fuel::units(rids.len())).await?;
-	}
-	Ok(count)
 }
 
 #[cfg(test)]

@@ -366,6 +366,47 @@ async fn narrow_records_are_read_in_batches_that_grow_to_the_row_cap() {
 	assert!(batches.iter().all(|len| *len <= 1000), "{batches:?}");
 }
 
+const PAGED_SCHEMA: &str = "
+	DEFINE TABLE t SCHEMALESS;
+	DEFINE FIELD n ON t TYPE int;
+	DEFINE INDEX n_idx ON t FIELDS n;
+	FOR $i IN 1..=3000 { CREATE type::record('t', $i) SET n = $i, m = $i % 7 };
+";
+
+/// A B-tree scan under its pipeline's own `LIMIT` reads no more records than
+/// the limit takes, give or take one minimum entry read: the read that
+/// reaches the limit asks for the rows still wanted rather than a full batch.
+#[tokio::test]
+async fn an_index_scan_under_a_limit_reads_no_further_than_the_limit() {
+	let db = TestDb::new(PAGED_SCHEMA).await;
+	let ctx = db.exec_ctx().await;
+	BATCHES.with(|batches| batches.borrow_mut().clear());
+	let rows = vm_rows(&ctx, "SELECT VALUE n FROM t WHERE n > 0 ORDER BY n DESC LIMIT 1000").await;
+	let read = BATCHES.with(|batches| batches.borrow().iter().sum::<usize>());
+	let want: Vec<Value> = (2001..=3000i64).rev().map(Value::from).collect();
+	assert_eq!(rows, want);
+	assert!((1000..=1000 + 32).contains(&read), "read {read} records for a page of 1000");
+}
+
+/// A limit applied past a sort the scan feeds bounds nothing the scan reads,
+/// and a filter that rejects most entries still finds the rows the limit
+/// takes.
+#[tokio::test]
+async fn an_index_scan_below_a_sort_or_a_filter_is_not_cut_short() {
+	let db = TestDb::new(PAGED_SCHEMA).await;
+	let ctx = db.exec_ctx().await;
+	BATCHES.with(|batches| batches.borrow_mut().clear());
+	let rows = vm_rows(&ctx, "SELECT VALUE n FROM t WHERE n > 0 ORDER BY m, n LIMIT 1").await;
+	let read = BATCHES.with(|batches| batches.borrow().iter().sum::<usize>());
+	assert_eq!(rows, vec![Value::from(7i64)]);
+	assert_eq!(read, 3000, "the sort sees every record");
+	let rows =
+		vm_rows(&ctx, "SELECT VALUE n FROM t WHERE n > 0 AND m = 3 ORDER BY n DESC LIMIT 5").await;
+	let want: Vec<Value> =
+		(1..=3000i64).rev().filter(|n| n % 7 == 3).take(5).map(Value::from).collect();
+	assert_eq!(rows, want);
+}
+
 const PREFILTER_SCHEMA: &str = "
 	DEFINE TABLE big SCHEMALESS;
 	FOR $i IN 1..=3000 {

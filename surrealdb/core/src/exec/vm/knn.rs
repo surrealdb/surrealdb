@@ -37,11 +37,11 @@ use crate::exec::operators::{KnnTopKHeap, extract_vector};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
+use crate::idx::kernels::vector::{query as typed_query_vector, score as score_raw_vector};
 use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::gate::{
 	BoxGateFut, CachedTableSelect, CandidateCondition, CandidateFetchCounter,
 };
-use crate::idx::trees::vector::{score_raw_vector, typed_query_vector};
 use crate::kvs::CachePolicy;
 use crate::val::{Number, RecordId, TableName, Value};
 

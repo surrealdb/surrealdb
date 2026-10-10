@@ -664,11 +664,14 @@ fn kind_holds_only_arrays(kind: &Kind) -> bool {
 /// A key orders its entries by the index columns and then, in a non-unique
 /// index, by the record id. The columns the access pins hold one value across
 /// the scan and order nothing, so the claim starts after them. It then claims
-/// each free column in turn and stops at the first it cannot state as a field
-/// path — which includes every column holding `*`, whose record sits at one key
-/// position per element rather than at one place in the order. The id is
-/// claimed only when every free column was: it orders the entries that agree
-/// on all of them, and says nothing across a column the claim left out.
+/// each free column in turn and stops at the first whose record may sit at one
+/// key position per element rather than at one place in the order: a column it
+/// cannot state as a field path, which includes every column holding `*`, and a
+/// plain column that may hold an array ([`IndexRef::may_hold_array`]), whose
+/// entries follow element order while the column's whole value, an array, sorts
+/// after every scalar. The id is claimed only when every free column was: it
+/// orders the entries that agree on all of them, and says nothing across a
+/// column the claim left out.
 pub(crate) fn scan_ordering(
 	index_ref: &IndexRef,
 	access: &BTreeAccess,
@@ -698,9 +701,16 @@ pub(crate) fn scan_ordering(
 		BTreeAccess::Equality(_) => ix_def.cols.len(),
 		_ => 0,
 	};
-	let free = ix_def.cols.iter().skip(pinned);
-	let mut ordering: Vec<SortProperty> =
-		free.clone().map_while(|col| field_path_from_idiom(col).ok().map(property)).collect();
+	let free = ix_def.cols.iter().enumerate().skip(pinned);
+	let mut ordering: Vec<SortProperty> = free
+		.clone()
+		.map_while(|(i, col)| {
+			if index_ref.may_hold_array(i) {
+				return None;
+			}
+			field_path_from_idiom(col).ok().map(property)
+		})
+		.collect();
 	if !index_ref.is_unique() && !ix_def.cols.is_empty() && ordering.len() == free.len() {
 		ordering.push(property(FieldPath::field("id")));
 	}

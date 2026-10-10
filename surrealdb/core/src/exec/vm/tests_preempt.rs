@@ -114,6 +114,21 @@ async fn every_loop_kind_yields_once_per_quantum() {
 	}
 }
 
+/// A B-tree scan spends a unit per entry it reads, so entries that name no
+/// row it hands on — the repeats of a record that holds an array, listed
+/// once per element — still bring it to a yield once per quantum.
+#[tokio::test]
+async fn an_index_scan_yields_over_entries_it_collapses() {
+	let setup = format!(
+		"DEFINE TABLE a; DEFINE INDEX ix ON a FIELDS v; CREATE a:1 SET v = array::range(0, {ROWS});"
+	);
+	let db = TestDb::new_with_config(&setup, config(false)).await;
+	let sql = "SELECT * FROM a WITH INDEX ix WHERE v >= 0";
+	let (_, rows) = yields(&db, sql).await;
+	assert_eq!(rows, 1, "`{sql}` lists its one record once");
+	assert_yields(&db, sql, ROWS).await;
+}
+
 /// The elements of the arrays the builtin shapes walk.
 const ELEMENTS: usize = 4_000;
 

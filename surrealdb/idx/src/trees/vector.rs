@@ -734,7 +734,7 @@ impl Vector {
 		Ok(res)
 	}
 
-	pub(super) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
+	pub(crate) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());
@@ -811,7 +811,7 @@ impl Vector {
 		}
 	}
 
-	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<()> {
+	pub(crate) fn check_expected_dimension(current: usize, expected: usize) -> Result<()> {
 		ensure!(
 			current == expected,
 			IdxError::InvalidVectorDimension {
@@ -822,7 +822,7 @@ impl Vector {
 		Ok(())
 	}
 
-	pub(super) fn check_dimension(&self, expected_dim: usize) -> Result<()> {
+	pub(crate) fn check_dimension(&self, expected_dim: usize) -> Result<()> {
 		Self::check_expected_dimension(self.len(), expected_dim)
 	}
 }
@@ -865,70 +865,11 @@ impl DistanceExt for Distance {
 	}
 }
 
-/// #548 exact tier: the query vector converted through the index's vector
-/// type, mirroring the conversion (including the dimension check) that
-/// `knn_search` applies before a graph search.
-pub fn typed_query_vector(
-	vector_type: VectorType,
-	dimension: usize,
-	pt: &[Number],
-) -> Result<Vector> {
-	let vector = Vector::try_from_vector(vector_type, pt)?;
-	vector.check_dimension(dimension)?;
-	Ok(vector)
-}
-
-/// #548 exact tier: convert a record's raw vector through the index's vector
-/// type and score it against the (already converted) query vector — exactly
-/// how the graph search scores stored vectors, so reduced-precision index
-/// types (F32/F16/I8/...) rank identically across tiers. `None` when the raw
-/// values cannot be represented in the vector type or the dimension does not
-/// match; such a record could not have been indexed as-is either.
-pub fn score_raw_vector(
-	distance: &Distance,
-	vector_type: VectorType,
-	dimension: usize,
-	query: &Vector,
-	raw: &[Number],
-) -> Option<f64> {
-	let record = Vector::try_from_vector(vector_type, raw).ok()?;
-	record.check_dimension(dimension).ok()?;
-	Some(distance.calculate(&record, query))
-}
-
-pub fn distance_compute(d: &Distance, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number> {
-	use surrealdb_runtime::util::math::ToFloat;
-	use surrealdb_runtime::util::math::vector::{
-		ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
-		ManhattanDistance, MinkowskiDistance, PearsonSimilarity, check_same_dimension,
-	};
-	match d {
-		Distance::Cosine => v1.cosine_distance(v2),
-		Distance::CosineNormalized => {
-			check_same_dimension("vector::distance::cosine_normalized", v1, v2)?;
-			Ok((1.0
-				- v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
-			.into())
-		}
-		Distance::Chebyshev => v1.chebyshev_distance(v2),
-		Distance::Euclidean => v1.euclidean_distance(v2),
-		Distance::Hamming => v1.hamming_distance(v2),
-		Distance::InnerProduct => {
-			check_same_dimension("vector::distance::inner_product", v1, v2)?;
-			Ok((-v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
-				.into())
-		}
-		Distance::Jaccard => v1.jaccard_similarity(v2),
-		Distance::Manhattan => v1.manhattan_distance(v2),
-		Distance::Minkowski(r) => v1.minkowski_distance(v2, r),
-		Distance::Pearson => v1.pearson_similarity(v2),
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use super::{DistanceExt as _, distance_compute, serialized_vector_from_value};
+	use super::{DistanceExt as _, serialized_vector_from_value};
 	use crate::catalog::{Distance, VectorType};
+	use crate::kernels::vector::distance_compute;
 	use crate::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::val::{Array, Number, Value};

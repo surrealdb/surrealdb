@@ -13,8 +13,7 @@ value = "[{ age: 70, city: 'london', id: record:3 }, { age: 55, city: 'london', 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -24,8 +23,7 @@ value = "[{ age: 70, city: 'london', id: record:3 }, { age: 55, city: 'london', 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Backward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Backward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -35,8 +33,7 @@ value = "[{ age: 40, city: 'paris', id: record:5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThan 50, direction: Backward] {rows: 1}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThan 50, direction: Backward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -46,8 +43,7 @@ value = "[{ age: 60, city: 'paris', id: record:4 }, { age: 40, city: 'paris', id
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -57,9 +53,7 @@ value = "[{ age: 70, city: 'london', id: record:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Limit [ctx: Db] [limit: 1] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward] {rows: 1}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Backward, limit: 1] {rows: 1}
 
 Total rows: 1"'''
 
@@ -69,9 +63,7 @@ value = "[{ age: 60, city: 'paris', id: record:4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Limit [ctx: Db] [limit: 1] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward] {rows: 1}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Backward, limit: 1] {rows: 1}
 
 Total rows: 1"'''
 */
@@ -79,6 +71,11 @@ Total rows: 1"'''
 -- Composite index on (city, age)
 {
     DEFINE INDEX idx_city_age ON TABLE record COLUMNS city, age;
+    -- The indexed columns are declared scalar kinds, so their index holds one
+    -- entry per record and a scan of it delivers their order: a plain column
+    -- that may hold an array is stored once per element and orders nothing.
+    DEFINE FIELD city ON record TYPE option<string>;
+    DEFINE FIELD age ON record TYPE option<int>;
     CREATE record:1 SET city = 'london', age = 30;
     CREATE record:2 SET city = 'london', age = 55;
     CREATE record:3 SET city = 'london', age = 70;

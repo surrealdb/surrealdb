@@ -2570,7 +2570,7 @@ pub(super) fn run_row<'r>(
 				let ranked =
 					crate::exec::operators::extract_vector(&value, &program.paths[*path as usize])
 						.and_then(|record| {
-							crate::idx::trees::vector::distance_compute(
+							crate::idx::kernels::vector::distance_compute(
 								&rank.distance,
 								&record,
 								query,

@@ -980,32 +980,6 @@ async fn evaluate_plan(
 	})
 }
 
-/// The record ids of `table` that doc-IDs `chunk` name, in `chunk`'s order.
-/// A doc-ID with no reverse mapping is a stale index entry for a deleted
-/// record and names none, as a fetch drops such entries.
-pub(crate) async fn resolve_doc_ids(
-	ctx: &ExecutionContext,
-	table: &TableName,
-	chunk: &[u64],
-) -> FlowResult<Vec<RecordId>> {
-	let db_ctx = ctx.database().context("a bitmap plan requires a database context")?;
-	let doc_ids =
-		TableDocIds::new(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table.clone());
-	let txn = ctx.txn();
-	let keys = doc_ids
-		.get_record_ids_batch(txn.as_ref(), chunk)
-		.await
-		.context("Failed to resolve doc-IDs to record IDs")?;
-	Ok(keys
-		.into_iter()
-		.flatten()
-		.map(|key| RecordId {
-			table: table.clone(),
-			key,
-		})
-		.collect())
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;

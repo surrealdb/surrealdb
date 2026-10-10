@@ -715,6 +715,7 @@ async fn a_write_answers_its_rows_and_leaves_its_records() {
 async fn a_region_answers_what_the_serial_run_answers() {
 	let setup = "
 		DEFINE TABLE t;
+		DEFINE FIELD n ON t TYPE int;
 		DEFINE FIELD twice ON t COMPUTED n * 2;
 		DEFINE INDEX by_n ON t FIELDS n;
 		DEFINE INDEX by_m ON t FIELDS m;
@@ -3532,11 +3533,19 @@ async fn an_indexed_statement_reads_the_index_the_planner_chooses() {
 	}
 	for (sql, index, sorted) in [
 		("SELECT * FROM indexed WHERE age = 3", Some("by_age"), false),
-		("SELECT * FROM indexed WHERE age > 6 ORDER BY age DESC LIMIT 2", Some("by_age"), false),
+		// `age` is declared no kind and `indexed:tags` holds an array in it,
+		// which the index stores once per element: the key order is not the
+		// column's order, so the sort stays.
+		("SELECT * FROM indexed WHERE age > 6 ORDER BY age DESC LIMIT 2", Some("by_age"), true),
+		// `n` is declared an int, so its index delivers its order.
+		("SELECT * FROM counted WHERE n > 2 ORDER BY n DESC LIMIT 2", Some("by_n"), false),
 		("SELECT * FROM indexed WHERE name = 'n7'", Some("by_name"), false),
-		("SELECT * FROM indexed WHERE kind = 1 ORDER BY age", Some("by_pair"), false),
+		// The pinned prefix leaves `age` free, which may hold an array.
+		("SELECT * FROM indexed WHERE kind = 1 ORDER BY age", Some("by_pair"), true),
 		("SELECT * FROM indexed WHERE age = 3 ORDER BY name", Some("by_age"), true),
-		("SELECT kind AS age FROM indexed ORDER BY age", Some("by_age"), true),
+		// The index delivers `n`, but the projection renames `m` to `n`, so the
+		// sort reads the renamed value and stays.
+		("SELECT m AS n FROM counted ORDER BY n", Some("by_n"), true),
 		("SELECT id FROM indexed WHERE age IN [3, 4]", Some("union of by_age"), false),
 		(
 			"SELECT id FROM indexed WHERE age = 3 OR age = 5 ORDER BY id DESC",

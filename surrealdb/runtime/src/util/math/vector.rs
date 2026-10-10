@@ -83,7 +83,7 @@ pub trait CosineDistance {
 	fn cosine_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl CosineDistance for Vec<Number> {
+impl CosineDistance for [Number] {
 	fn cosine_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::cosine", self, other)?;
 		let d = dot(self, other);
@@ -95,7 +95,7 @@ pub trait CosineSimilarity {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number>;
 }
 
-impl CosineSimilarity for Vec<Number> {
+impl CosineSimilarity for [Number] {
 	fn cosine_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::cosine", self, other)?;
 		let d = dot(self, other);
@@ -126,7 +126,7 @@ pub trait HammingDistance {
 	fn hamming_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl HammingDistance for Vec<Number> {
+impl HammingDistance for [Number] {
 	fn hamming_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::hamming", self, other)?;
 		Ok(self.iter().zip(other.iter()).filter(|(a, b)| a != b).count().into())
@@ -137,7 +137,7 @@ pub trait JaccardSimilarity {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number>;
 }
 
-impl JaccardSimilarity for Vec<Number> {
+impl JaccardSimilarity for [Number] {
 	fn jaccard_similarity(&self, other: &Self) -> Result<Number> {
 		let mut union: HashSet<&Number> = HashSet::from_iter(self.iter());
 		let intersection_size = other.iter().filter(|n| !union.insert(n)).count() as f64;
@@ -149,7 +149,7 @@ pub trait PearsonSimilarity {
 	fn pearson_similarity(&self, other: &Self) -> Result<Number>;
 }
 
-impl PearsonSimilarity for Vec<Number> {
+impl PearsonSimilarity for [Number] {
 	fn pearson_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::pearson", self, other)?;
 		let m1 = crate::fuel::now(super::mean(self))?.to_float();
@@ -170,7 +170,7 @@ pub trait ManhattanDistance {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl ManhattanDistance for Vec<Number> {
+impl ManhattanDistance for [Number] {
 	fn manhattan_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::manhattan", self, other)?;
 		Ok(self.iter().zip(other.iter()).map(|(a, b)| (a - b).abs()).sum())
@@ -181,7 +181,7 @@ pub trait MinkowskiDistance {
 	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number>;
 }
 
-impl MinkowskiDistance for Vec<Number> {
+impl MinkowskiDistance for [Number] {
 	fn minkowski_distance(&self, other: &Self, order: &Number) -> Result<Number> {
 		check_same_dimension("vector::distance::minkowski", self, other)?;
 		let p = order.to_float();
@@ -242,7 +242,7 @@ pub trait ChebyshevDistance {
 	fn chebyshev_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl ChebyshevDistance for Vec<Number> {
+impl ChebyshevDistance for [Number] {
 	fn chebyshev_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::chebyshev", self, other)?;
 		Ok(self
@@ -312,7 +312,7 @@ pub trait EuclideanDistance {
 	fn euclidean_distance(&self, other: &Self) -> Result<Number>;
 }
 
-impl EuclideanDistance for Vec<Number> {
+impl EuclideanDistance for [Number] {
 	fn euclidean_distance(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::distance::euclidean", self, other)?;
 		Ok(self
@@ -334,7 +334,7 @@ pub trait Magnitude {
 	fn magnitude(&self) -> Number;
 }
 
-impl Magnitude for Vec<Number> {
+impl Magnitude for [Number] {
 	fn magnitude(&self) -> Number {
 		magnitude_squared(self).sqrt().into()
 	}

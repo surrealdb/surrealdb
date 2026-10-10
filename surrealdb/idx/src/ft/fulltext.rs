@@ -35,7 +35,7 @@ use crate::expr::operator::BooleanOperator;
 use crate::ft::analyzer::filter::FilteringStage;
 use crate::ft::analyzer::tokenizer::Tokens;
 use crate::ft::analyzer::{Analyzer, AnalyzerFunction};
-use crate::ft::highlighter::{HighlightParams, Highlighter, Offseter};
+use crate::ft::highlighter::HighlightParams;
 use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
 use crate::key::schema::{
 	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
@@ -43,7 +43,7 @@ use crate::key::schema::{
 use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
-use crate::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
+use crate::{IndexKeyBase, bump_compaction_generation, kernels, read_compaction_generation};
 /// Represents the terms in a search query and their associated document sets
 pub struct QueryTerms {
 	/// The tokenized query terms
@@ -55,6 +55,68 @@ pub struct QueryTerms {
 	/// Indicates if any terms in the query are not found in the index
 	#[allow(dead_code)]
 	has_unknown_terms: bool,
+}
+
+/// A query's terms, analyzed, and what each reads of the index
+/// ([`FullTextIndex::plan_query`]).
+pub struct QueryPlan {
+	tokens: Tokens,
+	terms: Vec<String>,
+	reads: Vec<kernels::fulltext::TermReads>,
+}
+
+/// What one term's reads answered, with the changes the reading transaction
+/// buffered.
+pub struct TermState {
+	/// The keys of [`kernels::fulltext::TermReads::changes`].
+	pub change_keys: Vec<Vec<u8>>,
+	/// The keys and bitmaps of [`kernels::fulltext::TermReads::batches`].
+	pub batches: Vec<(Vec<u8>, RoaringTreemap)>,
+	pub pending_added: RoaringTreemap,
+	pub pending_removed: RoaringTreemap,
+	/// The value at [`kernels::fulltext::TermReads::residual`].
+	pub residual: Option<TermDocsResidual>,
+	/// The value at [`kernels::fulltext::TermReads::bitmap`].
+	pub bitmap: Option<RoaringTreemap>,
+}
+
+impl QueryPlan {
+	/// The distinct terms, in query order.
+	pub fn terms(&self) -> &[String] {
+		&self.terms
+	}
+
+	/// What each term of [`Self::terms`] reads, in the same order.
+	pub fn reads(&self) -> &[kernels::fulltext::TermReads] {
+		&self.reads
+	}
+
+	/// The query's terms with their document sets, from `states`, one per
+	/// term of [`Self::terms`] in the same order.
+	pub fn resolve(self, states: Vec<TermState>) -> Result<QueryTerms> {
+		anyhow::ensure!(
+			states.len() == self.terms.len(),
+			"{} term states for {} terms",
+			states.len(),
+			self.terms.len()
+		);
+		let mut docs = Vec::with_capacity(states.len());
+		for state in states {
+			let deltas = kernels::fulltext::term_deltas(&kernels::fulltext::TermChanges {
+				change_keys: &state.change_keys,
+				batches: &state.batches,
+				pending_added: &state.pending_added,
+				pending_removed: &state.pending_removed,
+			})?;
+			docs.push(kernels::fulltext::term_docs(state.bitmap, state.residual.as_ref(), deltas));
+		}
+		let has_unknown_terms = docs.iter().any(Option::is_none);
+		Ok(QueryTerms {
+			tokens: self.tokens,
+			docs,
+			has_unknown_terms,
+		})
+	}
 }
 
 impl QueryTerms {
@@ -555,134 +617,83 @@ impl FullTextIndex {
 		Ok(dl)
 	}
 
-	/// Every uncompacted change to one term's document set.
-	///
-	/// Three sources, all folded into signed counts so only the sign matters:
-	/// the per-document `!tt` entries an older server wrote, the batched `!tx`
-	/// bitmaps, and this transaction's own buffered contribution, which is not
-	/// written until commit and so cannot be read back from the transaction.
-	async fn term_deltas(&self, tx: &Transaction, term: &str) -> Result<HashMap<DocId, i64>> {
-		let mut deltas: HashMap<DocId, i64> = HashMap::new();
-		for k in tx.keys(self.ikb.new_tt_term_range(term)?, u32::MAX, 0, None).await? {
-			let tt = TermChangeKey::decode_key(&k)?;
-			*deltas.entry(tt.doc_id).or_default() += if tt.add {
-				1
-			} else {
-				-1
-			};
-		}
-		for (k, docs) in tx.getr(self.ikb.new_tx_term_range(term)?, None).await? {
-			let batch = TermChangeBatchKey::decode_key(&k)?;
-			let step = if batch.add {
-				1
-			} else {
-				-1
-			};
-			for doc_id in &docs {
-				*deltas.entry(doc_id).or_default() += step;
+	/// A query's terms: `query_string` analyzed as a query, each distinct
+	/// term once, in the order it first appears. Reads nothing of the index;
+	/// [`QueryPlan::reads`] names what each term reads.
+	pub async fn plan_query(
+		&self,
+		az_fn: &dyn AnalyzerFunction,
+		query_string: String,
+	) -> Result<QueryPlan> {
+		let tokens = self
+			.analyzer
+			.generate_tokens(az_fn, FilteringStage::Querying, query_string.into())
+			.await?;
+		let mut terms = Vec::new();
+		let mut unique_tokens = HashSet::new();
+		for token in tokens.list() {
+			if unique_tokens.insert(token) {
+				terms.push(tokens.get_token_string(token)?.to_owned());
 			}
 		}
-		let (added, removed) = self.ikb.pending_tt(tx, term);
-		for doc_id in &added {
-			*deltas.entry(doc_id).or_default() += 1;
-		}
-		for doc_id in &removed {
-			*deltas.entry(doc_id).or_default() -= 1;
-		}
-		Ok(deltas)
+		let reads = terms
+			.iter()
+			.map(|term| kernels::fulltext::term_reads(&self.ikb, term))
+			.collect::<Result<_>>()?;
+		Ok(QueryPlan {
+			tokens,
+			terms,
+			reads,
+		})
 	}
 
-	/// Extracts query terms from a search string
+	/// The changes to `term` the transaction `tx` buffered and has not yet
+	/// written: the documents it added and those it removed.
+	pub fn pending_term_changes(
+		&self,
+		tx: &Transaction,
+		term: &str,
+	) -> (RoaringTreemap, RoaringTreemap) {
+		self.ikb.pending_tt(tx, term)
+	}
+
+	/// Extracts query terms from a search string: [`Self::plan_query`], the
+	/// reads it names made through `env`'s transaction, and
+	/// [`QueryPlan::resolve`].
 	///
-	/// Tokenizes the query string, then retrieves the document bitmaps for each
-	/// unique term. The compacted bitmap fetches are batched via `tx.getm()` to
-	/// reduce KV round trips (one batch instead of N sequential gets).
+	/// The residual and the bitmap are read for every term, not only for
+	/// terms that have changes: see [`kernels::fulltext`].
 	pub async fn extract_querying_terms(
 		&self,
 		env: &dyn IndexEnv,
 		az_fn: &dyn AnalyzerFunction,
 		query_string: String,
 	) -> Result<QueryTerms> {
-		let tokens = self
-			.analyzer
-			.generate_tokens(az_fn, FilteringStage::Querying, query_string.into())
-			.await?;
-
-		let mut unique_terms: Vec<&str> = Vec::new();
-		let mut unique_tokens = HashSet::new();
-		for token in tokens.list() {
-			if unique_tokens.insert(token) {
-				unique_terms.push(tokens.get_token_string(token)?);
-			}
-		}
-
+		let plan = self.plan_query(az_fn, query_string).await?;
 		let tx = env.tx();
-
-		// Phase 1: Collect deltas for each term (sequential range scans)
-		let mut all_deltas: Vec<HashMap<DocId, i64>> = Vec::with_capacity(unique_terms.len());
-		for term in &unique_terms {
-			all_deltas.push(self.term_deltas(&tx, term).await?);
+		let mut states = Vec::with_capacity(plan.reads.len());
+		for (term, reads) in plan.terms.iter().zip(&plan.reads) {
+			let change_keys = tx.keys(reads.changes.clone(), u32::MAX, 0, None).await?;
+			let batches = tx.getr(reads.batches.clone(), None).await?;
+			let (pending_added, pending_removed) = self.pending_term_changes(&tx, term);
+			states.push(TermState {
+				change_keys,
+				batches,
+				pending_added,
+				pending_removed,
+				residual: None,
+				bitmap: None,
+			});
 		}
-
-		// Phase 1b: add what a term's compacted bitmap could not hold, which is
-		// part of the same total the deltas contribute to.
-		//
-		// Read for every term, not only for terms that have deltas. A residual
-		// this compactor wrote always sits beside a bitmap that agrees with its
-		// sign, so it would decide nothing on its own — but a compactor that
-		// does not know the family can move the bitmap out from under one, and
-		// the total is then the only thing that still says where the document
-		// belongs. Deciding from the bitmap alone would make that state
-		// permanent instead of leaving it to be folded away.
-		let residual_keys: Vec<_> =
-			unique_terms.iter().map(|term| self.ikb.new_tr_root(term)).collect();
-		for (deltas, residual) in
-			all_deltas.iter_mut().zip(tx.get_many_key(residual_keys, None).await?)
-		{
-			let Some(residual) = residual else {
-				continue;
-			};
-			for (doc_id, count) in residual.counts.iter() {
-				*deltas.entry(*doc_id).or_default() += *count;
-			}
+		let residual_keys: Vec<_> = plan.terms.iter().map(|t| self.ikb.new_tr_root(t)).collect();
+		let bitmap_keys: Vec<_> = plan.terms.iter().map(|t| self.ikb.new_td_root(t)).collect();
+		let residuals = tx.get_many_key(residual_keys, None).await?;
+		let bitmaps = tx.get_many_key(bitmap_keys, None).await?;
+		for ((state, residual), bitmap) in states.iter_mut().zip(residuals).zip(bitmaps) {
+			state.residual = residual;
+			state.bitmap = bitmap;
 		}
-
-		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
-		let bitmap_keys: Vec<_> =
-			unique_terms.iter().map(|term| self.ikb.new_td_root(term)).collect();
-		let bitmaps: Vec<Option<RoaringTreemap>> = tx.get_many_key(bitmap_keys, None).await?;
-
-		// Phase 3: Merge deltas into bitmaps
-		let mut docs = Vec::with_capacity(unique_terms.len());
-		let mut has_unknown_terms = false;
-		for (bitmap, deltas) in bitmaps.into_iter().zip(all_deltas.iter()) {
-			let mut doc_set = bitmap.unwrap_or_default();
-			for (doc_id, delta) in deltas {
-				match 0.cmp(delta) {
-					Ordering::Greater => {
-						doc_set.remove(*doc_id);
-					}
-					Ordering::Less => {
-						doc_set.insert(*doc_id);
-					}
-					Ordering::Equal => {}
-				}
-			}
-			if doc_set.is_empty() {
-				if !has_unknown_terms {
-					has_unknown_terms = true;
-				}
-				docs.push(None);
-			} else {
-				docs.push(Some(doc_set));
-			}
-		}
-
-		Ok(QueryTerms {
-			tokens,
-			docs,
-			has_unknown_terms,
-		})
+		plan.resolve(states)
 	}
 
 	pub async fn matches_value(
@@ -1023,11 +1034,7 @@ impl FullTextIndex {
 		qt: &QueryTerms,
 		bo: BooleanOperator,
 	) -> Option<FullTextHitsIterator> {
-		// Execute the operation depending on the operator
-		let hits = match bo {
-			BooleanOperator::And => Self::intersection_operation(&qt.docs),
-			BooleanOperator::Or => Self::union_operation(&qt.docs),
-		};
+		let hits = kernels::fulltext::combine(&qt.docs, bo);
 
 		// Create and return an iterator if we have matching documents
 		if let Some(hits) = hits
@@ -1049,68 +1056,7 @@ impl FullTextIndex {
 	/// over the table's shared doc-ID space and defers BM25 scoring to the
 	/// surviving documents. Returns `None` when no document matches.
 	pub fn merged_postings(qt: &QueryTerms, bo: BooleanOperator) -> Option<RoaringTreemap> {
-		match bo {
-			BooleanOperator::And => Self::intersection_operation(&qt.docs),
-			BooleanOperator::Or => Self::union_operation(&qt.docs),
-		}
-	}
-
-	fn intersection_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
-		// Early return for empty input
-		if docs.is_empty() {
-			return None;
-		}
-
-		// Collect only the "Some" variants
-		let mut valid_docs: Vec<&RoaringTreemap> = docs.iter().flatten().collect();
-
-		// If any term has no documents, the intersection is empty
-		if docs.len() != valid_docs.len() {
-			return None;
-		}
-
-		// Sort by cardinality - intersecting with smaller sets first is more efficient
-		valid_docs.sort_by_key(|bitmap| bitmap.len());
-
-		// Convert docs to an iterator
-		let mut iter = valid_docs.into_iter();
-
-		// Start with the smallest set (clone only once)
-		if let Some(mut result) = iter.next().cloned() {
-			// Intersect with remaining sets in order of increasing size
-			for d in iter {
-				// Early termination any terms docs is empty
-				if d.is_empty() {
-					return None;
-				}
-				result &= d;
-				// Check if the result becomes empty
-				if result.is_empty() {
-					return None;
-				}
-			}
-			// Return the result
-			Some(result)
-		} else {
-			None
-		}
-	}
-
-	fn union_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
-		// Convert docs to an iterator
-		let mut docs = docs.iter().flatten();
-
-		// Start with the first set
-		if let Some(mut result) = docs.next().cloned() {
-			// Union with remaining sets
-			for d in docs {
-				result |= d;
-			}
-			// Return the result
-			Some(result)
-		} else {
-			None
-		}
+		kernels::fulltext::combine(&qt.docs, bo)
 	}
 
 	pub async fn get_doc_id(&self, tx: &Transaction, rid: &RecordId) -> Result<Option<DocId>> {
@@ -1326,6 +1272,28 @@ impl FullTextIndex {
 		Ok(r1 || r2)
 	}
 
+	/// Each of the query's terms that document `doc_id` carries, in query
+	/// order, with its offsets in the document.
+	async fn term_hits(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+		qt: &QueryTerms,
+	) -> Result<Vec<kernels::fulltext::TermHit>> {
+		let mut hits = Vec::new();
+		let mut loaded = self.get_document_terms(tx, doc_id).await?;
+		for tk in qt.tokens.list() {
+			let term = qt.tokens.get_token_string(tk)?;
+			if let Some(td) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
+				hits.push(kernels::fulltext::TermHit {
+					char_len: tk.get_char_len(),
+					offsets: td.o,
+				});
+			}
+		}
+		Ok(hits)
+	}
+
 	/// Highlights search terms in a document
 	///
 	/// This method highlights the occurrences of search terms in the document
@@ -1342,15 +1310,8 @@ impl FullTextIndex {
 	) -> Result<Value> {
 		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
-			let mut hl = Highlighter::new(&hlp, idiom, doc);
-			let mut loaded = self.get_document_terms(tx, doc_id).await?;
-			for tk in qt.tokens.list() {
-				let term = qt.tokens.get_token_string(tk)?;
-				if let Some(td) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
-					hl.highlight(tk.get_char_len(), td.o);
-				}
-			}
-			return hl.try_into();
+			let hits = self.term_hits(tx, doc_id, qt).await?;
+			return kernels::fulltext::highlight(&hlp, idiom, doc, &hits);
 		}
 		Ok(Value::None)
 	}
@@ -1419,15 +1380,8 @@ impl FullTextIndex {
 	) -> Result<Value> {
 		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
-			let mut or = Offseter::new(partial);
-			let mut loaded = self.get_document_terms(tx, doc_id).await?;
-			for tk in qt.tokens.list() {
-				let term = qt.tokens.get_token_string(tk)?;
-				if let Some(o) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
-					or.highlight(tk.get_char_len(), o.o);
-				}
-			}
-			return Ok(or.into());
+			let hits = self.term_hits(tx, doc_id, qt).await?;
+			return Ok(kernels::fulltext::offsets(partial, &hits));
 		}
 		Ok(Value::None)
 	}
@@ -1488,12 +1442,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 
 /// Implements BM25 scoring for relevance ranking of search results
 pub struct Scorer {
-	/// precomputed BM25 scoring parameters
-	k1: f64,
-	k1_plus_1: f64,
-	one_minus_b: f64,
-	b_over_avg_len: f64,
-	doc_count: f64,
+	bm25: kernels::fulltext::Bm25,
 }
 
 impl Scorer {
@@ -1503,16 +1452,13 @@ impl Scorer {
 	/// parameters. It calculates the average document length for use in the
 	/// BM25 algorithm.
 	fn new(dlc: DocLengthAndCount, bm25: Bm25Params) -> Self {
-		let doc_count = dlc.doc_count as f64;
-		let average_doc_length = (dlc.total_docs_length as f64) / doc_count;
-		let k1 = bm25.k1 as f64;
-		let b = bm25.b as f64;
 		Self {
-			k1,
-			k1_plus_1: k1 + 1.0,
-			one_minus_b: 1.0 - b,
-			b_over_avg_len: b / average_doc_length,
-			doc_count,
+			bm25: kernels::fulltext::Bm25::new(
+				bm25.k1,
+				bm25.b,
+				dlc.doc_count,
+				dlc.total_docs_length,
+			),
 		}
 	}
 
@@ -1542,55 +1488,11 @@ impl Scorer {
 				let term = qt.tokens.get_token_string(token)?;
 				let td = fti.take_term_document(tx, doc_id, &mut loaded, term).await?;
 				if let Some(td) = td {
-					sc += self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
+					sc += self.bm25.score(td.f as f64, docs.len() as f64, doc_length)
 				}
 			}
 		}
 		Ok(sc as f32)
-	}
-
-	/// Computes the Okapi-BM25 score for a single term.
-	///
-	/// Variant:
-	/// • IDF is clamped to ≥ 0 (avoids negative weights for very common terms).
-	/// • Term-frequency is lower-bounded with 1 + ln(tf) as proposed in
-	///   “Lower-Bounding Term Frequency Normalization” (Lv & Zhai, CIKM 2011).
-	///
-	/// score =
-	///     idf · (k1 + 1) · tf′
-	///     ---------------------------------------------
-	///     tf′ + k1 · (1 − b + b · doc_len / avg_doc_len)
-	///
-	/// where
-	///   idf = ln((N − n(qᵢ) + 0.5)/(n(qᵢ) + 0.5)), clamped to ≥ 0
-	///   tf′ = 1 + ln(tf)
-	fn compute_bm25_score(&self, term_freq: f64, term_doc_count: f64, doc_length: f64) -> f64 {
-		// Early return for zero-term frequency
-		if term_freq <= 0.0 {
-			return 0.0;
-		}
-
-		// ---------- 1. Inverse Document Frequency (IDF) ---------------------
-		let denominator = term_doc_count + 0.5; // n(qᵢ) + 0.5
-		let numerator = self.doc_count - term_doc_count + 0.5; // N − n(qᵢ) + 0.5
-		let idf = (numerator / denominator).ln().max(0.0); // floor at 0
-
-		// Early return for zero IDF (very common terms)
-		if idf == 0.0 {
-			return 0.0;
-		}
-
-		// ---------- 2. Lower-bounded term-frequency -------------------------
-		let tf_prime = 1.0 + term_freq.ln(); // 1 + ln(tf)
-
-		// ---------- 3. Document-length normalisation -----------------------
-		let length_norm = self.one_minus_b + self.b_over_avg_len * doc_length;
-
-		// ---------- 4. Okapi BM25 (optimized) ------------------------------
-		let numerator = idf * self.k1_plus_1 * tf_prime;
-		let denominator = tf_prime + self.k1 * length_norm;
-
-		numerator / denominator
 	}
 }
 

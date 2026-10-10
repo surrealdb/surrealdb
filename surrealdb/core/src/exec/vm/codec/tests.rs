@@ -189,84 +189,21 @@ mod keys {
 		assert!(checked > 50, "only {checked} routes were simple");
 	}
 
-	/// An index entry's key, whether it names a record or is unique, and the
-	/// pending-entries marker, encoded from borrowed fields spell exactly the
-	/// bytes the typed keys spell: the indexed values under the index format,
-	/// each behind a terminator mark, and the record id under that format too.
+	/// The pending-entries marker encoded from borrowed fields spells exactly
+	/// the bytes the typed key spells: the record id as an identity, under the
+	/// index format.
 	#[test]
-	fn index_keys_match_the_typed_keys() {
+	fn the_pending_marker_matches_its_typed_key() {
 		use key::KeyField;
 
-		use crate::key::schema::{DocPendingKey, EntryKey, UniqueKey};
+		use crate::key::schema::DocPendingKey;
 		use crate::val::{Array, RecordIdKey, Strand};
 		let tb = TableName::from("t\u{1}b");
-		let lists: Vec<Vec<Value>> = vec![
-			vec![],
-			vec![int(0)],
-			vec![Value::from(0.0_f64)],
-			vec![Value::Number(Number::Decimal(rust_decimal::Decimal::new(15, 1)))],
-			vec![int(-7), Value::from(1.5_f64), int(i64::MAX)],
-			vec![string(AWKWARD), string("")],
-			vec![Value::None, Value::Null, Value::Bool(true)],
-			vec![Value::from(vec![int(1), string("x")]), Value::from(Array::default())],
-			vec![Value::RecordId(crate::val::RecordId::new(
-				TableName::from("other"),
-				RecordIdKey::Number(3),
-			))],
-		];
 		let ids = [
 			RecordIdKey::Number(-4),
 			RecordIdKey::String(Strand::new_static("a\u{0}b")),
 			RecordIdKey::Array(Array(vec![int(1), Value::from(2.5_f64)])),
 		];
-		for fd in &lists {
-			for id in &ids {
-				let typed = EntryKey::new(
-					NamespaceId(1),
-					DatabaseId(2),
-					Cow::Borrowed(&tb),
-					crate::catalog::IndexId(3),
-					Cow::Borrowed(fd),
-					Cow::Borrowed(id),
-				)
-				.encode_key()
-				.unwrap();
-				let vm = key::encode_fields(
-					"EntryKey",
-					&[
-						("ns", KeyField::Int(1)),
-						("db", KeyField::Int(2)),
-						("tb", KeyField::Str(tb.as_str())),
-						("ix", KeyField::Int(3)),
-						("fd", KeyField::Values(fd)),
-						("id", KeyField::Id(id)),
-					],
-				)
-				.unwrap();
-				assert_eq!(vm, typed.to_vec(), "entry {fd:?} {id:?}");
-			}
-			let typed = UniqueKey::new(
-				NamespaceId(1),
-				DatabaseId(2),
-				Cow::Borrowed(&tb),
-				crate::catalog::IndexId(3),
-				Cow::Borrowed(fd),
-			)
-			.encode_key()
-			.unwrap();
-			let vm = key::encode_fields(
-				"UniqueKey",
-				&[
-					("ns", KeyField::Int(1)),
-					("db", KeyField::Int(2)),
-					("tb", KeyField::Str(tb.as_str())),
-					("ix", KeyField::Int(3)),
-					("fd", KeyField::Values(fd)),
-				],
-			)
-			.unwrap();
-			assert_eq!(vm, typed.to_vec(), "unique {fd:?}");
-		}
 		for id in &ids {
 			let typed = DocPendingKey::new(
 				NamespaceId(1),

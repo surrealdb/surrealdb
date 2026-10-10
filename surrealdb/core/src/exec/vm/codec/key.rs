@@ -141,8 +141,6 @@ pub(crate) enum KeyField<'a> {
 	Id(&'a crate::val::RecordIdKey),
 	/// An edge direction.
 	Dir(crate::expr::Dir),
-	/// A list of values: an index entry's indexed values.
-	Values(&'a [Value]),
 }
 
 /// Encode a key of type `name` from `fields`, each field by its schema name,
@@ -168,20 +166,12 @@ pub(crate) fn encode_fields(name: &str, fields: &[(&str, KeyField<'_>)]) -> Resu
 				encode_borrowed(ty, find(name)?, indexed, &mut out)
 					.with_context(|| format!("field `{name}` of key `{}`", route.name))?;
 			}
+			// An index entry's indexed values are encoded by the B-tree key
+			// kernels (`idx::kernels::btree`), which both write paths and the
+			// read path share.
 			KeyStep::List {
-				name,
-				ty,
-				terminated,
-			} => {
-				let KeyField::Values(values) = find(name)? else {
-					bail!("list field `{name}` of key `{}` is not a list of values", route.name);
-				};
-				if *ty != "Value" {
-					bail!("the VM does not encode a list of `{ty}` in key `{}`", route.name);
-				}
-				encode_values(values, indexed, *terminated, &mut out)
-					.with_context(|| format!("field `{name}` of key `{}`", route.name))?;
-			}
+				..
+			} => bail!("key `{}` holds a list field the VM does not encode", route.name),
 		}
 	}
 	Ok(out)
@@ -192,31 +182,6 @@ pub(crate) fn encode_fields(name: &str, fields: &[(&str, KeyField<'_>)]) -> Resu
 /// index compares.
 fn indexed_format(format: &str) -> bool {
 	format.ends_with("IndexFormat")
-}
-
-/// A list field: each value behind a terminator mark, so a value whose
-/// encoding starts with a low byte is escaped rather than read as the end of
-/// the list, and the list closed by a terminator when `terminated`.
-fn encode_values(
-	values: &[Value],
-	indexed: bool,
-	terminated: bool,
-	out: &mut Vec<u8>,
-) -> Result<()> {
-	let mut w = storekey::Writer::new(&mut *out);
-	for value in values {
-		w.mark_terminator();
-		if indexed {
-			storekey::Encode::<crate::val::IndexFormat>::encode(value, &mut w)
-		} else {
-			storekey::Encode::<()>::encode(value, &mut w)
-		}
-		.map_err(|e| anyhow::anyhow!("{e}"))?;
-	}
-	if terminated {
-		w.write_terminator().map_err(|e| anyhow::anyhow!("{e}"))?;
-	}
-	Ok(())
 }
 
 fn encode_borrowed(ty: &str, value: KeyField<'_>, indexed: bool, out: &mut Vec<u8>) -> Result<()> {

@@ -30,6 +30,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 10]
@@ -80,8 +83,7 @@ value = '''
 'SelectProject [ctx: Db] [projections: id, joined]
     Limit [ctx: Db] [limit: 3]
         Filter [ctx: Db] [predicate: age > 25]
-            DistinctRecords [ctx: Db]
-                IndexScan [ctx: Db] [table: person, index: by_joined, direction: Forward]
+            IndexScan [ctx: Db] [table: person, index: by_joined, direction: Forward]
 ''''
 
 [[test.results]]
@@ -95,8 +97,7 @@ value = '''
 'SelectProject [ctx: Db] [projections: id, joined]
     Limit [ctx: Db] [limit: 2]
         Filter [ctx: Db] [predicate: age < 30]
-            DistinctRecords [ctx: Db]
-                IndexScan [ctx: Db] [table: person, index: by_joined, direction: Backward]
+            IndexScan [ctx: Db] [table: person, index: by_joined, direction: Backward]
 ''''
 
 [[test.results]]
@@ -134,6 +135,10 @@ DEFINE INDEX by_email ON person FIELDS email UNIQUE;
 DEFINE INDEX by_team ON person FIELDS team;
 DEFINE INDEX by_age ON person FIELDS age;
 DEFINE INDEX by_joined ON person FIELDS joined;
+-- `joined` is declared a scalar kind, so its index holds one entry per record
+-- and a scan of it delivers the column's order: a plain column that may hold
+-- an array is stored once per element and orders nothing.
+DEFINE FIELD joined ON person TYPE option<int>;
 FOR $i IN 1..=12 {
 	CREATE type::record('person', $i) SET
 		email = 'p' + <string> $i + '@example.com',

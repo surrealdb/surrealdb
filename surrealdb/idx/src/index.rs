@@ -13,7 +13,6 @@
 //! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
 //!   required.
 
-use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
@@ -33,7 +32,7 @@ use crate::env::{IndexEnv, expect_not_done};
 use crate::expr::Part;
 use crate::ft::analyzer::AnalyzerFunction;
 use crate::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
-use crate::key::schema::{EntryKey, UniqueKey};
+use crate::kernels::btree::{IndexKeyspace, StoredKey};
 #[cfg(diskann)]
 use crate::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
 use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswCompactionPlan, HnswIndex};
@@ -49,10 +48,9 @@ pub struct IndexOperation<'a> {
 	ix: &'a IndexDefinition,
 	ikb: IndexKeyBase,
 	/// `ix.table_name` wrapped as a `TableName`, resolved once here rather
-	/// than per key built below (`get_unique_index_key` /
-	/// `get_non_unique_index_key` run once per indexed value, i.e. per row
-	/// for a scalar column) so per-value key construction stays a cheap
-	/// borrow instead of a `Strand` clone per value.
+	/// than per key built below (`stored_key` runs once per indexed value,
+	/// i.e. per row for a scalar column) so per-value key construction stays
+	/// a cheap borrow instead of a `Strand` clone per value.
 	table_name: TableName,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
@@ -137,32 +135,20 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	/// Build the KV key for a unique index. The Array encodes values in
-	/// a canonical, lexicographically ordered byte form which normalizes numeric
-	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
-	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a [Value]) -> UniqueKey<'_> {
-		UniqueKey {
+	/// Where the entry for values `v` of this record is stored: the unique
+	/// slot on a `UNIQUE` index for a tuple holding no `NONE` or `NULL`, and
+	/// otherwise the non-unique key naming the record
+	/// ([`IndexKeyspace::stored_key`], which the read path's ranges agree
+	/// with). Numbers of every kind share key bytes, so `0`, `0f` and `0dec`
+	/// collide on a `UNIQUE` index.
+	fn stored_key(&self, unique: bool, v: &[Value]) -> Result<StoredKey> {
+		IndexKeyspace {
 			ns: self.ns,
 			db: self.db,
-			tb: Cow::Borrowed(&self.table_name),
+			tb: &self.table_name,
 			ix: self.ix.index_id,
-			fd: Cow::Borrowed(v),
 		}
-	}
-
-	/// Build the KV key for a non-unique index. The record id is appended
-	/// to the encoded field values so multiple records can share the same field
-	/// bytes; numeric values inside fd are normalized via Array.
-	fn get_non_unique_index_key(&self, v: &'a [Value]) -> EntryKey<'_> {
-		EntryKey {
-			ns: self.ns,
-			db: self.db,
-			tb: Cow::Borrowed(&self.table_name),
-			ix: self.ix.index_id,
-			fd: Cow::Borrowed(v),
-			id: Cow::Borrowed(&self.rid.key),
-		}
+		.stored_key(unique, v, &self.rid.key)
 	}
 
 	/// The value stored in this index's entries: the record ID, plus the
@@ -243,15 +229,8 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for (entry, o) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
-				if o.is_any_none_or_null() {
-					// NONE/NULL tuples use the non-unique key format (with
-					// record ID suffix) so multiple such entries can coexist.
-					let key = self.get_non_unique_index_key(&o);
-					Self::del_entry(&txn, &key, &value).await?;
-				} else {
-					let key = self.get_unique_index_key(&o);
-					Self::del_entry(&txn, &key, &value).await?;
-				}
+				let key = self.stored_key(true, &o)?;
+				Self::del_entry(&txn, &key, &value).await?;
 			}
 		}
 		// Create the new index data
@@ -259,20 +238,15 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
-				if n.is_any_none_or_null() {
-					// NONE/NULL tuples are stored with the non-unique key
-					// format so they remain visible to index scans. No
-					// uniqueness check — NULL != NULL per SQL convention.
-					let key = self.get_non_unique_index_key(&n);
+				let key = self.stored_key(true, &n)?;
+				if !key.unique {
+					// A tuple holding NONE or NULL names the record and is
+					// checked for no uniqueness: NULL equals no other NULL.
 					txn.set_key(&key, &value).await?;
-				} else {
-					let key = self.get_unique_index_key(&n);
-					if txn.put_compare_key(&key, &value, None).await.is_err() {
-						let key = self.get_unique_index_key(&n);
-						let entry: IndexEntryValue =
-							txn.get_key(&key, None).await?.expect("record should exist");
-						return self.err_index_exists(entry.rid, n);
-					}
+				} else if txn.put_compare_key(&key, &value, None).await.is_err() {
+					let entry: IndexEntryValue =
+						txn.get_key(&key, None).await?.expect("record should exist");
+					return self.err_index_exists(entry.rid, n);
 				}
 			}
 		}
@@ -305,7 +279,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(o, self.ix);
 			for (entry, o) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
-				let key = self.get_non_unique_index_key(&o);
+				let key = self.stored_key(false, &o)?;
 				Self::del_entry(&txn, &key, &value).await?;
 			}
 		}
@@ -314,7 +288,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
-				let key = self.get_non_unique_index_key(&n);
+				let key = self.stored_key(false, &n)?;
 				txn.set_key(&key, &value).await?;
 			}
 		}
@@ -919,7 +893,6 @@ mod interrupted_fan_out {
 	//! and those entries must reach no committed state even when the caller
 	//! commits anyway, as a client-owned transaction can.
 
-	use std::ops::Bound;
 	use std::time::Duration;
 
 	use anyhow::Result;
@@ -935,7 +908,7 @@ mod interrupted_fan_out {
 	use crate::env::IndexEnv;
 	use crate::expr::Idiom;
 	use crate::ft::analyzer::{AnalyzerFunction, BoxAnalyzerFut};
-	use crate::keys::compute_index_range;
+	use crate::kernels::btree::IndexKeyspace;
 	use crate::test_env::{CancelAtCheckpoint, TestIndexStore};
 	use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
@@ -996,7 +969,7 @@ mod interrupted_fan_out {
 
 	/// The index's entries as `tx` sees them, unique and non-unique alike.
 	async fn entries(tx: &Transaction, ix: &IndexDefinition) -> usize {
-		let range = compute_index_range(NS, DB, ix, Bound::Unbounded, Bound::Unbounded).unwrap();
+		let range = IndexKeyspace::of(NS, DB, ix).all().unwrap();
 		tx.count(range, None).await.unwrap()
 	}
 

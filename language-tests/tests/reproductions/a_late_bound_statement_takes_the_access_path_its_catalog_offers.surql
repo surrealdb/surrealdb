@@ -33,9 +33,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Limit [ctx: Db] [limit: 2]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: n, index: iv, access: >0, direction: Forward]
+    IndexScan [ctx: Db] [table: n, index: iv, access: >0, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
@@ -73,6 +71,10 @@ LET $go = true;
 	SELECT id FROM doc WHERE text @@ 'hello';
 };
 {
+	-- `v` is declared a scalar kind, so its index holds one entry per record and
+	-- a scan of it delivers the column's order: a plain column that may hold an
+	-- array is stored once per element and orders nothing.
+	DEFINE FIELD v ON n TYPE option<int>;
 	CREATE n:1 SET v = 3; CREATE n:2 SET v = 1; CREATE n:3 SET v = 2;
 	IF $go { DEFINE INDEX iv ON n FIELDS v };
 	SELECT id FROM n WHERE v > 0 LIMIT 2;

@@ -144,15 +144,19 @@ impl Default for Number {
 
 impl Eq for Number {}
 
+/// Numbers of every kind order as one line. Every NaN, whatever its sign
+/// and payload, is one value above every other number, `+inf` included, as
+/// the engine orders it.
 impl Ord for Number {
 	fn cmp(&self, other: &Self) -> Ordering {
 		fn total_cmp_f64(a: f64, b: f64) -> Ordering {
-			if a == 0.0 && b == 0.0 {
+			match (a.is_nan(), b.is_nan()) {
+				(true, true) => Ordering::Equal,
+				(true, false) => Ordering::Greater,
+				(false, true) => Ordering::Less,
 				// -0.0 = 0.0
-				Ordering::Equal
-			} else {
-				// Handles NaN's
-				a.total_cmp(&b)
+				(false, false) if a == 0.0 && b == 0.0 => Ordering::Equal,
+				(false, false) => a.total_cmp(&b),
 			}
 		}
 
@@ -173,6 +177,10 @@ impl Ord for Number {
 			(Number::Decimal(v), Number::Decimal(w)) => v.cmp(w),
 			// ------------------------------
 			(Number::Int(v), Number::Float(w)) => {
+				// A NaN is above every integer.
+				if w.is_nan() {
+					return Ordering::Less;
+				}
 				// If the float is not finite, we don't need to compare it to the integer.
 				if !w.is_finite() {
 					return greater!(w).reverse();
@@ -217,6 +225,10 @@ impl Ord for Number {
 							}
 						}
 					};
+				}
+				// A NaN is above every decimal.
+				if v.is_nan() {
+					return Ordering::Greater;
 				}
 				// If the float is not finite, we don't need to compare it to the decimal
 				if !v.is_finite() {
@@ -309,6 +321,10 @@ impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
 		match self {
 			Number::Int(v) => v.hash(state),
+			// Every NaN is one value, and `0.0` equals `-0.0`, so each hashes
+			// alike.
+			Number::Float(v) if v.is_nan() => f64::NAN.to_bits().hash(state),
+			Number::Float(v) if *v == 0.0 => 0.0f64.to_bits().hash(state),
 			Number::Float(v) => v.to_bits().hash(state),
 			Number::Decimal(v) => v.hash(state),
 		}
@@ -317,8 +333,9 @@ impl hash::Hash for Number {
 
 impl PartialEq for Number {
 	fn eq(&self, other: &Self) -> bool {
+		// Every NaN is one value, as `Ord` orders it.
 		fn total_eq_f64(a: f64, b: f64) -> bool {
-			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0)
+			a.to_bits().eq(&b.to_bits()) || (a == 0.0 && b == 0.0) || (a.is_nan() && b.is_nan())
 		}
 
 		match (self, other) {
@@ -372,5 +389,50 @@ impl From<f64> for Number {
 impl From<Decimal> for Number {
 	fn from(value: Decimal) -> Self {
 		Number::Decimal(value)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::cmp::Ordering;
+	use std::hash::{BuildHasher, RandomState};
+
+	use super::*;
+
+	#[test]
+	fn every_nan_is_one_value_above_every_number() {
+		let hasher = RandomState::new();
+		let nans = [f64::NAN, -f64::NAN, f64::from_bits(0x7ff0_0000_0000_0001)];
+		let numbers = [
+			Number::Float(f64::INFINITY),
+			Number::Float(f64::NEG_INFINITY),
+			Number::Float(0.0),
+			Number::Int(i64::MAX),
+			Number::Int(i64::MIN),
+			Number::Decimal(Decimal::MAX),
+			Number::Decimal(Decimal::MIN),
+		];
+		for x in nans {
+			let x = Number::Float(x);
+			for y in nans {
+				let y = Number::Float(y);
+				assert_eq!(x, y);
+				assert_eq!(x.cmp(&y), Ordering::Equal);
+				assert_eq!(hasher.hash_one(x), hasher.hash_one(y));
+			}
+			for n in &numbers {
+				assert_eq!(x.cmp(n), Ordering::Greater, "{x:?} against {n:?}");
+				assert_eq!(n.cmp(&x), Ordering::Less, "{n:?} against {x:?}");
+				assert_ne!(&x, n);
+			}
+		}
+	}
+
+	#[test]
+	fn equal_zeros_hash_alike() {
+		let hasher = RandomState::new();
+		let (zero, negative) = (Number::Float(0.0), Number::Float(-0.0));
+		assert_eq!(zero, negative);
+		assert_eq!(hasher.hash_one(zero), hasher.hash_one(negative));
 	}
 }

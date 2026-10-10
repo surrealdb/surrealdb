@@ -736,11 +736,14 @@ async fn a_restored_hnsw_index_still_answers_a_knn_query() -> Result<()> {
 /// planner's fallback is to scan the table and sort it, which produces exactly
 /// the same rows in exactly the same order. What separates them is the sort
 /// itself, so the assertion is that the restored database's plan walks the index
-/// and has no sort in it.
+/// and has no sort in it. `rank` is declared a scalar kind: an index over a
+/// column that may hold an array lists such a record once per element, so it
+/// serves no order, restored or not.
 #[tokio::test]
 async fn a_restored_index_still_serves_an_order_by() -> Result<()> {
 	let round_trip = RoundTrip::run(
 		"DEFINE TABLE doc SCHEMALESS;
+		 DEFINE FIELD rank ON doc TYPE int;
 		 DEFINE INDEX ix_rank ON doc FIELDS rank;
 		 CREATE doc:1 SET rank = 30;
 		 CREATE doc:2 SET rank = 10;
