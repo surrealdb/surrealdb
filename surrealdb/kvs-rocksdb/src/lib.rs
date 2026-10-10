@@ -1304,6 +1304,7 @@ impl Transaction {
 		&self,
 		iter: &mut ScanIter,
 		resume: &mut TxResume,
+		started: bool,
 		dir: Direction,
 		start: &[u8],
 		end: &[u8],
@@ -1317,12 +1318,8 @@ impl Transaction {
 		if epoch != resume.epoch {
 			let rng = start.to_vec()..end.to_vec();
 			let mut fresh = self.build_scan_iter(&rng, resume.version, inner);
-			if resume.has_next {
-				match (&mut fresh, dir) {
-					(ScanIter::Tx(it), Direction::Forward) => it.seek(&resume.next),
-					(ScanIter::Tx(it), Direction::Backward) => it.seek_for_prev(&resume.next),
-					(ScanIter::Db(_), _) => {}
-				}
+			if started {
+				resume.reposition(&mut fresh, dir, start, end);
 			}
 			*iter = fresh;
 			resume.epoch = epoch;
@@ -1342,6 +1339,7 @@ fn seek_and_skip(
 	dir: Direction,
 	started: &mut bool,
 	skip: &mut u32,
+	resume: &mut TxResume,
 	start: &[u8],
 	end: &[u8],
 ) -> Result<bool> {
@@ -1362,10 +1360,17 @@ fn seek_and_skip(
 				Direction::Forward => it.next(),
 				Direction::Backward => it.prev(),
 			}),
-			ScanIter::Tx(it) => it.valid().then(|| match dir {
-				Direction::Forward => it.next(),
-				Direction::Backward => it.prev(),
-			}),
+			ScanIter::Tx(it) => {
+				// A skipped entry counts as consumed, so a rebuilt iterator
+				// resumes past it even when the skip leaves nothing to yield.
+				if let Some(k) = it.key() {
+					resume.consumed(k);
+				}
+				it.valid().then(|| match dir {
+					Direction::Forward => it.next(),
+					Direction::Backward => it.prev(),
+				})
+			}
 		};
 		if still_valid.is_none() {
 			match &*iter {
@@ -1389,6 +1394,7 @@ fn fill_keys_into_state(state: &mut ScanStateKeys, limit: u32) -> Result<u64> {
 		state.dir,
 		&mut state.started,
 		&mut state.skip,
+		&mut state.resume,
 		&state.start,
 		&state.end,
 	)? {
@@ -1402,7 +1408,12 @@ fn fill_keys_into_state(state: &mut ScanStateKeys, limit: u32) -> Result<u64> {
 			fill_keys_inner(iter, limit, state.dir, &mut state.key_buf, &mut state.key_spans)
 		}
 	};
-	state.resume.note(&state.iter);
+	if out.is_ok()
+		&& matches!(state.iter, ScanIter::Tx(_))
+		&& let Some(span) = state.key_spans.last()
+	{
+		state.resume.consumed(&state.key_buf[span.offset..span.offset + span.len]);
+	}
 	out
 }
 
@@ -1415,6 +1426,7 @@ fn fill_vals_into_state(state: &mut ScanStateVals, limit: u32) -> Result<(u64, u
 		state.dir,
 		&mut state.started,
 		&mut state.skip,
+		&mut state.resume,
 		&state.start,
 		&state.end,
 	)? {
@@ -1438,7 +1450,12 @@ fn fill_vals_into_state(state: &mut ScanStateVals, limit: u32) -> Result<(u64, u
 			&mut state.spans,
 		),
 	};
-	state.resume.note(&state.iter);
+	if out.is_ok()
+		&& matches!(state.iter, ScanIter::Tx(_))
+		&& let Some(span) = state.spans.last()
+	{
+		state.resume.consumed(&state.key_buf[span.key_offset..span.key_offset + span.key_len]);
+	}
 	out
 }
 
@@ -1617,6 +1634,14 @@ pub(crate) async fn cursor_next_keys<'s>(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A zero-limit call is a no-op: it must not spend the pending `skip` or
+	// touch the iterator, so the first call that reads applies the skip in the
+	// view the transaction holds then.
+	if limit == 0 {
+		cursor.state.key_buf.clear();
+		cursor.state.key_spans.clear();
+		return Ok(KeysBatch::from_parts(&cursor.state.key_buf, &cursor.state.key_spans, 0));
+	}
 	// A writable scan holds `inner` across the batch so a savepoint rollback
 	// cannot rebuild the write-batch index under the iterator, and first
 	// replaces an iterator a rollback has invalidated.
@@ -1625,6 +1650,7 @@ pub(crate) async fn cursor_next_keys<'s>(
 		.sync_tx_iter(
 			&mut cursor.state.iter,
 			&mut cursor.state.resume,
+			cursor.state.started,
 			cursor.state.dir,
 			&cursor.state.start,
 			&cursor.state.end,
@@ -1660,6 +1686,19 @@ pub(crate) async fn cursor_next_vals<'s>(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A zero-limit call is a no-op; see `cursor_next_keys`.
+	if limit == 0 {
+		cursor.state.key_buf.clear();
+		cursor.state.val_buf.clear();
+		cursor.state.spans.clear();
+		return Ok(ValsBatch::from_parts(
+			&cursor.state.key_buf,
+			&cursor.state.val_buf,
+			&cursor.state.spans,
+			0,
+			0,
+		));
+	}
 	// A writable scan holds `inner` across the batch so a savepoint rollback
 	// cannot rebuild the write-batch index under the iterator, and first
 	// replaces an iterator a rollback has invalidated.
@@ -1668,6 +1707,7 @@ pub(crate) async fn cursor_next_vals<'s>(
 		.sync_tx_iter(
 			&mut cursor.state.iter,
 			&mut cursor.state.resume,
+			cursor.state.started,
 			cursor.state.dir,
 			&cursor.state.start,
 			&cursor.state.end,
@@ -1741,17 +1781,25 @@ fn visit_vals_into_state(
 		state.dir,
 		&mut state.started,
 		&mut state.skip,
+		&mut state.resume,
 		&state.start,
 		&state.end,
 	)? {
 		return Ok(ScanChunkStats::default());
 	}
-	let out = match &mut state.iter {
+	match &mut state.iter {
 		ScanIter::Db(iter) => visit_vals_inner(iter, limit, state.dir, f),
-		ScanIter::Tx(iter) => visit_vals_inner(iter, limit, state.dir, f),
-	};
-	state.resume.note(&state.iter);
-	out
+		ScanIter::Tx(iter) => {
+			// Rows the visitor accepts are the rows consumed.
+			let resume = &mut state.resume;
+			let mut tracked = |k: &[u8], v: &[u8]| {
+				let flow = f(k, v)?;
+				resume.consumed(k);
+				Ok(flow)
+			};
+			visit_vals_inner(iter, limit, state.dir, &mut tracked)
+		}
+	}
 }
 
 /// Drive the visitor over the next chunk of `(key, value)` pairs. Like
@@ -1773,6 +1821,11 @@ pub(crate) async fn cursor_for_each_vals(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A zero-limit chunk visits nothing and leaves the cursor untouched; see
+	// `cursor_next_keys`.
+	if limit == 0 {
+		return Ok(ScanChunkStats::default());
+	}
 	// A writable scan holds `inner` across the batch so a savepoint rollback
 	// cannot rebuild the write-batch index under the iterator, and first
 	// replaces an iterator a rollback has invalidated.
@@ -1781,6 +1834,7 @@ pub(crate) async fn cursor_for_each_vals(
 		.sync_tx_iter(
 			&mut cursor.state.iter,
 			&mut cursor.state.resume,
+			cursor.state.started,
 			cursor.state.dir,
 			&cursor.state.start,
 			&cursor.state.end,
@@ -1834,17 +1888,25 @@ fn visit_keys_into_state(
 		state.dir,
 		&mut state.started,
 		&mut state.skip,
+		&mut state.resume,
 		&state.start,
 		&state.end,
 	)? {
 		return Ok(ScanChunkStats::default());
 	}
-	let out = match &mut state.iter {
+	match &mut state.iter {
 		ScanIter::Db(iter) => visit_keys_inner(iter, limit, state.dir, f),
-		ScanIter::Tx(iter) => visit_keys_inner(iter, limit, state.dir, f),
-	};
-	state.resume.note(&state.iter);
-	out
+		ScanIter::Tx(iter) => {
+			// Rows the visitor accepts are the rows consumed.
+			let resume = &mut state.resume;
+			let mut tracked = |k: &[u8]| {
+				let flow = f(k)?;
+				resume.consumed(k);
+				Ok(flow)
+			};
+			visit_keys_inner(iter, limit, state.dir, &mut tracked)
+		}
+	}
 }
 
 /// Drive the keys visitor over the next chunk. Dispatched through
@@ -1857,6 +1919,11 @@ pub(crate) async fn cursor_for_each_keys(
 	if cursor.tx.done.load(Ordering::Relaxed) {
 		return Err(Error::TransactionFinished);
 	}
+	// A zero-limit chunk visits nothing and leaves the cursor untouched; see
+	// `cursor_next_keys`.
+	if limit == 0 {
+		return Ok(ScanChunkStats::default());
+	}
 	// A writable scan holds `inner` across the batch so a savepoint rollback
 	// cannot rebuild the write-batch index under the iterator, and first
 	// replaces an iterator a rollback has invalidated.
@@ -1865,6 +1932,7 @@ pub(crate) async fn cursor_for_each_keys(
 		.sync_tx_iter(
 			&mut cursor.state.iter,
 			&mut cursor.state.resume,
+			cursor.state.started,
 			cursor.state.dir,
 			&cursor.state.start,
 			&cursor.state.end,
