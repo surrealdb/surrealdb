@@ -235,3 +235,120 @@ impl BucketConnectionKey {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicUsize, Ordering};
+	use std::time::Duration;
+
+	use anyhow::Result;
+	use common::future::BoxFut;
+	use tokio::sync::Notify;
+
+	use super::BucketsManager;
+	use crate::buc::store::ObjectStore;
+	use crate::buc::store::memory::MemoryStore;
+	use crate::buc::{BucketStoreProvider, BucketStoreProviderRequirements, Config};
+	use crate::catalog::providers::DatabaseProvider;
+	use crate::dbs::Session;
+	use crate::dbs::capabilities::{Capabilities, Targets};
+	use crate::kvs::{Datastore, TransactionType};
+	use crate::observe::NoopObserver;
+
+	/// A provider whose first `connect` parks until `release` is notified,
+	/// announcing on `entered` that it has started; later connects return at
+	/// once.
+	struct GatedProvider {
+		calls: AtomicUsize,
+		entered: Arc<Notify>,
+		release: Arc<Notify>,
+	}
+
+	impl BucketStoreProviderRequirements for GatedProvider {}
+
+	impl BucketStoreProvider for GatedProvider {
+		fn connect<'a>(
+			&self,
+			_url: &'a str,
+			_global: bool,
+			_readonly: bool,
+			_config: Config,
+		) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>> {
+			let gated = self.calls.fetch_add(1, Ordering::SeqCst) == 0;
+			let entered = Arc::clone(&self.entered);
+			let release = Arc::clone(&self.release);
+			Box::pin(async move {
+				if gated {
+					entered.notify_one();
+					release.notified().await;
+				}
+				Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>)
+			})
+		}
+	}
+
+	/// Resolving a cold bucket holds no lock across its connect: while one
+	/// caller is parked inside a slow connect, a second caller for the same
+	/// bucket resolves it on a single-threaded runtime, and the parked caller
+	/// then adopts the connection the second one cached.
+	///
+	/// The scenario runs on its own `current_thread` runtime, so a caller that
+	/// blocked its thread on the cache would stop the runtime outright; the
+	/// test thread observes that as a timeout instead of hanging.
+	#[test]
+	fn a_slow_connect_does_not_block_other_callers() {
+		let (done_tx, done_rx) = std::sync::mpsc::channel();
+		std::thread::spawn(move || {
+			let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+			done_tx.send(rt.block_on(slow_connect_scenario())).ok();
+		});
+		match done_rx.recv_timeout(Duration::from_secs(10)) {
+			Ok(result) => result.unwrap(),
+			Err(_) => panic!("a caller blocked the runtime while another was connecting"),
+		}
+	}
+
+	async fn slow_connect_scenario() -> Result<()> {
+		let caps = Capabilities::all().with_experimental(Targets::All);
+		let ds = Datastore::builder().with_capabilities(caps).build_with_path("memory").await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		for res in ds.execute("DEFINE BUCKET b BACKEND 'memory';", &ses, None).await? {
+			res.result?;
+		}
+		let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+		let db = tx.expect_db_by_name("test", "test").await?;
+		let (ns, db) = (db.namespace_id, db.database_id);
+
+		// A manager with an empty cache, as on a node that has not yet served
+		// the bucket.
+		let entered = Arc::new(Notify::new());
+		let release = Arc::new(Notify::new());
+		let buckets = BucketsManager::new(
+			Box::new(GatedProvider {
+				calls: AtomicUsize::new(0),
+				entered: Arc::clone(&entered),
+				release: Arc::clone(&release),
+			}),
+			Config::default(),
+			Arc::new(NoopObserver),
+		);
+		let resolve = |buckets: &BucketsManager, tx: &Arc<_>| {
+			let (buckets, tx) = (buckets.clone(), Arc::clone(tx));
+			tokio::spawn(async move { buckets.get_bucket_store(&tx, ns, db, "b").await })
+		};
+
+		let first = resolve(&buckets, &tx);
+		entered.notified().await;
+		let second = resolve(&buckets, &tx).await??;
+		assert!(!first.is_finished(), "the first connect is still parked");
+
+		release.notify_one();
+		let first = first.await??;
+		assert!(Arc::ptr_eq(&first, &second), "the parked caller adopts the cached connection");
+		let cached = buckets.get_bucket_store(&tx, ns, db, "b").await?;
+		assert!(Arc::ptr_eq(&cached, &second), "later callers are served from the cache");
+		tx.cancel().await?;
+		Ok(())
+	}
+}
