@@ -44,20 +44,23 @@ pub(super) enum ScanIter {
 /// A savepoint rollback rebuilds the write-batch index that a
 /// [`ScanIter::Tx`] iterator points into, so the iterator must not be used
 /// afterwards. The cursor notices through `epoch` (compared against the
-/// transaction's rollback epoch on each batch), builds a new iterator, and
-/// seeks it to `next`, the first entry the previous iterator had not yet
-/// yielded. Unused by read-only cursors, whose iterators read the database
-/// directly and are unaffected by savepoints.
+/// transaction's rollback epoch on each batch) and builds a new iterator. The
+/// scan continues in the transaction's post-rollback view, strictly after
+/// `last`, the key of the last entry the cursor consumed, whether yielded or
+/// skipped. Resuming from where the old iterator stood would be wrong: the
+/// rollback can restore an entry the old iterator had stepped over, between
+/// `last` and its position or beyond a range it had already run out of.
+/// Unused by read-only cursors, whose iterators read the database directly and
+/// are unaffected by savepoints.
 pub(super) struct TxResume {
 	/// The transaction's rollback epoch when the iterator was last built.
 	pub(super) epoch: u64,
 	/// The version the scan reads at, needed to rebuild its `ReadOptions`.
 	pub(super) version: Option<u64>,
-	/// Key of the first entry not yet yielded, valid when `has_next`.
-	pub(super) next: Vec<u8>,
-	/// Whether the iterator was positioned on an entry when last advanced.
-	/// When false a rebuilt iterator is left unseeked, which is exhausted.
-	pub(super) has_next: bool,
+	/// Key of the last entry consumed, valid when `has_last`.
+	last: Vec<u8>,
+	/// Whether any entry has been consumed yet.
+	has_last: bool,
 }
 
 impl TxResume {
@@ -65,21 +68,46 @@ impl TxResume {
 		Self {
 			epoch,
 			version,
-			next: Vec::new(),
-			has_next: false,
+			last: Vec::new(),
+			has_last: false,
 		}
 	}
 
-	/// Record where `iter` stopped after a batch.
-	pub(super) fn note(&mut self, iter: &ScanIter) {
-		if let ScanIter::Tx(it) = iter {
-			self.next.clear();
-			match it.key() {
-				Some(k) => {
-					self.next.extend_from_slice(k);
-					self.has_next = true;
+	/// Record `key` as the last entry the cursor consumed.
+	pub(super) fn consumed(&mut self, key: &[u8]) {
+		self.last.clear();
+		self.last.extend_from_slice(key);
+		self.has_last = true;
+	}
+
+	/// Position a freshly built iterator of a cursor that has already started:
+	/// strictly after the last consumed entry, or at the range's near edge if
+	/// nothing was consumed. A cursor that has not started needs nothing, as
+	/// its first batch seeks.
+	pub(super) fn reposition(&self, iter: &mut ScanIter, dir: Direction, start: &[u8], end: &[u8]) {
+		let ScanIter::Tx(it) = iter else {
+			return;
+		};
+		match dir {
+			Direction::Forward => {
+				if self.has_last {
+					it.seek(&self.last);
+					if it.key() == Some(self.last.as_slice()) {
+						it.next();
+					}
+				} else {
+					it.seek(start);
 				}
-				None => self.has_next = false,
+			}
+			Direction::Backward => {
+				if self.has_last {
+					it.seek_for_prev(&self.last);
+					if it.key() == Some(self.last.as_slice()) {
+						it.prev();
+					}
+				} else {
+					it.seek_for_prev(end);
+				}
 			}
 		}
 	}
