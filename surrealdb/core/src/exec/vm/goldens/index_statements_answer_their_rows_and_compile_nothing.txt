@@ -587,14 +587,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: open:1, label: 'row 1' }
 { d: 2f, id: open:2, label: 'row 2' }
 { d: 4f, id: open:3, label: 'row 3' }
-### owner: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-1f
-0f
-1f
-### owner: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
 ### owner: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### owner: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -1230,14 +1230,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: mine:1, label: 'row 1' }
 { d: 2f, id: mine:2, label: 'row 2' }
 { d: 4f, id: mine:3, label: 'row 3' }
-### owner: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-1f
-0f
-1f
-### owner: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
 ### owner: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### owner: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -1873,14 +1873,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: locked:1, label: 'row 1' }
 { d: 2f, id: locked:2, label: 'row 2' }
 { d: 4f, id: locked:3, label: 'row 3' }
-### owner: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-1f
-0f
-1f
-### owner: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: locked:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: locked:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: locked:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+### owner: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### owner: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: locked:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: locked:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, secret: 's', tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: locked:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, secret: 's', tag: 'a', title: 'Beta gamma notes' }
 ### owner: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### owner: SELECT id FROM locked WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -2516,14 +2516,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: open:1, label: 'row 1' }
 { d: 2f, id: open:2, label: 'row 2' }
 { d: 4f, id: open:3, label: 'row 3' }
-### alice: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-1f
-0f
-1f
-### alice: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+### alice: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### alice: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
 ### alice: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### alice: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -2908,14 +2908,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 2f, id: mine:2, label: 'row 2' }
 { d: 6f, id: mine:4, label: 'row 4' }
 { d: 10f, id: mine:6, label: 'row 0' }
-### alice: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-3f
-1f
-1f
-### alice: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'the dog runs home', d: 3f, emb: [6f, 0f, 0f], id: mine:6, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Alpha Beta guide' }
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+### alice: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.75f
+2.75f
+### alice: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: mine:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: mine:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'running dogs and cats', d: 2.75f, emb: [12f, 0f, 0f], id: mine:12, label: 'row 0', n: 0, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Alpha Beta guide' }
 ### alice: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### alice: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -3062,9 +3062,9 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 (no rows)
 ### alice: SELECT id, vector::distance::knn() * 2 AS d, label FROM locked WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
 (no rows)
-### alice: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
+### alice: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
 (no rows)
-### alice: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
+### alice: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
 (no rows)
 ### alice: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 0 }
@@ -3675,14 +3675,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: open:1, label: 'row 1' }
 { d: 2f, id: open:2, label: 'row 2' }
 { d: 4f, id: open:3, label: 'row 3' }
-### bob: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-1f
-0f
-1f
-### bob: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'running dogs and cats', d: 1f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 1f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+### bob: SELECT VALUE vector::distance::knn() FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+1.25f
+0.25f
+0.75f
+### bob: SELECT *, vector::distance::knn() AS d FROM open WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'running dogs and cats', d: 1.25f, emb: [8f, 0f, 0f], id: open:8, label: 'row 2', n: 2, name: 'Goodbye', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: open:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 0.75f, emb: [10f, 0f, 0f], id: open:10, label: 'row 4', n: 4, name: 'Helloworld', owner: user:alice, tag: 'a', title: 'Beta gamma notes' }
 ### bob: SELECT count() FROM open WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### bob: SELECT id FROM open WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -4064,14 +4064,14 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 { d: 0f, id: mine:1, label: 'row 1' }
 { d: 4f, id: mine:3, label: 'row 3' }
 { d: 8f, id: mine:5, label: 'row 5' }
-### bob: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-2f
-0f
-2f
-### bob: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
-{ body: 'the dog runs home', d: 2f, emb: [7f, 0f, 0f], id: mine:7, label: 'row 1', n: 1, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
-{ body: 'the dog runs home', d: 0f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
-{ body: 'the dog runs home', d: 2f, emb: [11f, 0f, 0f], id: mine:11, label: 'row 5', n: 5, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
+### bob: SELECT VALUE vector::distance::knn() FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+2.25f
+0.25f
+1.75f
+### bob: SELECT *, vector::distance::knn() AS d FROM mine WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
+{ body: 'the dog runs home', d: 2.25f, emb: [7f, 0f, 0f], id: mine:7, label: 'row 1', n: 1, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
+{ body: 'the dog runs home', d: 0.25f, emb: [9f, 0f, 0f], id: mine:9, label: 'row 3', n: 3, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Alpha Beta guide' }
+{ body: 'the dog runs home', d: 1.75f, emb: [11f, 0f, 0f], id: mine:11, label: 'row 5', n: 5, name: 'Goodbye', owner: user:bob, tag: 'b', title: 'Beta gamma notes' }
 ### bob: SELECT count() FROM mine WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 5 }
 ### bob: SELECT id FROM mine WHERE emb <|4, 40|> [4.75, 0.0, 0.0] AND tag = 'a' ORDER BY id
@@ -4217,9 +4217,9 @@ error: There was no suitable index supporting the expression: title @@ 'beta'
 (no rows)
 ### bob: SELECT id, vector::distance::knn() * 2 AS d, label FROM locked WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id
 (no rows)
-### bob: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
+### bob: SELECT VALUE vector::distance::knn() FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
 (no rows)
-### bob: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id
+### bob: SELECT *, vector::distance::knn() AS d FROM locked WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id
 (no rows)
 ### bob: SELECT count() FROM locked WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL
 { count: 0 }

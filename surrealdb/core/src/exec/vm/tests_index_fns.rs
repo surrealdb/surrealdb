@@ -57,7 +57,9 @@ fn tables() -> String {
 	setup
 }
 
-/// Statements against table `t` the VM covers.
+/// Statements against table `t` the VM covers. No vector search among them
+/// has two rows a caller may read tied for its last place: which of them the
+/// search keeps is not fixed between runs.
 const COVERED: &[&str] = &[
 	// Each operator, over each analyzer.
 	"SELECT id FROM t WHERE title @1@ 'alpha' ORDER BY id",
@@ -138,8 +140,9 @@ const COVERED: &[&str] = &[
 	 ORDER BY id",
 	"SELECT id, vector::distance::knn() * 2 AS d, label FROM t \
 	 WHERE emb <|3, 40|> [1.0, 0.0, 0.0] ORDER BY id",
-	"SELECT VALUE vector::distance::knn() FROM t WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id",
-	"SELECT *, vector::distance::knn() AS d FROM t WHERE emb <|3, 40|> [9.0, 0.0, 0.0] ORDER BY id",
+	"SELECT VALUE vector::distance::knn() FROM t WHERE emb <|3, 40|> [9.25, 0.0, 0.0] ORDER BY id",
+	"SELECT *, vector::distance::knn() AS d FROM t WHERE emb <|3, 40|> [9.25, 0.0, 0.0] \
+	 ORDER BY id",
 	"SELECT count() FROM t WHERE emb <|5, 40|> [2.0, 0.0, 0.0] GROUP ALL",
 	// A condition beside the search is judged inside it: the rows are the
 	// nearest that satisfy it.
