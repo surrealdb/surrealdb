@@ -830,6 +830,13 @@ mod tests {
 	/// the production planner's wiring.
 	const TEST_DEPTH_LIMIT: u32 = 256;
 
+	/// Plans a test builds when its verdict must not depend on the hasher's
+	/// seed. Each plan draws fresh `RandomState` seeds for its sets and maps. A
+	/// probe meets an equal entry that hashes apart for about one seed in a
+	/// hundred, so a verdict that followed such a probe shows within this many
+	/// plans in all but about one run in 10^14.
+	const SEED_DRAWS: usize = 4096;
+
 	// ---------- test-only constructors ----------
 	//
 	// Mirror what `compile.rs` does in production: pre-encode the literal
@@ -1630,9 +1637,11 @@ mod tests {
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
 
-	/// The array-overlap evaluators resolve compound elements through the same
-	/// `HashMap<Value, _>`, so a cross-variant number miss must abort the whole
-	/// evaluation rather than count as "this element matches nothing".
+	/// A compound element holding a number, judged against a set holding one,
+	/// is undecidable in every mode. Hashing disagrees with equality on both
+	/// sides, so whether the probe meets the equal entry depends on the hasher's
+	/// seed, and `ContainNone` would turn a hit into a rejection only some seeds
+	/// produce. Each pass builds the plan afresh, drawing fresh seeds.
 	#[test]
 	fn streaming_array_overlap_cross_variant_number_miss_needs_full_decode() {
 		// Wrapped in an object so the element takes the decode path rather than
@@ -1640,37 +1649,131 @@ mod tests {
 		let wrap = |v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
 		let stored = wrap(Value::Number(Number::Decimal("0.1".parse().unwrap())));
 		let field = wrap(Value::Number(Number::Float(0.1)));
+		let rec = wire_record_plain_object(Object::from(BTreeMap::from([(
+			Strand::from("tags"),
+			Value::from(vec![field]),
+		)])));
 
 		for (mode, op) in [
 			(OverlapMode::Any, BinaryOperator::ContainAny),
 			(OverlapMode::All, BinaryOperator::ContainAll),
 			(OverlapMode::None, BinaryOperator::ContainNone),
 		] {
-			let set = Arc::new(HashSet::from([stored.clone()]));
-			let tables = overlap_streaming_from_set(set.as_ref());
-			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
-				literal_to_idx: tables.literal_to_idx,
-				wire_to_idx: tables.wire_to_idx,
-				literal_set: tables.literal_set,
-				literal_count: tables.literal_count,
-				mode,
-			});
-			let root = PredNode::LeafStreaming {
-				path: vec!["tags".into()],
-				evaluator: eval,
-				fallback: LeafFallback {
-					op,
-					literal: Value::from(vec![stored.clone()]),
-					reversed: false,
-				},
-			};
-			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-			let obj = Object::from(BTreeMap::from([(
+			for _ in 0..SEED_DRAWS {
+				let set = Arc::new(HashSet::from([stored.clone()]));
+				let tables = overlap_streaming_from_set(set.as_ref());
+				let eval: Arc<dyn super::StreamingLeafEvaluator> =
+					Arc::new(ArrayOverlapsLiteralSet {
+						literal_to_idx: tables.literal_to_idx,
+						wire_to_idx: tables.wire_to_idx,
+						literal_set: tables.literal_set,
+						literal_count: tables.literal_count,
+						mode,
+					});
+				let root = PredNode::LeafStreaming {
+					path: vec!["tags".into()],
+					evaluator: eval,
+					fallback: LeafFallback {
+						op: op.clone(),
+						literal: Value::from(vec![stored.clone()]),
+						reversed: false,
+					},
+				};
+				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+				assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
+			}
+		}
+	}
+
+	/// `Float` / `Decimal` equality is not transitive: this float equals both
+	/// decimals, which differ from each other. An array holding the float alone
+	/// satisfies `ContainAll` over the two, but a probe resolves the float to
+	/// one bit at most. The evaluator makes no probe for an element and set that
+	/// both hold a number, so it needs a full decode under every seed, for the
+	/// numbers bare or nested.
+	#[test]
+	fn streaming_array_overlap_all_float_equal_to_two_decimals_needs_full_decode() {
+		let float = Value::Number(Number::Float(0.8800000005551132));
+		let lo = Value::Number(Number::Decimal("0.8800000005551131776471763448".parse().unwrap()));
+		let hi = Value::Number(Number::Decimal("0.8800000005551131776471763449".parse().unwrap()));
+		assert_eq!(float, lo);
+		assert_eq!(float, hi);
+		assert_ne!(lo, hi);
+
+		let wrap = |v: &Value| {
+			Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v.clone())])))
+		};
+		for (literals, element) in [
+			(vec![lo.clone(), hi.clone()], float.clone()),
+			(vec![wrap(&lo), wrap(&hi)], wrap(&float)),
+		] {
+			let rec = wire_record_plain_object(Object::from(BTreeMap::from([(
 				Strand::from("tags"),
-				Value::from(vec![field.clone()]),
-			)]));
-			let rec = wire_record_plain_object(obj);
-			assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
+				Value::from(vec![element.clone()]),
+			)])));
+			for _ in 0..SEED_DRAWS {
+				let set: HashSet<Value> = literals.iter().cloned().collect();
+				let tables = overlap_streaming_from_set(&set);
+				assert_eq!(tables.literal_count, 2, "the decimals are two values");
+				let eval: Arc<dyn super::StreamingLeafEvaluator> =
+					Arc::new(ArrayOverlapsLiteralSet {
+						literal_to_idx: tables.literal_to_idx,
+						wire_to_idx: tables.wire_to_idx,
+						literal_set: tables.literal_set,
+						literal_count: tables.literal_count,
+						mode: OverlapMode::All,
+					});
+				let root = PredNode::LeafStreaming {
+					path: vec!["tags".into()],
+					evaluator: eval,
+					fallback: LeafFallback {
+						op: BinaryOperator::ContainAll,
+						literal: Value::from(literals.clone()),
+						reversed: false,
+					},
+				};
+				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+				assert_eq!(
+					pf.apply(&[], &rec),
+					PreDecodeFilterOutcome::NeedFullDecode,
+					"{element:?}"
+				);
+			}
+		}
+	}
+
+	/// The float equals both decimals, which differ from each other, so these
+	/// literals form no equivalence classes for `ContainAll`'s array-overlap
+	/// evaluator to count: the classes it would form depend on the order a
+	/// seeded set yields the literals in. The plan judges such a set by decoding
+	/// the field, so a row the predicate holds for is never rejected, whatever
+	/// seeds the plan draws.
+	#[test]
+	fn contains_all_over_floats_and_decimals_judges_the_decoded_field() {
+		let float = Value::Number(Number::Float(0.8800000005551132));
+		let lo = Value::Number(Number::Decimal("0.8800000005551131776471763448".parse().unwrap()));
+		let hi = Value::Number(Number::Decimal("0.8800000005551131776471763449".parse().unwrap()));
+		let contains_all = PreDecodeShape::Leaf {
+			path: vec![PathSegment::from("tags")].into(),
+			op: BinaryOperator::ContainAll,
+			literal: Value::from(vec![float.clone(), lo.clone(), hi]),
+			reversed: false,
+		};
+		let not_contains_all = PreDecodeShape::Not(Box::new(contains_all.clone()));
+		let tags = |v: &Value| {
+			wire_record_plain_object(Object::from(BTreeMap::from([(
+				Strand::from("tags"),
+				Value::from(vec![v.clone()]),
+			)])))
+		};
+		// The float matches every literal, so `ContainAll` holds; `lo` alone
+		// leaves `hi` unmatched, so its negation holds.
+		let cases = [(&contains_all, tags(&float)), (&not_contains_all, tags(&lo))];
+		for _ in 0..SEED_DRAWS {
+			for (shape, rec) in &cases {
+				let pf = shape.filter(TEST_DEPTH_LIMIT);
+				assert_eq!(pf.apply(&[], rec), PreDecodeFilterOutcome::NeedFullDecode, "{shape:?}");
+			}
 		}
 	}
 
@@ -1884,13 +1987,18 @@ mod tests {
 	/// A wrong *hit* cannot reject a row. A probe hits only an element `==` to
 	/// the value, and `==` implies `Value::equal` for every pair of values, so
 	/// where `NOT IN` and `CONTAINSNONE` reject on a hit the operator is false
-	/// too — for a string, a compound value and a regex alike (the regex in a
+	/// too — for a string, a compound value and, under `NOT IN`, a regex (in a
 	/// hand-built set, since the planner keeps regexes out of literal sets).
+	/// `CONTAINSNONE` makes no probe for a regex against a set holding one,
+	/// since a miss there would not be decisive (see `hash_miss_is_decisive`),
+	/// so it decodes that row instead of rejecting it.
 	#[test]
 	fn exclusion_rejects_on_a_hit_only_where_the_operator_is_false() {
 		let object =
 			Value::Object(Object::from(BTreeMap::from([(Strand::from("k"), Value::from("abc"))])));
-		for field in [Value::from("abc"), object, regex("a.*")] {
+		for (field, overlap_probes) in
+			[(Value::from("abc"), true), (object, true), (regex("a.*"), false)]
+		{
 			let set = HashSet::from([field.clone()]);
 			let literal = Value::from(vec![field.clone()]);
 
@@ -1908,6 +2016,9 @@ mod tests {
 				"NOT IN {field:?}"
 			);
 
+			if !overlap_probes {
+				continue;
+			}
 			let array = Value::from(vec![field.clone()]);
 			assert!(!operator_holds(&BinaryOperator::ContainNone, &array, &literal), "{field:?}");
 			let pf = PreDecodeFilter::new(

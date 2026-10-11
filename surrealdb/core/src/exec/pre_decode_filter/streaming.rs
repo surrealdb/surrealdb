@@ -247,7 +247,9 @@ pub(crate) enum OverlapMode {
 	Any,
 	/// [`BinaryOperator::ContainNone`]
 	None,
-	/// [`BinaryOperator::ContainAll`]
+	/// [`BinaryOperator::ContainAll`]. The plan builds it only over a set whose
+	/// numbers do not mix `Float` and `Decimal` — see
+	/// [`overlap_streaming_from_set`].
 	All,
 }
 
@@ -401,8 +403,13 @@ impl ArrayOverlapsLiteralSet {
 	/// compound element tag, decodes the element and probes `literal_to_idx`.
 	///
 	/// `Err(())` means undecidable, which the caller turns into
-	/// [`Evidence::Unknown`] — including a decoded miss that
-	/// [`hash_miss_is_decisive`] does not trust.
+	/// [`Evidence::Unknown`]. A decoded element is undecidable wherever
+	/// [`hash_miss_is_decisive`] does not trust a miss on it, and the probe is
+	/// then not made at all. That includes an element and a set that both hold a
+	/// number, and a string or a regex meeting a set that holds the other kind. A
+	/// miss would prove nothing, and with a number on both sides whether the probe
+	/// meets an equal entry that hashes apart depends on the hasher's seed, so no
+	/// verdict built on it would be reproducible.
 	#[inline]
 	fn element_in_set(
 		elem_bytes: &[u8],
@@ -415,11 +422,10 @@ impl ArrayOverlapsLiteralSet {
 				let mut r: &[u8] = elem_bytes;
 				let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r)
 					.map_err(|_| ())?;
-				let inside = literal_to_idx.contains_key(&v);
-				if !inside && !hash_miss_is_decisive(&v, set) {
+				if !hash_miss_is_decisive(&v, set) {
 					return Err(());
 				}
-				Ok(inside)
+				Ok(literal_to_idx.contains_key(&v))
 			}
 		}
 	}
@@ -428,9 +434,12 @@ impl ArrayOverlapsLiteralSet {
 	/// mode). Wire-fast path uses the precomputed `wire_to_idx` table; on a
 	/// compound tag, decodes the element and probes `literal_to_idx`.
 	///
-	/// `Err(())` covers the same undecidable cases as [`Self::element_in_set`]:
-	/// an untrustworthy miss must not be reported as "this element sets no bit",
-	/// or `All` would conclude the array is missing a literal it contains.
+	/// `Err(())` covers the same undecidable elements as [`Self::element_in_set`].
+	/// `All` can count such an element neither as setting no bit, since it may
+	/// equal a literal, nor as setting the bit of the entry a probe meets: the
+	/// element may equal literals of two classes while the probe resolves it to
+	/// one. `Float` / `Decimal` equality is not transitive, and a string can be
+	/// `==` to one literal while a regex literal matches it.
 	#[inline]
 	fn element_set_index(
 		elem_bytes: &[u8],
@@ -447,11 +456,10 @@ impl ArrayOverlapsLiteralSet {
 		}
 		let mut r: &[u8] = elem_bytes;
 		let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r).map_err(|_| ())?;
-		let idx = literal_to_idx.get(&v).copied();
-		if idx.is_none() && !hash_miss_is_decisive(&v, set) {
+		if !hash_miss_is_decisive(&v, set) {
 			return Err(());
 		}
-		Ok(idx)
+		Ok(literal_to_idx.get(&v).copied())
 	}
 }
 
@@ -527,6 +535,18 @@ pub(crate) struct OverlapLookupTables {
 /// `PartialEq` for every element type a literal set may hold: the variants whose
 /// `partial_cmp` can return `None` (`Geometry`, `Regex`, `Range`, `Closure`) are
 /// excluded by `literal_hashset_element_safe`.
+///
+/// The classes are equivalence classes only while equality among the literals
+/// is transitive, which `Float` / `Decimal` equality is not: one float can equal
+/// two decimals that differ from each other, and the class the ordered map files
+/// each spelling under then depends on the order the set yields them. `All`
+/// relies on the classes in two places. A wire hit reads the class of the
+/// top-level literal an element matches byte for byte, so `All` is not built over
+/// a set whose numbers spell both (see
+/// [`LiteralSet::numbers_mix_float_and_decimal`]). A decoded element is looked up
+/// only where [`hash_miss_is_decisive`] trusts a miss on it. Then one side is
+/// number-free, so the element is `==` to the literals of one class at most, and
+/// `==` decides [`Value::equal`] for it.
 pub(crate) fn overlap_streaming_from_set<S: BuildHasher>(
 	set: &HashSet<Value, S>,
 ) -> OverlapLookupTables {

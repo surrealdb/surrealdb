@@ -117,6 +117,13 @@ fn try_compile_leaf_streaming(
 				BinaryOperator::ContainAll => OverlapMode::All,
 				_ => return None,
 			};
+			// `All` counts the literals' equivalence classes, which literals
+			// spelling numbers both as floats and as decimals do not form (see
+			// `overlap_streaming_from_set`). The leaf then decodes the field and
+			// the operator judges it.
+			if mode == OverlapMode::All && tables.literal_set.numbers_mix_float_and_decimal() {
+				return None;
+			}
 			let evaluator: Arc<dyn StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
 				literal_to_idx: tables.literal_to_idx,
 				wire_to_idx: tables.wire_to_idx,

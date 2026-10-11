@@ -83,7 +83,10 @@ impl NumberSubVariant {
 ///   string, and a string's only against a set holding no regex.
 ///
 /// A hit needs neither: a probe hits only an element `==` to `value`, and `==`
-/// implies `Value::equal` for every pair of values.
+/// implies `Value::equal` for every pair of values. Whether a hit is
+/// **reproducible** is decided by the first condition alone. When it fails, an
+/// entry `==` to `value` may hash apart from it, and whether the probe still
+/// meets that entry depends on the hasher's seed.
 #[inline]
 pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
 	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
@@ -397,6 +400,19 @@ impl LiteralSet {
 	#[inline]
 	pub(crate) fn number_sub_variants_mask(&self) -> u8 {
 		self.number_sub_variants
+	}
+
+	/// True iff [`Self::numbers`] holds both a `Float` and a `Decimal`.
+	///
+	/// `Number`'s equality between those two sub-variants is approximate and not
+	/// transitive — one float can equal two decimals that differ from each other
+	/// — so the set's numbers fall into equivalence classes only while they do
+	/// not mix the two. Every other pairing of sub-variants compares exactly.
+	#[inline]
+	pub(crate) fn numbers_mix_float_and_decimal(&self) -> bool {
+		let both =
+			(1u8 << NumberSubVariant::Float as u8) | (1u8 << NumberSubVariant::Decimal as u8);
+		self.number_sub_variants & both == both
 	}
 
 	/// Whether the Strand partition holds these exact rev-2 `Value` wire bytes.
