@@ -972,6 +972,117 @@ mod tests {
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
 
+	/// `==` is `Value`'s derived `PartialEq`, under which a regex equals only a
+	/// regex with the same pattern. `=` and `!=` are `Value::equal`, which also
+	/// matches a regex against every string it matches. A comparison with a
+	/// regex literal judged on the wire — as a leaf of its own, or fused with
+	/// another comparison into one scan of the row object — must reject a
+	/// record only where the predicate, evaluated by `apply_binary` on the
+	/// decoded fields, is false.
+	#[test]
+	fn equality_with_a_regex_literal_rejects_only_where_the_predicate_is_false() {
+		let regex = |pattern: &str| Value::Regex(pattern.parse().expect("regex"));
+		let comparison = |field: &str, op: BinaryOperator, literal: Value, reversed: bool| {
+			Arc::new(SimpleBinaryOp {
+				field_name: field.into(),
+				op,
+				literal,
+				reversed,
+			}) as Arc<dyn PhysicalExpr>
+		};
+		let not = |expr: Arc<dyn PhysicalExpr>| {
+			Arc::new(UnaryOp {
+				op: PrefixOperator::Not,
+				expr,
+			}) as Arc<dyn PhysicalExpr>
+		};
+		let stored_v = [
+			Some(Value::from("abc")),
+			Some(Value::from("xyz")),
+			Some(regex("a.*")),
+			Some(regex("x")),
+			Some(Value::Number(Number::Int(1))),
+			None,
+		];
+
+		let mut wrong = Vec::new();
+		for op in [BinaryOperator::ExactEqual, BinaryOperator::Equal, BinaryOperator::NotEqual] {
+			for reversed in [false, true] {
+				let leaf = comparison("v", op.clone(), regex("a.*"), reversed);
+				// `n = 1` is true on every row below, so the conjunction is true
+				// exactly where the regex comparison is.
+				let conjunction: Arc<dyn PhysicalExpr> = Arc::new(BinaryOp {
+					left: Arc::clone(&leaf),
+					op: BinaryOperator::And,
+					right: comparison(
+						"n",
+						BinaryOperator::Equal,
+						Value::Number(Number::Int(1)),
+						false,
+					),
+				});
+				// Each shape with whether its comparisons fuse into one scan, and
+				// whether it negates the regex comparison.
+				let shapes = [
+					("v", Arc::clone(&leaf), false, false),
+					("NOT v", not(leaf), false, true),
+					("v AND n", Arc::clone(&conjunction), true, false),
+					("NOT (v AND n)", not(conjunction), true, true),
+				];
+				for (label, pred, fused, negated) in shapes {
+					let pf = PreDecodeFilter::new(
+						compile_predicate_shape(&pred).expect("compile"),
+						TEST_DEPTH_LIMIT,
+					);
+					let compared = match &pf.root {
+						PredNode::Not(inner) => inner.as_ref(),
+						root => root,
+					};
+					if fused {
+						assert!(
+							matches!(compared, PredNode::FusedFlatMapAnd { .. }),
+							"{label} built {:?}",
+							pf.root
+						);
+					} else {
+						assert!(
+							matches!(compared, PredNode::Leaf { .. }),
+							"{label} built {:?}",
+							pf.root
+						);
+					}
+					for v in &stored_v {
+						let field = v.clone().unwrap_or(Value::None);
+						let literal = regex("a.*");
+						let (left, right) = if reversed {
+							(&literal, &field)
+						} else {
+							(&field, &literal)
+						};
+						let compares = match super::apply_binary(&op, left, right) {
+							Some(Value::Bool(answer)) => answer,
+							other => panic!("{op:?} answered {other:?}"),
+						};
+						let mut fields =
+							BTreeMap::from([(Strand::from("n"), Value::Number(Number::Int(1)))]);
+						if let Some(v) = v {
+							fields.insert(Strand::from("v"), v.clone());
+						}
+						let rec = wire_record_plain_object(Object::from(fields));
+						if pf.apply(&[], &rec) == PreDecodeFilterOutcome::Reject
+							&& compares != negated
+						{
+							wrong.push(format!(
+								"{label}, {op:?}, reversed {reversed}, on v = {v:?}"
+							));
+						}
+					}
+				}
+			}
+		}
+		assert!(wrong.is_empty(), "rejected records the predicate holds for: {wrong:#?}");
+	}
+
 	#[test]
 	fn eval_set_membership_hits_returns_need_full_decode_for_inside() {
 		let set = Arc::new(HashSet::from([Value::Number(Number::Int(1))]));

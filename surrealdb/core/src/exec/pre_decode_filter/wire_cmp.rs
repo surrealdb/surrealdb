@@ -33,11 +33,12 @@ use crate::expr::operator::BinaryOperator;
 pub(super) mod variant_id {
 	pub(crate) const NUMBER: u8 = 3;
 	pub(crate) const STRING: u8 = 4;
-	/// [`Value::Regex`] — a `Value::String(s)` can compare equal to a
-	/// `Value::Regex(r)` (and vice versa) when the regex matches the string,
-	/// see `Value::equal`. The wire-fast eq / set paths must therefore bail
-	/// to the full-decode fallback whenever a Strand-tagged comparand meets
-	/// a Regex peer, since byte-eq cannot decide that case.
+	/// [`Value::Regex`]. Under `Value::equal` (`=`, `!=`) a `Value::String(s)`
+	/// and a `Value::Regex(r)` compare equal when `r` matches `s`, which
+	/// byte-eq cannot decide, so a wire path judging `Value::equal` either
+	/// bails to the full-decode fallback where a Strand meets a Regex or runs
+	/// the regex over the Strand. Under `Value`'s derived `PartialEq` (`==`)
+	/// the two never compare equal.
 	pub(crate) const REGEX: u8 = 16;
 }
 
@@ -160,8 +161,12 @@ pub(crate) fn evaluate_leaf_on_wire(
 	match op {
 		// Commutative — `reversed` is irrelevant. See the operator note in
 		// the module docstring.
-		BinaryOperator::Equal | BinaryOperator::ExactEqual => {
+		BinaryOperator::Equal => {
 			let truth = wire_eq(value_bytes, lit)?;
+			Some(evidence_bool(truth))
+		}
+		BinaryOperator::ExactEqual => {
+			let truth = wire_exact_eq(value_bytes, lit)?;
 			Some(evidence_bool(truth))
 		}
 		BinaryOperator::NotEqual => {
@@ -381,8 +386,9 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 	}
 }
 
-/// Byte-equality between a navigated [`Value`] wire and an array element
-/// candidate (for `ArrayElementContains`).
+/// Whether an array element's wire equals the needle `lit` under
+/// `Value::equal`, which `CONTAINS` tests an array's elements with, as
+/// [`wire_eq`] decides it (for `ArrayElementContains`).
 ///
 /// Returns [`None`] when the wire path doesn't cover the pair shape (caller
 /// falls back to full element decode + `Value::eq`).
@@ -390,6 +396,14 @@ pub(crate) fn eq_wire(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 	wire_eq(value_bytes, lit)
 }
 
+/// Whether the navigated value equals `lit` under `Value::equal`, which `=`
+/// and `!=` evaluate, or [`None`] when the wire cannot decide it.
+///
+/// `Value::equal` is `Value`'s derived `PartialEq` but for one pair of kinds:
+/// it matches a string against a regex by running the regex. So a Strand
+/// literal bails on a Regex-tagged field, and a Regex literal runs its regex
+/// over a Strand-tagged field. `==` has no such arm; [`wire_exact_eq`]
+/// answers it.
 fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 	match lit {
 		LiteralWire::Strand {
@@ -401,10 +415,9 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			if vid == variant_id::STRING {
 				return Some(value_bytes == full_wire.as_slice());
 			}
-			// `Value::equal` treats `String <-> Regex` asymmetrically: a
-			// `Value::Regex(r)` compares equal to a `Value::String(s)` iff
-			// `r.is_match(s)`. Byte-eq cannot decide that, so fall back to
-			// the decode path for Regex peers.
+			// A `Value::Regex(r)` field compares equal to a `Value::String(s)`
+			// literal iff `r.is_match(s)`. Byte-eq cannot decide that, so fall
+			// back to the decode path for Regex peers.
 			if vid == variant_id::REGEX {
 				return None;
 			}
@@ -461,17 +474,14 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 		}
 		LiteralWire::Regex {
 			regex,
+			full_wire: _,
 		} => {
-			// `Value::equal(Strand(s), Regex(r))` is asymmetric — true iff
+			// `Value::equal(Strand(s), Regex(r))` is true iff
 			// `r.is_match(s)`. Peek the field's wire: if it's a Strand,
 			// borrow its UTF-8 payload as `&str` (via the unchecked-utf8
 			// invariant — see [`strand_payload_str_unchecked`]) and run
-			// the pre-compiled regex against it.
-			//
-			// Other variant tags fall back to the decode path: Regex-vs-
-			// Regex equality compares the underlying pattern strings,
-			// which we don't reconstruct here; Number / Bool / etc. need
-			// the full `Value::equal` arms.
+			// the pre-compiled regex against it. Other variant tags fall
+			// back to the decode path.
 			let peek = peek_value(value_bytes)?;
 			if peek.tag.variant_id() != variant_id::STRING {
 				return None;
@@ -480,6 +490,35 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			Some(regex.inner().is_match(s))
 		}
 		LiteralWire::Other => None,
+	}
+}
+
+/// Whether the navigated value equals `lit` under `Value`'s derived
+/// `PartialEq`, which `==` (`operate::exact`) evaluates, or [`None`] when the
+/// wire cannot decide it.
+///
+/// It answers as [`wire_eq`] does except against a regex literal. Derived
+/// equality has no arm across kinds, so a regex equals only a regex with the
+/// same pattern, and never a string, whatever the regex matches. Every other
+/// answer [`wire_eq`] gives holds for `==` as well: the one other pair the two
+/// equalities disagree on, a Strand literal and a Regex-tagged field, is one
+/// it bails on.
+fn wire_exact_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
+	match lit {
+		LiteralWire::Regex {
+			regex: _,
+			full_wire,
+		} => {
+			let peek = peek_value(value_bytes)?;
+			if peek.tag.variant_id() != variant_id::REGEX {
+				return Some(false);
+			}
+			// A regex's wire holds its pattern, which is all `Regex`'s
+			// `PartialEq` compares, and the serialiser writes one wire per
+			// pattern, so byte-eq decides it.
+			Some(value_bytes == full_wire.as_slice())
+		}
+		_ => wire_eq(value_bytes, lit),
 	}
 }
 
@@ -1118,6 +1157,66 @@ mod tests {
 		// Number isn't matchable by a regex via `Value::equal`; the wire
 		// path defers to the decode fallback rather than answer false here.
 		assert_eq!(wire_eq(&v, &lit), None);
+	}
+
+	/// `==` has no string arm: a regex literal is unequal to every string,
+	/// the strings it matches included.
+	#[test]
+	fn evaluate_leaf_on_wire_exact_eq_regex_provably_false_on_strand() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let lit = LiteralWire::from_value(&Value::Regex(Regex::from_str("^abc").unwrap()));
+		for s in ["abcdef", "xyz"] {
+			let v = encoded(&Value::String(Strand::from(s)));
+			for reversed in [false, true] {
+				assert_eq!(
+					evaluate_leaf_on_wire(&v, &BinaryOperator::ExactEqual, &lit, reversed),
+					Some(Evidence::ProvablyFalse),
+					"{s:?} reversed {reversed}"
+				);
+			}
+		}
+	}
+
+	/// Under `==` a regex literal equals a regex with the same pattern and no
+	/// other value, which the wire decides without decoding: a regex's wire is
+	/// the one its decoded value re-encodes to, and it holds the pattern that
+	/// `Regex`'s `PartialEq` compares.
+	#[test]
+	fn evaluate_leaf_on_wire_exact_eq_regex_agrees_with_derived_eq() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		// `a\/b` and `a/b` parse to one pattern.
+		let patterns = ["^abc", "abc", "a.*", "", "a\\/b", "a/b", "é+"];
+		let regex = |p: &str| Value::Regex(Regex::from_str(p).unwrap());
+		let mut fields: Vec<Value> = patterns.iter().map(|p| regex(p)).collect();
+		fields.extend([
+			Value::String(Strand::from("abc")),
+			Value::Number(Number::Int(1)),
+			Value::Bool(true),
+			Value::None,
+			Value::Null,
+		]);
+		for field in &fields {
+			let wire = encoded(field);
+			let mut r: &[u8] = &wire;
+			let decoded =
+				<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+			assert_eq!(encoded(&decoded), wire, "{field:?} re-encodes to its own wire");
+			for p in patterns {
+				let literal = regex(p);
+				let lit = LiteralWire::from_value(&literal);
+				for reversed in [false, true] {
+					assert_eq!(
+						evaluate_leaf_on_wire(&wire, &BinaryOperator::ExactEqual, &lit, reversed),
+						Some(evidence_bool(*field == literal)),
+						"{field:?} == {literal:?} reversed {reversed}"
+					);
+				}
+			}
+		}
 	}
 
 	#[test]
