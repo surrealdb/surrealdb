@@ -170,13 +170,19 @@ pub(crate) enum LiteralWire {
 	Canonical {
 		full_wire: Vec<u8>,
 	},
-	/// `Value::Regex(_)` literal. The pre-compiled `regex::Regex` is kept
-	/// alive in an `Arc` so cloned `PredNode`s share it. Eval matches the
-	/// field's `Strand` value against the regex via a zero-copy `&str`
-	/// view over the wire-borrowed UTF-8 bytes (see
-	/// [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str_unchecked`]).
+	/// `Value::Regex(_)` literal. `=` and `==` compare it differently, and
+	/// each operator reads its own field:
+	///
+	/// * `regex` — the pre-compiled pattern, kept alive in an `Arc` so cloned `PredNode`s share it.
+	///   `Value::equal` (`=`, `!=`) matches a string against a regex, so a `Strand` field is
+	///   matched against it through a zero-copy `&str` view over the wire-borrowed UTF-8 bytes (see
+	///   [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str_unchecked`]).
+	/// * `full_wire` — the full rev-2 `Value` wire. `Value`'s derived `PartialEq` (`==`) equates a
+	///   regex only with a regex of the same pattern, and a regex's wire holds its pattern and
+	///   nothing else, so byte equality against it decides `==` for every field.
 	Regex {
 		regex: Arc<crate::val::Regex>,
+		full_wire: Vec<u8>,
 	},
 	/// Everything else — the wire-fast path doesn't apply. Callers retain
 	/// the original [`Value`] separately (on `PredNode::Leaf::literal`,
@@ -244,9 +250,15 @@ impl LiteralWire {
 					full_wire: full,
 				}
 			}
-			Value::Regex(r) => LiteralWire::Regex {
-				regex: Arc::new(r.clone()),
-			},
+			Value::Regex(r) => {
+				let mut full = Vec::new();
+				lit.serialize_revisioned(&mut full)
+					.expect("serialize Value::Regex never errors into Vec");
+				LiteralWire::Regex {
+					regex: Arc::new(r.clone()),
+					full_wire: full,
+				}
+			}
 			_ => LiteralWire::Other,
 		}
 	}
@@ -640,6 +652,27 @@ mod tests {
 				other => panic!("expected Canonical for {lit:?}, got {other:?}"),
 			}
 		}
+	}
+
+	#[test]
+	fn from_value_regex_round_trips() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let lit = Value::Regex(Regex::from_str("^a.c$").unwrap());
+		let LiteralWire::Regex {
+			regex,
+			full_wire,
+		} = LiteralWire::from_value(&lit)
+		else {
+			panic!("expected Regex variant");
+		};
+		assert_eq!(regex.inner().as_str(), "^a.c$");
+		let mut r: &[u8] = &full_wire;
+		let decoded =
+			<Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).unwrap();
+		assert_eq!(decoded, lit);
+		assert!(r.is_empty(), "`full_wire` is one whole value");
 	}
 
 	#[test]

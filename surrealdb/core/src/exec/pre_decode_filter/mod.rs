@@ -911,6 +911,115 @@ mod tests {
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
 
+	/// `==` is `Value`'s derived `PartialEq`, under which a regex equals only a
+	/// regex with the same pattern. `=` and `!=` are `Value::equal`, which also
+	/// matches a regex against every string it matches. A comparison with a
+	/// regex literal judged on the wire — as a leaf of its own, or fused with
+	/// another comparison into one scan of the row object — must reject a
+	/// record only where the predicate, evaluated by `apply_binary` on the
+	/// decoded fields, is false.
+	#[test]
+	fn equality_with_a_regex_literal_rejects_only_where_the_predicate_is_false() {
+		use super::{PreDecodeShape, apply_binary};
+
+		/// What `shape` evaluates to on the decoded `row`.
+		fn holds(shape: &PreDecodeShape, row: &Object) -> bool {
+			match shape {
+				PreDecodeShape::And(parts) => parts.iter().all(|part| holds(part, row)),
+				PreDecodeShape::Or(parts) => parts.iter().any(|part| holds(part, row)),
+				PreDecodeShape::Not(inner) => !holds(inner, row),
+				PreDecodeShape::Leaf {
+					path,
+					op,
+					literal,
+					reversed,
+				} => {
+					assert_eq!(path.len(), 1, "a root field");
+					let field = row.get(path[0].as_str()).cloned().unwrap_or(Value::None);
+					let (left, right) = if *reversed {
+						(literal, &field)
+					} else {
+						(&field, literal)
+					};
+					match apply_binary(op, left, right) {
+						Some(Value::Bool(answer)) => answer,
+						other => panic!("{op:?} answered {other:?}"),
+					}
+				}
+			}
+		}
+
+		let regex = |pattern: &str| Value::Regex(pattern.parse().expect("regex"));
+		let field_leaf =
+			|name: &str, op: BinaryOperator, literal: Value, reversed: bool| PreDecodeShape::Leaf {
+				path: vec![PathSegment::from(name)].into(),
+				op,
+				literal,
+				reversed,
+			};
+		// True on every row below, so a conjunction with it is true exactly
+		// where the regex comparison is.
+		let n_is_one = field_leaf("n", BinaryOperator::Equal, Value::Number(Number::Int(1)), false);
+		let stored_v = [
+			Some(Value::from("abc")),
+			Some(Value::from("xyz")),
+			Some(regex("a.*")),
+			Some(regex("x")),
+			Some(Value::Number(Number::Int(1))),
+			None,
+		];
+
+		let mut wrong = Vec::new();
+		for op in [BinaryOperator::ExactEqual, BinaryOperator::Equal, BinaryOperator::NotEqual] {
+			for reversed in [false, true] {
+				let leaf = field_leaf("v", op.clone(), regex("a.*"), reversed);
+				let conjunction = PreDecodeShape::And(vec![leaf.clone(), n_is_one.clone()]);
+				// Each shape with whether its comparisons fuse into one scan.
+				let shapes = [
+					(leaf.clone(), false),
+					(PreDecodeShape::Not(Box::new(leaf)), false),
+					(conjunction.clone(), true),
+					(PreDecodeShape::Not(Box::new(conjunction)), true),
+				];
+				for (shape, fused) in &shapes {
+					let pf = shape.filter(TEST_DEPTH_LIMIT);
+					let comparison = match &pf.root {
+						PredNode::Not(inner) => inner.as_ref(),
+						root => root,
+					};
+					if *fused {
+						assert!(
+							matches!(comparison, PredNode::FusedFlatMapAnd { .. }),
+							"{shape:?} built {:?}",
+							pf.root
+						);
+					} else {
+						assert!(
+							matches!(comparison, PredNode::Leaf { .. }),
+							"{shape:?} built {:?}",
+							pf.root
+						);
+					}
+					for v in &stored_v {
+						let mut fields =
+							BTreeMap::from([(Strand::from("n"), Value::Number(Number::Int(1)))]);
+						if let Some(v) = v {
+							fields.insert(Strand::from("v"), v.clone());
+						}
+						let row = Object::from(fields);
+						let rec = wire_record_plain_object(row.clone());
+						if pf.apply(&[], &rec) == PreDecodeFilterOutcome::Reject
+							&& holds(shape, &row)
+						{
+							wrong.push(format!("{shape:?} on v = {v:?}"));
+						}
+					}
+				}
+			}
+		}
+		assert!(wrong.is_empty(), "rejected records the predicate holds for: {wrong:#?}");
+	}
+
 	#[test]
 	fn eval_set_membership_hits_returns_need_full_decode_for_inside() {
 		let set = Arc::new(HashSet::from([Value::Number(Number::Int(1))]));
