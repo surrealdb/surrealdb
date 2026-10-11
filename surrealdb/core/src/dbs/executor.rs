@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow, bail};
 use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use rand::Rng;
-use surrealdb_datastore::close::CommitAction;
+use surrealdb_datastore::close::{AfterCommitWait, AfterCommitWaits, CommitAction};
 use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 use web_time::Instant;
@@ -2253,12 +2253,21 @@ impl Executor {
 		#[cfg(test)]
 		let live_or_kill =
 			matches!(&stmt, TopLevelStatement::Ast(TopLevelExpr::Live(_) | TopLevelExpr::Kill(_)));
-		let txn = Arc::new(
-			kvs.transaction(transaction_type)
-				.await?
-				.with_tenant_identity(self.ctx.tenant_identity().cloned())
-				.with_write_keys_limit(kvs.transaction_max_write_keys()),
-		);
+		let txn = kvs
+			.transaction(transaction_type)
+			.await?
+			.with_tenant_identity(self.ctx.tenant_identity().cloned())
+			.with_write_keys_limit(kvs.transaction_max_write_keys());
+		// A blocking `REBUILD INDEX` commits its catalog change first and its
+		// build is awaited below, once the commit has applied: the build commits
+		// far more writes than a transaction can stay open across on an
+		// optimistic storage engine. Any other statement leaves nothing for after
+		// its commit, and pays nothing for the queue.
+		let after_commit = stmt.awaits_its_build_after_commit().then(AfterCommitWaits::default);
+		let txn = Arc::new(match &after_commit {
+			Some(waits) => txn.with_after_commit_waits(waits),
+			None => txn,
+		});
 		let receiver = self.prepare_broker(
 			matches!(transaction_type, TransactionType::Write),
 			kvs.live_query_broker(),
@@ -2306,6 +2315,17 @@ impl Executor {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
+				// Stands in for a lost commit of a statement whose build has
+				// started and is queued for after the commit.
+				#[cfg(test)]
+				if after_commit.is_some()
+					&& let Err(e) = crate::kvs::testing::maybe_inject_retryable_conflict(
+						crate::kvs::testing::RetryableConflictSite::AwaitedBuildCommit,
+						self.ctx.node_id(),
+					) {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
 
 				if let Err(e) = txn.commit().await {
 					// Propagate a transaction conflict unwrapped so its
@@ -2336,6 +2356,15 @@ impl Executor {
 					Self::flush_live_query_notifications(prepared);
 				}
 
+				// The statement's result is not settled until the work it left for
+				// after the commit is: a blocking build that fails fails the
+				// statement.
+				if let Some(waits) = after_commit {
+					for wait in waits.take().await {
+						self.await_after_commit(kvs, wait, budget).await?;
+					}
+				}
+
 				Ok(value)
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
@@ -2346,6 +2375,61 @@ impl Executor {
 				let _ = txn.cancel().await;
 				Err(e)
 			}
+		}
+	}
+
+	/// Await `wait`, work a statement left for after its commit, for no longer
+	/// than what remains of `budget` and of the query's deadline, and only
+	/// while the query is not cancelled. The time waited is taken from
+	/// `budget`.
+	///
+	/// The statement has committed by the time this runs, and the work carries
+	/// on in the background once nothing waits for it. Running out of time is
+	/// therefore reported as [`DatastoreError::IndexBuildOutlastedTimeout`],
+	/// naming the timeout that ran out, and cancellation as
+	/// [`DatastoreError::IndexBuildWaitCancelled`]: never as a transaction or
+	/// query that did not complete.
+	async fn await_after_commit(
+		&self,
+		kvs: &Datastore,
+		wait: Box<dyn AfterCommitWait>,
+		budget: &mut Option<Duration>,
+	) -> Result<()> {
+		// The sooner of the two bounds applies, paired with the timeout to
+		// report should it run out: the configured transaction timeout for the
+		// request's budget, the query's own timeout for its deadline. Settled
+		// here rather than read back from the clock once the timer fires, which
+		// cannot tell two bounds apart that end close together.
+		let query = self.ctx.timeout().zip(self.ctx.deadline_timeout());
+		let transaction = |left: Duration| (left, kvs.transaction_timeout().unwrap_or(left));
+		let bound = match (*budget, query) {
+			(Some(left), Some((until, _))) if left <= until => Some(transaction(left)),
+			(_, Some(query)) => Some(query),
+			(Some(left), None) => Some(transaction(left)),
+			(None, None) => None,
+		};
+		let waiting = Instant::now();
+		let waited = async {
+			match bound {
+				Some((after, timeout)) => {
+					common::time::timeout(after, wait.wait()).await.map_err(|_| timeout)
+				}
+				None => Ok(wait.wait().await),
+			}
+		};
+		let outcome = match self.ctx.cancel_token() {
+			Some(token) => tokio::select! {
+				outcome = waited => outcome,
+				_ = token.cancelled() => bail!(DatastoreError::IndexBuildWaitCancelled),
+			},
+			None => waited.await,
+		};
+		if let Some(left) = budget.as_mut() {
+			*left = left.saturating_sub(waiting.elapsed());
+		}
+		match outcome {
+			Ok(result) => result,
+			Err(timeout) => bail!(DatastoreError::IndexBuildOutlastedTimeout(timeout.into())),
 		}
 	}
 

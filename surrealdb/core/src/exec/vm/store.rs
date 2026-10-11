@@ -1293,10 +1293,19 @@ async fn step_inner(
 			let options = ctx.options().cloned().ok_or_else(|| {
 				ControlFlow::Err(anyhow!("an index built without the session's options"))
 			})?;
-			builder
-				.run(frozen, options, table.table_id, std::sync::Arc::new(index), *blocking)
-				.await
-				.map_err(ControlFlow::Err)?;
+			let index = std::sync::Arc::new(index);
+			// A fresh definition is staged in this transaction and taken back if
+			// its build fails, so its build is awaited inside the transaction. A
+			// rebuilt index is already defined: its build is awaited after the
+			// commit wherever the transaction's owner offers that.
+			if *blocking && !*fresh {
+				builder
+					.run_awaited_after_commit(frozen, options, table.table_id, index, &ctx.txn())
+					.await
+			} else {
+				builder.run(frozen, options, table.table_id, index, *blocking).await
+			}
+			.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::SharesDocIds {
 			index,

@@ -10,7 +10,7 @@ use anyhow::{Result, ensure};
 use chrono::Utc;
 use common::time::sleep;
 use futures::channel::oneshot::{Receiver, Sender, channel};
-use surrealdb_datastore::close::{CommitAction, RollbackAction};
+use surrealdb_datastore::close::{AfterCommitWait, CommitAction, RollbackAction};
 use tokio::sync::{Notify, OnceCell, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -132,7 +132,7 @@ pub(crate) struct IndexBuilder {
 }
 
 enum BuildStart {
-	Started,
+	Started(IndexBuilding),
 	RemoteOwner(IndexBuilding),
 }
 
@@ -192,7 +192,7 @@ impl IndexBuilder {
 		};
 		building.defer_ownership_release(ctx).await;
 		self.start_acquired_building(Arc::clone(&building), acquired, sdr).await?;
-		Ok(BuildStart::Started)
+		Ok(BuildStart::Started(building))
 	}
 
 	async fn start_acquired_building(
@@ -343,6 +343,24 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
+		Ok(self.build_started(ctx, opt, tb, ix, blocking).await?.0)
+	}
+
+	/// [`Self::build`], also handing back the build this node started, if it
+	/// started one rather than waiting for or leaving it to a remote owner.
+	///
+	/// Refuses an index whose kernel this binary left out before anything is
+	/// started, so the statement that asked for the build fails rather than
+	/// commits a definition no build can serve.
+	async fn build_started(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		blocking: bool,
+	) -> Result<(Option<Receiver<Result<()>>>, Option<IndexBuilding>)> {
+		crate::idx::check_index_kernel(&ix.index)?;
 		expect_not_prepare_remove(&ix)?;
 		// A build started by the calling transaction changes what its later
 		// writes must decide about every index.
@@ -366,12 +384,12 @@ impl IndexBuilder {
 			);
 		}
 		match self.start_building(ctx, opt, tb, ix, key, sdr).await? {
-			BuildStart::Started => Ok(rcv),
+			BuildStart::Started(building) => Ok((rcv, Some(building))),
 			BuildStart::RemoteOwner(building) if blocking => {
 				self.wait_for_remote_building(ctx, building).await?;
-				Ok(None)
+				Ok((None, None))
 			}
-			BuildStart::RemoteOwner(_) => Ok(None),
+			BuildStart::RemoteOwner(_) => Ok((None, None)),
 		}
 	}
 
@@ -385,12 +403,47 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<()> {
-		crate::idx::check_index_kernel(&ix.index)?;
 		match self.build(ctx, opt, tb, ix, blocking).await? {
 			Some(rcv) => rcv.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
 				reason: "Channel shutdown".to_string(),
 			})?,
 			None => Ok(()),
+		}
+	}
+
+	/// Build index `ix` of table `tb` for a blocking statement whose
+	/// transaction stages nothing the build depends on, waiting for the build
+	/// after `txn` commits when the transaction's owner awaits work queued
+	/// for then, and inline otherwise.
+	///
+	/// The caller is a `REBUILD INDEX`: its index is already defined, and the
+	/// build is handed the definition it builds, so it reads nothing the
+	/// statement stages; a failed build leaves the index in `Error` for the next
+	/// rebuild rather than anything to take back. Awaiting after the commit
+	/// keeps the statement's transaction short: held open across the build's
+	/// own commits, it would outlast the write history an optimistic storage
+	/// engine validates a commit against, and fail once the build had already
+	/// published.
+	///
+	/// A build awaited after the commit is still running when `txn` closes, so
+	/// it is aborted should `txn` not commit (see [`AbortUncommittedRebuild`]).
+	pub(crate) async fn run_awaited_after_commit(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+		txn: &Transaction,
+	) -> Result<()> {
+		let (Some(rcv), Some(building)) = self.build_started(ctx, opt, tb, ix, true).await? else {
+			return Ok(());
+		};
+		match txn.wait_after_commit(Box::new(AwaitedBuild(rcv))).await {
+			None => {
+				txn.on_rollback(Box::new(AbortUncommittedRebuild(building))).await;
+				Ok(())
+			}
+			Some(inline) => inline.wait().await,
 		}
 	}
 
@@ -2608,6 +2661,40 @@ impl RollbackAction for ReleaseBuildOwnership {
 		Box::pin(async move {
 			(*self).release().await;
 			Ok(())
+		})
+	}
+}
+
+/// Aborts a rebuild awaited after its statement's commit, should that
+/// statement not commit.
+///
+/// The build starts before the commit and is handed the definition the
+/// statement stages. A statement that does not commit leaves the catalog on the
+/// definition from before it, so a build left to finish would publish a layout
+/// that definition does not describe. Aborted, the generation ends in `Error`,
+/// reported as `aborted`, for the next `REBUILD INDEX` to retry.
+struct AbortUncommittedRebuild(IndexBuilding);
+
+impl RollbackAction for AbortUncommittedRebuild {
+	fn run(
+		self: Box<Self>,
+		_drain_started_at: Instant,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		self.0.abort();
+		Box::pin(async { Ok(()) })
+	}
+}
+
+/// The outcome of a blocking build, awaited once the statement that started it
+/// has committed (see [`IndexBuilder::run_awaited_after_commit`]).
+struct AwaitedBuild(Receiver<Result<()>>);
+
+impl AfterCommitWait for AwaitedBuild {
+	fn wait(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			self.0.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
+				reason: "Channel shutdown".to_string(),
+			})?
 		})
 	}
 }

@@ -52,6 +52,11 @@ pub enum RetryableConflictSite {
 	/// around a block that runs LIVE or KILL). Raised in place of that commit,
 	/// discarding its writes as a real lost commit does.
 	LiveKillCommit,
+	/// A conflict on the commit of a statement that left a blocking index
+	/// build to await after it (a standalone, blocking `REBUILD INDEX`).
+	/// Raised in place of that commit, once the build has started, discarding
+	/// the statement's writes as a real lost commit does.
+	AwaitedBuildCommit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

@@ -55,7 +55,9 @@ use web_time::Instant;
 use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
-use crate::close::{CommitAction, RollbackAction};
+use crate::close::{
+	AfterCommitQueue, AfterCommitWait, AfterCommitWaits, CommitAction, RollbackAction,
+};
 use crate::index_shapes::{IndexShapes, ShapeRecorder, TableIndexShapes, ValueShape};
 use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 use crate::key::schema::{
@@ -356,6 +358,14 @@ pub struct Transaction {
 	/// Drained by [`Self::cancel`] and by a failed commit; discarded once the
 	/// commit succeeds.
 	rollback_actions: Mutex<Vec<Box<dyn RollbackAction>>>,
+	/// Work queued for this transaction's owner to await once it has committed.
+	///
+	/// `None` unless the owner promised to await it, by building the
+	/// transaction [`Self::with_after_commit_waits`]: a statement that finds no
+	/// queue does its work inline instead. Held weakly, because the owner holds
+	/// the queue (see [`AfterCommitWaits`]); discarded by [`Self::cancel`] and
+	/// by a failed commit.
+	after_commit_waits: Option<std::sync::Weak<AfterCommitQueue>>,
 	/// Per-table memo of the settled `graph_doc_ids` marker, backing
 	/// [`Self::graph_doc_ids_settled`]. The first read per table is locked
 	/// (`getu`), and its conflict registration covers the rest of the
@@ -1054,6 +1064,7 @@ impl Transaction {
 			provisional_save_points: Mutex::new(Vec::new()),
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
+			after_commit_waits: None,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		}
 	}
@@ -1380,6 +1391,34 @@ impl Transaction {
 	/// See [`Self::commit_actions`] for why an effect waits.
 	pub async fn on_commit(&self, action: Box<dyn CommitAction>) {
 		self.commit_actions.lock().await.push(action);
+	}
+
+	/// Accept work that statements leave for the owner to await after commit.
+	///
+	/// An owner that builds its transaction this way takes on awaiting whatever
+	/// is queued with [`Self::wait_after_commit`] — taken from `waits` once
+	/// [`Self::commit`] has succeeded — and reporting its outcome as the
+	/// statement's.
+	pub fn with_after_commit_waits(mut self, waits: &AfterCommitWaits) -> Self {
+		self.after_commit_waits = Some(waits.downgrade());
+		self
+	}
+
+	/// Queue work for the owner to await once this transaction has committed.
+	///
+	/// Hands the work back when the owner made no such promise, or has since
+	/// gone, so the caller does it inline.
+	pub async fn wait_after_commit(
+		&self,
+		wait: Box<dyn AfterCommitWait>,
+	) -> Option<Box<dyn AfterCommitWait>> {
+		match self.after_commit_waits.as_ref().and_then(std::sync::Weak::upgrade) {
+			Some(waits) => {
+				waits.lock().await.push(wait);
+				None
+			}
+			None => Some(wait),
+		}
 	}
 
 	/// Queue work to run if this transaction does not commit.
@@ -4564,6 +4603,7 @@ impl Transaction {
 			provisional_save_points: Mutex::new(Vec::new()),
 			commit_actions: Mutex::new(Vec::new()),
 			rollback_actions: Mutex::new(Vec::new()),
+			after_commit_waits: None,
 			graph_doc_ids_settled: Mutex::new(HashMap::new()),
 		};
 		Some(Speculation {
@@ -5354,12 +5394,16 @@ impl Transaction {
 		}
 	}
 
-	/// Drop the queued commit actions without running them.
+	/// Drop the queued commit actions and after-commit waits without running
+	/// them.
 	///
-	/// Invoked on cancel and on commit failure: the change each action answers to
-	/// never became durable, so the effect must not happen either.
+	/// Invoked on cancel and on commit failure: the change each answers to never
+	/// became durable, so the effect must not happen either.
 	async fn discard_commit_actions(&self) {
 		self.commit_actions.lock().await.clear();
+		if let Some(waits) = self.after_commit_waits.as_ref().and_then(std::sync::Weak::upgrade) {
+			waits.lock().await.clear();
+		}
 	}
 
 	// --------------------------------------------------
