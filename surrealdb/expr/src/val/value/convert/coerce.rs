@@ -180,33 +180,25 @@ impl Coerce for Null {
 }
 
 impl Coerce for i64 {
+	/// A number coerces exactly when it denotes one `i64`, which is what
+	/// `coerce` checks too: the two must agree, because a union kind coerces
+	/// to the first member `can_coerce` accepts and then requires `coerce` to
+	/// succeed.
 	fn can_coerce(v: &Value) -> bool {
-		let Value::Number(n) = v else {
-			return false;
-		};
-		match n {
-			Number::Int(_) => true,
-			Number::Float(f) => f.fract() == 0.0,
-			Number::Decimal(d) => i64::try_from(*d).is_ok(),
-		}
+		matches!(v, Value::Number(n) if n.as_int_lossless().is_some())
 	}
 
 	fn coerce(val: Value) -> Result<Self, CoerceError> {
 		match val {
 			// Allow any int number
 			Value::Number(Number::Int(v)) => Ok(v),
-			// Attempt to convert an float number
-			Value::Number(Number::Float(v)) if v.fract() == 0.0 => Ok(v as i64),
-			// Attempt to convert a decimal number
-			Value::Number(Number::Decimal(v)) if v.is_integer() => match v.try_into() {
-				// The Decimal can be represented as an i64
-				Ok(v) => Ok(v),
-				// The Decimal is out of bounds
-				_ => Err(CoerceError::InvalidKind {
-					from: val,
-					into: "int".into(),
-				}),
-			},
+			// A float or decimal coerces only when it is a whole number within
+			// the `i64` range. Anything else is refused, never rounded or
+			// clamped to the nearest bound.
+			Value::Number(n) => n.as_int_lossless().ok_or_else(|| CoerceError::InvalidKind {
+				from: val,
+				into: "int".into(),
+			}),
 			// Anything else raises an error
 			_ => Err(CoerceError::InvalidKind {
 				from: val,
@@ -1060,5 +1052,161 @@ mod tests {
 		let kind = Kind::Table(vec![]);
 		let result = value.coerce_to_kind(&kind);
 		assert!(result.is_err()); // Coercion from string is strict
+	}
+
+	fn float(f: f64) -> Value {
+		Value::Number(Number::Float(f))
+	}
+
+	fn decimal(mantissa: i128, scale: u32) -> Value {
+		Value::Number(Number::Decimal(Decimal::from_i128_with_scale(mantissa, scale)))
+	}
+
+	#[test]
+	fn test_coerce_float_to_int_accepts_whole_floats_in_range() {
+		assert_eq!(float(5.0).coerce_to::<i64>().unwrap(), 5);
+		assert_eq!(float(-5.0).coerce_to::<i64>().unwrap(), -5);
+		// Negative zero is the integer zero
+		assert_eq!(float(-0.0).coerce_to::<i64>().unwrap(), 0);
+		// 2^53: every smaller integer is also an f64
+		assert_eq!(
+			float(9_007_199_254_740_992.0).coerce_to::<i64>().unwrap(),
+			9_007_199_254_740_992
+		);
+		// -2^63 is `i64::MIN`
+		assert_eq!(float(i64::MIN as f64).coerce_to::<i64>().unwrap(), i64::MIN);
+		// The largest f64 below 2^63
+		assert_eq!(float(2f64.powi(63) - 1024.0).coerce_to::<i64>().unwrap(), i64::MAX - 1023);
+	}
+
+	#[test]
+	fn test_coerce_float_to_int_refuses_what_is_not_one_i64() {
+		for f in [
+			// 2^63: one past `i64::MAX`, which `i64::MAX as f64` also rounds up to
+			2f64.powi(63),
+			i64::MAX as f64,
+			// The f64 below -2^63
+			-2f64.powi(63) - 2048.0,
+			1e30,
+			-1e30,
+			f64::MAX,
+			f64::MIN,
+			f64::NAN,
+			f64::INFINITY,
+			f64::NEG_INFINITY,
+			0.5,
+			-0.5,
+		] {
+			let err = float(f).coerce_to::<i64>().unwrap_err();
+			assert!(
+				matches!(&err, CoerceError::InvalidKind { into, .. } if into == "int"),
+				"{f} should be refused as an int, got: {err}"
+			);
+			assert!(!float(f).can_coerce_to::<i64>(), "{f} must not report as coercible to int");
+		}
+	}
+
+	#[test]
+	fn test_coerce_float_out_of_range_refused_like_decimal() {
+		// A float and a decimal out of the `i64` range fail the same way
+		let float_err = float(1e30).coerce_to::<i64>().unwrap_err();
+		let decimal_err = decimal(10_000_000_000_000_000_000, 0).coerce_to::<i64>().unwrap_err();
+		assert!(matches!(float_err, CoerceError::InvalidKind { ref into, .. } if into == "int"));
+		assert!(matches!(decimal_err, CoerceError::InvalidKind { ref into, .. } if into == "int"));
+	}
+
+	/// Numbers of every shape that matter to an `int`: the bounds, the first
+	/// value past each bound, fractions, and the non-finite floats.
+	fn number_battery() -> Vec<Value> {
+		let mut out = vec![
+			Value::Number(Number::Int(0)),
+			Value::Number(Number::Int(i64::MIN)),
+			Value::Number(Number::Int(i64::MAX)),
+			decimal(0, 0),
+			decimal(15, 1),
+			decimal(-15, 1),
+			// A whole decimal carrying a trailing scale
+			decimal(50, 1),
+			decimal(i64::MAX as i128, 0),
+			decimal(i64::MAX as i128 + 1, 0),
+			decimal(i64::MIN as i128, 0),
+			decimal(i64::MIN as i128 - 1, 0),
+			decimal(10_000_000_000_000_000_000, 0),
+			// Fractional and out of range at once
+			decimal(100_000_000_000_000_000_005, 1),
+			Value::Number(Number::Decimal(Decimal::MAX)),
+			Value::Number(Number::Decimal(Decimal::MIN)),
+		];
+		for f in [
+			0.0,
+			-0.0,
+			5.0,
+			0.5,
+			-0.5,
+			1e30,
+			-1e30,
+			i64::MAX as f64,
+			i64::MIN as f64,
+			f64::MAX,
+			f64::MIN,
+			f64::MIN_POSITIVE,
+			f64::NAN,
+			f64::INFINITY,
+			f64::NEG_INFINITY,
+		] {
+			out.push(float(f));
+		}
+		out
+	}
+
+	#[test]
+	fn test_can_coerce_agrees_with_coerce_for_numbers() {
+		// A union kind coerces to the first member `can_coerce_to_kind`
+		// accepts and treats a failure there as unreachable, so the two must
+		// never disagree.
+		for value in number_battery() {
+			for kind in [Kind::Int, Kind::Float, Kind::Decimal, Kind::Number] {
+				assert_eq!(
+					value.can_coerce_to_kind(&kind),
+					value.clone().coerce_to_kind(&kind).is_ok(),
+					"can_coerce and coerce disagree for {value:?} into {}",
+					kind.to_sql()
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn test_coerce_union_with_int_never_claims_a_value_it_cannot_coerce() {
+		let fractional = decimal(15, 1);
+		let huge = float(1e30);
+		let unions = [
+			Kind::Either(vec![Kind::Int, Kind::String]),
+			Kind::Either(vec![Kind::None, Kind::Int]),
+			Kind::Array(Box::new(Kind::Either(vec![Kind::Int, Kind::String])), None),
+		];
+		for kind in &unions {
+			let wrap = |v: Value| match kind {
+				Kind::Array(..) => Value::Array(Array(vec![v])),
+				_ => v,
+			};
+			assert!(wrap(fractional.clone()).coerce_to_kind(kind).is_err());
+			assert!(wrap(huge.clone()).coerce_to_kind(kind).is_err());
+		}
+		// An alternative that can hold the value is still reached
+		let either = Kind::Either(vec![Kind::Int, Kind::Float]);
+		assert!(matches!(
+			huge.coerce_to_kind(&either).unwrap(),
+			Value::Number(Number::Float(f)) if f == 1e30
+		));
+		assert!(matches!(
+			fractional.coerce_to_kind(&either).unwrap(),
+			Value::Number(Number::Float(f)) if f == 1.5
+		));
+		// An in-range whole float is the first member's int
+		assert!(matches!(
+			float(5.0).coerce_to_kind(&either).unwrap(),
+			Value::Number(Number::Int(5))
+		));
 	}
 }
