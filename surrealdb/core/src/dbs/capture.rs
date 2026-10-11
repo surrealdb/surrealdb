@@ -36,7 +36,6 @@ mod tests {
 
 	use super::*;
 	use crate::ctx::Context;
-	use crate::expr::Expr;
 	use crate::expr::visit::Visit;
 	use crate::val::Value;
 
@@ -47,7 +46,7 @@ mod tests {
 			ctx.add_value(name.to_string(), Arc::new(Value::from(1)));
 		}
 		let ctx = ctx.freeze();
-		let expr = Expr::from(crate::syn::expr(src).expect("expression should parse"));
+		let expr = crate::syn::expr(src).expect("expression should parse");
 		let mut captures = Variables::default();
 		let _ = expr.visit(&mut ParameterCapturePass {
 			context: &ctx,
