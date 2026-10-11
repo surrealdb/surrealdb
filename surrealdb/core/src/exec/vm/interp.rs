@@ -471,8 +471,14 @@ pub(super) struct State {
 	/// read of a table named in the text stops at its statement's `LIMIT`.
 	/// Taken by that read.
 	pub(super) scan_hint: Option<u32>,
-	/// Whether a row has reached a paging instruction since the flag was
-	/// last cleared, for a region's batch that leaves the paging to its merge.
+	/// The paging clause a region's batch counts its rows against, which the
+	/// batch leaves to its merge: `None` for a state that runs no such batch.
+	pub(super) batch_paging: Option<u16>,
+	/// Whether a row has executed the paging instruction of
+	/// [`batch_paging`](Self::batch_paging) since the flag was last cleared.
+	/// A statement nested in the row's own expressions pages the rows it reads
+	/// by clauses of its own, which say nothing of whether the row is taken,
+	/// so no instruction of another clause sets it.
 	pub(super) reached_paging: bool,
 	/// Which of [`Program::reservations`] a draw has taken: each is taken
 	/// once, by the first run of the draw that reserved it.
@@ -925,6 +931,7 @@ impl State {
 			build_budget,
 			zeroed,
 			scan_hint,
+			batch_paging,
 			reached_paging,
 			reserved_taken,
 			units,
@@ -1000,6 +1007,7 @@ impl State {
 		*build_budget = usize::MAX;
 		*zeroed = false;
 		*scan_hint = None;
+		*batch_paging = None;
 		*reached_paging = false;
 		emptied(reserved_taken);
 		*units = None;
@@ -1257,6 +1265,7 @@ impl State {
 			build_budget: usize::MAX,
 			zeroed: false,
 			scan_hint: None,
+			batch_paging: None,
 			reached_paging: false,
 			reserved_taken: Vec::new(),
 			units: None,
@@ -1329,6 +1338,16 @@ impl State {
 
 	pub(super) fn take_output(&mut self) -> Vec<Value> {
 		std::mem::take(&mut self.output)
+	}
+
+	/// Note that the row has executed the paging instruction of clause
+	/// `limit`, when `limit` is the clause the batch this state runs counts
+	/// its rows against.
+	#[inline]
+	fn reach_paging(&mut self, limit: u16) {
+		if self.batch_paging == Some(limit) {
+			self.reached_paging = true;
+		}
 	}
 
 	/// Take the row just pushed onto sort `sort` into the rows it keeps, when
@@ -2973,7 +2992,7 @@ pub(super) fn run_row<'r>(
 				limit,
 				target,
 			} => {
-				state.reached_paging = true;
+				state.reach_paging(*limit);
 				let paging = &mut state.paging[*limit as usize];
 				if paging.skip > 0 {
 					paging.skip -= 1;
@@ -2985,7 +3004,7 @@ pub(super) fn run_row<'r>(
 			Instr::Take {
 				limit,
 			} => {
-				state.reached_paging = true;
+				state.reach_paging(*limit);
 				if let Some(remaining) = &mut state.paging[*limit as usize].remaining {
 					*remaining = remaining.saturating_sub(1);
 				}

@@ -418,7 +418,9 @@ struct BatchResult {
 
 /// How one row of a paged body's batch ended.
 struct RowEnd {
-	/// Whether the row reached its paging.
+	/// Whether the row reached the paging clause the batch counts its rows
+	/// against ([`State::batch_paging`]): a row a filter refuses never does,
+	/// whatever clauses of their own the statements nested in the filter run.
 	reached: bool,
 	/// Whether the batch skipped the row itself, as one `START` was sure to
 	/// skip.
@@ -1295,6 +1297,7 @@ async fn batch_state(
 		paging[limit as usize].skip = skip;
 	}
 	let mut state = State::sharing(program, paging, under.shared);
+	state.batch_paging = paged.map(|(limit, _)| limit);
 	// A worker's task draws on its own thread's fuel, no more than the
 	// statement's quantum before its first yield.
 	super::fuel::cap(super::fuel::quantum(ctx));

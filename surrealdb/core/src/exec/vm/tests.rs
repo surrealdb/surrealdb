@@ -827,6 +827,12 @@ async fn a_paged_region_answers_what_the_serial_run_answers() {
 	// the merged batches show a filter passing few rows and the window widens
 	// past the rows the limit leaves; row 2500 fails `<int>`.
 	let sparse = "(n % 100 = 0 OR n > 2450)";
+	// Per-row statements, each answering `n + 1` for row `n`, that page the
+	// two values they read from `$parent` with a `LIMIT` and with a `START`.
+	let nested_top = "(SELECT VALUE v FROM [{ v: $parent.n }, { v: $parent.n + 1 }] \
+		ORDER BY v DESC LIMIT 1)[0]";
+	let nested_skipped = "(SELECT VALUE v FROM [{ v: $parent.n }, { v: $parent.n + 1 }] \
+		ORDER BY v LIMIT 1 START 1)[0]";
 	let cases = [
 		("SELECT n, $this.s AS s FROM t LIMIT 1000".to_owned(), true, Ok(1000)),
 		("SELECT n, $this.s AS s FROM t LIMIT 1".to_owned(), true, Ok(1)),
@@ -880,6 +886,20 @@ async fn a_paged_region_answers_what_the_serial_run_answers() {
 			Err(()),
 		),
 		("SELECT n, $this.s AS s FROM t WHERE <int> $this.s >= 0 LIMIT 0".to_owned(), true, Ok(0)),
+		// A statement nested per row with a paging clause of its own: a row
+		// reaches the body's paging only by passing the filter, whatever the
+		// nested statement's own `LIMIT` and `START` take of the rows beneath
+		// it. Row `n` passes where `n + 1` is 1 modulo 97.
+		(format!("SELECT n FROM t WHERE {nested_top} % 97 = 1 LIMIT 5"), true, Ok(5)),
+		(format!("SELECT n FROM t WHERE {nested_top} % 97 = 1 LIMIT 3 START 1"), true, Ok(3)),
+		(format!("SELECT n FROM t WHERE {nested_skipped} % 97 = 1 LIMIT 5"), true, Ok(5)),
+		(
+			format!(
+				"SELECT n FROM t WHERE {nested_top} % 97 = 1 AND {nested_skipped} >= 0 LIMIT 4 START 2"
+			),
+			true,
+			Ok(4),
+		),
 	];
 	let handed = super::region::HANDED_TO_WORKERS.load(std::sync::atomic::Ordering::Relaxed);
 	for (sql, is_region, expected) in &cases {
