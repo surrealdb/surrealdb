@@ -1179,15 +1179,17 @@ description = "Run SurrealQL language tests with specified engine"
 script = """
     #!/bin/bash -ex
     cd language-tests
+    # The runner embeds the engine, so the `devopt` profile (see its comment in
+    # language-tests/Cargo.toml) sets how fast every query in the suite runs.
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
-        cargo build --locked --features ${_TEST_LANG_FEATURES}
+        cargo build --locked --profile devopt --features ${_TEST_LANG_FEATURES}
     else
-        cargo build --locked
+        cargo build --locked --profile devopt
     fi
     if [ "${_TEST_API_ENGINE}" = "tikv" ]; then
-        ./target/debug/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
+        ./target/devopt/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
     else
-        ./target/debug/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
+        ./target/devopt/surrealql-test --color always run --no-wip --jobs 12 --backend ${_TEST_API_ENGINE}
     fi
 """
 

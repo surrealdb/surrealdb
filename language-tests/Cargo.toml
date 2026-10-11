@@ -155,3 +155,15 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.base64ct]
 opt-level = 3
+
+# `dev` with optimised code, for the CI language-test lanes, which run thousands
+# of queries through an in-process engine. This mirrors `devopt` in the root
+# manifest (see the comment there for why it is a separate profile and what the
+# RocksDB override is for) and must be kept in step with it. The crypto
+# overrides above are inherited. Builds land in `target/devopt`.
+[profile.devopt]
+inherits = "dev"
+opt-level = 1
+
+[profile.devopt.package.surrealdb-librocksdb-sys]
+opt-level = 2

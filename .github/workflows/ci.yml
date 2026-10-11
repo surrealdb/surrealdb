@@ -110,7 +110,12 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        run: cargo build --locked --target ${{ env.TARGET }}
+        # `devopt` rather than `dev`: this binary is what the SDK, upgrade,
+        # conformance and MCP lanes execute, so it is built with optimised
+        # workspace code and RocksDB (see `[profile.devopt]` in Cargo.toml).
+        # Consumers download the single file to `target/debug` and are
+        # indifferent to the profile it was built in.
+        run: cargo build --locked --profile devopt --target ${{ env.TARGET }}
 
       - name: Upload artifact
         id: upload-surreal
@@ -118,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: surreal-${{ env.ARTIFACT_ARCH }}
-          path: target/${{ env.TARGET }}/debug/surreal
+          path: target/${{ env.TARGET }}/devopt/surreal
 
       # rust-toolchain.toml pins the toolchain every cargo invocation resolves
       # to, which is not the one the setup action installs targets for, so the
@@ -136,7 +141,7 @@ jobs:
       # of a Rust toolchain.
       - name: Pack Surrealism demo module
         run: >-
-          target/${{ env.TARGET }}/debug/surreal module build --debug
+          target/${{ env.TARGET }}/devopt/surreal module build --debug
           -o ${{ github.workspace }}/demo.surli surrealism/demo
 
       - name: Upload Surrealism demo module

@@ -70,9 +70,9 @@ jobs:
 
       - name: Build binary
         run: |
-          cargo build --locked --target x86_64-unknown-linux-gnu
+          cargo build --locked --profile devopt --target x86_64-unknown-linux-gnu
           mkdir -p artifacts
-          cp target/x86_64-unknown-linux-gnu/debug/surreal artifacts/surreal
+          cp target/x86_64-unknown-linux-gnu/devopt/surreal artifacts/surreal
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
