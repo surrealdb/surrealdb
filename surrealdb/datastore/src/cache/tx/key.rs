@@ -5,7 +5,7 @@ use uuid::Uuid;
 use super::lookup::Lookup;
 use crate::values::catalog_version::CatalogObjectKind;
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub enum Key {
 	/// A cache key for nodes
 	Nds,

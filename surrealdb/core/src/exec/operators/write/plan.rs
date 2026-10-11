@@ -159,8 +159,8 @@ pub(crate) struct WriteFacts {
 	/// `INSERT … ON DUPLICATE KEY UPDATE`: without it an `INSERT` conflict is
 	/// not retried as an update at all.
 	pub(crate) on_duplicate_key_update: bool,
-	/// `INSERT IGNORE`: a create failure this form does not retry is skipped
-	/// rather than raised.
+	/// `INSERT IGNORE`: a duplicate-record or unique-index conflict this form
+	/// does not retry is skipped rather than raised.
 	pub(crate) ignore: bool,
 	/// Whether a schema failure of `UPSERT`'s create attempt may be retried as
 	/// an update carrying the original failure. True for an `UPSERT` that has a
@@ -216,10 +216,12 @@ pub(crate) struct RetryPolicy {
 	/// False for `INSERT` without `ON DUPLICATE KEY UPDATE`, which has no
 	/// updating clause to run.
 	pub(crate) retry_conflict: bool,
-	/// Whether a create failure this policy does not retry is skipped rather
-	/// than raised. True for `INSERT IGNORE`, and for it alone: the row is
-	/// skipped whichever layer raised the failure, so a failure that moves
-	/// layers does not silently stop being ignored.
+	/// Whether a conflict this policy does not retry is skipped rather than
+	/// raised. True for `INSERT IGNORE`, and for it alone. Only a conflict is
+	/// skipped — a duplicate record id or a unique-index entry naming another
+	/// record ([`is_conflict`]). Every other create failure, such as a field
+	/// coercion, an `ASSERT`, a `VALUE` clause or an event that throws, is
+	/// raised: the row was rejected, not found to exist already.
 	pub(crate) skip_failures: bool,
 	/// Whether a schema failure re-runs as an update carrying the original
 	/// failure, which is re-raised if the update fails too.
@@ -382,14 +384,22 @@ pub(crate) fn classify_create_failure(
 	unretried(err, policy)
 }
 
-/// A create failure this policy does not retry: skipped whichever layer raised
-/// it under `INSERT IGNORE`, and raised otherwise.
+/// A create failure this policy does not retry: skipped under `INSERT IGNORE`
+/// when it is a conflict, and raised otherwise.
 fn unretried(err: anyhow::Error, policy: RetryPolicy) -> CreateFailure {
-	if policy.skip_failures {
+	if policy.skip_failures && is_conflict(&err) {
 		CreateFailure::Skip
 	} else {
 		CreateFailure::Raise(err)
 	}
+}
+
+/// Whether a create failure is a conflict with a record that already exists: a
+/// duplicate record id, raised by the document layer, or a unique-index entry,
+/// raised by the index layer. These are the failures `INSERT IGNORE` skips.
+fn is_conflict(err: &anyhow::Error) -> bool {
+	crate::idx::index_exists_record(err).is_some()
+		|| matches!(err.downcast_ref::<DocError>(), Some(DocError::RecordExists { .. }))
 }
 
 // ===========================================================================

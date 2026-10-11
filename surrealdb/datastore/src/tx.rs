@@ -156,9 +156,11 @@ pub struct Transaction {
 	/// The query cache for this store
 	cache: TransactionCache,
 	/// The caches speculations read through, each with the speculative state
-	/// its entries describe: a speculation starting from the same state
-	/// reads through its cache again.
-	speculative_caches: Mutex<Vec<(crate::speculation::Overlay, Arc<cache::tx::Cache>)>>,
+	/// its entries describe and the [`Self::state_changes`] reading of this
+	/// transaction they were read over: a speculation starting from the same
+	/// overlay reads through its cache again while this transaction has not
+	/// changed since.
+	speculative_caches: Mutex<Vec<(crate::speculation::Overlay, u64, Arc<cache::tx::Cache>)>>,
 	/// The sequences for this store
 	sequences: Sequences,
 	/// How many times this transaction has stamped a table's catalog version
@@ -182,7 +184,7 @@ pub struct Transaction {
 	catalog_epoch: u64,
 	/// How many writes and save-point rollbacks this transaction has taken
 	/// ([`Self::state_changes`]).
-	state_changes: AtomicU64,
+	state_changes: Arc<AtomicU64>,
 	/// The recordings of catalog reads open on this transaction
 	/// ([`Self::record_catalog_reads`]).
 	catalog_reads: crate::catalog_reads::CatalogReadLog,
@@ -1020,7 +1022,7 @@ impl Transaction {
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
 			catalog_epoch,
-			state_changes: AtomicU64::new(0),
+			state_changes: Arc::new(AtomicU64::new(0)),
 			catalog_reads: Default::default(),
 			changefeed: OnceLock::new(),
 			live_events: OnceLock::new(),
@@ -4137,8 +4139,11 @@ impl Transaction {
 		if self.tr.speculating() {
 			return None;
 		}
+		let base_state = self.state_changes();
 		let kept = self.speculative_caches.try_lock().ok().and_then(|kept| {
-			kept.iter().find(|(from, _)| from.writes_as(&overlay)).map(|(_, c)| Arc::clone(c))
+			kept.iter()
+				.find(|(from, at, _)| from.writes_as(&overlay) && *at == base_state)
+				.map(|(_, _, c)| Arc::clone(c))
 		});
 		// The view's overlay lists only the catalog ids held in this
 		// speculation: those `overlay` lists stay with whoever handed it in.
@@ -4150,7 +4155,7 @@ impl Transaction {
 			held,
 		);
 		let cache = TransactionCache::new(1);
-		cache.begin_speculation(kept, Arc::clone(&tr.writes));
+		cache.begin_speculation(kept, Arc::clone(&tr.writes), Arc::clone(&self.state_changes));
 		let view = Transaction {
 			local: self.local,
 			started_at: Instant::now(),
@@ -4166,7 +4171,7 @@ impl Transaction {
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
-			state_changes: AtomicU64::new(0),
+			state_changes: Arc::new(AtomicU64::new(0)),
 			changefeed: OnceLock::new(),
 			live_events: OnceLock::new(),
 			index_deltas: OnceLock::new(),
@@ -4193,6 +4198,7 @@ impl Transaction {
 			base: Arc::clone(self),
 			view: Arc::new(view),
 			from: overlay,
+			base_state,
 			ended: false,
 		})
 	}
@@ -4256,6 +4262,7 @@ impl Transaction {
 		// would leave the first mutation in the transaction's own frame, where a
 		// rollback cannot reach it.
 		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
+		self.cache.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
 		self.provisional_save_points.lock().await.push(snapshot);
 		Ok(())
@@ -4270,6 +4277,7 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.release_save_point();
 		}
+		self.cache.release_save_point();
 		// Released, the scope folds into the enclosing one, whose snapshot
 		// still describes the state an outer rollback returns to.
 		self.provisional_save_points.lock().await.pop();
@@ -4286,6 +4294,13 @@ impl Transaction {
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.rollback_save_point();
 		}
+		// A record or definition cached since the save point may describe a
+		// write the rollback undid, and a read must not be answered from it.
+		self.cache.rollback_save_point();
+		// The caches kept for later speculations were filled by reads that saw
+		// the writes now undone, and the journal above reaches only this
+		// transaction's own cache, so none of them may outlive the rollback.
+		self.speculative_caches.lock().await.clear();
 		// Whether a locked read's conflict registration survives a savepoint
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.
@@ -9481,6 +9496,9 @@ pub struct Speculation {
 	view: Arc<Transaction>,
 	/// The state the speculation started from.
 	from: crate::speculation::Overlay,
+	/// The base's [`Transaction::state_changes`] reading when the speculation
+	/// started.
+	base_state: u64,
 	ended: bool,
 }
 
@@ -9497,22 +9515,24 @@ impl Speculation {
 		self.finish()
 	}
 
-	/// End the view. A speculation that wrote nothing leaves its cache's
-	/// entries describing the state it started from, so they are kept for
-	/// the next speculation from that state; one that wrote drops them.
+	/// End the view. A speculation that wrote nothing, over a base that did
+	/// not change while it ran, leaves its cache's entries describing the
+	/// state it started from, so they are kept for the next speculation from
+	/// that state; any other drops them.
 	fn finish(&mut self) -> crate::speculation::Overlay {
 		let overlay = self.view.tr.end_speculation();
 		let cache = self.view.cache.end_speculation();
 		if let Some(cache) = cache
 			&& overlay.writes_as(&self.from)
+			&& self.base.state_changes() == self.base_state
 			&& let Ok(mut kept) = self.base.speculative_caches.try_lock()
 		{
-			kept.retain(|(from, _)| !from.writes_as(&self.from));
+			kept.retain(|(from, _, _)| !from.writes_as(&self.from));
 			// A handful of states is all a block's planning revisits.
 			if kept.len() >= 8 {
 				kept.remove(0);
 			}
-			kept.push((self.from.clone(), cache));
+			kept.push((self.from.clone(), self.base_state, cache));
 		}
 		overlay
 	}
@@ -9583,6 +9603,70 @@ mod speculation_tests {
 		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
 		drop(reading);
 		assert_eq!(tx.catalog_version(ns, db, &tb).await.unwrap(), None);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A save point's rollback undoes writes a speculation may have read, so a
+	/// cache kept from such a speculation must not answer the next one from
+	/// the same overlay.
+	#[tokio::test]
+	async fn a_save_point_rollback_drops_the_caches_kept_for_speculations() {
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::val::TableName;
+
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		let (ns, db, tb) = (NamespaceId(1), DatabaseId(1), TableName::new("t"));
+
+		tx.new_save_point().await.unwrap();
+		tx.bump_catalog_version(ns, db, &tb).await.unwrap();
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert!(reading.txn().catalog_version(ns, db, &tb).await.unwrap().is_some());
+		drop(reading);
+
+		tx.rollback_to_save_point().await.unwrap();
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A change to the base under a live speculation can undo what the
+	/// speculation has cached, so the speculation reads past those entries,
+	/// and its cache is not kept for the next speculation either.
+	#[tokio::test]
+	async fn a_live_speculation_reads_past_a_base_change_beneath_it() {
+		use crate::catalog::{DatabaseId, NamespaceId};
+		use crate::val::TableName;
+
+		let (tf, sq) = factory().await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq.clone()).await.unwrap());
+		let (ns, db, tb) = (NamespaceId(1), DatabaseId(1), TableName::new("t"));
+
+		tx.new_save_point().await.unwrap();
+		tx.bump_catalog_version(ns, db, &tb).await.unwrap();
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert!(reading.txn().catalog_version(ns, db, &tb).await.unwrap().is_some());
+		tx.rollback_to_save_point().await.unwrap();
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+
+		// A base write is a change too: a cache kept from before it is not
+		// reused after it.
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert_eq!(reading.txn().catalog_version(ns, db, &tb).await.unwrap(), None);
+		drop(reading);
+		tx.bump_catalog_version(ns, db, &tb).await.unwrap();
+		let reading = tx.speculate(Overlay::default()).expect("not a view");
+		assert!(reading.txn().catalog_version(ns, db, &tb).await.unwrap().is_some());
+		drop(reading);
 		tx.cancel().await.unwrap();
 	}
 

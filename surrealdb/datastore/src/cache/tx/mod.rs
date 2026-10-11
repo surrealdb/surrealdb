@@ -35,6 +35,18 @@ pub struct TransactionCache {
 	speculative: std::sync::Mutex<Option<Layer>>,
 	/// How many writes the speculation has taken, counted by its transactor.
 	speculative_writes: std::sync::Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicU64>>>,
+	/// The speculated-on transaction's count of changes to what it reads, with
+	/// the reading the speculation's entries were read over. A change to the
+	/// base under a live speculation can make what it cached untrue, so the
+	/// speculation then caches apart from what it read before.
+	speculative_base: std::sync::Mutex<Option<(std::sync::Arc<std::sync::atomic::AtomicU64>, u64)>>,
+	/// One frame per open save point, innermost last, each holding the keys
+	/// inserted while it was the innermost. An entry inserted inside a save
+	/// point may describe a write the save point's rollback undoes, so
+	/// [`Self::rollback_save_point`] evicts every key in the frame it closes.
+	save_points: std::sync::Mutex<Vec<Vec<key::Key>>>,
+	/// Whether any save point is open, so an insert outside one takes no lock.
+	journaling: std::sync::atomic::AtomicBool,
 }
 
 impl TransactionCache {
@@ -63,6 +75,51 @@ impl TransactionCache {
 			speculating: std::sync::atomic::AtomicBool::new(false),
 			speculative: std::sync::Mutex::new(None),
 			speculative_writes: std::sync::Mutex::new(None),
+			speculative_base: std::sync::Mutex::new(None),
+			save_points: std::sync::Mutex::new(Vec::new()),
+			journaling: std::sync::atomic::AtomicBool::new(false),
+		}
+	}
+
+	/// Open a save point: the entries inserted from here until it is released
+	/// or rolled back are recorded in a frame of their own.
+	pub(crate) fn push_save_point(&self) {
+		let mut frames = self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		frames.push(Vec::new());
+		self.journaling.store(true, std::sync::atomic::Ordering::Release);
+	}
+
+	/// Release the innermost save point. Its writes now belong to the
+	/// enclosing save point, so its entries join the enclosing frame, where an
+	/// outer rollback still reaches them.
+	pub(crate) fn release_save_point(&self) {
+		let mut frames = self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+		if let Some(frame) = frames.pop()
+			&& let Some(outer) = frames.last_mut()
+		{
+			outer.extend(frame);
+		}
+		self.journaling.store(!frames.is_empty(), std::sync::atomic::Ordering::Release);
+	}
+
+	/// Roll back the innermost save point, evicting every entry inserted while
+	/// it was open. An evicted entry is read again from storage, which the
+	/// rollback has already returned to its state at the save point.
+	pub(crate) fn rollback_save_point(&self) {
+		let frame = {
+			let mut frames =
+				self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+			let frame = frames.pop();
+			self.journaling.store(!frames.is_empty(), std::sync::atomic::Ordering::Release);
+			frame
+		};
+		for key in frame.into_iter().flatten() {
+			// The entry is in whichever cache answered when it was inserted;
+			// removing it from both is safe, as a removal only forces a read.
+			self.cache.remove(&key);
+			self.with(|cache| {
+				cache.remove(&key);
+			});
 		}
 	}
 
@@ -71,11 +128,14 @@ impl TransactionCache {
 	/// of its own until [`Self::end_speculation`]. `writes` counts the
 	/// speculation's writes: once it has taken one, what it caches describes
 	/// the state the write leaves rather than the one `kept` is kept for, so
-	/// it leaves `kept` for a cache of its own.
+	/// it leaves `kept` for a cache of its own. `base` counts the changes
+	/// to what the speculated-on transaction reads: once it moves, the
+	/// speculation likewise leaves what it cached for a cache of its own.
 	pub(crate) fn begin_speculation(
 		&self,
 		kept: Option<std::sync::Arc<Cache>>,
 		writes: std::sync::Arc<std::sync::atomic::AtomicU64>,
+		base: std::sync::Arc<std::sync::atomic::AtomicU64>,
 	) {
 		let layer = match kept {
 			Some(cache) => Layer {
@@ -90,6 +150,9 @@ impl TransactionCache {
 		*self.speculative.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(layer);
 		*self.speculative_writes.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
 			Some(writes);
+		let seen = base.load(std::sync::atomic::Ordering::Acquire);
+		*self.speculative_base.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+			Some((base, seen));
 		self.speculating.store(true, std::sync::atomic::Ordering::Release);
 	}
 
@@ -97,6 +160,7 @@ impl TransactionCache {
 	/// entries read while speculating.
 	pub(crate) fn end_speculation(&self) -> Option<std::sync::Arc<Cache>> {
 		self.speculating.store(false, std::sync::atomic::Ordering::Release);
+		self.speculative_base.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
 		self.speculative
 			.lock()
 			.unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -113,10 +177,23 @@ impl TransactionCache {
 				.unwrap_or_else(|poisoned| poisoned.into_inner())
 				.as_ref()
 				.is_some_and(|writes| writes.load(std::sync::atomic::Ordering::Acquire) > 0);
+			let base_changed = {
+				let mut base =
+					self.speculative_base.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+				match base.as_mut() {
+					Some((count, seen)) => {
+						let now = count.load(std::sync::atomic::Ordering::Acquire);
+						let changed = now != *seen;
+						*seen = now;
+						changed
+					}
+					None => false,
+				}
+			};
 			let mut speculative =
 				self.speculative.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
 			if let Some(layer) = speculative.as_mut() {
-				if wrote && layer.shared {
+				if base_changed || (wrote && layer.shared) {
 					*layer = Layer {
 						cache: std::sync::Arc::new(speculative_cache()),
 						shared: false,
@@ -135,7 +212,15 @@ impl TransactionCache {
 
 	/// Insert an item into the datastore cache
 	pub fn insert(&self, lookup: Lookup, entry: Entry) {
-		self.with(|cache| cache.insert(lookup.into(), entry));
+		let key = key::Key::from(lookup);
+		if self.journaling.load(std::sync::atomic::Ordering::Acquire) {
+			let mut frames =
+				self.save_points.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+			if let Some(frame) = frames.last_mut() {
+				frame.push(key.clone());
+			}
+		}
+		self.with(|cache| cache.insert(key, entry));
 	}
 
 	/// Remove an item from the datastore cache
