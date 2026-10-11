@@ -29,3 +29,43 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 		Ok(())
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use super::*;
+	use crate::ctx::Context;
+	use crate::expr::Expr;
+	use crate::expr::visit::Visit;
+	use crate::val::Value;
+
+	/// The names `src` captures from a context binding each of `bound`.
+	fn captured(src: &str, bound: &[&str]) -> Vec<String> {
+		let mut ctx = Context::new_test();
+		for name in bound {
+			ctx.add_value(name.to_string(), Arc::new(Value::from(1)));
+		}
+		let ctx = ctx.freeze();
+		let expr = Expr::from(crate::syn::expr(src).expect("expression should parse"));
+		let mut captures = Variables::default();
+		let _ = expr.visit(&mut ParameterCapturePass {
+			context: &ctx,
+			captures: &mut captures,
+		});
+		let mut names: Vec<String> = captures.0.keys().map(|k| k.to_string()).collect();
+		names.sort();
+		names
+	}
+
+	/// Every clause of a nested statement is walked, so a parameter read only
+	/// in a `SELECT`'s `START` or `TIMEOUT`, or an `UPDATE`'s or `UPSERT`'s
+	/// `TIMEOUT`, is captured.
+	#[test]
+	fn captures_every_statement_clause() {
+		let bound = ["st", "to"];
+		assert_eq!(captured("(SELECT * FROM t START $st TIMEOUT $to)", &bound), bound);
+		assert_eq!(captured("(UPDATE t SET a = 1 TIMEOUT $to)", &bound), ["to"]);
+		assert_eq!(captured("(UPSERT t SET a = 1 TIMEOUT $to)", &bound), ["to"]);
+	}
+}

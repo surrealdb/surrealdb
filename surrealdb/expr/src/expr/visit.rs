@@ -551,6 +551,7 @@ implement_visitor! {
 		if let Some(c) = u.cond.as_ref(){
 			this.visit_expr(&c.0)?;
 		}
+		this.visit_expr(&u.timeout)?;
 		Ok(())
 
 	}
@@ -576,6 +577,7 @@ implement_visitor! {
 		if let Some(c) = u.cond.as_ref(){
 			this.visit_expr(&c.0)?;
 		}
+		this.visit_expr(&u.timeout)?;
 		Ok(())
 
 	}
@@ -619,12 +621,16 @@ implement_visitor! {
 		if let Some(l) = s.limit.as_ref(){
 			this.visit_expr(&l.0)?;
 		}
+		if let Some(st) = s.start.as_ref(){
+			this.visit_expr(&st.0)?;
+		}
 		if let Some(f) = s.fetch.as_ref(){
 			for f in f.iter(){
 				this.visit_expr(&f.0)?;
 			}
 		}
 		this.visit_expr(&s.version)?;
+		this.visit_expr(&s.timeout)?;
 
 		Ok(())
 	}
@@ -2088,6 +2094,7 @@ implement_visitor_mut! {
 		if let Some(c) = u.cond.as_mut(){
 			this.visit_mut_expr(&mut c.0)?;
 		}
+		this.visit_mut_expr(&mut u.timeout)?;
 		Ok(())
 
 	}
@@ -2113,6 +2120,7 @@ implement_visitor_mut! {
 		if let Some(c) = u.cond.as_mut(){
 			this.visit_mut_expr(&mut c.0)?;
 		}
+		this.visit_mut_expr(&mut u.timeout)?;
 		Ok(())
 
 	}
@@ -2156,12 +2164,16 @@ implement_visitor_mut! {
 		if let Some(l) = s.limit.as_mut(){
 			this.visit_mut_expr(&mut l.0)?;
 		}
+		if let Some(st) = s.start.as_mut(){
+			this.visit_mut_expr(&mut st.0)?;
+		}
 		if let Some(f) = s.fetch.as_mut(){
 			for f in f.iter_mut(){
 				this.visit_mut_expr(&mut f.0)?;
 			}
 		}
 		this.visit_mut_expr(&mut s.version)?;
+		this.visit_mut_expr(&mut s.timeout)?;
 
 		Ok(())
 	}
