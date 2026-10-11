@@ -1116,6 +1116,34 @@ run_task = { name = [
     "test-idx",
 ], fork = true, parallel = false }
 
+# The RocksDB lane split into parts that CI runs on separate machines. Each leaf
+# above resolves a different feature set for `surrealdb-librocksdb-sys`, so cargo
+# compiles the C++ library again for every one, and kache cannot cache that build
+# script's output. Run back to back the lane is dominated by those rebuilds;
+# split, each part pays for the library once or twice instead of four times.
+# Together the parts run exactly the leaves of `ci-kvs-rocksdb`.
+[tasks.ci-kvs-rocksdb-core]
+category = "CI - INTEGRATION TESTS"
+description = "Run the RocksDB engine's tests inside surrealdb-core"
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
+run_task = "test-kvs"
+
+[tasks.ci-kvs-rocksdb-store]
+category = "CI - INTEGRATION TESTS"
+description = "Run the RocksDB engine's own, kvs-any and datastore tests"
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
+run_task = { name = [
+    "test-kvs-any",
+    "test-kvs-crate",
+    "test-datastore",
+], fork = true, parallel = false }
+
+[tasks.ci-kvs-rocksdb-idx]
+category = "CI - INTEGRATION TESTS"
+description = "Run the surrealdb-idx tests against the RocksDB engine"
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
+run_task = "test-idx"
+
 [tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the SurrealKV engine"
@@ -1236,14 +1264,20 @@ run_task = { name = [
 # Binaries for tagged versions are downloaded from download.surrealdb.com
 # into language-tests/.binary_cache/ (cached across CI runs). The trailing
 # `..` token in the version list cargo-builds the current checkout.
+#
+# The work is two phases so CI can overlap them. The harness phase compiles the
+# `surrealql-test` binary and runs its own unit tests; it needs nothing from the
+# checkout's `surreal` binary, so CI runs it while that binary is still being
+# built and hands `language-tests/target/debug/surrealql-test` to the axes phase.
+# The axes phase needs both binaries. The `ci-lang-upgrade-test-*` tasks run the
+# two phases back to back for a single machine.
 
-[tasks.test-lang-upgrade]
+[tasks.lang-upgrade-harness]
 private = true
 category = "CI - LANGUAGE TESTS"
-description = "Run SurrealQL language upgrade tests across the adjacent-pair, seed and cumulative axes"
+description = "Build the language upgrade harness and run its own unit tests"
 script = """
 #!/bin/bash -ex
-# Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
 cd language-tests
 cargo build --locked --features "${_TEST_LANG_FEATURES}"
 # The harness's own unit tests live behind the `upgrade` feature and nothing
@@ -1251,6 +1285,18 @@ cargo build --locked --features "${_TEST_LANG_FEATURES}"
 # execute the binary. Without this the version-gate regression tests — the guard
 # against a test silently dropping out of the run set — never execute.
 cargo test --locked --features "${_TEST_LANG_FEATURES}"
+"""
+
+[tasks.test-lang-upgrade]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run the language upgrade axes (adjacent-pair, seed and cumulative) with a built harness"
+script = """
+#!/bin/bash -ex
+# Needs language-tests/target/debug/surrealql-test, built with the lane's
+# `_TEST_LANG_FEATURES` by `lang-upgrade-harness`.
+# Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
+cd language-tests
 JOBS="${_TEST_LANG_UPGRADE_JOBS:-12}"
 # Only `--color` is a global flag; everything else belongs to the `upgrade`
 # subcommand and has to follow it.
@@ -1287,17 +1333,47 @@ echo "=== Upgrade chain walk: ${LANG_UPGRADE_CHAIN} (backend=${_TEST_API_ENGINE}
     --chain "${LANG_UPGRADE_CHAIN//;/,}"
 """
 
+[tasks.ci-lang-upgrade-harness-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Build the language upgrade harness for the SurrealKV backend"
+env = { _TEST_LANG_FEATURES = "upgrade" }
+run_task = "lang-upgrade-harness"
+
+[tasks.ci-lang-upgrade-harness-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Build the language upgrade harness for the RocksDB backend"
+env = { _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
+run_task = "lang-upgrade-harness"
+
+[tasks.ci-lang-upgrade-run-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Run the language upgrade axes with the SurrealKV backend, using a built harness"
+env = { _TEST_API_ENGINE = "surrealkv" }
+run_task = "test-lang-upgrade"
+
+[tasks.ci-lang-upgrade-run-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Run the language upgrade axes with the RocksDB backend, using a built harness"
+env = { _TEST_API_ENGINE = "rocksdb" }
+run_task = "test-lang-upgrade"
+
 [tasks.ci-lang-upgrade-test-surrealkv]
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests with the SurrealKV backend"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade" }
-run_task = "test-lang-upgrade"
+run_task = { name = [
+    "lang-upgrade-harness",
+    "test-lang-upgrade",
+], fork = true, parallel = false }
 
 [tasks.ci-lang-upgrade-test-rocksdb]
 category = "CI - LANGUAGE TESTS"
 description = "Run language upgrade tests with the RocksDB backend"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
-run_task = "test-lang-upgrade"
+run_task = { name = [
+    "lang-upgrade-harness",
+    "test-lang-upgrade",
+], fork = true, parallel = false }
 
 [tasks.ci-lang-upgrade-test-all]
 category = "CI - LANGUAGE TESTS"

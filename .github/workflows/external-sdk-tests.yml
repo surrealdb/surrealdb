@@ -40,59 +40,25 @@ jobs:
   # Server build (shared by SDK matrices)
   # ----------------------------------------
 
-  # On a pull request the amd64 binary is the one `ci.yml` already built for the
-  # same head commit: this job waits for that run's `surreal-amd64` artifact and
-  # republishes it. It compiles the binary itself only when no such artifact
-  # will appear (manual dispatch, or the `ci.yml` run was cancelled or skipped
-  # its build).
+  # `ci.yml` builds amd64 only on push and merge_group, so every run compiles
+  # the binary here. The compile includes RocksDB's C++ sources and fills the
+  # disk of a standard hosted runner, so pull requests use a 32-core runner.
   build:
     name: Build binary (amd64)
     if: ${{ github.event.pull_request.draft != true }}
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'runner-amd-16-cores-spot' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'runner-amd-32-cores' || 'runner-amd-16-cores-spot' }}
     permissions:
       contents: read
-      actions: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
-      - name: Fetch the binary built by CI
-        id: fetch
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          deadline=$((SECONDS + 3600))
-          while (( SECONDS < deadline )); do
-            run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=1" \
-              --jq '.workflow_runs[0] | select(. != null) | "\(.id) \(.status)"') || run=""
-            if [[ -n "$run" ]]; then
-              read -r id status <<<"$run"
-              art=$(gh api "repos/$REPO/actions/runs/$id/artifacts?name=surreal-amd64" \
-                --jq '.artifacts[] | select(.expired == false) | .id' | head -n 1) || art=""
-              if [[ -n "$art" ]]; then
-                mkdir -p artifacts
-                if gh run download "$id" -R "$REPO" -n surreal-amd64 -D artifacts; then
-                  echo "found=true" >> "$GITHUB_OUTPUT"
-                  exit 0
-                fi
-              fi
-              if [[ "$status" == "completed" ]]; then break; fi
-            fi
-            sleep 30
-          done
-          echo "found=false" >> "$GITHUB_OUTPUT"
-
       - name: Checkout sources
-        if: ${{ steps.fetch.outputs.found != 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # (Actions must be pinned by commit hash) v7.0.1
 
       - name: Setup environment
-        if: ${{ steps.fetch.outputs.found != 'true' }}
         uses: ./.github/actions/setup-environment
         with:
           # The kache S3 backend shared with the rest of CI. Empty on fork PRs,
@@ -103,7 +69,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        if: ${{ steps.fetch.outputs.found != 'true' }}
         run: |
           cargo build --locked --target x86_64-unknown-linux-gnu
           mkdir -p artifacts

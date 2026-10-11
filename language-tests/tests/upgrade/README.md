@@ -35,6 +35,13 @@ four runs per test. `--chain` conflicts with both: one invocation runs one axis.
 CI drives all three from `Makefile.ci.toml` (`tasks.test-lang-upgrade`) over the
 version lists defined at the top of that file.
 
+The harness is built apart from the axes: `tasks.lang-upgrade-harness` compiles
+`surrealql-test` and runs its unit tests, `tasks.test-lang-upgrade` runs the axes
+with the binary it finds at `language-tests/target/debug/surrealql-test`. CI
+builds the harness in the `upgrade-harness` job while the `build` job compiles the
+checkout's binary, and the lane downloads both. Locally,
+`cargo make ci-lang-upgrade-test-<engine>` runs the two phases in turn.
+
 ## `..`, and the version lists
 
 `..` is not a special token. Versions that fail to parse as semver are treated as

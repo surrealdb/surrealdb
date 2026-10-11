@@ -70,22 +70,21 @@ jobs:
           fi
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
 
+  # Every consumer of this job's binary runs on arm on pull requests, and the
+  # job gates all of them, so an amd64 leg there would hold them back for a
+  # binary none of them uses. push and merge_group build both, as the amd
+  # upgrade lanes run there.
   build:
-    name: Build binary (${{ matrix.name }})
+    name: Build binary (${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }})
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       matrix:
-        include:
-          - name: amd64
-            target: x86_64-unknown-linux-gnu
-            runner: runner-amd-32-cores
-          - name: arm64
-            target: aarch64-unknown-linux-gnu
-            # amd64 leg stays on-demand (no amd spot pool); arm builds spot on PRs.
-            runner: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     env:
+      TARGET: ${{ matrix.arch == 'arm' && 'aarch64-unknown-linux-gnu' || 'x86_64-unknown-linux-gnu' }}
+      ARTIFACT_ARCH: ${{ matrix.arch == 'arm' && 'arm64' || 'amd64' }}
       # Verbose cache tracing on the branches whose cache behaviour is worth
       # inspecting. kache writes it to stderr, so it lands in the build step's
       # own log; empty leaves the action's default filter in place.
@@ -111,15 +110,15 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        run: cargo build --locked --target ${{ matrix.target }}
+        run: cargo build --locked --target ${{ env.TARGET }}
 
       - name: Upload artifact
         id: upload-surreal
         background: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
-          name: surreal-${{ matrix.name }}
-          path: target/${{ matrix.target }}/debug/surreal
+          name: surreal-${{ env.ARTIFACT_ARCH }}
+          path: target/${{ env.TARGET }}/debug/surreal
 
       # rust-toolchain.toml pins the toolchain every cargo invocation resolves
       # to, which is not the one the setup action installs targets for, so the
@@ -137,13 +136,13 @@ jobs:
       # of a Rust toolchain.
       - name: Pack Surrealism demo module
         run: >-
-          target/${{ matrix.target }}/debug/surreal module build --debug
+          target/${{ env.TARGET }}/debug/surreal module build --debug
           -o ${{ github.workspace }}/demo.surli surrealism/demo
 
       - name: Upload Surrealism demo module
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
-          name: demo-surli-${{ matrix.name }}
+          name: demo-surli-${{ env.ARTIFACT_ARCH }}
           path: demo.surli
 
       - name: kache stats
@@ -884,7 +883,10 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [mem, rocksdb, surrealkv, tikv]
+        # RocksDB is three legs: each of its test suites resolves a different
+        # feature set for the C++ library, which cargo rebuilds for every one, so
+        # one leg running them in turn takes ~3x the others. See `ci-kvs-rocksdb-*`.
+        engine: [mem, rocksdb-core, rocksdb-store, rocksdb-idx, surrealkv, tikv]
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -1140,9 +1142,64 @@ jobs:
   # SurrealQL language upgrade tests
   # ----------------------------------------
 
+  # The harness is compiled apart from the lanes that run it. Compiling it takes
+  # as long as the `build` job does and needs nothing from that job's binary, so
+  # it runs alongside and the lane starts with the harness already in hand.
+  upgrade-harness:
+    name: Upgrade test harness - ${{ matrix.engine }} (${{ matrix.arch }})
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
+        engine: [surrealkv, rocksdb]
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: build-nightly
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: language-tests
+          # Engine-independent deps (see kvs-engines) — one shared cache key.
+          cache-key: lang-upgrade-harness
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: lang-upgrade-harness-${{ matrix.engine }}-${{ matrix.arch }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-make
+
+      # Builds the harness, then runs its own unit tests. The binary is uploaded
+      # once the unit tests have passed, so a lane never runs a harness that
+      # failed them.
+      - name: Build and test the harness
+        run: cargo make ci-lang-upgrade-harness-${{ matrix.engine }}
+
+      - name: Upload harness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
+        with:
+          name: upgrade-harness-${{ matrix.engine }}-${{ matrix.arch }}
+          path: language-tests/target/debug/surrealql-test
+          if-no-files-found: error
+
   upgrade-tests:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
-    needs: [build, changes]
+    needs: [build, upgrade-harness, changes]
     if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
@@ -1170,16 +1227,7 @@ jobs:
           # The WASI target is needed to build the Surrealism module the upgrade
           # tests load through DEFINE MODULE.
           targets: wasm32-wasip2
-          # Both workspaces are cached: `language-tests` for the test harness,
-          # and the root workspace because the final `..` hop builds the
-          # current checkout's surreal binary via cargo.
-          workspaces: |
-            language-tests
-            .
-          # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang-upgrade
-          # The compiled artifacts are not engine-independent, so the manifest
-          # is scoped per engine (see kvs-engines).
           kache-manifest-key: lang-upgrade-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Resolve upgrade version chain
@@ -1228,10 +1276,20 @@ jobs:
       - name: Set file permissions
         run: chmod +x target/debug/surreal
 
+      # Compiled by `upgrade-harness`, which runs while `build` does.
+      - name: Download harness
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: upgrade-harness-${{ matrix.engine }}-${{ matrix.arch }}
+          path: language-tests/target/debug
+
+      - name: Set harness permissions
+        run: chmod +x language-tests/target/debug/surrealql-test
+
       - name: Run language upgrade tests
         env:
           LANG_UPGRADE_PREBUILT_CURRENT: "1"
-        run: cargo make ci-lang-upgrade-test-${{ matrix.engine }}
+        run: cargo make ci-lang-upgrade-run-${{ matrix.engine }}
 
   # ----------------------------------------
   # Tokio-console feature check
@@ -1582,6 +1640,7 @@ jobs:
       - kvs-engines
       # SurrealQL language tests
       - lang-tests
+      - upgrade-harness
       - upgrade-tests
       # JS SDK conformance
       - conformance-tests
@@ -1632,6 +1691,7 @@ jobs:
             "${{ needs.sdk-engines-server.result }}"
             "${{ needs.kvs-engines.result }}"
             "${{ needs.lang-tests.result }}"
+            "${{ needs.upgrade-harness.result }}"
             "${{ needs.upgrade-tests.result }}"
             "${{ needs.conformance-tests.result }}"
             "${{ needs.mcp-tests.result }}"
