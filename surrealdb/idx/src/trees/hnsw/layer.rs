@@ -113,6 +113,20 @@ where
 		self.graph.get_edges(e_id)
 	}
 
+	/// Whether `e_id` is an element of this layer.
+	///
+	/// Edges are not kept symmetric, so removing an element leaves the edges
+	/// other nodes hold towards it in place, here and in the store. The layer,
+	/// reconciled with the reader's snapshot, is what says an element still
+	/// exists; the process-wide vector cache cannot, because a reader on an
+	/// older snapshot can enter a removed element's vector into it after the
+	/// removal evicted it. Anything that reaches an element through an edge
+	/// checks this before reading its vector, so a removed element is never
+	/// searched through, selected as a neighbour, or written back as a node.
+	pub(super) fn is_node(&self, e_id: ElementId) -> bool {
+		self.graph.get_edges(e_id).is_some()
+	}
+
 	/// An empty edge set sized for this layer.
 	pub(super) fn new_edges(&self) -> S {
 		self.graph.new_edges()
@@ -297,22 +311,34 @@ where
 	) -> Result<DoublePriorityQueue> {
 		let mut fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 		while let Some((cq_dist, doc)) = candidates.pop_first() {
-			if cq_dist > fq_dist {
+			// Distance ends the walk only once `ef` results are held. Pending
+			// elements are expanded without being admitted, so a few near
+			// results can sit closer than the pending elements that are the
+			// only way on to the rest; stopping at them would return fewer
+			// results than the graph holds. Without pending documents every
+			// visited element is admitted, and no candidate is farther than
+			// the last result until `w` is full.
+			if w.len() >= ef && cq_dist > fq_dist {
 				break;
 			}
 			if let Some(neighbourhood) = self.graph.get_edges(doc) {
 				for &e_id in neighbourhood.iter() {
-					// Did we already visit it?
-					if !visited.insert(e_id) {
+					// Did we already visit it? Is it still an element?
+					if !visited.insert(e_id) || !self.is_node(e_id) {
 						continue;
 					}
 					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
 						let e_dist = elements.distance(&e_pt, q);
 						if e_dist < fq_dist || w.len() < ef {
+							// An element whose documents are all pending is still
+							// expanded, only never admitted: the search scores
+							// pending documents on their own, and dropping their
+							// elements from the frontier as well would cut the walk
+							// off from everything reachable only through them.
+							candidates.push(e_dist, e_id);
 							if Self::are_all_docs_in_pending(tx, pending, e_id, &e_pt).await? {
 								continue;
 							}
-							candidates.push(e_dist, e_id);
 							w.push(e_dist, e_id);
 							if w.len() > ef {
 								w.pop_last();
@@ -366,8 +392,8 @@ where
 				)
 				.await?;
 				for &e_id in neighbourhood.iter() {
-					// Did we already visit it?
-					if !visited.insert(e_id) {
+					// Did we already visit it? Is it still an element?
+					if !visited.insert(e_id) || !self.is_node(e_id) {
 						continue;
 					}
 					if let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? {
@@ -438,7 +464,7 @@ where
 		};
 		let mut ids: Vec<VectorId> = Vec::new();
 		for &e_id in neighbourhood.iter() {
-			if visited.contains(&e_id) {
+			if visited.contains(&e_id) || !self.is_node(e_id) {
 				continue;
 			}
 			let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? else {
@@ -654,6 +680,9 @@ where
 		let mut w = DoublePriorityQueue::default();
 		if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
 			for n_id in neighbors.iter() {
+				if !self.is_node(*n_id) {
+					continue;
+				}
 				if let Some(n_pt) = elements.get_vector(tx, n_id).await? {
 					let dist = elements.distance(&e_pt, &n_pt);
 					w.push(dist, *n_id);
@@ -675,6 +704,12 @@ where
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(e_id) {
 			let mut changed_nodes = Vec::with_capacity(f_ids.len());
 			for &q_id in f_ids.iter() {
+				// An edge towards an element already removed is dropped with
+				// the node, not repaired: repairing it would write the removed
+				// element back as a node.
+				if !self.is_node(q_id) {
+					continue;
+				}
 				if let Some(q_pt) = elements.get_vector(&ctx.tx, &q_id).await? {
 					let c = self
 						.search_multi_with_ignore(ctx, elements, &q_pt, vec![q_id, e_id], efc)
@@ -885,6 +920,8 @@ mod tests {
 
 	use anyhow::Result;
 	use ndarray::Array1;
+	use rand::rngs::SmallRng;
+	use rand::{Rng, SeedableRng};
 	use surrealdb_datastore::Transaction;
 	use surrealdb_kvs::TransactionType;
 
@@ -898,7 +935,7 @@ mod tests {
 	use crate::test_env::TestIndexStore;
 	use crate::trees::hnsw::index::{HnswCompactionOutcome, HnswIndex};
 	use crate::trees::hnsw::{ElementId, HnswState};
-	use crate::trees::vector::{SharedVector, Vector};
+	use crate::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::val::{Number, RecordIdKey, Value};
 
 	const NS: NamespaceId = NamespaceId(1);
@@ -1391,6 +1428,172 @@ mod tests {
 			every_layer,
 			"a replacement wrapper must take every layer from the store"
 		);
+		Ok(())
+	}
+
+	/// A search walks through the elements whose documents are all pending
+	/// rather than stopping at them.
+	///
+	/// The search scores pending documents on their own and keeps their
+	/// elements out of the graph results, but those elements still carry the
+	/// graph's edges. Here every record but the two nearest the query has a
+	/// pending delete, and the records lie on a line, so from an entry point
+	/// among them the two nearest are reachable only through pending elements:
+	/// a walk that stopped at pending elements would return fewer than two.
+	/// A third live record at the far end of the line is reachable only across
+	/// the pending ones as well, after the two nearest are found: a walk that
+	/// let those two set its distance bound before holding `ef` results would
+	/// stop short of it.
+	#[tokio::test]
+	async fn hnsw_search_walks_through_pending_elements() -> Result<()> {
+		const FAR: std::ops::RangeInclusive<i16> = 100..=499;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NS, DB, "tb".into(), IX);
+		let h = new_instance(&ds, &ikb).await?;
+		{
+			let env = ds.env(TransactionType::Write).await;
+			for i in [1, 2].into_iter().chain(FAR) {
+				h.index(&env, &RecordIdKey::Number(i.into()), None, Some(diagonal(i))).await?;
+			}
+			env.tx().commit().await?;
+		}
+		loop {
+			let env = ds.env(TransactionType::Write).await;
+			let compacted = h.index_pendings(&env).await?;
+			env.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		assert_eq!(nearest_to_origin(&ds, &h, 2).await?, vec![1, 2]);
+		// Delete every far record but the last, and leave the deletes pending.
+		{
+			let env = ds.env(TransactionType::Write).await;
+			for i in FAR.filter(|i| *i != *FAR.end()) {
+				h.index(&env, &RecordIdKey::Number(i.into()), Some(diagonal(i)), None).await?;
+			}
+			env.tx().commit().await?;
+		}
+		assert_eq!(
+			nearest_to_origin(&ds, &h, 3).await?,
+			vec![1, 2, i64::from(*FAR.end())],
+			"the three records left must be found through the pending ones"
+		);
+		Ok(())
+	}
+
+	/// A removed element stays out of the graph, whatever an older reader
+	/// enters into the vector cache.
+	///
+	/// Edges are not symmetric, so a removal leaves other nodes' edges towards
+	/// the removed element in the store. A reader whose snapshot predates the
+	/// removal walks the graph as it stood and enters the removed element's
+	/// vector into the process-wide cache after the removal evicted it. A
+	/// compaction that took that entry as proof the element exists would link
+	/// it through a leftover edge, writing it back as a node — and in time as
+	/// the entry point — with no vector behind it, and every later search and
+	/// compaction would fail on it.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn hnsw_removed_element_stays_out_of_the_graph() -> Result<()> {
+		let p = HnswParams {
+			dimension: 3,
+			vector_type: VectorType::F32,
+			ef_construction: 150,
+			extend_candidates: false,
+			keep_pruned_connections: false,
+			use_hashed_vector: false,
+			..params()
+		};
+		let content = |v: [f32; 3]| {
+			let vector: SharedVector = Vector::F32(Array1::from_vec(v.to_vec())).into();
+			vec![Value::from(vector.deref())]
+		};
+		let compact = async |ds: &TestIndexStore, h: &HnswIndex| -> Result<()> {
+			loop {
+				let env = ds.env(TransactionType::Write).await;
+				let compacted = h.index_pendings(&env).await?;
+				env.tx().commit().await?;
+				if compacted == 0 {
+					return Ok(());
+				}
+			}
+		};
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NS, DB, "tb".into(), IX);
+		let h = {
+			let env = ds.env(TransactionType::Read).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&env.tx(),
+				ikb.clone(),
+				TB,
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			env.tx().cancel().await?;
+			h
+		};
+		let mut rng = SmallRng::seed_from_u64(7);
+		let mut next = 0;
+		for round in 0..20 {
+			// Index fifty records, then remove forty of them.
+			let mut added = Vec::new();
+			{
+				let env = ds.env(TransactionType::Write).await;
+				for _ in 0..50 {
+					let v = [(); 3].map(|_| rng.random_range(-60.0..60.0));
+					h.index(&env, &RecordIdKey::Number(next), None, Some(content(v))).await?;
+					added.push((next, v));
+					next += 1;
+				}
+				env.tx().commit().await?;
+			}
+			compact(&ds, &h).await?;
+			let older = ds.env(TransactionType::Read).await;
+			{
+				let env = ds.env(TransactionType::Write).await;
+				for (id, v) in added.iter().take(40) {
+					h.index(&env, &RecordIdKey::Number(*id), Some(content(*v)), None).await?;
+				}
+				env.tx().commit().await?;
+			}
+			compact(&ds, &h).await?;
+			// A reader that began before the removals searches the graph as
+			// it stood, and caches the removed elements' vectors on the way.
+			let pt: Vec<Number> = [5.6, -1.7, 8.5].map(Number::Float).to_vec();
+			let mut stack = reblessive::tree::TreeStack::new();
+			stack
+				.enter(|stk| async { h.knn_search(&older, stk, &pt, 2, 40, None, None).await })
+				.finish()
+				.await?;
+			older.tx().cancel().await?;
+			// Every element the persisted graph holds has a vector.
+			let env = ds.env(TransactionType::Read).await;
+			let persisted = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&env.tx(),
+				ikb.clone(),
+				TB,
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			persisted.check_state(&env).await?;
+			let (enter_point, layers) = persisted.adjacency().await;
+			let nodes = layers.iter().flat_map(|layer| layer.iter().map(|(node, _)| *node));
+			for element in enter_point.into_iter().chain(nodes) {
+				let vector: Option<SerializedVector> =
+					env.tx().get_key(&ikb.new_he_key(element), None).await?;
+				assert!(
+					vector.is_some(),
+					"round {round}: element {element} is in the persisted graph without a vector"
+				);
+			}
+			env.tx().cancel().await?;
+		}
 		Ok(())
 	}
 }

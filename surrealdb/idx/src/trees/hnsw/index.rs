@@ -1076,9 +1076,15 @@ impl HnswIndex {
 	) -> Result<()> {
 		let hnsw = self.reconciled(ctx.env).await?;
 		// Do the search. The allow-list routes through the filtered chain even
-		// without a truthy filter: the unfiltered chain suppresses elements
-		// from the traversal frontier itself, which is fine for a handful of
-		// pending docs but would disconnect the walk under a selective bitmap.
+		// without a truthy filter: only that chain admits candidates document
+		// by document, which a bitmap over doc-IDs needs. Both chains expand
+		// through the elements they do not admit. They differ in when distance
+		// ends the walk: the unfiltered chain only once it holds `ef` results,
+		// the filtered chain as soon as its furthest admitted result is nearer
+		// than the next candidate, so a selective filter costs one bounded
+		// walk rather than a filter evaluation of every reachable record, at
+		// the price of returning fewer than `k` when matches lie beyond the
+		// rejected elements.
 		if filter.is_some() || allow_list.is_some() {
 			let neighbours = hnsw
 				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref(), allow_list)

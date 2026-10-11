@@ -176,6 +176,7 @@ impl Heuristic {
 			if let Some(e_conn) = layer.get_edges(e_id) {
 				for &e_adj in e_conn.iter() {
 					if e_adj != q_id
+						&& layer.is_node(e_adj)
 						&& ex.insert(e_adj)
 						&& let Some(d) = elements.get_distance(tx, q_pt, &e_adj).await?
 					{
