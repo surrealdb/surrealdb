@@ -868,6 +868,7 @@ mod tests {
 
 	use memchr::memmem;
 	use revision::SerializeRevisioned;
+	use rust_decimal::Decimal;
 	use surrealdb_strand::Strand;
 
 	use super::compile::compile_predicate_shape;
@@ -878,7 +879,7 @@ mod tests {
 	use super::wire_literal::{LiteralSet, LiteralWire};
 	use super::{
 		FusedFlatClause, FusedFlatClauses, LeafFallback, PathSegment, PreDecodeFilter,
-		PreDecodeFilterOutcome, PredNode,
+		PreDecodeFilterOutcome, PredNode, apply_binary,
 	};
 	use crate::catalog::Record;
 	use crate::exec::physical_expr::{BinaryOp, PhysicalExpr, SimpleBinaryOp, UnaryOp};
@@ -1059,6 +1060,112 @@ mod tests {
 		)]));
 		let rec = wire_record_plain_object(obj);
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+	}
+
+	/// A decimal's stored bytes carry its scale and the sign of a zero, so one
+	/// value has many encodings: `2.0dec` equals `2dec`, and `-0dec` equals
+	/// `0dec`. Every leaf the plan builds over a decimal literal judges the
+	/// value, as the operator does on the decoded field: a predicate the filter
+	/// rejects is false, and so is a negation it rejects. The stored bytes
+	/// settle every leaf but `CONTAINSALL`, whose misses are decoded.
+	#[test]
+	fn decimal_leaves_judge_the_value_not_its_encoding() {
+		let d = |s: &str| -> Decimal { s.parse().unwrap() };
+		let num = |d: Decimal| Value::Number(Number::Decimal(d));
+		let wire = |v: &Value| {
+			let mut out = Vec::new();
+			v.serialize_revisioned(&mut out).unwrap();
+			out
+		};
+		let list = |v: &Value| Value::from(vec![v.clone()]);
+		// One value spelled two ways. Parsing keeps the scale it reads, and
+		// negating a zero sets its sign.
+		let spellings = [
+			(d("2.0"), d("2")),
+			(d("2"), d("2.0")),
+			(-d("0"), d("0")),
+			(d("0"), -d("0")),
+			(d("0.00"), -d("0.0")),
+		];
+		for (a, b) in spellings {
+			assert_eq!(num(a), num(b));
+			assert_ne!(wire(&num(a)), wire(&num(b)), "{a:?} and {b:?} share an encoding");
+		}
+		// Two values, neither spelled in its shortest form.
+		let distinct = [(d("2.50"), d("3.0"))];
+
+		let mut wrong = Vec::new();
+		for (stored, literal) in spellings.into_iter().chain(distinct) {
+			let (stored, literal) = (num(stored), num(literal));
+			let cases = [
+				(stored.clone(), BinaryOperator::Equal, literal.clone()),
+				(stored.clone(), BinaryOperator::ExactEqual, literal.clone()),
+				(stored.clone(), BinaryOperator::NotEqual, literal.clone()),
+				(
+					stored.clone(),
+					BinaryOperator::Inside,
+					Value::from(vec![literal.clone(), num(d("7"))]),
+				),
+				(stored.clone(), BinaryOperator::NotInside, list(&literal)),
+				(list(&stored), BinaryOperator::Contain, literal.clone()),
+				(list(&stored), BinaryOperator::NotContain, literal.clone()),
+				(list(&stored), BinaryOperator::ContainAny, list(&literal)),
+				(list(&stored), BinaryOperator::ContainNone, list(&literal)),
+				(list(&stored), BinaryOperator::ContainAll, list(&literal)),
+			];
+			for (field, op, operand) in cases {
+				let holds = match apply_binary(&op, &field, &operand) {
+					Some(Value::Bool(b)) => b,
+					other => panic!("{field:?} {op:?} {operand:?} answered {other:?}"),
+				};
+				let rec = wire_record_plain_object(Object::from(BTreeMap::from([
+					(Strand::from("a"), field.clone()),
+					(Strand::from("b"), Value::Number(Number::Int(1))),
+				])));
+				let leaf: Arc<dyn PhysicalExpr> = Arc::new(SimpleBinaryOp {
+					field_name: "a".into(),
+					op: op.clone(),
+					literal: operand.clone(),
+					reversed: false,
+				});
+				// Beside a second comparison at the root, a comparison of `a`
+				// is judged in one scan of the record's object.
+				let fused: Arc<dyn PhysicalExpr> = Arc::new(BinaryOp {
+					left: Arc::clone(&leaf),
+					op: BinaryOperator::And,
+					right: Arc::new(SimpleBinaryOp {
+						field_name: "b".into(),
+						op: BinaryOperator::Equal,
+						literal: Value::Number(Number::Int(1)),
+						reversed: false,
+					}),
+				});
+				for (form, pred) in [("alone", leaf), ("with b = 1", fused)] {
+					let rejects = |pred: &Arc<dyn PhysicalExpr>| {
+						let root = compile_predicate_shape(pred).expect("compile");
+						PreDecodeFilter::new(root, TEST_DEPTH_LIMIT).apply(&[], &rec)
+							== PreDecodeFilterOutcome::Reject
+					};
+					let negated: Arc<dyn PhysicalExpr> = Arc::new(UnaryOp {
+						op: PrefixOperator::Not,
+						expr: Arc::clone(&pred),
+					});
+					let (rejected, negation_rejected) = (rejects(&pred), rejects(&negated));
+					let case = format!("a = {field:?}, a {op:?} {operand:?}, {form}");
+					if rejected && holds {
+						wrong.push(format!("rejected though it holds: {case}"));
+					}
+					if negation_rejected && !holds {
+						wrong.push(format!("negation rejected though it fails: {case}"));
+					}
+					if !rejected && !negation_rejected && !matches!(op, BinaryOperator::ContainAll)
+					{
+						wrong.push(format!("left to the decode: {case}"));
+					}
+				}
+			}
+		}
+		assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 	}
 
 	#[test]

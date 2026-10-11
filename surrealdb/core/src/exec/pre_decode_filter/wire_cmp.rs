@@ -8,10 +8,11 @@
 //! [`crate::fnc::operate`] path.
 //!
 //! Strand wire form is canonical (`u16 rev=1 || varint len || pre-validated
-//! UTF-8`), so byte-equality is value-equality. Number wire form is canonical
-//! per variant — `Int(1)` and `Float(1.0)` have distinct wires despite being
-//! `Value::equal`-equal, so cross-variant Number eq is left to the fallback
-//! path.
+//! UTF-8`), so byte-equality is value-equality. Among numbers only an `Int`'s
+//! wire is canonical. A `Decimal`'s carries its scale and the sign of a zero,
+//! so a decimal is compared by its decoded body. A `Float`, and every
+//! cross-variant pair (`Int(1)` and `Float(1.0)` have distinct wires despite
+//! being `Value::equal`-equal), is left to the fallback path.
 //!
 //! **Operator commutativity:** `Equal` / `NotEqual` / `ExactEqual` all
 //! commute, so the planner's `reversed` flag never changes their truth value
@@ -21,6 +22,7 @@
 //! decoding the literal anew, so the wire path bails on that case.
 
 use revision::optimised::tag::{SizeClass, Tag};
+use rust_decimal::Decimal;
 
 use super::Evidence;
 use super::wire_literal::{LiteralSet, LiteralWire, NumberSubVariant};
@@ -130,6 +132,20 @@ fn peek_number_sub_variant(payload: &[u8]) -> Option<NumberSubVariant> {
 		);
 	}
 	Some(sv)
+}
+
+/// The decimal held by a rev-2 `Value::Number(_)`'s payload whose sub-variant
+/// [`peek_number_sub_variant`] read as `Decimal`. Returns [`None`] for a
+/// truncated payload.
+///
+/// The body starts after the six bytes [`peek_number_sub_variant`] reads (the
+/// `u32_le` payload length, then the Number rev and the discriminant at one
+/// varint byte each) and is decoded by the `Decimal` implementation a full
+/// `Value` decode uses, so it is the decimal the authoritative predicate sees.
+#[inline]
+fn decimal_in_number_payload(payload: &[u8]) -> Option<Decimal> {
+	let mut body: &[u8] = payload.get(6..)?;
+	<Decimal as revision::DeserializeRevisioned>::deserialize_revisioned(&mut body).ok()
 }
 
 /// Compare a navigated [`Value`] wire against a pre-encoded [`LiteralWire`]
@@ -299,11 +315,12 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 /// wire-fast path inspects the runtime value's Number sub-variant against the
 /// set's stored sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
 ///
-/// - Runtime sub-variant is the **only** one stored AND is byte-canonical (`Int` / `Decimal`) →
-///   byte miss is definitive value miss.
-/// - Runtime sub-variant is `Float` → defer to fallback (`+0.0` ↔ `-0.0` and NaN edge cases).
-/// - Runtime sub-variant is **not** in the set's mask but the mask is non-empty → cross-variant
-///   equality may still hold under `Number::PartialEq`, defer to fallback.
+/// - Runtime sub-variant is the **only** one stored → an `Int` byte miss is a definitive value
+///   miss; a `Decimal` is probed by value among the set's decimals, since its bytes carry its scale
+///   and the sign of a zero; a `Float` defers to fallback (`+0.0` ↔ `-0.0` and NaN edge cases).
+/// - Runtime sub-variant is **not** in the set's mask but the mask is non-empty, or the set mixes
+///   sub-variants → cross-variant equality may still hold under `Number::PartialEq`, defer to
+///   fallback.
 pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<bool> {
 	let peek = peek_value(value_bytes)?;
 	match peek.tag.variant_id() {
@@ -342,20 +359,23 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 			if (mask & field_bit) == 0 {
 				return None;
 			}
-			// Field sub-variant matches a stored sub-variant. Float byte
-			// miss is still inconclusive (NaN / ±0); Int / Decimal are
-			// canonical-per-value so a hash miss is a value miss.
-			if !field_sv.byte_eq_decides_value_eq() {
-				return None;
-			}
-			// Also defer if the set mixes sub-variants — even if the
-			// field's sub-variant is byte-canonical, a stored
+			// Also defer if the set mixes sub-variants: a stored
 			// *other*-sub-variant entry could still be cross-variant
 			// `==` to the field.
 			if mask & !field_bit != 0 {
 				return None;
 			}
-			Some(false)
+			match field_sv {
+				// One encoding per integer: a byte miss is a value miss.
+				NumberSubVariant::Int => Some(false),
+				// Equal decimals can differ in scale and in the sign of a
+				// zero, which the bytes carry: probe by value.
+				NumberSubVariant::Decimal => {
+					Some(set.decimals_contain(&decimal_in_number_payload(peek.payload)?))
+				}
+				// A Float byte miss is inconclusive (NaN / ±0).
+				NumberSubVariant::Float => None,
+			}
 		}
 		_ => None,
 	}
@@ -396,6 +416,7 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			full_wire,
 			sub_variant_id,
 			int_value: _,
+			decimal_value,
 		} => {
 			let peek = peek_value(value_bytes)?;
 			if peek.tag.variant_id() != variant_id::NUMBER {
@@ -412,16 +433,22 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 			if field_sv != *sub_variant_id {
 				return None;
 			}
-			// Same sub-variant. `Float` byte equality is unreliable
-			// (NaN bit-equal but ≠ under `f64::PartialEq`; `+0.0` ↔ `-0.0`
-			// byte-differ but `==` under `f64::PartialEq`). Cheap to defer
-			// the few Float-eq predicates to the full decode and keep the
-			// wire-fast path correct.
-			if !field_sv.byte_eq_decides_value_eq() {
-				return None;
+			match field_sv {
+				// One encoding per integer.
+				NumberSubVariant::Int => Some(value_bytes == full_wire.as_slice()),
+				// Equal decimals can differ in scale (`2.0` / `2`) and in the
+				// sign of a zero, which the bytes carry: compare the values,
+				// as `Number`'s equality does.
+				NumberSubVariant::Decimal => {
+					Some(decimal_in_number_payload(peek.payload)? == (*decimal_value)?)
+				}
+				// `Float` byte equality is unreliable (NaN bit-equal but ≠
+				// under `f64::PartialEq`; `+0.0` ↔ `-0.0` byte-differ but `==`
+				// under `f64::PartialEq`). Cheap to defer the few Float-eq
+				// predicates to the full decode and keep the wire-fast path
+				// correct.
+				NumberSubVariant::Float => None,
 			}
-			// Int / Decimal: byte form is canonical per value.
-			Some(value_bytes == full_wire.as_slice())
 		}
 		LiteralWire::Canonical {
 			full_wire,
@@ -1120,9 +1147,8 @@ mod tests {
 	}
 
 	// ---------------------------------------------------------------------
-	// Number sub-variant fast path — eliminates the previous
-	// `Value::__deserialize_after_header` fallback for same-sub-variant
-	// `Int`/`Decimal` mismatches in the scan/predicate hot loop.
+	// Number sub-variant fast path: a same-sub-variant `Int` or `Decimal`
+	// comparison is decided without decoding the `Value`.
 	// ---------------------------------------------------------------------
 
 	#[test]
@@ -1137,11 +1163,42 @@ mod tests {
 	}
 
 	#[test]
-	fn wire_eq_number_decimal_byte_mismatch_is_provably_false() {
+	fn wire_eq_number_decimal_value_mismatch_is_provably_false() {
 		use rust_decimal::Decimal;
 		let lit = LiteralWire::from_value(&Value::Number(Number::Decimal(Decimal::from(5))));
 		let v = encoded(&Value::Number(Number::Decimal(Decimal::from(7))));
 		assert_eq!(wire_eq(&v, &lit), Some(false));
+	}
+
+	/// A decimal's bytes carry its scale and the sign of a zero; equality
+	/// ignores both.
+	#[test]
+	fn wire_eq_number_decimal_compares_values_not_encodings() {
+		use rust_decimal::Decimal;
+		let d = |s: &str| -> Decimal { s.parse().unwrap() };
+		let dec = |d: Decimal| Value::Number(Number::Decimal(d));
+		for (field, literal) in
+			[(d("2.0"), d("2")), (d("2"), d("2.00")), (-d("0"), d("0")), (d("0.0"), -d("0"))]
+		{
+			let lit = LiteralWire::from_value(&dec(literal));
+			assert_eq!(wire_eq(&encoded(&dec(field)), &lit), Some(true), "{field:?} = {literal:?}");
+		}
+		let lit = LiteralWire::from_value(&dec(d("2")));
+		assert_eq!(wire_eq(&encoded(&dec(d("2.01"))), &lit), Some(false));
+	}
+
+	#[test]
+	fn wire_value_in_set_decimal_probes_by_value() {
+		use std::collections::HashSet;
+
+		use rust_decimal::Decimal;
+		let d = |s: &str| -> Decimal { s.parse().unwrap() };
+		let dec = |d: Decimal| Value::Number(Number::Decimal(d));
+		let ls = LiteralSet::from_set(&HashSet::from([dec(d("2")), dec(d("0"))]));
+		for field in [d("2.0"), d("2.000"), -d("0"), d("0.00")] {
+			assert_eq!(wire_value_in_set(&encoded(&dec(field)), &ls), Some(true), "{field:?}");
+		}
+		assert_eq!(wire_value_in_set(&encoded(&dec(d("2.5"))), &ls), Some(false));
 	}
 
 	#[test]
