@@ -109,6 +109,75 @@ async fn multiwriter_same_keys_conflict(b: &TestBackend) {
 
 kvs_test!(multiwriter_same_keys_conflict, except = [tikv, indxdb, surrealds]);
 
+/// Of many transactions racing to create one absent key — each reads the key,
+/// finds nothing, and writes it — at most one commits, on the backends with
+/// write-write conflict detection.
+///
+/// Every pair of them overlaps: a transaction that begins after another
+/// commits sees that commit, finds the key present, and writes nothing. So a
+/// second creator to commit is a write that conflict detection let through
+/// against a commit its snapshot did not hold, which is a lost update. The
+/// catalog's get-or-create paths rest on this: a namespace or database is
+/// created by a read that finds no definition followed by a blind write of
+/// one, and a second creator replacing the first would remap the name to a
+/// fresh id, leaving everything defined under the first id unreachable.
+///
+/// Unlike [`multiwriter_same_keys_conflict`], whose transactions all begin
+/// before any commits, these run on threads of their own, so transactions
+/// begin while others are committing. The rounds make the interleavings that
+/// matter likely rather than certain.
+#[cfg(not(target_family = "wasm"))]
+async fn concurrent_creators_of_absent_key_commit_once(b: &TestBackend) {
+	const THREADS: usize = 16;
+	const ROUNDS: usize = 200;
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	let runtime = tokio::runtime::Handle::current();
+	let barrier = std::sync::Barrier::new(THREADS);
+	let creators: Vec<std::sync::atomic::AtomicUsize> =
+		(0..ROUNDS).map(|_| std::sync::atomic::AtomicUsize::new(0)).collect();
+	// The test runs on the thread blocked on the runtime, not on a worker, so
+	// it can wait here for threads that drive their transactions on the
+	// runtime themselves.
+	std::thread::scope(|scope| {
+		for thread in 0..THREADS {
+			let (ds, runtime, barrier, creators) = (&ds, &runtime, &barrier, &creators);
+			scope.spawn(move || {
+				for (round, created) in creators.iter().enumerate() {
+					barrier.wait();
+					runtime.block_on(async {
+						let key = format!("absent-{round}");
+						let tx = ds.transaction(Write).await.unwrap();
+						if tx.get(key.as_bytes().into(), None).await.unwrap().is_some() {
+							tx.cancel().await.unwrap();
+							return;
+						}
+						tx.set(key.into_bytes().into(), thread.to_string().into_bytes())
+							.await
+							.unwrap();
+						if tx.commit().await.is_ok() {
+							created.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+						}
+					});
+				}
+			});
+		}
+	});
+	let lost: Vec<(usize, usize)> = creators
+		.iter()
+		.map(|created| created.load(std::sync::atomic::Ordering::Relaxed))
+		.enumerate()
+		.filter(|(_, created)| *created != 1)
+		.collect();
+	assert!(
+		lost.is_empty(),
+		"rounds without exactly one committed creator (round, creators): {lost:?}"
+	);
+}
+
+#[cfg(not(target_family = "wasm"))]
+kvs_test!(concurrent_creators_of_absent_key_commit_once, except = [tikv, indxdb, surrealds]);
+
 /// Last-writer-wins backends allow overlapping same-key writers: every commit
 /// succeeds and the last committer's value wins. This holds for TiKV's
 /// optimistic model, for IndexedDB, whose OCC validation only inspects the

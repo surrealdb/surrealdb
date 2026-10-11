@@ -593,6 +593,65 @@ mod mem {
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
+	/// A `DEFINE TABLE IF NOT EXISTS` that reports success leaves the table
+	/// defined for the session's next statement, even when many sessions
+	/// create the same fresh database and table at once.
+	///
+	/// A session may lose a race and see a retryable transaction conflict on
+	/// `USE` or `DEFINE`; that is an error the caller is told about. What must
+	/// never happen is a `DEFINE` that succeeds followed by a read that says
+	/// the table does not exist. That is what a lost write-write conflict
+	/// between two sessions' implicit creations of the database produces: the
+	/// later creation remaps the name to a fresh id, and the table defined
+	/// under the first id is no longer reachable. The storage contract behind
+	/// it is `concurrent_creators_of_absent_key_commit_once` in
+	/// `surrealdb-kvs-test`; this is the same failure as an application sees
+	/// it, through the embedded engine.
+	#[test_log::test(tokio::test(flavor = "multi_thread", worker_threads = 8))]
+	async fn define_table_if_not_exists_is_visible_under_concurrent_first_access() {
+		const ROUNDS: usize = 200;
+		const SESSIONS: usize = 32;
+
+		let db = surrealdb::engine::any::connect("mem://").await.unwrap();
+		let mut reads = 0;
+		let mut invisible = Vec::new();
+		for round in 0..ROUNDS {
+			// A fresh database per round, so every round races its creation.
+			let database = format!("db{round}");
+			let mut tasks = tokio::task::JoinSet::new();
+			for _ in 0..SESSIONS {
+				// Each clone is a session of its own.
+				let db = db.clone();
+				let database = database.clone();
+				tasks.spawn(async move {
+					// A conflict here or on the definition is reported to the
+					// caller, and the session reads nothing.
+					db.use_ns("repro").use_db(&database).await.ok()?;
+					db.query("DEFINE TABLE IF NOT EXISTS t SCHEMALESS")
+						.await
+						.and_then(|r| r.check())
+						.ok()?;
+					let read: Result<Option<surrealdb::types::Value>, _> =
+						db.select(("t", "current")).await;
+					Some(read.err().map(|e| format!("round {round}: {e}")))
+				});
+			}
+			while let Some(read) = tasks.join_next().await {
+				if let Some(read) = read.unwrap() {
+					reads += 1;
+					invisible.extend(read);
+				}
+			}
+		}
+		// Most sessions win their race; a run in which none reads checks nothing.
+		assert!(reads >= ROUNDS, "only {reads} sessions reached the read");
+		assert!(
+			invisible.is_empty(),
+			"{} sessions saw DEFINE TABLE IF NOT EXISTS succeed and the table missing: {invisible:?}",
+			invisible.len()
+		);
+	}
+
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
