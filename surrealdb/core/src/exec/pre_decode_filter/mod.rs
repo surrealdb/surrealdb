@@ -755,8 +755,9 @@ impl PreDecodeFilter {
 /// A hit is always a hit. A **miss** only proves absence when
 /// [`hash_miss_is_decisive`] says so —
 /// numbers break the `Hash`/`Eq` contract, so `0.1f` misses a set holding
-/// `0.1dec` even though the two compare equal. An inconclusive miss sends the
-/// row to the authoritative predicate.
+/// `0.1dec` even though the two compare equal, and a stored regex misses a set
+/// holding a string it matches. An inconclusive miss sends the row to the
+/// authoritative predicate.
 #[inline]
 fn hash_set_evidence_for(
 	op: &BinaryOperator,
@@ -869,6 +870,7 @@ mod tests {
 	use revision::SerializeRevisioned;
 	use surrealdb_strand::Strand;
 
+	use super::compile::compile_predicate_shape;
 	use super::streaming::{
 		ArrayElementContains, ArrayOverlapsLiteralSet, OverlapMode, SubstringMatch,
 		overlap_streaming_from_set,
@@ -879,7 +881,8 @@ mod tests {
 		PreDecodeFilterOutcome, PredNode,
 	};
 	use crate::catalog::Record;
-	use crate::expr::operator::BinaryOperator;
+	use crate::exec::physical_expr::{BinaryOp, PhysicalExpr, SimpleBinaryOp, UnaryOp};
+	use crate::expr::operator::{BinaryOperator, PrefixOperator};
 	use crate::val::{Number, Object, Value};
 
 	/// Depth limit used in test fixtures. Matches the default
@@ -1756,5 +1759,208 @@ mod tests {
 			);
 		}
 		assert!(PreDecodeFilterStatus::NotApplicable.explain_text().is_none());
+	}
+
+	// ---------- a regex against strings: `Value::equal` is not `==` ----------
+
+	fn regex(pattern: &str) -> Value {
+		Value::Regex(pattern.parse().expect("regex"))
+	}
+
+	fn strings(items: &[&str]) -> Value {
+		Value::from(items.iter().map(|s| Value::from(*s)).collect::<Vec<_>>())
+	}
+
+	/// A record whose one field `v` holds `value`.
+	fn record_with_v(value: Value) -> Vec<u8> {
+		wire_record_plain_object(Object::from(BTreeMap::from([(Strand::from("v"), value)])))
+	}
+
+	/// Whether `field <op> literal` holds, as the operator judges the decoded
+	/// field.
+	fn operator_holds(op: &BinaryOperator, field: &Value, literal: &Value) -> bool {
+		match super::apply_binary(op, field, literal) {
+			Some(Value::Bool(holds)) => holds,
+			other => panic!("{op:?} answered {other:?}"),
+		}
+	}
+
+	/// `v <op> literal` as the planner hands it to the pre-decode compiler.
+	fn v_pred(op: BinaryOperator, literal: Value) -> Arc<dyn PhysicalExpr> {
+		Arc::new(SimpleBinaryOp {
+			field_name: "v".into(),
+			op,
+			literal,
+			reversed: false,
+		})
+	}
+
+	/// The filter a scan judges records by for `pred`.
+	fn filter_for(pred: &Arc<dyn PhysicalExpr>) -> PreDecodeFilter {
+		PreDecodeFilter::new(compile_predicate_shape(pred).expect("compile"), TEST_DEPTH_LIMIT)
+	}
+
+	/// `path CONTAINSANY` / `CONTAINSALL` / `CONTAINSNONE` over `set` exactly as
+	/// given, including elements the planner keeps out of a literal set.
+	fn overlap(path: Vec<PathSegment>, mode: OverlapMode, set: &HashSet<Value>) -> PredNode {
+		let op = match mode {
+			OverlapMode::Any => BinaryOperator::ContainAny,
+			OverlapMode::All => BinaryOperator::ContainAll,
+			OverlapMode::None => BinaryOperator::ContainNone,
+		};
+		let tables = overlap_streaming_from_set(set);
+		PredNode::LeafStreaming {
+			path,
+			evaluator: Arc::new(ArrayOverlapsLiteralSet {
+				literal_to_idx: tables.literal_to_idx,
+				wire_to_idx: tables.wire_to_idx,
+				literal_set: tables.literal_set,
+				literal_count: tables.literal_count,
+				mode,
+			}),
+			fallback: LeafFallback {
+				op,
+				literal: Value::from(set.iter().cloned().collect::<Vec<_>>()),
+				reversed: false,
+			},
+		}
+	}
+
+	/// `IN` and `CONTAINS*` judge membership by `Value::equal`, which matches a
+	/// string against a regex, while the decoded probe of a literal set compares
+	/// with `==`. A stored regex misses every string it matches, so its miss must
+	/// not reject the row, however number-free the set.
+	#[test]
+	fn stored_regex_matching_a_string_literal_needs_full_decode() {
+		use BinaryOperator::{ContainAll, ContainAny, Inside};
+		let cases = [
+			(Inside, regex("a.*"), strings(&["abc"])),
+			(ContainAny, Value::from(vec![regex("a.*")]), strings(&["abc"])),
+			(ContainAll, Value::from(vec![regex("a.*")]), strings(&["abc"])),
+			// One regex answers for both literals.
+			(ContainAll, Value::from(vec![regex("a.*")]), strings(&["abc", "axe"])),
+			// The string hits on the wire; the regex still answers for `xyz`.
+			(
+				ContainAll,
+				Value::from(vec![Value::from("abc"), regex("x")]),
+				strings(&["abc", "xyz"]),
+			),
+		];
+		let mut rejected = Vec::new();
+		for (op, field, literal) in cases {
+			assert!(operator_holds(&op, &field, &literal), "{field:?} {op:?} {literal:?}");
+			let pf = filter_for(&v_pred(op.clone(), literal.clone()));
+			if pf.apply(&[], &record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+				rejected.push(format!("{field:?} {op:?} {literal:?}"));
+			}
+		}
+		assert!(rejected.is_empty(), "rejected rows the operator holds for: {rejected:#?}");
+	}
+
+	/// `v = 'abc' OR v = 'xyz'` is fused into one set probe. The single
+	/// comparison `v = 'abc'` decodes a regex peer, and the fused set must not
+	/// reject it either.
+	#[test]
+	fn fused_equality_chain_on_a_stored_regex_needs_full_decode() {
+		let field = regex("a.*");
+		assert!(operator_holds(&BinaryOperator::Equal, &field, &Value::from("abc")));
+		let pred: Arc<dyn PhysicalExpr> = Arc::new(BinaryOp {
+			left: v_pred(BinaryOperator::Equal, Value::from("abc")),
+			op: BinaryOperator::Or,
+			right: v_pred(BinaryOperator::Equal, Value::from("xyz")),
+		});
+		let pf = filter_for(&pred);
+		assert!(matches!(pf.root, PredNode::LeafSetMembership { .. }), "{:?}", pf.root);
+		assert_eq!(pf.apply(&[], &record_with_v(field)), PreDecodeFilterOutcome::NeedFullDecode);
+	}
+
+	/// `NOT IN` and `CONTAINSNONE` read the same miss as proof that a stored
+	/// regex matches no literal. Under `NOT` that becomes a rejection of a row
+	/// the predicate holds for.
+	#[test]
+	fn negated_exclusion_of_a_stored_regex_matching_a_string_needs_full_decode() {
+		use BinaryOperator::{ContainNone, NotInside};
+		let literal = strings(&["abc"]);
+		let mut rejected = Vec::new();
+		for (op, field) in
+			[(NotInside, regex("a.*")), (ContainNone, Value::from(vec![regex("a.*")]))]
+		{
+			// The exclusion is false, so its negation holds.
+			assert!(!operator_holds(&op, &field, &literal), "{field:?} {op:?}");
+			let pred: Arc<dyn PhysicalExpr> = Arc::new(UnaryOp {
+				op: PrefixOperator::Not,
+				expr: v_pred(op.clone(), literal.clone()),
+			});
+			let pf = filter_for(&pred);
+			if pf.apply(&[], &record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+				rejected.push(format!("NOT ({field:?} {op:?})"));
+			}
+		}
+		assert!(rejected.is_empty(), "rejected rows the predicate holds for: {rejected:#?}");
+	}
+
+	/// The same pairing the other way round: a stored string misses a set
+	/// holding a regex that matches it. The planner keeps regexes out of literal
+	/// sets, so only a hand-built set reaches this.
+	#[test]
+	fn stored_string_matching_a_regex_in_the_set_needs_full_decode() {
+		let set = HashSet::from([regex("a.*")]);
+		let literal = Value::from(vec![regex("a.*")]);
+		let field = Value::from("abc");
+		let array = Value::from(vec![field.clone()]);
+		assert!(operator_holds(&BinaryOperator::Inside, &field, &literal));
+		assert!(operator_holds(&BinaryOperator::ContainAny, &array, &literal));
+		let inside =
+			set_membership(vec!["v".into()], BinaryOperator::Inside, Arc::new(set.clone()), false);
+		let any = overlap(vec!["v".into()], OverlapMode::Any, &set);
+		let mut rejected = Vec::new();
+		for (name, root, stored) in [("IN", inside, field), ("CONTAINSANY", any, array)] {
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			if pf.apply(&[], &record_with_v(stored)) == PreDecodeFilterOutcome::Reject {
+				rejected.push(name);
+			}
+		}
+		assert!(rejected.is_empty(), "rejected rows the operator holds for: {rejected:?}");
+	}
+
+	/// A wrong *hit* cannot reject a row. A probe hits only an element `==` to
+	/// the value, and `==` implies `Value::equal` for every pair of values, so
+	/// where `NOT IN` and `CONTAINSNONE` reject on a hit the operator is false
+	/// too — for a string, a compound value and a regex alike (the regex in a
+	/// hand-built set, since the planner keeps regexes out of literal sets).
+	#[test]
+	fn exclusion_rejects_on_a_hit_only_where_the_operator_is_false() {
+		let object =
+			Value::Object(Object::from(BTreeMap::from([(Strand::from("k"), Value::from("abc"))])));
+		for field in [Value::from("abc"), object, regex("a.*")] {
+			let set = HashSet::from([field.clone()]);
+			let literal = Value::from(vec![field.clone()]);
+
+			assert!(!operator_holds(&BinaryOperator::NotInside, &field, &literal), "{field:?}");
+			let root = set_membership(
+				vec!["v".into()],
+				BinaryOperator::NotInside,
+				Arc::new(set.clone()),
+				false,
+			);
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			assert_eq!(
+				pf.apply(&[], &record_with_v(field.clone())),
+				PreDecodeFilterOutcome::Reject,
+				"NOT IN {field:?}"
+			);
+
+			let array = Value::from(vec![field.clone()]);
+			assert!(!operator_holds(&BinaryOperator::ContainNone, &array, &literal), "{field:?}");
+			let pf = PreDecodeFilter::new(
+				overlap(vec!["v".into()], OverlapMode::None, &set),
+				TEST_DEPTH_LIMIT,
+			);
+			assert_eq!(
+				pf.apply(&[], &record_with_v(array)),
+				PreDecodeFilterOutcome::Reject,
+				"CONTAINSNONE {field:?}"
+			);
+		}
 	}
 }

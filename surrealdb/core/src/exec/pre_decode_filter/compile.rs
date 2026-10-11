@@ -727,8 +727,8 @@ fn is_synthetic_id_path(path: &[PathSegment]) -> bool {
 /// loose equality (`=` / [`operate::equal`]). Collapsing the chain pays one field
 /// descent + one hash probe per row instead of one descent + comparison per arm;
 /// `eval_set_membership` keeps the two relations apart where hashing cannot
-/// decide loose equality (numbers — see
-/// [`Value::hash_agrees_with_eq`]).
+/// decide loose equality (numbers, and a regex against strings — see
+/// [`hash_miss_is_decisive`](super::wire_literal::hash_miss_is_decisive)).
 ///
 /// Conservative — an arm only joins a fused group when it is:
 /// - a [`PredNode::Leaf`] with `op == Equal`, `reversed == false`, a hashset-safe literal (see

@@ -165,16 +165,25 @@ impl Value {
 	/// [`Number`] may hash into a different bucket than an equal value, so
 	/// `contains` answers `false` for something the collection holds.
 	///
-	/// A probe is decisive as soon as *either* side is number-free, because
-	/// equality requires matching variants at every level: two values can only
-	/// hash apart while comparing equal if both carry a [`Number`] in the same
-	/// position. So a caller may trust a miss when this returns `true` for the
-	/// probed value, *or* when it returns `true` for every element of the
-	/// collection.
+	/// For `==` a probe is decisive as soon as *either* side is number-free,
+	/// because `==` requires matching variants at every level: two values can
+	/// only hash apart while comparing equal if both carry a [`Number`] in the
+	/// same position. So a caller judging `==` may trust a miss when this returns
+	/// `true` for the probed value, *or* when it returns `true` for every element
+	/// of the collection.
+	///
+	/// [`Value::equal`] — what `=`, `IN` and the `CONTAINS` family compare by —
+	/// is wider than `==` in one place: it matches a top-level [`Value::String`]
+	/// against a top-level [`Value::Regex`] by running the regex, and the two
+	/// hash apart. [`Value::Regex`] reports `false` for that reason, although its
+	/// own hash and `==` agree. A caller judging `equal` may trust a miss when
+	/// this returns `true` on *both* sides. The either-side rule does not carry
+	/// over, since a string reports `true`: it would trust a regex's miss against
+	/// a set of the strings it matches, unless the caller rules that pairing out
+	/// itself.
 	///
 	/// Variants whose hash/equality pairing is not established — [`Value::Geometry`]
-	/// (hashes `f64` coordinates), [`Value::Regex`] (equality with
-	/// [`Value::String`] is asymmetric), [`Value::Range`] and [`Value::Closure`] —
+	/// (hashes `f64` coordinates), [`Value::Range`] and [`Value::Closure`] —
 	/// report `false` so they take the same conservative path.
 	pub fn hash_agrees_with_eq(&self) -> bool {
 		match self {
