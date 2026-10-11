@@ -39,22 +39,34 @@ pub(super) enum ScanIter {
 }
 
 /// Where a writable-transaction cursor resumes if its iterator has to be
-/// rebuilt.
+/// repaired.
 ///
-/// A savepoint rollback rebuilds the write-batch index that a
-/// [`ScanIter::Tx`] iterator points into, so the iterator must not be used
-/// afterwards. The cursor notices through `epoch` (compared against the
-/// transaction's rollback epoch on each batch) and builds a new iterator. The
-/// scan continues in the transaction's post-rollback view, strictly after
-/// `last`, the key of the last entry the cursor consumed, whether yielded or
-/// skipped. Resuming from where the old iterator stood would be wrong: the
-/// rollback can restore an entry the old iterator had stepped over, between
-/// `last` and its position or beyond a range it had already run out of.
-/// Unused by read-only cursors, whose iterators read the database directly and
-/// are unaffected by savepoints.
+/// A writable scan iterator reads the transaction's pending writes through
+/// the write batch, and two things the transaction does between batches
+/// invalidate what it holds:
+///
+/// * A savepoint rollback rebuilds the write-batch index that a [`ScanIter::Tx`] iterator points
+///   into, so the iterator must not be used afterwards. The cursor notices through `epoch`
+///   (compared against the transaction's rollback epoch on each batch) and builds a new iterator.
+///   The scan continues in the transaction's post-rollback view, strictly after `last`, the key of
+///   the last entry the cursor consumed, whether yielded or skipped. Resuming from where the old
+///   iterator stood would be wrong: the rollback can restore an entry the old iterator had stepped
+///   over, between `last` and its position or beyond a range it had already run out of.
+/// * Any write appends to the write batch, which can reallocate the buffer. The iterator caches the
+///   value of the entry it is parked on as a slice into that buffer, so the cached value can
+///   dangle. The cursor notices through `writes` (compared against the transaction's write epoch)
+///   and seeks the existing iterator back to the entry it is parked on, which re-reads it from the
+///   buffer. The entry's key is read from the buffer on every call, so it is sound to seek by.
+///   Seeking there rather than past `last` leaves what the scan sees of the transaction's writes as
+///   it was: an entry written between `last` and the parked entry stays unseen.
+///
+/// Unused by read-only cursors, whose iterators read the database directly
+/// and are unaffected by either.
 pub(super) struct TxResume {
 	/// The transaction's rollback epoch when the iterator was last built.
 	pub(super) epoch: u64,
+	/// The transaction's write epoch when the iterator was last positioned.
+	pub(super) writes: u64,
 	/// The version the scan reads at, needed to rebuild its `ReadOptions`.
 	pub(super) version: Option<u64>,
 	/// Key of the last entry consumed, valid when `has_last`.
@@ -64,9 +76,10 @@ pub(super) struct TxResume {
 }
 
 impl TxResume {
-	pub(super) fn new(epoch: u64, version: Option<u64>) -> Self {
+	pub(super) fn new(epoch: u64, writes: u64, version: Option<u64>) -> Self {
 		Self {
 			epoch,
+			writes,
 			version,
 			last: Vec::new(),
 			has_last: false,
@@ -109,6 +122,22 @@ impl TxResume {
 					it.seek_for_prev(end);
 				}
 			}
+		}
+	}
+
+	/// Seek an iterator the transaction has written under back to the entry
+	/// it is parked on, so it re-reads the entry from the write batch. An
+	/// exhausted or not yet positioned iterator is left alone.
+	pub(super) fn reseek(iter: &mut ScanIter, dir: Direction) {
+		let ScanIter::Tx(it) = iter else {
+			return;
+		};
+		let Some(at) = it.key().map(<[u8]>::to_vec) else {
+			return;
+		};
+		match dir {
+			Direction::Forward => it.seek(&at),
+			Direction::Backward => it.seek_for_prev(&at),
 		}
 	}
 }

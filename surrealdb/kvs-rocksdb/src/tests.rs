@@ -1358,3 +1358,186 @@ async fn cursor_survives_savepoint_rollback() {
 		tx.cancel().await.unwrap();
 	}
 }
+
+/// Open a cursor over `wr/` on a writable transaction whose entries in the
+/// range are all pending writes, and write outside the range between every
+/// batch. Returns what the cursor yielded.
+///
+/// Because every entry is pending, after each batch the iterator is parked on
+/// an entry that lives in the transaction's write batch. That batch is one
+/// growing buffer; the writes between batches reallocate it under the parked
+/// iterator.
+async fn scan_with_writes_between_batches(
+	vals: bool,
+	dir: surrealdb_kvs::Direction,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+	use surrealdb_kvs::api::Transactable;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	const COUNT: usize = 40;
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	let tx_ref = tx.as_ref();
+	for i in 0..COUNT {
+		let value = format!("{i:04}").repeat(16).into_bytes();
+		tx.set(format!("wr/key_{i:04}").into_bytes().into(), value).await.unwrap();
+	}
+	let mut seen = Vec::new();
+	let mut keys_cursor = None;
+	let mut vals_cursor = None;
+	if vals {
+		vals_cursor = Some(
+			Transactable::open_vals_cursor(tx_ref, prefix_byte_range("wr/"), dir, 0, None)
+				.await
+				.unwrap(),
+		);
+	} else {
+		keys_cursor = Some(
+			Transactable::open_keys_cursor(tx_ref, prefix_byte_range("wr/"), dir, 0, None)
+				.await
+				.unwrap(),
+		);
+	}
+	for round in 0.. {
+		let before = seen.len();
+		if let Some(c) = vals_cursor.as_mut() {
+			let b = c.next_batch(5).await.unwrap();
+			seen.extend(b.iter().map(|(k, v)| (k.to_vec(), v.to_vec())));
+		}
+		if let Some(c) = keys_cursor.as_mut() {
+			let b = c.next_batch(5).await.unwrap();
+			seen.extend(b.iter().map(|k| (k.to_vec(), Vec::new())));
+		}
+		if seen.len() == before {
+			break;
+		}
+		for j in 0..50 {
+			let key = format!("other/{round:03}_{j:03}").into_bytes();
+			tx.set(key.into(), vec![b'x'; 64]).await.unwrap();
+		}
+	}
+	drop(keys_cursor);
+	drop(vals_cursor);
+	tx.cancel().await.unwrap();
+	seen
+}
+
+/// Writes made between batches of an open writable-transaction scan cursor
+/// must not disturb what a key+value cursor goes on to yield, in either
+/// direction.
+#[tokio::test(flavor = "multi_thread")]
+async fn vals_cursor_survives_writes_between_batches() {
+	use surrealdb_kvs::Direction;
+
+	for dir in [Direction::Forward, Direction::Backward] {
+		let mut expected: Vec<usize> = (0..40).collect();
+		if dir == Direction::Backward {
+			expected.reverse();
+		}
+		let expected: Vec<(Vec<u8>, Vec<u8>)> = expected
+			.into_iter()
+			.map(|i| {
+				(format!("wr/key_{i:04}").into_bytes(), format!("{i:04}").repeat(16).into_bytes())
+			})
+			.collect();
+		assert_eq!(scan_with_writes_between_batches(true, dir).await, expected, "{dir:?}");
+	}
+}
+
+/// As [`vals_cursor_survives_writes_between_batches`], for a keys-only
+/// cursor.
+#[tokio::test(flavor = "multi_thread")]
+async fn keys_cursor_survives_writes_between_batches() {
+	use surrealdb_kvs::Direction;
+
+	for dir in [Direction::Forward, Direction::Backward] {
+		let mut expected: Vec<usize> = (0..40).collect();
+		if dir == Direction::Backward {
+			expected.reverse();
+		}
+		let expected: Vec<(Vec<u8>, Vec<u8>)> = expected
+			.into_iter()
+			.map(|i| (format!("wr/key_{i:04}").into_bytes(), Vec::new()))
+			.collect();
+		assert_eq!(scan_with_writes_between_batches(false, dir).await, expected, "{dir:?}");
+	}
+}
+
+/// Between every batch of an open writable-transaction vals cursor, overwrite
+/// the entry the iterator is parked on with a longer value and delete the
+/// entry after it, in either direction. The cursor must yield the parked entry
+/// with the value written while it was parked, and never the deleted entry.
+///
+/// Every write lands at or beyond the parked entry, so nothing the cursor has
+/// already yielded changes afterwards: what it yields is the range as the
+/// transaction finally holds it.
+#[tokio::test(flavor = "multi_thread")]
+async fn vals_cursor_rereads_the_entry_written_under_it() {
+	use std::collections::BTreeMap;
+
+	use surrealdb_kvs::Direction;
+	use surrealdb_kvs::api::Transactable;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	for dir in [Direction::Forward, Direction::Backward] {
+		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+		let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let mut model = BTreeMap::new();
+		for i in 0..40 {
+			let key = format!("wr/key_{i:04}").into_bytes();
+			let value = format!("{i:04}").repeat(16).into_bytes();
+			tx.set(key.clone().into(), value.clone()).await.unwrap();
+			model.insert(key, value);
+		}
+		let mut cursor =
+			Transactable::open_vals_cursor(tx.as_ref(), prefix_byte_range("wr/"), dir, 0, None)
+				.await
+				.unwrap();
+		let mut seen: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+		loop {
+			let batch = cursor.next_batch(5).await.unwrap();
+			let before = seen.len();
+			seen.extend(batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())));
+			let Some((last, _)) = seen.last().filter(|_| seen.len() > before) else {
+				break;
+			};
+			// The entries after `last` in scan order: the parked entry first.
+			let ahead: Vec<Vec<u8>> = match dir {
+				Direction::Forward => model
+					.range::<Vec<u8>, _>((
+						std::ops::Bound::Excluded(last),
+						std::ops::Bound::Unbounded,
+					))
+					.take(2)
+					.map(|(k, _)| k.clone())
+					.collect(),
+				Direction::Backward => model
+					.range::<Vec<u8>, _>(..last)
+					.rev()
+					.take(2)
+					.map(|(k, _)| k.clone())
+					.collect(),
+			};
+			if let Some(parked) = ahead.first() {
+				let value = b"rewritten".repeat(64);
+				tx.set(parked.clone().into(), value.clone()).await.unwrap();
+				model.insert(parked.clone(), value);
+			}
+			if let Some(after) = ahead.get(1) {
+				tx.del(after.clone().into()).await.unwrap();
+				model.remove(after);
+			}
+		}
+		drop(cursor);
+		tx.cancel().await.unwrap();
+		let mut expected: Vec<(Vec<u8>, Vec<u8>)> = model.into_iter().collect();
+		if dir == Direction::Backward {
+			expected.reverse();
+		}
+		assert_eq!(seen, expected, "{dir:?}");
+	}
+}

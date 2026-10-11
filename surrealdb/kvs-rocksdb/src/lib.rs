@@ -192,6 +192,13 @@ pub struct Transaction {
 	/// into write-batch state the rollback rebuilt, so its cursor replaces it
 	/// before the next read. See [`TxResume`].
 	rollback_epoch: AtomicU64,
+	/// Incremented, under `inner`, by every write or delete buffered into the
+	/// transaction. Buffering can reallocate the write batch that holds the
+	/// entries a writable scan iterator is parked on, leaving the value the
+	/// iterator cached for its current entry dangling, so a cursor whose
+	/// iterator was last advanced under an earlier value re-seeks it before the
+	/// next read. See [`TxResume`].
+	write_epoch: AtomicU64,
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
@@ -856,6 +863,7 @@ impl Datastore {
 			inner: Mutex::new(Some(tx)),
 			savepoints: Mutex::new(SavepointStack::default()),
 			rollback_epoch: AtomicU64::new(0),
+			write_epoch: AtomicU64::new(0),
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
 			commit_coordinator: self.commit_coordinator.clone(),
@@ -903,15 +911,23 @@ impl Transaction {
 		}
 	}
 
-	/// Mark the transaction as containing deletes
+	/// Mark the transaction as containing deletes.
+	///
+	/// Called under `inner` after every delete buffered into the transaction;
+	/// it advances `write_epoch`.
 	fn store_deletes(&self) {
+		self.write_epoch.fetch_add(1, Ordering::Release);
 		if self.current_state() < TransactionState::HasDeletes {
 			self.transaction_state.store(TransactionState::HasDeletes as u8, Ordering::Release);
 		}
 	}
 
-	/// Mark the transaction as containing writes
+	/// Mark the transaction as containing writes.
+	///
+	/// Called under `inner` after every put buffered into the transaction; it
+	/// advances `write_epoch`.
 	fn store_writes(&self) {
+		self.write_epoch.fetch_add(1, Ordering::Release);
 		if self.current_state() < TransactionState::HasWrites {
 			self.transaction_state.store(TransactionState::HasWrites as u8, Ordering::Release);
 		}
@@ -1294,12 +1310,17 @@ impl Transaction {
 	/// Prepare a cursor for its next batch.
 	///
 	/// Read-only cursors need nothing. A writable cursor takes `inner`, which
-	/// the caller holds for the batch so a savepoint rollback cannot run under
-	/// the iterator, and, if a rollback has run since the iterator was built,
-	/// replaces the iterator (see [`TxResume`]). The replacement reads the
-	/// same snapshot and bounds and continues at the first entry the old
-	/// iterator had not yielded, in the post-rollback view of the
-	/// transaction's writes.
+	/// the caller holds for the batch so neither a savepoint rollback nor a
+	/// write can run under the iterator, and repairs an iterator the
+	/// transaction has changed under since it was last advanced (see
+	/// [`TxResume`]):
+	///
+	/// * after a savepoint rollback it replaces the iterator with one that reads the same snapshot
+	///   and bounds and continues strictly after the last entry the cursor consumed, in the
+	///   post-rollback view of the transaction's writes;
+	/// * after writes it re-seeks the iterator to the entry it is parked on, which makes it re-read
+	///   the entry from the write batch instead of through the value it cached before the batch was
+	///   appended to.
 	async fn sync_tx_iter(
 		&self,
 		iter: &mut ScanIter,
@@ -1315,6 +1336,7 @@ impl Transaction {
 		let guard = self.inner.lock().await;
 		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 		let epoch = self.rollback_epoch.load(Ordering::Acquire);
+		let writes = self.write_epoch.load(Ordering::Acquire);
 		if epoch != resume.epoch {
 			let rng = start.to_vec()..end.to_vec();
 			let mut fresh = self.build_scan_iter(&rng, resume.version, inner);
@@ -1322,8 +1344,11 @@ impl Transaction {
 				resume.reposition(&mut fresh, dir, start, end);
 			}
 			*iter = fresh;
-			resume.epoch = epoch;
+		} else if writes != resume.writes && started {
+			TxResume::reseek(iter, dir);
 		}
+		resume.epoch = epoch;
+		resume.writes = writes;
 		Ok(Some(guard))
 	}
 }
@@ -2741,12 +2766,13 @@ impl Transactable for Transaction {
 			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
 			let epoch = self.rollback_epoch.load(Ordering::Acquire);
+			let writes = self.write_epoch.load(Ordering::Acquire);
 			drop(guard);
 			Ok(Box::new(RocksDbKeysCursor {
 				tx: self,
 				state: ScanStateKeys {
 					iter,
-					resume: TxResume::new(epoch, version),
+					resume: TxResume::new(epoch, writes, version),
 					dir,
 					started: false,
 					skip,
@@ -2781,12 +2807,13 @@ impl Transactable for Transaction {
 			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
 			let epoch = self.rollback_epoch.load(Ordering::Acquire);
+			let writes = self.write_epoch.load(Ordering::Acquire);
 			drop(guard);
 			Ok(Box::new(RocksDbValsCursor {
 				tx: self,
 				state: ScanStateVals {
 					iter,
-					resume: TxResume::new(epoch, version),
+					resume: TxResume::new(epoch, writes, version),
 					dir,
 					started: false,
 					skip,
