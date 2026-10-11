@@ -391,12 +391,62 @@ impl DecimalLexEncoder {
 		D128::from_parts(abs, -(scale as i32), sign, Context::default())
 	}
 
-	/// Converts a fastnum::D128 to a rust_decimal::Decimal.
+	/// Converts a fastnum::D128 to a rust_decimal::Decimal through the D128's
+	/// text.
 	///
-	/// This conversion uses string representation as an intermediate format
-	/// to ensure precision is maintained during the conversion.
+	/// The text of a D128 whose exponent is below -6 is in scientific notation,
+	/// which `Decimal::from_str_radix` does not read as a number, and a value
+	/// with more than 28 fractional digits is rounded. It is therefore only
+	/// meaningful for values that print positionally; a caller that must get the
+	/// same value back uses [`Self::to_decimal_exact`].
 	pub fn to_decimal(d128: D128) -> Result<Decimal> {
 		Ok(Decimal::from_str_radix(&d128.to_string(), 10)?)
+	}
+
+	/// Converts a finite fastnum::D128 to the rust_decimal::Decimal of exactly
+	/// the same value.
+	///
+	/// The inverse of [`Self::to_d128`]: every Decimal it was given converts
+	/// back unchanged, whatever its scale. A D128 that no Decimal can hold
+	/// exactly — a magnitude beyond the 96-bit mantissa, or a significant digit
+	/// past the 28th fractional place — is an error rather than a rounded value.
+	pub fn to_decimal_exact(d128: D128) -> Result<Decimal> {
+		// Largest mantissa a Decimal holds: 2^96 - 1.
+		const MAX_MANTISSA: u128 = (1 << 96) - 1;
+		// Most fractional digits a Decimal holds.
+		const MAX_SCALE: i32 = 28;
+
+		let unrepresentable =
+			|| anyhow::Error::new(Error::Serialization(format!("{d128} is not a Decimal")));
+		if d128.is_zero() {
+			return Ok(Decimal::ZERO);
+		}
+		let mut mantissa =
+			d128.digits().to_str_radix(10).parse::<u128>().map_err(|_| unrepresentable())?;
+		// The value is `mantissa * 10^exponent`.
+		let mut exponent = -(d128.fractional_digits_count() as i32);
+		// A positive exponent is trailing zeros the integer has to spell out.
+		while exponent > 0 {
+			mantissa = mantissa.checked_mul(10).ok_or_else(unrepresentable)?;
+			exponent -= 1;
+		}
+		// Past the Decimal's scale, only trailing zeros of the mantissa can go.
+		while exponent < -MAX_SCALE && mantissa % 10 == 0 {
+			mantissa /= 10;
+			exponent += 1;
+		}
+		if exponent < -MAX_SCALE || mantissa > MAX_MANTISSA {
+			return Err(unrepresentable());
+		}
+		let mantissa = mantissa as i128;
+		Ok(Decimal::from_i128_with_scale(
+			if d128.is_negative() {
+				-mantissa
+			} else {
+				mantissa
+			},
+			(-exponent) as u32,
+		))
 	}
 }
 
@@ -517,5 +567,62 @@ mod tests {
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");
+	}
+
+	#[test]
+	fn to_decimal_exact_is_the_inverse_of_to_d128() {
+		for text in [
+			"0",
+			"1",
+			"-1",
+			"1.50",
+			"100.000",
+			"0.0000001",
+			"-0.00000000000000000000000001",
+			"7.9228162514264337593543950335",
+			"79228162514264337593543950335",
+			"-79228162514264337593543950335",
+		] {
+			let d: Decimal = text.parse().unwrap();
+			let back = DecimalLexEncoder::to_decimal_exact(DecimalLexEncoder::to_d128(d)).unwrap();
+			assert_eq!(back, d, "{text}");
+			assert_eq!(back.scale(), d.scale(), "{text} lost its scale");
+		}
+	}
+
+	#[test]
+	fn to_decimal_exact_reads_any_spelling_of_a_representable_value() {
+		let cases: [(&str, &str); 5] = [
+			// A positive exponent is trailing zeros.
+			("1E+3", "1000"),
+			("12E+27", "12000000000000000000000000000"),
+			// Trailing zeros past the 28th place are not significant.
+			("1200E-30", "0.0000000000000000000000000012"),
+			("5E-7", "0.0000005"),
+			("-0E+10", "0"),
+		];
+		for (d128, decimal) in cases {
+			let d128: D128 = d128.parse().unwrap();
+			let decimal: Decimal = decimal.parse().unwrap();
+			assert_eq!(DecimalLexEncoder::to_decimal_exact(d128).unwrap(), decimal, "{d128}");
+		}
+	}
+
+	#[test]
+	fn to_decimal_exact_refuses_what_a_decimal_cannot_hold() {
+		for text in [
+			// Past the 96-bit mantissa.
+			"1E+29",
+			"79228162514264337593543950336",
+			"9999999999999999999999999999999999",
+			"1E+6144",
+			// A significant digit past the 28th fractional place.
+			"1E-29",
+			"123E-30",
+			"1E-6143",
+		] {
+			let d128: D128 = text.parse().unwrap();
+			assert!(DecimalLexEncoder::to_decimal_exact(d128).is_err(), "{text} is not a Decimal");
+		}
 	}
 }
