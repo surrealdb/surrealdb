@@ -84,7 +84,8 @@ impl Deref for Datetime {
 }
 
 impl Datetime {
-	/// Convert the datetime to a version stamp using the datastore's timestamp implementation.
+	/// Convert the datetime to the version a versioned read takes, through the
+	/// datastore's version implementation (`Transactable::version_impl`).
 	pub fn to_version_stamp(self, ts_impl: &dyn TimeStampImpl) -> Result<u64> {
 		let ts = ts_impl
 			.create_from_datetime(self.0)

@@ -13,8 +13,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+chrono = { workspace = true }
 inventory = { workspace = true }
 surrealdb-kvs = { workspace = true }
+web-time = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libtest-mimic = { workspace = true }

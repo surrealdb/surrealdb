@@ -660,7 +660,7 @@ async fn step_inner(
 			let stamp = read(regs, *src)
 				.cast_to::<crate::val::Datetime>()
 				.map_err(|e| ControlFlow::Err(anyhow!("{e}")))?
-				.to_version_stamp(ctx.txn().timestamp_impl().as_ref())
+				.to_version_stamp(ctx.txn().version_impl().as_ref())
 				.map_err(ControlFlow::Err)?;
 			let stamp = i64::try_from(stamp)
 				.map_err(|_| ControlFlow::Err(anyhow!("a version stamp {stamp} out of range")))?;

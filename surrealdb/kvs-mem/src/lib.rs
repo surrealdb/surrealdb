@@ -4,9 +4,7 @@
 mod cnf;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 pub use cnf::MemoryConfig;
 use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transaction as Tx};
 use tokio::sync::RwLock;
@@ -25,9 +23,6 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 use surrealdb_kvs::cursor::{fill_vals_batch, update_range};
 use surrealdb_kvs::err::{Error, Result};
-use surrealdb_kvs::timestamp::{
-	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
-};
 use surrealdb_kvs::{Direction, Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
 
 /// Convert a SurrealMX engine error into the generic KVS error type.
@@ -840,59 +835,6 @@ impl Transactable for Transaction {
 			}
 		})
 	}
-
-	fn timestamp_impl(&self) -> BoxTimeStampImpl {
-		Box::new(SurrealMxTimeStampImpl)
-	}
-}
-
-struct SurrealMxTimeStamp(u64);
-
-impl TimeStamp for SurrealMxTimeStamp {
-	fn as_versionstamp(&self) -> u128 {
-		self.0 as u128
-	}
-
-	fn as_datetime(&self) -> Option<DateTime<Utc>> {
-		Some(DateTime::from_timestamp_nanos(self.0 as i64))
-	}
-
-	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
-		let nanos: u64 = duration.as_nanos().try_into().ok()?;
-		Some(BoxTimeStamp::new(SurrealMxTimeStamp(self.0.checked_sub(nanos)?)))
-	}
-
-	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
-		bytes[..8].copy_from_slice(&self.0.to_be_bytes());
-		&bytes[..8]
-	}
-}
-
-struct SurrealMxTimeStampImpl;
-
-impl TimeStampImpl for SurrealMxTimeStampImpl {
-	fn earliest(&self) -> BoxTimeStamp {
-		BoxTimeStamp::new(SurrealMxTimeStamp(0))
-	}
-
-	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
-		Some(BoxTimeStamp::new(SurrealMxTimeStamp(version.try_into().ok()?)))
-	}
-
-	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
-		let nanos = dt.timestamp_nanos_opt()?;
-		if nanos < 0 {
-			return None;
-		}
-		Some(BoxTimeStamp::new(SurrealMxTimeStamp(nanos as u64)))
-	}
-
-	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
-		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
-			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
-		})?;
-		Ok(BoxTimeStamp::new(SurrealMxTimeStamp(u64::from_be_bytes(bytes))))
-	}
 }
 
 // Consume and iterate over only keys
@@ -1259,6 +1201,8 @@ impl ScanCursorVals for MemValsCursor<'_> {
 
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
+	use std::time::Duration;
+
 	use super::*;
 
 	/// A write / supersede / delete round-trip through the public transaction

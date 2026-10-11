@@ -523,7 +523,7 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		version: Option<&LogicalExpr>,
 	) -> PlanTimeVersion {
-		let stamps = || self.txn.as_ref().map(|txn| txn.timestamp_impl());
+		let stamps = || self.txn.as_ref().map(|txn| txn.version_impl());
 		let stamp_of = |datetime: crate::val::Datetime| match stamps() {
 			Some(stamps) => match datetime.to_version_stamp(stamps.as_ref()) {
 				Ok(stamp) => PlanTimeVersion::At(stamp),

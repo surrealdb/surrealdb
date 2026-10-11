@@ -1000,7 +1000,11 @@ impl Transactable for Transaction {
 		})
 	}
 
-	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+	/// Versions are SurrealKV's commit timestamps, nanoseconds since the Unix
+	/// epoch from the engine's own clock. The change feed is keyed by the
+	/// default stamps `timestamp` mints instead, which the default
+	/// `timestamp_impl` describes.
+	fn version_impl(&self) -> BoxTimeStampImpl {
 		Box::new(SurrealKvTimeStampImpl)
 	}
 }

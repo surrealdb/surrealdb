@@ -112,7 +112,7 @@ async fn assert_versioned_search_reads_each_candidate_once(index_ddl: &str) -> a
 		let indexes = txn.all_tb_indexes(ns, db_def, &table, None).await?;
 		let index = indexes.first().ok_or_else(|| anyhow::anyhow!("no index on pts"))?;
 		let version = match stamp {
-			Some(stamp) => Some(stamp.to_version_stamp(txn.timestamp_impl().as_ref())?),
+			Some(stamp) => Some(stamp.to_version_stamp(txn.version_impl().as_ref())?),
 			None => None,
 		};
 		let filter = KnnCondFilter {

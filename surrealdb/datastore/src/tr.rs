@@ -782,9 +782,16 @@ impl Transactor {
 		self.inner.safe_timestamp().await
 	}
 
-	/// Returns the implementation of timestamp that this transaction uses.
+	/// Returns the timestamp implementation of the stamps [`Self::timestamp`]
+	/// mints, which key the change feed and the live-query events.
 	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.inner.timestamp_impl()
+	}
+
+	/// Returns the timestamp implementation of the version a versioned read
+	/// takes, through which a `VERSION <datetime>` clause is converted.
+	pub fn version_impl(&self) -> BoxTimeStampImpl {
+		self.inner.version_impl()
 	}
 }
 

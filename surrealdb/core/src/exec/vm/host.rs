@@ -312,7 +312,7 @@ fn execute_tailed(
 				let stamp = value
 					.cast_to::<crate::val::Datetime>()
 					.map_err(|e| anyhow::anyhow!("{e}"))?
-					.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?;
+					.to_version_stamp(ctx.txn().version_impl().as_ref())?;
 				ctx.with_version_stamp(Some(stamp))
 			}
 			None => ctx,
@@ -691,7 +691,7 @@ async fn run_tailed(
 			let stamp = value
 				.cast_to::<crate::val::Datetime>()
 				.map_err(|e| anyhow::anyhow!("{e}"))?
-				.to_version_stamp(frame.txn().timestamp_impl().as_ref())?;
+				.to_version_stamp(frame.txn().version_impl().as_ref())?;
 			versioned = frame.clone().with_version_stamp(Some(stamp));
 			&versioned
 		}

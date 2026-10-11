@@ -177,13 +177,16 @@ impl TimeStampImpl for HlcTimeStampImpl {
 		Some(BoxTimeStamp::new(HlcTimeStamp(version.try_into().ok()?)))
 	}
 
+	/// The earliest stamp of the instant's millisecond, so it sorts at or below
+	/// every stamp minted from that instant on. `None` before the epoch, and
+	/// from the millisecond the upper 48 bits can no longer hold.
 	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
-		let milis = dt.timestamp_millis();
-		if milis < 0 {
+		let milis = u64::try_from(dt.timestamp_millis()).ok()?;
+		if milis >= 1 << 48 {
 			return None;
 		}
 
-		Some(BoxTimeStamp::new(HlcTimeStamp((milis as u64) << 16)))
+		Some(BoxTimeStamp::new(HlcTimeStamp(milis << 16)))
 	}
 
 	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
@@ -506,6 +509,20 @@ mod tests {
 		let ts = super::HlcTimeStampImpl.create_from_datetime(known_time).unwrap();
 		let recovered = ts.as_datetime().unwrap();
 		assert_eq!(known_time.timestamp_millis(), recovered.timestamp_millis());
+	}
+
+	#[test]
+	fn test_hlc_datetime_out_of_range() {
+		// No stamp precedes the epoch.
+		let before_epoch = Utc.timestamp_opt(-1, 0).unwrap();
+		assert!(super::HlcTimeStampImpl.create_from_datetime(before_epoch).is_none());
+		// The last millisecond the upper 48 bits hold converts; the next one has
+		// no stamp, rather than one wrapped back towards the epoch.
+		let last = Utc.timestamp_millis_opt((1 << 48) - 1).unwrap();
+		let ts = super::HlcTimeStampImpl.create_from_datetime(last).unwrap();
+		assert_eq!(ts.as_versionstamp(), ((1u128 << 48) - 1) << 16);
+		let unheld = Utc.timestamp_millis_opt(1 << 48).unwrap();
+		assert!(super::HlcTimeStampImpl.create_from_datetime(unheld).is_none());
 	}
 
 	#[test]

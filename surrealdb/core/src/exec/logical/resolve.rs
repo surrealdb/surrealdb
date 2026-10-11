@@ -463,7 +463,7 @@ async fn gather(
 	let param_names: HashSet<String> = param_names.difference(&bound).cloned().collect();
 	let mut param_sources = HashMap::new();
 	let mut param_versions = HashMap::new();
-	let stamps = txn.timestamp_impl();
+	let stamps = txn.version_impl();
 	for name in param_names {
 		let ns_db = bx.ns_db.filter(|_| bx.inlines_definitions);
 		let Some(value) =

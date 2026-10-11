@@ -7587,7 +7587,6 @@ name = "surrealdb-kvs-mem"
 version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
- "chrono",
  "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealmx",
@@ -7633,10 +7632,12 @@ dependencies = [
 name = "surrealdb-kvs-test"
 version = "3.4.0-nightly"
 dependencies = [
+ "chrono",
  "inventory",
  "libtest-mimic",
  "surrealdb-kvs",
  "tokio",
+ "web-time",
 ]
 
 [[package]]

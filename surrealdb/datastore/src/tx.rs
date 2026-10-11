@@ -4381,9 +4381,16 @@ impl Transaction {
 		Ok(!self.keys(range, 1, 0, None).await?.is_empty())
 	}
 
-	/// Returns the implementation of timestamp that this transaction uses.
+	/// Returns the timestamp implementation of the stamps [`Self::timestamp`]
+	/// mints, which key the change feed and the live-query events.
 	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.tr.timestamp_impl()
+	}
+
+	/// Returns the timestamp implementation of the version a versioned read
+	/// takes, through which a `VERSION <datetime>` clause is converted.
+	pub fn version_impl(&self) -> BoxTimeStampImpl {
+		self.tr.version_impl()
 	}
 
 	/// The key and value bytes this transaction has written, which its write
@@ -9561,8 +9568,12 @@ mod speculation_tests {
 	use crate::speculation::Overlay;
 
 	async fn factory() -> (TransactionFactory, Sequences) {
+		factory_on("mem://").await
+	}
+
+	async fn factory_on(url: &str) -> (TransactionFactory, Sequences) {
 		let builder = surrealdb_kvs_any::Backends::community()
-			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.new_transaction_builder(url, Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
 		let tf = TransactionFactory::new(
@@ -9781,6 +9792,44 @@ mod speculation_tests {
 			vec![b"/a1".to_vec(), b"/a2".to_vec(), b"/a4".to_vec()]
 		);
 		tx.cancel().await.unwrap();
+	}
+
+	/// A speculation's view converts a datetime as the storage beneath it
+	/// does, both into the stamps the change feed is keyed by and into the
+	/// version a read takes, so a statement planned over the view reads the
+	/// catalog at the version its `VERSION` clause names. Only a backend whose
+	/// versions are not its stamps tells the two apart: SurrealKV, which this
+	/// crate opens when built with `kv-surrealkv`.
+	async fn a_view_converts_a_datetime_as_its_storage_does(url: &str) {
+		use surrealdb_kvs::timestamp::{BoxTimeStampImpl, MAX_TIMESTAMP_BYTES};
+
+		let (tf, sq) = factory_on(url).await;
+		let tx = Arc::new(tf.transaction(TransactionType::Write, sq).await.unwrap());
+		let speculation = tx.speculate(Overlay::default()).expect("not a view");
+		let view = speculation.txn();
+		let now = chrono::Utc::now();
+		let encoded = |stamps: BoxTimeStampImpl| {
+			let stamp = stamps.create_from_datetime(now).expect("now converts");
+			let mut bytes = [0; MAX_TIMESTAMP_BYTES];
+			stamp.encode(&mut bytes).to_vec()
+		};
+		assert_eq!(encoded(view.version_impl()), encoded(tx.version_impl()));
+		assert_eq!(encoded(view.timestamp_impl()), encoded(tx.timestamp_impl()));
+		drop(speculation);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn a_view_converts_a_datetime_as_its_storage_does_on_mem() {
+		a_view_converts_a_datetime_as_its_storage_does("mem://").await;
+	}
+
+	#[cfg(feature = "kv-surrealkv")]
+	#[tokio::test]
+	async fn a_view_converts_a_datetime_as_its_storage_does_on_surrealkv() {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let url = format!("surrealkv://{}", dir.path().display());
+		a_view_converts_a_datetime_as_its_storage_does(&url).await;
 	}
 }
 

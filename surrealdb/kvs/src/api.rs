@@ -1137,17 +1137,45 @@ pub trait Transactable: Send + Sync {
 		self.timestamp()
 	}
 
-	/// Get a handle to the timestamp implementation used by [`Self::timestamp`].
+	/// Get a handle to the timestamp implementation of the stamps
+	/// [`Self::timestamp`] mints: it decodes them, re-creates them from their
+	/// versionstamps, and converts a datetime into their order.
 	///
-	/// Mirrors the same `test-inc-timestamp` swap: deterministic incrementing
-	/// counter in tests, HLC in production. Callers that need to mint many
-	/// timestamps in a row can hold the impl and avoid re-dispatching.
+	/// A datetime converted through it sorts at or below every stamp minted at
+	/// or after that instant, and above every stamp minted in an earlier tick of
+	/// the clock behind them. `SHOW CHANGES ... SINCE <datetime>` starts its
+	/// scan there, so a conversion in any other unit starts it years away from
+	/// the change sets it was asked for. A backend that overrides either this or
+	/// [`Self::timestamp`] overrides both, and keeps them agreeing.
+	///
+	/// Mirrors the `test-inc-timestamp` swap in [`Self::timestamp`]. That
+	/// deterministic counter tracks no clock, so under it a datetime converts to
+	/// a count rather than to the stamps minted at that instant.
 	fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		if cfg!(feature = "test-inc-timestamp") {
 			Box::new(IncTimeStampImpl)
 		} else {
 			Box::new(HlcTimeStampImpl)
 		}
+	}
+
+	/// Get a handle to the timestamp implementation of the `version` a
+	/// versioned read takes: [`Self::get`], [`Self::scan`] and the other reads
+	/// given `Some(version)` read the datastore as of that stamp, and a
+	/// `VERSION <datetime>` clause is converted through this implementation to
+	/// name it.
+	///
+	/// Defaults to [`Self::timestamp_impl`], which is right for a backend that
+	/// stamps its versions from the same oracle as [`Self::timestamp`]. A
+	/// backend whose versions come from anywhere else — its storage engine's own
+	/// commit clock, or its commit positions — overrides this one alone: the
+	/// change feed stays keyed by what `timestamp` mints.
+	///
+	/// A transaction that wraps another forwards this as well as
+	/// [`Self::timestamp_impl`]: left to the default, it would answer the
+	/// wrapped backend's stamps where that backend's versions are asked for.
+	fn version_impl(&self) -> BoxTimeStampImpl {
+		self.timestamp_impl()
 	}
 
 	/// Hint the backend to compact the given range (or the whole keyspace if

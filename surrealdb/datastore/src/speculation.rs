@@ -551,6 +551,10 @@ impl Transactable for Base {
 	fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.storage().timestamp_impl()
 	}
+
+	fn version_impl(&self) -> BoxTimeStampImpl {
+		self.storage().version_impl()
+	}
 }
 
 #[cfg(test)]

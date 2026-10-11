@@ -31,7 +31,8 @@ error: Expected a single result output when using the ONLY keyword
 ### SELECT * FROM t ORDER BY id TIMEOUT ({ LET $d = 1s; RETURN $d })
 1s
 ### SELECT * FROM [{ n: 1 }, { n: 2 }] VERSION d'2999-01-01T00:00:00Z'
-error: Timestamp arithmetic error: 2999-01-01T00:00:00Z
+{ n: 1 }
+{ n: 2 }
 ### SELECT * FROM [{ n: 1 }] VERSION 'not a datetime'
 error: Could not cast into `datetime` using input `'not a datetime'`
 ### SELECT * FROM [{ n: 1 }, { n: 2 }] VERSION (RETURN d'2999-01-01T00:00:00Z')
@@ -39,7 +40,7 @@ d'2999-01-01T00:00:00Z'
 ### SELECT n, (SELECT VALUE n FROM [1, 2]) AS m FROM [{ n: 1 }] VERSION (RETURN d'2999-01-01T00:00:00Z')
 d'2999-01-01T00:00:00Z'
 ### SELECT VALUE n FROM ONLY [{ n: 1 }] VERSION (SELECT VALUE <datetime> '2999-01-01T00:00:00Z' FROM ONLY [1])
-error: Timestamp arithmetic error: 2999-01-01T00:00:00Z
+1
 ### RETURN (SELECT * FROM ONLY t WHERE n = 2)
 { id: t:2, n: 2 }
 ### RETURN (SELECT * FROM t ORDER BY id TIMEOUT 1s)

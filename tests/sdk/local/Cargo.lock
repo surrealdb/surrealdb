@@ -4514,7 +4514,6 @@ name = "surrealdb-kvs-mem"
 version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
- "chrono",
  "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealmx",
