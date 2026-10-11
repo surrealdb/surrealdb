@@ -401,9 +401,8 @@ impl ArrayOverlapsLiteralSet {
 	/// compound element tag, decodes the element and probes `literal_to_idx`.
 	///
 	/// `Err(())` means undecidable, which the caller turns into
-	/// [`Evidence::Unknown`] — including when a decoded miss cannot be trusted
-	/// because hashing disagrees with equality on both sides of the probe
-	/// (see [`hash_miss_is_decisive`]).
+	/// [`Evidence::Unknown`] — including a decoded miss that
+	/// [`hash_miss_is_decisive`] does not trust.
 	#[inline]
 	fn element_in_set(
 		elem_bytes: &[u8],

@@ -72,15 +72,32 @@ impl NumberSubVariant {
 }
 
 /// Whether a `HashSet<Value>` / `HashMap<Value, _>` **miss** on `value` proves
-/// that `set` does not hold it.
+/// that no element of `set` is [`Value::equal`] to it, the equality `IN` and
+/// `CONTAINSANY` / `CONTAINSALL` / `CONTAINSNONE` judge membership by.
 ///
-/// The single rule every decode-fallback membership probe in this module shares:
-/// a miss is decisive as soon as one side of the probe is number-free. See
-/// [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
-/// meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side.
+/// The single rule every decode-fallback membership probe in this module
+/// shares. The probe compares with `==`, so a miss proves that much only when
+/// both of these hold:
+///
+/// - **No element is `==` to `value`.** The miss proves this as soon as one side of the probe is
+///   number-free. See [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
+///   meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side.
+/// - **No element is `Value::equal` to `value` without being `==` to it.** The two differ only
+///   between a top-level string and a top-level regex, which `Value::equal` matches by running the
+///   regex over the string. A regex's miss is therefore decisive only against a set holding no
+///   string, and a string's only against a set holding no regex.
+///
+/// A hit needs neither: a probe hits only an element `==` to `value`, and `==`
+/// implies `Value::equal` for every pair of values.
 #[inline]
 pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
-	set.hash_agrees_with_eq() || value.hash_agrees_with_eq()
+	let miss_rules_out_eq = set.hash_agrees_with_eq() || value.hash_agrees_with_eq();
+	let eq_decides_equal = match value {
+		Value::String(_) => !set.has_strand_asymmetric_match(),
+		Value::Regex(_) => set.has_no_strings(),
+		_ => true,
+	};
+	miss_rules_out_eq && eq_decides_equal
 }
 
 /// One predicate literal, optionally pre-encoded into rev-2 wire bytes.
@@ -276,7 +293,8 @@ pub(crate) struct LiteralSet {
 	/// True iff any element in `fallback` could equal-match a Strand-tagged
 	/// value asymmetrically via `Value::equal` (today: `Value::Regex`). When
 	/// set, `wire_cmp::wire_value_in_set` must hand a Strand-tag miss off to
-	/// the decode-fallback path rather than answering `Some(false)`.
+	/// the decode-fallback path rather than answering `Some(false)`, and
+	/// [`hash_miss_is_decisive`] does not trust that path's miss either.
 	strand_asymmetric: bool,
 	/// Bitmask of [`NumberSubVariant`]s present in [`Self::numbers`]
 	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`).
@@ -297,9 +315,10 @@ pub(crate) struct LiteralSet {
 	/// True iff some element's `Hash` disagrees with its `PartialEq` — in
 	/// practice, iff some element holds a `Number` (see
 	/// [`Value::hash_agrees_with_eq`] for why numbers break the contract). When
-	/// set, a `HashSet<Value>` miss against this set does **not** prove a value
-	/// miss, and the decode-fallback path must treat it as inconclusive unless
-	/// the probed value is itself number-free.
+	/// set, a `HashSet<Value>` miss against this set does **not** prove that no
+	/// element is `==` to the probed value, and the decode-fallback path must
+	/// treat it as inconclusive unless the probed value is itself number-free
+	/// (see [`hash_miss_is_decisive`]).
 	hash_eq_mismatch: bool,
 }
 
@@ -378,12 +397,21 @@ impl LiteralSet {
 		self.numbers.is_empty()
 	}
 
-	/// True iff a `HashSet<Value>` miss against this set proves a value miss.
+	/// Whether the set holds no top-level `String`, in which case no stored
+	/// entry is `Value::equal` to a regex unless it is `==` to it.
+	#[inline]
+	pub(crate) fn has_no_strings(&self) -> bool {
+		self.strands.is_empty()
+	}
+
+	/// True iff a `HashSet<Value>` miss against this set proves that no element
+	/// is `==` to the probed value.
 	///
 	/// False once any element holds a `Number`, because `Number: Hash` and
 	/// `Number: PartialEq` disagree — see [`Value::hash_agrees_with_eq`]. A
 	/// caller whose probed value is number-free may still trust a miss, since
-	/// equality requires matching variants on both sides.
+	/// `==` requires matching variants on both sides. Whether the miss also
+	/// rules out `Value::equal` is [`hash_miss_is_decisive`]'s question.
 	#[inline]
 	pub(crate) fn hash_agrees_with_eq(&self) -> bool {
 		!self.hash_eq_mismatch
@@ -434,6 +462,44 @@ mod tests {
 			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
 		]));
 		assert!(!numeric.hash_agrees_with_eq());
+	}
+
+	/// A miss [`hash_miss_is_decisive`] trusts proves that no element of the set
+	/// is `Value::equal` to the value. Checked over every pairing of a corpus
+	/// that covers the ways a hash probe parts from `Value::equal`: numbers that
+	/// hash apart across sub-variants, and a regex matching a string.
+	#[test]
+	fn a_decisive_miss_proves_no_equal_element() {
+		use std::str::FromStr;
+
+		use crate::val::Regex;
+		let regex = Value::Regex(Regex::from_str("a.*").unwrap());
+		let corpus = [
+			Value::from("abc"),
+			Value::from("xyz"),
+			regex.clone(),
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Float(0.1)),
+			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+			Value::Bool(true),
+			Value::from(vec![Value::from("abc")]),
+			Value::from(vec![regex]),
+		];
+		let mut sets = vec![HashSet::new()];
+		for (i, a) in corpus.iter().enumerate() {
+			sets.push(HashSet::from([a.clone()]));
+			for b in &corpus[i + 1..] {
+				sets.push(HashSet::from([a.clone(), b.clone()]));
+			}
+		}
+		for set in &sets {
+			let literal_set = LiteralSet::from_set(set);
+			for value in &corpus {
+				if hash_miss_is_decisive(value, &literal_set) && !set.contains(value) {
+					assert!(!set.iter().any(|e| e.equal(value)), "{value:?} missed {set:?}");
+				}
+			}
+		}
 	}
 
 	#[test]
