@@ -405,6 +405,7 @@ f7fe99a31682ebb3 language-tests/tests/language/closure/pure_no_namespace.surql
 68b814ce105b145e language-tests/tests/language/closure/script_body.surql
 958fceee75dd4bf4 language-tests/tests/language/closure/version.surql
 006864523ac55b70 language-tests/tests/language/closure/write_in_field_call_body.surql
+085e7c11685ba779 language-tests/tests/language/coerce/float_to_int.surql
 d9931be8a083f2b8 language-tests/tests/language/coerce/regex.surql
 c10d6ccb574437e7 language-tests/tests/language/constants/math/infinity.surql
 1d17321d72bf82a2 language-tests/tests/language/constants/math/log.surql
@@ -458,6 +459,7 @@ d18573c921117313 language-tests/tests/language/expression/operators/casting/cast
 5a47419dd98e49f4 language-tests/tests/language/expression/operators/casting/cast_string_to_record_table.surql
 cb98dc086a39b9a1 language-tests/tests/language/expression/operators/casting/datetime.surql
 c3bf334b1857fef5 language-tests/tests/language/expression/operators/casting/decimal.surql
+4ef4a612a3dc1301 language-tests/tests/language/expression/operators/casting/float_to_int.surql
 e9b59efa3f38ac3c language-tests/tests/language/expression/operators/casting/geometry.surql
 313e5714fa68d460 language-tests/tests/language/expression/operators/casting/point.surql
 75047cf6c05deda7 language-tests/tests/language/expression/operators/casting/range_to_array.surql
@@ -2316,6 +2318,7 @@ d6a85026d370b50a language-tests/tests/reproductions/a_field_permission_and_a_pro
 86a691b37354c9dd language-tests/tests/reproductions/a_field_write_permission_reads_computed_fields.surql
 ae25a40d70c14306 language-tests/tests/reproductions/a_field_write_permission_reads_computed_fields_import.surql
 71815e4cf2da0ee1 language-tests/tests/reproductions/a_field_write_permission_reads_computed_fields_late_bound.surql
+54490c828e9246b4 language-tests/tests/reproductions/a_float_beyond_the_i64_range_is_not_an_int.surql
 8a96168dd9915559 language-tests/tests/reproductions/a_from_source_contains_its_control_flow.surql
 7faae82cd975bb92 language-tests/tests/reproductions/a_function_argument_the_host_evaluates_runs_in_the_call_frame.surql
 4b9e243c8e94b4cb language-tests/tests/reproductions/a_function_call_with_no_database_asks_for_one.surql
@@ -2416,6 +2419,7 @@ f0640b53115c330f language-tests/tests/reproductions/a_table_select_permission_re
 723ef0e534267ae1 language-tests/tests/reproductions/a_timeout_beyond_the_clock_is_refused.surql
 0054aa185d5d8085 language-tests/tests/reproductions/a_timeout_clause_is_read_before_the_work.surql
 d023aab8a128078e language-tests/tests/reproductions/a_union_field_is_checked_only_where_every_input_proves_it.surql
+6adefdb0613f95d6 language-tests/tests/reproductions/a_union_with_int_refuses_a_fractional_decimal.surql
 28e01863010c1b0a language-tests/tests/reproductions/a_value_source_is_not_an_object.surql
 33a88ce14830a7e6 language-tests/tests/reproductions/a_value_source_materialises_past_the_limit.surql
 ab63a320d729e99d language-tests/tests/reproductions/a_versioned_btree_read_matches_its_noindex_twin.surql
