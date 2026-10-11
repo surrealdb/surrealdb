@@ -307,9 +307,12 @@ uuid = { workspace = true, features = ["js"] }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 # Cloud object-storage bucket backends (S3, GCS, Azure). Enabled only off-wasm,
-# since these pull an HTTP/TLS stack. `tls-webpki-roots` gives object_store's
-# HTTP client a rustls backend regardless of what else configures reqwest.
-object_store = { workspace = true, features = ["aws", "gcp", "azure", "tls-webpki-roots"] }
+# since these pull an HTTP/TLS stack (reqwest on rustls with aws-lc-rs). Their
+# clients are built through `obs::connector::BundledRootsConnector`, which
+# trusts the `webpki-root-certs` Mozilla roots alongside the system trust store,
+# so they connect from an image that ships no CA bundle.
+object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
+webpki-root-certs.workspace = true
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",

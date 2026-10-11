@@ -33,6 +33,7 @@ use url::Url;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::buc::Error;
+use crate::obs::connector::BundledRootsConnector;
 
 /// Attempt to connect to a cloud object-storage backend from a `BACKEND` URL.
 ///
@@ -169,6 +170,7 @@ impl S3Params {
 		// `from_env` seeds the standard AWS credential/config chain so instance
 		// or environment credentials work when none are given in the URL.
 		let mut builder = AmazonS3Builder::from_env()
+			.with_http_connector(BundledRootsConnector)
 			.with_bucket_name(self.bucket.as_str())
 			.with_region(self.region.as_str());
 
@@ -228,8 +230,9 @@ impl GcsParams {
 	}
 
 	fn build(&self) -> Result<Arc<dyn OsStore>, Error> {
-		let mut builder =
-			GoogleCloudStorageBuilder::from_env().with_bucket_name(self.bucket.as_str());
+		let mut builder = GoogleCloudStorageBuilder::from_env()
+			.with_http_connector(BundledRootsConnector)
+			.with_bucket_name(self.bucket.as_str());
 
 		if let Some(path) = &self.service_account_path {
 			builder = builder.with_service_account_path(path.as_str());
@@ -296,6 +299,7 @@ impl AzureParams {
 
 	fn build(&self) -> Result<Arc<dyn OsStore>, Error> {
 		let mut builder = MicrosoftAzureBuilder::from_env()
+			.with_http_connector(BundledRootsConnector)
 			.with_account(self.account.as_str())
 			.with_container_name(self.container.as_str());
 

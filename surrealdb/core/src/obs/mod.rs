@@ -14,13 +14,64 @@ use object_store::{ObjectStore, ObjectStoreExt, parse_url};
 use sha1::{Digest, Sha1};
 use url::Url;
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod connector;
+
+/// Builds the store `url` names, as [`parse_url`] does, except that a cloud
+/// client (S3, GCS, Azure) is built through
+/// [`connector::BundledRootsConnector`] so it trusts the same roots as a
+/// bucket backend.
+fn store_for_url(url: &Url) -> object_store::Result<Box<dyn ObjectStore>> {
+	#[cfg(not(target_family = "wasm"))]
+	{
+		use object_store::ObjectStoreScheme;
+		use object_store::aws::AmazonS3Builder;
+		use object_store::azure::MicrosoftAzureBuilder;
+		use object_store::gcp::GoogleCloudStorageBuilder;
+
+		use self::connector::BundledRootsConnector;
+
+		let (scheme, path) = ObjectStoreScheme::parse(url)?;
+		Path::parse(path)?;
+		let url = url.to_string();
+		match scheme {
+			ObjectStoreScheme::AmazonS3 => {
+				return Ok(Box::new(
+					AmazonS3Builder::new()
+						.with_url(url)
+						.with_http_connector(BundledRootsConnector)
+						.build()?,
+				));
+			}
+			ObjectStoreScheme::GoogleCloudStorage => {
+				return Ok(Box::new(
+					GoogleCloudStorageBuilder::new()
+						.with_url(url)
+						.with_http_connector(BundledRootsConnector)
+						.build()?,
+				));
+			}
+			ObjectStoreScheme::MicrosoftAzure => {
+				return Ok(Box::new(
+					MicrosoftAzureBuilder::new()
+						.with_url(url)
+						.with_http_connector(BundledRootsConnector)
+						.build()?,
+				));
+			}
+			_ => {}
+		}
+	}
+	parse_url(url).map(|(store, _)| store)
+}
+
 fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 	match std::env::var(env_var) {
 		Ok(url) => {
 			let url =
 				Url::parse(&url).unwrap_or_else(|_| panic!("Expected a valid url for {}", env_var));
-			let (store, _) =
-				parse_url(&url).unwrap_or_else(|_| panic!("Expected a valid url for {}", env_var));
+			let store = store_for_url(&url)
+				.unwrap_or_else(|_| panic!("Expected a valid url for {}", env_var));
 			if url.scheme() == "file" {
 				#[cfg(not(target_family = "wasm"))]
 				{
