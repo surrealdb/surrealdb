@@ -3,6 +3,7 @@
 //! memory, or cloud storage such as S3 or GCS.
 
 use std::sync::{Arc, LazyLock};
+#[cfg(not(target_family = "wasm"))]
 use std::{env, fs};
 
 use anyhow::Result;
@@ -48,27 +49,34 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 				"No {} environment variable found, using default directory {}",
 				env_var, default_dir
 			);
-			let path = env::current_dir()
-				.expect("current directory should be accessible")
-				.join(default_dir);
-			if !path.exists() || !path.is_dir() {
-				fs::create_dir_all(&path)
-					.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
-			}
-			#[cfg(not(target_family = "wasm"))]
-			{
-				// As long as the provided path is correct, the following should never panic
-				Arc::new(
-					object_store::local::LocalFileSystem::new_with_prefix(path)
-						.expect("valid local filesystem path"),
-				)
-			}
-			#[cfg(target_family = "wasm")]
-			{
-				Arc::new(object_store::memory::InMemory::new())
-			}
+			default_store(default_dir)
 		}
 	}
+}
+
+/// The store used when no URL is configured: a local file system store rooted
+/// at `default_dir`, resolved against the current directory and created if
+/// absent.
+#[cfg(not(target_family = "wasm"))]
+fn default_store(default_dir: &str) -> Arc<dyn ObjectStore> {
+	let path =
+		env::current_dir().expect("current directory should be accessible").join(default_dir);
+	if !path.exists() || !path.is_dir() {
+		fs::create_dir_all(&path)
+			.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
+	}
+	// As long as the provided path is correct, the following should never panic
+	Arc::new(
+		object_store::local::LocalFileSystem::new_with_prefix(path)
+			.expect("valid local filesystem path"),
+	)
+}
+
+/// The store used when no URL is configured: an in-memory store. A browser has
+/// no file system and no current directory, so `default_dir` is not resolved.
+#[cfg(target_family = "wasm")]
+fn default_store(_default_dir: &str) -> Arc<dyn ObjectStore> {
+	Arc::new(object_store::memory::InMemory::new())
 }
 
 static STORE: LazyLock<Arc<dyn ObjectStore>> =
@@ -155,5 +163,16 @@ mod tests {
 		assert!(env::current_dir().unwrap().join("store").exists());
 		// Remove the dir
 		fs::remove_dir_all(current_dir.join("store")).unwrap();
+	}
+
+	#[tokio::test]
+	async fn default_store_writes_under_the_default_dir() {
+		let tmp = temp_dir::TempDir::new().unwrap();
+		// An absolute `default_dir` replaces the current directory in the join.
+		let root = tmp.path().join("store");
+		let store = default_store(root.to_str().unwrap());
+		assert!(root.is_dir());
+		store.put(&Path::from("model.surml"), Bytes::from_static(b"model").into()).await.unwrap();
+		assert_eq!(fs::read(root.join("model.surml")).unwrap(), b"model");
 	}
 }
