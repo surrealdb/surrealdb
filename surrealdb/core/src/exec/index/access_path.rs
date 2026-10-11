@@ -6,6 +6,8 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use surrealdb_datastore::index_shapes::{TableIndexShapes, ValueShape};
+
 use super::IndexCandidate;
 use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition};
 use crate::expr::logical::LogicalExpr;
@@ -27,8 +29,9 @@ pub(crate) struct IndexRef {
 	/// made.
 	pub(crate) idx: usize,
 	definition: Arc<IndexDefinition>,
-	/// Per column, whether its declared kind holds no array; a column past
-	/// the end is not known to, and may hold one.
+	/// Per column, whether it is known to hold no array: its declared kind
+	/// holds none, or the index has recorded storing none in it. A column
+	/// past the end is not known to, and may hold one.
 	scalar: ColumnFlags,
 }
 
@@ -42,8 +45,8 @@ impl IndexRef {
 		}
 	}
 
-	/// The same reference, knowing the columns `scalar` marks to be declared
-	/// kinds that hold no array.
+	/// The same reference, knowing the columns `scalar` marks to hold no
+	/// array.
 	pub(crate) fn with_scalar_columns(mut self, scalar: ColumnFlags) -> Self {
 		self.scalar = scalar;
 		self
@@ -51,12 +54,20 @@ impl IndexRef {
 
 	/// Whether column `col` may hold an array, which the index writer stores
 	/// as one entry per element: a column spelled with no `*` or flatten that
-	/// is not declared a kind holding no array.
+	/// is not known to hold no array.
 	fn may_hold_array(&self, col: usize) -> bool {
-		self.definition.cols.get(col).is_some_and(|c| {
-			!c.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
-				&& !self.scalar.get(col).copied().unwrap_or(false)
-		})
+		self.definition.cols.get(col).is_some_and(|c| is_plain_column(c) && !self.is_scalar(col))
+	}
+
+	/// Whether the index holds each record at one entry for column `col`, at
+	/// the place the column's whole value sorts: a column spelled with no `*`
+	/// or flatten that is known to hold no array.
+	pub(crate) fn one_entry_per_record(&self, col: usize) -> bool {
+		self.definition.cols.get(col).is_some_and(|c| is_plain_column(c) && self.is_scalar(col))
+	}
+
+	fn is_scalar(&self, col: usize) -> bool {
+		self.scalar.get(col).copied().unwrap_or(false)
 	}
 
 	/// Get the index definition.
@@ -416,6 +427,103 @@ pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> 
 	(pinned..index.cols.len()).any(|col| index.may_hold_array(col))
 }
 
+/// Whether a scan of `index` over `access` would miss a record its range
+/// admits: the range bounds a column that may hold an array
+/// ([`IndexRef::may_hold_array`]) and reaches the band of the value order
+/// arrays sort in, after every `Uuid` and before every `Set`.
+///
+/// A record holding an array sits at its elements' keys, not at the place its
+/// whole value sorts, so a range admitting the whole array (`['ant'] > 'p'`)
+/// reaches none of its entries (`'ant'`) unless an element happens to fall
+/// inside it. A range clear of the band admits no array, so the entries it
+/// does reach are rechecked against the whole value and the scan misses
+/// nothing. A range bounded on neither side states no predicate and reaches
+/// every record.
+pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bool {
+	let (col, start, end) = match access {
+		BTreeAccess::Range {
+			range,
+		} => (0, range.start.as_ref(), range.end.as_ref()),
+		BTreeAccess::Compound {
+			prefix,
+			range: Some((op, value)),
+		} => {
+			let (start, end) = match op {
+				BinaryOperator::MoreThan => (Bound::Excluded(value), Bound::Unbounded),
+				BinaryOperator::MoreThanEqual => (Bound::Included(value), Bound::Unbounded),
+				BinaryOperator::LessThan => (Bound::Unbounded, Bound::Excluded(value)),
+				BinaryOperator::LessThanEqual => (Bound::Unbounded, Bound::Included(value)),
+				_ => return false,
+			};
+			(prefix.len(), start, end)
+		}
+		_ => return false,
+	};
+	if matches!((start, end), (Bound::Unbounded, Bound::Unbounded)) || !index.may_hold_array(col) {
+		return false;
+	}
+	range_reaches_arrays(start, end)
+}
+
+/// Whether the key range of `access` admits exactly the values its predicate
+/// does, for a column holding one entry per record: every number bounding the
+/// range is the same number as a float and as a decimal
+/// ([`exact_across_kinds`]). Numbers are keyed by their exact value, while a
+/// comparison between a float and a decimal converts the float to the decimal
+/// it prints as — the float `0.1` compares equal to the decimal `0.1` it keys
+/// above — so a range bounded by such a number lists records its comparison
+/// rejects, and the comparison has to judge each one. An equality reads the
+/// entries keyed by its value alone.
+pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
+	let inexact = |v: &Value| matches!(v, Value::Number(n) if !exact_across_kinds(n));
+	match access {
+		BTreeAccess::Range {
+			range,
+		} => ![range.start.as_ref(), range.end.as_ref()]
+			.into_iter()
+			.any(|b| matches!(b, Bound::Included(v) | Bound::Excluded(v) if inexact(v))),
+		BTreeAccess::Compound {
+			range: Some((_, v)),
+			..
+		} => !inexact(v),
+		_ => true,
+	}
+}
+
+/// Whether `n` is the same number as a float and as a decimal, so its key and
+/// every comparison with it agree: an integer, which compares exactly with
+/// both, or a finite float or a decimal whose value a float and a decimal both
+/// hold exactly (`1.5`, not `0.1`).
+fn exact_across_kinds(n: &Number) -> bool {
+	use rust_decimal::Decimal;
+	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+	match n {
+		Number::Int(_) => true,
+		Number::Float(f) => {
+			f.is_finite()
+				&& Decimal::from_f64_retain(*f).is_some_and(|d| Decimal::from_f64(*f) == Some(d))
+		}
+		Number::Decimal(d) => d.to_f64().is_some_and(|f| Decimal::from_f64_retain(f) == Some(*d)),
+	}
+}
+
+/// Whether some array lies between `start` and `end` in the value order a
+/// comparison reads. Every array sorts at or after the empty array and before
+/// the empty set.
+fn range_reaches_arrays(start: Bound<&Value>, end: Bound<&Value>) -> bool {
+	let starts_before_band_end = match start {
+		Bound::Unbounded => true,
+		Bound::Included(v) | Bound::Excluded(v) => *v < Value::Set(crate::val::Set::new()),
+	};
+	let empty = Value::Array(crate::val::Array::new());
+	let ends_after_band_start = match end {
+		Bound::Unbounded => true,
+		Bound::Included(v) => *v >= empty,
+		Bound::Excluded(v) => *v > empty,
+	};
+	starts_before_band_end && ends_after_band_start
+}
+
 /// Whether a declared field kind guarantees the stored value is never an
 /// array (or set). Array values fan out to one b-tree index entry per
 /// element. Conservative: any kind not on the allowlist (including `any`,
@@ -492,6 +600,7 @@ pub(crate) fn field_kind_excludes_arrays(kind: &Kind) -> bool {
 pub(crate) fn with_array_columns_as_elements(
 	indexes: Arc<[IndexDefinition]>,
 	fields: &[FieldDefinition],
+	shapes: &TableIndexShapes,
 ) -> ElementColumns {
 	let as_elements = |col: &Idiom| -> bool {
 		!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
@@ -525,16 +634,20 @@ pub(crate) fn with_array_columns_as_elements(
 			masks.push(Box::default());
 		}
 	}
-	// A plain column declared a kind that holds no array keeps one entry per
-	// record; scans over it need no dedupe.
+	// A plain column declared a kind that holds no array, or one the index
+	// has recorded storing no array in, keeps one entry per record; scans
+	// over it need no dedupe.
 	let scalar: Vec<ColumnFlags> = indexes
 		.iter()
 		.map(|ix| {
+			let stored = shapes.of(ix.index_id);
 			ix.cols
 				.iter()
-				.map(|col| {
-					!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
-						&& declared_kind(&col.0, fields).is_some_and(field_kind_excludes_arrays)
+				.enumerate()
+				.map(|(i, col)| {
+					is_plain_column(col)
+						&& (declared_kind(&col.0, fields).is_some_and(field_kind_excludes_arrays)
+							|| stored.is_some_and(|s| !s.may_hold(i, ValueShape::Array)))
 				})
 				.collect()
 		})
@@ -564,6 +677,12 @@ pub(crate) fn with_array_columns_as_elements(
 			..ElementColumns::unchanged(indexes)
 		},
 	}
+}
+
+/// Whether `col` is spelled with no `*` or flatten: the writer lists an
+/// array value in it once per element, and stores any other value whole.
+fn is_plain_column(col: &Idiom) -> bool {
+	!col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten))
 }
 
 /// Whether `col` flattens (`*`) a value that may be a set: one whose declared
@@ -1453,6 +1572,43 @@ fn find_hinted_index<'a>(
 }
 
 #[cfg(test)]
+mod range_comparison_tests {
+	use std::ops::Bound;
+
+	use super::{BTreeAccess, range_matches_comparison};
+	use crate::val::{Number, Range, Value};
+
+	fn below(v: Value) -> BTreeAccess {
+		BTreeAccess::Range {
+			range: Range {
+				start: Bound::Unbounded,
+				end: Bound::Excluded(v),
+			},
+		}
+	}
+
+	#[test]
+	fn a_number_bounds_a_range_exactly_when_both_kinds_hold_it() {
+		let decimal = |s: &str| Value::Number(Number::Decimal(s.parse().expect("decimal")));
+		for (bound, exact) in [
+			(Value::from(5), true),
+			(Value::from(i64::MAX), true),
+			(Value::Number(Number::Float(1.5)), true),
+			(Value::Number(Number::Float(0.1)), false),
+			(Value::Number(Number::Float(f64::NAN)), false),
+			(decimal("1.5"), true),
+			(decimal("0.1"), false),
+			(Value::from("p"), true),
+		] {
+			assert_eq!(range_matches_comparison(&below(bound.clone())), exact, "{bound:?}");
+		}
+		assert!(range_matches_comparison(&BTreeAccess::Equality(Value::Number(Number::Float(
+			0.1
+		)))));
+	}
+}
+
+#[cfg(test)]
 mod tests {
 	//! Unit tests for the plan-time access-path types.
 	//!
@@ -2132,7 +2288,7 @@ mod tests {
 		/// The columns of the first index after the rewrite, as SurrealQL.
 		fn planned(cols: &[&str], kind: Index, fields: &[FieldDefinition]) -> Vec<String> {
 			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", cols, kind)].into();
-			with_array_columns_as_elements(indexes, fields).indexes[0]
+			with_array_columns_as_elements(indexes, fields, &TableIndexShapes::default()).indexes[0]
 				.cols
 				.iter()
 				.map(|c| c.to_sql())
@@ -2311,7 +2467,8 @@ mod tests {
 			.into();
 			let fields =
 				[field("acl", Some(array_of_strings())), field("name", Some(Kind::String))];
-			let out = with_array_columns_as_elements(indexes, &fields);
+			let out =
+				with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
 			let flags: Vec<Vec<bool>> =
 				out.rewritten.as_deref().expect("rewritten").iter().map(|f| f.to_vec()).collect();
 			assert_eq!(flags, [vec![], vec![true], vec![]]);
@@ -2361,7 +2518,11 @@ mod tests {
 				field("tags", Some(Kind::Either(vec![Kind::None, set_of_strings()]))),
 				field("acl", Some(array_of_strings())),
 			];
-			let out = with_array_columns_as_elements(Arc::clone(&indexes), &fields);
+			let out = with_array_columns_as_elements(
+				Arc::clone(&indexes),
+				&fields,
+				&TableIndexShapes::default(),
+			);
 			// The index stays in the list, in place: only its set column is
 			// reported.
 			assert!(Arc::ptr_eq(&indexes, &out.indexes));
@@ -2384,7 +2545,8 @@ mod tests {
 			] {
 				let indexes: Arc<[IndexDefinition]> =
 					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out = with_array_columns_as_elements(indexes, &fields);
+				let out =
+					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
 				assert_eq!(
 					set_flags(&out),
 					if sets {
@@ -2418,7 +2580,8 @@ mod tests {
 			{
 				let indexes: Arc<[IndexDefinition]> =
 					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out = with_array_columns_as_elements(indexes, &fields);
+				let out =
+					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
 				assert_eq!(
 					set_flags(&out),
 					if sets {
@@ -2445,7 +2608,8 @@ mod tests {
 			{
 				let indexes: Arc<[IndexDefinition]> =
 					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out = with_array_columns_as_elements(indexes, &fields);
+				let out =
+					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
 				assert_eq!(
 					set_flags(&out),
 					if sets {
@@ -2466,12 +2630,13 @@ mod tests {
 				idx_def(3, "c", &["r.other.*"], Index::Idx),
 			]
 			.into();
-			let out = with_array_columns_as_elements(indexes, &[])
+			let out = with_array_columns_as_elements(indexes, &[], &TableIndexShapes::default())
 				.withholding_sets_at(&[Idiom::from_str("r.tags").expect("valid idiom").0]);
 			assert_eq!(set_flags(&out), [vec![true], vec![false, true], vec![false]]);
 			let none = with_array_columns_as_elements(
 				vec![idx_def(1, "a", &["r.tags.*"], Index::Idx)].into(),
 				&[],
+				&TableIndexShapes::default(),
 			)
 			.withholding_sets_at(&[]);
 			assert!(none.sets.is_none());
@@ -2497,7 +2662,11 @@ mod tests {
 			let indexes: Arc<[IndexDefinition]> =
 				vec![idx_def(1, "ix", &["name"], Index::Idx)].into();
 			let fields = [field("name", Some(Kind::String))];
-			let out = with_array_columns_as_elements(Arc::clone(&indexes), &fields);
+			let out = with_array_columns_as_elements(
+				Arc::clone(&indexes),
+				&fields,
+				&TableIndexShapes::default(),
+			);
 			assert!(Arc::ptr_eq(&indexes, &out.indexes));
 			assert!(out.rewritten.is_none());
 		}
@@ -2508,7 +2677,8 @@ mod tests {
 			let cols: Vec<&str> = names.iter().map(String::as_str).collect();
 			let fields: Vec<_> = names.iter().map(|n| field(n, Some(array_of_strings()))).collect();
 			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", &cols, Index::Idx)].into();
-			let out = with_array_columns_as_elements(indexes, &fields);
+			let out =
+				with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
 			assert_eq!(out.indexes[0].cols[69].to_sql(), "c69.*");
 			let flags = &out.rewritten.as_ref().expect("rewritten")[0];
 			assert_eq!(flags.len(), 70);

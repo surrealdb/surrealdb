@@ -157,6 +157,11 @@ impl<'a> IndexAnalyzer<'a> {
 		// (e.g. field > 5 AND field < 10 → Range(>5, <10))
 		self.merge_range_candidates(&mut candidates);
 
+		// A range that admits an array whose entries all sit outside it is not
+		// answered by the index; the merge runs first, since bounding a
+		// half-open range can take it clear of the array band.
+		candidates.retain(|c| !super::access_path::access_misses_arrays(&c.index_ref, &c.access));
+
 		// Deduplicate candidates - prefer compound over simple
 		self.deduplicate_candidates(&mut candidates);
 
@@ -978,9 +983,11 @@ impl<'a> IndexAnalyzer<'a> {
 	///
 	/// - full-text MATCHES leaves — the posting bitmap *is* the operator's truth set (the MATCHES
 	///   filter path evaluates membership on the same bitmaps);
-	/// - b-tree equality/range/compound leaves whose pinned columns are declared with an array-free
-	///   field kind (`exact_col`) — array values fan out to one index entry per element, which
-	///   would make the bitmap a superset of the predicate's truth set;
+	/// - b-tree equality/range/compound leaves whose pinned columns each hold one entry per record
+	///   ([`IndexRef::one_entry_per_record`]) or are declared with an array-free field kind
+	///   (`exact_col`) — array values fan out to one index entry per element, which would make the
+	///   bitmap a superset of the predicate's truth set — and whose range no number bounds
+	///   ([`super::access_path::range_matches_comparison`]);
 	/// - an OR of such leaves (`B OR C` is exactly `B ∪ C`).
 	///
 	/// Anything else returns `None`.
@@ -1032,7 +1039,12 @@ impl<'a> IndexAnalyzer<'a> {
 					BTreeAccess::FullText {
 						..
 					} => true,
-					_ => Self::candidate_pinned_columns(c).iter().all(exact_col),
+					_ => {
+						super::access_path::range_matches_comparison(&c.access)
+							&& Self::candidate_pinned_columns(c).iter().enumerate().all(
+								|(i, col)| c.index_ref.one_entry_per_record(i) || exact_col(col),
+							)
+					}
 				}
 			})
 			.max_by_key(|c| c.score())
@@ -2791,7 +2803,7 @@ mod tests {
 		fn same_index_range_branches_still_fuse() {
 			// A range branch can overlap an equality branch on the same
 			// index, so the disjointness decline does not apply.
-			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let az = scalar_analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
 			let cond = parse_cond("a = 1 OR a > 5");
 			let plan = fuse_union(&az, &cond).expect("overlappable branches union");
 			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 2));
@@ -3165,7 +3177,7 @@ mod tests {
 
 		#[test]
 		fn half_bounded_gt() {
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3182,7 +3194,7 @@ mod tests {
 
 		#[test]
 		fn half_bounded_gte() {
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a >= 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3218,7 +3230,7 @@ mod tests {
 		#[test]
 		fn value_lt_idiom_normalises() {
 			// `5 < a` should be treated as `a > 5`.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("5 < a");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -3316,7 +3328,7 @@ mod tests {
 
 		#[test]
 		fn equality_then_range() {
-			let a = analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
 			let cond = parse_cond("a = 1 AND b > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
@@ -3336,7 +3348,7 @@ mod tests {
 		fn trailing_equality_after_range_is_dropped() {
 			// `a = 1 AND b > 5 AND c = 2` on (a,b,c): the c=2 must NOT be part
 			// of the index prefix (BTree limitation); becomes residual filter.
-			let a = analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_abc", &["a", "b", "c"])], None);
 			let cond = parse_cond("a = 1 AND b > 5 AND c = 2");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_abc").expect("ix_abc");
@@ -3389,8 +3401,10 @@ mod tests {
 
 		#[test]
 		fn a_containment_pins_a_fanning_column_before_a_trailing_range() {
-			let a =
-				analyzer(vec![idx_basic(1, "ix_aeb", &["account", "emails.*.norm", "b"])], None);
+			let a = scalar_analyzer(
+				vec![idx_basic(1, "ix_aeb", &["account", "emails.*.norm", "b"])],
+				None,
+			);
 			let cond = parse_cond("account = 1 AND emails.*.norm CONTAINS 'x' AND b > 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_aeb").expect("ix_aeb");
@@ -3610,10 +3624,19 @@ mod tests {
 			// holding an array is stored once per element, so the index's key
 			// order is element order and covers no ORDER BY on the column.
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
-			let (cond, order) = parse_cond_order("a > 5", "a");
+			let (cond, order) = parse_cond_order("a < 5", "a");
 			let cands = a.analyze(Some(&cond), Some(&order));
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			assert!(!c.covers_order, "a column that may hold an array delivers no order");
+			// A range reaching the band arrays sort in is not offered at all: an
+			// array whose whole value is in range may have no element inside it.
+			let (cond, order) = parse_cond_order("a > 5", "a");
+			let cands = a.analyze(Some(&cond), Some(&order));
+			assert!(
+				find_for(&cands, "ix_a")
+					.is_none_or(|c| !matches!(c.access, BTreeAccess::Range { .. })),
+				"no range reaching the array band is offered over such a column"
+			);
 			let (_, order, _) = parse_select_parts("ORDER BY a");
 			let cands = a.analyze(None, order.as_ref());
 			assert!(
@@ -3703,7 +3726,7 @@ mod tests {
 		fn is_not_none_uses_index_range() {
 			// `a != NONE` is exact: NONE sorts first, so `> NONE` yields
 			// every NULL and concrete value, matching filter semantics.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a != NONE");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate for != NONE");
@@ -3818,8 +3841,10 @@ mod tests {
 			// from the union (a zero-row branch contributes nothing to
 			// OR semantics). With only one surviving branch the union
 			// degenerates to a plain BTreeScan on `idx_b`.
-			let a =
-				analyzer(vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])], None);
+			let a = scalar_analyzer(
+				vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])],
+				None,
+			);
 			let cond = parse_cond("(a > 10 AND a < 5) OR b = 1");
 			let path = a
 				.try_or_union(Some(&cond), crate::kvs::Direction::Forward)
@@ -3845,7 +3870,7 @@ mod tests {
 		#[test]
 		fn or_all_branches_empty_yields_empty_scan() {
 			// Every branch's range contradicts, so the OR is empty.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("(a > 10 AND a < 5) OR (a > 100 AND a < 50)");
 			let path =
 				a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union path");
@@ -4077,7 +4102,7 @@ mod tests {
 		fn contradictory_range_yields_empty_scan() {
 			// `a > 10 AND a < 5` — contradiction must short-circuit to
 			// AccessPath::EmptyScan.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a > 10 AND a < 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate");
@@ -4111,7 +4136,7 @@ mod tests {
 		fn equal_values_with_one_exclusive_is_empty() {
 			// `a > 5 AND a <= 5` — exclusive lower equal to inclusive upper
 			// has no satisfying value.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a > 5 AND a <= 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate");
@@ -4121,7 +4146,7 @@ mod tests {
 		#[test]
 		fn same_side_from_bounds_keep_tighter() {
 			// `a > 5 AND a > 10` → from bound tightens to > 10.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a > 5 AND a > 10");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");
@@ -4161,7 +4186,7 @@ mod tests {
 		#[test]
 		fn same_side_mixed_inclusive_picks_exclusive() {
 			// `a > 5 AND a >= 5` — same value, exclusive is tighter.
-			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
+			let a = scalar_analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a > 5 AND a >= 5");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_a").expect("ix_a");

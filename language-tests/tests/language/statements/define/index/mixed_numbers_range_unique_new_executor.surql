@@ -13,8 +13,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0 <2, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0 <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -24,8 +23,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <2, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -35,8 +33,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <1.5f, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0.1f <1.5f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -46,8 +43,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0 <1.5f, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0 <1.5f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -57,8 +53,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0.1f, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0.1f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -68,8 +63,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: >0, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: >0, direction: Forward]
 ''''
 
 [[test.results]]
@@ -79,8 +73,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: <2, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -90,8 +83,7 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: test, index: index, access: <1.9f, direction: Forward]
+        IndexScan [ctx: Db] [table: test, index: index, access: <1.9f, direction: Forward]
 ''''
 
 */

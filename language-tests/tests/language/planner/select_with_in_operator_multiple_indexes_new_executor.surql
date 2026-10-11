@@ -9,9 +9,8 @@ value = "'OK'"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 3}
-    Filter [ctx: Db] [predicate: (kind INSIDE [1, 2] OR pubkey INSIDE [123]) AND published > 2022] {rows: 3}
-        DistinctRecords [ctx: Db] {rows: 3}
-            IndexScan [ctx: Db] [table: notes, index: index_note_published, access: >2022, direction: Forward] {rows: 3}
+    Filter [ctx: Db] [predicate: kind INSIDE [1, 2] OR pubkey INSIDE [123]] {rows: 3}
+        IndexScan [ctx: Db] [table: notes, index: index_note_published, access: >2022, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -21,9 +20,8 @@ value = "[{ id: notes:3, kind: 1, pubkey: 123, published: 2023 }, { id: notes:4,
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: published < 2024 AND (kind INSIDE [1, 2] OR pubkey INSIDE [123]) AND published > 2022] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: notes, index: index_note_published, access: >2022 <2024, direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: kind INSIDE [1, 2] OR pubkey INSIDE [123]] {rows: 1}
+        IndexScan [ctx: Db] [table: notes, index: index_note_published, access: >2022 <2024, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

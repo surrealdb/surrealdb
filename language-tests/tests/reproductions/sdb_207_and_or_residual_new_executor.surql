@@ -32,29 +32,26 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: scanDefinition = (scan:one).scanDefinition AND createdAt <= (scan:one).task.finishedAt AND (closedAt = NONE OR closedAt >= (scan:one).createdAt)]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
-"'''
-
-[[test.results]]
-value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
-
-[[test.results]]
-value = '''
-"SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: scanDefinition = (scan_definition:a) AND createdAt <= d'2026-01-11T00:00:00Z' AND (closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
-"'''
-
-[[test.results]]
-value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
-
-[[test.results]]
-value = '''
-"SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
         IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+"'''
+
+[[test.results]]
+value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
+
+[[test.results]]
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    Filter [ctx: Db] [predicate: closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z']
+        IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
+"'''
+
+[[test.results]]
+value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"
+
+[[test.results]]
+value = '''
+"SelectProject [ctx: Db] [projections: id]
+    IndexScan [ctx: Db] [table: canonical_finding, index: scanDefinition_compound_idx, access: [scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]

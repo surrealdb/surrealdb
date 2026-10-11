@@ -343,12 +343,17 @@ fn a_served_statement_never_serves_one_sessions_folded_values_to_another() {
 				"Array(Array([RecordId(RecordId {{ table: Table(\"doc\"), key: String(\"{id}\") }})]))"
 			)
 		};
-		for (principal, own) in [("alice", "a"), ("bob", "b"), ("alice", "a"), ("bob", "b")] {
+		for (principal, own, other) in [
+			("alice", "a", "bob"),
+			("bob", "b", "alice"),
+			("alice", "a", "bob"),
+			("bob", "b", "alice"),
+		] {
 			let results = answer(principal).await;
 			assert_eq!(results[1], Ok(rows(own)), "{principal}: {results:?}");
 			assert_eq!(results[2], Ok(rows(own)), "{principal}: {results:?}");
 			let explained = results[3].clone().expect("EXPLAIN answers");
-			assert!(explained.contains(principal), "{principal}: {explained}");
+			assert!(!explained.contains(other), "{principal}: {explained}");
 		}
 		let results = answer("root").await;
 		assert!(

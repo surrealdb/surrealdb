@@ -689,6 +689,8 @@ async fn index_reclaim_modes(
 		.collect())
 }
 
+/// The keys under index `ix`'s root, leaving out the keys that record the
+/// value shapes it stored ([`surrealdb_datastore::index_shapes`]).
 async fn index_prefix_key_count(
 	ds: &Datastore,
 	ns: NamespaceId,
@@ -696,6 +698,7 @@ async fn index_prefix_key_count(
 	table: &TableName,
 	ix: IndexId,
 ) -> Result<usize> {
+	use crate::key::schema::{IndexBuildShapesKey, IndexShapesKey, IndexShapesTrackedKey};
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let key = IdxRoot {
 		ns,
@@ -705,7 +708,31 @@ async fn index_prefix_key_count(
 	};
 	let keys: Vec<(Vec<u8>, Vec<u8>)> = catch!(tx, tx.get_prefix_key(&key, None).await);
 	tx.cancel().await?;
-	Ok(keys.len())
+	let tb = || Cow::Borrowed(table);
+	let shapes = [
+		IndexShapesTrackedKey {
+			ns,
+			db,
+			tb: tb(),
+			ix,
+		}
+		.encode_key()?,
+		IndexShapesKey {
+			ns,
+			db,
+			tb: tb(),
+			ix,
+		}
+		.encode_key()?,
+		IndexBuildShapesKey {
+			ns,
+			db,
+			tb: tb(),
+			ix,
+		}
+		.encode_key()?,
+	];
+	Ok(keys.iter().filter(|(k, _)| !shapes.iter().any(|s| s.as_slice() == k.as_slice())).count())
 }
 
 async fn seed_durable_queue_generation(
@@ -1327,6 +1354,154 @@ async fn same_transaction_overwrite_concurrent_index_write_uses_fresh_fence_snap
 		0,
 	)
 	.await?;
+	Ok(())
+}
+
+/// Runs `sql` and returns its rows' record ids in the order they came back.
+#[cfg(feature = "kv-mem")]
+async fn ordered_result_ids(ds: &Datastore, session: &Session, sql: &str) -> Result<Vec<String>> {
+	use surrealdb_types::ToSql;
+
+	let mut results = ds.execute(sql, session, None).await?;
+	let value = results.remove(0).result?;
+	let surrealdb_types::Value::Array(rows) = value else {
+		anyhow::bail!("query returned non-array value: {value:?}");
+	};
+	rows.iter()
+		.map(|row| match row {
+			surrealdb_types::Value::RecordId(rid) => Ok(rid.to_sql()),
+			other => anyhow::bail!("row is not a record id: {other:?}"),
+		})
+		.collect()
+}
+
+/// Build `s_time` concurrently over three records holding scalar datetimes,
+/// running `during` while the build is parked in the transaction that clears
+/// the index and begins tracking its shapes, and return the shapes the index
+/// records once its build is `Online`.
+///
+/// A document write admitted while the build is parked there is queued to
+/// `!bg` with a `!bp` marker, so the initial scan indexes the record's queued
+/// old value and only the build's replay of the queue writes its new one.
+#[cfg(feature = "kv-mem")]
+async fn index_shapes_after_concurrent_build(
+	during: Option<&str>,
+) -> Result<(Arc<Datastore>, Session, Arc<surrealdb_datastore::index_shapes::IndexShapes>)> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE s SCHEMALESS;
+			CREATE s:1 SET time = d'2024-01-01' RETURN NONE;
+			CREATE s:2 SET time = d'2024-01-02' RETURN NONE;
+			CREATE s:3 SET time = d'2024-01-03' RETURN NONE;
+			",
+	)
+	.await?;
+
+	let site = RetryableConflictSite::ConcurrentIndexInitialCleanup;
+	let node_id = ds.id();
+	let guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX s_time ON s FIELDS time CONCURRENTLY",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "s", "s_time").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	if let Some(sql) = during {
+		execute_all_retrying_conflicts(&ds, &session, sql).await?;
+		let generation = durable_build_state(&ds, &ikb).await?.generation;
+		assert!(
+			durable_queue_generation_count(&ds, &ikb, generation).await? > 0,
+			"the write must be queued for the build to replay"
+		);
+		assert!(
+			retryable_conflict_count(site, node_id) > 0,
+			"the build must still be parked ahead of its initial scan when the write is queued"
+		);
+	}
+	drop(guard);
+	wait_for_index_ready(&ds, &session, "s", "s_time").await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let shapes = catch!(tx, tx.index_shapes(ns, db, &table, ix.index_id).await);
+	tx.cancel().await?;
+	Ok((ds, session, shapes))
+}
+
+/// Every shape a build records commits before the build publishes the index
+/// `Online`, the shapes of the writes it replays included. An array written
+/// to the column while the build runs is queued and stored by the replay, and
+/// a read planned once the index is `Online` plans the column as one that may
+/// hold an array: `ORDER BY ... DESC LIMIT` answers the whole-value order, in
+/// which the array sorts after every datetime, as its `WITH NOINDEX` twin does.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_build_records_the_shape_of_a_replayed_write_before_online() -> Result<()> {
+	use surrealdb_datastore::index_shapes::ValueShape;
+
+	let (ds, session, shapes) = index_shapes_after_concurrent_build(Some(
+		"UPDATE s:1 SET time = [d'2023-01-01'] RETURN NONE",
+	))
+	.await?;
+	assert!(shapes.is_tracked(), "a build tracks its index's shapes: {shapes:?}");
+	assert!(
+		shapes.may_hold(0, ValueShape::Array),
+		"the replayed array must be recorded by the time the build is Online: {shapes:?}"
+	);
+	assert!(shapes.may_hold(0, ValueShape::Whole), "{shapes:?}");
+
+	let expected = ["s:1", "s:3"];
+	assert_eq!(
+		ordered_result_ids(&ds, &session, "SELECT VALUE id FROM s ORDER BY time DESC LIMIT 2")
+			.await?,
+		expected
+	);
+	assert_eq!(
+		ordered_result_ids(
+			&ds,
+			&session,
+			"SELECT VALUE id FROM s WITH NOINDEX ORDER BY time DESC LIMIT 2"
+		)
+		.await?,
+		expected
+	);
+	Ok(())
+}
+
+/// The control for
+/// `concurrent_build_records_the_shape_of_a_replayed_write_before_online`: the
+/// same build with no write queued records only whole values, so a read
+/// planned once the index is `Online` answers `ORDER BY ... DESC LIMIT` from a
+/// backward scan of the index.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_build_of_scalars_records_no_array_shape() -> Result<()> {
+	use surrealdb_datastore::index_shapes::ValueShape;
+
+	let (ds, session, shapes) = index_shapes_after_concurrent_build(None).await?;
+	assert!(shapes.is_tracked(), "a build tracks its index's shapes: {shapes:?}");
+	assert!(!shapes.may_hold(0, ValueShape::Array), "{shapes:?}");
+	assert!(shapes.may_hold(0, ValueShape::Whole), "{shapes:?}");
+
+	const LATEST: &str = "SELECT VALUE id FROM s ORDER BY time DESC LIMIT 2";
+	let mut results = ds.execute(&format!("EXPLAIN {LATEST}"), &session, None).await?;
+	let plan = format!("{:?}", results.remove(0).result?);
+	assert!(plan.contains("IndexScan"), "an index with no array answers the order: {plan}");
+	let expected = ["s:3", "s:2"];
+	assert_eq!(ordered_result_ids(&ds, &session, LATEST).await?, expected);
+	assert_eq!(
+		ordered_result_ids(
+			&ds,
+			&session,
+			"SELECT VALUE id FROM s WITH NOINDEX ORDER BY time DESC LIMIT 2"
+		)
+		.await?,
+		expected
+	);
 	Ok(())
 }
 
@@ -9047,6 +9222,7 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 		"DEFINE FIELD category ON t TYPE string;
 		 DEFINE INDEX idx_category ON t FIELDS category;
 		 DEFINE INDEX idx_rawcat ON t FIELDS rawcat;
+		 DEFINE INDEX idx_plaincat ON t FIELDS plaincat;
 		 DEFINE INDEX hn_pt ON t FIELDS point HNSW DIMENSION 1;",
 	)
 	.await?;
@@ -9060,7 +9236,8 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 			CREATE type::record('t', $i) SET
 				point = [ <float> $i ],
 				category = IF $i % 12 < 11 { 'a' } ELSE { 'b' },
-				rawcat = IF $i % 12 < 11 { 'a' } ELSE { 'b' };
+				plaincat = IF $i % 12 < 11 { 'a' } ELSE { 'b' },
+				rawcat = IF $i == 0 { ['a'] } ELSE IF $i % 12 < 11 { 'a' } ELSE { 'b' };
 		};",
 	)
 	.await?;
@@ -9093,7 +9270,15 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 	assert!(plan.contains("prefilter_tier: graph"), "expected graph tier:\n{plan}");
 	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
 
-	// Contrast: `rawcat` has no declared field kind, so its equality is not
+	// `plaincat` has no declared field kind, but its index has stored no
+	// array in it, so its equality is exact and joins the allow-list too.
+	let plan =
+		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE plaincat = 'b' AND point <|3,40|> [0f]")
+			.await?;
+	assert!(plan.contains("prefilter_tier: exact"), "expected exact tier:\n{plan}");
+	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
+
+	// Contrast: `rawcat`'s index has stored an array, so its equality is not
 	// provably exact and remains an in-traversal residual — the filter
 	// fetches candidate records and says so.
 	let plan =
@@ -11081,4 +11266,100 @@ async fn unique_collision_across_transactions_rocksdb() -> Result<()> {
 	let dir = TempDir::new()?;
 	let (ds, session) = new_rocksdb_index_test_ds(&dir).await?;
 	unique_collision_across_transactions(ds, session).await
+}
+
+/// A planner shares the value shapes of an index through the node's cache only
+/// once the index's build has finished, or never ran: a build records shapes
+/// without stamping the catalog version, so an index still building is read at
+/// each planner's snapshot. A shape recorded with a stamp reaches the shared
+/// entry of the new version.
+#[cfg(feature = "kv-mem")]
+#[test_log::test(tokio::test)]
+async fn planning_shares_the_shapes_of_finished_builds_only() -> Result<()> {
+	use surrealdb_datastore::cache::ds::DatastoreCache;
+	use surrealdb_datastore::index_shapes::ValueShape;
+
+	let ds = Datastore::builder().build_with_path("memory").await?;
+	let cache = DatastoreCache::new(64);
+	let (ns, db) = (NamespaceId(1), DatabaseId(1));
+	let tb = TableName::from("t");
+	let index = |id: u32, name: &str| IndexDefinition {
+		index_id: IndexId(id),
+		name: name.into(),
+		table_name: tb.clone(),
+		cols: vec![crate::expr::Idiom::field("v")],
+		index: Index::Idx,
+		count_cond: None,
+		prepare_remove: false,
+		format_version: crate::catalog::INDEX_FORMAT_VERSION,
+		comment: None,
+	};
+	let (finished, building) = (index(1, "finished"), index(2, "building"));
+	let indexes = [finished.clone(), building.clone()];
+	let array = [(0u16, ValueShape::Array)];
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.bump_catalog_version(ns, db, &tb).await?;
+	tx.track_index_shapes(ns, db, &tb, finished.index_id, &[]).await?;
+	tx.track_index_shapes(ns, db, &tb, building.index_id, &[]).await?;
+	let ikb = IndexKeyBase::new(ns, db, tb.clone(), building.index_id);
+	tx.set_key(
+		&ikb.new_bs_key(),
+		&durable_build_state_for_phase(IndexBuildPhase::Building, 1, Some(Uuid::now_v7())),
+	)
+	.await?;
+	tx.commit().await?;
+
+	// The first planner loads the entry, which holds the finished index only.
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let shapes = tx.planning_index_shapes(Some(&cache), ns, db, &tb, &indexes).await?;
+	assert!(!shapes.of(finished.index_id).expect("read").may_hold(0, ValueShape::Array));
+	assert!(!shapes.of(building.index_id).expect("read").may_hold(0, ValueShape::Array));
+	tx.cancel().await?;
+
+	// Shapes recorded without a stamp, as a build records them.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.record_index_shapes(
+		ns,
+		db,
+		&tb,
+		finished.index_id,
+		&array,
+		surrealdb_datastore::index_shapes::ShapeRecorder::Build,
+	)
+	.await?;
+	tx.record_index_shapes(
+		ns,
+		db,
+		&tb,
+		building.index_id,
+		&array,
+		surrealdb_datastore::index_shapes::ShapeRecorder::Build,
+	)
+	.await?;
+	tx.commit().await?;
+
+	// The building index is read at the snapshot; the finished one is served
+	// from the entry of the unchanged version.
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let shapes = tx.planning_index_shapes(Some(&cache), ns, db, &tb, &indexes).await?;
+	assert!(
+		shapes.of(building.index_id).expect("read").may_hold(0, ValueShape::Array),
+		"an index still building is never served from the shared entry"
+	);
+	assert!(
+		!shapes.of(finished.index_id).expect("read").may_hold(0, ValueShape::Array),
+		"a finished index is served from the shared entry of its version"
+	);
+	tx.cancel().await?;
+
+	// A stamp moves planners to a new version, whose entry is read afresh.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.bump_catalog_version(ns, db, &tb).await?;
+	tx.commit().await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let shapes = tx.planning_index_shapes(Some(&cache), ns, db, &tb, &indexes).await?;
+	assert!(shapes.of(finished.index_id).expect("read").may_hold(0, ValueShape::Array));
+	tx.cancel().await?;
+	Ok(())
 }

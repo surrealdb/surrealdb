@@ -50,6 +50,13 @@ For the release **process** (how releases are cut and shipped), see
 - A value containing a deeply nested `GeometryCollection` that was stored by an
   earlier release may now return `The value is nested too deeply` when read. It
   can be repaired in place by overwriting the field; see below.
+- A B-tree index over a field with no declared type that was built by an
+  earlier release plans every query as if the field could hold an array:
+  `ORDER BY` over it sorts instead of reading the index in order, and a scan
+  over it lists each record once rather than stopping at a `LIMIT`, and a
+  range open at its upper end (`WHERE time > $since`) reads the table rather
+  than the index. Rows are unchanged. `REBUILD INDEX`, once every node runs this
+  release, restores the index plans for a field that never held an array.
 
 ### `--versions` is refused rather than ignored
 
@@ -237,6 +244,43 @@ UPDATE deep:1 SET g = NONE;
 Nothing a current release stores can newly reach this state: the write guard now
 counts the same `GeometryCollection` nesting the read path does, so a value that
 would be unreadable is rejected at the write instead.
+
+### Index order on fields with no declared type
+
+The index writer stores a record whose indexed field holds an array once per
+element of the array, so the order of such an index's entries is not the order
+of the field's values. A B-tree index built on this release records, per
+column, whether it has stored an array, and the planner treats a column that
+never has as it treats a column declared a scalar type: the index delivers the
+column's order, a `LIMIT` stops the scan, and a range over the column is
+answered by its keys. The first array written to the column changes every plan
+over it from then on. Deleting the record does not change it back; rebuilding
+the index does.
+
+A column that may hold an array is also not ranged over by its index past the
+place arrays sort, after every scalar: a record holding `[1]` satisfies
+`time > 5` by its whole value, but its one entry sits at `1`, outside the range.
+Such a range — one open at its upper end, or bounded above by an array or a
+later value — reads the table instead.
+
+An index built by an earlier release recorded nothing, so this release cannot
+tell whether its columns hold arrays and plans them as columns that may. Every
+query still returns the same rows; a schemaless "latest N" query such as
+`SELECT * FROM event ORDER BY time DESC LIMIT 10` sorts the matching rows
+rather than reading ten index entries, and `WHERE time > $since` reads the
+table.
+
+A statement that may write — `UPDATE`, `DELETE`, a block holding a write, or
+any statement calling a user-defined function or a script — plans every such
+column as one that may hold an array, rebuilt or not: it is planned before its
+writes run, and a write can store the first array.
+
+**What to do**: once every node of the cluster runs this release, run
+`REBUILD INDEX` on each B-tree index whose queries order by, or take ranges
+over, a field with no declared type. A node still on an earlier release writes
+arrays into an index without recording them, so an index rebuilt while such a
+node is still writing can plan a column that holds an array as one that never
+has, and order or bound it by element.
 
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
 

@@ -840,17 +840,18 @@ NONE
 { age: 3, id: indexed:57, kind: 0, name: 'n57' }
 ### SELECT * FROM indexed WHERE age > 6
 { age: 7, id: indexed:7, kind: 1, name: 'n7' }
-{ age: 7, id: indexed:16, kind: 1, name: 'n16' }
-{ age: 7, id: indexed:25, kind: 1, name: 'n25' }
-{ age: 7, id: indexed:34, kind: 1, name: 'n34' }
-{ age: 7, id: indexed:43, kind: 1, name: 'n43' }
-{ age: 7, id: indexed:52, kind: 1, name: 'n52' }
 { age: 8, id: indexed:8, kind: 2, name: 'n8' }
+{ age: 7, id: indexed:16, kind: 1, name: 'n16' }
 { age: 8, id: indexed:17, kind: 2, name: 'n17' }
+{ age: 7, id: indexed:25, kind: 1, name: 'n25' }
 { age: 8, id: indexed:26, kind: 2, name: 'n26' }
+{ age: 7, id: indexed:34, kind: 1, name: 'n34' }
 { age: 8, id: indexed:35, kind: 2, name: 'n35' }
+{ age: 7, id: indexed:43, kind: 1, name: 'n43' }
 { age: 8, id: indexed:44, kind: 2, name: 'n44' }
+{ age: 7, id: indexed:52, kind: 1, name: 'n52' }
 { age: 8, id: indexed:53, kind: 2, name: 'n53' }
+{ age: [3, 4], id: indexed:tags, name: 'tags' }
 ### SELECT * FROM indexed WHERE age >= 2 AND age < 4 AND kind = 1
 (no rows)
 ### SELECT id FROM indexed WHERE name = 'n7'
@@ -937,11 +938,11 @@ NONE
 { age: 8, id: indexed:44 }
 { age: 8, id: indexed:53 }
 ### SELECT id, age FROM indexed WHERE age > 2 ORDER BY age DESC LIMIT 5 START 2
-{ age: 8, id: indexed:44 }
-{ age: 8, id: indexed:35 }
-{ age: 8, id: indexed:26 }
 { age: 8, id: indexed:17 }
-{ age: 8, id: indexed:8 }
+{ age: 8, id: indexed:26 }
+{ age: 8, id: indexed:35 }
+{ age: 8, id: indexed:44 }
+{ age: 8, id: indexed:53 }
 ### SELECT id FROM indexed WHERE kind = 1 ORDER BY age DESC
 { id: indexed:52 }
 { id: indexed:43 }
@@ -982,6 +983,7 @@ NONE
 ### SELECT math::sum(age) AS s FROM indexed WHERE age > 5 GROUP ALL
 { s: 132 }
 ### SELECT kind, count() FROM indexed WHERE age > 5 GROUP BY kind
+{ count: 1, kind: NONE }
 { count: 7, kind: 0 }
 { count: 6, kind: 1 }
 { count: 6, kind: 2 }

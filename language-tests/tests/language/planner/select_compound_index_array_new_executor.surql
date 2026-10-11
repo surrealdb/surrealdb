@@ -28,8 +28,7 @@ value = "[{ id: t:[4, o:2] }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
-    DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

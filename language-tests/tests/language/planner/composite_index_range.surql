@@ -25,8 +25,7 @@ value = "[{ age: 40, city: 'paris', id: record:5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -36,8 +35,7 @@ value = "[{ age: 55, city: 'london', id: record:2 }, { age: 70, city: 'london', 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -47,8 +45,7 @@ value = "[{ age: 55, city: 'london', id: record:2 }, { age: 70, city: 'london', 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThan 50, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThan 50, direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -58,8 +55,7 @@ value = "[{ age: 40, city: 'paris', id: record:5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -75,9 +71,8 @@ value = "[{ active: false, age: 65, city: 'london', id: record:7 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: city = 'london' AND age > 50 AND active = true] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: active = true] {rows: 1}
+        IndexScan [ctx: Db] [table: record, index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

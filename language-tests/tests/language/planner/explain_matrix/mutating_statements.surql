@@ -180,25 +180,25 @@ value = "[m:2]"
 value = "[m:2]"
 
 [[test.results]]
-value = """{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ children: [{ attributes: { access: "['g1'] MoreThan 1", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"""
+value = """{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ children: [{ attributes: { access: "['g1']", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"""
 
 [[test.results]]
-value = """{ attributes: { form: 'DELETE' }, children: [{ attributes: { projections: '*' }, children: [{ children: [{ attributes: { access: "['g1'] MoreThan 1", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"""
+value = """{ attributes: { form: 'DELETE' }, children: [{ attributes: { projections: '*' }, children: [{ children: [{ attributes: { access: "['g1']", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"""
 
 [[test.results]]
-value = """{ attributes: { projections: 'id' }, children: [{ children: [{ attributes: { access: "['g1'] MoreThan 1", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }"""
-
-[[test.results]]
-value = "[m:2]"
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { access: "['g1'] MoreThan 1", direction: 'Forward', index: 'idx_grp_sub', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[m:2]"
 
 [[test.results]]
-value = "{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ children: [{ attributes: { access: '>15', direction: 'Forward', index: 'idx_qty', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
+value = "[m:2]"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ children: [{ attributes: { access: '>15', direction: 'Forward', index: 'idx_qty', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'DistinctRecords' }], context: 'Db', operator: 'SelectProject' }"
+value = "{ attributes: { form: 'UPDATE' }, children: [{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'm' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }], context: 'Db', operator: 'WriteOperator' }"
+
+[[test.results]]
+value = "{ attributes: { projections: 'id' }, children: [{ attributes: { access: '>15', direction: 'Forward', index: 'idx_qty', table: 'm' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
 value = "[m:2, m:3]"

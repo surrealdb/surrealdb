@@ -59,7 +59,8 @@ value = '''
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: rawcat = 'a']
-        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: rawcat = 'a']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+            BitmapIndexScan [ctx: Db] [index: idx_rawcat, access: = 'a']
 "'''
 */
 

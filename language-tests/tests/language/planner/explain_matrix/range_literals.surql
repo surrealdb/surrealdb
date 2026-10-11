@@ -418,8 +418,7 @@ value = "[rv:x]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        IndexScan [ctx: Db] [table: rv, index: idx_v, access: = 10..=20, direction: Forward]
+    IndexCountScan [ctx: Db] [source: rv, condition: v = 10..=20]
 ''''
 
 [[test.results]]
@@ -431,8 +430,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: rv, index: idx_v, access: >=10 <=20, direction: Forward]
+    IndexScan [ctx: Db] [table: rv, index: idx_v, access: >=10 <=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -444,9 +442,7 @@ value = "[rv:y]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: rv, index: idx_v, access: >=10 <=20, direction: Forward]
+    IndexCountScan [ctx: Db] [source: rv, condition: v INSIDE 10..=20]
 ''''
 
 [[test.results]]

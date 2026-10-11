@@ -7,11 +7,13 @@ auth = { level = "owner" }
 [test]
 reason = """
 	An index stores a record holding an array once per element, in any column
-	not declared a kind that holds no array. A scan whose key range leaves such
-	a column open reaches the record through several entries, and lists it
-	once: on a column with no declared kind, on one declared a kind admitting
-	an array, and as the trailing column of a compound index seeked on its
-	leading column. The rows and the count are the table scan's. A column
+	not known to hold no array. A scan whose key range leaves such a column
+	open reaches the record through several entries, and lists it once: on a
+	column with no declared kind, on one declared a kind admitting an array, and
+	as the trailing column of a compound index seeked on its leading column. The
+	rows and the count are the table scan's. A range over such a column that
+	reaches the band of the value order arrays sort in admits an array none of
+	whose elements is in the range, so a table scan answers it. A column
 	declared a scalar kind holds one entry per record, and its scan carries no
 	dedupe.
 """
@@ -108,7 +110,7 @@ DEFINE INDEX ix ON m FIELDS v;
 CREATE m:1 SET v = [10, 'x'];
 SELECT VALUE id FROM m WITH NOINDEX WHERE v > 5;
 SELECT VALUE id FROM m WITH INDEX ix WHERE v > 5;
-string::contains(<string> (EXPLAIN SELECT VALUE id FROM w WITH INDEX ix WHERE v > 5), 'DistinctRecords');
+string::contains(<string> (EXPLAIN SELECT VALUE id FROM w WITH INDEX ix WHERE v > 5), 'TableScan');
 DEFINE FIELD n ON s TYPE int;
 DEFINE INDEX ix ON s FIELDS n;
 CREATE s:1 SET n = 7;

@@ -16,8 +16,7 @@ value = "['alpha', 'alphabet', 'alpha􏿿', 'alpha􏿿tail', 'alphb', 'alp', 'AL
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha' <'alphb', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -30,8 +29,7 @@ value = "[ps:1, ps:2, ps:3, ps:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alphab')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alphab' <'alphac', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alphab' <'alphac', direction: Forward]
 "'''
 
 [[test.results]]
@@ -44,8 +42,7 @@ value = "[ps:2]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'zzz')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='zzz' <'zz{', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='zzz' <'zz{', direction: Forward]
 "'''
 
 [[test.results]]
@@ -58,8 +55,7 @@ value = "[]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'ALPHA')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='ALPHA' <'ALPHB', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='ALPHA' <'ALPHB', direction: Forward]
 "'''
 
 [[test.results]]
@@ -72,8 +68,7 @@ value = "[ps:7]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'hé')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='hé' <'hê', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='hé' <'hê', direction: Forward]
 "'''
 
 [[test.results]]
@@ -86,8 +81,7 @@ value = "[ps:9, ps:10]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha􏿿')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha􏿿' <'alphb', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='alpha􏿿' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -100,8 +94,7 @@ value = "[ps:3, ps:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, '􏿿')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='􏿿', direction: Forward]
+        IndexScan [ctx: Db] [table: ps, index: ps_name, access: >='􏿿', direction: Forward]
 "'''
 
 [[test.results]]
@@ -169,8 +162,7 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
+        IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -183,8 +175,7 @@ value = "[pc:1, pc:2, pc:3, pc:4]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha') AND tier = 'beta']
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
+        IndexScan [ctx: Db] [table: pc, index: pc_name_tier, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]
@@ -213,8 +204,7 @@ value = "NONE"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: string::starts_with(name, 'alpha')]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: pu, index: pu_name, access: >='alpha' <'alphb', direction: Forward]
+        IndexScan [ctx: Db] [table: pu, index: pu_name, access: >='alpha' <'alphb', direction: Forward]
 "'''
 
 [[test.results]]

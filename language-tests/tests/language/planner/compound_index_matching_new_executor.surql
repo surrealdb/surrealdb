@@ -19,7 +19,7 @@ value = "[{ event: 'event', id: event:1, name: 'someName', path: 'A/B/C' }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1}
+    Filter [ctx: Db] [predicate: path = 'A/B/C'] {rows: 1}
         IndexScan [ctx: Db] [table: event, index: idxNameEvent, access: ['someName', 'event'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''

@@ -38,7 +38,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Tobie' AND genre = 'm'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
         IndexScan [ctx: Db] [table: person2, index: person2_name, access: = 'Tobie', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
@@ -58,7 +58,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
         IndexScan [ctx: Db] [table: person3, index: person3_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''

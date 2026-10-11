@@ -800,10 +800,12 @@ async fn records_differing_only_in_id_number_kind_share_a_non_unique_entry() {
 /// bound, on one of the pair reads both through a scan and one through the
 /// index.
 ///
-/// Over a column declared a number kind a range is answered by its keys
-/// alone, with no recheck of the values: an exclusive bound on one of the
-/// pair then reads the other through the index, although the two compare
-/// equal.
+/// A range is answered by its keys alone only where its bound is a number a
+/// float and a decimal both hold exactly; there the key range and the
+/// comparison admit the same values. A bound like either of the pair keeps the
+/// comparison as a recheck, over a column declared a number kind as over an
+/// undeclared one, so an exclusive bound on one of the pair never reads the
+/// other through the index.
 #[tokio::test]
 async fn a_float_and_a_finer_decimal_are_two_keys_read_by_their_exact_values() {
 	let (ds, ses) = datastore().await;
@@ -860,11 +862,7 @@ async fn a_float_and_a_finer_decimal_are_two_keys_read_by_their_exact_values() {
 				};
 				let sql = format!("SELECT VALUE id FROM {tb} WITH INDEX ix WHERE v {op} $x;");
 				let indexed = exact_ids(run(&ds, &ses, &sql, &[("x", x)]).await);
-				let expected = if declared {
-					ids(&|v| admits(key(v).cmp(&key(x))))
-				} else {
-					ids(&|v| admits(key(v).cmp(&key(x))) && admits(v.cmp(x)))
-				};
+				let expected = ids(&|v| admits(key(v).cmp(&key(x))) && admits(v.cmp(x)));
 				assert_eq!(indexed, expected, "{tb}: indexed v {op} {x:?}");
 				let sql = format!("SELECT VALUE id FROM {tb} WITH NOINDEX WHERE v {op} $x;");
 				let scanned = exact_ids(run(&ds, &ses, &sql, &[("x", x)]).await);

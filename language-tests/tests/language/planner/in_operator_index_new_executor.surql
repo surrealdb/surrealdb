@@ -87,19 +87,16 @@ value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
     Filter [ctx: Db] [predicate: account = (accounts:1) AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
         UnionIndexScan [ctx: Db] [table: test, branches: 2] {rows: 1}
-            DistinctRecords [ctx: Db] {rows: 1}
-                IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['password'], direction: Forward] {rows: 1}
-            DistinctRecords [ctx: Db] {rows: 1}
-                IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['firebasePassword'], direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['password'], direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [table: test, index: idx_type_value, access: ['firebasePassword'], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 1}
-    Filter [ctx: Db] [predicate: account = (accounts:1) AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: test, index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: type INSIDE ['password', 'firebasePassword']] {rows: 1}
+        IndexScan [ctx: Db] [table: test, index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

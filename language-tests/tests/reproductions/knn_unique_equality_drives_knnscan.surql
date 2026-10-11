@@ -21,7 +21,8 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: email = 'b@x.com']
-        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1, predicate: email = 'b@x.com']
+        KnnScan [ctx: Db] [index: hn_pt1, k: 2, ef: 40, dimension: 1]
+            BitmapIndexScan [ctx: Db] [index: idx_email, access: = 'b@x.com']
 "'''
 
 [[test.results]]

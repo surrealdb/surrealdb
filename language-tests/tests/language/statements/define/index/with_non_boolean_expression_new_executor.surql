@@ -24,8 +24,7 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -34,8 +33,7 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -44,8 +42,7 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -54,8 +51,7 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -64,8 +60,7 @@ value = "[{ id: t:2, v: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx, access: >1, direction: Forward]
 ''''
 
 */

@@ -3290,14 +3290,20 @@ pub(super) fn family_of(id: crate::exec::operators::write::stage::StageId) -> &'
 /// A planner for a statement of `ctx`, as the executor plans one it is about
 /// to run: speculating, so a block's schema statements are modelled.
 pub(super) fn planner(ctx: &ExecutionContext) -> Planner<'_> {
+	let txn = ctx.try_txn().expect("a transaction");
+	// A read-only transaction records no value shape, so a statement planned
+	// in one trusts the shapes the indexes have recorded, as a statement that
+	// cannot write does.
+	let reads_only = !txn.writeable();
 	let mut planner = Planner::with_txn(
 		ctx.ctx(),
 		ctx.function_registry(),
-		ctx.try_txn().expect("a transaction"),
+		txn,
 		Some("test".to_owned()),
 		Some("test".to_owned()),
 	)
-	.with_auth(Arc::clone(&ctx.root().auth));
+	.with_auth(Arc::clone(&ctx.root().auth))
+	.trusting_index_shapes(reads_only);
 	planner.speculate_with(ctx.options().map(|options| Arc::new(options.clone())));
 	planner
 }
@@ -3534,9 +3540,12 @@ async fn an_indexed_statement_reads_the_index_the_planner_chooses() {
 	for (sql, index, sorted) in [
 		("SELECT * FROM indexed WHERE age = 3", Some("by_age"), false),
 		// `age` is declared no kind and `indexed:tags` holds an array in it,
-		// which the index stores once per element: the key order is not the
-		// column's order, so the sort stays.
-		("SELECT * FROM indexed WHERE age > 6 ORDER BY age DESC LIMIT 2", Some("by_age"), true),
+		// which the index stores once per element: a range reaching the band
+		// arrays sort in may miss such a record, so the table is scanned and
+		// sorted.
+		("SELECT * FROM indexed WHERE age > 6 ORDER BY age DESC LIMIT 2", None, true),
+		// A range clear of that band still reads the index, and the sort stays.
+		("SELECT * FROM indexed WHERE age < 6 ORDER BY age DESC LIMIT 2", Some("by_age"), true),
 		// `n` is declared an int, so its index delivers its order.
 		("SELECT * FROM counted WHERE n > 2 ORDER BY n DESC LIMIT 2", Some("by_n"), false),
 		("SELECT * FROM indexed WHERE name = 'n7'", Some("by_name"), false),

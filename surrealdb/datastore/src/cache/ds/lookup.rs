@@ -26,6 +26,9 @@ pub enum Lookup<'a> {
 	Ixs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, &'a str, Uuid),
+	/// A cache key for the value shapes a table's online B-tree indexes have
+	/// stored, under one catalog version
+	Ish(NamespaceId, DatabaseId, &'a str, Uuid),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -42,6 +45,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Fts(la, lb, lc, ld), Key::Fts(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Ixs(la, lb, lc, ld), Key::Ixs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Lvs(la, lb, lc, ld), Key::Lvs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
+			(Self::Ish(la, lb, lc, ld), Key::Ish(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			_ => false,
 		}
 	}

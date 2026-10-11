@@ -1,5 +1,5 @@
 use quick_cache::Equivalent;
-use surrealdb_catalog::{DatabaseId, NamespaceId};
+use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId};
 use surrealdb_expr::val::RecordIdKey;
 use uuid::Uuid;
 
@@ -78,6 +78,8 @@ pub enum Lookup<'a> {
 	Ixs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for the value shapes an index has stored
+	Ish(NamespaceId, DatabaseId, &'a str, IndexId),
 	/// A cache key for a node
 	Nd(Uuid),
 	/// A cache key for root config
@@ -173,6 +175,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Fts(la, lb, lc), Key::Fts(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ixs(la, lb, lc), Key::Ixs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Lvs(la, lb, lc), Key::Lvs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Ish(la, lb, lc, ld), Key::Ish(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			//
 			(Self::Nd(la), Key::Nd(ka)) => la == ka,
 			(Self::Rcg(la), Key::Rcg(ka)) => la == ka,

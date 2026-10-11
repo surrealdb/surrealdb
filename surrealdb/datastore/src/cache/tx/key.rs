@@ -1,4 +1,4 @@
-use surrealdb_catalog::{DatabaseId, NamespaceId};
+use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId};
 use surrealdb_expr::val::RecordIdKey;
 use uuid::Uuid;
 
@@ -73,6 +73,8 @@ pub enum Key {
 	Ixs(NamespaceId, DatabaseId, String),
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, String),
+	/// A cache key for the value shapes an index has stored
+	Ish(NamespaceId, DatabaseId, String, IndexId),
 	/// A cache key for a node
 	Nd(Uuid),
 	/// A cache key for a root config
@@ -168,6 +170,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Fts(a, b, c) => Key::Fts(a, b, c.to_string()),
 			Lookup::Ixs(a, b, c) => Key::Ixs(a, b, c.to_string()),
 			Lookup::Lvs(a, b, c) => Key::Lvs(a, b, c.to_string()),
+			Lookup::Ish(a, b, c, d) => Key::Ish(a, b, c.to_string(), d),
 			//
 			Lookup::Nd(a) => Key::Nd(a),
 			Lookup::Rcg(a) => Key::Rcg(a.to_string()),

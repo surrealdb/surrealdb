@@ -645,6 +645,20 @@ keyspace! {
 
 						index_version = ["!iv"] => u64;
 
+						/// The value shapes document writes have stored in a B-tree
+						/// index, two bits per column ([`crate::index_shapes`]).
+						index_shapes = ["!ia"] => Vec<u8>;
+
+						/// The value shapes a B-tree index's build has stored, two
+						/// bits per column ([`crate::index_shapes`]).
+						index_build_shapes = ["!ir"] => Vec<u8>;
+
+						/// Present when the index's `!ia` key holds every shape the
+						/// index stores: written by the transaction that begins a
+						/// build. An index built before shapes were recorded has none,
+						/// and may hold any shape.
+						index_shapes_tracked = ["!it"] => ();
+
 						/// Full-text term-document compaction generation. Deliberately
 						/// outside the `!tt` delta range, so a compactor can check that
 						/// the snapshot it read is still current before applying
@@ -2419,8 +2433,11 @@ mod tests {
 			"/***+!hr",
 			"/***+!hs",
 			"/***+!hv",
+			"/***+!ia",
 			"/***+!ig",
+			"/***+!it",
 			"/***+!ip",
+			"/***+!ir",
 			"/***+!iu",
 			"/***+!iv",
 			"/***+!td",

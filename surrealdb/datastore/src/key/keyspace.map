@@ -213,6 +213,9 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!iu{uid}{pos}{count}                                                               IndexCountKey ->  ()
 /*{ns}*{db}*{tb}+{ix}!iu                                                                             IndexCountPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!iv                                                                              IndexVersionKey ->  u64
+/*{ns}*{db}*{tb}+{ix}!ia                                                                               IndexShapesKey ->  Vec<u8>
+/*{ns}*{db}*{tb}+{ix}!ir                                                                          IndexBuildShapesKey ->  Vec<u8>
+/*{ns}*{db}*{tb}+{ix}!it                                                                        IndexShapesTrackedKey ->  ()
 /*{ns}*{db}*{tb}+{ix}!tv                                                                            TermGenerationKey ->  u64
 /*{ns}*{db}*{tb}+{ix}!ig{appending_id}{batch_id}                                                       IndexAppendKey ->  Appending
 /*{ns}*{db}*{tb}+{ix}!ig                                                                            IndexAppendPrefix ->  (range)

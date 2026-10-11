@@ -731,7 +731,9 @@ async fn spec_a_schema_statement_stamps_what_its_speculation_drew() {
 /// defines it where there is none takes the id, stamps and catalog version
 /// the statement's speculation drew, as the statement's own definition of it
 /// does where no write before it defines it: the catalog holds what the
-/// statements after them were planned against.
+/// statements after them were planned against. A write that records a value
+/// shape an index had not stored stamps a version of its own, so the writes
+/// after the definitions store no indexed value.
 #[tokio::test]
 async fn spec_a_table_a_write_defines_takes_what_the_schema_statement_after_it_drew() {
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
@@ -739,7 +741,7 @@ async fn spec_a_table_a_write_defines_takes_what_the_schema_statement_after_it_d
 
 	for (body, by_write) in [
 		("{ CREATE fresh:1; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2 }", true),
-		("{ UPSERT fresh:1; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:2 SET n = 1 }", true),
+		("{ UPSERT fresh:1; DEFINE INDEX by_n ON fresh FIELDS n; CREATE fresh:2 }", true),
 		(
 			"{ IF (SELECT VALUE n FROM ONLY t:0) = 1 { CREATE fresh:1 }; DEFINE FIELD k ON fresh VALUE 1; CREATE fresh:2 }",
 			false,

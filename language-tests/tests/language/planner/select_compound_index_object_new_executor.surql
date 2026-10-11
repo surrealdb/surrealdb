@@ -28,8 +28,7 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
-    DistinctRecords [ctx: Db] {rows: 1}
-        IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -43,8 +42,7 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
     Filter [ctx: Db] [predicate: b >= 2025 AND id.id().r = (o:2) AND b > 2020] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThanEqual 2025, direction: Forward] {rows: 1}
+        IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThanEqual 2025, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -58,8 +56,7 @@ value = "[{ id: t:{ id: 2, r: o:2 } }]"
 value = '''
 'SelectProject [ctx: Db] [projections: id] {rows: 1}
     Filter [ctx: Db] [predicate: b > 2020 AND id.id().r = (o:2) AND b <= 2024] {rows: 1}
-        DistinctRecords [ctx: Db] {rows: 1}
-            IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2020, direction: Forward] {rows: 1}
+        IndexScan [ctx: Db] [table: t, index: idx, access: [o:2] MoreThan 2020, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

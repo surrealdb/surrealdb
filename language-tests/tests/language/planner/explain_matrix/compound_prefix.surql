@@ -10,88 +10,83 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:1, cp2:2, cp2:3]"
+
+[[test.results]]
+value = "[cp2:1, cp2:2, cp2:3]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:2]"
+
+[[test.results]]
+value = "[cp2:2]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan 10, direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:2, cp2:3]"
+
+[[test.results]]
+value = "[cp2:2, cp2:3]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: >1, direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:4, cp2:5]"
+
+[[test.results]]
+value = "[cp2:4, cp2:5]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:2]"
+
+[[test.results]]
+value = "[cp2:2]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan NONE, direction: Forward]
+''''
+
+[[test.results]]
+value = "[cp2:1, cp2:2, cp2:3]"
+
+[[test.results]]
+value = "[cp2:1, cp2:2, cp2:3]"
+
+[[test.results]]
+value = '''
+'ProjectValue [ctx: Db] [expr: id]
+    Filter [ctx: Db] [predicate: b != 20]
         IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
-value = "[cp2:1, cp2:2, cp2:3]"
-
-[[test.results]]
-value = "[cp2:1, cp2:2, cp2:3]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
-''''
-
-[[test.results]]
-value = "[cp2:2]"
-
-[[test.results]]
-value = "[cp2:2]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan 10, direction: Forward]
-''''
-
-[[test.results]]
-value = "[cp2:2, cp2:3]"
-
-[[test.results]]
-value = "[cp2:2, cp2:3]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: >1, direction: Forward]
-''''
-
-[[test.results]]
-value = "[cp2:4, cp2:5]"
-
-[[test.results]]
-value = "[cp2:4, cp2:5]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1, 20], direction: Forward]
-''''
-
-[[test.results]]
-value = "[cp2:2]"
-
-[[test.results]]
-value = "[cp2:2]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1] MoreThan NONE, direction: Forward]
-''''
-
-[[test.results]]
-value = "[cp2:1, cp2:2, cp2:3]"
-
-[[test.results]]
-value = "[cp2:1, cp2:2, cp2:3]"
-
-[[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: a = 1 AND b != 20]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
-''''
-
-[[test.results]]
 value = "[cp2:1, cp2:3]"
 
 [[test.results]]
@@ -100,9 +95,8 @@ value = "[cp2:1, cp2:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: a = 1 AND a = 2]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
+    Filter [ctx: Db] [predicate: a = 2]
+        IndexScan [ctx: Db] [table: cp2, index: cp2_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -129,8 +123,7 @@ value = "[cp3:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10] MoreThan 'x', direction: Forward]
+    IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10] MoreThan 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -142,9 +135,8 @@ value = "[cp3:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: a = 1 AND c = 'x']
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1], direction: Forward]
+    Filter [ctx: Db] [predicate: c = 'x']
+        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1], direction: Forward]
 "'''
 
 [[test.results]]
@@ -156,9 +148,8 @@ value = "[cp3:1, cp3:3]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: a = 1 AND b > 10 AND c = 'x']
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1] MoreThan 10, direction: Forward]
+    Filter [ctx: Db] [predicate: c = 'x']
+        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1] MoreThan 10, direction: Forward]
 "'''
 
 [[test.results]]
@@ -182,8 +173,7 @@ value = "[cp3:3]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10], direction: Forward]
+    IndexScan [ctx: Db] [table: cp3, index: cp3_abc, access: [1, 10], direction: Forward]
 ''''
 
 [[test.results]]
@@ -354,8 +344,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: fan3, index: fan3_aet, access: ['acme', 'b@x'], direction: Forward]
+    IndexScan [ctx: Db] [table: fan3, index: fan3_aet, access: ['acme', 'b@x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -452,8 +441,7 @@ value = "NONE"
 value = '''
 'ProjectValue [ctx: Db] [expr: id]
     Sort [ctx: Db] [sort_keys: id ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: cp2x, index: cp2x_ab, access: [1], direction: Forward]
+        IndexScan [ctx: Db] [table: cp2x, index: cp2x_ab, access: [1], direction: Forward]
 ''''
 
 [[test.results]]

@@ -217,7 +217,7 @@ value = "[plainfan:two]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: grp = 'g' AND tags = ['x', 'y']]
+    Filter [ctx: Db] [predicate: tags = ['x', 'y']]
         DistinctRecords [ctx: Db]
             IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward]
 "'''
@@ -232,7 +232,7 @@ value = "[{ count: 1 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: grp = 'g' AND tags = ['x', 'y']]
+        Filter [ctx: Db] [predicate: tags = ['x', 'y']]
             DistinctRecords [ctx: Db]
                 IndexScan [ctx: Db] [table: plainfan, index: plainfan_grp_tags, access: ['g'], direction: Forward]
 "'''

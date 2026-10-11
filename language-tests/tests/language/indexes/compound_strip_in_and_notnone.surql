@@ -36,8 +36,7 @@ value = "[{ id: t:r1 }, { id: t:r2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: t, index: idx_ab, access: [1] MoreThan NONE, direction: Forward]
+    IndexScan [ctx: Db] [table: t, index: idx_ab, access: [1] MoreThan NONE, direction: Forward]
 ''''
 */
 DEFINE TABLE t;

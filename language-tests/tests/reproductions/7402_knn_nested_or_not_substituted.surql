@@ -36,7 +36,11 @@ value = "[{ id: pts:1 }, { id: pts:2 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 2}
     Filter [ctx: Db] [predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}
-        KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 100, dimension: 2, predicate: email = 'a' OR email = 'b' OR email = 'c'] {rows: 2}
+        KnnScan [ctx: Db] [index: pt_hnsw, k: 2, ef: 100, dimension: 2, prefilter_tier: exact] {rows: 2}
+            BitmapOr [ctx: Db] {rows: 3}
+                BitmapIndexScan [ctx: Db] [index: pt_email, access: = 'a'] {rows: 1}
+                BitmapIndexScan [ctx: Db] [index: pt_email, access: = 'b'] {rows: 1}
+                BitmapIndexScan [ctx: Db] [index: pt_email, access: = 'c'] {rows: 1}
 
 Total rows: 2"'''
 

@@ -16,6 +16,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
+use surrealdb_datastore::index_shapes::{ShapeRecorder, ValueShape};
 use surrealdb_datastore::{Transaction, storage_error};
 use surrealdb_types::ToSql;
 use uuid::Uuid;
@@ -61,6 +62,10 @@ pub struct IndexOperation<'a> {
 	/// `(old_doc_matches, new_doc_matches)` — whether the old/new document
 	/// satisfies the COUNT index condition. `None` for non-COUNT indexes.
 	count_cond_match: Option<(bool, bool)>,
+	/// Who records the value shapes this operation writes: a document write,
+	/// whose recording stamps the table's catalog version, or a build
+	/// ([`surrealdb_datastore::index_shapes`]).
+	shapes_by: ShapeRecorder,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -88,7 +93,15 @@ impl<'a> IndexOperation<'a> {
 			n,
 			rid,
 			count_cond_match: None,
+			shapes_by: ShapeRecorder::Write,
 		}
+	}
+
+	/// The same operation, applied by an index build: the value shapes it
+	/// records stamp no catalog version.
+	pub fn within_build(mut self) -> Self {
+		self.shapes_by = ShapeRecorder::Build;
+		self
 	}
 
 	pub fn with_count_cond_match(mut self, old_matches: bool, new_matches: bool) -> Self {
@@ -235,6 +248,7 @@ impl<'a> IndexOperation<'a> {
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
+			self.record_shapes(&txn, &n).await?;
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
@@ -251,6 +265,20 @@ impl<'a> IndexOperation<'a> {
 			}
 		}
 		Ok(())
+	}
+
+	/// Record the shapes of the values `n` this b-tree index stores beyond
+	/// those its columns are expected to ([`recorded_shapes`]), in the
+	/// transaction that writes their entries ([`Transaction::record_index_shapes`]).
+	async fn record_shapes(&self, txn: &Transaction, n: &[Value]) -> Result<()> {
+		let ix = self.ix.index_id;
+		let known = txn.index_shapes(self.ns, self.db, &self.table_name, ix).await?;
+		if known.records_all(recorded_shapes(n, self.ix)) {
+			return Ok(());
+		}
+		let shapes: Vec<_> = recorded_shapes(n, self.ix).collect();
+		txn.record_index_shapes(self.ns, self.db, &self.table_name, ix, &shapes, self.shapes_by)
+			.await
 	}
 
 	/// The cancellation checkpoint a b-tree fan-out runs before its `entry`-th
@@ -285,6 +313,7 @@ impl<'a> IndexOperation<'a> {
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
+			self.record_shapes(&txn, &n).await?;
 			let i = Indexable::new(n, self.ix);
 			for (entry, n) in i.into_iter().enumerate() {
 				self.checkpoint(&txn, entry).await?;
@@ -584,6 +613,63 @@ impl<'a> IndexOperation<'a> {
 	}
 }
 
+/// The shape the writer stores each column of `vals` in, for B-tree index
+/// `ix`, by column position ([`ValueShape`]). A column whose idiom ends in a
+/// flatten stores its value whole, an array included; any other column lists
+/// an array once per element. `NONE` and `NULL` record no shape.
+pub fn stored_shapes<'v>(
+	vals: &'v [Value],
+	ix: &'v IndexDefinition,
+) -> impl Iterator<Item = (u16, ValueShape)> + 'v {
+	vals.iter().zip(ix.cols.iter()).zip(0u16..).filter_map(|((v, col), i)| {
+		let shape = match v {
+			Value::None | Value::Null => return None,
+			Value::Array(_) if !stores_arrays_whole(col) => ValueShape::Array,
+			_ => ValueShape::Whole,
+		};
+		Some((i, shape))
+	})
+}
+
+/// Whether the writer stores an array in column `col` whole, at one entry,
+/// rather than once per element: the column's idiom ends in a flatten.
+fn stores_arrays_whole(col: &crate::expr::Idiom) -> bool {
+	matches!(col.0.last(), Some(&Part::Flatten))
+}
+
+/// The shape column `col` is expected to store: an array, listed by element,
+/// where its idiom selects many values (`.*`, `[WHERE …]`, a graph lookup) and
+/// does not end in a flatten; a whole value otherwise. A guess only: either
+/// shape may be stored in any column.
+fn expected_shape(col: &crate::expr::Idiom) -> ValueShape {
+	let selects_many =
+		col.0.iter().any(|part| matches!(part, Part::All | Part::Where(_) | Part::Lookup(_)));
+	if selects_many && !stores_arrays_whole(col) {
+		ValueShape::Array
+	} else {
+		ValueShape::Whole
+	}
+}
+
+/// The shape each column of B-tree index `ix` is expected to store, by
+/// column position. The transaction that begins a build records them with
+/// the index's tracked marker, so a column storing the shape it is expected
+/// to never makes a write record anything ([`recorded_shapes`]): a table's
+/// concurrent writers do not all rewrite one key on their first write.
+pub fn expected_shapes(ix: &IndexDefinition) -> Vec<(u16, ValueShape)> {
+	ix.cols.iter().zip(0u16..).map(|(col, i)| (i, expected_shape(col))).collect()
+}
+
+/// The shapes of `vals` a write to B-tree index `ix` records: those
+/// [`stored_shapes`] yields that their column is not expected to store
+/// ([`expected_shapes`]), which the index has recorded since its build began.
+pub fn recorded_shapes<'v>(
+	vals: &'v [Value],
+	ix: &'v IndexDefinition,
+) -> impl Iterator<Item = (u16, ValueShape)> + 'v {
+	stored_shapes(vals, ix).filter(|&(i, shape)| shape != expected_shape(&ix.cols[usize::from(i)]))
+}
+
 /// Extract from the given document, the values required by the index and put
 /// then in an array. Eg. IF the index is composed of the columns `name` and
 /// `instrument` Given this doc: { "id": 1, "instrument":"piano", "name":"Tobie"
@@ -594,8 +680,7 @@ impl Indexable {
 	pub fn new(vals: Vec<Value>, ix: &IndexDefinition) -> Self {
 		let mut source = Vec::with_capacity(vals.len());
 		for (v, i) in vals.into_iter().zip(ix.cols.iter()) {
-			let f = matches!(i.0.last(), Some(&Part::Flatten));
-			source.push((v, f));
+			source.push((v, stores_arrays_whole(i)));
 		}
 		Self(source)
 	}
@@ -1072,5 +1157,121 @@ mod interrupted_fan_out {
 			assert_commit_refused(&env.tx()).await;
 			assert_eq!(committed_entries(&ds, &ix).await, 0);
 		}
+	}
+}
+
+#[cfg(test)]
+mod value_shapes {
+	//! The value shape each column of a b-tree write records
+	//! ([`super::stored_shapes`]): an array the writer lists by element, or a
+	//! value it stores whole.
+
+	use std::collections::BTreeMap;
+
+	use surrealdb_datastore::index_shapes::ValueShape;
+
+	use super::{expected_shapes, recorded_shapes, stored_shapes};
+	use crate::catalog::{INDEX_FORMAT_VERSION, Index, IndexDefinition, IndexId};
+	use crate::expr::{Idiom, Part};
+	use crate::val::{Array, Object, Set, TableName, Value};
+
+	/// An index over `cols`, each a field optionally followed by `parts`.
+	fn index(cols: Vec<Idiom>) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(1),
+			name: "ix".into(),
+			table_name: TableName::from("t"),
+			cols,
+			index: Index::Idx,
+			count_cond: None,
+			prepare_remove: false,
+			format_version: INDEX_FORMAT_VERSION,
+			comment: None,
+		}
+	}
+
+	fn with(field: &str, part: Part) -> Idiom {
+		let mut idiom = Idiom::field(field);
+		idiom.0.push(part);
+		idiom
+	}
+
+	fn shapes(vals: &[Value], ix: &IndexDefinition) -> Vec<(u16, ValueShape)> {
+		stored_shapes(vals, ix).collect()
+	}
+
+	#[test]
+	fn a_column_selecting_many_values_is_expected_to_store_arrays() {
+		let ix = index(vec![
+			Idiom::field("a"),
+			with("tags", Part::All),
+			with("tags", Part::Flatten),
+			with("b", Part::Field("c".into())),
+		]);
+		assert_eq!(
+			expected_shapes(&ix),
+			[
+				(0, ValueShape::Whole),
+				(1, ValueShape::Array),
+				(2, ValueShape::Whole),
+				(3, ValueShape::Whole),
+			]
+		);
+	}
+
+	#[test]
+	fn a_write_records_only_the_shapes_its_columns_are_not_expected_to_store() {
+		let ix = index(vec![Idiom::field("a"), with("tags", Part::All)]);
+		let array = Value::Array(Array::from(vec![Value::from(1)]));
+		let expected = [Value::from("x"), array.clone()];
+		assert_eq!(recorded_shapes(&expected, &ix).collect::<Vec<_>>(), []);
+		let unexpected = [array, Value::from("x")];
+		assert_eq!(
+			recorded_shapes(&unexpected, &ix).collect::<Vec<_>>(),
+			[(0, ValueShape::Array), (1, ValueShape::Whole)]
+		);
+	}
+
+	#[test]
+	fn a_plain_column_records_an_array_or_a_whole_value() {
+		let ix = index(vec![Idiom::field("a"), Idiom::field("b")]);
+		let vals = [Value::Array(Array::from(vec![Value::from(1)])), Value::from("x")];
+		assert_eq!(shapes(&vals, &ix), [(0, ValueShape::Array), (1, ValueShape::Whole)]);
+	}
+
+	#[test]
+	fn an_empty_array_is_an_array() {
+		let ix = index(vec![Idiom::field("a")]);
+		assert_eq!(shapes(&[Value::Array(Array::new())], &ix), [(0, ValueShape::Array)]);
+	}
+
+	#[test]
+	fn none_and_null_record_nothing() {
+		let ix = index(vec![Idiom::field("a"), Idiom::field("b")]);
+		assert_eq!(shapes(&[Value::None, Value::Null], &ix), []);
+	}
+
+	#[test]
+	fn an_element_column_stores_a_string_an_object_and_a_set_whole() {
+		let ix = index(vec![with("tags", Part::All)]);
+		let object =
+			Value::Object(Object::from(BTreeMap::from([("x".to_owned(), Value::from(1))])));
+		let set = Value::Set(Set::from(std::collections::BTreeSet::from([Value::from("x")])));
+		for value in [Value::from("x"), object, set] {
+			assert_eq!(
+				shapes(std::slice::from_ref(&value), &ix),
+				[(0, ValueShape::Whole)],
+				"{value:?}"
+			);
+		}
+		let array = Value::Array(Array::from(vec![Value::from("x")]));
+		assert_eq!(shapes(&[array], &ix), [(0, ValueShape::Array)]);
+	}
+
+	#[test]
+	fn a_flattened_column_stores_an_array_whole() {
+		let ix = index(vec![with("tags", Part::Flatten)]);
+		let array = Value::Array(Array::from(vec![Value::from("x")]));
+		assert_eq!(shapes(&[array], &ix), [(0, ValueShape::Whole)]);
 	}
 }

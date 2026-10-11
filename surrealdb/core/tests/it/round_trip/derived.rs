@@ -741,7 +741,7 @@ async fn a_restored_hnsw_index_still_answers_a_knn_query() -> Result<()> {
 /// serves no order, restored or not.
 #[tokio::test]
 async fn a_restored_index_still_serves_an_order_by() -> Result<()> {
-	let round_trip = RoundTrip::run(
+	restored_index_serves_an_order_by(
 		"DEFINE TABLE doc SCHEMALESS;
 		 DEFINE FIELD rank ON doc TYPE int;
 		 DEFINE INDEX ix_rank ON doc FIELDS rank;
@@ -749,7 +749,31 @@ async fn a_restored_index_still_serves_an_order_by() -> Result<()> {
 		 CREATE doc:2 SET rank = 10;
 		 CREATE doc:3 SET rank = 20;",
 	)
-	.await?;
+	.await
+}
+
+/// A restored index over a column with no declared kind still serves an
+/// `ORDER BY` without a sort.
+///
+/// The restore builds the index again over the restored records, and the build
+/// records the value shapes it stores: none of `rank`'s values is an array, so
+/// the column plans as a scalar one and the index delivers its order.
+#[tokio::test]
+async fn a_restored_index_over_an_undeclared_column_still_serves_an_order_by() -> Result<()> {
+	restored_index_serves_an_order_by(
+		"DEFINE TABLE doc SCHEMALESS;
+		 DEFINE INDEX ix_rank ON doc FIELDS rank;
+		 CREATE doc:1 SET rank = 30;
+		 CREATE doc:2 SET rank = 10;
+		 CREATE doc:3 SET rank = 20;",
+	)
+	.await
+}
+
+/// Restore `setup`, which indexes `rank` on `doc` as `ix_rank`, and assert the
+/// restored database reads `ORDER BY rank` from the index with no sort.
+async fn restored_index_serves_an_order_by(setup: &str) -> Result<()> {
+	let round_trip = RoundTrip::run(setup).await?;
 
 	round_trip.assert_all().await?;
 	let ordered = "SELECT VALUE id FROM doc ORDER BY rank";

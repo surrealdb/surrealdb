@@ -806,7 +806,8 @@ impl Building {
 			None,
 			opt_values,
 			rid,
-		);
+		)
+		.within_build();
 		if let Some((old_matches, new_matches)) = count_cond_match {
 			io = io.with_count_cond_match(old_matches, new_matches);
 		}
@@ -1482,7 +1483,8 @@ impl Building {
 			appending.old_values,
 			appending.new_values,
 			&rid,
-		);
+		)
+		.within_build();
 		if let Some((old_matches, new_matches)) = appending.count_cond_match {
 			io = io.with_count_cond_match(old_matches, new_matches);
 		}

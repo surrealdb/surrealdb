@@ -56,6 +56,7 @@ use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{CommitAction, RollbackAction};
+use crate::index_shapes::{IndexShapes, ShapeRecorder, TableIndexShapes, ValueShape};
 use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 use crate::key::schema::{
 	AdjacencyEdgeTablePrefix, AdjacencyKey, AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix,
@@ -65,13 +66,14 @@ use crate::key::schema::{
 	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey,
 	DocLookupIdentityKey, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FieldKey,
 	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey,
-	IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey,
-	LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey,
-	NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot,
-	NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix,
-	ReclaimKey, ReclaimTbPrefix, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix,
-	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
-	SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix, TermChangeBatchKey,
+	IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix,
+	IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LiveEventsKey, MlModelKey, MlModelPrefix,
+	ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
+	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
+	ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
+	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey,
+	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
+	TableKey, TablePrefix, TermChangeBatchKey,
 };
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
@@ -88,6 +90,7 @@ use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
 use crate::values::ids::DocId;
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
+	IndexBuildState,
 };
 use crate::values::index_delta::{BufferedIndex, BufferedTerm, IndexDeltaBuffer};
 use crate::values::live_query::LiveEventBuffer;
@@ -177,6 +180,12 @@ pub struct Transaction {
 	/// prints the version again from what it wrote
 	/// ([`Self::reprint_stamped_table`]).
 	stamped_tables: parking_lot::Mutex<HashMap<(NamespaceId, DatabaseId, TableName), Uuid>>,
+	/// The indexes this transaction has written value shapes for
+	/// ([`Self::record_index_shapes`], [`Self::track_index_shapes`]), kept
+	/// until it ends: every rollback to a save point drops what the cache
+	/// holds of them, and of their tables' catalog versions, since the writes
+	/// it undoes may be among them.
+	shaped_indexes: parking_lot::Mutex<Vec<(NamespaceId, DatabaseId, TableName, IndexId)>>,
 	/// The count of the datastore's catalog commits finished when this
 	/// transaction opened, with none under way, where the datastore is the
 	/// store's sole writer; [`NO_CATALOG_EPOCH`] otherwise
@@ -1021,6 +1030,7 @@ impl Transaction {
 			catalog_stamps: AtomicU64::new(0),
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
+			shaped_indexes: Default::default(),
 			catalog_epoch,
 			state_changes: Arc::new(AtomicU64::new(0)),
 			catalog_reads: Default::default(),
@@ -2601,6 +2611,367 @@ impl Transaction {
 		Ok(version)
 	}
 
+	/// The value shapes index `ix` of `tb` has stored, as this transaction
+	/// sees them ([`crate::index_shapes`]).
+	pub async fn index_shapes(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<Arc<IndexShapes>> {
+		let shapes = self.table_index_shapes_of(ns, db, tb, &[ix]).await?;
+		match shapes.0.first() {
+			Some((_, shapes)) => Ok(Arc::clone(shapes)),
+			None => fail!("index shapes read for no index"),
+		}
+	}
+
+	/// The value shapes the B-tree indexes among `indexes`, `tb`'s, have
+	/// stored, as this transaction sees them, read together.
+	pub async fn table_index_shapes(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		indexes: &[catalog::IndexDefinition],
+	) -> Result<TableIndexShapes> {
+		let btree: Vec<IndexId> = indexes
+			.iter()
+			.filter(|ix| matches!(ix.index, catalog::Index::Idx | catalog::Index::Uniq))
+			.map(|ix| ix.index_id)
+			.collect();
+		self.table_index_shapes_of(ns, db, tb, &btree).await
+	}
+
+	/// The value shapes the B-tree indexes among `indexes`, `tb`'s, have
+	/// stored, for planning a statement that cannot write
+	/// ([`crate::index_shapes`]).
+	///
+	/// Shared through `cache` under the table's catalog version, for every
+	/// index whose build had finished, or had never run, where the shapes were
+	/// read: a finished index records a new shape only with a document write,
+	/// which stamps the version. An index still building records shapes
+	/// without stamping, so it is read through this transaction, as is every
+	/// index of a table no catalog write has stamped. A shared entry may
+	/// predate a rebuild of an index that the rebuild's statement has not yet
+	/// stamped past; the shapes a rebuild records are among those its index
+	/// recorded before it, so such an entry claims no less than the index
+	/// holds. Writers do not read through here: a writer that took an
+	/// outdated shape as recorded would skip recording it.
+	pub async fn planning_index_shapes(
+		&self,
+		cache: Option<&crate::cache::ds::DatastoreCache>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		indexes: &[catalog::IndexDefinition],
+	) -> Result<TableIndexShapes> {
+		let btree: Vec<IndexId> = indexes
+			.iter()
+			.filter(|ix| matches!(ix.index, catalog::Index::Idx | catalog::Index::Uniq))
+			.map(|ix| ix.index_id)
+			.collect();
+		if btree.is_empty() {
+			return Ok(TableIndexShapes::default());
+		}
+		let (Some(cache), Some(version)) = (cache, self.catalog_version(ns, db, tb).await?) else {
+			return self.table_index_shapes_of(ns, db, tb, &btree).await;
+		};
+		let lookup = crate::cache::ds::Lookup::Ish(ns, db, tb.as_str(), version);
+		let shared = match cache.get(&lookup) {
+			Some(entry) => entry.try_into_ish()?,
+			None => {
+				let (read, finished) =
+					self.read_index_shapes_and_builds(ns, db, tb, &btree).await?;
+				let finished: Vec<_> =
+					read.0.iter().filter(|(ix, _)| finished.contains(ix)).cloned().collect();
+				cache.insert(
+					crate::cache::ds::Lookup::Ish(ns, db, tb.as_str(), version),
+					crate::cache::ds::Entry::Ish(TableIndexShapes(finished.into())),
+				);
+				return Ok(read);
+			}
+		};
+		let unshared: Vec<IndexId> =
+			btree.iter().copied().filter(|ix| shared.of(*ix).is_none()).collect();
+		if unshared.is_empty() {
+			return Ok(shared);
+		}
+		let read = self.table_index_shapes_of(ns, db, tb, &unshared).await?;
+		Ok(TableIndexShapes(shared.0.iter().chain(read.0.iter()).cloned().collect()))
+	}
+
+	/// The value shapes of indexes `ixs` of `tb` as this transaction sees
+	/// them, with the indexes among them whose build had finished or never
+	/// ran, all read in one request. The shapes are kept in this transaction's
+	/// cache.
+	async fn read_index_shapes_and_builds(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ixs: &[IndexId],
+	) -> Result<(TableIndexShapes, Vec<IndexId>)> {
+		let mut keys = Vec::with_capacity(ixs.len() * 4);
+		for &ix in ixs {
+			keys.push(
+				BuildStateKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+				}
+				.encode_key()?,
+			);
+			self.push_index_shape_keys(&mut keys, ns, db, tb, ix)?;
+		}
+		let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
+		let res = self.tr.getm(&keys, None).await?;
+		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
+		let mut values = res.values.into_iter();
+		let mut shapes = Vec::with_capacity(ixs.len());
+		let mut finished = Vec::with_capacity(ixs.len());
+		for &ix in ixs {
+			let Some(build) = values.next() else {
+				fail!("index shapes read answered fewer values than keys");
+			};
+			let build = match build {
+				Some(bytes) => {
+					let key = BuildStateKey {
+						ns,
+						db,
+						tb: Cow::Borrowed(tb),
+						ix,
+					};
+					Some(IndexBuildState::kv_decode_value(&bytes, key.value_context())?)
+				}
+				None => None,
+			};
+			if build.is_none_or(|state| state.phase == IndexBuildPhase::Online) {
+				finished.push(ix);
+			}
+			let read = Arc::new(Self::decode_index_shapes(&mut values)?);
+			self.cache.insert(
+				cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
+				cache::tx::Entry::Any(Arc::clone(&read) as _),
+			);
+			shapes.push((ix, read));
+		}
+		Ok((TableIndexShapes(shapes.into()), finished))
+	}
+
+	/// Push the keys an index's shapes are read from — its `!it` marker, its
+	/// `!ia` and its `!ir` key — in the order [`Self::decode_index_shapes`]
+	/// reads their values.
+	fn push_index_shape_keys(
+		&self,
+		keys: &mut Vec<Key<'static>>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<()> {
+		let tb = Cow::Borrowed(tb);
+		keys.push(
+			IndexShapesTrackedKey {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			}
+			.encode_key()?,
+		);
+		keys.push(
+			IndexShapesKey {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			}
+			.encode_key()?,
+		);
+		keys.push(
+			IndexBuildShapesKey {
+				ns,
+				db,
+				tb,
+				ix,
+			}
+			.encode_key()?,
+		);
+		Ok(())
+	}
+
+	/// The shapes of index `ix` from the next three values of `values`, read
+	/// from the keys [`Self::push_index_shape_keys`] pushed.
+	fn decode_index_shapes(values: &mut impl Iterator<Item = Option<Val>>) -> Result<IndexShapes> {
+		let (Some(tracked), Some(written), Some(built)) =
+			(values.next(), values.next(), values.next())
+		else {
+			fail!("index shapes read answered fewer values than keys");
+		};
+		let decode = |bytes: Option<Val>| match bytes {
+			Some(bytes) => <Vec<u8> as KVValue>::kv_decode_value(&bytes, ()),
+			None => Ok(Vec::new()),
+		};
+		Ok(IndexShapes::new(tracked.is_some(), decode(written)?, decode(built)?))
+	}
+
+	/// The value shapes of indexes `ixs` of `tb`, read through this
+	/// transaction's cache, the ones not cached read together.
+	async fn table_index_shapes_of(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ixs: &[IndexId],
+	) -> Result<TableIndexShapes> {
+		let mut shapes = Vec::with_capacity(ixs.len());
+		let mut unread = Vec::new();
+		for &ix in ixs {
+			match self.cache.get(&cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix)) {
+				Some(entry) => shapes.push((ix, entry.try_into_type::<IndexShapes>()?)),
+				None => unread.push(ix),
+			}
+		}
+		if !unread.is_empty() {
+			// Every index's marker and shapes, read in one request.
+			let mut keys = Vec::with_capacity(unread.len() * 3);
+			for &ix in &unread {
+				self.push_index_shape_keys(&mut keys, ns, db, tb, ix)?;
+			}
+			let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
+			let res = self.tr.getm(&keys, None).await?;
+			self.metrics.record_get(res.records, key_bytes, res.value_bytes);
+			let mut values = res.values.into_iter();
+			for ix in unread {
+				let read = Arc::new(Self::decode_index_shapes(&mut values)?);
+				self.cache.insert(
+					cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
+					cache::tx::Entry::Any(Arc::clone(&read) as _),
+				);
+				shapes.push((ix, read));
+			}
+		}
+		Ok(TableIndexShapes(shapes.into()))
+	}
+
+	/// Record that index `ix` of `tb` has stored `shapes`, each a column and
+	/// the shape of the value written there, in the transaction that writes
+	/// the entries, whether or not the index is tracked.
+	///
+	/// Nothing is written for shapes already recorded; otherwise `by`'s key is
+	/// rewritten from the value this transaction read of it, so a concurrent
+	/// recording of the same kind conflicts with this one and is retried
+	/// against it. A document write's recording stamps the table's catalog
+	/// version, so no plan made before the shape was stored is reused after it;
+	/// a build's stamps nothing.
+	pub async fn record_index_shapes(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		shapes: &[(u16, ValueShape)],
+		by: ShapeRecorder,
+	) -> Result<()> {
+		let known = self.index_shapes(ns, db, tb, ix).await?;
+		let Some(stored) = known.with(shapes, by) else {
+			return Ok(());
+		};
+		match by {
+			ShapeRecorder::Write => {
+				let key = IndexShapesKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+				};
+				self.set_key(&key, &stored).await?;
+			}
+			ShapeRecorder::Build => {
+				let key = IndexBuildShapesKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+				};
+				self.set_key(&key, &stored).await?;
+			}
+		}
+		self.note_shaped_index(ns, db, tb, ix);
+		self.cache.insert(
+			cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
+			cache::tx::Entry::Any(Arc::new(known.replacing(by, stored))),
+		);
+		if by == ShapeRecorder::Write {
+			self.bump_catalog_version(ns, db, tb).await?;
+		}
+		Ok(())
+	}
+
+	/// Mark index `ix` of `tb` as recording every shape it stores from now
+	/// on, with `expected`, the shape each column is expected to store,
+	/// recorded as the build's: written by the transaction that begins a
+	/// build, after it has cleared the index's data and the shapes recorded
+	/// with it.
+	pub async fn track_index_shapes(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		expected: &[(u16, ValueShape)],
+	) -> Result<()> {
+		let key = IndexShapesTrackedKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix,
+		};
+		self.set_key(&key, &()).await?;
+		let tracked = IndexShapes::new(true, Vec::new(), Vec::new());
+		let built = tracked.with(expected, ShapeRecorder::Build).unwrap_or_default();
+		if !built.is_empty() {
+			let key = IndexBuildShapesKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				ix,
+			};
+			self.set_key(&key, &built).await?;
+		}
+		self.note_shaped_index(ns, db, tb, ix);
+		self.cache.insert(
+			cache::tx::Lookup::Ish(ns, db, tb.as_str(), ix),
+			cache::tx::Entry::Any(Arc::new(tracked.replacing(ShapeRecorder::Build, built))),
+		);
+		Ok(())
+	}
+
+	/// Note that this transaction has written index `ix`'s value shapes.
+	fn note_shaped_index(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) {
+		let mut shaped = self.shaped_indexes.lock();
+		if !shaped.iter().any(|(n, d, t, i)| *n == ns && *d == db && t == tb && *i == ix) {
+			shaped.push((ns, db, tb.clone(), ix));
+		}
+	}
+
+	/// Drop what the cache holds of the value shapes this transaction wrote,
+	/// and of their tables' catalog versions, so both are read again as the
+	/// store holds them after a rollback to a save point.
+	///
+	/// The indexes are kept for the rest of the transaction: a write in an
+	/// enclosing scope survives an inner rollback, and an outer rollback that
+	/// undoes it must drop the shapes read again in between.
+	fn forget_shaped_indexes(&self) {
+		for (ns, db, tb, ix) in self.shaped_indexes.lock().iter() {
+			self.cache.remove(&cache::tx::Lookup::Ish(*ns, *db, tb.as_str(), *ix));
+			self.cache.remove(&cache::tx::Lookup::Cv(*ns, *db, tb.as_str()));
+		}
+	}
+
 	/// The bytes `tb`'s definition key holds as this transaction sees it,
 	/// read past the transaction cache: what a table's catalog version is
 	/// printed from and proven against ([`CatalogVersion::proven`]).
@@ -4170,6 +4541,7 @@ impl Transaction {
 			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
+			shaped_indexes: Default::default(),
 			catalog_epoch: NO_CATALOG_EPOCH,
 			state_changes: Arc::new(AtomicU64::new(0)),
 			changefeed: OnceLock::new(),
@@ -4305,6 +4677,9 @@ impl Transaction {
 		// rollback is engine-defined, so no memo of one may outlive it: the
 		// next `graph_doc_ids_settled` call re-issues the locked read.
 		self.graph_doc_ids_settled.lock().await.clear();
+		// The rollback may undo a shape write and the catalog stamp beside it,
+		// and a later write of the same shape must find it unrecorded.
+		self.forget_shaped_indexes();
 		let snapshot = self.provisional_save_points.lock().await.pop();
 		if let Some(snapshot) = snapshot {
 			self.restore_provisional_sequences(snapshot).await;

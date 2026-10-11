@@ -53,8 +53,7 @@ pub(crate) use aggregate::{AggregationAnalysis, analyse_aggregation};
 pub(crate) use cycle_guard::{CycleGuard, EventsEntry};
 pub(crate) use fold::AccessOffer;
 pub(crate) use select::{
-	CountDecision, bitmap_plan_to_node, check_locked_read, decide_union_merge,
-	field_def_excludes_arrays, output_field_path,
+	CountDecision, bitmap_plan_to_node, check_locked_read, decide_union_merge, output_field_path,
 };
 
 use crate::ctx::FrozenContext;
@@ -295,6 +294,10 @@ pub struct Planner<'ctx> {
 	/// `LET $a = (LET …)`) raises when it is evaluated rather than binding
 	/// ([`Self::in_stored_clause`]).
 	stored_clause: bool,
+	/// Whether access-path selection may trust the value shapes the indexes
+	/// have recorded ([`surrealdb_datastore::index_shapes`]): set only for the
+	/// planner of a program that cannot write ([`Self::trusting_index_shapes`]).
+	trusts_index_shapes: bool,
 }
 
 /// How a statement reaches the catalog objects that code it runs may redefine
@@ -448,6 +451,7 @@ impl<'ctx> Planner<'ctx> {
 			kept: false,
 			within: CatalogWithin::default(),
 			stored_clause: false,
+			trusts_index_shapes: false,
 		}
 	}
 
@@ -492,6 +496,7 @@ impl<'ctx> Planner<'ctx> {
 			kept: false,
 			within: CatalogWithin::default(),
 			stored_clause: false,
+			trusts_index_shapes: false,
 		}
 	}
 
@@ -1411,6 +1416,7 @@ impl<'ctx> Planner<'ctx> {
 			kept: self.kept,
 			within: CatalogWithin::default(),
 			stored_clause: false,
+			trusts_index_shapes: false,
 		}
 	}
 
@@ -1461,6 +1467,7 @@ impl<'ctx> Planner<'ctx> {
 			kept: self.kept,
 			within: self.within,
 			stored_clause: self.stored_clause,
+			trusts_index_shapes: self.trusts_index_shapes,
 		}
 	}
 
@@ -1574,6 +1581,26 @@ impl<'ctx> Planner<'ctx> {
 		let mut reached = self.shadowing(std::iter::empty());
 		reached.when_reached = true;
 		reached
+	}
+
+	/// This planner, trusting the value shapes the indexes have recorded when
+	/// `reads_only` says the program it plans cannot write.
+	///
+	/// A program is compiled in full before it runs, and is not compiled again
+	/// while it runs. A program that writes may record a shape an index had
+	/// not stored after its later statements were planned on the index lacking
+	/// it, and those statements would read the index by an order and a range
+	/// its entries no longer keep. A program that cannot write sees every
+	/// shape its transaction recorded before it was planned, and records none.
+	pub(crate) fn trusting_index_shapes(mut self, reads_only: bool) -> Self {
+		self.trusts_index_shapes = reads_only;
+		self
+	}
+
+	/// Whether access-path selection may trust the value shapes the indexes
+	/// have recorded ([`Self::trusting_index_shapes`]).
+	pub(crate) fn trusts_index_shapes(&self) -> bool {
+		self.trusts_index_shapes
 	}
 
 	/// This planner planning a stored clause, or a statement nested in one
@@ -2023,7 +2050,8 @@ pub(crate) async fn plan_logical_scoped(
 	let (ns, db) = session_ns_db(ctx);
 	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db)
 		.with_depth(depth)
-		.with_perms_suppressed(perms_suppressed);
+		.with_perms_suppressed(perms_suppressed)
+		.trusting_index_shapes(op.read_only());
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}
@@ -2133,7 +2161,8 @@ pub(crate) async fn plan_request_statement(
 		};
 	}
 	let (ns, db) = session_ns_db(ctx);
-	let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db);
+	let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
+		.trusting_index_shapes(op.read_only());
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}
@@ -2198,7 +2227,8 @@ async fn plan_statement_with(
 	let (ns, db) = session_ns_db(ctx);
 	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db)
 		.with_depth(depth)
-		.with_perms_suppressed(perms_suppressed);
+		.with_perms_suppressed(perms_suppressed)
+		.trusting_index_shapes(op.read_only());
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}

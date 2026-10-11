@@ -29,14 +29,13 @@ pinned side; compound_prefix.surql asserts the contrast, because the node's
 presence is the only thing in the plan text separating an exact seek from a
 seek-then-collapse.
 
-One shape records a WRONG answer. It is pinned deliberately, labelled at its
-case:
-
-1. A plain (non-`*`) column whose VALUE is an array fans out on write all the
-   same. Its scan collapses a record's entries — the column is not declared a
-   kind that holds no array — so a range predicate lists each record once, but
-   it drops a record whose whole-array comparison is true while all of its
-   elements fall outside the range. Correct: the oracle's row set.
+A plain (non-`*`) column fans out on write all the same once its VALUE is an
+array. An index records whether it has stored an array in a column: one that
+never has holds each record at one entry, and its scans carry no dedupe, which
+is why the shapes over scalar data below plan without a Distinct. One that has
+lists each record once, and a range reaching the band of the value order arrays
+sort in is answered by a table scan, since a record whose whole-array
+comparison holds may have no element inside the range (shape J).
 
 The index-only count declines a plain column that is not declared a kind which
 excludes arrays, so its count runs through the row path and applies the
@@ -89,8 +88,7 @@ value = "[{ id: sh_flat:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_flat, index: idx, access: >15, direction: Forward]
+    IndexScan [ctx: Db] [table: sh_flat, index: idx, access: >15, direction: Forward]
 ''''
 
 [[test.results]]
@@ -153,8 +151,7 @@ value = "[{ id: sh_nested:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >=20, direction: Forward]
+    IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -166,8 +163,7 @@ value = "[{ id: sh_nested:2 }, { id: sh_nested:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >15, direction: Forward]
+    IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >15, direction: Forward]
 ''''
 
 [[test.results]]
@@ -179,8 +175,7 @@ value = "[{ id: sh_nested:2 }, { id: sh_nested:3 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >10 <30, direction: Forward]
+    IndexScan [ctx: Db] [table: sh_nested, index: idx, access: >10 <30, direction: Forward]
 ''''
 
 [[test.results]]
@@ -243,8 +238,7 @@ value = "[{ id: sh_deep:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_deep, index: idx, access: >=20, direction: Forward]
+    IndexScan [ctx: Db] [table: sh_deep, index: idx, access: >=20, direction: Forward]
 ''''
 
 [[test.results]]
@@ -307,8 +301,7 @@ value = "[{ id: sh_compound_nested:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1], direction: Forward]
+    IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1], direction: Forward]
 ''''
 
 [[test.results]]
@@ -332,8 +325,7 @@ value = "[{ id: sh_compound_nested:1 }, { id: sh_compound_nested:3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1] MoreThan 'x', direction: Forward]
+    IndexScan [ctx: Db] [table: sh_compound_nested, index: idx, access: [1] MoreThan 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -683,8 +675,7 @@ value = "[{ id: sh_idelem:[1, 'x'] }, { id: sh_idelem:[3, 'x'] }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_idelem, index: idx, access: >'x', direction: Forward]
+    IndexScan [ctx: Db] [table: sh_idelem, index: idx, access: >'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -749,12 +740,11 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: >'p', direction: Forward]
+    TableScan [ctx: Db] [table: sh_arrayvalue, direction: Forward, predicate: tags > 'p', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }]"
+value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }, { id: sh_arrayvalue:3 }]"
 
 [[test.results]]
 value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }, { id: sh_arrayvalue:3 }]"
@@ -763,12 +753,11 @@ value = "[{ id: sh_arrayvalue:1 }, { id: sh_arrayvalue:2 }, { id: sh_arrayvalue:
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: sh_arrayvalue, index: idx, access: >'p', direction: Forward]
+        TableScan [ctx: Db] [table: sh_arrayvalue, direction: Forward, predicate: tags > 'p', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ count: 2 }]"
+value = "[{ count: 3 }]"
 
 [[test.results]]
 value = "[{ count: 3 }]"
@@ -1160,11 +1149,10 @@ SELECT id FROM sh_idelem WITH NOINDEX WHERE id[0] = 1;
 -- Shape J: a plain (non-`*`) column whose VALUE is an array. The column shape
 -- says scalar, the data says array, and the index resolves that by writing one
 -- entry per element - the same physical layout as shape E from a column that
--- never asked for it. The record dedupe of shape E keys off the `*` in the
--- column idiom, which this column does not carry, so a scan of this index is
--- never wrapped in `Distinct` however far its key range reaches - which is
--- what J3 and J2 pin. sh_arrayvalue:1 carries two distinct elements, both
--- inside the range J3 seeks, so fan-out cannot hide.
+-- never asked for it. The index records that it stored an array in the column,
+-- so its scans list each record once and claim no order over it.
+-- sh_arrayvalue:1 carries two distinct elements, both inside the range J3
+-- states, so fan-out cannot hide.
 -- ===========================================================================
 
 DEFINE TABLE sh_arrayvalue SCHEMALESS;
@@ -1180,24 +1168,22 @@ EXPLAIN SELECT id FROM sh_arrayvalue WHERE tags = 'red';
 SELECT id FROM sh_arrayvalue WHERE tags = 'red';
 SELECT id FROM sh_arrayvalue WITH NOINDEX WHERE tags = 'red';
 
--- J2: the count of J1. The column is not declared a kind that excludes arrays,
--- so the index-only count declines and the count runs through the row path,
--- whose recheck discards the row. Index and oracle agree.
+-- J2: the count of J1. The column has stored an array, so the index-only count
+-- declines and the count runs through the row path, whose recheck discards the
+-- row. Index and oracle agree.
 EXPLAIN SELECT count() FROM sh_arrayvalue WHERE tags = 'red' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WHERE tags = 'red' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WITH NOINDEX WHERE tags = 'red' GROUP ALL;
 
--- J3: DEFECT PINNED. The range pins nothing and the column, with no declared
--- kind, may hold an array, so the scan collapses sh_arrayvalue:1's two
--- entries into one row. But sh_arrayvalue:3 is dropped, because
--- `['ant'] > 'p'` holds under filter semantics while its only entry, 'ant',
--- sorts below the bound. Correct answer: the oracle's three rows.
+-- J3: the range reaches the array band, where `['ant'] > 'p'` holds under
+-- filter semantics while sh_arrayvalue:3's only entry, 'ant', sorts below the
+-- bound. A column that has stored an array is not ranged over by the index past
+-- the band's start, so a table scan answers, with the oracle's three rows.
 EXPLAIN SELECT id FROM sh_arrayvalue WHERE tags > 'p';
 SELECT id FROM sh_arrayvalue WHERE tags > 'p';
 SELECT id FROM sh_arrayvalue WITH NOINDEX WHERE tags > 'p';
 
--- J4: DEFECT PINNED, the count of J3: one short of the oracle, by the record
--- J3 drops.
+-- J4: the count of J3, by the same table scan: the oracle's count.
 EXPLAIN SELECT count() FROM sh_arrayvalue WHERE tags > 'p' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WHERE tags > 'p' GROUP ALL;
 SELECT count() FROM sh_arrayvalue WITH NOINDEX WHERE tags > 'p' GROUP ALL;

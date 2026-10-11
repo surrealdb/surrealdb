@@ -45,10 +45,8 @@ value = '''
     Limit [ctx: Db] [limit: 3]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
 ''''
 
 [[test.results]]
@@ -57,10 +55,8 @@ value = '''
     Limit [ctx: Db] [limit: 3]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
 ''''
 
 [[test.results]]
@@ -69,10 +65,8 @@ value = '''
     Limit [ctx: Db] [limit: 3, offset: 2]
         Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
             UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Desc]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
-                DistinctRecords [ctx: Db]
-                    IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Backward]
+                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Backward]
 ''''
 
 [[test.results]]
@@ -80,10 +74,8 @@ value = '''
 'SelectProject [ctx: Db] [projections: created_at]
     Filter [ctx: Db] [predicate: http_status INSIDE [200, 201]]
         UnionIndexScan [ctx: Db] [table: record, branches: 2, merge_by_index_key: created_at Asc]
-            DistinctRecords [ctx: Db]
-                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
-            DistinctRecords [ctx: Db]
-                IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
+            IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [200], direction: Forward]
+            IndexScan [ctx: Db] [table: record, index: idx_status_created, access: [201], direction: Forward]
 ''''
 */
 

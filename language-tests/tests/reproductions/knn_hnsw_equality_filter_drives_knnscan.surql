@@ -17,7 +17,8 @@ value = "[{ distance: 10f, id: pts:1 }, { distance: 30f, id: pts:3 }, { distance
 value = '''
 "SelectProject [ctx: Db] [projections: id] {rows: 3}
     Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
-        KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1, predicate: category = 'a'] {rows: 3}
+        KnnScan [ctx: Db] [index: pt_hnsw, k: 3, ef: 40, dimension: 1, prefilter_tier: exact] {rows: 3}
+            BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 5}
 
 Total rows: 3"'''
 

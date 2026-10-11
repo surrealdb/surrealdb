@@ -22,8 +22,7 @@ value = "[{ id: t:4, on: false, value: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: t, index: t_idx, access: [true], direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: t, index: t_idx, access: [true], direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -61,8 +60,7 @@ value = "[{ id: t:4, on: false, value: 2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: t, index: t_idx, access: [true], direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: t, index: t_idx, access: [true], direction: Forward] {rows: 2}
 
 Total rows: 2''''
 

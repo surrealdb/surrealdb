@@ -402,3 +402,58 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 
 	tx.cancel().await.unwrap();
 }
+
+/// A rollback to a save point drops the cached value shapes of every index the
+/// transaction recorded shapes for, the ones recorded in an enclosing scope
+/// too: an outer write survives an inner rollback, so the shapes read again in
+/// between hold it, and the outer rollback that undoes it must drop them.
+#[tokio::test]
+async fn index_shapes_are_read_again_after_each_nested_rollback() {
+	use surrealdb_datastore::index_shapes::ValueShape;
+
+	use crate::catalog::IndexId;
+
+	let (_ds, tx, ns, db) = setup_tx_with_ns_db().await;
+	let tb = TableName::from("t");
+	let ix = IndexId(1);
+	let array = [(0u16, ValueShape::Array)];
+	tx.track_index_shapes(ns, db, &tb, ix, &[]).await.unwrap();
+
+	tx.new_save_point().await.unwrap();
+	tx.record_index_shapes(
+		ns,
+		db,
+		&tb,
+		ix,
+		&array,
+		surrealdb_datastore::index_shapes::ShapeRecorder::Write,
+	)
+	.await
+	.unwrap();
+	tx.new_save_point().await.unwrap();
+	tx.rollback_to_save_point().await.unwrap();
+	let shapes = tx.index_shapes(ns, db, &tb, ix).await.unwrap();
+	assert!(shapes.may_hold(0, ValueShape::Array), "the outer write survives the inner rollback");
+
+	tx.rollback_to_save_point().await.unwrap();
+	let shapes = tx.index_shapes(ns, db, &tb, ix).await.unwrap();
+	assert!(shapes.is_tracked(), "the marker was written before either save point");
+	assert!(
+		!shapes.may_hold(0, ValueShape::Array),
+		"the outer rollback undoes the shape the cache read again after the inner one"
+	);
+
+	tx.record_index_shapes(
+		ns,
+		db,
+		&tb,
+		ix,
+		&array,
+		surrealdb_datastore::index_shapes::ShapeRecorder::Write,
+	)
+	.await
+	.unwrap();
+	let shapes = tx.index_shapes(ns, db, &tb, ix).await.unwrap();
+	assert!(shapes.may_hold(0, ValueShape::Array));
+	tx.cancel().await.unwrap();
+}

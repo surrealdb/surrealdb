@@ -994,11 +994,11 @@ impl<'ctx> Planner<'ctx> {
 	/// [`with_array_columns_as_elements`](crate::exec::index::access_path::with_array_columns_as_elements)
 	/// and [`foreign_set_prefixes`](crate::exec::index::access_path::foreign_set_prefixes).
 	///
-	/// `None` when the field list cannot be read: without it a column's
-	/// fan-out is unknown, so the caller declines its plan-time index path
-	/// rather than plan one that could count or order element entries as
-	/// rows. A declined select plan falls back to `DynamicScan`, which plans
-	/// without b-tree indexes when the list is unreadable there too.
+	/// `None` when the field list or the indexes' recorded shapes cannot be
+	/// read: without them a column's fan-out is unknown, so the caller
+	/// declines its plan-time index path rather than plan one that could
+	/// count or order element entries as rows. A declined select plan falls back to `DynamicScan`,
+	/// which plans without b-tree indexes when the list is unreadable there too.
 	async fn with_array_columns_as_elements(
 		&self,
 		txn: &Transaction,
@@ -1039,10 +1039,43 @@ impl<'ctx> Planner<'ctx> {
 				return None;
 			}
 		};
+		let shapes = self.index_shapes(txn, ns_id, db_id, table_name, &indexes).await?;
 		Some(
-			crate::exec::index::access_path::with_array_columns_as_elements(indexes, &fields)
-				.withholding_sets_at(&sets),
+			crate::exec::index::access_path::with_array_columns_as_elements(
+				indexes, &fields, &shapes,
+			)
+			.withholding_sets_at(&sets),
 		)
+	}
+
+	/// The value shapes `table_name`'s B-tree indexes among `indexes` have
+	/// stored, read for planning through the node's cache
+	/// ([`Transaction::planning_index_shapes`]), or none for a planner that
+	/// may not trust them ([`Planner::trusts_index_shapes`]). `None` when they
+	/// cannot be read.
+	async fn index_shapes(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		indexes: &[IndexDefinition],
+	) -> Option<surrealdb_datastore::index_shapes::TableIndexShapes> {
+		if !self.trusts_index_shapes() {
+			return Some(Default::default());
+		}
+		let cache = self.ctx.get_cache();
+		match txn.planning_index_shapes(cache.as_deref(), ns_id, db_id, table_name, indexes).await {
+			Ok(shapes) => Some(shapes),
+			Err(e) => {
+				tracing::warn!(
+					table = %table_name,
+					error = %e,
+					"plan-time index shapes failed; falling back to runtime",
+				);
+				None
+			}
+		}
 	}
 
 	/// Resolve a B-tree index access path covering the WHERE condition for
@@ -1054,8 +1087,9 @@ impl<'ctx> Planner<'ctx> {
 	/// Counting keys is exact only when each record has one key: an array
 	/// value is indexed once per element, so a record holding `[3, 4]` is
 	/// listed under `3` although `[3, 4] = 3` is false. The walk is therefore
-	/// chosen only for an index every column of which is declared a kind
-	/// that holds no array; any other count reads the records.
+	/// chosen only for an index every column of which holds one entry per
+	/// record — the index has recorded storing no array in it, or it is
+	/// declared a kind that holds none; any other count reads the records.
 	async fn resolve_count_btree_access(
 		&self,
 		table_name: &TableName,
@@ -1087,10 +1121,21 @@ impl<'ctx> Planner<'ctx> {
 		let columns =
 			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
+		// An element column (`tags.*`) whose element field is declared a
+		// scalar kind (`DEFINE FIELD tags.* … TYPE string`, a field named as
+		// the column is) holds one entry per element value, which the fan-out
+		// check below admits for an access that pins it.
+		// `IndexRef::one_entry_per_record` answers for plain columns only, so
+		// this is the one route by which such a column counts from its keys.
+		// The field list is the transaction's cached one.
 		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
-		let one_key_per_record = |cols: &[Idiom]| {
-			cols.iter().all(|col| {
-				fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
+		let one_key_per_record = |index: &IndexRef| {
+			index.cols.iter().enumerate().all(|(i, col)| {
+				index.one_entry_per_record(i)
+					|| fields
+						.iter()
+						.find(|fd| &fd.name == col)
+						.is_some_and(field_def_excludes_arrays)
 			})
 		};
 
@@ -1102,10 +1147,12 @@ impl<'ctx> Planner<'ctx> {
 		for candidate in &candidates {
 			// A key-only count counts index entries, so it is only a row
 			// count while each matching record owns exactly one entry in the
-			// range. A column not declared a kind that excludes arrays can hold
-			// an array, which is listed once per element, and a scan that fans
-			// out counts a record once per element.
-			if !one_key_per_record(&candidate.index_ref.cols) {
+			// range. A column not known to hold no array can hold one, which is
+			// listed once per element, and a scan that fans out counts a record
+			// once per element.
+			if !one_key_per_record(&candidate.index_ref)
+				|| !crate::exec::index::access_path::range_matches_comparison(&candidate.access)
+			{
 				continue;
 			}
 			if crate::exec::index::access_path::access_fans_out(

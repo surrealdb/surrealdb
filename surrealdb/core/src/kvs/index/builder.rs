@@ -1759,8 +1759,24 @@ impl Building {
 					}
 					return Err(err);
 				}
-				if let Err(err) = crate::idx::wipe_index_data(&tx, &self.ikb, &self.ix.index).await
-				{
+				// A cleared B-tree index records its value shapes from here on:
+				// the scan and every write it admits go through the writer that
+				// records them.
+				let cleaned =
+					match crate::idx::wipe_index_data(&tx, &self.ikb, &self.ix.index).await {
+						Ok(()) if matches!(self.ix.index, Index::Idx | Index::Uniq) => {
+							tx.track_index_shapes(
+								self.ikb.ns(),
+								self.ikb.db(),
+								self.ikb.table(),
+								self.ix.index_id,
+								&crate::idx::index::expected_shapes(&self.ix),
+							)
+							.await
+						}
+						cleaned => cleaned,
+					};
+				if let Err(err) = cleaned {
 					if self
 						.cancel_and_retryable_conflict(
 							&tx,

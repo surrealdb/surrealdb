@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
+use surrealdb_datastore::index_shapes::TableIndexShapes;
+
 use super::scope::WriteScope;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
@@ -89,6 +91,10 @@ pub(crate) struct WriteCtx {
 	/// before a change to its table's catalog no longer stands
 	/// ([`Self::stands`]).
 	pub(crate) resolved_at: (Option<uuid::Uuid>, u64),
+	/// The value shapes the table's B-tree indexes have stored, as the
+	/// transaction saw them when the context was resolved: a write of a shape
+	/// one has not recorded records it ([`surrealdb_datastore::index_shapes`]).
+	pub(crate) index_shapes: TableIndexShapes,
 }
 
 impl WriteCtx {
@@ -140,6 +146,15 @@ impl WriteCtx {
 		let catalog = NsDbTbMutCtx::load(exec.ctx(), &parent, tb, table, version)
 			.await
 			.map_err(ControlFlow::Err)?;
+		let index_shapes = txn
+			.table_index_shapes(
+				parent.ns.namespace_id,
+				parent.db.database_id,
+				table,
+				&catalog.indexes,
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
 		Ok(Self {
 			ns: catalog.ns,
 			db: catalog.db,
@@ -156,6 +171,7 @@ impl WriteCtx {
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: (catalog_version, stamps),
+			index_shapes,
 		})
 	}
 
@@ -181,6 +197,7 @@ impl WriteCtx {
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: self.resolved_at,
+			index_shapes: self.index_shapes.clone(),
 		}
 	}
 

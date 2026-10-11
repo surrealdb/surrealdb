@@ -36,7 +36,7 @@ value = "NONE"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 10]
-        Filter [ctx: Db] [predicate: team = 'blue' AND age > 25 AND email = 'p8@example.com']
+        Filter [ctx: Db] [predicate: team = 'blue' AND age > 25]
             IndexScan [ctx: Db] [table: person, index: by_email, access: = 'p8@example.com', direction: Forward]
 "'''
 
@@ -50,7 +50,7 @@ value = "[{ id: person:8 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 10]
-        Filter [ctx: Db] [predicate: age > 25 AND team = 'red']
+        Filter [ctx: Db] [predicate: age > 25]
             IndexScan [ctx: Db] [table: person, index: by_team, access: = 'red', direction: Forward]
 "'''
 
@@ -60,8 +60,7 @@ value = "[{ id: person:6 }, { id: person:9 }, { id: person:12 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: by_age, access: >30, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: by_age, access: >30, direction: Forward]
 ''''
 
 [[test.results]]
@@ -74,8 +73,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: id, joined]
     Sort [ctx: Db] [sort_keys: joined ASC]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: by_age, access: >25, direction: Forward]
+        IndexScan [ctx: Db] [table: person, index: by_age, access: >25, direction: Forward]
 ''''
 
 [[test.results]]

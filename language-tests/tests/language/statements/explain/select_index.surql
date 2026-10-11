@@ -31,8 +31,7 @@ Total rows: 1"'''
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: user, index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: user, index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 */

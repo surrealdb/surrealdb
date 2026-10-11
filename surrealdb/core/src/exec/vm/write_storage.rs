@@ -39,7 +39,7 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::docids::TableDocIds;
 use crate::idx::entry::IndexEntryValue;
-use crate::idx::index::Indexable;
+use crate::idx::index::{Indexable, recorded_shapes};
 use crate::kvs::index::{ConsumeResult, IndexMutation};
 use crate::kvs::storage_error;
 use crate::val::{Number, Object, Value};
@@ -908,6 +908,7 @@ async fn move_entries(
 		}
 	}
 	if let Some(n) = n {
+		record_shapes(ctx, ix, &n).await?;
 		for n in Indexable::new(n, ix) {
 			let key = key(&n)?;
 			if !key.unique {
@@ -932,6 +933,40 @@ async fn move_entries(
 		}
 	}
 	Ok(false)
+}
+
+/// Record the shapes of the values `n` B-tree index `ix` stores beyond those
+/// its columns are expected to ([`recorded_shapes`]), in the transaction that
+/// writes their entries
+/// ([`surrealdb_datastore::index_shapes`]). The shapes the write context read
+/// answer a write that adds none without a read.
+async fn record_shapes(ctx: &WriteCtx, ix: &IndexDefinition, n: &[Value]) -> FlowResult<()> {
+	let known = ctx.index_shapes.of(ix.index_id);
+	if known.is_some_and(|known| known.records_all(recorded_shapes(n, ix))) {
+		return Ok(());
+	}
+	// The context's shapes predate any this statement recorded; the
+	// transaction's are current, and answer every write after the first of a
+	// shape without a write of their own.
+	let txn = ctx.txn();
+	let current = txn
+		.index_shapes(ctx.db.namespace_id, ctx.db.database_id, &ix.table_name, ix.index_id)
+		.await
+		.map_err(ControlFlow::Err)?;
+	if current.records_all(recorded_shapes(n, ix)) {
+		return Ok(());
+	}
+	let shapes: Vec<_> = recorded_shapes(n, ix).collect();
+	txn.record_index_shapes(
+		ctx.db.namespace_id,
+		ctx.db.database_id,
+		&ix.table_name,
+		ix.index_id,
+		&shapes,
+		surrealdb_datastore::index_shapes::ShapeRecorder::Write,
+	)
+	.await
+	.map_err(ControlFlow::Err)
 }
 
 /// Delete the index entry at `key` while it names the record `expected`

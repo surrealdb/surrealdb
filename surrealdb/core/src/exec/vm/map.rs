@@ -3809,7 +3809,7 @@ async fn table_access(
 				}
 				_ => None,
 			};
-			let exact = !fans_out && answers_exactly(planner, &table, &index_ref, &access).await;
+			let exact = !fans_out && answers_exactly(&index_ref, &access);
 			Ok(Plan::IndexScan {
 				table,
 				index: index_ref,
@@ -3919,14 +3919,15 @@ async fn table_access(
 
 /// Whether B-tree `access` over `index` lists exactly the records whose
 /// columns satisfy the conjuncts it was chosen from ([`Plan::IndexScan`]'s
-/// `exact`): every column it pins is a plain field path, and `table`'s
-/// catalog declares that field with a kind that holds no array. An array
-/// value is listed once per element, and an empty one under `NULL`, so a
-/// column that may hold one lists records its conjunct rejects. Where the
-/// catalog cannot be read the access is not exact.
-async fn answers_exactly(
-	planner: &Planner<'_>,
-	table: &TableName,
+/// `exact`): every column it pins is a plain field path that holds one entry
+/// per record
+/// ([`IndexRef::one_entry_per_record`](crate::exec::index::access_path::IndexRef::one_entry_per_record)).
+/// An array value is listed once per element, and an empty one under `NULL`,
+/// so a column that may hold one lists records its conjunct rejects; and a
+/// range bounded by a number lists records whose number keys within it but
+/// compares outside it
+/// ([`range_matches_comparison`](crate::exec::index::access_path::range_matches_comparison)).
+fn answers_exactly(
 	index: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
 ) -> bool {
@@ -3943,25 +3944,12 @@ async fn answers_exactly(
 		_ => return false,
 	};
 	let columns = &index.cols[..pinned.min(index.cols.len())];
-	if columns.is_empty()
-		|| !columns
-			.iter()
-			.all(|column| column.0.iter().all(|part| matches!(part, crate::expr::Part::Field(_))))
-	{
-		return false;
-	}
-	let (Some(txn), Some((ns, db))) = (planner.txn(), planner.ns_db_ids().await) else {
-		return false;
-	};
-	let Ok(fields) = txn.all_tb_fields(ns, db, table, None).await else {
-		return false;
-	};
-	columns.iter().all(|column| {
-		fields
-			.iter()
-			.find(|field| &field.name == column)
-			.is_some_and(crate::exec::planner::field_def_excludes_arrays)
-	})
+	crate::exec::index::access_path::range_matches_comparison(access)
+		&& !columns.is_empty()
+		&& columns.iter().enumerate().all(|(col, column)| {
+			column.0.iter().all(|part| matches!(part, crate::expr::Part::Field(_)))
+				&& index.one_entry_per_record(col)
+		})
 }
 
 /// An index union over B-tree scans `paths`, merged for `order`.

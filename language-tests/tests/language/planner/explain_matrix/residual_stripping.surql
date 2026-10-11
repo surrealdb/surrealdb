@@ -468,8 +468,7 @@ value = "[rsm:1, rsm:2]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: rsm, index: rsm_tags_b, access: ['x'], direction: Forward]
+    IndexScan [ctx: Db] [table: rsm, index: rsm_tags_b, access: ['x'], direction: Forward]
 "'''
 
 [[test.results]]
@@ -505,7 +504,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: code = 'a' AND note = 'keep' AND n = 1]
+    Filter [ctx: Db] [predicate: note = 'keep' AND n = 1]
         IndexScan [ctx: Db] [table: rsc, index: rsc_code, access: = 'a', direction: Forward]
 "'''
 

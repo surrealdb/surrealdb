@@ -25,6 +25,9 @@ pub enum Key {
 	Ixs(NamespaceId, DatabaseId, String, Uuid),
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, String, Uuid),
+	/// A cache key for the value shapes a table's online B-tree indexes have
+	/// stored, under one catalog version
+	Ish(NamespaceId, DatabaseId, String, Uuid),
 }
 
 impl<'a> From<Lookup<'a>> for Key {
@@ -40,6 +43,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Fts(a, b, c, d) => Key::Fts(a, b, c.to_string(), d),
 			Lookup::Ixs(a, b, c, d) => Key::Ixs(a, b, c.to_string(), d),
 			Lookup::Lvs(a, b, c, d) => Key::Lvs(a, b, c.to_string(), d),
+			Lookup::Ish(a, b, c, d) => Key::Ish(a, b, c.to_string(), d),
 		}
 	}
 }

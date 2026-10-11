@@ -24,7 +24,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: field = 5 AND [5] INSIDE field]
+    Filter [ctx: Db] [predicate: [5] INSIDE field]
         IndexScan [ctx: Db] [table: t, index: idx_field, access: = 5, direction: Forward]
 ''''
 
@@ -40,7 +40,7 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: field = 5 AND group = 'g' AND [5] INSIDE field]
+    Filter [ctx: Db] [predicate: [5] INSIDE field]
         IndexScan [ctx: Db] [table: t, index: idx_ab, access: [5, 'g'], direction: Forward]
 "'''
 */

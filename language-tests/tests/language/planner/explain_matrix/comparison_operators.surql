@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "Comparison and equality operator matrix against a fixed index set: `=`, `==` (ExactEqual), `!=`, `<`, `<=`, `>`, `>=`, `IS NULL`, `IS NOT NULL`, `= NONE`, `!= NONE`, `= NULL`, `!= NULL` and a range literal, each with the field on the LEFT and again on the RIGHT (`35 < age`), over a standard scalar index, a UNIQUE scalar index, a nullable scalar index and a plain index on an array column. The planner has a separate bound-inverting arm per operand position, so a slip between the two would return the complement of the right answer while still rendering an IndexScan. Every plan assertion is therefore paired with the same query run twice for rows, once through the index and once `WITH NOINDEX`, which forces a table scan and is the oracle: EXPLAIN shows which operator ran, not whether it returned the right rows. Shapes that deliberately reach no index (`age != 35`, `35 != age`, `email != 'c@x'`, `tags != 'red'`, `score != NULL`, `score IS NOT NULL`) pin their TableScan too, because a shape silently becoming unindexed -- or a negation silently acquiring an IndexScan -- is the regression this file catches. A range literal is exactly a BTree range and is read as one: `age IN 30..40` seeks `access: >=30 <40` and `age IN 30..=40` seeks `>=30 <=40`, each spelling's own bounds carrying which end is open. Group (2) records what currently happens rather than what should; groups (1) and (3) record fan-out cases whose counts agree with the oracle. (1) A plain (non-`*`) index on an array column fans out to one entry per element, so `tags = 'red'` renders a narrow `access: = 'red'` on the ELEMENT key with the whole-array `predicate: tags = 'red'` retained. The row path re-checks that predicate and correctly returns none -- an array does not equal a scalar -- and the count over it declines the index-only `IndexCountScan` -- the column is not declared a kind that excludes arrays -- so it too runs through the row path and reports 0, as the oracle does. (2) A range over the same index lists each record once -- the column may hold an array, so the scan collapses a record's entries -- but drops rows whose entries all fall outside the range: `tags > 'blue'` and `'blue' < tags` lose person:e, whose empty array is indexed as a single NONE-keyed entry sorting before every string, even though `[] > 'blue'` holds for the filter, and `count()` over `>` and `>=` is short by that record. Correct behaviour is the oracle's row set. (3) `tags < 'blue'` counts 0, as the oracle does: the one entry below 'blue' is person:e's NONE-keyed empty array, and the count fetches that record and rejects it on its whole-array predicate. Whole-array equality against this column is the fourth arm of the same disagreement; it belongs to the fan-out key model rather than to the operator axis and is pinned once, in array_fanout_oracle.surql. The cells where index and oracle DO agree are pinned alongside -- the `<`, `<=` and `!=` arms on the array column, `count()` over the UNIQUE index, and `count()` over both NONE sentinel arms -- so a regression in one of them cannot be read as more of the same fan-out noise. In every divergence above the `WITH NOINDEX` result is the correct one. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan; the ordering does not change the access arm."
+reason = "Comparison and equality operator matrix against a fixed index set: `=`, `==` (ExactEqual), `!=`, `<`, `<=`, `>`, `>=`, `IS NULL`, `IS NOT NULL`, `= NONE`, `!= NONE`, `= NULL`, `!= NULL` and a range literal, each with the field on the LEFT and again on the RIGHT (`35 < age`), over a standard scalar index, a UNIQUE scalar index, a nullable scalar index and a plain index on an array column. The planner has a separate bound-inverting arm per operand position, so a slip between the two would return the complement of the right answer while still rendering an IndexScan. Every plan assertion is therefore paired with the same query run twice for rows, once through the index and once `WITH NOINDEX`, which forces a table scan and is the oracle: EXPLAIN shows which operator ran, not whether it returned the right rows. Shapes that deliberately reach no index (`age != 35`, `35 != age`, `email != 'c@x'`, `tags != 'red'`, `score != NULL`, `score IS NOT NULL`) pin their TableScan too, because a shape silently becoming unindexed -- or a negation silently acquiring an IndexScan -- is the regression this file catches. A range literal is exactly a BTree range and is read as one: `age IN 30..40` seeks `access: >=30 <40` and `age IN 30..=40` seeks `>=30 <=40`, each spelling's own bounds carrying which end is open. Groups (1), (2) and (3) record fan-out cases whose rows and counts agree with the oracle. (1) A plain (non-`*`) index on an array column fans out to one entry per element, so `tags = 'red'` renders a narrow `access: = 'red'` on the ELEMENT key with the whole-array `predicate: tags = 'red'` retained. The row path re-checks that predicate and correctly returns none -- an array does not equal a scalar -- and the count over it declines the index-only `IndexCountScan` -- the index has stored an array in the column -- so it too runs through the row path and reports 0, as the oracle does. (2) A range over the same column that reaches the band of the value order arrays sort in is answered by a table scan: `tags > 'blue'`, `'blue' < tags` and `tags >= 'blue'` admit person:e, whose empty array is indexed as a single NONE-keyed entry sorting before every string while `[] > 'blue'` holds for the filter, so the index would miss it. (3) `tags < 'blue'` counts 0, as the oracle does: the one entry below 'blue' is person:e's NONE-keyed empty array, and the count fetches that record and rejects it on its whole-array predicate. Whole-array equality against this column is the fourth arm of the same disagreement; it belongs to the fan-out key model rather than to the operator axis and is pinned once, in array_fanout_oracle.surql. The cells where index and oracle DO agree are pinned alongside -- the `<`, `<=` and `!=` arms on the array column, `count()` over the UNIQUE index, and `count()` over both NONE sentinel arms -- so a regression in one of them cannot be read as more of the same fan-out noise. Each plan is asserted on the query without `ORDER BY` and the rows on the same query with `ORDER BY id`, which makes the row comparison deterministic without putting a sort wrapper into every plan; the ordering does not change the access arm."
 
 [[test.results]]
 value = "NONE"
@@ -75,8 +75,7 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:d }, { id: person:e }
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: <35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: <35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -88,8 +87,7 @@ value = "[{ id: person:a }, { id: person:b }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: <=35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: <=35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -101,8 +99,7 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -114,8 +111,7 @@ value = "[{ id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >=35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >=35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -127,8 +123,7 @@ value = "[{ id: person:c }, { id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: <35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: <35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -140,8 +135,7 @@ value = "[{ id: person:a }, { id: person:b }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: <=35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: <=35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -153,8 +147,7 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -166,8 +159,7 @@ value = "[{ id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >=35, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >=35, direction: Forward]
 ''''
 
 [[test.results]]
@@ -275,8 +267,7 @@ value = "[{ id: person:a }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_score, access: >NONE, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_score, access: >NONE, direction: Forward]
 ''''
 
 [[test.results]]
@@ -288,8 +279,7 @@ value = "[{ id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_score, access: >NONE, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_score, access: >NONE, direction: Forward]
 ''''
 
 [[test.results]]
@@ -301,8 +291,7 @@ value = "[{ id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >=30 <40, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >=30 <40, direction: Forward]
 ''''
 
 [[test.results]]
@@ -314,8 +303,7 @@ value = "[{ id: person:b }, { id: person:c }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_age, access: >=30 <=40, direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_age, access: >=30 <=40, direction: Forward]
 ''''
 
 [[test.results]]
@@ -351,8 +339,7 @@ value = "[{ id: person:c }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: >'c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: >'c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -364,8 +351,7 @@ value = "[{ id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: <='c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: <='c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -401,12 +387,11 @@ value = "[]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_tags, access: >'blue', direction: Forward]
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: tags > 'blue', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }]"
+value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
 
 [[test.results]]
 value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
@@ -414,12 +399,11 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_tags, access: >'blue', direction: Forward]
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: 'blue' < tags, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }]"
+value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
 
 [[test.results]]
 value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
@@ -441,12 +425,11 @@ value = "[{ count: 0 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_tags, access: >'blue', direction: Forward]
+        TableScan [ctx: Db] [table: person, direction: Forward, predicate: tags > 'blue', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ count: 4 }]"
+value = "[{ count: 5 }]"
 
 [[test.results]]
 value = "[{ count: 5 }]"
@@ -454,12 +437,11 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_tags, access: >='blue', direction: Forward]
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: tags >= 'blue', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }]"
+value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
 
 [[test.results]]
 value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }, { id: person:e }]"
@@ -468,12 +450,11 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_tags, access: >='blue', direction: Forward]
+        TableScan [ctx: Db] [table: person, direction: Forward, predicate: tags >= 'blue', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ count: 4 }]"
+value = "[{ count: 5 }]"
 
 [[test.results]]
 value = "[{ count: 5 }]"
@@ -481,9 +462,7 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_age, access: >=35, direction: Forward]
+    IndexCountScan [ctx: Db] [source: person, condition: age >= 35]
 ''''
 
 [[test.results]]
@@ -495,8 +474,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: <'c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: <'c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -508,8 +486,7 @@ value = "[{ id: person:a }, { id: person:b }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: <='c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: <='c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -521,8 +498,7 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: >='c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: >='c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -534,8 +510,7 @@ value = "[{ id: person:c }, { id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    DistinctRecords [ctx: Db]
-        IndexScan [ctx: Db] [table: person, index: idx_email, access: >'c@x', direction: Forward]
+    IndexScan [ctx: Db] [table: person, index: idx_email, access: >'c@x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -547,9 +522,7 @@ value = "[{ id: person:d }, { id: person:e }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_email, access: >='c@x', direction: Forward]
+    IndexCountScan [ctx: Db] [source: person, condition: email >= 'c@x']
 "'''
 
 [[test.results]]
@@ -600,12 +573,11 @@ value = "[{ id: person:a }, { id: person:b }, { id: person:c }, { id: person:d }
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_tags, access: >'blue', direction: Forward]
+        TableScan [ctx: Db] [table: person, direction: Forward, predicate: 'blue' < tags, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
-value = "[{ count: 4 }]"
+value = "[{ count: 5 }]"
 
 [[test.results]]
 value = "[{ count: 5 }]"
@@ -640,8 +612,7 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        IndexScan [ctx: Db] [table: person, index: idx_score, access: = NONE, direction: Forward]
+    IndexCountScan [ctx: Db] [source: person, condition: score = NONE]
 ''''
 
 [[test.results]]
@@ -653,9 +624,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        DistinctRecords [ctx: Db]
-            IndexScan [ctx: Db] [table: person, index: idx_score, access: >NONE, direction: Forward]
+    IndexCountScan [ctx: Db] [source: person, condition: score != NONE]
 ''''
 
 [[test.results]]

@@ -599,8 +599,7 @@ value = "'OK'"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    DistinctRecords [ctx: Db] {rows: 2}
-        IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
+    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -621,10 +620,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
-            DistinctRecords [ctx: Db] {rows: 3}
-                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
-            DistinctRecords [ctx: Db] {rows: 3}
-                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -646,10 +643,8 @@ value = '''
     Sort [ctx: Db] [sort_keys: id ASC] {rows: 3}
         Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
             UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
-                DistinctRecords [ctx: Db] {rows: 3}
-                    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
-                DistinctRecords [ctx: Db] {rows: 3}
-                    IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
+                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
+                IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 
@@ -682,8 +677,7 @@ value = "[{ count: 2 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
     Filter [ctx: Db] [predicate: code INSIDE ['x', 'y'] AND tags CONTAINS 'red'] {rows: 2}
-        DistinctRecords [ctx: Db] {rows: 2}
-            IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
+        IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
@@ -720,10 +714,8 @@ value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     Filter [ctx: Db] [predicate: k INSIDE ['a', 'b']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: kv, branches: 2] {rows: 3}
-            DistinctRecords [ctx: Db] {rows: 3}
-                IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['a'], direction: Forward] {rows: 3}
-            DistinctRecords [ctx: Db] {rows: 3}
-                IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['b'], direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['a'], direction: Forward] {rows: 3}
+            IndexScan [ctx: Db] [table: kv, index: idx_kv, access: ['b'], direction: Forward] {rows: 3}
 
 Total rows: 3"'''
 

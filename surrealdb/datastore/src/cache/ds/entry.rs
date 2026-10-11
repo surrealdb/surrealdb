@@ -9,6 +9,7 @@ use jsonwebtoken::jwk::JwkSet;
 use super::catalog::TableSnapshot;
 use super::function::FunctionSnapshot;
 use crate::catalog;
+use crate::index_shapes::TableIndexShapes;
 
 /// A cached JWKS document together with the time it was stored.
 #[cfg(feature = "jwks")]
@@ -46,6 +47,9 @@ pub enum Entry {
 	Ixs(Arc<[catalog::IndexDefinition]>),
 	/// The compiled live-query subscriptions specified on a table.
 	Lvs(Arc<[catalog::SubscriptionDefinition]>),
+	/// The value shapes a table's online B-tree indexes have stored, as of one
+	/// catalog version.
+	Ish(TableIndexShapes),
 }
 
 impl Entry {
@@ -116,6 +120,15 @@ impl Entry {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Lvs"),
+		}
+	}
+	/// Converts this cache entry into a [`TableIndexShapes`].
+	/// Fails with a typed internal error if called on a cache entry that is not an
+	/// [`Entry::Ish`].
+	pub fn try_into_ish(self) -> Result<TableIndexShapes> {
+		match self {
+			Entry::Ish(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Ish"),
 		}
 	}
 }

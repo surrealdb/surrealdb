@@ -179,6 +179,7 @@ fff2e05e86664499 language-tests/tests/bench/permissions/select_scan.surql
 4758905873d00350 language-tests/tests/bench/planner/graph_semijoin_500.surql
 b383f17549e77e5a language-tests/tests/bench/planner/or_filter_200k.surql
 46b9a489a1d74d05 language-tests/tests/bench/planner/or_filter_disjoint_200k.surql
+b527a16387fd5875 language-tests/tests/bench/planner/order_index_latest_n.surql
 a767cfb60a98509b language-tests/tests/bench/planner/order_index_under_limit.surql
 c8b994754e4db0e4 language-tests/tests/bench/recursion/computed_field_select.surql
 62a33ec50a1d915d language-tests/tests/bench/recursion/dynamic_field_update.surql
@@ -2398,6 +2399,7 @@ f4a4e5e62e14135b language-tests/tests/reproductions/a_rerun_top_k_keeps_every_ro
 58b72a61849e3b37 language-tests/tests/reproductions/a_return_in_a_permission_block_is_an_error.surql
 0270a11c5d8cfd31 language-tests/tests/reproductions/a_return_in_a_permission_block_is_an_error_import.surql
 e99d383fbe679658 language-tests/tests/reproductions/a_retyped_field_still_broadcasts.surql
+88f7064c1e427d58 language-tests/tests/reproductions/a_rolled_back_shape_is_recorded_again.surql
 eb0f60eb774c1350 language-tests/tests/reproductions/a_row_in_hand_need_not_be_a_record.surql
 3184c7d9f2accff8 language-tests/tests/reproductions/a_row_is_filtered_then_projected_before_the_next_row.surql
 fae2574de9f7b631 language-tests/tests/reproductions/a_schema_clause_without_a_logical_form.surql
@@ -2476,7 +2478,8 @@ b40e5bedbe823eae language-tests/tests/reproductions/an_aggregate_argument_after_
 5cdb3f7e53226fdf language-tests/tests/reproductions/an_index_column_naming_its_own_record_reads_the_image.surql
 65ce6baa1bab7896 language-tests/tests/reproductions/an_index_equality_beside_another_conjunct_judges_the_array.surql
 6f65a381751c7e4c language-tests/tests/reproductions/an_index_over_a_column_holding_arrays_keeps_whole_value_order.surql
-d896edaf4ad17a6a language-tests/tests/reproductions/an_index_scan_lists_a_record_holding_an_array_once.surql
+3b36c6f4d577632a language-tests/tests/reproductions/an_index_scan_lists_a_record_holding_an_array_once.surql
+9944b94b87a5da16 language-tests/tests/reproductions/an_index_that_never_stored_an_array_keeps_its_order.surql
 8b12f2765f3e7b15 language-tests/tests/reproductions/an_indexed_count_counts_each_record_once.surql
 1a1b8647917a884d language-tests/tests/reproductions/an_object_row_with_a_record_id_is_a_record.surql
 12160274356f6f2c language-tests/tests/reproductions/an_order_key_a_rename_reuses.surql
@@ -2654,6 +2657,7 @@ b73ae4836fdad216 language-tests/tests/reproductions/index_expressions_agree_acro
 9574d7f440bfb6d5 language-tests/tests/reproductions/index_function_reads_a_block_or_closure_bound_matches_query.surql
 3104432a3f9f95ad language-tests/tests/reproductions/index_function_reads_a_loop_bound_matches_query.surql
 75fab6f6f5ba410f language-tests/tests/reproductions/index_function_under_split_reads_the_where_clause.surql
+00777b7c13cee013 language-tests/tests/reproductions/index_value_shapes_per_column_and_per_definition.surql
 5d3ab2cd21ce3659 language-tests/tests/reproductions/indexed_count_multi_conjunct_and.surql
 e7c71925557e843b language-tests/tests/reproductions/infinite_recursion_bug.surql
 bba6edab678235f0 language-tests/tests/reproductions/inline_call_in_from.surql
@@ -3034,6 +3038,10 @@ ed319ebc23a9a95e language-tests/tests/upgrade/define/3.00.00_index_unique_nullis
 cca473807012fa0d language-tests/tests/upgrade/define/3.00.00_index_unique_nullish_slot.surql
 2ed8b69908173a18 language-tests/tests/upgrade/define/3.00.00_index_unique_nullish_slot_current.surql
 ddc3697511694c1b language-tests/tests/upgrade/define/3.00.00_index_unique_nullish_slot_import.surql
+711a5a60e1d86a83 language-tests/tests/upgrade/define/3.00.00_index_value_shapes.surql
+8e1f97b116b370c5 language-tests/tests/upgrade/define/3.00.00_index_value_shapes_current.surql
+dc4e5e0439ab1eb4 language-tests/tests/upgrade/define/3.00.00_index_value_shapes_import.surql
+870f0b88feeebfc3 language-tests/tests/upgrade/define/3.00.00_index_value_shapes_rebuild.surql
 0a8e63c5805ebf16 language-tests/tests/upgrade/define/3.00.00_inline_cache_backfill_current.surql
 5ab622e5bd71947a language-tests/tests/upgrade/define/3.00.00_module_silo_rekey.surql
 6b138262ee32688e language-tests/tests/upgrade/define/3.00.00_module_silo_rekey_import.surql
