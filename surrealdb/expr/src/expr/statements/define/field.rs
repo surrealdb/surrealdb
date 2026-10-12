@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::expr::permission::{FieldPermissions, Permissions};
 use crate::expr::reference::Reference;
-use crate::expr::{CoverStmts, Expr, Kind, KindLiteral, Literal};
+use crate::expr::{CoverStmts, Expr, KeyNames, KeyNamesError, Kind, KindLiteral, Literal};
 
 /// Returns true if this type contains an `object` anywhere (including literal
 /// object types, `array<object>` and `option<object>`).
@@ -32,6 +32,10 @@ pub struct DefineFieldStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub field_kind: Option<Kind>,
+	/// The names of the components of the tuple type of an `id` field. Some only
+	/// when `field_kind` is a tuple of as many elements; set it through
+	/// [`Self::set_type`].
+	pub key_names: Option<KeyNames>,
 	pub flexible: bool,
 	pub readonly: bool,
 	/// Inline the field's value into the edge's adjacency (the `INLINE` clause).
@@ -54,6 +58,7 @@ impl Default for DefineFieldStatement {
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
 			field_kind: None,
+			key_names: None,
 			flexible: false,
 			readonly: false,
 			inline: false,
@@ -70,6 +75,39 @@ impl Default for DefineFieldStatement {
 	}
 }
 
+impl DefineFieldStatement {
+	/// Sets the type of the field and the names of its record id components.
+	///
+	/// `names` is Some only for the whole type of an `id` field, which must then
+	/// be a tuple with one element per name.
+	///
+	/// # Errors
+	///
+	/// [`KeyNamesError::Arity`] when `names` is Some and `kind` is not a tuple of
+	/// as many elements. The statement is unchanged.
+	pub fn set_type(
+		&mut self,
+		kind: Option<Kind>,
+		names: Option<KeyNames>,
+	) -> Result<(), KeyNamesError> {
+		if let Some(names) = &names {
+			let kinds = match &kind {
+				Some(Kind::Literal(KindLiteral::Array(kinds))) => kinds.len(),
+				_ => 0,
+			};
+			if kinds != names.len() {
+				return Err(KeyNamesError::Arity {
+					names: names.len(),
+					kinds,
+				});
+			}
+		}
+		self.field_kind = kind;
+		self.key_names = names;
+		Ok(())
+	}
+}
+
 impl ToSql for DefineFieldStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("DEFINE FIELD");
@@ -80,7 +118,19 @@ impl ToSql for DefineFieldStatement {
 		}
 		write_sql!(f, sql_fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		if let Some(ref v) = self.field_kind {
-			write_sql!(f, sql_fmt, " TYPE {}", v);
+			match (&self.key_names, v) {
+				(Some(names), Kind::Literal(KindLiteral::Array(kinds)))
+					if kinds.len() == names.len() =>
+				{
+					write_sql!(f, sql_fmt, " TYPE {}", names.fmt_keyed(kinds));
+				}
+				(Some(_), _) => {
+					debug_assert!(false, "component names do not match the type of the field");
+					tracing::error!("component names do not match the type of the field");
+					write_sql!(f, sql_fmt, " TYPE {}", v);
+				}
+				(None, _) => write_sql!(f, sql_fmt, " TYPE {}", v),
+			}
 			if self.flexible {
 				f.push_str(" FLEXIBLE");
 			}

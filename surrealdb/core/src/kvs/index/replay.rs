@@ -33,6 +33,27 @@ use crate::kvs::{
 };
 use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdentity, Value};
 
+/// The image of the record `rid` that an index entry is evaluated over, from
+/// the `data` its stored value decodes to.
+///
+/// The write path evaluates an entry over an image that carries the record's
+/// own `id`, and a column or a guard that reads a component of it
+/// ([`PhysicalIndexEntry::reads_record_id`](crate::exec::permission::PhysicalIndexEntry::reads_record_id))
+/// reads it there. A stored value may carry none, or another, so when `needed`
+/// the image is `data` with `id` set to `rid`, the key the record is stored
+/// under. Otherwise, and for data that is no object, it is `data` as it is.
+fn entry_image<'a>(data: &'a Value, rid: &RecordId, needed: bool) -> Cow<'a, Value> {
+	let Value::Object(object) = data else {
+		return Cow::Borrowed(data);
+	};
+	if !needed || matches!(object.get("id"), Some(Value::RecordId(id)) if id == rid) {
+		return Cow::Borrowed(data);
+	}
+	let mut object = object.clone();
+	object.insert("id", Value::RecordId(rid.clone()));
+	Cow::Owned(Value::Object(object))
+}
+
 /// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
 /// sweep chunk (and for its repair pass) before the sweep gives up.
 ///
@@ -673,15 +694,14 @@ impl Building {
 					(a.old_values, baselined_match(a.count_cond_match))
 				} else {
 					// Otherwise, proceed with normal indexing.
-					let opt_values = entry.values(&val.data, &exec).await?;
+					let image = entry_image(&val.data, &rid, entry.reads_record_id());
+					let opt_values = entry.values(&image, &exec).await?;
 					// COUNT WHERE indexes have no indexed values, so the
 					// initial scan carries the predicate result separately.
 					// The scan is the record's entry into the index, so the
 					// before-image it is compared against is its absence.
-					let count_cond_match = entry
-						.guard_matches(&val.data, &exec)
-						.await?
-						.map(|matches| (false, matches));
+					let count_cond_match =
+						entry.guard_matches(&image, &exec).await?.map(|matches| (false, matches));
 					(opt_values, count_cond_match)
 				};
 				self.index_initial_values(
@@ -2057,4 +2077,64 @@ fn capped_product(parts: Vec<Vec<Value>>, cap: usize) -> Vec<Vec<Value>> {
 		acc = next;
 	}
 	acc
+}
+
+#[cfg(test)]
+mod entry_image_tests {
+	use super::*;
+
+	fn record(n: i64) -> RecordId {
+		RecordId {
+			table: "t".into(),
+			key: RecordIdKey::Array(Array(vec![Value::from("f"), Value::from(n)])),
+		}
+	}
+
+	fn stored(fields: &[(&str, Value)]) -> Value {
+		Value::Object(Object::from_iter(
+			fields.iter().map(|(name, value)| ((*name).to_owned(), value.clone())),
+		))
+	}
+
+	#[test]
+	fn an_entry_that_does_not_read_the_id_is_evaluated_over_the_stored_value() {
+		let data = stored(&[("v", Value::from(7))]);
+		let image = entry_image(&data, &record(2), false);
+		assert!(matches!(image, Cow::Borrowed(_)));
+		assert_eq!(*image, data);
+	}
+
+	#[test]
+	fn a_stored_value_with_no_id_is_given_the_key_it_is_stored_under() {
+		let data = stored(&[("v", Value::from(7))]);
+		let image = entry_image(&data, &record(2), true);
+		assert!(matches!(image, Cow::Owned(_)));
+		assert_eq!(*image, stored(&[("v", Value::from(7)), ("id", Value::RecordId(record(2)))]));
+		// The stored value is left as it was read.
+		assert_eq!(data, stored(&[("v", Value::from(7))]));
+	}
+
+	#[test]
+	fn a_stored_id_that_is_the_key_is_kept() {
+		let data = stored(&[("id", Value::RecordId(record(2))), ("v", Value::from(7))]);
+		let image = entry_image(&data, &record(2), true);
+		assert!(matches!(image, Cow::Borrowed(_)));
+		assert_eq!(*image, data);
+	}
+
+	#[test]
+	fn a_stored_id_that_is_not_the_key_is_replaced_by_it() {
+		let data = stored(&[("id", Value::RecordId(record(9))), ("v", Value::from(7))]);
+		let image = entry_image(&data, &record(2), true);
+		assert_eq!(*image, stored(&[("id", Value::RecordId(record(2))), ("v", Value::from(7))]));
+	}
+
+	#[test]
+	fn a_stored_value_that_is_no_object_is_evaluated_as_it_is() {
+		for data in [Value::None, Value::from(7), Value::from("f")] {
+			let image = entry_image(&data, &record(2), true);
+			assert!(matches!(image, Cow::Borrowed(_)));
+			assert_eq!(*image, data);
+		}
+	}
 }

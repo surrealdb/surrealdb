@@ -233,7 +233,8 @@ fn generate_input_types(
 		// write and `READONLY` rejects writes entirely. Advertising them as
 		// settable in `Create*Input` / `Update*Input` / `Upsert*Input` would
 		// mislead schema introspection (the user-supplied value is silently
-		// dropped at SurrealQL evaluation time).
+		// dropped at SurrealQL evaluation time). A field derived from a named
+		// record id component is both, so it is never an input.
 		if fd.computed.is_some() || fd.readonly {
 			continue;
 		}
@@ -858,6 +859,12 @@ fn parse_where_arg(
 }
 
 /// Execute a CREATE for a normal (non-relation) table.
+///
+/// The record is named by `id_opt` when the input gives one, and by the table
+/// otherwise. A component of a record id that the `id` field names is a derived
+/// field and not an input, so `data_obj` holds none: such a table takes its key
+/// from the id given or from the `DEFAULT` of its `id` field, and a create that
+/// gives neither fails with the component it lacks.
 async fn execute_normal_create(
 	kvs: &Arc<Datastore>,
 	sess: &Arc<Session>,

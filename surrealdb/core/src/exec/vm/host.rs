@@ -1348,6 +1348,7 @@ pub(super) async fn run_storage_source(
 		Source::Scan {
 			table,
 			direction,
+			range: key_range,
 			..
 		} => {
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
@@ -1364,8 +1365,24 @@ pub(super) async fn run_storage_source(
 				tb: Cow::Borrowed(table),
 			}
 			.range()?;
-			scan_range(program, pipeline, range, *direction, version, state, ctx, yielder, flush_at)
-				.await
+			match key_range {
+				None => {
+					scan_range(
+						program, pipeline, range, *direction, version, state, ctx, yielder,
+						flush_at, None,
+					)
+					.await
+				}
+				Some(key_range) => {
+					out_of_line(|| {
+						scan_key_ranges(
+							program, pipeline, key_range, range, *direction, version, state, ctx,
+							yielder, flush_at,
+						)
+					})
+					.await
+				}
+			}
 		}
 		Source::Record {
 			table,
@@ -1410,6 +1427,7 @@ pub(super) async fn run_storage_source(
 						ctx,
 						yielder,
 						flush_at,
+						None,
 					)
 					.await
 				}
@@ -1503,6 +1521,7 @@ pub(super) async fn run_storage_source(
 					ctx,
 					yielder,
 					flush_at,
+					None,
 				)
 				.await;
 			};
@@ -2202,18 +2221,192 @@ fn record_id(row: &Value) -> Option<crate::val::RecordId> {
 
 /// The probe of the top-k pushdown `pipeline`'s scan carries, armed with the
 /// threshold cell of the sort that feeds on it in the run in progress; `None`
-/// for a scan with no pushdown or whose sort holds no cell.
+/// for a scan with no pushdown or whose sort holds no cell, and for a
+/// key-range scan cut by the second of a datetime component, which reads no
+/// stored bytes for the key ([`CoarseGate`]).
 fn armed_probe(
 	pipeline: &Pipeline,
 	state: &State,
 ) -> Option<Arc<crate::exec::topk_pushdown::TopKThresholdProbe>> {
 	let topk = pipeline.source.topk()?;
+	if topk.coarse.is_some() {
+		return None;
+	}
 	let cell = state.topk_cells.get(topk.sort as usize)?.as_ref()?;
 	Some(topk.probe(cell))
 }
 
+/// The cut a key-range scan makes beneath a bounded sort ordered first by a
+/// datetime component of the record id, which the scan delivers in the order
+/// of its whole second ([`super::plan::CoarseCutoff`]).
+///
+/// The sort publishes the first key of the last row it keeps once it holds
+/// as many as it keeps. A record whose component is in a second past that
+/// key's, in the scan's direction, orders strictly after every kept row, and
+/// so does every record the scan reads after it: the scan stops before it.
+/// The threshold is read at each record until the sort first publishes one,
+/// and afresh before each batch the scan reads after that; a threshold read
+/// late is looser, which cuts later, never wrongly.
+struct CoarseGate {
+	position: u32,
+	direction: crate::kvs::Direction,
+	/// The rows the sort keeps: the first step of a decoded scan's reads
+	/// ([`scan_decoded_cut`]).
+	keep: u32,
+	cell: Arc<crate::exec::topk_pushdown::TopKThresholdCell>,
+	threshold: Option<Arc<Value>>,
+	/// Whether the scan has passed the threshold's second: no range after
+	/// the one it passed it in is read.
+	passed: bool,
+}
+
+impl CoarseGate {
+	/// The gate of `pipeline`'s scan reading in `direction`, in the run in
+	/// progress; `None` where the scan makes no such cut or its sort holds no
+	/// cell.
+	fn of(
+		program: &Program,
+		pipeline: &Pipeline,
+		state: &State,
+		direction: crate::kvs::Direction,
+	) -> Option<Self> {
+		let topk = pipeline.source.topk()?;
+		let coarse = topk.coarse?;
+		let cell = state.topk_cells.get(topk.sort as usize)?.as_ref()?;
+		let keep = program
+			.sorts
+			.get(topk.sort as usize)
+			.and_then(|sort| sort.keep)
+			.map_or(crate::kvs::NORMAL_BATCH_SIZE, |keep| u32::try_from(keep).unwrap_or(u32::MAX));
+		Some(Self {
+			position: coarse.position,
+			direction,
+			keep,
+			cell: Arc::clone(cell),
+			threshold: None,
+			passed: false,
+		})
+	}
+
+	/// Read the threshold the sort last published.
+	fn refresh(&mut self) {
+		self.threshold = self.cell.snapshot();
+	}
+
+	/// Whether the scan has passed the threshold's second at the record whose
+	/// key is `key`; once it has, it stays passed.
+	fn passes(&mut self, key: &RecordIdKey) -> bool {
+		if self.passed {
+			return true;
+		}
+		if self.threshold.is_none() {
+			self.refresh();
+		}
+		let (Some(threshold), Some(element)) = (
+			self.threshold.as_deref(),
+			crate::exec::operators::scan::key_range::key_element(key, self.position),
+		) else {
+			return false;
+		};
+		self.passed = crate::exec::operators::scan::key_range::past_second(
+			element,
+			threshold,
+			self.direction,
+		);
+		self.passed
+	}
+
+	/// [`Self::passes`] for a stored record, by its key bytes. The key is
+	/// decoded only once the sort has published a threshold: before that no
+	/// record passes it.
+	fn passes_stored(&mut self, key: &[u8]) -> bool {
+		if self.passed {
+			return true;
+		}
+		if self.threshold.is_none() {
+			self.refresh();
+			if self.threshold.is_none() {
+				return false;
+			}
+		}
+		use crate::key::KVKeyDecode as _;
+		match crate::key::schema::RecordKey::decode_key(key) {
+			Ok(decoded) => self.passes(&decoded.id),
+			Err(_) => false,
+		}
+	}
+}
+
+/// Run a pipeline over the records of the key ranges `key_range` builds in
+/// `table`, the table's whole record range, range by range in key order along
+/// `direction`. Answers whether the pipeline stopped, taking no more rows.
+///
+/// Each bound is evaluated once, here. A bound whose evaluation fails reads as
+/// `NONE`, which widens what it bounds: the predicate above the scan judges
+/// every row, so the rows are those a scan of the whole table would yield it.
+/// A range after the pipeline's limit is spent, or after the scan's cut has
+/// fired ([`CoarseGate`]), is not opened.
+#[allow(clippy::too_many_arguments)]
+async fn scan_key_ranges(
+	program: &Arc<Program>,
+	pipeline: &Pipeline,
+	key_range: &super::program::ScanRange,
+	table: crate::key::RawRange,
+	direction: crate::kvs::Direction,
+	version: Option<u64>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+) -> FlowResult<bool> {
+	let mut bounds = Vec::with_capacity(key_range.bounds.len());
+	for bound in key_range.bounds.iter() {
+		let value = match host_scalar(program, bound, ctx, None).await {
+			Ok(value) => value,
+			// A bound that cannot be evaluated bounds nothing: the scan widens
+			// rather than raising, and the predicate that holds the same
+			// expression raises where the statement owes it.
+			Err(_) => Value::None,
+		};
+		bounds.push(value);
+	}
+	let ranges = crate::exec::operators::scan::key_range::record_key_ranges(
+		&table,
+		&key_range.spec,
+		&bounds,
+		direction,
+	);
+	let mut gate = CoarseGate::of(program, pipeline, state, direction);
+	for (at, range) in ranges.into_iter().enumerate() {
+		if at > 0 && limits_spent(pipeline, state) {
+			return Ok(true);
+		}
+		if gate.as_ref().is_some_and(|gate| gate.passed) {
+			return Ok(false);
+		}
+		if scan_range(
+			program,
+			pipeline,
+			range,
+			direction,
+			version,
+			state,
+			ctx,
+			yielder,
+			flush_at,
+			gate.as_mut(),
+		)
+		.await?
+		{
+			return Ok(true);
+		}
+	}
+	Ok(false)
+}
+
 /// Run a pipeline over every record of `range`: inside the storage cursor on
 /// the stored bytes when it runs in place, over the decoded records otherwise.
+/// With `gate`, the scan stops before the first record past its cut.
 #[allow(clippy::too_many_arguments)]
 async fn scan_range(
 	program: &Arc<Program>,
@@ -2225,6 +2418,7 @@ async fn scan_range(
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
+	gate: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	// The first read of storage of a run whose reader says how many rows it
 	// takes reads no more records than that before it hands its rows on.
@@ -2232,7 +2426,17 @@ async fn scan_range(
 	if pipeline.in_place {
 		return scan_in_place(
 			program, pipeline, range, direction, version, first, state, ctx, yielder, flush_at,
+			gate,
 		)
+		.await;
+	}
+	if let Some(gate) = gate {
+		return out_of_line(|| {
+			scan_decoded_cut(
+				program, pipeline, range, direction, version, first, state, ctx, yielder, flush_at,
+				gate,
+			)
+		})
 		.await;
 	}
 	let topk_probe = armed_probe(pipeline, state);
@@ -2290,6 +2494,104 @@ thread_local! {
 /// more registers than this.
 const SMALL_REGISTERS: usize = 8;
 
+/// Run a pipeline whose rows are decoded over the records of `range`, which
+/// `gate` cuts: in steps, each step's rows handed on — to the bounded sort
+/// that publishes the threshold the gate reads — before the next step is
+/// read, and the gate judged on each record's key before it is decoded.
+///
+/// The first step reads no more records than the sort keeps (nor than
+/// `first`, where it is given), and each step after it twice as many as the
+/// one before, up to a whole batch. A scan whose sort fills from its first
+/// records therefore reads about as many records as it keeps, plus those of
+/// the second its last kept row is in; one read in whole batches, or ahead of
+/// its rows, would read records the cut can no longer stop. What it reads and
+/// refuses is charged as a scan of the decoded rows charges it.
+#[allow(clippy::too_many_arguments)]
+async fn scan_decoded_cut(
+	program: &Arc<Program>,
+	pipeline: &Pipeline,
+	range: crate::key::RawRange,
+	direction: crate::kvs::Direction,
+	version: Option<u64>,
+	first: Option<u32>,
+	state: &mut State,
+	ctx: &ExecutionContext,
+	yielder: &mut Out<'_, '_>,
+	flush_at: usize,
+	gate: &mut CoarseGate,
+) -> FlowResult<bool> {
+	use crate::exec::pre_decode_filter::PreDecodeFilterOutcome;
+	// The body's first step refuses what the shape judges false, so a record
+	// the stored bytes show it would refuse is not decoded.
+	let prefilter = pipeline
+		.source
+		.prefilter()
+		.map(|shape| shape.filter(ctx.root().ctx.config.exec.idiom_recursion_limit));
+	let txn = ctx.txn();
+	let mut cursor = txn
+		.open_vals_cursor_raw(range, direction, 0, version)
+		.await
+		.context("Failed to open scan cursor")?;
+	let mut step = first
+		.map_or(gate.keep, |first| first.min(gate.keep))
+		.clamp(1, crate::kvs::NORMAL_BATCH_SIZE);
+	loop {
+		let size = super::fuel::batch(step);
+		gate.refresh();
+		let mut decoded = Vec::with_capacity(size as usize);
+		let mut failed = None;
+		let mut cut = false;
+		let stats = cursor
+			.for_each(size, &mut |key, value| {
+				if gate.passes_stored(key) {
+					cut = true;
+					return Ok(std::ops::ControlFlow::Break(()));
+				}
+				if let Some(filter) = prefilter.as_deref()
+					&& filter.apply(key, value) == PreDecodeFilterOutcome::Reject
+				{
+					return Ok(std::ops::ControlFlow::Continue(()));
+				}
+				match crate::exec::operators::scan::pipeline::decode_record(key, value) {
+					Ok(row) => {
+						decoded.push(row);
+						Ok(std::ops::ControlFlow::Continue(()))
+					}
+					Err(e) => {
+						failed = Some(e);
+						Ok(std::ops::ControlFlow::Break(()))
+					}
+				}
+			})
+			.await
+			.context("Failed to scan record")?;
+		if let Some(e) = failed {
+			return Err(e);
+		}
+		#[cfg(test)]
+		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + decoded.len()));
+		ensure_below_memory_threshold()?;
+		// The records read and refused before decoding spend the fuel here;
+		// a record decoded is spent as its row runs.
+		let refused = (stats.rows as usize).saturating_sub(decoded.len());
+		super::fuel::charge(super::fuel::units(refused));
+		super::fuel::tick(ctx, 0).await?;
+		let mut rows = Rows::of(program, pipeline, ctx).reading(Some(size));
+		for row in decoded {
+			if rows.row(program, pipeline, row, state, ctx, yielder, flush_at).await? {
+				return Ok(true);
+			}
+		}
+		if rows.finish(state, ctx, yielder, flush_at).await? {
+			return Ok(true);
+		}
+		if cut || stats.rows < u64::from(size) {
+			return Ok(false);
+		}
+		step = step.saturating_mul(2).min(crate::kvs::NORMAL_BATCH_SIZE);
+	}
+}
+
 /// Run an in-place pipeline over every record of `range`, inside the storage
 /// cursor, on each record's stored bytes: no more than `first` records before
 /// the rows are handed on the first time, where it is given.
@@ -2305,6 +2607,7 @@ async fn scan_in_place(
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
+	mut gate: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	let topk_probe = armed_probe(pipeline, state);
 	let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
@@ -2327,8 +2630,16 @@ async fn scan_in_place(
 		// `Step::Yield` here.
 		let budget = super::fuel::left();
 		let mut unspent = budget;
+		if let Some(gate) = gate.as_deref_mut() {
+			gate.refresh();
+		}
+		let mut cut = false;
 		let stats = cursor
 			.for_each(chunk, &mut |key, value| {
+				if gate.as_deref_mut().is_some_and(|gate| gate.passes_stored(key)) {
+					cut = true;
+					return Ok(std::ops::ControlFlow::Break(()));
+				}
 				unspent = unspent.saturating_sub(1);
 				let next = if unspent == 0 {
 					std::ops::ControlFlow::Break(())
@@ -2366,7 +2677,7 @@ async fn scan_in_place(
 		// process past its memory threshold fails here rather than scanning on.
 		ensure_below_memory_threshold()?;
 		flush(state, yielder, flush_at, ctx).await?;
-		if stopped || stats.rows == 0 {
+		if stopped || cut || stats.rows == 0 {
 			return Ok(stopped);
 		}
 		if super::fuel::spent() {

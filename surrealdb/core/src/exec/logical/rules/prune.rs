@@ -14,9 +14,10 @@
 //!   layer left with no column goes. A column the layer keeps that is read by another kept column
 //!   of the same layer is kept too, since a re-derived computed field is judged against the row
 //!   with the layer's guards landed. Beneath a layer the demand is what its kept columns read plus
-//!   what passed through. Any expression that reads the row other than by name —
-//!   [`reads::reads_row_opaquely`], `*`, a closure, a `DISTINCT` — makes the demand the whole row,
-//!   and nothing beneath it is pruned.
+//!   what passed through. A column that stands for a component of the record id
+//!   ([`reads::key_part_columns`]) reads the id alone, though its body indexes it. Any expression
+//!   that reads the row other than by name — [`reads::reads_row_opaquely`], `*`, a closure, a
+//!   `DISTINCT` — makes the demand the whole row, and nothing beneath it is pruned.
 //!
 //! The demand is what resolve prunes by when it plans the layers; this rule
 //! re-applies it after the other rules have moved predicates beneath layers,
@@ -472,15 +473,21 @@ fn prune_columns(
 		column.output_path().and_then(|path| path.as_field().map(str::to_owned))
 	};
 	// What each column reads: its expression's named reads, with `$value`
-	// standing for the column's own field. `None` reads the row whole.
+	// standing for the column's own field. `None` reads the row whole. A column
+	// standing for a component of the record id reads the id alone, though its
+	// expression indexes into it, which a read by name takes for the whole row.
 	let reads_of = |column: &LogicalField| -> Option<HashSet<String>> {
 		let LogicalField::Single {
 			expr,
+			frame,
 			..
 		} = column
 		else {
 			return Some(HashSet::new());
 		};
+		if frame.key_part {
+			return Some(HashSet::from([String::from("id")]));
+		}
 		let mut out = named_reads(expr, cx.registry)?;
 		if expr.any(|e| matches!(e, LogicalExpr::Param(param) if param.as_str() == "value")) {
 			out.extend(name_of(column));
@@ -620,7 +627,7 @@ mod tests {
 	use super::super::test_support::{rewritten, rewritten_sql};
 	use super::*;
 	use crate::expr::logical::{
-		EvalFrame, FieldPath, FieldSchema, LogicalSource, OutputPath, SourceRef,
+		EvalFrame, FieldPath, FieldSchema, LogicalLiteral, LogicalSource, OutputPath, SourceRef,
 	};
 
 	fn plain() -> Vec<FieldSchema> {
@@ -927,5 +934,130 @@ Project[d]
 		let after = rewritten(plan).to_string();
 		assert!(after.contains("Project[*, a AS c : int @computed]"), "{after}");
 		assert!(!after.contains("AS d"), "{after}");
+	}
+
+	// --- key columns ---
+
+	/// `id[position]`: what a column standing for a component of the record id
+	/// evaluates.
+	fn id_element(position: i64) -> LogicalExpr {
+		LogicalExpr::Index {
+			base: Box::new(field("id")),
+			index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(position))),
+		}
+	}
+
+	/// The layer a table whose id names `city` and `time` derives them in.
+	fn key_layer(input: LogicalOp) -> LogicalOp {
+		layer(
+			input,
+			vec![
+				("city", id_element(0), EvalFrame::key_part()),
+				("time", id_element(1), EvalFrame::key_part()),
+			],
+		)
+	}
+
+	#[test]
+	fn an_unread_key_column_is_removed_and_an_empty_layer_goes() {
+		let layered = key_layer(source(Schema::closed(plain())));
+		let plan = rewritten(select(layered.clone(), &["a", "city"]));
+		assert_eq!(
+			plan.to_string(),
+			"\
+Project[a, city]
+  Project[*, id[0] AS city : int @computed @key]
+    Source[t]"
+		);
+		let plan = rewritten(select(layered, &["a"]));
+		assert_eq!(
+			plan.to_string(),
+			"\
+Project[a]
+  Source[t]"
+		);
+	}
+
+	#[test]
+	fn a_kept_key_column_reads_the_id_and_no_other_column() {
+		// `d` is an ordinary column that nothing reads. Keeping `city` must not
+		// keep it: a key column reads the id, not the row.
+		let layered = layer(
+			source(Schema::closed(plain())),
+			vec![
+				("city", id_element(0), EvalFrame::key_part()),
+				("d", field("b"), EvalFrame::computed(None)),
+			],
+		);
+		let plan = rewritten(select(layered, &["city"]));
+		assert_eq!(
+			plan.to_string(),
+			"\
+Project[city]
+  Project[*, id[0] AS city : int @computed @key]
+    Source[t]"
+		);
+	}
+
+	#[test]
+	fn a_key_column_demands_the_id_of_the_layers_beneath_it() {
+		// A computed layer beneath the key layer sets `c` and `d`. The key
+		// column reads the id alone, so neither is demanded and the layer goes.
+		let beneath = layer(
+			source(Schema::closed(plain())),
+			vec![
+				("c", field("a"), EvalFrame::computed(None)),
+				("d", field("b"), EvalFrame::computed(None)),
+			],
+		);
+		let layered = layer(beneath, vec![("city", id_element(0), EvalFrame::key_part())]);
+		let plan = rewritten(select(layered, &["city"]));
+		assert_eq!(
+			plan.to_string(),
+			"\
+Project[city]
+  Project[*, id[0] AS city : int @computed @key]
+    Source[t]"
+		);
+	}
+
+	#[test]
+	fn a_computed_column_that_indexes_the_id_still_reads_the_row_whole() {
+		// Only the key-part frame says the body reads the id alone. A computed
+		// field with the same body is judged as any other body that indexes
+		// `id`, which reaches the row.
+		let layered = layer(
+			source(Schema::closed(plain())),
+			vec![
+				("c", id_element(0), EvalFrame::computed(None)),
+				("d", field("b"), EvalFrame::computed(None)),
+			],
+		);
+		let plan = rewritten(select(layered, &["c"]));
+		assert_eq!(
+			plan.to_string(),
+			"\
+Project[c]
+  Project[*, id[0] AS c : int @computed, b AS d : int @computed]
+    Source[t]"
+		);
+	}
+
+	#[test]
+	fn the_demand_of_a_sort_keeps_the_key_column_it_reads() {
+		// `SELECT a FROM t ORDER BY city`: the sort reads `city`; `time` is
+		// read by nothing.
+		let layered = key_layer(source(Schema::closed(plain())));
+		let plan = lower("SELECT a FROM t ORDER BY city");
+		let Ok(plan) = plan.transform_up(&mut |node| {
+			Ok::<_, std::convert::Infallible>(if matches!(node, LogicalOp::Source(_)) {
+				layered.clone()
+			} else {
+				node
+			})
+		});
+		let after = rewritten(plan).to_string();
+		assert!(after.contains("id[0] AS city : int @computed @key"), "{after}");
+		assert!(!after.contains("AS time"), "{after}");
 	}
 }

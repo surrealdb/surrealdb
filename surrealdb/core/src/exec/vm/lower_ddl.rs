@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use super::{Lowered, Lowering, NotCovered, lower_view_rows};
+use crate::ddl::define::table::TableConversion;
 use crate::exec::vm::codec::TypeId;
 use crate::exec::vm::codec::key::RouteId;
 use crate::exec::vm::program::{
@@ -93,13 +94,19 @@ pub(crate) enum DdlChecks {
 	},
 	/// `DEFINE FIELD`: the table and the field as the catalog holds them, the
 	/// table's fields (`None` where they could not be read), and the
-	/// refusals of the definition's checks.
+	/// refusals of the definition's checks: `refused` of those the body makes
+	/// before `FLEXIBLE`'s, and `flexible` of `FLEXIBLE`'s. The record id
+	/// components an `id` definition names are not judged here: what they
+	/// are judged against includes the rows the table's views hold, which
+	/// the statements run before this one may change, so the statement judges
+	/// them when it runs (`FieldCheck::KeyComponents`), between the two.
 	DefineField {
 		existing_table: Option<Arc<crate::catalog::TableDefinition>>,
 		existing_field: Option<Arc<crate::catalog::FieldDefinition>>,
 		fields: Option<Arc<[crate::catalog::FieldDefinition]>>,
 		indexed: Option<FieldRefusal>,
 		refused: Option<FieldRefusal>,
+		flexible: Option<FieldRefusal>,
 	},
 	/// `REMOVE TABLE`, which checks nothing of the catalog when it is
 	/// planned: the tables a view reads from, and the edges of the relations
@@ -107,10 +114,16 @@ pub(crate) enum DdlChecks {
 	/// `StoreInstr::RefuseRemovingLightweight`).
 	RemoveTable,
 	/// `REMOVE FIELD` and `ALTER FIELD`: the table and the field as the
-	/// catalog holds them.
+	/// catalog holds them, and the refusal of the field's name against the
+	/// record id components of the table: a component name has no definition
+	/// of its own to remove or alter. Whether a definition still reads a
+	/// component of the `id` a `REMOVE FIELD` removes is judged when the
+	/// statement runs (`FieldCheck::IdUnread`), against the rows the views
+	/// over the table hold then.
 	Field {
 		existing_table: Option<Arc<crate::catalog::TableDefinition>>,
 		existing_field: Option<Arc<crate::catalog::FieldDefinition>>,
+		key_refusal: Option<FieldRefusal>,
 	},
 }
 
@@ -222,8 +235,34 @@ pub(in crate::exec::vm) async fn ddl_checks(
 					)
 					.await,
 				)?;
+				// The components an `id` names are judged when the statement
+				// runs; the clash of any other field with one reads only the
+				// catalog.
 				let refused = refusal(
-					crate::ddl::define::field::define_field_definition_validate(
+					async {
+						crate::ddl::define::field::define_field_definition_validate_clauses(
+							txn,
+							ns,
+							db,
+							&definition,
+						)
+						.await?;
+						if !definition.name.is_id() {
+							crate::ddl::define_field_statement_validate_key_components(
+								txn,
+								ns,
+								db,
+								&stmt.kind,
+								&definition,
+							)
+							.await?;
+						}
+						Ok(())
+					}
+					.await,
+				)?;
+				let flexible = refusal(
+					crate::ddl::define_field_statement_validate_flexible_restrictions(
 						txn,
 						ns,
 						db,
@@ -237,6 +276,7 @@ pub(in crate::exec::vm) async fn ddl_checks(
 					fields,
 					indexed,
 					refused,
+					flexible,
 				})
 			}
 			_ => Ok(DdlChecks::None),
@@ -256,9 +296,17 @@ pub(in crate::exec::vm) async fn ddl_checks(
 					return Ok(DdlChecks::None);
 				};
 				let table = crate::val::TableName::new(table);
+				let key_refusal = match (txn, ids) {
+					(Some(txn), Some((ns, db))) => key_name_refusal(
+						crate::ddl::key_scan::refuse_component_name(txn, ns, db, &table, &name)
+							.await,
+					)?,
+					_ => None,
+				};
 				Ok(DdlChecks::Field {
 					existing_table: table_of(&table).await?,
 					existing_field: field_of(&table, &name.to_raw_string()).await?,
+					key_refusal,
 				})
 			}
 			_ => Ok(DdlChecks::None),
@@ -278,9 +326,17 @@ pub(in crate::exec::vm) async fn ddl_checks(
 					return Ok(DdlChecks::None);
 				}
 				let table = crate::val::TableName::new(table);
+				let key_refusal = match (txn, ids) {
+					(Some(txn), Some((ns, db))) => key_name_refusal(
+						crate::ddl::key_scan::refuse_component_name(txn, ns, db, &table, &name)
+							.await,
+					)?,
+					_ => None,
+				};
 				Ok(DdlChecks::Field {
 					existing_table: table_of(&table).await?,
 					existing_field: field_of(&table, &name.to_raw_string()).await?,
+					key_refusal,
 				})
 			}
 			_ => Ok(DdlChecks::None),
@@ -299,10 +355,12 @@ fn field_definition(
 ) -> crate::catalog::FieldDefinition {
 	use crate::catalog;
 	use crate::expr::statements::define::field::DefineDefault;
-	catalog::FieldDefinition {
+	let mut definition = catalog::FieldDefinition {
 		name: name.clone(),
 		table: table.clone(),
-		field_kind: stmt.field_kind.clone(),
+		field_kind: None,
+		key: None,
+		key_part: None,
 		flexible: stmt.flexible,
 		readonly: stmt.readonly,
 		inline: stmt.inline,
@@ -333,7 +391,11 @@ fn field_definition(
 		auth_limit: Default::default(),
 		graphql_alias: stmt.graphql_alias.clone(),
 		graphql_deprecated: stmt.graphql_deprecated.clone(),
-	}
+	};
+	// The type and the names of the record id components it carries are set
+	// together, so the definition's key structure always matches its type.
+	definition.set_type(stmt.field_kind.clone(), stmt.key_names.clone());
+	definition
 }
 
 /// The definition `DEFINE TABLE` `stmt` forms for table `tb` with `view`, as
@@ -1198,6 +1260,23 @@ impl Lowering<'_, '_> {
 				definition,
 			});
 		}
+		// A relation or a view has no record id components to name: a table
+		// whose `id` names them is refused, whether its name is written or
+		// evaluated.
+		let conversion = match (&stmt.table_type, &stmt.view) {
+			(TableType::Relation(_), _) => Some(TableConversion::Relation),
+			(_, Some(_)) => Some(TableConversion::View),
+			_ => None,
+		};
+		if let Some(to) = conversion {
+			let table = self.load(name_op)?;
+			self.store(StoreInstr::RefuseNamedIdConversion {
+				ns,
+				db,
+				table,
+				to,
+			});
+		}
 		let stamp = self.register()?;
 		self.store(StoreInstr::NewUuid {
 			dst: stamp,
@@ -1573,6 +1652,7 @@ impl Lowering<'_, '_> {
 			fields,
 			indexed,
 			refused,
+			flexible,
 		} = self.ddl_checks()?
 		else {
 			// A database that does not exist yet has no catalog to check the
@@ -1677,6 +1757,7 @@ impl Lowering<'_, '_> {
 			}
 		}
 		let template = stored(&definition.to_stored(), "StoredFieldDefinition")?;
+		let template = self.constant(template);
 
 		self.store(StoreInstr::RefuseNoWrite);
 		// A computed field an index of the table covers is refused as its
@@ -1693,6 +1774,26 @@ impl Lowering<'_, '_> {
 		});
 		let (ns, db, database) = self.session_ids_and_database()?;
 		if let Some(refusal) = refused {
+			self.store(StoreInstr::RefuseField {
+				refusal,
+			});
+		}
+		// The record id components an `id` names, judged against the catalog
+		// and the rows of the table's views as the statements before this one
+		// leave them.
+		if name.is_id() {
+			let field = self.load(template)?;
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::KeyComponents {
+					field,
+					ns,
+					db,
+					kind: stmt.kind.clone(),
+				},
+			});
+			self.release(field);
+		}
+		if let Some(refusal) = flexible {
 			self.store(StoreInstr::RefuseField {
 				refusal,
 			});
@@ -1741,7 +1842,18 @@ impl Lowering<'_, '_> {
 				refusal,
 			});
 		}
-		let template = self.constant(template);
+		// A record id that names its components must admit every record the
+		// table holds, once the statement is known to define the field; the
+		// scan is skipped when the stored `id` already has the same structure.
+		if let Some(key) = definition.live_key() {
+			let table_reg = self.load(table_name)?;
+			self.store(StoreInstr::ValidateRecordKeys {
+				ns,
+				db,
+				table: table_reg,
+				key: Arc::clone(key),
+			});
+		}
 		let field = self.load(template)?;
 		let limit = self.register()?;
 		self.store(StoreInstr::SessionAuthLimit {
@@ -2686,6 +2798,7 @@ impl Lowering<'_, '_> {
 		let DdlChecks::Field {
 			existing_table,
 			existing_field,
+			key_refusal,
 		} = self.ddl_checks()?
 		else {
 			return Err(NotCovered::internal("a REMOVE FIELD mapped with no checks"));
@@ -2709,9 +2822,28 @@ impl Lowering<'_, '_> {
 				),
 			});
 		}
+		// A component of a named record id has no definition to remove, and the
+		// `id` stays while a definition reads a component, as the catalog and
+		// the rows of the table's views stand when the statement runs.
+		if let Some(refusal) = key_refusal {
+			self.store(StoreInstr::RefuseField {
+				refusal,
+			});
+		}
 		let (ns, db) = self.session_ids()?;
 		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
 		let tb = self.constant(Value::String(table.as_str().into()));
+		if name.is_id() {
+			let table_reg = self.load(tb)?;
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::IdUnread {
+					ns,
+					db,
+					table: table_reg,
+				},
+			});
+			self.release(table_reg);
+		}
 		let fd = self.constant(Value::String(fd.into()));
 		let key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb), ("fd", fd)])?;
 		let field = self.register()?;
@@ -2823,8 +2955,9 @@ impl Lowering<'_, '_> {
 		self.release(shown);
 
 		// Each column names a field the table defines, or a path beneath one
-		// whose type admits sub-fields, and no computed one; on a schemaless
-		// table a column may name no field at all.
+		// whose type admits sub-fields, and no computed one, or a component of
+		// the table's record id; on a schemaless table a column may name no
+		// field at all.
 		let schemafull = self.register()?;
 		self.get_field(table_def, "schemafull", schemafull);
 		let evaluated_cols = match written_cols {
@@ -2868,20 +3001,35 @@ impl Lowering<'_, '_> {
 				)?;
 				next.push(admitted);
 			}
-			let refused = self.emit(Instr::JumpIf {
-				cond: Operand::Reg(schemafull),
-				truthy: false,
-				target: 0,
-			});
+			// What neither the field nor its parent settles is the catalog's
+			// check of the column: a component of the table's record id passes
+			// as the whole column and is refused beneath it, and on a schemafull
+			// table any other path no field covers is missing.
 			let named = self.constant(Value::String(fd.as_str().into()));
 			let named = self.load(named)?;
-			self.store(StoreInstr::Raise {
-				error: StatementError::FdNotFound,
-				arg: named,
+			let list = self.register()?;
+			self.emit(Instr::NewArray {
+				dst: list,
 			});
+			self.emit(Instr::ArrayPush {
+				array: list,
+				value: Operand::Reg(named),
+			});
+			let table_name = self.load(tb)?;
+			let index_name = self.load(name.operand)?;
+			self.store(StoreInstr::CheckIndexColumns {
+				ns,
+				db,
+				table: table_name,
+				index: index_name,
+				columns: list,
+				schemafull,
+			});
+			self.release(table_name);
+			self.release(index_name);
+			self.release(list);
 			self.release(named);
 			let at = self.here();
-			self.patch(refused, at);
 			self.patch_all(next, at);
 		}
 		self.release(schemafull);
@@ -5309,6 +5457,19 @@ fn refusal_of(error: &anyhow::Error, what: &str) -> Lowered<FieldRefusal> {
 	})
 }
 
+/// The plan-time refusal of a field name against the record id components of
+/// its table, from the check that judged it; `None` when the name passes. A
+/// check that fails with anything but a refusal leaves the statement not
+/// covered.
+fn key_name_refusal(checked: anyhow::Result<()>) -> Lowered<Option<FieldRefusal>> {
+	match checked {
+		Ok(()) => Ok(None),
+		Err(error) => FieldRefusal::of(&error).map(Some).ok_or_else(|| {
+			NotCovered::internal(format!("a field name whose checks failed unexpectedly: {error}"))
+		}),
+	}
+}
+
 fn access_algorithm(alg: crate::expr::Algorithm) -> crate::catalog::Algorithm {
 	use crate::catalog::Algorithm as A;
 	use crate::expr::Algorithm;
@@ -5949,7 +6110,8 @@ impl Lowering<'_, '_> {
 	/// LIGHTWEIGHT relation, for a field that is `INLINE` only where the
 	/// planned catalog admits it. The stored field, read when the statement runs, has each altered
 	/// clause replaced, and the definition that forms is checked as the body
-	/// checks it — the `id` field's restrictions, `INLINE`'s, then `FLEXIBLE`'s — before
+	/// checks it — the `id` field's restrictions, the record id components it names, `INLINE`'s,
+	/// then `FLEXIBLE`'s, and the stored records against the record id the type names — before
 	/// it is written.
 	async fn alter_field(&mut self, stmt: &AlterFieldStatement) -> Lowered<()> {
 		use crate::expr::statements::alter::AlterKind;
@@ -5968,6 +6130,7 @@ impl Lowering<'_, '_> {
 		let DdlChecks::Field {
 			existing_table,
 			existing_field,
+			key_refusal,
 		} = self.ddl_checks()?
 		else {
 			return crate::exec::vm::host::out_of_line(|| self.alter_field_resolved(stmt)).await;
@@ -5991,8 +6154,16 @@ impl Lowering<'_, '_> {
 			..Default::default()
 		};
 		let mut fields: Vec<&str> = Vec::new();
+		// The type and the names of the record id components it carries are set
+		// together, so the stored type text carries the names.
 		match &stmt.kind {
-			AlterKind::Set(kind) => altered.field_kind = Some(kind.clone()),
+			AlterKind::Set(kind) => {
+				let names = match &stmt.key_names {
+					AlterKind::Set(names) => Some(names.clone()),
+					AlterKind::Drop | AlterKind::None => None,
+				};
+				altered.set_type(Some(kind.clone()), names);
+			}
 			AlterKind::Drop => {}
 			AlterKind::None => {}
 		}
@@ -6074,6 +6245,9 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("reference"),
 			AlterKind::None => {}
 		}
+		// The record id structure the statement gives the table, when it names
+		// components: the records are checked against it before it is written.
+		let scanned = altered.live_key().cloned();
 		let altered = match stored(&altered.to_stored(), "StoredFieldDefinition")? {
 			Value::Object(altered) => altered,
 			other => return Err(NotCovered::internal(format!("a stored field that is {other:?}"))),
@@ -6085,6 +6259,12 @@ impl Lowering<'_, '_> {
 			base: Base::Db,
 		});
 		let (ns, db) = self.session_ids()?;
+		// A component of a named record id has no definition to alter.
+		if let Some(refusal) = key_refusal {
+			self.store(StoreInstr::RefuseField {
+				refusal,
+			});
+		}
 		let (ns_op, db_op) = (Operand::Reg(ns), Operand::Reg(db));
 		let tb = self.constant(Value::String(table.as_str().into()));
 		let fd = self.constant(Value::String(fd.into()));
@@ -6128,6 +6308,19 @@ impl Lowering<'_, '_> {
 					field,
 				},
 			});
+			// Only a statement that sets or drops the type can change the record
+			// id components the definition names; any other keeps the structure
+			// that was checked when it was defined.
+			if !matches!(stmt.kind, AlterKind::None) {
+				self.store(StoreInstr::FieldCheck {
+					check: FieldCheck::KeyComponents {
+						field,
+						ns,
+						db,
+						kind: DefineKind::Overwrite,
+					},
+				});
+			}
 		}
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
 		let tb_name = self.load(tb)?;
@@ -6146,6 +6339,15 @@ impl Lowering<'_, '_> {
 					field,
 					table: table_def,
 				},
+			});
+		}
+		if let Some(key) = scanned {
+			let table_reg = self.load(tb)?;
+			self.store(StoreInstr::ValidateRecordKeys {
+				ns,
+				db,
+				table: table_reg,
+				key,
 			});
 		}
 		// `put_tb_field`.
@@ -6210,10 +6412,17 @@ impl Lowering<'_, '_> {
 		let name = crate::exec::vm::host::out_of_line(|| self.field_path(&stmt.name)).await?;
 		let table =
 			crate::exec::vm::host::out_of_line(|| self.name(&stmt.what, NameClause::Table)).await?;
-		let definition = crate::catalog::FieldDefinition {
-			name: crate::expr::Idiom::field("_"),
+		// The name is overwritten by the evaluated one before the definition is
+		// read back, so the stored type must already carry the record id
+		// component names: only the type of an `id` field can, and a statement
+		// that names components is parsed with the name `id` written.
+		let mut definition = crate::catalog::FieldDefinition {
+			name: crate::expr::Idiom::field(if stmt.key_names.is_some() {
+				"id"
+			} else {
+				"_"
+			}),
 			table: crate::val::TableName::new(Name::text_of(&stmt.what)),
-			field_kind: stmt.field_kind.clone(),
 			flexible: stmt.flexible,
 			readonly: stmt.readonly,
 			inline: stmt.inline,
@@ -6234,6 +6443,7 @@ impl Lowering<'_, '_> {
 			graphql_deprecated: stmt.graphql_deprecated.clone(),
 			..Default::default()
 		};
+		definition.set_type(stmt.field_kind.clone(), stmt.key_names.clone());
 		let template = stored(&definition.to_stored(), "StoredFieldDefinition")?;
 		self.store(StoreInstr::RealRunOnly);
 		let template = self.constant(template);
@@ -7816,4 +8026,305 @@ fn canonical_field_name(idiom: &crate::expr::Idiom) -> Option<crate::expr::Idiom
 		}
 	}
 	Some(crate::expr::Idiom(out))
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod key_component_tests {
+	use crate::exec::operators::test_util::TestDb;
+	use crate::exec::vm::program::{FieldCheck, FieldRefusal, Instr, Program, StoreInstr};
+	use crate::exec::vm::tests::{bind, planner};
+
+	/// The database the statements are lowered against: a table whose record
+	/// id names its components, one a permission reads, one a field reads
+	/// through a function it hands the record to, one a view that selects every
+	/// field holds rows of, one an index reads, a view, a relation and a plain
+	/// table.
+	const SCHEMA: &str = "DEFINE TABLE reading; \
+		 DEFINE FIELD id ON reading TYPE [city: string, time: datetime]; \
+		 DEFINE FUNCTION fn::city_of($r: any) { RETURN $r.city; }; \
+		 DEFINE FIELD id ON opaque TYPE [city: string, time: datetime]; \
+		 DEFINE FIELD label ON opaque COMPUTED fn::city_of($this); \
+		 DEFINE FIELD id ON stars TYPE [city: string, n: int]; \
+		 CREATE stars:['London', 1]; \
+		 DEFINE TABLE everything AS SELECT * FROM stars; \
+		 DEFINE FIELD temp ON reading TYPE int; \
+		 DEFINE TABLE watched PERMISSIONS FOR select WHERE city = 'London'; \
+		 DEFINE FIELD id ON watched TYPE [city: string, time: datetime]; \
+		 DEFINE TABLE plain; \
+		 DEFINE FIELD place ON plain TYPE string; \
+		 DEFINE TABLE by_place AS SELECT place, count() AS n FROM plain GROUP BY place; \
+		 DEFINE TABLE rel TYPE RELATION; \
+		 DEFINE TABLE tagged; \
+		 DEFINE INDEX by_tag ON tagged FIELDS tag;";
+
+	/// The program `sql` lowers to over [`SCHEMA`].
+	async fn lowered(db: &TestDb, sql: &str) -> Program {
+		let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+		let bound = bind(&ctx, sql).await;
+		let physical = crate::exec::vm::optimize::optimize(
+			crate::exec::vm::map::map(&planner(&ctx), &bound).await.expect("maps"),
+		);
+		let program =
+			crate::exec::vm::lower::lower(&planner(&ctx), &physical).await.expect("lowers");
+		ctx.txn().cancel().await.expect("cancel");
+		program
+	}
+
+	/// The store instructions of `program` and of the programs it holds.
+	fn store_instrs<'a>(program: &'a Program, out: &mut Vec<&'a StoreInstr>) {
+		for pipeline in program.pipelines.iter().chain(&program.host_code) {
+			for instr in &pipeline.code {
+				if let Instr::Store(store) = instr {
+					out.push(store);
+				}
+			}
+		}
+		for unit in program.units.iter() {
+			store_instrs(unit, out);
+		}
+	}
+
+	/// The refusals `program` makes of a field definition.
+	fn refusals(program: &Program) -> Vec<FieldRefusal> {
+		let mut stores = Vec::new();
+		store_instrs(program, &mut stores);
+		stores
+			.into_iter()
+			.filter_map(|store| match store {
+				StoreInstr::RefuseField {
+					refusal,
+				} => Some(refusal.clone()),
+				_ => None,
+			})
+			.collect()
+	}
+
+	/// What a field statement refuses of its own clauses, and of a field under
+	/// the name of a record id component, lowers to the refusal the body raises
+	/// against the catalog it reads; one that refuses neither lowers to none.
+	/// The components an `id` names, and the definitions reading them that
+	/// `REMOVE FIELD id` would strand, are judged when the statement runs
+	/// ([`the_record_id_components_of_the_id_are_judged_when_the_statement_runs`]).
+	#[tokio::test]
+	async fn the_clauses_of_a_field_definition_are_checked_when_it_is_lowered() {
+		let cases = [
+			("DEFINE FIELD id ON plain TYPE [place: string, time: datetime]", vec![]),
+			("DEFINE FIELD id ON rel TYPE [city: string, time: datetime]", vec![]),
+			(
+				"DEFINE FIELD id ON plain TYPE [zone: string, price: float]",
+				vec![FieldRefusal::IdComponentUnsupportedKind {
+					table: "plain".to_owned(),
+					component: "price".to_owned(),
+					kind: "float".to_owned(),
+				}],
+			),
+			(
+				"DEFINE FIELD id ON plain TYPE [zone: string, time: datetime] PERMISSIONS NONE",
+				vec![FieldRefusal::IdFieldSelectPermission("plain".to_owned())],
+			),
+			(
+				"DEFINE FIELD city ON reading TYPE string",
+				vec![FieldRefusal::IdComponentClash {
+					name: "city".to_owned(),
+					table: "reading".to_owned(),
+				}],
+			),
+			("DEFINE FIELD pressure ON reading TYPE int", vec![]),
+			(
+				"REMOVE FIELD city ON reading",
+				vec![FieldRefusal::IdComponentNotAField {
+					name: "city".to_owned(),
+					table: "reading".to_owned(),
+				}],
+			),
+			(
+				"ALTER FIELD time ON reading TYPE string",
+				vec![FieldRefusal::IdComponentNotAField {
+					name: "time".to_owned(),
+					table: "reading".to_owned(),
+				}],
+			),
+			("REMOVE FIELD id ON watched", vec![]),
+			("REMOVE FIELD id ON stars", vec![]),
+		];
+		let db = TestDb::new(SCHEMA).await;
+		for (sql, expected) in cases {
+			assert_eq!(refusals(&lowered(&db, sql).await), expected, "`{sql}`");
+		}
+	}
+
+	/// The error each statement of `sql` raises when it runs, in a database
+	/// [`SCHEMA`] leaves; `None` for one that succeeds.
+	async fn run_errors(sql: &str) -> Vec<Option<String>> {
+		let db = TestDb::new(SCHEMA).await;
+		db.datastore()
+			.execute(sql, &TestDb::owner(), None)
+			.await
+			.expect("the query runs")
+			.into_iter()
+			.map(|response| response.result.err().map(|error| error.to_string()))
+			.collect()
+	}
+
+	/// The record id components a `DEFINE FIELD id` names, and the definitions
+	/// a `REMOVE FIELD id` would leave reading a component, are judged when the
+	/// statement runs, against the catalog and the rows of the views over the
+	/// table as the statements before it leave them: a view that selects every
+	/// field reads every name once it holds a row, whether that row was written
+	/// before the block or by a statement of the block before the change.
+	#[tokio::test]
+	async fn the_record_id_components_of_the_id_are_judged_when_the_statement_runs() {
+		let under_wildcard = |table: &str, view: &str| {
+			Some(
+				FieldRefusal::IdComponentsUnderWildcardView {
+					table: table.to_owned(),
+					view: view.to_owned(),
+				}
+				.error()
+				.to_string(),
+			)
+		};
+		let cases: Vec<(&str, Vec<Option<String>>)> = vec![
+			(
+				"DEFINE FIELD id ON plain TYPE [place: string, time: datetime]",
+				vec![Some(
+					FieldRefusal::IdComponentShadowsField {
+						name: "place".to_owned(),
+						table: "plain".to_owned(),
+					}
+					.error()
+					.to_string(),
+				)],
+			),
+			("DEFINE FIELD id ON plain TYPE [zone: string, time: datetime]", vec![None]),
+			(
+				"DEFINE FIELD id ON rel TYPE [city: string, time: datetime]",
+				vec![Some(
+					FieldRefusal::IdComponentsOnRelation("rel".to_owned()).error().to_string(),
+				)],
+			),
+			(
+				"DEFINE FIELD id ON by_place TYPE [place: string, n: int]",
+				vec![Some(
+					FieldRefusal::IdComponentsOnView("by_place".to_owned()).error().to_string(),
+				)],
+			),
+			(
+				"DEFINE FIELD id ON tagged TYPE [tag: string, time: datetime]",
+				vec![Some(
+					FieldRefusal::IdComponentReadByExisting {
+						table: "tagged".to_owned(),
+						component: "tag".to_owned(),
+						what: "index".to_owned(),
+						name: "by_tag".to_owned(),
+					}
+					.error()
+					.to_string(),
+				)],
+			),
+			(
+				"REMOVE FIELD id ON watched",
+				vec![Some(
+					FieldRefusal::IdComponentInUse {
+						table: "watched".to_owned(),
+						component: "city".to_owned(),
+						what: "table permission".to_owned(),
+						name: "select".to_owned(),
+					}
+					.error()
+					.to_string(),
+				)],
+			),
+			("REMOVE FIELD id ON reading", vec![None]),
+			(
+				"REMOVE FIELD id ON opaque",
+				vec![Some(
+					FieldRefusal::IdComponentReadUnresolved {
+						table: "opaque".to_owned(),
+						component: "city".to_owned(),
+						what: "field".to_owned(),
+						name: "label".to_owned(),
+					}
+					.error()
+					.to_string(),
+				)],
+			),
+			(
+				"DEFINE FIELD OVERWRITE id ON stars TYPE [place: string, n: int]",
+				vec![under_wildcard("stars", "everything")],
+			),
+			("REMOVE FIELD id ON stars", vec![under_wildcard("stars", "everything")]),
+			// The rows the block's own statements leave decide.
+			("{ DELETE stars; REMOVE FIELD id ON stars; }", vec![None]),
+			(
+				"DEFINE TABLE fresh AS SELECT * FROM opaque; \
+				 { CREATE opaque:['Paris', d'2024-01-01T00:00:00Z'] RETURN NONE; \
+				 DEFINE FIELD OVERWRITE id ON opaque TYPE [time: datetime, city: string]; }",
+				vec![None, under_wildcard("opaque", "fresh")],
+			),
+			// `IF NOT EXISTS` over an existing `id` judges nothing.
+			("DEFINE FIELD IF NOT EXISTS id ON stars TYPE [place: string, n: int]", vec![None]),
+		];
+		for (sql, expected) in cases {
+			assert_eq!(run_errors(sql).await, expected, "`{sql}`");
+		}
+	}
+
+	/// The scan of the stored records, the run-time check of the components
+	/// and the refusal of a conversion are instructions of the statements that
+	/// need them: every definition, alteration of the type or removal of the
+	/// `id` checks its components, a definition of an id that names none scans
+	/// no record, and a field that is not the id, an alteration that keeps the
+	/// type and a table that stays a plain table lower to none.
+	#[tokio::test]
+	async fn the_instructions_of_the_record_id_components_are_lowered_only_where_they_apply() {
+		// The statement, then how many record scans, run-time checks of the
+		// components and conversion refusals it lowers to.
+		let cases = [
+			("DEFINE FIELD id ON plain TYPE string", 0, 1, 0),
+			("DEFINE FIELD id ON plain TYPE [zone: string, time: datetime]", 1, 1, 0),
+			("DEFINE FIELD pressure ON reading TYPE int", 0, 0, 0),
+			("REMOVE FIELD id ON reading", 0, 1, 0),
+			("REMOVE FIELD temp ON reading", 0, 0, 0),
+			("ALTER FIELD id ON reading TYPE [city: string, time: datetime]", 1, 1, 0),
+			("ALTER FIELD id ON reading COMMENT 'c'", 0, 0, 0),
+			("ALTER FIELD id ON plain TYPE string", 0, 1, 0),
+			("ALTER FIELD id ON plain DROP TYPE", 0, 1, 0),
+			("ALTER FIELD temp ON reading COMMENT 'c'", 0, 0, 0),
+			("DEFINE TABLE OVERWRITE plain SCHEMAFULL", 0, 0, 0),
+			("DEFINE TABLE OVERWRITE plain TYPE RELATION", 0, 0, 1),
+			("DEFINE TABLE OVERWRITE plain AS SELECT * FROM reading", 0, 0, 1),
+			("ALTER TABLE plain COMMENT 'c'", 0, 0, 0),
+			("ALTER TABLE rel COMMENT 'c'", 0, 0, 0),
+		];
+		let db = TestDb::new(SCHEMA).await;
+		for (sql, scans, checks, conversions) in cases {
+			let program = lowered(&db, sql).await;
+			let mut stores = Vec::new();
+			store_instrs(&program, &mut stores);
+			let count = |wanted: fn(&StoreInstr) -> bool| {
+				stores.iter().filter(|store| wanted(store)).count()
+			};
+			assert_eq!(
+				count(|store| matches!(store, StoreInstr::ValidateRecordKeys { .. })),
+				scans,
+				"record scans of `{sql}`"
+			);
+			assert_eq!(
+				count(|store| matches!(
+					store,
+					StoreInstr::FieldCheck {
+						check: FieldCheck::KeyComponents { .. } | FieldCheck::IdUnread { .. }
+					}
+				)),
+				checks,
+				"component checks of `{sql}`"
+			);
+			assert_eq!(
+				count(|store| matches!(store, StoreInstr::RefuseNamedIdConversion { .. })),
+				conversions,
+				"conversion refusals of `{sql}`"
+			);
+		}
+	}
 }

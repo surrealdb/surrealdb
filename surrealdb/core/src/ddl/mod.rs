@@ -22,6 +22,7 @@
 pub(crate) mod alter;
 pub(crate) mod define;
 pub(crate) mod grant;
+pub(crate) mod key_scan;
 
 /// The general route into the engine, named here because a schema
 /// statement is its most frequent caller. See [`crate::exec::entry`].
@@ -38,6 +39,7 @@ pub(crate) use self::define::field::{
 	define_field_statement_validate_computed_cycles,
 	define_field_statement_validate_computed_options,
 	define_field_statement_validate_flexible_restrictions,
+	define_field_statement_validate_key_components,
 	define_field_statement_validate_reference_options,
 };
 pub(crate) use self::define::user::{

@@ -20,6 +20,37 @@ impl<'a, 's> Parser<'a, 's> {
 		self.kind_with(true)
 	}
 
+	/// The `TYPE` of a field named `id`: a kind whose outermost tuple may name
+	/// its components, as in `[city: string, time: datetime]`. A tuple that is
+	/// not the first token of the kind, or whose first element is not a name
+	/// followed by `:`, is read as an ordinary kind.
+	pub(crate) fn id_kind(&mut self) -> R<NodeId> {
+		self.keyed_at = self.tok.start;
+		let res = self.kind();
+		self.keyed_at = u32::MAX;
+		res
+	}
+
+	/// A component name and its `:`, pushing the `Name`. Names are identifiers,
+	/// escaped or not, keywords included; a name not followed by `:` is not a
+	/// component name.
+	fn component_name(&mut self) -> R<()> {
+		let t = self.tok;
+		if !t.is_ident() || self.peek1().kind != T::Colon {
+			return Err(self.unexpected("a component name"));
+		}
+		self.bump();
+		let op = if t.kind == T::EscIdent {
+			1
+		} else {
+			0
+		};
+		let name = self.leaf(Tag::Name, op, t);
+		self.vals.push(name);
+		self.bump();
+		Ok(())
+	}
+
 	fn kind_with(&mut self, single: bool) -> R<NodeId> {
 		let base = self.frames.len();
 		self.push_frame(Frame::Atom {
@@ -155,14 +186,35 @@ impl<'a, 's> Parser<'a, 's> {
 					Frame::KindTuple {
 						start,
 						mark,
+						named,
 					} => {
 						self.vals.push(v);
-						self.eat(T::Comma);
-						if self.eat(T::RBracket) {
+						// A named tuple separates its elements with commas and
+						// allows one after the last; an unnamed tuple takes them
+						// or leaves them.
+						let closed = if !named {
+							self.eat(T::Comma);
+							self.eat(T::RBracket)
+						} else if self.eat(T::Comma) {
+							self.eat(T::RBracket)
+						} else if self.eat(T::RBracket) {
+							true
+						} else {
+							return Err(self.unexpected("`,` or `]`"));
+						};
+						if closed {
 							self.pop_frame();
 							let (list, d) = self.list_from(mark);
-							v = self.node(Tag::Kind, k::LIT_ARRAY, list, 0, start, d)?;
+							let code = if named {
+								k::LIT_KEYED
+							} else {
+								k::LIT_ARRAY
+							};
+							v = self.node(Tag::Kind, code, list, 0, start, d)?;
 						} else {
+							if named {
+								self.component_name()?;
+							}
 							self.push_alts(false)?;
 							continue 'want;
 						}
@@ -262,10 +314,20 @@ impl<'a, 's> Parser<'a, 's> {
 					let idx = self.empty_list();
 					return self.node(Tag::Kind, k::LIT_ARRAY, idx, 0, t.start, 0).map(Some);
 				}
+				// Only the opening tuple of an `id` field's `TYPE` names its
+				// components; the lookahead runs before the first element is read
+				// as a kind, since component names may be kind keywords.
+				let named = self.keyed_at == t.start
+					&& self.tok.is_ident()
+					&& self.peek1().kind == T::Colon;
 				self.push_frame(Frame::KindTuple {
 					start: t.start,
 					mark: self.vals.len() as u32,
+					named,
 				})?;
+				if named {
+					self.component_name()?;
+				}
 				self.push_alts(false)?;
 				return Ok(None);
 			}

@@ -289,6 +289,12 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::RefuseRedefiningTable {
 			..
 		}
+		| StoreInstr::RefuseNamedIdConversion {
+			..
+		}
+		| StoreInstr::ValidateRecordKeys {
+			..
+		}
 		| StoreInstr::Get {
 			..
 		}

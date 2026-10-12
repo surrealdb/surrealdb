@@ -49,8 +49,9 @@ use surrealdb_expr::parser;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::api_path::Path;
+use crate::catalog::KeyStructure;
 use crate::expr::logical::{LogicalExpr, LogicalOp};
-use crate::expr::{Block, Cond, Expr, Fields, Idiom, Kind};
+use crate::expr::{Block, Cond, Expr, Fields, Idiom, KeyNames, Kind, KindLiteral};
 use crate::val::Value;
 
 /// A type that round-trips through the canonical SurrealQL text stored in
@@ -160,6 +161,39 @@ impl SurqlText<Expr> {
 	/// they came from.
 	pub fn to_logical(&self) -> LogicalExprText {
 		LogicalExprText::from_raw(self.text.clone())
+	}
+}
+
+impl SurqlText<Kind> {
+	/// The text of the type of an `id` field whose components are named, in the
+	/// form the `DEFINE FIELD` statement writes it, as in
+	/// `[city: string, time: datetime]`. The names and the types come from `key`,
+	/// so the text agrees with the structure by construction.
+	///
+	/// A structure with no names, which no `id` field has, renders as the plain
+	/// tuple.
+	pub fn new_keyed(key: &KeyStructure) -> Self {
+		let kinds: Vec<Kind> = key
+			.components
+			.iter()
+			.map(|component| component.declared.clone().unwrap_or(Kind::Any))
+			.collect();
+		match &key.names {
+			Some(names) => Self::from_raw(names.fmt_keyed(&kinds).to_sql()),
+			None => Self::new(&Kind::Literal(KindLiteral::Array(kinds))),
+		}
+	}
+
+	/// Re-parses the text of the type of an `id` field: [`SurqlText::compile`],
+	/// except that the outermost tuple may name its components, which are returned
+	/// beside the kind. Text with no component names compiles to its plain kind,
+	/// with no names.
+	///
+	/// Reading never refuses a table over its names: names that do not form a valid
+	/// list (a repeat, a reserved name) are dropped with a warning, and the kind is
+	/// returned without them.
+	pub fn compile_keyed(&self) -> anyhow::Result<(Kind, Option<KeyNames>)> {
+		Ok(parser::id_kind_for_definition(&self.text)?)
 	}
 }
 
@@ -782,5 +816,84 @@ mod tests {
 			.expect("spawning the deep-compile thread")
 			.join()
 			.expect("deep-compile thread panicked");
+	}
+
+	/// The text of a type that names its components round-trips: compiling it
+	/// yields the plain tuple and the names, and rendering the structure built
+	/// from them yields the same text.
+	#[test]
+	fn keyed_kind_text_round_trips() {
+		for text in [
+			"[city: string, time: datetime]",
+			"[`my city`: string]",
+			"[`value`: int, string: string, `option`: int]",
+			"[a: record<person>, b: bool, c: uuid, d: duration]",
+		] {
+			let (kind, names) = KindText::from_raw(text).compile_keyed().unwrap();
+			let names = names.unwrap_or_else(|| panic!("`{text}` names its components"));
+			assert!(
+				matches!(&kind, Kind::Literal(KindLiteral::Array(kinds)) if kinds.len() == names.len())
+			);
+
+			let key = KeyStructure::from_stored_id_field(&kind, &names).unwrap();
+			assert_eq!(KindText::new_keyed(&key).as_str(), text);
+		}
+	}
+
+	/// Text with no component names compiles to its plain kind, with no names.
+	#[test]
+	fn unnamed_kind_text_compiles_to_the_plain_kind() {
+		for text in
+			["[string, int]", "[]", "record<person>", "string | int", "array<string>", "any"]
+		{
+			let text = KindText::from_raw(text);
+			let (kind, names) = text.compile_keyed().unwrap();
+			assert_eq!(names, None, "{}", text.as_str());
+			assert_eq!(kind, text.compile().unwrap(), "{}", text.as_str());
+		}
+	}
+
+	/// Only the id compiles names: the plain compile of the same text refuses
+	/// them.
+	#[test]
+	fn plain_kind_text_refuses_names() {
+		assert!(KindText::from_raw("[city: string, time: datetime]").compile().is_err());
+		assert!(KindText::from_raw("[city: string, time: datetime]").compile_keyed().is_ok());
+	}
+
+	/// Names that cannot form a valid list (a repeat, a reserved name) are dropped
+	/// when the text is read: the type compiles to the plain tuple with no names, so
+	/// that a table is never unreadable over them.
+	#[test]
+	fn keyed_kind_text_with_invalid_names_compiles_without_names() {
+		for (text, kinds) in [
+			("[a: string, a: int]", vec![Kind::String, Kind::Int]),
+			("[a: string, `a`: int]", vec![Kind::String, Kind::Int]),
+			("[id: string]", vec![Kind::String]),
+			("[in: string, b: int]", vec![Kind::String, Kind::Int]),
+			("[a: bool, out: int]", vec![Kind::Bool, Kind::Int]),
+		] {
+			let (kind, names) = KindText::from_raw(text).compile_keyed().unwrap();
+			assert_eq!(kind, Kind::Literal(KindLiteral::Array(kinds)), "{text}");
+			assert_eq!(names, None, "{text}");
+		}
+	}
+
+	/// Text that is not a type, or that names something other than the whole type,
+	/// does not compile.
+	#[test]
+	fn keyed_kind_text_that_is_not_a_type_does_not_compile() {
+		for text in ["[a: string, int]", "[a: string b: int]", "[a: string] | none"] {
+			assert!(KindText::from_raw(text).compile_keyed().is_err(), "{text}");
+		}
+	}
+
+	/// A structure that has no names renders as the plain tuple.
+	#[test]
+	fn a_structure_without_names_renders_as_the_plain_tuple() {
+		let (kind, names) = KindText::from_raw("[a: string, b: datetime]").compile_keyed().unwrap();
+		let mut key = KeyStructure::from_stored_id_field(&kind, &names.unwrap()).unwrap();
+		key.names = None;
+		assert_eq!(KindText::new_keyed(&key).as_str(), "[string, datetime]");
 	}
 }

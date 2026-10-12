@@ -2977,6 +2977,187 @@ mod tests {
 			.expect("own-tenant RPC use must be allowed");
 	}
 
+	/// A root owner's session on `test`/`test`, over a database that holds
+	/// `reading`, a table whose `id` names the components `city` and `time`.
+	async fn keyed_rpc() -> (DurableRpc, Uuid) {
+		let db = crate::exec::operators::test_util::TestDb::new(
+			"DEFINE TABLE reading SCHEMALESS;
+			DEFINE FIELD id ON reading TYPE [city: string, time: datetime];",
+		)
+		.await;
+		let rpc = DurableRpc::new(Arc::clone(db.datastore()));
+		let sid = Uuid::from_u128(51);
+		let session = Session::owner().with_ns("test").with_db("test");
+		rpc.set_session(sid, Arc::new(RwLock::new(session)));
+		(rpc, sid)
+	}
+
+	/// The value `method` answers with for `params`, or its failure.
+	async fn answer(
+		rpc: &DurableRpc,
+		sid: Uuid,
+		method: Method,
+		params: Vec<PublicValue>,
+	) -> Result<PublicValue, surrealdb_types::Error> {
+		match rpc.execute(None, sid, Some(sid), method, params.into()).await? {
+			DbResult::Other(value) => Ok(value),
+			other => panic!("`{method}` answered {other:?}"),
+		}
+	}
+
+	/// The London reading of the first of January, as a record id and as the
+	/// record `temp` leaves it.
+	fn london(temp: i64) -> (PublicValue, PublicValue) {
+		let id = crate::syn::value("reading:['London', d'2024-01-01T00:00:00Z']").unwrap();
+		let record = crate::syn::value(&format!(
+			"{{ city: 'London', id: reading:['London', d'2024-01-01T00:00:00Z'], temp: {temp}, time: d'2024-01-01T00:00:00Z' }}"
+		))
+		.unwrap();
+		(id, record)
+	}
+
+	/// The components of a record id are derived fields, so `create` takes the
+	/// key from the ones its content carries and refuses a content that
+	/// leaves one out: no key is drawn at random for it.
+	#[tokio::test]
+	async fn create_rpc_derives_the_key_from_the_components_of_its_content() {
+		let (rpc, sid) = keyed_rpc().await;
+		let (_, record) = london(1);
+		let created = answer(
+			&rpc,
+			sid,
+			Method::Create,
+			vec![
+				PublicValue::String("reading".to_owned()),
+				crate::syn::value("{ city: 'London', time: d'2024-01-01T00:00:00Z', temp: 1 }")
+					.unwrap(),
+			],
+		)
+		.await
+		.expect("the content names every component");
+		assert_eq!(created, record);
+
+		let refused = answer(
+			&rpc,
+			sid,
+			Method::Create,
+			vec![
+				PublicValue::String("reading".to_owned()),
+				crate::syn::value("{ city: 'London', temp: 2 }").unwrap(),
+			],
+		)
+		.await
+		.expect_err("the content leaves the time out");
+		assert_eq!(
+			refused.to_string(),
+			"Cannot create a record in `reading` without the record id component `time`: set `time`, give the record id, or define a DEFAULT on the `id` field"
+		);
+	}
+
+	/// `merge` may restate a component of the record id and may not change
+	/// it; the refusal names the value written, and the record is as it was.
+	#[tokio::test]
+	async fn merge_rpc_cannot_change_a_component_of_the_record_id() {
+		let (rpc, sid) = keyed_rpc().await;
+		let (id, _) = london(1);
+		answer(
+			&rpc,
+			sid,
+			Method::Create,
+			vec![
+				PublicValue::String("reading".to_owned()),
+				crate::syn::value("{ city: 'London', time: d'2024-01-01T00:00:00Z', temp: 1 }")
+					.unwrap(),
+			],
+		)
+		.await
+		.expect("the create runs");
+
+		let (_, restated) = london(2);
+		let merged = answer(
+			&rpc,
+			sid,
+			Method::Merge,
+			vec![id.clone(), crate::syn::value("{ city: 'London', temp: 2 }").unwrap()],
+		)
+		.await
+		.expect("restating a component is allowed");
+		assert_eq!(merged, restated);
+
+		let refused = answer(
+			&rpc,
+			sid,
+			Method::Merge,
+			vec![id.clone(), crate::syn::value("{ city: 'Paris' }").unwrap()],
+		)
+		.await
+		.expect_err("a component cannot be changed");
+		assert_eq!(
+			refused.to_string(),
+			"Found 'Paris' for the `city` field, but it is part of the record id of `reading` and does not match it"
+		);
+
+		let read = answer(&rpc, sid, Method::Select, vec![id]).await.expect("the select runs");
+		assert_eq!(read, restated);
+	}
+
+	/// `patch` may restate a component of the record id and may not change it,
+	/// whichever operation does: the refusal names the value written, and the
+	/// record is as it was.
+	#[tokio::test]
+	async fn patch_rpc_cannot_change_a_component_of_the_record_id() {
+		let (rpc, sid) = keyed_rpc().await;
+		let (id, _) = london(1);
+		answer(
+			&rpc,
+			sid,
+			Method::Create,
+			vec![
+				PublicValue::String("reading".to_owned()),
+				crate::syn::value("{ city: 'London', time: d'2024-01-01T00:00:00Z', temp: 1 }")
+					.unwrap(),
+			],
+		)
+		.await
+		.expect("the create runs");
+
+		let (_, patched) = london(3);
+		let applied = answer(
+			&rpc,
+			sid,
+			Method::Patch,
+			vec![
+				id.clone(),
+				crate::syn::value(
+					"[{ op: 'replace', path: '/city', value: 'London' }, { op: 'replace', path: '/temp', value: 3 }]",
+				)
+				.unwrap(),
+			],
+		)
+		.await
+		.expect("restating a component is allowed");
+		assert_eq!(applied, patched);
+
+		let refused = answer(
+			&rpc,
+			sid,
+			Method::Patch,
+			vec![
+				id.clone(),
+				crate::syn::value("[{ op: 'replace', path: '/city', value: 'Paris' }]").unwrap(),
+			],
+		)
+		.await
+		.expect_err("a component cannot be changed");
+		assert_eq!(
+			refused.to_string(),
+			"Found 'Paris' for the `city` field, but it is part of the record id of `reading` and does not match it"
+		);
+
+		let read = answer(&rpc, sid, Method::Select, vec![id]).await.expect("the select runs");
+		assert_eq!(read, patched);
+	}
+
 	/// Counts `on_rpc_complete` calls, reporting itself as a no-op shell or not.
 	///
 	/// A real observer never lies about [`ExecutionObserver::is_noop`] — only

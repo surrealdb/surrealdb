@@ -31,7 +31,7 @@ use surrealdb_strand::TableName;
 
 use super::query::{Query, TopLevelExpr};
 use super::{Lower, Options, Reject};
-use crate::expr::{Block, Expr, Fields, Function, Idiom, Kind, Literal};
+use crate::expr::{Block, Expr, Fields, Function, Idiom, KeyNames, Kind, Literal};
 
 /// The most nodes, and twice that many `extra` slots, an arena keeps between
 /// parses on one thread. A parse that grew it further hands the memory back.
@@ -266,6 +266,27 @@ pub fn idiom(src: &str, settings: &Settings, require_all: bool) -> Result<Idiom,
 /// Parses a kind without the enclosing `<` `>`.
 pub fn kind(src: &str, settings: &Settings, require_all: bool) -> Result<Kind, Error> {
 	entry(src, settings, Entry::Kind, require_all, |l, root| l.kind(root))
+}
+
+/// Parses the `TYPE` of a field named `id`, without the enclosing `<` `>`: a kind
+/// whose outermost tuple may name its components.
+///
+/// With `stored`, the text is a definition read back from the catalog, and names
+/// that do not form a valid list are dropped instead of refused
+/// ([`Lower::stored_id_type`]); otherwise they are a syntax error.
+pub fn id_kind(
+	src: &str,
+	settings: &Settings,
+	require_all: bool,
+	stored: bool,
+) -> Result<(Kind, Option<KeyNames>), Error> {
+	entry(src, settings, Entry::IdKind, require_all, |l, root| {
+		if stored {
+			l.stored_id_type(root)
+		} else {
+			l.field_type(root, true)
+		}
+	})
 }
 
 /// Parses a projection list, or `VALUE` and one selector.

@@ -1,0 +1,20 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "GraphQL list queries return the components a record id names as fields, and filter and order by them"
+
+[[test.results]]
+value = "{ all: [{ city: 'London', temp: 4, time: '2024-01-01T00:00:00+00:00' }, { city: 'London', temp: 5, time: '2024-01-02T00:00:00+00:00' }, { city: 'Paris', temp: 6, time: '2024-01-01T00:00:00+00:00' }], london: [{ temp: 5 }, { temp: 4 }] }"
+*/
+query {
+	all: readings(order: {asc: temp}) {
+		city
+		time
+		temp
+	}
+	london: readings(filter: {city: {eq: "London"}}, order: {desc: time}) {
+		temp
+	}
+}

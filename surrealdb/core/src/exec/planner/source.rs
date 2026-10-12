@@ -200,6 +200,14 @@ impl<'ctx> Planner<'ctx> {
 				crate::catalog::TableType::Relation(rel) if !rel.lightweight => {}
 				_ => return None,
 			}
+			// A component a record id names is derived from the id and never
+			// stored in the payload: a table whose ids name components takes
+			// no payload predicate.
+			if crate::catalog::table_key(&def, &fields)
+				.is_some_and(|key| key.origin == crate::catalog::KeyOrigin::IdField)
+			{
+				return None;
+			}
 			let inline = crate::doc::inline_fields(&fields);
 			let names: Vec<String> =
 				inline.iter().map(|f| crate::doc::inline_field_name(f)).collect();

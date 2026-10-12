@@ -624,6 +624,22 @@ later clause overrides an earlier one, and `syn`'s checks on combinations of
 clauses (`PASSWORD` with `PASSHASH`, `RETRY` before `ASYNC`, index column
 counts, DiskANN distance and type) run there.
 
+**Named record-id components.** The `TYPE` of the field `id` may be a tuple whose
+elements are named, `[city: string, time: datetime]`. The parser reads names
+only when the field name is the bare identifier `id` (escaped or not; not a
+parameter, a parenthesised expression or an idiom of several parts) and the
+tuple is the first token of the `TYPE`. `id_kind` records that token's start in
+`keyed_at` around one `kind()` call, and the tuple frame (`KindTuple { named }`)
+is the only place that tests it, so in every other position `[ident:` is an
+ordinary tuple kind and fails expecting a kind name. `Entry::IdKind` is the same
+rule as an entry point of its own. A named tuple is a `kind::LIT_KEYED` node
+holding alternating name `Name` leaves and kinds. Names are identifiers, with
+keywords and escaped identifiers included and strings and numbers not,
+separated by commas with one optional trailing comma, and every element has
+one. Lowering checks the names (`id`, `in` and `out` are reserved, a name is
+used once) and refuses `LIT_KEYED` anywhere but as the whole `TYPE`, as in
+`[a: string] | none`.
+
 **Expressions** use a Pratt engine that keeps its pending work on
 `Vec<Frame>`.
 
@@ -961,8 +977,8 @@ recursion and destructuring parts, JavaScript functions, `mod::`, `silo::`
 and `ml::` calls, geometry points) and all literals.
 
 **Entry points:** `parse_entry` parses an expression in field context, a
-block, a plain idiom, a kind or a field list alone, with or without
-requiring the whole input (`syn`'s fresh and `*_for_definition` forms);
+block, a plain idiom, a kind, the `TYPE` of the field `id` (`Entry::IdKind`) or a
+field list alone, with or without requiring the whole input (`syn`'s fresh and `*_for_definition` forms);
 `parse_statement` serves `StatementStream`. Every `syn` entry point the
 engine calls to parse a query, a stored definition, an expression or a
 client-supplied value has a parser-next counterpart. Still on `syn` alone:

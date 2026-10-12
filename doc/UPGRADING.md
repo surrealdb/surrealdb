@@ -10,7 +10,7 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, and JACCARD/PEARSON as distances
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, and named record-id components
 
 **Impact**:
 
@@ -50,6 +50,24 @@ For the release **process** (how releases are cut and shipped), see
 - A value containing a deeply nested `GeometryCollection` that was stored by an
   earlier release may now return `The value is nested too deeply` when read. It
   can be repaired in place by overwriting the field; see below.
+- A table whose `id` field names the components of its array ids, such as
+  `DEFINE FIELD id ON reading TYPE [city: string, time: datetime]`, cannot be
+  read by an earlier release. Defining one while any node still runs an earlier
+  release leaves that node unable to load the table. Nothing is stored
+  differently, so removing the names makes the table readable again.
+- Naming the components of a table that already holds records reads every record
+  inside the defining statement and refuses the statement, defining nothing,
+  when one does not fit. An int component holds only ints: a table that holds
+  `['a', 5.0]` where the structure needs an int is converted by copying it into
+  a new table.
+- A retention `DELETE` over such a table takes its cutoff as a value
+  (`LET $cut = time::now() - 30d;`), not as a call. A clock read inside a
+  mutation's `WHERE` is evaluated per row and bounds no range.
+- An aggregated view's plan can read a key range over its group columns, and an
+  `UPDATE` or `DELETE` of a view whose `WHERE` on a group alias selects no
+  stored row answers `[]` where it raised the refusal that a view is read-only.
+- `surrealdb-catalog`, `surrealdb-expr` and `surrealdb-parser-next` gain public
+  items that a struct literal or an exhaustive `match` must account for.
 - A B-tree index over a field with no declared type that was built by an
   earlier release plans every query as if the field could hold an array:
   `ORDER BY` over it sorts instead of reading the index in order, and a scan
@@ -244,6 +262,405 @@ UPDATE deep:1 SET g = NONE;
 Nothing a current release stores can newly reach this state: the write guard now
 counts the same `GeometryCollection` nesting the read path does, so a value that
 would be unreadable is rejected at the write instead.
+
+### A named record id cannot be read by an earlier release
+
+`DEFINE FIELD id ON reading TYPE [city: string, time: datetime]` stores the
+type of the field as the text `[city: string, time: datetime]`, and a node loads
+a table's field definitions by parsing that text. An earlier release does not
+accept a name inside an array type. On 3.3.0-beta.3 the statement answers
+
+```
+Parse error: Unexpected token `an identifier`, expected a kind name
+```
+
+An earlier node that loads the same text from the catalog has the same parser,
+so a statement that needs the table's fields fails there. A node may hold a
+table's definitions in a cache, so the failure can appear on a different node
+and later than the `DEFINE` that caused it.
+
+Nothing else about the table differs from a table whose `id` is an unnamed array
+type. The record keys, the record bodies, the index entries, the changefeed
+entries and the rows of an aggregated view are laid out as before, and a
+component is never stored in a record body: it is read from the key. That is why
+removing the names restores a table an earlier release can read.
+
+A dump of a database holding a named id carries the names in its
+`DEFINE FIELD id` statement. An earlier release fails that statement on import,
+and a `DEFINE INDEX` over a component that follows it names a field the earlier
+release does not derive.
+
+**What to do**: define names only when every process that opens the datastore
+runs this release: every server node, every embedded application, and every
+`surreal` command pointed at a datastore path rather than at a server. Leave a
+table's `id` as an unnamed array type until then, and restore a dump that
+carries names only onto this release.
+
+### Rolling upgrades and going back
+
+The feature changes nothing that is stored until a table's `id` is given names,
+so the nodes of a rolling upgrade have nothing to agree on before then. Naming
+is the one step an earlier node cannot follow:
+
+1. Upgrade every node to this release.
+2. Define the names after the last earlier node has gone, and not before.
+
+Downgrades are not covered by the upgrade tests. To make a table with names
+readable by an earlier release, on this release and before the binary is
+replaced:
+
+1. Remove every index over a component, and remove or rewrite every view, table
+   permission, event and field clause that reads a name, so that it reads the key
+   as `id[0]`, `id[1]` and so on. A clause that hands the record to a function
+   (`fn::city_of($this)`), calls a function evaluated against the record, or
+   reads a field by a name it computes (`type::field($name)`) counts as reading
+   every name. Remove every view that selects `*` from the table and holds rows,
+   and define it again after the next step. The change in the next step is
+   refused while one of these remains, and the error names it. Readers in other
+   tables are not found: a clause that reads a component through a record link
+   or a graph hop into the table (`prev.city`), or a statement over another
+   table that reads this one, has to be found by hand.
+2. Remove the names: `ALTER FIELD id ON reading TYPE [string, datetime]`.
+3. If the application reads the components as fields, write them into the record
+   bodies, which is possible only now that the names are gone:
+   `UPDATE reading SET city = id[0], time = id[1];`, which rewrites every record.
+   Records written while the names were defined hold neither field, because a
+   component is read from the key and never stored. Define the indexes again over
+   the stored fields afterwards.
+
+An earlier release then reads the table as an array id with those fields, and
+reads no component for a record whose body lacks the field.
+
+### What naming the components checks
+
+`DEFINE FIELD id ON reading TYPE [city: string, time: datetime]` and
+`ALTER FIELD id` to a named type read every record of the table before they
+define anything. The scan runs in the transaction of the statement and honours
+its timeout and cancellation. The statement is refused, and the table is left
+exactly as it was, when:
+
+- a record's id is not an array, or an element is not of its component's type;
+- a record stores a field under a component's name with a value that differs
+  from its key. A stored copy equal to the key is accepted, and is cut at the
+  record's next write;
+- an `int` position holds a float or a decimal (see the next section);
+- a record's id holds a datetime outside the years 0000 to 9999. Such an id is
+  stored as text that does not read back as a datetime, so no statement can read
+  that record's id, on this release or an earlier one. The refusal says so and,
+  because the id cannot be read, names no record:
+  ``the existing record in `reading` whose record id cannot be read does not
+  match it (a record id holding a datetime outside the years 0000 to 9999 cannot
+  be read back)``;
+- a name is already a field of the table, or an index or a view over the table
+  already reads a stored field of that name, since the name would then mean the
+  component instead. An index `COUNT` condition or a view that hands the record
+  to a function (`SELECT fn::city_of($this) AS c FROM reading`) may read any
+  name, and counts as reading it;
+- a view over the table selects every field (`SELECT *`, alone or beside other
+  fields) and holds rows. Its rows hold the fields of the records they were
+  written from, and naming the components would not rewrite them: rows written
+  afterwards would carry `city` and `time` and the old rows would not, so a
+  filter on a component would miss them. Remove the view, name the components
+  and define the view again, in one transaction, which fills it again from the
+  table:
+
+  ```surql
+  BEGIN;
+  REMOVE TABLE v;
+  DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+  DEFINE TABLE v AS SELECT * FROM reading;
+  COMMIT;
+  ```
+
+  Removing the view removes what is defined on it, which has to be defined
+  again. A view that holds no row, an aggregate view and a view that selects
+  named fields are not refused for this.
+
+Each refusal names the record or the definition and the remedy:
+
+```
+Cannot give `reading` the record id [city: string, time: datetime]: the existing
+record reading:['London', 'not-a-date'] does not match it (`time` is not a
+datetime). Copy the records into a table with the new record id instead
+
+Cannot give `reading` the record id [city: string, time: datetime]: the record
+reading:['London', d'2025-01-01T10:00:00Z'] stores a `city` field that differs
+from its record id. Remove it first, for example with UPDATE reading UNSET city
+
+Cannot name `city` in the record id of `reading`: the index `by_city` already
+reads a stored `city` field. Remove it, then define it again after changing the
+record id
+
+Cannot name `city` in the record id of `reading`: the view `v` reads fields of
+the record by names that cannot be determined, so it may already read a stored
+`city` field. Remove it, then define it again after changing the record id
+
+Cannot change the record id of `reading`: the view `v` selects every field of
+`reading` and holds rows written under the old record id. Remove the view, then
+define it again after changing the record id
+```
+
+Once a name is part of the id, defining a field of that name is refused in turn.
+
+Only `string`, `int`, `datetime`, `uuid`, `duration`, `bool` and `record`
+components are admitted; any other type for a name is refused at definition,
+because only those encodings keep their order in storage. A component name must
+be a plain identifier: ASCII letters, digits and underscores, not starting with
+a digit, and neither `NaN` nor `Infinity`. A keyword such as `time` or `value`
+is a plain identifier. A name that has to be escaped, such as `` `the city` ``,
+`` `a-b` `` or `` `café` ``, is refused:
+
+```
+Cannot name the record id component `the city` of `reading`: a component name
+must be a plain identifier of ASCII letters, digits and underscores that does
+not start with a digit and is not NaN or Infinity
+```
+
+Changing the names later is refused while something reads a name the change
+drops or renames, and that includes the `ASSERT`, `DEFAULT` and permissions of
+the `id` definition itself, which `ALTER FIELD` keeps, and a field's
+`REFERENCE ON DELETE THEN` repair. A clause reads the names it spells, through
+`$this`, `$parent`, the document `@` or a destructure (`$this.{city}`) as well
+as bare, and in an event through `$after`, `$before`, `$value` and `$input`. A bare name
+in a statement over another table (`UPDATE other SET n += 1`) counts as a read
+of this table's field of that name, so a component named like a field of the
+other table blocks the change, and the error names the event or clause that
+holds the statement. A clause that reads the record by a name it computes,
+hands the record to a function, a method or a cast, reads a part of a value
+that holds the record (`{ r: $this }.r.city`), or calls a user-defined function
+where the record is the document it is evaluated against, may read any name,
+and blocks the change of every name. The rows a view holds are judged as the
+statement that changes the id finds them, including rows written or deleted
+earlier in the same block, transaction or function. A view that selects `*` and holds rows blocks it too, with the
+remedy above:
+
+```
+Cannot change the record id of `reading`: the ASSERT of the field `id` reads its
+component `n`
+
+Cannot change the record id of `reading`: the field `label` reads fields of the
+record by names that cannot be determined, so it may read its component `city`
+```
+
+Comparing the record (`$before != $after`), copying it (`SET copy = $after`),
+`$value` in a field's own clause and a builtin handed a field's value do not
+block a change. What the check does not see: a read of a component from another
+record, through a record link or a graph hop into the table or a statement over
+another table that reads this one, whether by a path (`prev.city`) or by a name
+passed as a string to a builtin (`object::get(prev.*, 'city')`); and what a
+function body reads of a record it is handed as anything but the record itself
+(`fn::f(prev)`). A `VALUE` or
+`ASSERT` clause that reads the whole record sees at write time only the
+components that a field clause of the table reads by name.
+
+A component is a field of the table that only a change of the `id`'s type
+removes, so `REMOVE FIELD IF EXISTS city ON reading` is refused with the error
+that `city` is part of the record id rather than doing nothing. A migration
+script that removes a field which may since have become a component has to
+check for that first. The id of a relation
+table and of a view cannot be named, and a table with names cannot be turned
+into a relation table.
+
+A table too large to be read inside one statement's transaction and timeout
+fails the statement with the error of that timeout or limit, and defines
+nothing. Copy it with the recipe below: a new table is empty when its id is
+defined, so its definition reads nothing.
+
+**Operational notes**: the check reads the records the defining transaction
+sees. A write whose statement was planned against the catalog before the
+definition committed does not see the names, and can still commit a record
+whose id does not fit. Such a record is never returned wrongly, since every read
+over a key range keeps its condition and the id is checked as it is decoded, but
+a read over a key range can miss it. Define the names while nothing writes ids
+that would not fit. Running the same definition again does not check again: a
+`DEFINE FIELD OVERWRITE` or `ALTER FIELD` whose names and types equal the stored
+ones skips the scan. A missed record shows as a difference between a query's
+answer with `WITH NOINDEX`, which never reads a key range, and its answer
+without it. Removing the names and defining them again inside one transaction
+checks every record again, once nothing reads the names. The same write can
+also add a row under the old record id to a view that selects `*`, whether the
+check found the view empty or the view was defined again after the change, and
+a filter on a component misses that row; removing the view and defining it
+again refills it from the table. Define the names while nothing writes to the
+table.
+
+### An int component holds only ints, and converting a table that does not
+
+A key stores an int and a float of the same value under different bytes. An
+earlier release does not normalise the numbers in a record id: it keeps
+`counter:['a', 5.0]` and `counter:['a', 5]` as two records, whether its id was
+never typed or is declared `TYPE [string, int]` (observed on 3.3.0-beta.3 and
+3.3.0), so a typed table can hold such keys as well as an untyped one. A range over an int
+component reaches the bytes of an int and misses those of a float, so this
+release keeps the int position to ints:
+
+- a write converts a float or a decimal whose value is a whole number in the range
+  of an `int` to that int, and refuses any other number with an error that begins
+  ``Couldn't coerce value for the record id component `n` of `counter`:``;
+- defining the names refuses a table that already holds a float or a decimal at
+  an int position, and the error names the first such record.
+
+Both apply only to a table whose `id` names its components. A plain upgrade
+changes no record and needs no action; only the statement that names an `int`
+component can be refused.
+
+**What to do**: copy the records into a new table whose `id` is defined first.
+Explicit ids are converted as they are written, so the copy keeps each record's
+key and turns `5.0` into `5`. Two records that convert to the same key are one
+record in the new table, and the copy has to say what becomes of them.
+
+A table `counter` holds four records, written by an earlier release:
+
+```surql
+counter:['a', 4]    hits: 1
+counter:['a', 5]    hits: 2
+counter:['a', 5.0]  hits: 3
+counter:['b', 7.0]  hits: 4
+```
+
+```surql
+DEFINE FIELD id ON counter TYPE [site: string, n: int];
+-- Cannot give `counter` the record id [site: string, n: int]: the existing record
+-- counter:['a', 5f] does not match it (`n` is a float; an int component holds only
+-- ints). Copy the records into a table with the new record id instead
+```
+
+The new table carries the structure from the start. It holds no record, so
+defining it checks nothing:
+
+```surql
+DEFINE TABLE counter_v2 SCHEMALESS;
+DEFINE FIELD id ON counter_v2 TYPE [site: string, n: int];
+```
+
+A counter sums the records that collide. `INSERT INTO ... (SELECT ...)` keeps the
+key of each record it reads and replaces its table, and `$input` is the row being
+inserted:
+
+```surql
+INSERT INTO counter_v2 (SELECT * FROM counter)
+    ON DUPLICATE KEY UPDATE hits += $input.hits;
+```
+
+Check the result before anything depends on it. The records that merged are the
+difference in count, and the sum is unchanged:
+
+```surql
+SELECT count() AS records, math::sum(hits) AS total FROM counter GROUP ALL;
+-- [{ records: 4, total: 10 }]
+SELECT count() AS records, math::sum(hits) AS total FROM counter_v2 GROUP ALL;
+-- [{ records: 3, total: 10 }]
+SELECT site, n, hits FROM counter_v2 ORDER BY id;
+-- [{ hits: 1, n: 4, site: 'a' }, { hits: 5, n: 5, site: 'a' }, { hits: 4, n: 7, site: 'b' }]
+```
+
+Without `ON DUPLICATE KEY UPDATE`, the first collision fails the statement with
+``Database record `counter_v2:['a', 5]` already exists``. Outside a `BEGIN`
+block a statement is one transaction, so the failed copy stores nothing and can
+be run again.
+
+Where one of two colliding records should win rather than merge, copy the
+records that win first and skip the rest, which `INSERT IGNORE` does for a record
+that already exists. Here the record written as an int wins, and the whole copy
+commits or none of it does:
+
+```surql
+BEGIN;
+INSERT INTO counter_v2 (SELECT * FROM counter WHERE type::is_int(record::id(id)[1]));
+INSERT IGNORE INTO counter_v2 (SELECT * FROM counter WHERE !type::is_int(record::id(id)[1]));
+COMMIT;
+```
+
+`record::id(id)[1]` is the second element of the key, on any table. A number
+that is not whole, such as `['b', 7.5]`, is neither merged nor skipped: its copy
+fails with the coercion error above, because no int is that key. Decide which key
+the record should have and insert it under that id.
+
+Then switch the application to `counter_v2` and remove `counter`. What the copy
+does not carry is everything defined on the old table, which a new `DEFINE TABLE`
+does not inherit: restate its permissions, fields, indexes and events on the new
+table, using `INFO FOR TABLE counter` as the list. Records elsewhere that link to
+`counter:['a', 5.0]` keep pointing at the old table and have to be rewritten.
+A copy into the old name goes through a staging table instead:
+`INSERT INTO staging (SELECT * FROM counter)` keeps every key as it is, then
+`REMOVE TABLE counter`, define the table with its new `id`, and run the copy
+above from `staging`. It holds the data twice for the time between.
+
+A table too large for one transaction is copied in slices by a condition on the
+first component, for example `WHERE record::id(id)[0] = 'a'`, one statement per
+slice. Records that collide share every component, so a slice keeps them
+together. A failed slice leaves the earlier slices in the new table, so empty it
+(`DELETE counter_v2;`) before running the copy again.
+
+### Retention over a keyed table
+
+A retention delete takes its cutoff as a value:
+
+```surql
+LET $cut = time::now() - 30d;
+DELETE reading WHERE time < $cut;
+```
+
+A mutation evaluates a clock read in its `WHERE` once per row, never once per
+statement. `DELETE reading WHERE time < time::now() - 30d` therefore removes the
+same records in effect, but has no bound to read a range or an index with: it
+reads every record of the table and calls the clock for each. `LET` evaluates
+the clock once, before the statement, and `$cut` is a value the statement holds,
+which can bound a key range. A `SELECT` folds the clock in its conditions to one
+instant, so `time > time::now() - 1d` needs no `LET` there.
+
+A bound as a value reads a range only where the key order allows it. In an id
+`[city: string, time: datetime]` the keys are ordered by city and then by time,
+so `time < $cut` is one contiguous range for a city and not for the table. There
+are three ways to reach the old records without reading the rest:
+
+- pin the leading components: `DELETE reading WHERE city = $city AND time < $cut;`,
+  once per city;
+- define an index on the component, `DEFINE INDEX by_time ON reading FIELDS time;`.
+  A mutation reads an index, on any table, only for a bound written as a literal
+  (`DELETE reading WHERE time < d'2025-01-01T00:00:00Z'`); with `$cut` it reads
+  the table. A `SELECT` reads the index with either;
+- order the key by time, `[time: datetime, city: string]`, when time is what
+  most reads and deletes bound. A range over the first component needs no
+  prefix, and a read by city alone then has no leading component to bound it.
+
+The planner does not skip over a leading component to reach a later one, so a
+bound on `time` alone over `[city, time]` without an index reads the whole table.
+That is correct and costs the table's size, and the `LET` form still saves the
+clock call on every record. A bound that a client supplies as a query variable is
+the same as a `LET`.
+
+### Aggregated views read key ranges
+
+The rows of `DEFINE TABLE hourly AS SELECT ... GROUP BY city, hour` are keyed by
+an array of the group values. A `WHERE` that compares the group columns to
+literals now reads the matching range of that table's keys and no more, and keeps
+the condition above the read. A view row's group columns are stored fields, so
+nothing is derived and no definition changes. The rows a statement returns are
+unchanged; `EXPLAIN` shows a key range where it showed a scan.
+
+One answer changes. An `UPDATE` or `DELETE` of a view whose `WHERE` on a group
+alias selects no stored row returns `[]`, where the full scan raised the refusal
+that a view is read-only. A statement that selects a row still raises it.
+
+### Changes to the published crates
+
+`surrealdb-catalog`, `surrealdb-expr` and `surrealdb-parser-next` are published.
+Code that builds or matches on their types has to name the additions:
+
+- `surrealdb_parser_next::Entry` has a new variant, `IdKind`. An exhaustive
+  `match` on `Entry` needs an arm.
+- `FieldDefinition` (`surrealdb-catalog`) gains the public fields `key` and
+  `key_part`, and `DefineFieldStatement` and `AlterFieldStatement`
+  (`surrealdb-expr`) gain `key_names`. A struct literal names them, or takes
+  `..Default::default()` where the type provides it.
+- A table's field list can hold a virtual definition for a component, which has
+  `key_part` set and no stored form. Code that lists the definitions and writes
+  them back must skip it.
+- `INFO FOR TABLE ... STRUCTURE` reports an `id` with named components under an
+  additive `components` key, a list of `name`, `position` and `kind`. Its `kind`
+  keeps the unnamed form (`[string, datetime]`), so a client that parses `kind`
+  is unaffected.
 
 ### Index order on fields with no declared type
 

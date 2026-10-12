@@ -27,7 +27,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use surrealdb_catalog::providers::TableProvider;
 use surrealdb_catalog::{
-	DatabaseId, FieldDefinition, IndexDefinition, NamespaceId, TableDefinition,
+	DatabaseId, FieldDefinition, IndexDefinition, KeyStructure, NamespaceId, TableDefinition,
+	table_key,
 };
 use surrealdb_expr::val::TableName;
 use uuid::Uuid;
@@ -84,8 +85,15 @@ pub struct TableSnapshot {
 	/// shared like any other, so asking for it again costs nothing; defining
 	/// it stamps a new version, under which it is loaded afresh.
 	pub definition: Option<Arc<TableDefinition>>,
-	/// The table's field definitions.
+	/// The table's field definitions, with the virtual definitions of the
+	/// components its record id names ([`FieldDefinition::is_key_part`])
+	/// placed straight after `id`.
 	pub fields: Arc<[FieldDefinition]>,
+	/// What the table's record ids are made of, as [`table_key`] reads it
+	/// from the definition and the field list; `None` for a table whose ids
+	/// are unconstrained. It is a function of the two beside it, so it is
+	/// valid under the version that validates them.
+	pub key: Option<Arc<KeyStructure>>,
 	/// The table's index definitions.
 	pub indexes: Arc<[IndexDefinition]>,
 	/// The catalog version the table was read under, or `None` for a table
@@ -154,9 +162,11 @@ impl TableSnapshot {
 	) -> Result<Self> {
 		let fields = txn.all_tb_fields(ns, db, table, None).await?;
 		let indexes = txn.all_tb_indexes(ns, db, table, None).await?;
+		let key = definition.as_deref().and_then(|definition| table_key(definition, &fields));
 		Ok(Self {
 			definition,
 			fields,
+			key,
 			indexes,
 			version,
 		})
@@ -297,6 +307,13 @@ impl CatalogSnapshot {
 		self.entry(table).map(|entry| &entry.fields)
 	}
 
+	/// The key structure of the record ids of `table`: `None` both for a
+	/// table the snapshot was never asked for and for one whose ids are
+	/// unconstrained; [`Self::entry`] tells the two apart.
+	pub fn key(&self, table: &TableName) -> Option<&Arc<KeyStructure>> {
+		self.entry(table)?.key.as_ref()
+	}
+
 	/// The index definitions of `table`, or `None` if the snapshot was never
 	/// asked for it.
 	pub fn indexes(&self, table: &TableName) -> Option<&Arc<[IndexDefinition]>> {
@@ -330,8 +347,9 @@ mod tests {
 		IndexId, NamespaceDefinition, NamespaceId, StoredTableDefinition, TableDefinition, TableId,
 	};
 	use surrealdb_cnf::ConfigMap;
-	use surrealdb_expr::expr::Idiom;
+	use surrealdb_expr::expr::{Idiom, KeyNames, Kind, KindLiteral};
 	use surrealdb_expr::val::TableName;
+	use surrealdb_strand::Strand;
 	use uuid::Uuid;
 
 	use super::CatalogSnapshot;
@@ -830,5 +848,202 @@ mod tests {
 		assert!(
 			store.cache.get(&super::Lookup::Catalog(NS, DB, "person", version.unwrap())).is_none()
 		);
+	}
+	/// `DEFINE FIELD id ON reading TYPE [city: string, time: datetime]`.
+	fn named_id() -> FieldDefinition {
+		let mut id = field("reading", "id");
+		id.set_type_strict(
+			Some(Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]))),
+			Some(KeyNames::new(vec![Strand::new("city"), Strand::new("time")], 2).unwrap()),
+		)
+		.unwrap();
+		id
+	}
+
+	/// An `id` with a type and no names.
+	fn plain_id() -> FieldDefinition {
+		let mut id = field("reading", "id");
+		id.set_type_strict(
+			Some(Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]))),
+			None,
+		)
+		.unwrap();
+		id
+	}
+
+	/// The field names of `table`, in the order the snapshot lists them.
+	fn field_order(snapshot: &CatalogSnapshot, table: &str) -> Vec<String> {
+		snapshot
+			.fields(&TableName::from(table))
+			.unwrap()
+			.iter()
+			.map(|f| f.name.to_raw_string())
+			.collect()
+	}
+
+	/// The components a record id names are fields of the table's snapshot,
+	/// placed straight after `id`, and the snapshot carries the key structure
+	/// they were derived from.
+	#[tokio::test]
+	async fn a_named_id_puts_its_components_in_the_snapshot_with_the_key() {
+		let store = Store::new().await;
+		store.define_table("reading", 1).await;
+		let reading = TableName::from("reading");
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &field("reading", "temp")).await.unwrap();
+		tx.put_tb_field(NS, DB, &reading, &named_id()).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let snapshot = store.snapshot(&["reading"]).await;
+		assert_eq!(field_order(&snapshot, "reading"), ["id", "city", "time", "temp"]);
+		let fields = snapshot.fields(&reading).unwrap();
+		let parts: Vec<Option<u32>> = fields.iter().map(|f| f.key_part).collect();
+		assert_eq!(parts, [None, Some(0), Some(1), None]);
+		assert!(fields[1].is_key_part() && fields[2].is_key_part());
+		assert!(!fields[0].is_key_part() && !fields[3].is_key_part());
+
+		let key = snapshot.key(&reading).expect("a named id gives the table a key structure");
+		assert_eq!(key.arity(), 2);
+		let id_key = fields[0].live_key().expect("the id holds the structure the snapshot carries");
+		assert!(Arc::ptr_eq(key, id_key), "the snapshot carries the id's own structure");
+
+		// The entry is shared like any other: a second transaction is served it.
+		let again = store.snapshot(&["reading"]).await;
+		assert!(Arc::ptr_eq(snapshot.entry(&reading).unwrap(), again.entry(&reading).unwrap()));
+		assert!(Arc::ptr_eq(key, again.key(&reading).unwrap()));
+	}
+
+	/// A table whose `id` names nothing has no key structure and no virtual
+	/// definition, and its field list is the allocation the transaction holds
+	/// for the table.
+	#[tokio::test]
+	async fn an_unnamed_id_adds_nothing() {
+		let store = Store::new().await;
+		store.define_table("reading", 1).await;
+		let reading = TableName::from("reading");
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &plain_id()).await.unwrap();
+		tx.put_tb_field(NS, DB, &reading, &field("reading", "temp")).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let snapshot = store.snapshot(&["reading"]).await;
+		assert_eq!(field_order(&snapshot, "reading"), ["id", "temp"]);
+		assert!(snapshot.fields(&reading).unwrap().iter().all(|f| f.key_part.is_none()));
+		assert!(snapshot.key(&reading).is_none());
+		assert!(snapshot.entry(&reading).unwrap().key.is_none());
+
+		let tx = store.read().await;
+		let first = tx.all_tb_fields(NS, DB, &reading, None).await.unwrap();
+		let second = tx.all_tb_fields(NS, DB, &reading, None).await.unwrap();
+		tx.cancel().await.unwrap();
+		assert!(Arc::ptr_eq(&first, &second), "the transaction answers from one list");
+		assert_eq!(*first, **snapshot.fields(&reading).unwrap());
+	}
+
+	/// A table with no fields at all has none of either.
+	#[tokio::test]
+	async fn a_table_with_no_fields_has_no_key() {
+		let store = Store::new().await;
+		store.define_table("person", 1).await;
+		let snapshot = store.snapshot(&["person"]).await;
+		assert!(snapshot.fields(&TableName::from("person")).unwrap().is_empty());
+		assert!(snapshot.key(&TableName::from("person")).is_none());
+		assert!(snapshot.key(&TableName::from("never_asked")).is_none());
+	}
+
+	/// The derived definition of a component has no stored form: storing one is
+	/// refused, nothing is written and the catalog version stays where it was.
+	#[tokio::test]
+	async fn a_virtual_definition_cannot_be_stored() {
+		let store = Store::new().await;
+		store.define_table("reading", 1).await;
+		let reading = TableName::from("reading");
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &named_id()).await.unwrap();
+		tx.commit().await.unwrap();
+		let before = store.snapshot(&["reading"]).await;
+		let version = before.entry(&reading).unwrap().version();
+		let derived = before.key(&reading).unwrap().derived_fields(&reading);
+		assert_eq!(derived.len(), 2);
+
+		for virtual_field in &derived {
+			let tx = store.write().await;
+			let error = tx
+				.put_tb_field(NS, DB, &reading, virtual_field)
+				.await
+				.expect_err("a field derived from the record id is not stored");
+			let message = error.to_string();
+			assert!(message.contains(&virtual_field.name.to_raw_string()), "{message}");
+			assert!(message.contains("derived from the record id"), "{message}");
+			let own = tx.all_tb_fields(NS, DB, &reading, None).await.unwrap();
+			assert_eq!(own.len(), 3, "the transaction still holds the one stored id");
+			tx.cancel().await.unwrap();
+		}
+
+		let after = store.snapshot(&["reading"]).await;
+		assert_eq!(after.entry(&reading).unwrap().version(), version);
+		assert!(Arc::ptr_eq(before.entry(&reading).unwrap(), after.entry(&reading).unwrap()));
+		let tx = store.read().await;
+		let stored = tx.all_tb_fields(NS, DB, &reading, None).await.unwrap();
+		tx.cancel().await.unwrap();
+		assert_eq!(stored.iter().filter(|f| f.key_part.is_none()).count(), 1);
+	}
+
+	/// Redefining `id` without its names takes the components out of the next
+	/// snapshot together with the key structure, and the snapshot is read under
+	/// a new version.
+	#[tokio::test]
+	async fn redefining_the_id_without_names_removes_the_components() {
+		let store = Store::new().await;
+		store.define_table("reading", 1).await;
+		let reading = TableName::from("reading");
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &named_id()).await.unwrap();
+		tx.put_tb_field(NS, DB, &reading, &field("reading", "temp")).await.unwrap();
+		tx.commit().await.unwrap();
+		let named = store.snapshot(&["reading"]).await;
+		assert_eq!(field_order(&named, "reading"), ["id", "city", "time", "temp"]);
+
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &plain_id()).await.unwrap();
+		tx.commit().await.unwrap();
+		let plain = store.snapshot(&["reading"]).await;
+		assert_ne!(
+			named.entry(&reading).unwrap().version(),
+			plain.entry(&reading).unwrap().version()
+		);
+		assert_eq!(field_order(&plain, "reading"), ["id", "temp"]);
+		assert!(plain.key(&reading).is_none());
+		assert!(named.key(&reading).is_some(), "the snapshot already taken keeps what it read");
+	}
+
+	/// Uncommitted DDL on a named `id` is private to the transaction that wrote
+	/// it, components and key structure included.
+	#[tokio::test]
+	async fn an_uncommitted_named_id_is_private() {
+		let store = Store::new().await;
+		store.define_table("reading", 1).await;
+		let reading = TableName::from("reading");
+		let committed = store.snapshot(&["reading"]).await;
+		assert!(committed.key(&reading).is_none());
+
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &reading, &named_id()).await.unwrap();
+		let private = CatalogSnapshot::for_tables(
+			Some(&store.cache),
+			&tx,
+			NS,
+			DB,
+			std::slice::from_ref(&reading),
+		)
+		.await
+		.unwrap();
+		assert_eq!(field_order(&private, "reading"), ["id", "city", "time"]);
+		assert!(private.key(&reading).is_some());
+		tx.cancel().await.unwrap();
+
+		let later = store.snapshot(&["reading"]).await;
+		assert!(field_order(&later, "reading").is_empty());
+		assert!(later.key(&reading).is_none());
 	}
 }

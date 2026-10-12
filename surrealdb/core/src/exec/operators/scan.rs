@@ -13,6 +13,7 @@ mod graph;
 pub(crate) mod graph_keys;
 pub(crate) mod index_count;
 pub(crate) mod key_matcher;
+pub(crate) mod key_range;
 mod knn;
 pub(crate) mod lightweight;
 pub(crate) mod pipeline;

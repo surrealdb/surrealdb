@@ -234,10 +234,12 @@ pub(crate) enum Frame {
 		start: u32,
 		mark: u32,
 	},
-	/// A literal array kind.
+	/// A literal array kind. When `named`, it is the opening tuple of an `id`
+	/// field's `TYPE`: names and kinds alternate on the value stack.
 	KindTuple {
 		start: u32,
 		mark: u32,
+		named: bool,
 	},
 }
 

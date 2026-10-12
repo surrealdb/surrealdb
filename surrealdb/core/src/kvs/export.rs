@@ -726,7 +726,10 @@ async fn export_table_structure(
 	// importer would reject — so no field lines are emitted for it.
 	if crate::kvs::lightweight::lightweight_relation(&table.table_type).is_none() {
 		let fields = tx.all_tb_fields(ns, db, &tb_name, None).await?;
-		for field in fields.iter() {
+		// The components a named `id` declares are derived from it, so the `id`
+		// statement is their only definition; a line of their own would be refused
+		// on import as a field that clashes with the record id.
+		for field in fields.iter().filter(|field| !field.is_key_part()) {
 			chn.send(bytes!(format!("{};", field.to_sql_overwrite()))).await?;
 		}
 	}
@@ -1072,7 +1075,9 @@ async fn export_table_data(
 	// index set only bears on the second.
 	let indexes = tx.all_tb_indexes(ns, db, &tb_name, None).await?;
 	// A `REFERENCE` field writes back-reference keys on every write path, a
-	// restore included, so its fan-out is part of what one record costs.
+	// restore included, so its fan-out is part of what one record costs. Only a
+	// definition with a `REFERENCE` is read from the list, so the derived
+	// definitions of named record id components (which have none) are inert here.
 	let fields = tx.all_tb_fields(ns, db, &tb_name, None).await?;
 	// A record's value decodes only with its own key's record id, so the table's
 	// records are read as bytes and decoded per key by `export_regular_data`.

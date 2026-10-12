@@ -492,6 +492,12 @@ pub trait TableProvider: Sync {
 	) -> BoxProviderFut<'a, Result<Arc<[catalog::EventDefinition]>>>;
 
 	/// Retrieve all field definitions for a specific table.
+	///
+	/// When the table's `id` names the components of its record id, the list also
+	/// holds the virtual definition of each component, straight after `id`
+	/// ([`catalog::fields_from_stored`]). Such a definition has no stored form:
+	/// [`catalog::FieldDefinition::is_key_part`] is true, and
+	/// [`Self::put_tb_field`] refuses it.
 	fn all_tb_fields<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -555,6 +561,11 @@ pub trait TableProvider: Sync {
 	) -> BoxProviderFut<'a, Result<Arc<catalog::EventDefinition>>>;
 
 	/// Retrieve a field for a table.
+	///
+	/// Only a stored definition is found: the virtual definition of a named record
+	/// id component exists in the list [`Self::all_tb_fields`] returns and nowhere
+	/// else, so a component's name finds none. The `id` definition is stored; its
+	/// [`catalog::FieldDefinition::live_key`] says which names are components.
 	fn get_tb_field<'a>(
 		&'a self,
 		ns: NamespaceId,

@@ -7,6 +7,8 @@
 //! - Full-text search indexes (FullText) with MATCHES operator
 //! - Vector similarity indexes (Hnsw) with KNN search
 //! - Count indexes for COUNT(*) optimization
+//! - Key ranges over a table whose record ids name their components ([`key_range`]), which need no
+//!   index
 //!
 //! ## Architecture
 //!
@@ -28,6 +30,8 @@
 
 pub(crate) mod access_path;
 pub(crate) mod analysis;
+pub(crate) mod derived_columns;
 pub(crate) mod iterator;
+pub(crate) mod key_range;
 
 pub use analysis::IndexCandidate;

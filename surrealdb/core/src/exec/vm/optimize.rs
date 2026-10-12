@@ -18,8 +18,14 @@ trait Rule {
 	fn rewrite(&self, plan: &Plan) -> Option<Plan>;
 }
 
-const RULES: &[&dyn Rule] =
-	&[&DeliveredOrder, &BoundSort, &AnsweredByLookup, &AnsweredByIndex, &ConjunctOrder];
+const RULES: &[&dyn Rule] = &[
+	&DeliveredOrder,
+	&BoundSort,
+	&CoarseCutoffSort,
+	&AnsweredByLookup,
+	&AnsweredByIndex,
+	&ConjunctOrder,
+];
 
 /// How many passes a plan gets before the driver stops. Every rule makes a
 /// plan strictly more annotated, so a fixed point comes long before this.
@@ -410,6 +416,9 @@ fn rewrite_children(plan: Plan) -> (Plan, bool) {
 		Plan::TableScan {
 			..
 		}
+		| Plan::KeyRangeScan {
+			..
+		}
 		| Plan::RecordScan {
 			..
 		}
@@ -721,11 +730,20 @@ fn rewrite_children(plan: Plan) -> (Plan, bool) {
 ///
 /// Filters, permissions, layers and enforcement keep their input's order, so
 /// the order reaching the sort is the source's. A table scan delivers `id`
-/// order along its direction. An index scan that covers the pipeline's ordering delivers
-/// it over the record fields it names, ties in the index's key order.
+/// order along its direction where key order is `id` order. An index scan that covers the
+/// pipeline's ordering delivers it over the record fields it names, ties in the index's key order.
 /// Only a sort whose keys read exactly those fields is removed: a key that a
 /// projection renamed reads another value under the same name, and a
 /// computed key would go unevaluated.
+///
+/// A key-range scan reads its ranges in key order along its direction, so it
+/// delivers `id` order where every component of the key orders exactly, and
+/// the components its access orders by ([`KeyRangeAccess::ordered_by`]) where
+/// the access delivers them exactly: a sort key reads a component as `id[i]`,
+/// or as the column a layer beneath the sort derives from it. A key on a
+/// component the access pins to one value may run either way.
+///
+/// [`KeyRangeAccess::ordered_by`]: crate::exec::index::key_range::KeyRangeAccess::ordered_by
 struct DeliveredOrder;
 
 impl Rule for DeliveredOrder {
@@ -739,9 +757,26 @@ impl Rule for DeliveredOrder {
 		else {
 			return None;
 		};
+		let by_id = |direction: &crate::kvs::Direction| {
+			matches!(
+				keys.as_slice(),
+				[key] if matches!(&key.read, SortKeyRead::Path(path) if *path == FieldPath::field("id"))
+					&& !key.collate && !key.numeric
+					&& key.ascending == matches!(direction, crate::kvs::Direction::Forward)
+			)
+		};
+		let mut layers = Vec::new();
 		let mut source = &**input;
 		loop {
 			source = match source {
+				Plan::Layer {
+					input,
+					fields,
+					..
+				} => {
+					layers.push(fields);
+					input
+				}
 				Plan::Filter {
 					input,
 					..
@@ -750,27 +785,28 @@ impl Rule for DeliveredOrder {
 					input,
 					..
 				}
-				| Plan::Layer {
-					input,
-					..
-				}
 				| Plan::Enforced {
 					input,
 					..
 				} => input,
 				// A table scan delivers the records in key order along its
-				// direction: by `id`, ascending when it reads forward.
+				// direction: by `id`, ascending when it reads forward, where
+				// key order is `id` order.
 				Plan::TableScan {
 					direction,
+					id_order,
 					..
 				} => {
-					let by_id = matches!(
-						keys.as_slice(),
-						[key] if matches!(&key.read, SortKeyRead::Path(path) if *path == FieldPath::field("id"))
-							&& !key.collate && !key.numeric
-							&& key.ascending == matches!(direction, crate::kvs::Direction::Forward)
-					);
-					return by_id.then(|| (**input).clone());
+					return (*id_order && by_id(direction)).then(|| (**input).clone());
+				}
+				Plan::KeyRangeScan {
+					access,
+					..
+				} => {
+					if access.key.all_exactly_ordered() && by_id(&access.direction) {
+						return Some((**input).clone());
+					}
+					return key_range_delivers(access, keys, &layers).then(|| (**input).clone());
 				}
 				Plan::IndexScan {
 					ordered_by: Some(fields),
@@ -844,6 +880,7 @@ impl Rule for BoundSort {
 				direction,
 				single_key: keys.len() == 1,
 				depth_limit: 256,
+				coarse_cutoff: None,
 			};
 			let updated = install_topk_key(sorted, key);
 			(updated, true)
@@ -866,6 +903,10 @@ impl Rule for BoundSort {
 	}
 }
 
+/// `plan` with `key` installed on the scan beneath its predicates, which then
+/// reads the key from each record's stored bytes. A key-range scan takes no
+/// key whose path opens with a component of the record id, which is not
+/// stored in the record body.
 fn install_topk_key(plan: &Plan, key: super::plan::TopKKey) -> Plan {
 	match plan {
 		Plan::TableScan {
@@ -873,12 +914,27 @@ fn install_topk_key(plan: &Plan, key: super::plan::TopKKey) -> Plan {
 			direction,
 			schema,
 			topk: _,
+			id_order,
 		} => Plan::TableScan {
 			table: table.clone(),
 			direction: *direction,
 			schema: schema.clone(),
 			topk: Some(key),
+			id_order: *id_order,
 		},
+		Plan::KeyRangeScan {
+			table,
+			access,
+			schema,
+			topk: _,
+		} if !crate::exec::topk_pushdown::reads_key_component(&key.path, &access.key) => {
+			Plan::KeyRangeScan {
+				table: table.clone(),
+				access: std::sync::Arc::clone(access),
+				schema: schema.clone(),
+				topk: Some(key),
+			}
+		}
 		Plan::Filter {
 			predicate,
 			input,
@@ -889,6 +945,214 @@ fn install_topk_key(plan: &Plan, key: super::plan::TopKKey) -> Plan {
 			once: once.clone(),
 		},
 		other => other.clone(),
+	}
+}
+
+/// Whether key-range access `access` delivers the order of sort keys `keys`
+/// exactly: it delivers its ordering exactly, and each key reads the
+/// component the access orders by at its place, without `COLLATE` or
+/// `NUMERIC`, in the access's direction unless the access pins the component
+/// to one value. `layers` are the layers between the sort and the scan.
+fn key_range_delivers(
+	access: &crate::exec::index::key_range::KeyRangeAccess,
+	keys: &[super::plan::SortKeySpec],
+	layers: &[&crate::expr::logical::LogicalFields],
+) -> bool {
+	use crate::exec::index::key_range::{DeliveredKeyOrder, KeyEq};
+	if access.delivers != DeliveredKeyOrder::Exact || keys.len() != access.ordered_by.len() {
+		return false;
+	}
+	let forward = matches!(access.direction, crate::kvs::Direction::Forward);
+	keys.iter().zip(&access.ordered_by).all(|(key, &position)| {
+		let pinned = matches!(access.eq.get(position as usize), Some(KeyEq::One(_)));
+		!key.collate
+			&& !key.numeric
+			&& sort_key_component(&key.read, &access.key, layers) == Some(position)
+			&& (pinned || key.ascending == forward)
+	})
+}
+
+/// The position of the record-id component sort key `read` reads, over a
+/// table whose ids have structure `key`: `id[i]` evaluated, or a field a
+/// layer in `layers` derives as a column reading the component.
+fn sort_key_component(
+	read: &SortKeyRead,
+	key: &crate::catalog::KeyStructure,
+	layers: &[&crate::expr::logical::LogicalFields],
+) -> Option<u32> {
+	use crate::exec::field_path::FieldPathPart;
+	use crate::exec::index::key_range::component_position;
+	match read {
+		SortKeyRead::Computed(expr) => {
+			component_position(key, expr).filter(|_| matches!(expr, LogicalExpr::Index { .. }))
+		}
+		SortKeyRead::Path(path) => {
+			let [FieldPathPart::Field(name)] = path.0.as_slice() else {
+				return None;
+			};
+			let alias = crate::expr::logical::OutputPath::field(name.clone());
+			// The layer nearest the sort that sets the column is the one whose
+			// value the sort reads.
+			layers
+				.iter()
+				.find_map(|fields| {
+					let crate::expr::logical::LogicalFields::Select(fields) = fields else {
+						return None;
+					};
+					fields.iter().find_map(|field| match field {
+						crate::expr::logical::LogicalField::Single {
+							expr,
+							alias: Some(column),
+							frame,
+							..
+						} if *column == alias => {
+							Some(frame.key_part.then(|| component_position(key, expr)).flatten())
+						}
+						_ => None,
+					})
+				})
+				.flatten()
+		}
+	}
+}
+
+/// A sort that keeps `keep` rows, over a key-range scan that delivers its
+/// first key by the whole second of a datetime component of the record id,
+/// has the scan cut where no later row can take a kept place
+/// ([`super::plan::CoarseCutoff`]).
+///
+/// Applies where only predicates, permissions, layers and enforcement lie
+/// between them, which pass rows on in the order they arrive, where the first
+/// key reads the component the access delivers by the second
+/// ([`DeliveredKeyOrder::Coarse`]) in the scan's direction, without `COLLATE`
+/// or `NUMERIC`, and where the scan carries no other top-k key. The sort
+/// publishes its threshold for the scan to read.
+///
+/// [`DeliveredKeyOrder::Coarse`]: crate::exec::index::key_range::DeliveredKeyOrder::Coarse
+struct CoarseCutoffSort;
+
+impl Rule for CoarseCutoffSort {
+	fn rewrite(&self, plan: &Plan) -> Option<Plan> {
+		use crate::exec::index::key_range::DeliveredKeyOrder;
+		let Plan::Sort {
+			input,
+			keys,
+			keep: Some(keep),
+			pushdown: _,
+			random: false,
+			spill,
+		} = plan
+		else {
+			return None;
+		};
+		let first = keys.first()?;
+		if first.collate || first.numeric {
+			return None;
+		}
+		let mut layers = Vec::new();
+		let mut source = &**input;
+		let position = loop {
+			source = match source {
+				Plan::Layer {
+					input,
+					fields,
+					..
+				} => {
+					layers.push(fields);
+					input
+				}
+				Plan::Filter {
+					input,
+					..
+				}
+				| Plan::PermissionFilter {
+					input,
+					..
+				}
+				| Plan::Enforced {
+					input,
+					..
+				} => input,
+				Plan::KeyRangeScan {
+					access,
+					topk: None,
+					..
+				} => {
+					let DeliveredKeyOrder::Coarse {
+						position,
+					} = access.delivers
+					else {
+						return None;
+					};
+					let forward = matches!(access.direction, crate::kvs::Direction::Forward);
+					if first.ascending != forward
+						|| sort_key_component(&first.read, &access.key, &layers) != Some(position)
+					{
+						return None;
+					}
+					break position;
+				}
+				_ => return None,
+			};
+		};
+		let cutoff = super::plan::CoarseCutoff {
+			position,
+			keep: u64::try_from(*keep).ok()?,
+		};
+		let key = super::plan::TopKKey {
+			path: std::sync::Arc::from([]),
+			direction: if first.ascending {
+				crate::exec::operators::SortDirection::Asc
+			} else {
+				crate::exec::operators::SortDirection::Desc
+			},
+			single_key: keys.len() == 1,
+			depth_limit: 0,
+			coarse_cutoff: Some(cutoff),
+		};
+		Some(Plan::Sort {
+			input: Box::new(install_coarse_cutoff(input, key)),
+			keys: keys.clone(),
+			keep: Some(*keep),
+			pushdown: true,
+			random: false,
+			spill: *spill,
+		})
+	}
+}
+
+/// `plan` with the coarse top-k `key` installed on the key-range scan at the
+/// end of its chain of predicates, permissions, layers and enforcement.
+fn install_coarse_cutoff(plan: &Plan, key: super::plan::TopKKey) -> Plan {
+	let mut plan = plan.clone();
+	let mut node = &mut plan;
+	loop {
+		node = match node {
+			Plan::Layer {
+				input,
+				..
+			}
+			| Plan::Filter {
+				input,
+				..
+			}
+			| Plan::PermissionFilter {
+				input,
+				..
+			}
+			| Plan::Enforced {
+				input,
+				..
+			} => input,
+			Plan::KeyRangeScan {
+				topk,
+				..
+			} => {
+				*topk = Some(key);
+				return plan;
+			}
+			_ => return plan,
+		};
 	}
 }
 
@@ -1743,7 +2007,12 @@ fn total_read(plan: &Plan, inert: &[crate::val::TableName]) -> bool {
 			input,
 			table,
 		} => inert.contains(table) && total_read(input, inert),
+		// A key-range scan evaluates its deferred bounds when it opens, and
+		// widens a bound that raises rather than raising.
 		Plan::TableScan {
+			..
+		}
+		| Plan::KeyRangeScan {
 			..
 		}
 		| Plan::IndexScan {

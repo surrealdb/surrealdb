@@ -25,8 +25,9 @@ pub(crate) use conditions::{
 	BruteForceKnnParams, BruteForceKnnVector, exact_knn_by, expr_contains_matches,
 	extract_bruteforce_knn, extract_matches_context, extract_record_id_point_lookup,
 	extract_table_from_matches, has_knn_ktree_operator, has_knn_operator, idiom_matches_column,
-	idiom_matches_containment, strip_fts_probes, strip_index_conditions,
-	strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	idiom_matches_column_in, idiom_matches_containment, is_plan_time_computable, strip_fts_probes,
+	strip_index_conditions, strip_index_conditions_in, strip_knn_and_matches_from_condition,
+	strip_knn_from_condition,
 };
 pub(crate) use fields::{
 	check_forbidden_group_by_params, field_path_from_expr, idiom_is_id, path_steps,

@@ -1450,10 +1450,24 @@ impl State {
 	/// Prune sort `sort` to the `keep` rows its order can still reach once it
 	/// holds a quarter more, and take the last kept row as its floor. The
 	/// rows a prune sorts, no more than a quantum, are charged whole.
+	///
+	/// A sort that cuts a key-range scan by the second of a datetime component
+	/// ([`SortSpec::floors_at_keep`](super::program::SortSpec)) also prunes the
+	/// first time it holds as many rows as it keeps, so the scan has a
+	/// threshold from then on rather than a quarter more rows later: a region
+	/// hands its sort no more than `keep` rows a batch, so a sort waiting for
+	/// the quarter more would publish only several batches on.
 	fn prune(&mut self, program: &Program, sort: u16, keep: usize) {
 		let at = sort as usize;
+		let first_floor =
+			program.sorts[at].floors_at_keep && keep > 0 && !self.sort_arrivals[at].floored;
+		let margin = if first_floor {
+			0
+		} else {
+			(keep / 4).max(16)
+		};
 		let rows = &mut self.sorts[at];
-		if rows.len() < keep.saturating_add((keep / 4).max(16)) {
+		if rows.len() < keep.saturating_add(margin) {
 			return;
 		}
 		super::fuel::charge(super::fuel::units(rows.len()));

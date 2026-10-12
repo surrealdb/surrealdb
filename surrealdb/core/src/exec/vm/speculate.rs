@@ -460,6 +460,10 @@ impl crate::exec::logical::footprint::CatalogView for TxnCatalog {
 		Box::pin(async { true })
 	}
 
+	/// A field derived from a named record id component
+	/// ([`crate::catalog::FieldDefinition::is_key_part`]) reads nothing but
+	/// the id of the row it is read from, so it does not count as a computed
+	/// field here.
 	fn reads_through<'a>(
 		&'a self,
 		table: &'a surrealdb_strand::TableName,
@@ -480,7 +484,7 @@ impl crate::exec::logical::footprint::CatalogView for TxnCatalog {
 			}
 			match self.txn.all_tb_fields(ns, db, table, None).await {
 				Ok(fields) => fields.iter().any(|field| {
-					field.computed.is_some()
+					(field.computed.is_some() && !field.is_key_part())
 						|| (!self.schema
 							&& matches!(field.select_permission, Permission::Specific(_)))
 				}),

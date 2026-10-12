@@ -57,20 +57,26 @@
 // variant is collected, which a wildcard arm would silently absorb.
 #![warn(clippy::wildcard_enum_match_arm)]
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::Planner;
 use super::util::{expr_contains_matches, has_knn_operator};
 use crate::err::{EngineError, Error};
+use crate::exec::expression_registry::resolve_order_by_alias;
 use crate::exec::function::FunctionRegistry;
-use crate::exec::logical::reads::{layer_column_names, reads_beneath, reads_row_opaquely};
+use crate::exec::logical::reads::{
+	KeyColumn, key_part_columns, layer_column_names, reads_beneath, reads_row_opaquely,
+	substitute_key_parts,
+};
 use crate::exec::logical::{and, conjuncts, is_false};
 use crate::expr::logical::{
 	EvalFrame, EvalMode, FieldPath, JoinKind, LogicalAggregate, LogicalExpr, LogicalFetch,
 	LogicalField, LogicalFields, LogicalFilter, LogicalJoin, LogicalLimit, LogicalLiteral,
-	LogicalOnly, LogicalOp, LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalSort,
-	LogicalSource, LogicalSplit, LogicalTimeout, LogicalVersionScope, Schema, SourceRef,
+	LogicalOnly, LogicalOp, LogicalOrder, LogicalOrdering, LogicalPermissionFilter, LogicalProject,
+	LogicalSort, LogicalSource, LogicalSplit, LogicalTimeout, LogicalVersionScope, Schema,
+	SourceRef,
 };
 use crate::val::{Strand, TableName};
 
@@ -399,6 +405,30 @@ impl ChainNode {
 			} => layer_column_names(fields),
 		}
 	}
+
+	/// The field names of the layer's columns that stand for a component of
+	/// the record id; empty for any other node.
+	fn key_column_names(&self) -> Vec<FieldPath> {
+		self.key_columns().into_iter().map(|column| FieldPath::field(column.name)).collect()
+	}
+
+	/// The layer's columns that stand for a component of the record id; empty
+	/// for any other node.
+	fn key_columns(&self) -> Vec<KeyColumn> {
+		match self {
+			ChainNode::Permission {
+				..
+			}
+			| ChainNode::Filter {
+				..
+			}
+			| ChainNode::Join => Vec::new(),
+			ChainNode::Layer {
+				fields,
+				..
+			} => key_part_columns(fields),
+		}
+	}
 }
 
 /// Whether `join` is a semi or anti join lifted out of a permission
@@ -657,15 +687,22 @@ impl Planner<'_> {
 		match node {
 			Some(node) if is_layer_chain_over_table(&node) => {
 				let (chain, _) = peel_layer_chain(node);
+				// An ungrouped pipeline sorts the rows it projects, so an
+				// `ORDER BY` name is the projection's before it is the row's.
+				let projected = match &clauses.group {
+					Some(_) => None,
+					None => clauses.project.as_ref().map(|project| &project.fields),
+				};
 				let offer = chain_offer(
 					&chain,
 					cond.as_ref(),
 					clauses.order.as_ref(),
+					projected,
 					self.function_registry(),
 				);
 				AccessOffer {
 					cond: offer.cond,
-					order: offer.order.cloned(),
+					order: offer.order.map(Cow::into_owned),
 					has_query_limit,
 					permissioned: offer.permissioned,
 				}
@@ -769,7 +806,10 @@ struct ChainOffer<'a> {
 	/// conjuncts that read no layer column, and the table permission
 	/// predicates where no part of the offer is evaluated per row.
 	cond: Option<LogicalExpr>,
-	order: Option<&'a LogicalOrdering>,
+	/// The ordering offered to the access path: the pipeline's, with each key
+	/// that reads a column standing for a component of the record id read as
+	/// that element of the id.
+	order: Option<Cow<'a, LogicalOrdering>>,
 	/// Whether a table permission predicate is part of `cond`: the access
 	/// path chosen from it may then read at the definer's bound, which a
 	/// checked caller's `EXPLAIN` must not print.
@@ -796,10 +836,24 @@ struct ChainOffer<'a> {
 /// so its conjuncts are offered, while a filter over a layer whose column it
 /// reads — one a join's left input carries — is withheld and judged where it
 /// stands.
+///
+/// A column that stands for a component of the record id is a layer column
+/// like any other: a conjunct that reads it is withheld. A conjunct the
+/// binding rules moved beneath the layers as a read of the id reads no layer
+/// column and is offered, and no offered conjunct reads such a column, since
+/// beneath the chain it does not exist.
+///
+/// An order key is offered as the read of the id element such a column stands
+/// for ([`key_order`]); withheld otherwise when it reads a layer column. A
+/// table permission predicate joins the offer as written, and may read such a
+/// column by name: what it offers an access path is a predicate over the
+/// record, whose components every access path resolves by the record id's
+/// structure, never as stored fields.
 fn chain_offer<'a>(
 	chain: &[ChainNode],
 	cond: Option<&LogicalExpr>,
 	order: Option<&'a LogicalOrdering>,
+	projected: Option<&LogicalFields>,
 	registry: &FunctionRegistry,
 ) -> ChainOffer<'a> {
 	let scoped = |expr: &LogicalExpr| has_knn_operator(expr) || expr_contains_matches(expr);
@@ -809,9 +863,17 @@ fn chain_offer<'a>(
 	let columns: Vec<FieldPath> = chain.iter().flat_map(ChainNode::column_names).collect();
 	let upper =
 		cond.and_then(|cond| retain_conjuncts(cond, |c| !is_false(c) && !withheld_by(c, &columns)));
-	let order = order.filter(|order| match order {
-		LogicalOrdering::Random => true,
-		LogicalOrdering::Order(keys) => !keys.iter().any(|key| withheld_by(&key.value, &columns)),
+	let key_columns: Vec<KeyColumn> = chain.iter().flat_map(ChainNode::key_columns).collect();
+	let order = order.and_then(|order| match order {
+		LogicalOrdering::Random => Some(Cow::Borrowed(order)),
+		LogicalOrdering::Order(keys) if key_columns.is_empty() => {
+			(!keys.iter().any(|key| withheld_by(&key.value, &columns)))
+				.then_some(Cow::Borrowed(order))
+		}
+		LogicalOrdering::Order(keys) => {
+			key_order(keys, projected, &key_columns, |expr| withheld_by(expr, &columns))
+				.map(|keys| Cow::Owned(LogicalOrdering::Order(keys)))
+		}
 	});
 	let mut refused = cond.is_some_and(is_false);
 	let mut pushed = Vec::new();
@@ -837,6 +899,17 @@ fn chain_offer<'a>(
 		(Some(pushed), Some(upper)) => Some(and(pushed, upper)),
 		(pushed, upper) => pushed.or(upper),
 	};
+	// What the user's conjuncts offer is read beneath the chain, where a column
+	// that stands for a component of the record id does not exist: the binding
+	// rules offer such a conjunct as a read of the id, and withhold it where
+	// they cannot. A permission predicate joins the offer below.
+	debug_assert!(
+		offer.as_ref().is_none_or(|offer| {
+			let keys: Vec<FieldPath> = chain.iter().flat_map(ChainNode::key_column_names).collect();
+			!reads_beneath(offer, &keys)
+		}),
+		"an offered predicate reads a column standing for a record id component: {offer:?}"
+	);
 	// A permission predicate joins the offer only where no part of the offer
 	// is evaluated per row: a KNN search evaluates its residual per candidate
 	// in the caller's frame, and MATCHES binds to the pipeline's scope.
@@ -875,6 +948,39 @@ fn chain_offer<'a>(
 		order,
 		permissioned,
 	}
+}
+
+/// The order keys `keys` of a pipeline over a chain whose layers derive the
+/// components of the record id in `key_columns`, as they are offered to the
+/// access path; `None` when one is withheld.
+///
+/// A key is resolved against the projection `projected` first, as the sort
+/// resolves it: a key naming a projected field or alias sorts by that field's
+/// expression. When the expression it sorts by reads a column standing for a
+/// component, the key is offered as that expression with the column read as
+/// the element of the id it stands for (`time` as `id[1]`), and withheld where
+/// it still reads a layer column. Any other key is offered as written, and
+/// withheld when `withheld` holds of it: it reads a layer column, or the row
+/// opaquely.
+fn key_order(
+	keys: &[LogicalOrder],
+	projected: Option<&LogicalFields>,
+	key_columns: &[KeyColumn],
+	withheld: impl Fn(&LogicalExpr) -> bool,
+) -> Option<Vec<LogicalOrder>> {
+	keys.iter()
+		.map(|key| {
+			let resolved = projected.and_then(|fields| resolve_order_by_alias(&key.value, fields));
+			let sorted_by = resolved.as_ref().map_or(&key.value, |(expr, _)| expr);
+			match substitute_key_parts(sorted_by, key_columns) {
+				Some(read) => (!withheld(&read)).then(|| LogicalOrder {
+					value: read,
+					..key.clone()
+				}),
+				None => (!withheld(&key.value)).then(|| key.clone()),
+			}
+		})
+		.collect()
 }
 
 /// The conjuncts of `cond`'s top-level `AND` chain for which `keep` holds,
@@ -1091,5 +1197,222 @@ mod tests {
 		let (clauses, stop) = collect_pipeline(op);
 		assert!(clauses.project.is_some());
 		assert!(matches!(&stop, PipelineStop::Node(node) if node.is_layer()));
+	}
+
+	/// The predicate of `SELECT * FROM t WHERE <condition>`.
+	fn predicate(condition: &str) -> LogicalExpr {
+		let LogicalOp::Project(LogicalProject {
+			input,
+			..
+		}) = lower(&format!("SELECT * FROM t WHERE {condition}"))
+		else {
+			panic!("expected a projection on top");
+		};
+		let LogicalOp::Filter(LogicalFilter {
+			predicate,
+			..
+		}) = *input
+		else {
+			panic!("expected a filter");
+		};
+		predicate
+	}
+
+	/// A layer deriving each of `names` as the element of the record id at its
+	/// position: `id[0] AS city`, `id[1] AS time`.
+	fn key_layer(names: &[&str]) -> ChainNode {
+		let mut fields = vec![LogicalField::All];
+		fields.extend(names.iter().zip(0_i64..).map(|(name, position)| {
+			LogicalField::column(
+				*name,
+				LogicalExpr::Index {
+					base: Box::new(LogicalExpr::Field("id".into())),
+					index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(position))),
+				},
+				Some(Kind::Int),
+				EvalFrame::key_part(),
+			)
+		}));
+		ChainNode::Layer {
+			fields: LogicalFields::Select(fields),
+		}
+	}
+
+	#[test]
+	fn a_key_layer_names_its_columns_as_key_columns_and_a_computed_layer_names_none() {
+		let key = key_layer(&["city", "time"]);
+		assert_eq!(
+			key.key_column_names(),
+			vec![FieldPath::field("city"), FieldPath::field("time")]
+		);
+		assert_eq!(key.column_names(), key.key_column_names());
+		let computed = ChainNode::Layer {
+			fields: layer_fields(&["c"]),
+		};
+		assert_eq!(computed.column_names(), vec![FieldPath::field("c")]);
+		assert!(computed.key_column_names().is_empty());
+		let filter = ChainNode::Filter {
+			predicate: predicate("a = 1"),
+		};
+		assert!(filter.key_column_names().is_empty());
+	}
+
+	#[test]
+	fn a_conjunct_reading_a_key_column_is_withheld_from_the_access_path() {
+		let registry = FunctionRegistry::with_builtins();
+		let chain = [key_layer(&["city", "time"])];
+		let cond = predicate("city = 'x' AND a = 1");
+		let offer = chain_offer(&chain, Some(&cond), None, None, &registry);
+		assert_eq!(offer.cond, Some(predicate("a = 1")));
+		assert!(!offer.permissioned);
+	}
+
+	/// The element of the record id at `position`, as a key column reads it.
+	fn id_element(position: i64) -> LogicalExpr {
+		LogicalExpr::Index {
+			base: Box::new(LogicalExpr::Field("id".into())),
+			index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(position))),
+		}
+	}
+
+	/// What `chain` offers of the `ORDER BY` of `sql`, resolved against the
+	/// statement's projection as the pipeline planner resolves it.
+	fn offered_order(chain: &[ChainNode], sql: &str) -> Option<LogicalOrdering> {
+		let registry = FunctionRegistry::with_builtins();
+		let (clauses, _) = collect_pipeline(lower(sql));
+		let order = clauses.order.as_ref().expect("ordered");
+		let projected = clauses.project.as_ref().map(|project| &project.fields);
+		chain_offer(chain, None, Some(order), projected, &registry).order.map(Cow::into_owned)
+	}
+
+	/// One ascending or descending key reading `value`.
+	fn order_by(value: LogicalExpr, ascending: bool) -> LogicalOrdering {
+		LogicalOrdering::Order(vec![LogicalOrder {
+			value,
+			collate: false,
+			numeric: false,
+			direction: ascending,
+		}])
+	}
+
+	#[test]
+	fn an_order_key_reading_a_key_column_is_offered_as_the_read_of_the_id_element() {
+		let chain = [key_layer(&["city", "time"])];
+		assert_eq!(
+			offered_order(&chain, "SELECT * FROM t ORDER BY time DESC"),
+			Some(order_by(id_element(1), false))
+		);
+		// Both keys are offered, each as its element.
+		let Some(LogicalOrdering::Order(keys)) =
+			offered_order(&chain, "SELECT * FROM t ORDER BY city, time")
+		else {
+			panic!("both keys read key columns and are offered");
+		};
+		let values: Vec<LogicalExpr> = keys.into_iter().map(|key| key.value).collect();
+		assert_eq!(values, vec![id_element(0), id_element(1)]);
+		// A key over a field of a component reads that field of the element.
+		assert_eq!(
+			offered_order(&chain, "SELECT * FROM t ORDER BY city.x"),
+			Some(order_by(
+				LogicalExpr::Access {
+					base: Box::new(id_element(0)),
+					field: "x".into(),
+				},
+				true
+			))
+		);
+		// A stored field's order key passes the layer as written.
+		assert_eq!(
+			offered_order(&chain, "SELECT * FROM t ORDER BY a"),
+			Some(order_by(LogicalExpr::Field("a".into()), true))
+		);
+	}
+
+	#[test]
+	fn an_order_key_is_resolved_against_the_projection_before_the_key_columns() {
+		let chain = [key_layer(&["city", "time"])];
+		// An alias of a component sorts by the component.
+		assert_eq!(
+			offered_order(&chain, "SELECT city AS c FROM t ORDER BY c"),
+			Some(order_by(id_element(0), true))
+		);
+		// An alias named like a component sorts by what it projects.
+		assert_eq!(
+			offered_order(&chain, "SELECT time AS city FROM t ORDER BY city"),
+			Some(order_by(id_element(1), true))
+		);
+		// A projected name read as written: the key column it names.
+		assert_eq!(
+			offered_order(&chain, "SELECT city FROM t ORDER BY city DESC"),
+			Some(order_by(id_element(0), false))
+		);
+	}
+
+	#[test]
+	fn an_order_key_reading_another_layer_column_is_still_withheld() {
+		let chain = [
+			key_layer(&["city", "time"]),
+			ChainNode::Layer {
+				fields: layer_fields(&["c"]),
+			},
+		];
+		assert_eq!(offered_order(&chain, "SELECT * FROM t ORDER BY time, c"), None);
+		// An alias named like a component that projects a stored field sorts
+		// by the field, and is judged as the key it is written as.
+		assert_eq!(offered_order(&chain, "SELECT a AS city FROM t ORDER BY city"), None);
+		// A chain with no key column offers its order keys as written.
+		let computed = [ChainNode::Layer {
+			fields: layer_fields(&["c"]),
+		}];
+		assert_eq!(
+			offered_order(&computed, "SELECT * FROM t ORDER BY a"),
+			Some(order_by(LogicalExpr::Field("a".into()), true))
+		);
+		assert_eq!(offered_order(&computed, "SELECT * FROM t ORDER BY c"), None);
+	}
+
+	#[test]
+	fn a_conjunct_over_the_id_that_the_binding_rules_moved_is_offered() {
+		let registry = FunctionRegistry::with_builtins();
+		let chain = [
+			key_layer(&["city", "time"]),
+			ChainNode::Filter {
+				predicate: predicate("id[0] = 'x'"),
+			},
+		];
+		let offer = chain_offer(&chain, None, None, None, &registry);
+		assert_eq!(offer.cond, Some(predicate("id[0] = 'x'")));
+	}
+
+	#[test]
+	fn a_permission_predicate_is_not_judged_as_a_user_conjunct() {
+		// The table permission is judged against the record by the
+		// permission node, which derives the columns its predicate reads.
+		let registry = FunctionRegistry::with_builtins();
+		let chain = [
+			key_layer(&["city"]),
+			ChainNode::Permission {
+				predicate: predicate("city = 'x'"),
+			},
+		];
+		let offer = chain_offer(&chain, None, None, None, &registry);
+		assert_eq!(offer.cond, Some(predicate("city = 'x'")));
+		assert!(offer.permissioned);
+	}
+
+	/// A filter beneath a key layer that reads a key column judges it where the
+	/// column does not exist; the binding rules never place one there.
+	#[cfg(debug_assertions)]
+	#[test]
+	#[should_panic(expected = "reads a column standing for a record id component")]
+	fn a_filter_beneath_a_key_layer_reading_its_column_is_refused() {
+		let registry = FunctionRegistry::with_builtins();
+		let chain = [
+			key_layer(&["city"]),
+			ChainNode::Filter {
+				predicate: predicate("city = 'x'"),
+			},
+		];
+		let _ = chain_offer(&chain, None, None, None, &registry);
 	}
 }

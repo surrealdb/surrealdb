@@ -70,9 +70,10 @@ pub(crate) struct FieldEvalOrder {
 	/// appears after the fields its clauses read, and after its own parent
 	/// field so the optional-parent skip still works.
 	///
-	/// Ties are broken by field index, which is name order, so a table whose
-	/// fields do not read each other is processed in exactly the order the
-	/// field list arrives in.
+	/// Ties are broken by putting a field derived from a named record id
+	/// component first and then by field index, which is name order, so a
+	/// table whose fields do not read each other and whose id names no
+	/// component is processed in exactly the order the field list arrives in.
 	pub(crate) order: Vec<usize>,
 	/// Indices of the `COMPUTED` fields that some other field's clause reads.
 	/// These are the ones the write path has to materialise, transitively; a
@@ -101,6 +102,14 @@ pub(crate) struct FieldEvalOrder {
 /// processing could be ordered against. A clause whose dependencies could not
 /// be fully determined (a subquery, a parameter, a graph traversal) contributes
 /// only the dependencies that were found, and keeps its name-order position.
+///
+/// A definition derived from a named record id component
+/// ([`FieldDefinition::is_key_part`]) reads the id and nothing the field loop
+/// produces: the id is settled before any field is processed. It has no
+/// dependency edges of its own, so an `id` clause that reads the name of a
+/// component is not a cycle, and it is processed ahead of every field that is
+/// ready beside it. A table that names no component is ordered by its
+/// dependencies alone, taking the lowest-numbered ready field each time.
 pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 	/// Record that `to` must be processed after `from`. Self-edges and repeats
 	/// are dropped so the in-degrees stay in step with the edge list.
@@ -120,6 +129,9 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 	// A field's clauses read other fields: those are processed first
 	let mut deps_by_field: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
 	for (i, fd) in fields.iter().enumerate() {
+		if fd.is_key_part() {
+			continue;
+		}
 		for dep in fd.production_dependencies() {
 			if let Some(&j) = by_name.get(&dep) {
 				deps_by_field[i].push(j);
@@ -136,18 +148,21 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 			}
 		}
 	}
-	// Kahn's algorithm, taking the lowest-numbered ready field each time so
-	// that a table with no inter-field dependencies keeps name order
+	// Kahn's algorithm, taking the ready field derived from a record id
+	// component first and otherwise the lowest-numbered one, so that a table
+	// with no inter-field dependencies keeps name order
+	let rank = |i: usize| (!fields[i].is_key_part(), i);
 	let mut order = Vec::with_capacity(fields.len());
-	let mut ready: BTreeSet<usize> =
-		indegree.iter().enumerate().filter(|(_, d)| **d == 0).map(|(i, _)| i).collect();
-	while let Some(i) = ready.iter().next().copied() {
-		ready.remove(&i);
+	let mut ready: BTreeSet<(bool, usize)> =
+		indegree.iter().enumerate().filter(|(_, d)| **d == 0).map(|(i, _)| rank(i)).collect();
+	while let Some(first) = ready.iter().next().copied() {
+		ready.remove(&first);
+		let i = first.1;
 		order.push(i);
 		for &next in &edges[i] {
 			indegree[next] -= 1;
 			if indegree[next] == 0 {
-				ready.insert(next);
+				ready.insert(rank(next));
 			}
 		}
 	}
@@ -499,8 +514,15 @@ impl From<Value> for CursorDoc {
 
 #[cfg(test)]
 mod tests {
-	use super::{FieldDefinition, computed_field_deps};
+	use std::collections::HashSet;
+
+	use surrealdb_strand::Strand;
+
+	use super::{FieldDefinition, computed_field_deps, field_eval_order, id_field_index};
+	use crate::catalog::DefineDefault;
+	use crate::expr::{KeyNames, Kind, KindLiteral};
 	use crate::syn;
+	use crate::val::TableName;
 
 	fn field(name: &str, computed: Option<&str>) -> FieldDefinition {
 		FieldDefinition {
@@ -529,5 +551,318 @@ mod tests {
 		assert!(total.fields.iter().any(|f| f == "price"));
 		assert!(total.fields.iter().any(|f| f == "qty"));
 		assert!(deps.contains_key("nested.deep"), "keyed by the full raw path");
+	}
+	/// The `id` of `reading` naming `city` and `time`, then the fields in
+	/// `rest`, as the catalog lists them: the two virtual definitions of the
+	/// components straight after `id`.
+	fn keyed(id: FieldDefinition, rest: Vec<FieldDefinition>) -> Vec<FieldDefinition> {
+		let mut id = id;
+		id.set_type_strict(
+			Some(Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]))),
+			Some(KeyNames::new(vec![Strand::new("city"), Strand::new("time")], 2).unwrap()),
+		)
+		.unwrap();
+		let derived = id.live_key().unwrap().derived_fields(&TableName::from("reading"));
+		let mut all = vec![id];
+		all.extend(derived);
+		all.extend(rest);
+		all
+	}
+
+	fn stored_value(name: &str, value: &str) -> FieldDefinition {
+		FieldDefinition {
+			name: syn::idiom(name).unwrap(),
+			value: Some(syn::expr(value).unwrap()),
+			..Default::default()
+		}
+	}
+
+	fn names(fields: &[FieldDefinition], order: &[usize]) -> Vec<String> {
+		order.iter().map(|&i| fields[i].name.to_raw_string()).collect()
+	}
+
+	/// A component derives from the id alone, so it is processed ahead of the
+	/// fields that are ready beside it, and a field that reads it comes after
+	/// it. A component nothing reads is not required of the validation pass.
+	#[test]
+	fn a_component_is_ordered_before_the_fields_that_read_it() {
+		let fields =
+			keyed(field("id", None), vec![stored_value("label", "city"), field("temp", None)]);
+		let order = field_eval_order(&fields);
+
+		assert!(order.cycle.is_none());
+		assert_eq!(names(&fields, &order.order), ["city", "time", "id", "label", "temp"]);
+		assert_eq!(order.order.len(), fields.len(), "every field is ordered exactly once");
+		assert_eq!(order.required_computed, HashSet::from([1]), "only the component `label` reads");
+	}
+
+	/// A clause of the `id` that reads a component is not a dependency cycle:
+	/// the component derives from the id, and it has no dependency of its own
+	/// for the order to follow back to the id.
+	#[test]
+	fn an_id_clause_reading_a_component_is_no_cycle() {
+		let mut id = field("id", None);
+		id.default = DefineDefault::Set(syn::expr("city").unwrap());
+		let fields = keyed(id, vec![field("temp", None)]);
+		let order = field_eval_order(&fields);
+
+		assert!(order.cycle.is_none(), "{:?}", order.cycle);
+		assert_eq!(names(&fields, &order.order), ["city", "time", "id", "temp"]);
+		assert!(order.required_computed.contains(&1));
+	}
+
+	/// A genuine cycle between ordinary fields is still reported, beside
+	/// components.
+	#[test]
+	fn a_real_cycle_is_still_reported_beside_components() {
+		let fields = keyed(
+			field("id", None),
+			vec![stored_value("a", "b"), stored_value("b", "a"), field("temp", None)],
+		);
+		let order = field_eval_order(&fields);
+
+		let mut cycle = order.cycle.clone().expect("a and b read each other");
+		cycle.sort();
+		assert_eq!(cycle, ["a", "b"]);
+		assert_eq!(order.order.len(), fields.len());
+	}
+
+	/// A table that names no component is ordered by its dependencies alone,
+	/// taking the lowest-numbered ready field each time.
+	#[test]
+	fn a_table_without_components_is_ordered_by_dependency_alone() {
+		let fields =
+			vec![field("id", None), stored_value("b", "c"), field("c", None), field("d", None)];
+		let order = field_eval_order(&fields);
+
+		assert!(order.cycle.is_none());
+		assert_eq!(order.order, [0, 2, 1, 3]);
+		assert!(order.required_computed.is_empty());
+		assert!(fields.iter().all(|f| !f.is_key_part()));
+	}
+
+	/// The plan names the id and every field by their place in the one list the
+	/// order is derived from, so the place of the id is the same whether the
+	/// components are in the list or not, and every place the order names is a
+	/// field of the list.
+	#[test]
+	fn the_places_a_plan_names_are_the_places_in_the_list() {
+		let fields = keyed(field("id", None), vec![field("temp", None)]);
+		let id = id_field_index(&fields).unwrap();
+		assert_eq!(fields[id].name.to_raw_string(), "id");
+		assert!(fields[id].key_part.is_none());
+
+		let order = field_eval_order(&fields);
+		let mut seen = order.order;
+		seen.sort_unstable();
+		assert_eq!(seen, (0..fields.len()).collect::<Vec<usize>>());
+	}
+
+	/// The order a table whose `id` names no component is processed in: Kahn's
+	/// algorithm over every field's dependency edges and the parent edges,
+	/// taking the lowest-numbered ready field each time. Kept here as the
+	/// reference [`field_eval_order`] is held to for such a table.
+	fn dependency_order(
+		fields: &[FieldDefinition],
+	) -> (Vec<usize>, HashSet<usize>, Option<Vec<String>>) {
+		use std::collections::{BTreeSet, HashMap};
+		fn add_edge(from: usize, to: usize, edges: &mut [Vec<usize>], indegree: &mut [usize]) {
+			if from != to && !edges[from].contains(&to) {
+				edges[from].push(to);
+				indegree[to] += 1;
+			}
+		}
+		let by_name: HashMap<String, usize> =
+			fields.iter().enumerate().map(|(i, fd)| (fd.name.to_raw_string(), i)).collect();
+		let mut edges: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
+		let mut indegree: Vec<usize> = vec![0; fields.len()];
+		let mut deps_by_field: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
+		for (i, fd) in fields.iter().enumerate() {
+			for dep in fd.production_dependencies() {
+				if let Some(&j) = by_name.get(&dep) {
+					deps_by_field[i].push(j);
+					add_edge(j, i, &mut edges, &mut indegree);
+				}
+			}
+		}
+		for (i, fd) in fields.iter().enumerate() {
+			for (j, other) in fields.iter().enumerate() {
+				if i != j && other.name.len() > fd.name.len() && other.name.starts_with(&fd.name) {
+					add_edge(i, j, &mut edges, &mut indegree);
+				}
+			}
+		}
+		let mut order = Vec::with_capacity(fields.len());
+		let mut ready: BTreeSet<usize> =
+			indegree.iter().enumerate().filter(|(_, d)| **d == 0).map(|(i, _)| i).collect();
+		while let Some(i) = ready.iter().next().copied() {
+			ready.remove(&i);
+			order.push(i);
+			for &next in &edges[i] {
+				indegree[next] -= 1;
+				if indegree[next] == 0 {
+					ready.insert(next);
+				}
+			}
+		}
+		let cycle = if order.len() < fields.len() {
+			let mut ordered = vec![false; fields.len()];
+			for &i in &order {
+				ordered[i] = true;
+			}
+			let remaining: Vec<usize> = (0..fields.len()).filter(|&i| !ordered[i]).collect();
+			let names = remaining.iter().map(|&i| fields[i].name.to_raw_string()).collect();
+			order.extend(remaining);
+			Some(names)
+		} else {
+			None
+		};
+		let mut required_computed: HashSet<usize> = HashSet::new();
+		let mut pending: Vec<usize> = Vec::new();
+		for (i, fd) in fields.iter().enumerate() {
+			if fd.computed.is_some() {
+				continue;
+			}
+			pending.extend(deps_by_field[i].iter().copied());
+			for dep in fd.assert_dependencies() {
+				if let Some(&j) = by_name.get(&dep) {
+					pending.push(j);
+				}
+			}
+		}
+		while let Some(i) = pending.pop() {
+			if fields[i].computed.is_none() {
+				continue;
+			}
+			if required_computed.insert(i) {
+				pending.extend(deps_by_field[i].iter().copied());
+			}
+		}
+		(order, required_computed, cycle)
+	}
+
+	/// A deterministic source of choices (xorshift64*), so a failing case is
+	/// reproduced by its seed.
+	struct Choices(u64);
+
+	impl Choices {
+		fn below(&mut self, n: usize) -> usize {
+			self.0 ^= self.0 >> 12;
+			self.0 ^= self.0 << 25;
+			self.0 ^= self.0 >> 27;
+			(self.0.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 33) as usize % n
+		}
+	}
+
+	/// A field list drawn from `pool`, in an arbitrary order, each field with
+	/// clauses that read other names of the pool, itself, or a name no field
+	/// has.
+	fn random_fields(choices: &mut Choices, pool: &[&str]) -> Vec<FieldDefinition> {
+		let mut names: Vec<&str> = pool.to_vec();
+		let mut fields = Vec::new();
+		while !names.is_empty() && fields.len() < 9 {
+			let name = names.swap_remove(choices.below(names.len()));
+			if choices.below(4) == 0 {
+				continue;
+			}
+			let reads = |choices: &mut Choices| -> Option<crate::expr::Expr> {
+				if choices.below(3) != 0 {
+					return None;
+				}
+				let read: Vec<&str> = (0..choices.below(4))
+					.map(|_| match choices.below(pool.len() + 1) {
+						n if n == pool.len() => "absent",
+						n => pool[n],
+					})
+					.collect();
+				let text = if read.is_empty() {
+					"1".to_owned()
+				} else {
+					read.join(" + ")
+				};
+				Some(syn::expr(&text).unwrap())
+			};
+			let mut fd = FieldDefinition {
+				name: syn::idiom(name).unwrap(),
+				..Default::default()
+			};
+			fd.value = reads(choices);
+			fd.assert = reads(choices);
+			fd.computed = reads(choices);
+			fd.default = match (reads(choices), choices.below(2)) {
+				(Some(expr), 0) => DefineDefault::Set(expr),
+				(Some(expr), _) => DefineDefault::Always(expr),
+				(None, _) => DefineDefault::None,
+			};
+			fields.push(fd);
+		}
+		fields
+	}
+
+	/// For a table whose `id` names no component, the order, the computed
+	/// fields required and the cycle reported are exactly those of the
+	/// dependency order alone, over every shape of dependency graph: parents
+	/// and children, reads of absent fields, self reads, cycles and `ASSERT`
+	/// reads.
+	#[test]
+	fn a_table_without_components_keeps_the_dependency_order_exactly() {
+		const POOL: &[&str] =
+			&["id", "a", "b", "c", "d", "e", "a.x", "a.y", "a.x.q", "b.z", "temp", "in"];
+		// How many lists were reordered, had a computed field required and had a
+		// cycle: each shape has to be drawn for the comparison to cover it.
+		let (mut reordered, mut requiring, mut cyclic) = (0, 0, 0);
+		for seed in 1..=4000_u64 {
+			let mut choices = Choices(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+			let fields = random_fields(&mut choices, POOL);
+			assert!(fields.iter().all(|f| !f.is_key_part()));
+			let found = field_eval_order(&fields);
+			let (order, required, cycle) = dependency_order(&fields);
+			reordered += usize::from(order.windows(2).any(|pair| pair[0] > pair[1]));
+			requiring += usize::from(!required.is_empty());
+			cyclic += usize::from(cycle.is_some());
+			let listed: Vec<String> = fields.iter().map(|f| f.name.to_raw_string()).collect();
+			assert_eq!(found.order, order, "seed {seed}: order of {listed:?}");
+			assert_eq!(found.required_computed, required, "seed {seed}: required of {listed:?}");
+			assert_eq!(found.cycle, cycle, "seed {seed}: cycle of {listed:?}");
+		}
+		assert!(
+			reordered > 100 && requiring > 100 && cyclic > 100,
+			"{reordered} {requiring} {cyclic}"
+		);
+	}
+
+	/// For a table whose `id` names components that no field reads, the
+	/// components come first and the other fields keep the order, required
+	/// computed fields and cycle they would have without the components.
+	#[test]
+	fn components_nothing_reads_leave_the_other_fields_in_dependency_order() {
+		const POOL: &[&str] = &["a", "b", "c", "d", "a.x", "a.y", "b.z", "temp"];
+		for seed in 1..=2000_u64 {
+			let mut choices = Choices(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+			let rest = random_fields(&mut choices, POOL);
+			let mut plain = vec![field("id", None)];
+			plain.extend(rest.iter().cloned());
+			let (order, required, cycle) = dependency_order(&plain);
+
+			let fields = keyed(field("id", None), rest);
+			let found = field_eval_order(&fields);
+			// `id` keeps its place; every other field moves past the two components.
+			let shifted = |i: usize| {
+				if i == 0 {
+					0
+				} else {
+					i + 2
+				}
+			};
+			let mut expected: Vec<usize> = vec![1, 2];
+			expected.extend(order.iter().map(|&i| shifted(i)));
+			assert_eq!(found.order, expected, "seed {seed}");
+			assert_eq!(
+				found.required_computed,
+				required.iter().map(|&i| shifted(i)).collect::<HashSet<usize>>(),
+				"seed {seed}"
+			);
+			assert_eq!(found.cycle, cycle, "seed {seed}");
+		}
 	}
 }

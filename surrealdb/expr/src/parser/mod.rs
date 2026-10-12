@@ -58,8 +58,8 @@ use crate::expr::statements::{
 };
 use crate::expr::{
 	Base, Block, ClosureExpr as Closure, Cond, Data, Dir, Explain, ExplainFormat, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Kind, Limit, Literal,
-	Lookup, Mock, Model, Param, Part, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, KeyNames, Kind, Limit,
+	Literal, Lookup, Mock, Model, Param, Part, RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit,
 	RecordIdLit, Script, Split, Splits, Start, With,
 };
 
@@ -743,8 +743,85 @@ impl<'a> Lower<'a> {
 					.collect::<R<_>>()?,
 			)),
 			k::LIT_ARRAY => Kind::Literal(KindLiteral::Array(kinds(n.a)?)),
+			// A named tuple is read only as the whole type of the `id` field, by
+			// [`Self::field_type`]; anywhere else, as in `[a: x] | none`, it is refused.
+			k::LIT_KEYED => {
+				return Err(Reject::new(
+					"component names are only allowed when they name the whole TYPE of the `id` field",
+				)
+				.at(n.start, n.end));
+			}
 			c => panic!("not a kind code: {c}"),
 		})
+	}
+
+	/// The `TYPE` of a field and, for the whole type of the field `id` written as a
+	/// named tuple, the names of its components. `field_is_id` is whether the field
+	/// is `id`.
+	///
+	/// A component name that is reserved or repeated is refused at the span of the
+	/// name.
+	pub fn field_type(&self, id: NodeId, field_is_id: bool) -> R<(Kind, Option<KeyNames>)> {
+		self.keyed_type(id, field_is_id, false)
+	}
+
+	/// The `TYPE` of the field `id` as the text a catalog definition stores for it:
+	/// [`Self::field_type`] for the field `id`, except that component names that do
+	/// not form a valid [`KeyNames`] are dropped with a warning instead of refused.
+	/// The type is then the plain tuple, as if it had been written without names.
+	///
+	/// Reading the catalog must not fail over names, because the whole field list of
+	/// the table would then be unreadable; whether names are acceptable is a check
+	/// made when a definition is written.
+	pub fn stored_id_type(&self, id: NodeId) -> R<(Kind, Option<KeyNames>)> {
+		self.keyed_type(id, true, true)
+	}
+
+	fn keyed_type(
+		&self,
+		id: NodeId,
+		field_is_id: bool,
+		stored: bool,
+	) -> R<(Kind, Option<KeyNames>)> {
+		use surrealdb_parser_next::ast::kind as k;
+		let n = self.n(id);
+		if !field_is_id || n.tag != Tag::Kind || n.op != k::LIT_KEYED {
+			return Ok((self.kind(id)?, None));
+		}
+		let list = self.list(n.a);
+		let mut names: Vec<Strand> = Vec::with_capacity(list.len() / 2);
+		let mut kinds = Vec::with_capacity(list.len() / 2);
+		for pair in list.chunks(2) {
+			let at = self.n(pair[0]);
+			let name = self.name(pair[0])?;
+			if !stored {
+				if KeyNames::is_reserved(&name) {
+					return Err(Reject::new(format!(
+						"the record id component name `{name}` is reserved"
+					))
+					.at(at.start, at.end));
+				}
+				if names.iter().any(|earlier| earlier.as_str() == name) {
+					return Err(Reject::new(format!(
+						"the record id component `{name}` is named twice"
+					))
+					.at(at.start, at.end));
+				}
+			}
+			names.push(Strand::new(name));
+			kinds.push(self.kind(pair[1])?);
+		}
+		let names = match KeyNames::new(names, kinds.len()) {
+			Ok(names) => Some(names),
+			Err(e) if stored => {
+				tracing::warn!(
+					"the component names of a stored record id type are not valid and are ignored: {e}"
+				);
+				None
+			}
+			Err(e) => return Err(Reject::new(e.to_string()).at(n.start, n.end)),
+		};
+		Ok((Kind::Literal(KindLiteral::Array(kinds)), names))
 	}
 
 	/// A `::` path `Name` as the joined, unescaped segment names.

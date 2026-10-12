@@ -185,6 +185,7 @@ impl IndexBuilder {
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<BuildStart> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, tb, ix, ix_key)?);
+		building.read_key_structure_in(ctx).await?;
 		let acquired = match building.acquire_build_state().await {
 			Ok(Some(acquired)) => acquired,
 			Ok(None) => return Ok(BuildStart::RemoteOwner(building)),
@@ -554,6 +555,10 @@ pub(super) struct Building {
 	/// holds no transaction: its sources resolve when the expression runs, so
 	/// nothing from the compiling batch is baked in.
 	compiled: OnceCell<Arc<PhysicalIndexEntry>>,
+	/// The structure of the record ids of the table this index is over, where
+	/// its `id` field names their components; read once for the whole build
+	/// ([`Self::table_key_structure`]).
+	key: OnceCell<Option<Arc<crate::catalog::KeyStructure>>>,
 }
 
 impl Building {
@@ -581,6 +586,7 @@ impl Building {
 			release_gate: AtomicU8::new(RELEASE_GATE_STATEMENT),
 			finished_notify: Notify::new(),
 			compiled: OnceCell::new(),
+			key: OnceCell::new(),
 		})
 	}
 
@@ -650,6 +656,10 @@ impl Building {
 	/// planner that resolves no table context cannot recurse into an index
 	/// expression that names the table it indexes, and it is what makes the
 	/// compiled form outlive the batch it was compiled in.
+	///
+	/// The structure of the table's record ids is read from the catalog, so
+	/// that a column or a guard that names a component of the id is compiled as
+	/// the write path compiles it ([`Self::table_key_structure`]).
 	pub(super) async fn compiled_index(
 		&self,
 		exec: &ExecutionContext,
@@ -657,11 +667,66 @@ impl Building {
 		self.compiled
 			.get_or_try_init(|| async {
 				let planner = Planner::new(exec.ctx(), exec.function_registry());
-				let entry = index_entry_physical(&self.ix, &planner).await?;
+				let key = self.table_key_structure().await?;
+				let entry = index_entry_physical(&self.ix, &planner, key.as_deref()).await?;
 				Ok::<_, anyhow::Error>(Arc::new(entry))
 			})
 			.await
 			.cloned()
+	}
+
+	/// The structure of the record ids of the table this index is over, where
+	/// its `id` field names their components; `None` for every other table.
+	///
+	/// A build a statement started holds the structure that statement's
+	/// transaction reads ([`Self::read_key_structure_in`]), which sees an `id`
+	/// the same transaction named before defining the index. A build with no
+	/// statement behind it, a maintenance resume, reads it in a transaction of
+	/// its own, where the definition it resumes is committed. The names of the
+	/// components an index reads cannot change while the index exists, so every
+	/// structure the build can read names them alike.
+	async fn table_key_structure(&self) -> Result<Option<Arc<crate::catalog::KeyStructure>>> {
+		self.key
+			.get_or_try_init(|| async {
+				let tx = self.new_read_tx().await?;
+				let key = self.key_structure_through(&tx).await;
+				tx.cancel().await?;
+				key
+			})
+			.await
+			.cloned()
+	}
+
+	/// Read the structure of the table's record ids through the transaction of
+	/// `ctx`, the statement that starts this build, when it holds one.
+	///
+	/// The statement's program runs sealed off the catalog; this is a load the
+	/// build makes of its own, as its own transactions do, so it is declared
+	/// unsealed ([`crate::kvs::catalog_reads::sealed`]).
+	pub(super) async fn read_key_structure_in(&self, ctx: &FrozenContext) -> Result<()> {
+		if let Some(tx) = ctx.try_tx() {
+			let key =
+				crate::kvs::catalog_reads::sealed(false, self.key_structure_through(tx)).await?;
+			// The cell is empty: nothing compiles the index before the build is
+			// started.
+			let _ = self.key.set(key);
+		}
+		Ok(())
+	}
+
+	/// The structure of the table's record ids where its `id` field names
+	/// their components, as `tx` reads the catalog.
+	async fn key_structure_through(
+		&self,
+		tx: &Transaction,
+	) -> Result<Option<Arc<crate::catalog::KeyStructure>>> {
+		let (ns, db, table) = (self.ix_key.ns, self.ix_key.db, &self.ix_key.tb);
+		let Some(definition) = tx.get_tb(ns, db, table, None).await? else {
+			return Ok(None);
+		};
+		let fields = tx.all_tb_fields(ns, db, table, None).await?;
+		Ok(crate::catalog::table_key(&definition, &fields)
+			.filter(|key| key.origin == crate::catalog::KeyOrigin::IdField))
 	}
 
 	/// Acquire durable ownership for this build.

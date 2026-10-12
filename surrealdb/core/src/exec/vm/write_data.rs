@@ -95,6 +95,11 @@ pub(in crate::exec::vm) enum DataInstr {
 	/// Stamp `id`, and an edge's `in`, `out` and record-type marker, onto the
 	/// post-image.
 	StampRecordFields,
+	/// Judge the fields of the record that name components of its record id, and
+	/// cut them from the post-image: each must be the key's own element, which
+	/// is held by the key and is never stored. Emitted only for a table whose
+	/// `id` field names its components, and a no-op when the table resolved none.
+	SettleKeyFields,
 	/// Settle the record's id: a key the record or its data clause supplied,
 	/// the `id` field's `DEFAULT` — host pipeline `default`, run over the
 	/// record the `DEFAULT` reads in the field's `DEFAULT` frame — or a
@@ -134,6 +139,7 @@ impl DataInstr {
 			}
 			| DataInstr::CheckDataFields
 			| DataInstr::StampRecordFields
+			| DataInstr::SettleKeyFields
 			| DataInstr::GenerateId {
 				..
 			}
@@ -540,6 +546,10 @@ pub(super) async fn step(
 			data::stamp_record_fields(row)?;
 			Ok(next)
 		}
+		DataInstr::SettleKeyFields => {
+			data::settle_key_fields(row, &ctx)?;
+			Ok(next)
+		}
 		DataInstr::GenerateId {
 			default,
 		} => {
@@ -558,8 +568,10 @@ pub(super) async fn step(
 			let doc = data::id_default_doc(row).clone();
 			let value =
 				clause(run_image(program, *pipeline, doc, Some(frame), state, &exec).await)?;
+			let row = write_state(state)?.row()?;
+			data::check_default_id(row, &ctx, &table, &value)?;
 			let id = value.generate(table, false).map_err(ControlFlow::Err)?;
-			data::finish_record_id(write_state(state)?.row()?, &ctx, id)?;
+			data::finish_record_id(row, &ctx, id)?;
 			Ok(next)
 		}
 		DataInstr::MergeSupplied => {

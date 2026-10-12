@@ -1,0 +1,17 @@
+DEFINE FIELD id ON reading TYPE [city: string];
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime,];
+DEFINE FIELD id ON reading TYPE [value: int, string: string, option: int];
+DEFINE FIELD id ON reading TYPE [`my city`: string, time: datetime];
+DEFINE FIELD id ON reading TYPE [`NaN`: string, `1a`: int, ⟨x y⟩: bool];
+DEFINE FIELD id ON reading TYPE [place: record<place | town>, n: option<int>, u: uuid, d: duration];
+DEFINE FIELD id ON reading TYPE [a: int | string, b: any];
+DEFINE FIELD OVERWRITE id ON reading TYPE [city: string, time: datetime];
+DEFINE FIELD IF NOT EXISTS id ON reading TYPE [city: string, time: datetime];
+DEFINE FIELD `id` ON reading TYPE [city: string];
+DEFINE FIELD id ON reading TYPE [city: string, time: datetime] DEFAULT ['London', time::now()];
+DEFINE FIELD id ON reading TYPE [a: string] TYPE [string];
+DEFINE FIELD id ON reading TYPE [string, datetime] TYPE [a: string, b: datetime];
+DEFINE FIELD id ON reading TYPE [];
+DEFINE FIELD id ON reading TYPE [string, datetime];
+DEFINE FIELD value ON reading TYPE [string];

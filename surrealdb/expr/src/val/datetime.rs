@@ -5,7 +5,7 @@ use std::{ops, str};
 
 use anyhow::{Result, anyhow};
 use chrono::offset::LocalResult;
-use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Datelike, SecondsFormat, TimeZone, Timelike, Utc};
 use common::fmt::QuoteStr;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -101,6 +101,79 @@ impl Datetime {
 	/// Convert to second timestamp.
 	pub fn to_secs(self) -> i64 {
 		self.0.timestamp()
+	}
+}
+
+/// The number of bytes in the `YYYY-MM-DDTHH:MM:SS` prefix of a datetime's key
+/// encoding.
+pub const KEY_SECOND_PREFIX_LEN: usize = 19;
+
+impl Datetime {
+	/// Whether the key encoding of this datetime opens with the fixed-width
+	/// `YYYY-MM-DDTHH:MM:SS` text that [`Datetime::key_second_prefix`] returns.
+	///
+	/// A datetime is encoded in a key as its RFC 3339 text. Only the years
+	/// 0000 to 9999 render as four digits; every other year renders with a sign
+	/// and a different width, so its text neither has the fixed prefix nor
+	/// orders consistently with the other years. A leap second (a nanosecond
+	/// field of one billion or more) renders as second 60, which no whole-second
+	/// floor maps onto.
+	pub fn in_key_range(&self) -> bool {
+		(0..=9999).contains(&self.0.year()) && !self.is_leap_second()
+	}
+
+	/// Whether this datetime is a leap second: its nanosecond field is one billion
+	/// or more, so that it renders as second 60.
+	pub fn is_leap_second(&self) -> bool {
+		self.0.nanosecond() >= 1_000_000_000
+	}
+
+	/// The `YYYY-MM-DDTHH:MM:SS` text, in UTC, that every key encoding of a
+	/// datetime within the same whole second opens with.
+	///
+	/// The text is fixed-width ASCII, so the byte order of these prefixes is the
+	/// chronological order of the whole seconds. The bytes that follow it in a
+	/// full encoding are the sub-second digits and the `Z`, and those do not sort
+	/// chronologically: `.500Z` sorts before `Z`. A prefix therefore delimits a
+	/// whole second of keys and nothing finer.
+	///
+	/// Returns `None` unless [`Datetime::in_key_range`].
+	pub fn key_second_prefix(&self) -> Option<[u8; KEY_SECOND_PREFIX_LEN]> {
+		if !self.in_key_range() {
+			return None;
+		}
+		let t = &self.0;
+		let mut out = *b"0000-00-00T00:00:00";
+		put_digits(&mut out[0..4], t.year() as u32);
+		put_digits(&mut out[5..7], t.month());
+		put_digits(&mut out[8..10], t.day());
+		put_digits(&mut out[11..13], t.hour());
+		put_digits(&mut out[14..16], t.minute());
+		put_digits(&mut out[17..19], t.second());
+		Some(out)
+	}
+
+	/// This datetime with the sub-second part removed.
+	///
+	/// For a datetime that is [`Datetime::in_key_range`], two datetimes have the
+	/// same floor exactly when they have the same
+	/// [`Datetime::key_second_prefix`], and floors compare in the order of their
+	/// prefixes.
+	pub fn floor_second(&self) -> Datetime {
+		match self.0.with_nanosecond(0) {
+			Some(floored) => Datetime(floored),
+			// Zero is a valid nanosecond field for every datetime, so this arm
+			// is unreachable; the datetime is returned as it was.
+			None => *self,
+		}
+	}
+}
+
+/// Writes `value` into `out` as zero-padded decimal digits.
+fn put_digits(out: &mut [u8], mut value: u32) {
+	for slot in out.iter_mut().rev() {
+		*slot = b'0' + (value % 10) as u8;
+		value /= 10;
 	}
 }
 

@@ -572,6 +572,11 @@ fn holds_a_let_statement(expr: &LogicalExpr) -> bool {
 /// none of the table's fields is computed, and neither its select permission
 /// nor any field's is a predicate, so a row is kept or refused, and a field
 /// kept or cut, without evaluating anything.
+///
+/// A field derived from a named record id component
+/// ([`crate::catalog::FieldDefinition::is_key_part`]) is not counted as
+/// computed: `id[i]` reads the id alone, which every decode sets from the
+/// key, and indexes it without a fetch or an effect.
 async fn enforcement_is_total(planner: &Planner<'_>, table: &TableName) -> bool {
 	use crate::catalog::Permission;
 	let (Some(txn), Some((ns, db))) = (planner.txn(), planner.ns_db_ids().await) else {
@@ -587,7 +592,8 @@ async fn enforcement_is_total(planner: &Planner<'_>, table: &TableName) -> bool 
 		return false;
 	};
 	fields.iter().all(|field| {
-		field.computed.is_none() && !matches!(field.select_permission, Permission::Specific(_))
+		(field.computed.is_none() || field.is_key_part())
+			&& !matches!(field.select_permission, Permission::Specific(_))
 	})
 }
 
@@ -764,7 +770,7 @@ async fn indexed_field(
 		right: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
 	};
 	let decision =
-		planner.decide_access_path(table, Some(&probe), None, None, false, false).await?;
+		planner.decide_access_path(table, Some(&probe), None, None, false, false, false).await?;
 	let AccessPath::BTreeScan {
 		index_ref,
 		access: BTreeAccess::Equality(_),
@@ -1877,10 +1883,13 @@ async fn write_rows(
 	input: &LogicalOp,
 	cond: &LogicalExpr,
 ) -> Mapped<WriteRows> {
-	let filtered = LogicalOp::Filter(crate::expr::logical::LogicalFilter {
-		input: Box::new(input.clone()),
-		predicate: cond.clone(),
-	});
+	let filtered = match read_condition(planner, input, cond).await {
+		Some(predicate) => LogicalOp::Filter(crate::expr::logical::LogicalFilter {
+			input: Box::new(input.clone()),
+			predicate,
+		}),
+		None => input.clone(),
+	};
 	let read = crate::exec::vm::host::out_of_line(|| map_rows(planner, &filtered, false)).await?;
 	let searched = holds_on_chain(&read.root, &|node| {
 		matches!(node, Plan::KnnScan { .. } | Plan::KnnTopK { .. })
@@ -1941,6 +1950,20 @@ async fn write_rows(
 		} else {
 			Some(held)
 		};
+	}
+	// A record-id range over a table whose record ids name their components
+	// may be read widened, beneath a filter holding the range as written
+	// ([`keyed_record_read`]). The read's filters are dropped above, so the
+	// write judges that range first, then its condition.
+	if let Some(range) = keyed_range_residual(planner, input).await {
+		cond = Some(match cond {
+			Some(cond) => LogicalExpr::Binary {
+				left: Box::new(range),
+				op: BinaryOperator::And,
+				right: Box::new(cond),
+			},
+			None => range,
+		});
 	}
 	Ok(WriteRows {
 		root,
@@ -2228,8 +2251,6 @@ async fn count_deltas(
 	table: &TableName,
 	count: &CountDecision,
 ) -> Mapped<Option<crate::catalog::IndexId>> {
-	use surrealdb_types::ToSql;
-
 	use crate::catalog::Index;
 	let Some(txn) = planner.txn() else {
 		return Err(NotCovered::internal("no transaction at plan time"));
@@ -2252,13 +2273,19 @@ async fn count_deltas(
 			cond,
 			..
 		} => {
-			let cond = cond.to_sql();
+			let key =
+				crate::exec::vm::host::out_of_line(|| planner.named_key_structure(table)).await;
 			indexes
 				.iter()
 				.find(|ix| {
 					matches!(&ix.index, Index::Count(Some(_)))
-						&& ix.count_cond.as_ref().map(|guard| guard.0.to_sql()).as_deref()
-							== Some(cond.as_str())
+						&& ix.count_cond.as_ref().is_some_and(|guard| {
+							crate::exec::index::derived_columns::guard_counts(
+								key.as_deref(),
+								&guard.0,
+								cond,
+							)
+						})
 				})
 				.map(|ix| ix.index_id)
 		}
@@ -2398,7 +2425,12 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 				random: true,
 			}),
 			Some(ordering) => Some(SortClause {
-				keys: sort_keys(ordering, None, planner.function_registry())?,
+				keys: sort_keys(
+					ordering,
+					None,
+					planner.function_registry(),
+					evaluates_id_elements(planner, ordering, op).await,
+				)?,
 				random: false,
 			}),
 			None => None,
@@ -2449,6 +2481,7 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 					None => projected.map(|fields| (fields, &mut projection)),
 				},
 				planner.function_registry(),
+				evaluates_id_elements(planner, ordering, op).await,
 			)?,
 			random: false,
 		}),
@@ -3696,15 +3729,337 @@ async fn map_source(
 	};
 	let schema = source.schema.clone();
 	let leaf = match record {
-		Some(record) => Plan::RecordScan {
-			table,
-			record,
-			schema,
-			for_update: source.for_update,
-		},
+		Some(record) => {
+			let (record, residual) = keyed_record_read(planner, &table, record, versioned).await;
+			let scan = Plan::RecordScan {
+				table,
+				record,
+				schema,
+				for_update: source.for_update,
+			};
+			match residual {
+				Some(predicate) => Plan::Filter {
+					input: Box::new(scan),
+					predicate,
+					once: None,
+				},
+				None => scan,
+			}
+		}
 		None => table_access(planner, table, source, offer, versioned).await?,
 	};
 	Ok((leaf, dependency, enforces))
+}
+
+/// The record-id read of `record` over `table`, and the predicate that must
+/// judge the rows it yields, where the table's record ids name their
+/// components.
+///
+/// An int component holds only ints, so a literal float or decimal element
+/// that equals an int is read as that int: its key is the int's key. A range
+/// bound is read as a key that reaches every record the bound admits:
+///
+/// - a datetime element orders by its whole second only, so the bound is cut at the element and the
+///   element moved one second outwards, exclusively;
+/// - an element of an int or datetime component whose key cannot be known at plan time (not a
+///   literal, a fractional number, a datetime with no key text) leaves the side open.
+///
+/// A range so widened yields records outside the range as written, so it is
+/// returned with the predicate `id` compared with each side as written. The
+/// read and the predicate are returned unchanged for every other table and
+/// record, and for a `versioned` read: the structure the catalog holds now
+/// need not be the one the records at the version were written under.
+async fn keyed_record_read(
+	planner: &Planner<'_>,
+	table: &TableName,
+	record: LogicalExpr,
+	versioned: bool,
+) -> (LogicalExpr, Option<LogicalExpr>) {
+	use crate::expr::logical::{LogicalRecordIdKey, LogicalRecordIdKeyRange};
+	let LogicalExpr::RecordId(lit) = &record else {
+		return (record, None);
+	};
+	if versioned {
+		return (record, None);
+	}
+	let array_bound = |bound: &std::ops::Bound<LogicalRecordIdKey>| {
+		matches!(
+			bound,
+			std::ops::Bound::Included(LogicalRecordIdKey::Array(_))
+				| std::ops::Bound::Excluded(LogicalRecordIdKey::Array(_))
+		)
+	};
+	let candidate = match &lit.key {
+		LogicalRecordIdKey::Array(_) => true,
+		LogicalRecordIdKey::Range(range) => array_bound(&range.start) || array_bound(&range.end),
+		_ => false,
+	};
+	if !candidate || lit.table != *table {
+		return (record, None);
+	}
+	let Some(key) = crate::exec::vm::host::out_of_line(|| planner.named_key_structure(table)).await
+	else {
+		return (record, None);
+	};
+	match &lit.key {
+		LogicalRecordIdKey::Array(elements) => {
+			let elements = normalised_elements(&key, elements);
+			let read = LogicalExpr::RecordId(Box::new(crate::expr::logical::LogicalRecordIdLit {
+				table: lit.table.clone(),
+				key: LogicalRecordIdKey::Array(elements),
+			}));
+			(read, None)
+		}
+		LogicalRecordIdKey::Range(range) => {
+			let (start, start_widened) = widened_bound(&key, &range.start, KeySide::Low);
+			let (end, end_widened) = widened_bound(&key, &range.end, KeySide::High);
+			let read = LogicalExpr::RecordId(Box::new(crate::expr::logical::LogicalRecordIdLit {
+				table: lit.table.clone(),
+				key: LogicalRecordIdKey::Range(Box::new(LogicalRecordIdKeyRange {
+					start,
+					end,
+				})),
+			}));
+			if !start_widened && !end_widened {
+				return (read, None);
+			}
+			let side = |bound: &std::ops::Bound<LogicalRecordIdKey>, low: bool| {
+				let (key, op) = match bound {
+					std::ops::Bound::Included(key) if low => (key, BinaryOperator::MoreThanEqual),
+					std::ops::Bound::Excluded(key) if low => (key, BinaryOperator::MoreThan),
+					std::ops::Bound::Included(key) => (key, BinaryOperator::LessThanEqual),
+					std::ops::Bound::Excluded(key) => (key, BinaryOperator::LessThan),
+					std::ops::Bound::Unbounded => return None,
+				};
+				Some(LogicalExpr::Binary {
+					left: Box::new(LogicalExpr::Field("id".into())),
+					op,
+					right: Box::new(LogicalExpr::RecordId(Box::new(
+						crate::expr::logical::LogicalRecordIdLit {
+							table: lit.table.clone(),
+							key: key.clone(),
+						},
+					))),
+				})
+			};
+			let residual = match (side(&range.start, true), side(&range.end, false)) {
+				(Some(low), Some(high)) => Some(LogicalExpr::Binary {
+					left: Box::new(low),
+					op: BinaryOperator::And,
+					right: Box::new(high),
+				}),
+				(low, high) => low.or(high),
+			};
+			(read, residual)
+		}
+		_ => (record, None),
+	}
+}
+
+/// The part of a write's condition `cond` its read of `input` chooses an
+/// access path from; `None` when no part is left.
+///
+/// A mutation's `WHERE` reads the clock per row (ADR 0006), so a conjunct that
+/// reads it is no bound of a key range: over a table whose record ids name
+/// their components, such a conjunct (one holding no `MATCHES` or `KNN`
+/// operator, which the access path answers) is left out of the read. The read
+/// is a superset either way, since the write judges the whole condition per
+/// record. Over any other table the read takes the whole condition.
+async fn read_condition(
+	planner: &Planner<'_>,
+	input: &LogicalOp,
+	cond: &LogicalExpr,
+) -> Option<LogicalExpr> {
+	use crate::exec::logical::effects::effects_of_expr;
+	use crate::expr::logical::EffectSet;
+	let registry = planner.function_registry();
+	let conjuncts = crate::exec::logical::conjuncts(cond);
+	let reads_clock = |conjunct: &LogicalExpr| {
+		let effects = effects_of_expr(conjunct, registry);
+		effects.set.contains(EffectSet::CLOCK) && !effects.index_operator
+	};
+	if !conjuncts.iter().any(|conjunct| reads_clock(conjunct))
+		|| !reads_keyed_table(planner, input).await
+	{
+		return Some(cond.clone());
+	}
+	conjuncts
+		.into_iter()
+		.filter(|conjunct| !reads_clock(conjunct))
+		.cloned()
+		.reduce(crate::exec::logical::and)
+}
+
+/// Whether a table source of `input`, at the foot of a chain of single inputs
+/// or of a union's inputs, has record ids that name their components.
+async fn reads_keyed_table(planner: &Planner<'_>, input: &LogicalOp) -> bool {
+	let mut todo = vec![input];
+	while let Some(op) = todo.pop() {
+		match op {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::Table(table),
+				..
+			}) => {
+				if planner.named_key_structure(table).await.is_some() {
+					return true;
+				}
+			}
+			LogicalOp::Source(_) => {}
+			_ => todo.extend(op.children()),
+		}
+	}
+	false
+}
+
+/// The predicate the records of the one record-id source at the foot of
+/// `input`'s chain of single inputs must meet, where [`keyed_record_read`]
+/// widens its range; `None` for a source read as written, and for an input
+/// that reads several sources, whose reads keep their predicates.
+async fn keyed_range_residual(planner: &Planner<'_>, input: &LogicalOp) -> Option<LogicalExpr> {
+	let mut op = input;
+	loop {
+		match op {
+			LogicalOp::Source(LogicalSource {
+				source: SourceRef::RecordId(record),
+				..
+			}) => {
+				let read = LogicalExpr::RecordId(record.clone());
+				return keyed_record_read(planner, &record.table, read, false).await.1;
+			}
+			_ => match op.children() {
+				[child] => op = child,
+				_ => return None,
+			},
+		}
+	}
+}
+
+/// Which side of a record-id range a bound is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KeySide {
+	Low,
+	High,
+}
+
+/// The elements of an array record-id key over a table with key structure
+/// `key`, with every literal float or decimal at an int component that equals
+/// an int read as that int.
+fn normalised_elements(
+	key: &crate::catalog::KeyStructure,
+	elements: &[LogicalExpr],
+) -> Vec<LogicalExpr> {
+	elements
+		.iter()
+		.enumerate()
+		.map(|(position, element)| {
+			let int = key
+				.components
+				.get(position)
+				.is_some_and(|component| component.kind == crate::catalog::ComponentKind::Int);
+			if int
+				&& let Some(crate::val::Value::Number(number)) =
+					crate::exec::planner::util::try_literal_to_value(element)
+				&& let Some(int) = number.as_int_lossless()
+			{
+				return LogicalExpr::Literal(LogicalLiteral::Integer(int));
+			}
+			element.clone()
+		})
+		.collect()
+}
+
+/// A bound of a record-id range over a table with key structure `key`, read as
+/// a key that reaches every record the bound admits (see
+/// [`keyed_record_read`]), with whether it was widened.
+fn widened_bound(
+	key: &crate::catalog::KeyStructure,
+	bound: &std::ops::Bound<crate::expr::logical::LogicalRecordIdKey>,
+	side: KeySide,
+) -> (std::ops::Bound<crate::expr::logical::LogicalRecordIdKey>, bool) {
+	use std::ops::Bound;
+
+	use crate::catalog::ComponentKind;
+	use crate::expr::logical::LogicalRecordIdKey;
+	let (elements, included) = match bound {
+		Bound::Included(LogicalRecordIdKey::Array(elements)) => (elements, true),
+		Bound::Excluded(LogicalRecordIdKey::Array(elements)) => (elements, false),
+		other => return (other.clone(), false),
+	};
+	let elements = normalised_elements(key, elements);
+	for (position, element) in elements.iter().enumerate() {
+		let kind = key.components.get(position).map(|component| &component.kind);
+		match kind {
+			Some(ComponentKind::Datetime) => {
+				let Some(crate::val::Value::Datetime(datetime)) =
+					crate::exec::planner::util::try_literal_to_value(element)
+				else {
+					return (Bound::Unbounded, true);
+				};
+				let step = chrono::TimeDelta::seconds(match side {
+					KeySide::Low => -1,
+					KeySide::High => 1,
+				});
+				let moved = datetime
+					.floor_second()
+					.checked_add_signed(step)
+					.map(crate::val::Datetime)
+					.filter(|moved| datetime.in_key_range() && moved.in_key_range());
+				let Some(moved) = moved else {
+					return (Bound::Unbounded, true);
+				};
+				let mut cut = elements[..position].to_vec();
+				cut.push(LogicalExpr::Literal(LogicalLiteral::Datetime(moved)));
+				return (Bound::Excluded(LogicalRecordIdKey::Array(cut)), true);
+			}
+			Some(ComponentKind::Int) => {
+				let int = matches!(
+					crate::exec::planner::util::try_literal_to_value(element),
+					Some(crate::val::Value::Number(crate::val::Number::Int(_)))
+				);
+				if !int {
+					return (Bound::Unbounded, true);
+				}
+			}
+			_ => {}
+		}
+	}
+	let key = LogicalRecordIdKey::Array(elements);
+	if included {
+		(Bound::Included(key), false)
+	} else {
+		(Bound::Excluded(key), false)
+	}
+}
+
+/// Whether a table scan of `table` delivers its rows in the order of `id`
+/// where the offer asks for that order ([`Plan::TableScan`]'s `id_order`).
+///
+/// Key order is `id` order unless the table's record id names a component
+/// whose key bytes order its values coarsely (a datetime, by the whole
+/// second). The catalog is read only when the offered ordering is `id` alone,
+/// the one ordering a table scan is taken to deliver. A `versioned` scan is
+/// not taken to deliver it: the records at the version may have been written
+/// under a structure the catalog no longer holds.
+async fn scan_orders_by_id(
+	planner: &Planner<'_>,
+	table: &TableName,
+	offer: &AccessOffer,
+	versioned: bool,
+) -> bool {
+	let by_id = matches!(
+		&offer.order,
+		Some(LogicalOrdering::Order(keys))
+			if keys.len() == 1 && crate::exec::planner::util::idiom_is_id(&keys[0].value)
+	);
+	if !by_id {
+		return true;
+	}
+	if versioned {
+		return false;
+	}
+	crate::exec::vm::host::out_of_line(|| planner.named_key_structure(table))
+		.await
+		.is_none_or(|key| key.all_exactly_ordered())
 }
 
 /// The access path for a table source: a lookup of the record the predicate
@@ -3718,6 +4073,8 @@ async fn table_access(
 ) -> Mapped<Plan> {
 	let schema = source.schema.clone();
 	if let Some(record) = planner.record_point_lookup(&table, offer.cond.as_ref()) {
+		// A point lookup names one key, so the read is never widened.
+		let (record, _) = keyed_record_read(planner, &table, record, versioned).await;
 		return Ok(Plan::RecordScan {
 			table,
 			record,
@@ -3738,11 +4095,13 @@ async fn table_access(
 	});
 	if versioned && !index_operator && !matches!(planner.plan_time_version, PlanTimeVersion::At(_))
 	{
+		let id_order = scan_orders_by_id(planner, &table, offer, versioned).await;
 		return Ok(Plan::TableScan {
 			table,
 			direction: crate::kvs::Direction::Forward,
 			schema,
 			topk: None,
+			id_order,
 		});
 	}
 	let Some(decision) = planner
@@ -3753,6 +4112,7 @@ async fn table_access(
 			source.with.as_ref(),
 			offer.has_query_limit,
 			versioned,
+			offer.permissioned,
 		)
 		.await
 	else {
@@ -3766,6 +4126,7 @@ async fn table_access(
 				direction: crate::kvs::Direction::Forward,
 				schema,
 				topk: None,
+				id_order: true,
 			});
 		}
 		return Err(NotCovered::internal("no plan-time access path"));
@@ -3777,9 +4138,22 @@ async fn table_access(
 		offer.order.as_ref()
 	};
 	match decision.path {
-		AccessPath::TableScan => Ok(Plan::TableScan {
+		AccessPath::TableScan => {
+			let id_order = scan_orders_by_id(planner, &table, offer, versioned).await;
+			Ok(Plan::TableScan {
+				table,
+				direction: decision.direction,
+				schema,
+				topk: None,
+				id_order,
+			})
+		}
+		// A key range over the record keys reads the ranges alone, in the
+		// access's direction: a superset of the rows the predicate admits, and
+		// the predicate the range was planned from stays above it.
+		AccessPath::KeyRange(access) => Ok(Plan::KeyRangeScan {
 			table,
-			direction: decision.direction,
+			access: std::sync::Arc::new(access),
 			schema,
 			topk: None,
 		}),
@@ -3923,15 +4297,22 @@ async fn table_access(
 /// per record
 /// ([`IndexRef::one_entry_per_record`](crate::exec::index::access_path::IndexRef::one_entry_per_record)).
 /// An array value is listed once per element, and an empty one under `NULL`,
-/// so a column that may hold one lists records its conjunct rejects; and a
-/// range bounded by a number lists records whose number keys within it but
-/// compares outside it
-/// ([`range_matches_comparison`](crate::exec::index::access_path::range_matches_comparison)).
+/// so a column that may hold one lists records its conjunct rejects; a range
+/// bounded by a number lists records whose number keys within it but compares
+/// outside it
+/// ([`range_matches_comparison`](crate::exec::index::access_path::range_matches_comparison));
+/// and a range widened to the seconds of its bounds over a datetime component
+/// of the record id
+/// ([`range_is_widened`](crate::exec::index::derived_columns::range_is_widened))
+/// lists records its conjunct rejects too.
 fn answers_exactly(
 	index: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
 ) -> bool {
 	use crate::exec::index::access_path::BTreeAccess;
+	if crate::exec::index::derived_columns::range_is_widened(index, access) {
+		return false;
+	}
 	let pinned = match access {
 		BTreeAccess::Equality(_) => index.cols.len(),
 		BTreeAccess::Compound {
@@ -4363,7 +4744,11 @@ fn output_path(expr: &LogicalExpr, alias: Option<&crate::expr::logical::OutputPa
 /// A key is resolved against the projection first (`resolve_order_by_alias`):
 /// a key naming a projected field or alias sorts by that field's expression.
 /// A bare field read, or an unresolved key that is a path, is read as a path;
-/// any other key is computed, once per row, for the sort.
+/// any other key is computed, once per row, for the sort. With `id_elements`,
+/// the rows are a table's whose record ids name their components
+/// ([`evaluates_id_elements`]), and an unresolved key spelled as an element of
+/// the record id (`id[i]`) is computed: a path read does not index a record
+/// id's key.
 ///
 /// With `shared`, the statement's fields and the projection they map to, a
 /// computed key naming a field's alias is that field's value: the field is
@@ -4376,6 +4761,7 @@ fn sort_keys(
 	ordering: &LogicalOrdering,
 	shared: Option<(&LogicalFields, &mut Projection)>,
 	registry: &crate::exec::function::FunctionRegistry,
+	id_elements: bool,
 ) -> Mapped<Vec<SortKeySpec>> {
 	let LogicalOrdering::Order(orders) = ordering else {
 		return Err(NotCovered::internal("ORDER BY RAND()"));
@@ -4401,6 +4787,17 @@ fn sort_keys(
 			}
 			Some((expr, _)) => SortKeyRead::Computed(expr.clone()),
 			None => match field_path_from_expr(&order.value) {
+				// A path read structurally does not index a record id's key,
+				// so over a table whose ids name their components `id[i]` is
+				// evaluated, which reads the element without reading the
+				// record.
+				Ok(path)
+					if id_elements
+						&& reads_id_element(&path)
+						&& is_effect_free_over_pairs(&order.value, registry) =>
+				{
+					SortKeyRead::Computed(order.value.clone())
+				}
 				Ok(path) => SortKeyRead::Path(path),
 				Err(_) => SortKeyRead::Computed(order.value.clone()),
 			},
@@ -4424,6 +4821,33 @@ fn sort_keys(
 		});
 	}
 	Ok(keys)
+}
+
+/// Whether `ordering` holds a key spelled as an element of the record id
+/// (`id[i]`) and `input` reads a table whose record ids name their
+/// components, whose sort then evaluates such a key ([`sort_keys`]). The
+/// catalog is read only for an ordering that holds such a key.
+async fn evaluates_id_elements(
+	planner: &Planner<'_>,
+	ordering: &LogicalOrdering,
+	input: &LogicalOp,
+) -> bool {
+	let LogicalOrdering::Order(orders) = ordering else {
+		return false;
+	};
+	let spells_an_element = orders
+		.iter()
+		.any(|order| field_path_from_expr(&order.value).is_ok_and(|path| reads_id_element(&path)));
+	spells_an_element
+		&& crate::exec::vm::host::out_of_line(|| reads_keyed_table(planner, input)).await
+}
+
+/// Whether `path` is `id[i]`: an element of the row's record id.
+fn reads_id_element(path: &FieldPath) -> bool {
+	matches!(
+		path.0.as_slice(),
+		[FieldPathPart::Field(id), FieldPathPart::Index(_) | FieldPathPart::First] if id == "id"
+	)
 }
 
 /// Whether evaluating `expr` has no effect as [`is_effect_free`] reads it,

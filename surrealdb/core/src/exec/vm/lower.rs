@@ -721,6 +721,10 @@ fn scanned_table(node: &Plan) -> Option<&surrealdb_strand::TableName> {
 			table,
 			..
 		}
+		| Plan::KeyRangeScan {
+			table,
+			..
+		}
 		| Plan::RecordScan {
 			table,
 			..
@@ -3296,6 +3300,9 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			Plan::TableScan {
 				..
 			}
+			| Plan::KeyRangeScan {
+				..
+			}
 			| Plan::RecordScan {
 				..
 			}
@@ -3327,6 +3334,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 							table,
 							direction,
 							topk,
+							range,
 							..
 						},
 						Some(Plan::Filter {
@@ -3335,14 +3343,26 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 							..
 						}),
 						None,
-					) => Source::Scan {
-						table,
-						direction,
-						topk,
-						prefilter: crate::exec::pre_decode_filter::PreDecodeShape::of(predicate)
-							.map(|shape| super::plain::ValueData::new(shape, "a scan's prefilter"))
-							.transpose()?,
-					},
+					) => {
+						// A component a table's record id names is not in the
+						// stored bytes: a shape reading one is not taken.
+						let key = self.scanned_key(&table);
+						let shape = crate::exec::pre_decode_filter::PreDecodeShape::of(predicate)
+							.filter(|shape| {
+								key.as_deref().is_none_or(|key| !shape.reads_key_component(key))
+							});
+						Source::Scan {
+							table,
+							direction,
+							topk,
+							prefilter: shape
+								.map(|shape| {
+									super::plain::ValueData::new(shape, "a scan's prefilter")
+								})
+								.transpose()?,
+							range,
+						}
+					}
 					(source, ..) => source,
 				}
 			}
@@ -3416,6 +3436,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					held: *spill,
 					spill: self.tempfiles && keep.is_none() && !*random,
 					pushdown: *pushdown,
+					floors_at_keep: false,
 					random: *random,
 					knn_slot: None,
 					knn_query: None,
@@ -3472,6 +3493,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					held: super::plan::Spill::Bounded,
 					spill: false,
 					pushdown: false,
+					floors_at_keep: false,
 					random: false,
 					knn_slot: self.index_scope.knn.then(|| self.knn_slot()),
 					knn_query,
@@ -4571,6 +4593,100 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 		})
 	}
 
+	/// The structure of `table`'s record ids in the catalog the statement is
+	/// planned against, where they name their components; `None` for every
+	/// other table, and where the plan read no catalog for it.
+	fn scanned_key(
+		&self,
+		table: &surrealdb_strand::TableName,
+	) -> Option<std::sync::Arc<crate::catalog::KeyStructure>> {
+		let txn = self.planner.txn()?;
+		self.catalog.table(txn, table).ok()??.key.clone()
+	}
+
+	/// The key ranges of `access` as the scan builds them when it opens: its
+	/// shape, and a host scalar per bound. A deferred bound the body cannot
+	/// evaluate reads as `NONE`, which widens the side or ends the equality run
+	/// it bounds: the predicate above the scan, which holds the same
+	/// expression, judges every row.
+	async fn scan_range(
+		&mut self,
+		access: &crate::exec::index::key_range::KeyRangeAccess,
+	) -> Lowered<super::program::ScanRange> {
+		use crate::exec::index::key_range::{KeyBound, KeyEq, KeyRangeBound};
+		use crate::exec::operators::scan::key_range::{
+			ScanEq, ScanKeyRange, ScanRangeOn, ScanSide,
+		};
+		let mut bounds = Vec::new();
+		let mut values = Vec::new();
+		let slot = |bound: &KeyBound, values: &mut Vec<KeyBound>| -> Lowered<u16> {
+			let at = u16::try_from(values.len())
+				.map_err(|_| NotCovered::internal("more key bounds than a scan holds"))?;
+			values.push(bound.clone());
+			Ok(at)
+		};
+		let mut eq = Vec::with_capacity(access.eq.len());
+		for pinned in access.eq.iter() {
+			eq.push(match pinned {
+				KeyEq::One(bound) => ScanEq::One(slot(bound, &mut values)?),
+				KeyEq::In(list) => ScanEq::In(
+					list.iter()
+						.map(|bound| slot(bound, &mut values))
+						.collect::<Lowered<Vec<_>>>()?
+						.into_boxed_slice(),
+				),
+			});
+		}
+		let side = |side: &Option<KeyRangeBound>,
+		            values: &mut Vec<KeyBound>|
+		 -> Lowered<Option<ScanSide>> {
+			side.as_ref()
+				.map(|side| {
+					Ok(ScanSide {
+						bound: slot(&side.bound, values)?,
+						inclusive: side.inclusive,
+					})
+				})
+				.transpose()
+		};
+		let range = match &access.range {
+			Some(range) => Some(ScanRangeOn {
+				low: side(&range.low, &mut values)?,
+				high: side(&range.high, &mut values)?,
+			}),
+			None => None,
+		};
+		for value in values {
+			bounds.push(match value {
+				KeyBound::Literal(value) => super::program::HostScalar::Const(
+					super::plain::ValueData::new(value, "a key bound")?,
+				),
+				KeyBound::Deferred(expr) => {
+					match crate::exec::vm::host::out_of_line(|| self.host_scalar(&expr)).await {
+						Ok(scalar) => scalar,
+						Err(_) => super::program::HostScalar::Const(super::plain::ValueData::new(
+							crate::val::Value::None,
+							"a key bound",
+						)?),
+					}
+				}
+			});
+		}
+		Ok(super::program::ScanRange {
+			spec: ScanKeyRange {
+				kinds: access
+					.key
+					.components
+					.iter()
+					.map(|component| component.kind.clone())
+					.collect(),
+				eq: eq.into_boxed_slice(),
+				range,
+			},
+			bounds: bounds.into_boxed_slice(),
+		})
+	}
+
 	/// Whether `table` is a lightweight relation in the catalog the statement
 	/// is planned against, which stores no record range to scan.
 	fn is_lightweight(&self, table: &surrealdb_strand::TableName) -> Lowered<bool> {
@@ -4589,6 +4705,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				direction,
 				schema,
 				topk,
+				..
 			} => {
 				self.schema = schema.as_deref().cloned();
 				self.table.get_or_insert_with(|| table.clone());
@@ -4609,6 +4726,37 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					direction: *direction,
 					topk,
 					prefilter: None,
+					range: None,
+				})
+			}
+			Plan::KeyRangeScan {
+				table,
+				access,
+				schema,
+				topk,
+			} => {
+				self.schema = schema.as_deref().cloned();
+				self.table.get_or_insert_with(|| table.clone());
+				// A key with no sort to publish its threshold reads none.
+				let topk = match (topk, self.topk_sort) {
+					(Some(key), Some(sort)) => Some(TopKScan::new(key, sort)),
+					_ => None,
+				};
+				// A sort that cuts the scan by the second publishes its
+				// threshold as soon as it holds what it keeps.
+				if let Some(topk) = &topk
+					&& topk.coarse.is_some()
+					&& let Some(spec) = self.sorts.get_mut(topk.sort as usize)
+				{
+					spec.floors_at_keep = true;
+				}
+				let range = crate::exec::vm::host::out_of_line(|| self.scan_range(access)).await?;
+				Ok(Source::Scan {
+					table: table.clone(),
+					direction: access.direction,
+					topk,
+					prefilter: None,
+					range: Some(std::sync::Arc::new(range)),
 				})
 			}
 			Plan::RecordScan {

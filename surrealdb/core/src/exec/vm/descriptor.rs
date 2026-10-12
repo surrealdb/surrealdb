@@ -62,6 +62,8 @@ pub(crate) struct TableDescriptor {
 	pub(crate) stamp: Option<u64>,
 	/// `None` where the catalog holds no such table.
 	pub(crate) definition: Option<Arc<TableDefinition>>,
+	/// The table's field definitions, including the virtual definitions of
+	/// the components its record id names.
 	pub(crate) fields: Arc<[FieldDefinition]>,
 }
 

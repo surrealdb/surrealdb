@@ -53,7 +53,7 @@ use tracing::instrument;
 use super::query::Query as Ast;
 use super::settings::{ParserConfig, ParserSettings};
 use super::{entry, value as values};
-use crate::expr::{Block, Expr, Fields, Function, Idiom, Kind};
+use crate::expr::{Block, Expr, Fields, Function, Idiom, KeyNames, Kind};
 
 /// Takes a string and returns if it could be a reserved keyword in certain
 /// contexts.
@@ -184,6 +184,19 @@ pub fn kind_with_settings(
 	run(input, || entry::kind(input, &settings.next(), require_all))
 }
 
+/// Parses the `TYPE` of a field named `id`, without the enclosing `<` `>`, under
+/// `settings`: a kind whose outermost tuple may name its components, which are
+/// returned beside the kind. With `require_all`, anything after the kind is an
+/// error.
+#[instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len()))]
+pub fn id_kind_with_settings(
+	input: &str,
+	settings: ParserSettings,
+	require_all: bool,
+) -> Result<(Kind, Option<KeyNames>), ParseError> {
+	run(input, || entry::id_kind(input, &settings.next(), require_all, false))
+}
+
 /// Parses a projection list, or `VALUE` and one selector, under `settings`.
 /// With `require_all`, anything after it is an error.
 #[instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len()))]
@@ -297,6 +310,24 @@ pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
 		crate::expr::credentials::prepare(&mut value);
 		value
 	})
+}
+
+/// Re-parses the text a catalog definition stores for the `TYPE` of a field named
+/// `id`: [`kind_for_definition`], except that the outermost tuple may name its
+/// components, which are returned beside the kind. [`kind_for_definition`]
+/// itself refuses named components.
+///
+/// Reading never refuses a table over its component names. Names that do not
+/// form a valid list (a reserved name, a repeated name) are dropped with a
+/// warning, and the kind is returned without names, as for an unnamed tuple.
+#[instrument(level = "trace", target = "surrealdb::core::syn", skip(input), fields(length = input.len()))]
+pub fn id_kind_for_definition(input: &str) -> Result<(Kind, Option<KeyNames>), ParseError> {
+	run(input, || entry::id_kind(input, &ParserSettings::STORED_TEXT.next(), true, true)).map(
+		|(mut kind, names)| {
+			crate::expr::credentials::prepare(&mut kind);
+			(kind, names)
+		},
+	)
 }
 
 /// Parses a SurrealQL [`PublicValue`], also parsing values within strings.

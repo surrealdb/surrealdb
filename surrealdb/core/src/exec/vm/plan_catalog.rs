@@ -38,8 +38,8 @@ use super::NotCovered;
 use super::lower::Lowered;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
-	DatabaseId, EventDefinition, FieldDefinition, IndexDefinition, NamespaceId, ParamDefinition,
-	TableDefinition,
+	DatabaseId, EventDefinition, FieldDefinition, IndexDefinition, KeyStructure, NamespaceId,
+	ParamDefinition, TableDefinition, table_key,
 };
 use crate::exec::planner::{FunctionLookup, Planner};
 use crate::expr::Function;
@@ -57,7 +57,13 @@ pub(crate) struct TableCatalog {
 	pub(crate) version: Option<Uuid>,
 	/// `None` where the catalog holds no such table.
 	pub(crate) definition: Option<Arc<TableDefinition>>,
+	/// The table's field definitions, including the virtual definitions of
+	/// the components its record id names.
 	pub(crate) fields: Arc<[FieldDefinition]>,
+	/// What the table's record ids are made of, as [`table_key`]
+	/// reads it from `definition` and `fields`; `None` where they are
+	/// unconstrained. Moves only with `version`.
+	pub(crate) key: Option<Arc<KeyStructure>>,
 	/// What a write to the table runs, for a table the plan writes to.
 	pub(crate) written: Option<WrittenTable>,
 }
@@ -773,6 +779,7 @@ async fn read_table(
 			version: None,
 			definition: None,
 			fields: Arc::from([]),
+			key: None,
 			written: written.then(|| WrittenTable {
 				indexes: Arc::from([]),
 				events: Arc::from([]),
@@ -807,11 +814,13 @@ async fn read_table(
 		}),
 		false => None,
 	};
+	let key = definition.as_deref().and_then(|definition| table_key(definition, &fields));
 	Ok(TableCatalog {
 		table: table.clone(),
 		version,
 		definition,
 		fields,
+		key,
 		written,
 	})
 }

@@ -50,6 +50,7 @@ pub(super) async fn step(
 				| StoreInstr::RefuseField { .. }
 				| StoreInstr::RefuseRemovingLightweight { .. }
 				| StoreInstr::RefuseRedefiningTable { .. }
+				| StoreInstr::RefuseNamedIdConversion { .. }
 				| StoreInstr::FieldCheck { .. }
 				| StoreInstr::Allow { .. }
 				| StoreInstr::RefuseNoWrite
@@ -338,6 +339,33 @@ async fn step_inner(
 			))
 			.await
 			.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::RefuseNamedIdConversion {
+			ns,
+			db,
+			table,
+			to,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let table = table_named(&read(regs, *table))?;
+			let txn = ctx.txn();
+			super::schema_host::refuse_named_id_conversion(&txn, ns, db, &table, *to)
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::ValidateRecordKeys {
+			ns,
+			db,
+			table,
+			key,
+		} => {
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let table = table_named(&read(regs, *table))?;
+			super::schema_host::validate_record_keys(ctx, ns, db, &table, key)
+				.await
+				.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::RefuseRemovingLightweight {
 			ns,
@@ -1107,6 +1135,33 @@ async fn step_inner(
 							.map_err(ControlFlow::Err)?;
 					}
 				}
+				FieldCheck::KeyComponents {
+					field: reg,
+					ns,
+					db,
+					kind,
+				} => {
+					let definition = field(*reg)?;
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let txn = ctx.txn();
+					super::schema_host::check_key_components(&txn, ns, db, kind, &definition)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+				FieldCheck::IdUnread {
+					ns,
+					db,
+					table,
+				} => {
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let table = table_named(&read(regs, *table))?;
+					let txn = ctx.txn();
+					super::schema_host::refuse_removing_id(&txn, ns, db, &table)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
 			}
 		}
 		StoreInstr::PurgeDroppedReferences {
@@ -1827,6 +1882,7 @@ fn speculative_skip(instr: &StoreInstr) -> bool {
 			| StoreInstr::ConnectBucket { .. }
 			| StoreInstr::SequenceDefinedHere { .. }
 			| StoreInstr::EvictSequence { .. }
+			| StoreInstr::ValidateRecordKeys { .. }
 	)
 }
 

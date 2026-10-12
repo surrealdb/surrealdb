@@ -23,6 +23,19 @@
 //! literal `true` is dropped. Nothing crosses a permission node: the
 //! conjuncts land above it, and the rule does not look beneath it.
 //!
+//! A column that stands for a component of the record id
+//! ([`reads::key_part_columns`]) is the exception to the first of those: it
+//! holds an element of the id, which every layer passes through, so a read of
+//! it is the same read of the id (`city` is `id[0]`). A conjunct is judged in
+//! those terms, and what moves is the conjunct written over the id, which reads
+//! no column of any layer and which the access path of a source can recognise.
+//! A conjunct that stays is left as it was written. Only a conjunct is
+//! rewritten: the keys of a `Sort` are not, because an `ORDER BY` name is
+//! resolved against the user's projection before it is read from the row, which
+//! this rule cannot see, and the key of an ordering is read as a path, which
+//! yields nothing for an element of a record id; and neither is a `Project`
+//! item or a group key, which name what the statement returns.
+//!
 //! A conjunct also stays where one written ahead of it stays and can raise.
 //! Moving it would put its judgement before that conjunct's, and `AND`
 //! reaches them left to right: a row the moved conjunct rejects never reaches
@@ -35,7 +48,10 @@
 //! the conjuncts would land, so a filter directly above a source or a
 //! permission node is left as it is.
 
-use super::reads::{layer_column_names, reads_beneath, reads_row_opaquely};
+use super::reads::{
+	KeyColumn, key_part_columns, layer_column_names, reads_beneath, reads_row_opaquely,
+	substitute_key_parts,
+};
 use super::{
 	Outcome, RuleContext, RuleDef, and_all, fire, is_false, is_permission_node, is_true, may_raise,
 	mentions_index_operator, split_and,
@@ -88,16 +104,23 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 			}
 			if is_false(&term) {
 				falses.push(term);
-			} else if mentions_index_operator(&term)
-				|| reads_row_opaquely(&term, cx.registry)
-				|| reads_beneath(&term, &chain.columns)
+				continue;
+			}
+			// A read of a column that stands for a component of the record id
+			// is judged as the read of that element of the id; the conjunct
+			// that moves is written that way, and one that stays is not.
+			let over_the_id = substitute_key_parts(&term, &chain.keys);
+			let judged = over_the_id.as_ref().unwrap_or(&term);
+			if mentions_index_operator(judged)
+				|| reads_row_opaquely(judged, cx.registry)
+				|| reads_beneath(judged, &chain.columns)
 			{
 				raising_stands |= may_raise(&term, cx.permission_checked_params);
 				kept.push(term);
 			} else if raising_stands {
 				kept.push(term);
 			} else {
-				moved.push(term);
+				moved.push(over_the_id.unwrap_or(term));
 			}
 		}
 		if kept.is_empty() {
@@ -127,6 +150,8 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 struct Chain {
 	/// The columns of every layer crossed, as the field each lands under.
 	columns: Vec<FieldPath>,
+	/// The columns among them that stand for a component of the record id.
+	keys: Vec<KeyColumn>,
 	/// How many layers are crossed.
 	layers: usize,
 }
@@ -138,6 +163,7 @@ impl Chain {
 	fn of(mut op: &LogicalOp) -> Option<Self> {
 		let mut chain = Self {
 			columns: Vec::new(),
+			keys: Vec::new(),
 			layers: 0,
 		};
 		loop {
@@ -151,6 +177,7 @@ impl Chain {
 					unreachable!("a layer is a projection")
 				};
 				chain.columns.extend(layer_column_names(fields));
+				chain.keys.extend(key_part_columns(fields));
 				chain.layers += 1;
 				op = input;
 				continue;
@@ -442,5 +469,275 @@ Filter[c = 1]
 	fn a_filter_over_a_plain_source_is_left_alone() {
 		let plan = filter(source(), "SELECT * FROM t WHERE a = 2");
 		assert_eq!(rewritten(plan.clone()), plan);
+	}
+
+	// --- columns that stand for a component of the record id ---
+
+	/// `id[position]`: what a column standing for a component of the record id
+	/// evaluates.
+	fn id_element(position: i64) -> LogicalExpr {
+		LogicalExpr::Index {
+			base: Box::new(LogicalExpr::Field("id".into())),
+			index: Box::new(LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Integer(
+				position,
+			))),
+		}
+	}
+
+	/// A layer deriving each of `names` as the element of the record id at its
+	/// position over `input`.
+	fn key_layer(input: LogicalOp, names: &[&str]) -> LogicalOp {
+		let mut fields = vec![LogicalField::All];
+		fields.extend(names.iter().zip(0_i64..).map(|(name, position)| {
+			LogicalField::column(
+				*name,
+				id_element(position),
+				Some(Kind::Int),
+				EvalFrame::key_part(),
+			)
+		}));
+		LogicalOp::Project(LogicalProject {
+			input: Box::new(input),
+			fields: LogicalFields::Select(fields),
+			omit: vec![],
+		})
+	}
+
+	/// Whether `op` is a filter directly over a layer that stands directly over
+	/// the source: the conjuncts did not move.
+	fn stays_over_the_layer(op: &LogicalOp) -> bool {
+		let LogicalOp::Filter(LogicalFilter {
+			input,
+			..
+		}) = op
+		else {
+			return false;
+		};
+		let LogicalOp::Project(LogicalProject {
+			input: beneath,
+			..
+		}) = &**input
+		else {
+			return false;
+		};
+		input.is_layer() && matches!(&**beneath, LogicalOp::Source(_))
+	}
+
+	#[test]
+	fn a_conjunct_over_a_key_column_moves_as_a_read_of_the_id() {
+		let plan = filter(
+			key_layer(source(), &["city", "time"]),
+			"SELECT * FROM t WHERE city = 'x' AND a = 2",
+		);
+		assert_eq!(
+			rewritten(plan).to_string(),
+			"\
+Project[*, id[0] AS city : int @computed @key, id[1] AS time : int @computed @key]
+  Filter[id[0] = 'x' AND a = 2]
+    Source[t]"
+		);
+	}
+
+	#[test]
+	fn a_conjunct_over_a_key_column_lands_above_the_permission_node() {
+		let plan =
+			filter(key_layer(permission(source()), &["city"]), "SELECT * FROM t WHERE city = 'x'");
+		assert_eq!(
+			rewritten(plan).to_string(),
+			"\
+Project[*, id[0] AS city : int @computed @key]
+  Filter[id[0] = 'x']
+    PermissionFilter[b > 0]
+      Source[t]"
+		);
+	}
+
+	#[test]
+	fn a_read_nested_in_a_call_is_substituted_too() {
+		let plan = filter(
+			key_layer(source(), &["city"]),
+			"SELECT * FROM t WHERE string::lowercase(city) = 'x'",
+		);
+		let after = rewritten(plan).to_string();
+		assert!(after.starts_with("Project[*, id[0] AS city"), "{after}");
+		assert!(after.contains("Filter[string::lowercase(id[0]) = 'x']"), "{after}");
+	}
+
+	#[test]
+	fn a_field_of_a_key_column_is_a_field_of_the_element() {
+		let plan = filter(key_layer(source(), &["city"]), "SELECT * FROM t WHERE city.x = 4");
+		let after = rewritten(plan).to_string();
+		assert!(after.starts_with("Project[*, id[0] AS city"), "{after}");
+		assert!(after.contains("Filter[id[0].x = 4]"), "{after}");
+	}
+
+	#[test]
+	fn a_key_column_beside_a_computed_column_moves_alone() {
+		let layered = layer(key_layer(source(), &["city"]), "c", LogicalExpr::Field("a".into()));
+		// `c` is set by a layer above the key layer, so the conjunct over it
+		// stays; the one over `city` and the one over the stored `a` move.
+		let plan = filter(layered.clone(), "SELECT * FROM t WHERE city = 'x' AND c = 1 AND a = 2");
+		assert_eq!(
+			rewritten(plan).to_string(),
+			"\
+Filter[c = 1]
+  Project[*, a AS c : int @computed]
+    Project[*, id[0] AS city : int @computed @key]
+      Filter[id[0] = 'x' AND a = 2]
+        Source[t]"
+		);
+		// A disjunction that reads both is one conjunct: it stays, written as
+		// the statement wrote it.
+		let plan = filter(layered, "SELECT * FROM t WHERE city = 'x' OR c = 1");
+		let after = rewritten(plan.clone());
+		assert_eq!(after, plan, "{after}");
+	}
+
+	#[test]
+	fn a_read_of_the_row_other_than_by_name_stays_over_the_layer() {
+		let layered = key_layer(source(), &["city"]);
+		for sql in [
+			"SELECT * FROM t WHERE $this.city = 'x'",
+			"SELECT * FROM t WHERE type::field('city') = 'x'",
+			"SELECT * FROM t WHERE city IN (SELECT VALUE x FROM u LIMIT 1)",
+		] {
+			let after = rewritten(filter(layered.clone(), sql));
+			assert!(stays_over_the_layer(&after), "`{sql}`:\n{after}");
+		}
+	}
+
+	#[test]
+	fn a_read_of_the_name_in_a_body_is_not_a_read_of_the_column() {
+		// The `city` inside the filter body names a field of the element being
+		// filtered. The one outside is the column; the conjunct reads both, so it
+		// stays as written.
+		let layered = key_layer(source(), &["city"]);
+		let plan =
+			filter(layered.clone(), "SELECT * FROM t WHERE city = tags[WHERE city = 'x'][0]");
+		let after = rewritten(plan.clone());
+		assert_eq!(after, plan, "{after}");
+		// With nothing else naming the column the conjunct stays too: the body's
+		// read is not substituted, and a read of a column anywhere in a
+		// conjunct is a read of the column.
+		let plan = filter(layered, "SELECT * FROM t WHERE tags[WHERE city = 'x'] != []");
+		let after = rewritten(plan.clone());
+		assert_eq!(after, plan, "{after}");
+	}
+
+	#[test]
+	fn a_conjunct_that_stays_and_can_raise_keeps_the_one_after_it() {
+		let layered = layer(key_layer(source(), &["city"]), "c", LogicalExpr::Field("a".into()));
+		// `c + 1` reads a column and can raise, so `city = 'x'` after it is not
+		// judged ahead of it.
+		let plan = filter(layered.clone(), "SELECT * FROM t WHERE c + 1 = 2 AND city = 'x'");
+		let after = rewritten(plan.clone());
+		assert_eq!(after, plan, "{after}");
+		// A conjunct that stays and cannot raise holds nothing back.
+		let plan = filter(layered, "SELECT * FROM t WHERE c = 1 AND city = 'x'");
+		assert_eq!(
+			rewritten(plan).to_string(),
+			"\
+Filter[c = 1]
+  Project[*, a AS c : int @computed]
+    Project[*, id[0] AS city : int @computed @key]
+      Filter[id[0] = 'x']
+        Source[t]"
+		);
+	}
+
+	#[test]
+	fn the_keys_of_a_sort_are_not_substituted() {
+		// `ORDER BY` names are resolved against the projection before the row,
+		// and the key of an ordering is read as a path; the rule leaves them.
+		let layered = key_layer(source(), &["city"]);
+		let plan = lower("SELECT * FROM t ORDER BY city");
+		let Ok(plan) = plan.transform_up(&mut |node| {
+			Ok::<_, std::convert::Infallible>(if matches!(node, LogicalOp::Source(_)) {
+				layered.clone()
+			} else {
+				node
+			})
+		});
+		let after = rewritten(plan).to_string();
+		assert!(after.contains("Sort[ORDER BY city"), "{after}");
+		assert_eq!(after.matches("id[0]").count(), 1, "only the column holds the read:\n{after}");
+	}
+
+	#[test]
+	fn a_substituted_move_is_a_fixpoint() {
+		let plan = filter(
+			key_layer(source(), &["city", "time"]),
+			"SELECT * FROM t WHERE city = 'x' AND time > 1 AND a = 2",
+		);
+		let once = rewritten(plan);
+		assert_eq!(rewritten(once.clone()), once, "{once}");
+	}
+
+	#[test]
+	fn a_chain_with_no_key_column_is_judged_as_it_was_written() {
+		// A computed column whose body is `id[0]` is not a key column: the
+		// conjunct over it stays.
+		let layered = layer(source(), "c", id_element(0));
+		let plan = filter(layered, "SELECT * FROM t WHERE c = 'x'");
+		let after = rewritten(plan.clone());
+		assert_eq!(after, plan, "{after}");
+	}
+}
+
+/// What binding a statement over a table whose record id names its components
+/// puts beneath the layers.
+#[cfg(all(test, feature = "kv-mem"))]
+mod bound {
+	use super::super::super::test_fixture::{Fixture, owner};
+
+	const READINGS: &str = "DEFINE TABLE reading SCHEMAFULL PERMISSIONS FULL;
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+		DEFINE FIELD temp ON reading TYPE int;";
+
+	/// Where `needle` first stands in `plan`, which the test requires.
+	fn at(plan: &str, needle: &str) -> usize {
+		plan.find(needle).unwrap_or_else(|| panic!("`{needle}` is not in:\n{plan}"))
+	}
+
+	#[tokio::test]
+	async fn a_conjunct_over_a_component_is_judged_beneath_the_layer() {
+		let fx = Fixture::new(READINGS).await;
+		let plan = fx.bind_as(&owner(), "SELECT * FROM reading WHERE city = 'x'").await;
+		// The layer still derives the column the `*` returns; the conjunct is
+		// over the id, beneath it, and is not left above.
+		assert!(at(&plan, "id[0] AS city") < at(&plan, "Filter[id[0] = 'x']"), "{plan}");
+		assert!(!plan.contains("Filter[city"), "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_layer_nothing_reads_once_the_conjunct_moved_is_elided() {
+		let fx = Fixture::new(READINGS).await;
+		let plan = fx.bind_as(&owner(), "SELECT temp FROM reading WHERE city = 'x'").await;
+		assert!(!plan.contains("@key"), "{plan}");
+		assert!(plan.contains("Filter[id[0] = 'x']"), "{plan}");
+		assert!(!plan.contains("AS city"), "{plan}");
+		// The same for a `VALUE` projection.
+		let plan = fx.bind_as(&owner(), "SELECT VALUE temp FROM reading WHERE city = 'x'").await;
+		assert!(!plan.contains("@key"), "{plan}");
+		assert!(plan.contains("Filter[id[0] = 'x']"), "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_component_the_projection_reads_keeps_its_column_and_its_name() {
+		let fx = Fixture::new(READINGS).await;
+		let plan = fx.bind_as(&owner(), "SELECT city FROM reading WHERE city = 'x'").await;
+		assert!(plan.starts_with("Project[city]"), "{plan}");
+		assert!(at(&plan, "id[0] AS city") < at(&plan, "Filter[id[0] = 'x']"), "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_component_a_sort_or_a_grouping_reads_keeps_its_column() {
+		let fx = Fixture::new(READINGS).await;
+		let plan = fx.bind_as(&owner(), "SELECT temp FROM reading ORDER BY time").await;
+		assert!(plan.contains("id[1] AS time"), "{plan}");
+		assert!(plan.contains("Sort[ORDER BY time"), "{plan}");
+		let plan = fx.bind_as(&owner(), "SELECT city, count() FROM reading GROUP BY city").await;
+		assert!(plan.contains("id[0] AS city"), "{plan}");
+		assert!(!plan.contains("AS time"), "{plan}");
 	}
 }

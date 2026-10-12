@@ -328,3 +328,458 @@ async fn a_write_lowers_its_clauses_without_compiling_them() {
 		"lowering a write compiled its clauses (statement, with, without): {compiled:?}"
 	);
 }
+
+/// Tables whose `id` names its components, beside tables whose does not: a
+/// string and an int component, a `DEFAULT` that completes a key, a `DEFAULT`
+/// that yields nothing, a table with no `id` field of its own and one whose
+/// `id` is a tuple type with no names.
+pub(super) const KEYED_SCHEMA: &str = "
+	DEFINE TABLE reading PERMISSIONS FULL;
+	DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+	DEFINE TABLE counter PERMISSIONS FULL;
+	DEFINE FIELD id ON counter TYPE [site: string, n: int];
+	DEFINE TABLE defaulted PERMISSIONS FULL;
+	DEFINE FIELD id ON defaulted TYPE [city: string, time: datetime] DEFAULT ['London', d'2024-01-01T00:00:00Z'];
+	DEFINE TABLE nothing PERMISSIONS FULL;
+	DEFINE FIELD id ON nothing TYPE [city: string, time: datetime] DEFAULT NONE;
+	DEFINE TABLE plain PERMISSIONS FULL;
+	DEFINE TABLE tupled PERMISSIONS FULL;
+	DEFINE FIELD id ON tupled TYPE [string, datetime];
+";
+
+/// The statements a table of [`KEYED_SCHEMA`] is written by, in the forms the
+/// census lowers: one of each order that settles a record's id and its fields.
+const KEYED_STATEMENTS: &[&str] = &[
+	"CREATE {} SET a = 1",
+	"CREATE {}:1 SET a = 1",
+	"CREATE {} CONTENT { a: 1 }",
+	"UPDATE {} SET a = 1",
+	"UPDATE {}:1 SET a = 1",
+	"UPSERT {} SET a = 1",
+	"UPSERT {}:1 SET a = 1",
+	"INSERT INTO {} { a: 1 }",
+	"INSERT INTO {} { a: 1 } ON DUPLICATE KEY UPDATE a = 2",
+];
+
+/// Whether a run of `program` judges the fields that name the components of a
+/// record id: whether any of its pipelines, host pipelines or units holds
+/// [`DataInstr::SettleKeyFields`].
+fn settles_keys(program: &super::program::Program) -> bool {
+	use super::program::{Instr, WriteInstr};
+	use super::write::DataInstr;
+	program
+		.pipelines
+		.iter()
+		.chain(&program.host_code)
+		.flat_map(|pipeline| pipeline.code.iter())
+		.any(|instr| matches!(instr, Instr::Write(WriteInstr::Data(DataInstr::SettleKeyFields))))
+		|| program.units.iter().any(|unit| settles_keys(unit))
+}
+
+/// The program `sql` lowers to as the owner writes it, and the same with the
+/// stage bundles a write that reaches any table loads by name appended.
+async fn lowered_for_census(
+	db: &TestDb,
+	sql: &str,
+) -> (super::program::Program, super::program::Program) {
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	let bound = bind(&ctx, sql).await;
+	let physical =
+		super::optimize::optimize(super::map::map(&planner(&ctx), &bound).await.expect("maps"));
+	let program = super::lower::lower(&planner(&ctx), &physical).await.expect("lowers");
+	let staged = with_stages(&planner(&ctx), &program).await;
+	ctx.txn().cancel().await.expect("cancel");
+	(program, staged)
+}
+
+/// A write to a table whose `id` names its components runs the instruction that
+/// judges them, and a write to any other table runs none: an unkeyed table pays
+/// nothing for the feature, whether its `id` is undeclared or is a tuple type
+/// with no names. A delete has no data stage that settles fields, keyed or not.
+#[tokio::test]
+async fn only_a_write_to_a_keyed_table_settles_key_fields() {
+	let db = TestDb::new_with_auth(KEYED_SCHEMA).await;
+	for statement in KEYED_STATEMENTS {
+		for (table, keyed) in [
+			("reading", true),
+			("counter", true),
+			("defaulted", true),
+			("plain", false),
+			("tupled", false),
+		] {
+			let sql = statement.replace("{}", table);
+			let (program, staged) = lowered_for_census(&db, &sql).await;
+			if keyed {
+				assert!(settles_keys(&staged), "`{sql}` does not settle key fields");
+			} else {
+				assert!(!settles_keys(&program), "`{sql}` settles key fields");
+			}
+		}
+	}
+	for table in ["reading", "plain"] {
+		let sql = format!("DELETE {table}");
+		let (program, staged) = lowered_for_census(&db, &sql).await;
+		assert!(!settles_keys(&program), "`{sql}` settles key fields");
+		assert!(!settles_keys(&staged), "`{sql}` settles key fields once its stages are loaded");
+	}
+}
+
+/// What a keyed write is expected to leave.
+enum Left {
+	/// The write answers and the table holds this many records.
+	Records(usize),
+	/// The write is refused with a message holding the text. Nothing it did is
+	/// kept, so the table is as it was.
+	Refused(&'static str),
+}
+
+/// The records of `table` as stored, each with its id, after `sql` runs as the
+/// owner against a fresh [`KEYED_SCHEMA`]: the statements are separated by `; `,
+/// the run stops at the first that fails, and what it left is committed only
+/// when none did. Answers the last outcome and the records.
+async fn written_keyed(
+	table: &str,
+	sql: &str,
+) -> (Result<Vec<crate::val::Value>, String>, Vec<(crate::val::RecordId, crate::val::Value)>) {
+	use crate::catalog::providers::TableProvider;
+	let db = TestDb::new_with_auth(KEYED_SCHEMA).await;
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	let mut outcome_of_last = Ok(Vec::new());
+	for statement in sql.split("; ") {
+		let bound = bind(&ctx, statement).await;
+		let op = super::plan(&planner(&ctx), &bound)
+			.await
+			.unwrap_or_else(|| panic!("the VM declined `{statement}`"));
+		outcome_of_last = outcome(&op, &ctx).await;
+		if outcome_of_last.is_err() {
+			break;
+		}
+	}
+	let txn = ctx.txn();
+	if outcome_of_last.is_ok() {
+		txn.commit().await.expect("commit");
+	} else {
+		txn.cancel().await.expect("cancel");
+	}
+	let read = db.exec_ctx().await;
+	let op = crate::exec::operators::test_util::plan_statement(
+		&format!("SELECT VALUE id FROM {table}"),
+		&read,
+	)
+	.await;
+	let ids = outcome(&op, &read).await.expect("the ids read");
+	let db_ctx = read.database().expect("a database");
+	let (ns, dbid) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+	let txn = read.txn();
+	let mut stored = Vec::new();
+	for id in ids {
+		let crate::val::Value::RecordId(rid) = id else {
+			panic!("an id that is no record id: {id:?}");
+		};
+		let record = txn.get_record(ns, dbid, &rid.table, &rid.key, None).await.expect("reads");
+		stored.push((rid, record.data.clone()));
+	}
+	(outcome_of_last, stored)
+}
+
+/// The names of the components of each keyed table of [`KEYED_SCHEMA`], which no
+/// record of it ever stores.
+fn component_names(table: &str) -> &'static [&'static str] {
+	match table {
+		"reading" | "defaulted" | "nothing" => &["city", "time"],
+		"counter" => &["site", "n"],
+		_ => &[],
+	}
+}
+
+const SEED: &str = "CREATE reading:['London', d'2024-01-01T00:00:00Z'] SET temp = 1";
+
+/// Writes to the keyed tables, each with what it leaves. A record is stored
+/// without the fields that name the components of its id, whichever way they
+/// were written, and a refused write leaves the table as it was.
+fn keyed_writes() -> Vec<(&'static str, String, Left)> {
+	let london = "d'2024-01-01T00:00:00Z'";
+	let seeded = |sql: &str| format!("{SEED}; {sql}");
+	vec![
+		(
+			"reading",
+			format!("CREATE reading SET city = 'London', time = {london}, temp = 1"),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			format!("CREATE reading CONTENT {{ city: 'London', time: {london}, temp: 1 }}"),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			format!("INSERT INTO reading {{ city: 'London', time: {london}, temp: 1 }}"),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			format!(
+				"INSERT INTO reading [{{ city: 'London', time: {london} }}, {{ city: 'Paris', time: {london} }}]"
+			),
+			Left::Records(2),
+		),
+		(
+			"reading",
+			format!("INSERT INTO reading (city, time, temp) VALUES ('Rome', {london}, 1)"),
+			Left::Records(1),
+		),
+		("reading", format!("CREATE reading:['London', {london}] SET temp = 1"), Left::Records(1)),
+		(
+			"reading",
+			format!("CREATE reading:['London', {london}] SET city = 'London', time = {london}"),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			format!("CREATE reading:['London', {london}] SET city = 'Paris'"),
+			Left::Refused("part of the record id of `reading`"),
+		),
+		(
+			"reading",
+			"CREATE reading SET city = 'London'".to_owned(),
+			Left::Refused("record id component `time`"),
+		),
+		(
+			"reading",
+			"CREATE reading SET temp = 1".to_owned(),
+			Left::Refused("record id component `city`"),
+		),
+		(
+			"reading",
+			"INSERT IGNORE INTO reading { temp: 1 }".to_owned(),
+			Left::Refused("record id component `city`"),
+		),
+		(
+			"reading",
+			"CREATE reading:['London'] SET temp = 1".to_owned(),
+			Left::Refused("1 value was given"),
+		),
+		(
+			"reading",
+			format!("CREATE reading:['London', {london}, 3] SET temp = 1"),
+			Left::Refused("3 values were given"),
+		),
+		(
+			"reading",
+			"CREATE reading:['London', 5] SET temp = 1".to_owned(),
+			Left::Refused("record id component `time`"),
+		),
+		(
+			"reading",
+			"CREATE reading SET city = 'London', time = '2024-01-01T00:00:00Z'".to_owned(),
+			Left::Refused("record id component `time`"),
+		),
+		(
+			"reading",
+			format!(
+				"UPSERT reading SET city = 'London', time = {london}, temp = 1; UPSERT reading SET city = 'London', time = {london}, temp = 2"
+			),
+			Left::Records(1),
+		),
+		("reading", seeded("UPDATE reading SET temp = 2"), Left::Records(1)),
+		("reading", seeded("UPDATE reading SET city = 'London'"), Left::Records(1)),
+		(
+			"reading",
+			seeded("UPDATE reading SET city = 'Paris'"),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		(
+			"reading",
+			seeded("UPDATE reading UNSET city"),
+			Left::Refused("Found NONE for the `city` field"),
+		),
+		(
+			"reading",
+			seeded("UPDATE reading SET city = NONE"),
+			Left::Refused("Found NONE for the `city` field"),
+		),
+		(
+			"reading",
+			seeded("UPDATE reading SET city += 'x'"),
+			Left::Refused("Found 'Londonx' for the `city` field"),
+		),
+		("reading", seeded("UPDATE reading SET city.x = 1"), Left::Refused("for the `city` field")),
+		(
+			"reading",
+			seeded("UPDATE reading MERGE { city: 'Paris' }"),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		("reading", seeded("UPDATE reading MERGE { city: 'London', temp: 3 }"), Left::Records(1)),
+		(
+			"reading",
+			seeded("UPDATE reading PATCH [{ op: 'replace', path: '/city', value: 'Paris' }]"),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		(
+			"reading",
+			seeded("UPDATE reading PATCH [{ op: 'remove', path: '/city' }]"),
+			Left::Refused("Found NONE for the `city` field"),
+		),
+		(
+			"reading",
+			seeded(&format!(
+				"UPDATE reading CONTENT (SELECT * FROM ONLY reading:['London', {london}])"
+			)),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			seeded(&format!("UPDATE reading REPLACE {{ city: 'Paris', time: {london} }}")),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		(
+			"reading",
+			seeded(&format!(
+				"INSERT INTO reading {{ city: 'London', time: {london}, temp: 2 }} ON DUPLICATE KEY UPDATE temp = $input.temp"
+			)),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			seeded(&format!(
+				"INSERT INTO reading {{ city: 'London', time: {london}, temp: 2 }} ON DUPLICATE KEY UPDATE city = 'Paris'"
+			)),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		("counter", "CREATE counter SET site = 'a', n = 5.0".to_owned(), Left::Records(1)),
+		("counter", "CREATE counter SET site = 'a', n = 5dec".to_owned(), Left::Records(1)),
+		(
+			"counter",
+			"CREATE counter SET site = 'a', n = 5.5".to_owned(),
+			Left::Refused("record id component `n`"),
+		),
+		(
+			"counter",
+			"CREATE counter SET site = 'a', n = 1e30".to_owned(),
+			Left::Refused("record id component `n`"),
+		),
+		("counter", "CREATE counter:['a', 5] SET n = 5.0".to_owned(), Left::Records(1)),
+		(
+			"counter",
+			"CREATE counter:['a', 5] SET n = 6".to_owned(),
+			Left::Refused("Found 6 for the `n` field"),
+		),
+		("defaulted", "CREATE defaulted SET temp = 1".to_owned(), Left::Records(1)),
+		(
+			"defaulted",
+			"CREATE defaulted SET city = 'Paris', time = d'2025-01-01T00:00:00Z'".to_owned(),
+			Left::Records(1),
+		),
+		(
+			"defaulted",
+			"CREATE defaulted SET city = 'Paris'".to_owned(),
+			Left::Refused("Found 'Paris' for the `city` field"),
+		),
+		(
+			"nothing",
+			"CREATE nothing SET temp = 1".to_owned(),
+			Left::Refused("record id component `city`"),
+		),
+		// A `DEFAULT` yielding nothing names the component the record lacks.
+		(
+			"nothing",
+			"CREATE nothing SET city = 'London'".to_owned(),
+			Left::Refused("record id component `time`"),
+		),
+		// An edge written into a table that is not a relation table takes its
+		// key from its components as any other record does.
+		(
+			"reading",
+			format!(
+				"CREATE person:a; CREATE person:b; RELATE person:a->reading->person:b SET city = 'London', time = {london}, temp = 1"
+			),
+			Left::Records(1),
+		),
+		(
+			"reading",
+			"CREATE person:a; CREATE person:b; RELATE person:a->reading->person:b SET city = 'London', temp = 1".to_owned(),
+			Left::Refused("record id component `time`"),
+		),
+	]
+}
+
+/// A keyed write builds its key from the components it is given, holds every
+/// element to its component, stores none of the fields that name them, and
+/// judges what a statement restates against the key.
+#[tokio::test]
+async fn keyed_writes_settle_their_components_as_instructions() {
+	for (table, sql, left) in keyed_writes() {
+		let (rows, stored) = written_keyed(table, &sql).await;
+		match left {
+			Left::Records(count) => {
+				assert!(rows.is_ok(), "`{sql}` was refused: {rows:?}");
+				assert_eq!(stored.len(), count, "`{sql}` left {stored:?}");
+				for (rid, body) in &stored {
+					let crate::val::Value::Object(body) = body else {
+						panic!("`{sql}` stored the non-object {body:?} at {}", rid.to_sql());
+					};
+					for name in component_names(table) {
+						assert!(
+							body.get(name).is_none(),
+							"`{sql}` stored `{name}` in {}: {}",
+							rid.to_sql(),
+							body.to_sql()
+						);
+					}
+				}
+			}
+			Left::Refused(text) => {
+				let message = rows.expect_err(&format!("`{sql}` was not refused"));
+				assert!(message.contains(text), "`{sql}` was refused with `{message}`");
+				assert!(stored.is_empty(), "`{sql}` left {stored:?}");
+			}
+		}
+	}
+}
+
+/// An int component of a key is an int, however the number was written, and a
+/// key that was built from the components is the key an explicit id names.
+#[tokio::test]
+async fn an_int_component_of_a_written_key_is_an_int() {
+	use crate::val::{Number, RecordIdKey, Value};
+	for sql in [
+		"CREATE counter SET site = 'a', n = 5.0",
+		"CREATE counter SET site = 'a', n = 5dec",
+		"CREATE counter SET site = 'a', n = 5",
+		"CREATE counter:['a', 5.0] SET v = 1",
+		"INSERT INTO counter { id: counter:['a', 5dec] }",
+	] {
+		let (rows, stored) = written_keyed("counter", sql).await;
+		assert!(rows.is_ok(), "`{sql}` was refused: {rows:?}");
+		let [(rid, _)] = stored.as_slice() else {
+			panic!("`{sql}` left {stored:?}");
+		};
+		let RecordIdKey::Array(elements) = &rid.key else {
+			panic!("`{sql}` made the key {}", rid.to_sql());
+		};
+		assert!(
+			matches!(elements.0.as_slice(), [Value::String(_), Value::Number(Number::Int(5))]),
+			"`{sql}` made the key {}",
+			rid.to_sql()
+		);
+	}
+}
+
+/// A table that names no components stores the fields a statement writes,
+/// whatever they are called: the names of another table's components are
+/// ordinary fields here.
+#[tokio::test]
+async fn an_unkeyed_table_stores_the_fields_it_is_given() {
+	for table in ["plain", "tupled"] {
+		let sql = format!("CREATE {table}:['London', d'2024-01-01T00:00:00Z'] SET city = 'London'");
+		let (rows, stored) = written_keyed(table, &sql).await;
+		assert!(rows.is_ok(), "`{sql}` was refused: {rows:?}");
+		let [(_, body)] = stored.as_slice() else {
+			panic!("`{sql}` left {stored:?}");
+		};
+		let crate::val::Value::Object(body) = body else {
+			panic!("`{sql}` stored {body:?}");
+		};
+		assert!(body.get("city").is_some(), "`{sql}` stored {}", body.to_sql());
+	}
+}

@@ -1456,3 +1456,139 @@ async fn a_live_registered_after_ddl_raced_its_arrival_notifies_by_the_new_catal
 	let expected: PublicValue = crate::syn::value("{ id: lv:1, v: 1, double: 5 }").unwrap();
 	assert_eq!(sent.result, expected);
 }
+
+/// Whether the program lowered for `sql` over `schema` derives the table's
+/// computed fields onto the images its observers read.
+async fn derives_for_observers(schema: &str, sql: &str) -> bool {
+	use super::program::{Instr, WriteInstr};
+	use super::write::SchemaInstr;
+	let db = TestDb::new(schema).await;
+	let ctx = db.exec_ctx_as(&TestDb::owner(), crate::kvs::TransactionType::Write).await;
+	let bound = bind(&ctx, sql).await;
+	let physical =
+		super::optimize::optimize(super::map::map(&planner(&ctx), &bound).await.expect("maps"));
+	let program = super::lower::lower(&planner(&ctx), &physical).await.expect("lowers");
+	let program = super::tests::with_stages(&planner(&ctx), &program).await;
+	ctx.txn().cancel().await.expect("cancel");
+	let mut stack = vec![&program];
+	while let Some(program) = stack.pop() {
+		stack.extend(program.units.iter().map(|unit| &**unit));
+		let derives = program.pipelines.iter().flat_map(|pipeline| &pipeline.code).any(|instr| {
+			matches!(instr, Instr::Write(WriteInstr::Schema(SchemaInstr::Observe { .. })))
+		});
+		if derives {
+			return true;
+		}
+	}
+	false
+}
+
+/// A table whose `id` names its components derives them for the observers of
+/// every form of write though it declares no other computed field, because
+/// the components are computed fields themselves; a table that names none and
+/// declares none derives nothing, and pays nothing for it.
+#[tokio::test]
+async fn a_table_with_named_id_components_derives_them_for_its_observers() {
+	let keyed = "
+		DEFINE TABLE reading SCHEMALESS;
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+	";
+	for sql in [
+		"CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 1",
+		"UPDATE reading SET temp = 2",
+		"UPSERT reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 3",
+		"INSERT INTO reading { city: 'Rome', time: d'2024-01-01T00:00:00Z', temp: 4 }",
+		"DELETE reading",
+	] {
+		assert!(derives_for_observers(keyed, sql).await, "`{sql}` derives no component");
+	}
+	let plain = "DEFINE TABLE plain SCHEMALESS;";
+	for sql in [
+		"CREATE plain SET n = 1",
+		"UPDATE plain SET n = 2",
+		"INSERT INTO plain { n: 3 }",
+		"DELETE plain",
+	] {
+		assert!(!derives_for_observers(plain, sql).await, "`{sql}` derives for a table with none");
+	}
+}
+
+/// A subscription to a table whose `id` names its components is notified of
+/// them as fields of the record, in whole and under a projection, and its
+/// `WHERE` reads them: the record the notification carries is the one the
+/// subscriber would read, though no record stores a component.
+#[tokio::test]
+async fn subscriptions_are_notified_of_named_id_components() {
+	use crate::types::{PublicAction, PublicValue};
+
+	async fn open(db: &TestDb, live: &str) -> crate::types::PublicUuid {
+		let owner = TestDb::owner().with_rt(true);
+		let mut responses =
+			db.datastore().execute(live, &owner, None).await.expect("the live query runs");
+		match responses.remove(0).result.expect("the live query opens") {
+			PublicValue::Uuid(id) => id,
+			other => panic!("`{live}` answered {other:?}"),
+		}
+	}
+
+	let (db, notifications) = TestDb::new_with_notifications("").await;
+	db.run(
+		"DEFINE TABLE reading SCHEMALESS;
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];",
+	)
+	.await;
+	let everything = open(&db, "LIVE SELECT * FROM reading").await;
+	let paris = open(&db, "LIVE SELECT city, temp FROM reading WHERE city = 'Paris'").await;
+	while notifications.try_recv().is_ok() {}
+
+	// A record of another city reaches the subscription that reads every one.
+	db.run("CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 1").await;
+	let sent = notifications.recv().await.expect("the create notifies");
+	assert_eq!(sent.id, everything);
+	assert_eq!(sent.action, PublicAction::Create);
+	let expected: PublicValue = crate::syn::value(
+		"{ city: 'London', id: reading:['London', d'2024-01-01T00:00:00Z'], temp: 1, time: d'2024-01-01T00:00:00Z' }",
+	)
+	.unwrap();
+	assert_eq!(sent.result, expected);
+	assert!(notifications.try_recv().is_err(), "the Paris subscription is told of London");
+
+	// A record of the other city reaches both, the second as it projects.
+	db.run("CREATE reading SET city = 'Paris', time = d'2024-01-02T00:00:00Z', temp = 5").await;
+	let mut both = [
+		notifications.recv().await.expect("the first subscription is told"),
+		notifications.recv().await.expect("the second subscription is told"),
+	];
+	assert!(notifications.try_recv().is_err(), "two subscriptions, two notifications");
+	both.sort_by_key(|sent| sent.id != everything);
+	assert_eq!(both[0].id, everything);
+	assert_eq!(both[0].action, PublicAction::Create);
+	let expected: PublicValue = crate::syn::value(
+		"{ city: 'Paris', id: reading:['Paris', d'2024-01-02T00:00:00Z'], temp: 5, time: d'2024-01-02T00:00:00Z' }",
+	)
+	.unwrap();
+	assert_eq!(both[0].result, expected);
+	assert_eq!(both[1].id, paris);
+	assert_eq!(both[1].action, PublicAction::Create);
+	let expected: PublicValue = crate::syn::value("{ city: 'Paris', temp: 5 }").unwrap();
+	assert_eq!(both[1].result, expected);
+
+	// An update and a delete carry the components of the record they are about.
+	db.run("UPDATE reading:['London', d'2024-01-01T00:00:00Z'] SET temp = 2").await;
+	let sent = notifications.recv().await.expect("the update notifies");
+	assert_eq!(sent.id, everything);
+	assert_eq!(sent.action, PublicAction::Update);
+	let expected: PublicValue = crate::syn::value(
+		"{ city: 'London', id: reading:['London', d'2024-01-01T00:00:00Z'], temp: 2, time: d'2024-01-01T00:00:00Z' }",
+	)
+	.unwrap();
+	assert_eq!(sent.result, expected);
+	assert!(notifications.try_recv().is_err(), "the Paris subscription is told of London");
+
+	db.run("DELETE reading:['London', d'2024-01-01T00:00:00Z']").await;
+	let sent = notifications.recv().await.expect("the delete notifies");
+	assert_eq!(sent.id, everything);
+	assert_eq!(sent.action, PublicAction::Delete);
+	assert_eq!(sent.result, expected);
+	assert!(notifications.try_recv().is_err(), "the Paris subscription is told of London");
+}

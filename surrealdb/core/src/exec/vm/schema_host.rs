@@ -137,6 +137,81 @@ pub(super) async fn check_table_altered(
 			altered,
 		),
 	)
+	.await?;
+	crate::exec::vm::descriptor::schema(
+		crate::ddl::define::table::validate_named_id_survives_conversion(
+			txn, ns, db, previous, altered,
+		),
+	)
+	.await
+}
+
+/// The checks a field statement makes of the definition `definition` it
+/// forms, in the database `ns`, `db`: the record id components it names, or
+/// the clash of the field it defines with one, judged as a `DEFINE FIELD` of
+/// `kind` judges them, against the catalog and the rows of the table's views
+/// as `txn` holds them.
+pub(super) async fn check_key_components(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	kind: &DefineKind,
+	definition: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::define_field_statement_validate_key_components(
+		txn, ns, db, kind, definition,
+	))
+	.await
+}
+
+/// What refuses `REMOVE FIELD id` on the table `table` of the database `ns`,
+/// `db`: a definition of the table that reads a component of its record id,
+/// as `txn` holds the catalog and the rows of the table's views.
+pub(super) async fn refuse_removing_id(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::key_scan::refuse_removing_field(
+		txn,
+		ns,
+		db,
+		table,
+		&Idiom::field("id"),
+	))
+	.await
+}
+
+/// What refuses turning the table `table` of the database `ns`, `db` into `to`: a
+/// record id that names its components, as `txn` holds the table's `id`.
+pub(super) async fn refuse_named_id_conversion(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	to: crate::ddl::define::table::TableConversion,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::define::table::refuse_named_id_conversion(
+		txn, ns, db, table, to,
+	))
+	.await
+}
+
+/// The check `DEFINE FIELD` and `ALTER FIELD` make of the records of `table` in
+/// the database `ns`, `db` against the record id structure `key`: every stored
+/// record id and body must fit it, unless the stored `id` already has `key`.
+pub(super) async fn validate_record_keys(
+	ctx: &crate::exec::ExecutionContext,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	key: &std::sync::Arc<crate::catalog::KeyStructure>,
+) -> anyhow::Result<()> {
+	let txn = ctx.txn();
+	crate::exec::vm::descriptor::schema(crate::ddl::key_scan::validate_record_keys(
+		ctx, &txn, ns, db, table, key,
+	))
 	.await
 }
 

@@ -3560,7 +3560,7 @@ impl Transaction {
 		let val = self.tr.getr(range.into_key_range(), None).await?;
 		let stored: Arc<[catalog::StoredFieldDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-		let val = catalog::from_stored_all(&stored)?;
+		let val = catalog::fields_from_stored(&stored)?;
 		self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(&val)));
 		Ok(val)
 	}
@@ -7143,7 +7143,7 @@ impl TableProvider for Transaction {
 					let val = self.tr.getr(range.into_key_range(), version).await?;
 					let stored: Arc<[catalog::StoredFieldDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-					return catalog::from_stored_all(&stored);
+					return catalog::fields_from_stored(&stored);
 				}
 				// The transaction's cache answers without another await.
 				let qey = cache::tx::Lookup::Fds(ns, db, tb.as_str());
@@ -7403,6 +7403,16 @@ impl TableProvider for Transaction {
 		fd: &'a catalog::FieldDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			// A definition derived from a named record id component exists only in
+			// the list `all_tb_fields` builds; the catalog stores the `id` that
+			// names it.
+			if fd.key_part.is_some() {
+				return Err(EngineError::Internal(format!(
+					"the field `{}` of table `{tb}` is derived from the record id and cannot be stored",
+					fd.name.to_raw_string(),
+				))
+				.into());
+			}
 			let stored = fd.to_stored();
 			let name = fd.name.to_raw_string();
 			let key = FieldKey {

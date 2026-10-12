@@ -199,3 +199,63 @@ pub(crate) fn validate_lightweight_clauses(def: &mut TableDefinition) -> Result<
 	}
 	Ok(())
 }
+
+/// What a table becomes that its record id, with named components, cannot be.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TableConversion {
+	/// A relation table, whose record id is its own key beside `in` and `out`.
+	Relation,
+	/// A view, whose record ids are derived from its query.
+	View,
+}
+
+impl TableConversion {
+	/// What the table becomes, as the refusal names it.
+	fn describes(self) -> &'static str {
+		match self {
+			Self::Relation => "a relation table",
+			Self::View => "a view",
+		}
+	}
+}
+
+/// Refuses turning the table `table` into `to` while its record id names
+/// components. A table with no `id` definition, or one that names nothing,
+/// passes.
+pub(crate) async fn refuse_named_id_conversion(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &crate::val::TableName,
+	to: TableConversion,
+) -> Result<()> {
+	anyhow::ensure!(
+		crate::ddl::key_scan::stored_key(txn, ns, db, table).await?.is_none(),
+		crate::exec::Error::IdComponentsTableConversion {
+			table: table.as_str().to_owned(),
+			to: to.describes().to_owned(),
+		}
+	);
+	Ok(())
+}
+
+/// [`refuse_named_id_conversion`] for the table `previous` altered into `def`:
+/// turning a table whose record id names components into a relation or a view
+/// is refused. A definition that stays what `previous` was passes without a
+/// catalog read, since a relation or a view never has a record id that names
+/// components.
+pub(crate) async fn validate_named_id_survives_conversion(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	previous: &TableDefinition,
+	def: &TableDefinition,
+) -> Result<()> {
+	let was_relation = matches!(previous.table_type, TableType::Relation(_));
+	let to = match (&def.table_type, &def.view) {
+		(TableType::Relation(_), _) if !was_relation => TableConversion::Relation,
+		(_, Some(_)) if previous.view.is_none() => TableConversion::View,
+		_ => return Ok(()),
+	};
+	refuse_named_id_conversion(txn, ns, db, &def.name, to).await
+}

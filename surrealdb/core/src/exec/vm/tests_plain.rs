@@ -288,12 +288,37 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	(
 		"schema_host.rs",
 		"check_index_column",
-		"declared schema service: an index column that is evaluated, checked as DEFINE INDEX checks one",
+		"declared schema service: an index column that is evaluated, or a written one no field \
+		 settles, checked as DEFINE INDEX checks one",
 	),
 	(
 		"schema_host.rs",
 		"check_table_altered",
 		"declared schema service: a table as ALTER TABLE alters it, checked against the table it found",
+	),
+	(
+		"schema_host.rs",
+		"check_key_components",
+		"declared schema service: the record id components a DEFINE FIELD's or an ALTER FIELD's \
+		 definition names, checked as DEFINE FIELD checks them",
+	),
+	(
+		"schema_host.rs",
+		"refuse_removing_id",
+		"declared schema service: what REMOVE FIELD refuses of the id of a table whose \
+		 definitions read its record id components, judged as its body judges it",
+	),
+	(
+		"schema_host.rs",
+		"refuse_named_id_conversion",
+		"declared schema service: what DEFINE TABLE refuses of a table whose record id names its \
+		 components, judged as its body judges it",
+	),
+	(
+		"schema_host.rs",
+		"validate_record_keys",
+		"declared schema service: the records of a table checked against the record id structure \
+		 DEFINE FIELD and ALTER FIELD give it, as their bodies check them",
 	),
 	(
 		"descriptor.rs",

@@ -163,10 +163,11 @@ impl<'a, 's> Parser<'a, 's> {
 			}
 			DefineKind::Field => {
 				rec[define::NAME] = self.expr(true)?;
+				let field_is_id = self.is_bare_id(rec[define::NAME]);
 				self.expect_kw(Kw::On, "ON")?;
 				self.eat_kw(Kw::Table);
 				rec[define::ON] = self.expr(false)?;
-				self.field_clauses()?;
+				self.field_clauses(field_is_id)?;
 			}
 			DefineKind::Index => {
 				rec[define::NAME] = self.expr(true)?;
@@ -1027,7 +1028,9 @@ impl<'a, 's> Parser<'a, 's> {
 		Ok(())
 	}
 
-	pub(crate) fn field_clauses(&mut self) -> R<()> {
+	/// The clauses of `DEFINE FIELD`. `field_is_id` is whether the field is the
+	/// bare `id`, the only one whose `TYPE` may name the components of a tuple.
+	pub(crate) fn field_clauses(&mut self, field_is_id: bool) -> R<()> {
 		loop {
 			match self.tok.kw {
 				Kw::Flexible => {
@@ -1041,7 +1044,11 @@ impl<'a, 's> Parser<'a, 's> {
 				Kw::Type => {
 					let t = self.bump();
 					let first = self.ast.nodes.len();
-					let k = self.kind()?;
+					let k = if field_is_id {
+						self.id_kind()?
+					} else {
+						self.kind()?
+					};
 					let flexible = self.eat_kw(Kw::Flexible) as u32;
 					self.push_clause(Cl::FieldType, k, flexible, t.start, first)?;
 				}

@@ -409,6 +409,10 @@ impl Lowering<'_, '_> {
 	/// fields `reads` — every field of the record when `None` — derives, with
 	/// the computed fields those read in turn, in the order the table's view
 	/// derives them. A field whose body has no logical form is not lowered.
+	///
+	/// The fields that name the components of a record id are computed
+	/// fields of the table, derived from `id`, so a predicate that reads one
+	/// derives it here like any other.
 	pub(super) async fn guard_derivations(
 		&self,
 		table: &surrealdb_strand::TableName,

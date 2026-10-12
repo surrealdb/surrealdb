@@ -319,17 +319,19 @@ impl Lowering<'_, '_> {
 		else {
 			return Err(NotCovered::internal("indexes of a statement that names no single table"));
 		};
-		let defs = match self.catalog.written(&txn, &table)? {
-			Some((_, written)) => Arc::clone(&written.indexes),
-			None => Arc::from(Vec::new()),
+		let (key, defs) = match self.catalog.written(&txn, &table)? {
+			Some((read, written)) => (read.key.clone(), Arc::clone(&written.indexes)),
+			None => (None, Arc::from(Vec::new())),
 		};
+		let key = key.as_deref();
 		let mut per_index = Vec::with_capacity(defs.len());
 		for ix in defs.iter() {
 			if ix.prepare_remove {
 				per_index.push(IndexPlan::Removed);
 				continue;
 			}
-			let columns = crate::exec::vm::host::out_of_line(|| self.index_columns(ix)).await?;
+			let columns =
+				crate::exec::vm::host::out_of_line(|| self.index_columns(ix, key)).await?;
 			per_index.push(match NativeIndexKind::of(&ix.index) {
 				None => IndexPlan::Entries {
 					columns,
@@ -337,7 +339,7 @@ impl Lowering<'_, '_> {
 				Some(kind) => IndexPlan::Native {
 					kind,
 					columns,
-					guard: crate::exec::vm::host::out_of_line(|| self.index_guard(ix)).await?,
+					guard: crate::exec::vm::host::out_of_line(|| self.index_guard(ix, key)).await?,
 				},
 			});
 		}
@@ -348,9 +350,19 @@ impl Lowering<'_, '_> {
 	/// runs over, one per column in the definition's order, each evaluated in
 	/// the index-entry frame with the image as the record a self-dereference
 	/// answers from.
-	async fn index_columns(&mut self, ix: &IndexDefinition) -> Lowered<u16> {
-		let mut bodies = Vec::with_capacity(ix.cols.len());
-		for col in &ix.cols {
+	///
+	/// A column that addresses a component of the record id, where `key` names
+	/// them, is the element of the image's own id
+	/// ([`canonical_columns`](crate::exec::index::derived_columns::canonical_columns)),
+	/// the one place a component has a value.
+	async fn index_columns(
+		&mut self,
+		ix: &IndexDefinition,
+		key: Option<&crate::catalog::KeyStructure>,
+	) -> Lowered<u16> {
+		let columns = crate::exec::index::derived_columns::canonical_columns(key, &ix.cols);
+		let mut bodies = Vec::with_capacity(columns.len());
+		for col in columns.iter() {
 			bodies.push(self.index_body(crate::expr::Expr::Idiom(col.clone()))?);
 		}
 		let aside = self.set_aside();
@@ -362,12 +374,19 @@ impl Lowering<'_, '_> {
 
 	/// A host pipeline answering the `WHERE` guard of `COUNT` index `ix` for
 	/// the image it runs over, in the index-entry frame; `None` for an index
-	/// with no guard.
-	async fn index_guard(&mut self, ix: &IndexDefinition) -> Lowered<Option<u16>> {
+	/// with no guard. A read of a component of the record id, where `key` names
+	/// them, is the element of the image's own id
+	/// ([`canonical_guard`](crate::exec::index::derived_columns::canonical_guard)).
+	async fn index_guard(
+		&mut self,
+		ix: &IndexDefinition,
+		key: Option<&crate::catalog::KeyStructure>,
+	) -> Lowered<Option<u16>> {
 		let Some(cond) = &ix.count_cond else {
 			return Ok(None);
 		};
 		let body = self.index_body(cond.0.clone())?;
+		let body = crate::exec::index::derived_columns::canonical_guard(key, &body).unwrap_or(body);
 		let aside = self.set_aside();
 		self.document = super::DocumentRoot::RowElseReceiver;
 		let built = self.index_pipeline(&[body], false).await;

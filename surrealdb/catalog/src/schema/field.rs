@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use anyhow::Context as _;
 use revision::revisioned;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::{LogicalPermissionBody, StoredPermission, StoredReference};
+use super::{
+	KeyStructure, KeyStructureError, LogicalPermissionBody, StoredPermission, StoredReference,
+};
 use crate::catalog::auth::AuthLimit;
 use crate::catalog::{
 	ExprText, FromStored, IdiomText, KindText, LogicalBody, Permission, reference_to_stored,
@@ -12,7 +16,7 @@ use crate::expr as runtime;
 use crate::expr::logical::{LogicalExpr, LogicalPermission};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Idiom, Kind};
+use crate::expr::{Expr, Idiom, KeyNames, Kind};
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
@@ -158,10 +162,12 @@ impl_kv_value_revisioned!(StoredFieldDefinition);
 
 impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {
+		let key = self.live_key().cloned();
 		Value::from(map! {
 			"name" => self.name.structure(),
 			"table" => Value::String(self.table.into()),
 			"kind", if let Some(v) = self.field_kind => Value::from(v.to_sql()),
+			"components", if let Some(v) = &key => v.components_structure(),
 			"flexible", if self.flexible => true.into(),
 			"value", if let Some(v) = self.value => Value::from(v.to_stored_sql()),
 			"assert", if let Some(v) = self.assert => Value::from(v.to_stored_sql()),
@@ -195,6 +201,7 @@ impl FieldDefinition {
 			name: crate::expr::Expr::Idiom(self.name.clone()),
 			what: runtime::Expr::Table(self.table.clone()),
 			field_kind: self.field_kind.clone(),
+			key_names: self.live_key().and_then(|key| key.names.clone()),
 			flexible: self.flexible,
 			readonly: self.readonly,
 			inline: self.inline,
@@ -297,11 +304,28 @@ impl DefineDefault {
 /// for as long as the catalog holds it. Reading the [`Expr`] half and building
 /// a body from it instead renders the expression back to text and re-parses it
 /// for every record the clause is applied to.
+///
+/// Two fields exist only at runtime and are never written to
+/// [`StoredFieldDefinition`]. [`Self::key`] is set on the definition of an `id`
+/// whose `TYPE` names its components, and [`Self::key_part`] on the virtual
+/// definition of one such component (see [`KeyStructure::derived_fields`]).
+/// [`Self::set_type`] is the only writer of `key`, and sets it together with the
+/// type. A type written to `field_kind` directly leaves `key` stale, so every
+/// reader acts on [`Self::live_key`], which is the structure only while it still
+/// describes the type. A type is written through `set_type` so that the two agree.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct FieldDefinition {
 	pub name: Idiom,
 	pub table: TableName,
 	pub field_kind: Option<Kind>,
+	/// The structure of the record ids of the table, for an `id` definition whose
+	/// `TYPE` names its components. Runtime-only; set through [`Self::set_type`] and
+	/// read through [`Self::live_key`].
+	pub key: Option<Arc<KeyStructure>>,
+	/// The position in the record id that this definition reads, for the virtual
+	/// definition of a named component. Runtime-only: such a definition is derived
+	/// from the `id` definition, never stored, and never written to the catalog.
+	pub key_part: Option<u32>,
 	pub flexible: bool,
 	pub readonly: bool,
 	pub inline: bool,
@@ -335,10 +359,22 @@ impl FromStored for FieldDefinition {
 
 	fn from_stored(stored: &StoredFieldDefinition) -> anyhow::Result<FieldDefinition> {
 		fn build(stored: &StoredFieldDefinition) -> anyhow::Result<FieldDefinition> {
-			Ok(FieldDefinition {
-				name: stored.name.compile()?,
+			let name = stored.name.compile()?;
+			// Only the type of `id` can name the components of a record id.
+			let (field_kind, names) = match &stored.field_kind {
+				Some(text) if name.is_id() => {
+					let (kind, names) = text.compile_keyed()?;
+					(Some(kind), names)
+				}
+				Some(text) => (Some(text.compile()?), None),
+				None => (None, None),
+			};
+			let mut definition = FieldDefinition {
+				name,
 				table: stored.table.clone(),
-				field_kind: stored.field_kind.as_ref().map(|t| t.compile()).transpose()?,
+				field_kind: None,
+				key: None,
+				key_part: None,
 				flexible: stored.flexible,
 				readonly: stored.readonly,
 				inline: stored.inline,
@@ -359,7 +395,9 @@ impl FromStored for FieldDefinition {
 				comment: stored.comment.clone(),
 				graphql_alias: stored.graphql_alias.clone(),
 				graphql_deprecated: stored.graphql_deprecated.clone(),
-			})
+			};
+			definition.set_type(field_kind, names);
+			Ok(definition)
 		}
 		build(stored).with_context(|| {
 			format!(
@@ -368,6 +406,79 @@ impl FromStored for FieldDefinition {
 				stored.table
 			)
 		})
+	}
+}
+
+impl FieldDefinition {
+	/// Sets the type of the field and the names of its record id components,
+	/// together, so that [`Self::key`] agrees with [`Self::field_kind`].
+	///
+	/// `names` belongs to the `id` field and to a tuple type with one element per
+	/// name; for anything else the names are dropped, the type is kept, and
+	/// [`Self::key`] is `None`. A component whose type a key range cannot reason
+	/// about is kept, with an unknown order ([`KeyStructure::from_stored_id_field`]).
+	///
+	/// Infallible, so that reading the catalog never refuses a table over its
+	/// component names. `DEFINE FIELD` and `ALTER FIELD` run the strict check,
+	/// [`Self::set_type_strict`], first.
+	pub fn set_type(&mut self, kind: Option<Kind>, names: Option<KeyNames>) {
+		self.field_kind = kind;
+		self.key = None;
+		let Some(names) = names else {
+			return;
+		};
+		let structure = match &self.field_kind {
+			Some(kind) if self.name.is_id() => KeyStructure::from_stored_id_field(kind, &names),
+			_ => None,
+		};
+		match structure {
+			Some(structure) => self.key = Some(Arc::new(structure)),
+			None => warn!(
+				"the component names of the record id of table `{}` do not fit the type of its `id` field and are ignored",
+				self.table
+			),
+		}
+	}
+
+	/// [`Self::set_type`], refusing a type whose components a key range cannot
+	/// reason about ([`KeyStructure::from_id_field`]). The definition is unchanged
+	/// on error.
+	///
+	/// # Errors
+	///
+	/// The first fault in the type, as [`KeyStructure::from_id_field`] reports it;
+	/// a type that is not a tuple is [`KeyStructureError::NotATuple`].
+	pub fn set_type_strict(
+		&mut self,
+		kind: Option<Kind>,
+		names: Option<KeyNames>,
+	) -> Result<(), KeyStructureError> {
+		if let Some(names) = &names {
+			let kind = kind.as_ref().ok_or(KeyStructureError::NotATuple)?;
+			KeyStructure::from_id_field(kind, names)?;
+		}
+		self.set_type(kind, names);
+		Ok(())
+	}
+
+	/// The key structure, when it still describes [`Self::field_kind`]. The
+	/// structure is derived from the type, so a type written to `field_kind`
+	/// directly leaves it stale; the type is what the definition declares.
+	///
+	/// A reader that acts on the structure (the table's key, the derived component
+	/// fields, a write, a planner rule) reads it through this method rather than
+	/// from [`Self::key`], so that a stale structure is never acted on. It is also
+	/// what a definition renders and stores.
+	pub fn live_key(&self) -> Option<&Arc<KeyStructure>> {
+		let key = self.key.as_ref()?;
+		self.field_kind.as_ref().is_some_and(|kind| key.declares(kind)).then_some(key)
+	}
+
+	/// Whether this is the virtual definition of a named record id component.
+	/// Such a definition is derived at runtime and is not a definition anyone
+	/// wrote; see [`KeyStructure::derived_fields`].
+	pub fn is_key_part(&self) -> bool {
+		self.key_part.is_some()
 	}
 }
 
@@ -510,11 +621,21 @@ impl FieldDefinition {
 			|| !matches!(self.default, DefineDefault::None)
 	}
 
+	/// The stored form of this definition. A definition whose `id` names its
+	/// components stores the names in the text of its type
+	/// ([`KindText::new_keyed`]); no other runtime state is stored.
+	///
+	/// A virtual definition ([`Self::key_part`]) has no stored form and is never
+	/// passed here.
 	pub fn to_stored(&self) -> StoredFieldDefinition {
+		debug_assert!(self.key_part.is_none(), "a derived field definition has no stored form");
 		StoredFieldDefinition {
 			name: IdiomText::new(&self.name),
 			table: self.table.clone(),
-			field_kind: self.field_kind.as_ref().map(KindText::new),
+			field_kind: match self.live_key() {
+				Some(key) => Some(KindText::new_keyed(key)),
+				None => self.field_kind.as_ref().map(KindText::new),
+			},
 			flexible: self.flexible,
 			readonly: self.readonly,
 			inline: self.inline,
@@ -680,5 +801,361 @@ mod tests {
 				);
 			}
 		}
+	}
+
+	fn component_names(list: &[&str]) -> KeyNames {
+		KeyNames::new(list.iter().map(surrealdb_strand::Strand::new).collect(), list.len()).unwrap()
+	}
+
+	fn tuple(kinds: Vec<Kind>) -> Kind {
+		Kind::Literal(crate::expr::KindLiteral::Array(kinds))
+	}
+
+	fn id_field(kind: Kind, names: Option<KeyNames>) -> FieldDefinition {
+		let mut def = FieldDefinition {
+			name: Idiom::field("id"),
+			table: TableName::from("reading"),
+			..Default::default()
+		};
+		def.set_type_strict(Some(kind), names).unwrap();
+		def
+	}
+
+	/// The names live in the text of the type, so they survive a trip through
+	/// the stored form and back, and print as the statement that defined them.
+	#[test]
+	fn a_named_id_survives_storage_and_rendering() {
+		let cases: [(&[&str], Vec<Kind>, &str); 4] = [
+			(
+				&["city", "time"],
+				vec![Kind::String, Kind::Datetime],
+				"[city: string, time: datetime]",
+			),
+			(&["city"], vec![Kind::String], "[city: string]"),
+			// A space needs backticks; so do the reserved words `value` and `option`.
+			// `DEFINE FIELD` refuses a name that is not a plain identifier, but stored
+			// text holding one still loads and renders as written.
+			(&["my city", "n"], vec![Kind::String, Kind::Int], "[`my city`: string, n: int]"),
+			(
+				&["value", "string", "option"],
+				vec![Kind::Int, Kind::String, Kind::Int],
+				"[`value`: int, string: string, `option`: int]",
+			),
+		];
+		for (list, kinds, text) in cases {
+			let mut def = id_field(tuple(kinds.clone()), None);
+			def.set_type(Some(tuple(kinds.clone())), Some(component_names(list)));
+			let plain = list.iter().all(|name| KeyStructure::is_plain_name(name));
+			assert_eq!(
+				def.clone()
+					.set_type_strict(Some(tuple(kinds.clone())), Some(component_names(list)))
+					.is_ok(),
+				plain,
+				"{text}"
+			);
+			let key = def.key.as_ref().expect("a named id has a key structure");
+			assert_eq!(key.arity(), list.len());
+
+			let stored = def.to_stored();
+			assert_eq!(stored.field_kind.as_ref().map(KindText::as_str), Some(text));
+
+			let loaded = FieldDefinition::from_stored(&stored).unwrap();
+			assert_eq!(loaded, def, "{text} did not survive to_stored/from_stored");
+			assert_eq!(loaded.key, def.key);
+			assert_eq!(loaded.field_kind, Some(tuple(kinds)));
+			assert_eq!(loaded.to_stored(), stored, "{text} did not store back to the same bytes");
+
+			let statement =
+				loaded.to_runtime_definition(runtime::statements::define::DefineKind::Default);
+			assert_eq!(statement.key_names, key.names);
+			assert!(
+				statement.to_sql().starts_with(&format!("DEFINE FIELD id ON reading TYPE {text}")),
+				"{}",
+				statement.to_sql()
+			);
+			assert!(
+				loaded
+					.to_sql_overwrite()
+					.starts_with(&format!("DEFINE FIELD OVERWRITE id ON reading TYPE {text}")),
+				"{}",
+				loaded.to_sql_overwrite()
+			);
+			assert!(
+				loaded.to_sql().starts_with(&format!("DEFINE FIELD id ON reading TYPE {text}"))
+			);
+		}
+	}
+
+	/// A type with no names is stored as the plain kind text, and reads
+	/// back with no structure.
+	#[test]
+	fn an_unnamed_id_is_stored_as_the_plain_kind_text() {
+		for kind in [
+			tuple(vec![Kind::String, Kind::Int]),
+			tuple(vec![Kind::Float]),
+			Kind::Record(vec![TableName::from("person")]),
+			Kind::Either(vec![Kind::String, Kind::Int]),
+			Kind::Any,
+		] {
+			let def = id_field(kind.clone(), None);
+			assert!(def.key.is_none() && def.key_part.is_none());
+			let stored = def.to_stored();
+			assert_eq!(
+				stored.field_kind,
+				Some(KindText::new(&kind)),
+				"the stored text of `{}` changed",
+				kind.to_sql()
+			);
+			assert_eq!(stored.field_kind.as_ref().unwrap().as_str(), kind.to_sql());
+
+			let loaded = FieldDefinition::from_stored(&stored).unwrap();
+			assert_eq!(loaded, def);
+			assert!(loaded.key.is_none());
+			assert_eq!(
+				loaded
+					.to_runtime_definition(runtime::statements::define::DefineKind::Default)
+					.key_names,
+				None
+			);
+		}
+
+		// A field with no type at all.
+		let bare = FieldDefinition {
+			name: Idiom::field("id"),
+			table: TableName::from("reading"),
+			..Default::default()
+		};
+		assert_eq!(bare.to_stored().field_kind, None);
+		assert_eq!(FieldDefinition::from_stored(&bare.to_stored()).unwrap(), bare);
+	}
+
+	/// The names are read only for `id`: text on any other field is the plain
+	/// kind grammar, which refuses names.
+	#[test]
+	fn names_are_read_only_from_the_type_of_id() {
+		let stored = |name: &str, text: &str| StoredFieldDefinition {
+			name: IdiomText::from_raw(name),
+			table: TableName::from("reading"),
+			field_kind: Some(KindText::from_raw(text)),
+			..{
+				let mut s = FieldDefinition {
+					name: Idiom::field(name),
+					table: TableName::from("reading"),
+					..Default::default()
+				}
+				.to_stored();
+				s.field_kind = None;
+				s
+			}
+		};
+		let id =
+			FieldDefinition::from_stored(&stored("id", "[city: string, time: datetime]")).unwrap();
+		assert_eq!(id.key.as_ref().map(|k| k.arity()), Some(2));
+		assert_eq!(
+			id.field_kind,
+			Some(tuple(vec![Kind::String, Kind::Datetime])),
+			"the type is the plain tuple, whatever the names"
+		);
+
+		let other = stored("value", "[city: string, time: datetime]");
+		assert!(FieldDefinition::from_stored(&other).is_err());
+		let plain = FieldDefinition::from_stored(&stored("value", "[string, datetime]")).unwrap();
+		assert!(plain.key.is_none());
+	}
+
+	/// A stored type outside the allow-list keeps the table readable: the
+	/// structure exists and orders nothing.
+	#[test]
+	fn a_stored_type_outside_the_allow_list_is_read_with_an_unknown_order() {
+		let mut stored = id_field(tuple(vec![Kind::String, Kind::Datetime]), None).to_stored();
+		stored.field_kind = Some(KindText::from_raw("[a: float, b: datetime]"));
+		let loaded = FieldDefinition::from_stored(&stored).unwrap();
+		let key = loaded.key.as_ref().expect("the names are kept");
+		assert_eq!(key.order(0), crate::catalog::ComponentOrder::Unknown);
+		assert_eq!(key.order(1), crate::catalog::ComponentOrder::CoarseSecond);
+		assert_eq!(loaded.to_stored(), stored, "the text is written back as it was read");
+	}
+
+	/// Stored text whose names cannot form a valid list (a repeat, a reserved name)
+	/// leaves the field readable: the type is the plain tuple and there is no
+	/// structure. The whole field list of the table still loads, and nothing is
+	/// derived from the id.
+	#[test]
+	fn stored_names_that_are_not_valid_leave_the_table_readable() {
+		for (text, kinds) in [
+			("[a: string, a: int]", vec![Kind::String, Kind::Int]),
+			("[id: string, b: int]", vec![Kind::String, Kind::Int]),
+			("[in: string]", vec![Kind::String]),
+			("[x: int, out: datetime]", vec![Kind::Int, Kind::Datetime]),
+		] {
+			let mut id = id_field(tuple(kinds.clone()), None).to_stored();
+			id.field_kind = Some(KindText::from_raw(text));
+			let value = FieldDefinition {
+				name: Idiom::field("value"),
+				table: TableName::from("reading"),
+				..Default::default()
+			}
+			.to_stored();
+			let list = [id, value];
+
+			let loaded = FieldDefinition::from_stored(&list[0])
+				.unwrap_or_else(|e| panic!("`{text}` did not load: {e}"));
+			assert_eq!(loaded.field_kind, Some(tuple(kinds)), "{text}");
+			assert!(loaded.key.is_none() && loaded.live_key().is_none(), "{text}");
+			assert_eq!(
+				loaded.to_stored().field_kind.as_ref().map(KindText::as_str),
+				Some(loaded.field_kind.as_ref().unwrap().to_sql().as_str()),
+				"{text}: the names are not written back"
+			);
+
+			let fields = crate::catalog::fields_from_stored(&list)
+				.unwrap_or_else(|e| panic!("`{text}`: the field list did not load: {e}"));
+			assert_eq!(fields.len(), 2, "{text}");
+			assert!(fields.iter().all(|f| f.key.is_none() && f.key_part.is_none()), "{text}");
+		}
+	}
+
+	/// `set_type` never fails: names that do not fit are dropped and the type is
+	/// kept, so a catalog read is never refused over them.
+	#[test]
+	fn set_type_drops_names_that_do_not_fit() {
+		let mut def = FieldDefinition {
+			name: Idiom::field("id"),
+			table: TableName::from("reading"),
+			..Default::default()
+		};
+		// Not a tuple.
+		def.set_type(Some(Kind::String), Some(component_names(&["a"])));
+		assert_eq!(def.field_kind, Some(Kind::String));
+		assert!(def.key.is_none());
+		// Wrong arity.
+		def.set_type(Some(tuple(vec![Kind::String, Kind::Int])), Some(component_names(&["a"])));
+		assert_eq!(def.field_kind, Some(tuple(vec![Kind::String, Kind::Int])));
+		assert!(def.key.is_none());
+		// No type at all.
+		def.set_type(None, Some(component_names(&["a"])));
+		assert_eq!(def.field_kind, None);
+		assert!(def.key.is_none());
+
+		// Another field.
+		let mut other = FieldDefinition {
+			name: Idiom::field("city"),
+			table: TableName::from("reading"),
+			..Default::default()
+		};
+		other.set_type(Some(tuple(vec![Kind::String])), Some(component_names(&["a"])));
+		assert_eq!(other.field_kind, Some(tuple(vec![Kind::String])));
+		assert!(other.key.is_none());
+
+		// A later call replaces the structure, and `None` clears it.
+		def.set_type(Some(tuple(vec![Kind::String])), Some(component_names(&["a"])));
+		assert!(def.key.is_some());
+		def.set_type(Some(tuple(vec![Kind::String])), None);
+		assert!(def.key.is_none());
+	}
+
+	#[test]
+	fn set_type_strict_refuses_what_a_key_range_cannot_reason_about() {
+		let mut def = id_field(tuple(vec![Kind::String]), Some(component_names(&["a"])));
+		let before = def.clone();
+		assert_eq!(
+			def.set_type_strict(
+				Some(tuple(vec![Kind::String, Kind::Float])),
+				Some(component_names(&["a", "b"]))
+			),
+			Err(KeyStructureError::UnsupportedKind {
+				name: "b".to_owned(),
+				kind: "float".to_owned()
+			})
+		);
+		assert_eq!(
+			def.set_type_strict(Some(Kind::String), Some(component_names(&["a"]))),
+			Err(KeyStructureError::NotATuple)
+		);
+		assert_eq!(
+			def.set_type_strict(None, Some(component_names(&["a"]))),
+			Err(KeyStructureError::NotATuple)
+		);
+		assert_eq!(def, before, "a refused type leaves the definition as it was");
+
+		// Without names there is nothing to refuse, whatever the type.
+		def.set_type_strict(Some(tuple(vec![Kind::Float])), None).unwrap();
+		assert!(def.key.is_none());
+	}
+
+	/// INFO FOR TABLE ... STRUCTURE lists the components of a named id, and
+	/// nothing for any other definition.
+	#[test]
+	fn structure_lists_the_components_of_a_named_id() {
+		let get = |v: &Value, key: &str| match v {
+			Value::Object(o) => o.get(key).cloned(),
+			other => panic!("expected an object, got {other:?}"),
+		};
+		let named = id_field(
+			tuple(vec![Kind::String, Kind::Datetime]),
+			Some(component_names(&["city", "time"])),
+		)
+		.structure();
+		assert_eq!(get(&named, "kind"), Some(Value::from("[string, datetime]")));
+		let Some(Value::Array(components)) = get(&named, "components") else {
+			panic!("a named id reports its components");
+		};
+		assert_eq!(components.0.len(), 2);
+		for (position, (name, kind)) in
+			[("city", "string"), ("time", "datetime")].into_iter().enumerate()
+		{
+			let c = &components.0[position];
+			assert_eq!(get(c, "name"), Some(Value::from(name)));
+			assert_eq!(get(c, "position"), Some(Value::from(position as i64)));
+			assert_eq!(get(c, "kind"), Some(Value::from(kind)));
+		}
+
+		let unnamed = id_field(tuple(vec![Kind::String, Kind::Datetime]), None).structure();
+		assert_eq!(get(&unnamed, "components"), None);
+		let plain = FieldDefinition {
+			name: Idiom::field("value"),
+			table: TableName::from("reading"),
+			..Default::default()
+		}
+		.structure();
+		assert_eq!(get(&plain, "components"), None);
+	}
+
+	/// A virtual definition has no stored form. Handing one to `to_stored`
+	/// is a fault in the caller, which a debug build catches.
+	#[test]
+	#[cfg(debug_assertions)]
+	#[should_panic(expected = "no stored form")]
+	fn a_derived_definition_cannot_be_stored() {
+		let key =
+			id_field(tuple(vec![Kind::String]), Some(component_names(&["city"]))).key.unwrap();
+		let derived = key.derived_fields(&TableName::from("reading")).remove(0);
+		assert!(derived.is_key_part());
+		let _ = derived.to_stored();
+	}
+
+	/// The structure is derived from the type. A type written to `field_kind`
+	/// directly leaves it stale, and what is stored, rendered and reported is
+	/// the type.
+	#[test]
+	fn a_type_written_directly_wins_over_a_stale_structure() {
+		let mut def = id_field(
+			tuple(vec![Kind::String, Kind::Datetime]),
+			Some(component_names(&["city", "time"])),
+		);
+		def.field_kind = Some(tuple(vec![Kind::String, Kind::Int]));
+
+		let stored = def.to_stored();
+		assert_eq!(stored.field_kind.as_ref().map(KindText::as_str), Some("[string, int]"));
+		assert!(FieldDefinition::from_stored(&stored).unwrap().key.is_none());
+
+		let statement = def.to_runtime_definition(runtime::statements::define::DefineKind::Default);
+		assert_eq!(statement.key_names, None);
+		assert!(statement.to_sql().starts_with("DEFINE FIELD id ON reading TYPE [string, int]"));
+
+		let Value::Object(info) = def.structure() else {
+			panic!("a definition reports an object");
+		};
+		assert_eq!(info.get("components"), None);
 	}
 }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use surrealdb_datastore::index_shapes::{TableIndexShapes, ValueShape};
 
 use super::IndexCandidate;
+use super::key_range::KeyRangeAccess;
 use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition};
 use crate::expr::logical::LogicalExpr;
 use crate::expr::operator::MatchesOperator;
@@ -33,6 +34,14 @@ pub(crate) struct IndexRef {
 	/// holds none, or the index has recorded storing none in it. A column
 	/// past the end is not known to, and may hold one.
 	scalar: ColumnFlags,
+	/// Per column, whether it is a datetime component of the table's record
+	/// id, whose entries order only by the whole second
+	/// ([`super::derived_columns`]); a column past the end is not.
+	coarse: ColumnFlags,
+	/// Whether the record ids that follow the columns in the entries of a
+	/// non-unique index order other than by value
+	/// ([`super::derived_columns::id_orders_coarsely`]).
+	coarse_id: bool,
 }
 
 impl IndexRef {
@@ -42,6 +51,8 @@ impl IndexRef {
 			idx,
 			definition: Arc::new(indexes[idx].clone()),
 			scalar: ColumnFlags::default(),
+			coarse: ColumnFlags::default(),
+			coarse_id: false,
 		}
 	}
 
@@ -50,6 +61,35 @@ impl IndexRef {
 	pub(crate) fn with_scalar_columns(mut self, scalar: ColumnFlags) -> Self {
 		self.scalar = scalar;
 		self
+	}
+
+	/// The same reference, knowing the columns `coarse` marks to be datetime
+	/// components of the record id.
+	pub(crate) fn with_coarse_columns(mut self, coarse: ColumnFlags) -> Self {
+		self.coarse = coarse;
+		self
+	}
+
+	/// The same reference, knowing that the record ids its entries end with
+	/// order other than by value.
+	pub(crate) fn with_coarse_id(mut self) -> Self {
+		self.coarse_id = true;
+		self
+	}
+
+	/// Whether the entries that agree on every column list their records in
+	/// the order of `id`: the record id an entry ends with orders as its value
+	/// does.
+	pub(crate) fn orders_by_id(&self) -> bool {
+		!self.coarse_id
+	}
+
+	/// Whether the entries of column `col` order only by the whole second: it
+	/// is a datetime component of the table's record id. A scan lists the
+	/// entries of such a column in no chronological order within a second, and
+	/// a range over it reaches the records of its bounds' seconds.
+	pub(crate) fn orders_coarsely(&self, col: usize) -> bool {
+		self.coarse.get(col).copied().unwrap_or(false)
 	}
 
 	/// Whether column `col` may hold an array, which the index writer stores
@@ -189,6 +229,15 @@ pub enum AccessPath {
 		paths: Vec<AccessPath>,
 		dedupe: bool,
 	},
+
+	/// Scan of the ranges of record keys a predicate over the components of
+	/// the table's record id selects ([`super::key_range::plan_key_range`]).
+	///
+	/// Reads no index. A record has one key, so no record is reached twice
+	/// and no dedupe is needed. The ranges are a superset of the records the
+	/// predicate admits: the whole predicate is evaluated over the rows the
+	/// scan yields.
+	KeyRange(KeyRangeAccess),
 }
 
 impl AccessPath {
@@ -1413,9 +1462,11 @@ fn kind_holds_only_arrays(kind: &Kind) -> bool {
 /// cannot state as a field path, which includes every column holding `*`, and a
 /// plain column that may hold an array ([`IndexRef::may_hold_array`]), whose
 /// entries follow element order while the column's whole value, an array, sorts
-/// after every scalar. The id is claimed only when every free column was: it
-/// orders the entries that agree on all of them, and says nothing across a
-/// column the claim left out.
+/// after every scalar. It stops as well at a column whose entries order only by
+/// the whole second ([`IndexRef::orders_coarsely`]). The id is claimed only when
+/// every free column was: it orders the entries that agree on all of them, and
+/// says nothing across a column the claim left out. Nor is it claimed where the
+/// record ids do not order by value ([`IndexRef::orders_by_id`]).
 pub(crate) fn scan_ordering(
 	index_ref: &IndexRef,
 	access: &BTreeAccess,
@@ -1448,14 +1499,19 @@ pub(crate) fn scan_ordering(
 	let free = ix_def.cols.iter().enumerate().skip(pinned);
 	let mut ordering: Vec<SortProperty> = free
 		.clone()
-		.map_while(|(i, col)| {
-			if index_ref.may_hold_array(i) {
+		.map_while(|(at, col)| {
+			if index_ref.may_hold_array(at) {
 				return None;
 			}
-			field_path_from_idiom(col).ok().map(property)
+			let path = field_path_from_idiom(col).ok()?;
+			(!index_ref.orders_coarsely(at)).then(|| property(path))
 		})
 		.collect();
-	if !index_ref.is_unique() && !ix_def.cols.is_empty() && ordering.len() == free.len() {
+	if !index_ref.is_unique()
+		&& !ix_def.cols.is_empty()
+		&& ordering.len() == free.len()
+		&& index_ref.orders_by_id()
+	{
 		ordering.push(property(FieldPath::field("id")));
 	}
 	ordering

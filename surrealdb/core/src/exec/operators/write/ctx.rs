@@ -14,7 +14,7 @@ use super::scope::WriteScope;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, Error as CatalogError, EventDefinition, FieldDefinition, IndexDefinition,
-	NamespaceDefinition, SubscriptionDefinition, TableDefinition,
+	KeyStructure, NamespaceDefinition, SubscriptionDefinition, TableDefinition,
 };
 use crate::doc::{FieldEvalOrder, NsDbCtx, NsDbTbMutCtx};
 use crate::exec::ExecutionContext;
@@ -69,6 +69,14 @@ pub(crate) struct WriteCtx {
 	/// Index of the `id` field in `fields`, so id coercion reads its kind and
 	/// default without rescanning the list per record.
 	pub(crate) id_field: Option<usize>,
+	/// What the array keys of the table are made of, when the `id` field's type
+	/// names their components (`TYPE [city: string, time: datetime]`); `None`
+	/// for every other table. The record id stages consult it to build the key
+	/// from the components a record is written with, to hold every element to
+	/// its component's type, and to verify the components a record restates
+	/// against the key. It is read from the same field list as `fields`, so it
+	/// describes exactly the schema the stages apply.
+	pub(crate) key: Option<Arc<KeyStructure>>,
 
 	/// The context the stages evaluate against, and the only handle to the
 	/// transaction. No operator begins, commits or cancels one; a write
@@ -146,6 +154,11 @@ impl WriteCtx {
 		let catalog = NsDbTbMutCtx::load(exec.ctx(), &parent, tb, table, version)
 			.await
 			.map_err(ControlFlow::Err)?;
+		let key = catalog
+			.id_field_idx
+			.and_then(|index| catalog.fields.get(index))
+			.and_then(FieldDefinition::live_key)
+			.cloned();
 		let index_shapes = txn
 			.table_index_shapes(
 				parent.ns.namespace_id,
@@ -168,6 +181,7 @@ impl WriteCtx {
 			field_order: catalog.field_order,
 			computed_deps: catalog.computed_deps,
 			id_field: catalog.id_field_idx,
+			key,
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: (catalog_version, stamps),
@@ -194,6 +208,7 @@ impl WriteCtx {
 			field_order: Arc::clone(&self.field_order),
 			computed_deps: self.computed_deps.clone(),
 			id_field: self.id_field,
+			key: self.key.clone(),
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: self.resolved_at,

@@ -520,4 +520,144 @@ mod tests {
 			"INSERT with both relation and ignore must parse cleanly; got: {structured}"
 		);
 	}
+
+	/// The schema of a table whose `id` names its components.
+	const READING: &str = "DEFINE TABLE reading SCHEMALESS; \
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];";
+
+	/// The create tool derives the record id from the components the data
+	/// carries, answers with the components as fields, and refuses data that
+	/// leaves one out rather than drawing a key at random.
+	#[tokio::test]
+	async fn create_derives_the_record_id_from_the_components_of_a_named_id() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+
+		let created = create(
+			&session,
+			CreateParams {
+				target: "reading".into(),
+				data: Some(json!({
+					"city": "London",
+					"time": { "$ql": "d'2024-01-01T00:00:00Z'" },
+					"temp": 1,
+				})),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = created.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("ok"), "{structured}");
+		assert_eq!(
+			first_row(&created),
+			json!({
+				"city": "London",
+				"id": "reading:['London', d'2024-01-01T00:00:00Z']",
+				"temp": 1,
+				"time": "2024-01-01T00:00:00Z",
+			})
+		);
+
+		let refused = create(
+			&session,
+			CreateParams {
+				target: "reading".into(),
+				data: Some(json!({ "city": "London", "temp": 2 })),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = refused.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			structured.get("error").and_then(|v| v.as_str()),
+			Some(
+				"Cannot create a record in `reading` without the record id component `time`: set `time`, give the record id, or define a DEFAULT on the `id` field"
+			)
+		);
+	}
+
+	/// The update tool may restate a component of the record id and may not
+	/// change it: the refusal names the value written and the record keeps its
+	/// key and its fields.
+	#[tokio::test]
+	async fn update_cannot_change_a_component_of_a_named_id() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+		session
+			.execute(
+				"CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 1;",
+				None,
+			)
+			.await
+			.expect("seed");
+
+		let refused = update(
+			&session,
+			UpdateParams {
+				target: "reading".into(),
+				content_data: None,
+				merge_data: Some(json!({ "city": "Paris" })),
+				patch_data: None,
+				where_clause: Some("city = 'London'".into()),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = refused.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("error"));
+		assert_eq!(
+			structured.get("error").and_then(|v| v.as_str()),
+			Some(
+				"Found 'Paris' for the `city` field, but it is part of the record id of `reading` and does not match it"
+			)
+		);
+
+		let merged = update(
+			&session,
+			UpdateParams {
+				target: "reading".into(),
+				content_data: None,
+				merge_data: Some(json!({ "city": "London", "temp": 2 })),
+				patch_data: None,
+				where_clause: Some("city = 'London'".into()),
+				scope: Default::default(),
+			},
+		)
+		.await
+		.expect("call returns");
+		let structured = merged.structured_content.as_ref().expect("structured");
+		assert_eq!(structured.get("status").and_then(|v| v.as_str()), Some("ok"), "{structured}");
+		assert_eq!(
+			first_row(&merged),
+			json!({
+				"city": "London",
+				"id": "reading:['London', d'2024-01-01T00:00:00Z']",
+				"temp": 2,
+				"time": "2024-01-01T00:00:00Z",
+			})
+		);
+	}
+
+	/// A record id with an array key is not a target of the structured tools,
+	/// so no record of such a table is named through them: they are given the
+	/// table, and the key is derived.
+	#[tokio::test]
+	async fn an_array_record_id_is_not_a_target() {
+		let session = session().await;
+		session.execute(READING, None).await.expect("schema");
+		let rejected = create(
+			&session,
+			CreateParams {
+				target: "reading:['London', d'2024-01-01T00:00:00Z']".into(),
+				data: Some(json!({ "temp": 3 })),
+				scope: Default::default(),
+			},
+		)
+		.await;
+		assert!(rejected.is_err(), "an array key reached the statement");
+	}
 }

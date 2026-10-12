@@ -44,7 +44,7 @@
 //! | Rule | Module |
 //! |---|---|
 //! | Adjacent filters merge; a predicate moves through a user projection, and into a subquery that returns its rows unchanged | [`filter`] |
-//! | The conjuncts that read no layer column move beneath a chain of layers, to directly above the source or the permission node the chain stands on | [`layers`] |
+//! | The conjuncts that read no layer column move beneath a chain of layers, to directly above the source or the permission node the chain stands on; a column that stands for a component of the record id is read as the id element it is | [`layers`] |
 //! | A conjunct over one side of a join moves to that side | [`join`] |
 //! | An identity projection goes; a layer column nothing above reads goes | [`prune`] |
 //! | A filter that admits every row, a paging clause that pages nothing, a sort of one row, a doubled `ONLY` and a block within a block go | [`identity`] |

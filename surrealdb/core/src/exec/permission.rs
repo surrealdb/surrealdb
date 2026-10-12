@@ -43,7 +43,7 @@ use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{
-	EventDefinition, FieldDefinition, IndexDefinition, Permission, TableDefinition,
+	EventDefinition, FieldDefinition, IndexDefinition, KeyStructure, Permission, TableDefinition,
 };
 use crate::doc::Action as DocAction;
 use crate::err::{EngineError, Error};
@@ -505,6 +505,11 @@ pub(crate) struct PhysicalIndexEntry {
 	/// A `COUNT` index's `WHERE` guard; `None` for every other index kind and
 	/// for an unguarded count index.
 	guard: Option<Clause>,
+	/// Whether a column or the guard may read a component of the record id, as
+	/// the element of the id, so the image it is evaluated over must carry its
+	/// `id`: a column that addresses a component by its name or as `id[i]`, or
+	/// any guard over a table whose record ids name their components.
+	reads_record_id: bool,
 }
 
 impl std::fmt::Debug for PhysicalIndexEntry {
@@ -519,6 +524,13 @@ impl std::fmt::Debug for PhysicalIndexEntry {
 /// Compile one index definition's stored expressions; see
 /// [`PhysicalIndexEntry`].
 ///
+/// `key` is the structure of the table's record ids where they name their
+/// components. A column that addresses a component, and a guard that reads one,
+/// is evaluated as the element of the image's own id (`id[i]`), the one place a
+/// component has a value ([`crate::exec::index::derived_columns`]); a table
+/// with no named components passes `None` and its expressions are compiled as
+/// they are stored.
+///
 /// An expression the lowering has no form for — or one holding a write no
 /// operator compiles — is carried as a [`Clause::Uncompilable`], as every other
 /// stored clause is; see [`clause_to_physical`].
@@ -530,18 +542,40 @@ impl std::fmt::Debug for PhysicalIndexEntry {
 pub(crate) async fn index_entry_physical(
 	ix: &IndexDefinition,
 	planner: &Planner<'_>,
+	key: Option<&KeyStructure>,
 ) -> Result<PhysicalIndexEntry, Error> {
-	let mut cols = Vec::with_capacity(ix.cols.len());
-	for col in &ix.cols {
+	use crate::exec::index::derived_columns::{canonical_columns, canonical_guard};
+
+	// A column reads a component whichever way it spells it, by name or as
+	// `id[i]`; only the first is rewritten.
+	let key = key.filter(|key| key.origin == crate::catalog::KeyOrigin::IdField);
+	let columns = canonical_columns(key, &ix.cols);
+	let mut reads_record_id =
+		key.is_some_and(|key| ix.cols.iter().any(|col| key.component_of(col).is_some()));
+	let mut cols = Vec::with_capacity(columns.len());
+	for col in columns.iter() {
 		cols.push(index_column_physical(col, planner).await?);
 	}
 	let guard = match &ix.count_cond {
-		Some(cond) => Some(index_expr_physical(&cond.0, planner).await?),
+		Some(cond) => {
+			let logical = crate::expr::logical::lower_expr(cond.0.clone());
+			let canonical = logical.as_ref().ok().and_then(|guard| canonical_guard(key, guard));
+			// A guard over a table whose record ids name their components may
+			// read one as `id[i]` as well as by name.
+			reads_record_id |= key.is_some();
+			let body = match (&canonical, &logical) {
+				(Some(canonical), _) => Ok(canonical),
+				(None, Ok(guard)) => Ok(guard),
+				(None, Err(err)) => Err(anyhow::Error::new(err.clone())),
+			};
+			Some(clause_to_physical(body, planner).await?)
+		}
 		None => None,
 	};
 	Ok(PhysicalIndexEntry {
 		cols,
 		guard,
+		reads_record_id,
 	})
 }
 
@@ -567,6 +601,16 @@ async fn index_expr_physical(expr: &Expr, planner: &Planner<'_>) -> Result<Claus
 }
 
 impl PhysicalIndexEntry {
+	/// Whether a column or the guard may read a component of the record id, so
+	/// the image the entry is evaluated over must carry its `id` field: a column
+	/// that addresses a component by its name or as `id[i]`, or any guard over a
+	/// table whose record ids name their components. An image decoded from
+	/// storage may carry none; the caller that holds the record's id puts it
+	/// there before evaluating.
+	pub(crate) fn reads_record_id(&self) -> bool {
+		self.reads_record_id
+	}
+
 	/// The values this index holds for one image of the record, or `None` when
 	/// the image is nullish and the index holds nothing for it.
 	///
@@ -1323,5 +1367,173 @@ mod tests {
 		let clause = Clause::uncompilable("a shape".to_owned());
 		let err = eval_clause(&clause, &Value::None, &ctx).await.expect_err("it never evaluates");
 		assert!(err.to_string().contains("a shape"), "the reason is reported: {err}");
+	}
+
+	// =========================================================================
+	// index_entry_physical over a table whose record id names its components
+	// =========================================================================
+
+	mod keyed_index_entries {
+		use chrono::{TimeZone, Utc};
+		use surrealdb_strand::Strand;
+
+		use super::*;
+		use crate::catalog::{Index, IndexId};
+		use crate::expr::{Cond, KeyNames, Kind, KindLiteral};
+		use crate::val::{Array, Datetime, Object, RecordId, RecordIdKey};
+
+		/// `[city: string, time: datetime]`.
+		fn reading() -> KeyStructure {
+			let names = ["city", "time"].iter().map(|name| Strand::new(*name)).collect();
+			KeyStructure::from_id_field(
+				&Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime])),
+				&KeyNames::new(names, 2).expect("valid names"),
+			)
+			.expect("a keyed type")
+		}
+
+		fn datetime(h: u32, m: u32, s: u32, nanos: u32) -> Datetime {
+			let whole = Utc.with_ymd_and_hms(2025, 1, 1, h, m, s).unwrap();
+			Datetime(whole + chrono::TimeDelta::nanoseconds(i64::from(nanos)))
+		}
+
+		/// The image of `reading:['london', 2025-01-01T10:00:05.5Z]`, which also
+		/// holds a stored field `other`.
+		fn image() -> Value {
+			let id = RecordId {
+				table: "reading".into(),
+				key: RecordIdKey::Array(Array(vec![
+					Value::from("london"),
+					Value::Datetime(datetime(10, 0, 5, 500_000_000)),
+				])),
+			};
+			Value::Object(Object::from_iter([
+				("id".to_owned(), Value::RecordId(id)),
+				("other".to_owned(), Value::from(7)),
+			]))
+		}
+
+		fn index(cols: &[&str], guard: Option<&str>) -> IndexDefinition {
+			IndexDefinition {
+				index_id: IndexId(1),
+				name: Strand::from("i"),
+				table_name: "reading".into(),
+				cols: cols.iter().map(|col| field_idiom(col)).collect(),
+				index: match guard {
+					Some(_) => Index::Count(None),
+					None => Index::Idx,
+				},
+				count_cond: guard.map(|guard| Cond(parse_sql_expr(guard))),
+				comment: None,
+				prepare_remove: false,
+				format_version: 1,
+			}
+		}
+
+		/// A database-level context over an open transaction: a compiled column
+		/// is a closure unit, and a unit is invoked inside a transaction.
+		async fn db_ctx() -> ExecutionContext {
+			TestDb::new("").await.exec_ctx().await
+		}
+
+		async fn entry(
+			ix: &IndexDefinition,
+			key: Option<&KeyStructure>,
+			ctx: &ExecutionContext,
+		) -> PhysicalIndexEntry {
+			let planner = Planner::new(ctx.ctx(), ctx.function_registry());
+			index_entry_physical(ix, &planner, key).await.expect("the entry compiles")
+		}
+
+		#[tokio::test]
+		async fn a_column_that_names_a_component_holds_the_element_of_the_id() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let ix = index(&["time", "city", "other"], None);
+			let entry = entry(&ix, Some(&key), &ctx).await;
+			assert!(entry.reads_record_id());
+			assert_eq!(
+				entry.values(&image(), &ctx).await.unwrap(),
+				Some(vec![
+					Value::Datetime(datetime(10, 0, 5, 500_000_000)),
+					Value::from("london"),
+					Value::from(7),
+				])
+			);
+		}
+
+		#[tokio::test]
+		async fn a_component_spelled_as_an_element_of_the_id_holds_the_same_value() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let named = entry(&index(&["time"], None), Some(&key), &ctx).await;
+			let element = entry(&index(&["id[1]"], None), Some(&key), &ctx).await;
+			assert!(element.reads_record_id());
+			assert_eq!(
+				named.values(&image(), &ctx).await.unwrap(),
+				element.values(&image(), &ctx).await.unwrap()
+			);
+		}
+
+		#[tokio::test]
+		async fn a_table_with_no_named_components_compiles_a_column_as_stored() {
+			let ctx = db_ctx().await;
+			let entry = entry(&index(&["time", "other"], None), None, &ctx).await;
+			assert!(!entry.reads_record_id());
+			// `time` is not a stored field of the image, so it holds nothing.
+			assert_eq!(
+				entry.values(&image(), &ctx).await.unwrap(),
+				Some(vec![Value::None, Value::from(7)])
+			);
+		}
+
+		#[tokio::test]
+		async fn a_column_that_names_no_component_reads_no_part_of_the_id() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let entry = entry(&index(&["other"], None), Some(&key), &ctx).await;
+			assert!(!entry.reads_record_id());
+			assert_eq!(entry.values(&image(), &ctx).await.unwrap(), Some(vec![Value::from(7)]));
+		}
+
+		#[tokio::test]
+		async fn an_image_with_no_id_holds_no_component() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let entry = entry(&index(&["time"], None), Some(&key), &ctx).await;
+			let bare = Value::Object(Object::from_iter([("other".to_owned(), Value::from(7))]));
+			assert_eq!(entry.values(&bare, &ctx).await.unwrap(), Some(vec![Value::None]));
+			assert_eq!(entry.values(&Value::None, &ctx).await.unwrap(), None);
+		}
+
+		#[tokio::test]
+		async fn a_guard_reads_a_component_as_the_element_of_the_id() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let ix = index(&[], Some("city = 'london' AND time > d'2025-01-01T10:00:00Z'"));
+			let entry = entry(&ix, Some(&key), &ctx).await;
+			assert!(entry.reads_record_id());
+			assert_eq!(entry.guard_matches(&image(), &ctx).await.unwrap(), Some(true));
+
+			let elsewhere = index(&[], Some("city = 'paris'"));
+			let entry = self::entry(&elsewhere, Some(&key), &ctx).await;
+			assert_eq!(entry.guard_matches(&image(), &ctx).await.unwrap(), Some(false));
+
+			// Stored as written, the guard reads fields the image does not hold.
+			let stored = self::entry(&ix, None, &ctx).await;
+			assert!(!stored.reads_record_id());
+			assert_eq!(stored.guard_matches(&image(), &ctx).await.unwrap(), Some(false));
+		}
+
+		#[tokio::test]
+		async fn a_guard_that_reads_no_component_is_compiled_as_stored() {
+			let ctx = db_ctx().await;
+			let key = reading();
+			let entry = entry(&index(&[], Some("other = 7")), Some(&key), &ctx).await;
+			// Any guard over a keyed table is evaluated over an image with its id.
+			assert!(entry.reads_record_id());
+			assert_eq!(entry.guard_matches(&image(), &ctx).await.unwrap(), Some(true));
+			assert_eq!(entry.guard_matches(&Value::None, &ctx).await.unwrap(), Some(false));
+		}
 	}
 }

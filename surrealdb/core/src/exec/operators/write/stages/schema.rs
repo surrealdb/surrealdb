@@ -158,8 +158,16 @@ pub(crate) fn clean_none(v: &mut Value) -> bool {
 }
 
 /// Whether anything other than the statement's own projection reads this record
-/// after it is written: a table event, a live-query subscription, or a
-/// changefeed on the table or on its database.
+/// after it is written: a table event, a live-query subscription, a changefeed
+/// on the table or on its database, or a foreign view over a table whose `id`
+/// names its components.
+///
+/// A foreign view reads the images the write hands it as they are, and a
+/// component is a derived field: the image carries it only once the observers'
+/// derivation has run, so a view of a keyed table counts as an observer. A view
+/// of any other table does not: it is handed the images as stored, and a
+/// `COMPUTED` field it reads is derived onto them only when another observer
+/// is present.
 ///
 /// Under `OPTION IMPORT` nothing does. An import runs no observer, so deriving
 /// the computed values one would read evaluates bodies whose result is
@@ -173,4 +181,68 @@ pub(crate) fn has_record_observers(ctx: &WriteCtx) -> bool {
 		|| !ctx.lives.is_empty()
 		|| ctx.table.changefeed.is_some()
 		|| ctx.db.changefeed.is_some()
+		|| (ctx.key.is_some() && !ctx.views.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+	use super::has_record_observers;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::exec::operators::write::ctx::{TableExistence, WriteCtx};
+	use crate::val::TableName;
+
+	/// The `id` of a table that names its components.
+	const KEYED: &str = "
+		DEFINE TABLE reading SCHEMALESS;
+		DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+	";
+
+	/// Whether a write to `table`, in a database `setup` defines, has an
+	/// observer that reads the record after it is written.
+	async fn observed(setup: &str, table: &str) -> bool {
+		let db = TestDb::new(setup).await;
+		let exec = db.exec_ctx().await;
+		let observed =
+			match WriteCtx::resolve(&exec, &TableName::from(table), TableExistence::Required).await
+			{
+				Ok(ctx) => has_record_observers(&ctx),
+				Err(_) => panic!("the table `{table}` resolves"),
+			};
+		exec.txn().cancel().await.expect("the read transaction ends");
+		observed
+	}
+
+	#[tokio::test]
+	async fn a_keyed_table_nothing_reads_has_no_observer() {
+		assert!(!observed(KEYED, "reading").await);
+	}
+
+	#[tokio::test]
+	async fn a_foreign_view_of_a_keyed_table_is_an_observer() {
+		let setup = format!(
+			"{KEYED}
+			DEFINE TABLE by_city AS SELECT city, count() AS n FROM reading GROUP BY city;"
+		);
+		assert!(observed(&setup, "reading").await);
+	}
+
+	#[tokio::test]
+	async fn a_foreign_view_of_a_table_whose_id_names_nothing_is_not() {
+		let setup = "
+			DEFINE TABLE reading SCHEMALESS;
+			DEFINE TABLE by_city AS SELECT city, count() AS n FROM reading GROUP BY city;
+		";
+		assert!(!observed(setup, "reading").await);
+	}
+
+	#[tokio::test]
+	async fn the_other_observers_of_a_keyed_table_still_are() {
+		let event = format!("{KEYED} DEFINE EVENT seen ON reading THEN {{}};");
+		assert!(observed(&event, "reading").await);
+		let feed = "
+			DEFINE TABLE reading SCHEMALESS CHANGEFEED 1h;
+			DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+		";
+		assert!(observed(feed, "reading").await);
+	}
 }

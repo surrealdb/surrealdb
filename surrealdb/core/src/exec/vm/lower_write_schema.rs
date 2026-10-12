@@ -609,6 +609,14 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	/// Emit `MaterialiseObservedFields`: every `COMPUTED` field derived onto
 	/// both images, in the table's computed dependency order, when the record
 	/// has an observer.
+	///
+	/// The fields that name the components of a record id are `COMPUTED`
+	/// definitions of `fields` ([`catalog::KeyStructure::derived_fields`]),
+	/// so a table whose `id` names its components derives them here though it
+	/// declares no other computed field; only a table with neither lowers
+	/// nothing.
+	///
+	/// [`catalog::KeyStructure::derived_fields`]: crate::catalog::KeyStructure::derived_fields
 	async fn materialise_observed_fields(&mut self, fields: &[FieldDefinition]) -> Lowered<()> {
 		let computed: Vec<&FieldDefinition> =
 			fields.iter().filter(|fd| fd.computed.is_some()).collect();

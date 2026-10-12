@@ -18,9 +18,17 @@ use crate::expr::statements::define::kind_contains_object;
 /// `COMPUTED`, `DEFAULT ALWAYS`, `READONLY`, `FLEXIBLE`, and a `TYPE` that is
 /// not a valid record-id key kind. A definition of any other field passes.
 ///
-/// A plain `DEFAULT` and an `ASSERT` are permitted: both are applied to the
-/// record-id key at key-generation time in `Document::generate_record_id`
-/// (the `ASSERT` binds the key to `$key`).
+/// A `TYPE` that names the components of its record id is held to three more
+/// rules. Each component name must be a plain identifier
+/// (`KeyStructure::is_plain_name`). Each component must have a type a key range
+/// can reason about (string, int, datetime, uuid, duration, bool or record). The
+/// field takes no `SELECT`
+/// permission but the full one, because the components are readable as fields
+/// of the table, which the table's permissions govern.
+///
+/// A plain `DEFAULT` and an `ASSERT` are permitted: the write path applies both
+/// to the record-id key when it generates the id (the `GenerateRecordId`
+/// stage), and the `ASSERT` binds the key to `$key`.
 pub(crate) fn id_field_restrictions(def: &catalog::FieldDefinition) -> Result<()> {
 	if !def.name.is_id() {
 		return Ok(());
@@ -46,6 +54,36 @@ pub(crate) fn id_field_restrictions(def: &catalog::FieldDefinition) -> Result<()
 		ensure!(
 			RecordIdKeyLit::kind_supported(kind),
 			ExecError::IdFieldUnsupportedKind(kind.to_sql())
+		);
+	}
+	// The components a record id names keep their order in storage, and a
+	// permission on the id alone would not cover the fields that read them.
+	if let Some(key) = def.live_key() {
+		if let (Some(names), Some(kind)) = (&key.names, &def.field_kind)
+			&& let Err(error) = catalog::KeyStructure::from_id_field(kind, names)
+		{
+			return Err(match error {
+				catalog::KeyStructureError::UnsupportedKind {
+					name,
+					kind,
+				} => ExecError::IdComponentUnsupportedKind {
+					table: def.table.as_str().to_owned(),
+					component: name,
+					kind,
+				},
+				catalog::KeyStructureError::NotPlainName(name) => {
+					ExecError::IdComponentNameUnsupported {
+						table: def.table.as_str().to_owned(),
+						component: name,
+					}
+				}
+				_ => ExecError::IdFieldUnsupportedKind(kind.to_sql()),
+			}
+			.into());
+		}
+		ensure!(
+			matches!(def.select_permission, catalog::Permission::Full),
+			ExecError::IdFieldSelectPermission(def.table.as_str().to_owned())
 		);
 	}
 	Ok(())

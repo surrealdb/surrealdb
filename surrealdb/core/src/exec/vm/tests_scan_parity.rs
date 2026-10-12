@@ -644,3 +644,623 @@ async fn a_declared_int_is_a_guarded_hint_over_retyped_rows() {
 		(1..=3i64).map(|i| Value::RecordId(crate::val::RecordId::new("n".into(), i))).collect();
 	assert_eq!(got, want, "`{sql}`");
 }
+
+/// Tables whose record ids name their components: `reading` keyed by a city
+/// and a datetime with millisecond parts, so several records share a whole
+/// second, and `counter` keyed by a site, an int (some written as a float
+/// equal to it, which the key stores as the int) and a tag.
+const KEYED_SCHEMA: &str = "
+	DEFINE TABLE reading SCHEMALESS;
+	DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+	FOR $i IN 0..240 {
+		CREATE reading SET
+			city = ['A', 'B', 'C'][$i % 3],
+			time = time::from_millis(1704067200000 + $i * 337),
+			v = $i;
+	};
+	DEFINE TABLE counter SCHEMALESS;
+	DEFINE FIELD id ON counter TYPE [site: string, n: int, tag: string];
+	FOR $i IN 0..78 {
+		CREATE counter SET
+			site = ['a', 'b'][$i % 2],
+			n = (($i % 13) - 3) * [1, 1.0][$i % 2],
+			tag = ['x', 'y', 'z'][$i % 3],
+			v = $i;
+	};
+";
+
+/// The first millisecond of the `reading` rows.
+const READING_EPOCH_MS: i64 = 1704067200000;
+
+/// A deterministic stream of pseudo-random numbers (xorshift64).
+struct Draws(u64);
+
+impl Draws {
+	fn next(&mut self) -> u64 {
+		self.0 ^= self.0 << 13;
+		self.0 ^= self.0 >> 7;
+		self.0 ^= self.0 << 17;
+		self.0
+	}
+
+	fn below(&mut self, n: u64) -> u64 {
+		self.next() % n
+	}
+
+	fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+		items[self.below(items.len() as u64) as usize]
+	}
+}
+
+/// A datetime near the `reading` rows, with a sub-millisecond part at times,
+/// written as a literal or as a call evaluated when the scan opens.
+fn reading_time(draws: &mut Draws) -> String {
+	use chrono::TimeZone as _;
+	let ms = READING_EPOCH_MS - 2000 + draws.below(84_000) as i64;
+	match draws.below(3) {
+		0 => format!("time::from_millis({ms})"),
+		_ => {
+			let nanos = (ms.rem_euclid(1000) * 1_000_000) as u32 + draws.below(3) as u32 * 250_000;
+			let at = chrono::Utc
+				.timestamp_opt(ms.div_euclid(1000), nanos)
+				.single()
+				.expect("a datetime in range");
+			format!("d'{}'", at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
+		}
+	}
+}
+
+/// A random `WHERE` and ordering over `reading`'s components.
+fn reading_clauses(draws: &mut Draws) -> String {
+	let mut conjuncts = Vec::new();
+	let city = draws.pick(&[
+		"",
+		"city = 'A'",
+		"city = 'B'",
+		"id[0] = 'C'",
+		"city = 'Z'",
+		"city IN ['A', 'C']",
+		"city IN ['B', 'Z', 'B']",
+		"city > 'A'",
+		"city = 'A' OR city = 'C'",
+	]);
+	if !city.is_empty() {
+		conjuncts.push(city.to_string());
+	}
+	match draws.below(8) {
+		0 => {}
+		1 => conjuncts.push(format!("time > {}", reading_time(draws))),
+		2 => conjuncts.push(format!("time >= {}", reading_time(draws))),
+		3 => conjuncts.push(format!("time < {}", reading_time(draws))),
+		4 => conjuncts.push(format!("time <= {}", reading_time(draws))),
+		5 => conjuncts.push(format!(
+			"time >= {} AND time < {}",
+			reading_time(draws),
+			reading_time(draws)
+		)),
+		6 => conjuncts.push(format!(
+			"{} < id[1] AND id[1] <= {}",
+			reading_time(draws),
+			reading_time(draws)
+		)),
+		_ => {
+			let ms = READING_EPOCH_MS + draws.below(240) as i64 * 337;
+			conjuncts.push(format!("time = time::from_millis({ms})"));
+		}
+	}
+	if draws.below(4) == 0 {
+		conjuncts.push("v % 2 = 0".to_string());
+	}
+	let mut clauses = String::new();
+	if !conjuncts.is_empty() {
+		clauses.push_str(" WHERE ");
+		clauses.push_str(&conjuncts.join(" AND "));
+	}
+	clauses.push_str(draws.pick(&[
+		"",
+		"",
+		" ORDER BY time",
+		" ORDER BY time DESC",
+		" ORDER BY time LIMIT 4",
+		" ORDER BY time DESC LIMIT 3",
+		" ORDER BY time LIMIT 3 START 5",
+		" ORDER BY id",
+		" ORDER BY id DESC LIMIT 5",
+	]));
+	clauses
+}
+
+/// A random int bound, of every number kind.
+fn counter_number(draws: &mut Draws) -> &'static str {
+	draws.pick(&["-4", "-3", "0", "2", "5", "9", "12", "5.0", "2.5", "-1.5dec", "7dec", "-0.5"])
+}
+
+/// A random `WHERE` and ordering over `counter`'s components.
+fn counter_clauses(draws: &mut Draws) -> String {
+	let mut conjuncts = Vec::new();
+	let site = draws.pick(&["", "site = 'a'", "site = 'b'", "site IN ['a', 'b']", "site = 'q'"]);
+	if !site.is_empty() {
+		conjuncts.push(site.to_string());
+	}
+	match draws.below(7) {
+		0 => {}
+		1 => conjuncts.push(format!("n = {}", counter_number(draws))),
+		2 => conjuncts.push(format!("n > {}", counter_number(draws))),
+		3 => conjuncts.push(format!("n <= {}", counter_number(draws))),
+		4 => conjuncts.push(format!(
+			"n >= {} AND n < {}",
+			counter_number(draws),
+			counter_number(draws)
+		)),
+		5 => conjuncts.push(format!(
+			"n IN [{}, {}, {}]",
+			counter_number(draws),
+			counter_number(draws),
+			counter_number(draws)
+		)),
+		_ => conjuncts.push(format!("n = {} AND tag >= 'y'", counter_number(draws))),
+	}
+	let mut clauses = String::new();
+	if !conjuncts.is_empty() {
+		clauses.push_str(" WHERE ");
+		clauses.push_str(&conjuncts.join(" AND "));
+	}
+	clauses.push_str(draws.pick(&[
+		"",
+		"",
+		" ORDER BY n",
+		" ORDER BY n DESC",
+		" ORDER BY n, tag LIMIT 4",
+		" ORDER BY n DESC, tag DESC LIMIT 3 START 1",
+		" ORDER BY id",
+		" ORDER BY id DESC LIMIT 5",
+	]));
+	clauses
+}
+
+/// Whether the program `sql` lowers to reads key ranges of a table.
+async fn reads_key_ranges(ctx: &ExecutionContext, sql: &str) -> bool {
+	let program = super::tests_sources::program_of(ctx, sql).await;
+	program.pipelines.iter().any(|pipeline| {
+		matches!(
+			&pipeline.source,
+			Source::Scan {
+				range: Some(_),
+				..
+			}
+		)
+	})
+}
+
+/// The `ORDER BY` keys of `clauses`, each the path it orders by, in key
+/// order: a statement's order, which leaves rows of equal keys in no order.
+fn order_keys(clauses: &str) -> Vec<&str> {
+	let Some((_, order)) = clauses.split_once(" ORDER BY ") else {
+		return Vec::new();
+	};
+	let order = order.split(" LIMIT ").next().unwrap_or(order);
+	order.split(", ").map(|key| key.strip_suffix(" DESC").unwrap_or(key)).collect()
+}
+
+/// Each statement of `clauses` over `table` returns, read through the key
+/// ranges its predicate admits, the rows a scan of the whole table with the
+/// same predicate returns: the same rows, and where the statement orders them
+/// the same order, up to the order of rows whose `ORDER BY` keys are equal,
+/// which the statement leaves open (a scan read backwards meets them in the
+/// reverse of a forward scan's order). Under a `LIMIT` the rows that tie at
+/// its edge may differ too, so an ordered statement is held to the sequence
+/// of its rows' keys, and an unlimited one to its rows as well. At least
+/// `ranged` of the statements read key ranges. Every row of `table` has a
+/// distinct `v`.
+async fn keyed_parity(
+	ctx: &ExecutionContext,
+	table: &str,
+	clauses: impl Fn(&mut Draws) -> String,
+	seed: u64,
+	statements: usize,
+	ranged: usize,
+) {
+	let mut draws = Draws(seed);
+	let mut read_ranges = 0;
+	for _ in 0..statements {
+		let clauses = clauses(&mut draws);
+		let sql = format!("SELECT VALUE v FROM {table}{clauses}");
+		let scan = format!("SELECT VALUE v FROM {table} WITH NOINDEX{clauses}");
+		let got = vm_rows(ctx, &sql).await;
+		let want = vm_rows(ctx, &scan).await;
+		let keys = order_keys(&clauses);
+		if !keys.is_empty() {
+			let keyed =
+				vm_rows(ctx, &format!("SELECT VALUE [v, [{}]] FROM {table}", keys.join(", ")))
+					.await;
+			let key_of: std::collections::BTreeMap<Value, Value> = keyed
+				.into_iter()
+				.map(|row| match row {
+					Value::Array(pair) => {
+						let mut pair = pair.into_iter();
+						(pair.next().expect("a v"), pair.next().expect("its keys"))
+					}
+					other => panic!("a row of `v` and its keys, not {other:?}"),
+				})
+				.collect();
+			let keys_of = |rows: &[Value]| -> Vec<Value> {
+				rows.iter().map(|v| key_of.get(v).cloned().expect("a row of the table")).collect()
+			};
+			assert_eq!(keys_of(&got), keys_of(&want), "`{sql}` orders its rows");
+		}
+		if keys.is_empty() || !sql.contains(" LIMIT ") {
+			let (mut got, mut want) = (got, want);
+			got.sort();
+			want.sort();
+			assert_eq!(got, want, "`{sql}`");
+		}
+		if reads_key_ranges(ctx, &sql).await {
+			read_ranges += 1;
+		}
+		assert!(!reads_key_ranges(ctx, &scan).await, "`{scan}` reads key ranges");
+	}
+	assert!(read_ranges >= ranged, "only {read_ranges} statements over {table} read key ranges");
+}
+
+#[tokio::test]
+async fn a_key_range_scan_returns_what_the_table_scan_returns() {
+	let db = TestDb::new(KEYED_SCHEMA).await;
+	let ctx = db.exec_ctx().await;
+	keyed_parity(&ctx, "reading", reading_clauses, 0x9e37_79b9_7f4a_7c15, 600, 200).await;
+	keyed_parity(&ctx, "counter", counter_clauses, 0x2545_f491_4f6c_dd1d, 400, 100).await;
+}
+
+#[tokio::test]
+async fn a_key_range_scan_reads_only_its_ranges() {
+	let db = TestDb::new(KEYED_SCHEMA).await;
+	let ctx = db.exec_ctx().await;
+	// Eighty `reading` rows are in city `B`; a range over a few seconds of
+	// them reads those alone.
+	let cases: &[(&str, usize)] = &[
+		("SELECT VALUE v FROM reading WHERE city = 'B'", 80),
+		(
+			"SELECT VALUE v FROM reading WHERE city = 'B' AND time >= d'2024-01-01T00:00:10Z' \
+			 AND time < d'2024-01-01T00:00:20Z'",
+			10,
+		),
+		(
+			"SELECT VALUE v FROM reading WHERE city IN ['A', 'C'] AND time < d'2024-01-01T00:00:01Z'",
+			2,
+		),
+		("SELECT VALUE v FROM counter WHERE site = 'a' AND n = 2", 3),
+	];
+	for (sql, at_most) in cases {
+		assert!(reads_key_ranges(&ctx, sql).await, "`{sql}` reads key ranges");
+		super::host::RECORDS_SCANNED.with(|scanned| scanned.set(0));
+		let rows = vm_rows(&ctx, sql).await;
+		let scanned = super::host::RECORDS_SCANNED.with(|scanned| scanned.get());
+		// A datetime bound widens to its whole second, so a range may read the
+		// records of a second either side of it that the predicate refuses.
+		assert!(scanned <= at_most + 6, "`{sql}` read {scanned} records for {} rows", rows.len());
+		assert!(scanned >= rows.len(), "`{sql}` read {scanned} records for {} rows", rows.len());
+	}
+}
+
+/// A feed of 2500 readings twenty to the second, more than the batches a
+/// scan reads at once.
+const TICK_SCHEMA: &str = "
+	DEFINE TABLE tick SCHEMALESS;
+	DEFINE FIELD id ON tick TYPE [feed: string, at: datetime];
+	FOR $i IN 0..2500 {
+		CREATE tick SET feed = 'f', at = time::from_millis(1704067200000 + $i * 50), v = $i;
+	};
+";
+
+#[tokio::test]
+async fn a_bounded_sort_over_a_datetime_component_stops_the_scan_past_its_second() {
+	// A region hands its sort a batch's rows when it merges the batch, so
+	// with batches out on workers the sort publishes its threshold only as
+	// late as the region reads ahead, and the cut, judged later, is looser.
+	// How far the scan reads is measured on a run with no workers, where each
+	// batch is merged as soon as it runs; the rows are checked on both.
+	let serial = surrealdb_cnf::ConfigMap::empty()
+		.with_key_value("region_row_threshold", usize::MAX.to_string());
+	for (db, bounded) in [
+		(TestDb::new(TICK_SCHEMA).await, false),
+		(TestDb::new_with_config(TICK_SCHEMA, serial).await, true),
+	] {
+		stops_past_its_second(&db.exec_ctx().await, bounded).await;
+	}
+}
+
+/// The coarse cut over `tick`, with how far the scan reads checked where
+/// `bounded`.
+async fn stops_past_its_second(ctx: &ExecutionContext, bounded: bool) {
+	let int = |i: i64| Value::Number(crate::val::Number::Int(i));
+	for (sql, want) in [
+		("SELECT VALUE v FROM tick WHERE feed = 'f' ORDER BY at LIMIT 3", vec![0, 1, 2]),
+		(
+			"SELECT VALUE v FROM tick WHERE feed = 'f' ORDER BY at DESC LIMIT 3",
+			vec![2499, 2498, 2497],
+		),
+		(
+			"SELECT VALUE v FROM tick WHERE feed = 'f' AND at > d'2024-01-01T00:00:05.5Z' \
+			 ORDER BY at LIMIT 2 START 1",
+			vec![112, 113],
+		),
+	] {
+		let program = super::tests_sources::program_of(ctx, sql).await;
+		let cut = program
+			.pipelines
+			.iter()
+			.any(|pipeline| pipeline.source.topk().is_some_and(|topk| topk.coarse.is_some()));
+		assert!(cut, "`{sql}` cuts its scan by the second");
+		super::host::RECORDS_SCANNED.with(|scanned| scanned.set(0));
+		let got = vm_rows(ctx, sql).await;
+		let scanned = super::host::RECORDS_SCANNED.with(|scanned| scanned.get());
+		assert_eq!(got, want.into_iter().map(int).collect::<Vec<_>>(), "`{sql}`");
+		let scan = sql.replacen(" WHERE ", " WITH NOINDEX WHERE ", 1);
+		assert_eq!(got, vm_rows(ctx, &scan).await, "`{sql}`");
+		// The sort publishes its threshold once it first holds what it keeps,
+		// and the scan stops at the first record of a later second: it reads
+		// no more than the batch that record is in, not the whole feed.
+		if bounded {
+			assert!(scanned <= 1500, "`{sql}` read {scanned} records");
+		}
+	}
+}
+
+/// A feed of 2000 readings a second and a half apart, so that no second holds
+/// two: several batches of records, each in a second of its own.
+const SPREAD_SCHEMA: &str = "
+	DEFINE TABLE spread SCHEMALESS;
+	DEFINE FIELD id ON spread TYPE [feed: string, at: datetime];
+	FOR $i IN 0..2000 {
+		CREATE spread SET feed = 'f', at = time::from_millis(1704067200000 + $i * 1500), v = $i;
+	};
+";
+
+/// A bounded sort over a datetime component of the record id, whose scan
+/// decodes its rows, reads about as many records as the sort keeps, with
+/// region workers and without: the scan hands the sort its first records
+/// before it reads more, so the sort publishes its threshold while the cut
+/// can still stop the scan.
+#[tokio::test]
+async fn a_bounded_sort_over_a_datetime_component_reads_about_what_it_keeps() {
+	let serial = surrealdb_cnf::ConfigMap::empty()
+		.with_key_value("region_row_threshold", usize::MAX.to_string());
+	for db in
+		[TestDb::new(SPREAD_SCHEMA).await, TestDb::new_with_config(SPREAD_SCHEMA, serial).await]
+	{
+		let ctx = db.exec_ctx().await;
+		let int = |i: i64| Value::Number(crate::val::Number::Int(i));
+		for (sql, want) in [
+			(
+				"SELECT * FROM spread WHERE feed = 'f' ORDER BY at DESC LIMIT 10",
+				(1990..2000).rev().collect::<Vec<i64>>(),
+			),
+			("SELECT v, at FROM spread WHERE feed = 'f' ORDER BY at LIMIT 10", (0..10).collect()),
+			(
+				"SELECT v FROM spread WHERE feed = 'f' AND at >= d'2024-01-01T00:10:00Z' \
+				 ORDER BY at LIMIT 3 START 2",
+				vec![402, 403, 404],
+			),
+		] {
+			let program = super::tests_sources::program_of(&ctx, sql).await;
+			let cut = program.pipelines.iter().any(|pipeline| {
+				!pipeline.in_place
+					&& pipeline.source.topk().is_some_and(|topk| topk.coarse.is_some())
+			});
+			assert!(cut, "`{sql}` cuts a scan of decoded rows by the second");
+			super::host::RECORDS_SCANNED.with(|scanned| scanned.set(0));
+			let got = vm_rows(&ctx, sql).await;
+			let scanned = super::host::RECORDS_SCANNED.with(|scanned| scanned.get());
+			let values: Vec<Value> = got
+				.iter()
+				.map(|row| match row {
+					Value::Object(object) => object.get("v").cloned().unwrap_or(Value::None),
+					other => other.clone(),
+				})
+				.collect();
+			assert_eq!(values, want.into_iter().map(int).collect::<Vec<_>>(), "`{sql}`");
+			let scan = sql.replacen(" WHERE ", " WITH NOINDEX WHERE ", 1);
+			assert_eq!(got, vm_rows(&ctx, &scan).await, "`{sql}`");
+			assert!(scanned <= 24, "`{sql}` read {scanned} records");
+		}
+	}
+}
+
+/// The rows the bounded sort of `program` that publishes a threshold holds
+/// when it first publishes one, fed rows whose keys rise, one at a time.
+fn rows_held_at_first_threshold(program: &super::program::Program) -> usize {
+	let registry = crate::exec::function::FunctionRegistry::with_builtins();
+	let at = program
+		.sorts
+		.iter()
+		.position(|spec| spec.pushdown)
+		.expect("a sort that publishes its threshold");
+	let keep = program.sorts[at].keep.expect("a bounded sort");
+	let mut state =
+		super::interp::State::new(program, Vec::new(), &registry).expect("the state starts");
+	let cell = std::sync::Arc::new(crate::exec::topk_pushdown::TopKThresholdCell::default());
+	state.topk_cells[at] = Some(std::sync::Arc::clone(&cell));
+	for held in 1..=keep * 4 + 64 {
+		state.sorts[at]
+			.push((vec![Value::from(held as i64)], super::interp::SortRow::Value(Value::None)));
+		state.keep_sorted(program, at as u16);
+		if cell.snapshot().is_some() {
+			return held;
+		}
+	}
+	panic!("the sort never published a threshold");
+}
+
+/// A bounded sort whose threshold a scan of stored bytes reads (the top-k
+/// pushdown of a table scan) publishes it once it holds a quarter more rows
+/// than it keeps, at least sixteen more; only the sort that cuts a key-range
+/// scan by the second of a datetime component publishes as soon as it holds
+/// what it keeps.
+#[tokio::test]
+async fn only_a_coarse_cut_sort_publishes_its_threshold_once_full() {
+	let db = TestDb::new(&format!(
+		"{TICK_SCHEMA}
+		DEFINE TABLE plain SCHEMALESS;
+		FOR $i IN 0..40 {{ CREATE plain SET v = $i; }};"
+	))
+	.await;
+	let ctx = db.exec_ctx().await;
+	let pushed =
+		super::tests_sources::program_of(&ctx, "SELECT * FROM plain ORDER BY v LIMIT 3").await;
+	assert!(
+		pushed
+			.pipelines
+			.iter()
+			.any(|pipeline| pipeline.source.topk().is_some_and(|topk| topk.coarse.is_none())),
+		"the table scan reads the sort's threshold from stored bytes"
+	);
+	assert!(pushed.sorts.iter().all(|spec| !spec.floors_at_keep));
+	assert_eq!(rows_held_at_first_threshold(&pushed), 3 + 16);
+	let wide =
+		super::tests_sources::program_of(&ctx, "SELECT * FROM plain ORDER BY v LIMIT 100").await;
+	assert_eq!(rows_held_at_first_threshold(&wide), 100 + 25);
+	let coarse = super::tests_sources::program_of(
+		&ctx,
+		"SELECT VALUE v FROM tick WHERE feed = 'f' ORDER BY at LIMIT 3",
+	)
+	.await;
+	assert!(coarse.sorts.iter().any(|spec| spec.floors_at_keep));
+	assert_eq!(rows_held_at_first_threshold(&coarse), 3);
+}
+
+/// How the sort of `sql` reads its first key: `Some(true)` evaluated,
+/// `Some(false)` read as a path of the row, `None` with no sort.
+async fn first_sort_key_evaluated(ctx: &ExecutionContext, sql: &str) -> Option<bool> {
+	use super::plan::{Plan, SortKeyRead};
+	let bound = bind(ctx, sql).await;
+	let physical = super::map::map(&planner(ctx), &bound).await.expect("statement maps");
+	let mut node = &physical.root;
+	loop {
+		node = match node {
+			Plan::Sort {
+				keys,
+				..
+			} => return keys.first().map(|key| matches!(key.read, SortKeyRead::Computed(_))),
+			Plan::Project {
+				input,
+				..
+			}
+			| Plan::Limit {
+				input,
+				..
+			} => input,
+			_ => return None,
+		};
+	}
+}
+
+/// An `ORDER BY id[i]` is evaluated over a table whose record ids name their
+/// components, where the transparency of the components reads them as
+/// `id[i]`; over any other table it is read as the path it spells, as it
+/// always has been.
+#[tokio::test]
+async fn an_order_by_an_id_element_is_evaluated_only_over_a_keyed_table() {
+	let db = TestDb::new(&format!(
+		"{TICK_SCHEMA}
+		DEFINE TABLE pair SCHEMALESS;
+		CREATE pair:['b', 1] SET v = 1;
+		CREATE pair:['a', 2] SET v = 2;"
+	))
+	.await;
+	let ctx = db.exec_ctx().await;
+	for (sql, evaluated) in [
+		("SELECT * FROM pair ORDER BY id[0]", false),
+		("SELECT v FROM pair ORDER BY id[1] DESC LIMIT 1", false),
+		("SELECT * FROM pair ORDER BY v", false),
+		("SELECT * FROM tick ORDER BY id[1] LIMIT 2", true),
+		("SELECT v FROM tick ORDER BY id[0], v", true),
+	] {
+		assert_eq!(first_sort_key_evaluated(&ctx, sql).await, Some(evaluated), "`{sql}`");
+	}
+}
+
+/// Twins of the [`KEYED_SCHEMA`] tables with no named components: the same
+/// rows keyed by plain array ids, each component also stored as a field of
+/// the record (an int component as the int its key holds).
+const TWIN_SCHEMA: &str = "
+	DEFINE TABLE reading_twin SCHEMALESS;
+	FOR $i IN 0..240 {
+		LET $city = ['A', 'B', 'C'][$i % 3];
+		LET $time = time::from_millis(1704067200000 + $i * 337);
+		CREATE type::record('reading_twin', [$city, $time]) SET city = $city, time = $time, v = $i;
+	};
+	DEFINE TABLE counter_twin SCHEMALESS;
+	FOR $i IN 0..78 {
+		LET $site = ['a', 'b'][$i % 2];
+		LET $n = ($i % 13) - 3;
+		LET $tag = ['x', 'y', 'z'][$i % 3];
+		CREATE type::record('counter_twin', [$site, $n, $tag]) SET site = $site, n = $n, tag = $tag, v = $i;
+	};
+";
+
+/// Each statement of `clauses` over keyed `table` returns what the same
+/// statement over its unkeyed twin `twin` returns, the twin read by a table
+/// scan of stored fields: the same rows, and where the statement orders them,
+/// the same sequence of `ORDER BY` keys (rows whose keys tie are in no order).
+/// An `ORDER BY id` is left out: the twin's array ids order by their key
+/// bytes, which put a datetime's fraction of a second before the whole
+/// second it follows.
+async fn twin_parity(
+	ctx: &ExecutionContext,
+	table: &str,
+	twin: &str,
+	clauses: impl Fn(&mut Draws) -> String,
+	seed: u64,
+	statements: usize,
+) {
+	let mut draws = Draws(seed);
+	let mut compared = 0;
+	while compared < statements {
+		let clauses = clauses(&mut draws);
+		if clauses.contains("ORDER BY id") {
+			continue;
+		}
+		compared += 1;
+		let sql = format!("SELECT VALUE v FROM {table}{clauses}");
+		let base = format!("SELECT VALUE v FROM {twin}{clauses}");
+		let got = vm_rows(ctx, &sql).await;
+		let want = vm_rows(ctx, &base).await;
+		let keys = order_keys(&clauses);
+		if keys.is_empty() || !clauses.contains(" LIMIT ") {
+			let (mut got, mut want) = (got.clone(), want.clone());
+			got.sort();
+			want.sort();
+			assert_eq!(got, want, "`{sql}` against `{base}`");
+		}
+		if !keys.is_empty() {
+			let keyed =
+				vm_rows(ctx, &format!("SELECT VALUE [v, [{}]] FROM {twin}", keys.join(", "))).await;
+			let key_of: std::collections::BTreeMap<Value, Value> = keyed
+				.into_iter()
+				.map(|row| match row {
+					Value::Array(pair) => {
+						let mut pair = pair.into_iter();
+						(pair.next().expect("a v"), pair.next().expect("its keys"))
+					}
+					other => panic!("a row of `v` and its keys, not {other:?}"),
+				})
+				.collect();
+			let keys_of = |rows: &[Value]| -> Vec<Value> {
+				rows.iter().map(|v| key_of.get(v).cloned().expect("a row of the twin")).collect()
+			};
+			assert_eq!(keys_of(&got), keys_of(&want), "`{sql}` against `{base}` orders its rows");
+		}
+	}
+}
+
+/// A table whose record ids name their components answers every predicate
+/// and ordering over them as a table with plain array ids answers the same
+/// statement over stored copies of the components: the key range is a
+/// superset, the predicate above it is kept, and nothing about the answer
+/// depends on how the rows were read.
+#[tokio::test]
+async fn a_keyed_table_answers_as_its_unkeyed_twin() {
+	let db = TestDb::new(&format!("{KEYED_SCHEMA}{TWIN_SCHEMA}")).await;
+	let ctx = db.exec_ctx().await;
+	twin_parity(&ctx, "reading", "reading_twin", reading_clauses, 0x51ed_270b_27b4_e2a1, 400).await;
+	twin_parity(&ctx, "counter", "counter_twin", counter_clauses, 0x0bad_5eed_c0ff_ee11, 300).await;
+}

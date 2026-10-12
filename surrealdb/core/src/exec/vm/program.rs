@@ -23,6 +23,7 @@ use super::codec::TypeId;
 use super::codec::key::RouteId;
 use super::row::FieldName;
 use super::scalar::Scalar;
+use crate::ddl::define::table::TableConversion;
 use crate::exec::field_path::FieldPath;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::operator::BinaryOperator;
@@ -1337,6 +1338,26 @@ pub(super) enum StoreInstr {
 		db: Reg,
 		definition: Arc<crate::catalog::TableDefinition>,
 	},
+	/// Raise what refuses turning the table named in `table` of the database
+	/// `ns`, `db` into `to`: a record id that names its components, as the
+	/// table's `id` stands when the instruction runs.
+	RefuseNamedIdConversion {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		to: TableConversion,
+	},
+	/// Raise what refuses the records of the table named in `table` of the
+	/// database `ns`, `db` as records of the record id structure `key`: a record
+	/// id it does not admit, or a body that stores a component under another
+	/// value. Does nothing when the stored `id` already has `key`. Skipped by a
+	/// speculative run, which leaves the records for the statement's real run.
+	ValidateRecordKeys {
+		ns: Reg,
+		db: Reg,
+		table: Reg,
+		key: Arc<crate::catalog::KeyStructure>,
+	},
 	/// Raise what refuses the removal of table `tb` of the database `ns`,
 	/// `db`: a non-empty LIGHTWEIGHT relation using it as an endpoint, or the
 	/// table being a non-empty LIGHTWEIGHT relation, as the edges stand when
@@ -1510,8 +1531,8 @@ pub(super) enum StoreInstr {
 	RefuseField {
 		refusal: FieldRefusal,
 	},
-	/// Raise what `ALTER FIELD`'s body raises when `check` fails of the
-	/// definition it has formed.
+	/// Raise what the body of `DEFINE FIELD`, `ALTER FIELD` or `REMOVE FIELD`
+	/// raises when `check` fails, judged when the instruction runs.
 	FieldCheck {
 		check: FieldCheck,
 	},
@@ -1895,6 +1916,74 @@ pub(crate) enum FieldRefusal {
 	},
 	IdFieldKeywordConflict(String),
 	IdFieldUnsupportedKind(String),
+	IdComponentUnsupportedKind {
+		table: String,
+		component: String,
+		kind: String,
+	},
+	IdComponentNameUnsupported {
+		table: String,
+		component: String,
+	},
+	IdComponentsOnRelation(String),
+	IdComponentsOnView(String),
+	IdComponentsTableConversion {
+		table: String,
+		to: String,
+	},
+	IdFieldSelectPermission(String),
+	IdComponentClash {
+		name: String,
+		table: String,
+	},
+	IdComponentShadowsField {
+		name: String,
+		table: String,
+	},
+	IdComponentNotAField {
+		name: String,
+		table: String,
+	},
+	IdComponentsNonConforming {
+		table: String,
+		ty: String,
+		record: String,
+		reason: String,
+	},
+	IdComponentsBodyConflict {
+		table: String,
+		ty: String,
+		record: String,
+		component: String,
+	},
+	IdComponentReadByExisting {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+	IdComponentInUse {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+	IdComponentReadUnresolved {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+	IdComponentReadByExistingUnresolved {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+	IdComponentsUnderWildcardView {
+		table: String,
+		view: String,
+	},
 	/// The catalog's missing-table error.
 	TbNotFound(crate::val::TableName),
 	/// The catalog's refusal of a view's aggregation.
@@ -1960,6 +2049,126 @@ impl FieldRefusal {
 			},
 			E::IdFieldKeywordConflict(k) => Self::IdFieldKeywordConflict(k.clone()),
 			E::IdFieldUnsupportedKind(k) => Self::IdFieldUnsupportedKind(k.clone()),
+			E::IdComponentUnsupportedKind {
+				table,
+				component,
+				kind,
+			} => Self::IdComponentUnsupportedKind {
+				table: table.clone(),
+				component: component.clone(),
+				kind: kind.clone(),
+			},
+			E::IdComponentNameUnsupported {
+				table,
+				component,
+			} => Self::IdComponentNameUnsupported {
+				table: table.clone(),
+				component: component.clone(),
+			},
+			E::IdComponentsOnRelation(t) => Self::IdComponentsOnRelation(t.clone()),
+			E::IdComponentsOnView(t) => Self::IdComponentsOnView(t.clone()),
+			E::IdComponentsTableConversion {
+				table,
+				to,
+			} => Self::IdComponentsTableConversion {
+				table: table.clone(),
+				to: to.clone(),
+			},
+			E::IdFieldSelectPermission(t) => Self::IdFieldSelectPermission(t.clone()),
+			E::IdComponentClash {
+				name,
+				table,
+			} => Self::IdComponentClash {
+				name: name.clone(),
+				table: table.clone(),
+			},
+			E::IdComponentShadowsField {
+				name,
+				table,
+			} => Self::IdComponentShadowsField {
+				name: name.clone(),
+				table: table.clone(),
+			},
+			E::IdComponentNotAField {
+				name,
+				table,
+			} => Self::IdComponentNotAField {
+				name: name.clone(),
+				table: table.clone(),
+			},
+			E::IdComponentsNonConforming {
+				table,
+				ty,
+				record,
+				reason,
+			} => Self::IdComponentsNonConforming {
+				table: table.clone(),
+				ty: ty.clone(),
+				record: record.clone(),
+				reason: reason.clone(),
+			},
+			E::IdComponentsBodyConflict {
+				table,
+				ty,
+				record,
+				component,
+			} => Self::IdComponentsBodyConflict {
+				table: table.clone(),
+				ty: ty.clone(),
+				record: record.clone(),
+				component: component.clone(),
+			},
+			E::IdComponentReadByExisting {
+				table,
+				component,
+				what,
+				name,
+			} => Self::IdComponentReadByExisting {
+				table: table.clone(),
+				component: component.clone(),
+				what: what.clone(),
+				name: name.clone(),
+			},
+			E::IdComponentInUse {
+				table,
+				component,
+				what,
+				name,
+			} => Self::IdComponentInUse {
+				table: table.clone(),
+				component: component.clone(),
+				what: what.clone(),
+				name: name.clone(),
+			},
+			E::IdComponentReadUnresolved {
+				table,
+				component,
+				what,
+				name,
+			} => Self::IdComponentReadUnresolved {
+				table: table.clone(),
+				component: component.clone(),
+				what: what.clone(),
+				name: name.clone(),
+			},
+			E::IdComponentReadByExistingUnresolved {
+				table,
+				component,
+				what,
+				name,
+			} => Self::IdComponentReadByExistingUnresolved {
+				table: table.clone(),
+				component: component.clone(),
+				what: what.clone(),
+				name: name.clone(),
+			},
+			E::IdComponentsUnderWildcardView {
+				table,
+				view,
+			} => Self::IdComponentsUnderWildcardView {
+				table: table.clone(),
+				view: view.clone(),
+			},
 			_ => return None,
 		})
 	}
@@ -2018,14 +2227,135 @@ impl FieldRefusal {
 			},
 			Self::IdFieldKeywordConflict(k) => E::IdFieldKeywordConflict(k),
 			Self::IdFieldUnsupportedKind(k) => E::IdFieldUnsupportedKind(k),
+			Self::IdComponentUnsupportedKind {
+				table,
+				component,
+				kind,
+			} => E::IdComponentUnsupportedKind {
+				table,
+				component,
+				kind,
+			},
+			Self::IdComponentNameUnsupported {
+				table,
+				component,
+			} => E::IdComponentNameUnsupported {
+				table,
+				component,
+			},
+			Self::IdComponentsOnRelation(t) => E::IdComponentsOnRelation(t),
+			Self::IdComponentsOnView(t) => E::IdComponentsOnView(t),
+			Self::IdComponentsTableConversion {
+				table,
+				to,
+			} => E::IdComponentsTableConversion {
+				table,
+				to,
+			},
+			Self::IdFieldSelectPermission(t) => E::IdFieldSelectPermission(t),
+			Self::IdComponentClash {
+				name,
+				table,
+			} => E::IdComponentClash {
+				name,
+				table,
+			},
+			Self::IdComponentShadowsField {
+				name,
+				table,
+			} => E::IdComponentShadowsField {
+				name,
+				table,
+			},
+			Self::IdComponentNotAField {
+				name,
+				table,
+			} => E::IdComponentNotAField {
+				name,
+				table,
+			},
+			Self::IdComponentsNonConforming {
+				table,
+				ty,
+				record,
+				reason,
+			} => E::IdComponentsNonConforming {
+				table,
+				ty,
+				record,
+				reason,
+			},
+			Self::IdComponentsBodyConflict {
+				table,
+				ty,
+				record,
+				component,
+			} => E::IdComponentsBodyConflict {
+				table,
+				ty,
+				record,
+				component,
+			},
+			Self::IdComponentReadByExisting {
+				table,
+				component,
+				what,
+				name,
+			} => E::IdComponentReadByExisting {
+				table,
+				component,
+				what,
+				name,
+			},
+			Self::IdComponentInUse {
+				table,
+				component,
+				what,
+				name,
+			} => E::IdComponentInUse {
+				table,
+				component,
+				what,
+				name,
+			},
+			Self::IdComponentReadUnresolved {
+				table,
+				component,
+				what,
+				name,
+			} => E::IdComponentReadUnresolved {
+				table,
+				component,
+				what,
+				name,
+			},
+			Self::IdComponentReadByExistingUnresolved {
+				table,
+				component,
+				what,
+				name,
+			} => E::IdComponentReadByExistingUnresolved {
+				table,
+				component,
+				what,
+				name,
+			},
+			Self::IdComponentsUnderWildcardView {
+				table,
+				view,
+			} => E::IdComponentsUnderWildcardView {
+				table,
+				view,
+			},
 		};
 		anyhow::Error::new(error)
 	}
 }
 
-/// A check `ALTER FIELD` makes of the stored field definition it forms by
-/// merging its clauses into the one the statement reads, as its body makes
-/// it of that definition before writing it.
+/// A check a field statement makes when it runs, as its body makes it: of the
+/// stored field definition `ALTER FIELD` forms by merging its clauses into the
+/// one the statement reads, or `DEFINE FIELD` forms from its clauses, before
+/// writing it; or of the table whose `id` `REMOVE FIELD` removes.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum FieldCheck {
 	/// The definition in `field` uses none of the clauses the `id` field
@@ -2045,6 +2375,26 @@ pub(super) enum FieldCheck {
 	/// (`field_rules::flexible_restrictions`).
 	Flexible {
 		field: Reg,
+		table: Reg,
+	},
+	/// The record id components the definition in `field` names, or the clash of
+	/// the field it defines with one, judged against the catalog of the
+	/// database `ns`, `db`, and the rows its views hold, as a `DEFINE FIELD`
+	/// of `kind` judges them (`ddl::define_field_statement_validate_key_components`).
+	/// `ALTER FIELD` judges its merged definition as `DEFINE FIELD OVERWRITE`.
+	KeyComponents {
+		field: Reg,
+		ns: Reg,
+		db: Reg,
+		kind: crate::expr::statements::define::DefineKind,
+	},
+	/// No definition of the table named in `table` reads a component of its
+	/// record id, judged against the catalog of the database `ns`, `db` and
+	/// the rows its views hold, so `REMOVE FIELD id` may remove its `id`
+	/// (`ddl::key_scan::refuse_removing_field`).
+	IdUnread {
+		ns: Reg,
+		db: Reg,
 		table: Reg,
 	},
 }
@@ -3020,6 +3370,13 @@ pub(super) struct SortSpec {
 	/// scan that feeds it ([`TopKScan`]), through its cell of
 	/// [`State::topk_cells`](super::interp::State).
 	pub(super) pushdown: bool,
+	/// Whether the sort takes its first floor as soon as it holds as many rows
+	/// as it keeps, rather than a quarter more: the sort of a key-range scan
+	/// cut by the second of a datetime component ([`TopKScan::coarse`]), whose
+	/// region hands it no more than `keep` rows a batch, so the cut fires
+	/// within the batch that fills it. Every other bounded sort floors at a
+	/// quarter more.
+	pub(super) floors_at_keep: bool,
 	pub(super) random: bool,
 	/// Where the first key of each row the sort keeps is published for
 	/// `vector::distance::knn()`: the sort of a brute-force KNN ranks rows by
@@ -3501,7 +3858,7 @@ assert_plain!(ClosureValueSpec);
 /// unit is lowered to. A kept unit is keyed by it, so a unit lowered for
 /// another version is never linked; it changes whenever an instruction, an
 /// operand or a spec changes what it means.
-pub(crate) const ISA_VERSION: u32 = 2;
+pub(crate) const ISA_VERSION: u32 = 3;
 
 /// The content digest of a closure as written: SHA-256 over the canonical
 /// encoding [`Self::of`] states. It is the code reference a closure value
@@ -4485,11 +4842,16 @@ pub(super) enum Source {
 	/// it decodes the record, when the body's first step is a filter whose
 	/// whole predicate the bytes can judge. The filter still runs on every
 	/// record the scan yields.
+	///
+	/// With `range`, only the records whose keys lie in the key ranges it
+	/// builds when the scan opens, range by range in key order along
+	/// `direction` ([`super::plan::Plan::KeyRangeScan`]).
 	Scan {
 		table: TableName,
 		direction: Direction,
 		topk: Option<TopKScan>,
 		prefilter: Option<super::plain::ValueData<crate::exec::pre_decode_filter::PreDecodeShape>>,
+		range: Option<Arc<ScanRange>>,
 	},
 	/// The records `record` names, evaluated once when the pipeline opens:
 	/// one record for a record id, the records of its range in key order for
@@ -4703,9 +5065,30 @@ pub(super) struct KnnPrefilterSpec {
 	pub(super) uncovered_matches: bool,
 }
 
+/// The key ranges a scan reads over a table whose record ids name their
+/// components: the shape of the ranges, and the host scalars that give the
+/// values of its bound slots, each evaluated when the scan opens.
+///
+/// A bound that raises when it is evaluated reads as `NONE`, a value no
+/// component holds, so the side or the equality run it bounds widens: the
+/// predicate above the scan judges every row it yields.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ScanRange {
+	pub(super) spec: crate::exec::operators::scan::key_range::ScanKeyRange,
+	/// The value of bound slot `i` of `spec`.
+	pub(super) bounds: Box<[HostScalar]>,
+}
+
+assert_plain!(ScanRange);
+
 /// The top-k threshold pushdown of a table scan: the first `ORDER BY` key of
 /// the sort that feeds on the scan, which the scan reads from a record's
 /// stored bytes to reject a record that cannot enter the sort's top k.
+///
+/// With `coarse`, the scan is a key-range scan that delivers the first key by
+/// the whole second of a datetime component of the record id: it reads no
+/// stored bytes for the key, and stops once it reads a record whose component
+/// is in a second past the threshold's ([`super::plan::CoarseCutoff`]).
 ///
 /// Sort `sort` of the program holding the scan publishes the threshold, in
 /// its cell of the running state, and the scan arms a probe with that cell
@@ -4722,6 +5105,8 @@ pub(super) struct TopKScan {
 	pub(super) sort: u16,
 	/// The bound on how deep the walk over the stored bytes descends.
 	pub(super) depth_limit: u32,
+	/// The cut a key-range scan makes by the second of a datetime component.
+	pub(super) coarse: Option<super::plan::CoarseCutoff>,
 }
 
 impl TopKScan {
@@ -4733,6 +5118,7 @@ impl TopKScan {
 			single_key: key.single_key,
 			sort,
 			depth_limit: key.depth_limit,
+			coarse: key.coarse_cutoff,
 		}
 	}
 
@@ -5283,3 +5669,110 @@ pub(super) struct TailSpec {
 // graph beneath the root, so a field anywhere in it that gives it a handle
 // fails the build here.
 assert_plain!(Program);
+
+#[cfg(test)]
+mod field_refusal_tests {
+	use super::FieldRefusal;
+	use crate::exec::Error;
+
+	/// The refusals of the record id components a field definition raises.
+	fn key_component_errors() -> Vec<Error> {
+		let text = |s: &str| s.to_owned();
+		vec![
+			Error::IdComponentUnsupportedKind {
+				table: text("reading"),
+				component: text("temp"),
+				kind: text("float"),
+			},
+			Error::IdComponentNameUnsupported {
+				table: text("reading"),
+				component: text("the city"),
+			},
+			Error::IdComponentsOnRelation(text("follows")),
+			Error::IdComponentsOnView(text("by_city")),
+			Error::IdComponentsTableConversion {
+				table: text("reading"),
+				to: text("a relation table"),
+			},
+			Error::IdFieldSelectPermission(text("reading")),
+			Error::IdComponentClash {
+				name: text("city"),
+				table: text("reading"),
+			},
+			Error::IdComponentShadowsField {
+				name: text("city"),
+				table: text("reading"),
+			},
+			Error::IdComponentNotAField {
+				name: text("city"),
+				table: text("reading"),
+			},
+			Error::IdComponentsNonConforming {
+				table: text("reading"),
+				ty: text("[city: string, time: datetime]"),
+				record: text("reading:['London', 5]"),
+				reason: text("`time` is not a datetime"),
+			},
+			Error::IdComponentsBodyConflict {
+				table: text("reading"),
+				ty: text("[city: string, time: datetime]"),
+				record: text("reading:['London', d'2024-01-01T00:00:00Z']"),
+				component: text("city"),
+			},
+			Error::IdComponentReadByExisting {
+				table: text("reading"),
+				component: text("city"),
+				what: text("index"),
+				name: text("by_city"),
+			},
+			Error::IdComponentInUse {
+				table: text("reading"),
+				component: text("city"),
+				what: text("view"),
+				name: text("by_city"),
+			},
+			Error::IdComponentReadUnresolved {
+				table: text("reading"),
+				component: text("city"),
+				what: text("field"),
+				name: text("label"),
+			},
+			Error::IdComponentReadByExistingUnresolved {
+				table: text("reading"),
+				component: text("city"),
+				what: text("view"),
+				name: text("by_city"),
+			},
+			Error::IdComponentsUnderWildcardView {
+				table: text("reading"),
+				view: text("everything"),
+			},
+		]
+	}
+
+	/// A program carries a refusal in place of the error it raises, so each
+	/// refusal of a record id component must raise exactly the error it stands
+	/// for: the same variant and the same message.
+	#[test]
+	fn a_record_id_component_refusal_raises_the_error_it_stands_for() {
+		for error in key_component_errors() {
+			let message = error.to_string();
+			let variant = std::mem::discriminant(&error);
+			let refusal = FieldRefusal::of(&anyhow::Error::new(error))
+				.unwrap_or_else(|| panic!("no refusal stands for `{message}`"));
+			let raised = refusal.error();
+			let raised = raised
+				.downcast_ref::<Error>()
+				.unwrap_or_else(|| panic!("`{message}` is raised as another error"));
+			assert_eq!(std::mem::discriminant(raised), variant, "`{message}`");
+			assert_eq!(raised.to_string(), message);
+		}
+	}
+
+	/// An error that is not a refusal of a field definition stands for nothing.
+	#[test]
+	fn an_error_that_is_no_field_refusal_has_none() {
+		assert!(FieldRefusal::of(&anyhow::anyhow!("not a refusal")).is_none());
+		assert!(FieldRefusal::of(&anyhow::Error::new(Error::NsEmpty)).is_none());
+	}
+}

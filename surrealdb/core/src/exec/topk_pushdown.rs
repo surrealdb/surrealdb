@@ -227,11 +227,41 @@ pub(crate) fn field_path_wire_segments(path: &FieldPath) -> Option<Vec<PathSegme
 	Some(segments)
 }
 
+/// Whether wire segments `path` open with the name of a component of record
+/// ids with structure `key`.
+///
+/// A named component is derived from the record id and never stored in the
+/// record body, so a raw read of it would see `Missing` and mis-reject, as a
+/// read of `id` would: such a path is not probed.
+pub(crate) fn reads_key_component(
+	path: &[PathSegment],
+	key: &crate::catalog::KeyStructure,
+) -> bool {
+	path.first().is_some_and(|root| {
+		key.components.iter().any(|component| {
+			component.name.as_ref().is_some_and(|name| name.as_str() == root.as_str())
+		})
+	})
+}
+
 #[cfg(test)]
 mod tests {
 
 	use super::*;
 	use crate::val::Number;
+
+	#[test]
+	fn a_path_rooted_at_a_named_component_is_not_probed() {
+		use crate::expr::{KeyNames, Kind, KindLiteral};
+		use crate::val::Strand;
+		let names = KeyNames::new(vec![Strand::new("city"), Strand::new("time")], 2).unwrap();
+		let kind = Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]));
+		let key = crate::catalog::KeyStructure::from_id_field(&kind, &names).expect("a structure");
+		assert!(reads_key_component(&[PathSegment::new("time")], &key));
+		assert!(reads_key_component(&[PathSegment::new("city"), PathSegment::new("x")], &key));
+		assert!(!reads_key_component(&[PathSegment::new("temp")], &key));
+		assert!(!reads_key_component(&[], &key));
+	}
 
 	#[test]
 	fn cell_starts_empty_publishes_and_overwrites() {

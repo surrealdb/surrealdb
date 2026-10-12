@@ -254,6 +254,10 @@ pub struct Parser<'a, 's> {
 	/// Set for the next path call only: its name need not be a builtin, as
 	/// for a middleware name.
 	any_path: bool,
+	/// The start of the token that opens the `TYPE` of a field named `id`,
+	/// the one position where a tuple kind may name its components, or
+	/// `u32::MAX` outside such a `TYPE`.
+	keyed_at: u32,
 	/// Set when the parser has looked at a token within [`END_SLACK`] bytes
 	/// of the end of input, so more input could have changed what it saw.
 	/// Only a failed statement consults it: a parsed one is confirmed by its
@@ -341,6 +345,9 @@ pub enum Entry {
 	Idiom,
 	/// A kind without the enclosing `<` `>`.
 	Kind,
+	/// The `TYPE` of a field named `id`: a kind whose outermost tuple may name
+	/// its components, as a [`Tag::Kind`] node.
+	IdKind,
 	/// A projection list, or `VALUE` and one selector, as a [`Tag::Fields`]
 	/// node.
 	Fields,
@@ -384,6 +391,7 @@ pub fn parse_entry(
 		}
 		Entry::Idiom => p.plain_idiom(),
 		Entry::Kind => p.kind(),
+		Entry::IdKind => p.id_kind(),
 		Entry::Fields => p.fields_entry(),
 		Entry::Duration => p.duration_lit(),
 		Entry::Table => p.name(),
@@ -453,6 +461,7 @@ impl<'a, 's> Parser<'a, 's> {
 			native: 0,
 			table_as_field: true,
 			any_path: false,
+			keyed_at: u32::MAX,
 			saw_end: core::cell::Cell::new(false),
 		};
 		p.note(p.tok);
@@ -1346,6 +1355,24 @@ impl<'a, 's> Parser<'a, 's> {
 				crate::decode::unescape(crate::decode::strip_delims(text), &mut name) && is(&name)
 			}
 			_ => false,
+		}
+	}
+
+	/// Whether the expression `id` is a single bare identifier spelling `id`,
+	/// escaped or not: the name of the one field whose `TYPE` may name the
+	/// components of a record-id tuple. A parameter, a parenthesised
+	/// expression and an idiom with more than one part are not.
+	fn is_bare_id(&self, id: NodeId) -> bool {
+		let n = self.ast.nodes[id as usize];
+		if n.tag != Tag::Field || n.op != 0 || n.depth & COVERED != 0 || n.end <= n.start {
+			return false;
+		}
+		let text = &self.text[n.start as usize..n.end as usize];
+		if text.starts_with(['`', '⟨']) {
+			let mut name = String::new();
+			crate::decode::unescape(crate::decode::strip_delims(text), &mut name) && name == "id"
+		} else {
+			text == "id"
 		}
 	}
 

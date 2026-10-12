@@ -25,6 +25,27 @@ pub(crate) struct TopKKey {
 	pub(crate) single_key: bool,
 	/// The bound on how deep the walk over the stored bytes descends.
 	pub(crate) depth_limit: u32,
+	/// Where the first key is a datetime component of the record id that a
+	/// key-range scan delivers in the order of its whole second
+	/// ([`Plan::KeyRangeScan`]): the scan reads no stored bytes for the key,
+	/// and stops once it reads past the second of the sort's threshold.
+	pub(crate) coarse_cutoff: Option<CoarseCutoff>,
+}
+
+/// The cut a key-range scan makes beneath a sort that keeps `keep` rows,
+/// ordered first by the datetime component at `position`, which the scan
+/// delivers in the order of its whole second.
+///
+/// Once the sort holds `keep` rows, the first key of the last of them is its
+/// threshold. Every record the scan reads after one whose component is in a
+/// later second (an earlier one, reading backwards) orders strictly after the
+/// threshold, so it can take no kept place: the scan stops there. Rows within
+/// the threshold's own second are still read, since the key bytes do not
+/// order them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CoarseCutoff {
+	pub(crate) position: u32,
+	pub(crate) keep: u64,
 }
 
 /// A plan and the catalog state it was made from.
@@ -552,6 +573,32 @@ pub(crate) enum Plan {
 	TableScan {
 		table: TableName,
 		direction: Direction,
+		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
+		topk: Option<TopKKey>,
+		/// Whether record-key order is the order of `id`: `false` for a table
+		/// whose record id names a component whose key bytes order its values
+		/// only coarsely (a datetime), so a sort by `id` is never taken as
+		/// delivered.
+		id_order: bool,
+	},
+	/// The records of `table` whose record keys lie in the ranges `access`
+	/// describes over the components its record id names, in key order along
+	/// the access's direction, range by range: a superset of the rows the
+	/// predicate above admits, which is always kept and judges every row.
+	///
+	/// The ranges are built each time the scan opens, from the access's
+	/// bounds evaluated then: a literal, or an expression that reads no row of
+	/// the table and has no effect. A bound whose value its component cannot
+	/// hold widens the range rather than raising. `topk` is as for
+	/// [`Plan::TableScan`], with a [`CoarseCutoff`] where the access delivers
+	/// the order of a datetime component by the second.
+	///
+	/// The structure the access was planned against is a catalog fact read
+	/// when the statement is planned, held for every run of the plan's
+	/// snapshot as the indexes of [`Plan::IndexScan`] are.
+	KeyRangeScan {
+		table: TableName,
+		access: std::sync::Arc<crate::exec::index::key_range::KeyRangeAccess>,
 		schema: Option<std::sync::Arc<crate::expr::logical::Schema>>,
 		topk: Option<TopKKey>,
 	},
@@ -1326,6 +1373,9 @@ impl Plan {
 	pub(crate) fn input(&self) -> Option<&Plan> {
 		match self {
 			Plan::TableScan {
+				..
+			}
+			| Plan::KeyRangeScan {
 				..
 			}
 			| Plan::RecordScan {

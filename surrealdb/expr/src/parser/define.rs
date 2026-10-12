@@ -464,10 +464,12 @@ impl Lower<'_> {
 					kind,
 					..Default::default()
 				};
+				// Only the field `id` may name the components of its tuple type.
+				let is_id = matches!(&s.name, Expr::Idiom(i) if i.is_id());
 				for c in clauses {
 					match cl(c) {
 						Cl::FieldType => {
-							let k = self.kind(c.a)?;
+							let (k, names) = self.field_type(c.a, is_id)?;
 							if c.b == 1 {
 								if !kind_contains_object(&k) {
 									let (a, b) = self.last_tok(c.start, c.end);
@@ -478,7 +480,9 @@ impl Lower<'_> {
 								}
 								s.flexible = true;
 							}
-							s.field_kind = Some(k);
+							// Each `TYPE` clause replaces the names along with the kind.
+							s.set_type(Some(k), names)
+								.map_err(|e| Reject::new(e.to_string()).at(c.start, c.end))?;
 						}
 						Cl::Readonly => s.readonly = true,
 						Cl::Inline => s.inline = true,
@@ -1459,9 +1463,13 @@ impl Lower<'_> {
 					if_exists,
 					..Default::default()
 				};
+				let is_id = matches!(&s.name, Expr::Idiom(i) if i.is_id());
 				for c in clauses {
 					match (unsafe_cl(c.op), drop(c)) {
-						(_, Some(Cl::FieldType)) => s.kind = AlterKind::Drop,
+						(_, Some(Cl::FieldType)) => {
+							s.kind = AlterKind::Drop;
+							s.key_names = AlterKind::Drop;
+						}
 						(_, Some(Cl::Flexible)) => s.flexible = AlterKind::Drop,
 						(_, Some(Cl::Readonly)) => s.readonly = AlterKind::Drop,
 						(_, Some(Cl::Inline)) => s.inline = AlterKind::Drop,
@@ -1471,7 +1479,7 @@ impl Lower<'_> {
 						(_, Some(Cl::Comment)) => s.comment = AlterKind::Drop,
 						(_, Some(_)) => s.reference = AlterKind::Drop,
 						(Cl::FieldType, _) => {
-							let k = self.kind(c.a)?;
+							let (k, names) = self.field_type(c.a, is_id)?;
 							if c.b == 1 {
 								if !kind_contains_object(&k) {
 									let (a, b) = self.last_tok(c.start, c.end);
@@ -1482,7 +1490,9 @@ impl Lower<'_> {
 								}
 								s.flexible = AlterKind::Set(());
 							}
-							s.kind = AlterKind::Set(k);
+							let names = names.map_or(AlterKind::Drop, AlterKind::Set);
+							s.set_type(AlterKind::Set(k), names)
+								.map_err(|e| Reject::new(e.to_string()).at(c.start, c.end))?;
 						}
 						(Cl::Flexible, _) => s.flexible = AlterKind::Set(()),
 						(Cl::Readonly, _) => s.readonly = AlterKind::Set(()),

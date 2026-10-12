@@ -53,6 +53,7 @@ impl<'a, 's> Parser<'a, 's> {
 				rec[0] = 1;
 			}
 			self.alter_target(kind, &mut rec)?;
+			let field_is_id = kind == DefineKind::Field as u8 && self.is_bare_id(rec[1]);
 			if kind == DefineKind::Config as u8 {
 				// One optional `COMMENT` or `DROP COMMENT`.
 				if self.at_kw(Kw::Comment) {
@@ -62,7 +63,7 @@ impl<'a, 's> Parser<'a, 's> {
 				}
 			} else {
 				let clauses = self.vals.len();
-				self.alter_clauses(kind)?;
+				self.alter_clauses(kind, field_is_id)?;
 				// `ALTER INDEX` must change something.
 				if kind == DefineKind::Index as u8 && self.vals.len() == clauses {
 					return Err(self.unexpected("`PREPARE`, `DROP` or `COMMENT`"));
@@ -261,7 +262,9 @@ impl<'a, 's> Parser<'a, 's> {
 		}
 	}
 
-	fn alter_clauses(&mut self, kind: u8) -> R<()> {
+	/// The clauses of an `ALTER` of `kind`. `field_is_id` is whether the target
+	/// is the field `id`, whose `TYPE` may name the components of a tuple.
+	fn alter_clauses(&mut self, kind: u8, field_is_id: bool) -> R<()> {
 		use DefineKind as D;
 		let k = |d: D| d as u8;
 		loop {
@@ -340,7 +343,7 @@ impl<'a, 's> Parser<'a, 's> {
 					self.alter_drop(allowed, expected)?;
 				}
 				_ => {
-					if !self.alter_clause(kind, t)? {
+					if !self.alter_clause(kind, field_is_id, t)? {
 						return Ok(());
 					}
 				}
@@ -349,7 +352,7 @@ impl<'a, 's> Parser<'a, 's> {
 	}
 
 	/// One kind-specific `ALTER` clause at `t`; `false` when `t` starts none.
-	fn alter_clause(&mut self, kind: u8, t: Tok) -> R<bool> {
+	fn alter_clause(&mut self, kind: u8, field_is_id: bool, t: Tok) -> R<bool> {
 		use DefineKind as D;
 		let is = |d: D| kind == d as u8;
 		match t.kw {
@@ -387,7 +390,11 @@ impl<'a, 's> Parser<'a, 's> {
 			Kw::Type if is(D::Field) => {
 				self.bump();
 				let first = self.ast.nodes.len();
-				let k = self.kind()?;
+				let k = if field_is_id {
+					self.id_kind()?
+				} else {
+					self.kind()?
+				};
 				let flexible = self.eat_kw(Kw::Flexible) as u32;
 				self.push_clause(Cl::FieldType, k, flexible, t.start, first)?;
 			}

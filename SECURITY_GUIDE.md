@@ -410,7 +410,9 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   layer; the one permitted crossing is the access-path offer beneath the
   stack (`chain_offer` in `exec/planner/fold.rs`), which reads keys, not
   record values, drops every conjunct and order key rooted in a layer column
-  or reading the row opaquely, and hands the scan no predicate when a
+  or reading the row opaquely (a conjunct over the column of a record-id
+  component reaches it as the read of `id[i]`, which is the key, as does an
+  order key over one), and hands the scan no predicate when a
   permission node stands in the chain, so the nodes above judge every row it
   yields. The layer order (module docs of `exec/operators/layer.rs`): a
   stored field's guard is judged against the record as stored, a computed
@@ -422,7 +424,8 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   and frame stay) and a permission filter's predicate as `<permission>`, a
   permission join hides its right side, its table and
   its alias, an access path chosen from a permission predicate prints
-  `<permission>` in place of its index, bound and record id, and `EXPLAIN ANALYZE` reports no metrics for
+  `<permission>` in place of its index, bound and record id (a key range's `key`,
+  `range` and `ranges` included), and `EXPLAIN ANALYZE` reports no metrics for
   any operator beneath a permission filter, a layer or a permission join
   (`ExecOperator::hides_metrics_beneath` and `redacts_access_paths_beneath`,
   applied in `exec/operators/explain.rs`; the VM sets them on the nodes it
@@ -575,6 +578,57 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
 - The import flag must reset at the start of each new request.
 - Record-scoped auth must be verified at all permission check sites to ensure the
   record token's namespace and database match the current execution scope.
+- **The components a record id names are fields the table's permissions govern,
+  and a key range over them is an access path, never an enforcement point.** A
+  table whose `id` names its components (`DEFINE FIELD id ON reading TYPE
+  [city: string, time: datetime]`) derives each one as a read-only virtual field
+  of the row, the read `id[i]` (`KeyStructure::derived_fields` in
+  `catalog/schema/key.rs`; the definition carries `key_part`), with a full
+  `select` permission. Whoever may read a row reads every component of its key,
+  and the table's `PermissionFilter` and permission clauses judge a component as
+  they judge any field. A component has no permission of its own, and none can
+  be put on `id`: a `SELECT` permission on a named `id` other than `FULL` is
+  refused at `DEFINE` and `ALTER` (`IdFieldSelectPermission`, raised by
+  `id_field_restrictions` in `exec/field_rules.rs`), because a permission on
+  `id` alone would not cover the fields that read it. A component is never
+  re-derived beneath a field guard: it reads `id` alone.
+  The key range (`plan_key_range` in `exec/index/key_range.rs`,
+  `Plan::KeyRangeScan`) keeps five properties.
+  - It is a superset. Its ranges hold every record the predicate admits and the
+    predicate, the `PermissionFilter` and the layers above the scan judge every
+    row it yields; no conjunct is consumed. A range that is wider than it needs
+    to be costs reads, never a disclosure.
+  - It is not offered where the plan cannot vouch for the read. It is not planned
+    under `RestrictedPrefixes::AssumeRestricted`, `VERSION`, a `WITH` hint,
+    `MATCHES` or a KNN operator, and a conjunct that reads a field the caller may
+    not read is withheld from it (`cond_touches`), as it is from an index.
+  - Under a permissioned offer (`AccessOffer::permissioned`, where a table
+    permission predicate contributes to what the access path is offered) only
+    literal bounds are pushed. A deferred bound is evaluated in the caller's
+    frame when the scan opens, and a permission predicate is definer code. A
+    deferred bound anywhere reads no row of the table, holds no nested
+    statement, closure or index operator and has no effect, and an error in
+    evaluating it widens the side it bounds rather than raising.
+  - Every range `record_key_ranges` builds is intersected with the table's
+    record range, and an empty or inverted range is dropped, so a bound the
+    caller supplies cannot take the scan out of the table (section 14).
+  - For a checked caller beneath a permission, `key`, `range` and `ranges` print
+    `<permission>` (`ACCESS_PATH_ATTRS` in `exec/operators/explain.rs`), as the
+    index, access and record id of any access path do, and the column of a
+    component prints `<computed>` where its expression stands.
+  Verified by: `a_permissioned_offer_pushes_literals_only`,
+  `a_deferred_bound_is_pushed_only_when_it_reads_no_row_and_has_no_effect`
+  (`exec/index/key_range.rs`), `every_range_lies_within_the_table`,
+  `a_bound_its_component_cannot_hold_widens_rather_than_raising`
+  (`exec/operators/scan/key_range.rs`),
+  `a_checked_caller_is_shown_no_text_of_a_key_column` (`exec/vm/explain.rs`),
+  `a_component_is_not_rederived_beneath_a_restricted_field`
+  (`exec/logical/resolve.rs`) and `a_key_range_scan_returns_what_the_table_scan_returns`
+  (`exec/vm/tests_scan_parity.rs`); end to end by
+  `language/statements/select/id_components_permissions.surql`,
+  `language/statements/define/field/id_components_select_permission_refused.surql`,
+  `language/planner/id_components_permission_bounds.surql` and
+  `language/planner/id_components_permission_bounds_for_another_user.surql`.
 
 ### Review Triggers
 
@@ -604,6 +658,10 @@ Flag for detailed review when changes touch:
 - `purge_references` or cascade processing logic
 - How `auth_enabled` is evaluated or propagated
 - The `reduced` document mechanism or computed field handling
+- `plan_key_range`, `AccessOffer::permissioned`, `record_key_ranges`, the
+  `KeyRangeScan` EXPLAIN attributes in `ACCESS_PATH_ATTRS`, or the derivation of
+  a record-id component (`KeyStructure::derived_fields`, a `key_part` definition,
+  `id_field_restrictions`)
 
 ---
 
@@ -686,6 +744,37 @@ relate), Key API, field evaluation, events, views, cascades
 - Import mode (which bypasses field/event/view processing and the `ENFORCED` relation
   endpoint-existence check) must only be settable by administrative callers. It must not
   bypass any permission check: table-level `PERMISSIONS` still gate every imported write.
+- **A field a write names that is also part of the record id is verified against the
+  id, and a failure discloses only what the caller wrote.** A `id` field that is not the
+  record the statement addresses is `IdMismatch` (`check_special_field` in
+  `exec/operators/write/stages/data.rs`, run by `CheckDataFields`). On a table whose `id`
+  names its components, a field named like a component is compared with the key's element
+  and cut, and is never stored: a restatement that equals the element is accepted, and
+  anything else (a different value, an `UNSET` or `NONE`, a write beneath the component, a
+  compound assignment) is `IdComponentMismatch` (`settle_key_fields` in the same file, run by
+  `DefaultRecordData`, as `DataInstr::SettleKeyFields`). `OPTION IMPORT` is held to the same
+  check, because the import path skips the schema stage. Both errors carry the value the
+  caller's data clause produced (`to_sql` of it) and never the key's element itself. That
+  value is the caller's input, or computed by the caller's own expression over what the
+  data clause reads (`SET city = city + 'x'` echoes the result), which is no more than any
+  failing expression in the same clause discloses (`SET v = <int> city`). In an `UPDATE`
+  they are raised after `CheckUpdatePermissions` and `CheckWhereCondition`, and in every
+  create order after `CheckPermissionsQuickCreate`. An `UPSERT` that names a record its
+  update permission refuses evaluates its data clause on the record reduced by the select
+  permission and can raise either error before the refusal; the error then carries only
+  what the caller wrote, since the reduced record holds none of the hidden fields. What a
+  mismatch tells a caller is that the value they wrote is not the record's: for
+  `IdMismatch`, of the record they named; for `IdComponentMismatch`, of a record their
+  update permission and `WHERE` admitted, whose components the same `WHERE` already reads
+  (a component has no field permission). A new error on this path must keep both
+  properties: raised after the table's gates, and carrying nothing beyond what the
+  caller's own data clause reads.
+  Verified by: `keyed_writes_settle_their_components_as_instructions`
+  (`exec/vm/tests_write_data.rs`), `merge_rpc_cannot_change_a_component_of_the_record_id`
+  (`rpc/protocol.rs`), and end to end by
+  `language/statements/update/id_components_immutable.surql`,
+  `language/write/id_components_error_precedence.surql` and
+  `language/write/id_components_import.surql`.
 
 ### Review Triggers
 
@@ -697,6 +786,8 @@ Flag when changes touch:
 - Key API body parsing behavior
 - Import mode access control
 - New secondary processing triggers (post-write hooks)
+- `settle_key_fields`, `check_special_field`, or any new error raised from
+  `CheckDataFields` or `DefaultRecordData` that echoes a value
 
 ---
 
@@ -958,6 +1049,65 @@ Flag when changes touch:
 - Async event MAXDEPTH and RETRY limits must prevent unbounded background execution.
 - Changefeed retention must be bounded.
 - Concurrent schema modifications on the same resource must be serialized.
+- **Naming the components of a record id (`DEFINE FIELD id ON reading TYPE [city:
+  string, time: datetime]`, `ALTER FIELD`) must not change what a definer-written
+  expression reads, and its validation scan must be bounded.** A name that an
+  index column, an index `COUNT` condition or a view over the table reads as a
+  stored field is refused when the id takes it (`IdComponentReadByExisting`), and a
+  name that an index, a view, a table permission, a field's clause or an event reads
+  is refused when the id drops or renames it (`IdComponentInUse`), as is a name the
+  `id` definition's own `ASSERT`, `DEFAULT` or permissions read when that definition
+  drops or renames it; a field cannot take a component's name, nor
+  the id the name of a field (`IdComponentClash`, `IdComponentShadowsField`), and
+  `REMOVE` or `ALTER` of a component name is `IdComponentNotAField`. A component
+  name must be a plain identifier (`IdComponentNameUnsupported`,
+  `KeyStructure::is_plain_name`): the paths that evaluate a record's fields for its
+  events, views, `RETURN` images and `VALUE` and `ASSERT` clauses key a field by
+  its raw rendering, under which an escaped name would read `NONE`. A permission
+  predicate that read `city` as a stored field and now reads the component, or read
+  a component and now reads `NONE`, admits the wrong rows, so the check reads every
+  clause that holds an expression (`first_reader` and `record_reads` in
+  `ddl/key_scan.rs`) and fails closed: a clause that reads the record by a name it
+  computes, hands the record whole to a function, method, closure or cast, or calls
+  a user-defined, script, module or silo function where the record is the document
+  it is evaluated against, may read any name and blocks the change
+  (`IdComponentReadUnresolved`, `IdComponentReadByExistingUnresolved`), and so does
+  a view that selects `*` and holds rows (`IdComponentsUnderWildcardView`). Function
+  bodies are not read. A path through the document (`@.city`) reads the record;
+  a part of a value that holds the record (`{ r: $this }.r.city`) may read any
+  name; a field's `REFERENCE ON DELETE THEN` repair is read with the referencing
+  record as `$this`. A bare name in a statement over another table is counted as
+  a read of this table's field of that name: fail-closed, and the refusal then
+  names the clause that holds the statement. The dependents check of
+  `DEFINE FIELD id` and `REMOVE FIELD id` runs when the statement runs, as
+  `ALTER FIELD`'s does (`FieldCheck::KeyComponents`, `FieldCheck::IdUnread` in
+  `exec/vm/program.rs`), so rows a block, transaction or function body writes
+  into a view before the change are seen. What the check does not see is
+  review-only: a read of a component from another record, through a record link
+  or a graph hop into the table or a statement over another table that reads
+  this one, by a path or by a name passed as a string to a builtin; what a
+  function body reads of a record handed to it as anything but the record or
+  the document; and an index column spelled `id[i]`. A change that widens what a
+  clause can read extends `record_reads`. The scan that validates the table's records
+  (`validate_record_keys` in `ddl/key_scan.rs`) runs in the defining transaction
+  under the definer's authority, reads each record's key and, where it could hold a
+  component name, its body, pages by the fuel left and charges the meter per record,
+  so it honours the statement's cancellation and deadline. Its refusals
+  (`IdComponentsNonConforming`, `IdComponentsBodyConflict`) name the record id, the
+  component and the remedy and never a stored field value.
+  Verified by: `the_records_are_checked_only_against_a_changed_structure`,
+  `a_view_that_selects_every_field_reads_every_name_once_it_holds_a_row` and the
+  `record_reads` tests (`ddl/key_scan.rs`),
+  `the_record_id_components_of_the_id_are_judged_when_the_statement_runs`
+  (`exec/vm/lower_ddl.rs`), and end to end by
+  `language/statements/define/field/id_components_wildcard_view_judged_when_the_statement_runs.surql`,
+  `language/statements/define/field/id_components_rename_used_by_reference_repair.surql`,
+  `language/statements/define/field/id_components_rename_used_through_function.surql`,
+  `language/statements/define/field/id_components_wildcard_view_rename_and_remove_refused.surql`,
+  `language/statements/define/field/id_components_rename_used_by_permission.surql`,
+  `language/statements/define/field/id_components_rename_used_by_event.surql`,
+  `language/statements/define/field/id_components_rename_used_by_view.surql` and
+  `language/statements/define/field/id_components_clash_existing_index_on_body_field.surql`.
 
 ### Review Triggers
 
@@ -967,6 +1117,9 @@ Flag when changes touch:
 - Expression types in VALUE/ASSERT/PERMISSIONS
 - Execution authority semantics for schema-defined expressions
 - Changefeed, index, or event behavior
+- `ddl/key_scan.rs`, `define_field_statement_validate_key_components`, or any
+  change to what `extract_computed_deps` or `record_reads` reports as a read of a
+  name
 
 ---
 
@@ -1024,6 +1177,14 @@ Flag when changes touch:
   (users, access grants, functions at higher privilege than the importer).
 - CLI import connecting to a local datastore must not silently disable authentication.
 - Export must respect table and field permissions. Secrets must be redacted.
+- A dump of a table whose `id` names its components carries the `id` as written and
+  no definition of a component, which is not a stored field. Importing into such a
+  table is held to the same check as any write (section 4): a component field in
+  the payload that differs from the key is refused under `OPTION IMPORT`, and an
+  equal one is cut. A view row's key is taken to agree with its group values, which
+  view maintenance guarantees and `OPTION IMPORT` does not; a key range over an
+  aggregated view can miss a hand-forged row, never return one the predicate does
+  not admit.
 
 ### Review Triggers
 
@@ -1259,7 +1420,15 @@ implementations
   (paths, connection strings, internal state) must be stripped before reaching client-
   facing error paths.
 - Key range scans must be bounded. Prefix scans must not inadvertently cross
-  namespace or database boundaries due to key encoding ordering.
+  namespace or database boundaries due to key encoding ordering. A key-range scan
+  over a table's record keys builds its ranges from values the caller supplies
+  (`record_key_ranges` in `exec/operators/scan/key_range.rs`): each bound is
+  encoded as an element of an array key after the table's own record-key prefix,
+  every range is intersected with the table's record range, an empty or inverted
+  range is dropped, and a bound the component cannot hold widens a side inside the
+  table. No bound reaches the bytes before the table's prefix.
+  Verified by: `every_range_lies_within_the_table` and
+  `inverted_or_empty_bounds_read_nothing` (`exec/operators/scan/key_range.rs`).
 - Backend credentials and connection configuration must not be logged or included in
   error messages.
 - Encryption-at-rest configuration must not be alterable by non-root principals.
@@ -1273,7 +1442,7 @@ Flag when changes touch:
 - Key encoding or decoding logic (`kvs/` key types)
 - Transaction lifecycle (begin, commit, cancel, retry)
 - Datastore initialization or backend selection
-- Key prefix construction or range scan boundaries
+- Key prefix construction or range scan boundaries (including `record_key_ranges`)
 - Storage-layer error types or error conversion
 - New storage backends or backend configuration
 - Encryption or credential handling in storage config

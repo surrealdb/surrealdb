@@ -398,6 +398,167 @@ pub(crate) enum Error {
 		field: String,
 		index: String,
 	},
+
+	/// A component of a named record id has a type whose stored order a key
+	/// range cannot use.
+	#[error(
+		"The record id component `{component}` of `{table}` cannot have the type `{kind}`: only string, int, datetime, uuid, duration, bool and record components keep their order in storage"
+	)]
+	IdComponentUnsupportedKind {
+		table: String,
+		component: String,
+		kind: String,
+	},
+
+	/// A component of a named record id is given a name that is not a plain
+	/// identifier (`KeyStructure::is_plain_name`): the fields of a record are
+	/// keyed by their raw names, which escape any other name.
+	#[error(
+		"Cannot name the record id component `{component}` of `{table}`: a component name must be a plain identifier of ASCII letters, digits and underscores that does not start with a digit and is not NaN or Infinity"
+	)]
+	IdComponentNameUnsupported {
+		table: String,
+		component: String,
+	},
+
+	/// The record id of a relation table is its `in`, its `out` and its own
+	/// key, so it has no components to name.
+	#[error("Cannot name the parts of the record id of `{0}`: it is a relation table")]
+	IdComponentsOnRelation(String),
+
+	/// The record id of a view is derived from the view's query.
+	#[error("Cannot name the parts of the record id of `{0}`: it is a view")]
+	IdComponentsOnView(String),
+
+	/// A table whose record id names its components cannot become a relation
+	/// table or a view. `to` reads "a relation table" or "a view".
+	#[error("Cannot make `{table}` {to}: its record id has named components")]
+	IdComponentsTableConversion {
+		table: String,
+		to: String,
+	},
+
+	/// A component of a named record id is readable as a field of the table, so
+	/// the `id` field takes no permission of its own on `SELECT`.
+	#[error(
+		"Cannot restrict SELECT on the `id` field of `{0}`: its record id components are readable as fields"
+	)]
+	IdFieldSelectPermission(String),
+
+	/// A field was defined under the name of a component of the record id.
+	#[error(
+		"Cannot define the field `{name}` on `{table}`: `{name}` is part of the record id of `{table}`"
+	)]
+	IdComponentClash {
+		name: String,
+		table: String,
+	},
+
+	/// The record id was given a component name that a field of the table
+	/// already holds.
+	#[error(
+		"Cannot name `{name}` in the record id of `{table}`: `{name}` is already a field of `{table}`"
+	)]
+	IdComponentShadowsField {
+		name: String,
+		table: String,
+	},
+
+	/// A component name is not a field with a definition of its own, so it can
+	/// be neither removed nor altered.
+	#[error(
+		"`{name}` is part of the record id of `{table}`; change the TYPE of `id` to rename or remove it"
+	)]
+	IdComponentNotAField {
+		name: String,
+		table: String,
+	},
+
+	/// An existing record has an id the named record id does not admit. `ty` is
+	/// the type as written and `reason` says what is wrong with the record id.
+	#[error(
+		"Cannot give `{table}` the record id {ty}: the existing record {record} does not match it ({reason}). Copy the records into a table with the new record id instead"
+	)]
+	IdComponentsNonConforming {
+		table: String,
+		ty: String,
+		record: String,
+		reason: String,
+	},
+
+	/// An existing record stores a field under the name of a component, with a
+	/// value other than the component's.
+	#[error(
+		"Cannot give `{table}` the record id {ty}: the record {record} stores a `{component}` field that differs from its record id. Remove it first, for example with UPDATE {table} UNSET {component}"
+	)]
+	IdComponentsBodyConflict {
+		table: String,
+		ty: String,
+		record: String,
+		component: String,
+	},
+
+	/// A name given to a component is read as a stored field by `what` (an
+	/// index or a view), whose meaning the name would change.
+	#[error(
+		"Cannot name `{component}` in the record id of `{table}`: the {what} `{name}` already reads a stored `{component}` field. Remove it, then define it again after changing the record id"
+	)]
+	IdComponentReadByExisting {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+
+	/// A component name is read by `what` (an index, a view, an event, a field
+	/// or a table permission), so the record id cannot drop or rename it.
+	#[error(
+		"Cannot change the record id of `{table}`: the {what} `{name}` reads its component `{component}`"
+	)]
+	IdComponentInUse {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+
+	/// `what` (an index, a view, an event, a field or a table permission)
+	/// reads the record by names it computes, or hands the record to a body
+	/// that may read any of its fields, so it may read the component
+	/// `component` the record id would drop or rename.
+	#[error(
+		"Cannot change the record id of `{table}`: the {what} `{name}` reads fields of the record by names that cannot be determined, so it may read its component `{component}`"
+	)]
+	IdComponentReadUnresolved {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+
+	/// `what` (an index or a view) reads the record by names it computes, or
+	/// hands the record to a body that may read any of its fields, so it may
+	/// already read a stored field under the name a component would take.
+	#[error(
+		"Cannot name `{component}` in the record id of `{table}`: the {what} `{name}` reads fields of the record by names that cannot be determined, so it may already read a stored `{component}` field. Remove it, then define it again after changing the record id"
+	)]
+	IdComponentReadByExistingUnresolved {
+		table: String,
+		component: String,
+		what: String,
+		name: String,
+	},
+
+	/// A view over the table selects every field and holds rows, which carry
+	/// the components of the record ids they were written under by name; a
+	/// change of the names would not rewrite them.
+	#[error(
+		"Cannot change the record id of `{table}`: the view `{view}` selects every field of `{table}` and holds rows written under the old record id. Remove the view, then define it again after changing the record id"
+	)]
+	IdComponentsUnderWildcardView {
+		table: String,
+		view: String,
+	},
 }
 
 impl LeafError for Error {
@@ -436,6 +597,51 @@ impl LeafError for Error {
 			Error::AccessContextNotReadOnly | Error::AccessContextRequiresRecord => {
 				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
+			// A record id whose components are named cannot take the definition:
+			// the DEFINE/ALTER/REMOVE or the existing data conflicts with the
+			// names, and the author of the statement can correct either.
+			Error::IdComponentUnsupportedKind {
+				..
+			}
+			| Error::IdComponentNameUnsupported {
+				..
+			}
+			| Error::IdComponentsOnRelation(_)
+			| Error::IdComponentsOnView(_)
+			| Error::IdComponentsTableConversion {
+				..
+			}
+			| Error::IdFieldSelectPermission(_)
+			| Error::IdComponentClash {
+				..
+			}
+			| Error::IdComponentShadowsField {
+				..
+			}
+			| Error::IdComponentNotAField {
+				..
+			}
+			| Error::IdComponentsNonConforming {
+				..
+			}
+			| Error::IdComponentsBodyConflict {
+				..
+			}
+			| Error::IdComponentReadByExisting {
+				..
+			}
+			| Error::IdComponentInUse {
+				..
+			}
+			| Error::IdComponentReadUnresolved {
+				..
+			}
+			| Error::IdComponentReadByExistingUnresolved {
+				..
+			}
+			| Error::IdComponentsUnderWildcardView {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 
 			// A `THROW`, reaching the client verbatim. The only kind in this
 			// type the query author chooses.

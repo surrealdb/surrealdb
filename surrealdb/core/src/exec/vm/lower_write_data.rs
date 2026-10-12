@@ -15,6 +15,7 @@
 use surrealdb_types::ToSql as _;
 
 use super::{Lowered, Lowering, NotCovered};
+use crate::catalog::KeyOrigin;
 use crate::exec::operators::write::stage::StageId;
 use crate::exec::vm::program::{
 	AssignShape, DataShape, Enforce, InsertFieldSpec, InsertInto, InsertRowsSpec, Instr, Label,
@@ -137,6 +138,9 @@ impl Lowering<'_, '_> {
 			}
 			StageId::DefaultRecordData => {
 				self.emit(data_instr(DataInstr::StampRecordFields));
+				if self.writes_keyed_table()? {
+					self.emit(data_instr(DataInstr::SettleKeyFields));
+				}
 				Ok(())
 			}
 			StageId::GenerateRecordId => {
@@ -444,6 +448,23 @@ impl Lowering<'_, '_> {
 			bare,
 			checked,
 		})
+	}
+
+	/// Whether the `id` field of the statement's one table names the components of
+	/// its record ids, as the plan read the catalog. Such a table's records are
+	/// judged against their keys ([`DataInstr::SettleKeyFields`]); any other pays
+	/// no instruction for it. A write with no table, which names no `id` field,
+	/// has none.
+	fn writes_keyed_table(&self) -> Lowered<bool> {
+		let Some(table) = self.write_table.as_ref() else {
+			return Ok(false);
+		};
+		let Some(txn) = self.planner.txn() else {
+			return Err(NotCovered::internal("the id field was read with no transaction"));
+		};
+		Ok(self.catalog.table(txn, table)?.is_some_and(|read| {
+			read.key.as_ref().is_some_and(|key| key.origin == KeyOrigin::IdField)
+		}))
 	}
 
 	/// The host pipeline of the `id` field's `DEFAULT` of the statement's one

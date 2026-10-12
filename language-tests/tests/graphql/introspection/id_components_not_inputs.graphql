@@ -1,0 +1,30 @@
+/**
+[env]
+imports = ["../id_components_import.surql"]
+
+[test]
+reason = "The components a record id names are derived, read-only fields, so no create, update or upsert input offers them; the record id itself is the only way to name them"
+
+[[test.results]]
+value = "{ create: { inputFields: [{ name: 'id' }, { name: 'temp' }], kind: 'INPUT_OBJECT' }, update: { inputFields: [{ name: 'temp' }], kind: 'INPUT_OBJECT' }, upsert: { inputFields: [{ name: 'id' }, { name: 'temp' }], kind: 'INPUT_OBJECT' } }"
+*/
+query {
+	create: __type(name: "CreateReadingInput") {
+		kind
+		inputFields {
+			name
+		}
+	}
+	update: __type(name: "UpdateReadingInput") {
+		kind
+		inputFields {
+			name
+		}
+	}
+	upsert: __type(name: "UpsertReadingInput") {
+		kind
+		inputFields {
+			name
+		}
+	}
+}

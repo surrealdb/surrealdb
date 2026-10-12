@@ -1141,16 +1141,19 @@ impl Lowering<'_, '_> {
 }
 
 /// Whether a pipeline over `source` reads nothing of the frame's parameters
-/// through its source: one that evaluates no compiled expression.
+/// through its source: one that evaluates no compiled expression. A scan of
+/// key ranges evaluates its bounds when it opens.
 fn reads_no_frame(source: &Source) -> bool {
 	matches!(
 		source,
 		Source::Once
-			| Source::Scan { .. }
-			| Source::LightweightEdges {
-				record: None,
+			| Source::Scan {
+				range: None,
 				..
-			} | Source::Sorted { .. }
+			} | Source::LightweightEdges {
+			record: None,
+			..
+		} | Source::Sorted { .. }
 			| Source::Groups { .. }
 			| Source::Split { .. }
 	)

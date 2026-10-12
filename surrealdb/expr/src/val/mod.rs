@@ -33,6 +33,7 @@ pub mod evaluator;
 pub mod field_path;
 pub mod file;
 pub mod geometry;
+pub mod key_encoding;
 pub mod number;
 pub mod object;
 pub mod range;
@@ -57,6 +58,9 @@ pub use self::duration::Duration;
 pub use self::evaluator::{BoxInvokeFut, ClosureEvaluator};
 pub use self::file::File;
 pub use self::geometry::Geometry;
+pub use self::key_encoding::{
+	encode_datetime_second_prefix, try_array_key_prefix, try_encode_component,
+};
 pub use self::number::Number;
 pub use self::object::Object;
 pub use self::range::Range;

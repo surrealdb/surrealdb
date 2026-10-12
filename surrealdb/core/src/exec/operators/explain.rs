@@ -100,10 +100,12 @@ struct Redaction {
 
 /// The attributes that print what an access path reads at or a scan applies:
 /// the index and the bound an index scan reads, a record id looked up, a
-/// full-text query, the predicate a scan applies per row. Beneath a
+/// full-text query, the predicate a scan applies per row, and the pinned
+/// components, range and range count of a key-range scan. Beneath a
 /// permission node whose predicate drove the access path these are the
 /// definer's, so a checked caller sees `<permission>` in their place.
-const ACCESS_PATH_ATTRS: &[&str] = &["index", "access", "record_id", "query", "predicate"];
+const ACCESS_PATH_ATTRS: &[&str] =
+	&["index", "access", "record_id", "query", "predicate", "key", "range", "ranges"];
 
 impl Redaction {
 	/// The redaction in force beneath `plan`.

@@ -45,12 +45,12 @@ use super::row_scope::{PathRoot, classify_path_root};
 use super::util::{
 	exact_knn_by, expr_contains_matches, extract_record_id_point_lookup, field_path_from_expr,
 	fold_expressions, has_knn_operator, order_is_scan_compatible, resolve_param_value,
-	resolve_projection_field_idioms, source_field_reads_are_inert, strip_index_conditions,
+	resolve_projection_field_idioms, source_field_reads_are_inert, strip_index_conditions_in,
 	strip_knn_from_condition,
 };
 use super::{PlanTimeVersion, Planner};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
-use crate::catalog::{Index, IndexDefinition};
+use crate::catalog::{Index, IndexDefinition, KeyStructure, table_key};
 use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
@@ -58,6 +58,7 @@ use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path_paged,
 };
 use crate::exec::index::analysis::{IndexAnalyzer, KnnQueryVectors};
+use crate::exec::index::key_range::{DeliveredKeyOrder, KeyRangeAccess, plan_key_range};
 use crate::exec::logical::reads::{
 	declared_read_prefix, paths_overlap, reads_at_or_beneath, reads_row_opaquely,
 };
@@ -761,6 +762,11 @@ impl<'ctx> Planner<'ctx> {
 	/// whose `SELECT` permission is not `FULL` when the caller's reads are
 	/// checked, since that guard reads the stored record. The table's own
 	/// permission and the layers above the scan are the caller's to judge.
+	///
+	/// A field derived from a named record id component
+	/// ([`crate::catalog::FieldDefinition::is_key_part`]) is not a computed
+	/// field here: `id[i]` reads the id alone, which every decode sets from
+	/// the key whatever fields it lists.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn scan_decode_fields(
 		&self,
@@ -798,7 +804,7 @@ impl<'ctx> Planner<'ctx> {
 		defined
 			.iter()
 			.all(|fd| {
-				fd.computed.is_none()
+				(fd.computed.is_none() || fd.is_key_part())
 					&& (!checked
 						|| matches!(fd.select_permission, crate::catalog::Permission::Full))
 			})
@@ -900,10 +906,20 @@ impl<'ctx> Planner<'ctx> {
 		let Ok(indexes) = filter_online_indexes(txn, ns_id, db_id, indexes).await else {
 			return false;
 		};
-		let cond_sql = cond.to_sql();
-		indexes.iter().any(|ix| {
-			matches!(&ix.index, Index::Count(Some(_)))
-				&& ix.count_cond.as_ref().is_some_and(|c| c.0.to_sql() == cond_sql)
+		let guards: Vec<_> = indexes
+			.iter()
+			.filter(|ix| matches!(&ix.index, Index::Count(Some(_))))
+			.filter_map(|ix| ix.count_cond.as_ref())
+			.collect();
+		if guards.is_empty() {
+			return false;
+		}
+		// Where the table's record ids name their components, a guard written
+		// with a component's name is the condition a layer moved beneath
+		// itself, which reads that component as an element of the id.
+		let key = self.record_key_structure(txn, ns_id, db_id, table_name).await;
+		guards.iter().any(|guard| {
+			crate::exec::index::derived_columns::guard_counts(key.as_deref(), &guard.0, cond)
 		})
 	}
 
@@ -1139,7 +1155,10 @@ impl<'ctx> Planner<'ctx> {
 			})
 		};
 
-		let analyzer = columns.analyzer(with);
+		// The key lets the analyzer match a column that addresses a component
+		// of the record id, and widen a range over a datetime one.
+		let key = self.record_key_structure(txn, ns_id, db_id, table_name).await;
+		let analyzer = columns.analyzer(with).with_key(key.clone());
 		let candidates = analyzer.analyze(Some(cond), None);
 
 		// Look for a candidate that fully covers the WHERE condition
@@ -1161,10 +1180,26 @@ impl<'ctx> Planner<'ctx> {
 			) {
 				continue;
 			}
+			// A range widened to the seconds of its bounds counts records its
+			// predicate rejects.
+			if crate::exec::index::derived_columns::range_is_widened(
+				&candidate.index_ref,
+				&candidate.access,
+			) {
+				continue;
+			}
 			// Check: does this index access fully cover the condition?
 			// If strip_index_conditions returns None, the index
-			// consumed the entire WHERE clause.
-			if strip_index_conditions(cond, &candidate.access, &candidate.index_ref.cols).is_none()
+			// consumed the entire WHERE clause. A conjunct that reads a
+			// component of the record id as `id[i]` is the column the index
+			// holds for it.
+			if strip_index_conditions_in(
+				cond,
+				&candidate.access,
+				&candidate.index_ref.cols,
+				key.as_deref(),
+			)
+			.is_none()
 			{
 				return Some((candidate.index_ref.clone(), candidate.access.clone()));
 			}
@@ -1206,7 +1241,8 @@ impl<'ctx> Planner<'ctx> {
 		let columns =
 			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
-		let analyzer = columns.analyzer(with);
+		let key = self.record_key_structure(txn, ns_id, db_id, table_name).await;
+		let analyzer = columns.analyzer(with).with_key(key);
 		analyzer.try_bitmap_count_fusion(cond, &exact_col)
 	}
 
@@ -1409,6 +1445,13 @@ impl<'ctx> Planner<'ctx> {
 	/// would hand the sort an already-truncated prefix. The runtime fallback
 	/// (`operators/scan/dynamic.rs`) applies the same guard when it runs,
 	/// against the actor's resolved field permissions.
+	///
+	/// `permissioned` says a table permission predicate is part of `cond`
+	/// ([`super::AccessOffer::permissioned`]): a key range over the
+	/// components of the record id then takes only literal bounds, since a
+	/// bound evaluated when the scan opens is evaluated in the caller's
+	/// frame, not the definer's.
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn decide_access_path(
 		&self,
 		table_name: &TableName,
@@ -1417,6 +1460,7 @@ impl<'ctx> Planner<'ctx> {
 		with: Option<&With>,
 		has_query_limit: bool,
 		versioned: bool,
+		permissioned: bool,
 	) -> Option<AccessDecision> {
 		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
 			return None;
@@ -1437,6 +1481,7 @@ impl<'ctx> Planner<'ctx> {
 				with,
 				has_query_limit,
 				versioned,
+				permissioned,
 				&restricted_select,
 			)
 			.await
@@ -1453,6 +1498,14 @@ impl<'ctx> Planner<'ctx> {
 	/// Performs index analysis using the WHERE condition and ORDER BY clause.
 	/// Returns the selected `AccessPath` and scan direction, or `None` if
 	/// the namespace/database cannot be resolved.
+	///
+	/// Over a table whose record ids name their components, or an aggregated
+	/// view, whose rows are keyed by their group values, a key range over
+	/// the record keys ([`plan_key_range`]) competes with the index
+	/// candidates
+	/// ([`IndexCandidate::outranks_key_range`](crate::exec::index::IndexCandidate::outranks_key_range));
+	/// it is not planned
+	/// under a `VERSION`, a `WITH` hint, a `MATCHES` or a KNN operator.
 	#[allow(clippy::too_many_arguments)]
 	async fn resolve_access_path(
 		&self,
@@ -1465,6 +1518,7 @@ impl<'ctx> Planner<'ctx> {
 		with: Option<&With>,
 		has_limit: bool,
 		has_version: bool,
+		permissioned: bool,
 		restricted_select: &RestrictedPrefixes,
 	) -> Result<Option<(AccessPath, Direction)>, Error> {
 		let direction = determine_scan_direction(order);
@@ -1501,6 +1555,44 @@ impl<'ctx> Planner<'ctx> {
 		let db_def = match txn.get_db_by_name(ns_name, db_name, None).await {
 			Ok(Some(db)) => db,
 			_ => return Ok(None),
+		};
+
+		// The structure of the table's record ids, where they name their
+		// components or the table is an aggregated view: what a key range is
+		// planned against, and what the index analyzer matches a column
+		// addressing a component by. An ordering reads it too, for an index
+		// over a datetime component delivers no order within a second.
+		let key = match (cond, order) {
+			(None, None) => None,
+			_ => {
+				self.record_key_structure(txn, ns_def.namespace_id, db_def.database_id, table_name)
+					.await
+			}
+		};
+		// A read at a stamp plans no key range: the structure was checked
+		// against the keys present when it was defined, not against the keys a
+		// past stamp holds. A `WITH` hint chooses the read, and a `MATCHES` or
+		// a KNN operator has no answer but its index.
+		let key_range = match (&key, cond) {
+			(Some(key), Some(cond))
+				if with.is_none()
+					&& !self.reads_versioned(has_version)
+					&& !expr_contains_matches(cond)
+					&& !has_knn_operator(cond) =>
+			{
+				// A conjunct that reads a field the caller may not read is
+				// left to the reduced row, as it is for an index.
+				let conjuncts: Vec<&LogicalExpr> = crate::exec::logical::conjuncts(cond)
+					.into_iter()
+					.filter(|c| !restricted_select.cond_touches(c))
+					.collect();
+				plan_key_range(key, &conjuncts, order, permissioned, self.function_registry())
+			}
+			_ => None,
+		};
+		let key_range_path = |access: KeyRangeAccess| {
+			let direction = access.direction;
+			(AccessPath::KeyRange(access), direction)
 		};
 
 		// Fetch queryable indexes for the table. Building or errored durable
@@ -1567,7 +1659,7 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		if indexes.is_empty() {
-			return Ok(Some((AccessPath::TableScan, direction)));
+			return Ok(Some(key_range.map_or((AccessPath::TableScan, direction), key_range_path)));
 		}
 
 		// Rewrite projection function calls (e.g. type::field("name")) →
@@ -1590,7 +1682,7 @@ impl<'ctx> Planner<'ctx> {
 		// answered from the reduced document instead.
 		let indexes = drop_restricted_indexes(indexes, restricted_select);
 		if indexes.is_empty() {
-			return Ok(Some((AccessPath::TableScan, direction)));
+			return Ok(Some(key_range.map_or((AccessPath::TableScan, direction), key_range_path)));
 		}
 		// Only an ANN index reads a KNN query vector; without one, a
 		// brute-force source resolves its own.
@@ -1613,8 +1705,27 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(None);
 		};
 
-		let analyzer = columns.analyzer(with).with_knn_query_vectors(&knn_query_vectors);
+		let analyzer =
+			columns.analyzer(with).with_key(key).with_knn_query_vectors(&knn_query_vectors);
 		let candidates = analyzer.analyze(analysis_cond, order);
+
+		// A key range is chosen unless an index candidate outranks it, and only
+		// a candidate that outranks it is chosen in its place.
+		let candidates = match key_range {
+			Some(access) => {
+				let pinned = access.eq.len();
+				let delivers = access.delivers == DeliveredKeyOrder::Exact;
+				let outranking: Vec<_> = candidates
+					.into_iter()
+					.filter(|c| c.outranks_key_range(pinned, delivers, has_limit))
+					.collect();
+				if outranking.is_empty() {
+					return Ok(Some(key_range_path(access)));
+				}
+				outranking
+			}
+			None => candidates,
+		};
 
 		// Bitmap candidate fusion: when the WHERE clause is an AND of several
 		// index-backed predicates, intersect per-branch candidate bitmaps
@@ -1810,6 +1921,34 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		Ok(Some((path, direction)))
+	}
+
+	/// The structure of `table`'s record ids that access-path selection reads:
+	/// the one [`table_key`] derives, from the `id` field where it names its
+	/// components and from the group expressions of an aggregated view.
+	/// `None` for every other table.
+	async fn record_key_structure(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+	) -> Option<Arc<KeyStructure>> {
+		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
+		let definition = txn.get_tb(ns_id, db_id, table_name, None).await.ok()??;
+		table_key(&definition, &fields)
+	}
+
+	/// The structure of `table`'s record ids where its `id` field names their
+	/// components, read in the planner's transaction; `None` for every other
+	/// table, and where the planner has no transaction or the catalog cannot
+	/// answer.
+	pub(crate) async fn named_key_structure(&self, table: &TableName) -> Option<Arc<KeyStructure>> {
+		let txn = self.txn.as_ref()?;
+		let (ns, db) = self.ns_db_ids().await?;
+		self.record_key_structure(txn, ns, db, table)
+			.await
+			.filter(|key| key.origin == crate::catalog::KeyOrigin::IdField)
 	}
 
 	/// Attempt to build the bitmap fusion plan for `resolve_access_path`.
@@ -2590,9 +2729,11 @@ fn is_id_field(expr: &LogicalExpr) -> bool {
 /// order. `dedupe` says whether branches can list the same record.
 ///
 /// A merge by record id applies to `ORDER BY id` alone over equality scans,
-/// each of which lists its records in id order. A merge by an index key
-/// applies where every branch pins the same composite-index prefix and the
-/// ordering is that index's next column.
+/// each of which lists its records in id order where the record ids order by
+/// value ([`IndexRef::orders_by_id`]). A merge by an index key applies where
+/// every branch pins the same composite-index prefix and the ordering is that
+/// index's next column, which orders by value
+/// ([`IndexRef::orders_coarsely`]).
 pub(crate) fn decide_union_merge(
 	paths: Vec<AccessPath>,
 	dedupe: bool,
@@ -2600,15 +2741,17 @@ pub(crate) fn decide_union_merge(
 ) -> (Vec<AccessPath>, Option<MergeMode>) {
 	// Enable merge-sort by record ID when ORDER BY is `id ASC/DESC`
 	// only and every sub-path is an equality B-tree scan (each one
-	// already produces records in record-ID order).
+	// already produces records in record-ID order, unless the record ids
+	// order other than by value).
 	let merge_dir = detect_order_by_id_only(order).filter(|_| {
 		paths.iter().all(|p| {
 			matches!(
 				p,
 				AccessPath::BTreeScan {
+					index_ref,
 					access: BTreeAccess::Equality(_),
 					..
-				}
+				} if index_ref.orders_by_id()
 			)
 		})
 	});
@@ -2751,6 +2894,11 @@ fn detect_order_for_composite_union(
 	// that is exactly the ORDER BY target.
 	let ix_def = first_index_ref.definition();
 	if ix_def.cols.len() <= first_prefix_len {
+		return None;
+	}
+	// A column whose entries order only by the whole second leaves each
+	// branch out of order within a second.
+	if first_index_ref.orders_coarsely(first_prefix_len) {
 		return None;
 	}
 	let sort_col_idiom = ix_def.cols.get(first_prefix_len)?;

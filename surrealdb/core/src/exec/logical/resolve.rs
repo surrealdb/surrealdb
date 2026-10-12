@@ -47,7 +47,14 @@
 //! computed fields, and Cr ⊆ C the fields that need re-derivation: a body
 //! that reads some g ∈ S by name — `g`, `$this.g`, `$parent.g` — or
 //! dereferences its own id, plus everything that transitively reads a field
-//! in Cr. What the statement *needs* of C is what its stages read by name,
+//! in Cr. The field a named component of the record id derives (`city` of an
+//! `id` declared `[city: string, ..]`) is a member of C whose body is `id[i]`:
+//! its derivation column carries the key-part frame ([`EvalFrame::key_part`]),
+//! which says the column reads that component of the id and nothing else, and
+//! the body indexes the key of the id rather than dereferencing it. It reads
+//! `id` alone, which DDL keeps out of S while it names components, and no
+//! member of C, so it is not in Cr. What the
+//! statement *needs* of C is what its stages read by name,
 //! transitively through the bodies — a nested statement that inherits the
 //! row ([`LogicalOp::inherits_row`]) reads with the stage that holds it —
 //! or all of C when a stage reads the row as a whole: `*`, a row parameter,
@@ -343,11 +350,34 @@ struct FieldFacts {
 	/// The definer's authority, when it narrows the caller's; `None` for the
 	/// root-Owner stamp, which narrows nothing.
 	auth: Option<crate::iam::AuthLimit>,
+	/// The position of the record id component the field names, for the
+	/// virtual definition of one ([`FieldDefinition::key_part`]). Its
+	/// `computed` body is `id[position]`.
+	key_part: Option<u32>,
 }
 
 impl FieldFacts {
 	fn restricted(&self) -> bool {
 		!matches!(self.select, LogicalPermission::Full)
+	}
+
+	/// The frame of the column that derives this computed field from the row
+	/// as the scan reads it: one that says the column reads a record id
+	/// component for the field of a named component, and the frame of a
+	/// computed body for every other computed field.
+	fn derivation_frame(&self) -> EvalFrame {
+		match self.key_part {
+			Some(_) => EvalFrame::key_part(),
+			None => EvalFrame::computed(self.auth.clone()),
+		}
+	}
+
+	/// Whether `body`, this computed field's body, reaches the row through its
+	/// own record id and so reads a record other than the row it is evaluated
+	/// on. The body of a named component, `id[position]`, indexes the key of
+	/// the id and follows no link.
+	fn dereferences_own_id(&self, body: &LogicalExpr) -> bool {
+		self.key_part.is_none() && dereferences_own_id(body)
 	}
 
 	/// The field the path starts from: the key of the row a column standing
@@ -933,6 +963,7 @@ fn table_facts(
 			computed,
 			select,
 			auth,
+			key_part: fd.key_part,
 		});
 	}
 	let schema = match &def {
@@ -1695,7 +1726,7 @@ impl Resolver<'_> {
 				let body = field.computed.as_ref().expect("a computed field");
 				if whole_row.contains(field.root())
 					|| reads_any_of(body, &stored_roots, ROW_PARAMS)
-					|| dereferences_own_id(body)
+					|| field.dereferences_own_id(body)
 				{
 					rederived.insert(field.root().clone());
 				}
@@ -1759,7 +1790,9 @@ impl Resolver<'_> {
 				}
 			}
 			let guarded_roots: HashSet<Strand> = if all
-				|| rederived_needed.iter().any(|field| dereferences_own_id(&bodies[field.root()]))
+				|| rederived_needed
+					.iter()
+					.any(|field| field.dereferences_own_id(&bodies[field.root()]))
 			{
 				stored_roots.clone()
 			} else {
@@ -1827,7 +1860,7 @@ impl Resolver<'_> {
 				field.root().as_str(),
 				bodies[field.root()].clone(),
 				field.kind.clone(),
-				EvalFrame::computed(field.auth.clone()),
+				field.derivation_frame(),
 			));
 		}
 		if !scope.checks {
@@ -4444,5 +4477,132 @@ mod tests {
 			.await
 			.expect("resolves");
 		assert!(permission_predicates(&plan).is_empty(), "{plan}");
+	}
+	/// A table whose `id` names two components, and an ordinary computed field
+	/// that reads one of them.
+	const READINGS: &str = "DEFINE TABLE reading SCHEMAFULL PERMISSIONS FULL;
+		 DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+		 DEFINE FIELD temp ON reading TYPE int;
+		 DEFINE FIELD label ON reading TYPE string COMPUTED string::concat(city, '-', temp);";
+
+	/// The declared kind and the frame of a layer column.
+	fn kind_and_frame(field: LogicalField) -> (Option<Kind>, EvalFrame) {
+		let LogicalField::Single {
+			kind,
+			frame,
+			..
+		} = field
+		else {
+			unreachable!()
+		};
+		(kind, frame)
+	}
+
+	/// A component is derived as a computed column whose frame says it reads
+	/// the record id, and a field that reads it derives one rank above.
+	#[tokio::test]
+	async fn a_component_is_a_key_column_beneath_the_fields_that_read_it() {
+		use crate::expr::logical::EvalMode;
+
+		let fixture = Fixture::new(READINGS).await;
+		let bound = fixture.bound_as(&owner(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+		let plan = super::super::bind(
+			super::super::lower_test("SELECT city, label FROM reading WHERE city = 'Paris'"),
+			&bx,
+		)
+		.await
+		.expect("binds");
+		let layers = layer_nodes(&plan);
+		let [upper, lower] = layers.as_slice() else {
+			panic!("{plan}");
+		};
+		let (kind, frame) = kind_and_frame(column(lower, "city"));
+		assert_eq!(kind, Some(Kind::String), "{plan}");
+		assert_eq!(frame, EvalFrame::key_part(), "{plan}");
+		assert_eq!(frame.mode, EvalMode::Computed);
+		assert!(frame.auth.is_none(), "reading the id narrows nothing");
+		// An ordinary computed field is not a key column, whatever it reads.
+		let (kind, frame) = kind_and_frame(column(upper, "label"));
+		assert_eq!(kind, Some(Kind::String), "{plan}");
+		assert_eq!(frame.mode, EvalMode::Computed);
+		assert!(!frame.key_part, "{plan}");
+		// `time` is not read, so it is not derived.
+		assert!(!plan.to_string().contains("AS time"), "{plan}");
+		// The plan says which columns read the id.
+		let text = plan.to_string();
+		assert!(text.contains("@computed @key"), "{text}");
+		assert_eq!(text.matches("@key").count(), 1, "{text}");
+
+		// What the schema reads each column as: the component by the type the
+		// id declares for it.
+		let schema = upper.schema();
+		let kind_of = |name: &str| schema.field(&FieldPath::field(name)).map(|f| f.kind.clone());
+		assert_eq!(kind_of("city"), Some(Kind::String));
+		assert_eq!(kind_of("label"), Some(Kind::String));
+		let plan = super::super::bind(super::super::lower_test("SELECT time FROM reading"), &bx)
+			.await
+			.expect("binds");
+		let layers = layer_nodes(&plan);
+		let [only] = layers.as_slice() else {
+			panic!("{plan}");
+		};
+		let schema = only.schema();
+		assert_eq!(
+			schema.field(&FieldPath::field("time")).map(|f| f.kind.clone()),
+			Some(Kind::Datetime)
+		);
+	}
+
+	/// A statement that reads no component derives none, and one that reads the
+	/// whole row derives all of them with the fields that read them.
+	#[tokio::test]
+	async fn components_are_derived_where_they_are_read() {
+		let fixture = Fixture::new(READINGS).await;
+		for sql in [
+			"SELECT temp FROM reading",
+			"SELECT id, temp FROM reading WHERE temp > 1 ORDER BY temp",
+			"SELECT count() FROM reading GROUP ALL",
+		] {
+			let plan = fixture.bind_as(&owner(), sql).await;
+			assert!(layers(&plan).is_empty(), "{sql}\n{plan}");
+		}
+
+		let bound = fixture.bound_as(&owner(), vec![]).await;
+		let bx = fixture.bind_context(&bound);
+		let plan = super::super::bind(super::super::lower_test("SELECT * FROM reading"), &bx)
+			.await
+			.expect("binds");
+		let layers = layer_nodes(&plan);
+		let [upper, lower] = layers.as_slice() else {
+			panic!("{plan}");
+		};
+		for name in ["city", "time"] {
+			let (_, frame) = kind_and_frame(column(lower, name));
+			assert_eq!(frame, EvalFrame::key_part(), "{name}\n{plan}");
+		}
+		let (_, frame) = kind_and_frame(column(upper, "label"));
+		assert!(!frame.key_part, "{plan}");
+	}
+
+	/// A component depends on the record id alone, so a restricted stored field
+	/// puts no guard beneath it, while an ordinary computed field that reaches
+	/// the row through its own id is re-derived from the reduced record.
+	#[tokio::test]
+	async fn a_component_is_not_rederived_beneath_a_restricted_field() {
+		let fixture = Fixture::new(
+			"DEFINE TABLE reading SCHEMAFULL PERMISSIONS FULL;
+			 DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
+			 DEFINE FIELD secret ON reading TYPE string PERMISSIONS FOR select NONE;
+			 DEFINE FIELD peek ON reading COMPUTED id.secret;",
+		)
+		.await;
+		let plan = fixture.bind_as(&record_user(), "SELECT city, time FROM reading").await;
+		assert!(!plan.contains("@permission"), "{plan}");
+		assert!(plan.contains("@computed @key"), "{plan}");
+		// The control: a body that follows its own id is judged against what the
+		// caller may see of the record, so the guard is in the plan.
+		let plan = fixture.bind_as(&record_user(), "SELECT peek FROM reading").await;
+		assert!(plan.contains("@permission"), "{plan}");
 	}
 }

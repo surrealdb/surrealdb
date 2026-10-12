@@ -1,20 +1,27 @@
 //! What an expression reads off the row, as the rules and the physical
 //! planner both need to know it.
 //!
-//! Two questions are answered here. Which declared position a path reads
+//! Three questions are answered here. Which declared position a path reads
 //! ([`declared_read_prefix`], [`reads_at_or_beneath`], [`reads_beneath`]),
 //! which is how a rule tells a conjunct that reads a layer's column from one
 //! that reads only what the layer passes through. And whether an expression
 //! reads the row other than by a field's name ([`reads_row_opaquely`]), in
 //! which case what it reaches cannot be told from the expression and nothing
 //! may move it past a node that sets columns on the row.
+//!
+//! A third concerns the layers of a table whose record id names its
+//! components: the column that stands for a component is a read of one element
+//! of the id ([`key_part_columns`]), so a read of the column is the same read
+//! made of the id wherever it stands ([`substitute_key_parts`]).
 
 use std::ops::ControlFlow;
 
 use super::effects::Oracle;
+use super::rules::rewrite_positions;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{
-	FieldPath, FieldSegment, LogicalExpr, LogicalFields, effects_of, invokes_unseen_body,
+	FieldPath, FieldSegment, LogicalExpr, LogicalField, LogicalFields, LogicalLiteral, effects_of,
+	invokes_unseen_body,
 };
 
 /// Whether `expr` may read the row other than by a field's name: through a
@@ -226,4 +233,242 @@ pub(crate) fn layer_column_names(fields: &LogicalFields) -> Vec<FieldPath> {
 		.filter_map(|field| field.output_path())
 		.map(|path| FieldPath::field(path.name()))
 		.collect()
+}
+
+/// A column of a layer that stands for one component of the record id.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct KeyColumn {
+	/// The field the column lands under.
+	pub(crate) name: String,
+	/// What the column evaluates: a read of one element of the record id,
+	/// which depends on the id alone.
+	pub(crate) body: LogicalExpr,
+}
+
+/// The columns of a layer's `fields` that stand for a component of the record
+/// id: those whose frame is
+/// [`EvalFrame::key_part`](crate::expr::logical::EvalFrame::key_part). Empty
+/// for every other layer, which is every layer of a table whose id names no
+/// components.
+pub(crate) fn key_part_columns(fields: &LogicalFields) -> Vec<KeyColumn> {
+	let LogicalFields::Select(fields) = fields else {
+		return Vec::new();
+	};
+	fields
+		.iter()
+		.filter_map(|field| match field {
+			LogicalField::Single {
+				expr,
+				frame,
+				..
+			} if frame.key_part => Some(KeyColumn {
+				name: field.output_path()?.as_field()?.to_owned(),
+				body: expr.clone(),
+			}),
+			LogicalField::Single {
+				..
+			}
+			| LogicalField::All => None,
+		})
+		.collect()
+}
+
+/// `expr` with each read, at the row, of a column in `columns` replaced by the
+/// expression the column evaluates, or `None` when it reads none.
+///
+/// A column that stands for a component of the record id holds the element the
+/// id holds, so a conjunct over the column is the same expression over that
+/// element, which reads no column of any layer. Only a read of the row's own
+/// field is replaced: one inside a body evaluated against another value (an
+/// element of a `[WHERE …]` filter, a destructure, a nested plan, a closure)
+/// names that value's field and is left as written, so the result may still
+/// read a column, which the caller decides.
+pub(crate) fn substitute_key_parts(
+	expr: &LogicalExpr,
+	columns: &[KeyColumn],
+) -> Option<LogicalExpr> {
+	substitute(expr, columns, false)
+}
+
+/// [`substitute_key_parts`] for an expression evaluated against a record whose
+/// component fields are not materialised, such as a `COUNT` index's guard:
+/// a read of a component through the record (`$this.city`, `$self.city`,
+/// `@.city`, `$this['city']`, `$self['city']`) is replaced as a bare read of it
+/// is. `@['city']` indexes the record id rather than reading the record, so it
+/// is left as written.
+pub(crate) fn substitute_record_key_parts(
+	expr: &LogicalExpr,
+	columns: &[KeyColumn],
+) -> Option<LogicalExpr> {
+	substitute(expr, columns, true)
+}
+
+fn substitute(
+	expr: &LogicalExpr,
+	columns: &[KeyColumn],
+	through_record: bool,
+) -> Option<LogicalExpr> {
+	let is_the_record = |base: &LogicalExpr| {
+		matches!(base, LogicalExpr::Doc)
+			|| matches!(base, LogicalExpr::Param(param) if matches!(param.as_str(), "this" | "self"))
+	};
+	let column_of = |e: &LogicalExpr| -> Option<&KeyColumn> {
+		let name = if let LogicalExpr::Field(name) = e {
+			name.as_str()
+		} else if let LogicalExpr::Access {
+			base,
+			field,
+		} = e && through_record
+			&& is_the_record(base)
+		{
+			field.as_str()
+		} else if let LogicalExpr::Index {
+			base,
+			index,
+		} = e && through_record
+			&& matches!(base.as_ref(), LogicalExpr::Param(param) if matches!(param.as_str(), "this" | "self"))
+			&& let LogicalExpr::Literal(LogicalLiteral::String(field)) = index.as_ref()
+		{
+			field.as_str()
+		} else {
+			return None;
+		};
+		columns.iter().find(|c| c.name == name)
+	};
+	if columns.is_empty() || !expr.any(|e| column_of(e).is_some()) {
+		return None;
+	}
+	let mut out = expr.clone();
+	let mut changed = false;
+	rewrite_positions(&mut out, true, &mut |e, at_row| {
+		if at_row && let Some(column) = column_of(e) {
+			*e = column.body.clone();
+			changed = true;
+		}
+	});
+	changed.then_some(out)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::super::lower_test as lower;
+	use super::*;
+	use crate::expr::Kind;
+	use crate::expr::logical::{EvalFrame, LogicalFilter, LogicalOp, LogicalProject};
+
+	/// The predicate of `SELECT * FROM t WHERE <condition>`.
+	fn predicate(condition: &str) -> LogicalExpr {
+		let LogicalOp::Project(LogicalProject {
+			input,
+			..
+		}) = lower(&format!("SELECT * FROM t WHERE {condition}"))
+		else {
+			panic!("expected a projection on top");
+		};
+		let LogicalOp::Filter(LogicalFilter {
+			predicate,
+			..
+		}) = *input
+		else {
+			panic!("expected a filter");
+		};
+		predicate
+	}
+
+	fn id_element(position: i64) -> LogicalExpr {
+		LogicalExpr::Index {
+			base: Box::new(LogicalExpr::Field("id".into())),
+			index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(position))),
+		}
+	}
+
+	fn column(name: &str, expr: LogicalExpr, frame: EvalFrame) -> LogicalField {
+		LogicalField::column(name, expr, Some(Kind::Int), frame)
+	}
+
+	fn city_and_time() -> Vec<KeyColumn> {
+		vec![
+			KeyColumn {
+				name: "city".to_owned(),
+				body: id_element(0),
+			},
+			KeyColumn {
+				name: "time".to_owned(),
+				body: id_element(1),
+			},
+		]
+	}
+
+	#[test]
+	fn the_key_columns_of_a_layer_are_those_in_the_key_part_frame() {
+		let fields = LogicalFields::Select(vec![
+			LogicalField::All,
+			column("city", id_element(0), EvalFrame::key_part()),
+			column("c", LogicalExpr::Field("a".into()), EvalFrame::computed(None)),
+			column("time", id_element(1), EvalFrame::key_part()),
+			column("g", LogicalExpr::Field("b".into()), EvalFrame::permission(None)),
+		]);
+		assert_eq!(key_part_columns(&fields), city_and_time());
+		// A computed column with the same body is not one.
+		let fields = LogicalFields::Select(vec![
+			LogicalField::All,
+			column("c", id_element(0), EvalFrame::computed(None)),
+		]);
+		assert!(key_part_columns(&fields).is_empty());
+		assert!(key_part_columns(&LogicalFields::all()).is_empty());
+		let value = LogicalFields::Value {
+			expr: LogicalExpr::Field("a".into()),
+			alias: None,
+		};
+		assert!(key_part_columns(&value).is_empty());
+	}
+
+	#[test]
+	fn a_read_of_a_key_column_becomes_the_read_of_the_id_element() {
+		let columns = city_and_time();
+		assert_eq!(
+			substitute_key_parts(&predicate("city = 'x'"), &columns),
+			Some(predicate("id[0] = 'x'"))
+		);
+		assert_eq!(
+			substitute_key_parts(&predicate("city = 'x' AND time > 1 AND a = 2"), &columns),
+			Some(predicate("id[0] = 'x' AND id[1] > 1 AND a = 2"))
+		);
+		assert_eq!(
+			substitute_key_parts(&predicate("string::lowercase(city) = 'x'"), &columns),
+			Some(predicate("string::lowercase(id[0]) = 'x'"))
+		);
+		assert_eq!(
+			substitute_key_parts(&predicate("city.x = 4"), &columns),
+			Some(predicate("id[0].x = 4"))
+		);
+		// Only the columns named are substituted.
+		assert_eq!(
+			substitute_key_parts(&predicate("city = 'x' AND time > 1"), &columns[..1]),
+			Some(predicate("id[0] = 'x' AND time > 1"))
+		);
+	}
+
+	#[test]
+	fn an_expression_that_names_no_column_is_not_rewritten() {
+		let columns = city_and_time();
+		for condition in ["a = 1", "$this.city = 'x'", "x.city = 'x'", "type::field('city') = 1"] {
+			assert_eq!(substitute_key_parts(&predicate(condition), &columns), None, "{condition}");
+		}
+		assert_eq!(substitute_key_parts(&predicate("city = 'x'"), &[]), None);
+	}
+
+	#[test]
+	fn a_read_in_a_body_is_left_as_written() {
+		let columns = city_and_time();
+		// The `city` in the filter body names a field of the element filtered.
+		assert_eq!(
+			substitute_key_parts(&predicate("tags[WHERE city = 'x'] != []"), &columns),
+			None
+		);
+		assert_eq!(
+			substitute_key_parts(&predicate("city = tags[WHERE city = 'x'][0]"), &columns),
+			Some(predicate("id[0] = tags[WHERE city = 'x'][0]"))
+		);
+	}
 }

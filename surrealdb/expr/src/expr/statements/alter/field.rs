@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::AlterKind;
 use crate::expr::permission::{FieldPermissions, Permissions};
 use crate::expr::reference::Reference;
-use crate::expr::{CoverStmts, Expr, Kind, Literal};
+use crate::expr::{CoverStmts, Expr, KeyNames, KeyNamesError, Kind, KindLiteral, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
@@ -21,6 +21,11 @@ pub struct AlterFieldStatement {
 	pub what: Expr,
 	pub if_exists: bool,
 	pub kind: AlterKind<Kind>,
+	/// The names of the components of the tuple type of an `id` field: `Set` with
+	/// a named `TYPE`, `Drop` with an unnamed `TYPE` or `DROP TYPE`, `None` when
+	/// the statement leaves the type alone. Change it through
+	/// [`Self::set_type`].
+	pub key_names: AlterKind<KeyNames>,
 	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
 	/// Set or drop the `INLINE` clause.
@@ -40,6 +45,7 @@ impl Default for AlterFieldStatement {
 			what: Expr::Literal(Literal::None),
 			if_exists: false,
 			kind: AlterKind::None,
+			key_names: AlterKind::None,
 			flexible: AlterKind::None,
 			readonly: AlterKind::None,
 			inline: AlterKind::None,
@@ -53,6 +59,40 @@ impl Default for AlterFieldStatement {
 	}
 }
 
+impl AlterFieldStatement {
+	/// Sets the type and the names of the components of the record id.
+	///
+	/// `Set` names must come with a `Set` tuple type of one element per name.
+	/// The type of an unnamed `TYPE` or `DROP TYPE` carries `Drop` names, and a
+	/// statement without a `TYPE` clause carries `None`.
+	///
+	/// # Errors
+	///
+	/// [`KeyNamesError::Arity`] when the names do not match the tuple. The
+	/// statement is unchanged.
+	pub fn set_type(
+		&mut self,
+		kind: AlterKind<Kind>,
+		names: AlterKind<KeyNames>,
+	) -> Result<(), KeyNamesError> {
+		if let AlterKind::Set(names) = &names {
+			let kinds = match &kind {
+				AlterKind::Set(Kind::Literal(KindLiteral::Array(kinds))) => kinds.len(),
+				_ => 0,
+			};
+			if kinds != names.len() {
+				return Err(KeyNamesError::Arity {
+					names: names.len(),
+					kinds,
+				});
+			}
+		}
+		self.kind = kind;
+		self.key_names = names;
+		Ok(())
+	}
+}
+
 impl ToSql for AlterFieldStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "ALTER FIELD");
@@ -61,7 +101,19 @@ impl ToSql for AlterFieldStatement {
 		}
 		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		match self.kind {
-			AlterKind::Set(ref x) => write_sql!(f, fmt, " TYPE {x}"),
+			AlterKind::Set(ref x) => match (&self.key_names, x) {
+				(AlterKind::Set(names), Kind::Literal(KindLiteral::Array(kinds)))
+					if kinds.len() == names.len() =>
+				{
+					write_sql!(f, fmt, " TYPE {}", names.fmt_keyed(kinds));
+				}
+				(AlterKind::Set(_), _) => {
+					debug_assert!(false, "component names do not match the type of the field");
+					tracing::error!("component names do not match the type of the field");
+					write_sql!(f, fmt, " TYPE {x}");
+				}
+				_ => write_sql!(f, fmt, " TYPE {x}"),
+			},
 			AlterKind::Drop => write_sql!(f, fmt, " DROP TYPE"),
 			AlterKind::None => {}
 		}

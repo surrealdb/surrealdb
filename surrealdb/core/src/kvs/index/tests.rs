@@ -11268,6 +11268,227 @@ async fn unique_collision_across_transactions_rocksdb() -> Result<()> {
 	unique_collision_across_transactions(ds, session).await
 }
 
+/// What `table`'s index `index` compiles to in a build, and holds for `image`:
+/// whether the entry reads the record's own id, the values it indexes, and the
+/// answer of its guard.
+#[cfg(feature = "kv-mem")]
+async fn compiled_entry_over(
+	ds: &Datastore,
+	session: &Session,
+	table: &str,
+	index: &str,
+	image: &Value,
+) -> Result<(bool, Option<Vec<Value>>, Option<bool>)> {
+	let (ns, db, table, ix) = get_table_index(ds, table, index).await?;
+	let building = new_building_for_index(ds, session, ns, db, &table, ix).await?;
+	let ctx = building.new_write_tx_ctx().await?;
+	let exec = building.exec_ctx(&ctx).await?;
+	let entry = building.compiled_index(&exec).await?;
+	let values = entry.values(image, &exec).await?;
+	let guard = entry.guard_matches(image, &exec).await?;
+	ctx.tx().cancel().await?;
+	Ok((entry.reads_record_id(), values, guard))
+}
+
+/// A build compiles a column or a guard that names a component of the table's
+/// record id as the write path compiles it, from the structure the `id` field
+/// declares, and compiles every other column as it is stored.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_build_compiles_the_components_of_a_named_record_id() -> Result<()> {
+	use crate::val::Object;
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD id ON t TYPE [feed: string, n: int];
+		 DEFINE INDEX by_n ON t FIELDS n;
+		 DEFINE INDEX by_element ON t FIELDS id[1];
+		 DEFINE INDEX by_feed_v ON t FIELDS feed, v;
+		 DEFINE INDEX by_v ON t FIELDS v;
+		 DEFINE INDEX only_f ON t COUNT WHERE feed = 'f';
+		 DEFINE INDEX only_f_this ON t COUNT WHERE $this.feed = 'f';
+		 DEFINE INDEX only_f_doc ON t COUNT WHERE @.feed = 'f';
+		 DEFINE TABLE plain SCHEMALESS;
+		 DEFINE INDEX plain_n ON plain FIELDS n;
+		 DEFINE INDEX plain_count ON plain COUNT WHERE n = 5;",
+	)
+	.await?;
+	let image = |table: &str, key: Vec<Value>, stored: &[(&str, Value)]| {
+		let id = RecordId {
+			table: table.into(),
+			key: RecordIdKey::Array(key.into()),
+		};
+		let mut fields = vec![("id".to_owned(), Value::RecordId(id))];
+		fields.extend(stored.iter().map(|(name, value)| ((*name).to_owned(), value.clone())));
+		Value::Object(Object::from_iter(fields))
+	};
+	let keyed = image("t", vec![Value::from("f"), Value::from(2)], &[("v", Value::from(7))]);
+
+	assert_eq!(
+		compiled_entry_over(&ds, &session, "t", "by_n", &keyed).await?,
+		(true, Some(vec![Value::from(2)]), None),
+		"a component is read off the id"
+	);
+	assert_eq!(
+		compiled_entry_over(&ds, &session, "t", "by_element", &keyed).await?,
+		(true, Some(vec![Value::from(2)]), None),
+		"`id[1]` is the same column as the component it addresses"
+	);
+	assert_eq!(
+		compiled_entry_over(&ds, &session, "t", "by_feed_v", &keyed).await?,
+		(true, Some(vec![Value::from("f"), Value::from(7)]), None),
+		"a component and a stored field in one index"
+	);
+	assert_eq!(
+		compiled_entry_over(&ds, &session, "t", "by_v", &keyed).await?,
+		(false, Some(vec![Value::from(7)]), None),
+		"an index over a stored field reads no part of the id"
+	);
+	let (reads_id, _, guard) = compiled_entry_over(&ds, &session, "t", "only_f", &keyed).await?;
+	assert!(reads_id, "a guard over a component reads the id");
+	assert_eq!(guard, Some(true));
+	let elsewhere = image("t", vec![Value::from("g"), Value::from(2)], &[]);
+	let (_, _, guard) = compiled_entry_over(&ds, &session, "t", "only_f", &elsewhere).await?;
+	assert_eq!(guard, Some(false));
+	for index in ["only_f_this", "only_f_doc"] {
+		let (_, _, guard) = compiled_entry_over(&ds, &session, "t", index, &keyed).await?;
+		assert_eq!(guard, Some(true), "{index}: a guard reading a component through the record");
+		let (_, _, guard) = compiled_entry_over(&ds, &session, "t", index, &elsewhere).await?;
+		assert_eq!(guard, Some(false), "{index}");
+	}
+
+	let unkeyed = image("plain", vec![Value::from("f"), Value::from(2)], &[("n", Value::from(5))]);
+	assert_eq!(
+		compiled_entry_over(&ds, &session, "plain", "plain_n", &unkeyed).await?,
+		(false, Some(vec![Value::from(5)]), None),
+		"a table whose id names no components indexes the stored field"
+	);
+	// Neither a column nor a guard of such a table reads the id, so the build
+	// evaluates its entries over the stored value as it decodes.
+	let (reads_id, _, guard) =
+		compiled_entry_over(&ds, &session, "plain", "plain_count", &unkeyed).await?;
+	assert!(!reads_id, "a guard over a table whose id names no components reads no part of it");
+	assert_eq!(guard, Some(true));
+	Ok(())
+}
+
+/// The integers a `SELECT VALUE` query returns, in the order it returns them.
+#[cfg(feature = "kv-mem")]
+async fn int_rows(ds: &Datastore, session: &Session, sql: &str) -> Result<Vec<i64>> {
+	let mut results = ds.execute(sql, session, None).await?;
+	let value = results.remove(0).result?;
+	let surrealdb_types::Value::Array(rows) = value else {
+		anyhow::bail!("query returned non-array value: {value:?}");
+	};
+	rows.iter()
+		.map(|row| match row {
+			surrealdb_types::Value::Number(n) => {
+				n.to_int().ok_or_else(|| anyhow::anyhow!("row is not an integer: {row:?}"))
+			}
+			other => anyhow::bail!("row is not a number: {other:?}"),
+		})
+		.collect()
+}
+
+/// The text `EXPLAIN` renders for `sql`.
+#[cfg(feature = "kv-mem")]
+async fn plan_text(ds: &Datastore, session: &Session, sql: &str) -> Result<String> {
+	let mut results = ds.execute(&format!("EXPLAIN {sql}"), session, None).await?;
+	match results.remove(0).result? {
+		surrealdb_types::Value::String(plan) => Ok(plan),
+		other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
+	}
+}
+
+/// Seeds `t`, whose id names `[feed: string, n: int]`, with `['f', 1]`,
+/// `['f', 2]`, `['g', 3]` and `['g', 4]`, starts `define` (an index named
+/// `ix`) held before its initial scan, and while it is held creates
+/// `['f', 11]` and `['g', 12]`, deletes `['f', 1]` and updates `['g', 3]`.
+/// Returns once the build is ready, the held writes having reached the index
+/// through the build's queue.
+#[cfg(feature = "kv-mem")]
+async fn keyed_build_with_held_writes(define: &str) -> Result<(Arc<Datastore>, Session)> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE FIELD id ON t TYPE [feed: string, n: int];
+		 CREATE t SET feed = 'f', n = 1 RETURN NONE;
+		 CREATE t SET feed = 'f', n = 2 RETURN NONE;
+		 CREATE t SET feed = 'g', n = 3 RETURN NONE;
+		 CREATE t SET feed = 'g', n = 4 RETURN NONE;",
+	)
+	.await?;
+	let guard = start_index_build_paused(&ds, &session, define).await?;
+	for write in [
+		"CREATE t SET feed = 'f', n = 11 RETURN NONE",
+		"CREATE t SET feed = 'g', n = 12 RETURN NONE",
+		"DELETE t:['f', 1] RETURN NONE",
+		"UPDATE t:['g', 3] SET v = 1 RETURN NONE",
+	] {
+		execute_all_retrying_conflicts(&ds, &session, write).await?;
+	}
+	drop(guard);
+	wait_for_index_ready(&ds, &session, "t", "ix").await?;
+	let building = index_building_json(&ds, &session, "t", "ix").await?;
+	assert!(
+		building.get("updated").and_then(|updated| updated.as_u64()).is_some_and(|n| n > 0),
+		"the held writes are replayed from the build's queue: {building}"
+	);
+	Ok((ds, session))
+}
+
+/// A write held in a build's queue indexes a component of a named record id
+/// as the build's scan does: once the build is ready, the index over the
+/// component `n` lists each row the table ends with once, and none it no
+/// longer holds.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_queued_during_a_build_indexes_a_component_of_a_named_record_id() -> Result<()> {
+	let (ds, session) =
+		keyed_build_with_held_writes("DEFINE INDEX ix ON t FIELDS n CONCURRENTLY").await?;
+	let all = "SELECT VALUE n FROM t WITH INDEX ix WHERE n >= 0 ORDER BY n";
+	let plan = plan_text(&ds, &session, all).await?;
+	assert!(plan.contains("IndexScan"), "the rows are read through the index: {plan}");
+	assert_eq!(int_rows(&ds, &session, all).await?, vec![2, 3, 4, 11, 12]);
+	for (n, expected) in [(1, vec![]), (3, vec![3]), (11, vec![11]), (12, vec![12])] {
+		let sql = format!("SELECT VALUE n FROM t WITH INDEX ix WHERE n = {n}");
+		assert_eq!(int_rows(&ds, &session, &sql).await?, expected, "{sql}");
+	}
+	Ok(())
+}
+
+/// A `COUNT` index guarded by a predicate over a component counts a write
+/// held in its build's queue as its scan counts a stored row: the count read
+/// from the index is that of the rows the guard admits once the build is
+/// ready.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_queued_during_a_build_is_counted_by_a_guard_over_a_component() -> Result<()> {
+	let (ds, session) =
+		keyed_build_with_held_writes("DEFINE INDEX ix ON t COUNT WHERE feed = 'f' CONCURRENTLY")
+			.await?;
+	let count = "SELECT count() FROM t WHERE feed = 'f' GROUP ALL";
+	let plan = plan_text(&ds, &session, count).await?;
+	assert!(plan.contains("IndexCountScan"), "the count is read from the index: {plan}");
+	// `['f', 2]` and `['f', 11]`: the deleted `['f', 1]` is not counted.
+	assert_eq!(count_query_value(&ds, &session, count).await?, 2);
+	assert_eq!(
+		count_query_value(
+			&ds,
+			&session,
+			"SELECT count() FROM t WITH NOINDEX WHERE feed = 'f' GROUP ALL"
+		)
+		.await?,
+		2
+	);
+	Ok(())
+}
+
 /// A planner shares the value shapes of an index through the node's cache only
 /// once the index's build has finished, or never ran: a build records shapes
 /// without stamping the catalog version, so an index still building is read at

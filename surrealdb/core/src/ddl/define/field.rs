@@ -69,6 +69,11 @@ pub(crate) async fn define_field_definition_apply(
 	// Validate id field restrictions
 	crate::exec::field_rules::id_field_restrictions(definition)?;
 
+	// Validate the record id components the definition names, or the field
+	// it defines under the name of one
+	crate::ddl::define_field_statement_validate_key_components(&ctx.tx(), ns, db, kind, definition)
+		.await?;
+
 	// Validate FLEXIBLE restrictions
 	crate::ddl::define_field_statement_validate_flexible_restrictions(
 		&ctx.tx(),
@@ -164,6 +169,14 @@ pub(crate) async fn define_field_definition_apply(
 				return Ok(Value::None);
 			}
 		}
+	}
+
+	// A record id that names its components must admit every record the table
+	// holds; the scan is skipped when the stored `id` already has the same
+	// structure.
+	if let Some(key) = definition.live_key() {
+		let exec = crate::ddl::frame(ctx, opt, None).await;
+		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &tb_name, key).await?;
 	}
 
 	// Process the statement
@@ -293,6 +306,11 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 
 	if let Some(self_kind) = &definition.field_kind {
 		for fd in fds.iter() {
+			// A derived component has no type of its own to nest under: a field
+			// under its name is refused as a clash.
+			if fd.is_key_part() {
+				continue;
+			}
 			if definition.name.starts_with(&fd.name)
 				&& definition.name != fd.name
 				&& let Some(fd_kind) = &fd.field_kind
@@ -451,6 +469,11 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 	} else {
 		// Ensure no parent fields are computed
 		for field in fields.iter() {
+			// A derived component is computed from the id; a field under its name
+			// is refused as a clash.
+			if field.is_key_part() {
+				continue;
+			}
 			if field.computed.is_some()
 				&& definition.name.starts_with(&field.name)
 				&& field.name != definition.name
@@ -496,6 +519,11 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		std::collections::BTreeMap::new();
 
 	for fd in fields.iter() {
+		// A derived component reads only the id, which no clause of its own
+		// can reach: it is a leaf of the graph.
+		if fd.is_key_part() {
+			continue;
+		}
 		if !fd.has_production_clause() {
 			continue;
 		}
@@ -651,12 +679,117 @@ pub(crate) async fn define_field_definition_check_indexed_computed(
 	Ok(())
 }
 
+/// The checks `DEFINE FIELD` and `ALTER FIELD` make of the record id components
+/// `definition` names, or of a field `definition` defines under the name of one,
+/// against the catalog of namespace `ns` and database `db`, read through `txn`.
+///
+/// For the `id` field naming components, in the order it makes them:
+/// - the table is not a relation or a view, whose record ids have no components to name;
+/// - no field of the table has a name a component takes;
+/// - no index or view reads, as a stored field, a name the record id adds;
+/// - nothing on the table reads a name the record id removes, renames or moves. Retyping a
+///   component under the same name and position is allowed: the scan of the stored records proves
+///   they already conform.
+/// - the definition's own `ASSERT`, `DEFAULT` and permissions read no name the record id removes or
+///   renames. A name it moves still resolves, by name, in the definition that moves it.
+///
+/// For any other field, the name must not be the root of a component's name.
+///
+/// `kind` decides what an existing `id` does: `IF NOT EXISTS` over it leaves it
+/// alone, so nothing is checked. A table with no named `id` and a definition
+/// that names none checks nothing.
+///
+/// # Errors
+///
+/// The refusal naming the conflict, as an [`ExecError`]; the error of a catalog
+/// read that fails.
+pub(crate) async fn define_field_statement_validate_key_components(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	kind: &DefineKind,
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	use crate::ddl::key_scan::{self, Readers};
+
+	let table = &definition.table;
+	let existing_id = txn.get_tb_field(ns, db, table, "id", None).await?;
+	let old_key = existing_id.as_deref().and_then(catalog::FieldDefinition::live_key);
+	if !definition.name.is_id() {
+		if let (Some(root), Some(key)) = (key_scan::root_name(&definition.name), old_key) {
+			ensure!(
+				key.names.as_ref().is_none_or(|names| names.position(root).is_none()),
+				ExecError::IdComponentClash {
+					name: root.to_owned(),
+					table: table.as_str().to_owned(),
+				}
+			);
+		}
+		return Ok(());
+	}
+	if matches!(kind, DefineKind::IfNotExists) && existing_id.is_some() {
+		return Ok(());
+	}
+	let new_key = definition.live_key();
+	if let Some(names) = new_key.and_then(|key| key.names.as_ref()) {
+		if let Some(tb) = txn.get_tb(ns, db, table, None).await? {
+			ensure!(
+				!matches!(tb.table_type, TableType::Relation(_)),
+				ExecError::IdComponentsOnRelation(table.as_str().to_owned())
+			);
+			ensure!(tb.view.is_none(), ExecError::IdComponentsOnView(table.as_str().to_owned()));
+		}
+		let fields = txn.all_tb_fields(ns, db, table, None).await?;
+		for name in names.iter() {
+			let shadowed = fields.iter().any(|field| {
+				!field.is_key_part()
+					&& !field.name.is_id()
+					&& key_scan::root_name(&field.name) == Some(name)
+			});
+			ensure!(
+				!shadowed,
+				ExecError::IdComponentShadowsField {
+					name: name.to_owned(),
+					table: table.as_str().to_owned(),
+				}
+			);
+		}
+	}
+	let change =
+		key_scan::name_change(old_key.map(|key| key.as_ref()), new_key.map(|key| key.as_ref()));
+	if !change.added.is_empty()
+		&& let Some(reader) =
+			key_scan::first_reader(txn, ns, db, table, &change.added, Readers::Structural).await?
+	{
+		bail!(key_scan::read_by_existing(table, reader));
+	}
+	if !change.removed.is_empty()
+		&& let Some(reader) =
+			key_scan::first_reader(txn, ns, db, table, &change.removed, Readers::All).await?
+	{
+		bail!(key_scan::in_use(table, reader));
+	}
+	let kept = |name: &str| {
+		new_key
+			.and_then(|key| key.names.as_ref())
+			.is_some_and(|names| names.position(name).is_some())
+	};
+	let dropped: Vec<String> = change.removed.into_iter().filter(|name| !kept(name)).collect();
+	if let Some(reader) = key_scan::id_clause_reader(definition, &dropped) {
+		bail!(key_scan::in_use(table, reader));
+	}
+	Ok(())
+}
+
 /// The checks `DEFINE FIELD` makes of `definition` against the catalog of
-/// namespace `ns` and database `db`, read through `txn`, in the order it makes
-/// them: the GraphQL alias, the computed options and dependency cycles, the
-/// reference options, the kinds of the fields the definition nests in or
-/// over, the `id` field's restrictions and `FLEXIBLE`'s.
-pub(crate) async fn define_field_definition_validate(
+/// namespace `ns` and database `db`, read through `txn`, before it judges the
+/// record id components the definition names: the GraphQL alias, the computed
+/// options and dependency cycles, the reference options, the kinds of the
+/// fields the definition nests in or over, and the `id` field's restrictions.
+/// The components are judged next
+/// ([`define_field_statement_validate_key_components`]), then `FLEXIBLE`'s
+/// restrictions ([`define_field_statement_validate_flexible_restrictions`]).
+pub(crate) async fn define_field_definition_validate_clauses(
 	txn: &Arc<Transaction>,
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -668,6 +801,5 @@ pub(crate) async fn define_field_definition_validate(
 	define_field_statement_validate_reference_options(definition)?;
 	define_field_statement_disallow_mismatched_types(txn, ns, db, definition).await?;
 	crate::exec::field_rules::id_field_restrictions(definition)?;
-	define_field_statement_validate_flexible_restrictions(txn, ns, db, definition).await?;
 	Ok(())
 }

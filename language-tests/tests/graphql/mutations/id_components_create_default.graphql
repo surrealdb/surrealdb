@@ -1,0 +1,17 @@
+/**
+[env]
+imports = ["../id_components_default_import.surql"]
+
+[test]
+reason = "GraphQL create that gives no id takes the key from the DEFAULT of the id field, and what it returns carries the components that key names"
+
+[[test.results]]
+value = "{ createSensor: { city: 'Rome', temp: 3, time: '2024-02-01T00:00:00+00:00' } }"
+*/
+mutation {
+	createSensor(data: { temp: 3 }) {
+		city
+		time
+		temp
+	}
+}

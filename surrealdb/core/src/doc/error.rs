@@ -11,7 +11,9 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use common::{LeafError, internal_todo};
-use surrealdb_types::{AlreadyExistsError, Error as TypesError, NotFoundError, ToSql};
+use surrealdb_types::{
+	AlreadyExistsError, Error as TypesError, NotFoundError, ToSql, ValidationError,
+};
 
 use crate::expr::Idiom;
 use crate::val::{CoerceError, RecordId};
@@ -147,6 +149,53 @@ pub(crate) enum Error {
 
 	#[error("The event {0} reached the max async event nesting depth: {1}.")]
 	EvReachMaxDepth(String, u16),
+
+	/// A record was created in a table whose record id names its components,
+	/// and neither the record nor the statement nor the `id` field's `DEFAULT`
+	/// supplied one of them
+	#[error(
+		"Cannot create a record in `{table}` without the record id component `{component}`: set `{component}`, give the record id, or define a DEFAULT on the `id` field"
+	)]
+	IdComponentMissing {
+		table: String,
+		component: String,
+	},
+
+	/// A write named a field that is a component of the record id, with a value
+	/// other than the record id's. `value` is what the caller wrote, and nothing
+	/// of the record's own key.
+	#[error(
+		"Found {value} for the `{component}` field, but it is part of the record id of `{table}` and does not match it"
+	)]
+	IdComponentMismatch {
+		table: String,
+		component: String,
+		value: String,
+	},
+
+	/// An element of the record id is not a value its component can hold.
+	/// `error` says why, in the words of the coercion or of the component's
+	/// own conformance check.
+	#[error(
+		"Couldn't coerce value for the record id component `{component}` of `{table}`: {error}"
+	)]
+	IdComponentCoerce {
+		table: String,
+		component: String,
+		error: String,
+	},
+
+	/// The record id of a table whose `id` names its components has another
+	/// number of elements. `expected` lists the component names.
+	#[error(
+		"The record id of `{table}` has the components {expected}, but {found} {} given",
+		if *found == 1 { "value was" } else { "values were" }
+	)]
+	IdComponentArity {
+		table: String,
+		expected: String,
+		found: usize,
+	},
 }
 
 impl Error {
@@ -230,6 +279,23 @@ impl LeafError for Error {
 			| Error::EvNamespaceMismatch(..)
 			| Error::EvDatabaseMismatch(..)
 			| Error::EvReachMaxDepth(..) => internal_todo(message),
+			// A write that gives a record in a table with named record id
+			// components an id that does not fit them, or restates one of them
+			// differently. The author of the statement can correct it, so it is
+			// a validation fault and not a schema one: `is_schema_related` does
+			// not list these, so `UPSERT` never retries one as an update.
+			Error::IdComponentMissing {
+				..
+			}
+			| Error::IdComponentMismatch {
+				..
+			}
+			| Error::IdComponentCoerce {
+				..
+			}
+			| Error::IdComponentArity {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 		}
 	}
 }

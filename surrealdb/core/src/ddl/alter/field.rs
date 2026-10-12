@@ -10,6 +10,7 @@ use crate::dbs::Options;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::field::{AlterDefault, AlterFieldStatement};
+use crate::expr::statements::define::DefineKind;
 use crate::iam::AuthLimit;
 use crate::val::{TableName, Value};
 
@@ -28,6 +29,9 @@ pub(crate) async fn alter_field_statement_apply(
 	// Fetch the transaction
 	let txn = ctx.tx();
 	let name = idiom.to_raw_string();
+	// A component of a named record id is a derived field: it has no definition
+	// to alter.
+	crate::ddl::key_scan::refuse_component_name(&txn, ns, db, &what, &idiom).await?;
 	// Get the table definition
 	let mut df = match txn.get_tb_field(ns, db, &what, &name, None).await? {
 		Some(tb) => tb.deref().clone(),
@@ -62,9 +66,17 @@ pub(crate) async fn alter_field_statement_apply(
 	// reference target tables the change drops.
 	let old_definition = df.clone();
 
+	// The type and the names of the record id components it carries are set
+	// together, so the definition's key structure always matches its type.
 	match this.kind {
-		AlterKind::Set(ref k) => df.field_kind = Some(k.clone()),
-		AlterKind::Drop => df.field_kind = None,
+		AlterKind::Set(ref k) => {
+			let names = match this.key_names {
+				AlterKind::Set(ref names) => Some(names.clone()),
+				AlterKind::Drop | AlterKind::None => None,
+			};
+			df.set_type(Some(k.clone()), names);
+		}
+		AlterKind::Drop => df.set_type(None, None),
 		AlterKind::None => {}
 	}
 	match this.flexible {
@@ -153,6 +165,21 @@ pub(crate) async fn alter_field_statement_apply(
 	// DEFINE FIELD refuses is refused here whichever ALTER sets it.
 	crate::exec::field_rules::id_field_restrictions(&df)?;
 
+	// The record id components the merged definition names: judged as `DEFINE
+	// FIELD OVERWRITE` judges them. Only a statement that sets or drops the type
+	// of `id` can change them; a field under a component's name was refused
+	// above.
+	if df.name.is_id() && !matches!(this.kind, AlterKind::None) {
+		crate::ddl::define_field_statement_validate_key_components(
+			&txn,
+			ns,
+			db,
+			&DefineKind::Overwrite,
+			&df,
+		)
+		.await?;
+	}
+
 	// INLINE embeds the field's value into the edge's adjacency payloads;
 	// the same restrictions as DEFINE FIELD, validated against the fully
 	// resolved definition.
@@ -207,6 +234,14 @@ pub(crate) async fn alter_field_statement_apply(
 	if df.flexible {
 		let tb = txn.get_tb(ns, db, &what, None).await?;
 		crate::exec::field_rules::flexible_restrictions(&df, tb.as_deref())?;
+	}
+
+	// A record id that names its components must admit every record the table
+	// holds; the scan is skipped when the stored `id` already has the same
+	// structure.
+	if let Some(key) = df.live_key() {
+		let exec = crate::ddl::frame(ctx, opt, None).await;
+		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &what, key).await?;
 	}
 
 	txn.put_tb_field(ns, db, &what, &df).await?;

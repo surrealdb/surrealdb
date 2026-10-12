@@ -251,6 +251,12 @@ util/                                # import-only datasets (never run on their 
   records-10000-computed-deps-opaque.surql    # …+ one written with `$auth` (dependencies unresolvable)
   records-10000-perms-where-computed.surql    # row-level table permission + COMPUTED fields on the same table
   events-timeseries-100000.surql     # 100k events with timestamps spread across one year (bounded, for bucketing)
+  readings-keyed-100000.surql        # 100k readings over 50 cities, record id `[city: string, time: datetime]` (named components, sub-second times)
+  readings-unkeyed-100000.surql      # the same rows under random ids with `city` / `time` stored in the body (no index)
+  readings-unkeyed-100000-indexed.surql # …+ a compound (city, time) index: the unkeyed answer to a per-city time window
+  readings-{keyed,unkeyed}-100000-time-indexed.surql # …+ an index on `time` (the derived component / the stored field), for retention deletes
+  readings-array-ids-100000.surql    # the rows under array ids `[city, time]` with no named components and equal `city` / `time` copies in the body
+  readings-{keyed,unkeyed,unkeyed-indexed}-empty.surql # empty tables, for the create-throughput matrix
   geo-points-100000.surql            # 100k places each with a `location` point spread across the globe
   recursion-functions.surql          # recursive user functions (fn::fib branching, fn::sum_to linear)
   recursion-items-dynamic-1000.surql  # imports recursion-functions + 1000 items with a recursive DYNAMIC (VALUE, write-time) field
@@ -283,6 +289,11 @@ computed/                            # read-time COMPUTED field materialisation:
                                      #   over a computed key, and the intersection with field permissions
                                      #   (unreduced-record clone, re-derivation against the reduced record)
 timeseries/                          # temporal bucketing: GROUP BY time::group(…) by day / hour (± per-bucket stats)
+                                     #   plus named record-id components: a one-hour key-range window (one city, IN over
+                                     #   three), the latest ten rows of a city, a LET-cutoff retention delete over an index
+                                     #   on the derived `time`, create throughput, a full `SELECT *` (derived vs stored
+                                     #   components), and the define-time scan of 100k records. The matrix benches run the keyed
+                                     #   table against its unkeyed twin (`--dataset keyed` / `unkeyed` / `stored` / `unkeyed_indexed`)
 geo/                                 # FULL-SCAN geo functions (no spatial index yet, #219): geo::distance
                                      #   proximity & nearest-N, point-in-polygon containment (INSIDE)
 recursion/                           # recursive USER functions (fn::fib, per-row fn::sum_to) + recursive

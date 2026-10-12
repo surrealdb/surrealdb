@@ -10,9 +10,9 @@ use std::sync::Arc;
 use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
-use crate::catalog::{Index, IndexDefinition};
+use crate::catalog::{Index, IndexDefinition, KeyStructure};
 use crate::exec::planner::util::{
-	expr_contains_matches, idiom_matches_column, idiom_matches_containment, try_literal_to_value,
+	expr_contains_matches, idiom_matches_column_in, idiom_matches_containment, try_literal_to_value,
 };
 use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalOrdering};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -38,6 +38,11 @@ pub struct IndexAnalyzer<'a> {
 	/// holds no array; a column past the end of its index's flags is not
 	/// known to. `None` knows of none. Carried on each [`IndexRef`] made.
 	scalar: Option<Arc<[super::access_path::ColumnFlags]>>,
+	/// The structure of the table's record ids, when they name their
+	/// components: a b-tree column and a path that address the same
+	/// component match whichever way each spells it
+	/// ([`idiom_matches_column_in`]). `None` matches as written.
+	key: Option<Arc<KeyStructure>>,
 }
 
 /// The query vectors of the KNN operators whose right operand is a parameter,
@@ -55,7 +60,15 @@ impl<'a> IndexAnalyzer<'a> {
 			knn_query_vectors: None,
 			no_containment: None,
 			scalar: None,
+			key: None,
 		}
+	}
+
+	/// Match the b-tree columns that address a component of the table's
+	/// record id by the component, as `key` describes them.
+	pub(crate) fn with_key(mut self, key: Option<Arc<KeyStructure>>) -> Self {
+		self.key = key;
+		self
 	}
 
 	/// Know the columns `flags` marks, per index of `indexes`, to be declared
@@ -69,12 +82,26 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// A reference to index `idx` of `indexes`, carrying which of its columns
-	/// are known to hold no array.
+	/// are known to hold no array and which are datetime components of the
+	/// record id, whose entries order only by the whole second, and whether
+	/// the record ids its entries end with order by value.
 	fn index_ref(&self, idx: usize) -> IndexRef {
 		let index_ref = IndexRef::new(&self.indexes, idx);
-		match self.scalar.as_ref().and_then(|flags| flags.get(idx)) {
+		let index_ref = match self.scalar.as_ref().and_then(|flags| flags.get(idx)) {
 			Some(flags) if flags.contains(&true) => index_ref.with_scalar_columns(flags.clone()),
 			_ => index_ref,
+		};
+		let Some(key) = self.key.as_deref() else {
+			return index_ref;
+		};
+		let index_ref = match super::derived_columns::coarse_columns(key, &self.indexes[idx].cols) {
+			Some(coarse) => index_ref.with_coarse_columns(coarse),
+			None => index_ref,
+		};
+		if super::derived_columns::id_orders_coarsely(key) {
+			index_ref.with_coarse_id()
+		} else {
+			index_ref
 		}
 	}
 
@@ -161,6 +188,17 @@ impl<'a> IndexAnalyzer<'a> {
 		// answered by the index; the merge runs first, since bounding a
 		// half-open range can take it clear of the array band.
 		candidates.retain(|c| !super::access_path::access_misses_arrays(&c.index_ref, &c.access));
+
+		// A range over a datetime component of the record id reaches the
+		// whole seconds of its bounds. It is widened after the bounds merge,
+		// which judges the bounds as written: a range the merge proves empty is
+		// empty whatever the widening makes of its bounds. A component's kind
+		// is a declared scalar, so the array check above never judges a column
+		// the widening changes. A candidate whose datetime bound has no
+		// widening is discarded: without the bound it would read as exact.
+		candidates.retain_mut(|candidate| {
+			super::derived_columns::widen_access(&candidate.index_ref, &mut candidate.access)
+		});
 
 		// Deduplicate candidates - prefer compound over simple
 		self.deduplicate_candidates(&mut candidates);
@@ -769,7 +807,9 @@ impl<'a> IndexAnalyzer<'a> {
 				Some(BitmapPlan::Or(children))
 			}
 			AccessPath::EmptyScan => Some(BitmapPlan::Or(Vec::new())),
+			// A key range reads no index, so it has no doc-IDs to fuse.
 			AccessPath::TableScan
+			| AccessPath::KeyRange(_)
 			| AccessPath::KnnSearch {
 				..
 			}
@@ -1039,6 +1079,12 @@ impl<'a> IndexAnalyzer<'a> {
 					BTreeAccess::FullText {
 						..
 					} => true,
+					// A range over a datetime component of the record id lists
+					// records whose datetime lies in the second of a bound, not
+					// beyond it, so its bitmap is a superset of the truth set.
+					access if super::derived_columns::range_is_widened(&c.index_ref, access) => {
+						false
+					}
 					_ => {
 						super::access_path::range_matches_comparison(&c.access)
 							&& Self::candidate_pinned_columns(c).iter().enumerate().all(
@@ -1201,7 +1247,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 				// The IN column must be the FIRST column of the index.
 				if let Some(first_col) = ix_def.cols.first()
-					&& path_matches_column(path, first_col)
+					&& path_matches_column(path, first_col, self.key.as_deref())
 				{
 					let ncols = ix_def.cols.len();
 					if best.is_none_or(|(_, best_ncols)| ncols < best_ncols) {
@@ -1594,7 +1640,9 @@ impl<'a> IndexAnalyzer<'a> {
 
 			for (col_idx, col) in ix_def.cols.iter().enumerate() {
 				// Find a condition that matches this column
-				let matching_cond = conditions.iter().find(|c| path_matches_column(&c.path, col));
+				let matching_cond = conditions
+					.iter()
+					.find(|c| path_matches_column(&c.path, col, self.key.as_deref()));
 
 				// `path_matches_column` vetoes any column holding `*`, so a
 				// fanning column is reached only through the containment
@@ -1830,7 +1878,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 			// Check if the path matches the first column of the index
 			if let Some(first_col) = ix_def.cols.first()
-				&& path_matches_column(path, first_col)
+				&& path_matches_column(path, first_col, self.key.as_deref())
 				&& let Some(access) =
 					self.match_operator_to_access(op, &value, position, &ix_def.index)
 			{
@@ -2027,7 +2075,7 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 			if let Some(col) = ix_def.cols.first()
-				&& path_matches_column(path, col)
+				&& path_matches_column(path, col, self.key.as_deref())
 			{
 				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access.clone()));
@@ -2118,8 +2166,10 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
+			// The probe a full-text scan answers is stripped from the predicate
+			// by matching its column as written, so it is matched as written here.
 			if let Some(first_col) = ix_def.cols.first()
-				&& path_matches_column(path, first_col)
+				&& path_matches_column(path, first_col, None)
 			{
 				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(
@@ -2206,8 +2256,10 @@ impl<'a> IndexAnalyzer<'a> {
 				_ => continue,
 			};
 
+			// An ANN index is matched by its column as written, as the KNN
+			// operator's other consumers match it.
 			if let Some(first_col) = ix_def.cols.first()
-				&& path_matches_column(path, first_col)
+				&& path_matches_column(path, first_col, None)
 			{
 				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(
@@ -2443,6 +2495,61 @@ impl IndexCandidate {
 		}
 	}
 
+	/// Whether this candidate is chosen over a key range over the components
+	/// of the table's record id ([`AccessPath::KeyRange`]) that pins `pinned`
+	/// leading components to values, of which `delivers_order` says whether
+	/// it delivers the `ORDER BY`. Under `limited` the statement pages its rows.
+	///
+	/// The scores above weigh index shapes against each other; a key range is
+	/// weighed by the same intent, with no statistics:
+	///
+	/// - a provably empty candidate reads nothing, and wins;
+	/// - a full-text or ANN candidate answers an operator nothing else answers, and wins;
+	/// - a unique index pinned on every column returns at most one row, and wins;
+	/// - an index pinning strictly more columns than the key range wins: each pinned column narrows
+	///   the scan more than the key range's next one can;
+	/// - at an equal count, under a `LIMIT`, an index that covers the `ORDER BY` wins over a key
+	///   range that does not deliver it, since it can stop once the page is full;
+	/// - otherwise the key range wins: it reads each record once, from the record keys themselves,
+	///   with no index entry to follow.
+	pub(crate) fn outranks_key_range(
+		&self,
+		pinned: usize,
+		delivers_order: bool,
+		limited: bool,
+	) -> bool {
+		if self.empty {
+			return true;
+		}
+		let (equalities, whole) = match &self.access {
+			BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => return true,
+			BTreeAccess::Equality(_) => (1, self.index_ref.cols.len() == 1),
+			BTreeAccess::Compound {
+				prefix,
+				..
+			} => (prefix.len(), prefix.len() == self.index_ref.cols.len()),
+			BTreeAccess::Range {
+				..
+			} => (0, false),
+		};
+		if self.index_ref.is_unique() && whole {
+			return true;
+		}
+		if equalities > pinned {
+			return true;
+		}
+		equalities == pinned
+			&& limited
+			&& self.covers_order
+			&& !delivers_order
+			&& !super::access_path::access_fans_out(&self.index_ref.cols, &self.access)
+	}
+
 	/// Convert this candidate to an AccessPath.
 	pub fn to_access_path(&self, direction: Direction) -> AccessPath {
 		if self.empty {
@@ -2500,7 +2607,8 @@ struct SimpleCondition {
 }
 
 /// Whether a condition's path is exactly an index column, step for step
-/// ([`idiom_matches_column`]): a column may hold any part a path can — a
+/// ([`idiom_matches_column`](crate::exec::planner::util::idiom_matches_column)): a column may
+/// hold any part a path can — a
 /// field, a computed index such as `id[1]`, a method call such as
 /// `id.id().r` — and matches the expression that renders the same way.
 ///
@@ -2508,8 +2616,13 @@ struct SimpleCondition {
 /// excluded because the Scan predicate filter cannot correctly evaluate
 /// comparison operators on flattened paths — `[40] = 40` evaluates to false.
 /// Users should use CONTAINS/INSIDE operators for array-aware queries.
-fn path_matches_column(path: &LogicalExpr, index_col: &Idiom) -> bool {
-	!index_col.0.iter().any(|p| matches!(p, Part::All)) && idiom_matches_column(path, index_col)
+///
+/// With `key`, the structure of the table's record ids where they name their
+/// components, a path and a column that address the same component match
+/// whichever way each spells it ([`idiom_matches_column_in`]).
+fn path_matches_column(path: &LogicalExpr, index_col: &Idiom, key: Option<&KeyStructure>) -> bool {
+	!index_col.0.iter().any(|p| matches!(p, Part::All))
+		&& idiom_matches_column_in(path, index_col, key)
 }
 
 /// Whether a field reference in a containment leaf (`field CONTAINS v`,
@@ -4367,6 +4480,190 @@ mod tests {
 				empty: false,
 			};
 			assert_eq!(fanning.rank(true), fanning.score());
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 5. Columns that address components of the record id
+	// ------------------------------------------------------------------
+	mod derived_columns {
+		use std::ops::Bound;
+
+		use super::*;
+		use crate::exec::index::derived_columns::range_is_widened;
+		use crate::expr::{KeyNames, Kind, KindLiteral};
+		use crate::val::Datetime;
+
+		/// `[feed: string, at: datetime, n: int]`.
+		fn key() -> Arc<KeyStructure> {
+			let names = ["feed", "at", "n"].iter().map(|name| Strand::new(*name)).collect();
+			Arc::new(
+				KeyStructure::from_id_field(
+					&Kind::Literal(KindLiteral::Array(vec![
+						Kind::String,
+						Kind::Datetime,
+						Kind::Int,
+					])),
+					&KeyNames::new(names, 3).expect("valid names"),
+				)
+				.expect("a keyed type"),
+			)
+		}
+
+		/// An analyzer over a table whose id names its components, and whose
+		/// indexed columns are declared kinds holding no array (a component never
+		/// holds one).
+		fn keyed<'a>(defs: Vec<IndexDefinition>) -> IndexAnalyzer<'a> {
+			scalar_analyzer(defs, None).with_key(Some(key()))
+		}
+
+		fn datetime(text: &str) -> Value {
+			Value::Datetime(Datetime(
+				chrono::DateTime::parse_from_rfc3339(text)
+					.expect("an RFC 3339 datetime")
+					.with_timezone(&chrono::Utc),
+			))
+		}
+
+		#[test]
+		fn a_range_over_a_datetime_component_reads_the_whole_seconds_of_its_bounds() {
+			let a = keyed(vec![idx_basic(1, "by_at", &["at"])]);
+			let cond =
+				parse_cond("at > d'2025-01-01T10:00:01Z' AND at <= d'2025-01-01T10:00:05.500Z'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_at").expect("by_at");
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Included(datetime("2025-01-01T10:00:00.999999999Z")));
+			assert_eq!(range.end, Bound::Included(datetime("2025-01-01T10:00:05Z")));
+			assert!(range_is_widened(&c.index_ref, &c.access), "the scan answers no conjunct");
+		}
+
+		#[test]
+		fn a_component_spelled_as_an_element_of_the_id_is_widened_alike() {
+			let a = keyed(vec![idx_basic(1, "by_at", &["at"])]);
+			let cond = parse_cond("id[1] >= d'2025-01-01T10:00:01.250Z'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_at").expect("by_at");
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Included(datetime("2025-01-01T10:00:00.999999999Z")));
+			assert_eq!(range.end, Bound::Unbounded);
+		}
+
+		#[test]
+		fn an_equality_over_a_datetime_component_is_exact() {
+			let a = keyed(vec![idx_basic(1, "by_at", &["at"])]);
+			let cond = parse_cond("at = d'2025-01-01T10:00:05.500Z'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_at").expect("by_at");
+			match &c.access {
+				BTreeAccess::Equality(value) => {
+					assert_eq!(value, &datetime("2025-01-01T10:00:05.500Z"));
+				}
+				other => panic!("expected Equality, got {other:?}"),
+			}
+			assert!(!range_is_widened(&c.index_ref, &c.access));
+		}
+
+		#[test]
+		fn the_range_after_a_pinned_prefix_is_widened() {
+			let a = keyed(vec![idx_basic(1, "by_feed_at", &["feed", "at"])]);
+			let cond = parse_cond("feed = 'f' AND at <= d'2025-01-01T10:00:05.500Z'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_feed_at").expect("by_feed_at");
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix, &vec![Value::from("f")]);
+			assert_eq!(
+				range,
+				&Some((BinaryOperator::LessThanEqual, datetime("2025-01-01T10:00:05Z")))
+			);
+			assert!(range_is_widened(&c.index_ref, &c.access));
+		}
+
+		#[test]
+		fn an_ordering_by_a_datetime_component_is_not_covered() {
+			let a = keyed(vec![idx_basic(1, "by_at", &["at"])]);
+			let (cond, order) = parse_cond_order("at > d'2025-01-01T10:00:01Z'", "at");
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "by_at").expect("by_at");
+			assert!(!c.covers_order, "the entries order by the whole second only");
+
+			// The same query over a table whose ids name no components.
+			let a = scalar_analyzer(vec![idx_basic(1, "by_at", &["at"])], None);
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "by_at").expect("by_at");
+			assert!(c.covers_order);
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z")));
+			assert!(!range_is_widened(&c.index_ref, &c.access));
+		}
+
+		#[test]
+		fn an_ordering_by_id_is_not_covered_where_the_id_holds_a_datetime() {
+			let a = keyed(vec![idx_basic(1, "by_feed", &["feed"])]);
+			let (cond, order) = parse_cond_order("feed = 'f'", "id");
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "by_feed").expect("by_feed");
+			assert!(!c.covers_order, "the ids an entry ends with order by the whole second");
+
+			// The same query over a table whose ids name no components.
+			let a = scalar_analyzer(vec![idx_basic(1, "by_feed", &["feed"])], None);
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "by_feed").expect("by_feed");
+			assert!(c.covers_order);
+		}
+
+		#[test]
+		fn a_range_over_an_int_component_is_exact() {
+			let a = keyed(vec![idx_basic(1, "by_n", &["n"])]);
+			let (cond, order) = parse_cond_order("n > 3", "n");
+			let cands = a.analyze(Some(&cond), Some(&order));
+			let c = find_for(&cands, "by_n").expect("by_n");
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Excluded(Value::from(3)));
+			assert!(!range_is_widened(&c.index_ref, &c.access));
+			assert!(c.covers_order, "an int component orders by value");
+		}
+
+		#[test]
+		fn a_range_over_a_stored_datetime_field_is_not_widened() {
+			let a = keyed(vec![idx_basic(1, "by_seen", &["seen"])]);
+			let cond = parse_cond("seen > d'2025-01-01T10:00:01Z'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_seen").expect("by_seen");
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z")));
+			assert!(!range_is_widened(&c.index_ref, &c.access));
 		}
 	}
 }

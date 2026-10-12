@@ -368,7 +368,8 @@ pub enum Cl {
 	Retry,
 	/// `a`: integer.
 	MaxDepth,
-	/// `a`: kind; `b`: 1 with `FLEXIBLE`.
+	/// `a`: kind, a [`kind::LIT_KEYED`] node when the field is `id` and its
+	/// type names the components of the key; `b`: 1 with `FLEXIBLE`.
 	FieldType,
 	Readonly,
 	Inline,
@@ -593,6 +594,10 @@ pub mod kind {
 	pub const LIT_OBJECT: u8 = 27;
 	/// `[kind, …]`: `a` the list of kinds.
 	pub const LIT_ARRAY: u8 = 28;
+	/// `[name: kind, …]`, the whole `TYPE` of an `id` field: `a` the list of
+	/// alternating component `Name`s and kinds. Only [`crate::Entry::IdKind`]
+	/// and the `TYPE` clause of a field named `id` produce it.
+	pub const LIT_KEYED: u8 = 29;
 }
 
 #[repr(u8)]

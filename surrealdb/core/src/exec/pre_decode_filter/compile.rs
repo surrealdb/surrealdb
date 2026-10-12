@@ -260,6 +260,25 @@ impl PreDecodeShape {
 		})
 	}
 
+	/// Whether a leaf of this shape reads a path that opens with the name of a
+	/// component of record ids with structure `key`.
+	///
+	/// A named component is derived from the record id and never stored in
+	/// the record body, so its stored bytes would read as missing, as `id`'s
+	/// would: a scan of such a table takes no shape that reads one.
+	pub(crate) fn reads_key_component(&self, key: &crate::catalog::KeyStructure) -> bool {
+		match self {
+			Self::And(parts) | Self::Or(parts) => {
+				parts.iter().any(|part| part.reads_key_component(key))
+			}
+			Self::Not(inner) => inner.reads_key_component(key),
+			Self::Leaf {
+				path,
+				..
+			} => crate::exec::topk_pushdown::reads_key_component(path, key),
+		}
+	}
+
 	/// The filter that judges stored bytes by this shape, descending no deeper
 	/// than `depth_limit` path segments.
 	pub(crate) fn filter(&self, depth_limit: u32) -> Arc<PreDecodeFilter> {
@@ -790,6 +809,30 @@ mod tests {
 			op,
 			right: Box::new(right),
 		}
+	}
+
+	#[test]
+	fn a_shape_reading_a_named_component_is_told_apart() {
+		use crate::expr::{KeyNames, Kind, KindLiteral};
+		use crate::val::Strand;
+		let names = KeyNames::new(vec![Strand::new("city"), Strand::new("time")], 2).unwrap();
+		let kind = Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]));
+		let key = crate::catalog::KeyStructure::from_id_field(&kind, &names).expect("a structure");
+		let london = Value::from("London");
+		let city = PreDecodeShape::of(&field_cmp("city", BinaryOperator::Equal, &london, false))
+			.expect("a field compared with a literal");
+		assert!(city.reads_key_component(&key));
+		let temp = PreDecodeShape::of(&field_cmp(
+			"temp",
+			BinaryOperator::MoreThan,
+			&Value::Number(Number::Int(3)),
+			true,
+		))
+		.expect("a field compared with a literal");
+		assert!(!temp.reads_key_component(&key));
+		let both = PreDecodeShape::And(vec![temp.clone(), PreDecodeShape::Not(Box::new(city))]);
+		assert!(both.reads_key_component(&key));
+		assert!(!PreDecodeShape::Or(vec![temp]).reads_key_component(&key));
 	}
 
 	fn un(op: PrefixOperator, expr: LogicalExpr) -> LogicalExpr {

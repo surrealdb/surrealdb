@@ -1,0 +1,185 @@
+# The type text of every field definition the language tests and the parser
+# corpus define, in its stored (canonical) form, one per line, followed by
+# forms written for this list. Lines starting with # are comments.
+#
+# Read by the tests of schema/key.rs: an id field and any other field with one
+# of these types is stored, read back and rendered exactly as the type alone
+# would be.
+'a'
+'a' | 'b'
+'foo' | 'bar'
+'make'
+'make' | 'bake'
+'make' | 'bake' | 'cake'
+'singleton'
+'string'
+123
+[]
+[none | number, number]
+[string, datetime]
+[string, number]
+[string]
+[uuid, 'string', datetime]
+any
+array
+array<'a' | 'b'>
+array<'a'>
+array<datetime>
+array<float | array<bool>> | set<number>
+array<float>
+array<int | string> | int
+array<int>
+array<none | number | null>
+array<none | { key: none | number }>
+array<number, 2>
+array<number>
+array<object>
+array<record<cat | wolf>>
+array<record<city>>
+array<record<employee>, 5>
+array<record<product>>
+array<record<province>>
+array<record<t>>
+array<record<tag>>
+array<record<tree>>
+array<string, 2>
+array<string>
+array<string> | string
+array<{ rating: number }>
+bool
+bool | int
+bytes
+datetime
+decimal
+duration
+file
+float
+function
+geometry
+geometry<collection>
+geometry<point>
+geometry<polygon | multipolygon | collection>
+int
+int | object | string
+int | string
+none
+none | array
+none | array<float>
+none | array<number>
+none | array<record<a>>
+none | array<record<comic_book | book>>
+none | array<record<comic_book>>
+none | array<record<comment>>
+none | array<record<house>>
+none | array<record<person>>
+none | array<record<root>>
+none | array<record<u7154>>
+none | array<string>
+none | bool
+none | datetime
+none | int
+none | number
+none | object
+none | record<bug_detail>
+none | record<knows>
+none | record<leaf>
+none | record<mid>
+none | record<node>
+none | record<parent>
+none | record<person>
+none | record<reading>
+none | record<root>
+none | record<side>
+none | record<target>
+none | record<team>
+none | record<test5>
+none | set<record<root>>
+none | set<string>
+none | string
+none | string | null
+null
+null | { city: string }
+number
+number | record
+object
+object | array<number>
+range
+record
+record<a7237>
+record<a>
+record<account>
+record<address_history>
+record<anchor>
+record<author>
+record<b>
+record<bug_data>
+record<bug_detail>
+record<category>
+record<chain_field_reference_author>
+record<chat>
+record<city>
+record<dm3_user>
+record<friend>
+record<i>
+record<journey>
+record<layout>
+record<linked>
+record<node>
+record<payment_details>
+record<person | robot>
+record<person | thing | other>
+record<person>
+record<seller>
+record<stuff>
+record<t | t2>
+record<t | u>
+record<t>
+record<target>
+record<test>
+record<u>
+record<up_reference_strategies_target>
+record<user>
+record<users>
+record<usr>
+set
+set<datetime>
+set<float, 5>
+set<int>
+set<object>
+set<string>
+string
+string | array<object> | { data: { objects: array<object> }, more_data: { maybe_object: none | object } }
+string | int
+string | null
+uuid
+{ a: int }
+{ a: int, b: int, c: int, d: int }
+{ a: int, b: none | string }
+{ a: string, b: number }
+{ a: string, b: number } | { a: string, b: bool }
+{ age: int, name: string }
+{ api: { endpoints: { primary: string, secondary: none | string } } }
+{ can: none | { hold: string } }
+{ datetime: datetime, uuid: 'string' }
+{ debug: none | bool, timeout: none | int, verbose: none | bool }
+{ email: string, id: string, name: none | string }
+{ first: string, last: string }
+{ iid: string, parent: number }
+{ key: none | number }
+{ tags: array<string> }
+{ visible: bool }
+# Written for this list: the shapes above in positions the tests do not reach.
+[[string, int], datetime]
+[{ a: int }, string]
+['a', int]
+[record<a | b>, uuid]
+[string, int] | none
+array<[string, int]>
+set<[string, datetime], 3>
+{ option: bool, string: int, value: string }
+{ "my key": [string, int] }
+geometry<point | polygon>
+regex
+1d | 2d
+-5 |  0.5f
+true | false

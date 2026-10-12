@@ -534,6 +534,37 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 			DocError::EvDatabaseMismatch("sample".to_string(), "sample".to_string()),
 		),
 		("EvReachMaxDepth", DocError::EvReachMaxDepth("sample".to_string(), 1)),
+		(
+			"IdComponentMissing",
+			DocError::IdComponentMissing {
+				table: "reading".to_string(),
+				component: "city".to_string(),
+			},
+		),
+		(
+			"IdComponentMismatch",
+			DocError::IdComponentMismatch {
+				table: "reading".to_string(),
+				component: "city".to_string(),
+				value: "'Paris'".to_string(),
+			},
+		),
+		(
+			"IdComponentCoerce",
+			DocError::IdComponentCoerce {
+				table: "reading".to_string(),
+				component: "time".to_string(),
+				error: "Expected `datetime` but found `1`".to_string(),
+			},
+		),
+		(
+			"IdComponentArity",
+			DocError::IdComponentArity {
+				table: "reading".to_string(),
+				expected: "[city, time]".to_string(),
+				found: 1,
+			},
+		),
 	]
 }
 
@@ -1151,6 +1182,113 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			ExecError::ComputedFieldCannotBeIndexed {
 				field: "sample".to_string(),
 				index: "sample".to_string(),
+			},
+		),
+		(
+			"IdComponentUnsupportedKind",
+			ExecError::IdComponentUnsupportedKind {
+				table: "reading".to_string(),
+				component: "value".to_string(),
+				kind: "float".to_string(),
+			},
+		),
+		(
+			"IdComponentNameUnsupported",
+			ExecError::IdComponentNameUnsupported {
+				table: "reading".to_string(),
+				component: "the city".to_string(),
+			},
+		),
+		("IdComponentsOnRelation", ExecError::IdComponentsOnRelation("edge".to_string())),
+		("IdComponentsOnView", ExecError::IdComponentsOnView("v".to_string())),
+		(
+			"IdComponentsTableConversion",
+			ExecError::IdComponentsTableConversion {
+				table: "reading".to_string(),
+				to: "a relation table".to_string(),
+			},
+		),
+		("IdFieldSelectPermission", ExecError::IdFieldSelectPermission("reading".to_string())),
+		(
+			"IdComponentClash",
+			ExecError::IdComponentClash {
+				name: "city".to_string(),
+				table: "reading".to_string(),
+			},
+		),
+		(
+			"IdComponentShadowsField",
+			ExecError::IdComponentShadowsField {
+				name: "city".to_string(),
+				table: "reading".to_string(),
+			},
+		),
+		(
+			"IdComponentNotAField",
+			ExecError::IdComponentNotAField {
+				name: "city".to_string(),
+				table: "reading".to_string(),
+			},
+		),
+		(
+			"IdComponentsNonConforming",
+			ExecError::IdComponentsNonConforming {
+				table: "reading".to_string(),
+				ty: "[city: string, time: datetime]".to_string(),
+				record: "reading:[1, 2]".to_string(),
+				reason: "`time` is not a datetime".to_string(),
+			},
+		),
+		(
+			"IdComponentsBodyConflict",
+			ExecError::IdComponentsBodyConflict {
+				table: "reading".to_string(),
+				ty: "[city: string, time: datetime]".to_string(),
+				record: "reading:[1, 2]".to_string(),
+				component: "city".to_string(),
+			},
+		),
+		(
+			"IdComponentReadByExisting",
+			ExecError::IdComponentReadByExisting {
+				table: "reading".to_string(),
+				component: "city".to_string(),
+				what: "index".to_string(),
+				name: "by_city".to_string(),
+			},
+		),
+		(
+			"IdComponentInUse",
+			ExecError::IdComponentInUse {
+				table: "reading".to_string(),
+				component: "time".to_string(),
+				what: "index".to_string(),
+				name: "by_time".to_string(),
+			},
+		),
+		(
+			"IdComponentReadUnresolved",
+			ExecError::IdComponentReadUnresolved {
+				table: "reading".to_string(),
+				component: "city".to_string(),
+				what: "field".to_string(),
+				name: "label".to_string(),
+			},
+		),
+		(
+			"IdComponentReadByExistingUnresolved",
+			ExecError::IdComponentReadByExistingUnresolved {
+				table: "reading".to_string(),
+				component: "city".to_string(),
+				what: "view".to_string(),
+				name: "by_city".to_string(),
+			},
+		),
+		(
+			"IdComponentsUnderWildcardView",
+			ExecError::IdComponentsUnderWildcardView {
+				table: "reading".to_string(),
+				view: "everything".to_string(),
 			},
 		),
 	]

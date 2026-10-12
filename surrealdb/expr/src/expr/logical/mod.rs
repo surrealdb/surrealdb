@@ -250,6 +250,10 @@ pub struct EvalFrame {
 	/// reach. It is independent of `mode`: a `VALUE` clause runs in
 	/// [`EvalMode::Caller`] under the definer's limit.
 	pub auth: Option<AuthLimit>,
+	/// Marks a column that reads one named component of the array record id of
+	/// its table (`id[i]`). Its value depends on the record id alone, so a
+	/// predicate or sort key over the column is the same expression over `id[i]`.
+	pub key_part: bool,
 }
 
 impl EvalFrame {
@@ -263,6 +267,7 @@ impl EvalFrame {
 		Self {
 			mode: EvalMode::Permission,
 			auth,
+			key_part: false,
 		}
 	}
 
@@ -272,6 +277,7 @@ impl EvalFrame {
 		Self {
 			mode: EvalMode::MutablePermission,
 			auth,
+			key_part: false,
 		}
 	}
 
@@ -280,12 +286,23 @@ impl EvalFrame {
 		Self {
 			mode: EvalMode::Computed,
 			auth,
+			key_part: false,
+		}
+	}
+
+	/// A column that reads a named record id component, under the caller's
+	/// authority.
+	pub fn key_part() -> Self {
+		Self {
+			mode: EvalMode::Computed,
+			auth: None,
+			key_part: true,
 		}
 	}
 
 	/// Whether this is the plain caller frame, which a rendered plan omits.
 	pub fn is_caller(&self) -> bool {
-		self.mode == EvalMode::Caller && self.auth.is_none()
+		self.mode == EvalMode::Caller && self.auth.is_none() && !self.key_part
 	}
 }
 
@@ -3300,6 +3317,9 @@ fn render_frame(frame: &EvalFrame) -> Option<String> {
 	if let Some(auth) = &frame.auth {
 		parts.push(render_auth(auth));
 	}
+	if frame.key_part {
+		parts.push("@key".to_string());
+	}
 	if parts.is_empty() {
 		None
 	} else {
@@ -3827,6 +3847,7 @@ Project[a, c, secret]
 			frame: EvalFrame {
 				mode: EvalMode::Caller,
 				auth: Some(root_limit()),
+				key_part: false,
 			},
 		};
 		assert!(!project(vec![LogicalField::All, narrowed], vec![]).is_layer());
@@ -3990,6 +4011,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 		let frame = EvalFrame {
 			mode: EvalMode::Caller,
 			auth: Some(root_limit()),
+			key_part: false,
 		};
 		assert!(!frame.is_caller());
 		assert!(EvalFrame::caller().is_caller());

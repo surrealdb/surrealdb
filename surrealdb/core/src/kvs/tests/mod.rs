@@ -19,6 +19,8 @@ mod blocking_rebuild_index_test;
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
+mod export_id_components_test;
+#[cfg(feature = "kv-mem")]
 mod export_views_test;
 #[cfg(feature = "kv-mem")]
 mod graph_degree_test;

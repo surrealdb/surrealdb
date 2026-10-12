@@ -444,6 +444,29 @@ impl<'a> Explainer<'a> {
 				}
 				self.node("TableScan", ContextLevel::Database, attrs, vec![])
 			}
+			Plan::KeyRangeScan {
+				table,
+				access,
+				topk,
+				..
+			} => {
+				let mut attrs = vec![("table".to_string(), table.to_string())];
+				attrs.extend(key_range_attrs(access));
+				let prefiltered = self.prefilter.take();
+				if let Some(predicate) = &prefiltered {
+					attrs.push(("predicate".to_string(), predicate.clone()));
+				}
+				attrs.extend(self.paging.take().unwrap_or_default());
+				if prefiltered.is_some() {
+					attrs.push(("pre_decode_filter".to_string(), "yes".to_string()));
+				}
+				match topk.as_ref().map(|topk| topk.coarse_cutoff.is_some()) {
+					Some(true) => attrs.push(("topk_cutoff".to_string(), "second".to_string())),
+					Some(false) => attrs.push(("topk_pushdown".to_string(), "yes".to_string())),
+					None => {}
+				}
+				self.node("KeyRangeScan", ContextLevel::Database, attrs, vec![])
+			}
 			Plan::IndexScan {
 				table,
 				index,
@@ -1431,8 +1454,112 @@ fn is_true(predicate: &LogicalExpr) -> bool {
 }
 
 fn prefiltered_scan(input: &Plan, predicate: &LogicalExpr) -> bool {
-	matches!(input, Plan::TableScan { .. })
-		&& crate::exec::pre_decode_filter::PreDecodeShape::of(predicate).is_some()
+	match input {
+		Plan::TableScan {
+			..
+		} => crate::exec::pre_decode_filter::PreDecodeShape::of(predicate).is_some(),
+		// A component the record id names is not in the stored bytes.
+		Plan::KeyRangeScan {
+			access,
+			..
+		} => crate::exec::pre_decode_filter::PreDecodeShape::of(predicate)
+			.is_some_and(|shape| !shape.reads_key_component(&access.key)),
+		_ => false,
+	}
+}
+
+/// The attributes of key-range access `access`: the components the ranges
+/// pin (`key`), the range on the next one (`range`), how many ranges an `IN`
+/// expands to where more than one (`ranges`), the direction, the order the
+/// scan delivers (`ordered`: `exact`, or `second` for a datetime component
+/// whose keys order by the whole second), `granularity: second` where a bound
+/// on a datetime component widens to its whole second, and `residual: yes`:
+/// the predicate the ranges were planned from judges every row.
+///
+/// `key`, `range` and `ranges` name what the access reads at, so they are
+/// among the attributes a checked caller beneath a permission is shown
+/// `<permission>` in place of.
+fn key_range_attrs(
+	access: &crate::exec::index::key_range::KeyRangeAccess,
+) -> Vec<(String, String)> {
+	use crate::catalog::ComponentKind;
+	use crate::exec::index::key_range::{DeliveredKeyOrder, KeyBound, KeyEq};
+	let name = |position: u32| {
+		access
+			.key
+			.name_of(position)
+			.map_or_else(|| format!("id[{position}]"), |name| name.to_string())
+	};
+	let bound = |bound: &KeyBound| match bound {
+		KeyBound::Literal(value) => value.to_sql(),
+		KeyBound::Deferred(expr) => expr.to_sql(),
+	};
+	let mut attrs = Vec::new();
+	let mut pinned = Vec::new();
+	let mut ranges = 1usize;
+	let mut widened = false;
+	for (position, eq) in access.eq.iter().enumerate() {
+		let position = position as u32;
+		widened |= matches!(
+			access.key.components.get(position as usize).map(|c| &c.kind),
+			Some(ComponentKind::Datetime)
+		) && matches!(eq, KeyEq::One(KeyBound::Deferred(_)) | KeyEq::In(_));
+		pinned.push(match eq {
+			KeyEq::One(value) => format!("{} = {}", name(position), bound(value)),
+			KeyEq::In(values) => {
+				ranges = ranges.saturating_mul(values.len());
+				format!(
+					"{} IN [{}]",
+					name(position),
+					values.iter().map(bound).collect::<Vec<_>>().join(", ")
+				)
+			}
+		});
+	}
+	if !pinned.is_empty() {
+		attrs.push(("key".to_string(), pinned.join(", ")));
+	}
+	if let Some(range) = &access.range {
+		let component = name(range.position);
+		let mut sides = Vec::new();
+		if let Some(low) = &range.low {
+			let op = if low.inclusive {
+				">="
+			} else {
+				">"
+			};
+			sides.push(format!("{component} {op} {}", bound(&low.bound)));
+		}
+		if let Some(high) = &range.high {
+			let op = if high.inclusive {
+				"<="
+			} else {
+				"<"
+			};
+			sides.push(format!("{component} {op} {}", bound(&high.bound)));
+		}
+		attrs.push(("range".to_string(), sides.join(" AND ")));
+		widened |= matches!(
+			access.key.components.get(range.position as usize).map(|c| &c.kind),
+			Some(ComponentKind::Datetime)
+		);
+	}
+	if ranges > 1 {
+		attrs.push(("ranges".to_string(), ranges.to_string()));
+	}
+	attrs.push(("direction".to_string(), format!("{:?}", access.direction)));
+	match access.delivers {
+		DeliveredKeyOrder::None => {}
+		DeliveredKeyOrder::Exact => attrs.push(("ordered".to_string(), "exact".to_string())),
+		DeliveredKeyOrder::Coarse {
+			..
+		} => attrs.push(("ordered".to_string(), "second".to_string())),
+	}
+	if widened {
+		attrs.push(("granularity".to_string(), "second".to_string()));
+	}
+	attrs.push(("residual".to_string(), "yes".to_string()));
+	attrs
 }
 
 /// Whether `predicate`, the filter directly over `input`, is answered in full
@@ -1447,7 +1574,11 @@ fn rechecking_scan(input: &Plan, predicate: &LogicalExpr) -> bool {
 	else {
 		return false;
 	};
-	crate::exec::planner::util::strip_index_conditions(predicate, access, &index.cols).is_none()
+	// A range widened to the seconds of its bounds lists records its predicate
+	// rejects.
+	!crate::exec::index::derived_columns::range_is_widened(index, access)
+		&& crate::exec::planner::util::strip_index_conditions(predicate, access, &index.cols)
+			.is_none()
 }
 
 /// Whether `plan` is a scan of one table, beneath the layers of its table
@@ -1457,6 +1588,9 @@ fn rechecking_scan(input: &Plan, predicate: &LogicalExpr) -> bool {
 fn takes_paging(plan: &Plan) -> bool {
 	match plan {
 		Plan::TableScan {
+			..
+		}
+		| Plan::KeyRangeScan {
 			..
 		} => true,
 		Plan::Filter {
@@ -1488,7 +1622,9 @@ fn takes_paging(plan: &Plan) -> bool {
 /// entry, `name = <expression> [: kind] @frame`. A permission predicate and a
 /// computed body are the definer's, so a `checked` caller is shown
 /// `<permission>` or `<computed>` where the expression stands, and no text of
-/// either.
+/// either. A column that stands for a component of the record id is labelled
+/// `@key` rather than `@computed`, which is what tells it from a computed
+/// field that happens to read the id.
 fn layer_attrs(
 	fields: &crate::expr::logical::LogicalFields,
 	checked: bool,
@@ -1516,11 +1652,15 @@ fn layer_attrs(
 			if let Some(kind) = &column.kind {
 				text.push_str(&format!(" : {}", kind.to_sql()));
 			}
-			text.push_str(match column.frame.mode {
-				EvalMode::Caller => " @caller",
-				EvalMode::Permission => " @permission",
-				EvalMode::MutablePermission => " @mutable-permission",
-				EvalMode::Computed => " @computed",
+			text.push_str(if column.frame.key_part {
+				" @key"
+			} else {
+				match column.frame.mode {
+					EvalMode::Caller => " @caller",
+					EvalMode::Permission => " @permission",
+					EvalMode::MutablePermission => " @mutable-permission",
+					EvalMode::Computed => " @computed",
+				}
 			});
 			text
 		})
@@ -1673,5 +1813,55 @@ impl VmAnalysis {
 			);
 			Ok(ValueBatch::new(vec![value]))
 		}))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::layer_attrs;
+	use crate::expr::Kind;
+	use crate::expr::logical::{
+		EvalFrame, LogicalExpr, LogicalField, LogicalFields, LogicalLiteral,
+	};
+
+	/// A layer whose one column, `city`, evaluates `id[0]` in `frame`.
+	fn layer(frame: EvalFrame) -> LogicalFields {
+		LogicalFields::Select(vec![
+			LogicalField::All,
+			LogicalField::column(
+				"city",
+				LogicalExpr::Index {
+					base: Box::new(LogicalExpr::Field("id".into())),
+					index: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(0))),
+				},
+				Some(Kind::String),
+				frame,
+			),
+		])
+	}
+
+	fn columns(frame: EvalFrame, checked: bool) -> String {
+		let attrs = layer_attrs(&layer(frame), checked);
+		let [(name, text)] = attrs.as_slice() else {
+			panic!("one attribute, got {attrs:?}");
+		};
+		assert_eq!(name, "columns");
+		text.clone()
+	}
+
+	#[test]
+	fn a_column_that_stands_for_a_record_id_component_is_labelled_key() {
+		assert_eq!(columns(EvalFrame::key_part(), false), "city = id[0] : string @key");
+		// A computed field with the same body is not one.
+		assert_eq!(columns(EvalFrame::computed(None), false), "city = id[0] : string @computed");
+	}
+
+	#[test]
+	fn a_checked_caller_is_shown_no_text_of_a_key_column() {
+		assert_eq!(columns(EvalFrame::key_part(), true), "city = <computed> : string @key");
+		assert_eq!(
+			columns(EvalFrame::computed(None), true),
+			"city = <computed> : string @computed"
+		);
 	}
 }

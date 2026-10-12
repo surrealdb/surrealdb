@@ -23,7 +23,8 @@ use surrealdb_types::ToSql;
 
 use super::fields::{idiom_is_id, path_steps};
 use super::literals::try_literal_to_value;
-use crate::catalog::Distance;
+use crate::catalog::{Distance, KeyStructure};
+use crate::exec::index::key_range::component_position;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalRecordIdKey};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::{BinaryOperator, Idiom, Part};
@@ -102,7 +103,7 @@ pub(crate) enum BruteForceKnnVector {
 /// subqueries, closures, prefix expressions and every other node kind are
 /// not — a brute-force KNN with such a right-hand side registers no KNN
 /// source and evaluates to `false` per row instead.
-fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
+pub(crate) fn is_plan_time_computable(expr: &LogicalExpr) -> bool {
 	match expr {
 		// `Tree::eval_array` fully computes array elements, whatever they are.
 		LogicalExpr::Array(_) => true,
@@ -398,6 +399,32 @@ pub(crate) fn idiom_matches_column(expr: &LogicalExpr, col: &Idiom) -> bool {
 		&& steps.iter().zip(col.0.iter()).all(|(step, p)| step_matches(step, p))
 }
 
+/// [`idiom_matches_column`], with the components of a table's record id
+/// matched by position: where `key` is the structure of the table's keys and
+/// its `id` names them, a path and a column that each address one component
+/// ([`KeyStructure::component_of`], by its name or as `id[i]`) match when they
+/// address the same one, so `id[0]` matches the column `city` of a table whose
+/// id names `city` first, and `city` matches the column `id[0]`. Every other
+/// pair is compared as [`idiom_matches_column`] compares it. With no `key`, or
+/// the key of an aggregated view (whose group fields are stored in its rows
+/// and read by name), the two are the same.
+pub(crate) fn idiom_matches_column_in(
+	expr: &LogicalExpr,
+	col: &Idiom,
+	key: Option<&KeyStructure>,
+) -> bool {
+	if idiom_matches_column(expr, col) {
+		return true;
+	}
+	let Some(key) = key.filter(|key| key.origin == crate::catalog::KeyOrigin::IdField) else {
+		return false;
+	};
+	match (component_position(key, expr), key.component_of(col)) {
+		(Some(read), Some(column)) => read == column,
+		_ => false,
+	}
+}
+
 fn step_matches(step: &LogicalExpr, p: &Part) -> bool {
 	match (step, p) {
 		(LogicalExpr::Each(_), Part::All)
@@ -497,9 +524,25 @@ pub(crate) fn strip_index_conditions(
 	access: &crate::exec::index::access_path::BTreeAccess,
 	cols: &[Idiom],
 ) -> Option<LogicalExpr> {
+	strip_index_conditions_in(cond, access, cols, None)
+}
+
+/// [`strip_index_conditions`], matching a conjunct to an index column the way
+/// [`idiom_matches_column_in`] does: with the structure `key` of the table's
+/// record ids, a path and a column that address the same component are the
+/// same column, whichever way each spells it. A conjunct a layer moved beneath
+/// itself reads a component as `id[i]`, and the column an index holds for it is
+/// spelled by the component's name.
+pub(crate) fn strip_index_conditions_in(
+	cond: &LogicalExpr,
+	access: &crate::exec::index::access_path::BTreeAccess,
+	cols: &[Idiom],
+	key: Option<&KeyStructure>,
+) -> Option<LogicalExpr> {
 	let matcher = IndexConditionMatcher {
 		cols,
 		access,
+		key,
 	};
 	strip_and_simplify(cond.clone(), |e| match e {
 		LogicalExpr::Binary {
@@ -519,6 +562,9 @@ struct IndexConditionMatcher<'a> {
 	cols: &'a [Idiom],
 	/// The chosen access pattern describing which conditions are covered.
 	access: &'a crate::exec::index::access_path::BTreeAccess,
+	/// The structure of the table's record ids, where a column and a path may
+	/// address one component by different spellings.
+	key: Option<&'a KeyStructure>,
 }
 
 impl IndexConditionMatcher<'_> {
@@ -597,7 +643,7 @@ impl IndexConditionMatcher<'_> {
 				// Check equality conditions against prefix values.
 				if is_equality {
 					for (col, val) in self.cols.iter().zip(prefix.iter()) {
-						if idiom_matches_column(idiom, col) && value == *val {
+						if idiom_matches_column_in(idiom, col, self.key) && value == *val {
 							return true;
 						}
 					}
@@ -618,7 +664,7 @@ impl IndexConditionMatcher<'_> {
 				// Check range condition on the column after the prefix.
 				if let Some((range_op, range_val)) = range
 					&& let Some(col) = self.cols.get(prefix.len())
-					&& idiom_matches_column(idiom, col)
+					&& idiom_matches_column_in(idiom, col, self.key)
 				{
 					if effective_op == *range_op && value == *range_val {
 						return true;
@@ -641,7 +687,7 @@ impl IndexConditionMatcher<'_> {
 				let Some(col) = self.cols.first() else {
 					return false;
 				};
-				if is_equality && idiom_matches_column(idiom, col) && value == *val {
+				if is_equality && idiom_matches_column_in(idiom, col, self.key) && value == *val {
 					return true;
 				}
 				// CONTAINS / INSIDE on the single-column array-element index:
@@ -657,7 +703,7 @@ impl IndexConditionMatcher<'_> {
 				let Some(col) = self.cols.first() else {
 					return false;
 				};
-				if !idiom_matches_column(idiom, col) {
+				if !idiom_matches_column_in(idiom, col, self.key) {
 					return false;
 				}
 				// A range literal became this access whole, so the leaf is
@@ -947,6 +993,35 @@ mod tests {
 		assert!(idiom_matches_column(&path("a.*"), &col("a.*")));
 		assert!(idiom_matches_column(&path("a[*].b"), &col("a[*].b")));
 		assert!(!idiom_matches_column(&parse_cond("a + 1"), &col("a")));
+	}
+
+	#[test]
+	fn a_component_of_the_record_id_matches_its_column_however_it_is_spelled() {
+		use crate::expr::{KeyNames, Kind, KindLiteral};
+		use crate::val::Strand;
+		let col = |s: &str| Idiom::from_str(s).expect("valid idiom");
+		let path = |s: &str| {
+			lower_expr(crate::expr::Expr::Idiom(crate::syn::idiom(s).expect("idiom")))
+				.expect("lowers")
+		};
+		let names = KeyNames::new(vec![Strand::new("city"), Strand::new("time")], 2).unwrap();
+		let kind = Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Datetime]));
+		let key = KeyStructure::from_id_field(&kind, &names).unwrap();
+		let key = Some(&key);
+		// A name and a position address the same component, either way round.
+		assert!(idiom_matches_column_in(&path("id[0]"), &col("city"), key));
+		assert!(idiom_matches_column_in(&path("city"), &col("id[0]"), key));
+		assert!(idiom_matches_column_in(&path("time"), &col("id[1]"), key));
+		// Without the structure they are only the paths they spell.
+		assert!(!idiom_matches_column_in(&path("id[0]"), &col("city"), None));
+		assert!(idiom_matches_column_in(&path("city"), &col("city"), None));
+		// Different components, a path beneath one, and a position past the
+		// arity match nothing new.
+		assert!(!idiom_matches_column_in(&path("time"), &col("city"), key));
+		assert!(!idiom_matches_column_in(&path("city.x"), &col("id[0]"), key));
+		assert!(!idiom_matches_column_in(&path("id[0].x"), &col("city"), key));
+		assert!(!idiom_matches_column_in(&path("id[2]"), &col("city"), key));
+		assert!(!idiom_matches_column_in(&path("other"), &col("city"), key));
 	}
 
 	#[test]
