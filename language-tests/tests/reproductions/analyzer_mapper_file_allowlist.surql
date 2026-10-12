@@ -2,6 +2,7 @@
 [env]
 namespace = true
 database = true
+remote-skip = "resolves a relative mapper() file path against the process working directory; the remote server's differs from the harness's, so the path errors before the file-allowlist check"
 
 [test]
 reason = "DEFINE ANALYZER mapper() must enforce the configured file_allowlist. The test harness allows only the `../tests` tree, so a mapper path outside it must be denied rather than read off the host filesystem."

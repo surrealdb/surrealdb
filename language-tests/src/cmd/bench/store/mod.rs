@@ -7,6 +7,7 @@ use clap::ArgMatches;
 use surrealdb_types::{Datetime, SurrealValue, Value};
 
 use crate::cli::Backend;
+use crate::cmd::bench::meta::RunMetadata;
 use crate::cmd::bench::stats::MeasurementData;
 
 mod local;
@@ -50,6 +51,7 @@ pub struct BenchMarkRun {
 	pub path: String,
 	pub backend: Backend,
 	pub measurement: MeasurementData,
+	pub meta: RunMetadata,
 	/// The commit this measurement was taken at. The `measurement` table has
 	/// always declared this field, but nothing ever wrote it — so a stored
 	/// baseline could not say which code it came from.
@@ -57,6 +59,30 @@ pub struct BenchMarkRun {
 	/// Rows the benched statement returned. Compared against the baseline's to
 	/// catch a bench whose *workload* changed rather than its speed.
 	pub rows: Option<i64>,
+}
+
+impl BenchMarkRun {
+	/// Build the object stored as the measurement's `CONTENT`: the sample
+	/// statistics with the provenance fields (`commit`, `rows`) and the run
+	/// metadata (transport/git/host) alongside them, so each stored row carries
+	/// the conditions it was measured under.
+	///
+	/// Assembled here rather than in the query so both stores write the same
+	/// shape, and because an object-merge builtin is not available to lean on.
+	fn into_content_value(self) -> Value {
+		let mut object =
+			self.measurement.into_value().into_object().expect("a measurement is an object");
+		// Metadata first: the provenance fields below are the authoritative ones
+		// and must survive a key of the same name in the metadata.
+		if let Value::Object(meta) = self.meta.into_value() {
+			for (k, v) in meta {
+				object.insert(k, v);
+			}
+		}
+		object.insert("commit", self.commit);
+		object.insert("rows", self.rows);
+		Value::Object(object)
+	}
 }
 
 /// A stored measurement together with the provenance needed to judge whether
@@ -72,22 +98,6 @@ pub struct Baseline {
 	pub commit: Option<String>,
 	pub datetime: Option<Datetime>,
 	pub rows: Option<i64>,
-}
-
-/// The object a measurement is stored as: the sample statistics with the
-/// provenance fields alongside them.
-///
-/// Assembled here rather than in the query so both stores write the same shape,
-/// and because an object-merge builtin is not available to lean on.
-fn measurement_content(
-	measurement: MeasurementData,
-	commit: Option<String>,
-	rows: Option<i64>,
-) -> Value {
-	let mut object = measurement.into_value().into_object().expect("a measurement is an object");
-	object.insert("commit", commit);
-	object.insert("rows", rows);
-	Value::Object(object)
 }
 
 /// Reads the provenance fields off a `fn::last_measurement` row.
@@ -112,6 +122,7 @@ trait BenchDataStore: Send + Sync {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
+		transport: &'a str,
 	) -> impl Future<Output = Result<Option<Baseline>>> + 'a + Send;
 
 	fn close<'a>(&'a mut self) -> impl Future<Output = Result<()>> + 'a + Send {
@@ -128,6 +139,7 @@ pub trait DynBenchDataStore {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
+		transport: &'a str,
 	) -> BoxFuture<'a, Result<Option<Baseline>>>;
 
 	fn close<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
@@ -142,8 +154,9 @@ impl<T: BenchDataStore> DynBenchDataStore for T {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
+		transport: &'a str,
 	) -> BoxFuture<'a, Result<Option<Baseline>>> {
-		Box::pin(<T as BenchDataStore>::fetch_latest(self, path, backend))
+		Box::pin(<T as BenchDataStore>::fetch_latest(self, path, backend, transport))
 	}
 
 	fn close<'a>(&'a mut self) -> BoxFuture<'a, Result<()>> {

@@ -1,5 +1,6 @@
 /**
 [env]
+remote-exclusive = true
 namespace = false
 database = false
 clean = true

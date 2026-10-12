@@ -131,6 +131,28 @@ pub struct TestEnv {
 	/// actual elapsed times.
 	pub redact_volatile_explain_attrs: Option<bool>,
 
+	/// When set, the test is skipped on remote (`--endpoint`) runs, with this
+	/// string reported as the reason. For the handful of tests that assert
+	/// behaviour which only holds for an embedded, in-process datastore — a
+	/// connection-less `$session`, the absence of a bootstrap root user, or
+	/// process-relative file paths — and so can't be reproduced faithfully over
+	/// the API. Ignored by embedded runs.
+	pub remote_skip: Option<String>,
+
+	/// The test reaches outside its own namespace — it creates a root user,
+	/// access method or namespace, changes a system setting, or asserts on the
+	/// literal name of the namespace it runs in. Remote (`--endpoint`) runs give
+	/// it the endpoint to itself and the namespace name its config asks for;
+	/// every other test runs concurrently in a namespace named for the run.
+	///
+	/// Embedded runs ignore it: every test there already has a private
+	/// datastore, so there is nothing to share.
+	///
+	/// A test that needs this and does not declare it fails rather than races —
+	/// see [`crate::cmd::run::executor::Executor::check_root_leak`].
+	#[serde(default)]
+	pub remote_exclusive: bool,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -153,6 +175,8 @@ impl Default for TestEnv {
 			backend: Default::default(),
 			versioned: Default::default(),
 			redact_volatile_explain_attrs: Default::default(),
+			remote_skip: None,
+			remote_exclusive: Default::default(),
 			_unused_keys: Default::default(),
 		}
 	}
@@ -171,6 +195,16 @@ impl TestEnv {
 	/// Defaults to "test"
 	pub fn database(&self) -> Option<&str> {
 		self.database.as_ref().map(|x| x.as_str()).into_value(ENV_DEFAULT_DATABASE)
+	}
+
+	/// Whether a remote run has to give this test the endpoint to itself.
+	///
+	/// Either it says so, or it asked not to run beside anything at all, or it
+	/// declares no namespace — in which case it has nowhere but root to write
+	/// and cannot be isolated by one.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn needs_exclusive_endpoint(&self) -> bool {
+		self.remote_exclusive || self.sequential || self.namespace().is_none()
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {

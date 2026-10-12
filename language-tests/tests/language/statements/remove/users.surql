@@ -1,5 +1,6 @@
 /**
 [env]
+remote-exclusive = true
 timeout = 400000
 context-timeout = 400000
 

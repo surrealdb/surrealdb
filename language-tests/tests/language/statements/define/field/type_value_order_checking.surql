@@ -44,6 +44,7 @@ error = "Couldn't coerce value for field `must_be_number` of `test:admin`: Expec
 value = "[{ can_be_number: 1, id: test:admin, must_be_number: 8, unchecked_number: 222, version: 123456789 }]"
 
 [env]
+remote-exclusive = true
 namespace = "test"
 database = "test"
 

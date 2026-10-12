@@ -7,6 +7,7 @@ auth = { level = "owner" }
 # survives the removal of the table it was queued from and can still be drained.
 # Nothing drains it here, so it outlives this test's `REMOVE NS`.
 clean = true
+remote-skip = "asserts that a queued ASYNC event body stays unrun, which holds only because the embedded harness builds its datastores without maintenance tasks; a real server runs them and drains the queue"
 
 [test]
 reason = """

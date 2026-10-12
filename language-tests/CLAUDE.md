@@ -71,6 +71,21 @@ Every `.surql` and `.gql` file runs once per backend, on the default engine:
 the bytecode VM. There is no per-test engine selector, so a plan assertion
 (`EXPLAIN`) pins the VM's plan and nothing else.
 
+### Running against a server
+
+`run --endpoint <url>` drives the suite through the SDK against a real server
+instead of an in-process datastore. Tests run concurrently there, isolated by a
+namespace each (`lt_<run>_<n>`), so a test that reaches outside one — a root
+user or access method, a namespace, `ALTER SYSTEM`, or an assertion on the
+literal name of its own namespace — must declare `[env] remote-exclusive` and is
+given the endpoint to itself. Undeclared root-level state fails the test by name
+rather than racing; `README.md > [env.remote-exclusive]` has the message and the
+rules.
+
+**The suite is destructive to whatever it is pointed at.** It drops and creates
+namespaces and removes root configs, so point it only at an instance nobody else
+is using.
+
 ### Naming and companions
 
 Reproductions are flat in `tests/reproductions/`, named for the behaviour they

@@ -3,6 +3,7 @@
 namespace = true
 database = true
 auth = { level = "owner" }
+remote-exclusive = true
 
 [test]
 reason = "An evaluated TIMEOUT of ALTER SEQUENCE and QUERY_TIMEOUT of ALTER SYSTEM is evaluated when the statement runs and cast to a duration"

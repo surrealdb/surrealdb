@@ -248,6 +248,15 @@ pub fn parse() -> ArgMatches {
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 			)
 			.arg(
+				arg!(--endpoint <URL> "Run the suite against a remote SurrealDB instance over ws:// or http:// (requires building with `--features remote`) instead of an embedded datastore")
+			)
+			.arg(
+				arg!(--username <USER> "Root username to sign in to the --endpoint server").default_value("root").requires("endpoint")
+			)
+			.arg(
+				arg!(--password <PASSWORD> "Root password to sign in to the --endpoint server").default_value("root").requires("endpoint")
+			)
+			.arg(
 				Arg::new("config")
 					.long("config")
 					.value_name("KEY=VALUE")

@@ -1,5 +1,6 @@
 /**
 [env]
+remote-exclusive = true
 backend = ["mem"]
 
 [test]

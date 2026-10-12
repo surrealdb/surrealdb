@@ -35,6 +35,13 @@ impl TestRunId {
 	pub fn new(id: usize) -> Self {
 		TestRunId(id)
 	}
+
+	/// The run's index in the set, unique within one invocation. Remote runs
+	/// build each test's namespace name from it.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn index(self) -> usize {
+		self.0
+	}
 }
 
 /// A single instance of test being run with a given configuration of datastore.

@@ -1,4 +1,7 @@
 /**
+[env]
+remote-exclusive = true
+
 [test]
 reason = "Test ALTER CONFIG with all config types"
 

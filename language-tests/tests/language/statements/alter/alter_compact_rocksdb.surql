@@ -1,6 +1,11 @@
 /**
 [env]
+remote-exclusive = true
 backend = ["rocksdb"]
+# `ALTER SYSTEM COMPACT` compacts the whole store, so against a server that has
+# served the rest of the suite it is doing real work; the default 1s budget
+# describes a query, not this.
+timeout = 30000
 
 [test]
 
