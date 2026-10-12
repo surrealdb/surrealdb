@@ -1,0 +1,6 @@
+ignore_patterns:
+  - "Cargo.lock"
+  - "revision.lock"
+  - "supply-chain/**"
+code_review:
+  comment_severity_threshold: MEDIUM
