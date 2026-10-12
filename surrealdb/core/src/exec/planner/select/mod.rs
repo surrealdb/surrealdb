@@ -1944,11 +1944,42 @@ impl<'ctx> Planner<'ctx> {
 	/// table, and where the planner has no transaction or the catalog cannot
 	/// answer.
 	pub(crate) async fn named_key_structure(&self, table: &TableName) -> Option<Arc<KeyStructure>> {
-		let txn = self.txn.as_ref()?;
-		let (ns, db) = self.ns_db_ids().await?;
-		self.record_key_structure(txn, ns, db, table)
+		self.named_key_structure_at(table, None).await
+	}
+
+	/// [`Self::named_key_structure`] as the catalog held it at `version`, or as
+	/// it stands now where `version` is `None`. A read at a stamp is answered
+	/// from the definitions of that stamp, since the structure the records
+	/// there were written under need not be the one the catalog holds now.
+	pub(crate) async fn named_key_structure_at(
+		&self,
+		table: &TableName,
+		version: Option<u64>,
+	) -> Option<Arc<KeyStructure>> {
+		self.key_structure_at(table, version)
 			.await
 			.filter(|key| key.origin == crate::catalog::KeyOrigin::IdField)
+	}
+
+	/// The structure of `table`'s record ids whatever names them — an `id`
+	/// field naming its components or an aggregated view's group columns
+	/// ([`KeyOrigin`](crate::catalog::KeyOrigin)) — as the catalog held it at
+	/// `version`, or as it stands now where `version` is `None`.
+	///
+	/// A caller that reasons about the stored keys themselves, rather than
+	/// about what a record id's names admit, wants this rather than
+	/// [`Self::named_key_structure_at`]: a view's keys are encoded from its
+	/// group columns exactly as a named `id`'s are from its components.
+	pub(crate) async fn key_structure_at(
+		&self,
+		table: &TableName,
+		version: Option<u64>,
+	) -> Option<Arc<KeyStructure>> {
+		let txn = self.txn.as_ref()?;
+		let (ns, db) = self.ns_db_ids().await?;
+		let fields = txn.all_tb_fields(ns, db, table, version).await.ok()?;
+		let definition = txn.get_tb(ns, db, table, version).await.ok()??;
+		table_key(&definition, &fields)
 	}
 
 	/// Attempt to build the bitmap fusion plan for `resolve_access_path`.

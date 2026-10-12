@@ -13,7 +13,10 @@ and aggregated views grouped by a number, by a string under `ORDER BY id`, and b
 nothing. None of these reads a record-id component by name, so their access paths,
 bounds, orders and counts are the plans the index analyzer gives a table with no
 key structure: a datetime bound is the literal as written, a compound index
-delivers its order and limit, and a view grouped by a number keeps its scan. The
+delivers its order and limit, and a view grouped by a number keeps its scan. An
+aggregated view's key records no kind for its group columns, so none of them is
+known to order its key bytes exactly and `ORDER BY id` over such a view keeps its
+`Sort`, the scan still reading in the sort's direction. The
 index over `id[1]` lists each record once, because the declared kind of that
 element of the typed array id holds no array, so its scan needs no
 `DistinctRecords`; an index over an undeclared field that has recorded storing
@@ -174,7 +177,8 @@ value = '''
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: per_s, direction: Backward]
+    Sort [ctx: Db] [sort_keys: id DESC]
+        TableScan [ctx: Db] [table: per_s, direction: Backward]
 ''''
 */
 DEFINE TABLE plain SCHEMALESS;

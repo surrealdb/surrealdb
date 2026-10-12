@@ -577,7 +577,10 @@ pub(crate) enum Plan {
 		topk: Option<TopKKey>,
 		/// Whether record-key order is the order of `id`: `false` for a table
 		/// whose record id names a component whose key bytes order its values
-		/// only coarsely (a datetime), so a sort by `id` is never taken as
+		/// only coarsely (a datetime), judged against the record-id structure
+		/// of the state being read — the stamp's, under a `VERSION` — and
+		/// `false` under a stamp only the run can evaluate, which names no
+		/// state to judge against. A sort by `id` is then never taken as
 		/// delivered.
 		id_order: bool,
 	},

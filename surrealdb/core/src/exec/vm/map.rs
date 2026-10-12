@@ -4034,12 +4034,24 @@ fn widened_bound(
 /// Whether a table scan of `table` delivers its rows in the order of `id`
 /// where the offer asks for that order ([`Plan::TableScan`]'s `id_order`).
 ///
-/// Key order is `id` order unless the table's record id names a component
-/// whose key bytes order its values coarsely (a datetime, by the whole
-/// second). The catalog is read only when the offered ordering is `id` alone,
-/// the one ordering a table scan is taken to deliver. A `versioned` scan is
-/// not taken to deliver it: the records at the version may have been written
-/// under a structure the catalog no longer holds.
+/// The catalog is read only when the offered ordering is `id` alone, the one
+/// ordering a table scan is taken to deliver; every other ordering is left to
+/// the sort above the scan and answered `true` unread.
+///
+/// Key order is `id` order where nothing structures the table's record ids,
+/// and where what structures them — an `id` field naming its components, or
+/// an aggregated view's group columns, both of which encode the key the same
+/// way — holds only components whose key bytes order their values exactly. A
+/// datetime orders by the whole second alone, so a key holding one does not
+/// deliver `id` order.
+///
+/// Which structure answers is the structure the records being read were
+/// written under, not the one the catalog holds now: the names of a record id
+/// can be removed while the keys written under them stay as they are. A
+/// `versioned` read therefore reads the structure as of its stamp, and where
+/// only the run can evaluate the stamp ([`PlanTimeVersion::Unknown`]) there is
+/// no catalog state to read it at, so the scan delivers no order and the sort
+/// above it stands.
 async fn scan_orders_by_id(
 	planner: &Planner<'_>,
 	table: &TableName,
@@ -4054,10 +4066,15 @@ async fn scan_orders_by_id(
 	if !by_id {
 		return true;
 	}
-	if versioned {
-		return false;
-	}
-	crate::exec::vm::host::out_of_line(|| planner.named_key_structure(table))
+	let version = if versioned {
+		let PlanTimeVersion::At(stamp) = planner.plan_time_version else {
+			return false;
+		};
+		Some(stamp)
+	} else {
+		None
+	};
+	crate::exec::vm::host::out_of_line(|| planner.key_structure_at(table, version))
 		.await
 		.is_none_or(|key| key.all_exactly_ordered())
 }
