@@ -501,6 +501,20 @@ impl Number {
 		}
 	}
 
+	/// Reconstructs a Number of the given kind from a buffer produced by
+	/// `as_decimal_buf()`.
+	///
+	/// This is the inverse of the buffer's encoding for the kind it was written
+	/// with: an `Int` decodes to the same `i64`, a `Decimal` to a `Decimal` of
+	/// the same value, and a `Float` to the same `f64` bit for bit (the sign of a
+	/// zero and the payload of a NaN are not stored). Decoding then encoding
+	/// therefore reproduces the buffer, which a record id read back out of a key
+	/// relies on to address its own record.
+	///
+	/// A float is decoded straight from the decimal digits to the nearest `f64`.
+	/// The buffer holds the float's exact expansion to 34 digits, so that
+	/// conversion lands on the float it was written from at every magnitude,
+	/// including the ones a `Decimal` cannot hold.
 	pub fn from_decimal_buf_kind(b: &[u8], kind: NumberKind) -> Result<Self> {
 		let dec = DecimalLexEncoder::decode(b)?;
 		match kind {
@@ -518,15 +532,12 @@ impl Number {
 						Ok(Number::Float(f64::INFINITY))
 					}
 				} else {
-					let dec = DecimalLexEncoder::to_decimal(dec)?;
-					dec.to_f64()
-						.ok_or_else(|| anyhow::Error::msg(format!("Invalid f64 {dec}")))
-						.map(Number::Float)
+					Ok(Number::Float(dec.to_f64()))
 				}
 			}
 			NumberKind::Decimal => {
-				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
-				Ok(Number::Decimal(DecimalLexEncoder::to_decimal(dec)?))
+				ensure!(dec.is_finite(), format!("Invalid decimal value: {dec}"));
+				Ok(Number::Decimal(DecimalLexEncoder::to_decimal_exact(dec)?))
 			}
 		}
 	}
@@ -1634,5 +1645,162 @@ mod tests {
 			Number::Decimal(d).fixed(2),
 			Number::Decimal(Decimal::from_str_normalized("1.23").unwrap()),
 		);
+	}
+
+	/// A number as a record key stores it, and as a scan reads it back.
+	fn through_record_key(n: &Number) -> (Vec<u8>, Number) {
+		let key = storekey::encode_vec(n).unwrap();
+		let back = storekey::decode_borrow::<Number>(&key)
+			.unwrap_or_else(|e| panic!("the key of {n:?} does not decode: {e}"));
+		(key, back)
+	}
+
+	/// A record id read out of a key is used to fetch the record again, which
+	/// re-encodes it, so decoding must give back the value the key was written
+	/// from: the same float bit for bit, not a neighbour of it, and not an error.
+	fn assert_float_key_round_trips(f: f64) {
+		let (key, back) = through_record_key(&Number::Float(f));
+		let Number::Float(g) = back else {
+			panic!("{f:e} decoded as {back:?}, not a float");
+		};
+		// The sign of a zero and the payload of a NaN are not stored.
+		let same =
+			g.to_bits() == f.to_bits() || (f == 0.0 && g == 0.0) || (f.is_nan() && g.is_nan());
+		assert!(same, "{f:e} decoded as {g:e}");
+		assert_eq!(
+			through_record_key(&Number::Float(g)).0,
+			key,
+			"{f:e} does not re-encode to its key"
+		);
+	}
+
+	#[test]
+	fn a_float_key_decodes_to_the_float_it_was_written_from() {
+		for f in [
+			0.0,
+			-0.0,
+			0.1,
+			0.2 + 0.1,
+			1.5,
+			5.0,
+			1.6330027767028172,
+			std::f64::consts::PI,
+			9007199254740994.0,
+			f64::EPSILON,
+			f64::INFINITY,
+			f64::NEG_INFINITY,
+			f64::NAN,
+			// Past the largest magnitude a `Decimal` holds, ~7.9e28.
+			1e28,
+			7.9e28,
+			1e29,
+			1e30,
+			-1e30,
+			1e300,
+			f64::MAX,
+			f64::MIN,
+			// Below the smallest scale a `Decimal` holds, and the subnormals.
+			1e-6,
+			1e-7,
+			5.6527459748369866e-8,
+			1e-20,
+			1e-28,
+			1e-29,
+			1e-300,
+			f64::MIN_POSITIVE,
+			5e-324,
+		] {
+			assert_float_key_round_trips(f);
+		}
+		// Every decimal exponent, over mantissas of every length.
+		for e in -324..=308 {
+			for m in ["1", "9.999999999999999", "1.2345678901234567", "5", "7.1"] {
+				if let Ok(f) = format!("{m}e{e}").parse::<f64>() {
+					assert_float_key_round_trips(f);
+					assert_float_key_round_trips(-f);
+				}
+			}
+		}
+		let mut rng = rand::rng();
+		for _ in 0..20_000 {
+			assert_float_key_round_trips(f64::from_bits(rng.random()));
+			assert_float_key_round_trips(rng.random::<f64>());
+			assert_float_key_round_trips(
+				rng.random::<f64>() * 10f64.powi(rng.random_range(-30..30)),
+			);
+		}
+	}
+
+	#[test]
+	fn a_decimal_key_decodes_to_the_decimal_it_was_written_from() {
+		fn assert_round_trips(d: Decimal) {
+			let (key, back) = through_record_key(&Number::Decimal(d));
+			assert!(matches!(back, Number::Decimal(g) if g == d), "{d} decoded as {back:?}");
+			assert_eq!(through_record_key(&back).0, key, "{d} does not re-encode to its key");
+		}
+		for d in [
+			"0",
+			"1",
+			"-1",
+			"1.5",
+			"1.50",
+			"100.000",
+			"1000000",
+			// A scale of 7 or more is printed in scientific notation by `D128`.
+			"0.0000001",
+			"-0.0000000121",
+			"0.0000000000000000000000000001",
+			"7.9228162514264337593543950335",
+			"79228162514264337593543950335",
+			"-79228162514264337593543950335",
+		] {
+			assert_round_trips(d.parse().unwrap());
+		}
+		assert_round_trips(Decimal::MAX);
+		assert_round_trips(Decimal::MIN);
+		let mut rng = rand::rng();
+		for _ in 0..20_000 {
+			let mantissa = (rng.random::<u128>() >> rng.random_range(32..128)) as i128;
+			let mantissa = if rng.random() {
+				-mantissa
+			} else {
+				mantissa
+			};
+			assert_round_trips(Decimal::from_i128_with_scale(mantissa, rng.random_range(0..=28)));
+		}
+	}
+
+	#[test]
+	fn an_int_key_decodes_to_the_int_it_was_written_from() {
+		let mut ints = vec![0, 1, -1, i64::MAX, i64::MIN];
+		for e in 0..19 {
+			let p = 10i64.pow(e);
+			ints.extend([p, -p, p - 1, p + 1, 5 * p]);
+		}
+		for i in ints {
+			let (key, back) = through_record_key(&Number::Int(i));
+			assert!(matches!(back, Number::Int(g) if g == i), "{i} decoded as {back:?}");
+			assert_eq!(through_record_key(&back).0, key);
+		}
+	}
+
+	/// What a released binary stored for these numbers. The bytes are the format
+	/// of every record id and key that holds one, so they must not change: a
+	/// scan on a newer release decodes exactly these.
+	#[test]
+	fn the_stored_bytes_of_a_numeric_key_are_frozen() {
+		fn hex(b: &[u8]) -> String {
+			b.iter().map(|b| format!("{b:02x}")).collect()
+		}
+		for (n, stored) in [
+			(Number::Float(1e30), "a01937211111111111111112a995735949767001000003"),
+			(Number::Float(0.1), "a01918211111111111111116662226234236893813229001000003"),
+			(Number::Float(5e-324), "a017d35a51767569523576552876798a3979332483480f01000003"),
+			(Number::Decimal("0.0000001".parse().unwrap()), "a019122001000004"),
+			(Number::Int(1000), "a0191c21110f01000002"),
+		] {
+			let key = storekey::encode_vec(&n).unwrap();
+			assert_eq!(hex(&key), stored, "{n:?}");
+		}
 	}
 }
