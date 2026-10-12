@@ -5,7 +5,7 @@ use surrealdb_expr::expr::builtin_paths::{PATHS, PathKind};
 #[test]
 fn paths_parse() {
 	let mut failures = Vec::new();
-	for (path, (kind, _)) in PATHS.entries() {
+	for (path, (kind, _, _)) in PATHS.entries() {
 		let path = path.into_inner();
 		let source = match kind {
 			PathKind::Constant(_) => format!("RETURN {path};"),

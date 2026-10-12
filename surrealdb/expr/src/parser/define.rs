@@ -159,7 +159,7 @@ impl Lower<'_> {
 
 	fn changefeed(&self, c: &Node) -> R<ChangeFeed> {
 		Ok(ChangeFeed {
-			expiry: self.duration(c.a)?,
+			expiry: self.duration(c.a)?.into(),
 			store_diff: c.b == 1,
 		})
 	}

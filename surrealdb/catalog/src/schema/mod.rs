@@ -41,6 +41,7 @@ use crate::catalog::{ExprText, FromStored, LogicalBody};
 use crate::expr::logical::{LogicalPermission, LogicalPermissionRef};
 pub use crate::expr::permission::{Permission, Permissions};
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
 
 /// Placeholder substituted for a secret when a catalog definition is serialised
@@ -63,15 +64,19 @@ use crate::val::Value;
 pub const REDACTED: &str = "[REDACTED]";
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum StoredPermission {
+	#[stored(n = 1)]
 	None,
 	#[default]
+	#[stored(n = 2)]
 	Full,
 	/// Canonical SurrealQL text of the permission's guard expression (the
 	/// bare expression, not prefixed with `WHERE`). Compiled on demand by
 	/// consumers that need to evaluate or analyze it; see
 	/// [`crate::catalog::FromStored`] and `exec::permission`.
+	#[stored(n = 3)]
 	Specific(ExprText),
 }
 
@@ -99,11 +104,16 @@ impl ToSql for StoredPermission {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredPermissions {
+	#[stored(n = 2)]
 	pub select: StoredPermission,
+	#[stored(n = 4)]
 	pub create: StoredPermission,
+	#[stored(n = 6)]
 	pub update: StoredPermission,
+	#[stored(n = 8)]
 	pub delete: StoredPermission,
 }
 

@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use crate::error::DatastoreError;
 
+pub mod ledger;
+
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct MajorVersion(u16);
 
@@ -50,8 +52,15 @@ impl KVValue for MajorVersion {
 }
 
 impl MajorVersion {
-	/// The latest version
-	pub const LATEST: u16 = 3;
+	/// The newest stamp this build writes. A store that may hold bytes in the stored-value
+	/// grammar carries it: a store created at a feature level above Legacy is stamped with it,
+	/// and so is a store at the transaction that raises its level or commits its first
+	/// stored-grammar bytes. A release that checks only this stamp, and so knows no ledger,
+	/// refuses such a store at startup.
+	pub const LATEST: u16 = 4;
+	/// The stamp of a store that holds no bytes in the stored-value grammar: the last stamp of
+	/// the 3.x line, which this build opens and brings forward when its feature level is raised.
+	pub const LEGACY: u16 = 3;
 	/// The latest version
 	pub fn latest() -> Self {
 		Self(Self::LATEST)
@@ -67,6 +76,11 @@ impl MajorVersion {
 	/// Check if we are running the latest version
 	pub fn is_latest(self) -> bool {
 		self.0 == Self::LATEST
+	}
+	/// Whether this build opens a store carrying this stamp: the latest, or the one a store
+	/// that has not been raised keeps ([`Self::LEGACY`]).
+	pub fn is_supported(self) -> bool {
+		self.0 == Self::LATEST || self.0 == Self::LEGACY
 	}
 }
 
@@ -185,10 +199,14 @@ impl revision::LengthPrefixedBytes for StorageVersion {}
 
 /// One entry in the datastore's version history, stored at `/!vh{ts}{nd}`.
 ///
-/// An entry is written only when a node advances the datastore's stamped
-/// version, so the history is the sequence of versions the datastore has
-/// progressed through rather than a log of every startup. Entries are keyed by
-/// the writing node so that appends from different nodes never target the same
+/// An entry records a transition, so the history is the sequence of releases
+/// that have changed the datastore's state rather than a log of every startup.
+/// It is *upward* when `from` is `None` or below `to`: a node advanced the
+/// stamped version, or a node at the stamp finished rechecking what earlier
+/// releases left unmaintained. It is a *downward note* when `from`, the stamp,
+/// is above `to`, the running release: a release below the stamp opened the
+/// datastore, which leaves the stamp where it is. Entries are keyed by the
+/// writing node so that appends from different nodes never target the same
 /// key, which matters on backends that resolve concurrent writes by
 /// last-writer-wins rather than by conflict.
 #[revisioned(revision = 1)]
@@ -228,6 +246,32 @@ pub struct MigrationRecord {
 }
 
 impl_kv_value_revisioned!(MigrationRecord);
+
+impl MigrationRecord {
+	/// The ledger record of an entry applied by `node` at `timestamp` (milliseconds since the
+	/// Unix epoch), naming the release `version` that introduced it.
+	///
+	/// Every ledger record is built here, so every entry has the same shape.
+	pub fn applied(name: &str, version: (u64, u64, u64), node: Uuid, timestamp: u64) -> Self {
+		Self {
+			name: name.to_owned(),
+			version: StorageVersion::from_triple(version),
+			node,
+			timestamp,
+		}
+	}
+}
+
+/// The wall clock in milliseconds since the Unix epoch, as ledger and history records stamp it.
+///
+/// A clock before the epoch reads as `0`, and a reading beyond `u64` milliseconds saturates.
+pub(crate) fn unix_millis_now() -> u64 {
+	use web_time::{SystemTime, UNIX_EPOCH};
+	SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+		.unwrap_or(0)
+}
 
 #[cfg(test)]
 mod tests {

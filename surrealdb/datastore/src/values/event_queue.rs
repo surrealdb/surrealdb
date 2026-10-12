@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use revision::revisioned;
+use surrealdb_catalog::stored::EmbeddedEntry;
 use surrealdb_catalog::{Record, StoredEventDefinition};
 use surrealdb_expr::val::{RecordId, Value};
 use surrealdb_iam::Auth;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 
 /// Persisted payload for processing DEFINE EVENT ... ASYNC.
@@ -50,7 +50,10 @@ pub struct AsyncEventRecord {
 	/// Auth context with any event-specific limits applied.
 	pub auth_with_limit: Arc<Auth>,
 	/// Snapshot of the event definition used for execution and retry policy.
-	pub event_definition: StoredEventDefinition,
+	///
+	/// Held through [`EmbeddedEntry`] so that a definition `revision` cannot hold travels in the
+	/// stored grammar.
+	pub event_definition: EmbeddedEntry<StoredEventDefinition>,
 }
 
-impl_kv_value_revisioned!(AsyncEventRecord);
+impl_kv_value_embedding!(AsyncEventRecord);

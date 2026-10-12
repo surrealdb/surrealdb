@@ -3,23 +3,27 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::catalog::{ExprText, FromStored};
-use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::Value;
+use crate::stored::Stored;
+use crate::val::{BoundedDuration, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 /// The type of access methods available
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub enum AccessType {
+	#[stored(n = 1)]
 	Record(RecordAccess),
+	#[stored(n = 2)]
 	Jwt(JwtAccess),
+	#[stored(n = 3)]
 	Bearer(BearerAccess),
 }
 
@@ -91,50 +95,69 @@ impl InfoStructure for AccessType {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct RecordAccess {
 	/// Canonical SurrealQL text of the `SIGNUP` clause's expression.
+	#[stored(n = 2)]
 	pub signup: Option<ExprText>,
 	/// Canonical SurrealQL text of the `SIGNIN` clause's expression.
+	#[stored(n = 4)]
 	pub signin: Option<ExprText>,
+	#[stored(n = 6)]
 	pub jwt: JwtAccess,
+	#[stored(n = 8)]
 	pub bearer: Option<BearerAccess>,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct BearerAccess {
+	#[stored(n = 2)]
 	pub kind: BearerAccessType,
+	#[stored(n = 4)]
 	pub subject: BearerAccessSubject,
+	#[stored(n = 6)]
 	pub jwt: JwtAccess,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub enum BearerAccessType {
+	#[stored(n = 1)]
 	Bearer,
+	#[stored(n = 2)]
 	Refresh,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub enum BearerAccessSubject {
+	#[stored(n = 1)]
 	Record,
+	#[stored(n = 2)]
 	User,
 }
 
 #[revisioned(revision = 2)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct JwtAccess {
 	// Verify is required
+	#[stored(n = 2)]
 	pub verify: JwtAccessVerify,
 	// Issue is optional
 	// It is possible to only verify externally issued tokens
+	#[stored(n = 4)]
 	pub issue: Option<JwtAccessIssue>,
 	/// Accepted values for the token `aud` claim. When set, tokens verified
 	/// against this access method must carry an `aud` claim that intersects
 	/// this list. `None` disables audience validation.
 	#[revision(start = 2)]
+	#[stored(n = 6)]
 	pub audience: Option<Vec<String>>,
 }
 
@@ -169,47 +192,72 @@ impl InfoStructure for JwtAccess {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub enum JwtAccessVerify {
+	#[stored(n = 1)]
 	Key(JwtAccessVerifyKey),
+	#[stored(n = 2)]
 	Jwks(JwtAccessVerifyJwks),
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct JwtAccessVerifyKey {
+	#[stored(n = 2)]
 	pub alg: Algorithm,
+	#[stored(n = 4)]
 	pub key: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct JwtAccessVerifyJwks {
+	#[stored(n = 2)]
 	pub url: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct JwtAccessIssue {
+	#[stored(n = 2)]
 	pub alg: Algorithm,
+	#[stored(n = 4)]
 	pub key: String,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Algorithm {
+	#[stored(n = 1)]
 	EdDSA,
+	#[stored(n = 2)]
 	Es256,
+	#[stored(n = 3)]
 	Es384,
+	#[stored(n = 4)]
 	Es512,
+	#[stored(n = 5)]
 	Hs256,
+	#[stored(n = 6)]
 	Hs384,
+	#[stored(n = 7)]
 	Hs512,
+	#[stored(n = 8)]
 	Ps256,
+	#[stored(n = 9)]
 	Ps384,
+	#[stored(n = 10)]
 	Ps512,
+	#[stored(n = 11)]
 	Rs256,
+	#[stored(n = 12)]
 	Rs384,
+	#[stored(n = 13)]
 	Rs512,
 }
 
@@ -247,12 +295,17 @@ impl ToSql for Algorithm {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredAccessDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
+	#[stored(n = 4)]
 	pub access_type: AccessType,
+	#[stored(n = 6)]
 	pub base: Base,
 	/// Canonical SurrealQL text of the `AUTHENTICATE` clause's expression.
+	#[stored(n = 8)]
 	pub authenticate: Option<ExprText>,
 	/// Canonical SurrealQL text of the `CONTEXT` clause's expression.
 	///
@@ -260,13 +313,22 @@ pub struct StoredAccessDefinition {
 	/// decode to an access method without a context clause — which is exactly
 	/// the pre-feature behaviour.
 	#[revision(start = 2)]
+	#[stored(n = 10)]
 	pub context: Option<ExprText>,
-	pub grant_duration: Option<Duration>,
-	pub token_duration: Option<Duration>,
-	pub session_duration: Option<Duration>,
+	#[stored(n = 12)]
+	pub grant_duration: Option<BoundedDuration>,
+	#[stored(n = 14)]
+	pub token_duration: Option<BoundedDuration>,
+	#[stored(n = 16)]
+	pub session_duration: Option<BoundedDuration>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 }
-impl_kv_value_revisioned!(StoredAccessDefinition);
+impl_kv_value_catalog!(StoredAccessDefinition);
 
 impl AccessDefinition {
 	fn to_runtime_definition(&self) -> runtime::statements::define::DefineAccessStatement {
@@ -765,9 +827,9 @@ impl FromStored for AccessDefinition {
 				context: stored.context.as_ref().map(|t| t.compile()).transpose()?,
 				signup,
 				signin,
-				grant_duration: stored.grant_duration,
-				token_duration: stored.token_duration,
-				session_duration: stored.session_duration,
+				grant_duration: stored.grant_duration.map(Duration::from),
+				token_duration: stored.token_duration.map(Duration::from),
+				session_duration: stored.session_duration.map(Duration::from),
 				comment: stored.comment.clone(),
 			})
 		}
@@ -792,9 +854,9 @@ impl AccessDefinition {
 			base: self.base.clone(),
 			authenticate: self.authenticate.as_ref().map(ExprText::new),
 			context: self.context.as_ref().map(ExprText::new),
-			grant_duration: self.grant_duration,
-			token_duration: self.token_duration,
-			session_duration: self.session_duration,
+			grant_duration: self.grant_duration.map(BoundedDuration::from),
+			token_duration: self.token_duration.map(BoundedDuration::from),
+			session_duration: self.session_duration.map(BoundedDuration::from),
 			comment: self.comment.clone(),
 		}
 	}

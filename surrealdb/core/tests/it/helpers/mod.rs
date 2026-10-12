@@ -358,6 +358,7 @@ pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static)
 	builder
 		.spawn(|| {
 			let runtime = tokio::runtime::Builder::new_current_thread()
+				.enable_all()
 				.build()
 				.expect("with_enough_stack: tokio current_thread runtime");
 			runtime.block_on(fut)

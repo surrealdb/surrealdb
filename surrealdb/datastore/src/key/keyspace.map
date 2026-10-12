@@ -5,6 +5,7 @@ Every route, the generated type that addresses it, and the value it stores.
 Generated from the `keyspace!` schema; do not edit by hand.
 
 !bv                                                                                                      BootstrapKey ->  crate::version::MajorVersion
+!fl                                                                                                   FeatureLevelKey ->  surrealdb_catalog::StoredFeatureLevel
 !v                                                                                                         VersionKey ->  crate::version::MajorVersion
 /                                                                                                            RootRoot ->  (subtree)
 /!vs                                                                                                StorageVersionKey ->  crate::version::StorageVersion
@@ -16,6 +17,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!ns                                                                                                  NamespacePrefix ->  (range)
 /!nd{nd}                                                                                                      NodeKey ->  surrealdb_catalog::node::Node
 /!nd                                                                                                       NodePrefix ->  (range)
+/!nr{nd}                                                                                               NodeReleaseKey ->  surrealdb_catalog::node::NodeRelease
+/!nr                                                                                                NodeReleasePrefix ->  (range)
 /!us{user}                                                                                                RootUserKey ->  surrealdb_catalog::UserDefinition
 /!us                                                                                                   RootUserPrefix ->  (range)
 /!ac{ac}                                                                                          RootAccessMethodKey ->  surrealdb_catalog::StoredAccessDefinition
@@ -44,12 +47,15 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!rc                                                                                                    ReclaimPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}                                                                                ReclaimTbPrefix ->  (range)
 /${nd}                                                                                                  NodeStateRoot ->  (subtree)
+/$                                                                                                    NodeStatePrefix ->  (range)
 /${nd}!lq{lq}                                                                                        NodeLiveQueryKey ->  surrealdb_catalog::NodeLiveQuery
 /${nd}!lq                                                                                         NodeLiveQueryPrefix ->  (range)
 /&{ac}                                                                                                 RootAccessRoot ->  (subtree)
+/&                                                                                                   RootAccessPrefix ->  (range)
 /&{ac}!gr{gr}                                                                                            RootGrantKey ->  surrealdb_catalog::AccessGrant
 /&{ac}!gr                                                                                             RootGrantPrefix ->  (range)
 /*{ns}                                                                                                         NsRoot ->  (subtree)
+/*                                                                                                           NsPrefix ->  (range)
 /*{ns}!db{db}                                                                                             DatabaseKey ->  surrealdb_catalog::DatabaseDefinition
 /*{ns}!db                                                                                              DatabasePrefix ->  (range)
 /*{ns}!us{user}                                                                                             NsUserKey ->  surrealdb_catalog::UserDefinition
@@ -61,9 +67,11 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}!di{nid}                                                                                           DbIdStateKey ->  crate::sequences::SequenceState
 /*{ns}!di                                                                                             DbIdStatePrefix ->  (range)
 /*{ns}&{ac}                                                                                              NsAccessRoot ->  (subtree)
+/*{ns}&                                                                                                NsAccessPrefix ->  (range)
 /*{ns}&{ac}!gr{gr}                                                                                         NsGrantKey ->  surrealdb_catalog::AccessGrant
 /*{ns}&{ac}!gr                                                                                          NsGrantPrefix ->  (range)
 /*{ns}*{db}                                                                                                    DbRoot ->  (subtree)
+/*{ns}*                                                                                                      DbPrefix ->  (range)
 /*{ns}*{db}!tb{tb}                                                                                           TableKey ->  surrealdb_catalog::StoredTableDefinition
 /*{ns}*{db}!tb                                                                                            TablePrefix ->  (range)
 /*{ns}*{db}!us{user}                                                                                        DbUserKey ->  surrealdb_catalog::UserDefinition
@@ -81,6 +89,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!cf                                                                                     ChangefeedFenceKey ->  u64
 /*{ns}*{db}!cv{tb}                                                                                  CatalogVersionKey ->  crate::values::catalog_version::CatalogVersion
 /*{ns}*{db}!cv                                                                                   CatalogVersionPrefix ->  (range)
+/*{ns}*{db}!gn{tb}                                                                                  GenerationMarkKey ->  surrealdb_catalog::GenerationMark
+/*{ns}*{db}!gn                                                                                   GenerationMarkPrefix ->  (range)
 /*{ns}*{db}!ov{kind}{name}{sub}                                                                      ObjectVersionKey ->  crate::values::catalog_version::CatalogVersion
 /*{ns}*{db}!ov                                                                                    ObjectVersionPrefix ->  (range)
 /*{ns}*{db}!fn{fc}                                                                                        FunctionKey ->  surrealdb_catalog::StoredFunctionDefinition
@@ -109,9 +119,11 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!sq{sq}!st{nid}                                                                                SeqStateKey ->  crate::sequences::SequenceState
 /*{ns}*{db}!sq{sq}!st                                                                                  SeqStatePrefix ->  (range)
 /*{ns}*{db}&{ac}                                                                                         DbAccessRoot ->  (subtree)
+/*{ns}*{db}&                                                                                           DbAccessPrefix ->  (range)
 /*{ns}*{db}&{ac}!gr{gr}                                                                                    DbGrantKey ->  surrealdb_catalog::AccessGrant
 /*{ns}*{db}&{ac}!gr                                                                                     DbGrantPrefix ->  (range)
 /*{ns}*{db}*{tb}                                                                                              TblRoot ->  (subtree)
+/*{ns}*{db}*                                                                                                TblPrefix ->  (range)
 /*{ns}*{db}*{tb}*{id}                                                                                       RecordKey ->  Record
 /*{ns}*{db}*{tb}*                                                                                        RecordPrefix ->  (range)
 /*{ns}*{db}*{tb}~{id}{dir}{foreign_table}{foreign_key}                                                       GraphKey ->  ()
@@ -146,6 +158,10 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}!ix                                                                                    IndexDefPrefix ->  (range)
 /*{ns}*{db}*{tb}!lq{lq}                                                                               SubscriptionKey ->  surrealdb_catalog::StoredSubscriptionDefinition
 /*{ns}*{db}*{tb}!lq                                                                                SubscriptionPrefix ->  (range)
+/*{ns}*{db}*{tb}!lg{generation}                                                                             LayoutKey ->  surrealdb_catalog::LayoutDescriptor
+/*{ns}*{db}*{tb}!lg                                                                                      LayoutPrefix ->  (range)
+/*{ns}*{db}*{tb}!mi                                                                                TableMigrationsKey ->  surrealdb_catalog::TableMigrations
+/*{ns}*{db}*{tb}!fc                                                                               TableConformanceKey ->  surrealdb_catalog::TableConformance
 /*{ns}*{db}*{tb}!dh{start}                                                                              DocIdBatchKey ->  crate::sequences::BatchValue
 /*{ns}*{db}*{tb}!dh                                                                                  DocIdBatchPrefix ->  (range)
 /*{ns}*{db}*{tb}!ds{nid}                                                                                DocIdStateKey ->  crate::sequences::SequenceState

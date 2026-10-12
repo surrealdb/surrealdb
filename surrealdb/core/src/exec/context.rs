@@ -496,9 +496,24 @@ impl DatabaseContext {
 
 		// Cache miss or versioned lookup — go to the transaction
 		let txn = self.txn();
-		let result = txn
+		let result = match txn
 			.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table, version)
-			.await?;
+			.await
+		{
+			Ok(result) => result,
+			// An index a newer release wrote is one this scan cannot choose.
+			// The scan reads the table without any of the indexes, which
+			// returns the same rows, and the list is not cached.
+			Err(e)
+				if matches!(
+					crate::err::Error::entry_refusal(&e),
+					Some(surrealdb_catalog::stored::EntryError::NeedsRelease { .. })
+				) =>
+			{
+				return Ok(Arc::from([]));
+			}
+			Err(e) => return Err(e),
+		};
 
 		if version.is_none() {
 			// Populate cache (write lock — brief exclusive access)

@@ -3,16 +3,25 @@ use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::language::Language;
+use crate::val::stored::schema::Stored;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Filter {
+	#[stored(n = 1)]
 	Ascii,
+	#[stored(n = 2)]
 	EdgeNgram(u16, u16),
+	#[stored(n = 3)]
 	Lowercase,
+	#[stored(n = 4)]
 	Ngram(u16, u16),
+	#[stored(n = 5)]
 	Snowball(Language),
+	#[stored(n = 6)]
 	Uppercase,
+	#[stored(n = 7)]
 	Mapper(String),
 }
 

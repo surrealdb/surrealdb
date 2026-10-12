@@ -14,6 +14,7 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
 use surrealdb_cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
+use surrealdb_strand::Strand;
 use surrealdb_types::regex_engine::{self, RegexError};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -43,8 +44,9 @@ impl DeserializeRevisioned for Regex {
 	fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error> {
 		match u16::deserialize_revisioned(r)? {
 			1 => {
-				let s = String::deserialize_revisioned(r)?;
-				regex_engine::compile(&s, None)
+				// Strand reads a claimed length without allocating it up front.
+				let s = Strand::deserialize_revisioned(r)?;
+				regex_engine::compile(s.as_str(), None)
 					.map(Self)
 					.map_err(|e| revision::Error::Deserialize(format!("invalid regex: {e}")))
 			}

@@ -3,12 +3,16 @@ use revision::revisioned;
 use crate::catalog::StoredModuleDefinition;
 pub use crate::expr::module::ModuleName;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum ModuleExecutable {
+	#[stored(n = 1)]
 	Surrealism(SurrealismExecutable),
+	#[stored(n = 2)]
 	Silo(SiloExecutable),
 }
 
@@ -22,9 +26,12 @@ impl InfoStructure for ModuleExecutable {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct SurrealismExecutable {
+	#[stored(n = 2)]
 	pub bucket: String,
+	#[stored(n = 4)]
 	pub key: String,
 }
 
@@ -39,12 +46,18 @@ impl InfoStructure for SurrealismExecutable {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct SiloExecutable {
+	#[stored(n = 2)]
 	pub organisation: String,
+	#[stored(n = 4)]
 	pub package: String,
+	#[stored(n = 6)]
 	pub major: u32,
+	#[stored(n = 8)]
 	pub minor: u32,
+	#[stored(n = 10)]
 	pub patch: u32,
 }
 

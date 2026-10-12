@@ -148,6 +148,28 @@ async fn recognised_keys_are_attributed_to_the_right_route() {
 	assert_eq!(by_kind.get(&KeyKind::Record), Some(&3), "got {by_kind:?}");
 }
 
+/// The value under `any`, decoded under the type its key binds. A record of a stamped generation
+/// is read only through its table's layouts, so a record key's value is decoded against the
+/// layouts `tx` lists for its table; every other key's value needs nothing beyond its key.
+async fn decode_value(
+	tx: &crate::kvs::Transaction,
+	any: &AnyKey<'_>,
+	value: &[u8],
+) -> anyhow::Result<crate::key::schema::AnyValue> {
+	use surrealdb_kvs::value::KVValue;
+
+	use crate::catalog::{Record, RecordContext};
+	use crate::val::RecordId;
+
+	let AnyKey::Record(record) = any else {
+		return any.decode_value(value);
+	};
+	let layouts = tx.table_layouts(record.ns, record.db, record.tb.as_ref(), None).await?;
+	let id = RecordId::new(record.tb.as_ref().clone(), record.id.as_ref().clone());
+	let record = Record::kv_decode_value(value, RecordContext::with_layouts(id, layouts))?;
+	Ok(crate::key::schema::AnyValue::Record(record))
+}
+
 /// A value decodes under the type its key binds, including for records, whose
 /// identity lives in the key rather than in the stored bytes.
 #[tokio::test]
@@ -157,7 +179,6 @@ async fn values_decode_under_the_type_their_key_binds() {
 
 	let tx = ds.transaction(Read).await.unwrap();
 	let entries = tx.getr_raw(RawRange::every_key(), None).await.unwrap();
-	let _ = tx.cancel().await;
 
 	let mut decoded = 0usize;
 	let mut failures = Vec::new();
@@ -165,12 +186,13 @@ async fn values_decode_under_the_type_their_key_binds() {
 		let Some(any) = AnyKey::decode(key) else {
 			continue;
 		};
-		match any.decode_value(value) {
+		match decode_value(&tx, &any, value).await {
 			Ok(_) => decoded += 1,
 			Err(e) => failures.push(format!("{}: {e}", describe(key))),
 		}
 	}
 
+	let _ = tx.cancel().await;
 	assert!(failures.is_empty(), "values failed to decode:\n{}", failures.join("\n"));
 	assert!(decoded > 20, "expected to have decoded a populated store, got {decoded}");
 }
@@ -190,7 +212,6 @@ async fn a_decoded_value_carries_its_contents() {
 
 	let tx = ds.transaction(Read).await.unwrap();
 	let entries = tx.getr_raw(RawRange::every_key(), None).await.unwrap();
-	let _ = tx.cancel().await;
 
 	let mut namespaces = Vec::new();
 	let mut record_ids = Vec::new();
@@ -208,7 +229,7 @@ async fn a_decoded_value_carries_its_contents() {
 			}
 			_ => None,
 		};
-		match any.decode_value(value) {
+		match decode_value(&tx, &any, value).await {
 			Ok(AnyValue::NamespaceDefinition(ns)) => namespaces.push(ns.name.to_string()),
 			Ok(AnyValue::Record(record)) => {
 				let expected = expected.expect("a record key names a record");
@@ -225,6 +246,8 @@ async fn a_decoded_value_carries_its_contents() {
 			_ => {}
 		}
 	}
+
+	let _ = tx.cancel().await;
 
 	assert_eq!(namespaces, ["test"], "the namespace definition decoded to its name");
 

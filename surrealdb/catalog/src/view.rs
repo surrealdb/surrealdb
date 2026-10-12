@@ -9,6 +9,7 @@ use crate::expr as runtime;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Expr, Fields, Group, Groups, View};
+use crate::stored::Stored;
 use crate::val::Value;
 
 /// Stored form of [`ViewDefinition`].
@@ -37,10 +38,15 @@ use crate::val::Value;
 /// nothing else, and `stored_views_are_always_written_as_clauses` holds it to
 /// that. The legacy variants are decode-only, and a table re-storing one
 /// migrates it in passing.
+///
+/// The stored grammar writes only `Clauses`: an encoder, a floor computation and a VM conversion
+/// first map a legacy variant through [`StoredViewDefinition::current`].
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0", legacy = "StoredViewDefinition::current")]
 pub enum StoredViewDefinition {
 	/// Decode-only: a materialized view, before the clauses became text.
+	#[stored(legacy)]
 	Materialized {
 		fields: Fields,
 		tables: Vec<TableName>,
@@ -49,6 +55,7 @@ pub enum StoredViewDefinition {
 	/// Decode-only: an aggregated view, before the clauses became text. Carries
 	/// the aggregation analysis derived from `fields` and `groups`, which
 	/// compiling recomputes and so ignores.
+	#[stored(legacy)]
 	Aggregated {
 		analysis: AggregationAnalysis,
 		condition: Option<Expr>,
@@ -58,6 +65,7 @@ pub enum StoredViewDefinition {
 	},
 	/// Decode-only: a view classified as unmaintained, before the clauses became
 	/// text.
+	#[stored(legacy)]
 	Select {
 		fields: Fields,
 		tables: Vec<TableName>,
@@ -65,20 +73,53 @@ pub enum StoredViewDefinition {
 		groups: Option<Groups>,
 	},
 	/// The clauses of the view's `AS SELECT ... FROM ... WHERE ... GROUP ...`.
+	#[stored(n = 1)]
 	Clauses {
 		/// The `SELECT` field list.
+		#[stored(n = 2)]
 		fields: FieldsText,
 		/// The tables the view reads from.
+		#[stored(n = 4)]
 		tables: Vec<TableName>,
 		/// The `WHERE` clause, if the view has one.
+		#[stored(n = 6)]
 		condition: Option<ExprText>,
 		/// The `GROUP` targets. `None` is a view with no `GROUP` clause; `Some`
 		/// with no targets is `GROUP ALL`.
+		#[stored(n = 8)]
 		groups: Option<Vec<IdiomText>>,
 	},
 }
 
 impl StoredViewDefinition {
+	/// The current form of this view: `Clauses` for every variant, built from the variant's own
+	/// clauses by rendering them to text, which cannot fail. `Clauses` maps to itself.
+	pub fn current(&self) -> Self {
+		match self {
+			Self::Clauses {
+				..
+			} => self.clone(),
+			Self::Materialized {
+				fields,
+				tables,
+				condition,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), None),
+			Self::Aggregated {
+				analysis: _,
+				condition,
+				tables,
+				groups,
+				fields,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), Some(groups)),
+			Self::Select {
+				fields,
+				tables,
+				condition,
+				groups,
+			} => Self::clauses(fields, tables.clone(), condition.as_ref(), groups.as_ref()),
+		}
+	}
+
 	/// Rebuilds the view's clauses as an AST, whichever shape they were stored
 	/// in. The legacy variants already hold ASTs, so only `Clauses` compiles.
 	fn to_view(&self) -> anyhow::Result<View> {

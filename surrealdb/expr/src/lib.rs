@@ -11,6 +11,8 @@
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
 
+// The `Stored` derive names this crate by its package name, including inside this crate.
+extern crate self as surrealdb_expr;
 #[macro_use]
 extern crate surrealdb_collections;
 #[macro_use]

@@ -127,6 +127,18 @@ pub(crate) trait StreamingLeafEvaluator: std::fmt::Debug + Send + Sync {
 			&Value::None,
 		)
 	}
+
+	/// Evidence for the leaf decoded to `leaf`: for a record in the
+	/// stored-value encoding, which [`Self::evaluate`] cannot walk, and for a
+	/// `revision` leaf the walk could not open.
+	///
+	/// Default: the caller's [`LeafFallback`](super::LeafFallback) applied to
+	/// `leaf`. Correct for evaluators whose predicate is that comparison of the
+	/// leaf itself; an evaluator judging a function of the leaf must override
+	/// it, since the fallback compares the leaf.
+	fn evaluate_decoded(&self, leaf: &Value, fallback: &super::LeafFallback) -> Evidence {
+		super::evidence_from_binary_cmp(&fallback.op, &fallback.literal, fallback.reversed, leaf)
+	}
 }
 
 /// [`BinaryOperator::Contain`] / [`BinaryOperator::NotContain`] on a string leaf with a literal
@@ -533,7 +545,8 @@ pub(crate) struct OverlapLookupTables {
 /// Indices are therefore assigned through an ordered map, which collapses each
 /// equivalence class to one bit. `Ord`-equality is the same relation as
 /// `PartialEq` for every element type a literal set may hold: the variants whose
-/// `partial_cmp` can return `None` (`Geometry`, `Regex`, `Range`, `Closure`) are
+/// `partial_cmp` can return `None` (`Regex`, `Range`, `Closure`), and `Geometry`, which is
+/// totally ordered but whose order equates NaN coordinates that `PartialEq` does not, are
 /// excluded by `literal_hashset_element_safe`.
 ///
 /// The classes are equivalence classes only while equality among the literals

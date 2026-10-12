@@ -23,6 +23,18 @@ impl<'b> Reader<'b> {
 		self.bytes.len()
 	}
 
+	/// The bytes not yet read, for a decoder that reads from a slice and
+	/// reports how far it got; [`Self::advance`] then moves past what it read.
+	pub(super) fn rest(&self) -> &'b [u8] {
+		self.bytes
+	}
+
+	/// Skip `n` bytes. Fails, leaving the reader where it was, when fewer
+	/// than `n` remain.
+	pub(super) fn advance(&mut self, n: usize) -> Result<()> {
+		self.take(n).map(|_| ())
+	}
+
 	pub(super) fn take(&mut self, n: usize) -> Result<&'b [u8]> {
 		if self.bytes.len() < n {
 			bail!("a value ended {} bytes early", n - self.bytes.len());
@@ -123,6 +135,12 @@ impl Writer {
 
 	pub(super) fn raw(&mut self, bytes: &[u8]) {
 		self.bytes.extend_from_slice(bytes);
+	}
+
+	/// What `f` appends to the buffer, for an encoder that writes bytes
+	/// itself. What is written is unspecified when `f` fails.
+	pub(super) fn embedded(&mut self, f: impl FnOnce(&mut Vec<u8>) -> Result<()>) -> Result<()> {
+		f(&mut self.bytes)
 	}
 
 	pub(super) fn u8(&mut self, b: u8) {

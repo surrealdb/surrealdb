@@ -1,32 +1,45 @@
-use std::time::Duration;
-
 use revision::revisioned;
 pub use surrealdb_iam::ScramCredential;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::base::Base;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::{Array, Value};
+use crate::impl_kv_value_catalog;
+use crate::stored::Stored;
+use crate::val::{Array, BoundedDuration, Value};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct UserDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
+	#[stored(n = 4)]
 	pub hash: String,
+	#[stored(n = 6)]
 	pub code: String,
+	#[stored(n = 8)]
 	pub roles: Vec<String>,
 	/// Duration after which the token obtained after authenticating with user credentials expires
-	pub token_duration: Option<Duration>,
+	#[stored(n = 10)]
+	pub token_duration: Option<BoundedDuration>,
 	/// Duration after which the session authenticated with user credentials or token expires
-	pub session_duration: Option<Duration>,
+	#[stored(n = 12)]
+	pub session_duration: Option<BoundedDuration>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 14)]
 	pub base: Base,
 	/// SCRAM-SHA-256 verifier material, populated when the user is defined with a
 	/// plaintext `PASSWORD` (or an explicit `PASSSCRAM`). `None` for users defined
 	/// via `PASSHASH` only, and for users stored before this field existed.
 	#[revision(start = 2)]
+	#[stored(n = 16)]
 	pub scram: Option<ScramCredential>,
 }
 
@@ -69,11 +82,11 @@ impl UserDefinition {
 			duration: crate::expr::user::UserDuration {
 				token: this
 					.token_duration
-					.map(|d| Value::from(d).into_literal())
+					.map(|d| Value::Duration(d.into()).into_literal())
 					.unwrap_or(crate::expr::Expr::Literal(crate::expr::Literal::None)),
 				session: this
 					.session_duration
-					.map(|d| Value::from(d).into_literal())
+					.map(|d| Value::Duration(d.into()).into_literal())
 					.unwrap_or(crate::expr::Expr::Literal(crate::expr::Literal::None)),
 			},
 			comment: this
@@ -100,12 +113,12 @@ impl InfoStructure for UserDefinition {
 			"scram", if this.scram.is_some() => Value::from(super::REDACTED),
 			"roles" => Array::from(this.roles.into_iter().map(Value::from).collect::<Vec<_>>()).into(),
 			"duration" => Value::from(map! {
-				"token" => this.token_duration.map(Value::from).unwrap_or(Value::None),
-				"session" => this.session_duration.map(Value::from).unwrap_or(Value::None),
+				"token" => this.token_duration.map(|d| Value::Duration(d.into())).unwrap_or(Value::None),
+				"session" => this.session_duration.map(|d| Value::Duration(d.into())).unwrap_or(Value::None),
 			}),
 			"comment", if let Some(v) = this.comment => v.into(),
 		})
 	}
 }
 
-impl_kv_value_revisioned!(UserDefinition);
+impl_kv_value_catalog!(UserDefinition);

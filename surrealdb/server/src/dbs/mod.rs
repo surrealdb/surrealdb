@@ -921,6 +921,9 @@ pub async fn init<C: TransactionBuilderFactory>(
 		// which `check_version` is obliged to refuse, permanently, on this and
 		// every later start.
 		.without_maintenance_tasks()
+		// Nothing here may open a transaction (see below): the feature level and
+		// the ledger are read by `check_version` in `initialise_datastore`.
+		.without_startup_transactions()
 		.with_config(config)
 		// Mirror the tokio runtime worker count the server built itself
 		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore
@@ -1131,9 +1134,13 @@ pub(crate) async fn initialise_datastore(
 	retry_with_timeout("Insert node", pending.timeout, || async { dbs.insert_node().await })
 		.await?;
 	// The version is stamped and this node is registered, so the maintenance
-	// tasks may start writing.
+	// tasks may start writing. A read-only datastore starts only the membership
+	// refresh, and its first pass would only be refused: expiry and cleanup write
+	// state it does not accept.
 	dbs.start_maintenance_tasks();
-	spawn_first_node_maintenance_pass(dbs, &pending.engine, pending.canceller.clone());
+	if !dbs.is_read_only() {
+		spawn_first_node_maintenance_pass(dbs, &pending.engine, pending.canceller.clone());
+	}
 	Ok(())
 }
 
@@ -1144,7 +1151,28 @@ pub(crate) async fn initialise_datastore(
 /// The import runs *before* credential initialisation so that an import which
 /// supplies root users suppresses creation of the CLI bootstrap user, matching
 /// the historical (pre-early-bind) ordering.
+///
+/// A datastore that is open read-only refuses both writes, and `retry_with_timeout`
+/// would retry that permanent refusal until its budget ran out and fail the start.
+/// So each step is skipped, with a warning naming it, and the server serves what
+/// the store already holds.
 pub(crate) async fn finish_startup(ds: &Datastore, pending: &PendingStartup) -> Result<()> {
+	if ds.is_read_only() {
+		if let Some(file) = &pending.import_file {
+			warn!(
+				target: TARGET,
+				file = ?file,
+				"The datastore is open read-only, so the startup import was skipped"
+			);
+		}
+		if pending.credentials.is_some() {
+			warn!(
+				target: TARGET,
+				"The datastore is open read-only, so the root credentials were not initialised"
+			);
+		}
+		return Ok(());
+	}
 	// Import the startup file.
 	//
 	// An import is not transactional: each statement commits on its own and

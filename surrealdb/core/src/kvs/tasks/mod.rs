@@ -128,6 +128,10 @@ impl Tasks {
 /// is to start them against a datastore built with
 /// [`Builder::without_maintenance_tasks`](crate::kvs::ds::builder::Builder::without_maintenance_tasks).
 ///
+/// On a datastore that [`Datastore::is_read_only`] reports, only the cluster
+/// heartbeat runs: it writes this node's own membership rows, which a read-only
+/// datastore still accepts, and every other task writes state it refuses.
+///
 /// A build without the `maintenance-tasks` feature starts nothing and logs an
 /// error naming the feature: its host drives that work instead.
 pub fn init(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
@@ -152,6 +156,9 @@ fn start(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOption
 	let triggers = dbs.commit_triggers();
 	let mut tasks = Vec::with_capacity(6);
 	tasks.push(spawn_task_node_membership_refresh(Weak::clone(&weak), canceller.clone(), opts));
+	if dbs.is_read_only() {
+		return Tasks(tasks);
+	}
 	tasks.push(spawn_task_event_processing(
 		Weak::clone(&weak),
 		Arc::clone(triggers),
@@ -731,7 +738,21 @@ async fn update_node_membership(
 	timeout_duration: Duration,
 ) -> NodeMembershipUpdateResult {
 	match dbs.update_node_with_timeout(timeout_duration, canceller).await {
-		Ok(()) => NodeMembershipUpdateResult::Updated,
+		Ok(()) => {
+			// Another node may have raised or lowered the feature level, so the
+			// heartbeat is when this node reads it again. A failure to read it
+			// leaves the cell as it was, possibly behind the store in either
+			// direction; writes stay safe because every floor above the cell's
+			// `in_use` is admitted by a locked read of the stored level.
+			match common::time::timeout(timeout_duration, dbs.refresh_feature_level()).await {
+				Ok(Ok(())) => {}
+				Ok(Err(e)) => warn!("Could not refresh the feature level: {e}"),
+				Err(_) => {
+					warn!("Timed out refreshing the feature level after {timeout_duration:?}")
+				}
+			}
+			NodeMembershipUpdateResult::Updated
+		}
 		Err(e) if is_query_cancelled(&e) => NodeMembershipUpdateResult::Cancelled,
 		Err(e) if is_query_timedout(&e) => NodeMembershipUpdateResult::TimedOut,
 		Err(e) => NodeMembershipUpdateResult::Failed(e),

@@ -1,32 +1,46 @@
 use anyhow::Context as _;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{FromStored, Permission, StoredPermission};
-use crate::expr as runtime;
 use crate::expr::statements::define::{DefineBucketStatement, DefineKind};
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Stored,
+)]
+#[stored(since = "4.0", transparent)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BucketId(pub u32);
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredBucketDefinition {
+	#[stored(n = 2)]
 	pub id: Option<BucketId>,
+	#[stored(n = 4)]
 	pub name: Strand,
+	#[stored(n = 6)]
 	pub backend: Option<Strand>,
+	#[stored(n = 8)]
 	pub permissions: StoredPermission,
+	#[stored(n = 10)]
 	pub readonly: bool,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 }
-impl_kv_value_revisioned!(StoredBucketDefinition);
+impl_kv_value_catalog!(StoredBucketDefinition);
 
 impl BucketDefinition {
 	fn to_runtime_definition(&self) -> DefineBucketStatement {

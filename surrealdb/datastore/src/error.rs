@@ -14,8 +14,11 @@
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use common::{LeafError, internal_todo};
+use surrealdb_catalog::Generation;
 use surrealdb_expr::val::Duration;
+use surrealdb_kvs::{FeatureLevel, Release};
 use surrealdb_types::{AuthError, ConfigurationError, Error as TypesError, QueryError};
+use uuid::Uuid;
 
 /// A failure in the datastore layer.
 #[derive(Debug, thiserror::Error)]
@@ -146,6 +149,119 @@ pub enum DatastoreError {
 	MigrationTimedOut {
 		migrations: String,
 	},
+
+	/// A write needs a release's features, and the store's feature level is below it.
+	#[error(
+		"This needs feature level {needed}, but the store is at {level}. Raise the feature level once every node runs {needed} or later"
+	)]
+	FeatureNotEnabled {
+		needed: Release,
+		level: FeatureLevel,
+	},
+
+	/// The feature level was asked to rise above the release this build is.
+	#[error("The feature level cannot be raised to {target}: this build is {current}")]
+	FeatureLevelAboveRelease {
+		target: Release,
+		current: Release,
+	},
+
+	/// The feature level was asked to be set below the first release that has one.
+	#[error("The feature level cannot be set below {first}, the first release with one")]
+	FeatureLevelBelowFirst {
+		first: Release,
+	},
+
+	/// A live node runs a release below the level the store was asked to rise to.
+	#[error(
+		"The feature level cannot be raised to {target} while node {node} runs {}",
+		.release.map_or_else(|| "a release that records none".to_string(), |r| r.to_string())
+	)]
+	FeatureLevelNodeBehind {
+		node: Uuid,
+		release: Option<Release>,
+		target: Release,
+	},
+
+	/// The feature level was asked to fall below a release whose features entries already use.
+	#[error("The feature level cannot be lowered to {target}: entries already need {in_use}")]
+	FeatureLevelInUse {
+		in_use: Release,
+		target: Release,
+	},
+
+	/// The feature level was asked to fall on a store that records none.
+	#[error("The feature level cannot be lowered: the store has not recorded one")]
+	FeatureLevelUnset,
+
+	/// An entry in the stored grammar sits in a store that records no feature level.
+	#[error("The store holds catalog entries in the stored grammar but records no feature level")]
+	FeatureLevelMissing,
+
+	/// A configured feature level is neither `current`, `legacy` nor a release.
+	#[error(
+		"The configured feature level is not a release of the form major.minor, `current` or `legacy`"
+	)]
+	FeatureLevelPinInvalid,
+
+	/// A table's generation ring is full: the generation after its newest is its oldest, so no
+	/// further layout can be minted until the ring's oldest generation is retired.
+	///
+	/// `floor` is the oldest generation the table holds.
+	#[error(
+		"Table '{table}' has used every generation from {floor}, so no further layout can be minted until its floor moves"
+	)]
+	GenerationRingFull {
+		table: String,
+		floor: Generation,
+	},
+
+	/// A layout key already exists at the number a mint would take, though the table's ring does
+	/// not hold the number: stored state that no mint of this build writes.
+	#[error(
+		"Table '{table}' already holds a layout for generation {generation}, which its ring does not"
+	)]
+	GenerationOccupied {
+		table: String,
+		generation: Generation,
+	},
+
+	/// An operation that needs a table's generation ring was given a table that has none.
+	#[error("Table '{table}' has no generation")]
+	NoGeneration {
+		table: String,
+	},
+
+	/// A floor was moved to a generation the table's ring does not hold.
+	#[error(
+		"Table '{table}' cannot move its floor to generation {floor}: its generations are {base} to {head}"
+	)]
+	FloorOutsideWindow {
+		table: String,
+		floor: Generation,
+		base: Generation,
+		head: Generation,
+	},
+
+	/// A conformance claim was settled against a definition of field `field` that is no longer the
+	/// table's current one.
+	#[error(
+		"The definition of field '{field}' of table '{table}' changed since its conformance was checked"
+	)]
+	ConformanceStale {
+		table: String,
+		field: String,
+	},
+
+	/// The store records features this build does not maintain, so it opens read-only.
+	///
+	/// `features` holds ledger ids and recorded names only.
+	#[error(
+		"The store is open read-only: it records features this build does not maintain ({features}). Run a release that knows them to write to it"
+	)]
+	StoreReadOnly {
+		features: String,
+	},
 }
 
 impl LeafError for DatastoreError {
@@ -199,6 +315,43 @@ impl LeafError for DatastoreError {
 			| DatastoreError::MigrationTimedOut {
 				..
 			} => internal_todo(message),
+			DatastoreError::FeatureNotEnabled {
+				..
+			}
+			| DatastoreError::FeatureLevelAboveRelease {
+				..
+			}
+			| DatastoreError::FeatureLevelBelowFirst {
+				..
+			}
+			| DatastoreError::FeatureLevelNodeBehind {
+				..
+			}
+			| DatastoreError::FeatureLevelInUse {
+				..
+			}
+			| DatastoreError::FeatureLevelUnset
+			| DatastoreError::FeatureLevelMissing
+			| DatastoreError::FeatureLevelPinInvalid
+			| DatastoreError::StoreReadOnly {
+				..
+			} => TypesError::configuration(message, None),
+			DatastoreError::GenerationRingFull {
+				..
+			}
+			| DatastoreError::NoGeneration {
+				..
+			}
+			| DatastoreError::FloorOutsideWindow {
+				..
+			}
+			| DatastoreError::ConformanceStale {
+				..
+			} => TypesError::query(message, None),
+			// Stored state no mint of this build writes, as a stamp outside the ring is.
+			DatastoreError::GenerationOccupied {
+				..
+			} => TypesError::serialization(message, None),
 		}
 	}
 }

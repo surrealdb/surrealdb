@@ -509,6 +509,11 @@ pub(super) struct State {
 	/// backfill met it, for a view whose table the plan could not name: the
 	/// table, and its order.
 	pub(super) backfill_order: Option<(surrealdb_strand::TableName, std::sync::Arc<Program>)>,
+	/// The format a backfill writes the rows of the view table it fills in: the table, and
+	/// the slot that answers for it while the transaction's layout epoch
+	/// ([`crate::kvs::Transaction::layout_epoch`]) stands.
+	pub(super) backfill_format:
+		Option<(surrealdb_strand::TableName, crate::exec::operators::write::ctx::RecordFormatSlot)>,
 	/// The calls of code the host runs that [`Instr::ExternalEnter`] has
 	/// entered and [`Instr::ExternalCall`] has yet to make, by
 	/// [`Program::externals`](super::program::Program::externals) index.
@@ -941,6 +946,7 @@ impl State {
 			matches_evals,
 			backfill,
 			backfill_order,
+			backfill_format,
 			externals,
 			call_units,
 			recursion,
@@ -1016,6 +1022,7 @@ impl State {
 		emptied(matches_evals);
 		*backfill = None;
 		*backfill_order = None;
+		*backfill_format = None;
 		emptied(externals);
 		emptied(call_units);
 		*recursion = None;
@@ -1275,6 +1282,7 @@ impl State {
 			matches_evals: Vec::new(),
 			backfill: None,
 			backfill_order: None,
+			backfill_format: None,
 			externals: Vec::new(),
 			call_units: Vec::new(),
 			recursion: None,
@@ -1660,6 +1668,13 @@ impl State {
 	/// [`Self::settle`] for a record read in place, from its stored bytes: a
 	/// sort takes the bytes, decoded only if the record keeps its place, and
 	/// the output takes the record decoded.
+	///
+	/// The caller has admitted the record's generation against its table's
+	/// layouts ([`crate::kvs::RowGate`]); the bytes a sort keeps are decoded
+	/// later without a check. A record in a packed layout is never given: the
+	/// host decodes it and settles it as a value ([`Self::settle`]), so a sort,
+	/// a frame's late transcode and a spill run hold no packed bytes and read
+	/// no layouts.
 	pub(super) fn settle_stored(
 		&mut self,
 		program: &Program,
@@ -1713,12 +1728,12 @@ impl State {
 			Some(Pending::Emit) if self.row_frame.is_some() => {
 				self.drain_output_into_frame()?;
 				if let Some(frame) = &mut self.row_frame {
-					frame.push_stored(key, value)?;
+					frame.push_stored(key, value, None)?;
 				}
 			}
 			pending => {
 				self.pending = pending;
-				let row = super::row::RevisionRow::new(key, value).record()?;
+				let row = super::row::StoredRow::new(key, value).record()?;
 				self.settle(program, row);
 			}
 		}
@@ -3599,6 +3614,12 @@ impl SortRow {
 
 	/// The row, decoded when it is held as stored bytes, those of a slab row
 	/// read from `slab`, its sort's slab.
+	///
+	/// Stored bytes entered the sort through a scan that admitted their
+	/// generation in the same transaction, so the decode checks none: it reads
+	/// the document or `revision` encoding and refuses any other envelope. A
+	/// packed row never enters a sort as stored bytes, so the decode takes no
+	/// layouts.
 	pub(super) fn into_value_in(self, slab: &[u8]) -> anyhow::Result<Value> {
 		match self {
 			SortRow::Value(value) => Ok(value),
@@ -3607,7 +3628,7 @@ impl SortRow {
 				split,
 			} => {
 				let (key, value) = bytes.split_at(split);
-				super::row::RevisionRow::new(key, value).record()
+				super::row::StoredRow::new(key, value).record()
 			}
 			SortRow::Slab {
 				start,
@@ -3618,7 +3639,7 @@ impl SortRow {
 				else {
 					anyhow::bail!("a sorted row outside its sort's slab");
 				};
-				super::row::RevisionRow::new(key, value).record()
+				super::row::StoredRow::new(key, value).record()
 			}
 		}
 	}

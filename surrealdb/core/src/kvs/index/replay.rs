@@ -28,7 +28,7 @@ use crate::key::schema::{
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, Resumable};
 use crate::kvs::{
-	DatastoreError, Direction, INDEXING_BATCH_SIZE, Transaction, Val,
+	DatastoreError, Direction, INDEXING_BATCH_SIZE, LayoutSet, Transaction, Val,
 	is_retryable_transaction_conflict,
 };
 use crate::val::{Array, Number, Object, RecordId, RecordIdKey, RecordIdentity, Value};
@@ -645,6 +645,8 @@ impl Building {
 			} else {
 				Vec::new()
 			};
+			// The generations of the batch's records, checked as each is read.
+			let mut layouts = LayoutSet::new(self.ix_key.ns, self.ix_key.db, None);
 			// Index the records.
 			for (i, ((_, v), key)) in values.iter().zip(keys).enumerate() {
 				// Per-record analysis (deserialization, tokenization, filters)
@@ -655,13 +657,25 @@ impl Building {
 					return Ok(count);
 				}
 				self.is_beyond_threshold(Some(initial_count + count))?;
-				// Parse the value.
-				let val: Record = revision::from_slice(v.as_slice())?;
 				let rid: Arc<RecordId> = RecordId {
 					table: key.tb.into_owned(),
 					key: key.id.into_owned(),
 				}
 				.into();
+				// The record as it was written: an id its encoding left out is
+				// the key's. Its generation is admitted against the table's
+				// layouts first. Descriptors are immutable, and one is retired
+				// only by a floor move whose precondition is that no row names
+				// its generation, so `lookup_tx`, opened after the batch was
+				// read, lists every generation the batch names. A packed record is
+				// decoded with the layouts that admitted it.
+				let (_, admitted) =
+					layouts.admit_with_layouts(&lookup_tx, &rid.table, v.as_slice()).await?;
+				let val = Record::decode_admitted_as_written(
+					v.as_slice(),
+					admitted.map(|held| &**held),
+					|| (*rid).clone(),
+				)?;
 				if count_progress.is_some() {
 					live_ids.insert(RecordIdentity(rid.key.clone()));
 					last_live_id = Some(rid.key.clone());
@@ -1785,7 +1799,7 @@ impl Building {
 			}
 			// One batched probe decides every record's fate in this chunk.
 			let record_keys: Vec<RecordKey> = ids.iter().map(|id| self.record_key(id)).collect();
-			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
+			let records = catch!(tx, tx.getm_raw(record_keys, None).await);
 			// Records reclaimed in this chunk, remembered for the post-commit
 			// re-probe that repairs concurrent re-creates.
 			let mut reclaimed: Vec<(RecordIdKey, DocId)> = Vec::new();
@@ -1867,7 +1881,7 @@ impl Building {
 			let tx = ctx.tx();
 			let record_keys: Vec<RecordKey> =
 				reclaimed.iter().map(|(id, _)| self.record_key(id)).collect();
-			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
+			let records = catch!(tx, tx.getm_raw(record_keys, None).await);
 			let mut restored = 0usize;
 			for ((id, doc_id), existing) in reclaimed.iter().zip(records) {
 				if existing.is_some() && catch!(tx, docs.restore(&tx, id, *doc_id).await) {

@@ -76,6 +76,7 @@ surrealdb-cnf = { workspace = true }
 surrealdb-collections = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true }
+surrealdb-stored-derive = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-parser-next.workspace = true
 parse-common.workspace = true

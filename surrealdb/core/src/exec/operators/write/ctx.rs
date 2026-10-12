@@ -6,15 +6,17 @@
 //! `INSERT` whose rows name their own — holds one of these per table.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, Weak};
 
 use surrealdb_datastore::index_shapes::TableIndexShapes;
 
 use super::scope::WriteScope;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseDefinition, Error as CatalogError, EventDefinition, FieldDefinition, IndexDefinition,
-	KeyStructure, NamespaceDefinition, SubscriptionDefinition, TableDefinition,
+	DatabaseDefinition, DatabaseId, Error as CatalogError, EventDefinition, FieldDefinition,
+	Generation, IndexDefinition, KeyStructure, NamespaceDefinition, NamespaceId, RecordFormat,
+	RecordWriter, SubscriptionDefinition, TableDefinition, TableLayouts,
 };
 use crate::doc::{FieldEvalOrder, NsDbCtx, NsDbTbMutCtx};
 use crate::exec::ExecutionContext;
@@ -34,6 +36,180 @@ pub(crate) enum TableExistence {
 	Required,
 	/// A missing table is defined by this write.
 	DefinedOnDemand,
+}
+
+/// The format a statement's record writes give the rows of its table, as resolved at one layout
+/// epoch of its transaction ([`Transaction::layout_epoch`]), with the layouts a packed format
+/// reads its descriptor from.
+///
+/// Filled by this statement's record writes, one record at a time, for this context's table in
+/// this context's transaction. A slot answers only for the epoch it was filled at: a mint, a
+/// range delete over held layouts or a savepoint rollback that undid one of those or the
+/// stored-format ledger entry moves the epoch and so empties it, because each can change which
+/// format is current or whether the entry is part of the transaction. A hit costs two atomic
+/// loads and no lock, hash lookup, allocation or reference count.
+///
+/// One word holds both the epoch and the format, so a reader never sees an epoch with a format
+/// written for another, and any number of writers may fill it. The high 32 bits hold the epoch
+/// and the low 32 bits the format's code: 0 for [`RecordFormat::Revision`], `stamp + 1` for
+/// [`RecordFormat::Document`], and [`Self::PACKED`] with `stamp + 1` for
+/// [`RecordFormat::Packed`], where the stamp is the generation's number, or 0 for a document with
+/// no generation. A format whose code does not fit, or an epoch above `u32::MAX`, is
+/// not cached, and every record of such a statement resolves the format again.
+///
+/// The layouts a packed format needs are set once, by the first packed fill. The word claims a
+/// packed format at an epoch only when the layouts resolved at that epoch are the very ones held
+/// (`Arc::ptr_eq`), so a hit lends layouts resolved at the epoch it answers for. A fill whose
+/// layouts are others, which happens when a mid-statement mint or a rollback replaced them, is not
+/// cached: the rows of such a statement resolve through the transaction.
+#[derive(Debug)]
+pub(crate) struct RecordFormatSlot {
+	/// `(epoch << 32) | code` of the last fill; [`Self::EMPTY`] when it never was.
+	word: AtomicU64,
+	/// The layouts the slot's packed format was resolved from.
+	layouts: OnceLock<Arc<TableLayouts>>,
+}
+
+/// A format a [`RecordFormatSlot`] answered, with the layouts it lends for a packed one.
+pub(crate) struct SlotHit<'a> {
+	pub(crate) format: RecordFormat,
+	pub(crate) layouts: Option<&'a TableLayouts>,
+}
+
+/// The format of one record write: lent by a statement's slot, or resolved by the transaction.
+pub(crate) enum ResolvedFormat<'a> {
+	Slot(SlotHit<'a>),
+	Writer(RecordWriter),
+}
+
+impl ResolvedFormat<'_> {
+	/// The format the record is written in.
+	pub(crate) fn format(&self) -> RecordFormat {
+		match self {
+			Self::Slot(hit) => hit.format,
+			Self::Writer(writer) => writer.format(),
+		}
+	}
+
+	/// The layouts a packed format reads its descriptor from, and a write that names its record is
+	/// checked against.
+	pub(crate) fn layouts(&self) -> Option<&TableLayouts> {
+		match self {
+			Self::Slot(hit) => hit.layouts,
+			Self::Writer(writer) => writer.layouts().map(|layouts| &**layouts),
+		}
+	}
+}
+
+impl RecordFormatSlot {
+	/// The word of a slot nothing has filled. No fill produces it: a fill's code is below
+	/// `u32::MAX`.
+	const EMPTY: u64 = u64::MAX;
+
+	/// The bit of a code that marks a packed format.
+	const PACKED: u32 = 0x8000_0000;
+
+	/// A slot that answers for no epoch.
+	pub(crate) fn empty() -> Self {
+		Self {
+			word: AtomicU64::new(Self::EMPTY),
+			layouts: OnceLock::new(),
+		}
+	}
+
+	/// The format resolved at `epoch`, or `None` when the slot was filled at another epoch or
+	/// never, or holds a word that is no fill's: a code is a fill's only when it is 0 or names a
+	/// generation, the codes [`Self::set`] writes, and a packed code is a fill's only when the slot
+	/// holds layouts.
+	pub(crate) fn get(&self, epoch: u64) -> Option<SlotHit<'_>> {
+		if epoch > u64::from(u32::MAX) {
+			return None;
+		}
+		let word = self.word.load(Ordering::Acquire);
+		if word == Self::EMPTY || word >> 32 != epoch {
+			return None;
+		}
+		let code = u32::try_from(word & u64::from(u32::MAX)).ok()?;
+		if code == 0 {
+			return Some(SlotHit {
+				format: RecordFormat::Revision,
+				layouts: None,
+			});
+		}
+		let stamp = u16::try_from((code & !Self::PACKED).checked_sub(1)?).ok()?;
+		let generation = Generation::new(stamp);
+		if code & Self::PACKED == 0 {
+			return Some(SlotHit {
+				format: RecordFormat::Document {
+					generation,
+				},
+				layouts: None,
+			});
+		}
+		let generation = generation?;
+		let layouts = self.layouts.get()?;
+		Some(SlotHit {
+			format: RecordFormat::Packed {
+				generation,
+			},
+			layouts: Some(&**layouts),
+		})
+	}
+
+	/// Records that `writer`'s format is the table's current one at `epoch`, unless the epoch or
+	/// the format's code does not fit the word, or the writer is packed and its layouts are not
+	/// the ones the slot holds.
+	pub(crate) fn set(&self, epoch: u64, writer: &RecordWriter) {
+		if epoch > u64::from(u32::MAX) {
+			return;
+		}
+		let code_of = |stamp: u16| u32::from(stamp) + 1;
+		let code = match writer.format() {
+			RecordFormat::Revision => 0,
+			RecordFormat::Document {
+				generation,
+			} => code_of(generation.map_or(0, Generation::get)),
+			RecordFormat::Packed {
+				generation,
+			} => {
+				let Some(layouts) = writer.layouts() else {
+					return;
+				};
+				let held = self.layouts.get_or_init(|| Arc::clone(layouts));
+				if !Arc::ptr_eq(held, layouts) {
+					return;
+				}
+				code_of(generation.get()) | Self::PACKED
+			}
+		};
+		self.word.store((epoch << 32) | u64::from(code), Ordering::Release);
+	}
+
+	/// The format the rows of `tb` are written in, answered from the slot while it stands.
+	///
+	/// The slot answers when it was filled at the transaction's current layout epoch, with no
+	/// lock, hash lookup or allocation. Otherwise the transaction resolves the writer
+	/// ([`Transaction::record_writer`]), which commits the stored-format ledger entry with the
+	/// first record that needs it, and the slot is filled at the epoch read *before* that call,
+	/// so an event that moves the epoch during it leaves the slot stale and the next record
+	/// resolves again.
+	///
+	/// The slot describes one table: a caller passes the same `tb` every time.
+	pub(crate) async fn resolve(
+		&self,
+		txn: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> anyhow::Result<ResolvedFormat<'_>> {
+		let epoch = txn.layout_epoch();
+		if let Some(hit) = self.get(epoch) {
+			return Ok(ResolvedFormat::Slot(hit));
+		}
+		let writer = txn.record_writer(ns, db, tb).await?;
+		self.set(epoch, &writer);
+		Ok(ResolvedFormat::Writer(writer))
+	}
 }
 
 /// Resolved once per statement per table, shared by every record.
@@ -99,6 +275,15 @@ pub(crate) struct WriteCtx {
 	/// before a change to its table's catalog no longer stands
 	/// ([`Self::stands`]).
 	pub(crate) resolved_at: (Option<uuid::Uuid>, u64),
+	/// The format this statement's record writes give this table's rows, cached per layout epoch
+	/// ([`RecordFormatSlot`]).
+	pub(crate) format: RecordFormatSlot,
+	/// The layout epoch of the transaction ([`Transaction::layout_epoch`]) read after this
+	/// statement's last forfeit of its own table's conformance record, which an `OPTION IMPORT`
+	/// row stamped with a generation makes before it lands; `u64::MAX` before any. A row skips
+	/// the forfeit only while the epoch still equals it: a save-point rollback that undoes the
+	/// forfeit moves the epoch, so the forfeit is made again.
+	pub(crate) conformance_forfeit: AtomicU64,
 	/// The value shapes the table's B-tree indexes have stored, as the
 	/// transaction saw them when the context was resolved: a write of a shape
 	/// one has not recorded records it ([`surrealdb_datastore::index_shapes`]).
@@ -185,6 +370,8 @@ impl WriteCtx {
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: (catalog_version, stamps),
+			format: RecordFormatSlot::empty(),
+			conformance_forfeit: AtomicU64::new(u64::MAX),
 			index_shapes,
 		})
 	}
@@ -212,6 +399,8 @@ impl WriteCtx {
 			exec: exec.clone(),
 			scope: Weak::new(),
 			resolved_at: self.resolved_at,
+			format: RecordFormatSlot::empty(),
+			conformance_forfeit: AtomicU64::new(u64::MAX),
 			index_shapes: self.index_shapes.clone(),
 		}
 	}

@@ -8,6 +8,7 @@ pub mod access;
 pub mod access_type;
 pub mod algorithm;
 pub mod analyzer_function;
+pub mod arrival;
 pub mod base;
 pub mod block;
 pub mod bytesize;

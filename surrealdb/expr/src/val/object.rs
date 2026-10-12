@@ -4,9 +4,10 @@ use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use common::fmt::EscapeObjectKey;
 use http::{HeaderMap, HeaderName, HeaderValue};
-use revision::revisioned;
+use revision::optimised::indexed::IndexedMapEncoded;
+use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_collections::{Entry as VecMapEntry, VecMap, VecMapIntoIter};
+use surrealdb_collections::{Entry as VecMapEntry, VecMap, VecMapIntoIter, bounded};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::literal::ObjectEntry;
@@ -21,11 +22,37 @@ use crate::val::{IndexFormat, RecordId, Strand, Value};
 ///   zero-allocation: `walk_field_0()` on a `Wire`-repr parent borrows the field bytes directly by
 ///   bracketing `skip_indexed_map` with `BorrowedReader::remaining()` snapshots, no decode +
 ///   re-encode required.
-#[revisioned(revision(1), revision(2, optimised))]
+#[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Object(#[revision(indexed_map)] pub VecMap<Strand, Value>);
+
+/// Reads exactly what the derived serializer writes.
+///
+/// Revision 1 is the plain `VecMap` body; revision 2 is a `u32` payload length and the payload, an
+/// indexed map body. The payload is read through [`bounded::read_payload`], decoded from the slice
+/// and refused if bytes are left over. `VecMap`'s decoders refuse duplicate and out-of-order keys.
+impl DeserializeRevisioned for Object {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
+		match bounded::read_revision(reader, "Object", 2)? {
+			1 => Ok(Self(VecMap::<Strand, Value>::deserialize_revisioned(reader)?)),
+			_ => {
+				let payload = bounded::read_payload(reader)?;
+				let mut body = payload.as_slice();
+				let map = VecMap::<Strand, Value>::deserialize_indexed_map(&mut body)?;
+				bounded::finish(body)?;
+				Ok(Self(map))
+			}
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Object {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {

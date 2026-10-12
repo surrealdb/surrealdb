@@ -482,15 +482,18 @@ fn wire_eq(value_bytes: &[u8], lit: &LiteralWire) -> Option<bool> {
 		} => {
 			// `Value::equal(Strand(s), Regex(r))` is true iff
 			// `r.is_match(s)`. Peek the field's wire: if it's a Strand,
-			// borrow its UTF-8 payload as `&str` (via the unchecked-utf8
-			// invariant — see [`strand_payload_str_unchecked`]) and run
-			// the pre-compiled regex against it. Other variant tags fall
-			// back to the decode path.
+			// borrow its UTF-8 payload as `&str` (see [`strand_payload_str`])
+			// and run the pre-compiled regex against it.
+			//
+			// Other variant tags fall back to the decode path: Regex-vs-
+			// Regex equality compares the underlying pattern strings,
+			// which we don't reconstruct here; Number / Bool / etc. need
+			// the full `Value::equal` arms.
 			let peek = peek_value(value_bytes)?;
 			if peek.tag.variant_id() != variant_id::STRING {
 				return None;
 			}
-			let s = strand_payload_str_unchecked(value_bytes)?;
+			let s = strand_payload_str(value_bytes)?;
 			Some(regex.inner().is_match(s))
 		}
 		LiteralWire::Other => None,
@@ -546,31 +549,15 @@ fn varlen_payload_after_u32_len(payload: &[u8]) -> Option<&[u8]> {
 	Some(&rest[..len])
 }
 
-/// Borrow the UTF-8 bytes inside a rev-2 `Value::String(Strand)` wire as
-/// `&str` without re-validating UTF-8.
+/// Borrow the UTF-8 bytes inside a rev-2 `Value::String(Strand)` wire as `&str`.
 ///
-/// `value_bytes` must point at the start of a `Value::String(Strand)` wire
-/// (rev prefix + variant tag + `u32_le` envelope length + Strand body where
-/// the Strand body is `<varint len> || utf8`). On success returns the
-/// borrowed `&str` view of the inner UTF-8 bytes (no length prefix);
-/// returns `None` on wire-shape mismatch (wrong tag, truncated lengths).
-///
-/// # Safety invariant
-///
-/// The Strand wire's UTF-8 payload is **pre-validated at serialise time**:
-/// every path that produces a `Strand` (parser, decoder, `Strand::from`)
-/// goes through `str::from_utf8` or similar before writing the wire bytes,
-/// and the wire layout has no normalisation pass at decode time. So the
-/// bytes returned by [`varlen_payload_after_u32_len`] for a `String`
-/// variant are guaranteed to be valid UTF-8 by the surrealdb invariant.
-///
-/// `from_utf8_unchecked` skips the per-byte validation that
-/// `from_utf8(...).unwrap()` would perform — a non-trivial saving for
-/// long Strand values in the scan hot path.
-///
-/// In debug builds the `debug_assert!` surfaces any wire-validation
-/// regression immediately; in release builds the check is elided.
-pub(crate) fn strand_payload_str_unchecked(value_bytes: &[u8]) -> Option<&str> {
+/// `value_bytes` must point at the start of a `Value::String(Strand)` wire (rev prefix + variant
+/// tag + `u32_le` envelope length + Strand body, which is `<varint len> || utf8`). On success
+/// returns the borrowed `&str` view of the inner UTF-8 bytes (no length prefix). Returns `None`
+/// on a wire-shape mismatch (wrong tag, truncated lengths) and when the bytes are not valid
+/// UTF-8, so a caller declines to the full decode, which refuses such a string with its own
+/// error. The bytes are validated here, never assumed valid: stored bytes are untrusted.
+pub(crate) fn strand_payload_str(value_bytes: &[u8]) -> Option<&str> {
 	let peek = peek_value(value_bytes)?;
 	if peek.tag.variant_id() != variant_id::STRING || !matches!(peek.size_class, SizeClass::Varlen)
 	{
@@ -579,21 +566,7 @@ pub(crate) fn strand_payload_str_unchecked(value_bytes: &[u8]) -> Option<&str> {
 	let strand_wire = varlen_payload_after_u32_len(peek.payload)?;
 	let mut r: &[u8] = strand_wire;
 	let len = <usize as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r).ok()?;
-	if r.len() < len {
-		return None;
-	}
-	let utf8 = &r[..len];
-	debug_assert!(
-		std::str::from_utf8(utf8).is_ok(),
-		"strand_payload_str_unchecked: rev-2 invariant violated — \
-		 Strand wire bytes are not valid UTF-8",
-	);
-	// SAFETY: see the "Safety invariant" section in the docstring.
-	// Strand wire bytes are pre-validated UTF-8 by every writer; the
-	// rev-2 envelope has no decode-time normalisation. The debug assert
-	// catches any regression in writer-side validation. Lifetime of the
-	// returned `&str` is tied to `value_bytes`, which the caller owns.
-	Some(unsafe { std::str::from_utf8_unchecked(utf8) })
+	std::str::from_utf8(r.get(..len)?).ok()
 }
 
 #[inline]
@@ -1115,20 +1088,20 @@ mod tests {
 	}
 
 	// ------------------------------------------------------------------
-	// strand_payload_str_unchecked + LiteralWire::Regex
+	// strand_payload_str + LiteralWire::Regex
 	// ------------------------------------------------------------------
 
 	#[test]
-	fn strand_payload_str_unchecked_borrows_inner_utf8() {
+	fn strand_payload_str_borrows_inner_utf8() {
 		let v = encoded(&Value::String(Strand::from("hello 世界")));
-		let s = strand_payload_str_unchecked(&v).expect("string payload");
+		let s = strand_payload_str(&v).expect("string payload");
 		assert_eq!(s, "hello 世界");
 	}
 
 	#[test]
-	fn strand_payload_str_unchecked_returns_none_on_non_string() {
+	fn strand_payload_str_returns_none_on_non_string() {
 		let v = encoded(&Value::Number(Number::Int(1)));
-		assert_eq!(strand_payload_str_unchecked(&v), None);
+		assert_eq!(strand_payload_str(&v), None);
 	}
 
 	#[test]

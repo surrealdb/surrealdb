@@ -180,11 +180,19 @@ pub async fn connect(
 	kvs.check_version().await.map_err(std_error_to_types_error)?;
 	kvs.bootstrap().await.map_err(std_error_to_types_error)?;
 	kvs.start_maintenance_tasks();
-	// If a root user is specified, setup the initial datastore credentials
+	// If a root user is specified, setup the initial datastore credentials. A datastore that is
+	// open read-only refuses the write, so the step is skipped and the store serves what it
+	// already holds.
 	if let Some(root) = &config.root {
-		kvs.initialise_credentials(&root.username, &root.password)
-			.await
-			.map_err(std_error_to_types_error)?;
+		if kvs.is_read_only() {
+			tracing::warn!(
+				"The datastore is open read-only, so the root credentials were not initialised"
+			);
+		} else {
+			kvs.initialise_credentials(&root.username, &root.password)
+				.await
+				.map_err(std_error_to_types_error)?;
+		}
 	}
 
 	Ok(serve(kvs, notifications, session_rx))

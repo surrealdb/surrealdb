@@ -152,27 +152,38 @@ async fn write_guard_charges_range_deletes() {
 }
 
 /// Commit-time changefeed writes are part of the transaction's write set and
-/// count against the guard: a statement whose per-record writes fit the
-/// limit still fails (and rolls back) when its changefeed entries push the
-/// buffered write set past the limit.
+/// count against the guard: a block whose record writes fit the limit still
+/// fails (and rolls back) when its changefeed entries push the buffered write
+/// set past the limit, while the same block on tables without a changefeed
+/// commits.
+///
+/// The limit admits each `DEFINE TABLE`, whose writes include the table's
+/// layout generation and its bookkeeping, and the six record writes of either
+/// block, and not those six plus the changefeed entries.
 #[tokio::test(flavor = "multi_thread")]
 async fn write_guard_counts_changefeed_writes() {
-	let (ds, ses) = guarded_ds(4).await;
+	let (ds, ses) = guarded_ds(7).await;
+	run(
+		&ds,
+		&ses,
+		"DEFINE TABLE t CHANGEFEED 1h; DEFINE TABLE u CHANGEFEED 1h; DEFINE TABLE v; DEFINE TABLE w;",
+	)
+	.await;
+	run(&ds, &ses, "BEGIN; CREATE |v:3| RETURN NONE; CREATE |w:3| RETURN NONE; COMMIT;").await;
 	// Two changefeed tables produce multiple commit-time feed entries, all
 	// of which must flow through the sequential guarded path.
-	run(&ds, &ses, "DEFINE TABLE t CHANGEFEED 1h; DEFINE TABLE u CHANGEFEED 1h;").await;
 	// The guard trips at commit time (store_changes), so inside a block the
 	// limit error is reported on the COMMIT slot while earlier statements
 	// report "not executed" — collect every error and match any of them.
 	let errs: Vec<String> = ds
-		.execute("BEGIN; CREATE |t:2| RETURN NONE; CREATE |u:2| RETURN NONE; COMMIT;", &ses, None)
+		.execute("BEGIN; CREATE |t:3| RETURN NONE; CREATE |u:3| RETURN NONE; COMMIT;", &ses, None)
 		.await
 		.unwrap()
 		.into_iter()
 		.filter_map(|r| r.result.err().map(|e| e.to_string()))
 		.collect();
 	assert!(
-		errs.iter().any(|e| e.contains("maximum number of key writes (4)")),
+		errs.iter().any(|e| e.contains("maximum number of key writes (7)")),
 		"expected the guard error among the block errors: {errs:?}"
 	);
 	let res = ds.execute("SELECT count() FROM t GROUP ALL;", &ses, None).await.unwrap();

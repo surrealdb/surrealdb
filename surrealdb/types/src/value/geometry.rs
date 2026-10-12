@@ -9,6 +9,7 @@ use geo_types::{
 use serde::{Deserialize, Serialize};
 
 use crate::sql::{SqlFormat, ToSql};
+use crate::value::number::cmp_f64;
 use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 
 /// Represents geometric shapes in SurrealDB
@@ -429,103 +430,159 @@ impl Geometry {
 	}
 }
 
-impl PartialOrd for Geometry {
-	#[rustfmt::skip]
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		#[inline]
+/// Compares two coordinate streams lexicographically, `x` before `y`, with [`cmp_f64`]. A stream
+/// that is a proper prefix of the other is ordered first.
+fn cmp_coords(
+	mut a: impl Iterator<Item = (f64, f64)>,
+	mut b: impl Iterator<Item = (f64, f64)>,
+) -> Ordering {
+	loop {
+		match (a.next(), b.next()) {
+			(None, None) => return Ordering::Equal,
+			(None, Some(_)) => return Ordering::Less,
+			(Some(_), None) => return Ordering::Greater,
+			(Some((ax, ay)), Some((bx, by))) => {
+				match cmp_f64(ax, bx).then_with(|| cmp_f64(ay, by)) {
+					Ordering::Equal => {}
+					ordering => return ordering,
+				}
+			}
+		}
+	}
+}
+
+impl Geometry {
+	/// The position of a geometry's kind in the order: points first, collections last.
+	fn kind_rank(&self) -> u8 {
+		match self {
+			Self::Point(_) => 0,
+			Self::Line(_) => 1,
+			Self::Polygon(_) => 2,
+			Self::MultiPoint(_) => 3,
+			Self::MultiLine(_) => 4,
+			Self::MultiPolygon(_) => 5,
+			Self::Collection(_) => 6,
+		}
+	}
+
+	/// A total order over geometries: the order [`PartialOrd`] reports.
+	///
+	/// Geometries compare by kind (point, line, polygon, multipoint, multiline, multipolygon,
+	/// collection), then by their coordinates read in storage order (a polygon's interior rings
+	/// before its exterior) with [`cmp_f64`] on `x` and then `y`, a shorter prefix first, and
+	/// finally by shape: the ring lengths of a polygon, the line lengths of a multiline, the
+	/// polygon count and shapes of a multipolygon, and the members, then the member count, of a
+	/// collection. Two geometries compare equal exactly when they have the same kind, shape and
+	/// coordinates, where `-0.0` equals `0.0` and a NaN equals a NaN of the same bits.
+	///
+	/// The server's own geometry type implements the same order; the two must agree.
+	pub(crate) fn total_cmp(&self, other: &Self) -> Ordering {
 		fn coord(v: &Coord) -> (f64, f64) {
 			v.x_y()
 		}
 
-		#[inline]
 		fn point(v: &Point) -> (f64, f64) {
 			coord(&v.0)
 		}
 
-		#[inline]
 		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.into_iter().map(coord)
+			v.0.iter().map(coord)
 		}
 
-		#[inline]
 		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
 			v.interiors().iter().chain(once(v.exterior())).flat_map(line)
 		}
 
-		#[inline]
 		fn multipoint(v: &MultiPoint) -> impl Iterator<Item = (f64, f64)> + '_ {
 			v.iter().map(point)
 		}
 
-		#[inline]
 		fn multiline(v: &MultiLineString) -> impl Iterator<Item = (f64, f64)> + '_ {
 			v.iter().flat_map(line)
 		}
 
-		#[inline]
 		fn multipolygon(v: &MultiPolygon) -> impl Iterator<Item = (f64, f64)> + '_ {
 			v.iter().flat_map(polygon)
 		}
 
-		match (self, other) {
-			//
-			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
-			//
-			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
-			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
-			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
-			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
-			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => multipolygon(a).partial_cmp(multipolygon(b)),
-			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
+		/// The ring count, then every ring length, with the exterior last.
+		fn polygon_shape(v: &Polygon) -> impl Iterator<Item = usize> + '_ {
+			once(v.interiors().len())
+				.chain(v.interiors().iter().map(|ring| ring.0.len()))
+				.chain(once(v.exterior().0.len()))
 		}
+
+		let ranks = self.kind_rank().cmp(&other.kind_rank());
+		if ranks != Ordering::Equal {
+			return ranks;
+		}
+		// Both sides are of one kind from here. The match is exhaustive over `self`, so a new
+		// variant does not compile until it has its own comparison; the `let ... else` arms can
+		// only be taken for a kind mismatch, which the rank comparison above has already ruled out.
+		match self {
+			Self::Point(a) => {
+				let Self::Point(b) = other else {
+					return ranks;
+				};
+				cmp_coords(once(point(a)), once(point(b)))
+			}
+			Self::Line(a) => {
+				let Self::Line(b) = other else {
+					return ranks;
+				};
+				cmp_coords(line(a), line(b))
+			}
+			Self::Polygon(a) => {
+				let Self::Polygon(b) = other else {
+					return ranks;
+				};
+				cmp_coords(polygon(a), polygon(b))
+					.then_with(|| polygon_shape(a).cmp(polygon_shape(b)))
+			}
+			Self::MultiPoint(a) => {
+				let Self::MultiPoint(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multipoint(a), multipoint(b))
+			}
+			Self::MultiLine(a) => {
+				let Self::MultiLine(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multiline(a), multiline(b))
+					.then_with(|| a.iter().map(|l| l.0.len()).cmp(b.iter().map(|l| l.0.len())))
+			}
+			Self::MultiPolygon(a) => {
+				let Self::MultiPolygon(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multipolygon(a), multipolygon(b)).then_with(|| {
+					once(a.0.len())
+						.chain(a.iter().flat_map(polygon_shape))
+						.cmp(once(b.0.len()).chain(b.iter().flat_map(polygon_shape)))
+				})
+			}
+			Self::Collection(a) => {
+				let Self::Collection(b) = other else {
+					return ranks;
+				};
+				a.iter()
+					.zip(b.iter())
+					.map(|(x, y)| x.total_cmp(y))
+					.find(|ordering| *ordering != Ordering::Equal)
+					.unwrap_or_else(|| a.len().cmp(&b.len()))
+			}
+		}
+	}
+}
+
+impl PartialOrd for Geometry {
+	/// Always `Some`: geometries are totally ordered, NaN coordinates included. Set membership
+	/// follows this order. The order merges `-0.0` and `0.0`, as the derived `PartialEq` does, and
+	/// equates a NaN with a NaN of the same bits, which the derived `PartialEq` does not, so `==`
+	/// and the order disagree only for geometries holding a NaN.
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.total_cmp(other))
 	}
 }
 

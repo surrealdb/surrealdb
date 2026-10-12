@@ -53,10 +53,12 @@ pub mod catalog_reads;
 pub mod close;
 pub mod config;
 pub mod factory;
+pub mod feature;
 pub mod index_shapes;
 pub mod index_state;
 pub mod into;
 pub mod key;
+pub mod layouts;
 pub mod sequences;
 pub mod speculation;
 pub mod tasklease;
@@ -183,7 +185,9 @@ mod storage_error_tests {
 
 pub use config::TransactionConfig;
 pub use factory::TransactionFactory;
+pub use feature::{FeatureLevelCell, FeatureLevelState, LevelledMode, Readable};
 pub use into::IntoBytes;
+pub use layouts::{Admission, LayoutSet, RowGate};
 pub use surrealdb_kvs::consts::NORMAL_BATCH_SIZE;
 pub use surrealdb_kvs::{
 	Direction, Error, Key, KeyRange, Result, TransactionType, Val, Version, api, consts, err,

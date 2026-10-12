@@ -32,7 +32,7 @@ use crate::val::{Datetime, TableName, Value};
 	strict: false,
 	comment: Some("comment".to_string()),
 	changefeed: Some(ChangeFeed {
-		expiry: Duration::from_secs(123),
+		expiry: Duration::from_secs(123).into(),
 		store_diff: false,
 	}),
 }, 25)]
@@ -54,7 +54,7 @@ use crate::val::{Datetime, TableName, Value};
 		}.to_stored()),
 	permissions: StoredPermissions::default(),
 	changefeed: Some(ChangeFeed {
-		expiry: Duration::from_secs(123),
+		expiry: Duration::from_secs(123).into(),
 		store_diff: false,
 	}),
 	comment: Some("comment".to_string()),
@@ -106,9 +106,9 @@ use crate::val::{Datetime, TableName, Value};
 	base: Base::Root,
 	authenticate: Some(ExprText::from_raw("'expr'")),
 	context: Some(ExprText::from_raw("'expr'")),
-	grant_duration: Some(Duration::from_secs(123)),
-	token_duration: Some(Duration::from_secs(123)),
-	session_duration: Some(Duration::from_secs(123)),
+	grant_duration: Some(Duration::from_secs(123).into()),
+	token_duration: Some(Duration::from_secs(123).into()),
+	session_duration: Some(Duration::from_secs(123).into()),
 	comment: Some("comment".to_string()),
 }, 70)]
 #[case::access(AccessGrant {
@@ -237,7 +237,7 @@ use crate::val::{Datetime, TableName, Value};
 	name: "sequence".into(),
 	batch: 123,
 	start: 123,
-	timeout: Some(Duration::from_secs(123)),
+	timeout: Some(Duration::from_secs(123).into()),
 }, 15)]
 #[case::version(MajorVersion::from(1), 2)]
 #[case::user(UserDefinition {
@@ -245,8 +245,8 @@ use crate::val::{Datetime, TableName, Value};
 	hash: "hash".into(),
 	code: "code".to_string(),
 	roles: vec!["role".to_string()],
-	token_duration: Some(Duration::from_secs(123)),
-	session_duration: Some(Duration::from_secs(123)),
+	token_duration: Some(Duration::from_secs(123).into()),
+	session_duration: Some(Duration::from_secs(123).into()),
 	comment: Some("comment".to_string()),
 	base: crate::catalog::schema::base::Base::Root,
 	scram: None,

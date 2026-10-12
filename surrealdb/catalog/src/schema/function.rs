@@ -1,6 +1,5 @@
 use anyhow::Context as _;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -9,43 +8,58 @@ use crate::catalog::{
 	BlockText, FromStored, KindText, LogicalBlockBody, LogicalPermissionBody, Permission,
 	StoredPermission,
 };
-use crate::expr as runtime;
 use crate::expr::logical::{LogicalOp, LogicalPermission};
 use crate::expr::statements::DefineFunctionStatement;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Block, Kind};
+use crate::stored::Stored;
 use crate::val::Value;
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredFunctionDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
 	/// Canonical SurrealQL kind-grammar text for each argument's declared type.
 	#[revision(end = 4, convert_fn = "convert_args")]
 	pub old_args: Vec<(String, Kind)>,
 	#[revision(start = 4)]
+	#[stored(n = 4)]
 	pub args: Vec<(String, KindText)>,
 	/// Canonical SurrealQL text of the function's `{ ... }` body block.
+	#[stored(n = 6)]
 	pub block: BlockText,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 8)]
 	pub permissions: StoredPermission,
 	/// Canonical SurrealQL kind-grammar text of the `RETURNS` clause.
 	#[revision(end = 4, convert_fn = "convert_returns")]
 	pub old_returns: Option<Kind>,
 	#[revision(start = 4)]
+	#[stored(n = 10)]
 	pub returns: Option<KindText>,
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
+	#[stored(n = 12)]
 	pub auth_limit: AuthLimit,
 	/// Optional alias used as the GraphQL Query field name. See GitHub issue
 	/// #4537. `Option<String>::default()` already returns `None`.
 	#[revision(start = 3)]
+	#[stored(n = 14)]
 	pub graphql_alias: Option<String>,
 
 	/// Reason emitted on the GraphQL `@deprecated` directive of the
 	/// auto-generated Query field for this function.
 	#[revision(start = 3)]
+	#[stored(n = 16)]
 	pub graphql_deprecated: Option<String>,
 }
 
@@ -75,7 +89,7 @@ impl StoredFunctionDefinition {
 	}
 }
 
-impl_kv_value_revisioned!(StoredFunctionDefinition);
+impl_kv_value_catalog!(StoredFunctionDefinition);
 
 impl FunctionDefinition {
 	fn to_runtime_definition(&self) -> DefineFunctionStatement {

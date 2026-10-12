@@ -2,7 +2,6 @@ use anyhow::{Context as _, Result};
 use common::fail;
 use common::fmt::EscapeKwFreeIdent;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{ApiConfig, FromStored, StoredApiConfigDefinition};
@@ -11,6 +10,8 @@ pub use crate::expr::graphql_config::{
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::ConfigKind;
+use crate::impl_kv_value_catalog;
+use crate::stored::Stored;
 use crate::val::Value;
 
 /// The config struct as it is stored on disk.
@@ -22,13 +23,17 @@ use crate::val::Value;
 /// expr-layer `ConfigInner::GraphQL` and a component of the GraphQL schema cache
 /// key, so a `Stored` prefix would misdescribe it in most of its uses.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum StoredConfigDefinition {
+	#[stored(n = 1)]
 	Default(DefaultConfig),
+	#[stored(n = 2)]
 	GraphQL(GraphQLConfig),
+	#[stored(n = 3)]
 	Api(StoredApiConfigDefinition),
 }
-impl_kv_value_revisioned!(StoredConfigDefinition);
+impl_kv_value_catalog!(StoredConfigDefinition);
 
 impl StoredConfigDefinition {
 	/// Convert the config definition into a graphql config.
@@ -90,9 +95,12 @@ impl InfoStructure for ConfigDefinition {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct DefaultConfig {
+	#[stored(n = 2)]
 	pub namespace: Option<String>,
+	#[stored(n = 4)]
 	pub database: Option<String>,
 }
 

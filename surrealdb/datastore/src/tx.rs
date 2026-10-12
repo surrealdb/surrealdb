@@ -24,26 +24,34 @@ use chrono::Utc;
 use common::EngineError;
 use common::time::sleep;
 use roaring::RoaringTreemap;
-use surrealdb_catalog::node::Node;
+use surrealdb_catalog::node::{Node, NodeRelease, Timestamp};
 use surrealdb_catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CachePolicy,
 	CancellationProbe, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider,
 	RootProvider, TableProvider, UserProvider,
 };
+use surrealdb_catalog::stored::{CATALOG_MARKER, EntryError};
 use surrealdb_catalog::{
-	self, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError, FromStored,
-	IndexId, LATEST_EDGE_VARIANT, Metadata, NamespaceDefinition, NamespaceId, Record, RecordType,
-	StoredConfigDefinition, StoredTableDefinition, TableDefinition, TableId, TableType,
+	self, Conformance, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError,
+	FieldCandidate, FieldClaim, FromStored, Generation, GenerationLayout, GenerationMark,
+	GenerationRing, IndexId, LATEST_EDGE_VARIANT, LayoutDescriptor, LayoutRefusal, Metadata,
+	NamespaceDefinition, NamespaceId, Record, RecordFormat, RecordLayoutError, RecordType,
+	RecordWriter, StoredConfigDefinition, StoredFeatureLevel, StoredFieldDefinition, StoredRecord,
+	StoredTableDefinition, TableConformance, TableDefinition, TableId, TableLayouts,
+	TableMigrations, TableShape, TableType, birth_claims_of, decode_generation, definition_digest,
+	derive_layout,
 };
 use surrealdb_expr::val::{RecordId, RecordIdKey, RecordIdentity, TableName, Value};
 use surrealdb_kvs::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
 	ValsBatch,
 };
-use surrealdb_kvs::key::{AnyRange, KVKey, KVKeyDecode, KVSubspace, Resumable, TypedRange};
+use surrealdb_kvs::key::{
+	AnyRange, KVKey, KVKeyDecode, KVSubspace, RawRange, Resumable, TypedRange,
+};
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
-use surrealdb_kvs::value::KVValue;
-use surrealdb_kvs::{Key, KeyRange};
+use surrealdb_kvs::value::{EncodeContext, Encoded, KVValue};
+use surrealdb_kvs::{FeatureLevel, Key, KeyRange, Release};
 use surrealdb_observe::{
 	ExecutionObserver, Outcome, TenantIdentity, TransactionEvent, TransactionEventSafe,
 	TransactionMetrics,
@@ -58,6 +66,7 @@ use crate::cache::tx::TransactionCache;
 use crate::close::{
 	AfterCommitQueue, AfterCommitWait, AfterCommitWaits, CommitAction, RollbackAction,
 };
+use crate::feature::{FeatureLevelCell, FeatureLevelState, LevelledMode, Readable};
 use crate::index_shapes::{IndexShapes, ShapeRecorder, TableIndexShapes, ValueShape};
 use crate::key::reclaim::{ALL_DOC_ID_KINDS, Expunge, ReclaimState};
 use crate::key::schema::{
@@ -66,17 +75,19 @@ use crate::key::schema::{
 	CatalogVersionKey, CatalogVersionPrefix, ChangeFeedKey, ChangefeedFenceKey, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
 	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocKeyKey,
-	DocLookupIdentityKey, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FieldKey,
-	FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GraphFoldKey, GraphPointerKey,
-	IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix,
-	IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LiveEventsKey, MlModelKey, MlModelPrefix,
-	ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
+	DocLookupIdentityKey, DocLookupKey, DocStatsBatchKey, EventKey, EventPrefix, FeatureLevelKey,
+	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey,
+	GraphFoldKey, GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey,
+	IndexDefKey, IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey,
+	LayoutPrefix, LiveEventsKey, MigrationKey, MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix,
+	NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NodeReleaseKey, NsAccessMethodKey,
 	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
-	ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey,
+	ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RecordPrefix,
 	RootAccessMethodKey, RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey,
 	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
-	TableKey, TablePrefix, TermChangeBatchKey,
+	TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
 };
+use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
@@ -96,6 +107,8 @@ use crate::values::index_build::{
 };
 use crate::values::index_delta::{BufferedIndex, BufferedTerm, IndexDeltaBuffer};
 use crate::values::live_query::LiveEventBuffer;
+use crate::version::ledger::{RECORD_FORMAT_V1, RECORD_FORMAT_V1_NAME, RECORD_FORMAT_V1_VERSION};
+use crate::version::{MajorVersion, MigrationRecord, unix_millis_now};
 use crate::{
 	DatastoreError, Direction, Error as KvsError, IntoBytes, NORMAL_BATCH_SIZE, TransactionConfig,
 	TransactionFactory, TransactionType, Transactor, Val, cache, catalog,
@@ -131,6 +144,193 @@ pub(crate) type ProvisionalSequence = Arc<Mutex<Option<Sequence>>>;
 /// A transaction's provisional slots, with what each held, at one moment. See
 /// `Transaction::provisional_save_points`.
 type ProvisionalSnapshot = Vec<((NamespaceId, DatabaseId, String), Option<Sequence>)>;
+
+/// What a levelled write read at its key, in the form [`Transaction::changed_definition`]
+/// takes: `None` when the write read nothing.
+fn held(prior: &Option<Option<Val>>) -> Option<Option<&[u8]>> {
+	prior.as_ref().map(Option::as_deref)
+}
+
+/// Whether a failure to decode a catalog entry is a refusal because a newer
+/// release wrote it ([`EntryError::NeedsRelease`]), found anywhere in the
+/// failure's source chain.
+pub(crate) fn refused_by_release(err: &anyhow::Error) -> bool {
+	err.chain()
+		.any(|cause| matches!(EntryError::of_cause(cause), Some(EntryError::NeedsRelease { .. })))
+}
+
+/// The refusal of `layouts`' table, when the table's generation ring is one this build cannot
+/// read: nothing is written to the table's rows or minted for it on a guess.
+fn ring_refusal_error(layouts: &TableLayouts) -> Option<anyhow::Error> {
+	layouts.ring_refusal().map(|cause| {
+		CatalogError::Layout(RecordLayoutError::RingRefused {
+			table: layouts.table().clone(),
+			cause: cause.clone(),
+		})
+		.into()
+	})
+}
+
+/// Whether a failure is [`DatastoreError::FeatureNotEnabled`], found anywhere in the failure's
+/// source chain.
+fn refused_by_level(err: &anyhow::Error) -> bool {
+	err.chain().any(|cause| {
+		matches!(
+			cause.downcast_ref::<DatastoreError>(),
+			Some(DatastoreError::FeatureNotEnabled { .. })
+		)
+	})
+}
+
+/// Brings the datastore's feature level cell up to a record this transaction wrote, once the
+/// transaction has committed.
+struct ObserveFeatureLevel {
+	cell: Arc<FeatureLevelCell>,
+	record: StoredFeatureLevel,
+}
+
+impl CommitAction for ObserveFeatureLevel {
+	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+		Box::pin(async move { self.cell.observe(Some(&self.record)) })
+	}
+}
+
+/// Takes the stored-format ledger entry as committed in the datastore's feature level cell, once
+/// the transaction that wrote or saw the entry has committed.
+struct ObserveStoredFormat {
+	cell: Arc<FeatureLevelCell>,
+}
+
+impl CommitAction for ObserveStoredFormat {
+	fn run(self: Box<Self>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+		Box::pin(async move { self.cell.observe_stored_format() })
+	}
+}
+
+/// A transaction's view of the layouts of the tables it has read or written, by namespace and
+/// database and then by table, so a lookup borrows the table's name instead of cloning it.
+type LayoutMemo = HashMap<(NamespaceId, DatabaseId), HashMap<TableName, Arc<TableLayouts>>>;
+
+/// The keys a range delete must not remove unnoticed from a table whose layouts this transaction
+/// holds: `[start, end)` covers the table's `!fc`, `!lg` and `!mi` keys
+/// ([`Transaction::hold_span`]).
+#[derive(Clone, Debug)]
+enum HeldSpan {
+	/// The keys from `start` up to, and excluding, `end`.
+	Bounded {
+		start: Key<'static>,
+		end: Key<'static>,
+	},
+	/// A span whose keys could not be encoded, which overlaps every range.
+	Unbounded,
+}
+
+impl HeldSpan {
+	/// Whether the delete of `range` may remove a key of the span, comparing the borrowed bytes.
+	fn overlaps(&self, range: &KeyRange<'_>) -> bool {
+		match self {
+			Self::Bounded {
+				start,
+				end,
+			} => range.start.as_slice() < end.as_slice() && start.as_slice() < range.end.as_slice(),
+			Self::Unbounded => true,
+		}
+	}
+}
+
+/// A transaction's held spans, by namespace and database and then by table.
+type HeldSpans = HashMap<(NamespaceId, DatabaseId), HashMap<TableName, HeldSpan>>;
+
+/// The tables whose definition a transaction created, and the born tables whose conformance the
+/// table's next stamp settles.
+///
+/// A birth is the one moment a table has no writer that has seen it, which is what a floor that is
+/// known at birth needs ([`Transaction::mint_with`]). A birth is keyed by the id the creating write
+/// gave the table, so it can never apply to another incarnation of the name: a save point rollback
+/// that restores an older definition leaves a birth that names an id the definition does not
+/// carry. Save points therefore do not restore it, and a speculation starts from a copy.
+#[derive(Clone, Debug, Default)]
+struct Births {
+	/// The tables whose definition key this transaction wrote while it held nothing.
+	born: HashMap<(NamespaceId, DatabaseId, TableName), Birth>,
+	/// The born tables whose conformance the table's next stamp settles.
+	unsettled: HashSet<(NamespaceId, DatabaseId, TableName)>,
+	/// The field definitions of a table as the last settle or derivation compiled them. A
+	/// compiled definition is a function of the definition's bytes ([`CompiledField`]), so an
+	/// entry stays right whatever else the transaction does, and the next read compiles only the
+	/// definitions whose bytes changed since the last one. The creation of a table clears its
+	/// entry.
+	compiled: HashMap<(NamespaceId, DatabaseId, TableName), Arc<CompiledFields>>,
+}
+
+/// The compiled field definitions of a table, by the `fd` component of the field's key.
+type CompiledFields = HashMap<String, CompiledField>;
+
+/// A field definition compiled for the birth claim rules, with the stored bytes it was compiled
+/// from.
+#[derive(Clone, Debug)]
+struct CompiledField {
+	/// The stored definition `candidate` was compiled from.
+	bytes: Arc<[u8]>,
+	/// The definition, compiled.
+	candidate: Arc<FieldCandidate>,
+}
+
+/// A table this transaction created ([`Births`]).
+#[derive(Clone, Copy, Debug)]
+struct Birth {
+	/// The id the creating write gave the table.
+	table_id: TableId,
+	/// Whether this transaction minted the table's first generation after creating it, so the
+	/// ring the table holds is one its birth started.
+	minted_ring: bool,
+}
+
+/// What a transaction holds of a table's conformance record `!fc`
+/// ([`Transaction::held_conformance`]).
+#[derive(Clone, Debug)]
+enum HeldConformance {
+	/// The record was read and is not there.
+	Absent,
+	/// This transaction removed the record with a delete conditional on the bytes it read, which
+	/// its write set holds ([`Transaction::forfeit_conformance`]).
+	Forfeited,
+	/// The record, as this transaction reads or wrote it.
+	Claims(Arc<TableConformance>),
+	/// The record is there and this build does not decode it, so it states no claims.
+	Unreadable,
+}
+
+/// A transaction's view of the conformance records of the tables it has read or written, by
+/// namespace and database and then by table.
+type ConformanceMemo = HashMap<(NamespaceId, DatabaseId), HashMap<TableName, HeldConformance>>;
+
+/// What a save point records when it opens, so that rolling it back undoes exactly what its scope
+/// did to the transaction's own bookkeeping.
+struct SavePointMark {
+	/// How many commit actions were queued; the rollback drops those queued after it
+	/// ([`Transaction::commit_actions`]).
+	actions: usize,
+	/// The layout epoch; a rollback finding it moved forgets the layouts the transaction holds
+	/// ([`Transaction::layout_epoch`]).
+	layout_epoch: u64,
+	/// The count of range deletes; a rollback finding it moved forgets the layouts the
+	/// transaction holds, because the delete it undoes may have removed layouts.
+	range_deletes: u64,
+	/// Whether the transaction already held the stored-format ledger entry; a rollback of a scope
+	/// that took it discards the observation ([`Transaction::admit_stored_format`]).
+	stored_format_admitted: bool,
+}
+
+/// What admitting a stored record found ([`Transaction::admit_record_bytes`]).
+struct Admitted {
+	/// The generation the record's bytes carry: `None` for a `revision` record and for stamp 0.
+	generation: Option<Generation>,
+	/// The layouts that admitted the record, for a packed row only: its decode reads its
+	/// descriptor from them. A document and a `revision` row clone no layouts, because their
+	/// decode needs none.
+	layouts: Option<Arc<TableLayouts>>,
+}
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -168,6 +368,67 @@ pub struct Transaction {
 	speculative_caches: Mutex<Vec<(crate::speculation::Overlay, u64, Arc<cache::tx::Cache>)>>,
 	/// The sequences for this store
 	sequences: Sequences,
+	/// The feature level the store was last read at, shared with every transaction of the store
+	/// ([`Self::write_level`]).
+	feature: Arc<FeatureLevelCell>,
+	/// Whether the engine this transaction runs on admits no other writer of the store
+	/// ([`Self::sole_writer`]), as the engine answered when the transaction opened.
+	sole_writer: bool,
+	/// This transaction's view of each table's layouts, filled by a read of the table's `!lg`
+	/// keys or adopted from a shared snapshot ([`Self::table_layouts`]).
+	///
+	/// Cleared by a range delete that spans a held table's layouts and by a save point rollback
+	/// that undoes a mint, a floor move, a range delete or the stored-format ledger entry, the
+	/// events that can change which generations the transaction sees, and each of them moves the
+	/// layout epoch. A generation number names one descriptor at a time, but a save point
+	/// rollback can undo a mint after which the transaction mints the same number with other
+	/// bytes, so a missed invalidation could leave a number naming another descriptor, and a
+	/// packed row read through it would decode to wrong values. That is why every holder of
+	/// layouts (a row gate, a layout set, a write context's format slot) re-resolves when the
+	/// layout epoch moves.
+	layout_memo: parking_lot::Mutex<LayoutMemo>,
+	/// This transaction's view of each table's conformance record `!fc`, filled by a read of the
+	/// key or by this transaction's own write or delete of it ([`Self::held_conformance`]).
+	///
+	/// Cleared with the layout memo ([`Self::invalidate_layouts`]); never shared with another
+	/// transaction, because the record changes without a catalog version stamp.
+	conformance_memo: parking_lot::Mutex<ConformanceMemo>,
+	/// The span of keys of every table either memo holds, computed once when the table enters a
+	/// memo ([`Self::hold_span`]) and cleared with them, so that a range delete is compared with
+	/// each span by borrowed bytes ([`Self::begin_range_delete`]).
+	held_spans: parking_lot::Mutex<HeldSpans>,
+	/// The tables whose definition this transaction created, with the id it gave each, and the
+	/// born tables the next stamp settles ([`Births`]).
+	births: parking_lot::Mutex<Births>,
+	/// Counts the events that change which generation is current, what the transaction holds of a
+	/// table's conformance record, or whether the stored-format ledger entry is part of this
+	/// transaction: a mint, a floor move, a write or removal of a conformance record, a range
+	/// delete that spans a held table's keys and a save point rollback that undid any of them or
+	/// the entry. A writer that holds a format it resolved at one value of the epoch holds it only
+	/// while the epoch is unchanged ([`Self::layout_epoch`]).
+	layout_epoch: AtomicU64,
+	/// How many range deletes this transaction has issued. A save point rollback that finds it
+	/// moved may have restored keys a delete removed, including layouts of a table the
+	/// transaction had not yet read when the delete ran.
+	range_deletes: AtomicU64,
+	/// Whether this transaction holds the stored-format ledger entry: it wrote the entry, or read
+	/// it, and no save point rollback has since discarded the observation
+	/// ([`Self::admit_stored_format`]).
+	stored_format_admitted: AtomicBool,
+	/// Whether this transaction read the stored-format ledger entry from storage and found it
+	/// absent ([`Self::stored_format_present`]). The entry can enter the transaction's view only
+	/// through its own write, which sets [`Self::stored_format_admitted`], and that flag is
+	/// consulted first; so a save point rollback that undoes the write leaves this flag, and its
+	/// answer, correct.
+	stored_format_absent: AtomicBool,
+	/// Set when a schema statement failed after writing part of its change, so the writes the
+	/// transaction holds are a state no caller asked for. A transaction with it set refuses to
+	/// commit, as for the other poisons ([`Self::poisoned`]); a save point rollback does not clear
+	/// it.
+	catalog_write_poisoned: AtomicBool,
+	/// What each open save point recorded when it opened, innermost last, so that a rollback
+	/// undoes exactly what the scope did to the transaction's bookkeeping ([`SavePointMark`]).
+	save_point_marks: Mutex<Vec<SavePointMark>>,
 	/// How many times this transaction has stamped a table's catalog version
 	/// ([`Self::bump_catalog_version`]). It only grows, so a reader that saw
 	/// the same count earlier in the transaction knows no table's version has
@@ -347,6 +608,11 @@ pub struct Transaction {
 	/// commit would leave them standing after a rollback undid what they answer
 	/// to. Drained by [`Self::commit`]; discarded by [`Self::cancel`] and by a
 	/// failed commit.
+	///
+	/// An action queued inside a save point scope answers to writes of that scope: it is
+	/// discarded when the scope rolls back, unless it declares otherwise
+	/// ([`CommitAction::answers_to_scope`]), and belongs to the enclosing scope when the scope
+	/// is released ([`Self::save_point_marks`]).
 	commit_actions: Mutex<Vec<Box<dyn CommitAction>>>,
 	/// Effects owed if this transaction does *not* commit.
 	///
@@ -922,28 +1188,39 @@ impl Transaction {
 		// parse. One unreadable `VALUE` on an unrelated table would then fail
 		// every delete in the database. Nothing leaves this function but a
 		// boolean and a set of names.
-		let tbs: Arc<[StoredTableDefinition]> = {
-			let range = TablePrefix {
+		//
+		// Entries decode one by one so that an entry a newer release wrote, and
+		// this build refuses, can be told from a corrupt one. A refused table or
+		// field may be a reference field this build cannot see, so the answer
+		// becomes the conservative one: any table may be referenced, and the
+		// purge scans.
+		let mut refused = false;
+		let table_range = TablePrefix {
+			ns,
+			db,
+		}
+		.range()?;
+		let table_rows = self.tr.getr(table_range.into_key_range(), None).await?;
+		'walk: for (_, raw_table) in table_rows.values.iter() {
+			let Some(tb) = Self::decode_or_refused::<StoredTableDefinition>(raw_table)? else {
+				refused = true;
+				break 'walk;
+			};
+			let tb_name = TableName::from(tb.name.clone());
+			let field_range = FieldPrefix {
 				ns,
 				db,
+				tb: Cow::Borrowed(&tb_name),
 			}
 			.range()?;
-			let val = self.tr.getr(range.into_key_range(), None).await?;
-			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
-		};
-		for tb in tbs.iter() {
-			let tb_name = TableName::from(tb.name.clone());
-			let fds: Arc<[catalog::StoredFieldDefinition]> = {
-				let range = FieldPrefix {
-					ns,
-					db,
-					tb: Cow::Borrowed(&tb_name),
-				}
-				.range()?;
-				let val = self.tr.getr(range.into_key_range(), None).await?;
-				util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
-			};
-			for fd in fds.iter() {
+			let field_rows = self.tr.getr(field_range.into_key_range(), None).await?;
+			for (_, raw_field) in field_rows.values.iter() {
+				let Some(fd) =
+					Self::decode_or_refused::<catalog::StoredFieldDefinition>(raw_field)?
+				else {
+					refused = true;
+					break 'walk;
+				};
 				// Only reference fields write reference keys.
 				if fd.reference.is_none() {
 					continue;
@@ -961,12 +1238,34 @@ impl Transaction {
 				}
 			}
 		}
+		if refused {
+			tracing::warn!(
+				target: "surrealdb::core::kvs::tx",
+				"A table or field definition needs a newer release than this build, so \
+				 every table is treated as possibly referenced and deletes scan for references"
+			);
+			any = true;
+		}
 		let targets = Arc::new(ReferenceTargets {
 			any,
 			tables,
 		});
 		self.cache.insert(qey, cache::tx::Entry::Any(targets.clone()));
 		Ok(targets)
+	}
+
+	/// Decodes one catalog entry, or `None` when a newer release wrote it and this
+	/// build refuses it ([`EntryError::NeedsRelease`]). Any other failure is an
+	/// error.
+	fn decode_or_refused<V>(raw: &[u8]) -> Result<Option<V>>
+	where
+		V: KVValue<KeyContext = ()>,
+	{
+		match V::kv_decode_value(raw, ()) {
+			Ok(value) => Ok(Some(value)),
+			Err(e) if refused_by_release(&e) => Ok(None),
+			Err(e) => Err(e),
+		}
 	}
 
 	/// The table's settled `graph_doc_ids` marker — whether numeric
@@ -1018,6 +1317,13 @@ impl Transaction {
 	/// finished, with none under way, read before the underlying transaction
 	/// opened, where the datastore is the store's sole writer, and
 	/// [`NO_CATALOG_EPOCH`] otherwise ([`Self::catalog_epoch`]).
+	///
+	/// `sole_writer` is whether the engine the transaction opened on admits no other writer of the
+	/// store ([`Self::sole_writer`]).
+	///
+	/// `feature` is the store's feature level cell, shared by every transaction of
+	/// the store.
+	#[expect(clippy::too_many_arguments, reason = "each argument is a distinct shared handle")]
 	pub fn new(
 		local: bool,
 		sequences: Sequences,
@@ -1026,6 +1332,8 @@ impl Transaction {
 		tr: Transactor,
 		config: &TransactionConfig,
 		catalog_epoch: u64,
+		sole_writer: bool,
+		feature: Arc<FeatureLevelCell>,
 	) -> Transaction {
 		Transaction {
 			local,
@@ -1037,6 +1345,18 @@ impl Transaction {
 			cache: TransactionCache::new(config.transaction_cache_size),
 			speculative_caches: Mutex::new(Vec::new()),
 			sequences,
+			feature,
+			sole_writer,
+			layout_memo: Default::default(),
+			conformance_memo: Default::default(),
+			held_spans: Default::default(),
+			births: Default::default(),
+			layout_epoch: AtomicU64::new(0),
+			range_deletes: AtomicU64::new(0),
+			stored_format_admitted: AtomicBool::new(false),
+			stored_format_absent: AtomicBool::new(false),
+			catalog_write_poisoned: AtomicBool::new(false),
+			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(0),
 			object_stamps: AtomicU64::new(0),
 			stamped_tables: Default::default(),
@@ -1594,7 +1914,7 @@ impl Transaction {
 
 	/// The reason this transaction may not commit, if there is one.
 	///
-	/// Three conditions poison a transaction, and all mean its writes are a state no
+	/// Four conditions poison a transaction, and all mean its writes are a state no
 	/// caller asked for:
 	///
 	/// - A tripped write-cardinality guard leaves the writes buffered before the failing
@@ -1604,6 +1924,8 @@ impl Transaction {
 	///   writes survive. See [`Self::save_point_poisoned`].
 	/// - A record's write stopped part-way leaves the record disagreeing with its index entries.
 	///   See [`Self::poison_interrupted_write`].
+	/// - A schema statement that failed after writing part of its change leaves a catalog change
+	///   the statement did not finish. See [`Self::catalog_write_poisoned`].
 	///
 	/// Each is reachable at an explicit COMMIT: a client-owned (RPC/SDK)
 	/// transaction survives the statement error that set the flag. An explicit
@@ -1628,6 +1950,14 @@ impl Transaction {
 			return Err(crate::error::DatastoreError::QueryNotExecuted {
 				message: "A record's write was stopped part-way, leaving the transaction holding \
 				          only some of that record's index entries"
+					.to_string(),
+			}
+			.into());
+		}
+		if self.catalog_write_poisoned.load(Ordering::Relaxed) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A schema statement failed after writing part of its change, so the \
+				          transaction cannot commit"
 					.to_string(),
 			}
 			.into());
@@ -1925,6 +2255,70 @@ impl Transaction {
 		val.map(|v| <K as KVKey>::Value::kv_decode_value(&v, key.value_context())).transpose()
 	}
 
+	/// Fetch a specific record value at `version` when given, with the generation its stored
+	/// bytes carry.
+	///
+	/// The record is what [`TableProvider::get_record`] answers. The generation is:
+	/// - the one the record's bytes were admitted under: `None` for a `revision` record and for
+	///   stamp 0;
+	/// - `None` for a lightweight edge, which is synthesised from the adjacency and has no stored
+	///   bytes, with no layout read;
+	/// - `None` for a record that does not exist.
+	///
+	/// A cached record carries the generation it was cached with.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn get_stamped_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<(Arc<Record>, Option<Generation>)> {
+		// Cache is not versioned
+		if version.is_some() {
+			return match self.read_stamped_record(ns, db, tb, id, version).await? {
+				Some((record, generation)) => Ok((record.into_read_only(), generation)),
+				None => match self.lightweight_record(ns, db, tb, id, version).await? {
+					Some(record) => Ok((record.into_read_only(), None)),
+					None => Ok((Arc::new(Default::default()), None)),
+				},
+			};
+		}
+		let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
+		match self.cache.get(&qey) {
+			// The entry is in the cache
+			Some(val) => val.try_into_stamped_record(),
+			// The entry is not in the cache
+			None => {
+				match self.read_stamped_record(ns, db, tb, id, None).await? {
+					Some((record, generation)) => {
+						let record = record.into_read_only();
+						let entry = cache::tx::Entry::Val(Arc::clone(&record), generation);
+						self.cache.insert(qey, entry);
+						Ok((record, generation))
+					}
+					// A lightweight edge has no record; synthesize
+					// it from the adjacency. Cacheable: the delete
+					// pipeline clears the entry through
+					// `del_record` exactly as for a stored record.
+					None => match self.lightweight_record(ns, db, tb, id, None).await? {
+						Some(record) => {
+							let record = record.into_read_only();
+							let entry = cache::tx::Entry::Val(Arc::clone(&record), None);
+							self.cache.insert(qey, entry);
+							Ok((record, None))
+						}
+						None => Ok((Arc::new(Default::default()), None)),
+					},
+				}
+			}
+		}
+	}
+
 	/// Fetch a specific record value, registering the record key for
 	/// commit-time conflict detection.
 	///
@@ -1934,6 +2328,10 @@ impl Transaction {
 	/// the record is present in the transaction read cache: the conflict
 	/// registration must reach the storage engine. The fetched value
 	/// refreshes the cache afterwards.
+	///
+	/// The stored bytes are decoded against the table's layouts
+	/// ([`Self::decode_record`]), so a record of a generation the table does not list, or
+	/// lists with a layout this build refuses, is refused rather than read.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
@@ -1945,24 +2343,45 @@ impl Transaction {
 		tb: &TableName,
 		id: &RecordIdKey,
 	) -> Result<Arc<Record>> {
-		// Fetch the record from the datastore. `tx.getu_key` decodes
-		// using the storage key, so the canonical `id` is spliced back
-		// in automatically (see `RecordKey::value_context`).
+		self.get_stamped_record_for_update(ns, db, tb, id).await.map(|(record, _)| record)
+	}
+
+	/// [`Self::get_record_for_update`] with the generation the record's bytes carry: `None` for a
+	/// `revision` record, stamp 0 and a record that does not exist.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn get_stamped_record_for_update(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+	) -> Result<(Arc<Record>, Option<Generation>)> {
 		let key = RecordKey {
 			ns,
 			db,
 			tb: Cow::Borrowed(tb),
 			id: Cow::Borrowed(id),
 		};
-		match self.getu_key(&key).await? {
-			Some(record) => {
+		match self.getu_key_raw(&key).await? {
+			Some(bytes) => {
+				// The key supplies the canonical `id`, and the table's layouts admit a v1
+				// record's generation.
+				let rid = RecordId {
+					table: tb.clone(),
+					key: id.clone(),
+				};
+				let (record, generation) =
+					self.decode_stamped_record(ns, db, tb, &bytes, rid, None).await?;
 				let record = record.into_read_only();
 				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
-				let entry = cache::tx::Entry::Val(Arc::clone(&record));
+				let entry = cache::tx::Entry::Val(Arc::clone(&record), generation);
 				self.cache.insert(qey, entry);
-				Ok(record)
+				Ok((record, generation))
 			}
-			None => Ok(Arc::new(Default::default())),
+			None => Ok((Arc::new(Default::default()), None)),
 		}
 	}
 
@@ -2004,10 +2423,31 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<(Vec<(Vec<u8>, V)>, ScanChunkStats)>
 	where
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let (out, _, stats) =
+			self.decode_range_tolerating(rng, dir, limit, skip, version, false).await?;
+		Ok((out, stats))
+	}
+
+	/// [`Self::decode_range`], which with `skip_refused` set skips an entry that a newer
+	/// release wrote ([`refused_by_release`]) instead of failing, and counts the entries it
+	/// skipped. Any other decode failure still fails the read.
+	async fn decode_range_tolerating<V>(
+		&self,
+		rng: KeyRange<'static>,
+		dir: Direction,
+		limit: Option<u32>,
+		skip: u32,
+		version: Option<u64>,
+		skip_refused: bool,
+	) -> Result<(Vec<(Vec<u8>, V)>, usize, ScanChunkStats)>
+	where
 		// `Send` because the decode happens inside the cursor's visitor, which the
 		// storage layer requires to be sendable.
 		V: KVValue<KeyContext = ()> + Send,
 	{
+		let mut refused = 0usize;
 		let mut cursor = self.tr.open_vals_cursor(rng, dir, skip, version).await?;
 		let mut out: Vec<(Vec<u8>, V)> = match limit {
 			// A bounded read knows its ceiling, so size the output once. Unbounded
@@ -2033,6 +2473,10 @@ impl Transaction {
 						out.push((key.to_vec(), value));
 						Ok(ControlFlow::Continue(()))
 					}
+					Err(e) if skip_refused && refused_by_release(&e) => {
+						refused += 1;
+						Ok(ControlFlow::Continue(()))
+					}
 					Err(e) => {
 						failed = Some(e);
 						Ok(ControlFlow::Break(()))
@@ -2054,7 +2498,7 @@ impl Transaction {
 			}
 		}
 
-		Ok((out, total))
+		Ok((out, refused, total))
 	}
 
 	/// Fetch every entry in a range or region as bytes.
@@ -2138,10 +2582,34 @@ impl Transaction {
 		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None).await?;
+		let defined = self.changed_definition(&key, None, None).await?;
 		self.tr.del(key).await?;
 		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
+	}
+
+	/// Delete a key of a prefix that holds no live definition, such as one whose catalog parent
+	/// is removed: soft-deleted when `expunge` is false, cleared of every version when true.
+	///
+	/// Unlike [`Self::del`] and [`Self::clr`], the key is not examined as a definition: a
+	/// definition under a removed parent names no live catalog state, so its deletion stamps no
+	/// version and forfeits no conformance. Those writes would land under the very prefix being
+	/// reclaimed, either deleting a key the reclaim deletes anyway or writing one behind its
+	/// cursor. The transaction must hold no layout or conformance of a table under the prefix.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn del_reclaimed(&self, key: Key<'_>, expunge: bool) -> Result<()> {
+		let _changed = self.reserve_write_slot()?;
+		let key_bytes = key.len() as u64;
+		if expunge {
+			self.tr.clr(key).await?;
+		} else {
+			self.tr.del(key).await?;
+		}
+		self.metrics.record_del(1, key_bytes);
+		Ok(())
 	}
 
 	/// Delete a key from the datastore.
@@ -2152,7 +2620,7 @@ impl Transaction {
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None).await?;
+		let defined = self.changed_definition(&key, None, None).await?;
 		self.tr.del(key).await?;
 		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
@@ -2209,10 +2677,15 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		if <K::Value as KVValue>::LEVELLED
+			&& let Some(chk) = chk
+		{
+			return self.delete_compare_levelled(key, chk, false).await;
+		}
 		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let key_bytes = encoded.len() as u64;
-		let defined = self.changed_definition(&encoded, None).await?;
+		let defined = self.changed_definition(&encoded, None, None).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.delc(encoded, None).await?,
@@ -2244,7 +2717,7 @@ impl Transaction {
 	pub async fn del_compare(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None).await?;
+		let defined = self.changed_definition(&key, None, None).await?;
 		self.tr.delc(key, chk).await?;
 		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
@@ -2260,14 +2733,21 @@ impl Transaction {
 	)]
 	pub async fn delr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
-		self.tr.delr(rng.into_key_range()).await?;
+		let rng = rng.into_key_range();
+		// Whether or not the delete completes, it may have removed layouts the transaction holds.
+		let spans_layouts = self.begin_range_delete(&rng);
+		let deleted = self.tr.delr(rng).await;
+		if spans_layouts {
+			self.invalidate_layouts();
+		}
+		deleted?;
 		// Range/prefix deletes don't report the number of affected keys or
 		// their byte size.
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
 
-	/// Delete a range of keys from the datastore.
+	/// Delete a range of keys from the datastore, as [`Self::delr`] does.
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
@@ -2291,7 +2771,7 @@ impl Transaction {
 	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None).await?;
+		let defined = self.changed_definition(&key, None, None).await?;
 		self.tr.clr(key).await?;
 		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
@@ -2309,7 +2789,7 @@ impl Transaction {
 		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
-		let defined = self.changed_definition(&key, None).await?;
+		let defined = self.changed_definition(&key, None, None).await?;
 		self.tr.clr(key).await?;
 		self.metrics.record_del(1, key_bytes);
 		self.restamp_defined(defined).await
@@ -2325,10 +2805,15 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		if <K::Value as KVValue>::LEVELLED
+			&& let Some(chk) = chk
+		{
+			return self.delete_compare_levelled(key, chk, true).await;
+		}
 		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let key_bytes = encoded.len() as u64;
-		let defined = self.changed_definition(&encoded, None).await?;
+		let defined = self.changed_definition(&encoded, None, None).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.clrc(encoded, None).await?,
@@ -2361,7 +2846,13 @@ impl Transaction {
 	)]
 	pub async fn clrr(&self, rng: impl AnyRange) -> Result<()> {
 		let _changed = self.reserve_write_slot()?;
-		self.tr.clrr(rng.into_key_range()).await?;
+		let rng = rng.into_key_range();
+		let spans_layouts = self.begin_range_delete(&rng);
+		let cleared = self.tr.clrr(rng).await;
+		if spans_layouts {
+			self.invalidate_layouts();
+		}
+		cleared?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -2379,8 +2870,13 @@ impl Transaction {
 		K: KVSubspace,
 	{
 		let _changed = self.reserve_write_slot()?;
-		let range = key.raw_range()?;
-		self.tr.clrr(range.into_key_range()).await?;
+		let range = key.raw_range()?.into_key_range();
+		let spans_layouts = self.begin_range_delete(&range);
+		let cleared = self.tr.clrr(range).await;
+		if spans_layouts {
+			self.invalidate_layouts();
+		}
+		cleared?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -3059,6 +3555,20 @@ impl Transaction {
 	/// `None`, answering the version stamped. A schema statement run again
 	/// after a speculation of it stamps the version the speculation minted,
 	/// which what was planned over the speculation read.
+	///
+	/// A defined table at a level above `Legacy` also gets the generation its rows are written
+	/// in ([`Self::mint_generation`]): a stamp mints when the table has no readable head, or
+	/// when the layout derived from the table's definition and fields, as the stamp sees them,
+	/// differs from the head's. A table this transaction created has its conformance settled
+	/// ([`Self::settle_birth_claims`]). The stamp is the one step every DDL path that changes a
+	/// table ends with, so no path can leave a table without a generation, with the layout of an
+	/// earlier field set or with the claims of one. Every DDL path's last stamp of a table
+	/// therefore follows all its writes of that table's field and table keys, and follows every
+	/// range delete under the table's root that is not meant to remove its generations or
+	/// claims, because the delete removes the descriptor the stamp minted. A mint or settle that
+	/// fails poisons the transaction, which then commits nothing: they run after the statement's
+	/// own catalog writes, which a client-owned transaction would otherwise commit beside the
+	/// failed statement.
 	pub async fn stamp_catalog_version(
 		&self,
 		ns: NamespaceId,
@@ -3067,6 +3577,13 @@ impl Transaction {
 		version: Option<Uuid>,
 	) -> Result<Uuid> {
 		let stored = self.table_stored(ns, db, tb).await?;
+		if let Some(table) = stored.as_deref()
+			&& !self.write_level().is_legacy()
+			&& let Err(e) = self.settle_generation(ns, db, tb, table).await
+		{
+			self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+			return Err(e);
+		}
 		let version = match version {
 			Some(version) => CatalogVersion::stamped(version, stored.as_deref()),
 			None => CatalogVersion::fresh(stored.as_deref()),
@@ -3086,6 +3603,876 @@ impl Transaction {
 			self.catalog_stamps.fetch_add(1, std::sync::atomic::Ordering::Release);
 		}
 		Ok(version.0)
+	}
+
+	/// Gives `tb` the generation its rows are written in: mints the next generation of its ring
+	/// when the table has no readable head, or when the layout derived from its definition and
+	/// its field definitions ([`derive_layout`]) differs from the head's. The two are compared by
+	/// their canonical bytes. `stored` is the table's stored definition as the caller read and
+	/// decoded it, `None` when this build does not decode it.
+	///
+	/// The table's layouts are read afresh, through this transaction, so the answer holds every
+	/// generation the transaction has written and none a range delete has removed. A table whose
+	/// ring this build refuses is refused with [`RecordLayoutError::RingRefused`], and nothing is
+	/// minted on a guess. A table whose definitions this build cannot read
+	/// ([`Self::derive_table_layout`] answers `None`) keeps a readable head as it is, and with no
+	/// readable head gets a generation in the document layout, so that it can be written. Any
+	/// other mint goes through [`Self::mint_with`].
+	///
+	/// What a mint writes depends only on what the transaction reads, so a speculation of a
+	/// statement and its real run mint the same number and the same bytes.
+	async fn mint_generation(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+	) -> Result<()> {
+		let layouts = self.reload_table_layouts(ns, db, tb, None).await?;
+		if let Some(refusal) = ring_refusal_error(&layouts) {
+			return Err(refusal);
+		}
+		let head = match layouts.current() {
+			Some((_, GenerationLayout::Readable(head))) => Some(head),
+			_ => None,
+		};
+		let descriptor = match self.derive_table_layout(ns, db, tb, stored).await? {
+			Some(descriptor) => descriptor,
+			None if head.is_some() => return Ok(()),
+			None => LayoutDescriptor::document(tb.clone()),
+		};
+		if let Some(head) = head
+			&& head.kv_canonical()? == descriptor.kv_canonical()?
+		{
+			return Ok(());
+		}
+		self.mint_with(ns, db, tb, stored, &layouts, descriptor).await
+	}
+
+	/// Mints the generation after the head of `layouts`' ring, whatever the state of the current
+	/// generation, with the layout derived from the table's definition and fields, or the
+	/// document layout when derivation cannot read them.
+	///
+	/// `layouts` are the table's layouts as this transaction reads them, and `stored` is the
+	/// table's stored definition, `None` when this build does not decode it. A stamp of a table
+	/// mints only when the derived layout differs from the head's; this mints unconditionally.
+	/// The mint writes the descriptor create-only, reads back and decodes the bytes it wrote,
+	/// advances the table's ring and `!gn` mark, and holds the layouts it leaves, as every mint
+	/// does. A ring this build cannot read ([`RecordLayoutError::RingRefused`]), a full ring
+	/// ([`DatastoreError::GenerationRingFull`]) and a number that already has a layout key
+	/// ([`DatastoreError::GenerationOccupied`]) are refused with nothing written.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn mint_next(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+		layouts: &TableLayouts,
+	) -> Result<()> {
+		let descriptor = self
+			.derive_table_layout(ns, db, tb, stored)
+			.await?
+			.unwrap_or_else(|| LayoutDescriptor::document(tb.clone()));
+		self.mint_with(ns, db, tb, stored, layouts, descriptor).await
+	}
+
+	/// The layout a generation minted for `tb` gives its rows, derived from its definition `stored`
+	/// and its field definitions ([`derive_layout`]). `None` when derivation cannot run: `stored`
+	/// is `None` (this build does not decode the definition), or one of the table's field keys or
+	/// definitions is one this build cannot read or compile.
+	///
+	/// A table that may not pack ([`TableShape::may_pack`]) derives the document layout without
+	/// reading a field. Field definitions are read through the transaction
+	/// ([`Self::compiled_fields`]), so the answer holds the transaction's own writes. A storage
+	/// error fails the derivation; a definition this build cannot read only answers `None`.
+	async fn derive_table_layout(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+	) -> Result<Option<LayoutDescriptor>> {
+		let Some(stored) = stored else {
+			return Ok(None);
+		};
+		let shape = TableShape::of(tb, stored);
+		if !shape.may_pack() {
+			return Ok(Some(LayoutDescriptor::document(tb.clone())));
+		}
+		let Some(fields) = self.compiled_fields(ns, db, tb).await? else {
+			return Ok(None);
+		};
+		let candidates: Vec<&FieldCandidate> =
+			fields.values().map(|compiled| compiled.candidate.as_ref()).collect();
+		Ok(Some(derive_layout(shape, &candidates)))
+	}
+
+	/// Mints the generation after the head of `layouts`' ring with `descriptor`, and holds the
+	/// layouts it leaves.
+	///
+	/// `layouts` are the table's layouts as this transaction reads them, and `stored` is the
+	/// table's stored definition, `None` when this build does not decode it. The generation is the
+	/// ring's head plus one, wrapping from 65535 to 1. A table with no ring continues from its
+	/// `!gn` mark, which survives the table's removal, so a number is never given to two
+	/// descriptors under one table name. The mint:
+	///
+	/// - refuses a ring this build cannot read ([`RecordLayoutError::RingRefused`]);
+	/// - refuses a full ring, where the next generation is the ring's oldest, with
+	///   [`DatastoreError::GenerationRingFull`], and writes nothing;
+	/// - refuses a number that already has a layout key with
+	///   [`DatastoreError::GenerationOccupied`], which no mint of this build leaves behind;
+	/// - writes the descriptor create-only, so a concurrent mint of the same number fails at commit
+	///   and retries, on every backend;
+	/// - reads back the bytes it wrote and decodes them as every other transaction will
+	///   ([`decode_generation`]): the layouts it holds afterwards list that decoded descriptor, and
+	///   a descriptor that does not read back as written is an encoder fault that fails the
+	///   statement ([`RecordLayoutError::CurrentRefused`], [`RecordLayoutError::CurrentMissing`]);
+	/// - writes the ring to `!mi` with a compare against the ring `layouts` holds (an absent `!mi`
+	///   for a table with no ring), so a mint and a floor move of one table never both commit;
+	/// - writes the new head to `!gn`.
+	///
+	/// A new ring starts with its first generation as the floor when the table was created by
+	/// this transaction, is not a view and holds no record ([`Self::born_empty`]): nothing can
+	/// have written a row the ring does not describe. Any other new ring starts with an unknown
+	/// floor, 0. A ring in use keeps its floor. A table created by this transaction records that
+	/// its creation started the ring it holds ([`Birth::minted_ring`]). The transaction's layout
+	/// memo is updated with the minted generation and the layout epoch is advanced, so a writer
+	/// that resolved the table's format earlier resolves it again.
+	async fn mint_with(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+		layouts: &TableLayouts,
+		descriptor: LayoutDescriptor,
+	) -> Result<()> {
+		if let Some(refusal) = ring_refusal_error(layouts) {
+			return Err(refusal);
+		}
+		let ring = layouts.ring();
+		let mark_key = GenerationMarkKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let mark = if ring.is_empty() {
+			self.get_key(&mark_key, None).await?.map(|mark| mark.head())
+		} else {
+			ring.head()
+		};
+		let next = mark.map_or(Generation::FIRST, Generation::next);
+		if ring.is_full() {
+			let floor = ring.base().ok_or_else(|| {
+				CatalogError::Layout(RecordLayoutError::Misnumbered {
+					table: tb.clone(),
+				})
+			})?;
+			return Err(DatastoreError::GenerationRingFull {
+				table: tb.as_str().to_owned(),
+				floor,
+			}
+			.into());
+		}
+		let first = if ring.is_empty() {
+			stored
+		} else {
+			None
+		};
+		let advanced = if ring.is_empty() {
+			let floor = match first {
+				Some(stored) if self.born_empty(ns, db, tb, stored).await? => Some(next),
+				_ => None,
+			};
+			GenerationRing::new(next, next, floor)
+		} else {
+			ring.advanced()
+		};
+		let minted_ring = advanced.ok_or_else(|| {
+			CatalogError::Layout(RecordLayoutError::Misnumbered {
+				table: tb.clone(),
+			})
+		})?;
+		let layout_key = LayoutKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			generation: next.get(),
+		};
+		if self.exists_key(&layout_key, None).await? {
+			return Err(DatastoreError::GenerationOccupied {
+				table: tb.as_str().to_owned(),
+				generation: next,
+			}
+			.into());
+		}
+		self.put_compare_key(&layout_key, &descriptor, None).await?;
+		let written = self.get_key_raw(&layout_key, None).await?.ok_or_else(|| {
+			CatalogError::Layout(RecordLayoutError::CurrentMissing {
+				table: tb.clone(),
+				generation: next,
+			})
+		})?;
+		let minted = match decode_generation(tb, &written) {
+			GenerationLayout::Readable(minted) => minted,
+			GenerationLayout::Refused(cause) => {
+				return Err(CatalogError::Layout(RecordLayoutError::CurrentRefused {
+					table: tb.clone(),
+					generation: next,
+					cause,
+				})
+				.into());
+			}
+		};
+		let migrations_key = TableMigrationsKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let migrations = TableMigrations::of(minted_ring).ok_or_else(|| {
+			CatalogError::Layout(RecordLayoutError::Misnumbered {
+				table: tb.clone(),
+			})
+		})?;
+		let prior = TableMigrations::of(ring);
+		self.put_compare_key(&migrations_key, &migrations, prior.as_ref()).await?;
+		self.set_key(&mark_key, &GenerationMark::new(next)).await?;
+		let minted = layouts.with_minted(minted_ring, minted).map_err(CatalogError::Layout)?;
+		self.memoise_layouts(Arc::new(minted));
+		self.layout_epoch.fetch_add(1, Ordering::Release);
+		if let Some(stored) = first {
+			self.note_ring_minted(ns, db, tb, stored);
+		}
+		Ok(())
+	}
+
+	/// The birth this transaction recorded for `tb` under the table id `stored` carries, if it
+	/// recorded one: a definition of another id is another incarnation of the name.
+	fn birth_of(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: &StoredTableDefinition,
+	) -> Option<Birth> {
+		let births = self.births.lock();
+		births
+			.born
+			.get(&(ns, db, tb.clone()))
+			.copied()
+			.filter(|birth| birth.table_id == stored.table_id)
+	}
+
+	/// Records that the first generation of `tb`'s ring was minted by the transaction that created
+	/// the table, when `stored` is the definition that creation wrote.
+	fn note_ring_minted(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: &StoredTableDefinition,
+	) {
+		let mut births = self.births.lock();
+		if let Some(birth) = births.born.get_mut(&(ns, db, tb.clone()))
+			&& birth.table_id == stored.table_id
+		{
+			birth.minted_ring = true;
+		}
+	}
+
+	/// Whether `tb` is a table this transaction created, that is not a view and holds no record,
+	/// as this transaction sees it: the one state in which no writer that has seen the table can
+	/// have written a row the table's first generation does not describe.
+	///
+	/// `stored` is the table's stored definition. It must carry the id of the creation this
+	/// transaction recorded ([`Births`]); a table whose definition was only rewritten, or a
+	/// definition of another incarnation of the name, is not born here. The record probe reads
+	/// one key through this transaction, so it sees the transaction's own writes.
+	async fn born_empty(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: &StoredTableDefinition,
+	) -> Result<bool> {
+		if stored.view.is_some() || self.birth_of(ns, db, tb, stored).is_none() {
+			return Ok(false);
+		}
+		Ok(!self.holds_record(ns, db, tb).await?)
+	}
+
+	/// Whether `tb` holds a record key, as this transaction sees it. The probe reads one key
+	/// through this transaction, so it sees the transaction's own writes.
+	async fn holds_record(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<bool> {
+		let records = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		Ok(!self.keys_raw(records, 1, 0, None).await?.is_empty())
+	}
+
+	/// Moves the floor of `tb` to `floor`, the oldest generation a row may still carry, and
+	/// retires the descriptors of every generation before it.
+	///
+	/// The table's ring then starts at `floor`: its base and its known floor are `floor`, and its
+	/// head is unchanged, so a floor never moves past the head. The descriptors of the generations
+	/// that leave the ring, from the old base up to but excluding `floor` in ring order, are
+	/// cleared with every version of their keys, so no store keeps a descriptor the ring no longer
+	/// names: a layout key is written once, and a soft delete would leave it readable at an earlier
+	/// version. One range is cleared, or two when the retired generations wrap past 65535. A floor
+	/// equal to the base retires nothing and writes the ring again. The table's catalog version is
+	/// stamped.
+	///
+	/// The write takes the locked read of the table's definition, as [`Self::replace_tb`] does, so
+	/// it conflicts with any concurrent DDL of the table, and writes `!mi` with a compare against
+	/// the ring it read, so it conflicts with a concurrent mint on every backend. Refused, with
+	/// nothing written:
+	///
+	/// - a table that is not defined ([`CatalogError::TbNotFound`]);
+	/// - a table whose ring this build cannot read ([`RecordLayoutError::RingRefused`]);
+	/// - a table with no generation ([`DatastoreError::NoGeneration`]);
+	/// - a floor outside the ring ([`DatastoreError::FloorOutsideWindow`]).
+	///
+	/// A failure after the first write poisons the transaction, which then commits nothing.
+	///
+	/// The caller guarantees that no row of the table carries a generation before `floor`, the
+	/// stamp 0 or the `revision` format, and that no transaction that could write one can still
+	/// commit. A versioned read, at a version before the move, of a row in a retired generation is
+	/// refused afterwards, because the clear removes the descriptor from history too.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
+	pub async fn move_floor(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		floor: Generation,
+	) -> Result<()> {
+		let table_key = TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		if self.getu_key(&table_key).await?.is_none() {
+			return Err(CatalogError::TbNotFound {
+				name: tb.clone(),
+			}
+			.into());
+		}
+		let layouts = self.reload_table_layouts(ns, db, tb, None).await?;
+		if let Some(refusal) = ring_refusal_error(&layouts) {
+			return Err(refusal);
+		}
+		let ring = layouts.ring();
+		if ring.is_empty() {
+			return Err(DatastoreError::NoGeneration {
+				table: tb.as_str().to_owned(),
+			}
+			.into());
+		}
+		let misnumbered = || {
+			CatalogError::Layout(RecordLayoutError::Misnumbered {
+				table: tb.clone(),
+			})
+		};
+		// A ring that is not empty has a base and a head.
+		let (base, head) = ring.base().zip(ring.head()).ok_or_else(misnumbered)?;
+		let Some(moved) = ring.with_floor(floor) else {
+			return Err(DatastoreError::FloorOutsideWindow {
+				table: tb.as_str().to_owned(),
+				floor,
+				base,
+				head,
+			}
+			.into());
+		};
+		let migrations = TableMigrations::of(moved).ok_or_else(misnumbered)?;
+		let prior = TableMigrations::of(ring).ok_or_else(misnumbered)?;
+		// The retired generations are those from the old base up to, and excluding, the new one.
+		// They are one run of keys unless the ring wraps past 65535 between them, and then two:
+		// the old base to the end of the layout keys, and the start of the layout keys to the new
+		// floor. The parts are built before the first write.
+		let whole: RawRange = LayoutPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?
+		.into();
+		let layout_key = |generation: Generation| {
+			LayoutKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				generation: generation.get(),
+			}
+			.encode_key()
+		};
+		let mut retired: Vec<RawRange> = Vec::with_capacity(2);
+		if floor.get() > base.get() {
+			let (from, to) = (layout_key(base)?, layout_key(floor)?);
+			retired.push(whole.part(from.as_slice(), to.as_slice()));
+		} else if floor.get() < base.get() {
+			let (lo, hi) = whole.bounds();
+			let (from, to) = (layout_key(base)?, layout_key(floor)?);
+			retired.push(whole.part(from.as_slice(), hi));
+			retired.push(whole.part(lo, to.as_slice()));
+		}
+		let migrations_key = TableMigrationsKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let written = async {
+			for part in retired {
+				self.clrr(part).await?;
+			}
+			self.put_compare_key(&migrations_key, &migrations, Some(&prior)).await?;
+			self.reload_table_layouts(ns, db, tb, None).await?;
+			self.layout_epoch.fetch_add(1, Ordering::Release);
+			self.bump_catalog_version(ns, db, tb).await?;
+			Ok::<(), anyhow::Error>(())
+		}
+		.await;
+		if written.is_err() {
+			self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+		}
+		written
+	}
+
+	/// The conformance record of `tb` as this transaction sees it, or as of `version`.
+	///
+	/// `None` when the record is absent, when this transaction removed it, and when it is there and
+	/// this build does not decode it: none of those states a claim. A claim says nothing about a
+	/// row stamped 0 or written in `revision`, and a consumer checks it against the field's
+	/// current definition ([`surrealdb_catalog::FieldClaim::holds_for`]) and keeps the check of
+	/// each row's own generation.
+	///
+	/// A current read is held until a range delete over the table's keys or a save point rollback
+	/// that undid a write of the record clears it. A versioned read is never held.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
+	pub async fn table_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> Result<Option<Arc<TableConformance>>> {
+		let held = match version {
+			None => self.held_conformance(ns, db, tb).await?,
+			Some(_) => self.read_conformance(ns, db, tb, version).await?,
+		};
+		Ok(match held {
+			HeldConformance::Claims(claims) => Some(claims),
+			HeldConformance::Absent | HeldConformance::Forfeited | HeldConformance::Unreadable => {
+				None
+			}
+		})
+	}
+
+	/// Removes `tb`'s conformance record, whatever it holds, so that the table states no claim.
+	///
+	/// The delete is conditional on the bytes this transaction reads at the key, an absent record
+	/// included, so it conflicts with any concurrent write or removal of the record on every
+	/// backend: a promotion that read the claims before this forfeit cannot commit beside it. It is
+	/// made once per transaction and table while nothing undoes it, and is answered from the
+	/// transaction's own view after that.
+	///
+	/// A forfeit is bookkeeping the statement did not ask for, so it is a counted state change and
+	/// takes no slot of the write-cardinality guard. It awaits no encoder and no writer that
+	/// notices definitions ([`Self::restamp_defined`]), which is what lets the writers' hooks call
+	/// it.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
+	pub async fn forfeit_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		if matches!(self.memoised_conformance(ns, db, tb), Some(HeldConformance::Forfeited)) {
+			return Ok(());
+		}
+		let _changed = self.state_change();
+		let key = TableConformanceKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key()?;
+		let key_bytes = key.len() as u64;
+		let prior = self.tr.get(key.as_borrowed(), None).await?;
+		self.tr.delc(key, prior.as_deref()).await?;
+		self.metrics.record_del(1, key_bytes);
+		self.hold_conformance(ns, db, tb, HeldConformance::Forfeited);
+		self.layout_epoch.fetch_add(1, Ordering::Release);
+		Ok(())
+	}
+
+	/// Adds, or replaces, the claim that `field` of `tb` conforms, when the field's current
+	/// definition is the one with digest `definition`
+	/// ([`surrealdb_catalog::definition_digest`]).
+	///
+	/// Refused with [`DatastoreError::ConformanceStale`] when the field is not defined or its
+	/// definition has another digest, and with [`CatalogError::TbNotFound`] for a table that is not
+	/// defined. The write takes the locked read of the table's definition, as [`Self::replace_tb`]
+	/// does, so it conflicts with concurrent DDL of the table, and writes the record conditional on
+	/// the bytes it read, so it conflicts with a concurrent forfeit or promotion on every backend.
+	/// The table's catalog version is not stamped: a snapshot keyed by it never holds the record.
+	///
+	/// The caller guarantees that every row a committed or concurrent transaction can write at a
+	/// generation of the table's ring holds, at every occupied path of the field, a value the
+	/// definition coerces. A claim only ever answers which code to run, never whether to check a
+	/// row's generation.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))
+	)]
+	pub async fn promote_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		field: &str,
+		definition: i64,
+		conformance: Conformance,
+	) -> Result<()> {
+		let table_key = TableKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		if self.getu_key_raw(&table_key).await?.is_none() {
+			return Err(CatalogError::TbNotFound {
+				name: tb.clone(),
+			}
+			.into());
+		}
+		let field_key = FieldKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			fd: Cow::Borrowed(field),
+		};
+		let current = match self.get_key(&field_key, None).await? {
+			Some(stored) => Some(definition_digest(&stored)?),
+			None => None,
+		};
+		if current != Some(definition) {
+			return Err(DatastoreError::ConformanceStale {
+				table: tb.as_str().to_owned(),
+				field: field.to_owned(),
+			}
+			.into());
+		}
+		let claim = FieldClaim {
+			field: field.to_owned(),
+			definition,
+			conformance,
+		};
+		let claimed = match self.held_conformance(ns, db, tb).await? {
+			HeldConformance::Claims(claims) => claims.with_claim(claim)?,
+			HeldConformance::Absent | HeldConformance::Forfeited | HeldConformance::Unreadable => {
+				TableConformance::default().with_claim(claim)?
+			}
+		};
+		self.write_conformance(ns, db, tb, claimed).await
+	}
+
+	/// What this transaction holds of `tb`'s conformance record, if it holds anything.
+	fn memoised_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Option<HeldConformance> {
+		self.conformance_memo.lock().get(&(ns, db)).and_then(|tables| tables.get(tb)).cloned()
+	}
+
+	/// Holds `held` as this transaction's view of `tb`'s conformance record, with the table's span.
+	fn hold_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		held: HeldConformance,
+	) {
+		self.hold_span(ns, db, tb);
+		self.conformance_memo.lock().entry((ns, db)).or_default().insert(tb.clone(), held);
+	}
+
+	/// `tb`'s conformance record read from storage, at `version` when given, bypassing what this
+	/// transaction holds.
+	///
+	/// A record this build cannot decode is [`HeldConformance::Unreadable`], which states no claim:
+	/// the record never licenses anything, so a record that cannot be read is the same as none.
+	/// Only a storage error fails the read.
+	async fn read_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> Result<HeldConformance> {
+		let key = TableConformanceKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let Some(bytes) = self.get_key_raw(&key, version).await? else {
+			return Ok(HeldConformance::Absent);
+		};
+		match TableConformance::kv_decode_value(&bytes, ()) {
+			Ok(claims) => Ok(HeldConformance::Claims(Arc::new(claims))),
+			Err(_) => {
+				tracing::debug!(
+					target: "surrealdb::core::kvs::tx",
+					table = tb.as_str(),
+					"a conformance record this build cannot read states no claim"
+				);
+				Ok(HeldConformance::Unreadable)
+			}
+		}
+	}
+
+	/// `tb`'s conformance record as this transaction sees it: what it holds, or else one read of
+	/// the record, which it then holds.
+	async fn held_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<HeldConformance> {
+		if let Some(held) = self.memoised_conformance(ns, db, tb) {
+			return Ok(held);
+		}
+		let held = self.read_conformance(ns, db, tb, None).await?;
+		self.hold_conformance(ns, db, tb, held.clone());
+		Ok(held)
+	}
+
+	/// Writes `value` as `tb`'s conformance record, conditional on the bytes this transaction reads
+	/// there, and holds it. The transaction takes `value` over as the record it holds.
+	///
+	/// The write is bookkeeping the statement did not ask for: a counted state change that takes no
+	/// slot of the write-cardinality guard. It is made through the transactor and notices no
+	/// definition, and it encodes, so nothing reached from [`Self::restamp_defined`] may await it.
+	/// The encoding carries the floor of the stored grammar, which admits the stored-format ledger
+	/// entry in this transaction.
+	async fn write_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		value: TableConformance,
+	) -> Result<()> {
+		let _changed = self.state_change();
+		let key = TableConformanceKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key()?;
+		let prior = self.tr.get(key.as_borrowed(), None).await?;
+		let bytes = self.encode_with_prior(&value, prior.as_deref()).await?;
+		let key_bytes = key.len() as u64;
+		let value_bytes = bytes.len() as u64;
+		self.tr.putc(key, bytes, prior).await?;
+		self.metrics.record_put(key_bytes, value_bytes);
+		self.hold_conformance(ns, db, tb, HeldConformance::Claims(Arc::new(value)));
+		self.layout_epoch.fetch_add(1, Ordering::Release);
+		Ok(())
+	}
+
+	/// Makes `claims` the whole of `tb`'s conformance record: no claim removes the record
+	/// ([`Self::forfeit_conformance`]), claims equal to the ones this transaction holds write
+	/// nothing, and any others replace the record.
+	async fn replace_conformance(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		claims: Vec<FieldClaim>,
+	) -> Result<()> {
+		if claims.is_empty() {
+			return self.forfeit_conformance(ns, db, tb).await;
+		}
+		if let HeldConformance::Claims(held) = self.held_conformance(ns, db, tb).await?
+			&& held.claims() == claims.as_slice()
+		{
+			return Ok(());
+		}
+		self.write_conformance(ns, db, tb, TableConformance::new(claims)?).await
+	}
+
+	/// Settles the conformance of a table this transaction created, once its definition and fields
+	/// are written: the table's field definitions then describe every row it will hold from its
+	/// first generation on, because it has none yet.
+	///
+	/// Acts only on a table that [`Births`] lists as unsettled, and only when `stored`, the table's
+	/// decoded definition, carries the id of the creation recorded. A table whose definition
+	/// carries another id is not this transaction's birth: the hooks have already forfeited
+	/// whatever its changes required, and nothing is written. For the table that is the birth, the
+	/// record written is:
+	///
+	/// - none, when the definition does not decode (`stored` is `None`), when the ring the table
+	///   holds predates the birth ([`Birth::minted_ring`]) so that rows an earlier incarnation left
+	///   may sit under it, when the table is a view or a lightweight relation, when it holds a
+	///   record key, or when a field definition does not decode or compile;
+	/// - otherwise the claims [`surrealdb_catalog::birth_claims_of`] takes from the field
+	///   definitions.
+	///
+	/// A field definition is compiled once for as long as its stored bytes stand
+	/// ([`Births::compiled`]), so the settles of a transaction that defines many fields read the
+	/// definitions again and compile only the ones that changed. A table whose fields change again
+	/// in this transaction is listed as unsettled again by the hooks and is settled again at its
+	/// next stamp. A storage error fails the settle; a definition this build cannot read only
+	/// withholds claims.
+	async fn settle_birth_claims(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		stored: Option<&StoredTableDefinition>,
+	) -> Result<()> {
+		let key = (ns, db, tb.clone());
+		let birth = {
+			let mut births = self.births.lock();
+			if births.unsettled.is_empty() {
+				return Ok(());
+			}
+			if !births.unsettled.remove(&key) {
+				return Ok(());
+			}
+			match births.born.get(&key) {
+				Some(birth) => *birth,
+				None => return Ok(()),
+			}
+		};
+		let Some(stored) = stored else {
+			return self.replace_conformance(ns, db, tb, Vec::new()).await;
+		};
+		if stored.table_id != birth.table_id {
+			return Ok(());
+		}
+		if !birth.minted_ring
+			|| stored.view.is_some()
+			|| matches!(&stored.table_type, TableType::Relation(r) if r.lightweight)
+		{
+			return self.replace_conformance(ns, db, tb, Vec::new()).await;
+		}
+		if self.holds_record(ns, db, tb).await? {
+			return self.replace_conformance(ns, db, tb, Vec::new()).await;
+		}
+		let Some(fields) = self.compiled_fields(ns, db, tb).await? else {
+			return self.withhold_for_undecodable_fields(ns, db, tb).await;
+		};
+		let claims = {
+			let candidates: Vec<&FieldCandidate> =
+				fields.values().map(|compiled| compiled.candidate.as_ref()).collect();
+			birth_claims_of(&candidates)
+		};
+		self.replace_conformance(ns, db, tb, claims).await
+	}
+
+	/// The field definitions of `tb`, as this transaction reads them and compiled, by the `fd`
+	/// component of each field's key. `None` when one of the table's field keys does not decode or
+	/// one of its definitions does not decode or compile: a build that cannot read a definition
+	/// states nothing from the table's fields.
+	///
+	/// The definitions are read raw through the transaction, never through the field cache, which
+	/// the catalog's raw field writes do not invalidate, so the answer holds every write of this
+	/// transaction. A definition is compiled once for as long as its stored bytes stand
+	/// ([`Births::compiled`]): a read compiles only the definitions whose bytes changed since the
+	/// last one. A storage error fails the read.
+	async fn compiled_fields(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<Option<Arc<CompiledFields>>> {
+		let fields = FieldPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		let rows = self.getr_raw(fields, None).await?;
+		let key = (ns, db, tb.clone());
+		let held = self.births.lock().compiled.remove(&key);
+		let mut previous: CompiledFields = held.map(Arc::unwrap_or_clone).unwrap_or_default();
+		let mut current: CompiledFields = HashMap::with_capacity(rows.len());
+		for (field_key, value) in rows {
+			let Ok(decoded) = FieldKey::decode_key(&field_key) else {
+				return Ok(None);
+			};
+			let fd = decoded.fd.into_owned();
+			let compiled = match previous.remove(&fd) {
+				Some(reused) if *reused.bytes == *value.as_slice() => reused,
+				_ => {
+					let candidate = StoredFieldDefinition::kv_decode_value(&value, ())
+						.ok()
+						.and_then(|definition| FieldCandidate::compile(&fd, &definition));
+					match candidate {
+						Some(candidate) => CompiledField {
+							bytes: Arc::from(value),
+							candidate: Arc::new(candidate),
+						},
+						None => return Ok(None),
+					}
+				}
+			};
+			current.insert(fd, compiled);
+		}
+		let current = Arc::new(current);
+		self.births.lock().compiled.insert(key, Arc::clone(&current));
+		Ok(Some(current))
+	}
+
+	/// Removes the conformance record of a born table one of whose field definitions does not
+	/// decode or compile: a table whose definitions this build cannot read claims nothing.
+	async fn withhold_for_undecodable_fields(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		tracing::debug!(
+			target: "surrealdb::core::kvs::tx",
+			table = tb.as_str(),
+			"a table whose field definitions do not decode claims nothing"
+		);
+		self.replace_conformance(ns, db, tb, Vec::new()).await
+	}
+
+	/// Gives `tb` the generation its rows are written in ([`Self::mint_generation`]) and settles
+	/// the conformance of a table this transaction created ([`Self::settle_birth_claims`]).
+	///
+	/// The table's stored definition is decoded once for both. The settle follows the mint because
+	/// a claim is only sound under the ring the birth minted.
+	async fn settle_generation(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		table: &[u8],
+	) -> Result<()> {
+		let stored = StoredTableDefinition::kv_decode_value(table, ()).ok();
+		self.mint_generation(ns, db, tb, stored.as_ref()).await?;
+		self.settle_birth_claims(ns, db, tb, stored.as_ref()).await
 	}
 
 	/// The version of `object` as this transaction sees it, or `None` for an
@@ -3225,42 +4612,84 @@ impl Transaction {
 		Ok(version.0)
 	}
 
-	/// The object whose definition a write of `val` at `key` changes, or a
-	/// deletion of `key` when `val` is `None`, for [`Self::restamp_defined`] to
-	/// mint a version for once the write succeeds.
+	/// The change a write of `val` at `key` makes to a catalog definition, or a deletion of `key`
+	/// when `val` is `None`, for [`Self::restamp_defined`] to follow once the write succeeds.
 	///
-	/// `None` when `key` is no versioned object's definition, and also when
-	/// the write leaves the definition as it is — the same bytes written
-	/// again, or a definition that is not there deleted — so a statement that
-	/// rewrites a definition unchanged leaves its version standing, and two
-	/// runs of it leave the catalog as one does. Only a key that is an
-	/// object's definition costs the read of what it holds.
+	/// A table's definition key answers a [`TableChange`] when this transaction has stamped the
+	/// table, whatever the write changed, and otherwise only when the write creates, rewrites or
+	/// removes the definition. A write that leaves the definition as it is leaves the table
+	/// unnoticed unless it is stamped. A table's field definition key answers
+	/// [`Defined::Field`] when the write changes the bytes it holds, and is examined only for a
+	/// deletion or a write that read its key. Any other key answers the object whose definition it
+	/// is, and `None` when it is no versioned object's definition, and also when the write leaves
+	/// the definition as it is (the same bytes written again, or a definition that is not there
+	/// deleted), so a statement that rewrites a definition unchanged leaves its version standing,
+	/// and two runs of it leave the catalog as one does. Only a key that is a definition costs the
+	/// read of what it holds.
+	///
+	/// `prior` is what the caller has already read at `key`: `Some(held)` where
+	/// `held` is the stored bytes, or `None` for a key that holds nothing; and
+	/// `None` for a caller that has read nothing, which leaves this to read the
+	/// key when it must. A levelled write reads the key to encode against it, so
+	/// it passes what it read and the key is read once.
 	async fn changed_definition(
 		&self,
 		key: &Key<'_>,
 		val: Option<&[u8]>,
+		prior: Option<Option<&[u8]>>,
 	) -> Result<Option<Defined>> {
-		if let Some(table) = self.stamped_table_at(key)? {
-			return Ok(Some(Defined::Table(table)));
+		if let Some(table) = table_definition_at(key) {
+			let read;
+			let prior = match prior {
+				Some(held) => held,
+				None => {
+					read = self.tr.get(key.as_borrowed(), None).await?;
+					read.as_deref()
+				}
+			};
+			let stamped = {
+				let stamped = self.stamped_tables.lock();
+				!stamped.is_empty() && stamped.contains_key(&table)
+			};
+			let change = TableDefinitionChange::of(prior, val);
+			if !stamped && matches!(change, TableDefinitionChange::Unchanged) {
+				return Ok(None);
+			}
+			return Ok(Some(Defined::Table(TableChange {
+				table,
+				stamped,
+				change,
+			})));
+		}
+		// Field definitions are written levelled, which reads the key, so a write of one passes
+		// what it read. A raw write of any other key under a table, a record's above all, passes
+		// nothing and is not examined: only a deletion, or a write that read its key, can be a
+		// field definition.
+		if (val.is_none() || prior.is_some())
+			&& let Some(table) = field_definition_table(key)
+		{
+			let read;
+			let prior = match prior {
+				Some(held) => held,
+				None => {
+					read = self.tr.get(key.as_borrowed(), None).await?;
+					read.as_deref()
+				}
+			};
+			return Ok((prior != val).then_some(Defined::Field(table)));
 		}
 		let Some(defined) = DefinedObject::at(key)? else {
 			return Ok(None);
 		};
-		let prior = self.tr.get(key.as_borrowed(), None).await?;
-		Ok((prior.as_deref() != val).then_some(Defined::Object(defined)))
-	}
-
-	/// The table whose definition `key` is, where this transaction has
-	/// stamped that table's version; `None` for any other key.
-	fn stamped_table_at(&self, key: &[u8]) -> Result<Option<(NamespaceId, DatabaseId, TableName)>> {
-		if key.len() < 14 || &key[11..14] != b"!tb" || self.stamped_tables.lock().is_empty() {
-			return Ok(None);
-		}
-		let Ok(table) = TableKey::decode_key(key) else {
-			return Ok(None);
+		let read;
+		let prior = match prior {
+			Some(held) => held,
+			None => {
+				read = self.tr.get(key.as_borrowed(), None).await?;
+				read.as_deref()
+			}
 		};
-		let table = (table.ns, table.db, table.tb.into_owned());
-		Ok(self.stamped_tables.lock().contains_key(&table).then_some(table))
+		Ok((prior != val).then_some(Defined::Object(defined)))
 	}
 
 	/// Print the version this transaction last stamped `table` with again,
@@ -3296,6 +4725,13 @@ impl Transaction {
 	/// not: the only range that spans these definitions is a whole
 	/// database's, which takes their versions with it, and a database's id is
 	/// never reused.
+	///
+	/// A table is not minted a version here: a table this transaction has
+	/// stamped prints its stamped version again from the definition as it now
+	/// stands, and the change is noted ([`Self::note_table_change`]). A change to
+	/// one of a table's field definitions is noted too
+	/// ([`Self::note_field_change`]). A noting that fails poisons the
+	/// transaction, because the definition is already written.
 	async fn restamp_defined(&self, defined: Option<Defined>) -> Result<()> {
 		match defined {
 			Some(Defined::Object(defined)) => {
@@ -3308,10 +4744,103 @@ impl Transaction {
 				)
 				.await?;
 			}
-			Some(Defined::Table(table)) => self.reprint_stamped_table(table).await?,
+			Some(Defined::Table(change)) => {
+				if change.stamped {
+					self.reprint_stamped_table(change.table.clone()).await?;
+				}
+				if let Err(e) = self.note_table_change(change).await {
+					self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+					return Err(e);
+				}
+			}
+			Some(Defined::Field(table)) => {
+				if let Err(e) = self.note_field_change(table).await {
+					self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+					return Err(e);
+				}
+			}
 			None => {}
 		}
 		Ok(())
+	}
+
+	/// Takes note of what a write of a table's definition changed, as
+	/// [`Self::changed_definition`] classified it.
+	///
+	/// A created table is a birth ([`Births`]): it is recorded with the id the write gave it, and
+	/// its conformance is left for the next stamp to settle. A creation whose definition does not
+	/// decode records no birth, and drops any an earlier creation of the name left. A rewrite that
+	/// makes the table a view or a lightweight relation, or leaves a definition this build cannot
+	/// decode, forfeits the table's conformance, as does the removal of the definition, and leaves
+	/// a born table for the next stamp to settle again. Any other rewrite changes no row's
+	/// relation to the field definitions, and leaves the conformance as it is.
+	///
+	/// A forfeit awaits [`Self::forfeit_conformance`], which awaits no writer that reaches
+	/// [`Self::restamp_defined`], so the futures of the write methods stay finite.
+	async fn note_table_change(&self, change: TableChange) -> Result<()> {
+		let TableChange {
+			table,
+			change,
+			..
+		} = change;
+		let forfeits = {
+			let mut births = self.births.lock();
+			match change {
+				TableDefinitionChange::Created(Some(table_id)) => {
+					births.unsettled.insert(table.clone());
+					births.compiled.remove(&table);
+					births.born.insert(
+						table.clone(),
+						Birth {
+							table_id,
+							minted_ring: false,
+						},
+					);
+					false
+				}
+				TableDefinitionChange::Created(None) => {
+					births.born.remove(&table);
+					births.compiled.remove(&table);
+					false
+				}
+				TableDefinitionChange::Rewritten {
+					forfeits: true,
+				} => {
+					if births.born.contains_key(&table) {
+						births.unsettled.insert(table.clone());
+					}
+					true
+				}
+				TableDefinitionChange::Removed => true,
+				TableDefinitionChange::Rewritten {
+					forfeits: false,
+				}
+				| TableDefinitionChange::Unchanged => false,
+			}
+		};
+		if forfeits {
+			let (ns, db, tb) = table;
+			self.forfeit_conformance(ns, db, &tb).await?;
+		}
+		Ok(())
+	}
+
+	/// Takes note of a change to one of a table's field definitions: the table's conformance
+	/// claims were settled against the field set that changed, so they are forfeited
+	/// ([`Self::forfeit_conformance`]), and a born table is left for the next stamp to settle
+	/// again.
+	///
+	/// Nothing here awaits a writer that reaches [`Self::restamp_defined`], so the futures of the
+	/// write methods stay finite.
+	async fn note_field_change(&self, table: (NamespaceId, DatabaseId, TableName)) -> Result<()> {
+		{
+			let mut births = self.births.lock();
+			if births.born.contains_key(&table) {
+				births.unsettled.insert(table.clone());
+			}
+		}
+		let (ns, db, tb) = table;
+		self.forfeit_conformance(ns, db, &tb).await
 	}
 
 	/// The table definitions of a database, read for a compilation that
@@ -3563,6 +5092,46 @@ impl Transaction {
 		let val = catalog::fields_from_stored(&stored)?;
 		self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(&val)));
 		Ok(val)
+	}
+
+	/// Answer this transaction's later reads of `tb`'s definition, fields and
+	/// indexes with `definition`, `fields` and `indexes`, as though it had read
+	/// them itself.
+	///
+	/// The caller holds them from a snapshot built under the catalog version
+	/// this transaction read for the table, so they are what its own reads
+	/// would return. An entry the transaction already holds is kept, and an
+	/// undefined table records no definition, as a read of it records none.
+	///
+	/// `indexes` is `None` when the snapshot holds no complete index list
+	/// because an index entry needs a newer release. The transaction then
+	/// records nothing for the indexes, so its own read of them refuses, which
+	/// is what keeps a write to the table from proceeding without them.
+	pub(crate) fn adopt_table_catalog(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		definition: Option<&Arc<TableDefinition>>,
+		fields: &Arc<[catalog::FieldDefinition]>,
+		indexes: Option<&Arc<[catalog::IndexDefinition]>>,
+	) {
+		if let Some(definition) = definition {
+			let qey = cache::tx::Lookup::Tb(ns, db, tb.as_str());
+			if self.cache.get(&qey).is_none() {
+				self.cache.insert(qey, cache::tx::Entry::Any(Arc::clone(definition) as _));
+			}
+		}
+		let qey = cache::tx::Lookup::Fds(ns, db, tb.as_str());
+		if self.cache.get(&qey).is_none() {
+			self.cache.insert(qey, cache::tx::Entry::Fds(Arc::clone(fields)));
+		}
+		if let Some(indexes) = indexes {
+			let qey = cache::tx::Lookup::Ixs(ns, db, tb.as_str());
+			if self.cache.get(&qey).is_none() {
+				self.cache.insert(qey, cache::tx::Entry::Ixs(Arc::clone(indexes)));
+			}
+		}
 	}
 
 	/// The listing of [`TableProvider::all_tb`], with no read noted.
@@ -3899,6 +5468,9 @@ impl Transaction {
 	/// Hold `record` in this transaction's cache as the record at `id` of
 	/// table `tb`, as [`TableProvider::put_record`] leaves it once the record
 	/// is written: for a writer that encodes the record's key and bytes itself.
+	///
+	/// `generation` is the one the record's bytes carry
+	/// ([`surrealdb_catalog::written_generation`]), `None` for stamp 0.
 	pub fn cache_record(
 		&self,
 		ns: NamespaceId,
@@ -3906,9 +5478,10 @@ impl Transaction {
 		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
+		generation: Option<Generation>,
 	) {
 		let qey = crate::cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
-		self.cache.insert(qey, crate::cache::tx::Entry::Val(record));
+		self.cache.insert(qey, crate::cache::tx::Entry::Val(record, generation));
 	}
 
 	/// Drop the record at `id` of table `tb` from this transaction's cache, as
@@ -3931,10 +5504,10 @@ impl Transaction {
 	{
 		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
-		let val = val.kv_encode_value()?;
+		let (val, prior) = self.encode_levelled(&key, val).await?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -3963,10 +5536,10 @@ impl Transaction {
 	{
 		let _changed = self.state_change();
 		let key = key.encode_key()?;
-		let val = val.kv_encode_value()?;
+		let (val, prior) = self.encode_levelled(&key, val).await?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -3985,7 +5558,7 @@ impl Transaction {
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), None).await?;
 		self.tr.set(key, val).await?;
 		self.metrics.record_set(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4002,10 +5575,10 @@ impl Transaction {
 	{
 		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
-		let val = val.kv_encode_value()?;
+		let (val, prior) = self.encode_levelled(&key, val).await?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
 		self.tr.put(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4024,7 +5597,7 @@ impl Transaction {
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), None).await?;
 		self.tr.put(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4044,12 +5617,15 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		if <K::Value as KVValue>::LEVELLED {
+			return self.put_compare_levelled(key, val, chk).await;
+		}
 		let _changed = self.reserve_write_slot()?;
 		let encoded = key.encode_key()?;
 		let encoded_val = val.kv_encode_value()?;
 		let key_bytes = encoded.len() as u64;
 		let value_bytes = encoded_val.len() as u64;
-		let defined = self.changed_definition(&encoded, Some(&encoded_val)).await?;
+		let defined = self.changed_definition(&encoded, Some(&encoded_val), None).await?;
 		match chk {
 			// Nothing to fence on, so nothing to re-examine.
 			None => self.tr.putc(encoded, encoded_val, None).await?,
@@ -4090,7 +5666,7 @@ impl Transaction {
 		let val = val.into_bytes();
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), None).await?;
 		self.tr.putc(key, val, chk.map(|x| x.into_bytes())).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4107,10 +5683,10 @@ impl Transaction {
 	{
 		let _changed = self.reserve_write_slot()?;
 		let key = key.encode_key()?;
-		let val = val.kv_encode_value()?;
+		let (val, prior) = self.encode_levelled(&key, val).await?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), held(&prior)).await?;
 		self.tr.replace(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4126,7 +5702,7 @@ impl Transaction {
 		let _changed = self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
-		let defined = self.changed_definition(&key, Some(&val)).await?;
+		let defined = self.changed_definition(&key, Some(&val), None).await?;
 		self.tr.replace(key, val).await?;
 		self.metrics.record_put(key_bytes, value_bytes);
 		self.restamp_defined(defined).await
@@ -4527,6 +6103,1044 @@ impl Transaction {
 	}
 
 	// --------------------------------------------------
+	// Layout functions
+	// --------------------------------------------------
+
+	/// Whether the engine this transaction runs on admits no other writer of the store.
+	///
+	/// Answered by the engine when the transaction opened. A store on such an engine has no other
+	/// process whose release must be consulted, and none that can write between this
+	/// transaction's read and its commit without this process's knowledge.
+	pub fn sole_writer(&self) -> bool {
+		self.sole_writer
+	}
+
+	/// The count of events that change which generation of a table is current, what the
+	/// transaction holds of a table's conformance record, or whether the stored-format ledger entry
+	/// is part of this transaction: a mint, a floor move, a write or removal of a conformance
+	/// record, a range delete that spans a held table's keys and a save point rollback that undid
+	/// any of them or the entry.
+	///
+	/// It only grows. A writer that resolved a table's record format at one value may write rows
+	/// in that format for as long as the value stands, and resolves it again once it changes.
+	pub fn layout_epoch(&self) -> u64 {
+		self.layout_epoch.load(Ordering::Acquire)
+	}
+
+	/// Notes that `range` is about to be deleted, and forgets what the transaction holds of the
+	/// layouts and conformance records when the range spans the `!fc`, `!lg` or `!mi` keys of some
+	/// held table.
+	///
+	/// Returns whether it did, so the caller forgets again once the delete has run, however it
+	/// ended. A range that spans the keys of no table the transaction holds changes nothing the
+	/// transaction holds: a table it has not read is read after the delete. The span of a table is
+	/// computed once, when the table enters a memo ([`Self::hold_span`]), so the comparison
+	/// encodes and allocates nothing. The count of range deletes moves either way, so that a save
+	/// point rollback, which may restore what the delete removed, judges the scope by it.
+	fn begin_range_delete(&self, range: &KeyRange<'_>) -> bool {
+		self.range_deletes.fetch_add(1, Ordering::AcqRel);
+		let spans_layouts = {
+			let spans = self.held_spans.lock();
+			spans.values().any(|tables| tables.values().any(|span| span.overlaps(range)))
+		};
+		if spans_layouts {
+			self.invalidate_layouts();
+		}
+		spans_layouts
+	}
+
+	/// Forgets what this transaction holds of any table's layouts and conformance records, and the
+	/// spans of the tables it held, and moves the layout epoch.
+	///
+	/// The three locks are taken one after another, never nested. A table that enters a memo again
+	/// takes its span again ([`Self::hold_span`]).
+	fn invalidate_layouts(&self) {
+		self.layout_memo.lock().clear();
+		self.conformance_memo.lock().clear();
+		self.held_spans.lock().clear();
+		self.layout_epoch.fetch_add(1, Ordering::Release);
+	}
+
+	/// Holds the span of `tb`'s `!fc`, `!lg` and `!mi` keys, unless it is held already.
+	///
+	/// The three keys lie under the table's root as `!fc`, `!lg{generation}` and `!mi`, which sort
+	/// in that order, so one span from the first to just past the last covers them all. It also
+	/// covers the table's keys between them, whose range deletes are DDL and only cost a reload. A
+	/// key that cannot be encoded holds a span that overlaps every range.
+	///
+	/// Held before the table enters the layout memo or the conformance memo, so a table either memo
+	/// holds always has its span.
+	fn hold_span(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
+		let mut spans = self.held_spans.lock();
+		let tables = spans.entry((ns, db)).or_default();
+		if tables.contains_key(tb) {
+			return;
+		}
+		let start = TableConformanceKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key();
+		let end = TableMigrationsKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_key();
+		let span = match (start, end) {
+			(Ok(start), Ok(end)) => HeldSpan::Bounded {
+				start,
+				end: end.next(),
+			},
+			_ => HeldSpan::Unbounded,
+		};
+		tables.insert(tb.clone(), span);
+	}
+
+	/// What this transaction holds of `tb`'s layouts, if it holds any.
+	fn memoised_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Option<Arc<TableLayouts>> {
+		self.layout_memo.lock().get(&(ns, db)).and_then(|tables| tables.get(tb)).cloned()
+	}
+
+	/// Holds `layouts` as this transaction's view of their table, with the table's span.
+	fn memoise_layouts(&self, layouts: Arc<TableLayouts>) {
+		self.hold_span(layouts.namespace(), layouts.database(), layouts.table());
+		self.layout_memo
+			.lock()
+			.entry((layouts.namespace(), layouts.database()))
+			.or_default()
+			.insert(layouts.table().clone(), layouts);
+	}
+
+	/// The layouts of `tb` as this transaction sees them, or as of `version`.
+	///
+	/// A current read (`version` of `None`) is held for the rest of the transaction until a range
+	/// delete over the table's layout keys or a save point rollback that undid a mint or a range
+	/// delete clears it, so a table's layouts cost one point read and one range read per
+	/// transaction. A versioned read is never held: it reads the table's `!mi` and `!lg` keys at
+	/// `version`, the version the caller reads the table's rows at.
+	///
+	/// A table that has no `!mi` answers empty layouts. The load fails only on a storage error: a
+	/// key or descriptor this build cannot read is counted or listed as a refused generation in the
+	/// answer, never a failure. A `!mi` this build refuses makes every nonzero stamp and every
+	/// write of the table a refusal ([`RecordLayoutError::RingRefused`]).
+	pub async fn table_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> Result<Arc<TableLayouts>> {
+		if version.is_none()
+			&& let Some(held) = self.memoised_layouts(ns, db, tb)
+		{
+			return Ok(held);
+		}
+		self.reload_table_layouts(ns, db, tb, version).await
+	}
+
+	/// The layouts of `tb` read from storage, bypassing what this transaction holds.
+	///
+	/// A current read replaces what the transaction holds of the table's layouts.
+	pub async fn reload_table_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> Result<Arc<TableLayouts>> {
+		let layouts = Arc::new(self.read_table_layouts(ns, db, tb, version).await?);
+		if version.is_none() {
+			self.memoise_layouts(Arc::clone(&layouts));
+		}
+		Ok(layouts)
+	}
+
+	/// Reads `tb`'s ring and `!lg` keys, at `version` when given, into its layouts.
+	///
+	/// The table's `!mi` is read first, and decides what the table has:
+	///
+	/// - absent: empty layouts, and the `!lg` range is not read. A `!lg` key without a `!mi` is
+	///   never decoded, and a nonzero stamp then meets an empty ring and is refused;
+	/// - present but refused by this build, because a newer release wrote it or it fails its
+	///   validation: refused layouts, and the `!lg` range is not read. Any other failure to decode
+	///   it fails the read;
+	/// - readable: its ring bounds the window, and the `!lg` range is read.
+	///
+	/// A `!lg` key that does not decode as a generation, one that names generation 0, and one
+	/// that names a generation outside the ring is counted in [`TableLayouts::damaged_keys`] and
+	/// never decoded: it is a leftover of an earlier incarnation of the table or a retired
+	/// generation. The listed generations are sorted by their position in the ring, and the layouts
+	/// decode only the last listed descriptor ([`TableLayouts::from_stored`]); every other
+	/// descriptor is decoded when a row first names it. A descriptor this build refuses is
+	/// reported as a refused generation when a row first names it: its entry error is the cause
+	/// when a newer release wrote it or it fails its validation, and
+	/// [`LayoutRefusal::NamesTable`] is the cause when it names another table. Only a storage
+	/// error, or a failure to decode the table's ring that is no refusal, fails the read.
+	async fn read_table_layouts(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		version: Option<u64>,
+	) -> Result<TableLayouts> {
+		// The storage layer's own read of a table's layouts, which the work it serves does not
+		// make: open recordings note the dependency, and work sealed off the catalog may make it.
+		self.catalog_reads.answered(crate::catalog_reads::CatalogRead::Table(ns, db, tb));
+		let migrations_key = TableMigrationsKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		};
+		let Some(stored) = self.get_key_raw(&migrations_key, version).await? else {
+			return Ok(TableLayouts::empty(ns, db, tb.clone()));
+		};
+		// The decode validates the entry through its ring, so the one failure path covers both.
+		let ring = match TableMigrations::kv_decode_value(&stored, ())
+			.and_then(|migrations| Ok(migrations.ring().map_err(CatalogError::Entry)?))
+		{
+			Ok(ring) => ring,
+			Err(e) => {
+				return match e.chain().find_map(EntryError::of_cause) {
+					Some(refusal) => Ok(TableLayouts::refused(
+						ns,
+						db,
+						tb.clone(),
+						LayoutRefusal::Entry(refusal),
+						0,
+					)),
+					None => Err(e),
+				};
+			}
+		};
+		let range = LayoutPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range()?;
+		let rows = self.getr_raw(range, version).await?;
+		let mut generations: Vec<(Generation, Box<[u8]>)> = Vec::with_capacity(rows.len());
+		let mut damaged_keys = 0u32;
+		for (key, bytes) in rows {
+			let generation = match LayoutKey::decode_key(&key)
+				.ok()
+				.and_then(|decoded| Generation::new(decoded.generation))
+			{
+				Some(generation) if ring.contains(generation) => generation,
+				_ => {
+					damaged_keys = damaged_keys.saturating_add(1);
+					continue;
+				}
+			};
+			generations.push((generation, bytes.into_boxed_slice()));
+		}
+		generations
+			.sort_unstable_by_key(|(generation, _)| ring.position(*generation).unwrap_or(u16::MAX));
+		Ok(TableLayouts::from_stored(ns, db, tb.clone(), ring, generations, damaged_keys)
+			.map_err(CatalogError::Layout)?)
+	}
+
+	/// Answers this transaction's later reads of a table's layouts with `layouts`, as though it
+	/// had read them itself.
+	///
+	/// The caller holds them from a snapshot served under the catalog version this transaction
+	/// read for the table, so they list the generations its own read would. They are ignored for
+	/// a table this transaction has stamped, which reads its layouts through itself because a
+	/// stamp may follow a mint a save point rollback has since undone, and for a table whose
+	/// layouts the transaction already holds.
+	pub fn adopt_table_layouts(&self, layouts: &Arc<TableLayouts>) {
+		let (ns, db, tb) = (layouts.namespace(), layouts.database(), layouts.table());
+		{
+			let stamped = self.stamped_tables.lock();
+			if !stamped.is_empty() && stamped.contains_key(&(ns, db, tb.clone())) {
+				return;
+			}
+		}
+		self.hold_span(ns, db, tb);
+		let mut memo = self.layout_memo.lock();
+		if memo.get(&(ns, db)).is_some_and(|tables| tables.contains_key(tb)) {
+			return;
+		}
+		memo.entry((ns, db)).or_default().insert(tb.clone(), Arc::clone(layouts));
+	}
+
+	/// The format this transaction writes a record of `tb` in, with the stored-format ledger
+	/// entry admitted when the format is not `revision`.
+	///
+	/// A table that has a ring of generations is written in the layout of its current generation's
+	/// descriptor ([`TableLayouts::write_format`]) at every feature level: documents stamped with
+	/// the generation, or rows packed as its descriptor says ([`RecordFormat::Packed`]). The
+	/// answer is refused when that generation's layout is one this build refuses
+	/// ([`RecordLayoutError::CurrentRefused`]) or its ring is refused
+	/// ([`RecordLayoutError::RingRefused`]). A table without one is written as
+	/// [`RecordFormat::Revision`], which every release reads, at the legacy level, and otherwise as
+	/// a document of generation 0.
+	///
+	/// A [`RecordFormat::Packed`] answer is written through [`Self::record_writer`], which holds
+	/// the layouts a packed row is laid out by; `encode_record` refuses it
+	/// ([`RecordLayoutError::WriteWithoutLayouts`]).
+	///
+	/// A ring exists only in a store that holds the stored-format ledger entry. At the legacy
+	/// level a transaction whose view of the store holds no such entry therefore has no table
+	/// with a ring, and the answer is `revision` with no layout read
+	/// ([`Self::stored_format_present`]). A record written as a document is bytes a 3.x release
+	/// cannot read, so the entry that says so commits with it ([`Self::admit_stored_format`]).
+	pub async fn record_format(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<RecordFormat> {
+		self.resolve_record_format(ns, db, tb).await.map(|(format, _)| format)
+	}
+
+	/// The writer of `tb`'s rows: the format [`Self::record_format`] answers, with the table's
+	/// layouts for a format of a nonzero generation. Every writer of a table row takes its format
+	/// from here (or from a write context's slot) and passes the row's id to
+	/// [`RecordWriter::encode`], which lets a packed table's rows pack and checks the layouts
+	/// against the row's table.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn record_writer(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<RecordWriter> {
+		let (format, layouts) = self.resolve_record_format(ns, db, tb).await?;
+		Ok(RecordWriter::new(format, layouts))
+	}
+
+	/// [`Self::record_format`] with the layouts it resolved the format from, kept for a format of a
+	/// nonzero generation ([`RecordFormat::Document`] from generation 1 and
+	/// [`RecordFormat::Packed`]) and `None` for `revision` and generation 0.
+	async fn resolve_record_format(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<(RecordFormat, Option<Arc<TableLayouts>>)> {
+		let legacy = self.write_level().is_legacy();
+		if legacy && !self.stored_format_present().await? {
+			return Ok((RecordFormat::Revision, None));
+		}
+		let layouts = self.table_layouts(ns, db, tb, None).await?;
+		if layouts.has_generation() {
+			let format = layouts.write_format().map_err(CatalogError::Layout)?;
+			self.admit_stored_format().await?;
+			return Ok((format, Some(layouts)));
+		}
+		if legacy {
+			return Ok((RecordFormat::Revision, None));
+		}
+		self.admit_stored_format().await?;
+		Ok((
+			RecordFormat::Document {
+				generation: None,
+			},
+			None,
+		))
+	}
+
+	/// Whether this transaction's view of the store holds the stored-format ledger entry.
+	///
+	/// True when a committed transaction was observed to hold it
+	/// ([`FeatureLevelCell::stored_format_recorded`]) or this transaction admitted it
+	/// ([`Self::admit_stored_format`]); false when this transaction already read it as absent;
+	/// otherwise one point read of the entry, whose answer is held for the rest of the
+	/// transaction when negative. A positive answer is the observation
+	/// [`Self::admit_stored_format`] makes: the transaction counts as holding the entry and the
+	/// datastore's cell learns of it once the transaction commits.
+	async fn stored_format_present(&self) -> Result<bool> {
+		if self.feature.stored_format_recorded()
+			|| self.stored_format_admitted.load(Ordering::Acquire)
+		{
+			return Ok(true);
+		}
+		if self.stored_format_absent.load(Ordering::Acquire) {
+			return Ok(false);
+		}
+		if self.exists_key(&MigrationKey::new(RECORD_FORMAT_V1.raw()), None).await? {
+			self.stored_format_admitted.store(true, Ordering::Release);
+			self.on_commit(Box::new(ObserveStoredFormat {
+				cell: Arc::clone(&self.feature),
+			}))
+			.await;
+			return Ok(true);
+		}
+		self.stored_format_absent.store(true, Ordering::Release);
+		Ok(false)
+	}
+
+	/// Commits the stored-format ledger entry with this transaction's first stored-grammar bytes.
+	///
+	/// The entry says that records or catalog entries of the store may be in the stored-value
+	/// grammar, which a release that does not know it refuses to open the store for. It must
+	/// therefore commit in every transaction that commits such bytes, and with no earlier
+	/// transaction's help: the check reads the key through this transaction, so the answer sees
+	/// the transaction's own writes.
+	///
+	/// The storage version stamp `!v` commits with the entry, raised to [`MajorVersion::LATEST`]:
+	/// a release that checks only that stamp, and so cannot read the ledger, refuses the store at
+	/// startup from the first commit that holds the entry.
+	///
+	/// At most one read per transaction, and none once a committed transaction has observed the
+	/// entry ([`FeatureLevelCell::stored_format_recorded`]). The entry and the stamp are written
+	/// when the entry is absent, uncharged against the write-key allowance, because they are
+	/// bookkeeping the statement did not ask for. The datastore's cell learns of the entry once
+	/// this transaction commits. A save point rollback of a scope that wrote or observed the
+	/// entry discards both this transaction's observation and the queued action, so the next
+	/// stored write checks again, and the cell never claims an entry that did not commit.
+	pub async fn admit_stored_format(&self) -> Result<()> {
+		if self.feature.stored_format_recorded()
+			|| self.stored_format_admitted.load(Ordering::Acquire)
+		{
+			return Ok(());
+		}
+		let key = MigrationKey::new(RECORD_FORMAT_V1.raw());
+		if !self.exists_key(&key, None).await? {
+			let record = MigrationRecord::applied(
+				RECORD_FORMAT_V1_NAME,
+				RECORD_FORMAT_V1_VERSION,
+				self.sequences.node_id(),
+				unix_millis_now(),
+			);
+			self.set_uncharged(key.encode_key()?, record.kv_encode_value()?).await?;
+			self.stamp_latest_storage_version().await?;
+		}
+		self.stored_format_admitted.store(true, Ordering::Release);
+		self.on_commit(Box::new(ObserveStoredFormat {
+			cell: Arc::clone(&self.feature),
+		}))
+		.await;
+		Ok(())
+	}
+
+	/// Raises the storage version stamp `!v` to [`MajorVersion::LATEST`] when it carries a lower
+	/// one. A store that carries no stamp is left alone: the datastore stamps it when it settles
+	/// the version.
+	async fn stamp_latest_storage_version(&self) -> Result<()> {
+		let key = VersionKey {};
+		let Some(stamped) = self.get_key(&key, None).await? else {
+			return Ok(());
+		};
+		if u16::from(stamped) >= MajorVersion::LATEST {
+			return Ok(());
+		}
+		self.set_uncharged(key.encode_key()?, MajorVersion::latest().kv_encode_value()?).await
+	}
+
+	/// [`Self::set`] for bookkeeping the statement did not ask for: it takes no slot of the
+	/// write-cardinality guard, so the write is not charged to the statement's write-key allowance.
+	///
+	/// The write is still a state change and a counted write, and a key that is a versioned
+	/// object's definition is restamped as for any write.
+	async fn set_uncharged(&self, key: Key<'_>, val: Vec<u8>) -> Result<()> {
+		let _changed = self.state_change();
+		let key_bytes = key.len() as u64;
+		let value_bytes = val.len() as u64;
+		let defined = self.changed_definition(&key, Some(&val), None).await?;
+		self.tr.set(key, val).await?;
+		self.metrics.record_set(key_bytes, value_bytes);
+		self.restamp_defined(defined).await
+	}
+
+	/// Checks that a stored record of `tb` may be read: its envelope parses, and a v1 record's
+	/// generation is listed by the table's layouts with a descriptor this build reads. Answers the
+	/// generation the record's bytes carry (`None` for a `revision` record and for stamp 0) and,
+	/// for a packed row only, the layouts that admitted it, which its decode reads its descriptor
+	/// from.
+	///
+	/// Layouts are loaded only for a nonzero generation, and reloaded at most once for one that is
+	/// unlisted or outside the table's ring, at `version`. A refusal is a [`CatalogError::Layout`]
+	/// that a caller can downcast to.
+	async fn admit_record_bytes(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		version: Option<u64>,
+	) -> Result<Admitted> {
+		let Some(stored) = StoredRecord::parse(bytes)? else {
+			return Ok(Admitted {
+				generation: None,
+				layouts: None,
+			});
+		};
+		let generation = match stored.generation() {
+			Ok(None) => {
+				return Ok(Admitted {
+					generation: None,
+					layouts: None,
+				});
+			}
+			Ok(Some(generation)) => Ok(generation),
+			Err(stamp) => Err(stamp),
+		};
+		let packed = stored.is_packed();
+		let layouts = self.table_layouts(ns, db, tb, version).await?;
+		if !layouts.belongs_to(ns, db, tb) {
+			return Err(CatalogError::Layout(RecordLayoutError::ForeignLayouts {
+				layouts: layouts.table().clone(),
+				table: tb.clone(),
+			})
+			.into());
+		}
+		// A stamp that names no generation is refused by the table's stamp refusal.
+		let generation = match generation {
+			Ok(generation) => generation,
+			Err(stamp) => return Err(CatalogError::Layout(layouts.stamp_refusal(stamp)).into()),
+		};
+		match layouts.admit(generation).map(drop) {
+			Ok(()) => Ok(Admitted {
+				generation: Some(generation),
+				layouts: packed.then_some(layouts),
+			}),
+			Err(
+				RecordLayoutError::UnknownGeneration {
+					..
+				}
+				| RecordLayoutError::OutsideWindow {
+					..
+				},
+			) => {
+				let layouts = self.reload_table_layouts(ns, db, tb, version).await?;
+				match layouts.admit(generation).map(drop) {
+					Ok(()) => Ok(Admitted {
+						generation: Some(generation),
+						layouts: packed.then_some(layouts),
+					}),
+					Err(e) => Err(CatalogError::Layout(e).into()),
+				}
+			}
+			Err(e) => Err(CatalogError::Layout(e).into()),
+		}
+	}
+
+	/// Decodes the stored bytes of the record `rid` of `tb`, in either encoding, checking a v1
+	/// record's generation against the table's layouts at `version`.
+	///
+	/// The layouts are loaded only for a nonzero generation and reloaded at most once for an
+	/// unlisted one; a `revision` record and a record of generation 0 cost no layout read.
+	pub async fn decode_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		rid: RecordId,
+		version: Option<u64>,
+	) -> Result<Record> {
+		self.decode_stamped_record(ns, db, tb, bytes, rid, version).await.map(|(record, _)| record)
+	}
+
+	/// [`Self::decode_record`] with the generation the stored bytes carry: `None` for a `revision`
+	/// record and for stamp 0.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn decode_stamped_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		rid: RecordId,
+		version: Option<u64>,
+	) -> Result<(Record, Option<Generation>)> {
+		let admitted = self.admit_record_bytes(ns, db, tb, bytes, version).await?;
+		let record = Record::decode_admitted(bytes, admitted.layouts.as_deref(), rid)?;
+		Ok((record, admitted.generation))
+	}
+
+	/// [`Self::decode_record`] for bytes read back as they were written: an `"id"` the encoding
+	/// left out is restored from `rid`, and any other is left as stored, as a view row needs.
+	pub async fn decode_record_as_written(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		bytes: &[u8],
+		rid: RecordId,
+		version: Option<u64>,
+	) -> Result<Record> {
+		let admitted = self.admit_record_bytes(ns, db, tb, bytes, version).await?;
+		Record::decode_admitted_as_written(bytes, admitted.layouts.as_deref(), || rid)
+	}
+
+	/// The record `id` of `tb` as stored, at `version` when given, decoded against the table's
+	/// layouts ([`Self::decode_stamped_record`]) with the generation its bytes carry; `None` when
+	/// no key holds one.
+	///
+	/// One read of the record's key. The layouts are consulted only for a v1 record of a
+	/// nonzero generation.
+	async fn read_stamped_record(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		version: Option<u64>,
+	) -> Result<Option<(Record, Option<Generation>)>> {
+		let key = RecordKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+		};
+		let Some(bytes) = self.get(key.encode_key()?, version).await? else {
+			return Ok(None);
+		};
+		let rid = RecordId {
+			table: tb.clone(),
+			key: id.clone(),
+		};
+		self.decode_stamped_record(ns, db, tb, &bytes, rid, version).await.map(Some)
+	}
+
+	/// Decodes the stored bytes a multi-get returned, one slot per record id in the order of
+	/// `rids`, against the layouts of each record's table at `version`.
+	///
+	/// A single [`LayoutSet`] serves the whole batch: a table's layouts are loaded on the first
+	/// row of it that names a nonzero generation, and reloaded at most once, and a packed row is
+	/// decoded with the layouts that admitted it. Each decoded record carries the generation its
+	/// bytes carry. A missing record stays `None`. The first record
+	/// that cannot be admitted or decoded fails the batch.
+	async fn decode_records<'r>(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: impl Iterator<Item = &'r RecordId>,
+		values: Vec<Option<Val>>,
+		version: Option<u64>,
+	) -> Result<Vec<Option<(Arc<Record>, Option<Generation>)>>> {
+		let mut layouts = LayoutSet::new(ns, db, version);
+		let mut out = Vec::with_capacity(values.len());
+		for (rid, value) in rids.zip(values) {
+			let Some(bytes) = value else {
+				out.push(None);
+				continue;
+			};
+			let (generation, admitted) =
+				layouts.admit_with_layouts(self, &rid.table, &bytes).await?;
+			let record = Record::decode_admitted(&bytes, admitted.map(|l| &**l), rid.clone())?;
+			out.push(Some((record.into_read_only(), generation)));
+		}
+		Ok(out)
+	}
+
+	// --------------------------------------------------
+	// Feature level functions
+	// --------------------------------------------------
+
+	/// The level this transaction's catalog writes are encoded at: the store's
+	/// level, capped at this build's release.
+	///
+	/// One atomic load of the datastore's cell, which may lag the store in either
+	/// direction (see [`crate::feature`]). The level only chooses what a write
+	/// encodes: [`Self::admit_floor`] decides whether the write may proceed, and
+	/// a write encoded above the store's level is refused there. A cell that
+	/// says `Legacy` is never trusted over a stored-grammar entry: a write of a
+	/// levelled value that meets one reads the store's level first.
+	pub fn write_level(&self) -> FeatureLevel {
+		self.feature.level().capped(Release::CURRENT)
+	}
+
+	/// Admits a write that uses the features of release `floor`, and records
+	/// that the store uses them.
+	///
+	/// Answers at once when `floor` is no newer than the newest release the
+	/// datastore last saw in use. Otherwise the store's record is read with a
+	/// locked read, so that a concurrent raise or lower conflicts with the first
+	/// write that uses a feature rather than racing it, and:
+	/// - `floor` above the store's level is refused with [`DatastoreError::FeatureNotEnabled`]. At
+	///   `Legacy`, that is a floor above the first stored release;
+	/// - a record whose `in_use` is below `floor` is rewritten with `in_use` at `floor`, keeping
+	///   what a newer release added to the record. The datastore's cell learns of it once this
+	///   transaction commits, so a rolled back transaction leaves the cell's `in_use` no higher
+	///   than the store's.
+	///
+	/// The durable `in_use` only rises. Never use this on a read-only
+	/// transaction: the locked read is refused.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn admit_floor(&self, floor: Release) -> Result<()> {
+		if self.feature.in_use().is_some_and(|in_use| floor <= in_use) {
+			return Ok(());
+		}
+		let raw = self.getu_key_raw(&FeatureLevelKey {}).await?;
+		let Some(record) = raw
+			.as_deref()
+			.map(|bytes| <StoredFeatureLevel as KVValue>::kv_decode_value(bytes, ()))
+			.transpose()?
+		else {
+			return if FeatureLevel::Legacy.admits(floor) {
+				Ok(())
+			} else {
+				Err(DatastoreError::FeatureNotEnabled {
+					needed: floor,
+					level: FeatureLevel::Legacy,
+				}
+				.into())
+			};
+		};
+		self.feature.observe_level(record.level());
+		if !record.feature_level().admits(floor) {
+			return Err(DatastoreError::FeatureNotEnabled {
+				needed: floor,
+				level: record.feature_level(),
+			}
+			.into());
+		}
+		if floor <= record.in_use() {
+			return Ok(());
+		}
+		let raised = StoredFeatureLevel::try_new(record.level(), floor)?;
+		let bytes = raised
+			.kv_encode_value_at(&EncodeContext {
+				level: FeatureLevel::At(Release::CURRENT),
+				prior: raw.as_deref(),
+			})?
+			.bytes;
+		self.set(FeatureLevelKey {}.encode_key()?, bytes).await?;
+		self.on_commit(Box::new(ObserveFeatureLevel {
+			cell: Arc::clone(&self.feature),
+			record: raised,
+		}))
+		.await;
+		Ok(())
+	}
+
+	/// The release each node last recorded beside the heartbeat given, in one
+	/// batched read, in the order of `nodes`.
+	///
+	/// A node's answer is `Some` only when its release record names exactly the heartbeat
+	/// given: the record is written beside the node's own heartbeat, so a record beside any
+	/// other heartbeat describes a state of the node that is gone. A node with no record, or
+	/// one recorded beside another heartbeat, answers `None`, which a caller treats as older
+	/// than any release: a release that rewrites its heartbeat without recording its own is
+	/// one that cannot be shown to be current.
+	///
+	/// A record that does not decode fails the read.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn node_releases(&self, nodes: &[(Uuid, Timestamp)]) -> Result<Vec<Option<Release>>> {
+		if nodes.is_empty() {
+			return Ok(Vec::new());
+		}
+		let keys: Vec<NodeReleaseKey> = nodes
+			.iter()
+			.map(|(nd, _)| NodeReleaseKey {
+				nd: *nd,
+			})
+			.collect();
+		let values = self.getm_raw(keys, None).await?;
+		nodes
+			.iter()
+			.zip(values)
+			.map(|((_, heartbeat), value)| {
+				let Some(bytes) = value else {
+					return Ok(None);
+				};
+				let recorded = <NodeRelease as KVValue>::kv_decode_value(&bytes, ())?;
+				Ok((recorded.heartbeat == *heartbeat).then_some(recorded.release))
+			})
+			.collect()
+	}
+
+	/// The store's recorded feature level, read without a lock.
+	///
+	/// A store with no record answers [`FeatureLevelState::LEGACY`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn feature_level_state(&self) -> Result<FeatureLevelState> {
+		Ok(self
+			.get_key(&FeatureLevelKey {}, None)
+			.await?
+			.as_ref()
+			.map_or(FeatureLevelState::LEGACY, FeatureLevelState::of))
+	}
+
+	/// [`Self::getu_key`] without decoding the value: the stored bytes of a key,
+	/// read with a lock that registers the key for commit-time conflict
+	/// detection.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn getu_key_raw<K>(&self, key: &K) -> Result<Option<Val>>
+	where
+		K: KVKey + Debug,
+	{
+		self.getu_raw(key.encode_key()?).await
+	}
+
+	/// Every value of a range that this build can read, in key order.
+	///
+	/// An entry that a newer release wrote, and that this build therefore
+	/// refuses with a release it needs ([`EntryError::NeedsRelease`]), is skipped
+	/// and counted in [`Readable::refused`]. Any other failure to decode fails
+	/// the read.
+	///
+	/// Reads through the storage cursor and caches nothing. For passes that must
+	/// carry on past an entry they cannot read, such as the background passes
+	/// over the catalog hierarchy, and not for a read that answers a statement,
+	/// which must fail when an entry it needs is refused.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn all_readable<V>(&self, rng: TypedRange<V>) -> Result<Readable<V>>
+	where
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let (rows, refused, stats) = self
+			.decode_range_tolerating(rng.into_key_range(), Direction::Forward, None, 0, None, true)
+			.await?;
+		self.metrics.record_get(stats.rows, stats.key_bytes, stats.value_bytes);
+		Ok(Readable {
+			values: rows.into_iter().map(|(_, value)| value).collect(),
+			refused,
+		})
+	}
+
+	/// The level a write that replaces `prior` is encoded at.
+	///
+	/// The store's level as the cell holds it, except where the cell says `Legacy`
+	/// and `prior` is a stored-grammar entry: the cell is behind the store, and
+	/// encoding at `Legacy` would write `revision` over an entry that may carry
+	/// fields this build does not know. The store's record is then read with a
+	/// locked read and the cell is brought up to it. A stored-grammar entry in a
+	/// store with no record is [`DatastoreError::FeatureLevelMissing`].
+	async fn level_for_write(&self, prior: Option<&[u8]>) -> Result<FeatureLevel> {
+		let level = self.write_level();
+		if !level.is_legacy() || prior.and_then(<[u8]>::first) != Some(&CATALOG_MARKER) {
+			return Ok(level);
+		}
+		let Some(raw) = self.getu_key_raw(&FeatureLevelKey {}).await? else {
+			return Err(DatastoreError::FeatureLevelMissing.into());
+		};
+		let record = <StoredFeatureLevel as KVValue>::kv_decode_value(&raw, ())?;
+		self.feature.observe(Some(&record));
+		Ok(record.feature_level().capped(Release::CURRENT))
+	}
+
+	/// `val` encoded for a write that replaces `prior`, with the floor it
+	/// carries admitted.
+	async fn encode_with_prior<V: KVValue>(
+		&self,
+		val: &V,
+		prior: Option<&[u8]>,
+	) -> Result<Vec<u8>> {
+		self.encode_admitted(prior, |ctx| val.kv_encode_value_at(ctx)).await
+	}
+
+	/// The bytes `encode` produces for a write that replaces `prior`, with the
+	/// floor they carry admitted.
+	///
+	/// `encode` runs at the level [`Self::level_for_write`] answers. When the
+	/// floor is refused because the store's level is below it, the refusal has
+	/// already brought the cell down to the store's level, and `encode` runs
+	/// once more at that level, so a value whose features the lower level does
+	/// not admit is encoded without them or refused by the encoder, and the
+	/// write is not refused for a level the cell merely remembered. A second
+	/// refusal, or one at an unchanged level, is the write's answer.
+	///
+	/// An encoding that carries a floor is in the stored grammar, so once its floor is
+	/// admitted the stored-format ledger entry is admitted too
+	/// ([`Self::admit_stored_format`]): the entry commits in the transaction that writes the
+	/// bytes. An encoding with no floor is `revision` or a fixed encoding and needs no entry.
+	async fn encode_admitted(
+		&self,
+		prior: Option<&[u8]>,
+		mut encode: impl FnMut(&EncodeContext<'_>) -> Result<Encoded>,
+	) -> Result<Vec<u8>> {
+		let mut level = self.level_for_write(prior).await?;
+		let mut retried = false;
+		loop {
+			let Encoded {
+				bytes,
+				floor,
+			} = encode(&EncodeContext {
+				level,
+				prior,
+			})?;
+			let Some(floor) = floor else {
+				return Ok(bytes);
+			};
+			match self.admit_floor(floor).await {
+				Ok(()) => {
+					// A floor means the bytes are in the stored grammar, which a release that
+					// does not know the ledger entry cannot read.
+					self.admit_stored_format().await?;
+					return Ok(bytes);
+				}
+				Err(e) if !retried && refused_by_level(&e) => {
+					let refreshed = self.write_level();
+					if refreshed == level {
+						return Err(e);
+					}
+					level = refreshed;
+					retried = true;
+				}
+				Err(e) => return Err(e),
+			}
+		}
+	}
+
+	/// `val` encoded for a write to `key`, and the bytes `key` held.
+	///
+	/// A value that is not levelled encodes as it always has, and the key is not
+	/// read: the second part of the answer is `None`. A levelled value reads the
+	/// key, which is how its encoding keeps what a newer release added to the
+	/// entry, and answers what it read as `Some(held)` for
+	/// [`Self::changed_definition`], so a defined object's key is read once per
+	/// write.
+	async fn encode_levelled<V: KVValue>(
+		&self,
+		key: &Key<'_>,
+		val: &V,
+	) -> Result<(Vec<u8>, Option<Option<Val>>)> {
+		if !V::LEVELLED {
+			return Ok((val.kv_encode_value()?, None));
+		}
+		let prior = self.tr.get(key.as_borrowed(), None).await?;
+		let bytes = self.encode_with_prior(val, prior.as_deref()).await?;
+		Ok((bytes, Some(prior)))
+	}
+
+	/// Whether the bytes a key holds say what `chk` says: `chk` and the stored
+	/// value are both absent, or both present and equal by
+	/// [`KVValue::kv_canonical`].
+	///
+	/// Equality is by meaning rather than by bytes, because a value encodes at
+	/// the level of the store it is written to, which need not be the level of
+	/// the entry that is stored. Stored bytes that do not decode do not match.
+	fn prior_matches<K>(key: &K, prior: Option<&[u8]>, chk: Option<&K::Value>) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let matches = match (prior, chk) {
+			(None, None) => true,
+			(Some(prior), Some(chk)) => {
+				let want = chk.kv_canonical()?;
+				K::Value::kv_decode_value(prior, key.value_context())
+					.and_then(|stored| stored.kv_canonical())
+					.is_ok_and(|have| have == want)
+			}
+			(None, Some(_)) | (Some(_), None) => false,
+		};
+		if matches {
+			Ok(())
+		} else {
+			Err(KvsError::TransactionConditionNotMet.into())
+		}
+	}
+
+	/// [`Self::put_compare_key`] for a levelled value: the key is read, compared
+	/// with `chk` by meaning, and written with a condition on the exact bytes read.
+	async fn put_compare_levelled<K>(
+		&self,
+		key: &K,
+		val: &K::Value,
+		chk: Option<&K::Value>,
+	) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let _changed = self.reserve_write_slot()?;
+		let encoded = key.encode_key()?;
+		let prior = self.tr.get(encoded.as_borrowed(), None).await?;
+		Self::prior_matches(key, prior.as_deref(), chk)?;
+		let bytes = self.encode_with_prior(val, prior.as_deref()).await?;
+		let key_bytes = encoded.len() as u64;
+		let value_bytes = bytes.len() as u64;
+		let defined =
+			self.changed_definition(&encoded, Some(&bytes), Some(prior.as_deref())).await?;
+		self.tr.putc(encoded, bytes, prior).await?;
+		self.metrics.record_put(key_bytes, value_bytes);
+		self.restamp_defined(defined).await
+	}
+
+	/// [`Self::del_compare_key`], or with `all_versions` [`Self::clr_compare_key`],
+	/// for a levelled value: the key is read, compared with `chk` by meaning, and
+	/// removed with a condition on the exact bytes read.
+	async fn delete_compare_levelled<K>(
+		&self,
+		key: &K,
+		chk: &K::Value,
+		all_versions: bool,
+	) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let _changed = self.reserve_write_slot()?;
+		let encoded = key.encode_key()?;
+		let key_bytes = encoded.len() as u64;
+		let prior = self.tr.get(encoded.as_borrowed(), None).await?;
+		Self::prior_matches(key, prior.as_deref(), Some(chk))?;
+		let defined = self.changed_definition(&encoded, None, Some(prior.as_deref())).await?;
+		if all_versions {
+			self.tr.clrc(encoded, prior.as_deref()).await?;
+		} else {
+			self.tr.delc(encoded, prior.as_deref()).await?;
+		}
+		self.metrics.record_del(1, key_bytes);
+		self.restamp_defined(defined).await
+	}
+
+	/// Writes a levelled value that the caller encodes: for a program that
+	/// encodes keys and values itself, such as the VM's.
+	///
+	/// `encode` is handed the level the write is encoded at and the bytes `key`
+	/// holds, and answers the bytes to write with the floor they carry, as
+	/// [`KVValue::kv_encode_value_at`] does; the floor is admitted
+	/// ([`Self::admit_floor`]). `encode` runs a second time, at the store's
+	/// level, when the first floor is refused because the cell remembered a
+	/// level above the store's. The write is as [`Self::set_key`] makes it, or
+	/// as [`Self::replace_raw`] for [`LevelledMode::Replace`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn put_levelled_raw(
+		&self,
+		key: Key<'_>,
+		mode: LevelledMode,
+		encode: impl FnMut(&EncodeContext<'_>) -> Result<Encoded>,
+	) -> Result<()> {
+		let _changed = self.reserve_write_slot()?;
+		let key_bytes = key.len() as u64;
+		let prior = self.tr.get(key.as_borrowed(), None).await?;
+		let bytes = self.encode_admitted(prior.as_deref(), encode).await?;
+		let value_bytes = bytes.len() as u64;
+		let defined = self.changed_definition(&key, Some(&bytes), Some(prior.as_deref())).await?;
+		match mode {
+			LevelledMode::Set => self.tr.set(key, bytes).await?,
+			LevelledMode::Replace => self.tr.replace(key, bytes).await?,
+		}
+		self.metrics.record_set(key_bytes, value_bytes);
+		self.restamp_defined(defined).await
+	}
+
+	// --------------------------------------------------
 	// Speculation functions
 	// --------------------------------------------------
 
@@ -4577,6 +7191,18 @@ impl Transaction {
 			speculative_caches: Mutex::new(Vec::new()),
 			catalog_reads: Default::default(),
 			sequences: self.sequences.clone(),
+			feature: Arc::clone(&self.feature),
+			sole_writer: self.sole_writer,
+			layout_memo: Default::default(),
+			conformance_memo: Default::default(),
+			held_spans: Default::default(),
+			births: parking_lot::Mutex::new(self.births.lock().clone()),
+			layout_epoch: AtomicU64::new(0),
+			range_deletes: AtomicU64::new(0),
+			stored_format_admitted: AtomicBool::new(false),
+			stored_format_absent: AtomicBool::new(false),
+			catalog_write_poisoned: AtomicBool::new(false),
+			save_point_marks: Mutex::new(Vec::new()),
 			catalog_stamps: AtomicU64::new(self.catalog_stamps()),
 			object_stamps: AtomicU64::new(self.catalog_object_stamps()),
 			stamped_tables: Default::default(),
@@ -4677,6 +7303,15 @@ impl Transaction {
 		self.cache.push_save_point();
 		let snapshot = self.snapshot_provisional_sequences().await;
 		self.provisional_save_points.lock().await.push(snapshot);
+		// The commit actions queued from here on answer to this scope's writes, and the layout
+		// state a rollback must judge is the state as it stands now.
+		let actions = self.commit_actions.lock().await.len();
+		self.save_point_marks.lock().await.push(SavePointMark {
+			actions,
+			layout_epoch: self.layout_epoch.load(Ordering::Acquire),
+			range_deletes: self.range_deletes.load(Ordering::Acquire),
+			stored_format_admitted: self.stored_format_admitted.load(Ordering::Acquire),
+		});
 		Ok(())
 	}
 
@@ -4693,6 +7328,9 @@ impl Transaction {
 		// Released, the scope folds into the enclosing one, whose snapshot
 		// still describes the state an outer rollback returns to.
 		self.provisional_save_points.lock().await.pop();
+		// The scope's commit actions, and whatever it did to the layouts, belong to the enclosing
+		// scope now.
+		self.save_point_marks.lock().await.pop();
 		Ok(())
 	}
 
@@ -4723,6 +7361,36 @@ impl Transaction {
 		let snapshot = self.provisional_save_points.lock().await.pop();
 		if let Some(snapshot) = snapshot {
 			self.restore_provisional_sequences(snapshot).await;
+		}
+		let mark = self.save_point_marks.lock().await.pop();
+		if let Some(mark) = mark {
+			// An effect queued in the scope answers to writes the rollback undid, unless it
+			// answers to the end of the transaction instead.
+			let mut actions = self.commit_actions.lock().await;
+			if actions.len() > mark.actions {
+				let queued = actions.split_off(mark.actions);
+				actions.extend(queued.into_iter().filter(|action| !action.answers_to_scope()));
+			}
+			drop(actions);
+			// What the transaction holds of the layouts, and whether it holds the stored-format
+			// ledger entry, is stale only if the scope changed it: a mint, a floor move, a write or
+			// removal of a conformance record, or a range delete over held layouts, moves the
+			// epoch; any range delete may have removed layouts of a table the transaction had not
+			// read yet; and an entry the scope wrote or observed set the admitted flag. A scope
+			// that did none of these, as the failed creating attempt of an upsert does not,
+			// leaves what the transaction holds describing storage as it stands, so the next
+			// write resolves nothing again.
+			let admitted_in_scope =
+				!mark.stored_format_admitted && self.stored_format_admitted.load(Ordering::Acquire);
+			if admitted_in_scope {
+				self.stored_format_admitted.store(false, Ordering::Release);
+			}
+			if admitted_in_scope
+				|| self.layout_epoch.load(Ordering::Acquire) != mark.layout_epoch
+				|| self.range_deletes.load(Ordering::Acquire) != mark.range_deletes
+			{
+				self.invalidate_layouts();
+			}
 		}
 		Ok(())
 	}
@@ -7634,9 +10302,14 @@ impl TableProvider for Transaction {
 		})
 	}
 
-	/// Fetch a specific record value.
+	/// Fetch a specific record value, at `version` when given.
 	///
 	/// This function will return a new default initialized record if it does not exist.
+	///
+	/// The stored bytes are decoded against the table's layouts at the same version as the
+	/// record ([`Transaction::decode_record`]), and a record is cached only once it has decoded.
+	/// The canonical `id` comes from the key. [`Transaction::get_stamped_record`] answers the
+	/// same record with its generation.
 	fn get_record<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -7647,69 +10320,17 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<Record>>> {
 		Box::pin(
 			async move {
-				// Cache is not versioned
-				if version.is_some() {
-					// Fetch the record from the datastore. `tx.get` decodes
-					// using the storage key, so the canonical `id` is
-					// spliced back in automatically (see
-					// `RecordKey::value_context`).
-					let key = RecordKey {
-						ns,
-						db,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-					};
-					match self.get_key(&key, version).await? {
-						Some(record) => Ok(record.into_read_only()),
-						None => match self.lightweight_record(ns, db, tb, id, version).await? {
-							Some(record) => Ok(record.into_read_only()),
-							None => Ok(Arc::new(Default::default())),
-						},
-					}
-				} else {
-					let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
-					match self.cache.get(&qey) {
-						// The entry is in the cache
-						Some(val) => val.try_into_record(),
-						// The entry is not in the cache
-						None => {
-							let key = RecordKey {
-								ns,
-								db,
-								tb: Cow::Borrowed(tb),
-								id: Cow::Borrowed(id),
-							};
-							match self.get_key(&key, None).await? {
-								Some(record) => {
-									let record = record.into_read_only();
-									let entry = cache::tx::Entry::Val(Arc::clone(&record));
-									self.cache.insert(qey, entry);
-									Ok(record)
-								}
-								// A lightweight edge has no record; synthesize
-								// it from the adjacency. Cacheable: the delete
-								// pipeline clears the entry through
-								// `del_record` exactly as for a stored record.
-								None => {
-									match self.lightweight_record(ns, db, tb, id, None).await? {
-										Some(record) => {
-											let record = record.into_read_only();
-											let entry = cache::tx::Entry::Val(Arc::clone(&record));
-											self.cache.insert(qey, entry);
-											Ok(record)
-										}
-										None => Ok(Arc::new(Default::default())),
-									}
-								}
-							}
-						}
-					}
-				}
+				self.get_stamped_record(ns, db, tb, id, version).await.map(|(record, _)| record)
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_record")),
 		)
 	}
 
+	/// Fetch the records `rids` name, in one batched read, at `version` when given.
+	///
+	/// Each slot holds the record, or a default record for an id that names none. The stored
+	/// bytes are decoded against the layouts of each record's table at the same version as the
+	/// rows, and the batch fails at the first record whose generation is refused.
 	fn get_records<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -7726,10 +10347,6 @@ impl TableProvider for Transaction {
 				}
 				// Cache is not versioned
 				if version.is_some() {
-					// `tx.getm` decodes each value with its own key's
-					// context (`RecordKey::value_context`), so the
-					// canonical `id` is spliced into the decoded record
-					// automatically.
 					let keys: Vec<RecordKey<'_>> = rids
 						.iter()
 						.map(|rid| RecordKey {
@@ -7739,9 +10356,13 @@ impl TableProvider for Transaction {
 							id: Cow::Borrowed(&rid.key),
 						})
 						.collect();
-					let values = self.get_many_key(keys, version).await?;
-					let mut out: Vec<Option<Arc<Record>>> =
-						values.into_iter().map(|opt| opt.map(Record::into_read_only)).collect();
+					let values = self.getm_raw(keys, version).await?;
+					let mut out: Vec<Option<Arc<Record>>> = self
+						.decode_records(ns, db, rids.iter(), values, version)
+						.await?
+						.into_iter()
+						.map(|slot| slot.map(|(record, _)| record))
+						.collect();
 					// A miss can be a lightweight edge; resolve every miss in
 					// one batched adjacency read.
 					let misses: Vec<(usize, &RecordId)> = out
@@ -7794,23 +10415,36 @@ impl TableProvider for Transaction {
 							id: Cow::Borrowed(&rid.key),
 						})
 						.collect();
-					let values = self.get_many_key(keys, None).await?;
+					let values = self.getm_raw(keys, None).await?;
+					let values = self
+						.decode_records(
+							ns,
+							db,
+							uncached_rids.iter().map(|(_, rid)| *rid),
+							values,
+							None,
+						)
+						.await?;
 					// Phase 3: populate cache + merge into output.
 					//
 					// Only populate the cache when the caller requests
 					// ReadWrite; ReadOnly avoids eviction churn during
 					// large sequential scans. Default (missing) records
 					// are never cached, matching `get_record`.
+					//
+					// `generation` is the one the record's bytes carry: `None` for
+					// a lightweight edge, which has no stored bytes.
 					let place = |out: &mut Vec<Option<Arc<Record>>>,
 					             i: usize,
 					             rid: &RecordId,
-					             record: Arc<Record>| {
+					             record: Arc<Record>,
+					             generation: Option<Generation>| {
 						if (record.metadata.is_some() || !record.data.is_none())
 							&& matches!(cache_policy, CachePolicy::ReadWrite)
 						{
 							let qey =
 								cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
-							let entry = cache::tx::Entry::Val(Arc::clone(&record));
+							let entry = cache::tx::Entry::Val(Arc::clone(&record), generation);
 							self.cache.insert(qey, entry);
 						}
 						out[i] = Some(record);
@@ -7820,7 +10454,9 @@ impl TableProvider for Transaction {
 					let mut misses: Vec<(usize, &RecordId)> = Vec::new();
 					for ((i, rid), opt) in uncached_rids.into_iter().zip(values) {
 						match opt {
-							Some(record) => place(&mut out, i, rid, record.into_read_only()),
+							Some((record, generation)) => {
+								place(&mut out, i, rid, record, generation)
+							}
 							None => misses.push((i, rid)),
 						}
 					}
@@ -7833,7 +10469,7 @@ impl TableProvider for Transaction {
 								Some(record) => record.into_read_only(),
 								None => Arc::new(Default::default()),
 							};
-							place(&mut out, i, rid, record);
+							place(&mut out, i, rid, record, None);
 						}
 					}
 				}
@@ -7874,6 +10510,13 @@ impl TableProvider for Transaction {
 		})
 	}
 
+	/// Insert a record that must not exist yet, in the format its table is written in
+	/// ([`Transaction::record_writer`]): the layout of the ring's head when the table has a
+	/// generation, at any feature level (a packed row when that layout is packed and the record
+	/// fits it, a document stamped with the head otherwise); otherwise `revision` at Legacy and a
+	/// generation-0 document above it. The record's key lets its `"id"` be left out and checks the
+	/// writer's layouts against the table. The record is cached under the generation its bytes
+	/// carry.
 	fn put_record<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -7890,10 +10533,20 @@ impl TableProvider for Transaction {
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 				};
-				self.put_key(&key, record.as_ref()).await?;
+				let writer = self.record_writer(ns, db, tb).await?;
+				let generation = surrealdb_catalog::written_generation(
+					writer.format(),
+					record.metadata.as_ref(),
+				);
+				let rid = RecordId {
+					table: tb.clone(),
+					key: id.clone(),
+				};
+				let bytes = writer.encode_whole(record.as_ref(), Some(&rid))?;
+				self.put(key.encode_key()?, bytes).await?;
 				// Set the value in the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
-				self.cache.insert(qey, cache::tx::Entry::Val(record));
+				self.cache.insert(qey, cache::tx::Entry::Val(record, generation));
 				// Return nothing
 				Ok(())
 			}
@@ -7901,6 +10554,9 @@ impl TableProvider for Transaction {
 		)
 	}
 
+	/// Write a record, replacing any record at its key, in the format its table is written in
+	/// ([`Transaction::record_writer`]), as [`Self::put_record`] writes one. Any cached copy of the
+	/// record is dropped.
 	fn set_record<'a>(
 		&'a self,
 		ns: NamespaceId,
@@ -7918,7 +10574,13 @@ impl TableProvider for Transaction {
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 				};
-				self.set_key(&key, record.as_ref()).await?;
+				let writer = self.record_writer(ns, db, tb).await?;
+				let rid = RecordId {
+					table: tb.clone(),
+					key: id.clone(),
+				};
+				let bytes = writer.encode_whole(record.as_ref(), Some(&rid))?;
+				self.set(key.encode_key()?, bytes).await?;
 				// Clear the value from the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
 				self.cache.remove(&qey);
@@ -9482,17 +12144,121 @@ impl Transaction {
 	}
 }
 
-/// A database-scoped catalog object identified from the key of its
-/// definition: the subject of the version a change to that key mints
-/// ([`Transaction::restamp_defined`]).
 /// What a single-key write changed that a catalog version stands for.
 enum Defined {
 	/// The definition of a versioned object other than a table.
 	Object(DefinedObject),
-	/// The definition of a table this transaction has stamped.
-	Table((NamespaceId, DatabaseId, TableName)),
+	/// The definition of a table: written while this transaction has stamped it, or created,
+	/// rewritten or removed.
+	Table(TableChange),
+	/// A field definition of the named table, written with other bytes or removed.
+	Field((NamespaceId, DatabaseId, TableName)),
 }
 
+/// What a write of a table's definition did ([`Transaction::changed_definition`]).
+struct TableChange {
+	/// The table the definition names.
+	table: (NamespaceId, DatabaseId, TableName),
+	/// Whether this transaction had stamped the table's catalog version when it was written.
+	stamped: bool,
+	/// How the write changed what the key held.
+	change: TableDefinitionChange,
+}
+
+/// How a write changed a table's definition key.
+#[derive(Clone, Copy, Debug)]
+enum TableDefinitionChange {
+	/// The key held nothing and now holds a definition, carrying this table id; `None` when the
+	/// definition does not decode.
+	Created(Option<TableId>),
+	/// The key held a definition and now holds different bytes. `forfeits` is whether the new
+	/// definition makes the table a view or a lightweight relation, or does not decode: whatever
+	/// was settled about the table's rows then no longer holds.
+	Rewritten {
+		forfeits: bool,
+	},
+	/// The key held a definition and now holds nothing.
+	Removed,
+	/// The write leaves the key as it was.
+	Unchanged,
+}
+
+impl TableDefinitionChange {
+	/// The change from `prior`, the bytes the key held, to `val`, the bytes it holds afterwards
+	/// (`None` for a key that holds nothing).
+	fn of(prior: Option<&[u8]>, val: Option<&[u8]>) -> Self {
+		match (prior, val) {
+			(None, Some(new)) => Self::Created(
+				StoredTableDefinition::kv_decode_value(new, ()).ok().map(|stored| stored.table_id),
+			),
+			(Some(old), Some(new)) if old != new => Self::Rewritten {
+				forfeits: match StoredTableDefinition::kv_decode_value(new, ()) {
+					Ok(stored) => {
+						stored.view.is_some()
+							|| matches!(&stored.table_type, TableType::Relation(r) if r.lightweight)
+					}
+					Err(_) => true,
+				},
+			},
+			(Some(_), None) => Self::Removed,
+			_ => Self::Unchanged,
+		}
+	}
+}
+
+/// The table whose definition `key` is, or `None` for any other key.
+///
+/// Called on every single-key write, so it rejects on the fixed bytes of a database-scoped
+/// catalog key (`/*{ns}*{db}!tb`, the namespace and database ids being four bytes each) before
+/// decoding anything.
+fn table_definition_at(key: &[u8]) -> Option<(NamespaceId, DatabaseId, TableName)> {
+	if key.len() < 14
+		|| key.first() != Some(&b'/')
+		|| key.get(1) != Some(&b'*')
+		|| key.get(6) != Some(&b'*')
+		|| key.get(11..14) != Some(b"!tb".as_slice())
+	{
+		return None;
+	}
+	let table = TableKey::decode_key(key).ok()?;
+	Some((table.ns, table.db, table.tb.into_owned()))
+}
+
+/// The table whose field definition `key` is, or `None` for any other key.
+///
+/// Called on every deletion and every write that read its key, so it rejects on the fixed bytes of
+/// a table-scoped key (`/*{ns}*{db}*{tb}`, the namespace and database ids being four bytes each)
+/// and then on the tag after the table's name before decoding anything, with no allocation and
+/// only checked arithmetic. A table's name is a string in the key's encoding: it ends at the first
+/// zero byte, and a byte below 2 inside it is written with a one byte escape before it.
+fn field_definition_table(key: &[u8]) -> Option<(NamespaceId, DatabaseId, TableName)> {
+	if key.len() < 16
+		|| key.first() != Some(&b'/')
+		|| key.get(1) != Some(&b'*')
+		|| key.get(6) != Some(&b'*')
+		|| key.get(11) != Some(&b'*')
+	{
+		return None;
+	}
+	let mut at = 12usize;
+	loop {
+		match *key.get(at)? {
+			0x00 => break,
+			0x01 => at = at.checked_add(2)?,
+			_ => at = at.checked_add(1)?,
+		}
+	}
+	let tag = at.checked_add(1)?..at.checked_add(4)?;
+	if key.get(tag) != Some(b"!fd".as_slice()) {
+		return None;
+	}
+	let field = FieldKey::decode_key(key).ok()?;
+	Some((field.ns, field.db, field.tb.into_owned()))
+}
+
+/// A database-scoped catalog object identified from the key of its
+/// definition: the subject of the version a change to that key mints
+/// ([`Transaction::restamp_defined`]).
 struct DefinedObject {
 	ns: NamespaceId,
 	db: DatabaseId,

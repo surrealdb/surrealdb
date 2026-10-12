@@ -11,11 +11,12 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{FromStored, IdiomText, SurqlText};
-use crate::expr as runtime;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
+use crate::stored::{Stored, impl_stored_id};
 use crate::val::{Array, Number, TableName, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -23,6 +24,7 @@ use crate::val::{Array, Number, TableName, Value};
 pub struct IndexId(pub u32);
 
 impl_kv_value_revisioned!(IndexId);
+impl_stored_id!(IndexId);
 
 impl Revisioned for IndexId {
 	fn revision() -> u16 {
@@ -96,28 +98,41 @@ pub const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
 pub const VECTOR_DOC_ELEMENTS_FORMAT_VERSION: u16 = 3;
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredIndexDefinition {
+	#[stored(n = 2)]
 	pub index_id: IndexId,
+	#[stored(n = 4)]
 	pub name: Strand,
+	#[stored(n = 6)]
 	pub table_name: Strand,
 	/// Raw idiom-path text for each indexed column, in `Idiom::to_raw_string()`
 	/// form (e.g. `"address.city"`). Compiled on demand by consumers that
 	/// need the structured `Idiom` (index maintenance, planner analysis).
+	#[stored(n = 8)]
 	pub cols: Vec<IdiomText>,
+	#[stored(n = 10)]
 	pub index: Index,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 	/// Whether this index has been marked for removal via `REMOVE INDEX`.
 	/// Indexes marked for removal are excluded from query planning and document
 	/// indexing, and any in-progress index builds are cancelled.
+	#[stored(n = 12)]
 	pub prepare_remove: bool,
 	/// On-disk format version of this index's persisted data. Definitions written
 	/// by a binary predating the table-level doc-ID space decode this as `0`.
 	#[revision(start = 2)]
+	#[stored(n = 14)]
 	pub format_version: u16,
 }
 
-impl_kv_value_revisioned!(StoredIndexDefinition);
+impl_kv_value_catalog!(StoredIndexDefinition);
 
 impl IndexDefinition {
 	/// Builds the runtime index. The count index's guard condition
@@ -178,7 +193,8 @@ impl ToSql for IndexDefinition {
 /// because the wire format it replaced (`Cond(Expr)`, a derived rev-1
 /// wrapper) carries a revision header that a bare `SurqlText` does not.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0", transparent)]
 pub struct CondText(pub SurqlText<Cond>);
 
 impl CondText {
@@ -206,21 +222,28 @@ impl CondText {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Index {
 	/// (Basic) non unique
 	#[default]
+	#[stored(n = 1)]
 	Idx,
 	/// Unique index
+	#[stored(n = 2)]
 	Uniq,
 	/// HNSW index for distance-based metrics
+	#[stored(n = 3)]
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
+	#[stored(n = 4)]
 	FullText(FullTextParams),
 	/// Count index
+	#[stored(n = 5)]
 	Count(Option<CondText>),
 	/// DiskANN index for distance-based metrics
 	#[revision(start = 2)]
+	#[stored(n = 6)]
 	DiskAnn(DiskAnnParams),
 }
 
@@ -272,13 +295,17 @@ impl From<Index> for runtime::index_kind::Index {
 
 /// Full-Text search parameters.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct FullTextParams {
 	/// The analyzer to use.
+	#[stored(n = 2)]
 	pub analyzer: Strand,
 	/// Whether to highlight the search results.
+	#[stored(n = 4)]
 	pub highlight: bool,
 	/// The scoring to use.
+	#[stored(n = 6)]
 	pub scoring: Scoring,
 }
 
@@ -304,18 +331,23 @@ impl From<FullTextParams> for runtime::index::FullTextParams {
 
 /// Scoring for Full-Text search.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Stored)]
+#[stored(since = "4.0")]
 pub enum Scoring {
 	/// BestMatching25 scoring.
 	///
 	/// <https://en.wikipedia.org/wiki/Okapi_BM25>
+	#[stored(n = 1)]
 	Bm {
 		/// The k~1~ parameter.
+		#[stored(n = 2)]
 		k1: f32,
 		/// The b parameter.
+		#[stored(n = 4)]
 		b: f32,
 	},
 	/// VectorSearch scoring.
+	#[stored(n = 2)]
 	Vs,
 }
 
@@ -396,46 +428,57 @@ impl From<Scoring> for runtime::scoring::Scoring {
 
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 2)]
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Distance {
 	/// Chebyshev distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>
+	#[stored(n = 1)]
 	Chebyshev,
 	/// Cosine distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Cosine_similarity>
+	#[stored(n = 2)]
 	Cosine,
 	/// Euclidean distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Euclidean_distance>
 	#[default]
+	#[stored(n = 3)]
 	Euclidean,
 	/// Hamming distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Hamming_distance>
+	#[stored(n = 4)]
 	Hamming,
 	/// Jaccard distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Jaccard_index>
+	#[stored(n = 5)]
 	Jaccard,
 	/// Manhattan distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Manhattan_distance>
+	#[stored(n = 6)]
 	Manhattan,
 	/// Minkowski distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Minkowski_distance>
+	#[stored(n = 7)]
 	Minkowski(Number),
 	/// Pearson distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Pearson_correlation_coefficient>
+	#[stored(n = 8)]
 	Pearson,
 	/// Cosine distance for already-normalized vectors.
 	#[revision(start = 2)]
+	#[stored(n = 9)]
 	CosineNormalized,
 	/// Inner product similarity, transformed as a distance score.
 	#[revision(start = 2)]
+	#[stored(n = 10)]
 	InnerProduct,
 }
 
@@ -492,27 +535,36 @@ impl From<Distance> for runtime::index::Distance {
 
 /// Vector type for storing vectors.
 #[revisioned(revision = 2)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum VectorType {
 	/// 64-bit floating point.
+	#[stored(n = 1)]
 	F64,
 	/// 32-bit floating point.
 	#[default]
+	#[stored(n = 2)]
 	F32,
 	/// 64-bit signed integer.
+	#[stored(n = 3)]
 	I64,
 	/// 32-bit signed integer.
+	#[stored(n = 4)]
 	I32,
 	/// 16-bit signed integer.
+	#[stored(n = 5)]
 	I16,
 	/// 16-bit floating point.
 	#[revision(start = 2)]
+	#[stored(n = 6)]
 	F16,
 	/// 8-bit signed integer.
 	#[revision(start = 2)]
+	#[stored(n = 7)]
 	I8,
 	/// 8-bit unsigned integer.
 	#[revision(start = 2)]
+	#[stored(n = 8)]
 	U8,
 }
 
@@ -563,28 +615,39 @@ impl From<VectorType> for runtime::index::VectorType {
 
 /// HNSW index parameters.
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct HnswParams {
 	/// The dimension of the index.
+	#[stored(n = 2)]
 	pub dimension: u16,
 	/// The distance metric to use.
+	#[stored(n = 4)]
 	pub distance: Distance,
 	/// The vector type to use.
+	#[stored(n = 6)]
 	pub vector_type: VectorType,
 	/// The m parameter.
+	#[stored(n = 8)]
 	pub m: u8,
 	/// The m0 parameter.
+	#[stored(n = 10)]
 	pub m0: u8,
 	/// The ml parameter.
+	#[stored(n = 12)]
 	pub ml: Number,
 	/// The ef_construction parameter.
+	#[stored(n = 14)]
 	pub ef_construction: u16,
 	/// Whether to extend candidates.
+	#[stored(n = 16)]
 	pub extend_candidates: bool,
 	/// Whether to keep pruned connections.
+	#[stored(n = 18)]
 	pub keep_pruned_connections: bool,
 	/// Whether to use vector hash for vector retrieval.
 	#[revision(start = 2)]
+	#[stored(n = 20)]
 	pub use_hashed_vector: bool,
 }
 
@@ -624,21 +687,29 @@ impl From<HnswParams> for runtime::index::HnswParams {
 
 /// DiskANN index parameters.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct DiskAnnParams {
 	/// The dimension of the index.
+	#[stored(n = 2)]
 	pub dimension: u16,
 	/// The distance metric to use.
+	#[stored(n = 4)]
 	pub distance: Distance,
 	/// The vector type to use.
+	#[stored(n = 6)]
 	pub vector_type: VectorType,
 	/// Target graph degree.
+	#[stored(n = 8)]
 	pub degree: u16,
 	/// Construction search list size.
+	#[stored(n = 10)]
 	pub l_build: u16,
 	/// DiskANN pruning alpha.
+	#[stored(n = 12)]
 	pub alpha: Number,
 	/// Whether to use vector hashes for vector retrieval.
+	#[stored(n = 14)]
 	pub use_hashed_vector: bool,
 }
 

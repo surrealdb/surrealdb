@@ -1,17 +1,36 @@
 use std::ops::Deref;
 
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Error, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 #[repr(transparent)]
 pub struct Bytes(pub ::bytes::Bytes);
+
+/// Reads exactly what the derived serializer writes (revision 1: a varint length, then the bytes).
+/// The bytes are read through [`bounded::read_bytes`], so a length that runs past the input costs
+/// at most [`bounded::PREALLOC_BYTES`] beyond what the input holds.
+impl DeserializeRevisioned for Bytes {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
+		bounded::read_revision(reader, "Bytes", 1)?;
+		let len = bounded::read_len(reader)?;
+		let bytes = bounded::read_bytes(reader, len)?;
+		Ok(Self(::bytes::Bytes::from(bytes)))
+	}
+}
+
+impl SkipCheckRevisioned for Bytes {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), Error> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
 
 impl Bytes {
 	pub fn into_inner(self) -> bytes::Bytes {

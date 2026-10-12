@@ -13,6 +13,8 @@ use crate::catalog::NamespaceId;
 use crate::expr::statements::define::DefineDatabaseStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Expr, Idiom, Literal};
+use crate::impl_kv_value_catalog;
+use crate::stored::{Stored, impl_stored_id};
 use crate::val::Value;
 
 #[derive(
@@ -33,6 +35,7 @@ use crate::val::Value;
 pub struct DatabaseId(pub u32);
 
 impl_kv_value_revisioned!(DatabaseId);
+impl_stored_id!(DatabaseId);
 
 impl Revisioned for DatabaseId {
 	fn revision() -> u16 {
@@ -88,16 +91,27 @@ impl From<u32> for DatabaseId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct DatabaseDefinition {
+	#[stored(n = 2)]
 	pub namespace_id: NamespaceId,
+	#[stored(n = 4)]
 	pub database_id: DatabaseId,
+	#[stored(n = 6)]
 	pub name: Strand,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 8)]
 	pub changefeed: Option<ChangeFeed>,
+	#[stored(n = 10)]
 	pub strict: bool,
 }
-impl_kv_value_revisioned!(DatabaseDefinition);
+impl_kv_value_catalog!(DatabaseDefinition);
 
 impl DatabaseDefinition {
 	fn to_runtime_definition(&self) -> DefineDatabaseStatement {

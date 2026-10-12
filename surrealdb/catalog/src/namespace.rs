@@ -12,6 +12,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::expr::statements::DefineNamespaceStatement;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal};
+use crate::impl_kv_value_catalog;
+use crate::stored::{Stored, impl_stored_id};
 use crate::val::Value;
 
 #[derive(
@@ -33,6 +35,7 @@ use crate::val::Value;
 pub struct NamespaceId(pub u32);
 
 impl_kv_value_revisioned!(NamespaceId);
+impl_stored_id!(NamespaceId);
 
 impl Revisioned for NamespaceId {
 	fn revision() -> u16 {
@@ -88,13 +91,21 @@ impl From<u32> for NamespaceId {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct NamespaceDefinition {
+	#[stored(n = 2)]
 	pub namespace_id: NamespaceId,
+	#[stored(n = 4)]
 	pub name: Strand,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 }
-impl_kv_value_revisioned!(NamespaceDefinition);
+impl_kv_value_catalog!(NamespaceDefinition);
 
 impl NamespaceDefinition {
 	fn to_runtime_definition(&self) -> DefineNamespaceStatement {

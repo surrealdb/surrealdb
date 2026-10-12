@@ -455,6 +455,17 @@ pub(crate) enum Error {
 	#[error(transparent)]
 	Exec(#[from] ExecError),
 
+	/// A failure raised by the catalog layer, which a catalog entry's refusal to
+	/// read or to write at the store's feature level reaches the planner as.
+	///
+	/// Transparent, like [`Error::Engine`]: the message and source chain are the
+	/// inner error's, so a refusal raised while planning reads exactly as the
+	/// same refusal raised while a statement runs. The wrapper exists because
+	/// the planner is typed on `Error` rather than `anyhow::Result`, so it needs
+	/// the `?` conversion.
+	#[error(transparent)]
+	Catalog(#[from] surrealdb_catalog::Error),
+
 	/// A failure raised by the index layer.
 	///
 	/// Transparent, like [`Error::Engine`]: the message and source chain are the
@@ -500,6 +511,23 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	/// The refusal of a catalog entry that `err` carries, found anywhere in its
+	/// source chain, whether it travels bare or inside [`Error::Catalog`].
+	///
+	/// A catalog read that fails with a refusal (an entry a newer release wrote,
+	/// or one that cannot be decoded) keeps its type through the planner, so the
+	/// statement that consulted the entry fails with the refusal rather than
+	/// with a rendered message.
+	pub(crate) fn entry_refusal(
+		err: &anyhow::Error,
+	) -> Option<surrealdb_catalog::stored::EntryError> {
+		err.chain().find_map(|cause| match cause.downcast_ref::<Error>() {
+			Some(Error::Catalog(surrealdb_catalog::Error::Entry(entry))) => Some(*entry),
+			Some(_) => None,
+			None => surrealdb_catalog::stored::EntryError::of_cause(cause),
+		})
+	}
+
 	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {

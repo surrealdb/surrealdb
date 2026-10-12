@@ -494,29 +494,24 @@ existing dependency supplies one either. Range partitioning needs no hash at
 all.
 
 Residual: `Value::cmp` is `partial_cmp().unwrap_or(Equal)`, which is not
-transitive in two places:
+transitive in one place: a `Float` and a `Decimal` that agree to about sixteen
+significant digits without being equal. A `Geometry` is totally ordered,
+NaN coordinates included, so it adds no case.
 
-- a `Float` and a `Decimal` that agree to about sixteen significant digits
-  without being equal;
-- a `Geometry` with a NaN coordinate, whose `partial_cmp` with a geometry of
-  its kind answers `None`.
-
-A `Closure` is not a third case: every closure compares `Equal` to every other,
+A `Closure` is not a second case: every closure compares `Equal` to every other,
 whatever it holds, which is a total preorder, so closures always route together
 and form one group, one distinct row or one join key, as they do unpartitioned.
 
-For the two non-transitive cases there can be a splitter `s` with `s < a` and
+For that case there can be a splitter `s` with `s < a` and
 `!(s < b)` although `a == b`, so two `cmp`-equal keys may route apart. Such a
 key is routed by `Splitters::route` like any other and never sent to an
 unpartitioned path. Main's `BTreeMap` is itself insertion-order dependent for
 such keys (which of several mutually "equal" keys it finds depends on the tree's
 shape), so no partitioning can promise main's exact grouping there, and a hash
 would fare no better. The guarantee is exact wherever the keys present are
-totally preordered by `Value::cmp`: every key set holding neither a
-`Float`/`Decimal` pair of that kind nor a `Geometry` with a NaN coordinate, at
-any depth. A container (`Array`, `Set`, `Object`) passes an element's `None`
-straight up, so a key such as `[loc]` with a NaN-coordinate point is
-non-transitive too. The
+totally preordered by `Value::cmp`: every key set holding no `Float`/`Decimal`
+pair of that kind, at any depth: a container (`Array`, `Set`, `Object`) compares
+element by element, so it is non-transitive wherever such a pair sits inside it. The
 equivalence tests pin `1`, `1.0f`, `1dec`, `-0.0f`/`0.0f`, `0.1f`/`0.1dec`
 (equal, and routed together when no splitter lies between them), and keys
 equal under `collate`/`numeric` sort flags but distinct under `Value::cmp`

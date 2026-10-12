@@ -1,26 +1,29 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, ExprText, FieldsText, FromStored, NamespaceId};
-use crate::expr as runtime;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::live::LiveFields;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
+use crate::stored::Stored;
 use crate::val::{TableName, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum StoredSubscriptionFields {
+	#[stored(n = 1)]
 	Diff,
 	/// Canonical SurrealQL text of the field selection.
 	#[revision(end = 2, convert_fn = "convert_select", fields_name = "SelectV1")]
 	Select(Fields),
 	#[revision(start = 2)]
+	#[stored(n = 2)]
 	Select(FieldsText),
 }
 
@@ -44,38 +47,48 @@ impl InfoStructure for SubscriptionFields {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredSubscriptionDefinition {
+	#[stored(n = 2)]
 	pub id: Uuid,
+	#[stored(n = 4)]
 	pub node: Uuid,
+	#[stored(n = 6)]
 	pub fields: StoredSubscriptionFields,
 	/// Canonical SurrealQL text of the subscription's source.
+	#[stored(n = 8)]
 	pub what: ExprText,
 	/// Canonical SurrealQL text of the `WHERE` clause.
+	#[stored(n = 10)]
 	pub cond: Option<ExprText>,
 	/// Canonical SurrealQL text of each `FETCH` target.
 	#[revision(end = 2, convert_fn = "convert_fetch")]
 	pub old_fetch: Option<Fetchs>,
 	#[revision(start = 2)]
+	#[stored(n = 12)]
 	pub fetch: Option<Vec<ExprText>>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
+	#[stored(n = 14)]
 	pub auth: Option<Auth>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
 	// so we can check it later when sending notifications.
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
+	#[stored(n = 16)]
 	pub session: Option<Value>,
 	// When a live query is created, we analyze the query
 	// and store the variables that are used in the query.
+	#[stored(n = 18)]
 	pub vars: BTreeMap<String, Value>,
 }
 
-impl_kv_value_revisioned!(StoredSubscriptionDefinition);
+impl_kv_value_catalog!(StoredSubscriptionDefinition);
 
 impl StoredSubscriptionDefinition {
 	/// Discards the old structured `Fetchs`: revision 2+ stores each fetch
@@ -384,14 +397,18 @@ impl FromStored for SubscriptionDefinition {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Stored)]
+#[stored(since = "4.0", floor_fixed)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct NodeLiveQuery {
+	#[stored(n = 2)]
 	pub ns: NamespaceId,
+	#[stored(n = 4)]
 	pub db: DatabaseId,
+	#[stored(n = 6)]
 	pub tb: TableName,
 }
-impl_kv_value_revisioned!(NodeLiveQuery);
+impl_kv_value_catalog!(NodeLiveQuery);
 
 #[cfg(test)]
 mod tests {

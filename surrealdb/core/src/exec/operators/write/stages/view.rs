@@ -41,7 +41,7 @@ use crate::expr::{
 	BinaryOperator, Cond, ControlFlow, Expr, Fields, Function, FunctionCall, Groups, Literal, Param,
 };
 use crate::key::schema::RecordKey;
-use crate::val::{Array, RecordIdKey, TableName, Value};
+use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 #[cfg(test)]
 thread_local! {
@@ -153,8 +153,8 @@ fn conjoin(left: Option<Expr>, right: Expr) -> Expr {
 
 /// A view row as it is stored.
 ///
-/// Decoded raw rather than through the record decoder, because a view row's
-/// `data` carries no `id`: the row's identity is its key, and splicing it back
+/// Decoded as written rather than through the record decoder, because a view
+/// row's `data` carries no `id`: the row's identity is its key, and splicing it
 /// in would change what the view table's own events and subscribers are shown.
 pub(crate) async fn read_view_row(
 	ctx: &WriteCtx,
@@ -169,8 +169,20 @@ pub(crate) async fn read_view_row(
 	};
 	match ctx.txn().get_key_raw(&record_key, None).await.map_err(ControlFlow::Err)? {
 		Some(bytes) => Ok(Some(Arc::new(
-			revision::from_slice::<Record>(&bytes)
-				.map_err(|err| ControlFlow::Err(anyhow::Error::new(err)))?,
+			ctx.txn()
+				.decode_record_as_written(
+					ctx.ns.namespace_id,
+					ctx.db.database_id,
+					table,
+					&bytes,
+					RecordId {
+						table: table.clone(),
+						key: key.clone(),
+					},
+					None,
+				)
+				.await
+				.map_err(ControlFlow::Err)?,
 		))),
 		None => Ok(None),
 	}

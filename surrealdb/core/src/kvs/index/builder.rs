@@ -2716,6 +2716,12 @@ impl CommitAction for ReleaseBuildOwnership {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 		Box::pin((*self).release())
 	}
+
+	/// The release is owed when the transaction ends, whichever way, and not to any write of a
+	/// save point scope: the scope's rollback must leave this half to run at the commit.
+	fn answers_to_scope(&self) -> bool {
+		false
+	}
 }
 
 impl RollbackAction for ReleaseBuildOwnership {

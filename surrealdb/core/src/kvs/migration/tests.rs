@@ -40,7 +40,7 @@ mod datastore {
 
 	use super::*;
 	use crate::key::KVKey;
-	use crate::key::schema::{MigrationKey, VersionKey};
+	use crate::key::schema::{FeatureLevelKey, MigrationKey, VersionKey};
 	use crate::kvs::version::MajorVersion;
 	use crate::kvs::{Datastore, TransactionType};
 
@@ -50,12 +50,34 @@ mod datastore {
 
 	/// Stands in for a datastore last touched by the version named: both the
 	/// legacy major-version key and the semantic version stamp, because a
-	/// datastore holding data with no major version reads as a v1 store.
+	/// datastore holding data with no major version reads as a v1 store. The
+	/// store is at the legacy feature level (see [`at_the_legacy_level`]).
 	async fn stamp(ds: &Datastore, version: &str) {
+		at_the_legacy_level(ds).await;
 		let txn = ds.transaction(TransactionType::Write).await.unwrap();
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
 		txn.set_key(&StorageVersionKey {}, &StorageVersion::parse(version).unwrap()).await.unwrap();
 		txn.commit().await.unwrap();
+	}
+
+	/// Puts the store at the legacy feature level, which records no level, as
+	/// a store upgraded from a release without feature levels stays until it is
+	/// raised.
+	///
+	/// A store created by this build records this build's release, and every
+	/// catalog entry the driver writes there, its lease included, is in the
+	/// stored-value grammar and commits the stored-format ledger entry. The
+	/// test registries stand in for other releases' registries and carry no row
+	/// for that entry, so on such a store the driver's own bookkeeping would
+	/// read as a migration they do not know. At the legacy level the driver
+	/// writes only `revision` encodings and records nothing but what the
+	/// registry under test runs.
+	async fn at_the_legacy_level(ds: &Datastore) {
+		let txn = ds.transaction(TransactionType::Write).await.unwrap();
+		txn.del_key(&FeatureLevelKey {}).await.unwrap();
+		txn.commit().await.unwrap();
+		ds.refresh_feature_level().await.unwrap();
+		assert!(ds.feature_level().await.unwrap().level.is_legacy());
 	}
 
 	/// A brand-new datastore is stamped at the running version, which is what
@@ -164,12 +186,13 @@ mod datastore {
 			name: "declared at the release",
 			version: (3, 4, 0),
 			run: bump,
+			on_demand: false,
 		}];
 
 		// A datastore a nightly of 3.4.0 already migrated.
 		let ds = mem().await;
 		stamp_nothing_but_data(&ds).await;
-		run_with(&ds, &registry, &StorageVersion::parse("3.4.0-nightly").unwrap(), false)
+		run_with(&ds, &registry, &[], &StorageVersion::parse("3.4.0-nightly").unwrap(), false)
 			.await
 			.unwrap();
 		assert_eq!(
@@ -184,7 +207,9 @@ mod datastore {
 
 		// The release itself then starts. Same triple, so no transition and no
 		// re-run — semver ordering would see 3.4.0 > 3.4.0-nightly and advance.
-		run_with(&ds, &registry, &StorageVersion::parse("3.4.0").unwrap(), false).await.unwrap();
+		run_with(&ds, &registry, &[], &StorageVersion::parse("3.4.0").unwrap(), false)
+			.await
+			.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 		assert_eq!(
 			ds.version_history().await.unwrap().len(),
@@ -216,19 +241,21 @@ mod datastore {
 				name: "first",
 				version: (3, 3, 0),
 				run: ok,
+				on_demand: false,
 			},
 			Migration {
 				id: 9202,
 				name: "second",
 				version: (3, 3, 0),
 				run: boom,
+				on_demand: false,
 			},
 		];
 		let current = StorageVersion::parse("3.3.0").unwrap();
 
 		let ds = mem().await;
 		stamp_nothing_but_data(&ds).await;
-		assert!(run_with(&ds, &registry, &current, false).await.is_err());
+		assert!(run_with(&ds, &registry, &[], &current, false).await.is_err());
 
 		// The first is durably applied even though the run aborted, and the
 		// stamp did not advance.
@@ -238,7 +265,7 @@ mod datastore {
 		assert_eq!(ds.storage_version().await.unwrap(), None);
 
 		// A restart owes only the second, and does not repeat the first.
-		assert!(run_with(&ds, &registry, &current, false).await.is_err());
+		assert!(run_with(&ds, &registry, &[], &current, false).await.is_err());
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1, "the applied migration ran again");
 	}
 
@@ -255,8 +282,9 @@ mod datastore {
 			.unwrap();
 		txn.commit().await.unwrap();
 
-		let err =
-			run_with(&ds, &[], &StorageVersion::parse("3.3.0").unwrap(), false).await.unwrap_err();
+		let err = run_with(&ds, &[], &[], &StorageVersion::parse("3.3.0").unwrap(), false)
+			.await
+			.unwrap_err();
 		let message = err.to_string();
 		assert!(
 			message.contains("id 9999") && message.contains("unreadable"),
@@ -265,7 +293,8 @@ mod datastore {
 	}
 
 	/// The stamp only ever moves forward, so a rollback to an older build does
-	/// not rewrite it downwards.
+	/// not rewrite it downwards. The history gains the downward note that
+	/// records the older build's writes, and no transition.
 	#[tokio::test]
 	async fn the_stamp_is_not_regressed_by_an_older_build() {
 		let ds = mem().await;
@@ -278,7 +307,11 @@ mod datastore {
 			ds.storage_version().await.unwrap(),
 			Some(StorageVersion::parse("99.0.0").unwrap())
 		);
-		assert!(ds.version_history().await.unwrap().is_empty());
+		let history = ds.version_history().await.unwrap();
+		assert_eq!(history.len(), 1, "unexpected history: {history:?}");
+		assert!(is_downward_note(&history[0]), "unexpected history: {history:?}");
+		assert_eq!(history[0].from, Some(StorageVersion::parse("99.0.0").unwrap()));
+		assert_eq!(history[0].to, StorageVersion::current());
 	}
 
 	/// The end-to-end path: a pre-stamp datastore runs the migration, records
@@ -299,6 +332,7 @@ mod datastore {
 			name: "test migration",
 			version: (3, 3, 0),
 			run: bump,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.3.0").unwrap();
 
@@ -306,7 +340,7 @@ mod datastore {
 		// A datastore with data but no stamp, so the migration is in the gap.
 		stamp_nothing_but_data(&ds).await;
 
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 
 		let recorded = ds.applied_migrations().await.unwrap();
@@ -318,7 +352,7 @@ mod datastore {
 		assert_eq!(ds.storage_version().await.unwrap(), Some(current.clone()));
 
 		// A second pass changes nothing.
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
 		assert_eq!(ds.version_history().await.unwrap().len(), 1);
@@ -342,12 +376,13 @@ mod datastore {
 			name: "ledger guarded",
 			version: (3, 3, 0),
 			run: bump,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.3.0").unwrap();
 
 		let ds = mem().await;
 		stamp_nothing_but_data(&ds).await;
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 
 		// Simulate the crash window: the migration ran and was recorded, but the
@@ -356,7 +391,7 @@ mod datastore {
 		txn.del_key(&StorageVersionKey {}).await.unwrap();
 		txn.commit().await.unwrap();
 
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 	}
 
@@ -378,10 +413,13 @@ mod datastore {
 			name: "should never run on a fresh store",
 			version: (3, 3, 0),
 			run: bump,
+			on_demand: false,
 		}];
 
 		let ds = mem().await;
-		run_with(&ds, &registry, &StorageVersion::parse("3.3.0").unwrap(), true).await.unwrap();
+		run_with(&ds, &registry, &[], &StorageVersion::parse("3.3.0").unwrap(), true)
+			.await
+			.unwrap();
 
 		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
 		// Recorded as applied without running, which is what keeps it off the
@@ -406,12 +444,13 @@ mod datastore {
 			name: "failing migration",
 			version: (3, 3, 0),
 			run: boom,
+			on_demand: false,
 		}];
 
 		let ds = mem().await;
 		stamp_nothing_but_data(&ds).await;
 
-		let err = run_with(&ds, &registry, &StorageVersion::parse("3.3.0").unwrap(), false)
+		let err = run_with(&ds, &registry, &[], &StorageVersion::parse("3.3.0").unwrap(), false)
 			.await
 			.unwrap_err();
 		assert!(err.to_string().contains("migration exploded"));
@@ -439,30 +478,36 @@ mod datastore {
 				name: "declared below the stamp",
 				version: (3, 2, 0),
 				run: record::<9101>,
+				on_demand: false,
 			},
 			Migration {
 				id: 9102,
 				name: "at the running version",
 				version: (3, 3, 0),
 				run: record::<9102>,
+				on_demand: false,
 			},
 			Migration {
 				id: 9103,
 				name: "also below the running version",
 				version: (3, 3, 5),
 				run: record::<9103>,
+				on_demand: false,
 			},
 			Migration {
 				id: 9104,
 				name: "after the build",
 				version: (3, 9, 0),
 				run: record::<9104>,
+				on_demand: false,
 			},
 		];
 
 		let ds = mem().await;
 		stamp(&ds, "3.2.4").await;
-		run_with(&ds, &registry, &StorageVersion::parse("3.4.0").unwrap(), false).await.unwrap();
+		run_with(&ds, &registry, &[], &StorageVersion::parse("3.4.0").unwrap(), false)
+			.await
+			.unwrap();
 
 		// 9104 is declared above the running version, so it is not yet owed.
 		assert_eq!(*ORDER.lock().unwrap(), vec![9101, 9102, 9103]);
@@ -482,14 +527,15 @@ mod datastore {
 			name: "reshapes the widgets",
 			version: (3, 4, 0),
 			run: |_| Box::pin(async { Ok(()) }),
+			on_demand: false,
 		}];
 		// A 3.4.0 build applies it and records it.
 		stamp_nothing_but_data(&ds).await;
-		run_with(&ds, &newer, &StorageVersion::parse("3.4.0").unwrap(), false).await.unwrap();
+		run_with(&ds, &newer, &[], &StorageVersion::parse("3.4.0").unwrap(), false).await.unwrap();
 
 		// Rolling back to a build whose registry has never heard of it must fail.
 		let older: [Migration; 0] = [];
-		let err = run_with(&ds, &older, &StorageVersion::parse("3.3.5").unwrap(), false)
+		let err = run_with(&ds, &older, &[], &StorageVersion::parse("3.3.5").unwrap(), false)
 			.await
 			.unwrap_err();
 		let message = err.to_string();
@@ -503,7 +549,7 @@ mod datastore {
 		let ds = mem().await;
 		stamp(&ds, "3.4.0").await;
 
-		run_with(&ds, &[], &StorageVersion::parse("3.3.5").unwrap(), false).await.unwrap();
+		run_with(&ds, &[], &[], &StorageVersion::parse("3.3.5").unwrap(), false).await.unwrap();
 
 		// The stamp is not dragged backwards by the older build.
 		assert_eq!(
@@ -534,9 +580,12 @@ mod datastore {
 			name: "backported fix",
 			version: (3, 3, 7),
 			run: bump,
+			on_demand: false,
 		}];
 
-		run_with(&ds, &backported, &StorageVersion::parse("3.4.1").unwrap(), false).await.unwrap();
+		run_with(&ds, &backported, &[], &StorageVersion::parse("3.4.1").unwrap(), false)
+			.await
+			.unwrap();
 
 		assert_eq!(RUNS.load(Ordering::SeqCst), 1);
 		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
@@ -560,11 +609,12 @@ mod datastore {
 			name: "never runs on a fresh store",
 			version: (3, 3, 0),
 			run: bump,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.3.0").unwrap();
 
 		let ds = mem().await;
-		run_with(&ds, &registry, &current, true).await.unwrap();
+		run_with(&ds, &registry, &[], &current, true).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
 		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
 
@@ -574,7 +624,7 @@ mod datastore {
 		txn.del_key(&StorageVersionKey {}).await.unwrap();
 		txn.commit().await.unwrap();
 
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
 	}
 
@@ -630,12 +680,13 @@ mod datastore {
 			name: "test migration",
 			version: (3, 3, 0),
 			run: noop,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.3.0").unwrap();
 
 		let ds = mem().await;
 		stamp_nothing_but_data(&ds).await;
-		run_with(&ds, &registry, &current, false).await.unwrap();
+		run_with(&ds, &registry, &[], &current, false).await.unwrap();
 
 		assert_eq!(ds.applied_migrations().await.unwrap().len(), 1);
 		assert_eq!(stored_lease(&ds).await, None);
@@ -659,6 +710,7 @@ mod datastore {
 			name: "test migration",
 			version: (3, 4, 0),
 			run: bump,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.4.0").unwrap();
 
@@ -670,7 +722,7 @@ mod datastore {
 
 		tokio::time::timeout(
 			std::time::Duration::from_secs(1),
-			run_with(&ds, &registry, &current, false),
+			run_with(&ds, &registry, &[], &current, false),
 		)
 		.await
 		.expect("a lease whose holder has finished must not hold up startup")
@@ -699,6 +751,7 @@ mod datastore {
 			name: "test migration",
 			version: (3, 4, 0),
 			run: bump,
+			on_demand: false,
 		}];
 		let current = StorageVersion::parse("3.4.0").unwrap();
 
@@ -709,18 +762,22 @@ mod datastore {
 		plant_history_entry(&ds, holder, earlier).await;
 		let lease = plant_foreign_lease(&ds, holder).await;
 
-		let waited =
-			tokio::time::timeout(WAIT_POLL_INTERVAL * 2, run_with(&ds, &registry, &current, false))
-				.await;
+		let waited = tokio::time::timeout(
+			WAIT_POLL_INTERVAL * 2,
+			run_with(&ds, &registry, &[], &current, false),
+		)
+		.await;
 
 		assert!(waited.is_err(), "a waiter must not take over from a holder that may be migrating");
 		assert_eq!(RUNS.load(Ordering::SeqCst), 0);
 		assert_eq!(stored_lease(&ds).await, Some(lease));
 	}
 
-	/// Stands in for an upgraded datastore: real data, a major version, and no
-	/// semantic version stamp.
+	/// Stands in for an upgraded datastore: real data, a major version, no
+	/// semantic version stamp, and the legacy feature level (see
+	/// [`at_the_legacy_level`]).
 	async fn stamp_nothing_but_data(ds: &Datastore) {
+		at_the_legacy_level(ds).await;
 		let txn = ds.transaction(TransactionType::Write).await.unwrap();
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
 		txn.commit().await.unwrap();

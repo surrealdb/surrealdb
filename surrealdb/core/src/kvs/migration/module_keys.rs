@@ -528,7 +528,7 @@ mod tests {
 
 			// An unstamped datastore carrying data, which is what an upgrade
 			// from a release that predates the stamp looks like.
-			run_with(&ds, MIGRATIONS, &StorageVersion::current(), false).await.unwrap();
+			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
 
 			assert_eq!(names(&ds, ns, db).await, vec![DERIVED_SILO]);
 			// Recorded, so a restart does not walk the band again.
@@ -575,7 +575,7 @@ mod tests {
 			};
 			assert!(e.to_string().contains(DERIVED_SILO), "unexpected error: {e}");
 
-			run_with(&ds, MIGRATIONS, &StorageVersion::current(), false).await.unwrap();
+			run_with(&ds, MIGRATIONS, &[], &StorageVersion::current(), false).await.unwrap();
 
 			let after = ds.execute(&remove, &session, None).await.unwrap();
 			after[0].result.as_ref().expect("the migrated definition is addressable by name");

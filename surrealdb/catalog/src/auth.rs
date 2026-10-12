@@ -1,12 +1,20 @@
 use revision::revisioned;
 
+use crate::stored::Stored;
+
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum AuthLevel {
+	#[stored(n = 1)]
 	No,
+	#[stored(n = 2)]
 	Root,
+	#[stored(n = 3)]
 	Namespace(String),
+	#[stored(n = 4)]
 	Database(String, String),
+	#[stored(n = 5)]
 	Record(String, String, String),
 }
 
@@ -37,9 +45,12 @@ impl From<&AuthLevel> for crate::iam::Level {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct AuthLimit {
+	#[stored(n = 2)]
 	pub level: AuthLevel,
+	#[stored(n = 4)]
 	pub role: Option<String>,
 }
 

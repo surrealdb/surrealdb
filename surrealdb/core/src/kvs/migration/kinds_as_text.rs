@@ -232,6 +232,13 @@ mod tests {
 			(ds, field, function)
 		}
 
+		/// Whether `bytes` store a definition whose kinds are text: the stored grammar a store at
+		/// a feature level writes, or a `revision` entry at or beyond `text_revision`.
+		fn stores_text(bytes: &[u8], text_revision: u16) -> bool {
+			bytes.first() == Some(&crate::catalog::stored::CATALOG_MARKER)
+				|| stored_revision(bytes).is_some_and(|revision| revision >= text_revision)
+		}
+
 		async fn stored<K: crate::key::KVKey + std::fmt::Debug>(
 			ds: &Datastore,
 			key: &K,
@@ -248,13 +255,13 @@ mod tests {
 			resave_kinds_as_text(&ds).await.unwrap();
 
 			let field_bytes = stored(&ds, &field).await;
-			assert_eq!(stored_revision(&field_bytes), Some(6));
+			assert!(stores_text(&field_bytes, FIELD_TEXT_REVISION));
 			assert_eq!(
 				StoredFieldDefinition::kv_decode_value(&field_bytes, ()).unwrap(),
 				StoredFieldDefinition::kv_decode_value(v3_3_0::FIELD_WITH_TYPE, ()).unwrap(),
 			);
 			let function_bytes = stored(&ds, &function).await;
-			assert_eq!(stored_revision(&function_bytes), Some(4));
+			assert!(stores_text(&function_bytes, FUNCTION_TEXT_REVISION));
 			assert_eq!(
 				StoredFunctionDefinition::kv_decode_value(&function_bytes, ()).unwrap(),
 				StoredFunctionDefinition::kv_decode_value(v3_3_0::FUNCTION_WITH_ARGS, ()).unwrap(),

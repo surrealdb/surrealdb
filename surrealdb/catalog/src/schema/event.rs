@@ -2,17 +2,17 @@ use std::sync::OnceLock;
 
 use anyhow::Context as _;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::auth::AuthLimit;
 use crate::catalog::{ExprText, FromStored, LogicalBody};
-use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::{TableName, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 /// Whether a stored event runs inline with the triggering write or is
 /// dispatched asynchronously, and the retry/nesting budget when async.
@@ -21,13 +21,18 @@ use crate::val::{TableName, Value};
 /// the parser's defaults; this carries the persisted form, so it is the one
 /// that owns the encoding and must not change shape without a revision bump.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum EventKind {
+	#[stored(n = 1)]
 	Sync,
+	#[stored(n = 2)]
 	Async {
 		/// Maximum retry count for async events (0 disables retries; event still runs once).
+		#[stored(n = 2)]
 		retry: u16,
 		/// Maximum async event nesting depth for this event (0 allows top-level only).
+		#[stored(n = 4)]
 		max_depth: u16,
 	},
 }
@@ -63,20 +68,32 @@ impl From<EventKind> for runtime::EventKind {
 }
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0", revision_embedded)]
 pub struct StoredEventDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
+	#[stored(n = 4)]
 	pub target_table: Strand,
 	/// Canonical SurrealQL text of the `WHEN` clause's expression.
+	#[stored(n = 6)]
 	pub when: ExprText,
 	/// Canonical SurrealQL text of each `THEN` clause expression.
+	#[stored(n = 8)]
 	pub then: Vec<ExprText>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
+	#[stored(n = 10)]
 	pub auth_limit: AuthLimit,
 	/// Whether this event should be queued for async processing.
 	#[revision(start = 3, default_fn = "default_event_kind")]
+	#[stored(n = 12)]
 	pub kind: EventKind,
 }
 
@@ -92,7 +109,7 @@ impl StoredEventDefinition {
 	}
 }
 
-impl_kv_value_revisioned!(StoredEventDefinition);
+impl_kv_value_catalog!(StoredEventDefinition);
 
 impl StoredEventDefinition {
 	pub fn retry(&self) -> u16 {

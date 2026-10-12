@@ -742,6 +742,12 @@ impl Sequences {
 		}
 	}
 
+	/// The id of the node these allocators run on: the one every record this node writes to the
+	/// store's ledger and node records names.
+	pub fn node_id(&self) -> Uuid {
+		self.nid
+	}
+
 	fn held_catalog_ids(&self) -> std::sync::MutexGuard<'_, HeldCatalogIds> {
 		self.held.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 	}
@@ -1099,7 +1105,14 @@ impl Sequences {
 			return self.next_provisional_val(ctx, tx, &slot, &domain, &seq_def).await;
 		}
 		let domain = Arc::new(SequenceDomain::new_user(ns, db, sq));
-		self.next_val(ctx, domain, seq_def.start, seq_def.batch, seq_def.timeout).await
+		self.next_val(
+			ctx,
+			domain,
+			seq_def.start,
+			seq_def.batch,
+			seq_def.timeout.map(Duration::from),
+		)
+		.await
 	}
 
 	/// Serves a draw from a sequence `tx` has defined and not committed, from
@@ -1281,7 +1294,16 @@ impl Sequence {
 		def: &SequenceDefinition,
 		caller: &Transaction,
 	) -> SequenceResult<Self> {
-		Self::build(ctx, sqs, seq, def.start, def.batch, def.timeout, Some(caller)).await
+		Self::build(
+			ctx,
+			sqs,
+			seq,
+			def.start,
+			def.batch,
+			def.timeout.map(Duration::from),
+			Some(caller),
+		)
+		.await
 	}
 
 	async fn build(
@@ -1332,7 +1354,7 @@ impl Sequence {
 				{
 					Some(def) => {
 						let def: SequenceDefinition = def;
-						(def.start, def.batch, def.timeout, Some(def))
+						(def.start, def.batch, def.timeout.map(Duration::from), Some(def))
 					}
 					// The caller read a definition, this transaction did not
 					// write it, and nothing is committed under the name: it was

@@ -25,8 +25,21 @@ use web_time::Instant;
 /// happened and cannot be taken back, so a failure here is logged rather than
 /// surfaced. Discarded when the transaction is cancelled or its commit fails,
 /// because the change the action answers to never became durable.
+///
+/// An action registered inside a save point scope answers to the writes of that scope, so a
+/// rollback of the scope discards it ([`Self::answers_to_scope`]).
 pub trait CommitAction: Send + Sync + 'static {
 	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+
+	/// Whether a rollback of the save point scope this action was registered in discards it.
+	///
+	/// True unless the action is one half of a pair registered on both outcomes
+	/// ([`RollbackAction`]), which answers to the end of the transaction rather than to any write:
+	/// the rollback half runs only when the transaction does not commit, so the commit half has to
+	/// survive a scope's rollback for one half of the pair to run in every case.
+	fn answers_to_scope(&self) -> bool {
+		true
+	}
 }
 
 /// Work owed when a transaction does *not* commit.

@@ -4,31 +4,41 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_kvs::impl_kv_value_revisioned;
+use surrealdb_kvs::value::KVValue;
+use surrealdb_kvs::{EncodeContext, FeatureLevel, Release};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::{Stored, canonical, decode_entry, encode_stored};
 use crate::val::{Object, Value};
+use crate::{Error, impl_kv_value_catalog};
 
 /// A node in the cluster
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Stored,
+)]
+#[stored(since = "4.0", floor_fixed)]
 pub struct Node {
 	/// The id of the node
+	#[stored(n = 2)]
 	pub id: Uuid,
 	/// The heartbeat of the node
+	#[stored(n = 4)]
 	pub heartbeat: Timestamp,
 	/// Whether the node is garbage collected
+	#[stored(n = 6)]
 	pub gc: bool,
 	/// Public HTTP endpoint at which other cluster members can reach this node
 	/// for cross-node messaging (live-query relay, etc.). `None` when not
 	/// configured — single-node and shared-backend deployments leave this empty.
 	#[revision(start = 2)]
+	#[stored(n = 8)]
 	pub http_endpoint: Option<String>,
 }
 
-impl_kv_value_revisioned!(Node);
+impl_kv_value_catalog!(Node);
 
 impl Node {
 	/// Create a new Node entry
@@ -103,14 +113,57 @@ impl InfoStructure for Node {
 	}
 }
 
+/// The release a node runs, recorded beside its heartbeat.
+///
+/// The record is the stored grammar at every feature level and is never merged with the record it
+/// replaces: each write describes the node that wrote it, so an earlier release drops a later
+/// release's ignorable fields when it rewrites its own record. `floor_fixed` keeps every release
+/// able to read, rewrite and remove it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Stored)]
+#[stored(since = "4.0", floor_fixed)]
+pub struct NodeRelease {
+	/// The release of the node's binary.
+	#[stored(n = 2)]
+	pub release: Release,
+	/// The heartbeat of the node's own record this one was written beside.
+	#[stored(n = 4)]
+	pub heartbeat: Timestamp,
+}
+
+/// Written in the stored grammar whatever the store's feature level, so the record is not
+/// levelled.
+impl KVValue for NodeRelease {
+	type KeyContext = ();
+
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let ctx = EncodeContext {
+			level: FeatureLevel::At(Release::CURRENT),
+			prior: None,
+		};
+		Ok(encode_stored(self, &ctx).map_err(Error::Entry)?.bytes)
+	}
+
+	fn kv_canonical(&self) -> anyhow::Result<Vec<u8>> {
+		Ok(canonical(self).map_err(Error::Entry)?)
+	}
+
+	fn kv_decode_value(bytes: &[u8], _: ()) -> anyhow::Result<Self> {
+		Ok(decode_entry::<Self>(bytes).map_err(Error::Entry)?)
+	}
+}
+
 // This struct is meant to represent a timestamp that can be used to partially
 // order events in a cluster. It should be derived from a timestamp oracle, such
 // as the one available in TiKV via the client `TimestampExt` implementation.
 /// A versionstamp-style timestamp used for cluster-node bookkeeping.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash)]
+#[derive(
+	Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Deserialize, Serialize, Hash, Stored,
+)]
+#[stored(since = "4.0", floor_fixed)]
 pub struct Timestamp {
 	/// The raw timestamp value.
+	#[stored(n = 2)]
 	pub value: u64,
 }
 

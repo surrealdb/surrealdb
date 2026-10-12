@@ -5,11 +5,11 @@ use anyhow::Result;
 use surrealdb_kvs::TransactionType::Read;
 use tokio_util::sync::CancellationToken;
 
-use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::TableMutations;
 use crate::key::TypedRange;
-use crate::key::schema::ChangeFeedPrefix;
+use crate::key::schema::{ChangeFeedPrefix, DatabasePrefix, NamespacePrefix, TablePrefix};
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{CHANGEFEED_GC_BATCH_SIZE, Datastore, Transaction};
@@ -118,6 +118,13 @@ pub async fn gc_all_at(
 /// Databases with no retention anywhere are omitted: they have nothing to
 /// collect.
 ///
+/// A namespace, database or table this build cannot read, because a newer
+/// release wrote its definition, is skipped and counted. A database whose
+/// retention cannot be known is skipped whole, with every table it holds: its
+/// changefeed entries are shared across its tables, so collecting any of them
+/// could remove what the unreadable definition keeps. Skipped changefeed data
+/// is retained, never lost, and the pass reports the count once.
+///
 /// Read in one short-lived read transaction, so no snapshot is held across the
 /// write transactions the deletes then commit.
 async fn targets(ds: &Datastore) -> Result<Vec<Target<TypedRange<TableMutations>>>> {
@@ -132,9 +139,34 @@ async fn targets(ds: &Datastore) -> Result<Vec<Target<TypedRange<TableMutations>
 		let mut buf = [0u8; _];
 		let earliest = ts_impl.earliest().encode(&mut buf).to_vec();
 		let mut targets = Vec::new();
-		for ns in txn.all_ns(None).await?.as_ref() {
-			for db in txn.all_db(ns.namespace_id, None).await?.as_ref() {
-				let tbs = txn.all_tb(db.namespace_id, db.database_id, None).await?;
+		let mut skipped = 0usize;
+		let nss = txn.all_readable(NamespacePrefix {}.range()?).await?;
+		skipped += nss.refused;
+		for ns in &nss.values {
+			let dbs = txn
+				.all_readable(
+					DatabasePrefix {
+						ns: ns.namespace_id,
+					}
+					.range()?,
+				)
+				.await?;
+			skipped += dbs.refused;
+			for db in &dbs.values {
+				let stored = txn
+					.all_readable(
+						TablePrefix {
+							ns: db.namespace_id,
+							db: db.database_id,
+						}
+						.range()?,
+					)
+					.await?;
+				if stored.refused > 0 {
+					skipped += stored.refused;
+					continue;
+				}
+				let tbs = crate::catalog::from_stored_all::<TableDefinition>(&stored.values)?;
 				let expiry = retention_of(db, tbs.as_ref());
 				if expiry.is_zero() {
 					continue;
@@ -157,6 +189,13 @@ async fn targets(ds: &Datastore) -> Result<Vec<Target<TypedRange<TableMutations>
 				});
 			}
 		}
+		if skipped > 0 {
+			warn!(
+				skipped,
+				"Changefeed garbage collection skipped catalog entries that need a newer release \
+				 than this build; their changefeed entries are retained"
+			);
+		}
 		Ok(targets)
 	}
 	.await;
@@ -169,11 +208,11 @@ async fn targets(ds: &Datastore) -> Result<Vec<Target<TypedRange<TableMutations>
 /// honoured. `Duration::ZERO` means no retention is configured anywhere, and so
 /// nothing to collect.
 fn retention_of(db: &DatabaseDefinition, tbs: &[TableDefinition]) -> Duration {
-	let db_expiry = db.changefeed.map(|v| v.expiry).unwrap_or_default();
+	let db_expiry = db.changefeed.map(|v| Duration::from(v.expiry)).unwrap_or_default();
 	let tb_expiry = tbs
 		.iter()
 		.filter_map(|tb| tb.changefeed.as_ref())
-		.map(|cf| cf.expiry)
+		.map(|cf| Duration::from(cf.expiry))
 		.filter(|&dur| !dur.is_zero())
 		.max()
 		.unwrap_or(Duration::ZERO);

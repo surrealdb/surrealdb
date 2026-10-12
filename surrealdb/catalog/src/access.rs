@@ -1,16 +1,20 @@
 use md5::Digest;
 use revision::revisioned;
 use sha2::Sha256;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
+use crate::impl_kv_value_catalog;
+use crate::stored::Stored;
 use crate::val::{Datetime, RecordId};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Subject {
+	#[stored(n = 1)]
 	Record(RecordId),
+	#[stored(n = 2)]
 	User(String),
 }
 
@@ -25,10 +29,14 @@ impl Subject {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Grant {
+	#[stored(n = 1)]
 	Jwt(GrantJwt),
+	#[stored(n = 2)]
 	Record(GrantRecord),
+	#[stored(n = 3)]
 	Bearer(GrantBearer),
 }
 
@@ -44,27 +52,37 @@ impl Grant {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct GrantJwt {
-	pub jti: Uuid,             // JWT ID
+	#[stored(n = 2)]
+	pub jti: Uuid, // JWT ID
+	#[stored(n = 4)]
 	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct GrantRecord {
-	pub rid: Uuid,             // Record ID
-	pub jti: Uuid,             // JWT ID
+	#[stored(n = 2)]
+	pub rid: Uuid, // Record ID
+	#[stored(n = 4)]
+	pub jti: Uuid, // JWT ID
+	#[stored(n = 6)]
 	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct GrantBearer {
+	#[stored(n = 2)]
 	pub id: String, // Key ID
 	// Key. Will not be stored and be returned as redacted.
 	// Immediately after generation, it will contain the plaintext key.
 	// Will be hashed before storage so that the plaintext key is not stored.
+	#[stored(n = 4)]
 	pub key: String,
 }
 
@@ -83,17 +101,25 @@ impl GrantBearer {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct AccessGrant {
-	pub id: String,                   // Unique grant identifier.
-	pub ac: String,                   // Access method used to create the grant.
-	pub creation: Datetime,           // Grant creation time.
+	#[stored(n = 2)]
+	pub id: String, // Unique grant identifier.
+	#[stored(n = 4)]
+	pub ac: String, // Access method used to create the grant.
+	#[stored(n = 6)]
+	pub creation: Datetime, // Grant creation time.
+	#[stored(n = 8)]
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
+	#[stored(n = 10)]
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
-	pub grant: Grant,                 // Grant data.
+	#[stored(n = 12)]
+	pub subject: Subject, // Subject of the grant.
+	#[stored(n = 14)]
+	pub grant: Grant, // Grant data.
 }
-impl_kv_value_revisioned!(AccessGrant);
+impl_kv_value_catalog!(AccessGrant);
 
 impl AccessGrant {
 	/// Returns a version of the statement where potential secrets are redacted.

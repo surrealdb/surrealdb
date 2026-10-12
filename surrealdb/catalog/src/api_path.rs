@@ -8,6 +8,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::Error;
 use crate::expr::Kind;
+use crate::expr::arrival::{Arrival, Release};
 use crate::syn;
 use crate::types::PublicKind;
 use crate::val::{Array, Object, Value};
@@ -237,6 +238,19 @@ impl FromStr for Path {
 		}
 
 		Ok(Self(segments))
+	}
+}
+
+/// A path arrives with the newest release among the kinds its segments annotate.
+impl Arrival for Path {
+	fn arrival(&self) -> Release {
+		let Path(segments) = self;
+		segments.iter().fold(Release::FIRST_STORED, |release, segment| match segment {
+			Segment::Fixed(_) | Segment::Rest(_) => release,
+			Segment::Dynamic(_, kind) => {
+				kind.as_ref().map_or(release, |k| release.max(k.arrival()))
+			}
+		})
 	}
 }
 

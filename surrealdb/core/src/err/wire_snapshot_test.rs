@@ -17,7 +17,7 @@ use surrealdb_types::{SurrealValue, ToSql};
 use super::{EngineError, Error};
 use crate::api::err::ApiError;
 use crate::buc::Error as BucError;
-use crate::catalog::Error as CatalogError;
+use crate::catalog::{Error as CatalogError, Generation};
 use crate::dbs::SortError;
 use crate::dbs::capabilities::Error as CapabilitiesError;
 use crate::doc::Error as DocError;
@@ -27,7 +27,7 @@ use crate::expr::{Bytesize, Error as ExprError, Idiom};
 use crate::iam::{Error as AuthError, PolicyError};
 use crate::idx::Error as IdxError;
 use crate::key::Error as KeyError;
-use crate::kvs::{DatastoreError, Error as KvsError};
+use crate::kvs::{DatastoreError, Error as KvsError, FeatureLevel, Release};
 use crate::syn::ParseError;
 use crate::val::{CastError, CoerceError, Duration, RecordId, Value};
 
@@ -81,6 +81,12 @@ fn every_variant() -> Vec<(&'static str, Error)> {
 		("ApiError", Error::ApiError(ApiError::BodyDecodeFailure)),
 		("InvalidUrl", Error::InvalidUrl("sample".to_string())),
 		("Http", Error::Http("sample".to_string())),
+		// Sampled the same way again, against the bare `Entry` row in the catalog
+		// block below.
+		(
+			"Catalog",
+			Error::Catalog(CatalogError::Entry(crate::catalog::stored::EntryError::NoHeader)),
+		),
 	]
 }
 
@@ -390,6 +396,86 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 				migrations: "sample".to_string(),
 			},
 		),
+		(
+			"FeatureNotEnabled",
+			DatastoreError::FeatureNotEnabled {
+				needed: Release::new(4, 0),
+				level: FeatureLevel::Legacy,
+			},
+		),
+		(
+			"FeatureLevelAboveRelease",
+			DatastoreError::FeatureLevelAboveRelease {
+				target: Release::new(4, 1),
+				current: Release::new(4, 0),
+			},
+		),
+		(
+			"FeatureLevelBelowFirst",
+			DatastoreError::FeatureLevelBelowFirst {
+				first: Release::new(4, 0),
+			},
+		),
+		(
+			"FeatureLevelNodeBehind",
+			DatastoreError::FeatureLevelNodeBehind {
+				node: uuid::Uuid::nil(),
+				release: None,
+				target: Release::new(4, 0),
+			},
+		),
+		(
+			"FeatureLevelInUse",
+			DatastoreError::FeatureLevelInUse {
+				in_use: Release::new(4, 1),
+				target: Release::new(4, 0),
+			},
+		),
+		("FeatureLevelUnset", DatastoreError::FeatureLevelUnset),
+		("FeatureLevelMissing", DatastoreError::FeatureLevelMissing),
+		("FeatureLevelPinInvalid", DatastoreError::FeatureLevelPinInvalid),
+		(
+			"GenerationRingFull",
+			DatastoreError::GenerationRingFull {
+				table: "sample".to_string(),
+				floor: Generation::new(1).expect("a nonzero generation"),
+			},
+		),
+		(
+			"GenerationOccupied",
+			DatastoreError::GenerationOccupied {
+				table: "sample".to_string(),
+				generation: Generation::new(1).expect("a nonzero generation"),
+			},
+		),
+		(
+			"NoGeneration",
+			DatastoreError::NoGeneration {
+				table: "sample".to_string(),
+			},
+		),
+		(
+			"FloorOutsideWindow",
+			DatastoreError::FloorOutsideWindow {
+				table: "sample".to_string(),
+				floor: Generation::new(1).expect("a nonzero generation"),
+				base: Generation::new(2).expect("a nonzero generation"),
+				head: Generation::new(3).expect("a nonzero generation"),
+			},
+		),
+		(
+			"ConformanceStale",
+			DatastoreError::ConformanceStale {
+				table: "sample".to_string(),
+				field: "sample".to_string(),
+			},
+		),
+		(
+			"StoreReadOnly",
+			DatastoreError::StoreReadOnly {
+				features: "sample".to_string(),
+			},
+		),
 	]
 }
 
@@ -597,6 +683,13 @@ fn every_auth_variant() -> Vec<(&'static str, AuthError)> {
 fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 	vec![
 		("InvalidPath", CatalogError::InvalidPath("sample".to_string())),
+		("Entry", CatalogError::Entry(crate::catalog::stored::EntryError::NoHeader)),
+		(
+			"Layout",
+			CatalogError::Layout(crate::catalog::RecordLayoutError::NoLayouts {
+				generation: 1,
+			}),
+		),
 		(
 			"Query",
 			CatalogError::Query {

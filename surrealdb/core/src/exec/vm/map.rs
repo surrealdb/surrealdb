@@ -4426,7 +4426,9 @@ async fn table_dependency(planner: &Planner<'_>, table: &TableName) -> Mapped<De
 	let Some((ns, db)) = crate::exec::vm::host::out_of_line(|| planner.ns_db_ids()).await else {
 		return Err(NotCovered::unresolved_database(planner));
 	};
-	let unread = |_| NotCovered::internal("the table catalog could not be read");
+	let unread = |e: anyhow::Error| {
+		super::plan_catalog::unread_catalog(&e, || "the table catalog could not be read".to_owned())
+	};
 	let version = txn.catalog_version(ns, db, table).await.map_err(unread)?;
 	Ok(Dependency::Table {
 		table: table.clone(),
@@ -5021,7 +5023,11 @@ async fn knn_union_sources(
 			});
 			continue;
 		}
-		let unread = |_| NotCovered::internal("the table catalog could not be read");
+		let unread = |e: anyhow::Error| {
+			super::plan_catalog::unread_catalog(&e, || {
+				"the table catalog could not be read".to_owned()
+			})
+		};
 		let exists = match table {
 			Some(table) => txn.get_tb(ns, db, table, None).await.map_err(unread)?.is_some(),
 			None => false,

@@ -37,6 +37,7 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 
@@ -46,6 +47,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Maximum byte length of a string that can be stored inline.
 pub const INLINE_CAP: usize = 23;
+
+/// The longest claimed length, in bytes, that revision decoding allocates up front.
+///
+/// A longer claim is read through a buffer that grows only as bytes arrive, so a corrupt length
+/// cannot cost memory the input does not hold. This equals
+/// `surrealdb_collections::bounded::PREALLOC_BYTES`; the crates do not depend on each other.
+const STREAM_THRESHOLD: usize = 64 * 1024;
 
 /// Tag for static strings.
 const TAG_STATIC: u8 = 254;
@@ -623,8 +631,20 @@ impl DeserializeRevisioned for Strand {
 				},
 			});
 		}
-		let mut buf = vec![0u8; len];
-		reader.read_exact(&mut buf).map_err(Error::Io)?;
+		let buf = if len <= STREAM_THRESHOLD {
+			let mut buf = vec![0u8; len];
+			reader.read_exact(&mut buf).map_err(Error::Io)?;
+			buf
+		} else {
+			// The length is a claim: grow only as bytes arrive.
+			let mut buf = Vec::with_capacity(STREAM_THRESHOLD);
+			let read =
+				Read::take(&mut *reader, len as u64).read_to_end(&mut buf).map_err(Error::Io)?;
+			if read != len {
+				return Err(Error::Io(std::io::ErrorKind::UnexpectedEof.into()));
+			}
+			buf
+		};
 		let s = String::from_utf8(buf).map_err(|e| Error::Utf8Error(e.utf8_error()))?;
 		Ok(Strand::from(s.into_boxed_str()))
 	}

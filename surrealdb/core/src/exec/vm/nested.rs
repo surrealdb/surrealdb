@@ -550,9 +550,20 @@ async fn dispatched(
 						&rid.table,
 						range,
 					)?;
+					let txn = ctx.txn();
+					let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+					let epoch = txn.layout_epoch();
+					let layouts = txn
+						.table_layouts(ns, db, &rid.table, version)
+						.await
+						.map_err(ControlFlow::Err)?;
+					let gate =
+						crate::kvs::RowGate::new(layouts, ns, db, &rid.table, version, epoch)
+							.map_err(ControlFlow::Err)?;
 					let mut source = kv_scan_stream(
-						ctx.txn(),
+						txn,
 						range,
+						gate,
 						version,
 						None,
 						crate::kvs::Direction::Forward,
@@ -688,6 +699,7 @@ async fn undispatched_table(
 	let records = kv_scan_stream(
 		ctx.txn(),
 		range,
+		descriptor.row_gate().map_err(ControlFlow::Err)?,
 		version,
 		None,
 		crate::kvs::Direction::Forward,

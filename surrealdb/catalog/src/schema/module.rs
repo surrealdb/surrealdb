@@ -1,30 +1,40 @@
 use anyhow::{Context as _, bail};
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{
 	FromStored, LogicalPermissionBody, ModuleExecutable, Permission, StoredPermission,
 };
-use crate::expr as runtime;
 use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::DefineModuleStatement;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredModuleDefinition {
+	#[stored(n = 2)]
 	pub name: Option<String>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 4)]
 	pub permissions: StoredPermission,
+	#[stored(n = 6)]
 	pub executable: ModuleExecutable,
 	/// Whether this module is loaded without verifying a signature.
 	///
 	/// Definitions written before this field existed predate signing
 	/// entirely, so they decode as unsigned and keep loading unchanged.
 	#[revision(start = 2, default_fn = "default_unsigned")]
+	#[stored(n = 8)]
 	pub unsigned: bool,
 }
 
@@ -34,7 +44,7 @@ impl StoredModuleDefinition {
 	}
 }
 
-impl_kv_value_revisioned!(StoredModuleDefinition);
+impl_kv_value_catalog!(StoredModuleDefinition);
 
 impl StoredModuleDefinition {
 	/// This function is used to get the storage name of a module.

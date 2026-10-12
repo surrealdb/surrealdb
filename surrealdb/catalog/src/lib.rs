@@ -6,6 +6,11 @@
 //! The provider traits here are the read/write contract the datastore layer
 //! implements to serve definitions to the engine.
 //!
+//! Every persisted catalog entry is a keyed map in the stored-value grammar, declared once per type
+//! by `#[derive(Stored)]` and frozen by `catalog-schema.lock`; entries a 3.x binary wrote in the
+//! `revision` encoding stay readable. The envelope, the dispatch between the two grammars, the
+//! feature-level rules and the embedded frame are described in [`stored`].
+//!
 //! This crate is an internal implementation detail of SurrealDB: its API is
 //! unstable and changes without notice. Depend on the `surrealdb` SDK or
 //! `surrealdb-core` instead.
@@ -56,15 +61,26 @@ pub mod aggregation;
 pub mod api_path;
 pub mod auth;
 mod compiled;
+mod conformance;
 mod database;
 mod error;
+/// The store-wide feature level record.
+pub mod feature;
+mod generation;
+/// Row layouts of table generations.
+pub mod layout;
+mod layout_derive;
 mod module;
 mod namespace;
 /// Cluster-node registration and liveness bookkeeping.
 pub mod node;
+/// Packed rows: writing and reading the rows of a packed descriptor.
+pub mod packed;
 pub mod providers;
 pub mod record;
 pub mod schema;
+/// Catalog entries in the stored-value grammar.
+pub mod stored;
 mod subscription;
 mod table;
 mod task;
@@ -73,8 +89,20 @@ pub mod view;
 
 pub use access::*;
 pub use compiled::*;
+pub use conformance::{
+	Conformance, FieldCandidate, FieldClaim, TableConformance, birth_claims, birth_claims_of,
+	definition_digest,
+};
 pub use database::*;
 pub use error::Error;
+pub use feature::StoredFeatureLevel;
+pub use generation::{Generation, GenerationMark, GenerationRing, TableMigrations};
+pub use layout::{
+	Column, ColumnRole, GenerationLayout, LayoutDescriptor, LayoutRefusal, Location,
+	MAX_PATH_DEPTH, PLANNED_PHYSICAL_KINDS, PackedDescriptor, PhysicalKind, Presence,
+	RecordLayoutError, RowLayout, TableLayouts, decode_generation,
+};
+pub use layout_derive::{TableShape, derive_layout};
 pub use module::*;
 pub use namespace::*;
 pub use record::*;

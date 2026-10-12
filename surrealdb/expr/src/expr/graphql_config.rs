@@ -11,22 +11,29 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
+use crate::val::stored::schema::Stored;
 use crate::val::{TableName, Value};
 
 #[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct GraphQLConfig {
+	#[stored(n = 2)]
 	pub tables: GraphQLTablesConfig,
+	#[stored(n = 4)]
 	pub functions: GraphQLFunctionsConfig,
 	/// Maximum query nesting depth. `None` means no limit.
 	#[revision(start = 2)]
+	#[stored(n = 6)]
 	pub depth_limit: Option<u32>,
 	/// Maximum query complexity (total number of fields). `None` means no limit.
 	#[revision(start = 2)]
+	#[stored(n = 8)]
 	pub complexity_limit: Option<u32>,
 	/// Controls whether GraphQL schema introspection is enabled.
 	/// Defaults to `Auto` (introspection enabled).
 	#[revision(start = 3)]
+	#[stored(n = 10)]
 	pub introspection: GraphQLIntrospectionConfig,
 }
 
@@ -43,12 +50,17 @@ impl InfoStructure for GraphQLConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum GraphQLTablesConfig {
 	#[default]
+	#[stored(n = 1)]
 	None,
+	#[stored(n = 2)]
 	Auto,
+	#[stored(n = 3)]
 	Include(Vec<TableName>),
+	#[stored(n = 4)]
 	Exclude(Vec<TableName>),
 }
 
@@ -68,12 +80,17 @@ impl InfoStructure for GraphQLTablesConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum GraphQLFunctionsConfig {
 	#[default]
+	#[stored(n = 1)]
 	None,
+	#[stored(n = 2)]
 	Auto,
+	#[stored(n = 3)]
 	Include(Vec<Strand>),
+	#[stored(n = 4)]
 	Exclude(Vec<Strand>),
 }
 
@@ -93,10 +110,13 @@ impl InfoStructure for GraphQLFunctionsConfig {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum GraphQLIntrospectionConfig {
 	#[default]
+	#[stored(n = 1)]
 	Auto,
+	#[stored(n = 2)]
 	None,
 }
 

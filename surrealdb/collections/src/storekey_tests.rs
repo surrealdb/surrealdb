@@ -145,19 +145,15 @@ fn vec_map_storekey_decode_rejects_duplicate_keys() {
 }
 
 #[test]
-fn vec_set_storekey_decode_rejects_descending_elements() {
+fn vec_set_storekey_decode_sorts_descending_elements() {
 	let bytes = storekey_set_bytes_u32(&[2, 1]);
-	assert!(matches!(
-		decode_borrow::<VecSet<u32>>(&bytes),
-		Err(storekey::DecodeError::InvalidFormat)
-	));
+	let set = decode_borrow::<VecSet<u32>>(&bytes).unwrap();
+	assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1, 2]);
 }
 
 #[test]
-fn vec_set_storekey_decode_rejects_duplicate_elements() {
+fn vec_set_storekey_decode_merges_duplicate_elements() {
 	let bytes = storekey_set_bytes_u32(&[1, 1]);
-	assert!(matches!(
-		decode_borrow::<VecSet<u32>>(&bytes),
-		Err(storekey::DecodeError::InvalidFormat)
-	));
+	let set = decode_borrow::<VecSet<u32>>(&bytes).unwrap();
+	assert_eq!(set.iter().copied().collect::<Vec<_>>(), [1]);
 }

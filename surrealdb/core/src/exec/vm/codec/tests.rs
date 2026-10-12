@@ -248,11 +248,12 @@ fn reclaim_state_matches_its_revisioned_encoding() {
 }
 
 /// An aggregated view row, whose metadata carries a stat of every kind, reads
-/// and writes as the Rust `Record` does: decoding its bytes and encoding them
-/// again, or encoding its metadata and data where they are, writes exactly the
-/// bytes the Rust codec writes.
+/// as the Rust `Record` does in either encoding, into one value, and writes
+/// exactly the bytes the Rust record's encoding writes.
 #[test]
-fn nest_a_view_rows_stats_match_their_revisioned_encoding() {
+fn a_view_rows_stats_read_in_either_encoding_and_write_the_stored_one() {
+	use surrealdb_kvs::value::KVValue;
+
 	use crate::catalog::aggregation::AggregationStat;
 	use crate::catalog::{Metadata, Record, RecordType};
 	use crate::val::{Datetime, Number, Object};
@@ -319,16 +320,11 @@ fn nest_a_view_rows_stats_match_their_revisioned_encoding() {
 			}),
 			data: Value::Object(data.clone()),
 		};
-		let rust = revision::to_vec(&record).unwrap();
-		let value = super::decode("Record", &rust).unwrap();
-		assert_eq!(super::encode("Record", &value).unwrap(), rust, "{record:?}");
-		let Value::Object(fields) = &value else {
-			panic!("a record decodes to an object: {value:?}");
-		};
-		let (Some(metadata), Some(data)) = (fields.get("metadata"), fields.get("data")) else {
-			panic!("a record decodes to its metadata and data: {value:?}");
-		};
-		assert_eq!(super::encode_record(metadata, data).unwrap(), rust, "{record:?}");
+		let legacy = revision::to_vec(&record).unwrap();
+		let stored = record.kv_encode_value().unwrap();
+		let value = super::decode("Record", &legacy).unwrap();
+		assert_eq!(super::decode("Record", &stored).unwrap(), value, "{record:?}");
+		assert_eq!(super::encode("Record", &value).unwrap(), stored, "{record:?}");
 	}
 }
 
@@ -342,11 +338,14 @@ fn ids_name_the_routes_and_types_their_names_do() {
 	let utf8 = encode_id(TypeId::UTF8, &Value::String("a".into())).unwrap();
 	assert_eq!(utf8, b"a");
 	assert_eq!(decode_id(TypeId::UTF8, &utf8).unwrap(), Value::String("a".into()));
-	let bytes = revision::to_vec(&crate::catalog::Record::new(Value::None)).unwrap();
-	let value = decode("Record", &bytes).unwrap();
+	let record = crate::catalog::Record::new(Value::None);
+	let legacy = revision::to_vec(&record).unwrap();
+	let stored = surrealdb_kvs::value::KVValue::kv_encode_value(&record).unwrap();
+	let value = decode("Record", &legacy).unwrap();
 	let id = TypeId::named("Record");
-	assert_eq!(decode_id(id, &bytes).unwrap(), value);
-	assert_eq!(encode_id(id, &value).unwrap(), bytes);
+	assert_eq!(decode_id(id, &legacy).unwrap(), value);
+	assert_eq!(decode_id(id, &stored).unwrap(), value);
+	assert_eq!(encode_id(id, &value).unwrap(), stored);
 }
 
 /// A function definition as 3.2.4 wrote it, at revision 3 with its argument
@@ -384,10 +383,12 @@ fn a_function_with_kinds_stored_as_an_ast_reads_as_kind_text() {
 }
 
 /// A table whose view is the `Aggregated` form, which predates a view's
-/// clauses being stored as text and which no frozen fixture covers, reads and
-/// writes as the Rust codec does.
+/// clauses being stored as text and which no frozen fixture covers, reads as
+/// the Rust codec reads it and is written back with the view in its current
+/// form. A view has no descriptor of its own: the VM reads it through the
+/// table that holds it.
 #[test]
-fn an_aggregated_view_matches_its_revisioned_encoding() {
+fn an_aggregated_view_reads_as_its_revisioned_encoding_and_is_written_as_clauses() {
 	use crate::catalog::aggregation::AggregationAnalysis;
 	use crate::catalog::view::StoredViewDefinition;
 	let ast = crate::syn::parse(
@@ -410,7 +411,25 @@ fn an_aggregated_view_matches_its_revisioned_encoding() {
 		groups,
 		fields: select.fields.clone(),
 	};
-	let rust = revision::to_vec(&view).unwrap();
-	let value = decode("StoredViewDefinition", &rust).unwrap();
-	assert_eq!(encode("StoredViewDefinition", &value).unwrap(), rust, "{view:?}");
+	let mut table = crate::catalog::StoredTableDefinition::new(
+		crate::catalog::NamespaceId(1),
+		crate::catalog::DatabaseId(2),
+		crate::catalog::TableId(3),
+		crate::val::TableName::new("t"),
+	);
+	table.view = Some(view.clone());
+	let rust = revision::to_vec(&table).unwrap();
+	let value = decode("StoredTableDefinition", &rust).unwrap();
+	assert_eq!(
+		value,
+		crate::catalog::stored::StoredField::to_vm_value(&table).unwrap(),
+		"{view:?}"
+	);
+	let written = encode("StoredTableDefinition", &value).unwrap();
+	let read = <crate::catalog::StoredTableDefinition as crate::key::KVValue>::kv_decode_value(
+		&written,
+		(),
+	)
+	.unwrap();
+	assert_eq!(read.view, Some(view.current()), "{view:?}");
 }

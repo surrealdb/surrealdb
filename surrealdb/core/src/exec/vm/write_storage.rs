@@ -5,25 +5,25 @@
 //!
 //! Which checks run and what is written is the body's control flow; an
 //! instruction here answers one fact of the record in flight or its table, or
-//! performs one storage effect. A record's key and bytes are encoded by the
-//! VM's own codecs (`vm::codec`), and the host writes them: on the statement's
-//! transaction here, as an intent on a fan.
+//! performs one storage effect. A record's key is encoded by the VM's own key
+//! codec (`vm::codec::key`) and its bytes by the record writer
+//! (`catalog::encode_record_with`, given the format and layouts the write
+//! context's slot resolves, or `Transaction::record_writer`), and the host
+//! writes them: on the statement's transaction here, as an intent on a fan.
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use surrealdb_datastore::values::graph::{AdjacencyValue, GraphFoldScope};
 use surrealdb_kvs::value::KVValue;
 use surrealdb_types::ToSql;
 
 use super::{State, internal};
-use crate::catalog::aggregation::AggregationStat;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{
-	IndexDefinition, LATEST_EDGE_VARIANT, Metadata, Record, RecordType, Relation, TableType,
-};
+use crate::catalog::{IndexDefinition, LATEST_EDGE_VARIANT, Record, Relation, TableType};
 use crate::doc::{Error as DocError, encode_inline_section, inline_fields};
 use crate::err::EngineError;
-use crate::exec::operators::write::ctx::WriteCtx;
+use crate::exec::operators::write::ctx::{ResolvedFormat, WriteCtx};
 use crate::exec::operators::write::metadata::{edge_variant, is_edge};
 use crate::exec::operators::write::row::{WriteExtras, WriteRow};
 use crate::exec::operators::write::stage::{LightweightReason, TableTypeFor};
@@ -42,7 +42,7 @@ use crate::idx::entry::IndexEntryValue;
 use crate::idx::index::{Indexable, recorded_shapes};
 use crate::kvs::index::{ConsumeResult, IndexMutation};
 use crate::kvs::storage_error;
-use crate::val::{Number, Object, Value};
+use crate::val::Value;
 
 /// An instruction of the storage stages.
 #[derive(Debug, Clone, PartialEq)]
@@ -1270,6 +1270,27 @@ fn graph_fields<'a>(
 	]
 }
 
+/// The format the record `rid` of the statement's table is written in, with the layouts a packed
+/// format reads its descriptor from.
+///
+/// The statement's slot answers for a record of the statement's own table
+/// ([`RecordFormatSlot::resolve`](crate::exec::operators::write::ctx::RecordFormatSlot::resolve));
+/// a record of another table never reads or fills it, and is resolved by the transaction's record
+/// writer.
+async fn record_format<'c>(
+	ctx: &'c crate::exec::operators::write::ctx::WriteCtx,
+	txn: &crate::kvs::Transaction,
+	rid: &crate::val::RecordId,
+) -> FlowResult<ResolvedFormat<'c>> {
+	let (ns, db) = (ctx.ns.namespace_id, ctx.db.database_id);
+	if rid.table == ctx.table.name {
+		ctx.format.resolve(txn, ns, db, &rid.table).await
+	} else {
+		txn.record_writer(ns, db, &rid.table).await.map(ResolvedFormat::Writer)
+	}
+	.map_err(ControlFlow::Err)
+}
+
 /// Write the record in flight at its key, as [`StorageInstr::Store`] states.
 async fn store(
 	row: &mut WriteRow,
@@ -1284,13 +1305,36 @@ async fn store(
 	let ns = ctx.ns.namespace_id;
 	let db = ctx.db.database_id;
 	let key = record_key(ns, db, &rid)?;
-	// A value nested past the cap is refused before it is encoded, as a stored
-	// record's own encoding refuses it: once stored, every later read of it
-	// would recurse past what a thread's stack holds.
-	crate::val::check_value_depth(&row.current).map_err(ControlFlow::Err)?;
-	let bytes = codec::encode_record(&metadata_value(row.metadata.as_ref()), &row.current)
-		.map_err(ControlFlow::Err)?;
 	let txn = ctx.txn();
+	let resolved = record_format(ctx, &txn, &rid).await?;
+	// The generation the encoded bytes carry, which the transaction's cache holds the row under.
+	let generation = crate::catalog::written_generation(resolved.format(), row.metadata.as_ref());
+	// An `OPTION IMPORT` row skips the schema stage, so it may not hold what the table's
+	// conformance record states: the record is forfeited before such a row lands. A claim covers
+	// only the rows stamped with a generation, so a row stamped 0 forfeits nothing. A row of the
+	// statement's own table skips the call while the transaction's layout epoch is the one read
+	// after the last call, which a rollback of the forfeit moves.
+	if generation.is_some() && ctx.exec().options().is_some_and(|options| options.import) {
+		let own = rid.table == ctx.table.name;
+		if !own || ctx.conformance_forfeit.load(Ordering::Acquire) != txn.layout_epoch() {
+			txn.forfeit_conformance(ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
+			if own {
+				ctx.conformance_forfeit.store(txn.layout_epoch(), Ordering::Release);
+			}
+		}
+	}
+	// The record's encoding refuses a value nested past the cap: once stored,
+	// every later read of it would recurse past what a thread's stack holds. It packs the row
+	// when the table's layout is packed and the row fits it, and checks the layouts against the
+	// row's table.
+	let bytes = crate::catalog::encode_record_with(
+		resolved.format(),
+		resolved.layouts(),
+		row.metadata.as_ref(),
+		&row.current,
+		Some(&rid),
+	)
+	.map_err(ControlFlow::Err)?;
 	if create {
 		txn.put(key.into(), bytes).await.map_err(|err| {
 			if matches!(storage_error(&err), Some(crate::kvs::Error::TransactionKeyAlreadyExists)) {
@@ -1312,6 +1356,7 @@ async fn store(
 				metadata: row.metadata.clone(),
 				data: row.current.clone(),
 			}),
+			generation,
 		);
 	} else {
 		txn.set(key.into(), bytes).await.map_err(ControlFlow::Err)?;
@@ -1334,12 +1379,15 @@ pub(super) async fn set_view_row(
 	let ns = ctx.ns.namespace_id;
 	let db = ctx.db.database_id;
 	let bytes = table_record_key(ns, db, table, key)?;
-	// A value nested past the cap is refused before it is encoded, as the
-	// stored record's own encoding refuses it.
-	crate::val::check_value_depth(&record.data).map_err(ControlFlow::Err)?;
-	let value = codec::encode_record(&metadata_value(record.metadata.as_ref()), &record.data)
-		.map_err(ControlFlow::Err)?;
 	let txn = ctx.txn();
+	// The view table is not the statement's table, so its writer is resolved from the
+	// transaction for each row; the transaction answers from its per-transaction memo.
+	let writer = txn.record_writer(ns, db, table).await.map_err(ControlFlow::Err)?;
+	// A view row's data is stored whole: no `id` is left out for its key to
+	// restore, so the row names no key and is never packed. A row with aggregation stats is
+	// written in the `revision` encoding without cloning it. The record's encoding refuses a
+	// value nested past the cap.
+	let value = writer.encode_whole(record, None).map_err(ControlFlow::Err)?;
 	txn.set(bytes.into(), value).await.map_err(ControlFlow::Err)?;
 	txn.forget_record(ns, db, table, key);
 	Ok(())
@@ -1379,260 +1427,4 @@ fn table_record_key(
 		],
 	)
 	.map_err(ControlFlow::Err)
-}
-
-/// The record-type marker as the VM's codec holds a value of `Option<Metadata>`:
-/// `NONE`, or the metadata's fields, each enum as an object keyed by its
-/// variant.
-fn metadata_value(metadata: Option<&Metadata>) -> std::borrow::Cow<'static, Value> {
-	use std::borrow::Cow;
-	use std::sync::LazyLock;
-	// The markers nearly every record carries, built once.
-	static TABLE: LazyLock<Value> = LazyLock::new(|| {
-		metadata_object(&Metadata {
-			record_type: RecordType::Table,
-			aggregation_stats: Vec::new(),
-		})
-	});
-	static EDGE: LazyLock<Value> = LazyLock::new(|| {
-		metadata_object(&Metadata {
-			record_type: RecordType::Edge {
-				variant: LATEST_EDGE_VARIANT,
-			},
-			aggregation_stats: Vec::new(),
-		})
-	});
-	let Some(metadata) = metadata else {
-		return Cow::Owned(Value::None);
-	};
-	if metadata.aggregation_stats.is_empty() {
-		match metadata.record_type {
-			RecordType::Table => return Cow::Borrowed(&TABLE),
-			RecordType::Edge {
-				variant,
-			} if variant == LATEST_EDGE_VARIANT => return Cow::Borrowed(&EDGE),
-			RecordType::Edge {
-				..
-			} => {}
-		}
-	}
-	Cow::Owned(metadata_object(metadata))
-}
-
-/// [`metadata_value`] of a marker that is present.
-fn metadata_object(metadata: &Metadata) -> Value {
-	let record_type = match metadata.record_type {
-		RecordType::Table => variant("Table", Value::None),
-		RecordType::Edge {
-			variant: layout,
-		} => variant("Edge", object([("variant", Value::from(layout as i64))])),
-	};
-	let stats = metadata.aggregation_stats.iter().map(stat_value).collect::<Vec<_>>();
-	object([("record_type", record_type), ("aggregation_stats", Value::from(stats))])
-}
-
-/// One running aggregation's state, as the VM's codec holds an
-/// `AggregationStat`.
-fn stat_value(stat: &AggregationStat) -> Value {
-	let arg = |arg: usize| ("arg", Value::from(arg as i64));
-	let number = |name: &'static str, n: &Number| (name, Value::Number(*n));
-	let count = |count: i64| ("count", Value::from(count));
-	match stat {
-		AggregationStat::Count {
-			count: c,
-		} => variant("Count", object([count(*c)])),
-		AggregationStat::CountValue {
-			arg: a,
-			count: c,
-		} => variant("CountValue", object([arg(*a), count(*c)])),
-		AggregationStat::NumberMax {
-			arg: a,
-			max,
-		} => variant("NumberMax", object([arg(*a), number("max", max)])),
-		AggregationStat::NumberMin {
-			arg: a,
-			min,
-		} => variant("NumberMin", object([arg(*a), number("min", min)])),
-		AggregationStat::Sum {
-			arg: a,
-			sum,
-		} => variant("Sum", object([arg(*a), number("sum", sum)])),
-		AggregationStat::Mean {
-			arg: a,
-			sum,
-			count: c,
-		} => variant("Mean", object([arg(*a), number("sum", sum), count(*c)])),
-		AggregationStat::StdDev {
-			arg: a,
-			shift,
-			sum,
-			sum_of_squares,
-			count: c,
-		} => variant(
-			"StdDev",
-			object([
-				arg(*a),
-				number("shift", shift),
-				number("sum", sum),
-				number("sum_of_squares", sum_of_squares),
-				count(*c),
-			]),
-		),
-		AggregationStat::Variance {
-			arg: a,
-			shift,
-			sum,
-			sum_of_squares,
-			count: c,
-		} => variant(
-			"Variance",
-			object([
-				arg(*a),
-				number("shift", shift),
-				number("sum", sum),
-				number("sum_of_squares", sum_of_squares),
-				count(*c),
-			]),
-		),
-		AggregationStat::TimeMax {
-			arg: a,
-			max,
-		} => variant("TimeMax", object([arg(*a), ("max", Value::Datetime(*max))])),
-		AggregationStat::TimeMin {
-			arg: a,
-			min,
-		} => variant("TimeMin", object([arg(*a), ("min", Value::Datetime(*min))])),
-		AggregationStat::Accumulate {
-			arg: a,
-			values,
-		} => variant("Accumulate", object([arg(*a), ("values", Value::from(values.clone()))])),
-	}
-}
-
-fn object<const N: usize>(fields: [(&'static str, Value); N]) -> Value {
-	Value::Object(Object::from_iter(fields.into_iter().map(|(k, v)| (k.to_owned(), v))))
-}
-
-fn variant(name: &'static str, body: Value) -> Value {
-	object([(name, body)])
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::catalog::LATEST_EDGE_VARIANT;
-
-	/// The marker the VM's codec encodes is the bytes the record's own
-	/// encoding writes, for every record type and every running aggregation.
-	#[test]
-	fn a_record_encodes_as_its_own_encoding_does() {
-		let now = crate::val::Datetime::now();
-		let stats = vec![
-			AggregationStat::Count {
-				count: 3,
-			},
-			AggregationStat::CountValue {
-				arg: 1,
-				count: 2,
-			},
-			AggregationStat::NumberMax {
-				arg: 0,
-				max: Number::Int(9),
-			},
-			AggregationStat::NumberMin {
-				arg: 0,
-				min: Number::Float(1.5),
-			},
-			AggregationStat::Sum {
-				arg: 2,
-				sum: Number::Int(10),
-			},
-			AggregationStat::Mean {
-				arg: 2,
-				sum: Number::Float(10.0),
-				count: 4,
-			},
-			AggregationStat::StdDev {
-				arg: 3,
-				shift: Number::Int(1),
-				sum: Number::Int(2),
-				sum_of_squares: Number::Int(5),
-				count: 2,
-			},
-			AggregationStat::Variance {
-				arg: 3,
-				shift: Number::Float(0.0),
-				sum: Number::Int(2),
-				sum_of_squares: Number::Int(5),
-				count: 2,
-			},
-			AggregationStat::TimeMax {
-				arg: 4,
-				max: now,
-			},
-			AggregationStat::TimeMin {
-				arg: 4,
-				min: now,
-			},
-			AggregationStat::Accumulate {
-				arg: 5,
-				values: vec![Value::from(1), Value::from("a")],
-			},
-		];
-		let small = Value::Object(Object::from_iter([("n".to_owned(), Value::from(1))]));
-		// Past the eight entries from which an object or an array is written
-		// behind an offset table, with keys whose encoded order is not their
-		// string order.
-		let wide = Value::Object(Object::from_iter(
-			(0..12)
-				.map(|i| {
-					(
-						"k".repeat(12 - i),
-						Value::from((0..i as i64).map(Value::from).collect::<Vec<_>>()),
-					)
-				})
-				.chain([("z".repeat(300), small.clone()), ("".to_owned(), Value::None)]),
-		));
-		for (metadata, data) in [
-			None,
-			Some(Metadata {
-				record_type: RecordType::Table,
-				aggregation_stats: Vec::new(),
-			}),
-			Some(Metadata {
-				record_type: RecordType::Edge {
-					variant: LATEST_EDGE_VARIANT,
-				},
-				aggregation_stats: Vec::new(),
-			}),
-			Some(Metadata {
-				record_type: RecordType::Edge {
-					variant: 1,
-				},
-				aggregation_stats: Vec::new(),
-			}),
-			Some(Metadata {
-				record_type: RecordType::Table,
-				aggregation_stats: stats,
-			}),
-		]
-		.into_iter()
-		.flat_map(|metadata| [(metadata.clone(), small.clone()), (metadata, wide.clone())])
-		{
-			let record = Record {
-				metadata: metadata.clone(),
-				data: data.clone(),
-			};
-			let native = revision::to_vec(&record).expect("encodes");
-			let marker = metadata_value(metadata.as_ref());
-			let vm = codec::encode(
-				"Record",
-				&object([("metadata", marker.clone().into_owned()), ("data", data.clone())]),
-			)
-			.expect("encodes");
-			assert_eq!(vm, native, "{metadata:?}");
-			let parts = codec::encode_record(&marker, &data).expect("encodes");
-			assert_eq!(parts, native, "{metadata:?} from its parts");
-		}
-	}
 }

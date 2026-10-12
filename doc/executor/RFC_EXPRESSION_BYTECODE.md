@@ -57,7 +57,7 @@ both are outside this RFC.
 A register's kind is decided when the program is lowered, and it is either **known** or **not
 known**; there is no third state.
 
-- **Leaves.** A literal's kind is known. A field of a table stored in a strict layout is known,
+- **Leaves.** A literal's kind is known. A field of a table stored in a packed layout is known,
   because the layout stores it untagged at an offset its generation assigns: reading it at all
   requires its kind. Any other field — the tagged encoding, a flexible field, a delegated row — is
   not known.

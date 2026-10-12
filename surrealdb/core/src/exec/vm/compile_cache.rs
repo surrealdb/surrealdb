@@ -227,111 +227,12 @@ impl ArgValues {
 	}
 }
 
-/// Whether `a` and `b` are the same value, not merely equal ones: of one
-/// variant throughout, every number of one kind and of the same bits. A
-/// value folded into compiled code stands for another only where they are
-/// the same: `1` and `1.0f` compare equal, but a body that folded `1`
-/// answers `type::of` with `int`.
+/// Whether `a` and `b` are the same value, not merely equal ones; see
+/// [`crate::val::same_value`]. A value folded into compiled code stands for
+/// another only where they are the same: `1` and `1.0f` compare equal, but a
+/// body that folded `1` answers `type::of` with `int`.
 pub(crate) fn same_value(a: &crate::val::Value, b: &crate::val::Value) -> bool {
-	use crate::val::{Number, Value};
-	match (a, b) {
-		(Value::Number(x), Value::Number(y)) => match (x, y) {
-			(Number::Int(x), Number::Int(y)) => x == y,
-			(Number::Float(x), Number::Float(y)) => x.to_bits() == y.to_bits(),
-			(Number::Decimal(x), Number::Decimal(y)) => x.serialize() == y.serialize(),
-			_ => false,
-		},
-		(Value::Array(x), Value::Array(y)) => {
-			x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| same_value(x, y))
-		}
-		(Value::Set(x), Value::Set(y)) => {
-			x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| same_value(x, y))
-		}
-		(Value::Object(x), Value::Object(y)) => same_object(x, y),
-		(Value::RecordId(x), Value::RecordId(y)) => {
-			x.table == y.table && same_record_key(&x.key, &y.key)
-		}
-		(Value::Range(x), Value::Range(y)) => {
-			same_bound(&x.start, &y.start, same_value) && same_bound(&x.end, &y.end, same_value)
-		}
-		(Value::Geometry(x), Value::Geometry(y)) => same_geometry(x, y),
-		_ => std::mem::discriminant(a) == std::mem::discriminant(b) && a == b,
-	}
-}
-
-/// [`same_value`] over two objects: the same keys in the same order, each
-/// holding the same value.
-fn same_object(a: &crate::val::Object, b: &crate::val::Object) -> bool {
-	a.len() == b.len()
-		&& a.iter().zip(b.iter()).all(|((ka, va), (kb, vb))| ka == kb && same_value(va, vb))
-}
-
-/// [`same_value`] over two record id keys: numbers nest in an array, object
-/// or range key.
-fn same_record_key(a: &crate::val::RecordIdKey, b: &crate::val::RecordIdKey) -> bool {
-	use crate::val::RecordIdKey;
-	match (a, b) {
-		(RecordIdKey::Number(x), RecordIdKey::Number(y)) => x == y,
-		(RecordIdKey::String(x), RecordIdKey::String(y)) => x == y,
-		(RecordIdKey::Uuid(x), RecordIdKey::Uuid(y)) => x == y,
-		(RecordIdKey::Array(x), RecordIdKey::Array(y)) => {
-			x.len() == y.len() && x.iter().zip(y.iter()).all(|(x, y)| same_value(x, y))
-		}
-		(RecordIdKey::Object(x), RecordIdKey::Object(y)) => same_object(x, y),
-		(RecordIdKey::Range(x), RecordIdKey::Range(y)) => {
-			same_bound(&x.start, &y.start, same_record_key)
-				&& same_bound(&x.end, &y.end, same_record_key)
-		}
-		_ => false,
-	}
-}
-
-/// Two bounds of one kind whose endpoints are the same under `same`.
-fn same_bound<T>(
-	a: &std::ops::Bound<T>,
-	b: &std::ops::Bound<T>,
-	same: impl Fn(&T, &T) -> bool,
-) -> bool {
-	use std::ops::Bound;
-	match (a, b) {
-		(Bound::Included(x), Bound::Included(y)) | (Bound::Excluded(x), Bound::Excluded(y)) => {
-			same(x, y)
-		}
-		(Bound::Unbounded, Bound::Unbounded) => true,
-		_ => false,
-	}
-}
-
-/// [`same_value`] over two geometries: of one kind and shape, every
-/// coordinate of the same bits, so `0.0` and `-0.0` differ.
-fn same_geometry(a: &crate::val::Geometry, b: &crate::val::Geometry) -> bool {
-	use crate::val::Geometry;
-	fn coord(a: &geo_types::Coord<f64>, b: &geo_types::Coord<f64>) -> bool {
-		a.x.to_bits() == b.x.to_bits() && a.y.to_bits() == b.y.to_bits()
-	}
-	fn line(a: &geo_types::LineString<f64>, b: &geo_types::LineString<f64>) -> bool {
-		a.0.len() == b.0.len() && a.0.iter().zip(&b.0).all(|(a, b)| coord(a, b))
-	}
-	fn polygon(a: &geo_types::Polygon<f64>, b: &geo_types::Polygon<f64>) -> bool {
-		line(a.exterior(), b.exterior())
-			&& a.interiors().len() == b.interiors().len()
-			&& a.interiors().iter().zip(b.interiors()).all(|(a, b)| line(a, b))
-	}
-	fn all<T>(a: &[T], b: &[T], same: impl Fn(&T, &T) -> bool) -> bool {
-		a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
-	}
-	match (a, b) {
-		(Geometry::Point(x), Geometry::Point(y)) => coord(&x.0, &y.0),
-		(Geometry::Line(x), Geometry::Line(y)) => line(x, y),
-		(Geometry::Polygon(x), Geometry::Polygon(y)) => polygon(x, y),
-		(Geometry::MultiPoint(x), Geometry::MultiPoint(y)) => {
-			all(&x.0, &y.0, |a, b| coord(&a.0, &b.0))
-		}
-		(Geometry::MultiLine(x), Geometry::MultiLine(y)) => all(&x.0, &y.0, line),
-		(Geometry::MultiPolygon(x), Geometry::MultiPolygon(y)) => all(&x.0, &y.0, polygon),
-		(Geometry::Collection(x), Geometry::Collection(y)) => all(x, y, same_geometry),
-		_ => false,
-	}
+	crate::val::same_value(a, b)
 }
 
 /// A closure as written, as a key: hashed by its digest, and equal to another

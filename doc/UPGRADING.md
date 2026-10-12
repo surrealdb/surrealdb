@@ -10,6 +10,273 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
+## v4.0.0 — the record format switch, layout generations, ledger classes and the rollback check
+
+A store records a **feature level**: the newest release whose on-disk
+encodings the store may use. A store that records none is at **Legacy**, where
+every record and every catalog entry is written in the `revision` encoding that
+all 3.x releases read. Above Legacy, records are written in the stored-value
+record format and catalog entries in the stored grammar. Which encoding a write
+uses depends only on the level the writing node holds. Every row and every
+entry carries enough in its first bytes for a reader to tell which encoding it
+is in, and a store may hold both side by side.
+
+**Impact**:
+
+- A store on an engine with a single writer (memory, RocksDB, SurrealKV) that
+  is at Legacy is raised to release 4.0 when this release starts. From then
+  on, records and catalog entries are written in the new formats, and a 3.x
+  release can no longer open the store.
+- A store on an engine that does not report a single writer (TiKV, for one) or
+  on IndxDB stays at Legacy until an operator raises it. A new store of any
+  kind starts at this build's release.
+- A store raised to 4.0 or above is refused at startup by 3.3, and cannot go
+  back to 3.0 through 3.2.
+- A store that holds a ledger entry this release does not know opens
+  read-only or is refused, according to the entry's class.
+- Every node records the release it runs beside its heartbeat, and a raise is
+  refused while a live node runs an older release.
+
+### The switch
+
+The feature level decides the encoding of everything a node writes. A node
+checks it on every write, from the level it holds in memory, and that level
+follows the store's record.
+
+- **Single-writer engines raise themselves.** The engine reports that no other
+  process can write to the store, so there is no older node to wait for. At
+  startup `check_version` raises a store at Legacy to release 4.0, not to this
+  build's release, so the store can still be rolled back to any release of the
+  4.x line, and logs the release. The raise commits together with the ledger
+  entry described below. A store already above Legacy is not touched, and a
+  second start opens no write transaction for it.
+- **Other engines and IndxDB wait for an operator.** More than one process,
+  possibly of different releases, can write to such a store, and a browser
+  store may be open in several tabs. The store stays at Legacy, and every
+  record keeps being written in `revision`, until an operator calls
+  `Datastore::raise_feature_level`. The raise is refused with
+  `FeatureLevelNodeBehind` while a node whose heartbeat is inside the liveness
+  window records an older release, or none. The check guards against a partial
+  rollout and is not a fence: a node that joins after the raise reads the level
+  when it starts and writes no more than its own release reads. There is no
+  SurrealQL syntax for the raise.
+- **A pin raises to a release.** The `feature_level` configuration key
+  (`SURREAL_FEATURE_LEVEL`), or `Builder::with_feature_level`, names a release
+  (`4.0`, or `current`). A new store is created at it, and an existing store is
+  raised to at least it when the datastore starts. A pin never lowers a level.
+  A pin whose raise is refused because of an older node logs a warning, and the
+  store keeps its level.
+- **`Datastore::lower_feature_level` lowers the level** to a release at or
+  above 4.0. It is refused while the store records that something in it uses a
+  newer release's features, and that record only rises. A store cannot be
+  lowered to Legacy.
+
+### Holding a store at Legacy
+
+`SURREAL_FEATURE_LEVEL=legacy`, or `Builder::with_legacy_feature_level`, keeps
+a store that records no level at Legacy. Nothing raises it: neither the
+single-writer raise nor a pin. The store gets no records in the new format, no
+layout descriptors and no ledger entry for the format, so a 3.3.x build that
+carries the readers for ledger ids 4 and 6 can still open it. Stock 3.3 is
+refused by those two ids, which every 4.0 startup records, whatever the hold.
+
+The hold applies only to a store at Legacy when it is opened. A store the build
+creates is created at this build's release, and a store that already records a
+level keeps it, each with one warning that the hold did not apply. The hold
+never lowers a level. It is one setting with the pin: the last call on the
+builder wins, and the builder's value beats the configuration key.
+
+The `legacy` value widens what `SURREAL_FEATURE_LEVEL` accepts. The server has
+no command-line flag for it.
+
+### The ledger, its classes and read-only mode
+
+The migration ledger (`/!mg`) lists the migrations and feature entries a store
+has recorded. An entry's **class** lives in its key, in the top two bits of the
+32-bit id, as the feature flags of ext4 do:
+
+| Class | Id bits | A release that does not know the entry |
+|---|---|---|
+| Compatible | `01` | opens the store as usual, and logs the id and name at info |
+| Read-only compatible | `10` | opens the store **read-only** |
+| Incompatible | `00` | refuses the store at startup |
+| Reserved | `11` | refuses the store at startup |
+
+Only entries the running release has no migration for are judged. Class `00`
+is the class of every id a release before the classes existed minted, so an
+earlier release already treats an unknown one as it treats an incompatible
+entry. A startup migration that a later 4.x release adds takes class
+Compatible.
+
+The record format entry (id 7, Incompatible) commits in the same transaction as
+the first bytes that need it: the first record in the new format, the first
+catalog entry in the stored grammar, the first layout descriptor, and the
+transaction that raises the level. A store that holds bytes in the new formats
+therefore holds the entry, and a release that does not know it is refused
+before it reads those bytes. The entry is never run at startup and is never
+part of a new store's baseline.
+
+**Read-only mode** is set at startup, before any maintenance task starts, when
+the ledger holds an unknown read-only compatible entry. It lasts for the life of
+the process.
+
+- Refused with `StoreReadOnly`: every write transaction (every statement that
+  writes, `LIVE SELECT` included), every maintenance job, and the creation and
+  refresh of durable RPC sessions.
+- Still written: this node's own membership row and its release record, so the
+  store keeps seeing the node as live, and the deletion of a durable session
+  when its session is torn down, so that a torn-down session cannot be revived.
+- Not started: every maintenance task except the node membership refresh. A
+  session that expired is still refused when it is loaded.
+- Skipped by the server, with one warning each: the configured import and the
+  root credential initialisation. With no root user created, a root sign-in
+  fails, so the store never opens without authentication.
+- Reads are unaffected, and the storage version stamp is not advanced.
+
+### Layout generations
+
+Every table defined above Legacy has a **layout generation**: a descriptor
+(`!lg{generation}` under the table's key range) that every record in the new
+format names in its header. A descriptor is immutable. Only the DDL statement
+that mints its generation writes it, in that statement's transaction. It names
+its table and carries the release a reader needs.
+
+A table's generations form a ring of the numbers 1 to 65535; 0 means "no
+descriptor" and needs none. The table records its oldest generation, its
+newest, and its floor: the oldest generation any of its rows is expected to
+carry, or 0 when that is unknown (a table from 3.x or created at Legacy, and a
+view). A table defined above Legacy with no rows starts with its floor at its
+first generation. The floor guides planning only; every row is still checked as
+it is read. Each mint takes the number after the newest, wrapping from 65535 to
+1. When that number is the table's oldest generation every number is in use:
+the DDL statement is refused with `GenerationRingFull`, naming the table and
+its oldest generation, and writes nothing; the transaction that attempted it
+commits nothing. A DDL statement that mints nothing still succeeds on a full
+ring, and every row stays readable. The newest number minted for a table name
+survives `REMOVE TABLE`, so a table defined again under the name continues the
+numbering. A mint that finds a descriptor already stored at its number is
+refused with `GenerationOccupied`.
+
+A reader resolves a row's generation against the descriptors of the row's table
+at its own snapshot. A generation outside the table's ring, or inside it with no
+descriptor, reloads the table's descriptors once and is then refused with a
+typed error, as is a header naming a number above 65535. A descriptor an earlier
+release cannot read costs only the rows of that generation, and the rest of the
+table stays readable. A table whose current generation is unreadable refuses
+writes, and the next DDL statement on it mints a new generation. A table whose
+ring record is damaged refuses every row in the new format, every write and
+every mint; its rows in the `revision` encoding and of generation 0 still read.
+Every 4.x node writes a table that has a generation in the new record format,
+whatever level that node's cell reports, for every record the new format can
+hold: an aggregated view row with statistics, and an edge in an earlier edge
+format, are still written in the `revision` encoding.
+
+A descriptor holds one of two layouts. The **document** layout stores a row as
+a stored-value object. The **packed** layout stores a row as fixed-width slots
+and variable slices, one column per declared field, so a reader can load a
+declared field of a row without decoding the rest of it. A `SCHEMAFULL` table
+that is not a view, not `DROP` and not a lightweight relation mints a new
+generation at every DDL statement after which the layout derived from its field
+definitions differs from its newest descriptor; a statement that changes no
+declared field, kind or optionality (an index, an event, a permission, a
+comment) mints nothing. Every other table derives the document layout. The
+derived descriptor is a function of the table's definition and field
+definitions alone, so two nodes of one release derive the same bytes from the
+same catalog. A table whose field definitions this release cannot read keeps its
+newest readable descriptor instead of minting.
+
+A row of a table whose newest descriptor is packed is written in the packed
+layout when every value fits its column, and as a document at the same
+generation otherwise (for example a value of another type under an `OPTION
+IMPORT`, a key no field declares, or a datetime that is a leap second). Rows of
+every earlier generation stay as they were written. Every 4.0 reader reads all
+of them in one table: `revision` rows, documents at generation 0, documents at
+a generation and packed rows at a generation, and answers the same value
+whichever it meets.
+
+Each stamp of a table whose derived layout differs from its newest descriptor
+takes one number of the table's ring, so a table defined one field per
+statement takes one per field, and a statement that writes several of a table's
+definitions (a relation's `in` and `out`, a view rebuild) can take more than
+one. The descriptors a reader loads grow with them. A number is read through the descriptor that currently holds it:
+once the ring wraps and a number is minted again, a row still stamped with its
+earlier use would be read through the new descriptor, which for a packed row
+gives wrong values with no error. Whatever moves a table's floor (a rewrite of
+its rows) must therefore first make sure that no row, and no transaction that
+could still write one, carries a number before the new floor.
+
+A table created above Legacy records the fields that every row it will hold is
+known to conform to (`!fc`). The record covers the fields defined in the
+transaction that created the table, while the table holds no record; a field
+defined by a later transaction is not added to it.
+The record never changes how a row is read or written. Any later change to a
+field definition of the table removes it, and so does an `OPTION IMPORT` write of
+a row stamped with a generation: two such imports into one table at once conflict
+over the removal, and the client retries the one that fails.
+
+### Going back to an earlier release
+
+- **3.3** reads the ledger. A store raised to the new format holds the
+  Incompatible entry 7, which 3.3 does not know, so 3.3 refuses to start with
+  `MigratedBeyondStorageVersion` naming the entry, before it reads any record.
+  Stock 3.3 also refuses every 4.0 store, whatever its level, because the 4.0
+  startup migrations record ids 4 and 6.
+- **3.0 through 3.2** have no ledger and check only the storage version stamp
+  (`!v`). A store carries stamp 4 from the moment it is created above Legacy,
+  and from the transaction that raises its level or commits its first
+  stored-format bytes, so these releases refuse a raised store at startup with
+  their out-of-date error. A store that has not been raised keeps stamp 3, which
+  they open as they always did; they already could not open a store that any 3.3
+  or later build had migrated. A 4.x release opens stamp 3 and stamp 4. Stamp 4
+  is not lowered by `lower_feature_level`, which never goes below 4.0. A value in
+  the new format is never misread by them either: no `revision` value starts with
+  `0xFF` (a record) or `0xFE` (a catalog entry in the stored grammar).
+- **Within the 4.x line** a store can be rolled back from one release to the
+  previous one. The earlier release opens the store unless the ledger refuses
+  it, as above. A catalog entry whose read floor is above the earlier release
+  is refused when read, and a field, index, event or foreign table entry among
+  them makes its table refuse writes there. A layout descriptor above its
+  release costs only that generation's rows. A table's generation ring and its
+  generation mark are readable by every 4.x release: their format never
+  requires a later one. A conformance record (`!fc`) above the earlier release
+  is read as "no field known to conform", and the earlier release's next field
+  change or `OPTION IMPORT` write to the table removes it.
+- **Version history.** An earlier release that opens a store of a later release
+  appends a note to the version history and leaves the stamp alone. When the
+  later release runs again, it rechecks the state the earlier release does not
+  maintain, for every check introduced since the lowest release that wrote to
+  the store, and appends an entry that retires the notes. `version_history`
+  lists the notes and the entries.
+
+### `rollback_check`
+
+`Datastore::rollback_check(target)` reports what a build of an earlier 4.x
+`target` release would refuse in the store. It is a Rust API, not SurrealQL. It
+is read-only: it writes nothing and takes no part in opening the store. It
+reports:
+
+- the ledger entries the target lacks, each with its class;
+- the layout descriptors inside their table's generation ring whose release is
+  above the target, and whether each is the table's newest generation;
+- the catalog entries whose read floor is above the target, with their scope,
+  and whether the entry makes its table refuse writes (a conformance record
+  above the target means the target treats the table as having no conforming
+  field; it never blocks writes);
+- the count of entries and keys that do not parse, which are not named because
+  a malformed value has no trustworthy name. A damaged generation mark or ring
+  record, and a layout key outside its table's ring, are counted here: no
+  release writes a ring or mark an earlier 4.x release refuses, and a damaged
+  mark blocks the next mint of a table of that name that has no ring;
+- the downward notes of the version history;
+- whether the store's `in_use` level is above the target, which makes
+  `lower_feature_level` refuse that release.
+
+Its `verdict()` follows the ledger alone, which is what the target applies when
+it opens the store: refused for an Incompatible or reserved entry, read-only
+for a read-only compatible entry, open otherwise. The other findings list what
+the target refuses after it has opened the store, one statement or row at a
+time. Run it before lowering the level or starting the earlier release.
+
 ## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, and named record-id components
 
 **Impact**:

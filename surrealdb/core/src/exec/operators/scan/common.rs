@@ -11,7 +11,7 @@ use surrealdb_strand::Strand;
 
 use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::catalog::{DatabaseId, NamespaceId, Record, StoredRecord, TableLayouts};
 use crate::err::EngineError;
 use crate::exec::object_extract::{
 	PathSegment, project_record_bytes, project_record_bytes_excluding,
@@ -19,9 +19,8 @@ use crate::exec::object_extract::{
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::{Clause, ControlFlowExt, EvalContext, ExecutionContext};
 use crate::expr::{ControlFlow, FlowResult};
-use crate::key::KVValue;
 use crate::key::schema::RecordKey;
-use crate::kvs::{CachePolicy, DatastoreError, Transaction};
+use crate::kvs::{CachePolicy, DatastoreError, LayoutSet, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Fail the query when the process is past `SURREAL_MEMORY_THRESHOLD`.
@@ -171,6 +170,8 @@ impl DecodeFields {
 
 	/// Decode this record's data as the set says, or `None` when its data
 	/// cannot be projected and must be decoded in full.
+	///
+	/// The record's generation was admitted by [`ReadAhead::read`].
 	fn project(&self, record_bytes: &[u8]) -> Option<crate::val::Object> {
 		if self.excluding {
 			project_record_bytes_excluding(record_bytes, &self.keys)
@@ -202,8 +203,10 @@ fn approx_key_size(key: &RecordIdKey) -> usize {
 
 /// A record [`ReadAhead`] holds until a batch decodes it.
 enum ReadAheadRecord {
-	/// The record's stored bytes.
-	Stored(Vec<u8>),
+	/// The record's stored bytes, with the layouts that admitted them when the
+	/// record is packed: its decode reads its descriptor from them. A document
+	/// and a `revision` record hold none.
+	Stored(Vec<u8>, Option<Arc<TableLayouts>>),
 	/// The record [`Transaction::get_records`] resolved for a record id with
 	/// no stored value (a lightweight edge, or the empty record of a missing
 	/// one).
@@ -277,6 +280,10 @@ impl ReadAhead {
 
 	/// Read the records `rids` names, after any records already held.
 	///
+	/// Each stored record's generation is admitted against its table's layouts
+	/// as it is read, so [`Self::decode_batch`] decodes only admitted bytes. A
+	/// record that is refused fails the read.
+	///
 	/// # Returns
 	///
 	/// The bytes read and the number of records found, for sizing the next
@@ -301,6 +308,10 @@ impl ReadAhead {
 			})
 			.collect();
 		let stored = txn.getm_raw(keys, version).await.context("Failed to fetch records")?;
+		// Each stored row's generation is admitted against its table's layouts
+		// before any row is decoded; layouts are loaded for a table only when
+		// one of its rows names a generation above 0.
+		let mut layouts = LayoutSet::new(ns_id, db_id, version);
 		let mut read_bytes = 0;
 		let mut read_rows = 0;
 		let mut miss_at = Vec::new();
@@ -308,9 +319,19 @@ impl ReadAhead {
 		for (rid, bytes) in rids.into_iter().zip(stored) {
 			let record = match bytes {
 				Some(bytes) => {
+					let packed = StoredRecord::is_packed_bytes(&bytes);
+					let (_, admitted) = layouts
+						.admit_with_layouts(txn, &rid.table, &bytes)
+						.await
+						.map_err(ControlFlow::Err)?;
+					let held = if packed {
+						admitted.map(Arc::clone)
+					} else {
+						None
+					};
 					read_bytes += bytes.len();
 					read_rows += 1;
-					ReadAheadRecord::Stored(bytes)
+					ReadAheadRecord::Stored(bytes, held)
 				}
 				None => {
 					miss_at.push(self.records.len());
@@ -363,14 +384,14 @@ impl ReadAhead {
 				break;
 			};
 			let data = match record {
-				ReadAheadRecord::Stored(bytes) => {
+				ReadAheadRecord::Stored(bytes, layouts) => {
 					match fields.and_then(|fields| fields.project(&bytes)) {
 						Some(mut object) => {
 							object.0.insert(Strand::new_static("id"), Value::RecordId(rid));
 							Value::Object(object)
 						}
 						None => {
-							Record::kv_decode_value(&bytes, rid)
+							Record::decode_admitted(&bytes, layouts.as_deref(), rid)
 								.context("Failed to deserialize record")?
 								.data
 						}

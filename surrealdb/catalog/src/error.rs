@@ -5,7 +5,11 @@
 //! is not there, or a definition wanted a name that is already taken. Three
 //! are about a definition's shape instead - an analyzer a live index still
 //! depends on, a method repeated across the `FOR` clauses of one `DEFINE API`,
-//! and an index whose stored format predates what this build can read.
+//! and an index whose stored format predates what this build can read. One
+//! more is about a stored definition as a whole: it cannot be read, or the
+//! store's feature level does not yet allow a write of it. A last group is about the
+//! layouts of a table's row generations: a row names one the table's layouts do not
+//! list or this build refuses.
 
 // The mapper below is the only place this layer's failures become public.
 // A new variant must make that decision explicitly rather than inheriting
@@ -15,6 +19,8 @@
 use common::{LeafError, internal_todo};
 use surrealdb_types::{AlreadyExistsError, Error as TypesError, NotFoundError};
 
+use crate::layout::{LayoutRefusal, RecordLayoutError};
+use crate::stored::EntryError;
 use crate::val::TableName;
 
 /// A failure in the catalog layer.
@@ -355,6 +361,48 @@ pub enum Error {
 	InvalidAggregationSelector {
 		expr: String,
 	},
+
+	/// A stored definition could not be read, or could not be written at the store's feature
+	/// level.
+	#[error("{0}")]
+	Entry(EntryError),
+
+	/// A record could not be read or written because of its table's layouts.
+	#[error("{0}")]
+	Layout(RecordLayoutError),
+}
+
+/// The public kind of a refusal to read or write a stored entry.
+///
+/// An entry written by a newer release, or a value the store's feature level does not yet allow,
+/// is a matter of how the deployment is configured. Every other refusal is a stored value that
+/// cannot be read.
+fn entry_kind(entry: EntryError, message: String) -> TypesError {
+	match entry {
+		EntryError::NeedsRelease {
+			..
+		}
+		| EntryError::AboveLevel {
+			..
+		} => TypesError::configuration(message, None),
+		EntryError::NoHeader
+		| EntryError::Marker(_)
+		| EntryError::ReservedBits(_)
+		| EntryError::Floor(_)
+		| EntryError::NotARelease(_)
+		| EntryError::RevisionTrailing {
+			..
+		}
+		| EntryError::Unlevelled {
+			..
+		}
+		| EntryError::RevisionWrite {
+			..
+		}
+		| EntryError::Body {
+			..
+		} => TypesError::serialization(message, None),
+	}
 }
 
 impl LeafError for Error {
@@ -370,6 +418,59 @@ impl LeafError for Error {
 			| Error::InvalidAggregationSelector {
 				..
 			} => internal_todo(message),
+			Error::Entry(entry) => entry_kind(entry, message),
+			// A generation written by a newer release, or one the store's feature level does not
+			// yet allow, is a matter of how the deployment is configured. Every other refusal is
+			// a stored value or a set of layouts that cannot be used.
+			Error::Layout(layout) => match layout {
+				RecordLayoutError::RefusedGeneration {
+					cause,
+					..
+				}
+				| RecordLayoutError::CurrentRefused {
+					cause,
+					..
+				}
+				| RecordLayoutError::RingRefused {
+					cause,
+					..
+				} => match cause {
+					LayoutRefusal::Entry(entry) => entry_kind(entry, message),
+					LayoutRefusal::NamesTable {
+						..
+					} => TypesError::serialization(message, None),
+				},
+				RecordLayoutError::UnknownGeneration {
+					..
+				}
+				| RecordLayoutError::NoLayouts {
+					..
+				}
+				| RecordLayoutError::ForeignLayouts {
+					..
+				}
+				| RecordLayoutError::Misnumbered {
+					..
+				}
+				| RecordLayoutError::GenerationOutOfRange {
+					..
+				}
+				| RecordLayoutError::OutsideWindow {
+					..
+				}
+				| RecordLayoutError::CurrentMissing {
+					..
+				}
+				| RecordLayoutError::LayoutMismatch {
+					..
+				}
+				| RecordLayoutError::MalformedRow {
+					..
+				}
+				| RecordLayoutError::WriteWithoutLayouts {
+					..
+				} => TypesError::serialization(message, None),
+			},
 			// Typed on the wire. Clients branch on these details, so these six
 			// arms are the part of this mapper that is a compatibility surface.
 			Error::NsNotFound {

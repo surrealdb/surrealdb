@@ -28,13 +28,13 @@ use anyhow::Result;
 use surrealdb_catalog::providers::TableProvider;
 use surrealdb_catalog::{
 	DatabaseId, FieldDefinition, IndexDefinition, KeyStructure, NamespaceId, TableDefinition,
-	table_key,
+	TableLayouts, table_key,
 };
 use surrealdb_expr::val::TableName;
 use uuid::Uuid;
 
 use super::{DatastoreCache, Entry, Lookup};
-use crate::tx::Transaction;
+use crate::tx::{Transaction, refused_by_release};
 
 /// One table's definition, fields and indexes, as every transaction that sees
 /// one catalog version of the table sees them.
@@ -94,8 +94,22 @@ pub struct TableSnapshot {
 	/// are unconstrained. It is a function of the two beside it, so it is
 	/// valid under the version that validates them.
 	pub key: Option<Arc<KeyStructure>>,
-	/// The table's index definitions.
+	/// The table's index definitions, empty when [`Self::indexes_refused`].
 	pub indexes: Arc<[IndexDefinition]>,
+	/// Whether an index entry of the table needs a newer release than this
+	/// build and so is missing from [`Self::indexes`].
+	///
+	/// A read of the table plans without its indexes and scans, which returns
+	/// the same rows. A write must not: the index would go unmaintained. The
+	/// snapshot therefore never answers a transaction's own read of the
+	/// table's indexes while this is set, and that read refuses.
+	pub indexes_refused: bool,
+	/// The table's generation ring and the row layouts of its generations, which list exactly the
+	/// generations and the ring stored under the version the snapshot is keyed by, because every
+	/// statement that changes the table's `!lg` or `!mi` keys stamps its version after the
+	/// change. Read for an undefined table too: rows may remain under its root until a range
+	/// delete reaches them.
+	pub layouts: Arc<TableLayouts>,
 	/// The catalog version the table was read under, or `None` for a table
 	/// that has never been stamped, whose snapshot is keyed by its
 	/// definition's content instead.
@@ -112,6 +126,11 @@ impl TableSnapshot {
 	/// indexes loaded on a miss and published under the hash. Without a
 	/// cache, or for an undefined table with no version, the table is loaded
 	/// through `txn` and nothing is shared.
+	///
+	/// A snapshot served from the cache also answers `txn`'s own later reads
+	/// of the table's definition, fields and indexes, as a load through `txn`
+	/// does, so a reader that asks `txn` rather than the snapshot decodes
+	/// nothing again.
 	async fn for_table(
 		cache: Option<&DatastoreCache>,
 		txn: &Transaction,
@@ -133,6 +152,7 @@ impl TableSnapshot {
 				let lookup =
 					Lookup::CatalogUnstamped(ns, db, table.as_str(), content_hash(&definition));
 				if let Some(entry) = cache.get(&lookup).map(Entry::try_into_catalog).transpose()? {
+					entry.adopt_into(txn, ns, db, table);
 					return Ok(entry);
 				}
 				let loaded =
@@ -142,6 +162,7 @@ impl TableSnapshot {
 			}
 		};
 		if let Some(entry) = cache.get(&lookup).map(Entry::try_into_catalog).transpose()? {
+			entry.adopt_into(txn, ns, db, table);
 			return Ok(entry);
 		}
 		let definition = txn.get_tb(ns, db, table, None).await?;
@@ -161,13 +182,20 @@ impl TableSnapshot {
 		version: Option<Uuid>,
 	) -> Result<Self> {
 		let fields = txn.all_tb_fields(ns, db, table, None).await?;
-		let indexes = txn.all_tb_indexes(ns, db, table, None).await?;
+		let (indexes, indexes_refused) = match txn.all_tb_indexes(ns, db, table, None).await {
+			Ok(indexes) => (indexes, false),
+			Err(e) if refused_by_release(&e) => (Arc::from([]), true),
+			Err(e) => return Err(e),
+		};
+		let layouts = txn.table_layouts(ns, db, table, None).await?;
 		let key = definition.as_deref().and_then(|definition| table_key(definition, &fields));
 		Ok(Self {
 			definition,
 			fields,
 			key,
 			indexes,
+			indexes_refused,
+			layouts,
 			version,
 		})
 	}
@@ -177,6 +205,20 @@ impl TableSnapshot {
 	/// its definition.
 	pub fn version(&self) -> Option<Uuid> {
 		self.version
+	}
+
+	/// Answer `txn`'s reads of the table with this snapshot, which `txn` was
+	/// served under the version, or the definition content, it read.
+	fn adopt_into(&self, txn: &Transaction, ns: NamespaceId, db: DatabaseId, table: &TableName) {
+		txn.adopt_table_catalog(
+			ns,
+			db,
+			table,
+			self.definition.as_ref(),
+			&self.fields,
+			(!self.indexes_refused).then_some(&self.indexes),
+		);
+		txn.adopt_table_layouts(&self.layouts);
 	}
 }
 
@@ -318,6 +360,11 @@ impl CatalogSnapshot {
 	/// asked for it.
 	pub fn indexes(&self, table: &TableName) -> Option<&Arc<[IndexDefinition]>> {
 		self.entry(table).map(|entry| &entry.indexes)
+	}
+
+	/// The row layouts of `table`, or `None` if the snapshot was never asked for it.
+	pub fn layouts(&self, table: &TableName) -> Option<&Arc<TableLayouts>> {
+		self.entry(table).map(|entry| &entry.layouts)
 	}
 
 	/// The tables the snapshot holds.
@@ -486,6 +533,41 @@ mod tests {
 			Arc::ptr_eq(entry, second.entry(&person).unwrap()),
 			"the second transaction served the first's entry"
 		);
+	}
+
+	/// A transaction served a cached entry answers its own reads of the table
+	/// with it: the definition, fields and indexes it reads afterwards are the
+	/// entry's own allocations, not a second decode.
+	#[tokio::test]
+	async fn a_served_entry_answers_the_transactions_own_reads() {
+		let store = Store::new().await;
+		store.define_table("person", 1).await;
+		let person = TableName::from("person");
+		let tx = store.write().await;
+		tx.put_tb_field(NS, DB, &person, &field("person", "name")).await.unwrap();
+		tx.commit().await.unwrap();
+		let built = store.snapshot(&["person"]).await;
+
+		let tx = store.read().await;
+		let served = CatalogSnapshot::for_tables(
+			Some(&store.cache),
+			&tx,
+			NS,
+			DB,
+			std::slice::from_ref(&person),
+		)
+		.await
+		.unwrap();
+		let entry = served.entry(&person).unwrap();
+		assert!(Arc::ptr_eq(entry, built.entry(&person).unwrap()), "served from the cache");
+		let definition = tx.get_tb(NS, DB, &person, None).await.unwrap().unwrap();
+		assert!(Arc::ptr_eq(&definition, entry.definition.as_ref().unwrap()));
+		let fields = tx.all_tb_fields(NS, DB, &person, None).await.unwrap();
+		assert!(Arc::ptr_eq(&fields, &entry.fields));
+		assert_eq!(fields.len(), 1);
+		let indexes = tx.all_tb_indexes(NS, DB, &person, None).await.unwrap();
+		assert!(Arc::ptr_eq(&indexes, &entry.indexes));
+		tx.cancel().await.unwrap();
 	}
 
 	/// A committed catalog write moves the table's version, so the next

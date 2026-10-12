@@ -20,7 +20,7 @@
 
 use std::borrow::Cow;
 
-use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, Record};
+use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, Record, RecordContext};
 use surrealdb_expr::expr::dir::Dir;
 use surrealdb_expr::val::{IndexFormat, RecordId, RecordIdKey, RecordIdentity, Value};
 use surrealdb_keyspace_macro::keyspace;
@@ -88,6 +88,14 @@ keyspace! {
 	/// counting as the data it exists to explain.
 	bootstrap = ["!bv"] => crate::version::MajorVersion;
 
+	/// The store's feature level: the newest release whose readers its catalog writes stay readable
+	/// by, and the newest release any entry needs. Absent on a store that never recorded one, which
+	/// is at the `Legacy` level.
+	///
+	/// Sorts before `!v`, and so before the range the emptiness probe in `get_version` scans, as
+	/// `!bv` does, and after `!bv`. No 3.x binary reads it.
+	feature_level = ["!fl"] => surrealdb_catalog::StoredFeatureLevel;
+
 	/// Storage format version. Sits outside the `/`-rooted keyspace and so sorts
 	/// before all data, which is what lets a version probe read it without
 	/// knowing whether anything else exists yet.
@@ -124,6 +132,13 @@ keyspace! {
 
 		/// A cluster node's heartbeat and metadata.
 		node = ["!nd", @, nd: Uuid] => surrealdb_catalog::node::Node;
+
+		/// The release the node last recorded beside its heartbeat.
+		///
+		/// Written in the stored-value grammar at every feature level, because no 3.x
+		/// release reads this key. The raise of the feature level consults it to refuse
+		/// while a live node runs an older release.
+		node_release = ["!nr", @, nd: Uuid] => surrealdb_catalog::node::NodeRelease;
 
 		/// A root-level user definition.
 		root_user = ["!us", @, user: Str] => surrealdb_catalog::UserDefinition;
@@ -168,16 +183,16 @@ keyspace! {
 
 		/// Per-node state. The node's own bytes address nothing; only the keys
 		/// beneath them do.
-		node_state = ["$", nd: Uuid] {
+		node_state = ["$", @, nd: Uuid] {
 			node_live_query = ["!lq", @, lq: Uuid] => surrealdb_catalog::NodeLiveQuery;
 		}
 
 		/// Grants issued against a root-level access method.
-		root_access = ["&", ac: Str] {
+		root_access = ["&", @, ac: Str] {
 			root_grant = ["!gr", @, gr: Str] => surrealdb_catalog::AccessGrant;
 		}
 
-		ns = ["*", ns: NamespaceId] (format_generic) {
+		ns = ["*", @, ns: NamespaceId] (format_generic) {
 			/// A database definition, keyed by name within its namespace.
 			database = ["!db", @, db: Str] => surrealdb_catalog::DatabaseDefinition;
 
@@ -192,11 +207,11 @@ keyspace! {
 			db_id_state = ["!di", @, nid: Uuid] => crate::sequences::SequenceState;
 
 			/// Grants issued against a namespace-level access method.
-			ns_access = ["&", ac: Str] {
+			ns_access = ["&", @, ac: Str] {
 				ns_grant = ["!gr", @, gr: Str] => surrealdb_catalog::AccessGrant;
 			}
 
-			db = ["*", db: DatabaseId] (format_generic) {
+			db = ["*", @, db: DatabaseId] (format_generic) {
 				/// A table definition, keyed by name within its database.
 				table = ["!tb", @, tb: Table] => surrealdb_catalog::StoredTableDefinition;
 
@@ -247,6 +262,15 @@ keyspace! {
 				/// no shareable snapshot, and its readers load through their own
 				/// transaction.
 				catalog_version = ["!cv", @, tb: Table] => crate::values::catalog_version::CatalogVersion;
+
+				/// The highest layout generation minted for table `tb` of this
+				/// database. Keyed by name, at the database level, so a
+				/// `REMOVE TABLE` (which deletes the table's subtree) leaves it,
+				/// and a table defined again under the name continues the
+				/// numbering. Written by every mint; read only by a mint of a
+				/// table that has no `!mi`. Its type is `floor_fixed`, so every
+				/// 4.x release can re-create the table.
+				generation_mark = ["!gn", @, tb: Table] => surrealdb_catalog::GenerationMark;
 
 				/// The identity of one database-scoped catalog object other than
 				/// a table — a function, param, database access method, model,
@@ -314,18 +338,22 @@ keyspace! {
 				}
 
 				/// Grants issued against a database-level access method.
-				db_access = ["&", ac: Str] {
+				db_access = ["&", @, ac: Str] {
 					db_grant = ["!gr", @, gr: Str] => surrealdb_catalog::AccessGrant;
 				}
 
-				tbl = ["*", tb: Table] (format_generic) {
+				tbl = ["*", @, tb: Table] (format_generic) {
 					/// A record document. Its identity comes from the key, so the
 					/// key supplies the decode context that rebuilds the `id` field
-					/// rather than trusting the stored copy.
-					record = ["*", @, id: Id] => Record (ctx = |k: &RecordKey| RecordId {
+					/// rather than trusting the stored copy. The key knows no table
+					/// layouts: a typed read through it decodes `revision` records
+					/// and generation-0 documents, and refuses any other generation.
+					/// A reader of a table's rows decodes the raw bytes against the
+					/// table's layouts.
+					record = ["*", @, id: Id] => Record (ctx = |k: &RecordKey| RecordContext::without_layouts(RecordId {
 						table: k.tb.as_ref().clone(),
 						key: k.id.clone().into_owned(),
-					});
+					}));
 
 					/// Graph edges.
 					///
@@ -402,6 +430,37 @@ keyspace! {
 					/// A live-query subscription against this table.
 					subscription = ["!lq", @, lq: Uuid]
 						=> surrealdb_catalog::StoredSubscriptionDefinition;
+
+					/// The row layout of one generation of the table: immutable, written only
+					/// by the transaction that mints the generation, and removed with the
+					/// table's rows or by a floor move. Generation `0` never has a key. Keys
+					/// sort by the generation's big-endian bytes; the order of generations is
+					/// their ring distance from the table's `base`
+					/// (`surrealdb_catalog::GenerationRing`), which wraps from 65535 to 1.
+					layout = ["!lg", @, generation: u16] => surrealdb_catalog::LayoutDescriptor;
+
+					/// The table's generation ring: the oldest generation it holds
+					/// (`base`), the newest (`head`) and the floor (`base` when every
+					/// row is known to carry a generation of the ring, 0 when that is
+					/// unknown). Written by every mint and by a floor move, in the
+					/// transaction that changes the descriptors, each with a compare
+					/// against the bytes it read. Every reader of the table's v1 rows
+					/// needs it, so its type is `floor_fixed`: every 4.x release
+					/// decodes it.
+					table_migrations = ["!mi"] => surrealdb_catalog::TableMigrations;
+
+					/// The fields of the table whose every row, stamped with a
+					/// generation of the table's ring, holds a value coerced by the
+					/// field's current definition
+					/// ([`surrealdb_catalog::TableConformance`]). Absent means no
+					/// field is known to conform. Changed without a catalog-version
+					/// stamp, so no cache keyed by `!cv` may hold it. Written and
+					/// removed only with a compare against the bytes read. A release
+					/// that claims what an earlier 4.x release's writes do not
+					/// maintain writes the claim so that the earlier release refuses
+					/// the entry (it then reads no claims and its forfeits remove the
+					/// entry).
+					table_conformance = ["!fc"] => surrealdb_catalog::TableConformance;
 
 					/// The document id allocator's reserved batch and its state.
 					doc_id_batch = ["!dh", @, start: i64] => crate::sequences::BatchValue;
@@ -2301,7 +2360,7 @@ mod tests {
 		// reported, and they are the whole answer.
 		let (matched, candidates) = unknown(b"/!nx");
 		assert_eq!(matched, 3);
-		assert_eq!(candidates, ["/!ns{ns}", "/!nd{nd}", "/!nh{start}", "/!ni{nid}"]);
+		assert_eq!(candidates, ["/!ns{ns}", "/!nd{nd}", "/!nr{nd}", "/!nh{start}", "/!ni{nid}"]);
 
 		// A well-formed table-level prefix with an undeclared tag after it. The
 		// namespace and database ids are stepped over rather than compared, so the
@@ -2360,6 +2419,7 @@ mod tests {
 		#[cfg_attr(not(diskann), allow(unused_mut))]
 		let mut stored_tags: Vec<&str> = ::std::vec![
 			"!v",
+			"!fl",
 			"/!ns",
 			"/!nd",
 			"/!us",

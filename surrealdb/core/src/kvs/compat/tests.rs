@@ -98,9 +98,17 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// their pin.
 	const AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE: &[&str] =
 		&["table_mutations_def", "analyzer_with_tokenizers"];
+	/// Written in the v1 record envelope or in `revision`, by its metadata, so
+	/// every frozen file holds the `revision` bytes an earlier release wrote:
+	/// they still decode, and a `Record` with no metadata or an edge on the
+	/// current adjacency layout re-encodes in the v1 envelope, any other in
+	/// `revision`. The encode pin of a `Record` is `stored_record.rs`, whose
+	/// frozen bytes are what the current encoder writes.
+	const STORED_VALUE_ENCODED: &[&str] = &["Record"];
 
 	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
-	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name)
+	if STORED_VALUE_ENCODED.contains(&type_name)
+		|| AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name)
 		|| AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE.contains(&fixture)
 	{
 		return false;
@@ -121,13 +129,42 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	}
 }
 
+/// The fixture types the VM's codec holds no descriptor for, because no key stores one on its
+/// own and so no program reads or writes one through a key route.
+///
+/// * `MajorVersion` is a bare `u16` key value, not a revisioned type.
+/// * `StoredApiActionDefinition` is held only inside a `StoredApiDefinition`, whose catalog codec
+///   reads and writes it; the `StoredApiDefinition` fixtures with actions check it there.
+const VM_UNDESCRIBED: &[&str] = &["MajorVersion", "StoredApiActionDefinition"];
+
+/// The bytes the Rust codec writes for `value` in the form the VM's codec holds it in, where
+/// that form differs from the value the Rust codec decodes; `None` where it does not.
+///
+/// A catalog type's VM value is its derive's `into_vm_value`, which holds a legacy enum variant
+/// as the current variant its `legacy` hook maps it to: a `StoredTableDefinition`'s view is held
+/// as [`StoredViewDefinition::current`], so the VM writes a view a release stored in a legacy
+/// variant as `Clauses`, as every view the Rust write path stores is written.
+fn vm_form(value: &dyn std::any::Any) -> Option<Vec<u8>> {
+	let table = value.downcast_ref::<StoredTableDefinition>()?;
+	let view = table.view.as_ref()?;
+	let current = view.current();
+	if current == *view {
+		return None;
+	}
+	let table = StoredTableDefinition {
+		view: Some(current),
+		..table.clone()
+	};
+	Some(table.kv_encode_value().expect("a table definition with a current view encodes"))
+}
+
 /// Macro to generate backwards compatibility tests for a fixture across multiple versions.
 ///
 /// Decode goes through the real `KVValue::kv_decode_value` path so the
 /// test exercises the same code production uses. Two arms:
 /// * 5-arg form (default): for value types whose `KeyContext = ()`.
-/// * 6-arg form (with `ctx`): for `Record`, whose decode splices the `RecordId` argument into the
-///   resulting `data` Object. Pass `fixtures::test_record_rid()` for those; Object-data Record
+/// * 6-arg form (with `ctx`): for `Record`, whose decode splices the context's `RecordId` into the
+///   resulting `data` Object. Pass `fixtures::test_record_context()` for those; Object-data Record
 ///   fixtures are built to include the same rid as their `id` field so the decode/expected
 ///   comparison lines up.
 macro_rules! compat_test {
@@ -206,11 +243,11 @@ macro_rules! compat_test {
 
 					// The VM's codec, where it describes the type, reads the
 					// fixture as the Rust codec does: decoding it and writing
-					// it back yields the bytes the Rust codec re-encodes.
+					// it back yields the bytes the Rust codec writes for the
+					// value in the form the VM holds it in (`vm_form`).
 					let type_name = stringify!($type);
-					// `MajorVersion` is a bare `u16` key value, not a revisioned type.
 					assert!(
-						type_name == "MajorVersion" || crate::exec::vm::codec::describes(type_name),
+						VM_UNDESCRIBED.contains(&type_name) || crate::exec::vm::codec::describes(type_name),
 						"the VM codec has no descriptor for {type_name}"
 					);
 					if crate::exec::vm::codec::describes(type_name) {
@@ -223,9 +260,10 @@ macro_rules! compat_test {
 								e
 							)
 						});
+						let expected_vm = vm_form(&decoded).unwrap_or_else(|| re_encoded.clone());
 						assert_eq!(
 							vm,
-							re_encoded,
+							expected_vm,
 							concat!("the VM codec re-encoded ", stringify!([<$version _ $base_name>]), " differently")
 						);
 					}
@@ -715,7 +753,7 @@ compat_test!(
 	Record,
 	RECORD_NONE,
 	fixtures::record_none(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -723,7 +761,7 @@ compat_test!(
 	Record,
 	RECORD_NULL,
 	fixtures::record_null(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -731,7 +769,7 @@ compat_test!(
 	Record,
 	RECORD_BOOL,
 	fixtures::record_bool(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -739,7 +777,7 @@ compat_test!(
 	Record,
 	RECORD_NUMBER_INT,
 	fixtures::record_number_int(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -747,7 +785,7 @@ compat_test!(
 	Record,
 	RECORD_NUMBER_FLOAT,
 	fixtures::record_number_float(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -755,7 +793,7 @@ compat_test!(
 	Record,
 	RECORD_NUMBER_DECIMAL,
 	fixtures::record_number_decimal(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -763,7 +801,7 @@ compat_test!(
 	Record,
 	RECORD_STRING,
 	fixtures::record_string(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -771,7 +809,7 @@ compat_test!(
 	Record,
 	RECORD_BYTES,
 	fixtures::record_bytes(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -779,7 +817,7 @@ compat_test!(
 	Record,
 	RECORD_DURATION,
 	fixtures::record_duration(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -787,7 +825,7 @@ compat_test!(
 	Record,
 	RECORD_DATETIME,
 	fixtures::record_datetime(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -795,7 +833,7 @@ compat_test!(
 	Record,
 	RECORD_UUID,
 	fixtures::record_uuid(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -803,7 +841,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_POINT,
 	fixtures::record_geometry_point(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -811,7 +849,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_LINE,
 	fixtures::record_geometry_line(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -819,7 +857,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_POLYGON,
 	fixtures::record_geometry_polygon(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -827,7 +865,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_MULTI_POINT,
 	fixtures::record_geometry_multi_point(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -835,7 +873,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_MULTI_LINE,
 	fixtures::record_geometry_multi_line(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -843,7 +881,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_MULTI_POLYGON,
 	fixtures::record_geometry_multi_polygon(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -851,7 +889,7 @@ compat_test!(
 	Record,
 	RECORD_GEOMETRY_COLLECTION,
 	fixtures::record_geometry_collection(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -859,7 +897,7 @@ compat_test!(
 	Record,
 	RECORD_TABLE,
 	fixtures::record_table(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -867,7 +905,7 @@ compat_test!(
 	Record,
 	RECORD_RECORDID,
 	fixtures::record_recordid(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -875,7 +913,7 @@ compat_test!(
 	Record,
 	RECORD_FILE,
 	fixtures::record_file(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -883,7 +921,7 @@ compat_test!(
 	Record,
 	RECORD_RANGE_UNBOUNDED,
 	fixtures::record_range_unbounded(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -891,7 +929,7 @@ compat_test!(
 	Record,
 	RECORD_RANGE_BOUNDED,
 	fixtures::record_range_bounded(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -899,7 +937,7 @@ compat_test!(
 	Record,
 	RECORD_REGEX,
 	fixtures::record_regex(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -907,7 +945,7 @@ compat_test!(
 	Record,
 	RECORD_ARRAY,
 	fixtures::record_array(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -915,7 +953,7 @@ compat_test!(
 	Record,
 	RECORD_OBJECT,
 	fixtures::record_object(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -923,7 +961,7 @@ compat_test!(
 	Record,
 	RECORD_SET,
 	fixtures::record_set(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -931,7 +969,7 @@ compat_test!(
 	Record,
 	RECORD_WITH_METADATA,
 	fixtures::record_with_metadata(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 compat_test!(
@@ -939,7 +977,7 @@ compat_test!(
 	Record,
 	RECORD_WITH_TABLE_METADATA,
 	fixtures::record_with_table_metadata(),
-	fixtures::test_record_rid(),
+	fixtures::test_record_context(),
 	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
 );
 
@@ -1317,6 +1355,11 @@ fn a_revision_bump_excuses_only_the_families_it_bumped() {
 	// keep their encode pin.
 	assert!(!version_writes_current_format("v3_4_0", "TableMutations", "table_mutations_def"));
 	assert!(version_writes_current_format("v3_4_0", "TableMutations", "table_mutations_set"));
+	// A record is written in the v1 record envelope or in `revision`, by its
+	// metadata, which no snapshot pins: `stored_record.rs` pins it instead.
+	for version in ["v3_4_0", "v3_3_0", "v3_1_1"] {
+		assert!(!version_writes_current_format(version, "Record", "record_bool"));
+	}
 }
 
 /// Freeze `v3_4_0.rs` against edits.

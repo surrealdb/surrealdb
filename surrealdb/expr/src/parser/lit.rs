@@ -668,7 +668,7 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 /// The path suggested for an unknown one: the current name of a
 /// deprecated path, or else the nearest path within edit distance 3.
 fn find_suggestion(got: &str) -> Option<&'static str> {
-	if let Some(p) = PATHS.entries().find_map(|(path, (_, old))| match old {
+	if let Some(p) = PATHS.entries().find_map(|(path, (_, old, _))| match old {
 		Some(s) if s.into_inner() == got => Some(path.into_inner()),
 		_ => None,
 	}) {

@@ -157,6 +157,10 @@ name = "surrealdb-keyspace-macro"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-stored-derive"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-kvs"
 allow = ["BUSL-1.1"]
 
@@ -365,6 +369,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-keyspace-macro"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-stored-derive"
 expression = "BUSL-1.1"
 license-files = []
 

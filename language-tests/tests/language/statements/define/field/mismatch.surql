@@ -46,16 +46,16 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd[0]` with type `number` as it mismatched with field `fd` with type `object`"
+error = "Cannot define field `fd[0]` in field `fd` of type `object`: only an array or set holds an index"
 
 [[test.results]]
 value = "NONE"
 [[test.results]]
 value = "NONE"
 [[test.results]]
-error = "Cannot set field `fd.a` with type `number` as it mismatched with field `fd` with type `object | array<number>`"
+error = "Cannot define field `fd.a` in field `fd` of type `object | array<number>`: only an object holds a field"
 [[test.results]]
-error = "Cannot set field `fd[0]` with type `number` as it mismatched with field `fd` with type `object | array<number>`"
+error = "Cannot define field `fd[0]` in field `fd` of type `object | array<number>`: only an array or set holds an index"
 
 [[test.results]]
 value = "NONE"

@@ -32,9 +32,50 @@
 //!   the worked example: it copies rather than moves, and a later release deletes what it left
 //!   behind once no supported upgrade path starts below it.
 //!
+//! # On-demand entries
+//!
+//! A migration with `on_demand` set is a ledger entry and no work. It is written by the code that
+//! first stores the bytes it describes, in the same transaction as those bytes, and never by
+//! startup: it is not a candidate for [`candidate_ids`], so it never runs, and a datastore this
+//! start created does not record it in its baseline. It stays in the registry so that
+//! `check_downgrade` knows the id, and so that [`describe`] can name it.
+//!
+//! # Ledger classes
+//!
+//! A ledger id carries a compatibility class in its top two bits (see
+//! [`crate::kvs::version::ledger`]), so a build reads what it may do with an entry it has no
+//! registry row for from the key alone:
+//!
+//! * an **incompatible** or reserved-class entry records bytes this build cannot read, and the
+//!   build refuses the datastore;
+//! * a **read-only compatible** entry records bytes this build can read but not maintain, and the
+//!   build opens the datastore read-only: [`Datastore::open_read_only`] refuses every write
+//!   transaction except this node's own bookkeeping, and nothing here runs a migration, advances
+//!   the stamp or writes any other state;
+//! * a **compatible** entry records bytes every build can ignore, and the build opens the datastore
+//!   read-write.
+//!
+//! Every migration a 4.x build adds at startup takes the compatible class.
+//! [`ledger_verdict`] is the one place that reads the classes. An id this build has a registry row
+//! for is never judged by its class.
+//!
+//! # Version history
+//!
+//! The version history (`/!vh`) records one entry per transition. The stamp only rises, so a
+//! release below it that opens the datastore appends a **downward note** (`from` is the stamp,
+//! `to` is the running release), once per `(from, to)` however often it restarts, and changes
+//! nothing else.
+//!
+//! A release that later runs against a stamp at or below its own redoes what the earlier releases
+//! left unmaintained, through [`RECHECKS`]. The notes recorded since the last upward entry that
+//! reached the stamp are the evidence: the lowest `to` among them is the floor, every recheck with
+//! `floor < since <= current` runs, and a run at the stamp's own release then appends an upward
+//! entry from that floor to itself, which is what retires the notes. A run that advances the stamp
+//! appends the entry that retires them.
+//!
 //! # Selection
 //!
-//! A migration runs when `version <= current` and its `/!mg{id}` entry is
+//! A migration runs when `version <= current`, it is not on-demand, and its `/!mg{id}` entry is
 //! absent. The ledger is the whole gate: it is what makes a migration run once,
 //! what lets an interrupted run resume rather than restart, and what keeps a
 //! datastore created fresh off the historical migrations — such a store records
@@ -48,6 +89,7 @@ mod doc_lookup_identity;
 mod kinds_as_text;
 mod module_keys;
 mod sequence_defs;
+mod stored_records;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -59,8 +101,11 @@ use crate::catalog::TaskLease;
 use crate::key::schema::{MigrationKey, StorageVersionKey, TaskLeaseKey, VersionHistoryKey};
 use crate::kvs::ds::Datastore;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
+use crate::kvs::version::ledger::{
+	LedgerClass, LedgerId, RECORD_FORMAT_V1, RECORD_FORMAT_V1_NAME, RECORD_FORMAT_V1_VERSION,
+};
 use crate::kvs::version::{MigrationRecord, StorageVersion, VersionHistoryEntry};
-use crate::kvs::{DatastoreError, TransactionType};
+use crate::kvs::{DatastoreError, Release, TransactionType};
 
 const TARGET: &str = "surrealdb::core::kvs::migration";
 
@@ -92,33 +137,78 @@ pub(crate) struct Migration {
 	pub version: (u64, u64, u64),
 	/// The work itself.
 	pub run: for<'a> fn(&'a Datastore) -> MigrationFuture<'a>,
+	/// Whether the entry is written on demand by the code that first stores what it describes,
+	/// and never selected, run or baselined by startup.
+	pub on_demand: bool,
 }
 
-/// Every migration, in ascending `id` order.
+/// Work a later release redoes after an earlier one wrote to the store, for state the earlier
+/// release does not maintain.
+///
+/// Same contract as a migration: idempotent, and safe to run concurrently with itself, because
+/// several nodes of the later release may start together. A recheck is not recorded in the ledger;
+/// the version history decides when it runs (see the module docs).
+pub(crate) struct Recheck {
+	/// The first release whose writes maintain the state this recheck repairs. The recheck runs
+	/// when an earlier release wrote to the store since the stamp last reached `since`.
+	pub since: (u64, u64, u64),
+	/// Human-readable name, recorded in logs.
+	pub name: &'static str,
+	/// The work itself.
+	pub run: for<'a> fn(&'a Datastore) -> MigrationFuture<'a>,
+}
+
+/// Every recheck, in the order they run.
+pub(crate) static RECHECKS: &[Recheck] = &[];
+
+/// Every migration, in ascending sequence order, which is the order they are applied.
+///
+/// An id carries its class in its top bits, so ids are not ordered by sequence across classes.
+///
+/// Id 5 is retired and never reused. It marks a datastore written in a record envelope no release
+/// reads; this build has no entry for it, so `check_downgrade` refuses such a datastore.
 pub(crate) static MIGRATIONS: &[Migration] = &[
 	Migration {
 		id: 1,
 		name: "copy sequence definitions out of the table band",
 		version: (3, 3, 0),
 		run: |ds| Box::pin(sequence_defs::copy_definitions_out_of_the_table_band(ds)),
+		on_demand: false,
 	},
 	Migration {
 		id: 2,
 		name: "re-key module definitions to their derived name",
 		version: (3, 3, 0),
 		run: |ds| Box::pin(module_keys::rekey_definitions_to_their_derived_name(ds)),
+		on_demand: false,
 	},
 	Migration {
 		id: 3,
 		name: "rebuild forward doc-ID mappings under an injective key",
 		version: (3, 3, 0),
 		run: |ds| Box::pin(doc_lookup_identity::rebuild_forward_doc_ids_under_an_injective_key(ds)),
+		on_demand: false,
 	},
 	Migration {
 		id: 4,
 		name: "re-save field and function kinds stored as an AST as text",
 		version: (3, 4, 0),
 		run: |ds| Box::pin(kinds_as_text::resave_kinds_as_text(ds)),
+		on_demand: false,
+	},
+	Migration {
+		id: 6,
+		name: "mark the store as opened by a build that reads the v1 record envelope",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(stored_records::mark_records_stored_value_encoded(ds)),
+		on_demand: false,
+	},
+	Migration {
+		id: RECORD_FORMAT_V1.raw(),
+		name: RECORD_FORMAT_V1_NAME,
+		version: RECORD_FORMAT_V1_VERSION,
+		run: |_| Box::pin(async { Ok(()) }),
+		on_demand: true,
 	},
 ];
 
@@ -128,7 +218,7 @@ pub(crate) static MIGRATIONS: &[Migration] = &[
 /// Called from [`Datastore::check_version`] once the major-version gate has
 /// passed, so the datastore is already known to be readable by this build.
 pub(crate) async fn run(ds: &Datastore, is_new: bool) -> Result<()> {
-	run_with(ds, MIGRATIONS, &StorageVersion::current(), is_new).await
+	run_with(ds, MIGRATIONS, RECHECKS, &StorageVersion::current(), is_new).await
 }
 
 /// [`run`] against an explicit registry and running version, so the driver can
@@ -137,6 +227,7 @@ pub(crate) async fn run(ds: &Datastore, is_new: bool) -> Result<()> {
 async fn run_with(
 	ds: &Datastore,
 	registry: &[Migration],
+	rechecks: &[Recheck],
 	current: &StorageVersion,
 	is_new: bool,
 ) -> Result<()> {
@@ -152,88 +243,189 @@ async fn run_with(
 		record_baseline(ds, registry).await?;
 	}
 
-	check_downgrade(ds, registry, stored.as_ref(), current).await?;
+	if let Opening::ReadOnly = check_downgrade(ds, registry, stored.as_ref(), current).await? {
+		return Ok(());
+	}
 
 	let pending = unapplied(ds, &candidate_ids(registry, current)).await?;
 	if !pending.is_empty() {
 		apply(ds, registry, &pending).await?;
 	}
 
-	advance_stamp(ds, stored, current).await
+	// A stamp above this release means an earlier release is writing to a store a later one
+	// advanced: the stamp stays, and the note tells the later release what to recheck. A stamp at
+	// or below this release may owe rechecks of what such notes record.
+	let owed = match stored.as_ref() {
+		Some(from) if from.triple() > current.triple() => {
+			return note_earlier_writer(ds, from, current).await;
+		}
+		Some(from) => recheck_after_earlier_writer(ds, rechecks, from, current).await?,
+		None => None,
+	};
+
+	advance_stamp(ds, stored.clone(), current).await?;
+
+	// A run that advanced the stamp has an entry of its own to retire the notes; a run at the
+	// stamp's own release appends one. It sorts after the notes it retires even when the nodes
+	// that wrote them read a clock ahead of this one.
+	match (owed, stored) {
+		(Some(owed), Some(from)) if from.triple() == current.triple() => {
+			record_history(
+				ds,
+				&VersionHistoryEntry {
+					from: Some(owed.floor),
+					to: current.clone(),
+					node: ds.id(),
+					timestamp: ds.clock_now().value.max(owed.latest.saturating_add(1)),
+				},
+			)
+			.await
+		}
+		_ => Ok(()),
+	}
 }
 
 /// Records every migration in the registry as applied, without running any.
 ///
 /// Used only for a datastore this start created: it has never held any layout a
-/// migration exists to repair, so the ledger starts full rather than empty.
+/// migration exists to repair, so the ledger starts full rather than empty. An
+/// on-demand entry describes bytes the store does not hold yet, so it is not
+/// recorded.
 async fn record_baseline(ds: &Datastore, registry: &[Migration]) -> Result<()> {
-	for migration in registry {
+	for migration in registry.iter().filter(|m| !m.on_demand) {
 		record_applied(ds, migration).await?;
 	}
 	Ok(())
 }
 
-/// Refuses to start when the datastore carries a migration this build has no
-/// code for.
+/// What the ledger allows this build to do with a datastore.
+pub(crate) enum LedgerVerdict {
+	/// Every entry is one this build knows or may ignore: the datastore opens read-write.
+	Open,
+	/// An entry records bytes this build can read but not maintain: the datastore opens
+	/// read-only. `features` names those entries by id and recorded name.
+	ReadOnly {
+		features: String,
+	},
+	/// An entry records bytes this build cannot read: the datastore is refused. `migrations`
+	/// names those entries by id and recorded name.
+	Refused {
+		migrations: String,
+	},
+}
+
+/// Judges the ledger's entries that `registry` has no row for, by class.
 ///
-/// The ledger is the evidence, not the version stamp: a migration that ran and
-/// was then rolled away from is by definition absent from this build's registry,
-/// so comparing versions against that registry could never name it. A stamp
-/// above the running version with no unknown migration behind it is allowed,
-/// with a warning, because nothing on disk has changed shape.
+/// The ledger is the evidence, not the version stamp: a migration that ran and was then rolled
+/// away from is by definition absent from this build's registry, so comparing versions against
+/// that registry could never name it. Matched on the ledger id, which is a migration's identity.
+/// The recorded name is documentation and may be reworded between releases, so comparing on it
+/// would read a rename as an unknown migration and refuse the start.
+///
+/// The ids come from the keys and the descriptions from the values, and a value that will not
+/// decode still yields its id: a record written in a revision this build cannot read is the
+/// strongest possible evidence that the datastore has moved past it, so it must not turn into a
+/// decode error. The class is read from the id, never from the value.
+///
+/// An incompatible or reserved-class entry makes the verdict [`LedgerVerdict::Refused`], whatever
+/// else the ledger holds; failing that, a read-only compatible entry makes it
+/// [`LedgerVerdict::ReadOnly`]. Entries that are compatible are logged and otherwise ignored.
+pub(crate) async fn ledger_verdict(
+	ds: &Datastore,
+	registry: &[Migration],
+) -> Result<LedgerVerdict> {
+	let mut refused = Vec::new();
+	let mut read_only = Vec::new();
+	let mut ignored = Vec::new();
+	for (id, described) in ds.applied_migration_ids().await? {
+		if registry.iter().any(|m| m.id == id) {
+			continue;
+		}
+		let text = match described {
+			Some(record) => format!("{} ({}, id {id})", record.name, record.version),
+			None => format!("id {id}, unreadable record"),
+		};
+		match LedgerId::from_raw(id).class() {
+			LedgerClass::Incompatible | LedgerClass::Reserved => refused.push(text),
+			LedgerClass::ReadOnlyCompatible => read_only.push(text),
+			LedgerClass::Compatible => ignored.push(text),
+		}
+	}
+	if !refused.is_empty() {
+		return Ok(LedgerVerdict::Refused {
+			migrations: refused.join(", "),
+		});
+	}
+	if !read_only.is_empty() {
+		return Ok(LedgerVerdict::ReadOnly {
+			features: read_only.join(", "),
+		});
+	}
+	if !ignored.is_empty() {
+		info!(
+			target: TARGET,
+			entries = %ignored.join(", "),
+			"The ledger holds entries this build does not know and may ignore"
+		);
+	}
+	Ok(LedgerVerdict::Open)
+}
+
+/// Whether the ledger lets this build write to the datastore.
+enum Opening {
+	/// The datastore opens read-write: migrations run and the stamp advances.
+	ReadWrite,
+	/// The datastore opens read-only: nothing is migrated, stamped or recorded.
+	ReadOnly,
+}
+
+/// Refuses to start when the datastore carries a ledger entry this build cannot read, and marks
+/// the datastore read-only when it carries one this build cannot maintain.
+///
+/// A stamp above the running version with no such entry behind it is allowed, with a warning,
+/// because nothing on disk has changed shape.
 async fn check_downgrade(
 	ds: &Datastore,
 	registry: &[Migration],
 	stored: Option<&StorageVersion>,
 	current: &StorageVersion,
-) -> Result<()> {
-	// Matched on the ledger id, which is a migration's identity. The recorded
-	// name is documentation and may be reworded between releases, so comparing
-	// on it would read a rename as an unknown migration and refuse the start.
-	//
-	// The ids come from the keys and the descriptions from the values, and a
-	// value that will not decode still yields its id: a record written in a
-	// revision this build cannot read is the strongest possible evidence that
-	// the datastore has moved past it, so it must not turn into a decode error.
-	let unknown: Vec<String> = ds
-		.applied_migration_ids()
-		.await?
-		.into_iter()
-		.filter(|(id, _)| !registry.iter().any(|m| m.id == *id))
-		.map(|(id, described)| match described {
-			Some(record) => format!("{} ({}, id {id})", record.name, record.version),
-			None => format!("id {id}, unreadable record"),
-		})
-		.collect();
-
-	if !unknown.is_empty() {
-		bail!(DatastoreError::MigratedBeyondStorageVersion {
+) -> Result<Opening> {
+	match ledger_verdict(ds, registry).await? {
+		LedgerVerdict::Refused {
+			migrations,
+		} => bail!(DatastoreError::MigratedBeyondStorageVersion {
 			stored: stored.map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_owned()),
 			running: current.to_string(),
-			migrations: unknown.join(", "),
-		});
+			migrations,
+		}),
+		LedgerVerdict::ReadOnly {
+			features,
+		} => {
+			ds.open_read_only(features);
+			return Ok(Opening::ReadOnly);
+		}
+		LedgerVerdict::Open => {}
 	}
 
 	let Some(from) = stored else {
-		return Ok(());
+		return Ok(Opening::ReadWrite);
 	};
 	if from.triple() <= current.triple() {
-		return Ok(());
+		return Ok(Opening::ReadWrite);
 	}
 
 	warn!(
 		target: TARGET,
 		stored = %from,
 		running = %current,
-		"This datastore was last written by a newer version of SurrealDB. \
-		 No data migration separates the two, so startup continues, but \
-		 running a mixed set of versions is not supported."
+		"A newer release last advanced this datastore; this release opens it. \
+		 Running a mixed set of releases is not supported."
 	);
-	Ok(())
+	Ok(Opening::ReadWrite)
 }
 
 /// Every migration this build ships that a datastore could still owe, in the
-/// order they must be applied.
+/// order they must be applied. An on-demand entry is never a candidate.
 ///
 /// Bounded above by the running version and nothing else. There is deliberately
 /// no lower bound on the datastore's stamp: a fix authored on a release branch
@@ -241,7 +433,11 @@ async fn check_downgrade(
 /// it forever. What keeps a migration from running twice, and what keeps a
 /// newly created datastore off the historical ones, is the ledger.
 fn candidate_ids(registry: &[Migration], current: &StorageVersion) -> Vec<u32> {
-	registry.iter().filter(|m| m.version <= current.triple()).map(|m| m.id).collect()
+	registry
+		.iter()
+		.filter(|m| !m.on_demand && m.version <= current.triple())
+		.map(|m| m.id)
+		.collect()
 }
 
 /// Of the given migrations, those with no ledger entry yet.
@@ -398,12 +594,12 @@ async fn release_lease(ds: &Datastore) -> Result<()> {
 /// Clears a migration lease whose holder has finished its migration pass but
 /// did not release the lease.
 ///
-/// [`advance_stamp`] runs only after [`apply`] returns, so a version history
-/// entry naming the holder, recorded no earlier than the holder last wrote the
-/// lease, proves the holder is past its migrations and will never renew the
-/// lease again. Both readings come from the holder's own clock, so the
-/// comparison is unaffected by skew between nodes. The tenure start is the
-/// lease's expiry less [`LEASE_DURATION`]. Without such an entry the holder may
+/// A version history entry is appended only after [`apply`] returns (a stamp
+/// advance, a downward note or an entry that retires notes), so one naming the
+/// holder, recorded no earlier than the holder last wrote the lease, proves
+/// the holder is past its migrations and will never renew the lease again. Both readings come from
+/// the holder's own clock, so the comparison is unaffected by skew between nodes. The tenure start
+/// is the lease's expiry less [`LEASE_DURATION`]. Without such an entry the holder may
 /// still be migrating, and the lease is left for it to finish or let expire.
 async fn clear_lease_of_finished_holder(ds: &Datastore) -> Result<()> {
 	let Some(held) = read_lease(ds).await? else {
@@ -437,12 +633,8 @@ async fn clear_lease_of_finished_holder(ds: &Datastore) -> Result<()> {
 /// A lost race here is benign: another node applied the same migration and
 /// recorded it, which is the state this call was trying to reach.
 async fn record_applied(ds: &Datastore, migration: &Migration) -> Result<()> {
-	let record = MigrationRecord {
-		name: migration.name.to_owned(),
-		version: StorageVersion::from_triple(migration.version),
-		node: ds.id(),
-		timestamp: ds.clock_now().value,
-	};
+	let record =
+		MigrationRecord::applied(migration.name, migration.version, ds.id(), ds.clock_now().value);
 	let txn = ds.transaction(TransactionType::Write).await?;
 	let key = MigrationKey::new(migration.id);
 	match run!(txn, txn.set_key(&key, &record).await) {
@@ -510,6 +702,143 @@ async fn advance_stamp(
 			Err(e)
 		}
 	}
+}
+
+/// Whether `entry` is a downward note: a release below the stamp opened the datastore.
+///
+/// Upward entries, which advance the stamp or retire notes, and the entry that first stamps a
+/// datastore, which has no `from`, are not.
+pub(crate) fn is_downward_note(entry: &VersionHistoryEntry) -> bool {
+	entry.from.as_ref().is_some_and(|from| from.triple() > entry.to.triple())
+}
+
+/// Records that `current`, a release below the stamp `stored`, opened the datastore.
+///
+/// Deduplicated against the latest history entry, so a release that restarts adds one note, not one
+/// per start. Two nodes of that release starting together may each append one; notes are
+/// idempotent evidence, so that is harmless. The stamp is not touched.
+async fn note_earlier_writer(
+	ds: &Datastore,
+	stored: &StorageVersion,
+	current: &StorageVersion,
+) -> Result<()> {
+	let history = ds.version_history().await?;
+	let already_noted = history.last().is_some_and(|last| {
+		last.from.as_ref().map(StorageVersion::triple) == Some(stored.triple())
+			&& last.to.triple() == current.triple()
+	});
+	if already_noted {
+		return Ok(());
+	}
+	record_history(
+		ds,
+		&VersionHistoryEntry {
+			from: Some(stored.clone()),
+			to: current.clone(),
+			node: ds.id(),
+			timestamp: ds.clock_now().value,
+		},
+	)
+	.await?;
+	info!(
+		target: TARGET,
+		stored = %stored,
+		running = %current,
+		"Recorded that a release below the datastore's version opened it"
+	);
+	Ok(())
+}
+
+/// What an earlier writer left for a later release to recheck.
+struct Owed {
+	/// The version of the lowest release that wrote since the stamp was last reached.
+	floor: StorageVersion,
+	/// The timestamp of the newest history entry.
+	latest: u64,
+}
+
+/// The lowest release among the downward notes recorded since the last upward entry that reached
+/// `stored`, when `current` is at or above `stored`.
+///
+/// The notes before that entry were retired by it. A history with no such entry (a stamp that
+/// predates the history) leaves every note outstanding. A note whose release is not below `current`
+/// owes nothing.
+fn recheck_floor(
+	history: &[VersionHistoryEntry],
+	stored: &StorageVersion,
+	current: &StorageVersion,
+) -> Option<StorageVersion> {
+	let from = history
+		.iter()
+		.rposition(|entry| !is_downward_note(entry) && entry.to.triple() >= stored.triple())
+		.map_or(0, |reached| reached + 1);
+	history[from..]
+		.iter()
+		.filter(|entry| is_downward_note(entry) && entry.to.triple() < current.triple())
+		.map(|entry| &entry.to)
+		.min_by_key(|to| to.triple())
+		.cloned()
+}
+
+/// Runs the rechecks the version history says an earlier release has made necessary, and returns
+/// what they covered.
+///
+/// `stored` is at or below `current`. Every recheck with `floor < since <= current` runs, in
+/// registry order, where `floor` is [`recheck_floor`]. A failing recheck fails the run before the
+/// stamp advances or the notes are retired, so the next start runs it again.
+async fn recheck_after_earlier_writer(
+	ds: &Datastore,
+	rechecks: &[Recheck],
+	stored: &StorageVersion,
+	current: &StorageVersion,
+) -> Result<Option<Owed>> {
+	let history = ds.version_history().await?;
+	let Some(floor) = recheck_floor(&history, stored, current) else {
+		return Ok(None);
+	};
+	for recheck in rechecks {
+		if recheck.since <= floor.triple() || recheck.since > current.triple() {
+			continue;
+		}
+		info!(
+			target: TARGET,
+			name = recheck.name,
+			floor = %floor,
+			"Rechecking state a release below the datastore's version does not maintain"
+		);
+		(recheck.run)(ds).await?;
+	}
+	let latest = history.last().map_or(0, |entry| entry.timestamp);
+	Ok(Some(Owed {
+		floor,
+		latest,
+	}))
+}
+
+/// Appends one entry to the version history.
+///
+/// A lost race is benign: the entry is keyed by its timestamp and node, and the state it
+/// records is already there.
+async fn record_history(ds: &Datastore, entry: &VersionHistoryEntry) -> Result<()> {
+	let txn = ds.transaction(TransactionType::Write).await?;
+	let key = VersionHistoryKey::new(entry.timestamp, entry.node);
+	match run!(txn, txn.set_key(&key, entry).await) {
+		Err(e) if lost_the_race(&e) => Ok(()),
+		other => other,
+	}
+}
+
+/// The release a migration's `version` belongs to, for comparison with a feature level.
+///
+/// The 3.4 development line is the 4.0 release, and an older version names the release of its major
+/// and minor. A number beyond what a release can name saturates.
+pub(crate) fn release_of(version: (u64, u64, u64)) -> Release {
+	let (major, minor, _) = version;
+	if (major, minor) == (3, 4) {
+		return Release::FIRST_STORED;
+	}
+	let narrow = |n: u64| u16::try_from(n).unwrap_or(u16::MAX);
+	Release::new(narrow(major), narrow(minor))
 }
 
 /// Names the given migrations for an operator-facing message.

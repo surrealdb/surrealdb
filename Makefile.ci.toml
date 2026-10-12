@@ -482,6 +482,19 @@ install_crate = "cargo-machete"
 command = "cargo"
 args = ["machete"]
 
+[tasks.ci-catalog-schema]
+category = "CI - CHECK"
+description = "Check the catalog's stored-grammar numbering against its schema lock, and against the base branch's lock when CATALOG_SCHEMA_BASE names one"
+command = "cargo"
+args = [
+    "test",
+    "--locked",
+    "-p",
+    "surrealdb-catalog",
+    "--test",
+    "catalog_schema_lock",
+]
+
 [tasks.ci-check-imports]
 category = "CI - CHECK"
 description = "Check for disallowed std::time imports (use web_time instead)"
@@ -1701,10 +1714,11 @@ script = """
     # defines the measured surface, and a crate added to the harness's
     # dependency graph must be added here too.
     #
-    # These are every first-party library crate the harness pulls in. The two
+    # These are every first-party library crate the harness pulls in. The
     # first-party proc-macro crates (surrealdb-keyspace-macro,
-    # surrealdb-types-derive) are deliberately absent: they execute while the
-    # compiler runs, so instrumenting them measures the build, not the tests.
+    # surrealdb-stored-derive, surrealdb-types-derive) are deliberately
+    # absent: they execute while the compiler runs, so instrumenting them
+    # measures the build, not the tests.
     COVERAGE_PACKAGES="surrealdb-catalog surrealdb-cnf surrealdb-collections \
         surrealdb-common surrealdb-core surrealdb-datastore surrealdb-expr \
         surrealdb-gql surrealdb-iam surrealdb-idx surrealdb-kvs \
@@ -1997,6 +2011,7 @@ dependencies = [
     "ci-check",
     "ci-check-wasm",
     "ci-check-imports",
+    "ci-catalog-schema",
     "ci-feature-check",
     "ci-unused-deps",
     "ci-docs",

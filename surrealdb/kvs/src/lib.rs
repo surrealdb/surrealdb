@@ -26,6 +26,7 @@ pub mod cursor;
 pub mod destroy;
 pub mod err;
 pub mod key;
+pub mod release;
 pub mod savepoint;
 pub mod threadpool;
 pub mod timestamp;
@@ -39,8 +40,10 @@ pub use api::{
 pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use destroy::{DestroyRange, DestroyRangeHandle};
 pub use err::{Error, Result};
+pub use release::{FeatureLevel, Release};
 pub use savepoint::SavepointStack;
 pub use types::{Key, KeyRange};
+pub use value::{EncodeContext, Encoded};
 
 /// The value part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Val = Vec<u8>;

@@ -98,8 +98,8 @@ impl TopKThresholdCell {
 	}
 }
 
-/// Scan-side probe: rejects rows from raw revision-encoded record bytes when
-/// their first ORDER BY key cannot beat the current threshold.
+/// Scan-side probe: rejects rows from a record's raw stored bytes, in either
+/// encoding, when their first ORDER BY key cannot beat the current threshold.
 ///
 /// Built at plan time by the select planner, naming its pushdown but holding no
 /// threshold. [`topk_probe_for_execute`] arms a copy for each execution with
@@ -165,6 +165,12 @@ impl TopKThresholdProbe {
 	/// decode. `true` only when the row's first ORDER BY key provably cannot
 	/// beat `threshold`; any uncertainty (wire bail, decode error) returns
 	/// `false` so the row takes the ordinary full-decode path.
+	///
+	/// The caller has admitted the record's generation against its table's
+	/// layouts ([`crate::kvs::RowGate`]) before this reads any field of it, so
+	/// a row of an unlisted generation is refused rather than rejected here. A
+	/// packed row's fields are not readable from its bytes alone, so it bails
+	/// and takes the full decode.
 	pub(crate) fn rejects(&self, threshold: &Value, record_bytes: &[u8]) -> bool {
 		let candidate =
 			match extract_field_from_record_bytes(record_bytes, &self.path, self.depth_limit) {
@@ -246,9 +252,63 @@ pub(crate) fn reads_key_component(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+
+	use chrono::{TimeZone, Utc};
+	use revision::SerializeRevisioned;
+	use surrealdb_strand::Strand;
 
 	use super::*;
-	use crate::val::Number;
+	use crate::catalog::Record;
+	use crate::val::{Datetime, Number, Object};
+
+	/// The format the generation-0 samples are written in.
+	const DOCUMENT: crate::catalog::RecordFormat = crate::catalog::RecordFormat::Document {
+		generation: None,
+	};
+
+	/// Matches the default `ctx.config.exec.idiom_recursion_limit` (256).
+	const TEST_DEPTH_LIMIT: u32 = 256;
+
+	fn wire_record(obj: Object) -> Vec<u8> {
+		// Route through the macro-generated serializer so the bytes always
+		// match the latest revision's wire layout.
+		let rec = Record {
+			metadata: None,
+			data: Value::Object(obj),
+		};
+		let mut out = Vec::new();
+		rec.serialize_revisioned(&mut out).unwrap();
+		out
+	}
+
+	/// `obj` as a record in the stored-value encoding.
+	fn stored_record(obj: Object) -> Vec<u8> {
+		crate::catalog::encode_record(DOCUMENT, None, &Value::Object(obj), None).unwrap()
+	}
+
+	fn int_object(field: &str, n: i64) -> Object {
+		Object::from(BTreeMap::from([(Strand::from(field), Value::Number(Number::Int(n)))]))
+	}
+
+	fn record_with_int(field: &str, n: i64) -> Vec<u8> {
+		wire_record(int_object(field, n))
+	}
+
+	/// A record holding `field: n` in each encoding.
+	fn records_with_int(field: &str, n: i64) -> [Vec<u8>; 2] {
+		[record_with_int(field, n), stored_record(int_object(field, n))]
+	}
+
+	fn probe(direction: SortDirection, single_key: bool, path: &[&str]) -> Arc<TopKThresholdProbe> {
+		TopKThresholdProbe::armed(
+			path.iter().map(|s| PathSegment::new(*s)).collect(),
+			direction,
+			single_key,
+			TEST_DEPTH_LIMIT,
+			Arc::new(TopKThresholdCell::default()),
+		)
+	}
 
 	#[test]
 	fn a_path_rooted_at_a_named_component_is_not_probed() {
@@ -271,6 +331,111 @@ mod tests {
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
 		cell.publish(Value::Number(Number::Int(7)));
 		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(7))));
+	}
+
+	/// Full reject matrix: {Asc, Desc} × {candidate better, tie, worse} ×
+	/// {single-key, multi-key}, over a record in each encoding. Candidate field
+	/// value is fixed at 5; the threshold varies.
+	#[test]
+	fn reject_matrix() {
+		let t = |n: i64| Value::Number(Number::Int(n));
+		// (direction, threshold, single_key, expect_reject)
+		let cases = [
+			// Asc: smaller is better. 5 vs 6 → better → pass.
+			(SortDirection::Asc, 6, true, false),
+			(SortDirection::Asc, 6, false, false),
+			// Asc tie: single rejects, multi passes.
+			(SortDirection::Asc, 5, true, true),
+			(SortDirection::Asc, 5, false, false),
+			// Asc worse: always rejects.
+			(SortDirection::Asc, 4, true, true),
+			(SortDirection::Asc, 4, false, true),
+			// Desc: larger is better. 5 vs 4 → better → pass.
+			(SortDirection::Desc, 4, true, false),
+			(SortDirection::Desc, 4, false, false),
+			// Desc tie: single rejects, multi passes.
+			(SortDirection::Desc, 5, true, true),
+			(SortDirection::Desc, 5, false, false),
+			// Desc worse: always rejects.
+			(SortDirection::Desc, 6, true, true),
+			(SortDirection::Desc, 6, false, true),
+		];
+		for rec in records_with_int("a", 5) {
+			for (direction, threshold, single_key, expect) in cases {
+				let p = probe(direction, single_key, &["a"]);
+				assert_eq!(
+					p.rejects(&t(threshold), &rec),
+					expect,
+					"direction={direction:?} threshold={threshold} single_key={single_key}",
+				);
+			}
+		}
+	}
+
+	/// Missing field reads as Value::None. Under DESC, None is the worst
+	/// possible key — rejected against any real threshold. Under ASC, None is
+	/// the best possible key — always passes.
+	#[test]
+	fn missing_field_reads_as_none() {
+		for rec in records_with_int("other", 1) {
+			let threshold = Value::Number(Number::Int(5));
+			assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&threshold, &rec));
+			assert!(!probe(SortDirection::Asc, true, &["a"]).rejects(&threshold, &rec));
+			// None == None tie: single-key rejects, multi-key passes.
+			assert!(probe(SortDirection::Desc, true, &["a"]).rejects(&Value::None, &rec));
+			assert!(!probe(SortDirection::Desc, false, &["a"]).rejects(&Value::None, &rec));
+		}
+	}
+
+	/// Wire-level bail (corrupt bytes / non-object intermediate) must pass the
+	/// row through to full decode, never reject.
+	#[test]
+	fn bail_passes_through() {
+		let threshold = Value::Number(Number::Int(5));
+		let p = probe(SortDirection::Desc, true, &["a"]);
+		assert!(!p.rejects(&threshold, b"\xff\xff\xff\xff"));
+		// Descending through a non-object intermediate (`a.b` where `a` is an
+		// int) bails rather than treating the leaf as missing.
+		for rec in records_with_int("a", 5) {
+			let nested = probe(SortDirection::Desc, true, &["a", "b"]);
+			assert!(!nested.rejects(&threshold, &rec));
+		}
+	}
+
+	/// Datetime keys take the leaf-decode path (wire-level ordered compare is
+	/// Int-only) and must still order correctly.
+	#[test]
+	fn datetime_leaf_compares() {
+		let older = Datetime(Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap());
+		let newer = Datetime(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap());
+		let rec = wire_record(Object::from(BTreeMap::from([(
+			Strand::from("created_at"),
+			Value::Datetime(older),
+		)])));
+		let p = probe(SortDirection::Desc, true, &["created_at"]);
+		// Row is older than the heap's worst → cannot enter the top-K.
+		assert!(p.rejects(&Value::Datetime(newer), &rec));
+		// Row ties with the heap's worst → single-key reject.
+		assert!(p.rejects(&Value::Datetime(older), &rec));
+		// Threshold older than the row → row wins → pass.
+		let rec_newer = wire_record(Object::from(BTreeMap::from([(
+			Strand::from("created_at"),
+			Value::Datetime(newer),
+		)])));
+		assert!(!p.rejects(&Value::Datetime(older), &rec_newer));
+	}
+
+	/// Nested Field chains descend; the leaf compares like a root field.
+	#[test]
+	fn nested_field_path_descends() {
+		let inner =
+			Object::from(BTreeMap::from([(Strand::from("score"), Value::Number(Number::Int(3)))]));
+		let object = Object::from(BTreeMap::from([(Strand::from("stats"), Value::Object(inner))]));
+		for rec in [wire_record(object.clone()), stored_record(object)] {
+			let p = probe(SortDirection::Desc, true, &["stats", "score"]);
+			assert!(p.rejects(&Value::Number(Number::Int(9)), &rec));
+			assert!(!p.rejects(&Value::Number(Number::Int(1)), &rec));
+		}
 	}
 
 	#[test]

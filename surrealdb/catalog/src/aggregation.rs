@@ -45,7 +45,8 @@ use std::mem;
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use common::fail;
-use revision::revisioned;
+use revision::{DeserializeRevisioned, SkipCheckRevisioned, revisioned};
+use surrealdb_collections::bounded;
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
@@ -142,7 +143,7 @@ impl Aggregation {
 }
 
 /// A enum containing the data for an aggregation.
-#[revisioned(revision = 2)]
+#[revisioned(revision = 2, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum AggregationStat {
 	Count {
@@ -201,6 +202,137 @@ pub enum AggregationStat {
 		arg: usize,
 		values: Vec<Value>,
 	},
+}
+
+/// Reads exactly what the derived serializer writes: the revision, a `u32` variant, then the
+/// variant's fields in declaration order. A stat written at revision 1 has no `shift` on `StdDev`
+/// and `Variance`, and takes [`AggregationStat::default_shift`]. `Accumulate`'s values are read
+/// through [`bounded::read_vec`], so a claimed length costs nothing beyond the values the input
+/// holds.
+impl DeserializeRevisioned for AggregationStat {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		fn arg<R: std::io::Read>(reader: &mut R) -> Result<usize, revision::Error> {
+			usize::deserialize_revisioned(reader)
+		}
+		fn count<R: std::io::Read>(reader: &mut R) -> Result<i64, revision::Error> {
+			i64::deserialize_revisioned(reader)
+		}
+		fn number<R: std::io::Read>(reader: &mut R) -> Result<Number, revision::Error> {
+			Number::deserialize_revisioned(reader)
+		}
+		fn shift<R: std::io::Read>(
+			reader: &mut R,
+			revision: u16,
+		) -> Result<Number, revision::Error> {
+			if revision >= 2 {
+				number(reader)
+			} else {
+				AggregationStat::default_shift(revision)
+			}
+		}
+
+		let revision = bounded::read_revision(reader, "AggregationStat", 2)?;
+		Ok(match u32::deserialize_revisioned(reader)? {
+			0 => Self::Count {
+				count: count(reader)?,
+			},
+			1 => {
+				let arg = arg(reader)?;
+				Self::CountValue {
+					arg,
+					count: count(reader)?,
+				}
+			}
+			2 => {
+				let arg = arg(reader)?;
+				Self::NumberMax {
+					arg,
+					max: number(reader)?,
+				}
+			}
+			3 => {
+				let arg = arg(reader)?;
+				Self::NumberMin {
+					arg,
+					min: number(reader)?,
+				}
+			}
+			4 => {
+				let arg = arg(reader)?;
+				Self::Sum {
+					arg,
+					sum: number(reader)?,
+				}
+			}
+			5 => {
+				let arg = arg(reader)?;
+				let sum = number(reader)?;
+				Self::Mean {
+					arg,
+					sum,
+					count: count(reader)?,
+				}
+			}
+			6 => {
+				let arg = arg(reader)?;
+				let shift = shift(reader, revision)?;
+				let sum = number(reader)?;
+				let sum_of_squares = number(reader)?;
+				Self::StdDev {
+					arg,
+					shift,
+					sum,
+					sum_of_squares,
+					count: count(reader)?,
+				}
+			}
+			7 => {
+				let arg = arg(reader)?;
+				let shift = shift(reader, revision)?;
+				let sum = number(reader)?;
+				let sum_of_squares = number(reader)?;
+				Self::Variance {
+					arg,
+					shift,
+					sum,
+					sum_of_squares,
+					count: count(reader)?,
+				}
+			}
+			8 => {
+				let arg = arg(reader)?;
+				Self::TimeMax {
+					arg,
+					max: Datetime::deserialize_revisioned(reader)?,
+				}
+			}
+			9 => {
+				let arg = arg(reader)?;
+				Self::TimeMin {
+					arg,
+					min: Datetime::deserialize_revisioned(reader)?,
+				}
+			}
+			10 => {
+				let arg = arg(reader)?;
+				Self::Accumulate {
+					arg,
+					values: bounded::read_vec::<Value, _>(reader)?,
+				}
+			}
+			x => {
+				return Err(revision::Error::Deserialize(format!(
+					"Invalid discriminant `{x}` for enum `AggregationStat` revision `{revision}`"
+				)));
+			}
+		})
+	}
+}
+
+impl SkipCheckRevisioned for AggregationStat {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
 }
 
 /// Widen an integer difference so that squaring it cannot overflow.

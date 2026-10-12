@@ -176,12 +176,10 @@ impl<R: AnyRange + Resumable + Clone> PagedDelete<'_, R> {
 				let _ = txn.cancel().await;
 				return Ok(PagedOutcome::Complete);
 			};
+			// Every window is a reclaimed prefix or an expired changefeed
+			// range, neither of which holds a live definition.
 			for key in &keys {
-				if self.expunge {
-					catch!(txn, txn.clr(Key::from(key)).await);
-				} else {
-					catch!(txn, txn.del(Key::from(key)).await);
-				}
+				catch!(txn, txn.del_reclaimed(Key::from(key), self.expunge).await);
 			}
 			let advanced = if let PageCompanion::ReclaimEntry {
 				rc,

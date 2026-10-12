@@ -15,6 +15,12 @@ use crate::cmd::util;
 use crate::tests::schema::{BoolOr, TestEnv};
 use crate::util::{get_timestamp, xorshift};
 
+/// The key of the store's feature-level record, which sits outside the `/` root.
+const FEATURE_LEVEL_KEY: &[u8] = b"!fl";
+
+/// The first key after the feature-level record.
+const AFTER_FEATURE_LEVEL_KEY: &[u8] = b"!fl\0";
+
 struct CreateInfo {
 	id_gen: AtomicUsize,
 	backend: Backend,
@@ -140,9 +146,13 @@ impl CreateInfo {
 				let ds = builder.build_with_path(&format!("tikv://{p}")).await?;
 				// Every TiKV datastore in a run aliases the one physical cluster, so a
 				// freshly built handle still sees whatever earlier tests left behind.
-				// Physically drop the entire keyspace out-of-transaction; `bootstrap`
-				// below then re-seeds the node keys. See `reset_storage`.
-				ds.unsafe_destroy_range((vec![0u8]..vec![0xffu8]).into()).await?;
+				// Physically drop the entire keyspace out-of-transaction, around the
+				// store's feature-level record, which the build above settled the
+				// handle's feature level against and which nothing re-seeds;
+				// `bootstrap` below then re-seeds the node keys. See `reset_storage`.
+				ds.unsafe_destroy_range((vec![0u8]..FEATURE_LEVEL_KEY.to_vec()).into()).await?;
+				ds.unsafe_destroy_range((AFTER_FEATURE_LEVEL_KEY..[0xffu8].as_slice()).into())
+					.await?;
 				ds
 			}
 		};
@@ -178,9 +188,15 @@ impl CreateInfo {
 	/// long-lived datastore registered, so we skip the per-test `bootstrap`
 	/// (three node-registry transactions) that a full wipe would force —
 	/// these are the same prefixes the retained-key check whitelists.
+	///
+	/// The store's feature-level record `!fl` is preserved too. It is written once,
+	/// when the store is created, and every handle's feature level is settled
+	/// against it; a wipe that took it would leave handles writing a grammar the
+	/// store does not record.
 	async fn reset_storage(&self, ds: &Datastore) -> Result<()> {
 		if let Backend::TikV = self.backend {
-			ds.unsafe_destroy_range((vec![0u8]..b"/!ic".to_vec()).into()).await?;
+			ds.unsafe_destroy_range((vec![0u8]..FEATURE_LEVEL_KEY.to_vec()).into()).await?;
+			ds.unsafe_destroy_range((AFTER_FEATURE_LEVEL_KEY..b"/!ic".as_slice()).into()).await?;
 			ds.unsafe_destroy_range((b"/!ns".as_slice()..[0xffu8].as_slice()).into()).await?;
 		}
 		Ok(())

@@ -21,10 +21,11 @@ use super::groups::GroupMut;
 use super::interp::{self, Arrivals, Groups, Paging, Pending, Region, State, Step};
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
 use super::region::Rows;
-use super::row::{RevisionRow, RowReader, ValueRow};
+use super::row::{RowReader, StoredRow, ValueRow};
 use super::scalar::Scalar;
 use super::services::{EngineServices, Services};
 use super::write;
+use crate::catalog::{StoredRecord, TableLayouts};
 use crate::exec::function::AccumulatorState;
 use crate::exec::index::access_path::access_repeats_records;
 use crate::exec::memory::runs::{BreakerKind, RunOrder, RunSpec};
@@ -34,7 +35,7 @@ use crate::exec::operators::limit::{PagingClause, paging_count};
 use crate::exec::operators::scan::common::{
 	DecodeFields, ensure_below_memory_threshold, resolve_version_stamp,
 };
-use crate::exec::operators::scan::pipeline::kv_scan_stream;
+use crate::exec::operators::scan::pipeline::{decode_record_value, kv_scan_stream};
 use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
@@ -46,6 +47,7 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordPrefix;
+use crate::kvs::{Admission, RowGate};
 use crate::val::{RecordIdKey, Value};
 
 /// A statement run by the bytecode VM.
@@ -1092,8 +1094,11 @@ pub(super) async fn run_pipelines(
 					for (keys, row) in rows {
 						state.sorted_keys = keys;
 						let stop = match row.stored(&slab) {
+							// Stored bytes in a sort were settled from a document or
+							// `revision` row: a packed row is settled as a value, so
+							// the replay needs no layouts.
 							Some((key, value)) => {
-								in_place_row(program, pipeline, key, value, state)
+								in_place_row(program, pipeline, key, value, None, state)
 									.map_err(ControlFlow::Err)?
 							}
 							None => {
@@ -1367,8 +1372,9 @@ pub(super) async fn run_storage_source(
 			.range()?;
 			match key_range {
 				None => {
+					let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 					scan_range(
-						program, pipeline, range, *direction, version, state, ctx, yielder,
+						program, pipeline, range, gate, *direction, version, state, ctx, yielder,
 						flush_at, None,
 					)
 					.await
@@ -1376,8 +1382,17 @@ pub(super) async fn run_storage_source(
 				Some(key_range) => {
 					out_of_line(|| {
 						scan_key_ranges(
-							program, pipeline, key_range, range, *direction, version, state, ctx,
-							yielder, flush_at,
+							program,
+							pipeline,
+							&descriptor,
+							key_range,
+							range,
+							*direction,
+							version,
+							state,
+							ctx,
+							yielder,
+							flush_at,
 						)
 					})
 					.await
@@ -1417,10 +1432,12 @@ pub(super) async fn run_storage_source(
 						table,
 						bounds,
 					)?;
+					let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 					scan_range(
 						program,
 						pipeline,
 						range,
+						gate,
 						crate::kvs::Direction::Forward,
 						version,
 						state,
@@ -1511,10 +1528,12 @@ pub(super) async fn run_storage_source(
 					tb: Cow::Borrowed(table),
 				}
 				.range()?;
+				let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 				return scan_range(
 					program,
 					pipeline,
 					range,
+					gate,
 					crate::kvs::Direction::Forward,
 					version,
 					state,
@@ -2345,11 +2364,13 @@ impl CoarseGate {
 /// `NONE`, which widens what it bounds: the predicate above the scan judges
 /// every row, so the rows are those a scan of the whole table would yield it.
 /// A range after the pipeline's limit is spent, or after the scan's cut has
-/// fired ([`CoarseGate`]), is not opened.
+/// fired ([`CoarseGate`]), is not opened. Each range is read through a
+/// generation check of its own, taken from `descriptor`.
 #[allow(clippy::too_many_arguments)]
 async fn scan_key_ranges(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
+	descriptor: &super::descriptor::TableDescriptor,
 	key_range: &super::program::ScanRange,
 	table: crate::key::RawRange,
 	direction: crate::kvs::Direction,
@@ -2376,25 +2397,27 @@ async fn scan_key_ranges(
 		&bounds,
 		direction,
 	);
-	let mut gate = CoarseGate::of(program, pipeline, state, direction);
+	let mut coarse = CoarseGate::of(program, pipeline, state, direction);
 	for (at, range) in ranges.into_iter().enumerate() {
 		if at > 0 && limits_spent(pipeline, state) {
 			return Ok(true);
 		}
-		if gate.as_ref().is_some_and(|gate| gate.passed) {
+		if coarse.as_ref().is_some_and(|coarse| coarse.passed) {
 			return Ok(false);
 		}
+		let gate = descriptor.row_gate().map_err(ControlFlow::Err)?;
 		if scan_range(
 			program,
 			pipeline,
 			range,
+			gate,
 			direction,
 			version,
 			state,
 			ctx,
 			yielder,
 			flush_at,
-			gate.as_mut(),
+			coarse.as_mut(),
 		)
 		.await?
 		{
@@ -2406,35 +2429,40 @@ async fn scan_key_ranges(
 
 /// Run a pipeline over every record of `range`: inside the storage cursor on
 /// the stored bytes when it runs in place, over the decoded records otherwise.
-/// With `gate`, the scan stops before the first record past its cut.
+///
+/// `gate` is the generation check of the table `range` reads: each record is
+/// admitted by it before the top-k probe, the pre-decode filter or the body
+/// reads any field of the record. With `coarse`, the scan stops before the
+/// first record past its cut.
 #[allow(clippy::too_many_arguments)]
 async fn scan_range(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
+	gate: RowGate,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	state: &mut State,
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
-	gate: Option<&mut CoarseGate>,
+	coarse: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	// The first read of storage of a run whose reader says how many rows it
 	// takes reads no more records than that before it hands its rows on.
 	let first = state.scan_hint.take();
 	if pipeline.in_place {
 		return scan_in_place(
-			program, pipeline, range, direction, version, first, state, ctx, yielder, flush_at,
-			gate,
+			program, pipeline, range, gate, direction, version, first, state, ctx, yielder,
+			flush_at, coarse,
 		)
 		.await;
 	}
-	if let Some(gate) = gate {
+	if let Some(coarse) = coarse {
 		return out_of_line(|| {
 			scan_decoded_cut(
-				program, pipeline, range, direction, version, first, state, ctx, yielder, flush_at,
-				gate,
+				program, pipeline, range, gate, direction, version, first, state, ctx, yielder,
+				flush_at, coarse,
 			)
 		})
 		.await;
@@ -2446,8 +2474,18 @@ async fn scan_range(
 		.source
 		.prefilter()
 		.map(|shape| shape.filter(ctx.root().ctx.config.exec.idiom_recursion_limit));
-	let mut source =
-		kv_scan_stream(ctx.txn(), range, version, None, direction, 0, first, prefilter, topk_probe);
+	let mut source = kv_scan_stream(
+		ctx.txn(),
+		range,
+		gate,
+		version,
+		None,
+		direction,
+		0,
+		first,
+		prefilter,
+		topk_probe,
+	);
 	// The rows of a program that does heavy work for each, reading only, are
 	// read and decoded on a task of their own, ahead of the work.
 	if program.access_mode == crate::exec::access_mode::AccessMode::ReadOnly
@@ -2495,9 +2533,9 @@ thread_local! {
 const SMALL_REGISTERS: usize = 8;
 
 /// Run a pipeline whose rows are decoded over the records of `range`, which
-/// `gate` cuts: in steps, each step's rows handed on — to the bounded sort
-/// that publishes the threshold the gate reads — before the next step is
-/// read, and the gate judged on each record's key before it is decoded.
+/// `coarse` cuts: in steps, each step's rows handed on — to the bounded sort
+/// that publishes the threshold the cut reads — before the next step is
+/// read, and the cut judged on each record's key before it is decoded.
 ///
 /// The first step reads no more records than the sort keeps (nor than
 /// `first`, where it is given), and each step after it twice as many as the
@@ -2506,11 +2544,18 @@ const SMALL_REGISTERS: usize = 8;
 /// the second its last kept row is in; one read in whole batches, or ahead of
 /// its rows, would read records the cut can no longer stop. What it reads and
 /// refuses is charged as a scan of the decoded rows charges it.
+///
+/// Each record is admitted by `gate` before the pre-decode filter or the
+/// decode reads it. A record naming a generation the gate does not list yet
+/// ends the step and is held, copied: the gate reloads the table's layouts,
+/// which cannot be done inside the cursor, and the held record is admitted
+/// and decoded last in the step, so records keep the order they are stored in.
 #[allow(clippy::too_many_arguments)]
 async fn scan_decoded_cut(
 	program: &Arc<Program>,
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
+	mut gate: RowGate,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	first: Option<u32>,
@@ -2518,7 +2563,7 @@ async fn scan_decoded_cut(
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
-	gate: &mut CoarseGate,
+	coarse: &mut CoarseGate,
 ) -> FlowResult<bool> {
 	use crate::exec::pre_decode_filter::PreDecodeFilterOutcome;
 	// The body's first step refuses what the shape judges false, so a record
@@ -2533,26 +2578,48 @@ async fn scan_decoded_cut(
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut step = first
-		.map_or(gate.keep, |first| first.min(gate.keep))
+		.map_or(coarse.keep, |first| first.min(coarse.keep))
 		.clamp(1, crate::kvs::NORMAL_BATCH_SIZE);
 	loop {
 		let size = super::fuel::batch(step);
-		gate.refresh();
+		coarse.refresh();
 		let mut decoded = Vec::with_capacity(size as usize);
 		let mut failed = None;
+		let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
 		let mut cut = false;
+		// The step is admitted and decoded against one view of the table's
+		// layouts: the visitor runs no statement that could move the
+		// transaction's layout epoch between this refresh and the end of the
+		// step.
+		gate.refresh(&txn).await.map_err(ControlFlow::Err)?;
+		let layouts: &TableLayouts = gate.layouts();
 		let stats = cursor
 			.for_each(size, &mut |key, value| {
-				if gate.passes_stored(key) {
+				if coarse.passes_stored(key) {
 					cut = true;
 					return Ok(std::ops::ControlFlow::Break(()));
 				}
+				match gate.admit(value) {
+					Admission::Admit => {}
+					Admission::Reload => {
+						held = Some((key.to_vec(), value.to_vec()));
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
+					Admission::Refuse(e) => {
+						failed = Some(ControlFlow::Err(e));
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
+				}
 				if let Some(filter) = prefilter.as_deref()
-					&& filter.apply(key, value) == PreDecodeFilterOutcome::Reject
+					&& filter.apply(value) == PreDecodeFilterOutcome::Reject
 				{
 					return Ok(std::ops::ControlFlow::Continue(()));
 				}
-				match crate::exec::operators::scan::pipeline::decode_record(key, value) {
+				match crate::exec::operators::scan::pipeline::decode_record(
+					key,
+					value,
+					Some(layouts),
+				) {
 					Ok(row) => {
 						decoded.push(row);
 						Ok(std::ops::ControlFlow::Continue(()))
@@ -2567,6 +2634,29 @@ async fn scan_decoded_cut(
 			.context("Failed to scan record")?;
 		if let Some(e) = failed {
 			return Err(e);
+		}
+		let reloaded = held.is_some();
+		if let Some((key, value)) = held {
+			gate.reload(&txn).await.map_err(ControlFlow::Err)?;
+			match gate.admit(&value) {
+				Admission::Admit => {}
+				Admission::Refuse(e) => return Err(ControlFlow::Err(e)),
+				Admission::Reload => {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"a record's generation was unlisted again after the layouts reloaded"
+					)));
+				}
+			}
+			let refused = prefilter
+				.as_deref()
+				.is_some_and(|filter| filter.apply(&value) == PreDecodeFilterOutcome::Reject);
+			if !refused {
+				decoded.push(crate::exec::operators::scan::pipeline::decode_record(
+					&key,
+					&value,
+					Some(&**gate.layouts()),
+				)?);
+			}
 		}
 		#[cfg(test)]
 		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + decoded.len()));
@@ -2585,7 +2675,9 @@ async fn scan_decoded_cut(
 		if rows.finish(state, ctx, yielder, flush_at).await? {
 			return Ok(true);
 		}
-		if cut || stats.rows < u64::from(size) {
+		// A step that ended on a held record read fewer than `size` records
+		// without reaching the end of the range.
+		if cut || (!reloaded && stats.rows < u64::from(size)) {
 			return Ok(false);
 		}
 		step = step.saturating_mul(2).min(crate::kvs::NORMAL_BATCH_SIZE);
@@ -2595,11 +2687,18 @@ async fn scan_decoded_cut(
 /// Run an in-place pipeline over every record of `range`, inside the storage
 /// cursor, on each record's stored bytes: no more than `first` records before
 /// the rows are handed on the first time, where it is given.
+///
+/// Each record is admitted by `gate` before the top-k probe or the body reads
+/// a field of it. A record naming a generation the gate does not list yet ends
+/// the chunk and is held, copied: the gate reloads the table's layouts, which
+/// cannot be done inside the cursor, and the held record is admitted and run
+/// before the scan goes on, so records run in the order they are stored.
 #[allow(clippy::too_many_arguments)]
 async fn scan_in_place(
 	program: &Program,
 	pipeline: &Pipeline,
 	range: crate::key::RawRange,
+	mut gate: RowGate,
 	direction: crate::kvs::Direction,
 	version: Option<u64>,
 	mut first: Option<u32>,
@@ -2607,7 +2706,7 @@ async fn scan_in_place(
 	ctx: &ExecutionContext,
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
-	mut gate: Option<&mut CoarseGate>,
+	mut coarse: Option<&mut CoarseGate>,
 ) -> FlowResult<bool> {
 	let topk_probe = armed_probe(pipeline, state);
 	let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
@@ -2619,10 +2718,16 @@ async fn scan_in_place(
 	loop {
 		let mut failed = None;
 		let mut stopped = false;
+		let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
 		let chunk =
 			super::fuel::batch(first.take().map_or(crate::kvs::NORMAL_BATCH_SIZE, |first| {
 				first.clamp(1, crate::kvs::NORMAL_BATCH_SIZE)
 			}));
+		// The chunk is admitted and run against one view of the table's layouts:
+		// the visitor runs no statement that could move the transaction's layout
+		// epoch between this refresh and the end of the chunk.
+		gate.refresh(&txn).await.map_err(ControlFlow::Err)?;
+		let layouts: &TableLayouts = gate.layouts();
 		// The body cannot yield inside the cursor, so the chunk counts the
 		// rows it reads against the fuel left and ends once that is spent: a
 		// unit per record read, run or refused. The body holds no backward
@@ -2630,13 +2735,13 @@ async fn scan_in_place(
 		// `Step::Yield` here.
 		let budget = super::fuel::left();
 		let mut unspent = budget;
-		if let Some(gate) = gate.as_deref_mut() {
-			gate.refresh();
+		if let Some(coarse) = coarse.as_deref_mut() {
+			coarse.refresh();
 		}
 		let mut cut = false;
 		let stats = cursor
 			.for_each(chunk, &mut |key, value| {
-				if gate.as_deref_mut().is_some_and(|gate| gate.passes_stored(key)) {
+				if coarse.as_deref_mut().is_some_and(|coarse| coarse.passes_stored(key)) {
 					cut = true;
 					return Ok(std::ops::ControlFlow::Break(()));
 				}
@@ -2646,14 +2751,27 @@ async fn scan_in_place(
 				} else {
 					std::ops::ControlFlow::Continue(())
 				};
-				if let (Some(probe), Some(threshold)) =
-					(topk_probe.as_ref(), topk_threshold.as_deref())
-					&& probe.rejects(threshold, value)
-				{
-					return Ok(next);
+				match gate.admit(value) {
+					Admission::Admit => {}
+					Admission::Reload => {
+						held = Some((key.to_vec(), value.to_vec()));
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
+					Admission::Refuse(e) => {
+						failed = Some(e);
+						return Ok(std::ops::ControlFlow::Break(()));
+					}
 				}
-				let settled = in_place_row(program, pipeline, key, value, state);
-				match settled {
+				match scan_row(
+					program,
+					pipeline,
+					topk_probe.as_ref(),
+					topk_threshold.as_deref(),
+					key,
+					value,
+					Some(layouts),
+					state,
+				) {
 					Ok(false) => Ok(next),
 					Ok(true) => {
 						stopped = true;
@@ -2671,6 +2789,29 @@ async fn scan_in_place(
 		if let Some(e) = failed {
 			return Err(ControlFlow::Err(e));
 		}
+		if let Some((key, value)) = held {
+			gate.reload(&txn).await.map_err(ControlFlow::Err)?;
+			match gate.admit(&value) {
+				Admission::Admit => {}
+				Admission::Refuse(e) => return Err(ControlFlow::Err(e)),
+				Admission::Reload => {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"a record's generation was unlisted again after the layouts reloaded"
+					)));
+				}
+			}
+			stopped = scan_row(
+				program,
+				pipeline,
+				topk_probe.as_ref(),
+				topk_threshold.as_deref(),
+				&key,
+				&value,
+				Some(&**gate.layouts()),
+				state,
+			)
+			.map_err(ControlFlow::Err)?;
+		}
 		#[cfg(test)]
 		RECORDS_SCANNED.with(|scanned| scanned.set(scanned.get() + stats.rows as usize));
 		// The rows the chunk emitted are held until `flush` hands them on, so a
@@ -2686,24 +2827,84 @@ async fn scan_in_place(
 	}
 }
 
+/// Run an admitted record of an in-place scan: refused unread when the top-k
+/// probe shows its ORDER BY key cannot beat the sort's worst kept row,
+/// otherwise run through the body ([`in_place_row`]). Answers whether the
+/// pipeline takes no more rows.
+///
+/// The caller has admitted the record's generation ([`RowGate::admit`]), so
+/// neither the probe nor the body reads a field of a record the table's
+/// layouts do not cover, and passes the layouts that admitted it, which a
+/// packed record is decoded with.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn scan_row(
+	program: &Program,
+	pipeline: &Pipeline,
+	probe: Option<&Arc<crate::exec::topk_pushdown::TopKThresholdProbe>>,
+	threshold: Option<&Value>,
+	key: &[u8],
+	value: &[u8],
+	layouts: Option<&TableLayouts>,
+	state: &mut State,
+) -> anyhow::Result<bool> {
+	if let (Some(probe), Some(threshold)) = (probe, threshold)
+		&& probe.rejects(threshold, value)
+	{
+		return Ok(false);
+	}
+	in_place_row(program, pipeline, key, value, layouts, state)
+}
+
 /// Run `pipeline`'s body over the stored record `key` names, whose encoded
 /// value is `value`, in place: the body hands the host no step (its pipeline
 /// is [`Pipeline::in_place`] or [`Pipeline::stored_rows`]), and the row it
 /// leaves pending is settled from the stored bytes. Answers whether the
 /// pipeline takes no more rows.
+///
+/// A record in a packed layout has no fields to read in place: it is decoded
+/// whole, through its generation's descriptor in `layouts` (the layouts that
+/// admitted it, refused as `NoLayouts` when `None`), run as a value row, and
+/// settled as a value. So a packed record never becomes a sort's stored bytes
+/// or a frame's late transcode, and neither needs layouts when it is read
+/// again.
 fn in_place_row(
 	program: &Program,
 	pipeline: &Pipeline,
 	key: &[u8],
 	value: &[u8],
+	layouts: Option<&TableLayouts>,
 	state: &mut State,
 ) -> anyhow::Result<bool> {
-	let row = RevisionRow::new(key, value);
+	if StoredRecord::is_packed_bytes(value) {
+		let row = decode_record_value(key, value, layouts)?;
+		let stop = finish_in_place(run_in_place(program, pipeline, &ValueRow(&row), state))?;
+		if state.pending.is_some() {
+			state.settle(program, row);
+		}
+		return Ok(stop);
+	}
+	let row = StoredRow::new(key, value);
+	let stop = finish_in_place(run_in_place(program, pipeline, &row, state))?;
+	if state.pending.is_some() {
+		state.settle_stored(program, key, value)?;
+	}
+	Ok(stop)
+}
+
+/// Run `pipeline`'s in-place body over `row`, with a register file sized to the
+/// body.
+fn run_in_place<'r>(
+	program: &'r Program,
+	pipeline: &'r Pipeline,
+	row: &'r dyn RowReader,
+	state: &mut State,
+) -> anyhow::Result<Step> {
 	// A body that holds few registers gets a register file of its
 	// size: the file is made and dropped for every record.
-	let step = if pipeline.registers <= SMALL_REGISTERS {
+	if pipeline.registers <= SMALL_REGISTERS {
 		let mut regs: [Scalar<'_>; SMALL_REGISTERS] = std::array::from_fn(|_| Scalar::None);
-		interp::run_row(program, pipeline, &row, &mut regs[..pipeline.registers], state, 0)
+		interp::run_row(program, pipeline, row, &mut regs[..pipeline.registers], state, 0)
 	} else {
 		let mut stack;
 		let mut spilled;
@@ -2714,8 +2915,14 @@ fn in_place_row(
 			spilled = (0..pipeline.registers).map(|_| Scalar::None).collect::<Vec<_>>();
 			&mut spilled[..]
 		};
-		interp::run_row(program, pipeline, &row, regs, state, 0)
-	};
+		interp::run_row(program, pipeline, row, regs, state, 0)
+	}
+}
+
+/// What a step an in-place body ended on means for the scan: whether the
+/// pipeline takes no more rows. A step that hands the host work is an error,
+/// because an in-place body hands it none.
+fn finish_in_place(step: anyhow::Result<Step>) -> anyhow::Result<bool> {
 	match step {
 		Ok(Step::Next) => Ok(false),
 		Ok(Step::Stop) => Ok(true),
@@ -2808,12 +3015,6 @@ fn in_place_row(
 		}) => Err(anyhow::anyhow!("an in-place pipeline yielded inside the storage cursor")),
 		Err(e) => Err(e),
 	}
-	.and_then(|stop| {
-		if state.pending.is_some() {
-			state.settle_stored(program, key, value)?;
-		}
-		Ok(stop)
-	})
 }
 
 /// Run a pipeline over rows held in memory. Each row spends a unit of fuel

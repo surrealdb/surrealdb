@@ -425,9 +425,9 @@ the choice and everything that depends on it above the source to be made at run 
 - **Kinds from the catalog and from storage.** The physical plan owns schema- and layout-derived
   kinds, read from the catalog it planned against, under the snapshot the program runs in. A
   declared kind is a guarantee only where that catalog guarantees every row it applies to: a
-  table whose rows are all in one strict layout generation, with no older generation left, as the
-  generation bookkeeping records; or a strict-layout row (record format v1) read through its
-  generation's descriptor, which makes the guarantee when the row is read. Where the guarantee
+  table whose rows are all in one packed layout generation, with no older generation left, as the
+  table's floor and conformance record say; or a packed row read through its generation's
+  descriptor, which makes the guarantee when the row is read. Where the guarantee
   holds, the physical plan may drop checks, reorder or merge fallible expressions, and bind
   monomorphic fast paths without a per-row guard. Where it does not — `SCHEMALESS` tables,
   `FLEXIBLE` fields, `any` and `option<…>`, revision-encoded rows or rows of an older generation,

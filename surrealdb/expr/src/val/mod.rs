@@ -9,10 +9,11 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use common::fmt::{EscapeIdent, QuoteStr};
 use geo_types::Point;
-use revision::revisioned;
+use revision::optimised::tag::{SizeClass, read_tag};
+use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
-use surrealdb_collections::VecMap;
+use surrealdb_collections::{VecMap, bounded};
 pub use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -24,6 +25,7 @@ use crate::val::table_name_public::IntoPublicTable;
 use crate::val::teardown::{Discard, Node, discard_all, discard_node};
 
 pub mod array;
+pub mod bounded_duration;
 pub mod bytes;
 pub mod closure;
 pub mod convert_public;
@@ -33,6 +35,7 @@ pub mod evaluator;
 pub mod field_path;
 pub mod file;
 pub mod geometry;
+pub mod identical;
 pub mod key_encoding;
 pub mod number;
 pub mod object;
@@ -41,6 +44,7 @@ pub mod record_id;
 pub mod regex;
 pub mod rnd;
 pub mod set;
+pub mod stored;
 pub mod table_name_public;
 mod teardown;
 pub mod uuid;
@@ -50,6 +54,7 @@ pub use surrealdb_strand::TableName;
 pub use teardown::discard_value;
 
 pub use self::array::Array;
+pub use self::bounded_duration::BoundedDuration;
 pub use self::bytes::Bytes;
 pub use self::closure::Closure;
 pub use self::convert_public::convert_public_value_to_internal;
@@ -58,6 +63,7 @@ pub use self::duration::Duration;
 pub use self::evaluator::{BoxInvokeFut, ClosureEvaluator};
 pub use self::file::File;
 pub use self::geometry::Geometry;
+pub use self::identical::{same_object_except, same_record_id, same_record_key, same_value};
 pub use self::key_encoding::{
 	encode_datetime_second_prefix, try_array_key_prefix, try_encode_component,
 };
@@ -104,7 +110,7 @@ pub struct Null;
 // `Set` indexed prologues, the planner hot path gets O(log n) Map
 // binary search, O(1) Array random access, and O(1) skip past any Value
 // — all zero-alloc through the descent chain.
-#[revisioned(revision(1), revision(2, optimised))]
+#[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
@@ -152,6 +158,82 @@ pub enum Value {
 	#[revision(size = "varlen")]
 	Closure(Box<Closure>),
 	// Add new variants here
+}
+
+/// Reads exactly what the derived serializer writes.
+///
+/// Revision 1 is a `u32` variant and the variant's value. Revision 2 is an `optimised` tag: `None`
+/// and `Null` are inline, `Bool` is one fixed byte, and every other variant is a `u32` payload
+/// length and the payload, which is read through [`bounded::read_payload`], decoded from the slice
+/// and refused if bytes are left over. A tag with its reserved bit set, or with a size class that
+/// is not its variant's, is refused. A closure is never stored and is always refused.
+impl DeserializeRevisioned for Value {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
+		match bounded::read_revision(reader, "Value", 2)? {
+			1 => {
+				let variant = u32::deserialize_revisioned(reader)?;
+				read_variant(variant, reader)
+			}
+			_ => {
+				let tag = read_tag(reader)?;
+				if tag.is_extended() {
+					return Err(RevisionError::InvalidOptimisedTag(tag.0));
+				}
+				let variant = u32::from(tag.variant_id());
+				match (variant, tag.size_class()?) {
+					(0 | 1, SizeClass::Inline) | (2, SizeClass::Fixed) => {
+						read_variant(variant, reader)
+					}
+					(3..=18, SizeClass::Varlen) => {
+						let payload = bounded::read_payload(reader)?;
+						let mut body = payload.as_slice();
+						let value = read_variant(variant, &mut body)?;
+						bounded::finish(body)?;
+						Ok(value)
+					}
+					_ => Err(RevisionError::Deserialize(
+						"Invalid tag for enum `Value` revision `2`".into(),
+					)),
+				}
+			}
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Value {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
+
+/// Reads the value of the variant numbered `variant`, in declaration order.
+fn read_variant<R: std::io::Read>(variant: u32, reader: &mut R) -> Result<Value, RevisionError> {
+	Ok(match variant {
+		0 => Value::None,
+		1 => Value::Null,
+		2 => Value::Bool(bool::deserialize_revisioned(reader)?),
+		3 => Value::Number(Number::deserialize_revisioned(reader)?),
+		4 => Value::String(Strand::deserialize_revisioned(reader)?),
+		5 => Value::Duration(Duration::deserialize_revisioned(reader)?),
+		6 => Value::Datetime(Datetime::deserialize_revisioned(reader)?),
+		7 => Value::Uuid(Uuid::deserialize_revisioned(reader)?),
+		8 => Value::Array(Array::deserialize_revisioned(reader)?),
+		9 => Value::Set(Set::deserialize_revisioned(reader)?),
+		10 => Value::Object(Object::deserialize_revisioned(reader)?),
+		11 => Value::Geometry(Geometry::deserialize_revisioned(reader)?),
+		12 => Value::Bytes(Bytes::deserialize_revisioned(reader)?),
+		13 => Value::Table(TableName::deserialize_revisioned(reader)?),
+		14 => Value::RecordId(RecordId::deserialize_revisioned(reader)?),
+		15 => Value::File(File::deserialize_revisioned(reader)?),
+		16 => Value::Regex(Regex::deserialize_revisioned(reader)?),
+		17 => Value::Range(Box::<Range>::deserialize_revisioned(reader)?),
+		18 => Value::Closure(Box::<Closure>::deserialize_revisioned(reader)?),
+		x => {
+			return Err(RevisionError::Deserialize(format!(
+				"Invalid discriminant `{x}` for enum `Value`"
+			)));
+		}
+	})
 }
 
 impl Eq for Value {}
@@ -221,8 +303,9 @@ impl Value {
 	/// Whether [`Value::cmp`] agrees with [`Value::equal`] for this value
 	/// against any other value that also agrees: `a.equal(b) == (a.cmp(b) ==
 	/// Equal)`. A value for which it does not — a regex (which `equal` matches
-	/// against strings), or one holding a geometry, range or closure (whose
-	/// `partial_cmp` may be undefined) — must be compared with `equal`.
+	/// against strings), a range or closure (whose `partial_cmp` may be
+	/// undefined), or a geometry (totally ordered, but its order equates NaN
+	/// coordinates that `equal` does not) — must be compared with `equal`.
 	///
 	/// A [`Number`] agrees at any depth: `Number`'s equality and order both
 	/// treat `1`, `1.0` and `1dec` as one value, `-0.0` as `0.0`, and a NaN by

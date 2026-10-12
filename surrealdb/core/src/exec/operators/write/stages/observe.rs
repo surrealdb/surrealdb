@@ -181,7 +181,7 @@ fn queued_payload(
 		auth_enabled: frame.auth_enabled(),
 		values: frame.ctx().collect_values(HashMap::new()),
 		auth_with_limit: Arc::clone(&frame.root().auth),
-		event_definition: definition.clone(),
+		event_definition: definition.clone().into(),
 	})
 }
 

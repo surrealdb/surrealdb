@@ -2189,6 +2189,7 @@ dependencies = [
  "surrealdb-kvs",
  "surrealdb-parse-common",
  "surrealdb-parser-next",
+ "surrealdb-stored-derive",
  "surrealdb-strand",
  "surrealdb-types",
  "thiserror",
@@ -2276,6 +2277,15 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-stored-derive"
+version = "3.4.0-nightly"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

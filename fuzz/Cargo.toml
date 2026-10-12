@@ -22,6 +22,9 @@ path = "../surrealdb/gql"
 [dependencies.surrealdb-expr]
 path = "../surrealdb/expr"
 
+[dependencies.surrealdb-catalog]
+path = "../surrealdb/catalog"
+
 
 [dependencies.surrealdb-types]
 path = "../surrealdb/types"
@@ -70,5 +73,29 @@ doc = false
 [[bin]]
 name = "fuzz_format"
 path = "fuzz_targets/fuzz_format.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_stored_decode"
+path = "fuzz_targets/fuzz_stored_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_stored_roundtrip"
+path = "fuzz_targets/fuzz_stored_roundtrip.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_record_envelope"
+path = "fuzz_targets/fuzz_record_envelope.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_packed_row"
+path = "fuzz_targets/fuzz_packed_row.rs"
 test = false
 doc = false

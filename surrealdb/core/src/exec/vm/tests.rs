@@ -2762,11 +2762,27 @@ async fn a_field_definition_is_checked_when_it_is_lowered() {
 		),
 		(
 			"DEFINE FIELD existing.sub ON person TYPE int",
-			vec![FieldRefusal::MismatchedFieldTypes {
+			vec![FieldRefusal::FieldParentCannotHold {
 				name: "existing.sub".to_owned(),
-				kind: "int".to_owned(),
-				existing_name: "existing".to_owned(),
-				existing_kind: "string".to_owned(),
+				parent: "existing".to_owned(),
+				kind: "string".to_owned(),
+				rule: "only an object holds a field".to_owned(),
+			}],
+		),
+		(
+			"DEFINE FIELD orphan.leaf ON person TYPE int",
+			vec![FieldRefusal::FieldParentUndefined {
+				name: "orphan.leaf".to_owned(),
+				parent: "orphan".to_owned(),
+			}],
+		),
+		(
+			"DEFINE FIELD existing.sub ON person",
+			vec![FieldRefusal::FieldParentCannotHold {
+				name: "existing.sub".to_owned(),
+				parent: "existing".to_owned(),
+				kind: "string".to_owned(),
+				rule: "only an object holds a field".to_owned(),
 			}],
 		),
 		(
@@ -4065,7 +4081,7 @@ async fn where_the_time_goes() {
 		loop {
 			let stats = cursor
 				.for_each(1000, &mut |key, val| {
-					rows.push(decode_record(key, val).expect("decodes"));
+					rows.push(decode_record(key, val, None).expect("decodes"));
 					Ok(std::ops::ControlFlow::Continue(()))
 				})
 				.await
@@ -4078,7 +4094,6 @@ async fn where_the_time_goes() {
 		drop(rows);
 
 		// The stored-bytes steps a row program takes for `n = 3`, one at a time.
-		let n = super::row::FieldName::new("n");
 		let three = crate::val::Number::Int(3);
 		for step in ["locate n", "locate + decode n", "locate + decode + registers"] {
 			let started = web_time::Instant::now();
@@ -4087,18 +4102,28 @@ async fn where_the_time_goes() {
 				.await
 				.expect("cursor");
 			let mut hits = 0usize;
+			let mut slot = u32::MAX;
 			loop {
 				let stats = cursor
 					.for_each(1000, &mut |_key, val| {
-						let data = crate::exec::object_extract::rev2_record_data_bytes(val)
-							.expect("rev 2");
-						let bytes = super::row::RevisionRow::field_bytes(data, &n)
-							.expect("walkable")
-							.expect("present");
+						let record = crate::catalog::StoredRecord::parse(val)
+							.expect("parses")
+							.expect("stored-value");
+						let data = record
+							.checked_document()
+							.expect("checks")
+							.expect("a document")
+							.value()
+							.expect("reads")
+							.as_ordered_object()
+							.expect("reads")
+							.expect("an object");
+						let value =
+							data.get_hinted("n", &mut slot).expect("walkable").expect("present");
 						if step == "locate n" {
-							hits += bytes.len() & 1;
+							hits += value.payload().len() & 1;
 						} else {
-							let scalar = super::row::scalar_from_wire(bytes).expect("decodes");
+							let scalar = super::row::scalar_from_stored(value).expect("decodes");
 							if step == "locate + decode + registers" {
 								let regs: [super::scalar::Scalar<'_>;
 									super::program::STACK_REGISTERS] = std::array::from_fn(|_| super::scalar::Scalar::None);
@@ -4639,214 +4664,6 @@ async fn point_reads_against_batched_reads() {
 		let batch = started.elapsed().as_nanos() as f64 / ROWS as f64;
 		assert_eq!(found, batched);
 		println!("point {point:>7.1} ns/read   batched {batch:>7.1} ns/read   ({found} records)");
-	}
-}
-
-/// The strict row layout against the `revision` encoding, over the same
-/// records held as stored bytes in memory, so the storage cursor's own cost
-/// is left out: reading an integer field, string equality and ordering, and
-/// the vectorized gather and filter of `row_against_vector`. Run in release,
-/// as `throughput`.
-#[tokio::test]
-#[ignore = "a measurement, not a check"]
-async fn strict_layout_against_revision() {
-	use std::borrow::Cow;
-
-	use super::layout::{ColumnKind, Layout, StrictRow, StringEncoding};
-	use super::row::{FieldName, RevisionRow, RowReader};
-	use super::scalar::Scalar;
-	use crate::exec::operators::scan::pipeline::decode_record;
-	use crate::key::schema::RecordPrefix;
-
-	const ROWS: usize = 200_000;
-	const WIDTH: usize = 1024;
-	let db = TestDb::new(&format!(
-		"FOR $i IN 1..={ROWS} {{ CREATE type::record('t', $i) SET n = $i % 7, i = $i, \
-		 name = IF $i % 10 = 0 THEN 'a name long enough to leave its slot' ELSE \
-		 string::repeat('n', 1 + $i % 5) END, s = 'row' }}"
-	))
-	.await;
-	let ctx = db.exec_ctx().await;
-	let db_ctx = ctx.database().expect("database");
-	let range = RecordPrefix {
-		ns: db_ctx.ns_ctx.ns.namespace_id,
-		db: db_ctx.db.database_id,
-		tb: Cow::Borrowed(&"t".into()),
-	}
-	.range()
-	.expect("range");
-	let txn = ctx.txn();
-	let mut cursor = txn
-		.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, None)
-		.await
-		.expect("cursor");
-	let mut stored: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(ROWS);
-	loop {
-		let stats = cursor
-			.for_each(1000, &mut |key, val| {
-				stored.push((key.to_vec(), val.to_vec()));
-				Ok(std::ops::ControlFlow::Continue(()))
-			})
-			.await
-			.expect("scan");
-		if stats.rows == 0 {
-			break;
-		}
-	}
-	assert_eq!(stored.len(), ROWS);
-	let records: Vec<crate::val::Object> = stored
-		.iter()
-		.map(|(k, v)| match decode_record(k, v).expect("decodes") {
-			Value::Object(object) => object,
-			other => panic!("not an object: {other:?}"),
-		})
-		.collect();
-
-	let per_row = |started: web_time::Instant| started.elapsed().as_nanos() as f64 / ROWS as f64;
-	let n = FieldName::new("n");
-	let name = FieldName::new("name");
-
-	// The `revision` encoding, read in place as the VM reads it today.
-	let revision = |label: &str| {
-		let mut hits = 0usize;
-		let started = web_time::Instant::now();
-		for (k, v) in &stored {
-			hits += usize::from(RevisionRow::new(k, v).field_int(&n).expect("reads") == Some(3));
-		}
-		let int = per_row(started);
-		let started = web_time::Instant::now();
-		for (k, v) in &stored {
-			if let Scalar::Str(s) = RevisionRow::new(k, v).field(&name).expect("reads") {
-				hits += usize::from(s == "nnn");
-			}
-		}
-		let eq = per_row(started);
-		let started = web_time::Instant::now();
-		for (k, v) in &stored {
-			if let Scalar::Str(s) = RevisionRow::new(k, v).field(&name).expect("reads") {
-				hits += usize::from(s > "nn");
-			}
-		}
-		let cmp = per_row(started);
-		let started = web_time::Instant::now();
-		for (k, v) in &stored {
-			if let Scalar::Str(s) = RevisionRow::new(k, v).field(&name).expect("reads") {
-				hits += usize::from(s.chars().count() > 2);
-			}
-		}
-		let len = per_row(started);
-		let started = web_time::Instant::now();
-		let mut emitted = 0usize;
-		let (mut names, mut ns): (Vec<usize>, Vec<i64>) = (Vec::new(), Vec::new());
-		for chunk in stored.chunks(WIDTH) {
-			names.clear();
-			ns.clear();
-			for (k, v) in chunk {
-				let row = RevisionRow::new(k, v);
-				names.push(match row.field(&name).expect("reads") {
-					Scalar::Str(s) => s.chars().count(),
-					_ => 0,
-				});
-				ns.push(row.field_int(&n).expect("reads").unwrap_or(0));
-			}
-			emitted += names
-				.iter()
-				.zip(&ns)
-				.filter(|(len, n)| **len > 2 && n.checked_mul(2).is_some_and(|v| v > 5))
-				.count();
-		}
-		let gather = per_row(started);
-		println!(
-			"{label:<22} int {int:>6.1}   eq {eq:>6.1}   cmp {cmp:>6.1}   len>2 {len:>6.1}   gather+filter {gather:>6.1} ns/row   ({hits} {emitted})"
-		);
-	};
-
-	let strict = |label: &str, strings: StringEncoding| {
-		let layout = Layout::plan(
-			1,
-			&[
-				("i", ColumnKind::Int),
-				("n", ColumnKind::Int),
-				("name", ColumnKind::String),
-				("s", ColumnKind::String),
-			],
-			strings,
-		)
-		.expect("plans");
-		let rows: Vec<Vec<u8>> =
-			records.iter().map(|r| layout.encode(r).expect("encodes")).collect();
-		let bytes: usize = rows.iter().map(Vec::len).sum();
-		let (n_col, name_col) =
-			(layout.column("n").expect("n"), layout.column("name").expect("name"));
-		let mut hits = 0usize;
-		let started = web_time::Instant::now();
-		for row in &rows {
-			hits += usize::from(StrictRow::new(&layout, row).read_int(n_col) == Some(3));
-		}
-		let int = per_row(started);
-		let started = web_time::Instant::now();
-		for row in &rows {
-			hits += usize::from(StrictRow::new(&layout, row).str_eq(name_col, "nnn"));
-		}
-		let eq = per_row(started);
-		let started = web_time::Instant::now();
-		for row in &rows {
-			hits += usize::from(
-				StrictRow::new(&layout, row).str_cmp(name_col, "nn")
-					== Some(std::cmp::Ordering::Greater),
-			);
-		}
-		let cmp = per_row(started);
-		let started = web_time::Instant::now();
-		for row in &rows {
-			hits +=
-				usize::from(StrictRow::new(&layout, row).str_len(name_col).is_some_and(|n| n > 2));
-		}
-		let len = per_row(started);
-		let started = web_time::Instant::now();
-		let mut emitted = 0usize;
-		let (mut names, mut ns): (Vec<usize>, Vec<i64>) = (Vec::new(), Vec::new());
-		for chunk in rows.chunks(WIDTH) {
-			names.clear();
-			ns.clear();
-			for row in chunk {
-				let row = StrictRow::new(&layout, row);
-				names.push(match row.read(name_col) {
-					Scalar::Str(s) => s.chars().count(),
-					_ => 0,
-				});
-				ns.push(row.read_int(n_col).unwrap_or(0));
-			}
-			emitted += names
-				.iter()
-				.zip(&ns)
-				.filter(|(len, n)| **len > 2 && n.checked_mul(2).is_some_and(|v| v > 5))
-				.count();
-		}
-		let gather = per_row(started);
-		println!(
-			"{label:<22} int {int:>6.1}   eq {eq:>6.1}   cmp {cmp:>6.1}   len>2 {len:>6.1}   gather+filter {gather:>6.1} ns/row   ({hits} {emitted}, {:.0} B/row)",
-			bytes as f64 / ROWS as f64
-		);
-	};
-
-	let revision_bytes: usize = stored.iter().map(|(_, v)| v.len()).sum();
-	println!("revision value size {:.0} B/row", revision_bytes as f64 / ROWS as f64);
-	for _ in 0..2 {
-		revision("revision");
-		strict("strict offset table", StringEncoding::OffsetTable);
-		strict(
-			"strict view 12",
-			StringEncoding::View {
-				inline: 12,
-			},
-		);
-		strict(
-			"strict view 8 (stats)",
-			StringEncoding::View {
-				inline: 8,
-			},
-		);
 	}
 }
 

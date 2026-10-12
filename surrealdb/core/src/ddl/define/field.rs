@@ -331,6 +331,9 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 			{
 				let path = definition.name[fd.name.len()..].to_vec();
 				if !fd_kind.allows_nested_kind(&path, self_kind) {
+					// A parent that cannot hold a field at all is refused by the
+					// nesting rule, whose error names why.
+					define_field_nesting_restrictions(&fds, definition)?;
 					bail!(ExecError::MismatchedFieldTypes {
 						name: definition.name.to_sql(),
 						kind: self_kind.to_sql(),

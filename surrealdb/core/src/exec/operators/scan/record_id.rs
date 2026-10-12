@@ -153,9 +153,24 @@ pub(crate) async fn execute_record_lookup(
 			};
 			let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
 
+			let epoch = txn.layout_epoch();
+			let layouts = txn
+				.table_layouts(ns.namespace_id, db.database_id, &rid.table, version)
+				.await
+				.map_err(ControlFlow::Err)?;
+			let gate = crate::kvs::RowGate::new(
+				layouts,
+				ns.namespace_id,
+				db.database_id,
+				&rid.table,
+				version,
+				epoch,
+			)
+			.map_err(ControlFlow::Err)?;
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
 				range,
+				gate,
 				version,
 				effective_storage_limit,
 				crate::kvs::Direction::Forward,

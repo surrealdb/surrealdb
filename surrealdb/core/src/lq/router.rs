@@ -128,6 +128,11 @@ impl LiveQueryRouter {
 	pub(crate) fn set_baseline(&self, safe_vs: u128) {
 		self.progress.lock().cursor = Some(safe_vs);
 	}
+
+	/// Whether the baseline cursor is established.
+	pub(crate) fn has_baseline(&self) -> bool {
+		self.progress.lock().cursor.is_some()
+	}
 }
 
 /// Run one tail-and-deliver pass for the Router engine.

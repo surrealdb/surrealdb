@@ -46,12 +46,13 @@ use super::program::UnitFrame;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, FieldDefinition, IndexDefinition, NamespaceDefinition,
-	NamespaceId, TableDefinition,
+	NamespaceId, TableDefinition, TableLayouts,
 };
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::{DatabaseContext, ExecutionContext};
 use crate::expr::{ControlFlow, FlowResult};
+use crate::kvs::RowGate;
 
 /// A table's catalog as a load found it; see the module.
 pub(crate) struct TableDescriptor {
@@ -65,9 +66,35 @@ pub(crate) struct TableDescriptor {
 	/// The table's field definitions, including the virtual definitions of
 	/// the components its record id names.
 	pub(crate) fields: Arc<[FieldDefinition]>,
+	/// The generations the table's rows are stored under, as of `stamp`, for
+	/// the table whether or not it is defined: rows remain under a removed
+	/// table's root until a range delete reaches them. A scan checks each row
+	/// it reads against these before it reads any field of the row
+	/// ([`Self::row_gate`]).
+	pub(crate) layouts: Arc<TableLayouts>,
+	/// The transaction's layout epoch ([`crate::kvs::Transaction::layout_epoch`])
+	/// read before `layouts` were loaded. A gate made from the descriptor holds
+	/// it, so a current gate takes the transaction's layouts again once the
+	/// epoch has moved since the load ([`RowGate::refresh`]), whether or not the
+	/// descriptor itself is served again.
+	pub(crate) layouts_epoch: u64,
 }
 
 impl TableDescriptor {
+	/// The check of one reader of this table's rows at the descriptor's
+	/// `VERSION` stamp. It refuses layouts that belong to another table before
+	/// the first row is read.
+	pub(crate) fn row_gate(&self) -> anyhow::Result<RowGate> {
+		RowGate::new(
+			Arc::clone(&self.layouts),
+			self.ns,
+			self.db,
+			&self.name,
+			self.stamp,
+			self.layouts_epoch,
+		)
+	}
+
 	/// The definition, or the error of a table that is not defined.
 	pub(crate) fn defined(&self) -> anyhow::Result<&Arc<TableDefinition>> {
 		self.definition.as_ref().ok_or_else(|| {
@@ -166,6 +193,10 @@ async fn load_table(
 		Some(_) => txn.all_tb_fields(ns, db, table, stamp).await?,
 		None => Arc::from([]),
 	};
+	// The load fails only on a storage error: a descriptor this build cannot
+	// read is a refused generation in the answer.
+	let layouts_epoch = txn.layout_epoch();
+	let layouts = txn.table_layouts(ns, db, table, stamp).await?;
 	Ok(Arc::new(TableDescriptor {
 		name: table.clone(),
 		ns,
@@ -173,6 +204,8 @@ async fn load_table(
 		stamp,
 		definition,
 		fields,
+		layouts,
+		layouts_epoch,
 	}))
 }
 

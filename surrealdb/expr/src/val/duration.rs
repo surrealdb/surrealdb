@@ -8,8 +8,9 @@ use common::duration::{
 	NANOSECONDS_PER_MICROSECOND, NANOSECONDS_PER_MILLISECOND, SECONDS_PER_DAY, SECONDS_PER_HOUR,
 	SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
-use revision::revisioned;
+use revision::{DeserializeRevisioned, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::Error;
@@ -17,13 +18,50 @@ use crate::expr::statements::info::InfoStructure;
 use crate::syn;
 use crate::val::{Datetime, IndexFormat, TryAdd, TrySub, Value};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Ord, Encode, BorrowDecode,
 )]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Duration(pub time::Duration);
+
+/// Reads exactly what the derived serializer writes (revision 1: seconds as a varint `u64`, then
+/// the sub-second nanoseconds as a varint `u32`).
+///
+/// Nanoseconds at or above one second carry into the seconds, as `std::time::Duration::new` does;
+/// a carry that overflows the seconds is a [`revision::Error::Deserialize`], never a panic. The VM
+/// codec applies the same rule.
+impl DeserializeRevisioned for Duration {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		bounded::read_revision(reader, "Duration", 1)?;
+		read_std_duration(reader).map(Self)
+	}
+}
+
+/// Reads the two fields `std::time::Duration` is serialized as: seconds as a varint `u64`, then
+/// the sub-second nanoseconds as a varint `u32`, with no revision header.
+///
+/// Nanoseconds at or above one second carry into the seconds, as `Duration::new` does; a carry
+/// that overflows the seconds is a [`revision::Error::Deserialize`], never a panic.
+pub(crate) fn read_std_duration<R: std::io::Read>(
+	reader: &mut R,
+) -> Result<time::Duration, revision::Error> {
+	let secs = u64::deserialize_revisioned(reader)?;
+	let nanos = u32::deserialize_revisioned(reader)?;
+	let secs = secs.checked_add(u64::from(nanos / NANOSECONDS_PER_SECOND)).ok_or_else(|| {
+		revision::Error::Deserialize("a duration past the representable range".to_owned())
+	})?;
+	Ok(time::Duration::new(secs, nanos % NANOSECONDS_PER_SECOND))
+}
+
+impl SkipCheckRevisioned for Duration {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
+
+const NANOSECONDS_PER_SECOND: u32 = 1_000_000_000;
 
 impl Duration {
 	pub const MAX: Duration = Duration(time::Duration::MAX);

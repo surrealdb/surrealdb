@@ -10,15 +10,20 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Kind;
 use crate::expr::statements::info::InfoStructure;
+use crate::val::stored::schema::Stored;
 use crate::val::{TableName, Value};
 
 /// The type of records stored by a table
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub enum TableType {
 	#[default]
+	#[stored(n = 1)]
 	Any,
+	#[stored(n = 2)]
 	Normal,
+	#[stored(n = 3)]
 	Relation(Relation),
 }
 
@@ -81,20 +86,24 @@ impl InfoStructure for TableType {
 }
 
 #[revisioned(revision = 3)]
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Hash, Clone, Eq, PartialEq, Stored)]
+#[stored(since = "4.0")]
 pub struct Relation {
 	#[revision(end = 2, convert_fn = "rev_convert_from")]
 	pub old_from: Option<Kind>,
 	/// Contains the tables the relation originates from,
 	/// if empty then there was no `IN` clause
 	#[revision(start = 2)]
+	#[stored(n = 2)]
 	pub from: Vec<TableName>,
 	#[revision(end = 2, convert_fn = "rev_convert_to")]
 	pub old_to: Option<Kind>,
 	/// Contains the tables the relation goes to,
 	/// if empty then there was no `OUT` clause
 	#[revision(start = 2)]
+	#[stored(n = 4)]
 	pub to: Vec<TableName>,
+	#[stored(n = 6)]
 	pub enforced: bool,
 	/// A lightweight relation stores each edge as its two vertex-side
 	/// adjacency keys alone — no record, no edge-side keys, no index keys.
@@ -103,6 +112,7 @@ pub struct Relation {
 	/// and `out`, and its endpoints must always be enforced (vertex
 	/// deletion is the only cleanup path).
 	#[revision(start = 3)]
+	#[stored(n = 8)]
 	pub lightweight: bool,
 }
 

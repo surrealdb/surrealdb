@@ -144,6 +144,21 @@ impl Default for Number {
 
 impl Eq for Number {}
 
+/// Compares two floats as a total order: `-0.0` equals `0.0`, and every other pair
+/// (NaN included) follows [`f64::total_cmp`].
+///
+/// Merging the two zeros loses no transitivity, since they are adjacent in `total_cmp`.
+///
+/// Geometry coordinate streams use this order, where NaNs of different sign and payload stay
+/// distinct. [`Number`] orders itself differently: every NaN is one value above `+inf`.
+pub(crate) fn cmp_f64(a: f64, b: f64) -> Ordering {
+	if a == 0.0 && b == 0.0 {
+		Ordering::Equal
+	} else {
+		a.total_cmp(&b)
+	}
+}
+
 /// Numbers of every kind order as one line. Every NaN, whatever its sign
 /// and payload, is one value above every other number, `+inf` included, as
 /// the engine orders it.

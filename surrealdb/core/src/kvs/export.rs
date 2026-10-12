@@ -33,7 +33,8 @@ use crate::expr::{
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::mean_tokens_per_document;
 use crate::key::schema::{RecordKey, RecordPrefix};
-use crate::key::{KVKeyDecode, KVSubspace, KVValue};
+use crate::key::{KVKeyDecode, KVSubspace};
+use crate::kvs::LayoutSet;
 use crate::kvs::sequences::next_unissued_value;
 use crate::val::TableName;
 use crate::{catalog, val};
@@ -985,7 +986,14 @@ async fn keys_per_record(
 /// Sizing has to look at record content, and the alternative to decoding a few
 /// twice is threading decoded records through the emit path — which would hold a
 /// whole batch's `Value`s alive for the sake of a handful used to measure.
-fn decode_sample(batch: &[(Vec<u8>, Vec<u8>)], limit: usize) -> Result<Vec<val::Value>> {
+///
+/// The caller has admitted every row's generation against the table's layouts and passes the
+/// layouts that admitted them: a packed row is decoded through its generation's descriptor there.
+fn decode_sample(
+	batch: &[(Vec<u8>, Vec<u8>)],
+	layouts: Option<&catalog::TableLayouts>,
+	limit: usize,
+) -> Result<Vec<val::Value>> {
 	batch
 		.iter()
 		.take(limit)
@@ -995,7 +1003,7 @@ fn decode_sample(batch: &[(Vec<u8>, Vec<u8>)], limit: usize) -> Result<Vec<val::
 				table: k.tb.into_owned(),
 				key: k.id.into_owned(),
 			};
-			Ok(Record::kv_decode_value(v, rid)?.data)
+			Ok(Record::decode_admitted(v, layouts, rid)?.data)
 		})
 		.collect()
 }
@@ -1087,6 +1095,8 @@ async fn export_table_data(
 		tb: std::borrow::Cow::Borrowed(&tb_name),
 	};
 	let mut next = Some(records.range()?);
+	// The table's layouts, loaded on the first row that names a generation above 0.
+	let mut layouts = LayoutSet::new(ns, db, None);
 
 	while let Some(rng) = next {
 		let batch = tx.batch_keys_vals_raw(rng, batch_size, None).await?;
@@ -1097,16 +1107,23 @@ async fn export_table_data(
 		if batch.result.is_empty() {
 			break;
 		}
+		// Each row's generation is checked before any row is decoded.
+		for (_, value) in &batch.result {
+			layouts.admit(tx, &tb_name, value).await?;
+		}
+		// The layouts that admitted the batch's rows: a packed row is decoded with them. The set
+		// holds none when no row names a generation above 0, and no row is then packed.
+		let table_layouts = layouts.layouts_of(&tb_name).map(|held| &**held);
 		// Price this batch from its own records. Sizing needs to see the data
 		// because a value index over an array field writes one entry per
 		// element, which the schema does not state.
-		let sample = decode_sample(&batch.result, FAN_OUT_SAMPLE)?;
+		let sample = decode_sample(&batch.result, table_layouts, FAN_OUT_SAMPLE)?;
 		let per_insert = records_per_insert(
 			keys_per_record(tx, ns, db, &tb_name, &indexes, &fields, &sample).await?,
 			batch_size,
 		);
 		for group in batch.result.chunks(per_insert) {
-			export_regular_data(group, chn).await?;
+			export_regular_data(group, table_layouts, chn).await?;
 		}
 	}
 
@@ -1160,7 +1177,9 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 /// # Arguments
 ///
 /// * `regular_values` - A vector of tuples containing the regular values to be exported. Each tuple
-///   consists of a key and a value.
+///   consists of a key and a value. The caller has admitted each value's generation against its
+///   table's layouts.
+/// * `layouts` - The layouts that admitted the values, which a packed value is decoded with.
 /// * `chn` - A reference to the channel to which the SQL commands will be sent.
 ///
 /// # Returns
@@ -1169,6 +1188,7 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 ///   occurs.
 async fn export_regular_data(
 	regular_values: &[(Vec<u8>, Vec<u8>)],
+	layouts: Option<&catalog::TableLayouts>,
 	chn: &Sender<Vec<u8>>,
 ) -> Result<()> {
 	// Initialize strings to hold normal records and graph edge records.
@@ -1183,7 +1203,7 @@ async fn export_regular_data(
 			table: k.tb.into_owned(),
 			key: k.id.into_owned(),
 		};
-		let v = Record::kv_decode_value(v, rid)?;
+		let v = Record::decode_admitted(v, layouts, rid)?;
 		// Process the value and categorize it into records_relate or records_normal.
 		process_record(&v, &mut records_relate, &mut records_normal);
 	}
@@ -1336,11 +1356,11 @@ pub(crate) fn define_user_statement_from_definition(
 		duration: UserDuration {
 			token: def
 				.token_duration
-				.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+				.map(|x| Expr::Literal(Literal::Duration(val::Duration::from(x))))
 				.unwrap_or(Expr::Literal(Literal::None)),
 			session: def
 				.session_duration
-				.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+				.map(|x| Expr::Literal(Literal::Duration(val::Duration::from(x))))
 				.unwrap_or(Expr::Literal(Literal::None)),
 		},
 		comment: def

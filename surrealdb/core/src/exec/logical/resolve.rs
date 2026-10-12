@@ -415,6 +415,17 @@ enum Named {
 	Param(String),
 }
 
+/// The error a failed catalog read raises while the catalog is gathered: the
+/// refusal itself where `e` carries one, so the statement fails naming the
+/// release it needs, and otherwise an internal error with the message `what`
+/// builds.
+fn catalog_read_error(e: &anyhow::Error, what: impl FnOnce() -> String) -> Error {
+	match Error::entry_refusal(e) {
+		Some(entry) => Error::Catalog(surrealdb_catalog::Error::Entry(entry)),
+		None => EngineError::Internal(what()).into(),
+	}
+}
+
 async fn gather(
 	op: &LogicalOp,
 	bx: &BindContext<'_>,
@@ -556,14 +567,13 @@ async fn gather(
 	let cache = bx.ctx.get_cache();
 	let current: Vec<TableName> =
 		worklist.iter().filter(|(_, stamp)| stamp.is_none()).map(|(t, _)| t.clone()).collect();
-	let mut shared: Option<Arc<SharedCatalog>> =
-		if current.is_empty() {
-			None
-		} else {
-			Some(SharedCatalog::for_tables(cache.as_deref(), txn, ns, db, &current).await.map_err(
-				|e| EngineError::Internal(format!("reading the catalog snapshot: {e:#}")),
-			)?)
-		};
+	let mut shared: Option<Arc<SharedCatalog>> = if current.is_empty() {
+		None
+	} else {
+		Some(SharedCatalog::for_tables(cache.as_deref(), txn, ns, db, &current).await.map_err(
+			|e| catalog_read_error(&e, || format!("reading the catalog snapshot: {e:#}")),
+		)?)
+	};
 
 	// Load each table once, following what its definition names. A table
 	// whose clauses have no logical form is recorded as unresolvable, so it
@@ -590,9 +600,9 @@ async fn gather(
 						.collect();
 					*shared =
 						shared.extended(cache.as_deref(), txn, &missing).await.map_err(|e| {
-							EngineError::Internal(format!(
-								"reading the definition of table `{table}`: {e:#}"
-							))
+							catalog_read_error(&e, || {
+								format!("reading the definition of table `{table}`: {e:#}")
+							})
 						})?;
 				}
 				let entry = shared.entry(&table).ok_or_else(|| {
@@ -604,12 +614,14 @@ async fn gather(
 			}
 			(stamp, _) => (
 				txn.get_tb(ns, db, &table, stamp).await.map_err(|e| {
-					EngineError::Internal(format!(
-						"reading the definition of table `{table}`: {e:#}"
-					))
+					catalog_read_error(&e, || {
+						format!("reading the definition of table `{table}`: {e:#}")
+					})
 				})?,
 				txn.all_tb_fields(ns, db, &table, stamp).await.map_err(|e| {
-					EngineError::Internal(format!("reading the fields of table `{table}`: {e:#}"))
+					catalog_read_error(&e, || {
+						format!("reading the fields of table `{table}`: {e:#}")
+					})
 				})?,
 			),
 		};

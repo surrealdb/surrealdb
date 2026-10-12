@@ -1,25 +1,28 @@
-use std::time::Duration;
-
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::expr as runtime;
 use crate::expr::statements::define::{DefineKind, DefineSequenceStatement};
 use crate::expr::statements::info::InfoStructure;
-use crate::val::Value;
+use crate::stored::Stored;
+use crate::val::{BoundedDuration, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct SequenceDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
+	#[stored(n = 4)]
 	pub batch: u32,
+	#[stored(n = 6)]
 	pub start: i64,
-	pub timeout: Option<Duration>,
+	#[stored(n = 8)]
+	pub timeout: Option<BoundedDuration>,
 }
 
-impl_kv_value_revisioned!(SequenceDefinition);
+impl_kv_value_catalog!(SequenceDefinition);
 
 impl SequenceDefinition {
 	fn to_runtime_definition(&self) -> DefineSequenceStatement {

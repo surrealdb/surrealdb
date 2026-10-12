@@ -5,34 +5,25 @@ use rust_decimal::Decimal;
 
 use super::wire::{Reader, Writer};
 use super::{types, value};
+use crate::catalog::stored::CatalogVTable;
 use crate::val::{Number, Object, Value};
 
 /// The shape of an encoded value.
 #[derive(Debug, Clone)]
 pub(super) enum Ty {
 	Bool,
-	/// Unsigned integers are varints; `u8` is one byte.
-	U8,
+	/// Unsigned integers are varints.
 	Uint,
 	/// Signed integers are zigzag varints.
 	Int,
-	F32,
-	F64,
 	/// A `String`, `Strand`, `TableName` or `str`: length and UTF-8.
 	String,
 	/// A `Vec<u8>`: length and bytes.
 	Bytes,
 	Uuid,
-	Decimal,
-	/// A `std::time::Duration`: seconds, then nanoseconds.
-	Duration,
-	/// A `chrono::DateTime<Utc>`: signed seconds, then nanoseconds.
-	DateTime,
 	Option(Box<Ty>),
 	/// Length, then each element.
 	Vec(Box<Ty>),
-	/// Length, then each key and value.
-	Map(Box<Ty>, Box<Ty>),
 	Tuple(Vec<Ty>),
 	/// A type with a descriptor of its own.
 	Named(&'static str),
@@ -48,8 +39,6 @@ pub(super) enum Native {
 	Number,
 	/// `val::Datetime`: a revisioned newtype over a `chrono` datetime.
 	Datetime,
-	/// `val::Duration`: a revisioned newtype over a `std` duration.
-	Duration,
 	RecordId,
 	/// A `RecordIdKey` on its own, read as a record id of the empty table.
 	RecordIdKey,
@@ -73,11 +62,6 @@ pub(super) enum Missing {
 	Default,
 	/// A fixed value.
 	Value(fn() -> Value),
-	/// Rebuilt from the value of a field the revision had.
-	Convert {
-		from: &'static str,
-		convert: fn(Value) -> Result<Value>,
-	},
 }
 
 /// One field of a struct, or of a struct-like variant.
@@ -87,8 +71,6 @@ pub(super) struct Field {
 	pub(super) ty: Ty,
 	/// The first revision that writes it.
 	pub(super) start: u16,
-	/// The first revision that no longer writes it.
-	pub(super) end: Option<u16>,
 	/// What it reads as in a revision that does not write it.
 	pub(super) missing: Missing,
 }
@@ -99,7 +81,6 @@ impl Field {
 			name,
 			ty,
 			start: 1,
-			end: None,
 			missing: Missing::Default,
 		}
 	}
@@ -109,18 +90,13 @@ impl Field {
 		self
 	}
 
-	pub(super) fn end(mut self, end: u16) -> Self {
-		self.end = Some(end);
-		self
-	}
-
 	pub(super) fn missing(mut self, missing: Missing) -> Self {
 		self.missing = missing;
 		self
 	}
 
 	fn alive(&self, revision: u16) -> bool {
-		self.start <= revision && self.end.is_none_or(|end| revision < end)
+		self.start <= revision
 	}
 }
 
@@ -183,6 +159,12 @@ pub(super) enum Body {
 	/// Written as another shape, with no revision header of its own: an id
 	/// newtype over a `u32`, a string wrapper.
 	Transparent(Ty),
+	/// A catalog type, read and written by the codec its derive generates.
+	/// The type's own entry is read and written by [`CatalogVTable::decode`]
+	/// and [`CatalogVTable::encode_at`]; a copy held inside a `revision`
+	/// container, by [`CatalogVTable::decode_embedded`] and
+	/// [`CatalogVTable::encode_embedded`].
+	Catalog(&'static CatalogVTable),
 }
 
 /// A revisioned type.
@@ -224,6 +206,16 @@ impl TypeDesc {
 		}
 	}
 
+	/// The descriptor of a catalog type, which names its generated codec.
+	pub(super) fn catalog(vtable: &'static CatalogVTable) -> Self {
+		Self {
+			name: vtable.name,
+			current: 0,
+			indexed_from: None,
+			body: Body::Catalog(vtable),
+		}
+	}
+
 	pub(super) fn indexed_from(mut self, revision: u16) -> Self {
 		self.indexed_from = Some(revision);
 		self
@@ -241,9 +233,13 @@ impl TypeDesc {
 // Decoding
 // ---------------------------------------------------------------------------
 
+/// Decode a value of `desc` held inside a `revision` container, from the
+/// front of `r`.
 pub(super) fn decode_named(desc: &TypeDesc, r: &mut Reader<'_>) -> Result<Value> {
-	if let Body::Transparent(ty) = &desc.body {
-		return decode_ty(ty, r);
+	match &desc.body {
+		Body::Transparent(ty) => return decode_ty(ty, r),
+		Body::Catalog(vtable) => return decode_embedded(vtable, r),
+		Body::Struct(_) | Body::Enum(_) => {}
 	}
 	let revision = u16::try_from(r.varint()?)
 		.map_err(|_| anyhow::anyhow!("a revision past u16 for {}", desc.name))?;
@@ -262,9 +258,23 @@ pub(super) fn decode_named(desc: &TypeDesc, r: &mut Reader<'_>) -> Result<Value>
 			}
 		},
 		Body::Enum(variants) => decode_variant(desc, variants, revision, r),
-		Body::Transparent(_) => unreachable!("handled above"),
+		Body::Transparent(_) | Body::Catalog(_) => unreachable!("handled above"),
 	}
 	.with_context(|| format!("decoding a {} at revision {revision}", desc.name))
+}
+
+/// Decode the catalog type `vtable` describes from the front of `r`, where it
+/// is held inside a `revision` container, and advance `r` past exactly what
+/// it read.
+fn decode_embedded(vtable: &CatalogVTable, r: &mut Reader<'_>) -> Result<Value> {
+	let mut cursor = r.rest();
+	let value = (vtable.decode_embedded)(&mut cursor)?;
+	let used = r
+		.remaining()
+		.checked_sub(cursor.len())
+		.with_context(|| format!("a {} read past what it was given", vtable.name))?;
+	r.advance(used)?;
+	Ok(value)
 }
 
 fn decode_fields(fields: &[Field], revision: u16, r: &mut Reader<'_>) -> Result<Value> {
@@ -273,40 +283,31 @@ fn decode_fields(fields: &[Field], revision: u16, r: &mut Reader<'_>) -> Result<
 		read.push((field.name, decode_ty(&field.ty, r)?));
 	}
 	let mut object = Object::default();
-	for field in fields.iter().filter(|f| f.end.is_none()) {
+	for field in fields {
 		let value = match read.iter().position(|(name, _)| *name == field.name) {
 			Some(at) => read.swap_remove(at).1,
-			None => missing(field, &mut read)?,
+			None => missing(field)?,
 		};
 		object.insert(field.name.to_owned(), value);
 	}
 	Ok(Value::Object(object))
 }
 
-fn missing(field: &Field, read: &mut Vec<(&'static str, Value)>) -> Result<Value> {
+fn missing(field: &Field) -> Result<Value> {
 	Ok(match &field.missing {
 		Missing::Default => default_of(&field.ty)?,
 		Missing::Value(value) => value(),
-		Missing::Convert {
-			from,
-			convert,
-		} => match read.iter().position(|(name, _)| name == from) {
-			Some(at) => convert(read.swap_remove(at).1)?,
-			None => bail!("field `{}` converts from `{from}`, which was not read", field.name),
-		},
 	})
 }
 
 fn default_of(ty: &Ty) -> Result<Value> {
 	Ok(match ty {
 		Ty::Bool => Value::Bool(false),
-		Ty::U8 | Ty::Uint | Ty::Int => Value::Number(Number::Int(0)),
-		Ty::F32 | Ty::F64 => Value::Number(Number::Float(0.0)),
+		Ty::Uint | Ty::Int => Value::Number(Number::Int(0)),
 		Ty::String => Value::String(Default::default()),
 		Ty::Bytes => Value::Bytes(Default::default()),
 		Ty::Option(_) => Value::None,
 		Ty::Vec(_) => Value::Array(Default::default()),
-		Ty::Map(..) => Value::Object(Default::default()),
 		Ty::Uuid => Value::Uuid(Default::default()),
 		other => bail!("no default for a missing {other:?}"),
 	})
@@ -319,7 +320,7 @@ fn decode_variant(
 	r: &mut Reader<'_>,
 ) -> Result<Value> {
 	let alive: Vec<&Variant> = variants.iter().filter(|v| v.alive(revision)).collect();
-	let index = r.varint()? as usize;
+	let index = usize::try_from(r.varint()?).context("a variant index past usize")?;
 	let variant =
 		alive.get(index).with_context(|| format!("no variant {index} of {}", desc.name))?;
 	let body = decode_shape(&variant.shape, revision, r)?;
@@ -363,29 +364,13 @@ fn decode_ty(ty: &Ty, r: &mut Reader<'_>) -> Result<Value> {
 			1 => Value::Bool(true),
 			b => bail!("an invalid bool {b}"),
 		},
-		Ty::U8 => int(r.u8()? as i128)?,
 		Ty::Uint => int(i128::try_from(r.varint()?)?)?,
 		Ty::Int => int(r.zigzag()?)?,
-		Ty::F32 => Value::Number(Number::Float(f32::from_le_bytes(r.array()?) as f64)),
-		Ty::F64 => Value::Number(Number::Float(f64::from_le_bytes(r.array()?))),
 		Ty::String => Value::String(
 			std::str::from_utf8(r.bytes()?).context("a string that is not UTF-8")?.into(),
 		),
 		Ty::Bytes => Value::Bytes(r.bytes()?.to_vec().into()),
 		Ty::Uuid => Value::Uuid(crate::val::Uuid(uuid::Uuid::from_bytes(r.array()?))),
-		Ty::Decimal => Value::Number(Number::Decimal(Decimal::deserialize(r.array()?))),
-		Ty::Duration => {
-			let secs = u64::try_from(r.varint()?)?;
-			let nanos = u32::try_from(r.varint()?)?;
-			Value::Duration(crate::val::Duration(std::time::Duration::new(secs, nanos)))
-		}
-		Ty::DateTime => {
-			let secs = i64::try_from(r.zigzag()?)?;
-			let nanos = u32::try_from(r.varint()?)?;
-			let at = chrono::DateTime::from_timestamp(secs, nanos)
-				.with_context(|| format!("a datetime out of range: {secs}s {nanos}ns"))?;
-			Value::Datetime(crate::val::Datetime(at))
-		}
 		Ty::Option(inner) => match r.u8()? {
 			0 => Value::None,
 			1 if holds_none(inner) => Value::Array(vec![decode_ty(inner, r)?].into()),
@@ -397,14 +382,6 @@ fn decode_ty(ty: &Ty, r: &mut Reader<'_>) -> Result<Value> {
 			let mut out = Vec::with_capacity(len.min(4096));
 			for _ in 0..len {
 				out.push(decode_ty(inner, r)?);
-			}
-			Value::Array(out.into())
-		}
-		Ty::Map(k, v) => {
-			let len = r.len()?;
-			let mut out = Vec::with_capacity(len.min(4096));
-			for _ in 0..len {
-				out.push(Value::Array(vec![decode_ty(k, r)?, decode_ty(v, r)?].into()));
 			}
 			Value::Array(out.into())
 		}
@@ -420,7 +397,6 @@ fn decode_ty(ty: &Ty, r: &mut Reader<'_>) -> Result<Value> {
 			Native::Value => value::decode(r)?,
 			Native::Number => Value::Number(value::decode_number(r)?),
 			Native::Datetime => Value::Datetime(value::decode_val_datetime(r)?),
-			Native::Duration => Value::Duration(value::decode_val_duration(r)?),
 			Native::RecordId => Value::RecordId(value::decode_record_id(r)?),
 			Native::RecordIdKey => Value::RecordId(crate::val::RecordId {
 				table: crate::val::TableName::new(""),
@@ -440,9 +416,12 @@ fn holds_none(ty: &Ty) -> bool {
 // Encoding
 // ---------------------------------------------------------------------------
 
+/// Encode `value` as `desc` held inside a `revision` container.
 pub(super) fn encode_named(desc: &TypeDesc, value: &Value, w: &mut Writer) -> Result<()> {
-	if let Body::Transparent(ty) = &desc.body {
-		return encode_ty(ty, value, w);
+	match &desc.body {
+		Body::Transparent(ty) => return encode_ty(ty, value, w),
+		Body::Catalog(vtable) => return w.embedded(|out| (vtable.encode_embedded)(value, out)),
+		Body::Struct(_) | Body::Enum(_) => {}
 	}
 	match &desc.body {
 		Body::Struct(_) => {
@@ -454,7 +433,7 @@ pub(super) fn encode_named(desc: &TypeDesc, value: &Value, w: &mut Writer) -> Re
 			encode_variant(desc, variants, desc.current, value, w)
 				.map_err(|e| located(e, || format!("encoding a {}", desc.name)))
 		}
-		Body::Transparent(_) => unreachable!("handled above"),
+		Body::Transparent(_) | Body::Catalog(_) => unreachable!("handled above"),
 	}
 }
 
@@ -581,24 +560,14 @@ fn integer(value: &Value) -> Result<i128> {
 	}
 }
 
-fn float(value: &Value) -> Result<f64> {
-	match value {
-		Value::Number(Number::Float(v)) => Ok(*v),
-		other => bail!("expected a float, found {other:?}"),
-	}
-}
-
 fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 	match ty {
 		Ty::Bool => match value {
 			Value::Bool(b) => w.u8(*b as u8),
 			other => bail!("expected a bool, found {other:?}"),
 		},
-		Ty::U8 => w.u8(u8::try_from(integer(value)?)?),
 		Ty::Uint => w.varint(u128::try_from(integer(value)?)?),
 		Ty::Int => w.zigzag(integer(value)?),
-		Ty::F32 => w.raw(&(float(value)? as f32).to_le_bytes()),
-		Ty::F64 => w.raw(&float(value)?.to_le_bytes()),
 		Ty::String => match value {
 			Value::String(s) => w.bytes(s.as_bytes()),
 			Value::Table(t) => w.bytes(t.as_str().as_bytes()),
@@ -611,24 +580,6 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 		Ty::Uuid => match value {
 			Value::Uuid(u) => w.raw(u.0.as_bytes()),
 			other => bail!("expected a uuid, found {other:?}"),
-		},
-		Ty::Decimal => match value {
-			Value::Number(Number::Decimal(d)) => w.raw(&d.serialize()),
-			other => bail!("expected a decimal, found {other:?}"),
-		},
-		Ty::Duration => match value {
-			Value::Duration(d) => {
-				w.varint(d.0.as_secs() as u128);
-				w.varint(d.0.subsec_nanos() as u128);
-			}
-			other => bail!("expected a duration, found {other:?}"),
-		},
-		Ty::DateTime => match value {
-			Value::Datetime(d) => {
-				w.zigzag(d.0.timestamp() as i128);
-				w.varint(d.0.timestamp_subsec_nanos() as u128);
-			}
-			other => bail!("expected a datetime, found {other:?}"),
 		},
 		Ty::Option(inner) => match value {
 			Value::None => w.u8(0),
@@ -651,18 +602,6 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 				encode_ty(inner, item, w)?;
 			}
 		}
-		Ty::Map(k, v) => {
-			let entries = array(value)?;
-			w.varint(entries.len() as u128);
-			for entry in entries {
-				let pair = array(entry)?;
-				if pair.len() != 2 {
-					bail!("a map entry is a [key, value] pair");
-				}
-				encode_ty(k, &pair[0], w)?;
-				encode_ty(v, &pair[1], w)?;
-			}
-		}
 		Ty::Tuple(tys) => {
 			let items = array(value)?;
 			if items.len() != tys.len() {
@@ -677,7 +616,6 @@ fn encode_ty(ty: &Ty, value: &Value, w: &mut Writer) -> Result<()> {
 			(Native::Value, value) => value::encode(value, w)?,
 			(Native::Number, Value::Number(n)) => value::encode_number(n, w),
 			(Native::Datetime, Value::Datetime(d)) => value::encode_val_datetime(d, w),
-			(Native::Duration, Value::Duration(d)) => value::encode_val_duration(d, w),
 			(Native::RecordId, Value::RecordId(rid)) => value::encode_record_id(rid, w)?,
 			(Native::RecordIdKey, Value::RecordId(rid)) => {
 				value::encode_record_id_key(&rid.key, w)?

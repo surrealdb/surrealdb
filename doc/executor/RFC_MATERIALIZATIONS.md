@@ -11,8 +11,8 @@ structure correct between them.
 Companions: [`RFC_DURABLE_BYTECODE_RUNTIME.md`](RFC_DURABLE_BYTECODE_RUNTIME.md),
 whose triggered programs, checkpoints and takeover a materialization runs on;
 [`RFC_RECORD_LAYOUT_AND_MIGRATE.md`](RFC_RECORD_LAYOUT_AND_MIGRATE.md), whose
-`MIGRATE` backfill is one kind of materialization here;
-[`RFC_STRICT_LAYOUT_ROLLOUT.md`](RFC_STRICT_LAYOUT_ROLLOUT.md).
+proposed migration backfill is one kind of materialization here;
+[`RFC_RECORD_FORMAT_ROLLOUT.md`](RFC_RECORD_FORMAT_ROLLOUT.md).
 
 ---
 

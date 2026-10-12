@@ -42,8 +42,8 @@ use crate::expr::{
 	BinaryOperator, Block, ControlFlow, Expr, Fields, Function, FunctionCall, Groups, Idiom,
 	Literal, Part, PostfixOperator, PrefixOperator,
 };
+use crate::key::KVKeyDecode;
 use crate::key::schema::{RecordKey, RecordPrefix};
-use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::{Direction, NORMAL_BATCH_SIZE, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value, try_encode_component};
 
@@ -1233,21 +1233,40 @@ fn is_the_component(stored: &Value, component: &Value) -> bool {
 	}
 }
 
+/// Refuses a record whose generation the table's `layouts` do not admit, as a
+/// read of the record refuses it. Neither way [`body_field`] reads a body
+/// checks a document's generation, so the body is read only once this passes.
+fn admit(value: &[u8], layouts: &catalog::TableLayouts) -> Result<()> {
+	if let Some(stored) = catalog::StoredRecord::parse(value)? {
+		let refusal =
+			|error: catalog::RecordLayoutError| anyhow::Error::new(catalog::Error::Layout(error));
+		match stored.generation() {
+			Ok(None) => {}
+			Ok(Some(generation)) => {
+				layouts.admit(generation).map_err(refusal)?;
+			}
+			Err(stamp) => return Err(refusal(layouts.stamp_refusal(stamp))),
+		}
+	}
+	Ok(())
+}
+
 /// The value the body of a stored record holds under `name`, or `None` when it
 /// holds none.
 ///
 /// The record is read in place where the stored bytes allow it and decoded
-/// whole where they do not.
+/// whole, through the table's `layouts`, where they do not.
 fn body_field(
 	segment: &PathSegment,
 	value: &[u8],
+	layouts: &catalog::TableLayouts,
 	rid: impl FnOnce() -> RecordId,
 ) -> Result<Option<Value>> {
 	match extract_field_from_record_bytes(value, std::slice::from_ref(segment), 1) {
 		Extracted::Found(found) => Ok(Some(found)),
 		Extracted::Missing => Ok(None),
 		Extracted::Bail => {
-			let record = catalog::Record::kv_decode_value(value, rid())?;
+			let record = catalog::Record::decode_admitted(value, Some(layouts), rid())?;
 			Ok(match &record.data {
 				Value::Object(object) => object.get(segment.as_str()).cloned(),
 				_ => None,
@@ -1269,6 +1288,7 @@ fn check_record(
 	probes: &[(u32, PathSegment)],
 	raw_key: &[u8],
 	value: &[u8],
+	layouts: &catalog::TableLayouts,
 ) -> Result<()> {
 	let ty = || declared_type(key);
 	let Ok(record_key) = RecordKey::decode_key(raw_key) else {
@@ -1296,11 +1316,14 @@ fn check_record(
 	let RecordIdKey::Array(elements) = record_key.id.as_ref() else {
 		return Ok(());
 	};
+	if !probes.is_empty() {
+		admit(value, layouts)?;
+	}
 	for (position, segment) in probes {
 		let Some(component) = elements.0.get(*position as usize) else {
 			continue;
 		};
-		let Some(stored) = body_field(segment, value, rid)? else {
+		let Some(stored) = body_field(segment, value, layouts, rid)? else {
 			continue;
 		};
 		if !is_the_component(&stored, component) {
@@ -1359,6 +1382,7 @@ pub(crate) async fn validate_record_keys(
 		.iter()
 		.filter_map(|c| Some((c.position, PathSegment::new(c.name.clone()?))))
 		.collect();
+	let layouts = txn.table_layouts(ns, db, table, None).await?;
 	let range = RecordPrefix {
 		ns,
 		db,
@@ -1371,7 +1395,7 @@ pub(crate) async fn validate_record_keys(
 		let chunk = crate::exec::vm::fuel::batch(NORMAL_BATCH_SIZE);
 		let stats = cursor
 			.for_each(chunk, &mut |raw_key, value| match check_record(
-				table, key, &probes, raw_key, value,
+				table, key, &probes, raw_key, value, &layouts,
 			) {
 				Ok(()) => Ok(Step::Continue(())),
 				Err(error) => {

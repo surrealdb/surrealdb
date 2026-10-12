@@ -70,8 +70,6 @@ mod row_json;
 pub(crate) use write::notify_at;
 #[cfg(test)]
 mod golden;
-#[cfg(test)]
-mod layout;
 pub(crate) mod live;
 mod lower;
 pub(crate) mod lower_live;
@@ -209,6 +207,8 @@ mod tests_plain_data;
 mod tests_planner;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_preempt;
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests_record_format;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_recurse;

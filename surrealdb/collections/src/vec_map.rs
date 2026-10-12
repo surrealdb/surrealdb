@@ -347,6 +347,12 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
 	}
 }
 
+impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.inner.next_back().map(|(k, v)| (k, v))
+	}
+}
+
 impl<'a, K, V> ExactSizeIterator for Iter<'a, K, V> {
 	fn len(&self) -> usize {
 		self.inner.len()

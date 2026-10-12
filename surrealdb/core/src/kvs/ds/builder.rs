@@ -9,9 +9,12 @@ use arc_swap::ArcSwap;
 use async_channel::Sender;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_datastore::FeatureLevelCell;
+use surrealdb_kvs::Release;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::config::FeatureLevelSetting;
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
@@ -23,6 +26,7 @@ use crate::http::HttpClient;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::migration::{self, LedgerVerdict, MIGRATIONS};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::{
@@ -56,6 +60,9 @@ pub struct Builder {
 	/// Whether to start the maintenance tasks. On by default; see
 	/// [`Builder::without_maintenance_tasks`].
 	maintenance: bool,
+	/// Whether building opens transactions; see
+	/// [`Builder::without_startup_transactions`].
+	startup_transactions: bool,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -73,6 +80,11 @@ pub struct Builder {
 	/// Overrides the built-in graph fold threshold; see
 	/// [`Builder::with_graph_fold_threshold`].
 	graph_fold_threshold: Option<usize>,
+	/// The feature level a new datastore is created at, and an existing one is
+	/// raised to, or the hold that keeps a Legacy one; see
+	/// [`Builder::with_feature_level`] and [`Builder::with_legacy_feature_level`].
+	/// The last call of the two wins.
+	feature_level: Option<FeatureLevelSetting>,
 	/// Object store provider for file buckets. When unset the datastore uses the
 	/// built-in [`CommunityComposer`] (memory, and — off wasm — file/S3/GCS/Azure).
 	/// Embedders on platforms the built-in backends can't reach (e.g. a wasm
@@ -102,6 +114,7 @@ impl Builder {
 			engine_options: EngineOptions::default(),
 			// A build without `maintenance-tasks` leaves that work to its host.
 			maintenance: cfg!(feature = "maintenance-tasks"),
+			startup_transactions: true,
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
@@ -112,6 +125,7 @@ impl Builder {
 			authenticate: false,
 			config: ConfigMap::empty(),
 			graph_fold_threshold: None,
+			feature_level: None,
 			bucket_store_provider: None,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: false,
@@ -136,6 +150,49 @@ impl Builder {
 	/// still drains that debt).
 	pub fn with_graph_fold_threshold(mut self, threshold: usize) -> Self {
 		self.graph_fold_threshold = Some(threshold);
+		self
+	}
+
+	/// Pins the datastore's feature level to `level`, which takes the place of
+	/// the `feature_level` configuration key.
+	///
+	/// A new datastore is created at `level` rather than at this build's
+	/// release, so a deployment that has not yet moved every node to this
+	/// release can create datastores that older nodes read. An existing
+	/// datastore is raised to at least `level` when
+	/// [`Datastore::check_version`] runs, and a datastore already at or above it
+	/// keeps its level: a pin never lowers. The raise is skipped, with a
+	/// warning, while a running node is older than `level`.
+	///
+	/// `level` must lie between the first release with a feature level and this
+	/// build's release, or the build fails.
+	///
+	/// Replaces an earlier call to this or to [`Builder::with_legacy_feature_level`].
+	pub fn with_feature_level(mut self, level: Release) -> Self {
+		self.feature_level = Some(FeatureLevelSetting::Pin(level));
+		self
+	}
+
+	/// Keeps a datastore that records no feature level at that level, so that its
+	/// records and catalog entries stay in the `revision` encoding, and takes the
+	/// place of the `feature_level` configuration key.
+	///
+	/// The hold does not keep the datastore open to every 3.x release. Every
+	/// start of this build records ledger id 6, an incompatible-class entry, so
+	/// a release whose registry lacks it (one without the v1 envelope reader)
+	/// refuses the datastore at its next start; a 3.x release that carries the
+	/// reader and registers id 6 reads it.
+	///
+	/// Without it, [`Datastore::check_version`] raises such a datastore on its
+	/// own when its storage engine admits no other writer, and an operator raises
+	/// one that does. The hold applies only to a datastore that records no level
+	/// when it is opened: a datastore this build creates records this build's
+	/// release, and one that records a level keeps it, each with a warning that
+	/// the hold did not apply. It never lowers a level.
+	///
+	/// Replaces an earlier call to this or to [`Builder::with_feature_level`].
+	pub fn with_legacy_feature_level(mut self) -> Self {
+		self.feature_level = Some(FeatureLevelSetting::Legacy);
 		self
 	}
 
@@ -193,6 +250,20 @@ impl Builder {
 	/// in this workspace does.
 	pub fn without_maintenance_tasks(mut self) -> Self {
 		self.maintenance = false;
+		self
+	}
+
+	/// Builds a datastore without opening a transaction, for a backend that
+	/// may not serve one until it reports serve-readiness.
+	///
+	/// Implies [`Builder::without_maintenance_tasks`]. The feature level, the
+	/// ledger and the Router live-query engine's baseline, which a build
+	/// otherwise reads, are settled by [`Datastore::check_version`], which the
+	/// caller runs once [`Datastore::wait_until_serve_ready`] returns and
+	/// before anything else opens a transaction or serves a query.
+	pub fn without_startup_transactions(mut self) -> Self {
+		self.maintenance = false;
+		self.startup_transactions = false;
 		self
 	}
 
@@ -396,6 +467,7 @@ impl Builder {
 		let triggers = Arc::new(surrealdb_datastore::triggers::CommitTriggers::new());
 		// Read before `self` is partially moved below.
 		let maintenance = self.maintenance;
+		let startup_transactions = self.startup_transactions;
 		let options = self.engine_options;
 		let shutdown = self.shutdown.clone();
 		let observer = self.observer;
@@ -403,13 +475,25 @@ impl Builder {
 		if let Some(threshold) = self.graph_fold_threshold {
 			runtime_config.idx.graph_fold_threshold = threshold;
 		}
+		// The explicit builder input beats the configuration key. Either way the
+		// datastore keeps the validated pin, which a malformed or out-of-range
+		// one fails the build for, or the Legacy hold, which has none.
+		let setting = self.feature_level.unwrap_or(runtime_config.datastore.feature_level);
+		runtime_config.datastore.feature_level = match setting.resolve()? {
+			Some(pin) => FeatureLevelSetting::Pin(pin),
+			None if setting.holds_legacy() => FeatureLevelSetting::Legacy,
+			None => FeatureLevelSetting::Unset,
+		};
 		let config = Arc::new(runtime_config);
+		// One cell per store, attached before the factory is cloned into the index
+		// builder and the sequences, so that every transaction shares it.
 		let tf = TransactionFactory::new(
 			Arc::clone(&triggers),
 			builder,
 			Arc::new(self.config.load::<TransactionConfig>()),
 		)
-		.with_observer(Arc::clone(&observer));
+		.with_observer(Arc::clone(&observer))
+		.with_feature_level(Arc::new(FeatureLevelCell::unsettled()));
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
 		// One registry per datastore, shared by the executor and by the index
 		// builder, so a build resolves the same names a query does.
@@ -433,6 +517,7 @@ impl Builder {
 			engine_options: options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			feature_level_settled: std::sync::atomic::AtomicBool::new(false),
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,
@@ -482,16 +567,11 @@ impl Builder {
 			config,
 		};
 		// Under the Router live-query engine, establish the router's baseline
-		// cursor now — before the datastore can accept any connection — so that
-		// every subscription (and every write a subscriber expects to see) lands
-		// strictly after the baseline. A lazy baseline on the first router tick
-		// would otherwise discard events captured in the startup window. Inline
-		// mode never runs the router, so it skips this entirely.
-		if datastore.config.datastore.live_query_engine == crate::kvs::LiveQueryEngine::Router {
-			let txn = datastore.transaction(crate::kvs::TransactionType::Read).await?;
-			let baseline = txn.safe_timestamp().await?.as_versionstamp();
-			txn.cancel().await?;
-			datastore.live_query_router.set_baseline(baseline);
+		// cursor now — before the datastore can accept any connection. A build
+		// that may open no transaction leaves it to `check_version`, which runs
+		// before the instance serves a query.
+		if startup_transactions {
+			datastore.establish_router_baseline().await?;
 		}
 		// Populate the system metrics cache before anyone can read it. The
 		// cache is process-wide and starts zeroed, and `INFO FOR ROOT` reports
@@ -512,6 +592,37 @@ impl Builder {
 		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
 		// nothing hands out a bare `Datastore` any more.
 		let datastore = Arc::new(datastore);
+		// A build that may open no transaction leaves the feature level and the
+		// ledger to `check_version`, which reads both once the backend serves.
+		if !startup_transactions {
+			return Ok(datastore);
+		}
+		// Read the store's feature level into the shared cell, creating it where
+		// the store is new. A build settles it here with or without the
+		// maintenance tasks, so a datastore a test drives by hand is created at
+		// its pin too. It precedes the version stamp, as `get_version` allows.
+		datastore.settle_feature_level().await?;
+		// What the ledger allows this build to do with the store. A build asks here
+		// with or without the maintenance tasks, so that a datastore a test drives
+		// by hand is read-only on the same evidence as a served one. It follows the
+		// feature level, which a store carrying entries this build does not
+		// maintain still reads. The read waits out a backend that is still
+		// forming, as the other startup steps do.
+		let verdict = Datastore::retry_bootstrap("Read ledger", || {
+			migration::ledger_verdict(&datastore, MIGRATIONS)
+		})
+		.await?;
+		match verdict {
+			LedgerVerdict::Open => {}
+			LedgerVerdict::ReadOnly {
+				features,
+			} => datastore.open_read_only(features),
+			// Nothing starts against a store this build refuses, and `check_version`
+			// reports the refusal.
+			LedgerVerdict::Refused {
+				..
+			} => return Ok(datastore),
+		}
 		// A datastore without its maintenance tasks is not a working database,
 		// so starting them is the constructor's job rather than every embedder's
 		// to remember. Opt out with `without_maintenance_tasks`.
@@ -533,6 +644,8 @@ impl Builder {
 			// set below.
 			let (_, is_new) = datastore.settle_storage_version().await?;
 			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
+			// A read-only store runs the membership refresh alone: every other task
+			// writes.
 			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
 			// This is the only writer, and it runs before the datastore is
 			// handed to anyone.
@@ -556,6 +669,7 @@ mod tests {
 	use tokio_util::sync::CancellationToken;
 
 	use super::Builder;
+	use crate::CommunityComposer;
 	use crate::buc::store::ObjectStore;
 	use crate::buc::{
 		BucketStoreProvider, BucketStoreProviderRequirements, Config as BucketConfig,
@@ -589,10 +703,19 @@ mod tests {
 		async fn new_transaction_builder(
 			&self,
 			_path: &str,
-			_canceller: CancellationToken,
-			_config: ConfigMap,
+			canceller: CancellationToken,
+			config: ConfigMap,
 		) -> Result<TransactionBuilderParts<Self::RouterState>> {
-			Ok(TransactionBuilderParts::new(Box::new(TestTransactionBuilder), self.state.clone()))
+			let inner = CommunityComposer()
+				.new_transaction_builder("memory", canceller, config)
+				.await?
+				.builder;
+			Ok(TransactionBuilderParts::new(
+				Box::new(TestTransactionBuilder {
+					inner,
+				}),
+				self.state.clone(),
+			))
 		}
 
 		fn path_valid(&self, v: &str) -> Result<String> {
@@ -600,7 +723,13 @@ mod tests {
 		}
 	}
 
-	struct TestTransactionBuilder;
+	/// An in-memory backend under its own name, so a test can tell the
+	/// composer's builder is the one the datastore runs on. Building a
+	/// datastore opens transactions whatever its options (it settles the
+	/// feature level and reads the ledger), so the stub has to serve them.
+	struct TestTransactionBuilder {
+		inner: Box<dyn TransactionBuilder>,
+	}
 
 	impl Display for TestTransactionBuilder {
 		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -615,13 +744,13 @@ mod tests {
 
 		fn new_transaction(
 			&self,
-			_write: TransactionType,
+			write: TransactionType,
 		) -> BoxFut<'_, crate::kvs::err::Result<(Box<dyn Transactable>, bool)>> {
-			Box::pin(async move { unreachable!("test does not open transactions") })
+			self.inner.new_transaction(write)
 		}
 
 		fn shutdown(&self) -> BoxFut<'_, crate::kvs::err::Result<()>> {
-			Box::pin(async move { Ok(()) })
+			self.inner.shutdown()
 		}
 
 		fn register_metrics(&self) -> Option<Metrics> {
@@ -634,9 +763,8 @@ mod tests {
 	}
 
 	/// Both of these assert how the builder plumbs a composer's router state,
-	/// which says nothing about storage — and the stub above opens no
-	/// transactions. They therefore build without maintenance tasks, because
-	/// that branch settles the storage version and so does open one.
+	/// which says nothing about storage. They build without maintenance tasks,
+	/// which would otherwise run against the stub's store.
 	#[tokio::test]
 	async fn build_with_factory_path_returns_router_state() -> Result<()> {
 		let expected = Arc::new(7);
@@ -665,6 +793,32 @@ mod tests {
 			.await?;
 
 		assert_eq!(datastore.to_string(), "test");
+		Ok(())
+	}
+
+	/// Under the Router live-query engine a build seeds the router's baseline,
+	/// and a build without startup transactions leaves it to `check_version`,
+	/// which seeds it before the datastore serves.
+	#[tokio::test]
+	async fn the_router_baseline_waits_for_check_version_without_startup_transactions() -> Result<()>
+	{
+		let router =
+			|| surrealdb_cnf::ConfigMap::empty().with_key_value("live_query_engine", "router");
+		let eager = Builder::new()
+			.without_maintenance_tasks()
+			.with_config(router())
+			.build_with_path("memory")
+			.await?;
+		assert!(eager.live_query_router.has_baseline());
+
+		let deferred = Builder::new()
+			.without_startup_transactions()
+			.with_config(router())
+			.build_with_path("memory")
+			.await?;
+		assert!(!deferred.live_query_router.has_baseline());
+		deferred.check_version().await?;
+		assert!(deferred.live_query_router.has_baseline());
 		Ok(())
 	}
 }

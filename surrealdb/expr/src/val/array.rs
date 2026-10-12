@@ -2,8 +2,9 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::{Error, Expr};
@@ -16,11 +17,51 @@ use crate::val::{IndexFormat, Set, Value};
 ///   zero-allocation through the Wire-repr fast path (skip + borrow). Walker exposes
 ///   `element_bytes(i)` for O(1) random access on the indexed path; sub-threshold arrays fall back
 ///   to a linear walk of the legacy body.
-#[revisioned(revision(1), revision(2, optimised))]
+#[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Array(#[revision(indexed_seq)] pub Vec<Value>);
+
+/// Set on the leading byte of an indexed sequence body when its offset table is present.
+const FLAG_INDEXED: u8 = 0b0000_0001;
+
+/// Reads exactly what the derived serializer writes.
+///
+/// Revision 1 is a varint length and its values. Revision 2 is a `u32` payload length and the
+/// payload: a flags byte, a varint count, the offset table (four bytes per value) when
+/// `FLAG_INDEXED` is set, then the values. The payload is read through
+/// [`bounded::read_payload`], decoded from the slice and refused if bytes are left over.
+impl DeserializeRevisioned for Array {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
+		match bounded::read_revision(reader, "Array", 2)? {
+			1 => Ok(Self(bounded::read_vec::<Value, _>(reader)?)),
+			_ => {
+				let payload = bounded::read_payload(reader)?;
+				let mut body = payload.as_slice();
+				let flags = u8::deserialize_revisioned(&mut body)?;
+				let len = bounded::read_len(&mut body)?;
+				if flags & FLAG_INDEXED != 0 {
+					let table = len.checked_mul(4).ok_or_else(|| {
+						RevisionError::Deserialize("indexed-seq offset table size overflow".into())
+					})?;
+					body = body.get(table..).ok_or_else(|| {
+						RevisionError::Io(std::io::ErrorKind::UnexpectedEof.into())
+					})?;
+				}
+				let items = bounded::read_vec_with(&mut body, len, Value::deserialize_revisioned)?;
+				bounded::finish(body)?;
+				Ok(Self(items))
+			}
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Array {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
 
 impl<T> From<Vec<T>> for Array
 where

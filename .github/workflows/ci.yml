@@ -471,6 +471,48 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  check-catalog-schema:
+    name: Check catalog schema
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      # The base branch's lock is the earlier lock a pull request's numbering is held to. A base
+      # without a lock leaves the variable unset, and only the committed lock is checked.
+      - name: Fetch the base branch's catalog schema lock
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin "$BASE_REF"
+          if git show "FETCH_HEAD:surrealdb/catalog/catalog-schema.lock" > "$RUNNER_TEMP/base.lock"; then
+            echo "CATALOG_SCHEMA_BASE=$RUNNER_TEMP/base.lock" >> "$GITHUB_ENV"
+          else
+            echo "The base branch has no catalog schema lock; checking the committed lock only."
+          fi
+
+      - name: Check the catalog schema lock
+        run: cargo make ci-catalog-schema
+
   check-docs:
     name: Check docs
     needs: changes
@@ -1628,6 +1670,7 @@ jobs:
       - check-wasm
       - test-wasm
       - check-revision
+      - check-catalog-schema
       - check-docs
       - parser
       - feature-check
@@ -1684,6 +1727,7 @@ jobs:
             "${{ needs.check-wasm.result }}"
             "${{ needs.test-wasm.result }}"
             "${{ needs.check-revision.result }}"
+            "${{ needs.check-catalog-schema.result }}"
             "${{ needs.check-docs.result }}"
             "${{ needs.parser.result }}"
             "${{ needs.feature-check.result }}"

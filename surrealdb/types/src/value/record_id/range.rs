@@ -139,7 +139,7 @@ impl Ord for RecordIdKeyRange {
 				},
 			}
 		}
-		match compare_bounds(&self.start, &other.end) {
+		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
 			x => x,
 		}

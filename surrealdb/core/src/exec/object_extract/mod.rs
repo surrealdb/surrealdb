@@ -1,11 +1,16 @@
-//! Walker-based field extraction for revision-encoded
-//! [`Record`](crate::catalog::Record) bytes.
+//! Field extraction from stored [`Record`](crate::catalog::Record) bytes.
 //!
-//! Table rows are encoded as revisioned [`crate::catalog::Record`] values
-//! whose payload is typically a [`Value::Object`] with sorted [`Strand`] keys
-//! backed by [`surrealdb_collections::VecMap`]. The pre-decode filter walks
-//! into nested fields without materialising the entire `Value` tree by using
-//! the per-type walkers emitted by `revision`'s `#[revisioned(...)]` derive.
+//! A record is stored in the v1 record envelope
+//! ([`StoredRecord`](crate::catalog::StoredRecord)), or as a revisioned
+//! [`crate::catalog::Record`] when its metadata needs it or an earlier release
+//! wrote it. The revisioned payload is typically a [`Value::Object`] with
+//! sorted [`Strand`] keys backed by [`surrealdb_collections::VecMap`]. The
+//! pre-decode filter walks into nested fields without materialising the entire
+//! `Value` tree: through [`OrderedObjectRef`](crate::val::stored::OrderedObjectRef) for the
+//! v1 envelope, and through the per-type walkers emitted by `revision`'s
+//! `#[revisioned(...)]` derive for the other. A v1 record's `id` is never
+//! answered from its bytes, which may leave it out: a path that starts at
+//! `id` bails, and the caller reads it from the key.
 
 use std::borrow::Cow;
 
@@ -17,7 +22,8 @@ use revision::{
 use surrealdb_strand::Strand;
 use wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
-use crate::catalog::Record;
+use crate::catalog::{Record, StoredRecord};
+use crate::val::stored::{OrderedObjectRef, ValueRef};
 use crate::val::{Object, Value};
 
 // Note: there is intentionally no bail on `metadata`. `metadata` flags the
@@ -145,7 +151,7 @@ pub(crate) enum WalkLeafErr {
 	Bail,
 }
 
-/// Result of extracting a field from a revisioned record.
+/// Result of extracting a field from a stored record.
 #[derive(Debug)]
 pub(crate) enum Extracted {
 	/// The field was reachable and decoded into a `Value`.
@@ -190,7 +196,7 @@ pub(crate) fn rev2_record_data_bytes(record_bytes: &[u8]) -> Option<&[u8]> {
 	}
 	let len_bytes: [u8; 4] = rest.get(..4)?.try_into().ok()?;
 	let payload_len = u32::from_le_bytes(len_bytes) as usize;
-	let payload = rest.get(4..4 + payload_len)?;
+	let payload = rest.get(4..4usize.checked_add(payload_len)?)?;
 	// `data` is field 1 of the 2-field indexed_struct prologue; its absolute
 	// payload offset is the second u32_le, at payload[4..8].
 	let off_bytes: [u8; 4] = payload.get(4..8)?.try_into().ok()?;
@@ -203,6 +209,10 @@ pub(crate) fn rev2_record_data_bytes(record_bytes: &[u8]) -> Option<&[u8]> {
 /// `into_data_bytes` walker chain for rev-1 records (and any bytes the fast
 /// path declines). Shared by every pre-decode-filter descent entry point so
 /// the fused envelope open lives in one place.
+///
+/// `record_bytes` is a `revision` record: a record in the stored-value
+/// encoding is read through [`stored_record_object`], and the caller has
+/// admitted either's generation.
 #[inline]
 pub(crate) fn record_data_bytes(record_bytes: &[u8]) -> Result<Cow<'_, [u8]>, RevisionError> {
 	if let Some(fast) = rev2_record_data_bytes(record_bytes) {
@@ -218,8 +228,8 @@ pub(crate) fn record_data_bytes(record_bytes: &[u8]) -> Result<Cow<'_, [u8]>, Re
 	Ok(Cow::Owned(data.into_owned()))
 }
 
-/// Walk the revisioned `record_bytes` along `path` and decode the leaf as a
-/// [`Value`].
+/// Walk `record_bytes`, a stored record in either encoding, along `path` and
+/// decode the leaf as a [`Value`].
 ///
 /// `depth_limit` bounds the number of path segments we descend through. The
 /// pre-decode filter threads `ctx.config.exec.idiom_recursion_limit` (default 256)
@@ -231,8 +241,13 @@ pub(crate) fn record_data_bytes(record_bytes: &[u8]) -> Result<Cow<'_, [u8]>, Re
 /// - [`Extracted::Found`] when every segment is present in the record's nested object map and the
 ///   leaf decodes successfully.
 /// - [`Extracted::Missing`] when an intermediate or leaf object key is absent at any level.
-/// - [`Extracted::Bail`] for edge / view records, non-object intermediates, paths longer than
-///   `depth_limit`, or any wire-level error.
+/// - [`Extracted::Bail`] for non-object intermediates, paths longer than `depth_limit`, a path
+///   starting at a stored-value record's `id` (its key, which the bytes may leave out), or any
+///   wire-level error.
+///
+/// The caller has admitted the record's generation against its table's
+/// layouts: nothing here checks one, and an envelope this build does not read
+/// is a [`Extracted::Bail`].
 pub(crate) fn extract_field_from_record_bytes(
 	record_bytes: &[u8],
 	path: &[PathSegment],
@@ -258,6 +273,9 @@ pub(crate) fn extract_field_from_record_bytes_parts(
 	if prefix.is_empty() && path.is_empty() {
 		return Extracted::Bail;
 	}
+	if record_bytes.first() == Some(&StoredRecord::MARKER) {
+		return extract_stored_field(record_bytes, prefix, path, depth_limit);
+	}
 	// Open the record's `data` field wire bytes: slice-direct on rev-2
 	// `indexed_struct` records, walker-chain fallback otherwise. Returns a
 	// `Cow<'_, [u8]>` which derefs to `&[u8]` for the inner
@@ -272,6 +290,96 @@ pub(crate) fn extract_field_from_record_bytes_parts(
 		Err(_) => return Extracted::Bail,
 	};
 	descend_value_path_parts(value_walker, prefix, path, depth_limit)
+}
+
+/// The data of a stored-value record as the object it is, its key order
+/// confirmed: `None` for a record in the `revision` encoding, `Some(None)` for
+/// a stored-value record that a whole decode refuses or whose data is not an
+/// object. The document is taken as a [`CheckedDocument`]: its whole body is
+/// proved a value of the stored grammar and a keyed object holds no `"id"`, so
+/// a field read refuses every record the whole decode refuses.
+///
+/// Reads the document layout from the record's first bytes and checks no
+/// generation: the caller has admitted the record's generation against its
+/// table's layouts. An envelope this build does not read answers `Some(None)`,
+/// and so does a record in a packed layout: its fields are read through its
+/// generation's descriptor, so an in-place reader declines it (the filter
+/// answers "unknown", the probe bails, a projection decodes the record).
+#[inline]
+pub(crate) fn stored_record_object(record_bytes: &[u8]) -> Option<Option<OrderedObjectRef<'_>>> {
+	if record_bytes.first() != Some(&StoredRecord::MARKER) {
+		return None;
+	}
+	Some(
+		StoredRecord::parse(record_bytes)
+			.ok()
+			.flatten()
+			.and_then(|record| record.checked_document().ok().flatten())
+			.and_then(|document| document.value().ok())
+			.and_then(|data| data.as_ordered_object().ok().flatten()),
+	)
+}
+
+/// The value `prefix ++ path` names in `data`, the data of a stored-value
+/// record, read in place.
+///
+/// Answers as the `revision` descent does: `Missing` for an absent key, and
+/// `Bail` for a non-object intermediate, an empty path, a path longer than
+/// `depth_limit`, bytes that do not read, or an object below `data` on the path
+/// whose keys do not ascend. A path starting at `id` bails too: the record's
+/// `id` is its key, which its bytes may leave out.
+pub(crate) fn descend_stored<'a>(
+	data: OrderedObjectRef<'a>,
+	prefix: &[&PathSegment],
+	path: &[PathSegment],
+	depth_limit: u32,
+) -> DescendResult<ValueRef<'a>> {
+	let total = prefix.len() + path.len();
+	if total == 0 || total > depth_limit as usize {
+		return DescendResult::Bail;
+	}
+	let mut remaining = total;
+	let mut object = data;
+	for segment in prefix.iter().copied().chain(path.iter()) {
+		if remaining == total && segment.as_str() == "id" {
+			return DescendResult::Bail;
+		}
+		remaining -= 1;
+		let value = match object.get(segment.as_str()) {
+			Ok(Some(value)) => value,
+			Ok(None) => return DescendResult::Missing,
+			Err(_) => return DescendResult::Bail,
+		};
+		if remaining == 0 {
+			return DescendResult::Found(value);
+		}
+		object = match value.as_ordered_object() {
+			Ok(Some(inner)) => inner,
+			_ => return DescendResult::Bail,
+		};
+	}
+	DescendResult::Bail
+}
+
+/// [`extract_field_from_record_bytes_parts`] over a record in the
+/// stored-value encoding: the value [`descend_stored`] reaches, decoded.
+fn extract_stored_field(
+	record_bytes: &[u8],
+	prefix: &[&PathSegment],
+	path: &[PathSegment],
+	depth_limit: u32,
+) -> Extracted {
+	let Some(Some(data)) = stored_record_object(record_bytes) else {
+		return Extracted::Bail;
+	};
+	match descend_stored(data, prefix, path, depth_limit) {
+		DescendResult::Found(value) => match value.decode() {
+			Ok(v) => Extracted::Found(v),
+			Err(_) => Extracted::Bail,
+		},
+		DescendResult::Missing => Extracted::Missing,
+		DescendResult::Bail => Extracted::Bail,
+	}
 }
 
 /// Construct an [`IndexedMapWalker`] directly from an [`Object`]'s rev-2
@@ -392,6 +500,17 @@ pub(crate) fn project_record_bytes_excluding(
 	record_bytes: &[u8],
 	excluded_sorted: &[PathSegment],
 ) -> Option<Object> {
+	if let Some(object) = stored_record_object(record_bytes) {
+		let object = object?;
+		let mut out = Object::default();
+		for entry in object.iter() {
+			let (key, value) = entry.ok()?;
+			if excluded_sorted.binary_search_by(|k| k.as_bytes().cmp(key.as_bytes())).is_err() {
+				out.0.insert(Strand::new(key), value.decode().ok()?);
+			}
+		}
+		return Some(out);
+	}
 	let data_bytes = record_data_bytes(record_bytes).ok()?;
 	let mut reader: &[u8] = &data_bytes;
 	let value_walker = Value::walk_revisioned(&mut reader).ok()?;
@@ -456,13 +575,24 @@ fn strand_wire_utf8(wire: &[u8]) -> Option<(&[u8], usize)> {
 /// `id` is not added: the caller sets it from the storage key, as a full
 /// decode does.
 ///
-/// Returns `None` when the record's data is not an object or its bytes cannot
-/// be walked; the caller then decodes the record in full. `keys_sorted` must
-/// be strictly ascending.
+/// Returns `None` when the record's data is not an object, its bytes cannot be
+/// walked, or its stored object's keys do not ascend; the caller then decodes
+/// the record in full. `keys_sorted` must be strictly
+/// ascending.
 pub(crate) fn project_record_bytes(
 	record_bytes: &[u8],
 	keys_sorted: &[PathSegment],
 ) -> Option<Object> {
+	if let Some(object) = stored_record_object(record_bytes) {
+		let object = object?;
+		let mut out = Object::default();
+		for key in keys_sorted {
+			if let Some(value) = object.get(key.as_str()).ok()? {
+				out.0.insert(key.as_strand().clone(), value.decode().ok()?);
+			}
+		}
+		return Some(out);
+	}
 	// The slot scan answers an empty needle list without opening the record,
 	// so the contract that a non-object or unwalkable record yields `None` is
 	// checked here first.

@@ -120,6 +120,11 @@ impl std::fmt::Display for Resource {
 
 impl Resource {
 	pub(crate) fn new(id: String, kind: ResourceKind, level: Level) -> Self {
+		Self::from_parts(id, kind, level)
+	}
+
+	/// A resource of exactly the given id, kind and level.
+	pub fn from_parts(id: String, kind: ResourceKind, level: Level) -> Self {
 		Self {
 			id,
 			kind,
@@ -127,15 +132,30 @@ impl Resource {
 		}
 	}
 
-	pub(crate) fn id(&self) -> &str {
-		&self.id
+	pub fn id(&self) -> &str {
+		let Resource {
+			id,
+			kind: _,
+			level: _,
+		} = self;
+		id
 	}
 
-	pub(crate) fn kind(&self) -> &ResourceKind {
-		&self.kind
+	pub fn kind(&self) -> &ResourceKind {
+		let Resource {
+			id: _,
+			kind,
+			level: _,
+		} = self;
+		kind
 	}
 
-	pub(crate) fn level(&self) -> &Level {
-		&self.level
+	pub fn level(&self) -> &Level {
+		let Resource {
+			id: _,
+			kind: _,
+			level,
+		} = self;
+		level
 	}
 }

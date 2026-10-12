@@ -7,6 +7,7 @@ InvalidPath	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string 
 ApiError	{ cause: NONE, code: -32008, details: { kind: 'Deserialization' }, kind: 'Serialization', message: 'Failed to decode the request body' }
 InvalidUrl	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The URL `sample` is invalid' }
 Http	{ cause: NONE, code: -32001, details: { kind: 'ConnectionFailed' }, kind: 'Connection', message: 'There was an error processing a remote HTTP request: sample' }
+Catalog	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'a catalog entry ends before its header' }
 HttpDisabled	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Remote HTTP request functions are not enabled' }
 ScriptingNotAllowed	{ cause: NONE, code: -32602, details: { kind: 'Scripting' }, kind: 'NotAllowed', message: 'Scripting functions are not allowed' }
 FunctionNotAllowed	{ cause: NONE, code: -32602, details: { details: { name: 'sample' }, kind: 'Function' }, kind: 'NotAllowed', message: "Function 'sample' is not allowed to be executed" }
@@ -101,6 +102,20 @@ InvalidStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'T
 OutdatedStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The data stored on disk is out-of-date with this version (Expected: 1, Actual: 1). Please follow the upgrade guides in the documentation, or use a clean storage directory if this is intended to be a new instance' }
 MigratedBeyondStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The data stored on disk was migrated by a newer version of SurrealDB (Stored: sample, Running: sample) and cannot be read by this one. The following data migrations have been applied that this version does not know about: sample. Run a version at or above sample, or restore from an export taken before the upgrade' }
 MigrationTimedOut	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Timed out waiting for another node to apply pending data migrations (sample). Check whether the migrating node is still running, then restart this one' }
+FeatureNotEnabled	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'This needs feature level 4.0, but the store is at 3.x. Raise the feature level once every node runs 4.0 or later' }
+FeatureLevelAboveRelease	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The feature level cannot be raised to 4.1: this build is 4.0' }
+FeatureLevelBelowFirst	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The feature level cannot be set below 4.0, the first release with one' }
+FeatureLevelNodeBehind	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The feature level cannot be raised to 4.0 while node 00000000-0000-0000-0000-000000000000 runs a release that records none' }
+FeatureLevelInUse	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The feature level cannot be lowered to 4.0: entries already need 4.1' }
+FeatureLevelUnset	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The feature level cannot be lowered: the store has not recorded one' }
+FeatureLevelMissing	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The store holds catalog entries in the stored grammar but records no feature level' }
+FeatureLevelPinInvalid	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The configured feature level is not a release of the form major.minor, `current` or `legacy`' }
+GenerationRingFull	{ cause: NONE, code: -32000, kind: 'Query', message: "Table 'sample' has used every generation from 1, so no further layout can be minted until its floor moves" }
+GenerationOccupied	{ cause: NONE, code: -32000, kind: 'Serialization', message: "Table 'sample' already holds a layout for generation 1, which its ring does not" }
+NoGeneration	{ cause: NONE, code: -32000, kind: 'Query', message: "Table 'sample' has no generation" }
+FloorOutsideWindow	{ cause: NONE, code: -32000, kind: 'Query', message: "Table 'sample' cannot move its floor to generation 1: its generations are 2 to 3" }
+ConformanceStale	{ cause: NONE, code: -32000, kind: 'Query', message: "The definition of field 'sample' of table 'sample' changed since its conformance was checked" }
+StoreReadOnly	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'The store is open read-only: it records features this build does not maintain (sample). Run a release that knows them to write to it' }
 BucketPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to get this file in the `sample` bucket" }
 ObsError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Operation not supported: sample' }, code: -32000, kind: 'Internal', message: 'Object Store error: Operation not supported: sample' }
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
@@ -136,6 +151,8 @@ IdComponentMismatch	{ cause: NONE, code: -32600, details: { kind: 'InvalidReques
 IdComponentCoerce	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: "Couldn't coerce value for the record id component `time` of `reading`: Expected `datetime` but found `1`" }
 IdComponentArity	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'The record id of `reading` has the components [city, time], but 1 value was given' }
 InvalidPath	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a path: sample' }
+Entry	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'a catalog entry ends before its header' }
+Layout	{ cause: NONE, code: -32000, kind: 'Serialization', message: "A stored record names generation 1 but was read without its table's layouts" }
 Query	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid query: sample' }
 InvalidAggregation	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid aggregation: sample' }
 InvalidAggregationSelector	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect selector for aggregate selection, expression `sample` within in selector cannot be aggregated in a group.' }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use surrealdb_catalog::node::Node;
-use surrealdb_catalog::{self, Record};
+use surrealdb_catalog::{self, Generation, Record};
 
 use crate::catalog;
 
@@ -11,8 +11,9 @@ use crate::catalog;
 pub enum Entry {
 	/// A cached entry of any type
 	Any(Arc<dyn Any + Send + Sync>),
-	/// A cached record document content
-	Val(Arc<Record>),
+	/// A cached record and the generation its stored bytes carry
+	/// ([`crate::Transaction::get_stamped_record`]).
+	Val(Arc<Record>, Option<Generation>),
 	/// A slice of Node specified at the root.
 	Nds(Arc<[Node]>),
 	/// A slice of DefineUserStatement specified at the root.
@@ -306,8 +307,14 @@ impl Entry {
 	/// Converts this cache entry into a single [`Record`].
 	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Val`].
 	pub fn try_into_record(self) -> Result<Arc<Record>> {
+		self.try_into_stamped_record().map(|(record, _)| record)
+	}
+	/// Converts this cache entry into a single [`Record`] and the generation its stored bytes
+	/// carry.
+	/// Fails with a typed internal error if called on a cache entry that is not an [`Entry::Val`].
+	pub fn try_into_stamped_record(self) -> Result<(Arc<Record>, Option<Generation>)> {
 		match self {
-			Entry::Val(v) => Ok(v),
+			Entry::Val(record, generation) => Ok((record, generation)),
 			_ => fail!("Unable to convert type into Entry::Val"),
 		}
 	}

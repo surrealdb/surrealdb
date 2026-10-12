@@ -1,10 +1,11 @@
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Error, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[storekey(format = "()")]
@@ -12,6 +13,27 @@ use crate::val::IndexFormat;
 pub struct File {
 	pub bucket: String,
 	pub key: String,
+}
+
+/// Reads exactly what the derived serializer writes (revision 1: the bucket, then the key) and
+/// builds the value from its fields: `File::new` would prepend a `/` to a key that lacks one, which
+/// is not what was stored.
+impl DeserializeRevisioned for File {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
+		bounded::read_revision(reader, "File", 1)?;
+		let bucket = bounded::read_string(reader)?;
+		let key = bounded::read_string(reader)?;
+		Ok(Self {
+			bucket,
+			key,
+		})
+	}
+}
+
+impl SkipCheckRevisioned for File {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), Error> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
 }
 
 impl File {

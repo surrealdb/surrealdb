@@ -4,6 +4,8 @@ use std::fmt::Display;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::val::stored::schema::Stored;
+
 /// The language a [`Tokenizer::Segment`] segments with.
 ///
 /// Separate from [`crate::expr::Language`], which selects a Snowball stemming
@@ -13,10 +15,14 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 /// apart makes `SNOWBALL(KOREAN)` and `SEGMENT(ENGLISH)` unrepresentable rather
 /// than merely rejected.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum SegmentLanguage {
+	#[stored(n = 1)]
 	Chinese,
+	#[stored(n = 2)]
 	Japanese,
+	#[stored(n = 3)]
 	Korean,
 }
 
@@ -37,11 +43,16 @@ impl Display for SegmentLanguage {
 }
 
 #[revisioned(revision = 2)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Tokenizer {
+	#[stored(n = 1)]
 	Blank,
+	#[stored(n = 2)]
 	Camel,
+	#[stored(n = 3)]
 	Class,
+	#[stored(n = 4)]
 	Punct,
 	/// Splits a span into words using a morphological dictionary.
 	///
@@ -51,6 +62,7 @@ pub enum Tokenizer {
 	/// therefore runs after the character-class tokenizers have produced spans,
 	/// segmenting each one further.
 	#[revision(start = 2)]
+	#[stored(n = 5)]
 	Segment(SegmentLanguage),
 }
 

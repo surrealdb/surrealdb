@@ -3,14 +3,19 @@ use std::fmt;
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum Base {
 	#[default]
+	#[stored(n = 1)]
 	Root,
+	#[stored(n = 2)]
 	Ns,
+	#[stored(n = 3)]
 	Db,
 }
 

@@ -14,6 +14,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use surrealdb_kvs::key::KVKey as _;
 
 use super::host::{admitted_unit, run_value_row, unit_table};
 use super::interp::State;
@@ -23,8 +24,8 @@ use super::store::{read, table_name_of, write};
 use super::write::WriteState;
 use crate::catalog::aggregation::{self, backfill_stats};
 use crate::catalog::providers::TableProvider as _;
-use crate::catalog::{Metadata, Record, RecordType};
-use crate::exec::operators::write::ctx::TableExistence;
+use crate::catalog::{Metadata, Record, RecordType, encode_whole_record_with};
+use crate::exec::operators::write::ctx::{RecordFormatSlot, ResolvedFormat, TableExistence};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
 use crate::exec::{ExecutionContext, FlowResult};
@@ -34,6 +35,27 @@ use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 fn internal(why: impl Into<String>) -> ControlFlow {
 	ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(why.into())))
+}
+
+/// The format the rows of view table `table` are written in, with the layouts a packed format
+/// reads its descriptor from.
+///
+/// The backfill holds a slot for the table it fills
+/// ([`RecordFormatSlot::resolve`](crate::exec::operators::write::ctx::RecordFormatSlot::resolve)),
+/// and starts a fresh one when it moves to another table.
+async fn row_format<'s>(
+	state: &'s mut State,
+	txn: &crate::kvs::Transaction,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	table: &TableName,
+) -> FlowResult<ResolvedFormat<'s>> {
+	if state.backfill_format.as_ref().is_none_or(|(held, _)| held != table) {
+		state.backfill_format = None;
+	}
+	let (_, slot) =
+		state.backfill_format.get_or_insert_with(|| (table.clone(), RecordFormatSlot::empty()));
+	slot.resolve(txn, ns, db, table).await.map_err(ControlFlow::Err)
 }
 
 /// The pipeline of a view table's order that takes a created row.
@@ -79,7 +101,16 @@ pub(super) async fn step(
 				tb: Cow::Borrowed(&table),
 				id: Cow::Borrowed(&id.key),
 			};
-			ctx.txn().put_key(&key, &record).await.map_err(ControlFlow::Err)?;
+			let txn = ctx.txn();
+			// The row names no key, so it is never packed and its layouts are not checked against
+			// its table; a view's layout is the document layout.
+			let bytes = {
+				let resolved = row_format(state, &txn, ns, db, &table).await?;
+				encode_whole_record_with(resolved.format(), resolved.layouts(), &record, None)
+					.map_err(ControlFlow::Err)?
+			};
+			let key = key.encode_key().map_err(ControlFlow::Err)?;
+			txn.put(key, bytes).await.map_err(ControlFlow::Err)?;
 			maintain(program, state, ctx, *order, &table, id.key, &record).await?;
 		}
 		StoreInstr::BackfillGroup {

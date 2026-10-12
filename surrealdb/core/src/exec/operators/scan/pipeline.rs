@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 
-use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Permission, TableLayouts};
 use crate::exec::permission::{
 	GuardKind, PhysicalPermission, check_permission_for_value, read_permission_to_physical,
 };
@@ -27,8 +27,8 @@ use crate::exec::topk_pushdown::TopKThresholdProbe;
 use crate::exec::{Clause, EvalContext, ExecutionContext, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::key::schema::RecordKey;
-use crate::key::{KVKeyDecode, KVValue, RawRange};
-use crate::kvs::{Direction, Transaction};
+use crate::key::{KVKeyDecode, RawRange};
+use crate::kvs::{Admission, Direction, RowGate, Transaction};
 use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
@@ -216,6 +216,17 @@ pub(crate) fn determine_scan_direction(
 /// from its key, so every value has to be decoded against the key it was stored
 /// under (see [`decode_record`]).
 ///
+/// `gate` is the generation check of the table the range reads. Each row is
+/// checked against it before the pre-decode filter, the top-k probe or the
+/// decode sees any field of the row, so a row of a generation the table does
+/// not list is refused rather than filtered out. A row naming an unlisted
+/// generation breaks the visit once: the gate reloads the table's layouts, and
+/// the row is read again before the scan goes on, in the order it was stored.
+/// The gate refreshes its layouts before each cursor batch
+/// ([`RowGate::refresh`]), so a batch is admitted and decoded against the
+/// layouts the transaction holds when it starts, and a packed row is decoded
+/// with the layouts that admitted it.
+///
 /// When `pre_skip > 0`, that many entries are skipped at the KV storage layer
 /// before any data is returned, avoiding I/O, allocation, and deserialization
 /// for rows that will be discarded anyway (the fast-path optimisation for
@@ -226,11 +237,13 @@ pub(crate) fn determine_scan_direction(
 /// storage. Subsequent batches use [`crate::kvs::NORMAL_BATCH_SIZE`].
 ///
 /// Iterates the cursor's borrowed `&[u8]` slices directly — record decode
-/// happens inline, no intermediate owned `Vec<u8>` allocation per row.
+/// happens inline, no intermediate owned `Vec<u8>` allocation per row. The one
+/// row a reload holds is copied.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
 	range: RawRange,
+	mut gate: RowGate,
 	version: Option<u64>,
 	storage_limit: Option<usize>,
 	direction: Direction,
@@ -269,16 +282,20 @@ pub(crate) fn kv_scan_stream(
 			// No more records than the fuel left: the batch is charged once it
 			// returns.
 			let batch_size = crate::exec::vm::fuel::batch(batch_size);
-			// Drive the cursor one borrowed row at a time. The visitor runs the
-			// pre-decode filter and decodes survivors straight from the engine's
-			// borrowed bytes; `decode_record` yields a fully owned `Value`, so
-			// the raw bytes are never retained and the engine hands them over
-			// with no per-row copy.
+			// Drive the cursor one borrowed row at a time. The visitor admits
+			// each row's generation, runs the pre-decode filter and decodes
+			// survivors straight from the engine's borrowed bytes;
+			// `decode_record` yields a fully owned `Value`, so the raw bytes
+			// are never retained and the engine hands them over with no
+			// per-row copy.
 			let mut decoded: Vec<Value> = Vec::with_capacity(batch_size as usize);
-			// `decode_record`'s error is a `ControlFlow`, which can't travel
-			// through the visitor's storage-error channel — stash it and
-			// re-raise it below, outside the cursor borrow.
+			// A row's failure is a `ControlFlow`, which can't travel through
+			// the visitor's storage-error channel — stash it and re-raise it
+			// below, outside the cursor borrow.
 			let mut decode_err: Option<ControlFlow> = None;
+			// The row that named a generation the gate does not list yet. The
+			// cursor has consumed it, and it is the last row the visit read.
+			let mut held: Option<(Vec<u8>, Vec<u8>)> = None;
 			let pdf = pre_decode_filter.as_ref();
 			// Snapshot the TopK rejection threshold once per cursor batch.
 			// The sort publishes monotonically-tightening values, so a stale
@@ -287,30 +304,33 @@ pub(crate) fn kv_scan_stream(
 			// downstream heap fills (or when no publisher was installed).
 			let topk_threshold = topk_probe.as_ref().and_then(|p| p.snapshot());
 			let mut topk_skipped: u64 = 0;
+			// The batch is admitted and decoded against one view of the
+			// table's layouts: the visitor is synchronous and runs no
+			// statement, so nothing moves the transaction's layout epoch
+			// between this refresh and the end of the batch.
+			gate.refresh(&txn).await?;
+			let layouts: &TableLayouts = gate.layouts();
 			let stats = cursor
 				.for_each(batch_size, &mut |key, val| {
-					if let Some(pdf) = pdf
-						&& pdf.apply(key, val) == PreDecodeFilterOutcome::Reject
-					{
-						// Rejected rows are still counted as scanned (the cursor
-						// read them), so `stats.rows` matches the old batch len.
-						return Ok(std::ops::ControlFlow::Continue(()));
-					}
-					// After the (cheaper, more selective) WHERE probe: skip
-					// decode when the row's ORDER BY key provably cannot beat
-					// the downstream top-K heap's worst entry.
-					if let (Some(probe), Some(threshold)) =
-						(topk_probe.as_ref(), topk_threshold.as_deref())
-						&& probe.rejects(threshold, val)
-					{
-						topk_skipped += 1;
-						return Ok(std::ops::ControlFlow::Continue(()));
-					}
-					match decode_record(key, val) {
-						Ok(v) => {
-							decoded.push(v);
-							Ok(std::ops::ControlFlow::Continue(()))
+					match gate.admit(val) {
+						Admission::Admit => {}
+						Admission::Reload => {
+							held = Some((key.to_vec(), val.to_vec()));
+							return Ok(std::ops::ControlFlow::Break(()));
 						}
+						Admission::Refuse(e) => {
+							decode_err = Some(ControlFlow::Err(e));
+							return Ok(std::ops::ControlFlow::Break(()));
+						}
+					}
+					let row = ScanRow {
+						pdf,
+						probe: topk_probe.as_ref(),
+						threshold: topk_threshold.as_deref(),
+						layouts: Some(layouts),
+					};
+					match row.read(key, val, &mut decoded, &mut topk_skipped) {
+						Ok(()) => Ok(std::ops::ControlFlow::Continue(())),
 						Err(cf) => {
 							decode_err = Some(cf);
 							Ok(std::ops::ControlFlow::Break(()))
@@ -319,20 +339,37 @@ pub(crate) fn kv_scan_stream(
 				})
 				.await
 				.context("Failed to scan record")?;
+			// Re-raise a stashed failure as the stream's terminal error, now
+			// that the cursor borrow has ended. `?` on an `Err` already ends
+			// the stream, so no explicit `return` is needed.
+			if let Some(cf) = decode_err {
+				Err(cf)?;
+			}
+			if let Some((key, val)) = held {
+				gate.reload(&txn).await?;
+				match gate.admit(&val) {
+					Admission::Admit => {}
+					Admission::Refuse(e) => Err(ControlFlow::Err(e))?,
+					Admission::Reload => Err(ControlFlow::Err(anyhow::anyhow!(
+						"a row's generation was unlisted again after the layouts reloaded"
+					)))?,
+				}
+				ScanRow {
+					pdf,
+					probe: topk_probe.as_ref(),
+					threshold: topk_threshold.as_deref(),
+					layouts: Some(&**gate.layouts()),
+				}
+				.read(&key, &val, &mut decoded, &mut topk_skipped)?;
+			}
 			if topk_skipped > 0
 				&& let Some(m) = topk_probe.as_ref().and_then(|p| p.metrics())
 			{
 				m.add_skipped_rows(topk_skipped);
 			}
-			// Re-raise a stashed decode error as the stream's terminal error,
-			// now that the cursor borrow has ended. `?` on an `Err` already
-			// ends the stream, so no explicit `return` is needed.
-			if let Some(cf) = decode_err {
-				Err(cf)?;
-			}
 			first = false;
-			// `stats.rows` counts every row the cursor advanced over (including
-			// pre-decode-filter rejects), matching the previous `batch.len()`.
+			// `stats.rows` counts every row the cursor advanced over, the
+			// pre-decode-filter rejects and the row a reload held included.
 			yielded += stats.rows as usize;
 			if stats.rows == 0 {
 				break;
@@ -355,18 +392,89 @@ pub(crate) fn kv_scan_stream(
 	Box::pin(stream)
 }
 
+/// What a scan does with one row its gate has admitted: the pre-decode filter,
+/// the top-k probe, and the decode.
+struct ScanRow<'a> {
+	pdf: Option<&'a Arc<PreDecodeFilter>>,
+	probe: Option<&'a Arc<TopKThresholdProbe>>,
+	threshold: Option<&'a Value>,
+	/// The layouts the row's gate admits against: a packed row is decoded through its
+	/// generation's descriptor there.
+	layouts: Option<&'a TableLayouts>,
+}
+
+impl ScanRow<'_> {
+	/// Appends the decoded row to `decoded` unless the filter or the probe
+	/// rejects it from its stored bytes.
+	///
+	/// The caller has admitted `val`'s generation ([`RowGate::admit`]), so
+	/// neither the filter nor the probe reads a field of a row the table's
+	/// layouts do not cover.
+	#[inline]
+	fn read(
+		&self,
+		key: &[u8],
+		val: &[u8],
+		decoded: &mut Vec<Value>,
+		topk_skipped: &mut u64,
+	) -> Result<(), ControlFlow> {
+		if let Some(pdf) = self.pdf
+			&& pdf.apply(val) == PreDecodeFilterOutcome::Reject
+		{
+			// A rejected row still counts as scanned: the cursor read it.
+			return Ok(());
+		}
+		// After the (cheaper, more selective) WHERE probe: skip decode when
+		// the row's ORDER BY key provably cannot beat the downstream top-K
+		// heap's worst entry.
+		if let (Some(probe), Some(threshold)) = (self.probe, self.threshold)
+			&& probe.rejects(threshold, val)
+		{
+			*topk_skipped += 1;
+			return Ok(());
+		}
+		decoded.push(decode_record(key, val, self.layouts)?);
+		Ok(())
+	}
+}
+
 /// Decode a record from its key and value bytes.
+///
+/// The caller has admitted the row's generation against its table's layouts
+/// ([`RowGate`], [`crate::kvs::LayoutSet`], or `Transaction::decode_record`)
+/// and passes the layouts that admitted it: a packed row is read through its
+/// generation's descriptor there, and is refused without them. The decode reads
+/// the document or `revision` encoding, refuses an envelope this build does not
+/// read, and does not check the generation of a document.
 #[inline]
-pub(crate) fn decode_record(key: &[u8], val: &[u8]) -> Result<Value, ControlFlow> {
-	let decoded_key = RecordKey::decode_key(key).context("Failed to decode record key")?;
+pub(crate) fn decode_record(
+	key: &[u8],
+	val: &[u8],
+	layouts: Option<&TableLayouts>,
+) -> Result<Value, ControlFlow> {
+	decode_record_value(key, val, layouts).map_err(ControlFlow::Err)
+}
+
+/// [`decode_record`] with the failure as the typed error it is, for a caller
+/// that holds no control flow: a refused envelope, or a packed row that its
+/// layouts do not read, reaches the client as the [`crate::catalog::Error`] it
+/// is.
+#[inline]
+pub(crate) fn decode_record_value(
+	key: &[u8],
+	val: &[u8],
+	layouts: Option<&TableLayouts>,
+) -> anyhow::Result<Value> {
+	let decoded_key =
+		RecordKey::decode_key(key).map_err(|e| e.context("Failed to decode record key"))?;
 
 	let rid = crate::val::RecordId {
 		table: decoded_key.tb.into_owned(),
 		key: decoded_key.id.into_owned(),
 	};
 
-	let record = crate::catalog::Record::kv_decode_value(val, rid)
-		.context("Failed to deserialize record")?;
+	let record = crate::catalog::Record::decode_admitted(val, layouts, rid)
+		.map_err(|e| e.context("Failed to deserialize record"))?;
 
 	// Take ownership of the value (zero-cost move for freshly deserialized data)
 	Ok(record.data)

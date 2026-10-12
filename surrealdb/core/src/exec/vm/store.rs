@@ -8,6 +8,7 @@
 use std::borrow::Cow;
 
 use anyhow::anyhow;
+use surrealdb_datastore::LevelledMode;
 
 use super::codec;
 use super::codec::TypeId;
@@ -17,6 +18,7 @@ use super::program::{
 	Service, StatementError, StoreInstr,
 };
 use super::scalar::Scalar;
+use crate::catalog::stored::StoredField;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::kvs::sequences::CatalogSequence;
@@ -143,8 +145,7 @@ async fn step_inner(
 			value,
 		} => {
 			let key = codec::key::encode_id(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
-			let bytes = codec::encode_id(*ty, &read(regs, *value)).map_err(ControlFlow::Err)?;
-			ctx.txn().set(key.into(), bytes).await.map_err(ControlFlow::Err)?;
+			put_value(ctx, key, *ty, &read(regs, *value), LevelledMode::Set).await?;
 		}
 		StoreInstr::Replace {
 			route,
@@ -153,8 +154,7 @@ async fn step_inner(
 			value,
 		} => {
 			let key = codec::key::encode_id(*route, &read(regs, *key)).map_err(ControlFlow::Err)?;
-			let bytes = codec::encode_id(*ty, &read(regs, *value)).map_err(ControlFlow::Err)?;
-			ctx.txn().replace_raw(key.into(), bytes).await.map_err(ControlFlow::Err)?;
+			put_value(ctx, key, *ty, &read(regs, *value), LevelledMode::Replace).await?;
 		}
 		StoreInstr::GetField {
 			src,
@@ -250,8 +250,7 @@ async fn step_inner(
 				.ok_or_else(|| ControlFlow::Err(anyhow!("a definition made with no session")))?;
 			let limit: crate::catalog::auth::AuthLimit =
 				crate::iam::AuthLimit::new_from_auth(options.auth.as_ref()).into();
-			let bytes = revision::to_vec(&limit).map_err(|e| ControlFlow::Err(e.into()))?;
-			write(regs, *dst, codec::decode("AuthLimit", &bytes).map_err(ControlFlow::Err)?);
+			write(regs, *dst, limit.into_vm_value().map_err(|e| ControlFlow::Err(e.into()))?);
 		}
 		StoreInstr::Lock {
 			route,
@@ -270,10 +269,8 @@ async fn step_inner(
 		StoreInstr::DeleteModelArtifact {
 			model,
 		} => {
-			if let Ok(model) = rust::<crate::catalog::StoredMlModelDefinition>(
-				"StoredMlModelDefinition",
-				&read(regs, *model),
-			) && let Some(opt) = ctx.options()
+			if let Ok(model) = rust::<crate::catalog::StoredMlModelDefinition>(&read(regs, *model))
+				&& let Some(opt) = ctx.options()
 				&& let Ok((ns, db)) = opt.ns_db()
 			{
 				let path = crate::expr::model::get_model_path(
@@ -307,8 +304,7 @@ async fn step_inner(
 			};
 			// The changefeed buffer holds the Rust definition it writes at
 			// commit.
-			let stored: crate::catalog::StoredTableDefinition =
-				rust("StoredTableDefinition", &read(regs, *definition))?;
+			let stored: crate::catalog::StoredTableDefinition = rust(&read(regs, *definition))?;
 			ctx.txn().changefeed_buffer_table_change(ns, db, &tb, &stored);
 		}
 		StoreInstr::ClearDatastoreCache => {
@@ -656,6 +652,11 @@ async fn step_inner(
 			let scanned = scan(*route, &read(regs, *key), *ty, ctx).await;
 			match (scanned, unread) {
 				(Ok(values), _) => write(regs, *dst, Value::Array(values.into())),
+				// An entry this build refuses is not an entry the statement can do
+				// without: it fails with the refusal, as a read of the entry does.
+				(Err(e), Some(_)) if crate::err::Error::entry_refusal(&e).is_some() => {
+					return Err(ControlFlow::Err(e));
+				}
 				(Err(e), Some(target)) => {
 					warn!(
 						target: "surrealdb::core::exec::vm",
@@ -921,10 +922,9 @@ async fn step_inner(
 				let import = ctx.options().is_some_and(|opt| opt.import);
 				let existing_uses_es512 = match read(regs, *existing) {
 					Value::Object(_) => {
-						if let Ok(stored) = rust::<crate::catalog::StoredAccessDefinition>(
-							"StoredAccessDefinition",
-							&read(regs, *existing),
-						) {
+						if let Ok(stored) =
+							rust::<crate::catalog::StoredAccessDefinition>(&read(regs, *existing))
+						{
 							stored.access_type.uses_es512()
 						} else {
 							false
@@ -942,8 +942,7 @@ async fn step_inner(
 				access,
 			} => {
 				use crate::catalog::FromStored as _;
-				let stored: crate::catalog::StoredAccessDefinition =
-					rust("StoredAccessDefinition", &read(regs, *access))?;
+				let stored: crate::catalog::StoredAccessDefinition = rust(&read(regs, *access))?;
 				let access = crate::catalog::AccessDefinition::from_stored(&stored)
 					.map_err(ControlFlow::Err)?;
 				super::schema_host::check_access_altered(&access).map_err(ControlFlow::Err)?;
@@ -1028,12 +1027,10 @@ async fn step_inner(
 			use crate::catalog::FromStored as _;
 			let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 			let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-			let table: crate::catalog::StoredTableDefinition =
-				rust("StoredTableDefinition", &read(regs, *table))?;
+			let table: crate::catalog::StoredTableDefinition = rust(&read(regs, *table))?;
 			let table =
 				crate::catalog::TableDefinition::from_stored(&table).map_err(ControlFlow::Err)?;
-			let index: crate::catalog::StoredIndexDefinition =
-				rust("StoredIndexDefinition", &read(regs, *index))?;
+			let index: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 			let index =
 				crate::catalog::IndexDefinition::from_stored(&index).map_err(ControlFlow::Err)?;
 			let frozen = ctx.ctx();
@@ -1063,7 +1060,7 @@ async fn step_inner(
 				return Ok(None);
 			};
 			let lv: crate::catalog::StoredSubscriptionDefinition =
-				rust("StoredSubscriptionDefinition", &read(regs, *subscription))?;
+				rust(&read(regs, *subscription))?;
 			ctx.txn()
 				.on_commit(crate::dbs::SendKill::boxed(
 					std::sync::Arc::clone(sender),
@@ -1090,8 +1087,7 @@ async fn step_inner(
 		} => {
 			use crate::catalog::FromStored as _;
 			let field = |reg| -> FlowResult<crate::catalog::FieldDefinition> {
-				let stored: crate::catalog::StoredFieldDefinition =
-					rust("StoredFieldDefinition", &read(regs, reg))?;
+				let stored: crate::catalog::StoredFieldDefinition = rust(&read(regs, reg))?;
 				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)
 			};
 			match check {
@@ -1106,7 +1102,7 @@ async fn step_inner(
 					let field = field(*reg)?;
 					if field.inline {
 						let stored: crate::catalog::StoredTableDefinition =
-							rust("StoredTableDefinition", &read(regs, *table))?;
+							rust(&read(regs, *table))?;
 						let table = crate::catalog::TableDefinition::from_stored(&stored)
 							.map_err(ControlFlow::Err)?;
 						let descriptor =
@@ -1128,7 +1124,7 @@ async fn step_inner(
 					let field = field(*reg)?;
 					if field.flexible {
 						let stored: crate::catalog::StoredTableDefinition =
-							rust("StoredTableDefinition", &read(regs, *table))?;
+							rust(&read(regs, *table))?;
 						let table = crate::catalog::TableDefinition::from_stored(&stored)
 							.map_err(ControlFlow::Err)?;
 						crate::exec::field_rules::flexible_restrictions(&field, Some(&table))
@@ -1140,8 +1136,7 @@ async fn step_inner(
 					table,
 				} => {
 					let field = field(*reg)?;
-					let stored: crate::catalog::StoredTableDefinition =
-						rust("StoredTableDefinition", &read(regs, *table))?;
+					let stored: crate::catalog::StoredTableDefinition = rust(&read(regs, *table))?;
 					let table = crate::catalog::TableDefinition::from_stored(&stored)
 						.map_err(ControlFlow::Err)?;
 					let descriptor = crate::exec::vm::descriptor::table_at(ctx, &table.name, None)
@@ -1191,8 +1186,7 @@ async fn step_inner(
 		} => {
 			use crate::catalog::FromStored as _;
 			let field = |value: Value| -> FlowResult<crate::catalog::FieldDefinition> {
-				let stored: crate::catalog::StoredFieldDefinition =
-					rust("StoredFieldDefinition", &value)?;
+				let stored: crate::catalog::StoredFieldDefinition = rust(&value)?;
 				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)
 			};
 			let old = read(regs, *old);
@@ -1224,8 +1218,7 @@ async fn step_inner(
 			refusal,
 		} => {
 			use crate::catalog::FromStored as _;
-			let table: crate::catalog::StoredTableDefinition =
-				rust("StoredTableDefinition", &read(regs, *table))?;
+			let table: crate::catalog::StoredTableDefinition = rust(&read(regs, *table))?;
 			let table =
 				crate::catalog::TableDefinition::from_stored(&table).map_err(ControlFlow::Err)?;
 			if crate::kvs::lightweight::lightweight_relation(&table.table_type).is_some() {
@@ -1247,8 +1240,7 @@ async fn step_inner(
 				None => Some("DEFINE INDEX"),
 				Some(index) => {
 					use crate::catalog::FromStored as _;
-					let stored: crate::catalog::StoredIndexDefinition =
-						rust("StoredIndexDefinition", &read(regs, *index))?;
+					let stored: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 					let index = crate::catalog::IndexDefinition::from_stored(&stored)
 						.map_err(ControlFlow::Err)?;
 					// Restamping at the current format moves an index with a
@@ -1302,8 +1294,7 @@ async fn step_inner(
 		} => {
 			use crate::catalog::FromStored as _;
 			let decode = |value: &Value| -> FlowResult<crate::catalog::IndexDefinition> {
-				let stored: crate::catalog::StoredIndexDefinition =
-					rust("StoredIndexDefinition", value)?;
+				let stored: crate::catalog::StoredIndexDefinition = rust(value)?;
 				crate::catalog::IndexDefinition::from_stored(&stored).map_err(ControlFlow::Err)
 			};
 			let (existing, template) =
@@ -1319,8 +1310,7 @@ async fn step_inner(
 			dst,
 		} => {
 			use crate::catalog::FromStored as _;
-			let stored: crate::catalog::StoredFieldDefinition =
-				rust("StoredFieldDefinition", &read(regs, *field))?;
+			let stored: crate::catalog::StoredFieldDefinition = rust(&read(regs, *field))?;
 			let field =
 				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)?;
 			write(
@@ -1336,12 +1326,10 @@ async fn step_inner(
 			fresh,
 		} => {
 			use crate::catalog::FromStored as _;
-			let table: crate::catalog::StoredTableDefinition =
-				rust("StoredTableDefinition", &read(regs, *table))?;
+			let table: crate::catalog::StoredTableDefinition = rust(&read(regs, *table))?;
 			let table =
 				crate::catalog::TableDefinition::from_stored(&table).map_err(ControlFlow::Err)?;
-			let index: crate::catalog::StoredIndexDefinition =
-				rust("StoredIndexDefinition", &read(regs, *index))?;
+			let index: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 			let index =
 				crate::catalog::IndexDefinition::from_stored(&index).map_err(ControlFlow::Err)?;
 			let frozen = ctx.ctx();
@@ -1385,8 +1373,7 @@ async fn step_inner(
 			dst,
 		} => {
 			use crate::catalog::FromStored as _;
-			let index: crate::catalog::StoredIndexDefinition =
-				rust("StoredIndexDefinition", &read(regs, *index))?;
+			let index: crate::catalog::StoredIndexDefinition = rust(&read(regs, *index))?;
 			let index =
 				crate::catalog::IndexDefinition::from_stored(&index).map_err(ControlFlow::Err)?;
 			write(regs, *dst, Value::Bool(index.uses_shared_doc_ids()));
@@ -1395,8 +1382,7 @@ async fn step_inner(
 			analyzer,
 			mappers,
 		} => {
-			let analyzer: crate::catalog::AnalyzerDefinition =
-				rust("AnalyzerDefinition", &read(regs, *analyzer))?;
+			let analyzer: crate::catalog::AnalyzerDefinition = rust(&read(regs, *analyzer))?;
 			let frozen = ctx.ctx();
 			let stores = frozen.get_index_stores();
 			if *mappers {
@@ -1414,7 +1400,7 @@ async fn step_inner(
 			let analyzers = match read(regs, *analyzers) {
 				Value::Array(analyzers) => analyzers
 					.iter()
-					.map(|az| rust::<crate::catalog::AnalyzerDefinition>("AnalyzerDefinition", az))
+					.map(rust::<crate::catalog::AnalyzerDefinition>)
 					.collect::<FlowResult<Vec<_>>>()?,
 				other => {
 					return Err(ControlFlow::Err(anyhow!(
@@ -1435,8 +1421,7 @@ async fn step_inner(
 				use crate::surrealism::cache::SurrealismCacheLookup;
 				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-				let md: crate::catalog::StoredModuleDefinition =
-					rust("StoredModuleDefinition", &read(regs, *module))?;
+				let md: crate::catalog::StoredModuleDefinition = rust(&read(regs, *module))?;
 				let md =
 					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
 				let lookup = match &md.executable {
@@ -1469,8 +1454,7 @@ async fn step_inner(
 				use crate::surrealism::cache::SurrealismCacheLookup;
 				let ns = crate::catalog::NamespaceId(id_of(&read(regs, *ns))?);
 				let db = crate::catalog::DatabaseId(id_of(&read(regs, *db))?);
-				let md: crate::catalog::StoredModuleDefinition =
-					rust("StoredModuleDefinition", &read(regs, *module))?;
+				let md: crate::catalog::StoredModuleDefinition = rust(&read(regs, *module))?;
 				let storage_name = md.get_storage_name().ok();
 				let md =
 					crate::catalog::ModuleDefinition::from_stored(&md).map_err(ControlFlow::Err)?;
@@ -1504,8 +1488,7 @@ async fn step_inner(
 			db,
 			bucket,
 		} => {
-			let bucket: crate::catalog::StoredBucketDefinition =
-				rust("StoredBucketDefinition", &read(regs, *bucket))?;
+			let bucket: crate::catalog::StoredBucketDefinition = rust(&read(regs, *bucket))?;
 			let Some(buckets) = ctx.ctx().get_buckets() else {
 				return Err(ControlFlow::Err(anyhow::Error::new(
 					crate::buc::Error::BucketUnavailable(bucket.name.as_str().to_owned()),
@@ -1629,8 +1612,7 @@ async fn step_inner(
 			kind,
 		} => {
 			use crate::catalog::FromStored as _;
-			let stored: crate::catalog::StoredFieldDefinition =
-				rust("StoredFieldDefinition", &read(regs, *definition))?;
+			let stored: crate::catalog::StoredFieldDefinition = rust(&read(regs, *definition))?;
 			let mut definition =
 				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)?;
 			let options = ctx.options().ok_or_else(|| {
@@ -1705,10 +1687,8 @@ async fn step_inner(
 			updated,
 		} => {
 			use crate::catalog::FromStored as _;
-			use crate::key::KVValue as _;
 			let table = |reg: &u16| -> FlowResult<crate::catalog::TableDefinition> {
-				let stored: crate::catalog::StoredTableDefinition =
-					rust("StoredTableDefinition", &read(regs, *reg))?;
+				let stored: crate::catalog::StoredTableDefinition = rust(&read(regs, *reg))?;
 				crate::catalog::TableDefinition::from_stored(&stored).map_err(ControlFlow::Err)
 			};
 			let previous = table(previous)?;
@@ -1717,9 +1697,8 @@ async fn step_inner(
 			super::schema_host::check_table_altered(&txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;
-			let bytes = altered.to_stored().kv_encode_value().map_err(ControlFlow::Err)?;
 			let normalised =
-				codec::decode("StoredTableDefinition", &bytes).map_err(ControlFlow::Err)?;
+				altered.to_stored().into_vm_value().map_err(|e| ControlFlow::Err(e.into()))?;
 			write(regs, *updated, normalised);
 		}
 		StoreInstr::JumpIfSessionBase {
@@ -1805,10 +1784,36 @@ fn stamp_of(value: &Value) -> FlowResult<u64> {
 }
 
 /// The Rust value of a register's value, for a service that holds one: the
-/// value crosses through its bytes, encoded as `ty`.
-fn rust<T: crate::key::KVValue<KeyContext = ()>>(ty: &str, value: &Value) -> FlowResult<T> {
-	let bytes = codec::encode(ty, value).map_err(ControlFlow::Err)?;
-	T::kv_decode_value(&bytes, ()).map_err(ControlFlow::Err)
+/// conversion of the type's own schema, the inverse of the one that builds the
+/// value from a stored definition.
+fn rust<T: StoredField>(value: &Value) -> FlowResult<T> {
+	T::from_vm_value(value.clone()).map_err(|e| ControlFlow::Err(e.into()))
+}
+
+/// Store `value` at `key` as type `ty`. A catalog type is written through the
+/// transaction's levelled write, which reads the entry it replaces, encodes at
+/// the store's feature level and admits the release the bytes need; any other
+/// type is written as its bytes.
+async fn put_value(
+	ctx: &ExecutionContext,
+	key: Vec<u8>,
+	ty: TypeId,
+	value: &Value,
+	mode: LevelledMode,
+) -> FlowResult<()> {
+	let txn = ctx.txn();
+	if codec::is_catalog(ty) {
+		return txn
+			.put_levelled_raw(key.into(), mode, |level| codec::encode_id_at(ty, value, level))
+			.await
+			.map_err(ControlFlow::Err);
+	}
+	let bytes = codec::encode_id(ty, value).map_err(ControlFlow::Err)?;
+	match mode {
+		LevelledMode::Set => txn.set(key.into(), bytes).await,
+		LevelledMode::Replace => txn.replace_raw(key.into(), bytes).await,
+	}
+	.map_err(ControlFlow::Err)
 }
 
 /// The error removing a table with views over it raises, from an object of

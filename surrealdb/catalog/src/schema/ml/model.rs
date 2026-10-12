@@ -1,27 +1,37 @@
 use anyhow::Context as _;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{FromStored, LogicalPermissionBody, Permission, StoredPermission};
-use crate::expr as runtime;
 use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredMlModelDefinition {
+	#[stored(n = 2)]
 	pub hash: Strand,
+	#[stored(n = 4)]
 	pub name: Strand,
+	#[stored(n = 6)]
 	pub version: Strand,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 8)]
 	pub permissions: StoredPermission,
 }
 
-impl_kv_value_revisioned!(StoredMlModelDefinition);
+impl_kv_value_catalog!(StoredMlModelDefinition);
 
 impl MlModelDefinition {
 	fn to_runtime_definition(&self) -> runtime::statements::DefineModelStatement {

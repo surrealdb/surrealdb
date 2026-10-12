@@ -244,6 +244,13 @@ fn any_value_enum(stored: &[&TypeDef]) -> TokenStream {
 			/// The key supplies its own decode context, so value types that carry
 			/// part of their identity in the key (a record's id, for one) are
 			/// reconstructed correctly rather than guessed at.
+			///
+			/// A key supplies no more than that. A value whose decode needs state
+			/// the key does not hold is refused when that state is missing: a
+			/// record of a table's nonzero layout generation is refused, because
+			/// only the table's layouts say what the generation holds. A caller
+			/// that needs such a value reads the layouts and decodes it through
+			/// the value type's own API.
 			pub fn decode_value(&self, bytes: &[u8]) -> ::anyhow::Result<AnyValue> {
 				Ok(match self {
 					#(#decode_arms)*

@@ -179,7 +179,7 @@ pub(crate) enum LiteralWire {
 	/// * `regex` — the pre-compiled pattern, kept alive in an `Arc` so cloned `PredNode`s share it.
 	///   `Value::equal` (`=`, `!=`) matches a string against a regex, so a `Strand` field is
 	///   matched against it through a zero-copy `&str` view over the wire-borrowed UTF-8 bytes (see
-	///   [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str_unchecked`]).
+	///   [`crate::exec::pre_decode_filter::wire_cmp::strand_payload_str`]).
 	/// * `full_wire` — the full rev-2 `Value` wire. `Value`'s derived `PartialEq` (`==`) equates a
 	///   regex only with a regex of the same pattern, and a regex's wire holds its pattern and
 	///   nothing else, so byte equality against it decides `==` for every field.

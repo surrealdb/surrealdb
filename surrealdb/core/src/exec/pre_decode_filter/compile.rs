@@ -353,18 +353,6 @@ fn flatten_or_into(acc: &mut Vec<PredNode>, node: PredNode) {
 	}
 }
 
-/// Whether `path` targets the synthetic record-root `id` field (`["id"]`).
-///
-/// `id` is not stored in the encoded record body — it is derived from the KV key,
-/// which only [`PreDecodeFilter::eval_leaf`] knows how to do (its id-key fast path).
-/// [`PreDecodeFilter::eval_set_membership`] reads from the body, so it would see
-/// `id` as missing and wrongly reject every row. Equality arms on `id` must
-/// therefore stay as [`PredNode::Leaf`] rather than fuse into a set — mirroring the
-/// `id`-leaf carve-out in [`partition_and_fuse`].
-fn is_synthetic_id_path(path: &[PathSegment]) -> bool {
-	path.len() == 1 && path[0].as_str() == "id"
-}
-
 /// Fuse a disjunction's arms, rewriting same-field equality chains into a single
 /// wire-fast [`PredNode::LeafSetMembership`].
 ///
@@ -376,14 +364,14 @@ fn is_synthetic_id_path(path: &[PathSegment]) -> bool {
 /// [`hash_miss_is_decisive`](super::wire_literal::hash_miss_is_decisive)).
 ///
 /// Conservative — an arm only joins a fused group when it is:
-/// - a [`PredNode::Leaf`] with `op == Equal`, `reversed == false`, a hashset-safe literal (see
-///   [`literal_hashset_element_safe`]), and a non-`id` path (see [`is_synthetic_id_path`]); or
-/// - an existing [`PredNode::LeafSetMembership`] with `op == Inside`, `reversed == false`, and a
-///   non-`id` path (absorbing an `a IN [..]` arm into the same-field group).
+/// - a [`PredNode::Leaf`] with `op == Equal`, `reversed == false`, and a hashset-safe literal (see
+///   [`literal_hashset_element_safe`]); or
+/// - an existing [`PredNode::LeafSetMembership`] with `op == Inside` and `reversed == false`
+///   (absorbing an `a IN [..]` arm into the same-field group).
 ///
 /// Everything else — `ExactEqual` (type-strict, diverges from the loose set path),
-/// `NotEqual`, `NotInside`, reversed arms, `id` paths, different fields, and non-leaf
-/// nodes — passes through untouched.
+/// `NotEqual`, `NotInside`, reversed arms, different fields, and non-leaf nodes — passes
+/// through untouched.
 fn fuse_or_combine(children: Vec<PredNode>) -> PredNode {
 	let mut bucket = Vec::new();
 	for c in children {
@@ -417,16 +405,14 @@ fn fuse_or_combine(children: Vec<PredNode>) -> PredNode {
 				literal,
 				reversed: false,
 				..
-			} if literal_hashset_element_safe(literal) && !is_synthetic_id_path(path) => {
-				Some((path.clone(), vec![literal.clone()]))
-			}
+			} if literal_hashset_element_safe(literal) => Some((path.clone(), vec![literal.clone()])),
 			PredNode::LeafSetMembership {
 				path,
 				op: BinaryOperator::Inside,
 				set,
 				reversed: false,
 				..
-			} if !is_synthetic_id_path(path) => Some((path.clone(), set.iter().cloned().collect())),
+			} => Some((path.clone(), set.iter().cloned().collect())),
 			_ => None,
 		};
 
@@ -491,7 +477,6 @@ fn fuse_or_combine(children: Vec<PredNode>) -> PredNode {
 }
 
 fn partition_and_fuse(bucket: Vec<PredNode>) -> PredNode {
-	let mut id_leaves = Vec::new();
 	let mut root_fusible = Vec::new();
 	let mut multi_leaves = Vec::new();
 	let mut rest = Vec::new();
@@ -507,10 +492,6 @@ fn partition_and_fuse(bucket: Vec<PredNode>) -> PredNode {
 			PredNode::Leaf {
 				ref path,
 				..
-			} if path.len() == 1 && path[0].as_str() == "id" => id_leaves.push(n),
-			PredNode::Leaf {
-				ref path,
-				..
 			} if path.len() == 1 => root_fusible.push(n),
 			PredNode::Leaf {
 				ref path,
@@ -521,7 +502,6 @@ fn partition_and_fuse(bucket: Vec<PredNode>) -> PredNode {
 	}
 
 	let mut out: Vec<PredNode> = Vec::new();
-	out.append(&mut id_leaves);
 
 	if root_fusible.len() >= 2 {
 		if let Some(fused) = build_root_fused_flat_map(&root_fusible) {
@@ -1269,11 +1249,11 @@ mod tests {
 
 	#[test]
 	fn an_id_equality_has_no_shape() {
-		// `id = 1 OR id = 2`: the synthetic `id` field is derived from the KV key,
-		// which the stored bytes do not hold, so a predicate over it has no
-		// pre-decode shape at all (and is never fused into a set membership that
-		// would reject every row). Regression test for the GraphQL
-		// `id: { in: [...] }` filter, which lowers to `id = a OR id = b`.
+		// `id = 1 OR id = 2`: the record's `id` is its KV key, which the stored bytes do
+		// not hold, so a predicate whose path starts at `id` has no pre-decode shape. This
+		// is the refusal every downstream reader of the tree relies on: no `PredNode` holds
+		// a leaf rooted at `id`, so the filter never judges one from the bytes. The GraphQL
+		// `id: { in: [...] }` filter lowers to this shape and must not compile.
 		let p = bin(
 			sb("id", BinaryOperator::Equal, Value::Number(Number::Int(1))),
 			BinaryOperator::Or,

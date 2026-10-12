@@ -235,7 +235,7 @@ mod tests {
 			database_id,
 			name: DB.into(),
 			changefeed: Some(ChangeFeed {
-				expiry: Duration::from_secs(10),
+				expiry: Duration::from_secs(10).into(),
 				store_diff,
 			}),
 			comment: None,
@@ -249,7 +249,7 @@ mod tests {
 		))
 		.unwrap();
 		tb_def.changefeed = Some(ChangeFeed {
-			expiry: Duration::from_secs(10 * 60),
+			expiry: Duration::from_secs(10 * 60).into(),
 			store_diff,
 		});
 

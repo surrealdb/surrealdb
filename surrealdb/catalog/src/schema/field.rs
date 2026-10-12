@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::Context as _;
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::{
@@ -12,20 +11,25 @@ use crate::catalog::auth::AuthLimit;
 use crate::catalog::{
 	ExprText, FromStored, IdiomText, KindText, LogicalBody, Permission, reference_to_stored,
 };
-use crate::expr as runtime;
 use crate::expr::logical::{LogicalExpr, LogicalPermission};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, KeyNames, Kind};
+use crate::stored::Stored;
 use crate::val::{TableName, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum StoredDefineDefault {
 	#[default]
+	#[stored(n = 1)]
 	None,
 	/// Canonical SurrealQL text of the default-value expression.
+	#[stored(n = 2)]
 	Always(ExprText),
+	#[stored(n = 3)]
 	Set(ExprText),
 }
 
@@ -59,7 +63,8 @@ pub struct ComputedDeps {
 }
 
 #[revisioned(revision = 6)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredFieldDefinition {
 	/// Canonical SurrealQL text of the field's path.
 	///
@@ -69,32 +74,51 @@ pub struct StoredFieldDefinition {
 	/// shapes a field path has no meaning for, such as a `[WHERE ...]` filter
 	/// or a computed `[$expr]` index, so the restriction is enforced by the
 	/// `DEFINE FIELD` parser rather than by the type.
+	#[stored(n = 2)]
 	pub name: IdiomText,
+	#[stored(n = 4)]
 	pub table: TableName,
 	/// Canonical SurrealQL kind-grammar text of the `TYPE` clause.
 	#[revision(end = 5, convert_fn = "convert_field_kind")]
 	pub old_field_kind: Option<Kind>,
 	#[revision(start = 5)]
+	#[stored(n = 6)]
 	pub field_kind: Option<KindText>,
+	#[stored(n = 8)]
 	pub flexible: bool,
+	#[stored(n = 10)]
 	pub readonly: bool,
 	/// Canonical SurrealQL text of the `VALUE` clause's expression.
+	#[stored(n = 12)]
 	pub value: Option<ExprText>,
 	/// Canonical SurrealQL text of the `ASSERT` clause's expression.
+	#[stored(n = 14)]
 	pub assert: Option<ExprText>,
 	/// Canonical SurrealQL text of the `COMPUTED` clause's expression.
+	#[stored(n = 16)]
 	pub computed: Option<ExprText>,
+	#[stored(n = 18)]
 	pub default: StoredDefineDefault,
 
+	#[stored(n = 20)]
 	pub select_permission: StoredPermission,
+	#[stored(n = 22)]
 	pub create_permission: StoredPermission,
+	#[stored(n = 24)]
 	pub update_permission: StoredPermission,
 
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 26)]
 	pub reference: Option<StoredReference>,
 
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
+	#[stored(n = 28)]
 	pub auth_limit: AuthLimit,
 
 	/// Pre-computed dependency metadata for computed fields. Removed at
@@ -111,6 +135,7 @@ pub struct StoredFieldDefinition {
 	/// GitHub issue #4537. `Option<String>::default()` already returns
 	/// `None` so no explicit `default_fn` is needed.
 	#[revision(start = 4)]
+	#[stored(n = 30)]
 	pub graphql_alias: Option<String>,
 
 	/// Reason emitted on the GraphQL `@deprecated` directive. When set, the
@@ -118,6 +143,7 @@ pub struct StoredFieldDefinition {
 	/// (and in input objects), surfacing the reason to schema consumers
 	/// while remaining usable for backwards compatibility.
 	#[revision(start = 4)]
+	#[stored(n = 32)]
 	pub graphql_deprecated: Option<String>,
 
 	/// Whether this field's value is inlined into the edge's vertex-side
@@ -126,6 +152,7 @@ pub struct StoredFieldDefinition {
 	/// edge record. Only top-level, non-computed fields of a non-lightweight
 	/// relation may set it.
 	#[revision(start = 6)]
+	#[stored(n = 34)]
 	pub inline: bool,
 }
 
@@ -158,7 +185,7 @@ impl StoredFieldDefinition {
 		Ok(())
 	}
 }
-impl_kv_value_revisioned!(StoredFieldDefinition);
+impl_kv_value_catalog!(StoredFieldDefinition);
 
 impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {

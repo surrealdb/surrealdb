@@ -48,6 +48,24 @@ use crate::kvs::Transaction;
 
 type Mapped<T> = Result<T, NotCovered>;
 
+/// The refusal of a catalog entry that a failed catalog read carries, found
+/// anywhere in `e`'s source chain: an entry a newer release wrote, or one whose
+/// bytes cannot be decoded.
+pub(super) fn catalog_refusal(e: &anyhow::Error) -> Option<surrealdb_catalog::stored::EntryError> {
+	crate::err::Error::entry_refusal(e)
+}
+
+/// Why a catalog read that failed with `e` leaves a statement unplanned: the
+/// refusal itself where `e` carries one, so the statement fails with the
+/// release it needs, and otherwise an internal error saying `what` did not
+/// read.
+pub(super) fn unread_catalog(e: &anyhow::Error, what: impl FnOnce() -> String) -> NotCovered {
+	match catalog_refusal(e) {
+		Some(entry) => NotCovered::refused(super::plan::Refusal::CatalogEntry(entry)),
+		None => NotCovered::internal(what()),
+	}
+}
+
 /// One table's catalog as a plan read it.
 #[derive(Debug, Clone)]
 pub(crate) struct TableCatalog {
@@ -737,7 +755,7 @@ async fn fill(planner: &Planner<'_>, mut needs: Needs, any: bool) -> Mapped<Plan
 		catalog.models.insert((name, version), read);
 	}
 	for storage in std::mem::take(&mut needs.modules) {
-		let read = read_module(&txn, catalog.database, &storage).await;
+		let read = read_module(&txn, catalog.database, &storage).await?;
 		catalog.modules.insert(storage, read);
 	}
 	Ok(catalog)
@@ -756,7 +774,7 @@ async fn plan_database(planner: &Planner<'_>, txn: &Transaction) -> Mapped<PlanD
 	match txn.get_db_by_name(ns, db, None).await {
 		Ok(None) => Ok(PlanDatabase::Absent),
 		Ok(Some(_)) => Err(NotCovered::internal("a database the planner could not name")),
-		Err(e) => Err(NotCovered::internal(format!("the database did not read: {e}"))),
+		Err(e) => Err(unread_catalog(&e, || format!("the database did not read: {e}"))),
 	}
 }
 
@@ -771,7 +789,7 @@ async fn read_table(
 ) -> Mapped<TableCatalog> {
 	let written = access >= Access::Written;
 	let unread = |what: &str, e: anyhow::Error| {
-		NotCovered::internal(format!("the {what} of {table} did not read: {e}"))
+		unread_catalog(&e, || format!("the {what} of {table} did not read: {e}"))
 	};
 	let PlanDatabase::Ids(ns, db) = database else {
 		return Ok(TableCatalog {
@@ -916,7 +934,7 @@ async fn read_param(
 		Err(e) if matches!(e.downcast_ref(), Some(crate::catalog::Error::PaNotFound { .. })) => {
 			Ok(None)
 		}
-		Err(e) => Err(NotCovered::internal(format!("a parameter that could not be read: {e}"))),
+		Err(e) => Err(unread_catalog(&e, || format!("a parameter that could not be read: {e}"))),
 	}
 }
 
@@ -931,18 +949,26 @@ async fn read_model(
 	};
 	txn.get_db_model(ns, db, name, version, None)
 		.await
-		.map_err(|e| NotCovered::internal(format!("a model that could not be read: {e}")))
+		.map_err(|e| unread_catalog(&e, || format!("a model that could not be read: {e}")))
 }
 
+/// The module stored under `storage`. A module that cannot be read for any
+/// reason but a refused entry is read as absent.
 async fn read_module(
 	txn: &Transaction,
 	database: PlanDatabase,
 	storage: &str,
-) -> Option<Arc<crate::catalog::ModuleDefinition>> {
+) -> Mapped<Option<Arc<crate::catalog::ModuleDefinition>>> {
 	let PlanDatabase::Ids(ns, db) = database else {
-		return None;
+		return Ok(None);
 	};
-	txn.get_db_module(ns, db, storage, None).await.ok()
+	match txn.get_db_module(ns, db, storage, None).await {
+		Ok(module) => Ok(Some(module)),
+		Err(e) => match catalog_refusal(&e) {
+			Some(entry) => Err(NotCovered::refused(super::plan::Refusal::CatalogEntry(entry))),
+			None => Ok(None),
+		},
+	}
 }
 
 /// The footprint of statement `op` ([`crate::exec::logical::footprint`]),

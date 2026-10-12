@@ -29,9 +29,11 @@ use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::values::graph::GraphFoldScope;
+use surrealdb_datastore::{FeatureLevelCell, FeatureLevelState};
 use surrealdb_expr::parser::Query as Ast;
 use surrealdb_kvs::TransactionType::*;
-use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, TransactionType};
+use surrealdb_kvs::value::EncodeContext;
+use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, FeatureLevel, Release, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, trace, warn};
@@ -45,10 +47,9 @@ use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
-	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider,
-	TableProvider, UserProvider,
+	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider,
 };
-use crate::catalog::{Index, NodeLiveQuery};
+use crate::catalog::{FromStored as _, Index, NodeLiveQuery, StoredFeatureLevel};
 use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context, FrozenContext};
 #[cfg(feature = "jwks")]
@@ -56,7 +57,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
-use crate::dbs::node::{Node, Timestamp};
+use crate::dbs::node::{Node, NodeRelease, Timestamp};
 use crate::dbs::{
 	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
 	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, TopLevelStatement,
@@ -82,11 +83,13 @@ use crate::idx::trees::hnsw::index::HnswCompactionOutcome;
 use crate::idx::trees::store::IndexStores;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix, DocPendingPrefix,
-	GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot, IndexCompactionIxPrefix,
-	IndexCompactionKey, IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey,
-	NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey,
-	SessionPrefix, StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
+	BootstrapKey, DatabasePrefix, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix,
+	DocPendingPrefix, FeatureLevelKey, GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot,
+	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, IndexDefPrefix,
+	MigrationKey, MigrationPrefix, NamespacePrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix,
+	NodeReleaseKey, NodeReleasePrefix, NsRoot, ReclaimKey, ReclaimPrefix, RootUserPrefix,
+	SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey, TablePrefix,
+	VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
@@ -126,6 +129,18 @@ pub use builder::Builder;
 pub use config::LiveQueryEngine;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
+
+/// Whether a feature-level raise consults the other nodes' recorded releases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NodeCheck {
+	/// Refuse while a running node records a release older than the target, or none.
+	Require,
+	/// Raise without consulting any node. For a store whose engine admits no other
+	/// writer: a node it lists is a record a process left behind, and it cannot
+	/// write between the raise and its commit.
+	Skip,
+}
+
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long [`Datastore::shutdown`] waits for the maintenance tasks to finish
@@ -183,6 +198,11 @@ const BOOTSTRAP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
+
+/// How recently a node must have heartbeat to count as running: a node whose
+/// heartbeat is older is expired by [`Datastore::expire_nodes`], and is not
+/// consulted when the feature level is raised.
+pub(crate) const NODE_LIVENESS: Duration = Duration::from_secs(30);
 
 /// Whether a reclaim pass emptied the prefix it was given.
 ///
@@ -338,6 +358,10 @@ pub struct Datastore {
 	/// retries after a later failure would otherwise see the key already there
 	/// and be told the datastore is pre-existing.
 	created_here: std::sync::atomic::AtomicBool,
+	/// Whether [`Self::settle_feature_level`] has read the store's feature
+	/// level into the shared cell, so [`Self::check_version`] reads it at most
+	/// once whether or not the builder did.
+	feature_level_settled: std::sync::atomic::AtomicBool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
@@ -745,6 +769,9 @@ impl Datastore {
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			feature_level_settled: std::sync::atomic::AtomicBool::new(
+				self.feature_level_settled.load(std::sync::atomic::Ordering::Acquire),
+			),
 			triggers: self.triggers,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
@@ -817,6 +844,9 @@ impl Datastore {
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
+			feature_level_settled: std::sync::atomic::AtomicBool::new(
+				self.feature_level_settled.load(std::sync::atomic::Ordering::Acquire),
+			),
 			triggers: Arc::clone(&self.triggers),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
@@ -1115,8 +1145,14 @@ impl Datastore {
 	}
 
 	/// Verifies the datastore's storage version and applies any data migrations
-	/// it owes, returning that version and whether this process created the
-	/// datastore.
+	/// it owes, returning the version the datastore carried when it was settled,
+	/// before any raise of its feature level this call makes, and whether this
+	/// process created the datastore.
+	///
+	/// A datastore stamped [`MajorVersion::LEGACY`] or [`MajorVersion::LATEST`]
+	/// opens. The raise of its feature level stamps [`MajorVersion::LATEST`] in
+	/// the transaction that records it, so a release that checks only the stamp
+	/// refuses the datastore from then on.
 	///
 	/// **Call this before serving any query against a datastore that may
 	/// predate this build.** A datastore is not fully readable until its
@@ -1124,14 +1160,29 @@ impl Datastore {
 	/// so an embedder that skips it against pre-3.3 storage sees sequences that
 	/// appear not to exist — which `DEFINE SEQUENCE ... IF NOT EXISTS` will then
 	/// recreate, resetting an allocator that has already issued values.
+	///
+	/// A datastore whose ledger records features this build does not maintain is
+	/// open read-only: nothing is migrated, stamped, pinned or raised, and every
+	/// write other than this node's own membership rows is refused (see
+	/// [`Self::is_read_only`]). A datastore at [`FeatureLevel::Legacy`] whose
+	/// storage engine admits no other writer is raised to
+	/// [`Release::FIRST_STORED`] here, unless the Legacy hold keeps it (see
+	/// [`Builder::with_legacy_feature_level`](self::builder::Builder::with_legacy_feature_level)).
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
 	)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
+		// A datastore built without startup transactions reads its feature level
+		// here. It precedes the version stamp, which would otherwise make a store
+		// this process creates read as an upgraded one.
+		if !self.feature_level_settled.load(std::sync::atomic::Ordering::Acquire) {
+			self.settle_feature_level().await?;
+		}
+		self.establish_router_baseline().await?;
 		let (version, is_new) = self.settle_storage_version().await?;
-		// Check we are running the latest version
-		if !version.is_latest() {
+		// Check this build opens the stamp: the latest, or that of a store not yet raised.
+		if !version.is_supported() {
 			bail!(DatastoreError::OutdatedStorageVersion {
 				expected: MajorVersion::latest().into(),
 				actual: version.into(),
@@ -1150,6 +1201,18 @@ impl Datastore {
 		// much longer, and the driver handles contention itself through a task
 		// lease.
 		migration::run(self, is_new).await?;
+		// A read-only datastore records no feature state, so neither the operator's pin
+		// nor the single-process raise applies to it. The migration driver may be what
+		// found it read-only, so this reads the mark after it ran.
+		if !self.is_read_only() {
+			// Raise the feature level to the operator's pin, now that the version and
+			// the migrations are settled.
+			self.apply_feature_level_pin().await?;
+			// A store whose engine admits no other writer has no node to wait for and
+			// no operator to coordinate with, so it moves to the first stored level
+			// itself.
+			self.raise_sole_writer_store().await?;
+		}
 		// Everything ok
 		Ok((version, is_new))
 	}
@@ -1187,10 +1250,14 @@ impl Datastore {
 		Ok(version)
 	}
 
-	/// Every version this datastore has been advanced to, oldest first.
+	/// Every transition in this datastore's version history, oldest first.
 	///
-	/// One entry per version transition, not per startup: a node that starts
-	/// against a datastore already stamped at its own version adds nothing.
+	/// One entry per transition, not per startup. An upward entry (its `from` is `None` or below
+	/// its `to`) records a release advancing the stamp, or a release at the stamp finishing the
+	/// rechecks that earlier releases' writes made necessary. A downward note (its `from`, the
+	/// stamp, is above its `to`, the running release) records that a release below the stamp opened
+	/// the datastore. A node that starts against a datastore already stamped at its own version, or
+	/// a release that restarts below the stamp, adds nothing.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
@@ -1246,6 +1313,10 @@ impl Datastore {
 	/// that carries none, and reports whether this call was the one that
 	/// stamped it.
 	///
+	/// A datastore that carries `!v` is answered from a read transaction, so a
+	/// read-only datastore, which refuses write transactions, settles its version
+	/// here. Only an absent `!v` opens the write transaction that stamps it.
+	///
 	/// # What `!v`'s absence means
 	///
 	/// `!v` was introduced in 2.0, so a datastore that holds data but no `!v`
@@ -1262,12 +1333,20 @@ impl Datastore {
 	/// # Ordering
 	///
 	/// The sentinel is only a fallback: nothing may write to a datastore before
-	/// its version is settled. That ordering is structural — the builder settles
-	/// the version before it starts any maintenance task, and a caller that
-	/// starts them itself does so after this has run (see
-	/// [`Datastore::start_maintenance_tasks`]). The sentinel is what keeps a
-	/// writer that escapes it anyway — a future job, a storage engine with keys
-	/// of its own — from turning a fresh datastore into an unstartable one.
+	/// its version is settled, with one exception beside the sentinel itself.
+	/// That ordering is structural — the builder settles the version before it
+	/// starts any maintenance task, and a caller that starts them itself does so
+	/// after this has run (see [`Datastore::start_maintenance_tasks`]). The
+	/// sentinel is what keeps a writer that escapes it anyway — a future job, a
+	/// storage engine with keys of its own — from turning a fresh datastore into
+	/// an unstartable one.
+	///
+	/// The exception is `!fl`, the feature level a new datastore records when
+	/// the builder creates it ([`Datastore::settle_feature_level`]). Like `!bv`
+	/// it sorts before `!v`, outside the range the emptiness probe scans, so it
+	/// never makes a datastore that holds nothing else read as data of unknown
+	/// provenance. It is written only into a datastore that holds no key but
+	/// `!bv`.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
@@ -1275,6 +1354,15 @@ impl Datastore {
 	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
 		#[cfg(test)]
 		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapBegin, self.id)?;
+		// The common case is a stamped datastore, which needs no write transaction.
+		{
+			let txn = self.transaction(Read).await?;
+			let stamped = catch!(txn, txn.get_key(&VersionKey {}, None).await);
+			txn.cancel().await?;
+			if let Some(version) = stamped {
+				return Ok((version, false));
+			}
+		}
 		// Start a new writeable transaction
 		let txn = self.transaction(Write).await?.enclose();
 		// Create the key where the version is stored
@@ -1400,6 +1488,411 @@ impl Datastore {
 	}
 
 	// --------------------------------------------------
+	// Feature level functions
+	// --------------------------------------------------
+
+	/// The cell holding the feature level this datastore last read, shared by
+	/// every transaction of the store and by every datastore forked from this
+	/// one.
+	fn feature_cell(&self) -> &Arc<FeatureLevelCell> {
+		self.transaction_factory.feature_level()
+	}
+
+	/// The release the operator pinned the feature level to, as the builder
+	/// validated it.
+	fn feature_level_pin(&self) -> Option<Release> {
+		match self.config.datastore.feature_level {
+			config::FeatureLevelSetting::Pin(release) => Some(release),
+			config::FeatureLevelSetting::Unset
+			| config::FeatureLevelSetting::Legacy
+			| config::FeatureLevelSetting::Invalid => None,
+		}
+	}
+
+	/// Whether the operator asked to keep a store that records no feature level at that
+	/// level, as the builder validated it.
+	fn holds_legacy(&self) -> bool {
+		self.config.datastore.feature_level.holds_legacy()
+	}
+
+	/// The release a new store is created at: the validated pin, or this
+	/// build's release.
+	fn initial_feature_level(&self) -> Release {
+		self.feature_level_pin().unwrap_or(Release::CURRENT)
+	}
+
+	/// The store's recorded feature level: the newest release whose features
+	/// the store may use, and the newest release whose features anything in it
+	/// uses. A store that records none is at [`FeatureLevel::Legacy`], where
+	/// the catalog is written in the encoding every 3.x release reads.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
+	pub async fn feature_level(&self) -> Result<FeatureLevelState> {
+		let txn = self.transaction(Read).await?;
+		let state = catch!(txn, txn.feature_level_state().await);
+		txn.cancel().await?;
+		Ok(state)
+	}
+
+	/// Raises the store's feature level to `target`, so that this and later
+	/// releases may write what `target` reads. A store already at or above
+	/// `target` is left as it is.
+	///
+	/// Refused while a node that is running (it has heartbeat within
+	/// [`NODE_LIVENESS`]) records a release older than `target`, or none: that
+	/// node could not read what the raised level lets the others write. The
+	/// check is a guard against a partial rollout, not a fence, so a node that
+	/// joins after the raise reads the level when it starts and writes no more
+	/// than its own release reads.
+	///
+	/// # Errors
+	///
+	/// - [`DatastoreError::FeatureLevelAboveRelease`] when `target` is newer than this build;
+	/// - [`DatastoreError::FeatureLevelBelowFirst`] when `target` precedes the first release with a
+	///   feature level;
+	/// - [`DatastoreError::FeatureLevelNodeBehind`] when a running node is older than `target`.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub async fn raise_feature_level(&self, target: Release) -> Result<()> {
+		Self::check_feature_level_target(target)?;
+		Self::retry("Raise feature level", || {
+			self.raise_feature_level_attempt(target, NodeCheck::Require)
+		})
+		.await
+	}
+
+	/// Lowers the store's feature level to `target`. A store already at or
+	/// below `target` is left as it is.
+	///
+	/// Refused while the store records that something in it uses the features of
+	/// a release newer than `target`. That record only rises, so a store that
+	/// has used a newer feature can never be lowered below it.
+	///
+	/// # Errors
+	///
+	/// - [`DatastoreError::FeatureLevelBelowFirst`] when `target` precedes the first release with a
+	///   feature level;
+	/// - [`DatastoreError::FeatureLevelUnset`] when the store records no feature level;
+	/// - [`DatastoreError::FeatureLevelInUse`] when entries already need a release newer than
+	///   `target`.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
+	)]
+	pub async fn lower_feature_level(&self, target: Release) -> Result<()> {
+		if target < Release::FIRST_STORED {
+			bail!(DatastoreError::FeatureLevelBelowFirst {
+				first: Release::FIRST_STORED,
+			});
+		}
+		Self::retry("Lower feature level", || self.lower_feature_level_attempt(target)).await
+	}
+
+	/// Refuses a feature level no build can hold: newer than this build, or
+	/// older than the first release that has one.
+	pub(super) fn check_feature_level_target(target: Release) -> Result<()> {
+		if target > Release::CURRENT {
+			bail!(DatastoreError::FeatureLevelAboveRelease {
+				target,
+				current: Release::CURRENT,
+			});
+		}
+		if target < Release::FIRST_STORED {
+			bail!(DatastoreError::FeatureLevelBelowFirst {
+				first: Release::FIRST_STORED,
+			});
+		}
+		Ok(())
+	}
+
+	async fn raise_feature_level_attempt(&self, target: Release, nodes: NodeCheck) -> Result<()> {
+		let txn = self.transaction(Write).await?.enclose();
+		// A locked read, so a concurrent raise or lower conflicts with this one.
+		let raw = catch!(txn, txn.getu_key_raw(&FeatureLevelKey {}).await);
+		let prior = catch!(
+			txn,
+			raw.as_deref()
+				.map(|bytes| <StoredFeatureLevel as KVValue>::kv_decode_value(bytes, ()))
+				.transpose()
+		);
+		if let Some(record) = &prior
+			&& record.feature_level().admits(target)
+		{
+			catch!(txn, txn.cancel().await);
+			self.feature_cell().observe(Some(record));
+			return Ok(());
+		}
+		// The nodes that are running, other than this one, which is this build.
+		let live: Vec<(Uuid, Timestamp)> = match nodes {
+			NodeCheck::Skip => Vec::new(),
+			NodeCheck::Require => {
+				let all = catch!(txn, txn.all_nodes().await);
+				let now = self.clock_now();
+				let cutoff = Timestamp {
+					value: now.value.saturating_sub(NODE_LIVENESS.as_millis() as u64),
+				};
+				all.iter()
+					.filter(|n| n.id != self.id && n.is_active() && n.heartbeat >= cutoff)
+					.map(|n| (n.id, n.heartbeat))
+					.collect()
+			}
+		};
+		if !live.is_empty() {
+			let releases = catch!(txn, txn.node_releases(&live).await);
+			for ((node, _), release) in live.iter().zip(releases) {
+				if release.is_none_or(|release| release < target) {
+					let _ = txn.cancel().await;
+					bail!(DatastoreError::FeatureLevelNodeBehind {
+						node: *node,
+						release,
+						target,
+					});
+				}
+			}
+		}
+		// The first raise from Legacy starts `in_use` at the first stored
+		// release: no level below it can be set, so nothing is lost.
+		let in_use = prior
+			.as_ref()
+			.map_or(Release::FIRST_STORED, |record| record.in_use().max(Release::FIRST_STORED));
+		let record =
+			catch!(txn, StoredFeatureLevel::try_new(target, in_use).map_err(anyhow::Error::from));
+		let key = catch!(txn, FeatureLevelKey {}.encode_key());
+		let bytes = catch!(
+			txn,
+			record.kv_encode_value_at(&EncodeContext {
+				level: FeatureLevel::At(Release::CURRENT),
+				prior: raw.as_deref(),
+			})
+		)
+		.bytes;
+		catch!(txn, txn.set(key, bytes).await);
+		// The entry that makes a release without the stored-value grammar refuse the store
+		// commits with the raise, so no such release joins between the raise and the first
+		// stored byte.
+		catch!(txn, txn.admit_stored_format().await);
+		catch!(txn, txn.commit().await);
+		self.feature_cell().observe(Some(&record));
+		Ok(())
+	}
+
+	async fn lower_feature_level_attempt(&self, target: Release) -> Result<()> {
+		let txn = self.transaction(Write).await?.enclose();
+		let raw = catch!(txn, txn.getu_key_raw(&FeatureLevelKey {}).await);
+		let Some(raw) = raw else {
+			let _ = txn.cancel().await;
+			bail!(DatastoreError::FeatureLevelUnset);
+		};
+		let prior = catch!(txn, <StoredFeatureLevel as KVValue>::kv_decode_value(&raw, ()));
+		if prior.level() <= target {
+			catch!(txn, txn.cancel().await);
+			self.feature_cell().observe(Some(&prior));
+			return Ok(());
+		}
+		if prior.in_use() > target {
+			let _ = txn.cancel().await;
+			bail!(DatastoreError::FeatureLevelInUse {
+				in_use: prior.in_use(),
+				target,
+			});
+		}
+		let record = catch!(
+			txn,
+			StoredFeatureLevel::try_new(target, prior.in_use()).map_err(anyhow::Error::from)
+		);
+		let key = catch!(txn, FeatureLevelKey {}.encode_key());
+		let bytes = catch!(
+			txn,
+			record.kv_encode_value_at(&EncodeContext {
+				level: FeatureLevel::At(Release::CURRENT),
+				prior: Some(&raw),
+			})
+		)
+		.bytes;
+		catch!(txn, txn.set(key, bytes).await);
+		catch!(txn, txn.commit().await);
+		self.feature_cell().observe(Some(&record));
+		Ok(())
+	}
+
+	/// Under the Router live-query engine, seeds the router's baseline cursor
+	/// with the safe watermark, once: every subscription, and every write a
+	/// subscriber expects to see, then lands strictly after it, where a lazy
+	/// baseline on the first router pass would discard the events captured
+	/// before it. Runs before the datastore serves a query. The Inline engine
+	/// never runs the router and reads nothing here.
+	pub(crate) async fn establish_router_baseline(&self) -> Result<()> {
+		if self.config.datastore.live_query_engine != LiveQueryEngine::Router
+			|| self.live_query_router.has_baseline()
+		{
+			return Ok(());
+		}
+		let txn = self.transaction(TransactionType::Read).await?;
+		let baseline = txn.safe_timestamp().await?.as_versionstamp();
+		txn.cancel().await?;
+		self.live_query_router.set_baseline(baseline);
+		Ok(())
+	}
+
+	/// Settles the feature level of a datastore the builder has just opened.
+	///
+	/// Reads the store's record into the shared cell. A store that holds no key
+	/// but the version sentinel is new, and is created at the validated pin or
+	/// at this build's release, with nothing yet in use beyond the first stored
+	/// release. A store that holds anything else and records no level is an
+	/// upgraded 3.x store and stays at [`FeatureLevel::Legacy`]; an operator
+	/// raises it, or [`Self::check_version`] does where the engine admits no
+	/// other writer.
+	///
+	/// Under the Legacy hold a store that settles above Legacy, whether it
+	/// recorded a level or was created here, logs one warning that the hold did
+	/// not apply.
+	///
+	/// This is the one write, beside the version sentinel, that may precede the
+	/// version stamp (see [`Self::get_version`]). It retries with the version
+	/// bootstrap, because concurrent instances conflict over the empty store.
+	pub(crate) async fn settle_feature_level(&self) -> Result<()> {
+		Self::retry_bootstrap("Settle feature level", || self.settle_feature_level_attempt())
+			.await?;
+		self.feature_level_settled.store(true, std::sync::atomic::Ordering::Release);
+		if self.holds_legacy() && !self.feature_cell().level().is_legacy() {
+			warn!(
+				target: TARGET,
+				level = ?self.feature_cell().level(),
+				"The legacy feature level hold applies only to a store at the legacy level; \
+				 this store records a level and keeps it"
+			);
+		}
+		Ok(())
+	}
+
+	async fn settle_feature_level_attempt(&self) -> Result<()> {
+		let txn = self.transaction(Write).await?.enclose();
+		if let Some(record) = catch!(txn, txn.get_key(&FeatureLevelKey {}, None).await) {
+			catch!(txn, txn.cancel().await);
+			self.feature_cell().observe(Some(&record));
+			return Ok(());
+		}
+		// Whether the store holds any key but the sentinel. Spans the whole byte
+		// space: a key this release does not describe is still data.
+		let range = RawRange::every_key_after(&Key::from(&b""[..]));
+		let keys = catch!(txn, txn.keys_raw(range, 2, 0, None).await);
+		let sentinel = catch!(txn, BootstrapKey {}.encode_key());
+		if keys.iter().any(|key| key.as_slice() != sentinel.as_slice()) {
+			catch!(txn, txn.cancel().await);
+			return Ok(());
+		}
+		let record = catch!(
+			txn,
+			StoredFeatureLevel::try_new(self.initial_feature_level(), Release::FIRST_STORED)
+				.map_err(anyhow::Error::from)
+		);
+		catch!(txn, txn.put_key(&FeatureLevelKey {}, &record).await);
+		catch!(txn, txn.commit().await);
+		self.feature_cell().observe(Some(&record));
+		Ok(())
+	}
+
+	/// Raises the store's feature level to at least the operator's pin, once the
+	/// storage version and the migrations are settled. It never lowers: a store
+	/// at or above the pin is left alone, so a binary rolled back onto a store
+	/// that a newer release raised keeps that level.
+	///
+	/// A raise refused because a running node is older than the pin logs a
+	/// warning and keeps the stored level, so a rolling restart with the pin in
+	/// its configuration never stops a node from starting. Any other refusal
+	/// fails the call.
+	///
+	/// Does nothing under the Legacy hold, which names no release.
+	pub(crate) async fn apply_feature_level_pin(&self) -> Result<()> {
+		if self.holds_legacy() {
+			return Ok(());
+		}
+		let Some(pin) = self.feature_level_pin() else {
+			return Ok(());
+		};
+		match self.raise_feature_level(pin).await {
+			Ok(()) => Ok(()),
+			Err(e)
+				if e.chain().any(|cause| {
+					matches!(
+						cause.downcast_ref::<DatastoreError>(),
+						Some(DatastoreError::FeatureLevelNodeBehind { .. })
+					)
+				}) =>
+			{
+				warn!(
+					target: TARGET,
+					pin = %pin,
+					error = %e,
+					"The configured feature level was not applied; the store keeps its level"
+				);
+				Ok(())
+			}
+			Err(e) => Err(e),
+		}
+	}
+
+	/// Raises a store at [`FeatureLevel::Legacy`] to [`Release::FIRST_STORED`] when its
+	/// engine admits no other writer.
+	///
+	/// A store on such an engine has one process, so there is no older node to wait for
+	/// and no operator to coordinate the switch with: the raise skips the node check and
+	/// the records after it are written in the stored grammar. A distributed store, and
+	/// one on an engine that may have several writers (a browser store shared between
+	/// tabs), waits for an operator ([`Self::raise_feature_level`]).
+	///
+	/// Does nothing when the datastore is read-only, when the Legacy hold applies, when
+	/// the engine may have other writers, or when the store records a level. The state is
+	/// read from storage, not from the cell, because the raise it replaces is the
+	/// operator's and may have happened since this node read it.
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
+	pub(crate) async fn raise_sole_writer_store(&self) -> Result<()> {
+		if self.is_read_only() || self.holds_legacy() {
+			return Ok(());
+		}
+		let txn = self.transaction(Read).await?;
+		if !txn.sole_writer() {
+			txn.cancel().await?;
+			return Ok(());
+		}
+		let state = catch!(txn, txn.feature_level_state().await);
+		txn.cancel().await?;
+		if !state.level.is_legacy() {
+			return Ok(());
+		}
+		let target = Release::FIRST_STORED;
+		Self::retry("Raise feature level", || {
+			self.raise_feature_level_attempt(target, NodeCheck::Skip)
+		})
+		.await?;
+		info!(
+			target: TARGET,
+			release = %target,
+			"This datastore has one writer, so its feature level was raised and new records are \
+			 written in the stored format"
+		);
+		Ok(())
+	}
+
+	/// Brings the shared cell up to the store's record, which another node may
+	/// have raised or lowered since this datastore last read it.
+	pub(crate) async fn refresh_feature_level(&self) -> Result<()> {
+		let txn = self.transaction(Read).await?;
+		let record = catch!(txn, txn.get_key(&FeatureLevelKey {}, None).await);
+		txn.cancel().await?;
+		self.feature_cell().observe(record.as_ref());
+		Ok(())
+	}
+
+	// --------------------------------------------------
 	// Initialisation functions
 	// --------------------------------------------------
 
@@ -1419,8 +1912,11 @@ impl Datastore {
 	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write).await?.enclose();
-		// Fetch the root users from the storage
-		let users = catch!(txn, txn.all_root_users(None).await);
+		// Whether any root user exists. Only the keys are probed: a user this
+		// build cannot read (a newer release wrote it) is still a root user, so
+		// no second one is created and startup proceeds.
+		let range = catch!(txn, RootUserPrefix {}.range());
+		let users = catch!(txn, txn.keys_raw(range, 1, 0, None).await);
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
@@ -1514,6 +2010,9 @@ impl Datastore {
 	/// `!v` existed, which [`Datastore::get_version`] is obliged to refuse as
 	/// out of date. Call this only once [`Datastore::check_version`] has
 	/// returned.
+	///
+	/// A datastore that is open read-only ([`Self::is_read_only`]) starts only the
+	/// node-membership refresh, because every other task writes state it refuses.
 	///
 	/// Idempotent: a datastore that already carries its tasks is left alone.
 	pub fn start_maintenance_tasks(self: &Arc<Self>) {
@@ -1868,6 +2367,11 @@ impl Datastore {
 	// --------------------------------------------------
 
 	/// Initialise the cluster and run bootstrap utilities
+	///
+	/// A datastore that is open read-only ([`Self::is_read_only`]) only registers this node:
+	/// that row is bookkeeping a read-only store still accepts. Archiving and removing other
+	/// nodes open ordinary write transactions, which such a store refuses, so those steps are
+	/// left to a node that can write.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)
@@ -1877,6 +2381,9 @@ impl Datastore {
 		// writing to the same cluster metadata keys may cause transaction conflicts.
 		// Insert this node in the cluster
 		Self::retry("Insert node", || self.insert_node()).await?;
+		if self.is_read_only() {
+			return Ok(());
+		}
 		// Mark inactive nodes as archived
 		Self::retry("Expire nodes", || self.expire_nodes()).await?;
 		// Remove archived nodes
@@ -1916,17 +2423,23 @@ impl Datastore {
 	/// These name a datastore this build cannot read, and no amount of waiting
 	/// changes that. Matched by type rather than by rendered text, which is what
 	/// the server's equivalent has to fall back on across the crate boundary.
+	///
+	/// A feature level record this build cannot read is one of them: it names
+	/// the store's state in bytes that no retry changes. So is a store that is
+	/// open read-only, whose ledger no retry changes either.
 	fn is_permanent_bootstrap_failure(err: &anyhow::Error) -> bool {
-		err.chain().any(|e| {
-			matches!(
-				e.downcast_ref::<DatastoreError>(),
-				Some(
-					DatastoreError::InvalidStorageVersion
-						| DatastoreError::OutdatedStorageVersion { .. }
-						| DatastoreError::MigratedBeyondStorageVersion { .. }
+		Error::entry_refusal(err).is_some()
+			|| err.chain().any(|e| {
+				matches!(
+					e.downcast_ref::<DatastoreError>(),
+					Some(
+						DatastoreError::InvalidStorageVersion
+							| DatastoreError::OutdatedStorageVersion { .. }
+							| DatastoreError::MigratedBeyondStorageVersion { .. }
+							| DatastoreError::StoreReadOnly { .. }
+					)
 				)
-			)
-		})
+			})
 	}
 
 	async fn retry_bootstrap<F, Fut, R>(task: &str, func: F) -> Result<R>
@@ -2088,6 +2601,40 @@ impl Datastore {
 		)));
 	}
 
+	/// Writes this node's own membership row and, beside it, the release this build runs.
+	///
+	/// Both writes belong to the caller's transaction, so a heartbeat commits only together
+	/// with the record of the release that wrote it. The release record is an upsert: the row it
+	/// replaces may be absent (the node's previous heartbeat came from a release that records
+	/// none) or describe an earlier release. `replace` makes the membership row an update of an
+	/// existing row rather than an upsert.
+	///
+	/// Only this node's own rows go through here. A record for another node would claim that
+	/// node runs this release.
+	async fn write_node(
+		&self,
+		txn: &Transaction,
+		key: &NodeKey,
+		node: &Node,
+		replace: bool,
+	) -> Result<()> {
+		if replace {
+			txn.replace_key(key, node).await?;
+		} else {
+			txn.set_key(key, node).await?;
+		}
+		txn.set_key(
+			&NodeReleaseKey {
+				nd: node.id,
+			},
+			&NodeRelease {
+				release: Release::CURRENT,
+				heartbeat: node.heartbeat,
+			},
+		)
+		.await
+	}
+
 	/// Registers this node's cluster membership entry with a fresh heartbeat.
 	///
 	/// Must be run at server or database startup. The write is idempotent:
@@ -2107,13 +2654,13 @@ impl Datastore {
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
-		let txn = self.transaction(Write).await?;
+		let txn = self.bookkeeping_transaction().await?;
 		let key = NodeKey {
 			nd: self.id,
 		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.set_key(&key, &node).await)
+		run!(txn, self.write_node(&txn, &key, &node, false).await)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -2131,13 +2678,13 @@ impl Datastore {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
 		// Open transaction and set node data
-		let txn = self.transaction(Write).await?;
+		let txn = self.bookkeeping_transaction().await?;
 		let key = NodeKey {
 			nd: self.id,
 		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.replace_key(&key, &node).await)
+		run!(txn, self.write_node(&txn, &key, &node, true).await)
 	}
 
 	/// Updates this node, bounding each step and explicitly cancelling any
@@ -2160,9 +2707,13 @@ impl Datastore {
 
 		let deadline = Instant::now() + timeout_duration;
 
-		let txn =
-			await_node_step(deadline, timeout_duration, Some(canceller), self.transaction(Write))
-				.await?;
+		let txn = await_node_step(
+			deadline,
+			timeout_duration,
+			Some(canceller),
+			self.bookkeeping_transaction(),
+		)
+		.await?;
 		let key = NodeKey {
 			nd: self.id,
 		};
@@ -2174,7 +2725,7 @@ impl Datastore {
 			deadline,
 			timeout_duration,
 			Some(canceller),
-			txn.replace_key(&key, &node),
+			self.write_node(&txn, &key, &node, true),
 		)
 		.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, Some(canceller), txn.commit()).await
@@ -2195,7 +2746,7 @@ impl Datastore {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
-		let txn = self.transaction(Write).await?;
+		let txn = self.bookkeeping_transaction().await?;
 		let key = NodeKey {
 			nd: self.id,
 		};
@@ -2208,7 +2759,7 @@ impl Datastore {
 			return Ok(());
 		};
 		let node = val.as_ref().archive();
-		run!(txn, txn.replace_key(&key, &node).await)
+		run!(txn, self.write_node(&txn, &key, &node, true).await)
 	}
 
 	/// Archives this node, bounding each step and explicitly cancelling any
@@ -2221,8 +2772,8 @@ impl Datastore {
 		trace!(target: TARGET, id = %self.id, timeout = ?timeout_duration, "Archiving node in the cluster with timeout");
 
 		let deadline = Instant::now() + timeout_duration;
-		let txn =
-			await_node_step(deadline, timeout_duration, None, self.transaction(Write)).await?;
+		let txn = await_node_step(deadline, timeout_duration, None, self.bookkeeping_transaction())
+			.await?;
 		let key = NodeKey {
 			nd: self.id,
 		};
@@ -2235,8 +2786,14 @@ impl Datastore {
 		};
 		let node = val.as_ref().archive();
 
-		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace_key(&key, &node))
-			.await?;
+		await_node_tx_step(
+			&txn,
+			deadline,
+			timeout_duration,
+			None,
+			self.write_node(&txn, &key, &node, true),
+		)
+		.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.commit()).await
 	}
 
@@ -2264,7 +2821,7 @@ impl Datastore {
 			nds.iter()
 				.filter_map(|n| {
 					// Check that the node is active and has expired
-					match n.is_active() && n.heartbeat < now - Duration::from_secs(30) {
+					match n.is_active() && n.heartbeat < now - NODE_LIVENESS {
 						true => Some(n.to_owned()),
 						false => None,
 					}
@@ -2418,14 +2975,90 @@ impl Datastore {
 				let key = NodeKey {
 					nd: *id,
 				};
-				// Delete the cluster node entry
+				// Delete the cluster node entry, and the release it recorded
 				catch!(txn, txn.clr_key(&key).await);
+				catch!(
+					txn,
+					txn.clr_key(&NodeReleaseKey {
+						nd: *id,
+					})
+					.await
+				);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
 		}
+		// Release records whose node row is gone
+		self.remove_orphaned_node_releases().await?;
 		// Everything was successful
 		Ok(())
+	}
+
+	/// Deletes the release records whose node row no longer exists.
+	///
+	/// A release that does not know the records removes a node's row without removing its
+	/// record, so the record outlives the node. The records are read in batches without a write
+	/// transaction, and a batch with orphans is deleted in a write transaction that checks each
+	/// candidate again, so a node that registers in between keeps its record.
+	async fn remove_orphaned_node_releases(&self) -> Result<()> {
+		let mut next = Some(NodeReleasePrefix {}.range()?);
+		while let Some(rng) = next {
+			let candidates = {
+				let txn = self.transaction(Read).await?;
+				let res =
+					catch!(txn, txn.batch_keys_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await);
+				next = match (&res.next, res.result.last()) {
+					(Some(_), Some(last)) => Some(rng.resume_after(last, Direction::Forward)),
+					_ => None,
+				};
+				// A key that does not spell a node id holds no record of a node, and is left alone
+				let nodes: Vec<Uuid> = res
+					.result
+					.iter()
+					.filter_map(|k| NodeReleaseKey::decode_key(k).ok())
+					.map(|k| k.nd)
+					.collect();
+				let orphans = catch!(txn, Self::nodes_without_row(&txn, nodes).await);
+				catch!(txn, txn.cancel().await);
+				orphans
+			};
+			if candidates.is_empty() {
+				continue;
+			}
+			let txn = self.transaction(Write).await?;
+			let orphans = catch!(txn, Self::nodes_without_row(&txn, candidates).await);
+			for nd in orphans {
+				trace!(target: TARGET, id = %nd, "Deleting release record of a node that is gone");
+				catch!(
+					txn,
+					txn.clr_key(&NodeReleaseKey {
+						nd,
+					})
+					.await
+				);
+			}
+			catch!(txn, txn.commit().await);
+		}
+		Ok(())
+	}
+
+	/// The nodes of `nodes` that have no membership row, in one batched read.
+	async fn nodes_without_row(txn: &Transaction, nodes: Vec<Uuid>) -> Result<Vec<Uuid>> {
+		if nodes.is_empty() {
+			return Ok(nodes);
+		}
+		let keys: Vec<NodeKey> = nodes
+			.iter()
+			.map(|nd| NodeKey {
+				nd: *nd,
+			})
+			.collect();
+		let rows = txn.getm_raw(keys, None).await?;
+		Ok(nodes
+			.into_iter()
+			.zip(rows)
+			.filter_map(|(nd, row)| row.is_none().then_some(nd))
+			.collect())
 	}
 
 	// ------------------------------
@@ -2442,6 +3075,10 @@ impl Datastore {
 	/// [`load_rpc_session`](Self::load_rpc_session), so none resurrects or
 	/// duplicates a session across nodes. This blind upsert is retained as a
 	/// primitive for callers that own the id exclusively (and for test setup).
+	///
+	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
+	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
+	/// still removes one.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -2480,6 +3117,10 @@ impl Datastore {
 	/// different nodes cannot both create it: one wins and the other is
 	/// reported as an existing session, letting `attach` return
 	/// `session_exists` instead of silently overwriting.
+	///
+	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
+	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
+	/// still removes one.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -2541,6 +3182,10 @@ impl Datastore {
 	/// the "push a local change to storage" path (a session-mutating method);
 	/// the authoritative *reload* path is
 	/// [`load_rpc_session`](Self::load_rpc_session).
+	///
+	/// A read-only store refuses this with [`DatastoreError::StoreReadOnly`]: it creates and
+	/// refreshes no durable session, while [`delete_rpc_session`](Self::delete_rpc_session)
+	/// still removes one.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(
@@ -2684,6 +3329,9 @@ impl Datastore {
 	/// then fails the teardown and can retry, keeping detach fail-closed. In
 	/// the supported single-node-per-session model such a conflict does not
 	/// arise (the owning node serializes the session's writes).
+	///
+	/// Runs through the bookkeeping transaction, so a read-only store still removes the durable
+	/// copy.
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))
@@ -2694,7 +3342,7 @@ impl Datastore {
 		let key = SessionKey {
 			id,
 		};
-		let txn = self.transaction(Write).await?;
+		let txn = self.bookkeeping_transaction().await?;
 		// Read the value we intend to remove; if it is already gone, done.
 		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
 			let _ = txn.cancel().await;
@@ -3108,23 +3756,52 @@ impl Datastore {
 		// Snapshot the (ns, db, table, index) hierarchy in a short read
 		// transaction. Index definitions are cloned out so the per-index
 		// build-state checks below don't hold the catalog transaction open.
+		//
+		// An entry a newer release wrote, which this build cannot read, is
+		// skipped and counted: an index this build cannot read is not adopted,
+		// and the pass reports the count once.
 		let mut candidates = Vec::new();
+		let mut skipped = 0usize;
 		{
 			let txn = self.transaction(Read).await?;
 			let res: Result<()> = async {
-				for ns in txn.all_ns(None).await?.iter() {
-					for db in txn.all_db(ns.namespace_id, None).await?.iter() {
-						for tb in txn.all_tb(ns.namespace_id, db.database_id, None).await?.iter() {
-							for ix in txn
-								.all_tb_indexes(
-									ns.namespace_id,
-									db.database_id,
-									&tb.name.clone(),
-									None,
+				let nss = txn.all_readable(NamespacePrefix {}.range()?).await?;
+				skipped += nss.refused;
+				for ns in &nss.values {
+					let dbs = txn
+						.all_readable(
+							DatabasePrefix {
+								ns: ns.namespace_id,
+							}
+							.range()?,
+						)
+						.await?;
+					skipped += dbs.refused;
+					for db in &dbs.values {
+						let tbs = txn
+							.all_readable(
+								TablePrefix {
+									ns: ns.namespace_id,
+									db: db.database_id,
+								}
+								.range()?,
+							)
+							.await?;
+						skipped += tbs.refused;
+						for tb in &tbs.values {
+							let tb_name = crate::val::TableName::from(tb.name.clone());
+							let ixs = txn
+								.all_readable(
+									IndexDefPrefix {
+										ns: ns.namespace_id,
+										db: db.database_id,
+										tb: Cow::Borrowed(&tb_name),
+									}
+									.range()?,
 								)
-								.await?
-								.iter()
-							{
+								.await?;
+							skipped += ixs.refused;
+							for ix in &ixs.values {
 								// Indexes pending removal are cleared by the
 								// tombstone reaper, not resumed.
 								if ix.prepare_remove {
@@ -3136,7 +3813,7 @@ impl Datastore {
 									db.database_id,
 									db.name.clone(),
 									tb.table_id,
-									Arc::new(ix.clone()),
+									Arc::new(crate::catalog::IndexDefinition::from_stored(ix)?),
 								));
 							}
 						}
@@ -3147,6 +3824,14 @@ impl Datastore {
 			.await;
 			let _ = txn.cancel().await;
 			res?;
+		}
+		if skipped > 0 {
+			warn!(
+				target: TARGET,
+				skipped,
+				"Index build adoption skipped catalog entries that need a newer release than \
+				 this build"
+			);
 		}
 		// Attempt a takeover for each candidate. `resume_stalled` is a cheap
 		// no-op for healthy/online/live builds, so this is safe to call for
@@ -4350,24 +5035,49 @@ impl Datastore {
 		// The catalog write that marks the vertex table folded addresses the
 		// namespace and database by name. A namespace or database dropped
 		// since the entry was queued leaves nothing to fold.
+		//
+		// A namespace or database this build cannot read, because a newer
+		// release wrote its definition, leaves nothing it can fold either. The
+		// scope is left, with a warning, and a later observation queues it again.
 		let (ns_name, db_name) = {
 			let txn = dbs.transaction(Read).await?;
-			let ns = txn
-				.all_ns(None)
-				.await?
-				.iter()
-				.find(|n| n.namespace_id == scope.ns)
-				.map(|n| n.name.to_string());
-			let db = txn
-				.all_db(scope.ns, None)
-				.await?
-				.iter()
-				.find(|d| d.database_id == scope.db)
-				.map(|d| d.name.to_string());
+			let found = async {
+				let nss = txn.all_readable(NamespacePrefix {}.range()?).await?;
+				let ns = nss
+					.values
+					.iter()
+					.find(|n| n.namespace_id == scope.ns)
+					.map(|n| n.name.to_string());
+				let dbs = txn
+					.all_readable(
+						DatabasePrefix {
+							ns: scope.ns,
+						}
+						.range()?,
+					)
+					.await?;
+				let db = dbs
+					.values
+					.iter()
+					.find(|d| d.database_id == scope.db)
+					.map(|d| d.name.to_string());
+				Ok::<_, anyhow::Error>((ns, db, nss.refused + dbs.refused))
+			}
+			.await;
 			let _ = txn.cancel().await;
-			match (ns, db) {
-				(Some(ns), Some(db)) => (ns, db),
-				_ => return Ok(()),
+			match found? {
+				(Some(ns), Some(db), _) => (ns, db),
+				(_, _, refused) => {
+					if refused > 0 {
+						warn!(
+							target: TARGET,
+							refused,
+							"A graph fold scope was left because a catalog entry on its path needs \
+							 a newer release than this build"
+						);
+					}
+					return Ok(());
+				}
 			}
 		};
 		let vertex = crate::val::RecordId::new(scope.tb.clone(), scope.id.clone());
@@ -5254,6 +5964,38 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, self.sequences.clone()).await
+	}
+
+	/// A write transaction that a read-only store still opens.
+	///
+	/// For this node's own membership rows and for deleting a torn-down session's durable
+	/// copy, which must be written whatever the ledger says. Every other writer opens its
+	/// transaction through [`Self::transaction`], which a read-only store refuses.
+	pub(crate) async fn bookkeeping_transaction(&self) -> Result<Transaction> {
+		self.transaction_factory.bookkeeping(self.sequences.clone()).await
+	}
+
+	/// Whether the store records features this build does not maintain, so that every write
+	/// transaction other than bookkeeping is refused with
+	/// [`DatastoreError::StoreReadOnly`].
+	pub fn is_read_only(&self) -> bool {
+		self.transaction_factory.is_read_only()
+	}
+
+	/// Opens the store read-only, logging it once. `features` names the ledger entries that this
+	/// build does not maintain; it is reported by every refusal and holds ids and recorded names
+	/// only. The mark is never cleared, and a store that is already read-only keeps its first
+	/// `features`.
+	pub(crate) fn open_read_only(&self, features: String) {
+		if self.is_read_only() {
+			return;
+		}
+		warn!(
+			target: TARGET,
+			features = %features,
+			"The datastore records features this build does not maintain, so it is open read-only"
+		);
+		self.transaction_factory.set_read_only(features);
 	}
 
 	pub(crate) fn sequences(&self) -> &Sequences {
@@ -6626,7 +7368,7 @@ mod test {
 
 	use super::*;
 	use crate::catalog::providers::{
-		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
+		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider, UserProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
 	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};

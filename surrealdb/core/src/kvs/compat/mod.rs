@@ -41,6 +41,7 @@ mod compiled_test;
 mod durable_session;
 pub(crate) mod fixtures;
 mod generator;
+mod stored_record;
 mod tests;
 
 #[rustfmt::skip]

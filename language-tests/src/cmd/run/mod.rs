@@ -1071,7 +1071,17 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// `/!tl` are task-lease keys (e.g. written when the tombstone-reclaim task
 	// acquires its lease during cleanup); like `/!ic` they are background-task
 	// infrastructure that legitimately persists, not leaked test data.
-	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic", b"/!tl"];
+	//
+	// `!fl` is the store's feature-level record, which every new store writes when it is
+	// created. It sits beside the version keys, outside the `/` root, so unlike the others its
+	// prefix has no leading `/`.
+	//
+	// `/!nr` are node release records, written beside the node's heartbeat and so infrastructure
+	// like `/!nd`. `/!mg` are ledger entries: a store's first stored write, or the raise of its
+	// feature level, records the record-format entry, so the entry persists in any store that
+	// has stored a record in the stored-value grammar.
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] =
+		&[b"/!ni", b"/!nh", b"/!nd", b"/!nr", b"/!mg", b"/!ic", b"/!tl", b"!fl"];
 
 	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;
 	// The point of this check is to find keys the declared keyspace does *not*

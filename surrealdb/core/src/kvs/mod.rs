@@ -29,6 +29,7 @@ pub(crate) mod lightweight;
 pub(crate) mod migration;
 pub(crate) mod paging;
 pub mod request;
+mod rollback;
 pub(crate) mod slowlog;
 
 #[cfg(test)]
@@ -46,6 +47,12 @@ pub use ds::{
 };
 pub(crate) use err::Error;
 pub use request::{Dialect, QueryRequest, QuerySource};
+pub use rollback::{
+	EntryFinding, GenerationFinding, LedgerFinding, RollbackCheck, RollbackVerdict,
+};
+// The types of the feature level API on [`Datastore`]: the releases it names and the state it
+// reports.
+pub use surrealdb_datastore::FeatureLevelState;
 pub(crate) use surrealdb_datastore::IntoBytes;
 // Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
 // the storage backend's, and a datastore failure is a different thing.
@@ -54,8 +61,8 @@ pub(crate) use surrealdb_datastore::error::DatastoreError;
 // `surrealdb-datastore`; these bind them to core's own `crate::kvs::…` paths.
 // Depend on that crate directly to reach them from outside core.
 pub(crate) use surrealdb_datastore::{
-	TransactionConfig, TransactionFactory, cache, catalog_reads, sequences, speculation, tasklease,
-	tx, util, version,
+	Admission, LayoutSet, RowGate, TransactionConfig, TransactionFactory, cache, catalog_reads,
+	sequences, speculation, tasklease, tx, util, version,
 };
 // Recognising a storage failure descends with the transaction layer: the code
 // that classifies one sits on both sides of the crate boundary. Both shapes stay
@@ -65,6 +72,7 @@ pub(crate) use surrealdb_datastore::{
 pub(crate) use surrealdb_datastore::{
 	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
+pub use surrealdb_kvs::{FeatureLevel, Release};
 pub(crate) use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;

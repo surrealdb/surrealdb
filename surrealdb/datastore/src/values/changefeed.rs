@@ -22,14 +22,15 @@ use std::sync::Arc;
 use anyhow::Result;
 use parking_lot::Mutex;
 use revision::revisioned;
+use surrealdb_catalog::stored::EmbeddedEntry;
 use surrealdb_catalog::{
 	DatabaseId, FromStored, NamespaceId, Record, StoredTableDefinition, TableDefinition,
 };
 use surrealdb_expr::expr::Operation;
 use surrealdb_expr::expr::statements::info::InfoStructure;
 use surrealdb_expr::val::{Array, Object, RecordId, TableName, Value};
+use surrealdb_kvs::Val;
 use surrealdb_kvs::value::KVValue;
-use surrealdb_kvs::{Val, impl_kv_value_revisioned};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -39,7 +40,9 @@ pub enum TableMutation {
 	// we do include it in the first field for convenience.
 	Set(RecordId, Value),
 	Del(RecordId),
-	Def(Box<StoredTableDefinition>),
+	/// A table definition, held through [`EmbeddedEntry`] so that a definition `revision`
+	/// cannot hold travels in the stored grammar.
+	Def(EmbeddedEntry<StoredTableDefinition>),
 	/// Includes the ID, current value (after change), changes that can be
 	/// applied to get the original value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
@@ -54,7 +57,7 @@ pub enum TableMutation {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableMutations(pub TableName, pub Vec<TableMutation>);
 
-impl_kv_value_revisioned!(TableMutations);
+impl_kv_value_embedding!(TableMutations);
 
 impl TableMutations {
 	/// Create a new table mutations
@@ -64,7 +67,7 @@ impl TableMutations {
 	/// Push a table change to the table mutations
 	pub fn push_table_change(&mut self, dt: StoredTableDefinition) {
 		// Push the table change to the entry
-		self.1.push(TableMutation::Def(Box::new(dt)));
+		self.1.push(TableMutation::Def(EmbeddedEntry::from(dt)));
 	}
 
 	/// Push a mutation to the table mutations (record change)
@@ -356,7 +359,7 @@ mod tests {
 						]))),
 					),
 					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
-					TableMutation::Def(Box::new(StoredTableDefinition::new(
+					TableMutation::Def(EmbeddedEntry::from(StoredTableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
@@ -409,7 +412,7 @@ mod tests {
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(Box::new(StoredTableDefinition::new(
+					TableMutation::Def(EmbeddedEntry::from(StoredTableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),

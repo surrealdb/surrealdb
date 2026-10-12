@@ -19,7 +19,8 @@ compat/
 ├── v3_0_0.rs           # FROZEN: Serialized bytes from version 3.0.0
 ├── tests.rs            # Tests that decode bytes and assert equality
 ├── durable_session.rs  # FROZEN rev-1 and rev-2 bytes for a type no released snapshot holds
-└── ann_pending.rs      # FROZEN rev-1 bytes for the two ANN pending values
+├── ann_pending.rs      # FROZEN rev-1 bytes for the two ANN pending values
+└── stored_record.rs    # FROZEN stored-value bytes for records
 ```
 
 ### Types outside the snapshot machinery
@@ -37,6 +38,14 @@ the *previous* revision's shape, a frozen byte constant generated from it by an
 the way a rolling upgrade needs. The frozen bytes are subject to the same rule
 as a version file — never edit them, and never regenerate them to make a failing
 test pass.
+
+A record is written in the v1 record envelope when its metadata is none or an
+edge on the current adjacency layout, and in `revision` otherwise, so no
+snapshot pins how one is written: every `vX_Y_Z.rs` file holds the `revision`
+bytes an earlier release wrote, which still decode, and re-encode in the v1
+envelope or in `revision` by the record's metadata. `stored_record.rs` holds the
+bytes of every record shape, and asserts both that they decode to the records
+they were captured from and that the current encoder writes them byte for byte.
 
 ### Data Flow
 

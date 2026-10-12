@@ -11,19 +11,21 @@ use crate::catalog::{
 	DatabaseId, FromStored, LogicalPermissions, NamespaceId, Permission, PermissionKind,
 	Permissions, StoredPermissions, StoredViewDefinition, ViewDefinition,
 };
-use crate::expr as runtime;
 use crate::expr::ChangeFeed;
 use crate::expr::logical::LogicalPermission;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::statements::info::InfoStructure;
 pub use crate::expr::table_type::{Relation, TableType};
+use crate::stored::{Stored, impl_stored_id};
 use crate::val::{TableName, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TableId(pub u32);
 
 impl_kv_value_revisioned!(TableId);
+impl_stored_id!(TableId);
 
 impl Revisioned for TableId {
 	fn revision() -> u16 {
@@ -67,27 +69,47 @@ impl revision::WalkRevisioned for TableId {
 }
 
 #[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0", revision_embedded)]
 pub struct StoredTableDefinition {
+	#[stored(n = 2)]
 	pub namespace_id: NamespaceId,
+	#[stored(n = 4)]
 	pub database_id: DatabaseId,
+	#[stored(n = 6)]
 	pub table_id: TableId,
+	#[stored(n = 8)]
 	pub name: Strand,
+	#[stored(n = 10)]
 	pub drop: bool,
+	#[stored(n = 12)]
 	pub schemafull: bool,
+	#[stored(n = 14)]
 	pub view: Option<StoredViewDefinition>,
+	#[stored(n = 16)]
 	pub permissions: StoredPermissions,
+	#[stored(n = 18)]
 	pub changefeed: Option<ChangeFeed>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
+	#[stored(n = 20)]
 	pub table_type: TableType,
 
 	/// The last time that a DEFINE FIELD was added to this table
+	#[stored(n = 22)]
 	pub cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table
+	#[stored(n = 24)]
 	pub cache_events_ts: Uuid,
 	/// The last time that a DEFINE TABLE was added to this table
+	#[stored(n = 26)]
 	pub cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
+	#[stored(n = 28)]
 	pub cache_indexes_ts: Uuid,
 
 	/// The last time the set of LIVE queries on this table changed (a LIVE was
@@ -98,17 +120,20 @@ pub struct StoredTableDefinition {
 	/// snapshot to poison the cache with a stale subscriber list. Old tables
 	/// default to the nil UUID; the first LIVE/KILL bumps it to a real value.
 	#[revision(start = 3)]
+	#[stored(n = 30)]
 	pub cache_lives_ts: Uuid,
 
 	/// Optional alias used as the GraphQL type / query / mutation prefix for
 	/// this table. See GitHub issue #4537. `Option<String>::default()` is
 	/// `None`, so the standard `#[revision]` default is sufficient.
 	#[revision(start = 2)]
+	#[stored(n = 32)]
 	pub graphql_alias: Option<String>,
 
 	/// Reason emitted on the GraphQL `@deprecated` directive for every
 	/// auto-generated Query/Mutation field that targets this table.
 	#[revision(start = 2)]
+	#[stored(n = 34)]
 	pub graphql_deprecated: Option<String>,
 
 	/// Whether packed adjacency blocks exist — or have ever existed — for
@@ -127,6 +152,7 @@ pub struct StoredTableDefinition {
 	/// is excluded from the SQL rendering; surfaced in `INFO` structure
 	/// output for observability.
 	#[revision(start = 4)]
+	#[stored(n = 36)]
 	pub graph_folded: bool,
 
 	/// Whether this table's shared doc-ID space is referenced from packed
@@ -144,6 +170,7 @@ pub struct StoredTableDefinition {
 	/// Internal bookkeeping: excluded from the SQL rendering; surfaced in
 	/// `INFO` structure output for observability.
 	#[revision(start = 4)]
+	#[stored(n = 38)]
 	/// `REMOVE TABLE` deletes the table's mapping space while foreign
 	/// tables' numeric blocks may still name its ids; recreating the same
 	/// table name then restarts allocation, so stale folded entries can
@@ -159,11 +186,13 @@ pub struct StoredTableDefinition {
 	/// them. Changing the stored value invalidates the table's cache
 	/// subspace wholesale; caches re-materialise lazily on the write path.
 	#[revision(start = 4)]
+	#[stored(n = 40)]
 	pub inline_edges_cap: Option<u32>,
 
 	/// Cap on the inline reference cache (the `INLINE REFERENCES` clause).
 	/// Same semantics as `inline_edges_cap`, for reference back-links.
 	#[revision(start = 4)]
+	#[stored(n = 42)]
 	pub inline_refs_cap: Option<u32>,
 
 	/// Generation counter of the table's inline-field set. Bumped by every
@@ -174,10 +203,11 @@ pub struct StoredTableDefinition {
 	/// evaluate silently. Zero means the table has never had an inline
 	/// field. Internal bookkeeping: excluded from INFO and export.
 	#[revision(start = 4)]
+	#[stored(n = 44)]
 	pub graph_inline_gen: u32,
 }
 
-impl_kv_value_revisioned!(StoredTableDefinition);
+impl_kv_value_catalog!(StoredTableDefinition);
 
 impl StoredTableDefinition {
 	pub fn new(

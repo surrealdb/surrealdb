@@ -46,10 +46,14 @@ use revision::{
 	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, WalkRevisioned,
 };
 use surrealdb_expr::parser;
+use surrealdb_expr::val::stored::schema::{Floor, SchemaError, StoredField};
+use surrealdb_expr::val::stored::{Encoder, Item};
+use surrealdb_kvs::Release;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::api_path::Path;
 use crate::catalog::KeyStructure;
+use crate::expr::arrival::{Arrival, LATEST_ARRIVAL};
 use crate::expr::logical::{LogicalExpr, LogicalOp};
 use crate::expr::{Block, Cond, Expr, Fields, Idiom, KeyNames, Kind, KindLiteral};
 use crate::val::Value;
@@ -69,6 +73,11 @@ use crate::val::Value;
 /// whose grammar is its own rather than SurrealQL's; its impl documents what
 /// that changes.
 pub trait SurqlTarget: Sized {
+	/// The name of the grammar this target's text is written in. The schema lock records it as
+	/// part of the field's wire type (`text:<grammar>`), so two targets that read the same stored
+	/// bytes under different grammars stay distinct types.
+	const GRAMMAR: &'static str;
+
 	/// Render this value to its canonical stored SurrealQL text.
 	fn render_canonical(&self) -> String;
 	/// Re-parse canonical stored text back into this type.
@@ -295,7 +304,49 @@ impl<T> WalkRevisioned for SurqlText<T> {
 	}
 }
 
+/// The stored form of a text is a `STRING` item, the same bytes as the `String` it wraps.
+///
+/// The text's release floor is the newest release among everything it uses. Parsing a text costs
+/// far more than reading it, so it is parsed only when some syntax could be newer than the first
+/// release; a text that does not parse has no known release, and the entry that holds it then
+/// takes the floor of the entry it replaces.
+impl<T: SurqlTarget + Arrival> StoredField for SurqlText<T> {
+	fn encode_item(&self, enc: &mut Encoder, prior: Option<Item<'_>>) -> Result<(), SchemaError> {
+		self.text.encode_item(enc, prior)
+	}
+
+	fn decode_item(item: Item<'_>, depth: u32) -> Result<Self, SchemaError> {
+		String::decode_item(item, depth).map(Self::from_raw)
+	}
+
+	fn floor(&self, acc: &mut Floor) -> Result<(), SchemaError> {
+		if LATEST_ARRIVAL <= Release::FIRST_STORED {
+			return Ok(());
+		}
+		match T::parse_canonical(&self.text) {
+			Ok(parsed) => acc.raise(parsed.arrival()),
+			Err(_) => acc.unparsable_text = true,
+		}
+		Ok(())
+	}
+
+	fn into_vm_value(self) -> Result<Value, SchemaError> {
+		self.text.into_vm_value()
+	}
+
+	fn from_vm_value(value: Value) -> Result<Self, SchemaError> {
+		String::from_vm_value(value).map(Self::from_raw)
+	}
+
+	fn write_type_name(out: &mut String) {
+		out.push_str("text:");
+		out.push_str(T::GRAMMAR);
+	}
+}
+
 impl SurqlTarget for Expr {
+	const GRAMMAR: &'static str = "expr";
+
 	fn render_canonical(&self) -> String {
 		self.to_stored_sql()
 	}
@@ -306,6 +357,8 @@ impl SurqlTarget for Expr {
 }
 
 impl SurqlTarget for Cond {
+	const GRAMMAR: &'static str = "cond";
+
 	fn render_canonical(&self) -> String {
 		self.0.to_stored_sql()
 	}
@@ -326,6 +379,8 @@ impl SurqlTarget for Cond {
 /// rendering here is the scalar's SurrealQL, which re-parses to the same
 /// scalar for every shape that has one.
 impl SurqlTarget for LogicalExpr {
+	const GRAMMAR: &'static str = "logical_expr";
+
 	fn render_canonical(&self) -> String {
 		self.to_sql()
 	}
@@ -339,6 +394,8 @@ impl SurqlTarget for LogicalExpr {
 /// profile into the [`LogicalOp::Sequence`] that runs it. Only obtained from a [`BlockText`]
 /// through [`SurqlText::<Block>::to_logical`]; definitions are never rendered from it.
 impl SurqlTarget for LogicalOp {
+	const GRAMMAR: &'static str = "logical_block";
+
 	fn render_canonical(&self) -> String {
 		self.to_sql()
 	}
@@ -349,6 +406,8 @@ impl SurqlTarget for LogicalOp {
 }
 
 impl SurqlTarget for Kind {
+	const GRAMMAR: &'static str = "kind";
+
 	fn render_canonical(&self) -> String {
 		self.to_sql()
 	}
@@ -359,6 +418,8 @@ impl SurqlTarget for Kind {
 }
 
 impl SurqlTarget for Idiom {
+	const GRAMMAR: &'static str = "idiom";
+
 	fn render_canonical(&self) -> String {
 		self.to_stored_sql()
 	}
@@ -369,6 +430,8 @@ impl SurqlTarget for Idiom {
 }
 
 impl SurqlTarget for Fields {
+	const GRAMMAR: &'static str = "fields";
+
 	fn render_canonical(&self) -> String {
 		self.to_stored_sql()
 	}
@@ -379,6 +442,8 @@ impl SurqlTarget for Fields {
 }
 
 impl SurqlTarget for Block {
+	const GRAMMAR: &'static str = "block";
+
 	fn render_canonical(&self) -> String {
 		self.to_stored_sql()
 	}
@@ -397,6 +462,8 @@ impl SurqlTarget for Block {
 /// whose kind annotation exceeds the configured depth has always been
 /// unreadable, and this is not the place to start changing that.
 impl SurqlTarget for Path {
+	const GRAMMAR: &'static str = "path";
+
 	fn render_canonical(&self) -> String {
 		self.to_sql()
 	}

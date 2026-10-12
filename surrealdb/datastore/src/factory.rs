@@ -6,13 +6,15 @@
 //! datastore, which is how the maintenance paths open their own.
 
 use std::any::{Any, TypeId};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::Result;
 use surrealdb_kvs::{Metrics, TransactionBuilder, TransactionType};
 use surrealdb_observe::{ExecutionObserver, NoopObserver};
 
 use crate::config::TransactionConfig;
+use crate::error::DatastoreError;
+use crate::feature::FeatureLevelCell;
 use crate::sequences::Sequences;
 use crate::tr::Transactor;
 use crate::triggers::CommitTriggers;
@@ -30,6 +32,13 @@ pub struct TransactionFactory {
 	observer: Arc<dyn ExecutionObserver>,
 	/// Limits handed to every transaction this factory opens.
 	config: Arc<TransactionConfig>,
+	/// The feature level the store was last read at, shared by every transaction this factory
+	/// opens and by every clone of the factory. See [`FeatureLevelCell`].
+	feature: Arc<FeatureLevelCell>,
+	/// The ledger ids and recorded names the store holds that this build does not maintain, set
+	/// once: the store is read-only exactly when the cell is set, so that [`Self::transaction`]
+	/// refuses to open a write transaction. See [`Self::bookkeeping`].
+	read_only: Arc<OnceLock<String>>,
 }
 
 impl TransactionFactory {
@@ -43,7 +52,35 @@ impl TransactionFactory {
 			triggers,
 			observer: Arc::new(NoopObserver),
 			config,
+			feature: Arc::new(FeatureLevelCell::unsettled()),
+			read_only: Arc::new(OnceLock::new()),
 		}
+	}
+
+	/// Marks the store read-only for every transaction opened by this factory or any of its
+	/// clones. `features` names the ledger entries the store records that this build does not
+	/// maintain; it is the first value set that is kept, and it is reported by every refusal.
+	/// The mark is never cleared.
+	pub fn set_read_only(&self, features: String) {
+		// The first value wins; a later call changes nothing and the mark stays set.
+		let _ = self.read_only.set(features);
+	}
+
+	/// Whether the store is open read-only. See [`Self::set_read_only`].
+	pub fn is_read_only(&self) -> bool {
+		self.read_only.get().is_some()
+	}
+
+	/// Replace the feature level cell, so that every transaction opened afterwards, and every
+	/// clone of the factory made afterwards, shares `cell`.
+	pub fn with_feature_level(mut self, cell: Arc<FeatureLevelCell>) -> Self {
+		self.feature = cell;
+		self
+	}
+
+	/// The feature level cell shared by this factory's transactions.
+	pub fn feature_level(&self) -> &Arc<FeatureLevelCell> {
+		&self.feature
 	}
 
 	/// Replace the observer. Used by the datastore builder to propagate the
@@ -60,24 +97,50 @@ impl TransactionFactory {
 		&self.observer
 	}
 
+	/// Opens a transaction of the given type.
+	///
+	/// A write transaction is refused with [`DatastoreError::StoreReadOnly`] while the store is
+	/// read-only; a read transaction is never refused.
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		sequences: Sequences,
+	) -> Result<Transaction> {
+		// A write transaction on a read-only store is refused before the backend opens one.
+		if matches!(write, TransactionType::Write)
+			&& let Some(features) = self.read_only.get()
+		{
+			return Err(DatastoreError::StoreReadOnly {
+				features: features.clone(),
+			}
+			.into());
+		}
+		self.open(write, sequences).await
+	}
+
+	/// Opens a write transaction that ignores the read-only mark.
+	///
+	/// Reserved for a node's own membership rows and for deleting a torn-down session's durable
+	/// copy, which must still be written on a read-only store. Nothing else may call it: a
+	/// statement, a maintenance job or a feature-state write goes through [`Self::transaction`].
+	pub async fn bookkeeping(&self, sequences: Sequences) -> Result<Transaction> {
+		self.open(TransactionType::Write, sequences).await
+	}
+
 	#[allow(
 		unreachable_code,
 		unreachable_patterns,
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		sequences: Sequences,
-	) -> Result<Transaction> {
+	async fn open(&self, write: TransactionType, sequences: Sequences) -> Result<Transaction> {
 		// The catalog commits finished before the transaction opens, read
 		// before it opens so that its snapshot holds at least those.
 		let settled = self.triggers.catalog_epoch.settled();
 		// Create a new transaction on the datastore
 		let (inner, local) = self.builder.new_transaction(write).await?;
-		let catalog_epoch =
-			settled.filter(|_| inner.sole_writer()).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		let sole_writer = inner.sole_writer();
+		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,
@@ -86,6 +149,8 @@ impl TransactionFactory {
 			Transactor::new(inner),
 			&self.config,
 			catalog_epoch,
+			sole_writer,
+			Arc::clone(&self.feature),
 		))
 	}
 

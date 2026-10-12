@@ -386,6 +386,9 @@ pub(crate) enum Refusal {
 	/// A statement that reads its database's catalog, run by a session that
 	/// selects a namespace but no database.
 	DatabaseEmpty,
+	/// A statement that consults a catalog entry this build refuses to read: a
+	/// newer release wrote it, or its bytes are damaged.
+	CatalogEntry(surrealdb_catalog::stored::EntryError),
 }
 
 impl Refusal {
@@ -442,6 +445,9 @@ impl Refusal {
 			}),
 			Self::NamespaceEmpty => crate::err::Error::Exec(crate::exec::Error::NsEmpty),
 			Self::DatabaseEmpty => crate::err::Error::Exec(crate::exec::Error::DbEmpty),
+			Self::CatalogEntry(entry) => {
+				crate::err::Error::Catalog(surrealdb_catalog::Error::Entry(*entry))
+			}
 		}
 	}
 
@@ -494,6 +500,9 @@ impl Refusal {
 			}),
 			crate::err::Error::Exec(crate::exec::Error::NsEmpty) => Some(Self::NamespaceEmpty),
 			crate::err::Error::Exec(crate::exec::Error::DbEmpty) => Some(Self::DatabaseEmpty),
+			crate::err::Error::Catalog(surrealdb_catalog::Error::Entry(entry)) => {
+				Some(Self::CatalogEntry(*entry))
+			}
 			crate::err::Error::Idx(crate::idx::Error::NoIndexFoundForMatch {
 				exp,
 			}) => Some(Self::NoIndexForMatch {

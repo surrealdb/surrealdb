@@ -3,42 +3,36 @@
 //! its structure, and what the process reports of itself.
 //!
 //! Rendering is a function of a definition's value: the program does every
-//! read, and the definition crosses into its Rust type through its bytes.
+//! read, and the definition crosses into its Rust type through its type's
+//! schema.
 
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use surrealdb_types::ToSql;
 
-use super::codec;
 use super::program::{Definitions, ProcessPart};
 use crate::catalog::FromStored;
+use crate::catalog::stored::StoredField;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::expr::statements::info::InfoStructure;
-use crate::key::KVValue;
 use crate::val::{Object, Value};
 
-/// The Rust definitions of the stored definitions in `values`, each encoded
-/// as `ty`.
-fn compiled<T>(ty: &str, values: &[Value]) -> anyhow::Result<Vec<T>>
+/// The Rust definitions of the stored definitions in `values`, each converted
+/// by its stored type's schema.
+fn compiled<T>(values: &[Value]) -> anyhow::Result<Vec<T>>
 where
 	T: FromStored,
-	T::Stored: KVValue<KeyContext = ()>,
+	T::Stored: StoredField,
 {
-	values
-		.iter()
-		.map(|value| {
-			let bytes = codec::encode(ty, value)?;
-			T::from_stored(&T::Stored::kv_decode_value(&bytes, ())?)
-		})
-		.collect()
+	values.iter().map(|value| T::from_stored(&T::Stored::from_vm_value(value.clone())?)).collect()
 }
 
-/// The definitions in `values`, each encoded as `ty`, that are their own
-/// stored form.
-fn decoded<T: KVValue<KeyContext = ()>>(ty: &str, values: &[Value]) -> anyhow::Result<Vec<T>> {
-	values.iter().map(|value| T::kv_decode_value(&codec::encode(ty, value)?, ())).collect()
+/// The definitions in `values`, each converted by its schema, that are their
+/// own stored form.
+fn decoded<T: StoredField>(values: &[Value]) -> anyhow::Result<Vec<T>> {
+	values.iter().map(|value| Ok(T::from_vm_value(value.clone())?)).collect()
 }
 
 /// `definitions` as `INFO` renders a list of them: an array of structures,
@@ -73,33 +67,31 @@ pub(super) async fn render(
 ) -> FlowResult<Value> {
 	use crate::catalog;
 	let rendered = match kind {
-		Definitions::Access => listed(
-			compiled::<catalog::AccessDefinition>("StoredAccessDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Api => listed(
-			compiled::<catalog::ApiDefinition>("StoredApiDefinition", values)?,
-			structured,
-			|v| Ok(v.path.to_string()),
-		),
-		Definitions::Analyzer => listed(
-			decoded::<catalog::AnalyzerDefinition>("AnalyzerDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Bucket => listed(
-			compiled::<catalog::BucketDefinition>("StoredBucketDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Function => listed(
-			compiled::<catalog::FunctionDefinition>("StoredFunctionDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
+		Definitions::Access => {
+			listed(compiled::<catalog::AccessDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Api => listed(compiled::<catalog::ApiDefinition>(values)?, structured, |v| {
+			Ok(v.path.to_string())
+		}),
+		Definitions::Analyzer => {
+			listed(decoded::<catalog::AnalyzerDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Bucket => {
+			listed(compiled::<catalog::BucketDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Function => {
+			listed(compiled::<catalog::FunctionDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
 		Definitions::Module => {
-			let modules = compiled::<catalog::ModuleDefinition>("StoredModuleDefinition", values)?;
+			let modules = compiled::<catalog::ModuleDefinition>(values)?;
 			if structured {
 				let (ns, db) = scope.ok_or_else(|| {
 					ControlFlow::Err(anyhow!("structured modules rendered with no database"))
@@ -114,33 +106,29 @@ pub(super) async fn render(
 			}
 			listed(modules, false, |v| v.get_storage_name())
 		}
-		Definitions::Model => listed(
-			compiled::<catalog::MlModelDefinition>("StoredMlModelDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Param => listed(
-			compiled::<catalog::ParamDefinition>("StoredParamDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Table => listed(
-			compiled::<catalog::TableDefinition>("StoredTableDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::User => {
-			listed(decoded::<catalog::UserDefinition>("UserDefinition", values)?, structured, |v| {
+		Definitions::Model => {
+			listed(compiled::<catalog::MlModelDefinition>(values)?, structured, |v| {
 				Ok(v.name.to_string())
 			})
 		}
-		Definitions::Config => listed(
-			compiled::<catalog::ConfigDefinition>("StoredConfigDefinition", values)?,
-			structured,
-			|v| Ok(v.name()),
-		),
+		Definitions::Param => {
+			listed(compiled::<catalog::ParamDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Table => {
+			listed(compiled::<catalog::TableDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::User => listed(decoded::<catalog::UserDefinition>(values)?, structured, |v| {
+			Ok(v.name.to_string())
+		}),
+		Definitions::Config => {
+			listed(compiled::<catalog::ConfigDefinition>(values)?, structured, |v| Ok(v.name()))
+		}
 		Definitions::Sequence => {
-			let sequences = decoded::<catalog::SequenceDefinition>("SequenceDefinition", values)?;
+			let sequences = decoded::<catalog::SequenceDefinition>(values)?;
 			match scope {
 				Some((ns, db)) if structured => {
 					process_sequences(&ctx.txn(), ns, db, &sequences, version).await
@@ -148,40 +136,38 @@ pub(super) async fn render(
 				_ => listed(sequences, structured, |v| Ok(v.name.to_string())),
 			}
 		}
-		Definitions::Namespace => listed(
-			decoded::<catalog::NamespaceDefinition>("NamespaceDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Database => listed(
-			decoded::<catalog::DatabaseDefinition>("DatabaseDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Event => listed(
-			compiled::<catalog::EventDefinition>("StoredEventDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Field => listed(
-			compiled::<catalog::FieldDefinition>("StoredFieldDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_raw_string()),
-		),
-		Definitions::Index => listed(
-			compiled::<catalog::IndexDefinition>("StoredIndexDefinition", values)?,
-			structured,
-			|v| Ok(v.name.to_string()),
-		),
-		Definitions::Live => listed(
-			compiled::<catalog::SubscriptionDefinition>("StoredSubscriptionDefinition", values)?,
-			structured,
-			|v| Ok(v.id.to_string()),
-		),
-		Definitions::Node => {
-			listed(decoded::<catalog::node::Node>("Node", values)?, structured, |v| {
+		Definitions::Namespace => {
+			listed(decoded::<catalog::NamespaceDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Database => {
+			listed(decoded::<catalog::DatabaseDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Event => {
+			listed(compiled::<catalog::EventDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Field => {
+			listed(compiled::<catalog::FieldDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_raw_string())
+			})
+		}
+		Definitions::Index => {
+			listed(compiled::<catalog::IndexDefinition>(values)?, structured, |v| {
+				Ok(v.name.to_string())
+			})
+		}
+		Definitions::Live => {
+			listed(compiled::<catalog::SubscriptionDefinition>(values)?, structured, |v| {
 				Ok(v.id.to_string())
 			})
+		}
+		Definitions::Node => {
+			listed(decoded::<catalog::node::Node>(values)?, structured, |v| Ok(v.id.to_string()))
 		}
 		Definitions::Defaults => {
 			return Err(ControlFlow::Err(anyhow!("the root's defaults rendered as a list")));
@@ -195,11 +181,10 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 	use crate::catalog;
 	match kind {
 		Definitions::User => {
-			let [user] =
-				decoded::<catalog::UserDefinition>("UserDefinition", std::slice::from_ref(value))
-					.map_err(ControlFlow::Err)?
-					.try_into()
-					.map_err(|_| ControlFlow::Err(anyhow!("one user rendered as several")))?;
+			let [user] = decoded::<catalog::UserDefinition>(std::slice::from_ref(value))
+				.map_err(ControlFlow::Err)?
+				.try_into()
+				.map_err(|_| ControlFlow::Err(anyhow!("one user rendered as several")))?;
 			Ok(if structured {
 				user.structure()
 			} else {
@@ -211,13 +196,10 @@ pub(super) fn render_one(kind: Definitions, structured: bool, value: &Value) -> 
 		Definitions::Defaults => match value {
 			Value::None => Ok(Value::Object(Object::default())),
 			value => {
-				let [config] = compiled::<catalog::ConfigDefinition>(
-					"StoredConfigDefinition",
-					std::slice::from_ref(value),
-				)
-				.map_err(ControlFlow::Err)?
-				.try_into()
-				.map_err(|_| ControlFlow::Err(anyhow!("one config rendered as several")))?;
+				let [config] = compiled::<catalog::ConfigDefinition>(std::slice::from_ref(value))
+					.map_err(ControlFlow::Err)?
+					.try_into()
+					.map_err(|_| ControlFlow::Err(anyhow!("one config rendered as several")))?;
 				match config {
 					catalog::ConfigDefinition::Default(defaults) => Ok(defaults.structure()),
 					other => Err(ControlFlow::Err(anyhow::Error::new(

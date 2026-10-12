@@ -4,6 +4,42 @@
 use anyhow::{Context as _, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 
+use crate::release::{FeatureLevel, Release};
+
+/// What a levelled write needs: the store's feature level, and the bytes the write replaces.
+#[derive(Clone, Copy, Debug)]
+pub struct EncodeContext<'a> {
+	/// The store's feature level. An encoding never exceeds what this level's release reads.
+	pub level: FeatureLevel,
+	/// The stored bytes the write replaces, when the key holds any. An encoder may carry forward
+	/// from them what it does not itself understand.
+	pub prior: Option<&'a [u8]>,
+}
+
+impl EncodeContext<'static> {
+	/// A store at the Legacy level, replacing nothing.
+	pub const LEGACY: Self = Self {
+		level: FeatureLevel::Legacy,
+		prior: None,
+	};
+
+	/// A store at this build's release, replacing nothing.
+	pub const CURRENT: Self = Self {
+		level: FeatureLevel::At(Release::CURRENT),
+		prior: None,
+	};
+}
+
+/// An encoded value, with the release floor of its stored-grammar form when one was written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Encoded {
+	/// The value bytes.
+	pub bytes: Vec<u8>,
+	/// The oldest release able to read `bytes`, when `bytes` are in a grammar that records one.
+	/// `None` for a fixed encoding, and for `revision`, which every release reads.
+	pub floor: Option<Release>,
+}
+
 /// KVValue is a trait that defines a value for the key-value store.
 ///
 /// `KeyContext` is the data the value decoder needs from the storage key
@@ -14,8 +50,41 @@ use roaring::{RoaringBitmap, RoaringTreemap};
 pub trait KVValue {
 	type KeyContext;
 
+	/// Whether the encoding of this value depends on the store's feature level and on the bytes it
+	/// replaces. False for every value whose encoding is fixed.
+	///
+	/// A writer of a levelled value must encode through [`Self::kv_encode_value_at`] with the
+	/// store's level and the stored bytes being replaced, so that:
+	///
+	/// - the encoding is one the level's release reads;
+	/// - what the replaced bytes hold that this build does not understand survives the write;
+	/// - a write that needs a newer release than the level is refused instead of written
+	///   unreadably.
+	///
+	/// A writer of a levelled value that compares before it writes must also compare through
+	/// [`Self::kv_canonical`], because the replaced bytes may be in either of two grammars.
+	/// [`Self::kv_encode_value`] is the encoding for callers that hold no store.
+	const LEVELLED: bool = false;
+
 	/// Encodes the value into a byte vector.
 	fn kv_encode_value(&self) -> Result<Vec<u8>>;
+
+	/// Encodes the value as a write at `ctx` would. A value with a fixed encoding returns
+	/// [`Self::kv_encode_value`] with no floor.
+	fn kv_encode_value_at(&self, ctx: &EncodeContext<'_>) -> Result<Encoded> {
+		let _ = ctx;
+		Ok(Encoded {
+			bytes: self.kv_encode_value()?,
+			floor: None,
+		})
+	}
+
+	/// Bytes that are equal exactly when two values are equal, for compare-and-set. A value with
+	/// more than one encoding of the same content overrides this with its canonical form. Defaults
+	/// to [`Self::kv_encode_value`].
+	fn kv_canonical(&self) -> Result<Vec<u8>> {
+		self.kv_encode_value()
+	}
 
 	/// Decodes the value from a byte slice, consuming `ctx` to recover
 	/// any fields derived from the storage key (see [`KeyContext`]).

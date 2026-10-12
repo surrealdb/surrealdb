@@ -18,6 +18,36 @@
 //! it comes here too, and is documented as belonging to the value rather than to
 //! its caller.
 
+/// Implements [`KVValue`](surrealdb_kvs::value::KVValue) for a `revision` container that holds a
+/// catalog entry through [`EmbeddedEntry`](surrealdb_catalog::stored::EmbeddedEntry).
+///
+/// The codec is the `revision` one. A read that fails because the held entry needs a newer release
+/// fails with that refusal as a catalog [`Error::Entry`](surrealdb_catalog::Error::Entry), not
+/// with the container's own error, so the reader is told which release it needs.
+macro_rules! impl_kv_value_embedding {
+	($name:ident) => {
+		impl surrealdb_kvs::value::KVValue for $name {
+			type KeyContext = ();
+
+			#[inline]
+			fn kv_encode_value(&self) -> ::anyhow::Result<Vec<u8>> {
+				Ok(::revision::to_vec(self)?)
+			}
+
+			#[inline]
+			fn kv_decode_value(bytes: &[u8], _: ()) -> ::anyhow::Result<Self> {
+				::revision::from_slice(bytes).map_err(|error| {
+					let error = ::anyhow::Error::from(error);
+					match error.chain().find_map(surrealdb_catalog::stored::EntryError::of_cause) {
+						Some(entry) => surrealdb_catalog::Error::Entry(entry).into(),
+						None => error,
+					}
+				})
+			}
+		}
+	};
+}
+
 pub mod catalog_version;
 pub mod changefeed;
 pub mod diskann;

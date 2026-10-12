@@ -18,6 +18,17 @@ impl Auth {
 		}
 	}
 
+	/// The actor this authentication acts as.
+	///
+	/// Every field of `Auth` is bound by name, so a field added to it must be given an accessor
+	/// here before the code that stores an `Auth` compiles.
+	pub fn actor(&self) -> &Actor {
+		let Auth {
+			actor,
+		} = self;
+		actor
+	}
+
 	pub fn id(&self) -> &str {
 		self.actor.id()
 	}

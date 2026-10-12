@@ -47,7 +47,7 @@ impl Ord for RecordIdKeyRange {
 				},
 			}
 		}
-		match compare_bounds(&self.start, &other.end) {
+		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
 			x => x,
 		}
@@ -297,7 +297,58 @@ impl<'de, F> BorrowDecode<'de, F> for RecordIdentity {
 	}
 }
 
+/// [`RecordIdKey::key_encoding_is_exact`] over a bound: an endpoint decides, an unbounded end
+/// holds nothing.
+fn bound_key_encoding_is_exact(bound: &Bound<RecordIdKey>) -> bool {
+	match bound {
+		Bound::Included(k) | Bound::Excluded(k) => k.key_encoding_is_exact(),
+		Bound::Unbounded => true,
+	}
+}
+
+/// [`RecordIdKey::key_encoding_is_exact`] over a value nested in a key.
+///
+/// Floats and decimals are normalised by the key encoding; a geometry or closure is not held
+/// losslessly by it; an int is exact. Containers, record ids and ranges are exact when what they
+/// hold is. Every other variant is encoded as it is.
+fn value_key_encoding_is_exact(value: &Value) -> bool {
+	fn range_bound(bound: &Bound<Value>) -> bool {
+		match bound {
+			Bound::Included(v) | Bound::Excluded(v) => value_key_encoding_is_exact(v),
+			Bound::Unbounded => true,
+		}
+	}
+	match value {
+		Value::Number(Number::Int(_)) => true,
+		Value::Number(_) | Value::Geometry(_) | Value::Closure(_) => false,
+		Value::Array(a) => a.iter().all(value_key_encoding_is_exact),
+		Value::Set(s) => s.iter().all(value_key_encoding_is_exact),
+		Value::Object(o) => o.values().all(value_key_encoding_is_exact),
+		Value::RecordId(id) => id.key.key_encoding_is_exact(),
+		Value::Range(r) => range_bound(&r.start) && range_bound(&r.end),
+		_ => true,
+	}
+}
+
 impl RecordIdKey {
+	/// Whether a record id with this key, written into a storage key and read back from it, is this
+	/// key exactly.
+	///
+	/// The key encoding normalises numbers (`-0.0` and `0.0`, `1.0` and `1`, a decimal's scale),
+	/// so a key that holds a float, a decimal, a geometry or a closure anywhere inside it is not
+	/// exact. Ints, strings and uuids are. Arrays, objects and ranges are exact when everything
+	/// they hold is.
+	pub fn key_encoding_is_exact(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(value_key_encoding_is_exact),
+			RecordIdKey::Object(o) => o.values().all(value_key_encoding_is_exact),
+			RecordIdKey::Range(r) => {
+				bound_key_encoding_is_exact(&r.start) && bound_key_encoding_is_exact(&r.end)
+			}
+		}
+	}
+
 	/// Whether `self` and `other` address the same record.
 	///
 	/// **Not `==`.** [`Number`]'s equality is cross-variant, so `[1] == [1dec]`

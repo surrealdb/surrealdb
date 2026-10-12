@@ -1,9 +1,16 @@
 //! Pre-decode filter ([`PreDecodeFilter`]) — **reject-only** optimisation during KV scans.
 //!
 //! Before paying full [`crate::catalog::Record`] deserialization, the scan may prove from
-//! **revision-encoded KV bytes alone** that the pushed-down WHERE cannot hold for this row. Only
+//! **the stored KV bytes alone** that the pushed-down WHERE cannot hold for this row. Only
 //! [`PreDecodeFilterOutcome::Reject`] drops the row without decode; every other outcome falls
 //! through to the normal path.
+//!
+//! A record in the stored-value encoding ([`crate::catalog::StoredRecord`]) is read in place:
+//! each leaf the predicate names is decoded alone and judged by the comparison the
+//! authoritative evaluator makes. A record in the `revision` encoding is walked on the wire, and
+//! its leaves are compared as wire bytes where [`wire_cmp`] covers the comparison. A record in a
+//! packed layout is read through its generation's descriptor, which a byte-level filter does not
+//! hold, so it is judged unknown and decoded.
 //!
 //! ## Timing (vs `scan_predicate`)
 //!
@@ -47,19 +54,18 @@ use std::sync::Arc;
 pub(crate) use compile::PreDecodeShape;
 use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
-pub(crate) use wire_cmp::{int_on_wire, strand_payload_str_unchecked};
+pub(crate) use wire_cmp::{int_on_wire, strand_payload_str};
 use wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 
 use crate::exec::object_extract::{
-	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr,
+	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr, descend_stored,
 	descend_to_value_walker_parts, extract_field_from_record_bytes, record_data_bytes,
-	scan_record_object_at_path_with_slots,
+	scan_record_object_at_path_with_slots, stored_record_object,
 };
 use crate::expr::operator::BinaryOperator;
 use crate::fnc::operate;
-use crate::key::KVKeyDecode;
-use crate::key::schema::RecordKey;
-use crate::val::{RecordId, Value};
+use crate::val::Value;
+use crate::val::stored::OrderedObjectRef;
 
 /// When a streaming leaf walk bails or misses, re-apply this op against a decoded leaf or
 /// [`Value::None`] to preserve parity with the ordinary [`PredNode::Leaf`] path.
@@ -268,6 +274,9 @@ pub(crate) enum Evidence {
 	Unknown,
 }
 
+/// A predicate never names the record's `id`: the id is the record's key, which the
+/// stored bytes do not hold. [`PreDecodeShape`] refuses any predicate whose path starts
+/// at `id`, and every reader of the tree relies on that refusal.
 #[derive(Debug)]
 pub(crate) struct PreDecodeFilter {
 	pub(crate) root: PredNode,
@@ -287,8 +296,20 @@ impl PreDecodeFilter {
 		}
 	}
 
-	pub(crate) fn apply(&self, key: &[u8], record_bytes: &[u8]) -> PreDecodeFilterOutcome {
-		let ev = self.eval_node(key, record_bytes, &[], &self.root);
+	/// Judges the stored record `record_bytes`, the value of the record `key`
+	/// names, from its bytes alone.
+	///
+	/// The caller has admitted the record's generation against its table's
+	/// layouts ([`crate::kvs::RowGate`]) before this reads any field of it: a
+	/// row of a generation the table does not list is refused, never judged
+	/// here. A row this reads in neither encoding, a packed row included, is
+	/// judged unknown, which keeps it.
+	pub(crate) fn apply(&self, record_bytes: &[u8]) -> PreDecodeFilterOutcome {
+		let ev = match stored_record_object(record_bytes) {
+			Some(Some(data)) => self.eval_stored(data, &[], &self.root),
+			Some(None) => Evidence::Unknown,
+			None => self.eval_node(record_bytes, &[], &self.root),
+		};
 		match ev {
 			Evidence::ProvablyFalse => PreDecodeFilterOutcome::Reject,
 			Evidence::ProvablyTrue | Evidence::Unknown => PreDecodeFilterOutcome::NeedFullDecode,
@@ -301,21 +322,15 @@ impl PreDecodeFilter {
 	/// `NavigatePrefix` chains are folded into `prefix` rather than carrying a
 	/// per-anchor state through the tree; the walker-based field extractor
 	/// handles missing intermediates itself.
-	fn eval_node(
-		&self,
-		key: &[u8],
-		record_bytes: &[u8],
-		prefix: &[&PathSegment],
-		node: &PredNode,
-	) -> Evidence {
+	fn eval_node(&self, record_bytes: &[u8], prefix: &[&PathSegment], node: &PredNode) -> Evidence {
 		match node {
 			PredNode::And(xs) => {
-				combine_and(xs.iter().map(|x| self.eval_node(key, record_bytes, prefix, x)))
+				combine_and(xs.iter().map(|x| self.eval_node(record_bytes, prefix, x)))
 			}
 			PredNode::Or(xs) => {
-				combine_or(xs.iter().map(|x| self.eval_node(key, record_bytes, prefix, x)))
+				combine_or(xs.iter().map(|x| self.eval_node(record_bytes, prefix, x)))
 			}
-			PredNode::Not(inner) => match self.eval_node(key, record_bytes, prefix, inner) {
+			PredNode::Not(inner) => match self.eval_node(record_bytes, prefix, inner) {
 				Evidence::ProvablyFalse => Evidence::ProvablyTrue,
 				Evidence::ProvablyTrue => Evidence::ProvablyFalse,
 				Evidence::Unknown => Evidence::Unknown,
@@ -327,7 +342,6 @@ impl PreDecodeFilter {
 				literal_wire,
 				reversed,
 			} => self.eval_leaf(
-				key,
 				record_bytes,
 				prefix,
 				path,
@@ -361,10 +375,6 @@ impl PreDecodeFilter {
 			} => self.eval_fused_flat(record_bytes, prefix, clauses),
 			PredNode::NavigatePrefix {
 				segment,
-				child: _,
-			} if segment.as_str() == "id" => Evidence::Unknown,
-			PredNode::NavigatePrefix {
-				segment,
 				child,
 			} => {
 				// Fold the navigate segment into the path prefix and keep
@@ -380,7 +390,7 @@ impl PreDecodeFilter {
 				let mut next: Vec<&PathSegment> = Vec::with_capacity(prefix.len() + 1);
 				next.extend_from_slice(prefix);
 				next.push(segment);
-				self.eval_node(key, record_bytes, &next, child.as_ref())
+				self.eval_node(record_bytes, &next, child.as_ref())
 			}
 		}
 	}
@@ -442,7 +452,7 @@ impl PreDecodeFilter {
 				// only here, not on the hot path.
 				let full: Vec<PathSegment> =
 					prefix.iter().map(|&s| s.clone()).chain(path.iter().cloned()).collect();
-				self.fallback_leaf_streaming(record_bytes, &full, fallback)
+				self.fallback_leaf_streaming(record_bytes, &full, evaluator, fallback)
 			}
 		}
 	}
@@ -451,18 +461,12 @@ impl PreDecodeFilter {
 		&self,
 		record_bytes: &[u8],
 		full: &[PathSegment],
+		evaluator: &dyn StreamingLeafEvaluator,
 		fallback: &LeafFallback,
 	) -> Evidence {
 		match extract_field_from_record_bytes(record_bytes, full, self.depth_limit) {
-			Extracted::Found(v) => {
-				evidence_from_binary_cmp(&fallback.op, &fallback.literal, fallback.reversed, &v)
-			}
-			Extracted::Missing => evidence_from_binary_cmp(
-				&fallback.op,
-				&fallback.literal,
-				fallback.reversed,
-				&Value::None,
-			),
+			Extracted::Found(v) => evaluator.evaluate_decoded(&v, fallback),
+			Extracted::Missing => evaluator.evaluate_missing(fallback),
 			Extracted::Bail => Evidence::Unknown,
 		}
 	}
@@ -510,7 +514,6 @@ impl PreDecodeFilter {
 	#[allow(clippy::too_many_arguments)]
 	fn eval_leaf(
 		&self,
-		key: &[u8],
 		record_bytes: &[u8],
 		prefix: &[&PathSegment],
 		path: &[PathSegment],
@@ -519,23 +522,6 @@ impl PreDecodeFilter {
 		literal_wire: &LiteralWire,
 		reversed: bool,
 	) -> Evidence {
-		// Fast-path: equality on the synthetic `id` field at the row root —
-		// derive the record id straight from the KV key, no decode.
-		if prefix.is_empty() && path.len() == 1 && path[0].as_str() == "id" {
-			let Ok(k) = RecordKey::decode_key(key) else {
-				return Evidence::Unknown;
-			};
-			let v = Value::RecordId(RecordId {
-				table: k.tb.into_owned(),
-				key: k.id.into_owned(),
-			});
-			return evidence_from_binary_cmp(op, literal, reversed, &v);
-		}
-		// `id.<sub>` at the row root cannot be reliably proved from the
-		// encoded value alone — table-level / projection nuances apply.
-		if prefix.is_empty() && path.first().is_some_and(|s| s.as_str() == "id") && path.len() > 1 {
-			return Evidence::Unknown;
-		}
 		// Single descent: try the wire-fast path on the borrowed value
 		// bytes; if the wire path doesn't cover the (op, type) combination,
 		// decode just this one value from the same slot bytes so we never
@@ -558,6 +544,141 @@ impl PreDecodeFilter {
 			DescendResult::Missing => evidence_from_binary_cmp(op, literal, reversed, &Value::None),
 			DescendResult::Bail => Evidence::Unknown,
 		}
+	}
+
+	/// [`Self::eval_node`] over `data`, the data of a record in the
+	/// stored-value encoding, read in place.
+	///
+	/// Each leaf is decoded alone and judged by the comparison the
+	/// authoritative evaluator makes of it; a leaf whose bytes do not decode is
+	/// unknown.
+	fn eval_stored(
+		&self,
+		data: OrderedObjectRef<'_>,
+		prefix: &[&PathSegment],
+		node: &PredNode,
+	) -> Evidence {
+		match node {
+			PredNode::And(xs) => combine_and(xs.iter().map(|x| self.eval_stored(data, prefix, x))),
+			PredNode::Or(xs) => combine_or(xs.iter().map(|x| self.eval_stored(data, prefix, x))),
+			PredNode::Not(inner) => match self.eval_stored(data, prefix, inner) {
+				Evidence::ProvablyFalse => Evidence::ProvablyTrue,
+				Evidence::ProvablyTrue => Evidence::ProvablyFalse,
+				Evidence::Unknown => Evidence::Unknown,
+			},
+			PredNode::Leaf {
+				path,
+				op,
+				literal,
+				reversed,
+				..
+			} => match self.stored_leaf(data, prefix, path) {
+				DescendResult::Found(Some(v)) => {
+					evidence_from_binary_cmp(op, literal, *reversed, &v)
+				}
+				DescendResult::Missing => {
+					evidence_from_binary_cmp(op, literal, *reversed, &Value::None)
+				}
+				DescendResult::Found(None) | DescendResult::Bail => Evidence::Unknown,
+			},
+			PredNode::LeafSetMembership {
+				path,
+				op,
+				set,
+				literal_set,
+				..
+			} => match self.stored_leaf(data, prefix, path) {
+				DescendResult::Found(Some(v)) => {
+					hash_set_evidence_for(op, set.contains(&v), &v, literal_set)
+				}
+				// Field absent → not in set.
+				DescendResult::Missing => Self::set_evidence_for(op, false),
+				DescendResult::Found(None) | DescendResult::Bail => Evidence::Unknown,
+			},
+			PredNode::LeafStreaming {
+				path,
+				evaluator,
+				fallback,
+			} => match self.stored_leaf(data, prefix, path) {
+				DescendResult::Found(Some(v)) => evaluator.evaluate_decoded(&v, fallback),
+				DescendResult::Missing => evaluator.evaluate_missing(fallback),
+				DescendResult::Found(None) | DescendResult::Bail => Evidence::Unknown,
+			},
+			PredNode::FusedFlatMapAnd {
+				clauses,
+				..
+			} => self.eval_stored_fused(data, prefix, clauses),
+			PredNode::NavigatePrefix {
+				segment,
+				child,
+			} => {
+				let mut next: Vec<&PathSegment> = Vec::with_capacity(prefix.len() + 1);
+				next.extend_from_slice(prefix);
+				next.push(segment);
+				self.eval_stored(data, &next, child.as_ref())
+			}
+		}
+	}
+
+	/// The leaf `prefix ++ path` names in a stored-value record's `data`,
+	/// decoded: `Found(None)` when its bytes do not decode.
+	fn stored_leaf(
+		&self,
+		data: OrderedObjectRef<'_>,
+		prefix: &[&PathSegment],
+		path: &[PathSegment],
+	) -> DescendResult<Option<Value>> {
+		match descend_stored(data, prefix, path, self.depth_limit) {
+			DescendResult::Found(leaf) => DescendResult::Found(leaf.decode().ok()),
+			DescendResult::Missing => DescendResult::Missing,
+			DescendResult::Bail => DescendResult::Bail,
+		}
+	}
+
+	/// [`Self::eval_fused_flat`] over a stored-value record's `data`: each
+	/// clause's field of the object `prefix` names, decoded once for all of
+	/// the clause's ops.
+	fn eval_stored_fused(
+		&self,
+		data: OrderedObjectRef<'_>,
+		prefix: &[&PathSegment],
+		clauses: &FusedFlatClauses,
+	) -> Evidence {
+		if clauses.is_empty() {
+			return Evidence::Unknown;
+		}
+		let none = || {
+			combine_and(clauses.iter().flat_map(|clause| {
+				clause.ops.iter().map(|opc| {
+					evidence_from_binary_cmp(&opc.op, &opc.literal, opc.reversed, &Value::None)
+				})
+			}))
+		};
+		let object = if prefix.is_empty() {
+			data
+		} else {
+			match descend_stored(data, prefix, &[], self.depth_limit) {
+				// An object whose keys do not ascend is refused by a whole decode.
+				DescendResult::Found(value) => match value.as_ordered_object() {
+					Ok(Some(object)) => object,
+					_ => return Evidence::Unknown,
+				},
+				DescendResult::Missing => return none(),
+				DescendResult::Bail => return Evidence::Unknown,
+			}
+		};
+		combine_and(clauses.iter().flat_map(|clause| {
+			// An absent field is NONE; one whose bytes do not read is unknown.
+			let value = match std::str::from_utf8(&clause.key_utf8).map(|k| object.get(k)) {
+				Ok(Ok(Some(value))) => value.decode().ok(),
+				Ok(Ok(None)) => Some(Value::None),
+				Ok(Err(_)) | Err(_) => None,
+			};
+			clause.ops.iter().map(move |opc| match &value {
+				Some(v) => evidence_from_binary_cmp(&opc.op, &opc.literal, opc.reversed, v),
+				None => Evidence::Unknown,
+			})
+		}))
 	}
 
 	fn eval_fused_flat(
@@ -823,7 +944,12 @@ mod tests {
 	};
 	use crate::catalog::Record;
 	use crate::expr::operator::BinaryOperator;
-	use crate::val::{Number, Object, Value};
+	use crate::val::{Number, Object, RecordId, Value};
+
+	/// The format the generation-0 samples are written in.
+	const DOCUMENT: crate::catalog::RecordFormat = crate::catalog::RecordFormat::Document {
+		generation: None,
+	};
 
 	/// Depth limit used in test fixtures. Matches the default
 	/// `ctx.config.exec.idiom_recursion_limit` (256) so test behaviour reflects
@@ -904,7 +1030,7 @@ mod tests {
 	fn empty_and_never_rejects() {
 		let pf = PreDecodeFilter::new(PredNode::And(Vec::new()), TEST_DEPTH_LIMIT);
 		let rec = wire_record_plain_object(Object::default());
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -915,7 +1041,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `==` is `Value`'s derived `PartialEq`, under which a regex equals only a
@@ -1015,9 +1141,7 @@ mod tests {
 						}
 						let row = Object::from(fields);
 						let rec = wire_record_plain_object(row.clone());
-						if pf.apply(&[], &rec) == PreDecodeFilterOutcome::Reject
-							&& holds(shape, &row)
-						{
+						if pf.apply(&rec) == PreDecodeFilterOutcome::Reject && holds(shape, &row) {
 							wrong.push(format!("{shape:?} on v = {v:?}"));
 						}
 					}
@@ -1035,7 +1159,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -1046,7 +1170,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(99)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `0.1f` and `0.1dec` compare equal but hash apart, so the decoded probe
@@ -1075,7 +1199,7 @@ mod tests {
 			let obj = Object::from(BTreeMap::from([(Strand::from("a"), field.clone())]));
 			let rec = wire_record_plain_object(obj);
 			assert_eq!(
-				pf.apply(&[], &rec),
+				pf.apply(&rec),
 				PreDecodeFilterOutcome::NeedFullDecode,
 				"stored {stored:?} field {field:?}"
 			);
@@ -1098,7 +1222,7 @@ mod tests {
 			nested(Value::Number(Number::Float(0.1))),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	/// A number-free value keeps its rejection even against a set full of
@@ -1122,7 +1246,7 @@ mod tests {
 			)]))),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A decimal's stored bytes carry its scale and the sign of a zero, so one
@@ -1204,8 +1328,7 @@ mod tests {
 				]);
 				for (form, shape) in [("alone", leaf), ("with b = 1", fused)] {
 					let rejects = |shape: PreDecodeShape| {
-						shape.filter(TEST_DEPTH_LIMIT).apply(&[], &rec)
-							== PreDecodeFilterOutcome::Reject
+						shape.filter(TEST_DEPTH_LIMIT).apply(&rec) == PreDecodeFilterOutcome::Reject
 					};
 					let negated = PreDecodeShape::Not(Box::new(shape.clone()));
 					let (rejected, negation_rejected) = (rejects(shape), rejects(negated));
@@ -1234,7 +1357,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1245,7 +1368,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1256,7 +1379,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(5)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1271,7 +1394,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("msg"), Value::String("hello".into()))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1288,7 +1411,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("b".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1300,7 +1423,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1317,25 +1440,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(3))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
-	}
-
-	#[test]
-	fn navigate_id_segment_forces_full_decode() {
-		let root = PredNode::NavigatePrefix {
-			segment: "id".into(),
-			child: Box::new(leaf(
-				vec!["x".into()],
-				BinaryOperator::Equal,
-				Value::Number(Number::Int(1)),
-				false,
-			)),
-		};
-		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-		let obj =
-			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
-		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// Navigate through a missing intermediate field: descendant leaf reads as `Value::None`,
@@ -1356,7 +1461,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("other"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// `FusedFlatClauses::try_new` rejects out-of-order keys.
@@ -1425,7 +1530,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("msg"), Value::String("hello".into()))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1448,7 +1553,7 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("n"), Value::Number(Number::Int(1)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	#[test]
@@ -1475,7 +1580,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1505,7 +1610,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("b".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1536,7 +1641,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Int(1))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A bit index identifies a literal value, not a spelling of one. A set that
@@ -1592,7 +1697,7 @@ mod tests {
 			)]));
 			let rec = wire_record_plain_object(obj);
 			assert_eq!(
-				pf.apply(&[], &rec),
+				pf.apply(&rec),
 				PreDecodeFilterOutcome::NeedFullDecode,
 				"element {element:?} satisfies the whole set"
 			);
@@ -1634,7 +1739,7 @@ mod tests {
 			Value::from(vec![Value::Number(Number::Decimal("0.1".parse().unwrap()))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	/// A compound element holding a number, judged against a set holding one,
@@ -1680,7 +1785,7 @@ mod tests {
 					},
 				};
 				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-				assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
+				assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
 			}
 		}
 	}
@@ -1733,11 +1838,7 @@ mod tests {
 					},
 				};
 				let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-				assert_eq!(
-					pf.apply(&[], &rec),
-					PreDecodeFilterOutcome::NeedFullDecode,
-					"{element:?}"
-				);
+				assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::NeedFullDecode, "{element:?}");
 			}
 		}
 	}
@@ -1772,7 +1873,7 @@ mod tests {
 		for _ in 0..SEED_DRAWS {
 			for (shape, rec) in &cases {
 				let pf = shape.filter(TEST_DEPTH_LIMIT);
-				assert_eq!(pf.apply(&[], rec), PreDecodeFilterOutcome::NeedFullDecode, "{shape:?}");
+				assert_eq!(pf.apply(rec), PreDecodeFilterOutcome::NeedFullDecode, "{shape:?}");
 			}
 		}
 	}
@@ -1804,7 +1905,7 @@ mod tests {
 			Value::from(vec![Value::String("a".into()), Value::String("z".into())]),
 		)]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
 	}
 
 	#[test]
@@ -1827,7 +1928,326 @@ mod tests {
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(2)))]));
 		let rec = wire_record_plain_object(obj);
-		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+		assert_eq!(pf.apply(&rec), PreDecodeFilterOutcome::Reject);
+	}
+
+	/// The records [`stored_value_records_are_judged_as_revision_records_are`]
+	/// judges: scalars of each comparable kind, nested objects, arrays, a
+	/// field that is not an object where a path descends through it, numbers
+	/// of differing variants, an empty record and one wide enough to index.
+	fn differential_records() -> Vec<Object> {
+		let object = |entries: Vec<(&str, Value)>| {
+			Object::from(
+				entries.into_iter().map(|(k, v)| (Strand::from(k), v)).collect::<BTreeMap<_, _>>(),
+			)
+		};
+		let int = |i: i64| Value::Number(Number::Int(i));
+		let text = |s: &str| Value::String(s.into());
+		let mut wide = Object::default();
+		for i in 0..12 {
+			wide.0.insert(Strand::from(format!("k{i:02}")), int(i));
+		}
+		vec![
+			object(vec![
+				("a", int(1)),
+				("b", text("x")),
+				("c", Value::from(vec![int(1), int(2), int(3)])),
+				("d", Value::Object(object(vec![("e", int(5)), ("f", text("hello world"))]))),
+				("g", Value::Bool(true)),
+				("h", Value::Number(Number::Float(1.5))),
+			]),
+			object(vec![
+				("a", int(2)),
+				("b", text("y")),
+				("c", Value::from(Vec::<Value>::new())),
+				("d", Value::Object(object(vec![("e", text("str"))]))),
+				("tags", Value::from(vec![text("red"), text("blue")])),
+			]),
+			object(vec![("a", text("1")), ("b", Value::Null), ("d", int(5))]),
+			object(vec![
+				("a", Value::Number(Number::Decimal("1".parse().unwrap()))),
+				("b", Value::Number(Number::Float(1.0))),
+				("c", Value::from(vec![text("a"), int(2)])),
+			]),
+			Object::default(),
+			wide,
+		]
+	}
+
+	/// The predicates [`stored_value_records_are_judged_as_revision_records_are`]
+	/// judges: every node kind the compiler emits, over present, absent, nested
+	/// and mistyped fields.
+	fn differential_predicates() -> Vec<PredNode> {
+		use BinaryOperator::*;
+
+		let int = |i: i64| Value::Number(Number::Int(i));
+		let text = |s: &str| Value::String(s.into());
+		let path = |p: &[&str]| p.iter().copied().map(PathSegment::from).collect::<Vec<_>>();
+		let cmp = |p: &[&str], op: BinaryOperator, lit: Value| leaf(path(p), op, lit, false);
+		let streaming = |p: &[&str], evaluator: Arc<dyn super::StreamingLeafEvaluator>, op, lit| {
+			PredNode::LeafStreaming {
+				path: path(p),
+				evaluator,
+				fallback: LeafFallback {
+					op,
+					literal: lit,
+					reversed: false,
+				},
+			}
+		};
+		let substring = |p: &[&str], needle: &str, negated: bool| {
+			let evaluator = Arc::new(SubstringMatch {
+				finder: memmem::Finder::new(needle.as_bytes()).into_owned(),
+				negated,
+			});
+			streaming(
+				p,
+				evaluator,
+				if negated {
+					NotContain
+				} else {
+					Contain
+				},
+				text(needle),
+			)
+		};
+		let contains = |p: &[&str], needle: Value, negated: bool| {
+			let evaluator = Arc::new(ArrayElementContains {
+				needle: Arc::new(needle.clone()),
+				needle_wire: Arc::new(LiteralWire::from_value(&needle)),
+				negated,
+			});
+			streaming(
+				p,
+				evaluator,
+				if negated {
+					NotContain
+				} else {
+					Contain
+				},
+				needle,
+			)
+		};
+		let overlaps = |p: &[&str], members: Vec<Value>, mode: OverlapMode| {
+			let set: HashSet<Value> = members.iter().cloned().collect();
+			let tables = overlap_streaming_from_set(&set);
+			let evaluator = Arc::new(ArrayOverlapsLiteralSet {
+				literal_to_idx: tables.literal_to_idx,
+				wire_to_idx: tables.wire_to_idx,
+				literal_set: tables.literal_set,
+				literal_count: tables.literal_count,
+				mode,
+			});
+			let op = match mode {
+				OverlapMode::Any => ContainAny,
+				OverlapMode::None => ContainNone,
+				OverlapMode::All => ContainAll,
+			};
+			streaming(p, evaluator, op, Value::from(members))
+		};
+		let members = |values: Vec<Value>| Arc::new(values.into_iter().collect::<HashSet<_>>());
+		let fused = |clauses: Vec<(&str, BinaryOperator, Value)>| PredNode::FusedFlatMapAnd {
+			clauses: FusedFlatClauses::try_new(
+				clauses
+					.into_iter()
+					.map(|(k, op, lit)| fused_clause(k.as_bytes().to_vec(), op, lit, false))
+					.collect(),
+			)
+			.expect("sorted unique"),
+		};
+		let navigate = |segment: &str, child: PredNode| PredNode::NavigatePrefix {
+			segment: segment.into(),
+			child: Box::new(child),
+		};
+		vec![
+			cmp(&["a"], Equal, int(1)),
+			cmp(&["a"], NotEqual, int(1)),
+			cmp(&["a"], MoreThan, int(1)),
+			cmp(&["a"], LessThanEqual, int(1)),
+			cmp(&["a"], ExactEqual, int(1)),
+			leaf(path(&["a"]), LessThan, int(1), true),
+			cmp(&["b"], Equal, text("x")),
+			cmp(&["b"], LessThan, text("y")),
+			cmp(&["h"], MoreThanEqual, Value::Number(Number::Float(1.5))),
+			cmp(&["zz"], Equal, Value::None),
+			cmp(&["zz"], NotEqual, int(1)),
+			cmp(&["d", "e"], Equal, int(5)),
+			cmp(&["d", "f"], Contain, text("world")),
+			cmp(&["d", "e", "x"], Equal, int(5)),
+			cmp(&["k07"], MoreThan, int(6)),
+			navigate("d", cmp(&["e"], Equal, int(5))),
+			set_membership(path(&["a"]), Inside, members(vec![int(1), int(2)]), false),
+			set_membership(path(&["b"]), NotInside, members(vec![text("x")]), false),
+			set_membership(
+				path(&["a"]),
+				Inside,
+				members(vec![Value::Number(Number::Decimal("1".parse().unwrap()))]),
+				false,
+			),
+			substring(&["b"], "x", false),
+			substring(&["d", "f"], "world", true),
+			contains(&["c"], int(2), false),
+			contains(&["tags"], text("red"), true),
+			overlaps(&["tags"], vec![text("red"), text("green")], OverlapMode::Any),
+			overlaps(&["c"], vec![int(1), int(9)], OverlapMode::All),
+			overlaps(&["c"], vec![int(7)], OverlapMode::None),
+			fused(vec![("a", MoreThan, int(0)), ("b", Equal, text("x"))]),
+			fused(vec![("k03", Equal, int(3)), ("k11", LessThan, int(5))]),
+			navigate(
+				"d",
+				PredNode::FusedFlatMapAnd {
+					clauses: FusedFlatClauses::try_new(vec![
+						fused_clause(b"e".to_vec(), Equal, int(5), false),
+						fused_clause(b"f".to_vec(), Equal, text("hello world"), false),
+					])
+					.expect("sorted unique"),
+				},
+			),
+			PredNode::And(vec![cmp(&["a"], Equal, int(1)), cmp(&["b"], Equal, text("y"))]),
+			PredNode::Or(vec![cmp(&["a"], Equal, int(9)), cmp(&["g"], Equal, Value::Bool(true))]),
+			PredNode::Not(Box::new(cmp(&["a"], Equal, int(1)))),
+		]
+	}
+
+	/// What the predicate is over the decoded record, where its leaves can say:
+	/// `None` when a path descends through a field that is not an object, or
+	/// an operator gives no boolean.
+	fn truth(node: &PredNode, data: &Value, prefix: &[&str]) -> Option<bool> {
+		let pick = |p: &[PathSegment]| -> Option<Value> {
+			let mut v = data;
+			for segment in prefix.iter().copied().chain(p.iter().map(PathSegment::as_str)) {
+				v = match v {
+					Value::Object(o) => match o.get(segment) {
+						Some(inner) => inner,
+						None => return Some(Value::None),
+					},
+					_ => return None,
+				};
+			}
+			Some(v.clone())
+		};
+		let judge = |op: &BinaryOperator, left: &Value, right: &Value| match super::apply_binary(
+			op, left, right,
+		) {
+			Some(Value::Bool(b)) => Some(b),
+			_ => None,
+		};
+		let compare = |p: &[PathSegment], op: &BinaryOperator, lit: &Value, reversed: bool| {
+			let v = pick(p)?;
+			if reversed {
+				judge(op, lit, &v)
+			} else {
+				judge(op, &v, lit)
+			}
+		};
+		// Three-valued: a definite part decides a conjunction or disjunction
+		// whatever the others are.
+		let all = |parts: Vec<Option<bool>>| match parts.contains(&Some(false)) {
+			true => Some(false),
+			false => parts.into_iter().collect::<Option<Vec<_>>>().map(|_| true),
+		};
+		match node {
+			PredNode::And(xs) => all(xs.iter().map(|x| truth(x, data, prefix)).collect()),
+			PredNode::Or(xs) => {
+				let parts: Vec<_> = xs.iter().map(|x| truth(x, data, prefix)).collect();
+				match parts.contains(&Some(true)) {
+					true => Some(true),
+					false => parts.into_iter().collect::<Option<Vec<_>>>().map(|_| false),
+				}
+			}
+			PredNode::Not(inner) => truth(inner, data, prefix).map(|b| !b),
+			PredNode::Leaf {
+				path,
+				op,
+				literal,
+				reversed,
+				..
+			} => compare(path, op, literal, *reversed),
+			PredNode::LeafSetMembership {
+				path,
+				op,
+				set,
+				..
+			} => compare(path, op, &Value::from(set.iter().cloned().collect::<Vec<_>>()), false),
+			PredNode::LeafStreaming {
+				path,
+				fallback,
+				..
+			} => judge(&fallback.op, &pick(path)?, &fallback.literal),
+			PredNode::FusedFlatMapAnd {
+				clauses,
+				..
+			} => {
+				let mut parts = Vec::new();
+				for clause in clauses.iter() {
+					let key = PathSegment::from(std::str::from_utf8(&clause.key_utf8).unwrap());
+					for opc in &clause.ops {
+						parts.push(compare(
+							std::slice::from_ref(&key),
+							&opc.op,
+							&opc.literal,
+							opc.reversed,
+						));
+					}
+				}
+				all(parts)
+			}
+			PredNode::NavigatePrefix {
+				segment,
+				child,
+			} => {
+				let mut next = prefix.to_vec();
+				next.push(segment.as_str());
+				truth(child, data, &next)
+			}
+		}
+	}
+
+	/// A stored-value record is judged as its `revision` encoding is: it is
+	/// rejected only when the predicate is false of the decoded record, and
+	/// rejected whenever the `revision` encoding of it is. Covers a record
+	/// whose `id` its key replaces and one that stores none.
+	#[test]
+	fn stored_value_records_are_judged_as_revision_records_are() {
+		let rid = RecordId::new("t".into(), crate::val::RecordIdKey::Number(1));
+		let mut rejected = 0;
+		for object in differential_records() {
+			let mut with_id = object.clone();
+			with_id.0.insert(Strand::from("id"), Value::RecordId(rid.clone()));
+			let data = Value::Object(with_id);
+			let revision = wire_record_plain_object(match &data {
+				Value::Object(o) => o.clone(),
+				_ => unreachable!(),
+			});
+			let keyed =
+				crate::catalog::encode_record(DOCUMENT, None, &data, Some(&rid)).expect("encodes");
+			let bare =
+				crate::catalog::encode_record(DOCUMENT, None, &Value::Object(object.clone()), None)
+					.expect("encodes");
+			for predicate in differential_predicates() {
+				let pf = PreDecodeFilter::new(predicate.clone(), TEST_DEPTH_LIMIT);
+				let expected = pf.apply(&revision);
+				let truth = truth(&predicate, &data, &[]);
+				for (encoding, bytes) in [("keyed", &keyed), ("bare", &bare)] {
+					let outcome = pf.apply(bytes);
+					if outcome == PreDecodeFilterOutcome::Reject {
+						rejected += 1;
+						assert_eq!(
+							truth,
+							Some(false),
+							"{encoding} record rejected though {predicate:?} is not false of {data:?}"
+						);
+					}
+					if expected == PreDecodeFilterOutcome::Reject {
+						assert_eq!(
+							outcome, expected,
+							"{encoding} record not rejected by {predicate:?} over {data:?}"
+						);
+					}
+				}
+			}
+		}
+		assert!(rejected > 0, "the corpus rejects no stored-value record");
 	}
 
 	// ---------- a regex against strings: `Value::equal` is not `==` ----------
@@ -1915,7 +2335,7 @@ mod tests {
 		for (op, field, literal) in cases {
 			assert!(operator_holds(&op, &field, &literal), "{field:?} {op:?} {literal:?}");
 			let pf = v_shape(op.clone(), literal.clone()).filter(TEST_DEPTH_LIMIT);
-			if pf.apply(&[], &record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
 				rejected.push(format!("{field:?} {op:?} {literal:?}"));
 			}
 		}
@@ -1935,7 +2355,7 @@ mod tests {
 		]);
 		let pf = shape.filter(TEST_DEPTH_LIMIT);
 		assert!(matches!(pf.root, PredNode::LeafSetMembership { .. }), "{:?}", pf.root);
-		assert_eq!(pf.apply(&[], &record_with_v(field)), PreDecodeFilterOutcome::NeedFullDecode);
+		assert_eq!(pf.apply(&record_with_v(field)), PreDecodeFilterOutcome::NeedFullDecode);
 	}
 
 	/// `NOT IN` and `CONTAINSNONE` read the same miss as proof that a stored
@@ -1953,7 +2373,7 @@ mod tests {
 			assert!(!operator_holds(&op, &field, &literal), "{field:?} {op:?}");
 			let shape = PreDecodeShape::Not(Box::new(v_shape(op.clone(), literal.clone())));
 			let pf = shape.filter(TEST_DEPTH_LIMIT);
-			if pf.apply(&[], &record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&record_with_v(field.clone())) == PreDecodeFilterOutcome::Reject {
 				rejected.push(format!("NOT ({field:?} {op:?})"));
 			}
 		}
@@ -1977,7 +2397,7 @@ mod tests {
 		let mut rejected = Vec::new();
 		for (name, root, stored) in [("IN", inside, field), ("CONTAINSANY", any, array)] {
 			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
-			if pf.apply(&[], &record_with_v(stored)) == PreDecodeFilterOutcome::Reject {
+			if pf.apply(&record_with_v(stored)) == PreDecodeFilterOutcome::Reject {
 				rejected.push(name);
 			}
 		}
@@ -2011,7 +2431,7 @@ mod tests {
 			);
 			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
 			assert_eq!(
-				pf.apply(&[], &record_with_v(field.clone())),
+				pf.apply(&record_with_v(field.clone())),
 				PreDecodeFilterOutcome::Reject,
 				"NOT IN {field:?}"
 			);
@@ -2026,7 +2446,7 @@ mod tests {
 				TEST_DEPTH_LIMIT,
 			);
 			assert_eq!(
-				pf.apply(&[], &record_with_v(array)),
+				pf.apply(&record_with_v(array)),
 				PreDecodeFilterOutcome::Reject,
 				"CONTAINSNONE {field:?}"
 			);

@@ -9,10 +9,11 @@ use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::catalog::auth::AuthLimit;
 use crate::catalog::{ExprText, FromStored, PathText, Permission, StoredPermission};
-use crate::expr as runtime;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::{Array, Object, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 /// REST API method.
 ///
@@ -22,22 +23,29 @@ use crate::val::{Array, Object, Value};
 /// the `SurrealValue` mapping and must not change shape or variant order
 /// without a revision bump.
 #[revisioned(revision = 1)]
-#[derive(SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Stored)]
 #[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, lowercase)]
+#[stored(since = "4.0")]
 pub enum ApiMethod {
 	/// REST DELETE method.
+	#[stored(n = 1)]
 	Delete,
 	/// REST GET method.
 	#[default]
+	#[stored(n = 2)]
 	Get,
 	/// REST PATCH method.
+	#[stored(n = 3)]
 	Patch,
 	/// REST POST method.
+	#[stored(n = 4)]
 	Post,
 	/// REST PUT method.
+	#[stored(n = 5)]
 	Put,
 	/// REST TRACE method.
+	#[stored(n = 6)]
 	Trace,
 }
 
@@ -85,20 +93,31 @@ impl From<ApiMethod> for runtime::ApiMethod {
 /// Not `Default`: a route path has no meaningful empty value, and every
 /// construction site supplies one.
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredApiDefinition {
 	/// The API's route path, as the canonical text `Path` renders to.
+	#[stored(n = 2)]
 	pub path: PathText,
 	/// The actions of the API.
+	#[stored(n = 4)]
 	pub actions: Vec<StoredApiActionDefinition>,
 	/// Canonical SurrealQL text of the fallback (`THEN`) clause's expression.
+	#[stored(n = 6)]
 	pub fallback: Option<ExprText>,
 	/// The config of the API.
+	#[stored(n = 8)]
 	pub config: StoredApiConfigDefinition,
 	/// An optional comment for the definition.
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
+	#[stored(n = 10)]
 	pub auth_limit: AuthLimit,
 }
 
@@ -138,7 +157,7 @@ impl StoredApiDefinition {
 	}
 }
 
-impl_kv_value_revisioned!(StoredApiDefinition);
+impl_kv_value_catalog!(StoredApiDefinition);
 
 impl ApiDefinition {
 	fn to_runtime_definition(&self) -> runtime::statements::DefineApiStatement {
@@ -183,11 +202,15 @@ impl InfoStructure for ApiMethod {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredApiActionDefinition {
+	#[stored(n = 2)]
 	pub methods: Vec<ApiMethod>,
 	/// Canonical SurrealQL text of the action's (`THEN`) expression.
+	#[stored(n = 4)]
 	pub action: ExprText,
+	#[stored(n = 6)]
 	pub config: StoredApiConfigDefinition,
 }
 
@@ -215,11 +238,14 @@ impl InfoStructure for ApiAction {
 
 /// The API config definition.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredApiConfigDefinition {
 	/// The middleware of the API.
+	#[stored(n = 2)]
 	pub middleware: Vec<MiddlewareDefinition>,
 	/// The permissions of the API.
+	#[stored(n = 4)]
 	pub permissions: StoredPermission,
 }
 
@@ -298,11 +324,14 @@ impl ToSql for ApiConfig {
 
 /// API Middleware definition.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct MiddlewareDefinition {
 	/// The name of function to invoke.
+	#[stored(n = 2)]
 	pub name: Strand,
 	/// The arguments to pass to the function.
+	#[stored(n = 4)]
 	pub args: Vec<Value>,
 }
 

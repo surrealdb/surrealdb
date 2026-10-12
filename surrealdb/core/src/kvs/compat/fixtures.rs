@@ -92,7 +92,7 @@ pub fn database_with_changefeed() -> DatabaseDefinition {
 		strict: false,
 		comment: Some("Event store".to_string()),
 		changefeed: Some(ChangeFeed {
-			expiry: Duration::from_secs(3600),
+			expiry: Duration::from_secs(3600).into(),
 			store_diff: true,
 		}),
 	}
@@ -196,7 +196,7 @@ pub fn table_schemafull() -> StoredTableDefinition {
 		view: None,
 		permissions: StoredPermissions::default(),
 		changefeed: Some(ChangeFeed {
-			expiry: Duration::from_secs(86400),
+			expiry: Duration::from_secs(86400).into(),
 			store_diff: false,
 		}),
 		comment: Some("Order records".to_string()),
@@ -445,9 +445,9 @@ pub fn access_bearer() -> StoredAccessDefinition {
 		base: Base::Root,
 		authenticate: None,
 		context: None,
-		grant_duration: Some(Duration::from_secs(3600)),
-		token_duration: Some(Duration::from_secs(900)),
-		session_duration: Some(Duration::from_secs(86400)),
+		grant_duration: Some(Duration::from_secs(3600).into()),
+		token_duration: Some(Duration::from_secs(900).into()),
+		session_duration: Some(Duration::from_secs(86400).into()),
 		comment: Some("API access".to_string()),
 	}
 }
@@ -472,7 +472,7 @@ pub fn access_with_authenticate() -> StoredAccessDefinition {
 		authenticate: Some(ExprText::from_raw("'SELECT * FROM user WHERE id = $auth.id'")),
 		context: None,
 		grant_duration: None,
-		token_duration: Some(Duration::from_secs(3600)),
+		token_duration: Some(Duration::from_secs(3600).into()),
 		session_duration: None,
 		comment: None,
 	}
@@ -516,9 +516,9 @@ pub fn access_record() -> StoredAccessDefinition {
 		base: Base::Db,
 		authenticate: Some(ExprText::from_raw("'SELECT * FROM user WHERE id = $auth.id'")),
 		context: None,
-		grant_duration: Some(Duration::from_secs(604800)),
-		token_duration: Some(Duration::from_secs(900)),
-		session_duration: Some(Duration::from_secs(86400)),
+		grant_duration: Some(Duration::from_secs(604800).into()),
+		token_duration: Some(Duration::from_secs(900).into()),
+		session_duration: Some(Duration::from_secs(86400).into()),
 		comment: Some("User record access".to_string()),
 	}
 }
@@ -539,7 +539,7 @@ pub fn access_jwt_jwks() -> StoredAccessDefinition {
 		context: None,
 		grant_duration: None,
 		token_duration: None,
-		session_duration: Some(Duration::from_secs(3600)),
+		session_duration: Some(Duration::from_secs(3600).into()),
 		comment: Some("External JWT verification via JWKS".to_string()),
 	}
 }
@@ -566,8 +566,8 @@ pub fn access_bearer_refresh() -> StoredAccessDefinition {
 		base: Base::Root,
 		authenticate: None,
 		context: None,
-		grant_duration: Some(Duration::from_secs(2592000)),
-		token_duration: Some(Duration::from_secs(300)),
+		grant_duration: Some(Duration::from_secs(2592000).into()),
+		token_duration: Some(Duration::from_secs(300).into()),
 		session_duration: None,
 		comment: None,
 	}
@@ -1213,7 +1213,7 @@ pub fn sequence_with_options() -> SequenceDefinition {
 		name: "invoice_number".into(),
 		batch: 100,
 		start: 1000,
-		timeout: Some(Duration::from_secs(30)),
+		timeout: Some(Duration::from_secs(30).into()),
 	}
 }
 
@@ -1243,8 +1243,8 @@ pub fn user_with_durations() -> UserDefinition {
 		hash: "$argon2id$v=19$m=65536,t=3,p=4$hash".to_string(),
 		code: "".to_string(),
 		roles: vec!["viewer".to_string(), "editor".to_string()],
-		token_duration: Some(Duration::from_secs(3600)),
-		session_duration: Some(Duration::from_secs(86400)),
+		token_duration: Some(Duration::from_secs(3600).into()),
+		session_duration: Some(Duration::from_secs(86400).into()),
 		comment: Some("API service account".to_string()),
 		base: Base::Ns,
 		scram: None,
@@ -1258,7 +1258,7 @@ pub fn user_db_base() -> UserDefinition {
 		hash: "$argon2id$v=19$m=65536,t=3,p=4$hash".to_string(),
 		code: "".to_string(),
 		roles: vec!["editor".to_string()],
-		token_duration: Some(Duration::from_secs(1800)),
+		token_duration: Some(Duration::from_secs(1800).into()),
 		session_duration: None,
 		comment: Some("Database-level user".to_string()),
 		base: Base::Db,
@@ -1484,6 +1484,11 @@ pub fn test_record_rid() -> RecordId {
 	}
 }
 
+/// The decode context of a `Record` compat test: [`test_record_rid`], no table layouts.
+pub fn test_record_context() -> crate::catalog::RecordContext {
+	crate::catalog::RecordContext::without_layouts(test_record_rid())
+}
+
 /// Record with object data
 pub fn record_object() -> Record {
 	let mut obj = Object::default();
@@ -1673,7 +1678,7 @@ pub fn table_mutations_del() -> TableMutations {
 /// Table mutations with Def operation
 pub fn table_mutations_def() -> TableMutations {
 	let mut mutations = TableMutations::new(TableName::from("users"));
-	mutations.1.push(TableMutation::Def(Box::new(table_basic())));
+	mutations.1.push(TableMutation::Def(table_basic().into()));
 	mutations
 }
 

@@ -13,8 +13,13 @@ use super::{
 	project_record_bytes_excluding, record_data_bytes, rev2_record_data_bytes,
 	scan_record_object_at_path_with_slots,
 };
-use crate::catalog::{Record, RecordType};
-use crate::val::{Number, Object, Value};
+use crate::catalog::{Record, RecordFormat, RecordType, StoredRecord, encode_record};
+use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
+
+/// The format the generation-0 samples are written in.
+const DOCUMENT: RecordFormat = RecordFormat::Document {
+	generation: None,
+};
 
 /// Build a `Vec<PathSegment>` from string slices. Mirrors how the planner
 /// hands paths to descent (one segment per dotted part).
@@ -537,6 +542,187 @@ fn equivalence_sample_records() -> Vec<Vec<u8>> {
 	]
 }
 
+/// The samples of [`equivalence_sample_records`] in the stored-value
+/// encoding, and two more: a record whose `id` its key replaces, and one that
+/// stores an `id` other than its key.
+fn stored_sample_records() -> Vec<Vec<u8>> {
+	let mut samples: Vec<Vec<u8>> = equivalence_sample_records()
+		.iter()
+		.map(|bytes| {
+			let record: Record = revision::from_slice(bytes).expect("sample decodes");
+			encode_record(DOCUMENT, record.metadata.as_ref(), &record.data, None)
+				.expect("sample encodes")
+		})
+		.collect();
+	let key = RecordId::new("t".into(), RecordIdKey::Number(1));
+	let mut object = Object::default();
+	object.0.insert(Strand::from("a"), Value::Bool(true));
+	object.0.insert(Strand::from("b"), Value::from(7i64));
+	object.0.insert(Strand::from("id"), Value::RecordId(key.clone()));
+	let data = Value::Object(object);
+	let keyed = encode_record(DOCUMENT, None, &data, Some(&key)).expect("sample encodes");
+	assert!(StoredRecord::parse(&keyed).unwrap().unwrap().is_keyed());
+	samples.push(keyed);
+	let other = RecordId::new("t".into(), RecordIdKey::Number(2));
+	let foreign = encode_record(DOCUMENT, None, &data, Some(&other)).expect("sample encodes");
+	assert!(!StoredRecord::parse(&foreign).unwrap().unwrap().is_keyed());
+	samples.push(foreign);
+	samples
+}
+
+/// Every sample, in each encoding.
+fn all_sample_records() -> Vec<Vec<u8>> {
+	let mut all = equivalence_sample_records();
+	all.extend(stored_sample_records());
+	all
+}
+
+/// The data a record's bytes hold, as written: a stored-value record whose
+/// key replaces its `id` holds none.
+fn data_as_written(bytes: &[u8]) -> Value {
+	match StoredRecord::parse(bytes).expect("sample parses") {
+		Some(stored) => stored.decode_document().expect("sample decodes").data,
+		None => revision::from_slice::<Record>(bytes).expect("sample decodes").data,
+	}
+}
+
+/// An extraction's outcome as a comparable value: `None` for a bail,
+/// `Some(None)` for a missing field.
+fn outcome(extracted: Extracted) -> Option<Option<Value>> {
+	match extracted {
+		Extracted::Found(v) => Some(Some(v)),
+		Extracted::Missing => Some(None),
+		Extracted::Bail => None,
+	}
+}
+
+/// A stored-value record answers every descent its `revision` encoding
+/// answers, with the same value, absence or bail: through nested objects,
+/// past a field that is not an object, along a path into a wide object, and
+/// past the depth limit. Only a path starting at `id` differs, which the
+/// stored-value record leaves to the key.
+#[test]
+fn extract_reads_a_stored_value_record_as_a_revision_record() {
+	let paths: [&[&str]; 10] = [
+		&["a"],
+		&["b"],
+		&["missing"],
+		&["addr"],
+		&["addr", "city"],
+		&["addr", "zip"],
+		&["addr", "city", "x"],
+		&["a", "x"],
+		&["k07"],
+		&["missing", "x"],
+	];
+	for bytes in equivalence_sample_records() {
+		let record: Record = revision::from_slice(&bytes).expect("sample decodes");
+		let stored =
+			encode_record(DOCUMENT, record.metadata.as_ref(), &record.data, None).expect("encodes");
+		for path in paths {
+			let path = p(path);
+			for limit in [TEST_DEPTH_LIMIT, 1, 0] {
+				assert_eq!(
+					outcome(extract_field_from_record_bytes(&stored, &path, limit)),
+					outcome(extract_field_from_record_bytes(&bytes, &path, limit)),
+					"{path:?} (limit {limit}) of {:?}",
+					record.data
+				);
+			}
+		}
+	}
+	let depth = 8;
+	let nested = wire_record_nested_x(depth);
+	let record: Record = revision::from_slice(&nested).expect("sample decodes");
+	let stored = encode_record(DOCUMENT, None, &record.data, None).expect("encodes");
+	let path: Vec<PathSegment> = std::iter::repeat_n(PathSegment::from("x"), depth).collect();
+	for limit in [depth as u32 - 1, depth as u32] {
+		assert_eq!(
+			outcome(extract_field_from_record_bytes(&stored, &path, limit)),
+			outcome(extract_field_from_record_bytes(&nested, &path, limit)),
+			"limit {limit}"
+		);
+	}
+}
+
+/// A stored-value record's `id` is never read from its bytes, which leave it
+/// out when the key replaces it: a path that starts there bails, whether or
+/// not the record stores one, and the caller reads it from the key.
+#[test]
+fn extract_leaves_a_stored_value_records_id_to_its_key() {
+	let samples = stored_sample_records();
+	for bytes in &samples[samples.len() - 2..] {
+		for path in [&["id"][..], &["id", "tb"]] {
+			assert!(
+				matches!(
+					extract_field_from_record_bytes(bytes, &p(path), TEST_DEPTH_LIMIT),
+					Extracted::Bail
+				),
+				"{path:?}"
+			);
+		}
+		assert!(matches!(
+			extract_field_from_record_bytes(bytes, &p(&["b"]), TEST_DEPTH_LIMIT),
+			Extracted::Found(Value::Number(Number::Int(7)))
+		));
+	}
+}
+
+/// Bytes that start as a stored-value record but do not read as one are a
+/// bail and project to `None`, so the caller decodes them in full and
+/// surfaces the error.
+#[test]
+fn a_stored_value_record_that_does_not_read_bails() {
+	let good =
+		encode_record(DOCUMENT, None, &Value::Object(Object::default()), None).expect("encodes");
+	for broken in [vec![StoredRecord::MARKER], vec![StoredRecord::MARKER, 0x80, 0x1A, 0x01], {
+		let mut b = good;
+		b.push(0);
+		b
+	}] {
+		assert!(matches!(
+			extract_field_from_record_bytes(&broken, &p(&["a"]), TEST_DEPTH_LIMIT),
+			Extracted::Bail
+		));
+		assert_eq!(project_record_bytes(&broken, &p(&["a"])), None);
+		assert_eq!(project_record_bytes_excluding(&broken, &p(&["a"])), None);
+	}
+}
+
+/// A stored-value record whose object keys are out of order bails, so the
+/// caller decodes it in full and surfaces the error, rather than reading a
+/// field it stores as absent or projecting a corrupt record.
+#[test]
+fn a_stored_value_record_with_keys_out_of_order_bails() {
+	let data = Value::Object(Object::from(std::collections::BTreeMap::from([
+		(Strand::from("aa"), Value::from(1)),
+		(Strand::from("bb"), Value::from(2)),
+	])));
+	let mut bytes = encode_record(DOCUMENT, None, &data, None).expect("encodes");
+	let at = |v: &[u8], needle: &[u8]| {
+		v.windows(needle.len()).position(|w| w == needle).expect("the key is stored")
+	};
+	let (a, b) = (at(&bytes, b"aa"), at(&bytes, b"bb"));
+	bytes[a..a + 2].copy_from_slice(b"bb");
+	bytes[b..b + 2].copy_from_slice(b"aa");
+	for field in ["aa", "cc"] {
+		assert!(
+			matches!(
+				extract_field_from_record_bytes(&bytes, &p(&[field]), TEST_DEPTH_LIMIT),
+				Extracted::Bail
+			),
+			"{field}"
+		);
+	}
+	assert_eq!(project_record_bytes(&bytes, &p(&["bb"])), None);
+	assert_eq!(project_record_bytes(&bytes, &p(&["cc"])), None);
+	// A projection that misses nothing, or names no key, reads no fewer keys
+	// out of order.
+	assert_eq!(project_record_bytes(&bytes, &p(&["aa"])), None);
+	assert_eq!(project_record_bytes(&bytes, &[]), None);
+	assert_eq!(project_record_bytes_excluding(&bytes, &p(&["cc"])), None);
+}
+
 #[test]
 fn rev2_record_data_bytes_matches_walker_path() {
 	// The slice-direct rev-2 fast path must return byte-for-byte what the
@@ -583,14 +769,14 @@ fn project_record_bytes_matches_a_full_decode_restricted_to_the_keys() {
 		&["k00", "k05", "k07", "k11", "zz"],
 		&["addr", "missing"],
 	];
-	for bytes in equivalence_sample_records() {
-		let full: Record = revision::from_slice(&bytes).expect("sample decodes");
+	for bytes in all_sample_records() {
+		let data = data_as_written(&bytes);
 		for keys in key_sets {
 			let mut segments: Vec<PathSegment> =
 				keys.iter().copied().map(PathSegment::from).collect();
 			segments.sort();
 			let projected = project_record_bytes(&bytes, &segments);
-			match &full.data {
+			match &data {
 				Value::Object(object) => {
 					let mut expected = Object::default();
 					for key in keys {
@@ -598,7 +784,7 @@ fn project_record_bytes_matches_a_full_decode_restricted_to_the_keys() {
 							expected.0.insert(Strand::from(*key), v.clone());
 						}
 					}
-					assert_eq!(projected, Some(expected), "keys {keys:?} of {:?}", full.data);
+					assert_eq!(projected, Some(expected), "keys {keys:?} of {data:?}");
 				}
 				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
 			}
@@ -628,20 +814,20 @@ fn project_record_bytes_excluding_matches_a_full_decode_without_the_keys() {
 		&["k00", "k05", "k07", "k11", "zz"],
 		&["addr", "missing"],
 	];
-	for bytes in equivalence_sample_records() {
-		let full: Record = revision::from_slice(&bytes).expect("sample decodes");
+	for bytes in all_sample_records() {
+		let data = data_as_written(&bytes);
 		for keys in key_sets {
 			let mut segments: Vec<PathSegment> =
 				keys.iter().copied().map(PathSegment::from).collect();
 			segments.sort();
 			let projected = project_record_bytes_excluding(&bytes, &segments);
-			match &full.data {
+			match &data {
 				Value::Object(object) => {
 					let mut expected = object.clone();
 					for key in keys {
 						expected.0.remove(*key);
 					}
-					assert_eq!(projected, Some(expected), "excluding {keys:?} of {:?}", full.data);
+					assert_eq!(projected, Some(expected), "excluding {keys:?} of {data:?}");
 				}
 				other => assert_eq!(projected, None, "non-object data {other:?} must not project"),
 			}

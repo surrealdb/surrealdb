@@ -1038,10 +1038,13 @@ async fn reclaim_queue_updates_are_bounded_by_the_batch() {
 
 	// Entries naming prefixes that hold nothing: the pass retires every one of
 	// them, and spends no budget doing it, so what it commits is queue writes
-	// alone.
+	// alone. The setup commits the stored-format ledger entry, which a store
+	// records once, with its first stored-grammar write: otherwise the pass's
+	// lease write would carry it.
 	let queued = batch + batch / 2;
 	{
 		let tx = ds.transaction(Write).await.unwrap();
+		tx.admit_stored_format().await.unwrap();
 		for i in 0..queued {
 			let rc = ReclaimKey::database(
 				NamespaceId(1),

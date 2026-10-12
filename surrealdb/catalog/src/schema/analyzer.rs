@@ -1,24 +1,34 @@
 use revision::revisioned;
-use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::expr as runtime;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Filter, Tokenizer};
+use crate::stored::Stored;
 use crate::val::{Array, Value};
+use crate::{expr as runtime, impl_kv_value_catalog};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct AnalyzerDefinition {
+	#[stored(n = 2)]
 	pub name: Strand,
+	#[stored(n = 4)]
 	pub function: Option<Strand>,
+	#[stored(n = 6)]
 	pub tokenizers: Option<Vec<Tokenizer>>,
+	#[stored(n = 8)]
 	pub filters: Option<Vec<Filter>>,
+	#[stored(
+		n = 1,
+		ignorable,
+		independent = "a comment is text for people and no other field reads it"
+	)]
 	pub comment: Option<String>,
 }
 
-impl_kv_value_revisioned!(AnalyzerDefinition);
+impl_kv_value_catalog!(AnalyzerDefinition);
 
 impl AnalyzerDefinition {
 	fn to_runtime_definition(&self) -> runtime::statements::define::DefineAnalyzerStatement {

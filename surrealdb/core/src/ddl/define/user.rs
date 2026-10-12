@@ -9,7 +9,7 @@ use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::user::DefineUserStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Duration, Value};
+use crate::val::{BoundedDuration, Duration, Value};
 
 pub(crate) async fn define_user_statement_to_definition(
 	this: &DefineUserStatement,
@@ -21,11 +21,11 @@ pub(crate) async fn define_user_statement_to_definition(
 	let token_duration = crate::ddl::scalar::scalar(exec, &this.duration.token)
 		.await?
 		.cast_to::<Option<Duration>>()?
-		.map(|x| x.0);
+		.map(|x| BoundedDuration(x.0));
 	let session_duration = crate::ddl::scalar::scalar(exec, &this.duration.session)
 		.await?
 		.cast_to::<Option<Duration>>()?
-		.map(|x| x.0);
+		.map(|x| BoundedDuration(x.0));
 
 	let comment = crate::ddl::scalar::scalar(exec, &this.comment).await?.cast_to()?;
 

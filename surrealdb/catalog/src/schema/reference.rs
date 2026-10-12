@@ -4,6 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::{ExprText, FromStored};
 use crate::expr::reference::Reference as ExprReference;
 use crate::expr::statements::info::InfoStructure;
+use crate::stored::Stored;
 use crate::val::Value;
 
 /// Stored form of a field's `REFERENCE` clause.
@@ -13,24 +14,32 @@ use crate::val::Value;
 /// variant order), with the `ON DELETE THEN` expression held as canonical
 /// SurrealQL text instead of an embedded AST.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub struct StoredReference {
+	#[stored(n = 2)]
 	pub on_delete: StoredReferenceDeleteStrategy,
 }
 
 /// Stored form of a reference's `ON DELETE` strategy.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Stored)]
+#[stored(since = "4.0")]
 pub enum StoredReferenceDeleteStrategy {
 	/// Reject the deletion while references exist.
+	#[stored(n = 1)]
 	Reject,
 	/// Leave the referencing field untouched.
+	#[stored(n = 2)]
 	Ignore,
 	/// Delete the referencing record too.
+	#[stored(n = 3)]
 	Cascade,
 	/// Unset the referencing field.
+	#[stored(n = 4)]
 	Unset,
 	/// Run a custom expression, stored as canonical SurrealQL text.
+	#[stored(n = 5)]
 	Custom(ExprText),
 }
 

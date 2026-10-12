@@ -32,8 +32,8 @@ pub(crate) fn config(alg: catalog::Algorithm, key: &str) -> Result<EncodingKey> 
 	}
 }
 
-pub(crate) fn expiration(d: Option<Duration>) -> Result<Option<i64>> {
-	let exp = match d {
+pub(crate) fn expiration(d: Option<impl Into<Duration>>) -> Result<Option<i64>> {
+	let exp = match d.map(Into::into) {
 		Some(v) => {
 			// The defined duration must be valid
 			match ChronoDuration::from_std(v) {

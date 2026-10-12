@@ -53,6 +53,32 @@ impl Actor {
 		}
 	}
 
+	/// An actor of exactly the given resource and roles.
+	pub fn from_parts(res: Resource, roles: Vec<Role>) -> Self {
+		Self {
+			res,
+			roles,
+		}
+	}
+
+	/// The resource the actor is.
+	pub fn resource(&self) -> &Resource {
+		let Actor {
+			res,
+			roles: _,
+		} = self;
+		res
+	}
+
+	/// The roles the actor holds, in the order they were granted.
+	pub fn roles(&self) -> &[Role] {
+		let Actor {
+			res: _,
+			roles,
+		} = self;
+		roles
+	}
+
 	pub fn from_role_names(id: String, roles: &[String], level: Level) -> Result<Self> {
 		let roles = roles.iter().map(|x| Role::from_str(x)).collect::<Result<Vec<_>, _>>()?;
 		Ok(Self::new(id, roles, level))

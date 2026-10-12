@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use super::{Lowered, Lowering, NotCovered, lower_view_rows};
+use crate::catalog::stored::StoredField;
 use crate::ddl::define::table::TableConversion;
 use crate::exec::vm::codec::TypeId;
 use crate::exec::vm::codec::key::RouteId;
@@ -93,17 +94,16 @@ pub(crate) enum DdlChecks {
 		redefined: Option<Arc<crate::catalog::TableDefinition>>,
 	},
 	/// `DEFINE FIELD`: the table and the field as the catalog holds them, the
-	/// table's fields (`None` where they could not be read), and the
-	/// refusals of the definition's checks: `refused` of those the body makes
-	/// before `FLEXIBLE`'s, and `flexible` of `FLEXIBLE`'s. The record id
-	/// components an `id` definition names are not judged here: what they
-	/// are judged against includes the rows the table's views hold, which
+	/// table's fields, and the refusals of the definition's checks: `refused`
+	/// of those the body makes before `FLEXIBLE`'s, and `flexible` of
+	/// `FLEXIBLE`'s. The record id components an `id` definition names are not judged here: what
+	/// they are judged against includes the rows the table's views hold, which
 	/// the statements run before this one may change, so the statement judges
 	/// them when it runs (`FieldCheck::KeyComponents`), between the two.
 	DefineField {
 		existing_table: Option<Arc<crate::catalog::TableDefinition>>,
 		existing_field: Option<Arc<crate::catalog::FieldDefinition>>,
-		fields: Option<Arc<[crate::catalog::FieldDefinition]>>,
+		fields: Arc<[crate::catalog::FieldDefinition]>,
 		indexed: Option<FieldRefusal>,
 		refused: Option<FieldRefusal>,
 		flexible: Option<FieldRefusal>,
@@ -117,9 +117,9 @@ pub(crate) enum DdlChecks {
 	/// fields as the catalog holds them — the fields nested in the field,
 	/// which `REMOVE FIELD` removes with it, and those an altered kind writes
 	/// or drops — and the refusal of the field's name against the record id
-	/// components of the table: a component name has no definition of its own
-	/// to remove or alter. Whether a definition still reads a component of the
-	/// `id` a `REMOVE FIELD` removes is judged when the statement runs
+	/// components of the table: a component name has no definition of its
+	/// own to remove or alter. Whether a definition still reads a component
+	/// of the `id` a `REMOVE FIELD` removes is judged when the statement runs
 	/// (`FieldCheck::IdUnread`), against the rows the views over the table
 	/// hold then.
 	Field {
@@ -141,7 +141,11 @@ pub(in crate::exec::vm) async fn ddl_checks(
 	use crate::catalog::TableType;
 	use crate::catalog::providers::{DatabaseProvider, TableProvider};
 	let txn = planner.txn();
-	let unread = |e: anyhow::Error| NotCovered::internal(format!("the catalog did not read: {e}"));
+	let unread = |e: anyhow::Error| {
+		crate::exec::vm::plan_catalog::unread_catalog(&e, || {
+			format!("the catalog did not read: {e}")
+		})
+	};
 	// The session's database, as the body resolves it.
 	let ids = match (txn, planner.ns(), planner.db()) {
 		(Some(txn), Some(ns), Some(db)) => txn
@@ -219,12 +223,18 @@ pub(in crate::exec::vm) async fn ddl_checks(
 					return Ok(DdlChecks::None);
 				};
 				let txn = txn.ok_or_else(|| decline("planning without a transaction"))?;
-				let refused = |_| decline("a field definition whose catalog did not read");
+				let refused =
+					|e: anyhow::Error| match crate::exec::vm::plan_catalog::catalog_refusal(&e) {
+						Some(entry) => {
+							NotCovered::refused(crate::exec::vm::plan::Refusal::CatalogEntry(entry))
+						}
+						None => decline("a field definition whose catalog did not read"),
+					};
 				let existing_table = txn.get_tb(ns, db, &table, None).await.map_err(refused)?;
 				let fd = name.to_raw_string();
 				let existing_field =
 					txn.get_tb_field(ns, db, &table, &fd, None).await.map_err(refused)?;
-				let fields = txn.all_tb_fields(ns, db, &table, None).await.ok();
+				let fields = txn.all_tb_fields(ns, db, &table, None).await.map_err(refused)?;
 				let definition = field_definition(stmt, &name, &table, &comment);
 				// One check while the definition is formed, the rest once the
 				// database is resolved.
@@ -953,7 +963,7 @@ impl Lowering<'_, '_> {
 		let comment =
 			crate::exec::vm::host::out_of_line(|| self.comment(&stmt.comment)).await?.operand;
 		let changefeed = self.constant(match &stmt.changefeed {
-			Some(cf) => changefeed_value(cf),
+			Some(cf) => stored(*cf)?,
 			None => Value::None,
 		});
 		let strict = self.constant(Value::Bool(stmt.strict));
@@ -1181,7 +1191,7 @@ impl Lowering<'_, '_> {
 			return Err(NotCovered::internal("a DEFINE TABLE mapped with no checks"));
 		};
 		template.table_type = table_type;
-		let template = stored(&template.to_stored(), "StoredTableDefinition")?;
+		let template = stored(template.to_stored())?;
 
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
@@ -1320,7 +1330,7 @@ impl Lowering<'_, '_> {
 					field_kind: Some(crate::expr::Kind::Record(tables.clone())),
 					..Default::default()
 				};
-				let value = stored(&fd.to_stored(), "StoredFieldDefinition")?;
+				let value = stored(fd.to_stored())?;
 				let value = self.constant(value);
 				let value = self.load(value)?;
 				let fd = self.constant(Value::String(field.into()));
@@ -1432,6 +1442,11 @@ impl Lowering<'_, '_> {
 				key: root,
 			});
 			self.release(root);
+			// The range holds the table's layout descriptors, so the delete removes the
+			// generation the stamp above minted. The stamp that follows mints one for the rows
+			// the backfill writes, and the committed catalog version names the state that holds
+			// it.
+			self.stamp(ns, db, name_op)?;
 			for source in view.source_tables() {
 				let ft = self.constant(Value::String(source.as_str().into()));
 				let foreign = self.object(&[
@@ -1633,8 +1648,6 @@ impl Lowering<'_, '_> {
 	/// raising it where the body raises it.
 	async fn define_field(&mut self, stmt: &DefineFieldStatement) -> Lowered<()> {
 		use crate::catalog::TableType;
-		// Reached only on a storage fault.
-		let decline = |why: &str| NotCovered::internal(why.to_owned());
 		// A field, table or comment that is evaluated is resolved as the
 		// program runs, and the definition is checked against the catalog it
 		// finds then.
@@ -1677,9 +1690,6 @@ impl Lowering<'_, '_> {
 			crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_some()
 		});
 		if stmt.inline && !lightweight_table {
-			let fields = fields
-				.as_ref()
-				.ok_or_else(|| decline("a field definition whose catalog did not read"))?;
 			let others = fields.iter().filter(|f| f.inline && f.name != name).count();
 			inline_refusal = inline_field_refusal(
 				existing_table.as_deref(),
@@ -1690,18 +1700,16 @@ impl Lowering<'_, '_> {
 		let definition = field_definition(stmt, &name, &table, &comment);
 		// What the body refuses of a field nested in something that cannot
 		// hold it, judged against the fields the definition leaves.
-		let Some(table_fields) = fields.as_ref() else {
-			return crate::exec::vm::host::out_of_line(|| self.define_field_resolved(stmt)).await;
-		};
+		let table_fields: &[crate::catalog::FieldDefinition] = &fields;
 		let nesting_refusal = match crate::exec::field_rules::define_field_nesting_restrictions(
 			table_fields,
 			&definition,
 		) {
 			Ok(()) => None,
-			Err(e) => Some(
-				FieldRefusal::of(&e)
-					.ok_or_else(|| decline("a field definition whose nesting did not judge"))?,
-			),
+			Err(e) => Some(FieldRefusal::of(&e).ok_or_else(|| {
+				// Reached only on a storage fault.
+				NotCovered::internal("a field definition whose nesting did not judge".to_owned())
+			})?),
 		};
 		// A record kind for a relation's `in` or `out` that is not the one the
 		// table names retargets the relation: the table is written with it,
@@ -1729,12 +1737,11 @@ impl Lowering<'_, '_> {
 					} else {
 						relation.to.clone_from(field_kind);
 					}
-					let bytes = revision::to_vec(&TableType::Relation(relation)).map_err(|e| {
-						NotCovered::internal(format!("table type did not encode: {e}"))
-					})?;
 					retarget =
-						Some(crate::exec::vm::codec::decode("TableType", &bytes).map_err(|e| {
-							NotCovered::internal(format!("table type the codec does not read: {e}"))
+						Some(TableType::Relation(relation).into_vm_value().map_err(|e| {
+							NotCovered::internal(format!(
+								"table type the codec does not convert: {e}"
+							))
 						})?);
 				}
 			} else {
@@ -1755,10 +1762,7 @@ impl Lowering<'_, '_> {
 				let existing = table_fields.iter().find(|f| f.name == path);
 				let sub =
 					crate::exec::field_rules::implied_definition(&definition, existing, path, kind);
-				nested.push((
-					surrealdb_types::ToSql::to_sql(&sub.name),
-					stored(&sub.to_stored(), "StoredFieldDefinition")?,
-				));
+				nested.push((surrealdb_types::ToSql::to_sql(&sub.name), stored(sub.to_stored())?));
 			}
 			dropped = crate::exec::field_rules::implied_definitions_dropped(
 				table_fields,
@@ -1766,11 +1770,14 @@ impl Lowering<'_, '_> {
 				&definition,
 			);
 		}
-		let template = stored(&definition.to_stored(), "StoredFieldDefinition")?;
+		let template = stored(definition.to_stored())?;
+		let template = self.constant(template);
 		// A refusal raised whatever the statement meets leaves nothing after it
 		// to raise.
-		let refused_before = indexed.is_some() || refused.is_some() || relation_refusal.is_some();
-		let template = self.constant(template);
+		let refused_before = indexed.is_some()
+			|| refused.is_some()
+			|| flexible.is_some()
+			|| relation_refusal.is_some();
 
 		self.store(StoreInstr::RefuseNoWrite);
 		// A computed field an index of the table covers is refused as its
@@ -1935,17 +1942,8 @@ impl Lowering<'_, '_> {
 			let gen_val = self.constant(Value::from(next_gen));
 			self.set_field(tb, "graph_inline_gen", gen_val);
 		}
-		self.store(StoreInstr::Lock {
-			route: RouteId::named("TableKey"),
-			key: tb_key,
-		});
-		self.store(StoreInstr::Put {
-			route: RouteId::named("TableKey"),
-			key: tb_key,
-			ty: TypeId::named("StoredTableDefinition"),
-			value: tb,
-		});
-		self.stamp(ns, db, table_name)?;
+		// Nested definitions are written before the table's rewrite and its stamp, so the stamp
+		// settles the field set the statement leaves (as the host path does).
 		for (path, value) in nested {
 			let path = self.constant(Value::String(path.into()));
 			let key = self.object(&[
@@ -1967,6 +1965,17 @@ impl Lowering<'_, '_> {
 		}
 		// An import restores the reference keys of the ones dropped verbatim.
 		self.delete_field_definitions((ns, db, table_name), &dropped, true)?;
+		self.store(StoreInstr::Lock {
+			route: RouteId::named("TableKey"),
+			key: tb_key,
+		});
+		self.store(StoreInstr::Put {
+			route: RouteId::named("TableKey"),
+			key: tb_key,
+			ty: TypeId::named("StoredTableDefinition"),
+			value: tb,
+		});
+		self.stamp(ns, db, table_name)?;
 		self.store(StoreInstr::ClearCache);
 		self.answer_none()
 	}
@@ -2708,7 +2717,7 @@ impl Lowering<'_, '_> {
 			crate::catalog::TableId(0),
 			crate::val::TableName::new(""),
 		);
-		let template = stored(&template, "StoredTableDefinition")?;
+		let template = stored(template)?;
 		let template = self.constant(template);
 		self.emit(Instr::Load {
 			dst: defined,
@@ -3011,7 +3020,7 @@ impl Lowering<'_, '_> {
 			prepare_remove: false,
 			format_version: crate::catalog::INDEX_FORMAT_VERSION,
 		};
-		let template = stored(&template.to_stored(), "StoredIndexDefinition")?;
+		let template = stored(template.to_stored())?;
 
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
@@ -4356,7 +4365,7 @@ impl Lowering<'_, '_> {
 			permissions: stmt.permissions.clone(),
 			permissions_body: crate::catalog::LogicalPermissionBody::of(&stmt.permissions),
 		};
-		let template = stored(&template.to_stored(), "StoredParamDefinition")?;
+		let template = stored(template.to_stored())?;
 		let template = self.constant(template);
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment);
@@ -4421,7 +4430,7 @@ impl Lowering<'_, '_> {
 			crate::catalog::auth::AuthLimit::default(),
 			comment_text(&stmt.comment),
 		);
-		let template = stored(&template.to_stored(), "StoredEventDefinition")?;
+		let template = stored(template.to_stored())?;
 		let template = self.constant(template);
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment);
@@ -4493,7 +4502,7 @@ impl Lowering<'_, '_> {
 			graphql_alias: stmt.graphql_alias.clone(),
 			graphql_deprecated: stmt.graphql_deprecated.clone(),
 		};
-		let template = stored(&template.to_stored(), "StoredFunctionDefinition")?;
+		let template = stored(template.to_stored())?;
 		let template = self.constant(template);
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment);
@@ -4582,13 +4591,13 @@ impl Lowering<'_, '_> {
 			hash: stmt.hash.clone(),
 			code: stmt.code.clone(),
 			roles: stmt.roles.clone(),
-			token_duration,
-			session_duration,
+			token_duration: token_duration.map(crate::val::BoundedDuration::from),
+			session_duration: session_duration.map(crate::val::BoundedDuration::from),
 			comment: comment_text(&stmt.comment),
 			base: stmt.base.into(),
 			scram: stmt.scram.clone(),
 		};
-		let definition = stored(&definition, "UserDefinition")?;
+		let definition = stored(definition)?;
 		let definition = self.constant(definition);
 		let definition = self.load(definition)?;
 		self.set_comment(definition, &comment);
@@ -4643,7 +4652,7 @@ impl Lowering<'_, '_> {
 			filters: stmt.filters.clone(),
 			comment: comment_text(&stmt.comment),
 		};
-		let definition = stored(&definition, "AnalyzerDefinition")?;
+		let definition = stored(definition)?;
 		let definition = self.constant(definition);
 		let definition = self.load(definition)?;
 		self.set_comment(definition, &comment);
@@ -4731,9 +4740,9 @@ impl Lowering<'_, '_> {
 			name: name.text().into(),
 			batch: batch.0,
 			start: start.0,
-			timeout,
+			timeout: timeout.map(crate::val::BoundedDuration::from),
 		};
-		let definition = stored(&definition, "SequenceDefinition")?;
+		let definition = stored(definition)?;
 		let definition = self.constant(definition);
 		let definition = self.load(definition)?;
 		self.set_name(definition, "name", &name);
@@ -4823,7 +4832,7 @@ impl Lowering<'_, '_> {
 			comment: comment_text(&stmt.comment),
 		};
 		let rendered = definition.path.to_string();
-		let template = stored(&definition.to_stored(), "StoredApiDefinition")?;
+		let template = stored(definition.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -4962,7 +4971,7 @@ impl Lowering<'_, '_> {
 		if matches!(base, crate::catalog::base::Base::Ns) {
 			return Err(NotCovered::internal("a namespace config"));
 		}
-		let definition = stored(&definition.to_stored(), "StoredConfigDefinition")?;
+		let definition = stored(definition.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -5048,7 +5057,7 @@ impl Lowering<'_, '_> {
 			readonly: stmt.readonly,
 			comment: comment_text(&stmt.comment),
 		};
-		let definition = stored(&definition.to_stored(), "StoredBucketDefinition")?;
+		let definition = stored(definition.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -5163,7 +5172,7 @@ impl Lowering<'_, '_> {
 			permissions: stmt.permissions.clone(),
 			permissions_body: crate::catalog::LogicalPermissionBody::of(&stmt.permissions),
 		};
-		let template = stored(&template.to_stored(), "StoredMlModelDefinition")?;
+		let template = stored(template.to_stored())?;
 		let template = self.constant(template);
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment);
@@ -5232,7 +5241,7 @@ impl Lowering<'_, '_> {
 		let stored_name = definition
 			.get_storage_name()
 			.map_err(|_| NotCovered::internal("a module the catalog cannot name"))?;
-		let definition = stored(&definition, "StoredModuleDefinition")?;
+		let definition = stored(definition)?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -5345,7 +5354,7 @@ impl Lowering<'_, '_> {
 			}
 			self.release(shown);
 		}
-		let definition = stored(&definition.to_stored(), "StoredAccessDefinition")?;
+		let definition = stored(definition.to_stored())?;
 		let ac = name.operand;
 		let (route, scope, exists) = match stmt.base {
 			Base::Root => {
@@ -6022,12 +6031,9 @@ impl Lowering<'_, '_> {
 			});
 		}
 		if let Some(kind) = &stmt.kind {
-			let bytes = revision::to_vec(kind)
-				.map_err(|e| NotCovered::internal(format!("table type did not encode: {e}")))?;
-			let decoded_type =
-				crate::exec::vm::codec::decode("TableType", &bytes).map_err(|e| {
-					NotCovered::internal(format!("table type the codec does not read: {e}"))
-				})?;
+			let decoded_type = kind.to_vm_value().map_err(|e| {
+				NotCovered::internal(format!("table type the codec does not convert: {e}"))
+			})?;
 			let decoded_type = self.constant(decoded_type);
 			self.set_field(table, "table_type", decoded_type);
 		}
@@ -6043,12 +6049,10 @@ impl Lowering<'_, '_> {
 			AlterKind::None => {}
 		}
 		if let Some(permissions) = &stmt.permissions {
-			let stored = crate::catalog::StoredPermissions::from_runtime(permissions);
-			let bytes = revision::to_vec(&stored)
-				.map_err(|e| NotCovered::internal(format!("permissions did not encode: {e}")))?;
-			let stored =
-				crate::exec::vm::codec::decode("StoredPermissions", &bytes).map_err(|e| {
-					NotCovered::internal(format!("permissions the codec does not read: {e}"))
+			let stored = crate::catalog::StoredPermissions::from_runtime(permissions)
+				.into_vm_value()
+				.map_err(|e| {
+					NotCovered::internal(format!("permissions the codec does not convert: {e}"))
 				})?;
 			let stored = self.constant(stored);
 			self.set_field(table, "permissions", stored);
@@ -6056,7 +6060,7 @@ impl Lowering<'_, '_> {
 		let changefeed_set = matches!(stmt.changefeed, AlterKind::Set(_));
 		match &stmt.changefeed {
 			AlterKind::Set(cf) => {
-				let cf = self.constant(changefeed_value(cf));
+				let cf = self.constant(stored(*cf)?);
 				self.set_field(table, "changefeed", cf);
 			}
 			AlterKind::Drop => {
@@ -6103,7 +6107,7 @@ impl Lowering<'_, '_> {
 					field_kind: Some(crate::expr::Kind::Record(tables.clone())),
 					..Default::default()
 				};
-				let value = stored(&fd.to_stored(), "StoredFieldDefinition")?;
+				let value = stored(fd.to_stored())?;
 				let value = self.constant(value);
 				let value = self.load(value)?;
 				self.set_name(value, "table", &table_name);
@@ -6345,7 +6349,7 @@ impl Lowering<'_, '_> {
 		// The record id structure the statement gives the table, when it names
 		// components: the records are checked against it before it is written.
 		let scanned = altered.live_key().cloned();
-		let altered = match stored(&altered.to_stored(), "StoredFieldDefinition")? {
+		let altered = match stored(altered.to_stored())? {
 			Value::Object(altered) => altered,
 			other => return Err(NotCovered::internal(format!("a stored field that is {other:?}"))),
 		};
@@ -6358,11 +6362,7 @@ impl Lowering<'_, '_> {
 		let mut nested = Vec::new();
 		let mut dropped = Vec::new();
 		if kind_altered && let Some(previous) = existing_field.as_deref() {
-			let formed = crate::catalog::FieldDefinition {
-				field_kind: match &stmt.kind {
-					AlterKind::Set(kind) => Some(kind.clone()),
-					AlterKind::Drop | AlterKind::None => None,
-				},
+			let mut formed = crate::catalog::FieldDefinition {
 				flexible: match stmt.flexible {
 					AlterKind::Set(()) => true,
 					AlterKind::Drop => false,
@@ -6370,16 +6370,26 @@ impl Lowering<'_, '_> {
 				},
 				..previous.clone()
 			};
+			// The type and the record id component names it carries are set
+			// together, as the body sets them.
+			match &stmt.kind {
+				AlterKind::Set(kind) => {
+					let names = match &stmt.key_names {
+						AlterKind::Set(names) => Some(names.clone()),
+						AlterKind::Drop | AlterKind::None => None,
+					};
+					formed.set_type(Some(kind.clone()), names);
+				}
+				AlterKind::Drop => formed.set_type(None, None),
+				AlterKind::None => {}
+			}
 			let implied =
 				crate::exec::field_rules::implied_definitions(&name, formed.field_kind.as_ref());
 			for (path, kind) in implied {
 				let existing = table_fields.iter().find(|f| f.name == path);
 				let sub =
 					crate::exec::field_rules::implied_definition(&formed, existing, path, kind);
-				nested.push((
-					surrealdb_types::ToSql::to_sql(&sub.name),
-					stored(&sub.to_stored(), "StoredFieldDefinition")?,
-				));
+				nested.push((surrealdb_types::ToSql::to_sql(&sub.name), stored(sub.to_stored())?));
 			}
 			dropped = crate::exec::field_rules::implied_definitions_dropped(
 				&table_fields,
@@ -6610,7 +6620,7 @@ impl Lowering<'_, '_> {
 			..Default::default()
 		};
 		definition.set_type(stmt.field_kind.clone(), stmt.key_names.clone());
-		let template = stored(&definition.to_stored(), "StoredFieldDefinition")?;
+		let template = stored(definition.to_stored())?;
 		self.store(StoreInstr::RealRunOnly);
 		let template = self.constant(template);
 		let definition = self.load(template)?;
@@ -6803,7 +6813,7 @@ impl Lowering<'_, '_> {
 		if stmt.permissions.is_some() {
 			fields.push("permissions");
 		}
-		let altered = stored(&altered.to_stored(), "StoredParamDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -6890,7 +6900,7 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("returns"),
 			AlterKind::None => {}
 		}
-		let altered = stored(&altered.to_stored(), "StoredFunctionDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -6971,7 +6981,7 @@ impl Lowering<'_, '_> {
 			crate::catalog::auth::AuthLimit::default(),
 			comment,
 		);
-		let altered = stored(&altered.to_stored(), "StoredEventDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7116,7 +7126,7 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("comment"),
 			AlterKind::None => {}
 		}
-		let altered = stored(&altered, "AnalyzerDefinition")?;
+		let altered = stored(altered)?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7168,16 +7178,16 @@ impl Lowering<'_, '_> {
 		};
 		let mut fields = Vec::new();
 		if let Some(hash) = &stmt.hash {
-			altered.hash = hash.clone();
+			altered.hash.clone_from(hash);
 			fields.push("hash");
 		}
 		if let Some(scram) = &stmt.scram {
-			altered.scram = scram.clone();
+			altered.scram.clone_from(scram);
 			fields.push("scram");
 		}
 		match &stmt.roles {
 			AlterKind::Set(roles) => {
-				altered.roles = roles.clone();
+				altered.roles.clone_from(roles);
 				fields.push("roles");
 			}
 			AlterKind::Drop => fields.push("roles"),
@@ -7188,7 +7198,9 @@ impl Lowering<'_, '_> {
 			(&stmt.session_duration, &mut altered.session_duration, "session_duration"),
 		] {
 			match clause {
-				AlterKind::Set(duration) => *slot = *duration,
+				AlterKind::Set(duration) => {
+					*slot = (*duration).map(crate::val::BoundedDuration::from)
+				}
 				AlterKind::Drop => *slot = None,
 				AlterKind::None => continue,
 			}
@@ -7202,7 +7214,7 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("comment"),
 			AlterKind::None => {}
 		}
-		let altered = stored(&altered, "UserDefinition")?;
+		let altered = stored(altered)?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7279,7 +7291,7 @@ impl Lowering<'_, '_> {
 				}),
 			),
 		};
-		let definition = stored(&definition.to_stored(), "StoredConfigDefinition")?;
+		let definition = stored(definition.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7384,7 +7396,7 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("comment"),
 			AlterKind::None => {}
 		}
-		let altered = stored(&altered.to_stored(), "StoredBucketDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7542,7 +7554,7 @@ impl Lowering<'_, '_> {
 			AlterKind::Drop => fields.push("comment"),
 			AlterKind::None => {}
 		}
-		let altered = stored(&altered.to_stored(), "StoredAccessDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7678,7 +7690,7 @@ impl Lowering<'_, '_> {
 			permissions_body: crate::catalog::LogicalPermissionBody::of(&permissions),
 			permissions,
 		};
-		let altered = stored(&altered.to_stored(), "StoredModuleDefinition")?;
+		let altered = stored(altered.to_stored())?;
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -7724,7 +7736,7 @@ impl Lowering<'_, '_> {
 				auth_limit: crate::catalog::auth::AuthLimit::default(),
 				comment: None,
 			};
-			match stored(&api.to_stored(), "StoredApiDefinition")? {
+			match stored(api.to_stored())? {
 				Value::Object(api) => Ok(api),
 				other => Err(NotCovered::internal(format!("a stored API that is {other:?}"))),
 			}
@@ -7981,22 +7993,12 @@ fn literal_duration(expr: &Expr) -> Option<Option<std::time::Duration>> {
 	}
 }
 
-/// A stored definition as the VM's codec reads it: a constant the program
-/// writes with the holes it fills.
-fn stored<T: crate::key::KVValue>(value: &T, ty: &'static str) -> Lowered<Value> {
-	let bytes = value
-		.kv_encode_value()
-		.map_err(|e| NotCovered::internal(format!("a {ty} did not encode: {e}")))?;
-	crate::exec::vm::codec::decode(ty, &bytes)
-		.map_err(|e| NotCovered::internal(format!("a {ty} the codec does not read: {e}")))
-}
-
-/// A changefeed clause as the codec reads a stored one.
-fn changefeed_value(cf: &crate::expr::ChangeFeed) -> Value {
-	let mut object = crate::val::Object::default();
-	object.insert("expiry".to_owned(), Value::Duration(crate::val::Duration(cf.expiry)));
-	object.insert("store_diff".to_owned(), Value::Bool(cf.store_diff));
-	Value::Object(object)
+/// A stored definition as the VM holds one: its type's schema converts it to
+/// a constant the program writes with the holes it fills.
+fn stored<T: StoredField>(value: T) -> Lowered<Value> {
+	value
+		.into_vm_value()
+		.map_err(|e| NotCovered::internal(format!("a definition the codec does not convert: {e}")))
 }
 
 /// A name a schema statement is written with, as the program reads it.

@@ -11,14 +11,16 @@ use geo::algorithm::intersects::Intersects;
 use geo_types::{
 	Coord, Line, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Error, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::bounded;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Object;
+use crate::val::number::cmp_f64;
 use crate::val::{Array, Value};
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 1, deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Geometry {
@@ -30,6 +32,67 @@ pub enum Geometry {
 	MultiPolygon(MultiPolygon<f64>),
 	Collection(Vec<Geometry>),
 	// Add new variants here
+}
+
+/// Reads exactly what the derived serializer writes (revision 1: a `u32` variant, then its
+/// geometry). Every length is read through [`bounded`], so a claimed count costs at most
+/// [`bounded::PREALLOC_BYTES`] beyond the coordinates the input holds, and every polygon ring goes
+/// through [`ring_before_closing`] before [`Polygon::new`] closes it.
+impl DeserializeRevisioned for Geometry {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
+		bounded::read_revision(reader, "Geometry", 1)?;
+		match u32::deserialize_revisioned(reader)? {
+			0 => Ok(Self::Point(Point(read_coord(reader)?))),
+			1 => Ok(Self::Line(read_line(reader)?)),
+			2 => Ok(Self::Polygon(read_polygon(reader)?)),
+			3 => {
+				let len = bounded::read_len(reader)?;
+				let points = bounded::read_vec_with(reader, len, |r| Ok(Point(read_coord(r)?)))?;
+				Ok(Self::MultiPoint(MultiPoint(points)))
+			}
+			4 => {
+				let len = bounded::read_len(reader)?;
+				let lines = bounded::read_vec_with(reader, len, read_line)?;
+				Ok(Self::MultiLine(MultiLineString(lines)))
+			}
+			5 => {
+				let len = bounded::read_len(reader)?;
+				let polygons = bounded::read_vec_with(reader, len, read_polygon)?;
+				Ok(Self::MultiPolygon(MultiPolygon(polygons)))
+			}
+			6 => Ok(Self::Collection(bounded::read_vec::<Geometry, _>(reader)?)),
+			x => Err(Error::Deserialize(format!(
+				"Invalid discriminant `{x}` for enum `Geometry` revision `1`"
+			))),
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Geometry {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), Error> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
+
+fn read_coord<R: std::io::Read>(reader: &mut R) -> Result<Coord<f64>, Error> {
+	let x = f64::deserialize_revisioned(reader)?;
+	let y = f64::deserialize_revisioned(reader)?;
+	Ok(Coord {
+		x,
+		y,
+	})
+}
+
+fn read_line<R: std::io::Read>(reader: &mut R) -> Result<LineString<f64>, Error> {
+	let len = bounded::read_len(reader)?;
+	Ok(LineString(bounded::read_vec_with(reader, len, read_coord)?))
+}
+
+fn read_polygon<R: std::io::Read>(reader: &mut R) -> Result<Polygon<f64>, Error> {
+	let exterior = ring_before_closing(read_line(reader)?);
+	let len = bounded::read_len(reader)?;
+	let interiors = bounded::read_vec_with(reader, len, |r| read_line(r).map(ring_before_closing))?;
+	Ok(Polygon::new(exterior, interiors))
 }
 
 impl Geometry {
@@ -408,8 +471,78 @@ impl Geometry {
 	}
 }
 
-impl PartialOrd for Geometry {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+/// Prepares a stored polygon ring for [`Polygon::new`].
+///
+/// `Polygon::new` closes a ring whose ends are not `==`, and a coordinate that
+/// holds a NaN is never `==` to anything, itself included. A ring whose first
+/// coordinate holds a NaN is therefore stored with its closing coordinate, a
+/// bit-identical copy of the first, and would gain another on every read. A
+/// ring of at least two coordinates whose first holds a NaN and whose last is
+/// bit-identical to it loses that last coordinate, so `Polygon::new` closes it
+/// again with an identical copy and the ring reads back exactly as it was
+/// written. Every other ring is returned unchanged.
+pub fn ring_before_closing(mut ring: LineString<f64>) -> LineString<f64> {
+	let closed_on_nan = match (ring.0.first(), ring.0.last()) {
+		(Some(first), Some(last)) if ring.0.len() >= 2 => {
+			(first.x.is_nan() || first.y.is_nan())
+				&& first.x.to_bits() == last.x.to_bits()
+				&& first.y.to_bits() == last.y.to_bits()
+		}
+		_ => false,
+	};
+	if closed_on_nan {
+		ring.0.pop();
+	}
+	ring
+}
+
+/// Compares two coordinate streams lexicographically, `x` before `y`, with [`cmp_f64`]. A stream
+/// that is a proper prefix of the other is ordered first.
+fn cmp_coords(
+	mut a: impl Iterator<Item = (f64, f64)>,
+	mut b: impl Iterator<Item = (f64, f64)>,
+) -> Ordering {
+	loop {
+		match (a.next(), b.next()) {
+			(None, None) => return Ordering::Equal,
+			(None, Some(_)) => return Ordering::Less,
+			(Some(_), None) => return Ordering::Greater,
+			(Some((ax, ay)), Some((bx, by))) => {
+				match cmp_f64(ax, bx).then_with(|| cmp_f64(ay, by)) {
+					Ordering::Equal => {}
+					ordering => return ordering,
+				}
+			}
+		}
+	}
+}
+
+impl Geometry {
+	/// The position of a geometry's kind in the order: points first, collections last.
+	fn kind_rank(&self) -> u8 {
+		match self {
+			Self::Point(_) => 0,
+			Self::Line(_) => 1,
+			Self::Polygon(_) => 2,
+			Self::MultiPoint(_) => 3,
+			Self::MultiLine(_) => 4,
+			Self::MultiPolygon(_) => 5,
+			Self::Collection(_) => 6,
+		}
+	}
+
+	/// A total order over geometries: the order [`PartialOrd`] reports.
+	///
+	/// Geometries compare by kind (point, line, polygon, multipoint, multiline, multipolygon,
+	/// collection), then by their coordinates read in storage order (a polygon's interior rings
+	/// before its exterior) with [`cmp_f64`] on `x` and then `y`, a shorter prefix first, and
+	/// finally by shape: the ring lengths of a polygon, the line lengths of a multiline, the
+	/// polygon count and shapes of a multipolygon, and the members, then the member count, of a
+	/// collection. Two geometries compare equal exactly when they have the same kind, shape and
+	/// coordinates, where `-0.0` equals `0.0` and a NaN equals a NaN of the same bits.
+	///
+	/// `surrealdb_types::Geometry` implements the same order; the two must agree.
+	pub fn total_cmp(&self, other: &Self) -> Ordering {
 		fn coord(v: &Coord) -> (f64, f64) {
 			v.x_y()
 		}
@@ -419,7 +552,7 @@ impl PartialOrd for Geometry {
 		}
 
 		fn line(v: &LineString) -> impl Iterator<Item = (f64, f64)> + '_ {
-			v.into_iter().map(coord)
+			v.0.iter().map(coord)
 		}
 
 		fn polygon(v: &Polygon) -> impl Iterator<Item = (f64, f64)> + '_ {
@@ -438,67 +571,85 @@ impl PartialOrd for Geometry {
 			v.iter().flat_map(polygon)
 		}
 
-		match (self, other) {
-			//
-			(Self::Point(_), Self::Line(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Point(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Line(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Line(_), Self::Polygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Line(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Polygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Polygon(_), Self::MultiPoint(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::Polygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPoint(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPoint(_), Self::MultiLine(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiPoint(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiLine(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiLine(_), Self::MultiPolygon(_)) => Some(Ordering::Less),
-			(Self::MultiLine(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::MultiPolygon(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::MultiPolygon(_), Self::Collection(_)) => Some(Ordering::Less),
-			//
-			(Self::Collection(_), Self::Point(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Line(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::Polygon(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPoint(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiLine(_)) => Some(Ordering::Greater),
-			(Self::Collection(_), Self::MultiPolygon(_)) => Some(Ordering::Greater),
-			//
-			(Self::Point(a), Self::Point(b)) => point(a).partial_cmp(&point(b)),
-			(Self::Line(a), Self::Line(b)) => line(a).partial_cmp(line(b)),
-			(Self::Polygon(a), Self::Polygon(b)) => polygon(a).partial_cmp(polygon(b)),
-			(Self::MultiPoint(a), Self::MultiPoint(b)) => multipoint(a).partial_cmp(multipoint(b)),
-			(Self::MultiLine(a), Self::MultiLine(b)) => multiline(a).partial_cmp(multiline(b)),
-			(Self::MultiPolygon(a), Self::MultiPolygon(b)) => {
-				multipolygon(a).partial_cmp(multipolygon(b))
-			}
-			(Self::Collection(a), Self::Collection(b)) => a.partial_cmp(b),
+		/// The ring count, then every ring length, with the exterior last.
+		fn polygon_shape(v: &Polygon) -> impl Iterator<Item = usize> + '_ {
+			once(v.interiors().len())
+				.chain(v.interiors().iter().map(|ring| ring.0.len()))
+				.chain(once(v.exterior().0.len()))
 		}
+
+		let ranks = self.kind_rank().cmp(&other.kind_rank());
+		if ranks != Ordering::Equal {
+			return ranks;
+		}
+		// Both sides are of one kind from here. The match is exhaustive over `self`, so a new
+		// variant does not compile until it has its own comparison; the `let ... else` arms can
+		// only be taken for a kind mismatch, which the rank comparison above has already ruled out.
+		match self {
+			Self::Point(a) => {
+				let Self::Point(b) = other else {
+					return ranks;
+				};
+				cmp_coords(once(point(a)), once(point(b)))
+			}
+			Self::Line(a) => {
+				let Self::Line(b) = other else {
+					return ranks;
+				};
+				cmp_coords(line(a), line(b))
+			}
+			Self::Polygon(a) => {
+				let Self::Polygon(b) = other else {
+					return ranks;
+				};
+				cmp_coords(polygon(a), polygon(b))
+					.then_with(|| polygon_shape(a).cmp(polygon_shape(b)))
+			}
+			Self::MultiPoint(a) => {
+				let Self::MultiPoint(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multipoint(a), multipoint(b))
+			}
+			Self::MultiLine(a) => {
+				let Self::MultiLine(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multiline(a), multiline(b))
+					.then_with(|| a.iter().map(|l| l.0.len()).cmp(b.iter().map(|l| l.0.len())))
+			}
+			Self::MultiPolygon(a) => {
+				let Self::MultiPolygon(b) = other else {
+					return ranks;
+				};
+				cmp_coords(multipolygon(a), multipolygon(b)).then_with(|| {
+					once(a.0.len())
+						.chain(a.iter().flat_map(polygon_shape))
+						.cmp(once(b.0.len()).chain(b.iter().flat_map(polygon_shape)))
+				})
+			}
+			Self::Collection(a) => {
+				let Self::Collection(b) = other else {
+					return ranks;
+				};
+				a.iter()
+					.zip(b.iter())
+					.map(|(x, y)| x.total_cmp(y))
+					.find(|ordering| *ordering != Ordering::Equal)
+					.unwrap_or_else(|| a.len().cmp(&b.len()))
+			}
+		}
+	}
+}
+
+impl PartialOrd for Geometry {
+	/// Always `Some`: geometries are totally ordered by [`Geometry::total_cmp`], NaN
+	/// coordinates included. Set membership follows this order. The order merges `-0.0` and
+	/// `0.0`, as the derived `PartialEq` does, and equates a NaN with a NaN of the same bits,
+	/// which the derived `PartialEq` does not, so `==` and the order disagree only for
+	/// geometries holding a NaN.
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.total_cmp(other))
 	}
 }
 
@@ -916,6 +1067,8 @@ impl<F> Encode<F> for Geometry {
 	}
 }
 
+/// Every polygon ring goes through [`ring_before_closing`] before [`Polygon::new`] closes it, so a
+/// ring whose first coordinate holds a NaN decodes to the ring that was encoded.
 impl<'de, F> BorrowDecode<'de, F> for Geometry {
 	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		match r.read_u8()? {
@@ -937,7 +1090,7 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 					ext.push(Coord::from(point))
 				}
-				let ext = LineString::new(ext);
+				let ext = ring_before_closing(LineString::new(ext));
 				let mut int = Vec::new();
 				while !r.read_terminal()? {
 					let mut line = Vec::new();
@@ -945,7 +1098,7 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 						line.push(Coord::from(point))
 					}
-					int.push(LineString::new(line))
+					int.push(ring_before_closing(LineString::new(line)))
 				}
 				Ok(Geometry::Polygon(Polygon::new(ext, int)))
 			}
@@ -977,7 +1130,7 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 						ext.push(Coord::from(point))
 					}
-					let ext = LineString::new(ext);
+					let ext = ring_before_closing(LineString::new(ext));
 					let mut int = Vec::new();
 					while !r.read_terminal()? {
 						let mut line = Vec::new();
@@ -985,7 +1138,7 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 							let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
 							line.push(Coord::from(point))
 						}
-						int.push(LineString::new(line))
+						int.push(ring_before_closing(LineString::new(line)))
 					}
 					polygons.push(Polygon::new(ext, int));
 				}
@@ -1015,6 +1168,69 @@ mod test {
 	use geo_types::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
 	use super::Geometry;
+
+	fn to_public(geometry: &Geometry) -> surrealdb_types::Geometry {
+		use surrealdb_types::Geometry as Public;
+		match geometry.clone() {
+			Geometry::Point(v) => Public::Point(v),
+			Geometry::Line(v) => Public::Line(v),
+			Geometry::Polygon(v) => Public::Polygon(v),
+			Geometry::MultiPoint(v) => Public::MultiPoint(v),
+			Geometry::MultiLine(v) => Public::MultiLine(v),
+			Geometry::MultiPolygon(v) => Public::MultiPolygon(v),
+			Geometry::Collection(v) => Public::Collection(v.iter().map(to_public).collect()),
+		}
+	}
+
+	/// The geometry order is kept in `surrealdb_types` and here, and the two must agree on
+	/// every pair, NaN payloads, signed zeros and infinities included: a value's order does not
+	/// depend on which representation compares it.
+	#[test]
+	fn the_order_agrees_with_the_public_geometry_order() {
+		let nan_b = f64::from_bits(f64::NAN.to_bits() ^ 1);
+		let floats = [0.0, -0.0, 1.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN, nan_b];
+		let mut cases = Vec::new();
+		for &x in &floats {
+			for &y in &[0.0, f64::NAN, 2.5] {
+				cases.push(Geometry::Point(Point::new(x, y)));
+			}
+		}
+		let ring = |x: f64| {
+			LineString::new(vec![
+				Coord::from((x, 0.0)),
+				Coord::from((1.0, 0.0)),
+				Coord::from((1.0, 1.0)),
+				Coord::from((x, 0.0)),
+			])
+		};
+		for &x in &floats {
+			cases.push(Geometry::Line(LineString::new(vec![Coord::from((x, 1.0))])));
+			cases.push(Geometry::Line(ring(x)));
+			cases.push(Geometry::Polygon(Polygon::new(ring(x), vec![])));
+			cases.push(Geometry::Polygon(Polygon::new(ring(0.0), vec![ring(x)])));
+			cases.push(Geometry::MultiPoint(MultiPoint(vec![Point::new(x, 0.0)])));
+			cases.push(Geometry::MultiLine(MultiLineString(vec![ring(x), ring(0.0)])));
+			cases.push(Geometry::MultiPolygon(MultiPolygon(vec![Polygon::new(ring(x), vec![])])));
+		}
+		cases.push(Geometry::Line(LineString::new(vec![])));
+		cases.push(Geometry::MultiPoint(MultiPoint(vec![])));
+		cases.push(Geometry::Collection(vec![]));
+		let leaves = cases.clone();
+		for pair in leaves.chunks(5) {
+			cases.push(Geometry::Collection(pair.to_vec()));
+		}
+		cases.push(Geometry::Collection(vec![Geometry::Collection(leaves[..3].to_vec())]));
+		let public: Vec<_> = cases.iter().map(to_public).collect();
+		for (i, a) in cases.iter().enumerate() {
+			for (j, b) in cases.iter().enumerate() {
+				assert_eq!(
+					a.partial_cmp(b),
+					public[i].partial_cmp(&public[j]),
+					"{a:?} against {b:?}"
+				);
+			}
+		}
+	}
 
 	fn round_trip(geom: &Geometry) {
 		let enc = storekey::encode_vec(geom).unwrap();

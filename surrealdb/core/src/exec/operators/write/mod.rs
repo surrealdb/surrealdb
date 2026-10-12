@@ -269,8 +269,10 @@ pub(crate) async fn read_subject(
 /// values.
 ///
 /// Streamed rather than collected: a target naming a table names every record
-/// in it, and the statement writes them one at a time.
-pub(crate) fn scan_subjects(
+/// in it, and the statement writes them one at a time. Each row is checked
+/// against the table's layouts at the statement's read version before it is
+/// decoded.
+pub(crate) async fn scan_subjects(
 	exec: &ExecutionContext,
 	table: &TableName,
 	range: Option<&RecordIdKeyRange>,
@@ -287,10 +289,18 @@ pub(crate) fn scan_subjects(
 		.range()
 		.map_err(ControlFlow::Err)?,
 	};
+	let txn = exec.txn();
+	let version = exec.version_stamp();
+	let epoch = txn.layout_epoch();
+	let layouts =
+		txn.table_layouts(ns_id, db_id, table, version).await.map_err(ControlFlow::Err)?;
+	let gate = crate::kvs::RowGate::new(layouts, ns_id, db_id, table, version, epoch)
+		.map_err(ControlFlow::Err)?;
 	Ok(crate::exec::operators::scan::pipeline::kv_scan_stream(
-		exec.txn(),
+		txn,
 		raw,
-		exec.version_stamp(),
+		gate,
+		version,
 		None,
 		crate::kvs::Direction::Forward,
 		0,

@@ -1338,7 +1338,7 @@ async fn run_targets(
 					if guarantees {
 						continue;
 					}
-					Rows::Scan(scan_subjects(ctx, &table, range.as_deref())?)
+					Rows::Scan(scan_subjects(ctx, &table, range.as_deref()).await?)
 				}
 			};
 			while let Some(row) = rows.next().await? {

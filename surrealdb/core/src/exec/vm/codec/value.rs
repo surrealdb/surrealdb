@@ -23,6 +23,7 @@ use rust_decimal::Decimal;
 use surrealdb_strand::Strand;
 
 use super::wire::{Reader, Writer};
+use crate::val::geometry::ring_before_closing;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, RecordIdKey,
 	RecordIdKeyRange, Set, TableName, Uuid, Value,
@@ -31,6 +32,7 @@ use crate::val::{
 /// Below this many entries an indexed compound has no offset table.
 const OFFSET_TABLE_MIN_LEN: usize = 8;
 const FLAG_INDEXED: u8 = 1;
+const NANOS_PER_SEC: u32 = 1_000_000_000;
 
 fn revision(r: &mut Reader<'_>, name: &str, max: u16) -> Result<u16> {
 	let rev = r.varint()?;
@@ -47,8 +49,8 @@ fn revision(r: &mut Reader<'_>, name: &str, max: u16) -> Result<u16> {
 pub(super) fn decode(r: &mut Reader<'_>) -> Result<Value> {
 	match revision(r, "Value", 2)? {
 		1 => {
-			let variant = r.varint()?;
-			decode_variant(variant as u8, r)
+			let variant = u8::try_from(r.varint()?).context("a Value variant past 255")?;
+			decode_variant(variant, r)
 		}
 		_ => {
 			let tag = r.u8()?;
@@ -144,7 +146,11 @@ fn decode_strand(r: &mut Reader<'_>) -> Result<Strand> {
 fn decode_std_duration(r: &mut Reader<'_>) -> Result<std::time::Duration> {
 	let secs = u64::try_from(r.varint()?)?;
 	let nanos = u32::try_from(r.varint()?)?;
-	Ok(std::time::Duration::new(secs, nanos))
+	// `Duration::new` carries whole seconds out of `nanos` and panics when that overflows `secs`.
+	let secs = secs
+		.checked_add(u64::from(nanos / NANOS_PER_SEC))
+		.context("a duration past the representable range")?;
+	Ok(std::time::Duration::new(secs, nanos % NANOS_PER_SEC))
 }
 
 fn decode_datetime(r: &mut Reader<'_>) -> Result<Datetime> {
@@ -232,8 +238,12 @@ fn decode_object(r: &mut Reader<'_>) -> Result<Object> {
 		}
 	} else {
 		// `(key_off, val_off)` per entry and the two region lengths.
-		body.take(len.checked_mul(8).context("an offset table past usize")? + 8)?;
-		let mut keys = Vec::with_capacity(len);
+		let table = len
+			.checked_mul(8)
+			.and_then(|n| n.checked_add(8))
+			.context("an offset table past usize")?;
+		body.take(table)?;
+		let mut keys = Vec::with_capacity(len.min(4096));
 		for _ in 0..len {
 			keys.push(decode_strand(&mut body)?);
 		}
@@ -310,11 +320,11 @@ fn decode_line(r: &mut Reader<'_>) -> Result<geo_types::LineString<f64>> {
 }
 
 fn decode_polygon(r: &mut Reader<'_>) -> Result<geo_types::Polygon<f64>> {
-	let exterior = decode_line(r)?;
+	let exterior = ring_before_closing(decode_line(r)?);
 	let len = r.len()?;
 	let mut interiors = Vec::with_capacity(len.min(4096));
 	for _ in 0..len {
-		interiors.push(decode_line(r)?);
+		interiors.push(ring_before_closing(decode_line(r)?));
 	}
 	Ok(geo_types::Polygon::new(exterior, interiors))
 }
@@ -733,16 +743,6 @@ pub(super) fn decode_val_datetime(r: &mut Reader<'_>) -> Result<Datetime> {
 pub(super) fn encode_val_datetime(d: &Datetime, w: &mut Writer) {
 	w.varint(1);
 	encode_datetime(d, w);
-}
-
-pub(super) fn decode_val_duration(r: &mut Reader<'_>) -> Result<Duration> {
-	revision(r, "Duration", 1)?;
-	Ok(Duration(decode_std_duration(r)?))
-}
-
-pub(super) fn encode_val_duration(d: &Duration, w: &mut Writer) {
-	w.varint(1);
-	encode_std_duration(&d.0, w);
 }
 
 /// The error encoding a closure fails with: a closure value is never stored,

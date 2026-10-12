@@ -1,6 +1,7 @@
-use revision::revisioned;
+use revision::optimised::indexed::IndexedSetEncoded;
+use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_collections::{VecSet, VecSetIntoIter};
+use surrealdb_collections::{VecSet, VecSetIntoIter, bounded};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Expr;
@@ -15,11 +16,37 @@ use crate::val::{IndexFormat, Value};
 /// - **Rev 2** — optimised envelope (`u16 revision || u32_le payload_length`), inner `VecSet`
 ///   written via the indexed-set prologue past `OFFSET_TABLE_MIN_LEN = 8`. Walker descent stays
 ///   zero-allocation through the Wire-repr fast path (skip + borrow).
-#[revisioned(revision(1), revision(2, optimised))]
+#[revisioned(revision(1), revision(2, optimised), deserialize = false, skip = true, walk = true)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub struct Set(#[revision(indexed_set)] pub VecSet<Value>);
+
+/// Reads exactly what the derived serializer writes.
+///
+/// Revision 1 is the plain `VecSet` body; revision 2 is a `u32` payload length and the payload, an
+/// indexed set body. The payload is read through [`bounded::read_payload`], decoded from the slice
+/// and refused if bytes are left over. Elements are taken in `Ord` order by `VecSet`'s decoders.
+impl DeserializeRevisioned for Set {
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, RevisionError> {
+		match bounded::read_revision(reader, "Set", 2)? {
+			1 => Ok(Self(VecSet::<Value>::deserialize_revisioned(reader)?)),
+			_ => {
+				let payload = bounded::read_payload(reader)?;
+				let mut body = payload.as_slice();
+				let set = VecSet::<Value>::deserialize_indexed_set(&mut body)?;
+				bounded::finish(body)?;
+				Ok(Self(set))
+			}
+		}
+	}
+}
+
+impl SkipCheckRevisioned for Set {
+	fn skip_check_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), RevisionError> {
+		Self::deserialize_revisioned(reader).map(drop)
+	}
+}
 
 impl Set {
 	/// Create a new empty set

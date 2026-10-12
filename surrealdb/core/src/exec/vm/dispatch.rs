@@ -616,7 +616,9 @@ pub(super) async fn candidates(
 	let Some((ns, db)) = planner.ns_db_ids().await else {
 		return Err(NotCovered::unresolved_database(planner));
 	};
-	let unread = |_| NotCovered::internal("the table catalog could not be read");
+	let unread = |e: anyhow::Error| {
+		super::plan_catalog::unread_catalog(&e, || "the table catalog could not be read".to_owned())
+	};
 	let mut names = Vec::with_capacity(named.len());
 	for name in named {
 		if txn.get_tb(ns, db, name, None).await.map_err(unread)?.is_some() {

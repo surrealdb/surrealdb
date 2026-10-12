@@ -3073,6 +3073,7 @@ dependencies = [
  "surrealdb-kvs",
  "surrealdb-parse-common",
  "surrealdb-parser-next",
+ "surrealdb-stored-derive",
  "surrealdb-strand",
  "surrealdb-types",
  "thiserror",
@@ -3170,6 +3171,15 @@ dependencies = [
  "url",
  "uuid",
  "web-time",
+]
+
+[[package]]
+name = "surrealdb-stored-derive"
+version = "3.4.0-nightly"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
