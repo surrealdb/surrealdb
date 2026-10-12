@@ -26,7 +26,6 @@ use std::ops::{self, Add, Div, Mul, Neg, Rem, Sub};
 use std::str::FromStr;
 
 use anyhow::{Result, bail, ensure};
-use fastnum::D128;
 use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
@@ -35,7 +34,7 @@ use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 
 use super::IndexFormat;
 use crate::expr::Error;
-use crate::expr::decimal::DecimalLexEncoder;
+use crate::expr::decimal::{DecimalLexEncoder, LexDecimal};
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
 #[derive(Copy, Clone, Encode, BorrowDecode)]
@@ -441,27 +440,21 @@ impl Number {
 	///   stream-friendly decoding.
 	///
 	/// Notes:
-	/// - There is no extra "type marker" for Int/Float/Decimal variants; all variants are
-	///   normalized through D128 for ordering.
+	/// - There is no extra "type marker" for Int/Float/Decimal variants; all variants are converted
+	///   to a [`LexDecimal`] first, which is what orders them against each other.
 	/// - Special float values (NaN/±∞) are mapped to fixed encodings at the extremes to preserve a
 	///   total order.
-	///
-	/// Returns an ordered byte buffer or an error if Decimal conversion fails
-	/// for Decimal variant values.
 	pub fn as_decimal_buf(&self) -> Vec<u8> {
+		DecimalLexEncoder::encode(self.as_lex_decimal())
+	}
+
+	/// The value in the form the key encoding works on; see
+	/// [`LexDecimal`] for how each variant converts.
+	fn as_lex_decimal(&self) -> LexDecimal {
 		match self {
-			Self::Int(v) => {
-				// Convert integer to decimal for consistent encoding across all numeric types
-				DecimalLexEncoder::encode(D128::from(*v))
-			}
-			Self::Float(v) => {
-				// Convert float to decimal for lexicographic encoding
-				DecimalLexEncoder::encode(D128::from_f64(*v))
-			}
-			Self::Decimal(v) => {
-				// Direct encoding of decimal values using lexicographic encoder
-				DecimalLexEncoder::encode(DecimalLexEncoder::to_d128(*v))
-			}
+			Self::Int(v) => LexDecimal::from_i64(*v),
+			Self::Float(v) => LexDecimal::from_f64(*v),
+			Self::Decimal(v) => LexDecimal::from_decimal(*v),
 		}
 	}
 
@@ -481,30 +474,18 @@ impl Number {
 	///
 	/// A finite value decodes as a `Decimal` when it is zero or `10^-6 <= |value| < 2^96`,
 	/// rounded to the 28 fractional digits and 96-bit mantissa a `Decimal` holds (see
-	/// [`DecimalLexEncoder::to_decimal_rounded`]), and as the nearest `f64` otherwise. Which one
+	/// [`LexDecimal::to_decimal_rounded`]), and as the nearest `f64` otherwise. Which one
 	/// depends on the value's magnitude alone, and the decoded value is within rounding of the
-	/// encoded one at every magnitude.
+	/// encoded one at every magnitude. NaN and the infinities decode as the `f64` they stand for.
 	///
 	/// Returns the reconstructed Number or an error if the buffer is empty or
 	/// cannot be decoded.
 	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		let dec = DecimalLexEncoder::decode(b)?;
-		if dec.is_finite() {
-			match DecimalLexEncoder::to_decimal_rounded(dec) {
-				Some(dec) => Ok(Number::Decimal(dec)),
-				None => Ok(Number::Float(dec.to_f64())),
-			}
-		} else if dec.is_nan() {
-			Ok(Number::Float(f64::NAN))
-		} else if dec.is_infinite() {
-			if dec.is_negative() {
-				Ok(Number::Float(f64::NEG_INFINITY))
-			} else {
-				Ok(Number::Float(f64::INFINITY))
-			}
-		} else {
-			bail!(Error::Serialization(format!("Invalid decimal value: {dec}")))
-		}
+		Ok(match dec.to_decimal_rounded() {
+			Some(dec) => Number::Decimal(dec),
+			None => Number::Float(dec.to_f64()),
+		})
 	}
 
 	/// Reconstructs a Number of the given kind from a buffer produced by
@@ -517,10 +498,7 @@ impl Number {
 	/// therefore reproduces the buffer, which a record id read back out of a key
 	/// relies on to address its own record.
 	///
-	/// A float is decoded straight from the decimal digits to the nearest `f64`.
-	/// The buffer holds the float's exact expansion to 34 digits, so that
-	/// conversion lands on the float it was written from at every magnitude,
-	/// including the ones a `Decimal` cannot hold.
+	/// A float is decoded from the decimal digits by [`LexDecimal::to_f64`].
 	pub fn from_decimal_buf_kind(b: &[u8], kind: NumberKind) -> Result<Self> {
 		let dec = DecimalLexEncoder::decode(b)?;
 		match kind {
@@ -528,22 +506,10 @@ impl Number {
 				ensure!(dec.is_finite(), format!("Invalid integer value: {dec}"));
 				Ok(Number::Int(dec.to_string().parse::<i64>()?))
 			}
-			NumberKind::Float => {
-				if dec.is_nan() {
-					Ok(Number::Float(f64::NAN))
-				} else if dec.is_infinite() {
-					if dec.is_negative() {
-						Ok(Number::Float(f64::NEG_INFINITY))
-					} else {
-						Ok(Number::Float(f64::INFINITY))
-					}
-				} else {
-					Ok(Number::Float(dec.to_f64()))
-				}
-			}
+			NumberKind::Float => Ok(Number::Float(dec.to_f64())),
 			NumberKind::Decimal => {
 				ensure!(dec.is_finite(), format!("Invalid decimal value: {dec}"));
-				Ok(Number::Decimal(DecimalLexEncoder::to_decimal_exact(dec)?))
+				Ok(Number::Decimal(dec.to_decimal_exact()?))
 			}
 		}
 	}
@@ -921,8 +887,8 @@ impl hash::Hash for Number {
 	/// and `Decimal(1)` share a hash. But [`Number`]'s equality is *approximate*
 	/// between `Float` and `Decimal`: it agrees to roughly sixteen significant
 	/// digits and then calls it equal, so `Float(0.1) == Decimal("0.1")` while the
-	/// buffers differ, `D128::from_f64(0.1)` being
-	/// `0.1000000000000000055511151231257827`. (Going the other way,
+	/// buffers differ, the float's key digits being
+	/// `0.100000000000000005551115123125782702118`. (Going the other way,
 	/// `Float(0.11111) != Decimal("0.11111")` — the relation is not even
 	/// transitive across the boundary.)
 	///
@@ -1384,6 +1350,52 @@ mod tests {
 
 	use super::*;
 
+	/// Whether two numbers agree to `digits` significant digits, to within one
+	/// unit of the last. Both are truncated to the same unit, so the comparison
+	/// is exact integer arithmetic whatever the magnitudes. Zero agrees only with
+	/// zero.
+	fn agree(a: LexDecimal, b: LexDecimal, digits: u32) -> bool {
+		let (
+			LexDecimal::Finite {
+				negative: na,
+				coefficient: ca,
+				exponent: ea,
+			},
+			LexDecimal::Finite {
+				negative: nb,
+				coefficient: cb,
+				exponent: eb,
+			},
+		) = (a, b)
+		else {
+			return false;
+		};
+		if ca == 0 || cb == 0 {
+			return ca == cb;
+		}
+		if na != nb {
+			return false;
+		}
+		let lead = |c: u128, e: i32| e + c.ilog10() as i32 + 1;
+		// The exponent of one unit in the last of `digits` digits, measured from the
+		// larger of the two leading digits.
+		let unit = lead(ca, ea).max(lead(cb, eb)) - digits as i32;
+		let scaled = |c: u128, e: i32| {
+			let shift = e - unit;
+			if shift >= 0 {
+				c * 10u128.pow(shift as u32)
+			} else {
+				10u128.checked_pow((-shift) as u32).map_or(0, |p| c / p)
+			}
+		};
+		scaled(ca, ea).abs_diff(scaled(cb, eb)) <= 1
+	}
+
+	/// Whether a decoded number agrees with the value a key was written from.
+	fn agrees(original: LexDecimal, decoded: &Number, digits: u32) -> bool {
+		agree(original, decoded.as_lex_decimal(), digits)
+	}
+
 	#[test]
 	fn test_decimal_ext_from_str_normalized() {
 		let decimal = Decimal::from_str_normalized("0.0").unwrap();
@@ -1707,20 +1719,6 @@ mod tests {
 		use rand::SeedableRng;
 		use rand::rngs::StdRng;
 
-		/// The distance between an `f64` and a decoded number, relative to the former,
-		/// where both are D128s so that the comparison is exact.
-		fn relative_distance(original: &D128, decoded: &Number) -> f64 {
-			let decoded = match decoded {
-				Number::Float(g) => D128::from_f64(*g),
-				Number::Decimal(d) => DecimalLexEncoder::to_d128(*d),
-				Number::Int(i) => D128::from(*i),
-			};
-			if original.is_zero() {
-				return decoded.abs().to_f64();
-			}
-			((*original - decoded).abs() / original.abs()).to_f64()
-		}
-
 		let mut rng = StdRng::seed_from_u64(0x1DE7);
 
 		// Every f64 bit pattern, so every magnitude and every digit string.
@@ -1729,7 +1727,7 @@ mod tests {
 			if f.is_nan() {
 				continue;
 			}
-			let original = D128::from_f64(f);
+			let original = LexDecimal::from_f64(f);
 			let decoded = through_index_key(&Number::Float(f));
 			match decoded {
 				// A float is the one it was written from.
@@ -1740,8 +1738,7 @@ mod tests {
 				// A Decimal keeps 28 fractional digits, so a value of at least a
 				// millionth keeps at least 22 significant ones.
 				Number::Decimal(_) => {
-					let distance = relative_distance(&original, &decoded);
-					assert!(distance < 1e-21, "{f:e} decoded as {decoded:?}, {distance:e} away");
+					assert!(agrees(original, &decoded, 22), "{f:e} decoded as {decoded:?}");
 				}
 				Number::Int(_) => panic!("{f:e} decoded as an int"),
 			}
@@ -1759,10 +1756,9 @@ mod tests {
 					continue;
 				}
 				for f in [f, -f] {
-					let original = D128::from_f64(f);
+					let original = LexDecimal::from_f64(f);
 					let decoded = through_index_key(&Number::Float(f));
-					let distance = relative_distance(&original, &decoded);
-					assert!(distance < 1e-21, "{f:e} decoded as {decoded:?}, {distance:e} away");
+					assert!(agrees(original, &decoded, 22), "{f:e} decoded as {decoded:?}");
 				}
 			}
 		}
@@ -1789,9 +1785,8 @@ mod tests {
 			} else {
 				match decoded {
 					Number::Float(g) => {
-						let original = DecimalLexEncoder::to_d128(d);
-						let distance = relative_distance(&original, &decoded);
-						assert!(distance < 1e-15, "{d} decoded as {g:e}, {distance:e} away");
+						let original = LexDecimal::from_decimal(d);
+						assert!(agrees(original, &decoded, 15), "{d} decoded as {g:e}");
 					}
 					other => panic!("{d} decoded as {other:?}, not a float"),
 				}
@@ -1822,7 +1817,7 @@ mod tests {
 			} else {
 				f
 			};
-			let text = D128::from_f64(f).to_string();
+			let text = LexDecimal::from_f64(f).to_string();
 			if text.contains(['e', 'E']) {
 				continue;
 			}
@@ -1838,7 +1833,7 @@ mod tests {
 		assert!(checked > 20_000, "only {checked} positional floats were generated");
 	}
 
-	/// Reading a Decimal from the text of the decoded D128, and a float where that
+	/// Reading a Decimal from the text of the decoded digits, and a float where that
 	/// text is not one, is a decoder of its own for the values it reads right. The
 	/// decoder under test agrees with it wherever it is right, in value and in kind,
 	/// so only a value it got wrong is ever decoded differently.
@@ -1853,16 +1848,6 @@ mod tests {
 				Ok(d) => Number::Decimal(d),
 				Err(_) => Number::Float(d128.to_f64()),
 			}
-		}
-
-		/// How far a number is from the value that was written, relative to it.
-		fn relative_distance(original: D128, read: &Number) -> f64 {
-			let read = match read {
-				Number::Float(g) => D128::from_f64(*g),
-				Number::Decimal(d) => DecimalLexEncoder::to_d128(*d),
-				Number::Int(i) => D128::from(*i),
-			};
-			((original - read).abs() / original.abs()).to_f64()
 		}
 
 		let mut rng = StdRng::seed_from_u64(0x7E47_0002);
@@ -1898,9 +1883,14 @@ mod tests {
 			let written = DecimalLexEncoder::decode(&key).unwrap();
 			assert!(
 				written.is_finite()
-					&& !written.is_zero()
-					&& relative_distance(written, &read) > 1e-9
-					&& relative_distance(written, &decoded) < 1e-15,
+					&& !matches!(
+						written,
+						LexDecimal::Finite {
+							coefficient: 0,
+							..
+						}
+					) && !agrees(written, &read, 9)
+					&& agrees(written, &decoded, 15),
 				"{n:?} decoded as {decoded:?}, which differs from {read:?}, read from text"
 			);
 		}
@@ -2112,7 +2102,7 @@ mod tests {
 			"1.50",
 			"100.000",
 			"1000000",
-			// A scale of 7 or more is printed in scientific notation by `D128`.
+			// A scale of 7 or more is printed in scientific notation by `LexDecimal`.
 			"0.0000001",
 			"-0.0000000121",
 			"0.0000000000000000000000000001",

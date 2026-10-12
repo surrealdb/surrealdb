@@ -299,10 +299,6 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.bnum]]
-version = "0.12.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.borsh]]
 version = "1.6.1"
 criteria = "safe-to-deploy"
@@ -661,10 +657,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.fastnum]]
-version = "0.7.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.fastrand]]

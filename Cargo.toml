@@ -189,7 +189,6 @@ diskann = { version = "=0.59.0", default-features = false }
 diskann-utils = "=0.59.0"
 diskann-vector = "=0.59.0"
 ext-sort = "^0.1.5"
-fastnum = "0.7.4"
 flatbuffers = { version = "25.12.19", features = ["serde"] }
 fst = "0.4.7"
 futures = "0.3.32"
