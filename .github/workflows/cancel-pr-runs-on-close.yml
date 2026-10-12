@@ -1,0 +1,72 @@
+# Cancels every in-flight `pull_request` workflow run for a pull request when that
+# pull request is closed, whether it was merged (including force merges that bypass
+# branch protection) or closed without merging.
+#
+# GitHub does not cancel existing runs when a PR merges, so without this workflow
+# queued and running PR jobs keep consuming runner capacity after their results
+# have stopped gating anything. Runs are matched by the pull request number they
+# are attached to, so runs for earlier commits of the same PR are included.
+#
+# This uses `pull_request_target` so the close event fires even when the PR has a merge
+# conflict; `pull_request` workflows do not run in that state. The job never checks
+# out or executes code from the PR. It only reads run metadata and cancels runs using
+# numeric inputs (the PR number and this run's ID), so the token is not exposed to
+# PR-controlled content. Keep it that way: do not add a checkout of the PR head here.
+#
+# Runs are matched only when the runs API associates them with this PR number.
+# Fork PR runs are matched only if that association is present.
+
+name: Cancel PR runs on close
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Cancel in-flight runs for this pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SELF_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Every status that means "not finished yet". Each is a separate query because
+          # the runs API accepts a single status value per request.
+          : > "$RUNNER_TEMP/run-ids"
+          for status in queued in_progress waiting requested pending; do
+            gh api --paginate \
+              "repos/$REPOSITORY/actions/runs?event=pull_request&status=$status&per_page=100" \
+              --jq ".workflow_runs[] | select(.id != $SELF_RUN_ID) | select(any(.pull_requests[]?; .number == $PR_NUMBER)) | .id" \
+              >> "$RUNNER_TEMP/run-ids"
+          done
+
+          ids=$(sort -u "$RUNNER_TEMP/run-ids")
+          if [ -z "$ids" ]; then
+            echo "No in-flight pull_request runs for #$PR_NUMBER"
+            exit 0
+          fi
+
+          # A run can finish between listing and cancelling; that cancel returns 409.
+          # Report it and continue so the remaining runs are still cancelled.
+          for id in $ids; do
+            if gh api -X POST "repos/$REPOSITORY/actions/runs/$id/cancel" > /dev/null; then
+              echo "Cancelled run $id"
+            else
+              echo "::warning::Could not cancel run $id (it may have already completed)"
+            fi
+          done
