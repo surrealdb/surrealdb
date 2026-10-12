@@ -179,6 +179,11 @@ impl DecimalLexEncoder {
 	/// This reverses the encoding process, reconstructing the original D128
 	/// from its byte representation while handling all the encoding
 	/// transformations.
+	///
+	/// A buffer that is not an encoding is an error, never a panic: an unknown
+	/// marker, a truncated buffer, an exponent byte or digit nibble outside the
+	/// format, a coefficient wider than a D128's, or an exponent a D128 cannot
+	/// hold.
 	pub fn decode(bytes: &[u8]) -> Result<D128> {
 		// Handle empty buffer
 		if bytes.is_empty() {
@@ -206,7 +211,7 @@ impl DecimalLexEncoder {
 		}
 
 		// Extract biased exponent (2 bytes with shift to avoid 0x00)
-		let biased_exponent = (bytes[1] - 1) as u16 * 255 + (bytes[2] - 1) as u16;
+		let biased_exponent = Self::exponent_byte(bytes[1])? * 255 + Self::exponent_byte(bytes[2])?;
 		// Unbias the scale, handling negative number complement
 		let biased_exponent = if is_negative {
 			// For negative numbers, undo the complement applied during encoding
@@ -231,7 +236,11 @@ impl DecimalLexEncoder {
 		// scientific notation
 		let exponent = scale - (digit_count - 1);
 
-		Ok(D128::from_parts(
+		// `from_parts` panics on an exponent the D128 cannot hold when its context
+		// traps, so it is built without traps and the overflow it signals is
+		// reported as an error: a buffer read from storage is never trusted to
+		// hold an in-range value.
+		let decoded = D128::from_parts(
 			mantissa,
 			exponent,
 			if is_negative {
@@ -239,8 +248,22 @@ impl DecimalLexEncoder {
 			} else {
 				Sign::Plus
 			},
-			Context::default(),
-		))
+			Context::default().without_traps(),
+		);
+		if decoded.is_op_overflow() || decoded.is_op_underflow() {
+			return Err(Error::Serialization(format!("Exponent out of range: {exponent}")).into());
+		}
+		Ok(decoded.with_ctx(Context::default()))
+	}
+
+	/// Reads one byte of the biased scale. The encoder shifts each byte up by one
+	/// so that none is `0x00`, which the stream terminator owns, so a `0x00` here
+	/// is not part of any encoding.
+	fn exponent_byte(byte: u8) -> Result<u16> {
+		match byte.checked_sub(1) {
+			Some(byte) => Ok(u16::from(byte)),
+			None => Err(Error::Serialization("Invalid exponent byte: 0".to_string()).into()),
+		}
 	}
 
 	/// Packs decimal digits for negative numbers with bit inversion for
@@ -355,7 +378,7 @@ impl DecimalLexEncoder {
 				"Invalid high nibble: {hi}"
 			))));
 		}
-		*m = *m * U128::TEN + U128::from(hi - 1);
+		*m = Self::push_digit(*m, hi - 1)?;
 		if lo == 0 {
 			return Ok(1);
 		}
@@ -364,8 +387,100 @@ impl DecimalLexEncoder {
 				"Invalid low nibble: {lo}"
 			))));
 		}
-		*m = *m * U128::TEN + U128::from(lo - 1);
+		*m = Self::push_digit(*m, lo - 1)?;
 		Ok(2)
+	}
+
+	/// Appends a decimal digit to a mantissa, refusing one that no longer fits
+	/// the D128's 128-bit coefficient.
+	fn push_digit(mantissa: U128, digit: u8) -> Result<U128> {
+		mantissa
+			.checked_mul_digit(10)
+			.and_then(|mantissa| mantissa.checked_add_digit(u64::from(digit)))
+			.ok_or_else(|| Error::Serialization("Mantissa too large".to_string()).into())
+	}
+
+	/// Converts a finite fastnum::D128 to the rust_decimal::Decimal that stands
+	/// for it in a decoded index key, or `None` when none does.
+	///
+	/// A Decimal holds a 96-bit mantissa and at most 28 fractional digits, so
+	/// the value is rounded, ties away from zero, to the nearest Decimal whose
+	/// mantissa is below 2^96 and whose scale is at most 28. It is computed from
+	/// the mantissa and exponent, never from the D128's text, which switches to
+	/// exponent notation that a Decimal's parser does not read.
+	///
+	/// A Decimal stands for a value only in the range `10^-6 <= |value| < 2^96`,
+	/// and for zero. `None` is returned outside it, and for NaN and the
+	/// infinities, and the caller carries the value as the nearest `f64` instead.
+	/// Which of the two a value decodes to therefore depends on its magnitude
+	/// alone.
+	pub fn to_decimal_rounded(d128: D128) -> Option<Decimal> {
+		// A Decimal's mantissa is 96 bits wide.
+		const MANTISSA_LIMIT: u128 = 1 << 96;
+		// A Decimal has at most 28 fractional digits.
+		const MAX_SCALE: u32 = 28;
+		// The power of ten of the leading digit of the smallest magnitude converted.
+		const MIN_LEADING_EXPONENT: i32 = -6;
+
+		if !d128.is_finite() {
+			return None;
+		}
+		// A D128's coefficient is a u128, so this cannot fail.
+		let mantissa = d128.digits().to_u128().ok()?;
+		if mantissa == 0 {
+			return Some(Decimal::ZERO);
+		}
+		let exponent = -i32::from(d128.fractional_digits_count());
+		if exponent + d128.digits_count() as i32 - 1 < MIN_LEADING_EXPONENT {
+			return None;
+		}
+		let (kept, scale) = if exponent > 0 {
+			// An integer: the mantissa followed by `exponent` zeros. A mantissa of at
+			// least one outgrows 96 bits within 29 of them, so this stops early.
+			let mut kept = mantissa;
+			for _ in 0..exponent {
+				kept = kept.checked_mul(10).filter(|kept| *kept < MANTISSA_LIMIT)?;
+			}
+			(kept, 0)
+		} else {
+			let fraction = exponent.unsigned_abs();
+			let pow10 = |n: u32| 10u128.checked_pow(n);
+			// Drop the fewest trailing digits that bring the scale and the mantissa
+			// within what a Decimal holds.
+			let mut dropped = fraction.saturating_sub(MAX_SCALE);
+			while mantissa / pow10(dropped)? >= MANTISSA_LIMIT {
+				dropped += 1;
+			}
+			// A digit left of the point cannot be dropped.
+			if dropped > fraction {
+				return None;
+			}
+			let mut kept = mantissa / pow10(dropped)?;
+			let mut scale = fraction - dropped;
+			if dropped > 0 && mantissa / pow10(dropped - 1)? % 10 >= 5 {
+				kept += 1;
+				// Rounding up carried into a 97th bit: keep one digit fewer.
+				if kept >= MANTISSA_LIMIT {
+					if scale == 0 {
+						return None;
+					}
+					kept = (kept + 4) / 10;
+					scale -= 1;
+				}
+			}
+			(kept, scale)
+		};
+		// `kept` is below 2^96, so it is an `i128` and a Decimal's mantissa.
+		let kept = kept as i128;
+		Decimal::try_from_i128_with_scale(
+			if d128.is_negative() {
+				-kept
+			} else {
+				kept
+			},
+			scale,
+		)
+		.ok()
 	}
 
 	/// Converts a rust_decimal::Decimal to a fastnum::D128.
@@ -567,6 +682,207 @@ mod tests {
 		assert!(result.is_err());
 		let err = result.unwrap_err();
 		assert!(err.to_string().contains("Empty mantissa"), "{err:?}");
+	}
+
+	/// A buffer in the encoder's layout for a finite value of the given digits
+	/// and scale, built without going through a D128 so that it can hold a scale
+	/// the encoder would never write.
+	fn buffer(negative: bool, scale: i32, radix10: &str) -> Vec<u8> {
+		let biased = (scale + DecimalLexEncoder::EXP_BIAS) as u16;
+		let shift = |e: u16| [(e / 255) as u8 + 1, (e % 255) as u8 + 1];
+		let mut buf = Vec::new();
+		if negative {
+			buf.push(DecimalLexEncoder::FINITE_NEGATIVE_MARKER);
+			buf.extend(shift(0xFFFF - biased));
+			DecimalLexEncoder::pack_digits_negative(radix10, &mut buf);
+		} else {
+			buf.push(DecimalLexEncoder::FINITE_POSITIVE_MARKER);
+			buf.extend(shift(biased));
+			DecimalLexEncoder::pack_digits_positive(radix10, &mut buf);
+		}
+		buf.push(0x00);
+		buf
+	}
+
+	#[test]
+	fn decode_refuses_a_scale_the_d128_cannot_hold() {
+		for negative in [false, true] {
+			// Scales of every f64 and Decimal, and up to the largest the encoder documents,
+			// then well past what any D128 holds.
+			for scale in [-324, 0, 28, 308, 6177] {
+				let decoded = DecimalLexEncoder::decode(&buffer(negative, scale, "1"));
+				assert!(decoded.is_ok(), "scale {scale} negative={negative}: {decoded:?}");
+			}
+			for scale in [40_000, 50_000, 58_000] {
+				let err = DecimalLexEncoder::decode(&buffer(negative, scale, "1"))
+					.expect_err("a scale beyond every D128 exponent is not decodable");
+				assert!(err.to_string().contains("Exponent out of range"), "{err:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn decode_refuses_a_zero_exponent_byte() {
+		// The encoder shifts each exponent byte up by one, so none is ever 0x00.
+		for marker in
+			[DecimalLexEncoder::FINITE_POSITIVE_MARKER, DecimalLexEncoder::FINITE_NEGATIVE_MARKER]
+		{
+			for exponent in [[0x00, 0x01], [0x01, 0x00], [0x00, 0x00]] {
+				let err =
+					DecimalLexEncoder::decode(&[marker, exponent[0], exponent[1], 0x20, 0x00])
+						.expect_err("a zero exponent byte is not part of any encoding");
+				assert!(err.to_string().contains("Invalid exponent byte"), "{err:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn decode_never_panics_over_every_exponent_byte_pair() {
+		for marker in
+			[DecimalLexEncoder::FINITE_POSITIVE_MARKER, DecimalLexEncoder::FINITE_NEGATIVE_MARKER]
+		{
+			let digits: [u8; 2] = if marker == DecimalLexEncoder::FINITE_POSITIVE_MARKER {
+				[0x20, 0x00]
+			} else {
+				[!0x20, 0xFF]
+			};
+			for hi in 0..=u8::MAX {
+				for lo in 0..=u8::MAX {
+					let decoded =
+						DecimalLexEncoder::decode(&[marker, hi, lo, digits[0], digits[1]]);
+					if hi == 0 || lo == 0 {
+						assert!(
+							decoded.is_err(),
+							"[{marker:#x}, {hi}, {lo}] decoded as {decoded:?}"
+						);
+					}
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn decode_refuses_a_mantissa_wider_than_the_coefficient() {
+		// The largest coefficient a D128 holds, 2^128 - 1, decodes.
+		let widest = u128::MAX.to_string();
+		for negative in [false, true] {
+			let decoded = DecimalLexEncoder::decode(&buffer(negative, 38, &widest))
+				.expect("the widest coefficient is a D128");
+			assert_eq!(decoded.digits().to_str_radix(10), widest);
+			// One digit more, or the same number of digits with a larger value, is not.
+			for too_wide in [format!("{widest}0"), "9".repeat(39), "9".repeat(80)] {
+				let err = DecimalLexEncoder::decode(&buffer(negative, 38, &too_wide))
+					.expect_err("a coefficient past 2^128 is not decodable");
+				assert!(err.to_string().contains("Mantissa too large"), "{too_wide}: {err:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn to_decimal_rounded_reads_a_value_the_way_a_decimal_parses_it() {
+		let cases: [(&str, &str); 17] = [
+			("0", "0"),
+			("1", "1"),
+			("-1.50", "-1.50"),
+			("100.000", "100.000"),
+			("0.000001", "0.000001"),
+			("-0.000001234", "-0.000001234"),
+			("79228162514264337593543950335", "79228162514264337593543950335"),
+			("7.9228162514264337593543950335", "7.9228162514264337593543950335"),
+			// More fractional digits than a Decimal holds are rounded at the 28th, ties up.
+			("0.1000000000000000055511151231257827", "0.1000000000000000055511151231"),
+			("0.12345678901234567890123456785", "0.1234567890123456789012345679"),
+			("-0.12345678901234567890123456785", "-0.1234567890123456789012345679"),
+			("0.12345678901234567890123456784999", "0.1234567890123456789012345678"),
+			// A mantissa past 96 bits gives up a fractional digit rather than an integer one.
+			("7.9228162514264337593543950336", "7.922816251426433759354395034"),
+			// Rounding up into a 97th bit keeps one digit fewer.
+			("7.92281625142643375935439503355", "7.922816251426433759354395034"),
+			("79228162514264337593543950335.4", "79228162514264337593543950335"),
+			("1E+28", "10000000000000000000000000000"),
+			("-3.4E+2", "-340"),
+		];
+		for (d128, expected) in cases {
+			let d128: D128 = d128.parse().unwrap();
+			let expected: Decimal = expected.parse().unwrap();
+			let got = DecimalLexEncoder::to_decimal_rounded(d128)
+				.unwrap_or_else(|| panic!("{d128} has a Decimal"));
+			assert_eq!(got.serialize(), expected.serialize(), "{d128}: {got} != {expected}");
+		}
+	}
+
+	#[test]
+	fn to_decimal_rounded_has_nothing_for_what_a_decimal_does_not_stand_for() {
+		for text in [
+			// A magnitude a Decimal's mantissa cannot hold.
+			"79228162514264337593543950336",
+			"-79228162514264337593543950336",
+			"79228162514264337593543950335.5",
+			"1E+29",
+			"1E+6144",
+			"9999999999999999455752309870428160",
+			// A magnitude below a millionth.
+			"9.99999E-7",
+			"1E-7",
+			"-1.5E-10",
+			"9.9999999999999994515327145420957165173E-21",
+			"1E-6143",
+		] {
+			let d128: D128 = text.parse().unwrap();
+			assert_eq!(DecimalLexEncoder::to_decimal_rounded(d128), None, "{text}");
+		}
+		for d128 in [D128::NAN, D128::INFINITY, D128::NEG_INFINITY] {
+			assert_eq!(DecimalLexEncoder::to_decimal_rounded(d128), None, "{d128}");
+		}
+	}
+
+	/// Over values that D128 writes positionally, a Decimal reads that text to
+	/// the same Decimal, at the same scale, that `to_decimal_rounded` computes
+	/// from the digits, or fails to read it exactly where `to_decimal_rounded`
+	/// has none.
+	#[test]
+	fn to_decimal_rounded_agrees_with_parsing_the_positional_text() {
+		use rand::{Rng, SeedableRng};
+
+		let mut rng = rand::rngs::StdRng::seed_from_u64(0xD128);
+		let mut positional = 0u32;
+		for _ in 0..200_000 {
+			let digits = rng.random_range(1..=39u32);
+			let mantissa = match 10u128.checked_pow(digits) {
+				Some(limit) => rng.random::<u128>() % limit,
+				None => rng.random::<u128>(),
+			};
+			let exponent = rng.random_range(-60..=2i32);
+			let d128 = D128::from_parts(
+				U128::from_u128(mantissa).unwrap(),
+				exponent,
+				if rng.random() {
+					Sign::Minus
+				} else {
+					Sign::Plus
+				},
+				Context::default(),
+			);
+			// Only text without an exponent is one a Decimal reads.
+			if d128.is_zero() || d128.to_string().contains(['e', 'E']) {
+				continue;
+			}
+			positional += 1;
+			let parsed = DecimalLexEncoder::to_decimal(d128);
+			let rounded = DecimalLexEncoder::to_decimal_rounded(d128);
+			match (&parsed, &rounded) {
+				(Ok(parsed), Some(rounded)) => {
+					assert_eq!(
+						parsed.serialize(),
+						rounded.serialize(),
+						"{d128}: {parsed} != {rounded}"
+					);
+				}
+				(Err(_), None) => {}
+				_ => panic!("{d128}: parsed as {parsed:?}, rounded to {rounded:?}"),
+			}
+		}
+		assert!(positional > 50_000, "only {positional} positional values were generated");
 	}
 
 	#[test]

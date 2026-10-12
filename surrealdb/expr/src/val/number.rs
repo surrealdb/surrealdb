@@ -479,14 +479,20 @@ impl Number {
 	/// - An explicit in-band terminator added by the encoder, which ensures the mantissa decoder
 	///   stops before any following data in the stream.
 	///
+	/// A finite value decodes as a `Decimal` when it is zero or `10^-6 <= |value| < 2^96`,
+	/// rounded to the 28 fractional digits and 96-bit mantissa a `Decimal` holds (see
+	/// [`DecimalLexEncoder::to_decimal_rounded`]), and as the nearest `f64` otherwise. Which one
+	/// depends on the value's magnitude alone, and the decoded value is within rounding of the
+	/// encoded one at every magnitude.
+	///
 	/// Returns the reconstructed Number or an error if the buffer is empty or
 	/// cannot be decoded.
 	pub fn from_decimal_buf(b: &[u8]) -> Result<Self> {
 		let dec = DecimalLexEncoder::decode(b)?;
 		if dec.is_finite() {
-			match DecimalLexEncoder::to_decimal(dec) {
-				Ok(dec) => Ok(Number::Decimal(dec)),
-				Err(_) => Ok(Number::Float(dec.to_f64())),
+			match DecimalLexEncoder::to_decimal_rounded(dec) {
+				Some(dec) => Ok(Number::Decimal(dec)),
+				None => Ok(Number::Float(dec.to_f64())),
 			}
 		} else if dec.is_nan() {
 			Ok(Number::Float(f64::NAN))
@@ -1581,6 +1587,324 @@ mod tests {
 		check(&[Number::Int(1), Number::Float(1.0), Number::Decimal(Decimal::ONE)]);
 		check(&[Number::Int(-1), Number::Float(-1.0), Number::Decimal(Decimal::NEGATIVE_ONE)]);
 		check(&[Number::Float(1.5), Number::Decimal(Decimal::from_str_normalized("1.5").unwrap())]);
+	}
+
+	/// A number as an index key stores it, and as a read of that key decodes it.
+	fn through_index_key(n: &Number) -> Number {
+		let key = storekey::encode_vec_format::<IndexFormat, _>(n).unwrap();
+		storekey::decode_borrow_format::<IndexFormat, Number>(&key)
+			.unwrap_or_else(|e| panic!("the index key of {n:?} does not decode: {e}"))
+	}
+
+	fn decimal(text: &str) -> Decimal {
+		text.parse().unwrap()
+	}
+
+	/// The decoded number is a `Decimal` of exactly this mantissa and scale.
+	#[track_caller]
+	fn assert_decimal(decoded: Number, mantissa: i128, scale: u32) {
+		match decoded {
+			Number::Decimal(d) => assert_eq!((d.mantissa(), d.scale()), (mantissa, scale), "{d}"),
+			other => panic!("decoded as {other:?}, not the decimal {mantissa}e-{scale}"),
+		}
+	}
+
+	#[test]
+	fn an_index_key_decodes_a_float_below_a_millionth_to_the_float_it_was_written_from() {
+		for f in [
+			1e-20,
+			5.6527459748369866e-8,
+			1e-7,
+			9.99e-7,
+			1e-28,
+			1e-29,
+			1e-300,
+			f64::MIN_POSITIVE,
+			5e-324,
+		] {
+			for f in [f, -f] {
+				match through_index_key(&Number::Float(f)) {
+					Number::Float(g) => {
+						assert_eq!(g.to_bits(), f.to_bits(), "{f:e} decoded as {g:e}")
+					}
+					other => panic!("{f:e} decoded as {other:?}, not a float"),
+				}
+			}
+		}
+	}
+
+	#[test]
+	fn an_index_key_decodes_a_float_to_the_decimal_it_has_always_decoded_to() {
+		// 0.1 is 0.1000000000000000055511151231257827…, of which a Decimal holds 28 places.
+		assert_decimal(through_index_key(&Number::Float(0.1)), 1000000000000000055511151231, 28);
+		assert_decimal(through_index_key(&Number::Float(-0.1)), -1000000000000000055511151231, 28);
+		assert_decimal(through_index_key(&Number::Float(1.5)), 15, 1);
+		assert_decimal(through_index_key(&Number::Float(0.0)), 0, 0);
+		assert_decimal(through_index_key(&Number::Float(1e28)), 9999999999999999583119736832, 0);
+		// Beyond a Decimal's 96 bits the value is a float.
+		for f in [1e30, -1e30, 1e300, f64::MAX, f64::MIN] {
+			assert!(
+				matches!(through_index_key(&Number::Float(f)), Number::Float(g) if g == f),
+				"{f:e}"
+			);
+		}
+		for f in [f64::INFINITY, f64::NEG_INFINITY] {
+			assert!(matches!(through_index_key(&Number::Float(f)), Number::Float(g) if g == f));
+		}
+		assert!(
+			matches!(through_index_key(&Number::Float(f64::NAN)), Number::Float(g) if g.is_nan())
+		);
+	}
+
+	#[test]
+	fn an_index_key_decodes_a_number_to_a_decimal_only_between_a_millionth_and_2_pow_96() {
+		// A Decimal's own range reads back as itself, scale included.
+		for text in [
+			"0.000001",
+			"-0.000001",
+			"0.0000010000000000000000000001",
+			"1.50",
+			"100.000",
+			"79228162514264337593543950335",
+			"-79228162514264337593543950335",
+			"7.9228162514264337593543950335",
+		] {
+			let d = decimal(text);
+			assert_decimal(through_index_key(&Number::Decimal(d)), d.mantissa(), d.scale());
+		}
+		// A magnitude below a millionth reads back as the nearest float.
+		for (text, float) in [
+			("0.0000001", "1e-7"),
+			("-0.0000001", "-1e-7"),
+			("0.0000009999999999999999999999", "9.999999999999999999999e-7"),
+			("0.0000000000000000000000000001", "1e-28"),
+		] {
+			let nearest: f64 = float.parse().unwrap();
+			match through_index_key(&Number::Decimal(decimal(text))) {
+				Number::Float(g) => assert_eq!(g.to_bits(), nearest.to_bits(), "{text}: {g:e}"),
+				other => panic!("{text} decoded as {other:?}, not a float"),
+			}
+		}
+		// A float is on one side or the other of 2^96 = 79228162514264337593543950336.
+		assert!(matches!(through_index_key(&Number::Float(2f64.powi(96))), Number::Float(_)));
+		assert!(matches!(
+			through_index_key(&Number::Float(2f64.powi(96) * (1.0 - f64::EPSILON))),
+			Number::Decimal(_)
+		));
+	}
+
+	#[test]
+	fn an_index_key_decodes_an_int_to_the_decimal_of_that_value() {
+		for i in [0, 1, -1, 7, i64::MAX, i64::MIN, 1_000_000, -1_000_000_007] {
+			assert_decimal(through_index_key(&Number::Int(i)), i128::from(i), 0);
+		}
+	}
+
+	/// Whatever a number is written as, an index key reads it back as a number of
+	/// about the same value, never one an exponent away.
+	#[test]
+	fn an_index_key_decodes_to_the_value_it_was_written_from_up_to_rounding() {
+		use rand::SeedableRng;
+		use rand::rngs::StdRng;
+
+		/// The distance between an `f64` and a decoded number, relative to the former,
+		/// where both are D128s so that the comparison is exact.
+		fn relative_distance(original: &D128, decoded: &Number) -> f64 {
+			let decoded = match decoded {
+				Number::Float(g) => D128::from_f64(*g),
+				Number::Decimal(d) => DecimalLexEncoder::to_d128(*d),
+				Number::Int(i) => D128::from(*i),
+			};
+			if original.is_zero() {
+				return decoded.abs().to_f64();
+			}
+			((*original - decoded).abs() / original.abs()).to_f64()
+		}
+
+		let mut rng = StdRng::seed_from_u64(0x1DE7);
+
+		// Every f64 bit pattern, so every magnitude and every digit string.
+		for _ in 0..60_000 {
+			let f = f64::from_bits(rng.random());
+			if f.is_nan() {
+				continue;
+			}
+			let original = D128::from_f64(f);
+			let decoded = through_index_key(&Number::Float(f));
+			match decoded {
+				// A float is the one it was written from.
+				Number::Float(g) if f.is_finite() => {
+					assert_eq!(g.to_bits(), f.to_bits(), "{f:e} decoded as {g:e}")
+				}
+				Number::Float(g) => assert_eq!(g, f, "{f:e}"),
+				// A Decimal keeps 28 fractional digits, so a value of at least a
+				// millionth keeps at least 22 significant ones.
+				Number::Decimal(_) => {
+					let distance = relative_distance(&original, &decoded);
+					assert!(distance < 1e-21, "{f:e} decoded as {decoded:?}, {distance:e} away");
+				}
+				Number::Int(_) => panic!("{f:e} decoded as an int"),
+			}
+		}
+
+		// Floats with a short mantissa at every power of ten, where the digit
+		// string is exact rather than a 39-digit expansion.
+		for e in -324..=308 {
+			for m in ["1", "9.999999999999999", "1.2345678901234567", "5", "7.1"] {
+				let Ok(f) = format!("{m}e{e}").parse::<f64>() else {
+					continue;
+				};
+				// A mantissa at the top of the range rounds up past `f64::MAX`.
+				if !f.is_finite() {
+					continue;
+				}
+				for f in [f, -f] {
+					let original = D128::from_f64(f);
+					let decoded = through_index_key(&Number::Float(f));
+					let distance = relative_distance(&original, &decoded);
+					assert!(distance < 1e-21, "{f:e} decoded as {decoded:?}, {distance:e} away");
+				}
+			}
+		}
+
+		// Every Decimal: those in range come back as themselves, and the rest as a
+		// float of the same value.
+		for _ in 0..60_000 {
+			let mantissa = (rng.random::<u128>() >> rng.random_range(32..128)) as i128;
+			let mantissa = if rng.random() {
+				-mantissa
+			} else {
+				mantissa
+			};
+			let d = Decimal::from_i128_with_scale(mantissa, rng.random_range(0..=28));
+			let decoded = through_index_key(&Number::Decimal(d));
+			if d.is_zero() || d.abs() >= decimal("0.000001") {
+				match decoded {
+					Number::Decimal(g) if d.is_zero() => assert!(g.is_zero(), "{d} decoded as {g}"),
+					Number::Decimal(g) => {
+						assert_eq!(g.serialize(), d.serialize(), "{d} decoded as {g}")
+					}
+					other => panic!("{d} decoded as {other:?}"),
+				}
+			} else {
+				match decoded {
+					Number::Float(g) => {
+						let original = DecimalLexEncoder::to_d128(d);
+						let distance = relative_distance(&original, &decoded);
+						assert!(distance < 1e-15, "{d} decoded as {g:e}, {distance:e} away");
+					}
+					other => panic!("{d} decoded as {other:?}, not a float"),
+				}
+			}
+		}
+
+		// Every i64.
+		for _ in 0..20_000 {
+			let i = rng.random::<i64>() >> rng.random_range(0..64);
+			assert_decimal(through_index_key(&Number::Int(i)), i128::from(i), 0);
+		}
+	}
+
+	/// A decoded float that a Decimal parser reads positionally is the Decimal it
+	/// reads, to the last digit and the scale, so a decoded value does not move.
+	#[test]
+	fn an_index_key_decodes_a_float_to_the_decimal_its_text_parses_to() {
+		use rand::SeedableRng;
+		use rand::rngs::StdRng;
+
+		let mut rng = StdRng::seed_from_u64(0x7E47);
+		let mut checked = 0;
+		for _ in 0..60_000 {
+			// Magnitudes of a millionth up to 2^96, written positionally.
+			let f = rng.random::<f64>() * 10f64.powi(rng.random_range(-6..=28));
+			let f = if rng.random() {
+				-f
+			} else {
+				f
+			};
+			let text = D128::from_f64(f).to_string();
+			if text.contains(['e', 'E']) {
+				continue;
+			}
+			let Ok(parsed) = Decimal::from_str_radix(&text, 10) else {
+				continue;
+			};
+			checked += 1;
+			match through_index_key(&Number::Float(f)) {
+				Number::Decimal(d) => assert_eq!(d.serialize(), parsed.serialize(), "{text}: {d}"),
+				other => panic!("{f:e} decoded as {other:?}, not the decimal {parsed}"),
+			}
+		}
+		assert!(checked > 20_000, "only {checked} positional floats were generated");
+	}
+
+	/// Reading a Decimal from the text of the decoded D128, and a float where that
+	/// text is not one, is a decoder of its own for the values it reads right. The
+	/// decoder under test agrees with it wherever it is right, in value and in kind,
+	/// so only a value it got wrong is ever decoded differently.
+	#[test]
+	fn an_index_key_decodes_every_value_a_text_read_gets_right_as_it_does() {
+		use rand::SeedableRng;
+		use rand::rngs::StdRng;
+
+		fn read_from_text(key: &[u8]) -> Number {
+			let d128 = DecimalLexEncoder::decode(key).unwrap();
+			match Decimal::from_str_radix(&d128.to_string(), 10) {
+				Ok(d) => Number::Decimal(d),
+				Err(_) => Number::Float(d128.to_f64()),
+			}
+		}
+
+		/// How far a number is from the value that was written, relative to it.
+		fn relative_distance(original: D128, read: &Number) -> f64 {
+			let read = match read {
+				Number::Float(g) => D128::from_f64(*g),
+				Number::Decimal(d) => DecimalLexEncoder::to_d128(*d),
+				Number::Int(i) => D128::from(*i),
+			};
+			((original - read).abs() / original.abs()).to_f64()
+		}
+
+		let mut rng = StdRng::seed_from_u64(0x7E47_0002);
+		let mut differed = 0;
+		let mut numbers = Vec::new();
+		for _ in 0..60_000 {
+			numbers.push(Number::Float(f64::from_bits(rng.random())));
+			numbers
+				.push(Number::Float(rng.random::<f64>() * 10f64.powi(rng.random_range(-40..40))));
+			let mantissa = (rng.random::<u128>() >> rng.random_range(32..128)) as i128;
+			numbers.push(Number::Decimal(Decimal::from_i128_with_scale(
+				if rng.random() {
+					-mantissa
+				} else {
+					mantissa
+				},
+				rng.random_range(0..=28),
+			)));
+			numbers.push(Number::Int(rng.random::<i64>() >> rng.random_range(0..64)));
+		}
+		for n in numbers {
+			let key = n.as_decimal_buf();
+			let (decoded, read) = (Number::from_decimal_buf(&key).unwrap(), read_from_text(&key));
+			let same = match (&decoded, &read) {
+				(Number::Decimal(a), Number::Decimal(b)) => a.serialize() == b.serialize(),
+				(Number::Float(a), Number::Float(b)) => a.to_bits() == b.to_bits() || a == b,
+				_ => false,
+			};
+			if same {
+				continue;
+			}
+			differed += 1;
+			let written = DecimalLexEncoder::decode(&key).unwrap();
+			assert!(
+				written.is_finite()
+					&& !written.is_zero()
+					&& relative_distance(written, &read) > 1e-9
+					&& relative_distance(written, &decoded) < 1e-15,
+				"{n:?} decoded as {decoded:?}, which differs from {read:?}, read from text"
+			);
+		}
+		assert!(differed > 1_000, "only {differed} values were decoded differently");
 	}
 
 	#[test]
