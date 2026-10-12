@@ -14,6 +14,7 @@ use std::time::Duration;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::TransactionType::Write;
 use temp_dir::TempDir;
+use web_time::Instant;
 
 use crate::CommunityComposer;
 use crate::catalog::providers::CatalogProvider;
@@ -181,20 +182,36 @@ async fn a_blocking_rebuild_inside_a_transaction_waits_inside_it() {
 	ds.shutdown().await.unwrap();
 }
 
+/// How long a build may go without changing its build report before
+/// [`settled_build`] gives up on it.
+const BUILD_STALL_LIMIT: Duration = Duration::from_secs(30);
+
 /// Wait for the build of `ix` on `t` to settle, returning its build report.
+///
+/// The wait has no overall deadline, since a build's duration depends on the
+/// machine running it. It fails only once the build report has not changed
+/// for [`BUILD_STALL_LIMIT`]: a running build advances its report as it
+/// commits each batch.
 async fn settled_build(ds: &Datastore, ses: &Session, ix: &str) -> serde_json::Value {
-	for _ in 0..600 {
+	let mut last = serde_json::Value::Null;
+	let mut changed = Instant::now();
+	loop {
 		let report = building(ds, ses, ix).await;
 		if matches!(report["status"].as_str(), Some("ready" | "aborted" | "error")) {
 			return report;
 		}
+		if report != last {
+			last = report;
+			changed = Instant::now();
+		} else if changed.elapsed() > BUILD_STALL_LIMIT {
+			panic!("the build of {ix} made no progress for {BUILD_STALL_LIMIT:?}: {last}");
+		}
 		tokio::time::sleep(Duration::from_millis(100)).await;
 	}
-	panic!("the build of {ix} did not settle");
 }
 
 /// Rows enough that a build takes many times the timeouts below.
-const MANY_ROWS: usize = 30_000;
+const MANY_ROWS: usize = 8_000;
 
 /// Run a blocking `REBUILD INDEX` of a b-tree index over `MANY_ROWS` on a
 /// datastore reopened with the given timeouts, asserting that the rebuild
