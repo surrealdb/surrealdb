@@ -84,7 +84,31 @@ impl Idiom {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
 	}
 
-	/// Returns a raw string representation of this idiom without any escaping.
+	/// The name of the record field this idiom names, unescaped: the key a
+	/// record holds the field under, and the name another field's clause reads
+	/// it by ([`crate::expr::computed_deps::extract_computed_deps`]). `None`
+	/// unless the idiom is exactly one field part: a longer path names a
+	/// position inside a field's value, not a key of the record.
+	///
+	/// This is not [`Self::to_raw_string`], which is the path's canonical text.
+	/// A name that would not parse bare (a space, a hyphen, a non-ASCII
+	/// character, a leading digit, a dot) comes back from that backticked, so
+	/// as a record key or a name to look a field up by it matches nothing.
+	pub fn field_name(&self) -> Option<&str> {
+		match self.0.as_slice() {
+			[Part::Field(name)] => Some(name.as_str()),
+			_ => None,
+		}
+	}
+
+	/// The canonical text of this idiom: each field part is escaped only as far
+	/// as it must be for the text to parse back as the same path
+	/// (`EscapeKwFreeIdent`), so a field named `a.b` reads `` `a.b` `` and is
+	/// told apart from the nested path `a.b`. A reserved word is left bare.
+	///
+	/// It is the key the catalog holds a field definition under and the text
+	/// stored field paths carry. It is not a record key: see
+	/// [`Self::field_name`].
 	pub fn to_raw_string(&self) -> String {
 		use std::fmt::Write;
 
@@ -434,6 +458,31 @@ mod tests {
 	#[case(Idiom::from(vec![Part::Field(Strand::new_static("value"))]), "value")]
 	fn test_idiom_to_raw_string(#[case] idiom: Idiom, #[case] expected: &'static str) {
 		assert_eq!(idiom.to_raw_string(), expected.to_string());
+	}
+
+	/// The name a record holds a field under is the name itself, where the
+	/// canonical text backticks one that would not parse bare. Only a single
+	/// field part has such a name: a longer path is a position inside a value.
+	#[rstest]
+	#[case("name", Some("name"), "name")]
+	#[case("`the x`", Some("the x"), "`the x`")]
+	#[case("`a-b`", Some("a-b"), "`a-b`")]
+	#[case("`café`", Some("café"), "`café`")]
+	#[case("`1st`", Some("1st"), "`1st`")]
+	#[case("`a.b`", Some("a.b"), "`a.b`")]
+	#[case("MixedCase", Some("MixedCase"), "MixedCase")]
+	#[case("a.b", None, "a.b")]
+	#[case("`the x`.y", None, "`the x`.y")]
+	#[case("tags[0]", None, "tags[0]")]
+	#[case("tags.*", None, "tags.*")]
+	fn test_idiom_field_name(
+		#[case] text: &str,
+		#[case] name: Option<&str>,
+		#[case] raw_string: &str,
+	) {
+		let idiom = Idiom::from_str(text).unwrap();
+		assert_eq!(idiom.field_name(), name);
+		assert_eq!(idiom.to_raw_string(), raw_string);
 	}
 
 	#[rstest]

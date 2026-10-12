@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use surrealdb_strand::Strand;
 
-use super::{Lowered, Lowering, NotCovered, needs_caller};
+use super::{Lowered, Lowering, NotCovered, computed_key, needs_caller};
 use crate::catalog::{Permission, PermissionKind, TableDefinition};
 use crate::exec::operators::write::plan::WriteForm;
 use crate::exec::operators::write::stage::{RecordImage, StageId};
@@ -384,8 +384,8 @@ impl Lowering<'_, '_> {
 			.fields
 			.iter()
 			.filter(|fd| fd.computed.is_some())
-			.map(|fd| fd.name.to_raw_string())
-			.collect();
+			.map(|fd| computed_key(fd).map(str::to_owned))
+			.collect::<Lowered<_>>()?;
 		if computed.is_empty() {
 			return Ok(Vec::new());
 		}
@@ -440,7 +440,7 @@ impl Lowering<'_, '_> {
 					NotCovered::internal(format!("a computed body has no logical form: {e}"))
 				})?
 				.clone();
-			let name = fd.name.to_raw_string();
+			let name = computed_key(fd)?.to_owned();
 			let deps = crate::expr::computed_deps::extract_computed_deps(stored);
 			order.push((name.clone(), deps.fields));
 			computed.push(Derivation {

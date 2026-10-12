@@ -266,6 +266,69 @@ async fn field_clauses_survive() -> Result<()> {
 	round_trip.assert_all().await
 }
 
+/// A `COMPUTED` field whose name has to be backticked when written is exported
+/// and restored under its own name, and derives under it afterwards.
+///
+/// Its definition is the text that carries the name, and a clause reading the
+/// field names it by the key a record holds it under, so the restored table has
+/// to hold both and agree with the source on what a read, a `VALUE` and an
+/// `ASSERT` that read it derive. The import applies no clause, so the derived
+/// values are compared by running queries against both databases.
+#[tokio::test]
+async fn computed_fields_with_escaped_names_survive() -> Result<()> {
+	let round_trip = RoundTrip::run(
+		"DEFINE TABLE b SCHEMALESS;
+		 DEFINE FIELD src ON b TYPE option<string>;
+		 DEFINE FIELD `the x` ON b COMPUTED string::concat(src, '/space');
+		 DEFINE FIELD `a-b` ON b COMPUTED string::concat(`the x`, '/hyphen');
+		 DEFINE FIELD `café` ON b COMPUTED string::concat(src, '/unicode');
+		 DEFINE FIELD `1st` ON b COMPUTED string::concat(src, '/digit');
+		 DEFINE FIELD copied ON b VALUE `a-b`;
+		 DEFINE FIELD checked ON b TYPE option<string> ASSERT $value = NONE OR $value = `the x`;
+		 CREATE b:1 SET src = 'q', checked = 'q/space';
+		 CREATE b:2 SET src = 'r';",
+	)
+	.await?;
+
+	assert_table_info_carries(
+		&round_trip,
+		"b",
+		&[
+			"DEFINE FIELD `the x` ON b COMPUTED string::concat(src, '/space')",
+			"DEFINE FIELD `a-b` ON b COMPUTED string::concat(`the x`, '/hyphen')",
+			"DEFINE FIELD `café` ON b COMPUTED string::concat(src, '/unicode')",
+			"DEFINE FIELD `1st` ON b COMPUTED string::concat(src, '/digit')",
+			"DEFINE FIELD copied ON b VALUE `a-b`",
+		],
+	)
+	.await?;
+	round_trip.assert_all().await?;
+
+	// Each read derives the field, through the chain that reads another one.
+	let read = "SELECT `the x`, `a-b`, `café`, `1st`, copied FROM b ORDER BY id";
+	round_trip.assert_query_equal(read).await?;
+	let restored = single(round_trip.target_query(read).await?, read)?.to_sql();
+	assert_eq!(
+		restored,
+		"[{ \"1st\": 'q/digit', \"a-b\": 'q/space/hyphen', \"café\": 'q/unicode', copied: \
+		 'q/space/hyphen', \"the x\": 'q/space' }, { \"1st\": 'r/digit', \"a-b\": \
+		 'r/space/hyphen', \"café\": 'r/unicode', copied: 'r/space/hyphen', \"the x\": 'r/space' }]"
+	);
+
+	// The restored table still derives for a write: the `VALUE` that reads the
+	// computed chain gets the derived value, and the `ASSERT` that reads it
+	// judges that.
+	let write = "CREATE b:3 SET src = 's' RETURN copied";
+	let derived = single(round_trip.target_query(write).await?, write)?.to_sql();
+	assert_eq!(derived, "[{ copied: 's/space/hyphen' }]");
+	let refused = "CREATE b:4 SET src = 's', checked = 'nope'";
+	assert!(
+		round_trip.target_query(refused).await.is_err(),
+		"the restored `ASSERT` reads the derived `the x`, so `nope` does not satisfy it"
+	);
+	Ok(())
+}
+
 /// A relation table's fields survive, both the pair the table definition
 /// generates and the ones the schema declares.
 ///

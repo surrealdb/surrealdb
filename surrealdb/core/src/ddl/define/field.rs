@@ -11,7 +11,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::define::DefineKind;
-use crate::expr::{Base, Kind, KindLiteral, Part};
+use crate::expr::{Base, Idiom, Kind, KindLiteral, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::FieldKey;
 use crate::kvs::Transaction;
@@ -509,8 +509,14 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		return Ok(());
 	}
 
+	// Fields are named by the key a record holds them under, which is how a
+	// clause names a field it reads. A nested field is read by nobody, so no
+	// edge leads to it and it cannot be on a cycle.
+	let Some(field_name) = definition.name.field_name() else {
+		return Ok(());
+	};
+
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
-	let field_name = definition.name.to_raw_string();
 
 	// Build adjacency list: field_name -> the fields its clauses read.
 	// Deps are always extracted on the fly (they are not stored).
@@ -527,16 +533,18 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		if !fd.has_production_clause() {
 			continue;
 		}
-		let name = fd.name.to_raw_string();
+		let Some(name) = fd.name.field_name() else {
+			continue;
+		};
 		// Skip the field being (re)defined -- we'll use the new definition below
 		if name == field_name {
 			continue;
 		}
-		graph.insert(name, fd.production_dependencies());
+		graph.insert(name.to_owned(), fd.production_dependencies());
 	}
 
 	// Insert/replace the field being defined with its freshly-extracted deps
-	graph.insert(field_name, definition.production_dependencies());
+	graph.insert(field_name.to_owned(), definition.production_dependencies());
 
 	// Iterative DFS cycle detection.
 	// States: 0 = unvisited, 1 = in current path, 2 = fully visited
@@ -572,9 +580,11 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 					Some(1) => {
 						// Found a cycle! Build the cycle path for the error message.
 						let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
+						// The names are shown as a statement writes them
+						let shown = |name: &str| Idiom::field(name).to_raw_string();
 						let cycle: Vec<String> =
-							path[cycle_start..].iter().map(|s| (*s).to_string()).collect();
-						let cycle_str = format!("{} -> {}", cycle.join(" -> "), neighbor);
+							path[cycle_start..].iter().map(|s| shown(s)).collect();
+						let cycle_str = format!("{} -> {}", cycle.join(" -> "), shown(neighbor));
 						bail!(ExecError::ComputedFieldCycle(cycle_str));
 					}
 					Some(0) | None => {

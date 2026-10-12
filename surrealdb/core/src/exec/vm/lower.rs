@@ -1430,6 +1430,15 @@ pub(super) fn needs_caller(expr: &LogicalExpr) -> bool {
 		})
 }
 
+/// The key a record holds the `COMPUTED` field `fd` under, which is also the
+/// name another clause reads it by. A computed field is a top-level one, so a
+/// name that is not exactly one field is a definition no derivation can key.
+pub(super) fn computed_key(fd: &crate::catalog::FieldDefinition) -> Lowered<&str> {
+	fd.name
+		.field_name()
+		.ok_or_else(|| NotCovered::internal("a computed field is not named by one field"))
+}
+
 /// A table's field view: its layers, top first, and whether the caller's
 /// reads are checked.
 type ViewLayers = (Vec<(LogicalFields, crate::expr::logical::Schema)>, bool);

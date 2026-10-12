@@ -725,7 +725,18 @@ pub(crate) async fn compile_field_state(
 		// evaluates is its logical form, which fails when evaluated if the
 		// clause has none.
 		if let (Some(expr), Some(body)) = (fd.computed.as_ref(), fd.computed_logical()) {
-			let field_name = fd.name.to_raw_string();
+			// The key the record holds the field under, which is the name every
+			// other clause reads it by.
+			let field_name = fd
+				.name
+				.field_name()
+				.ok_or_else(|| {
+					ControlFlow::Err(anyhow::anyhow!(
+						"a computed field is not named by one field: {}",
+						fd.name.to_raw_string()
+					))
+				})?
+				.to_owned();
 
 			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 
@@ -1105,7 +1116,8 @@ impl PermissionPass {
 	fn applies_to(self, state: &FieldState, idiom: &crate::expr::Idiom) -> bool {
 		let computed = match idiom.0.as_slice() {
 			[crate::expr::Part::Field(name)] => state.dep_map.contains_key(name.as_str()),
-			_ => state.dep_map.contains_key(&idiom.to_raw_string()),
+			// A computed field is a top-level one, so no longer path is its own
+			_ => false,
 		};
 		match self {
 			PermissionPass::All => true,

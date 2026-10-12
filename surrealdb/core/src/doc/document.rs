@@ -120,9 +120,12 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 		}
 	}
 
-	// Resolve dependency names against the fields this table defines
-	let by_name: HashMap<String, usize> =
-		fields.iter().enumerate().map(|(i, fd)| (fd.name.to_raw_string(), i)).collect();
+	// Resolve dependency names against the fields this table defines. A clause
+	// names a field it reads by the key a record holds it under, so a top-level
+	// field is looked up by that, unescaped; a nested field is read by nobody
+	// and has no entry.
+	let by_name: HashMap<&str, usize> =
+		fields.iter().enumerate().filter_map(|(i, fd)| Some((fd.name.field_name()?, i))).collect();
 	// edges[i] lists the fields that must be processed after field `i`
 	let mut edges: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
 	let mut indegree: Vec<usize> = vec![0; fields.len()];
@@ -133,7 +136,7 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 			continue;
 		}
 		for dep in fd.production_dependencies() {
-			if let Some(&j) = by_name.get(&dep) {
+			if let Some(&j) = by_name.get(dep.as_str()) {
 				deps_by_field[i].push(j);
 				add_edge(j, i, &mut edges, &mut indegree);
 			}
@@ -191,7 +194,7 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 		}
 		pending.extend(deps_by_field[i].iter().copied());
 		for dep in fd.assert_dependencies() {
-			if let Some(&j) = by_name.get(&dep) {
+			if let Some(&j) = by_name.get(dep.as_str()) {
 				pending.push(j);
 			}
 		}
@@ -218,12 +221,16 @@ pub(crate) fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 /// computed field's expression tree again for each record the statement
 /// touches. The result depends only on the field set, which is fixed for the
 /// life of the context.
+///
+/// Keyed by the name a record holds the field under, which is how a clause
+/// names it and how the resolver looks it up. A computed field is a top-level
+/// one, so a definition with no such name has no entry.
 fn computed_field_deps(fields: &[FieldDefinition]) -> HashMap<String, ComputedDeps> {
 	fields
 		.iter()
 		.filter_map(|fd| {
 			let computed = fd.computed.as_ref()?;
-			Some((fd.name.to_raw_string(), extract_computed_deps(computed)))
+			Some((fd.name.field_name()?.to_owned(), extract_computed_deps(computed)))
 		})
 		.collect()
 }
@@ -532,6 +539,14 @@ mod tests {
 		}
 	}
 
+	fn valued(name: &str, value: &str) -> FieldDefinition {
+		FieldDefinition {
+			name: syn::idiom(name).unwrap(),
+			value: Some(syn::expr(value).unwrap()),
+			..Default::default()
+		}
+	}
+
 	/// Only computed fields get an entry, keyed by the same raw name the
 	/// resolver looks them up by. A non-computed field must not appear, or the
 	/// resolver would treat it as a computed field with no dependencies.
@@ -545,12 +560,69 @@ mod tests {
 
 		let deps = computed_field_deps(&fields);
 
-		assert_eq!(deps.len(), 2, "only the two computed fields are keyed");
+		assert_eq!(deps.len(), 1, "only the top-level computed field is keyed");
 		assert!(!deps.contains_key("plain"));
 		let total = deps.get("total").expect("keyed by raw name");
 		assert!(total.fields.iter().any(|f| f == "price"));
 		assert!(total.fields.iter().any(|f| f == "qty"));
-		assert!(deps.contains_key("nested.deep"), "keyed by the full raw path");
+		assert!(!deps.contains_key("nested.deep"), "a nested path is not a record key");
+	}
+
+	/// The key is the name the record holds the field under, so a name that has
+	/// to be backticked when written is keyed without them.
+	#[test]
+	fn keys_deps_by_the_unescaped_name() {
+		for name in ["the x", "a-b", "café", "1st", "a.b"] {
+			let escaped = format!("`{name}`");
+			let fields = vec![field(&escaped, Some("src"))];
+
+			let deps = computed_field_deps(&fields);
+
+			assert!(deps.contains_key(name), "`{name}` is keyed by itself");
+			assert!(!deps.contains_key(&escaped), "`{name}` is not keyed by its rendering");
+		}
+	}
+
+	/// A dependency on a field whose name has to be backticked when written
+	/// orders the fields like any other, and marks the computed field read by
+	/// another clause as required.
+	#[test]
+	fn orders_fields_by_dependencies_on_escaped_names() {
+		// The names sort so that every reader precedes the field it reads
+		let fields = vec![
+			field("`a first`", Some("`z last` + 1")),
+			valued("copied", "`z last`"),
+			valued("`copied 2`", "`a first`"),
+			field("`z last`", Some("src")),
+		];
+		let at = |name: &str| fields.iter().position(|fd| fd.name.to_raw_string() == name).unwrap();
+
+		let eval = field_eval_order(&fields);
+
+		let rank = |name: &str| eval.order.iter().position(|&i| i == at(name)).unwrap();
+		assert!(eval.cycle.is_none());
+		assert!(rank("`z last`") < rank("`a first`"), "a computed field follows what it reads");
+		assert!(rank("`z last`") < rank("copied"), "a VALUE follows the computed field it reads");
+		assert!(rank("`a first`") < rank("`copied 2`"));
+		assert_eq!(
+			eval.required_computed,
+			[at("`a first`"), at("`z last`")].into_iter().collect::<std::collections::HashSet<_>>(),
+			"both computed fields are read by another field's clause"
+		);
+	}
+
+	/// A cycle through names that have to be backticked is found; a field
+	/// reading its own name is not one.
+	#[test]
+	fn finds_cycles_through_escaped_names() {
+		let cyclic = vec![valued("`m n`", "`o p`"), valued("`o p`", "`m n`")];
+		let eval = field_eval_order(&cyclic);
+		let mut cycle = eval.cycle.expect("a cycle through escaped names");
+		cycle.sort();
+		assert_eq!(cycle, ["`m n`", "`o p`"]);
+
+		let own = vec![valued("`own n`", "`own n` ?? 'init'")];
+		assert!(field_eval_order(&own).cycle.is_none(), "reading itself is not a cycle");
 	}
 	/// The `id` of `reading` naming `city` and `time`, then the fields in
 	/// `rest`, as the catalog lists them: the two virtual definitions of the

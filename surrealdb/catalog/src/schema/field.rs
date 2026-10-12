@@ -584,11 +584,13 @@ impl FieldDefinition {
 	/// itself — naming your own field is reading the value under consideration,
 	/// not asking for one to be produced first.
 	fn reads_of(&self, expr: &Expr) -> Vec<String> {
-		let own_name = self.name.to_raw_string();
+		// Dependencies are record keys, so the field is named by its own: a
+		// nested field has none and nothing reads it by name.
+		let own_name = self.name.field_name();
 		crate::expr::computed_deps::extract_computed_deps(expr)
 			.fields
 			.into_iter()
-			.filter(|dep| *dep != own_name)
+			.filter(|dep| Some(dep.as_str()) != own_name)
 			.collect()
 	}
 
@@ -693,6 +695,44 @@ mod tests {
 				def,
 				"`{raw}` did not survive to_stored/from_stored"
 			);
+		}
+	}
+
+	/// A clause reading its own field is reading the value under consideration,
+	/// not asking for one to be produced first, and a read of another field is
+	/// a dependency named by the key a record holds it under, whatever either
+	/// name has to be backticked as when written.
+	#[test]
+	fn dependencies_are_named_by_the_unescaped_field_name() {
+		for name in ["plain", "MixedCase", "the x", "a-b", "café", "1st", "a.b"] {
+			let escaped = format!("`{name}`");
+			let value = |text: &str| -> FieldDefinition {
+				FieldDefinition {
+					name: Idiom::from_str(&escaped).unwrap(),
+					table: TableName::from("t"),
+					value: Some(ExprText::from_raw(text).compile().unwrap()),
+					..Default::default()
+				}
+			};
+
+			let own = value(&format!("{escaped} ?? 'init'"));
+			assert!(
+				own.production_dependencies().is_empty(),
+				"`{name}` reading itself is not a dependency: {:?}",
+				own.production_dependencies()
+			);
+
+			let other = value("`another one` + 1");
+			assert_eq!(other.production_dependencies(), ["another one"]);
+			assert!(other.assert_dependencies().is_empty());
+
+			let reads_own_name = FieldDefinition {
+				name: Idiom::from_str("`another one`").unwrap(),
+				table: TableName::from("t"),
+				value: Some(ExprText::from_raw(format!("{escaped} + 1")).compile().unwrap()),
+				..Default::default()
+			};
+			assert_eq!(reads_own_name.production_dependencies(), [name]);
 		}
 	}
 

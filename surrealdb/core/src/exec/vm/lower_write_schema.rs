@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use super::{Lowered, Lowering, NotCovered, lend, needs_caller};
+use super::{Lowered, Lowering, NotCovered, computed_key, lend, needs_caller};
 use crate::catalog::{FieldDefinition, LogicalPermissionBody, Permission};
 use crate::exec::operators::write::stage::StageId;
 use crate::exec::planner::Planner;
@@ -634,12 +634,12 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			.iter()
 			.map(|fd| {
 				let expr = fd.computed.as_ref().expect("a computed field");
-				(
-					fd.name.to_raw_string(),
+				Ok((
+					computed_key(fd)?.to_owned(),
 					crate::expr::computed_deps::extract_computed_deps(expr).fields,
-				)
+				))
 			})
-			.collect();
+			.collect::<Lowered<_>>()?;
 		let derived: Vec<(&FieldDefinition, &LogicalExpr)> =
 			crate::expr::computed_deps::topological_sort_computed_fields(&topo)
 				.into_iter()
@@ -713,8 +713,8 @@ impl<'ctx> Lowering<'_, 'ctx> {
 	) -> Lowered<()> {
 		let names = computed
 			.iter()
-			.map(|fd| surrealdb_strand::Strand::new(fd.name.to_raw_string()))
-			.collect();
+			.map(|fd| Ok(surrealdb_strand::Strand::new(computed_key(fd)?)))
+			.collect::<Lowered<_>>()?;
 		self.computed_names.push(names);
 		let names = (self.computed_names.len() - 1) as u32;
 		let id = self.field("id");
@@ -724,7 +724,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			names,
 		});
 		for &(fd, body) in derived {
-			let name = fd.name.to_raw_string();
+			let name = computed_key(fd)?;
 			let auth = crate::exec::operators::scan::pipeline::narrowing_auth_limit(&fd.auth_limit)
 				.map_err(|e| {
 					NotCovered::internal(format!("a field's AUTH LIMIT did not convert: {e}"))
@@ -754,7 +754,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 				dst: value,
 				src: src?,
 			});
-			let field = self.field(&name);
+			let field = self.field(name);
 			if let Some(kind) = &fd.field_kind {
 				self.kinds.push(kind.clone());
 				self.emit(Instr::CoerceField {
@@ -771,7 +771,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			self.emit(Instr::NewObject {
 				dst: cuts,
 			});
-			self.paths.push(crate::exec::field_path::FieldPath::field(&name));
+			self.paths.push(crate::exec::field_path::FieldPath::field(name));
 			self.emit(Instr::SetField {
 				object: sets,
 				path: (self.paths.len() - 1) as u32,
