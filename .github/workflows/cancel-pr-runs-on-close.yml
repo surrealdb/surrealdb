@@ -22,6 +22,11 @@
 # PR-controlled head branch name is passed through `env` and `jq --arg` and is never
 # interpolated into the script, so it cannot inject commands. Keep it that way: do not
 # add a checkout of the PR head here.
+#
+# The job's `permissions` replace the workflow's, so every scope it needs is listed on the
+# job: `actions: write` to list and cancel runs, and `pull-requests: read` to list the open
+# PRs that share the head. Without the second, the pulls listing answers 403 on a private or
+# internal repository and the job fails before it cancels anything.
 
 name: Cancel PR runs on close
 
@@ -37,6 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
+      pull-requests: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
