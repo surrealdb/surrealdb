@@ -13,11 +13,16 @@ backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
 backend-tikv = ["surrealdb-core/kv-tikv"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
-bench = ["sha2","oorandom","clap/env", "surrealdb-core/kv-surrealkv"]
+bench = ["sha2","oorandom","clap/env", "surrealdb-core/kv-surrealkv", "dep:sysinfo", "dep:num_cpus"]
 bench-remote-store = ["bench","tokio-tungstenite", "tokio-tungstenite/native-tls"]
 # In-process sampling profiler for `bench run` (SIGPROF-based, so it works
 # where kernel perf events are locked down). See the `pprof` module.
 bench-pprof = ["bench", "dep:pprof"]
+# Run the test suite / benchmarks against a remote SurrealDB instance over the API
+# (`--endpoint ws://...` / `http://...`). Pulls the `surrealdb` SDK for SurrealQL
+# over ws/http and `reqwest` for the GraphQL/OpenGQL HTTP routes the SDK doesn't
+# expose. Off by default so normal / CI builds stay lean.
+remote = ["dep:surrealdb", "dep:reqwest", "dep:rustls"]
 
 [dependencies]
 # Crates for running surrealdb.
@@ -63,12 +68,30 @@ revision = { version = "0.19.0", optional = true }
 
 # In-process sampling profiler for benches (`bench-pprof` feature).
 pprof = { version = "0.15.0", features = ["flamegraph", "prost-codec"], optional = true }
+
+# `remote` feature: run the suite against a remote SurrealDB instance over the API.
+# The SDK provides SurrealQL over ws/http via `engine::any::connect` (returning the
+# same `surrealdb_types::Value` the embedded path uses, so no conversion is needed);
+# `reqwest` posts to the `/graphql` and `/gql` HTTP routes, which the SDK doesn't
+# wrap. TLS for the reqwest client comes from the SDK's `rustls` feature
+# (`reqwest/default-tls`) via feature unification on the shared reqwest crate.
+surrealdb = { path = "../surrealdb", default-features = false, features = ["protocol-ws", "protocol-http", "rustls"], optional = true }
+reqwest = { version = "0.13.2", default-features = false, features = ["json"], optional = true }
+# Only to install the process-wide rustls crypto provider (see `cmd/remote.rs`).
+# Already in the build graph via the SDK and reqwest, so this adds a manifest
+# edge rather than a crate; the version tracks the root workspace's pin.
+rustls = { version = "0.23.38", default-features = false, features = ["aws_lc_rs"], optional = true }
 cfg-if = "1.0.4"
 serde_json = "1.0.149"
 
 # Use for caching in benches
 sha2 = { version = "0.10.9", optional = true }
 oorandom = { version = "11", optional = true }
+
+# Host metadata embedded in uploaded benchmark results (already in the build
+# graph transitively, so promoting them to direct deps adds no compile cost).
+sysinfo = { version = "0.37", optional = true }
+num_cpus = { version = "1", optional = true }
 
 # `language-tests` is its own workspace (see `[workspace]` above), so it does not
 # inherit the profiles defined in the root SurrealDB workspace. The `profiling`

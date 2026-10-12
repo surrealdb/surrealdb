@@ -1,4 +1,7 @@
 /**
+[env]
+remote-skip = "returns `duration::max` (u64::MAX seconds); the wire protocol counts duration seconds in an i64, so the value has no representation over the API and every SDK client is refused it rather than handed a wrapped one"
+
 [test]
 
 [[test.results]]

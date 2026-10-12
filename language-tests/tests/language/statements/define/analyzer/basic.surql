@@ -3,6 +3,7 @@
 # Extra timeout due to file reading.
 timeout = 8000
 context-timeout = 8000
+remote-skip = "uses mapper() with a relative file path resolved against the process working directory, which differs between the embedded harness and the remote server"
 
 [test]
 

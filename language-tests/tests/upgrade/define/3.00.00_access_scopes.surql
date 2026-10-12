@@ -1,5 +1,6 @@
 /**
 [env]
+remote-exclusive = true
 imports = ["upgrade/define/3.00.00_access_scopes_import.surql"]
 clean = true
 

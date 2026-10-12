@@ -1,4 +1,7 @@
 /**
+[env]
+remote-exclusive = true
+
 [test]
 
 [[test.results]]

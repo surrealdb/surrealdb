@@ -43,6 +43,129 @@ cargo run --features backend-rocksdb run --backend rocksdb
 cargo run --features backend-tikv run --backend tikv
 ```
 
+## Running against a remote endpoint
+
+By default the suite runs against an embedded, in-process datastore. Build with
+the `remote` feature and pass `--endpoint` to instead run every test against a
+**running** SurrealDB instance over the API, exercising the full network and
+serialization path rather than just the engine:
+
+```bash
+# ws:// (or wss/http/https). Credentials default to root/root.
+cargo run --features remote run --endpoint ws://127.0.0.1:8000
+cargo run --features remote run --endpoint http://127.0.0.1:8000 --username root --password root
+```
+
+An embedded run owns the planner strategy, so it runs every test once per
+strategy the test declares. A remote one does not: the strategy is the server's
+own `--planner-strategy` startup flag and cannot be selected per statement over
+the API, so the axis collapses to a single run. `--planner-strategy` tells the
+harness which strategy the endpoint holds, spelled the way the server's flag
+spells it (`best-effort`, the server's default, `compute-only` or
+`all-read-only`); it is accepted only alongside `--endpoint`.
+
+A test is judged by *engine* rather than by strategy name: `all-ro` and
+`best-effort-ro` plan an answerable statement identically, so a test declaring
+either runs under either, and one narrowed to `compute-only` is reported as
+skipped rather than graded against the streaming engine.
+
+The strictness of `all-ro` does not survive that, and the remote run does not
+pretend otherwise. A test narrowed to `all-ro` asserts that the planner answers
+its statements; run under `best-effort-ro`, a planner that stopped being able to
+would fall back to compute and rows-only assertions could still pass. A test
+that pins an `EXPLAIN` still catches it, because the plan it asserts changes
+with the engine. That is most of them, but not all, and the strictness assertion
+belongs to the embedded run, which selects a strategy per session and walks the
+whole axis on every backend. Every line of a remote report names the strategy it
+ran under, so what was verified is on the face of it.
+
+A server behind a reverse proxy must be given its prefix **with the trailing
+slash** — `--endpoint wss://host/surreal/`, not `wss://host/surreal`. The SDK
+resolves its `rpc` route relative to the endpoint, so without the slash the last
+path segment is replaced and it connects to `wss://host/rpc`; the harness's own
+`/version`, `/graphql` and `/gql` requests follow it there, so the two halves of
+a run always agree, but neither reaches the prefix you meant.
+
+The run signs in as `--username` between tests, so that account must be one no
+test writes. The corpus names root users freely, and a test that removed or
+redefined the login account would lock the run out of the server partway
+through; a run whose `--username` collides with a scheduled test is refused
+before it starts, naming the tests. `root` is safe: the two tests that define
+it declare `[env] remote-skip`.
+
+Results are compared identically to embedded runs: SurrealQL goes through the
+SDK (flatbuffers, so types round-trip exactly), and GraphQL/GQL are POSTed
+to the server's `/graphql` and `/gql` routes.
+
+**The server must be started so its datastore matches the one the embedded
+harness builds** — otherwise tests that exercise scripting, file functions,
+GQL, `TEMPFILES` sorting, or `INFO` output fail spuriously:
+
+```bash
+SURREAL_FILE_ALLOWLIST="$(pwd)/tests" \
+surreal start --user root --pass root \
+  --allow-all --allow-experimental '*' \
+  --temporary-directory /tmp/surreal-lt --no-defaults \
+  memory
+```
+
+Each flag mirrors a setting in the harness's `Datastore::builder()`:
+
+| Server flag / env | Mirrors (embedded) | Why it's needed |
+|---|---|---|
+| `--allow-all` | `Capabilities::all()` | scripting, all functions, net, guests, arbitrary query |
+| `--allow-experimental '*'` | `.with_experimental(Targets::All)` | `files`, `surrealism`, `gql`. **Startup-only**, not implied by `--allow-all`. Without it `.gql` tests report a clear `/gql` HTTP error. |
+| `--temporary-directory <dir>` | `.with_temporary_directory(..)` | `... ORDER BY .. TEMPFILES` routes through `ExternalSortByKey` |
+| `SURREAL_FILE_ALLOWLIST=<abs tests dir>` | `file_allowlist = "../tests"` | `DEFINE ANALYZER .. mapper('<path>')` and file functions reading under `tests/` |
+| `--no-defaults` | (core datastore has no default ns/db) | the embedded datastore has no `main` namespace, so `INFO FOR ROOT` matches |
+| `--user root --pass root` | `.with_auth(true)` | the harness provisions per-test auth users as root |
+
+`SURREAL_FILE_ALLOWLIST` must be an **absolute** path to this directory's
+`tests/` folder (the server's CWD differs from the harness's); paths are
+`:`-separated.
+
+Remote runs are **concurrent**, `--jobs` deep like an embedded run. Each test
+is given a namespace of its own named `lt_<run>_<n>` and dropped whole at
+cleanup, which is the whole of its isolation — so a test that reaches outside
+one declares `[env] remote-exclusive` and is run on its own, in the namespace its
+config names, with a snapshot-diff cleanup removing whatever it created at the
+root level. A test that needs that and does not declare it fails rather than
+races; see [`[env.remote-exclusive]`](#envremote-exclusive).
+
+Run a dedicated instance for the suite. It creates and drops namespaces freely
+and owns the root configs (`GRAPHQL`, `API`, `DEFAULT`), so anything else using
+that server will lose state.
+
+Two ways of destroying a namespace are caught rather than reported after the
+fact. An exclusive test keeps its configured namespace name — the corpus default
+is `test` — and drops that name before it starts; and a test's body may remove a
+namespace by name, which reaches names no config mentions (a test declaring
+`namespace = false` has no configured name at all, yet is exclusive precisely
+because it works at root). Either way a namespace the endpoint already held goes
+with every database under it, and the second is invisible afterwards as well as
+irreversible: the snapshots compare name sets, so a test that removes a name and
+defines it again leaves the set unchanged while the data under it is gone.
+
+A run against an endpoint holding such a namespace is refused before any test
+runs, naming the namespace and the tests claiming it:
+
+```
+ws://127.0.0.1:8000 already holds 1 namespace(s) that a test claims or removes,
+which the run would drop whole and could not restore: `test` (claimed by 1
+test(s): reproductions/903_use_ns_db_expression_argument.surql). Point the run
+at an instance that does not hold them, or remove them yourself first.
+```
+
+The end-of-run sweep reports such a loss too, but only once it has happened and
+with no way to undo it, so the check is worth making while the data is there.
+
+Some tests can't be faithfully reproduced over the API and are reported as
+**skipped** (with a reason and a count, never failing the run): tests requiring
+non-default capabilities or a versioned datastore (both are server-startup
+config), record-auth tests, and tests declaring a planner strategy the endpoint
+does not run. The embedded-only retained-key/tombstone leak check is also
+skipped (no raw KV access over the API).
+
 ## GraphQL tests
 
 Besides `.surql` files the test directory can also contain `.graphql` files.
@@ -439,6 +562,10 @@ in toml and contains the following sections:
     - `[login]` the login configuration into the dataset.
     - `[capabilities]` a configuration of database capabilities in which the
       test should run.
+    - `remote-skip` a reason string that excludes the test from remote
+      (`--endpoint`) runs.
+    - `remote-exclusive` the test reaches outside its own namespace, so a remote
+      (`--endpoint`) run gives it the endpoint to itself.
 
 All keys in the config are optional and have default values if not explicitly
 specified.
@@ -936,6 +1063,12 @@ Valid strategy values:
 Defaults to `["compute-only", "all-ro"]` when omitted, meaning the test runs
 twice: once under the legacy compute executor and once requiring the new planner.
 
+Remote (`--endpoint`) runs have no axis here. The strategy is the server's own
+`--planner-strategy` startup flag, not something a session selects, so the run
+uses the single strategy `--planner-strategy` names and a test that does not
+list it is reported as skipped. See
+[Running against a remote endpoint](#running-against-a-remote-endpoint).
+
 **Examples:**
 ```toml
 # Run only under the new executor (narrow from the default two-strategy run)
@@ -948,3 +1081,99 @@ planner-strategy = ["all-ro"]
 [env]
 planner-strategy = ["compute-only"]
 ```
+#### `[env.remote-skip]`
+
+Excludes the test from remote (`--endpoint`) runs, reporting the given string as
+the skip reason. Embedded runs ignore it entirely.
+
+It is for the narrow case of a test whose expectation only holds against an
+embedded, in-process datastore, and which would therefore fail over the API for
+a reason that is not a defect — a connection-less `$session`, the absence of a
+bootstrap root user, or a path resolved against the harness's working directory.
+Everything the harness can decide for itself (non-default capabilities, a
+versioned datastore, record auth, a planner strategy the endpoint does not run,
+and GraphQL/GQL under non-owner auth) is skipped automatically and needs no
+key.
+
+The string is shown in the run summary, grouped by reason, so write it as the
+reason the test cannot be reproduced rather than as a label:
+
+```toml
+[env]
+remote-skip = "asserts $session.id, which over the API is the per-connection id but is NONE for the embedded harness's connection-less session"
+```
+
+Reach for it last. A test skipped here is coverage the remote run does not have,
+so prefer fixing the test to be transport-independent where that is possible.
+
+#### `[env.remote-exclusive]`
+
+Remote (`--endpoint`) runs execute tests concurrently against the one server,
+and what keeps them apart is a namespace each: a test is given one named
+`lt_<run>_<n>`, and everything it writes there goes away with it at cleanup.
+Embedded runs ignore this key — every test there already has a datastore of its
+own, so there is nothing to share.
+
+Set it when a test does not fit inside a namespace:
+
+- it creates a root user, root access method, or namespace, or changes a system
+  setting (`ALTER SYSTEM`, `CONFIG DEFAULT`);
+- it asserts on the literal name of the namespace it runs in — `USE DB other`
+  answers `{ database: 'other', namespace: 'test' }`, and `session::ns()`
+  returns the same;
+- it names a namespace in SurrealQL that the harness would otherwise rename
+  under it, e.g. `USE NS test DB test` in the body.
+
+Such a test then runs alone, in the namespace its `[env] namespace` names, with
+cleanup removing whatever root-level entities appeared while it ran. A test
+declaring `namespace = false` has nowhere but root to write and is exclusive
+automatically — it needs no key.
+
+```toml
+[env]
+remote-exclusive = true
+```
+
+**A test that needs this and does not declare it fails rather than races.**
+An `ALTER SYSTEM` is caught before the run starts, in the test's source and in
+its imports, and refuses to schedule the run at all — the setting it changes
+applies to every request the server is serving, so a test that restores it still
+imposes it on whatever ran beside it, and a check made afterwards would find
+nothing to report.
+
+Everything else is caught after cleanup: a concurrent test's root-level state is
+compared against a reading taken before the run began, and anything new fails the
+test by name:
+
+```
+> Test failed, it created root-level state but is not marked `[env] remote-exclusive`:
+  - NAMESPACE `test_namespace`
+  - USER `root_secret` ON ROOT
+```
+
+The endpoint is asked rather than the source read, so this holds however the
+state got there — the test's own body, one of its `imports`, or a function it
+calls. What it cannot see is the second and third cases above, which are
+ordinary expectation failures.
+
+The comparison also runs the other way. A test is as free to *remove* root state
+the endpoint already had as to add some, and that cannot be undone — a snapshot
+holds names, not definitions, and `INFO FOR ROOT` redacts a user's hash, so
+recreating one would invent an account rather than restore it. It is therefore
+reported rather than repaired. An exclusive test that removes a pre-existing root
+user, access or namespace fails by name, and the end-of-run sweep reports
+anything else that went missing and fails the run:
+
+```
+ ws://127.0.0.1:18283 was not left as this run found it; removed by this run and
+ not restorable: ACCESS `planted_ac` ON ROOT, USER `planted` ON ROOT
+```
+
+The per-test check for a concurrent test stays one-way on purpose: it puts the
+baseline back after reporting, so that one offender does not go on to fail every
+test after it, and a removal is the one thing it cannot put back. The sweep
+reports those once, for the run.
+
+Keep the declaration to tests that need it. Each one is a point where the run
+stops and waits for every job to drain, so it is the one part of the suite that
+does not get faster with `--jobs`.

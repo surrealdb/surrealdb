@@ -6,6 +6,7 @@ use clap::ArgMatches;
 use crate::cli::ColorMode;
 
 mod cli;
+mod meta;
 mod pprof;
 mod store;
 pub use cli::cmd;

@@ -423,3 +423,176 @@ impl Provisioner {
 fn is_base_environment(env: &TestEnv) -> bool {
 	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
 }
+
+/// Pool of connections to a remote SurrealDB instance for `--endpoint` runs.
+///
+/// Mirrors the embedded [`Provisioner`]: hands out one connection per parallel
+/// job (each its own session, so test-under-test signins don't bleed across
+/// jobs) plus a local embedded "grade" datastore for evaluating `@match` matcher
+/// expressions (which must run locally, never against the remote server). After
+/// a test, the connection is reset to root and returned to the pool; on a panic
+/// it is replaced with a fresh connection.
+#[cfg(feature = "remote")]
+pub struct RemoteProvisioner {
+	send: Sender<crate::cmd::remote::RemoteConn>,
+	recv: Receiver<crate::cmd::remote::RemoteConn>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_recv: Receiver<Arc<Datastore>>,
+	root_baseline: Arc<super::executor::RootSnapshot>,
+}
+
+#[cfg(feature = "remote")]
+impl RemoteProvisioner {
+	pub async fn new(
+		num_jobs: usize,
+		endpoint: String,
+		user: String,
+		pass: String,
+	) -> Result<Self> {
+		use crate::cmd::remote::RemoteConn;
+
+		let mut conns = Vec::with_capacity(num_jobs);
+		for _ in 0..num_jobs {
+			conns.push(RemoteConn::connect(&endpoint, &user, &pass).await?);
+		}
+
+		// The endpoint's root state as the run found it. Concurrently running
+		// tests are forbidden from changing it, so one reading taken here serves
+		// every leak check for the rest of the run — and anything already on the
+		// endpoint is recorded as pre-existing rather than blamed on a test.
+		let root_baseline = Arc::new(super::executor::snapshot_root(&conns[0]).await?);
+
+		let (send, recv) = mpsc::channel(num_jobs);
+		for conn in conns {
+			send.try_send(conn).unwrap();
+		}
+		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
+		for _ in 0..num_jobs {
+			grade_send.try_send(create_grade_ds().await).unwrap();
+		}
+		Ok(RemoteProvisioner {
+			send,
+			recv,
+			grade_send,
+			grade_recv,
+			root_baseline,
+		})
+	}
+
+	/// The endpoint's root state before any test ran; see [`Self::new`].
+	pub fn root_baseline(&self) -> Arc<super::executor::RootSnapshot> {
+		self.root_baseline.clone()
+	}
+
+	pub async fn obtain(&mut self) -> RemotePermit {
+		let conn = self.recv.recv().await.expect("Connection channel closed early");
+		let grade_ds = self.grade_recv.recv().await.expect("Datastore channel closed early");
+		RemotePermit {
+			conn,
+			grade_ds,
+			send: self.send.clone(),
+			grade_send: self.grade_send.clone(),
+		}
+	}
+
+	/// Return root to the state recorded before the run and report what survived;
+	/// see [`super::executor::sweep_to_baseline`] for why this is needed at all.
+	///
+	/// Call once, after every job has finished — it borrows a pooled connection
+	/// and returns it, so a running test would be competing for it, and the
+	/// baseline only describes an idle endpoint.
+	pub async fn sweep_to_baseline(&mut self) -> Result<super::executor::SweepResidue> {
+		use anyhow::Context;
+
+		let baseline = self.root_baseline.clone();
+		let conn =
+			self.recv.recv().await.context("connection pool closed before the final sweep")?;
+		let residue = super::executor::sweep_to_baseline(&conn, &baseline).await;
+		// Back into the pool either way, so `shutdown` closes it with the rest.
+		self.send.try_send(conn).ok();
+		residue
+	}
+
+	pub async fn shutdown(mut self) -> Result<()> {
+		mem::drop(self.send);
+		mem::drop(self.grade_send);
+		// Dropping each connection closes its session/socket.
+		while self.recv.recv().await.is_some() {}
+		while let Some(ds) = self.grade_recv.recv().await {
+			if let Err(e) = ds.shutdown().await {
+				println!("Warning: Datastore shutdown error: {e}");
+			}
+		}
+		Ok(())
+	}
+}
+
+#[cfg(feature = "remote")]
+#[must_use]
+pub struct RemotePermit {
+	conn: crate::cmd::remote::RemoteConn,
+	grade_ds: Arc<Datastore>,
+	send: Sender<crate::cmd::remote::RemoteConn>,
+	grade_send: Sender<Arc<Datastore>>,
+}
+
+#[cfg(feature = "remote")]
+impl RemotePermit {
+	pub async fn with<
+		F: AsyncFnOnce(&crate::cmd::remote::RemoteConn, &Arc<Datastore>) -> (CanReuse, R),
+		R,
+	>(
+		mut self,
+		f: F,
+	) -> Result<R> {
+		// Give each test a fresh session — the embedded harness does, and the SDK
+		// can't otherwise unset a leaked namespace/database/auth.
+		//
+		// A failed reconnect leaves the previous client in place, still carrying the
+		// last test's namespace/database selection. `prepare` re-authenticates but
+		// only calls `use_ns`/`use_db` for a test that names them, so a test that
+		// names neither would run against whatever the previous test selected and
+		// report a wrong result rather than an error. Refuse to run it. The pooled
+		// resources still go back: the failure is typically transient, and holding
+		// them back would starve the pool.
+		if let Err(e) = self.conn.reset_session().await {
+			self.grade_send
+				.try_send(self.grade_ds)
+				.expect("Too many datastores entered into datastore channel");
+			self.send
+				.try_send(self.conn)
+				.expect("Too many connections entered into connection channel");
+			return Err(e.context("Failed to reset the remote session before running a test"));
+		}
+
+		let (can_reuse, res) = f(&self.conn, &self.grade_ds).await;
+
+		// Return (or recreate, on panic) the grade datastore.
+		if let CanReuse::Reset = can_reuse {
+			if let Err(e) = self.grade_ds.shutdown().await {
+				println!("Failed to shutdown panicking datastore: {e}");
+			}
+			self.grade_send
+				.try_send(create_grade_ds().await)
+				.expect("Too many datastores entered into datastore channel");
+		} else {
+			self.grade_send
+				.try_send(self.grade_ds)
+				.expect("Too many datastores entered into datastore channel");
+		}
+
+		// Return the *same* connection to the pool. A panic in the test future
+		// doesn't corrupt the SDK client (unlike the embedded grade datastore above,
+		// which is rebuilt): whatever the test wrote lives in its namespace and is
+		// removed by the snapshot-diff cleanup. We deliberately don't drop-and-
+		// reconnect on this return path — a transient connect failure would return
+		// nothing to the channel and starve the pool. The session is reset (and root
+		// re-authenticated) at the *start* of the next `with`, so the connection's
+		// current auth/namespace state here is irrelevant.
+		self.send
+			.try_send(self.conn)
+			.expect("Too many connections entered into connection channel");
+
+		Ok(res)
+	}
+}

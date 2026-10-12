@@ -1,5 +1,6 @@
 /**
 [env]
+remote-exclusive = true
 # Root- and namespace-scoped state outlives a REMOVE NAMESPACE, so the ordinary
 # runner has to be told to reset the shared datastore after this test. The
 # upgrade runner ignores the flag — it gives every run its own store directory.

@@ -20,6 +20,10 @@ impl TestReport {
 			// nothing to report
 			return;
 		}
+		if self.grade() == TestGrade::Skipped {
+			// Skips are accounted for in the summary count, not printed per-test.
+			return;
+		}
 		let use_color = match color {
 			ColorMode::Always => true,
 			ColorMode::Never => false,
@@ -121,6 +125,10 @@ impl TestReport {
 				writeln!(f, "> Declared `[[test.repair]]` does not describe the code")?;
 				f.indent(|f| writeln!(f, "{explanation}"))
 			}
+			// Skips are filtered out before `display_grade` is reached.
+			super::TestReportKind::Skipped {
+				..
+			} => Ok(()),
 		}
 	}
 
@@ -216,6 +224,8 @@ impl TestReport {
 					)?;
 				}
 			}
+			// Skips are filtered out before the header is rendered.
+			TestGrade::Skipped => {}
 		}
 		Ok(())
 	}
@@ -233,6 +243,37 @@ impl TestReport {
 			TestError::Import(import, error) => {
 				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
+			}
+			TestError::LeakedRootState(x) => {
+				writeln!(
+					f,
+					"> Test failed, it created root-level state but is not marked `[env] remote-exclusive`:"
+				)?;
+				f.indent(|f| {
+					for x in x.iter() {
+						writeln!(f, "- {x}")?;
+					}
+					writeln!(
+						f,
+						"A remote run isolates tests by giving each its own namespace, so anything"
+					)?;
+					writeln!(
+						f,
+						"created outside one survives cleanup and is visible to every test running"
+					)?;
+					writeln!(
+						f,
+						"alongside. Set `remote-exclusive = true` in the test's `[env]` to run it on"
+					)?;
+					writeln!(
+						f,
+						"its own instead. The state above was seen while this test ran; when a"
+					)?;
+					writeln!(
+						f,
+						"test running alongside is the one that created it, mark that test."
+					)
+				})
 			}
 			TestError::BadCleanup(x) => {
 				writeln!(

@@ -1047,6 +1047,101 @@ run_task = { name = [
 ], fork = true, parallel = false }
 
 # --------------------------------------------------
+# Language tests over a remote --endpoint
+# --------------------------------------------------
+#
+# These exercise the test harness's `remote` path: instead of an embedded
+# in-process datastore, the suite runs against a *running* `surreal` server over
+# the API (ws://), so the network + serialization path and the remote executor
+# are covered in CI. The server is started to match the embedded harness's
+# datastore exactly (see language-tests/README.md) — otherwise scripting / file
+# functions / OpenGQL / TEMPFILES / `INFO FOR ROOT` diverge. `_TEST_API_ENGINE`
+# selects the *server's* backend (memory or rocksdb); the harness itself is
+# backend-agnostic over the API.
+#
+# Tests run concurrently, each in a namespace of its own, so the one server is
+# shared. A test that reaches outside its namespace declares
+# `[env] remote-exclusive` and is given the server to itself for its duration;
+# one that needs to and does not fails rather than races.
+
+[tasks.test-lang-remote]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests against a running server over --endpoint"
+script = """
+#!/bin/bash -ex
+# The server's default features cover every backend plus scripting / graphql /
+# opengql / surrealism, so one build serves any `_TEST_API_ENGINE`.
+cargo build --locked -p surreal
+SERVER="$(pwd)/target/debug/surreal"
+
+# Run from `language-tests` so the harness resolves its `tests/` directory the
+# same way the embedded path does (relative to CWD).
+cd language-tests
+cargo build --locked --features remote
+# The remote executor's own unit tests (endpoint-URL mapping, EXPLAIN metric
+# redaction) live behind the `remote` feature, and no other CI job builds it —
+# the embedded language-test jobs only `cargo build` and run the binary. Without
+# this they never execute.
+cargo test --locked --features remote
+HARNESS="$(pwd)/target/debug/surrealql-test"
+TESTS_DIR="$(pwd)/tests"
+WORK="$(mktemp -d)"
+mkdir -p "${WORK}/sort"
+
+# A dedicated, uncommon port so the suite doesn't collide with whatever else
+# might hold 8000 (Docker, a dev server) on a CI runner or a developer's box.
+HOST="127.0.0.1:18283"
+
+case "${_TEST_API_ENGINE}" in
+    memory|mem) DATA="memory" ;;
+    rocksdb)    DATA="rocksdb:${WORK}/data" ;;
+    *) echo "test-lang-remote: unsupported _TEST_API_ENGINE='${_TEST_API_ENGINE}'"; exit 1 ;;
+esac
+
+# Start the server with the same datastore configuration the embedded harness
+# builds: all capabilities + all experimental targets, a temp dir for TEMPFILES
+# sorting, the tests tree on the file allowlist, and no bootstrap `main` ns.
+SURREAL_FILE_ALLOWLIST="${TESTS_DIR}" "${SERVER}" start \
+    --bind "${HOST}" \
+    --user root --pass root \
+    --allow-all --allow-experimental '*' \
+    --temporary-directory "${WORK}/sort" --no-defaults \
+    --log warn "${DATA}" &
+SERVER_PID=$!
+# The rocksdb leg's datastore and the TEMPFILES sort directory both live under
+# `WORK`, so it is only removable once the server has gone; `wait` makes the
+# kill synchronous rather than racing the removal against a still-open store.
+trap 'kill "${SERVER_PID}" 2>/dev/null || true; wait "${SERVER_PID}" 2>/dev/null || true; rm -rf "${WORK}"' EXIT
+
+# Wait for the server to accept connections before running the suite.
+for _ in $(seq 1 60); do
+    if curl -sf "http://${HOST}/health" >/dev/null 2>&1; then READY=1; break; fi
+    sleep 1
+done
+if [ "${READY:-0}" != "1" ]; then echo "test-lang-remote: server did not become healthy"; exit 1; fi
+
+# `--backend` is what filters the corpus by `[env] backend`, so it has to name
+# the *server's* engine even though the harness opens no store of its own. Left
+# at its `memory` default the rocksdb leg would skip `alter_compact_rocksdb` and
+# instead run `alter_compact_mem`, which asserts compaction is unsupported —
+# against a server where it works.
+"${HARNESS}" --color always run --no-wip --backend "${_TEST_API_ENGINE}" --endpoint "ws://${HOST}"
+"""
+
+[tasks.ci-lang-test-remote-mem]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests over --endpoint against an in-memory server"
+env = { _TEST_API_ENGINE = "memory" }
+run_task = "test-lang-remote"
+
+[tasks.ci-lang-test-remote-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests over --endpoint against a RocksDB server"
+env = { _TEST_API_ENGINE = "rocksdb" }
+run_task = "test-lang-remote"
+
+# --------------------------------------------------
 # Language upgrade tests
 # --------------------------------------------------
 #

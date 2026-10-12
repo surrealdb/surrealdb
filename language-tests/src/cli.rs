@@ -1,10 +1,12 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 use clap::builder::{EnumValueParser, PossibleValue};
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
 use rust_decimal::serde::str;
 use semver::Version;
+use surrealdb_rpc::capabilities::NewPlannerStrategy;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "bench")]
 use surrealdb_types::SurrealValue;
@@ -42,6 +44,23 @@ pub enum Backend {
 	RocksDb,
 	SurrealKv,
 	TikV,
+}
+
+impl Backend {
+	/// Whether the provisioner can open this backend with versioning enabled, and
+	/// so whether a test declaring `env.versioned` can run against it. The others
+	/// are opened without it and reject a versioned statement rather than
+	/// answering it.
+	///
+	/// Matched exhaustively on purpose: a new backend has to state which side it
+	/// is on, because the wrong default silently either skips coverage or feeds
+	/// tests to a store that cannot serve them.
+	pub fn supports_versioning(self) -> bool {
+		match self {
+			Backend::RocksDb | Backend::SurrealKv => true,
+			Backend::Memory | Backend::TikV => false,
+		}
+	}
 }
 
 #[cfg(feature = "bench")]
@@ -196,6 +215,16 @@ impl ValueEnum for ColorMode {
 	}
 }
 
+/// The planner strategy a remote endpoint was started with.
+///
+/// Spelled the way the server's own `--planner-strategy` flag spells it, so the
+/// value is copied across rather than translated. The strategy is server-startup
+/// configuration: a run over the SDK cannot select one per statement, so the
+/// runner has to be told which one the server holds.
+fn planner_strategy(value: &str) -> Result<NewPlannerStrategy, String> {
+	NewPlannerStrategy::from_str(value)
+}
+
 pub fn parse() -> ArgMatches {
 	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
@@ -219,6 +248,21 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+			)
+			.arg(
+				arg!(--endpoint <URL> "Run the suite against a remote SurrealDB instance over ws:// or http:// (requires building with `--features remote`) instead of an embedded datastore")
+			)
+			.arg(
+				arg!(--username <USER> "Root username to sign in to the --endpoint server").default_value("root").requires("endpoint")
+			)
+			.arg(
+				arg!(--password <PASSWORD> "Root password to sign in to the --endpoint server").default_value("root").requires("endpoint")
+			)
+			.arg(
+				arg!(--"planner-strategy" <STRATEGY> "The planner strategy the --endpoint server was started with, spelled as its own `--planner-strategy` flag spells it: 'best-effort' (the server's default), 'compute-only' or 'all-read-only'")
+					.default_value("best-effort")
+					.requires("endpoint")
+					.value_parser(planner_strategy)
 			),
 	)
 		.subcommand(

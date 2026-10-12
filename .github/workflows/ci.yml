@@ -728,6 +728,10 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  # NOTE: language tests over a remote --endpoint need a server to point at and
+  # are destructive to it, so they are a manual-only workflow rather than a job
+  # here. See .github/workflows/lang-tests-remote.yml.
+
   # ----------------------------------------
   # SurrealQL language upgrade tests
   # ----------------------------------------

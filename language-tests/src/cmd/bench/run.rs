@@ -16,6 +16,7 @@ use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use surrealdb_types::Datetime;
 
 use crate::cli::{Backend, ColorMode};
+use crate::cmd::bench::meta::current_commit;
 use crate::cmd::bench::stats::{ComparisonData, MeasurementData};
 use crate::cmd::bench::store::{Baseline, BenchMarkRun, StoreConfig, get_store};
 use crate::cmd::bench::{DEFAULT_NOISE_THRESHOLD, DEFAULT_SIGNIFICANCE_THRESHOLD};
@@ -267,26 +268,6 @@ impl Comparison {
 /// board is measuring against whatever it last managed to store.
 const BASELINE_STALE_DAYS: i64 = 2;
 
-/// The commit being measured, recorded with each stored measurement so a
-/// baseline can later say which code produced it.
-///
-/// `GITHUB_SHA` in CI, otherwise `git rev-parse HEAD` so a local `--save` is
-/// attributable too. `None` when neither is available, which reads the same as
-/// every measurement stored before this was recorded at all.
-fn current_commit() -> Option<String> {
-	if let Ok(sha) = std::env::var("GITHUB_SHA")
-		&& !sha.is_empty()
-	{
-		return Some(sha);
-	}
-	let out = std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
-	if !out.status.success() {
-		return None;
-	}
-	let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
-	(!sha.is_empty()).then_some(sha)
-}
-
 /// Per-bench comparison against the fetched baseline. Percentages are relative to
 /// the baseline (positive = slower than baseline = regression).
 #[derive(serde::Serialize)]
@@ -380,6 +361,11 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	};
 
 	let mut store = get_store(&cfg.store).await?;
+
+	// Metadata embedded into every stored measurement (and used to key the
+	// baseline by transport). Benches currently run embedded; the remote
+	// transports populate this differently.
+	let meta = crate::cmd::bench::meta::RunMetadata::gather("embedded", None);
 
 	let core_version = Version::parse(VERSION).unwrap();
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
@@ -542,7 +528,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		for run in group {
 			baselines.push(
 				store
-					.fetch_latest(&run.name(), cfg.backend)
+					.fetch_latest(&run.name(), cfg.backend, &meta.transport)
 					.await
 					.context("Could not fetch latest measurement data")?,
 			);
@@ -608,6 +594,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 										measurement: measurement.clone(),
 										path: run.name(),
 										backend: cfg.backend,
+										meta: meta.clone(),
 										commit: current_commit(),
 										rows,
 									})
@@ -649,7 +636,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		}
 
 		let baseline = store
-			.fetch_latest(&run.name(), cfg.backend)
+			.fetch_latest(&run.name(), cfg.backend, &meta.transport)
 			.await
 			.context("Could not fetch latest measurement data")?;
 
@@ -686,12 +673,19 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 				);
 			}
 			BenchRunResult::Ok(measurement, rows, compare) => {
+				// Persist each result the moment its bench finishes, not in a trailing
+				// pass over the whole suite, so a run killed partway (job timeout,
+				// runner eviction, panic) keeps every completed bench instead of
+				// discarding the lot. The store is a per-bench time series, so a
+				// partial run is well-formed. Non-fatal: a transient store error must
+				// not sink an otherwise-good run.
 				if cfg.save
 					&& let Err(e) = store
 						.add(BenchMarkRun {
 							measurement: measurement.clone(),
 							path: run.name(),
 							backend: cfg.backend,
+							meta: meta.clone(),
 							commit: current_commit(),
 							rows,
 						})

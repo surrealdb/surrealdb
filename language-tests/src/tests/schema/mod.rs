@@ -144,6 +144,28 @@ pub struct TestEnv {
 	/// actual elapsed times.
 	pub redact_volatile_explain_attrs: Option<bool>,
 
+	/// When set, the test is skipped on remote (`--endpoint`) runs, with this
+	/// string reported as the reason. For the handful of tests that assert
+	/// behaviour which only holds for an embedded, in-process datastore — a
+	/// connection-less `$session`, the absence of a bootstrap root user, or
+	/// process-relative file paths — and so can't be reproduced faithfully over
+	/// the API. Ignored by embedded runs.
+	pub remote_skip: Option<String>,
+
+	/// The test reaches outside its own namespace — it creates a root user,
+	/// access method or namespace, changes a system setting, or asserts on the
+	/// literal name of the namespace it runs in. Remote (`--endpoint`) runs give
+	/// it the endpoint to itself and the namespace name its config asks for;
+	/// every other test runs concurrently in a namespace named for the run.
+	///
+	/// Embedded runs ignore it: every test there already has a private
+	/// datastore, so there is nothing to share.
+	///
+	/// A test that needs this and does not declare it fails rather than races —
+	/// see [`crate::cmd::run::executor::Executor::check_root_leak`].
+	#[serde(default)]
+	pub remote_exclusive: bool,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -167,6 +189,8 @@ impl Default for TestEnv {
 			versioned: Default::default(),
 			planner_strategy: default_planner_strategy(),
 			redact_volatile_explain_attrs: Default::default(),
+			remote_skip: None,
+			remote_exclusive: Default::default(),
 			_unused_keys: Default::default(),
 		}
 	}
@@ -187,6 +211,16 @@ impl TestEnv {
 		self.database.as_ref().map(|x| x.as_str()).into_value(ENV_DEFAULT_DATABASE)
 	}
 
+	/// Whether a remote run has to give this test the endpoint to itself.
+	///
+	/// Either it says so, or it asked not to run beside anything at all, or it
+	/// declares no namespace — in which case it has nowhere but root to write
+	/// and cannot be isolated by one.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn needs_exclusive_endpoint(&self) -> bool {
+		self.remote_exclusive || self.sequential || self.namespace().is_none()
+	}
+
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
 
@@ -202,7 +236,7 @@ impl TestEnv {
 ///
 /// Maps to `surrealdb_rpc::capabilities::NewPlannerStrategy` but uses shorter
 /// kebab-case names for TOML configuration.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NewPlannerStrategyConfig {
 	/// Try new planner, fall back on Unimplemented.
@@ -216,6 +250,33 @@ pub enum NewPlannerStrategyConfig {
 impl NewPlannerStrategyConfig {
 	pub const DEFAULT_STRATEGIES: &[NewPlannerStrategyConfig] =
 		&[NewPlannerStrategyConfig::ComputeOnly, NewPlannerStrategyConfig::AllRo];
+
+	/// Whether this strategy sends a read-only statement through the streaming
+	/// planner.
+	///
+	/// `all-ro` and `best-effort-ro` differ only in what they do when the planner
+	/// reports `Unimplemented`: the first fails, the second falls back to compute.
+	/// A statement the planner *can* answer is planned identically by both, so a
+	/// test that passes under one passes under the other. `compute-only` is the
+	/// one that reaches a different engine, which is the distinction a run that
+	/// cannot select a strategy — a remote one — has to judge a test by.
+	///
+	/// What this does not carry across is the strictness itself. A test narrowed
+	/// to `all-ro` is asserting that the planner answers its statements, and
+	/// under `best-effort-ro` a planner that stopped being able to would fall
+	/// back and the results could still match. A test that pins a plan still
+	/// catches that — the `EXPLAIN` it asserts changes with the engine — but one
+	/// asserting only rows does not. That assertion belongs to the embedded run,
+	/// which selects each strategy per session and walks the whole axis; a
+	/// remote run reports the strategy it used on every line and claims no more
+	/// than it verified.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn is_streaming(self) -> bool {
+		match self {
+			Self::AllRo | Self::BestEffortRo => true,
+			Self::ComputeOnly => false,
+		}
+	}
 }
 
 impl fmt::Display for NewPlannerStrategyConfig {

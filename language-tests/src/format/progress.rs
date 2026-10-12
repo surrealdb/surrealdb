@@ -96,6 +96,9 @@ impl<I: Eq, W: Write> Progress<I, W> {
 				TestGrade::Failed => {
 					ansi!(red, "Error ☓", reset_format)
 				}
+				TestGrade::Skipped => {
+					ansi!(blue, "Skipped ⊘", reset_format)
+				}
 			};
 
 			self.writer.write_fmt(format_args!(
@@ -108,6 +111,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 				TestGrade::Success => "Success ✓\n",
 				TestGrade::Warning => "Warning ⚠\n",
 				TestGrade::Failed => "Error ☓\n",
+				TestGrade::Skipped => "Skipped ⊘\n",
 			};
 			self.writer.write_all(res.as_bytes())
 		}

@@ -4,8 +4,6 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_rpc::capabilities::{Capabilities, NewPlannerStrategy, Targets};
 use surrealdb_types::Value as SurValue;
 
-use crate::tests::TestRun;
-use crate::tests::run::RunConfig;
 use crate::tests::schema::{
 	AuthLevel, BoolOr, Capabilities as TestCapabilities, SchemaTarget, TestAuth, TestConfig,
 };
@@ -80,18 +78,10 @@ pub struct ImportFailure {
 	pub message: String,
 }
 
-pub async fn run_imports<T: RunConfig>(
-	run: &TestRun<T>,
-	session: Session,
-	dbs: &Datastore,
-) -> Result<Option<ImportFailure>> {
-	run_imports_list(&run.case.imports, session, dbs).await
-}
-
 /// Runs an explicit list of import cases against the datastore, after defining
-/// the session's namespace/database. Used by [`run_imports`] (which forwards the
-/// test's resolved imports) and by the bench runner, which may substitute a
-/// per-variant import chain (see `[bench].datasets`).
+/// the session's namespace/database. Used by the test runner's embedded executor
+/// (which forwards the test's resolved imports) and by the bench runner, which
+/// may substitute a per-variant import chain (see `[bench].datasets`).
 ///
 /// Imports always run as `Session::owner()` retargeted (via `process_use`) to the
 /// session's `(ns, db)`, so the populated data depends only on `(ns, db)` and the

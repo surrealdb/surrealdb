@@ -1,0 +1,73 @@
+name: Language tests (remote --endpoint)
+
+run-name: "Remote language tests '${{ github.ref_name }}' (${{ inputs.engine }})"
+
+# Manual-only: the suite needs a real server to run against and is destructive to
+# it (it creates and drops namespaces and owns the root configs), so it is not
+# worth running on every push/PR. Trigger it on demand from the Actions tab or
+# with
+# `gh workflow run lang-tests-remote.yml --ref <branch> -f engine=<both|mem|rocksdb>`.
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "Server backend to run the suite against"
+        type: choice
+        options:
+          - both
+          - mem
+          - rocksdb
+        default: both
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  lang-tests-remote:
+    name: SurrealQL tests (remote --endpoint) - ${{ matrix.engine }}
+    runs-on: runner-arm-32-cores
+    strategy:
+      fail-fast: false
+      matrix:
+        # `both` runs mem + rocksdb; otherwise the single chosen backend.
+        engine: ${{ (inputs.engine == 'both') && fromJSON('["mem","rocksdb"]') || fromJSON(format('["{0}"]', inputs.engine)) }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The job builds both the server (root workspace) and the harness.
+          workspaces: |
+            .
+            language-tests
+          cache-key: lang-remote
+          # The server binary is engine-specific, so the manifest is scoped per
+          # engine the way the embedded `lang-tests` job scopes its own.
+          kache-manifest-key: lang-remote-${{ matrix.engine }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-make
+
+      - name: Run language tests over --endpoint
+        run: cargo make ci-lang-test-remote-${{ matrix.engine }}

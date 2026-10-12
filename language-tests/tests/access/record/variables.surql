@@ -2,6 +2,7 @@
 [env]
 imports = ["access/record/basic_access_import.surql"]
 clean = true
+remote-skip = "asserts $session.id, which over the API is the per-connection id but is NONE for the embedded harness's connection-less session"
 context_timeout = 5000
 
 signup = """{

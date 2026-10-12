@@ -99,6 +99,10 @@ pub enum TestTaskResult {
 	SigninError(anyhow::Error),
 	Import(String, String),
 	BadCleanup(Vec<Vec<u8>>),
+	/// The test created root-level state without declaring `remote-exclusive`.
+	/// Carries a description of each entity it left behind.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	LeakedRootState(Vec<String>),
 	Results {
 		did_timeout: bool,
 		res: Vec<Result<SurValue, String>>,
@@ -139,6 +143,9 @@ pub enum TestGrade {
 	/// Test produced unexpected results but does not cause the test run overall to fail.
 	/// Happens when for example a test is about a work in progress issue.
 	Warning,
+	/// Test was not run because the executor can't faithfully reproduce it (e.g.
+	/// a feature unsupported over a remote `--endpoint`). Does not fail the run.
+	Skipped,
 }
 
 pub enum TestError {
@@ -146,6 +153,8 @@ pub enum TestError {
 	Panicked(String),
 	Import(String, String),
 	BadCleanup(Vec<Vec<u8>>),
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	LeakedRootState(Vec<String>),
 }
 
 pub enum TestOutputs {
@@ -268,6 +277,12 @@ pub enum TestReportKind {
 	},
 	/// A `[[test.repair]]` declaration is no longer true of the code.
 	RepairContract(String),
+	/// The test was skipped (e.g. it relies on a feature the remote executor
+	/// can't reproduce). `reason` is shown in the summary.
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	Skipped {
+		reason: String,
+	},
 }
 
 #[derive(Clone)]
@@ -428,6 +443,9 @@ impl TestReport {
 			TestReportKind::NoExpectation {
 				..
 			} => TestGrade::Warning,
+			TestReportKind::Skipped {
+				..
+			} => TestGrade::Skipped,
 		}
 	}
 
@@ -437,6 +455,16 @@ impl TestReport {
 
 	pub fn is_unspecified_test(&self) -> bool {
 		matches!(self.kind, TestReportKind::NoExpectation { .. })
+	}
+
+	/// The reason this run was skipped, if it was.
+	pub fn skip_reason(&self) -> Option<&str> {
+		match &self.kind {
+			TestReportKind::Skipped {
+				reason,
+			} => Some(reason),
+			_ => None,
+		}
 	}
 
 	pub async fn from_test_result<T: RunConfig>(
@@ -457,6 +485,7 @@ impl TestReport {
 			TestTaskResult::RunningError(_) => (false, None),
 			TestTaskResult::Import(_, _) => (false, None),
 			TestTaskResult::BadCleanup(_) => (false, None),
+			TestTaskResult::LeakedRootState(_) => (false, None),
 			TestTaskResult::Results {
 				did_timeout,
 				res,
@@ -529,6 +558,22 @@ impl TestReport {
 		}
 	}
 
+	/// Builds a report for a test that was skipped without running (e.g. it uses
+	/// a feature the remote executor can't reproduce).
+	#[cfg_attr(not(feature = "remote"), allow(dead_code))]
+	pub fn skipped<T: RunConfig>(run: TestRun<T>, reason: impl Into<String>) -> Self {
+		TestReport {
+			id: run.id,
+			name: run.name(),
+			case: run.case,
+			kind: TestReportKind::Skipped {
+				reason: reason.into(),
+			},
+			timeout: false,
+			outputs: None,
+		}
+	}
+
 	async fn grade_result(
 		config: &TestConfig,
 		job_result: TestTaskResult,
@@ -540,6 +585,9 @@ impl TestReport {
 			}
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
 			TestTaskResult::BadCleanup(x) => TestReportKind::Error(TestError::BadCleanup(x)),
+			TestTaskResult::LeakedRootState(x) => {
+				TestReportKind::Error(TestError::LeakedRootState(x))
+			}
 			TestTaskResult::SignupError(err) => {
 				let expectation = TestExpectation::from_test_config(config);
 

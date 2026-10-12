@@ -1,4 +1,7 @@
 /**
+[env]
+remote-exclusive = true
+
 [test]
 run = false
 */
