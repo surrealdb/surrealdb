@@ -125,17 +125,17 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	},
 	/// Open field `field` of the table: its frame — the caller's authority
 	/// narrowed to the field's `AUTH LIMIT` — whether its `PERMISSIONS`, `write`,
-	/// are enforced under that frame, whether an absent optional parent skips
-	/// it, and every place its path names in the post-image.
+	/// are enforced under that frame, and every place its path names in the
+	/// post-image.
 	Field {
 		field: u16,
 		write: FieldWrite,
 	},
 	/// Step to the open field's next place, or jump to `done` when none is
 	/// left. The `id` field of an existing record, and a `READONLY` field of
-	/// one, are checked here and never produced. A field a parent skips is not
-	/// produced either, but its enforced permission predicate is still judged
-	/// and its answer discarded.
+	/// one, are checked here and never produced. A place within one an absent
+	/// optional field left empty is not produced either, but its enforced
+	/// permission predicate is still judged and its answer discarded.
 	NextPlace {
 		done: Label,
 	},
@@ -162,8 +162,8 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	/// Keep the value the record held when the open field's `PERMISSIONS` are
 	/// enforced and refuse the change.
 	Permit,
-	/// Write the place's value back into the post-image, and note an absent
-	/// optional parent, whose children are skipped.
+	/// Write the place's value back into the post-image, and note a place an
+	/// absent optional field left empty, whose places within are skipped.
 	Land,
 	/// Close the open field.
 	EndField,
@@ -266,9 +266,12 @@ pub(super) struct SchemaRecord {
 	input: Arc<Value>,
 	/// Whether the record is being created: it has no before-image.
 	creating: bool,
-	/// The path of a field left empty under a kind admitting `NONE`, whose
-	/// children are not produced.
-	skip: Option<Idiom>,
+	/// The places left empty under a kind admitting `NONE`, as paths within
+	/// the record. A place within one of them is not produced: there is no
+	/// object for its clauses to be about. Each is a place, not a field, so
+	/// one element of `a.*` left empty skips the places within that element
+	/// and no other.
+	absent: Vec<Idiom>,
 	/// The places whose `ASSERT` is judged once every field is produced, as
 	/// the field's index and the path within the record.
 	deferred: Vec<(usize, Idiom)>,
@@ -285,8 +288,6 @@ struct FieldCursor {
 	guarded: bool,
 	/// The field's `PERMISSIONS FOR create` and `update`.
 	write: FieldWrite,
-	/// Whether an absent optional parent skips the field.
-	skipped: bool,
 	/// The places the field's path names, as the post-image held them when
 	/// the field was opened.
 	places: std::vec::IntoIter<(Idiom, Value)>,
@@ -425,7 +426,7 @@ pub(super) async fn step(
 				rid,
 				input,
 				creating,
-				skip: None,
+				absent: Vec::new(),
 				deferred: Vec::new(),
 				field: None,
 			}));
@@ -449,16 +450,11 @@ pub(super) async fn step(
 			let guarded =
 				should_check_perms(db_ctx, Action::Edit).map_err(|e| ControlFlow::Err(e.into()))?;
 			let schema = record(write)?;
-			let skipped = schema.skip.as_ref().is_some_and(|parent| fd.name.starts_with(parent));
-			if !skipped {
-				schema.skip = None;
-			}
 			schema.field = Some(FieldCursor {
 				index: *field as usize,
 				frame,
 				guarded,
 				write: *permissions,
-				skipped,
 				places: places.into_iter(),
 				place: None,
 			});
@@ -477,11 +473,14 @@ pub(super) async fn step(
 				let rid = schema.rid.clone();
 				let cursor = schema.cursor()?;
 				let index = cursor.index;
-				let skipped = cursor.skipped;
 				let Some((path, val)) = cursor.places.next() else {
 					cursor.place = None;
 					return Ok(*done as usize);
 				};
+				let skipped = schema
+					.absent
+					.iter()
+					.any(|empty| path.len() > empty.len() && path.starts_with(empty));
 				let supplied = schema.input.pick(&path);
 				let fd = &fields[index];
 				let row = write.row()?;
@@ -520,7 +519,7 @@ pub(super) async fn step(
 					old,
 					supplied,
 				};
-				// A skipped field is neither produced nor written back. Its
+				// A skipped place is neither produced nor written back. Its
 				// permission predicate is judged all the same, as the field
 				// kernel judges it, and the answer is discarded with the value.
 				if skipped {
@@ -618,7 +617,7 @@ pub(super) async fn step(
 			let index = schema.cursor()?.index;
 			let place = schema.cursor()?.place.take().ok_or_else(|| internal("no place"))?;
 			if optional_and_absent(&schema.fields[index], &place.val) {
-				schema.skip = Some(schema.fields[index].name.clone());
+				schema.absent.push(place.path.clone());
 			}
 			// `put` on a `NONE` keeps an array's element positions, which `cut`
 			// would shift.

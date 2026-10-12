@@ -17,6 +17,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ id: person:guest, role: 'guest' }]"
 
 [[test.results]]
@@ -30,6 +33,7 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
     DURATION FOR TOKEN 1h, FOR SESSION 1h;
 
 DEFINE TABLE cart SCHEMALESS PERMISSIONS FULL;
+DEFINE FIELD items ON cart TYPE array<object>;
 
 -- Wildcard in the field path. Each concrete `items[i].secret` should be
 -- treated independently at evaluation time.

@@ -113,16 +113,19 @@ pub(crate) enum DdlChecks {
 	/// over the table, are read when it runs (`StoreInstr::ViewSources`,
 	/// `StoreInstr::RefuseRemovingLightweight`).
 	RemoveTable,
-	/// `REMOVE FIELD` and `ALTER FIELD`: the table and the field as the
-	/// catalog holds them, and the refusal of the field's name against the
-	/// record id components of the table: a component name has no definition
-	/// of its own to remove or alter. Whether a definition still reads a
-	/// component of the `id` a `REMOVE FIELD` removes is judged when the
-	/// statement runs (`FieldCheck::IdUnread`), against the rows the views
-	/// over the table hold then.
+	/// `REMOVE FIELD` and `ALTER FIELD`: the table, the field and the table's
+	/// fields as the catalog holds them — the fields nested in the field,
+	/// which `REMOVE FIELD` removes with it, and those an altered kind writes
+	/// or drops — and the refusal of the field's name against the record id
+	/// components of the table: a component name has no definition of its own
+	/// to remove or alter. Whether a definition still reads a component of the
+	/// `id` a `REMOVE FIELD` removes is judged when the statement runs
+	/// (`FieldCheck::IdUnread`), against the rows the views over the table
+	/// hold then.
 	Field {
 		existing_table: Option<Arc<crate::catalog::TableDefinition>>,
 		existing_field: Option<Arc<crate::catalog::FieldDefinition>>,
+		fields: Arc<[crate::catalog::FieldDefinition]>,
 		key_refusal: Option<FieldRefusal>,
 	},
 }
@@ -157,6 +160,11 @@ pub(in crate::exec::vm) async fn ddl_checks(
 			txn.get_tb_field(ns, db, table, fd, None).await.map_err(unread)
 		}
 		_ => Ok(None),
+	};
+	// The definitions of the fields of `table`.
+	let fields_of = async |table: &crate::val::TableName| match (txn, ids) {
+		(Some(txn), Some((ns, db))) => txn.all_tb_fields(ns, db, table, None).await.map_err(unread),
+		_ => Ok(Arc::from(Vec::new())),
 	};
 	match statement {
 		LogicalDdlStatement::Define(define) => match define.as_ref() {
@@ -306,6 +314,7 @@ pub(in crate::exec::vm) async fn ddl_checks(
 				Ok(DdlChecks::Field {
 					existing_table: table_of(&table).await?,
 					existing_field: field_of(&table, &name.to_raw_string()).await?,
+					fields: fields_of(&table).await?,
 					key_refusal,
 				})
 			}
@@ -336,6 +345,7 @@ pub(in crate::exec::vm) async fn ddl_checks(
 				Ok(DdlChecks::Field {
 					existing_table: table_of(&table).await?,
 					existing_field: field_of(&table, &name.to_raw_string()).await?,
+					fields: fields_of(&table).await?,
 					key_refusal,
 				})
 			}
@@ -1622,8 +1632,7 @@ impl Lowering<'_, '_> {
 	/// two), so the checks are made here, and a refusal is an instruction
 	/// raising it where the body raises it.
 	async fn define_field(&mut self, stmt: &DefineFieldStatement) -> Lowered<()> {
-		use crate::catalog::{self as catalog, TableType};
-		use crate::expr::Part;
+		use crate::catalog::TableType;
 		// Reached only on a storage fault.
 		let decline = |why: &str| NotCovered::internal(why.to_owned());
 		// A field, table or comment that is evaluated is resolved as the
@@ -1679,6 +1688,21 @@ impl Lowering<'_, '_> {
 			);
 		}
 		let definition = field_definition(stmt, &name, &table, &comment);
+		// What the body refuses of a field nested in something that cannot
+		// hold it, judged against the fields the definition leaves.
+		let Some(table_fields) = fields.as_ref() else {
+			return crate::exec::vm::host::out_of_line(|| self.define_field_resolved(stmt)).await;
+		};
+		let nesting_refusal = match crate::exec::field_rules::define_field_nesting_restrictions(
+			table_fields,
+			&definition,
+		) {
+			Ok(()) => None,
+			Err(e) => Some(
+				FieldRefusal::of(&e)
+					.ok_or_else(|| decline("a field definition whose nesting did not judge"))?,
+			),
+		};
 		// A record kind for a relation's `in` or `out` that is not the one the
 		// table names retargets the relation: the table is written with it,
 		// and nothing else the field's kind implies is derived.
@@ -1720,43 +1744,32 @@ impl Lowering<'_, '_> {
 			}
 		}
 		// The sub-field definitions an array or set kind implies, as the body
-		// derives them from the fields already defined.
+		// derives them from the fields already defined, and the ones the kind
+		// it replaces implied that go with it.
 		let mut nested = Vec::new();
-		if retarget.is_none()
-			&& let Some(mut kind) = stmt.field_kind.as_ref().and_then(|k| k.inner_kind())
-		{
-			let mut path = name.clone();
-			loop {
-				if let crate::expr::Kind::Any = kind {
-					break;
-				}
-				let next = kind.inner_kind();
-				path.0.push(Part::All);
-				let sub = match fields.as_ref().and_then(|f| f.iter().find(|f| f.name == path)) {
-					Some(existing) => catalog::FieldDefinition {
-						field_kind: Some(kind.clone()),
-						flexible: existing.flexible || definition.flexible,
-						..existing.clone()
-					},
-					None => catalog::FieldDefinition {
-						name: path.clone(),
-						table: table.clone(),
-						field_kind: Some(kind.clone()),
-						flexible: definition.flexible,
-						..Default::default()
-					},
-				};
+		let mut dropped = Vec::new();
+		if retarget.is_none() {
+			let implied =
+				crate::exec::field_rules::implied_definitions(&name, stmt.field_kind.as_ref());
+			for (path, kind) in implied {
+				let existing = table_fields.iter().find(|f| f.name == path);
+				let sub =
+					crate::exec::field_rules::implied_definition(&definition, existing, path, kind);
 				nested.push((
-					surrealdb_types::ToSql::to_sql(&path),
+					surrealdb_types::ToSql::to_sql(&sub.name),
 					stored(&sub.to_stored(), "StoredFieldDefinition")?,
 				));
-				match next {
-					Some(next) => kind = next,
-					None => break,
-				}
 			}
+			dropped = crate::exec::field_rules::implied_definitions_dropped(
+				table_fields,
+				existing_field.as_deref(),
+				&definition,
+			);
 		}
 		let template = stored(&definition.to_stored(), "StoredFieldDefinition")?;
+		// A refusal raised whatever the statement meets leaves nothing after it
+		// to raise.
+		let refused_before = indexed.is_some() || refused.is_some() || relation_refusal.is_some();
 		let template = self.constant(template);
 
 		self.store(StoreInstr::RefuseNoWrite);
@@ -1841,6 +1854,18 @@ impl Lowering<'_, '_> {
 			self.store(StoreInstr::RefuseField {
 				refusal,
 			});
+		}
+		// Raised where the body raises it, and not on an import, which replays
+		// definitions written before the rule held.
+		if let Some(refusal) = nesting_refusal.filter(|_| !refused_before) {
+			let import = self.store(StoreInstr::JumpIfImport {
+				target: 0,
+			});
+			self.store(StoreInstr::RefuseField {
+				refusal,
+			});
+			let at = self.here();
+			self.patch(import, at);
 		}
 		// A record id that names its components must admit every record the
 		// table holds, once the statement is known to define the field; the
@@ -1940,12 +1965,70 @@ impl Lowering<'_, '_> {
 			self.release(key);
 			self.release(value);
 		}
+		// An import restores the reference keys of the ones dropped verbatim.
+		self.delete_field_definitions((ns, db, table_name), &dropped, true)?;
 		self.store(StoreInstr::ClearCache);
 		self.answer_none()
 	}
 }
 
 impl Lowering<'_, '_> {
+	/// Delete the definitions of the fields `dropped` names on the table named
+	/// by `tb` in database `db` of namespace `ns`, each under every key it can
+	/// be stored under (`field_key_spellings`), and the reference keys each
+	/// wrote — which an import keeps, when `import_restores` says it restores
+	/// them verbatim.
+	fn delete_field_definitions(
+		&mut self,
+		(ns, db, tb): (Reg, Reg, Operand),
+		dropped: &[crate::expr::Idiom],
+		import_restores: bool,
+	) -> Lowered<()> {
+		for name in dropped {
+			for spelling in crate::ddl::define::field::field_key_spellings(name) {
+				let fd = self.constant(Value::String(spelling.into()));
+				let key = self.object(&[
+					("ns", Operand::Reg(ns)),
+					("db", Operand::Reg(db)),
+					("tb", tb),
+					("fd", fd),
+				])?;
+				let old = self.register()?;
+				self.store(StoreInstr::Get {
+					route: RouteId::named("FieldKey"),
+					key,
+					ty: TypeId::named("StoredFieldDefinition"),
+					dst: old,
+				});
+				self.store(StoreInstr::Delete {
+					route: RouteId::named("FieldKey"),
+					key,
+				});
+				let import = import_restores.then(|| {
+					self.store(StoreInstr::JumpIfImport {
+						target: 0,
+					})
+				});
+				let table = self.load(tb)?;
+				self.store(StoreInstr::PurgeDroppedReferences {
+					ns,
+					db,
+					table,
+					old,
+					new: None,
+				});
+				if let Some(import) = import {
+					let at = self.here();
+					self.patch(import, at);
+				}
+				self.release(key);
+				self.release(old);
+				self.release(table);
+			}
+		}
+		Ok(())
+	}
+
 	/// Stop answering `NONE` when `IF EXISTS` and the definition in `found`
 	/// is missing; raise `error` naming `name` when it is missing otherwise.
 	fn must_exist(
@@ -2798,6 +2881,7 @@ impl Lowering<'_, '_> {
 		let DdlChecks::Field {
 			existing_table,
 			existing_field,
+			fields,
 			key_refusal,
 		} = self.ddl_checks()?
 		else {
@@ -2871,6 +2955,18 @@ impl Lowering<'_, '_> {
 			old: field,
 			new: None,
 		});
+		// Every field nested in the removed one goes with it, and so do the
+		// keys any of them wrote.
+		let mut nested: Vec<crate::expr::Idiom> = Vec::new();
+		for fd in fields.iter() {
+			if fd.name.len() > name.len()
+				&& fd.name.starts_with(&name)
+				&& !nested.contains(&fd.name)
+			{
+				nested.push(fd.name.clone());
+			}
+		}
+		self.delete_field_definitions((ns, db, tb), &nested, false)?;
 		self.stamp(ns, db, tb)?;
 		let tb_key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb)])?;
 		let tb_name = self.load(tb)?;
@@ -6130,6 +6226,7 @@ impl Lowering<'_, '_> {
 		let DdlChecks::Field {
 			existing_table,
 			existing_field,
+			fields: table_fields,
 			key_refusal,
 		} = self.ddl_checks()?
 		else {
@@ -6252,6 +6349,44 @@ impl Lowering<'_, '_> {
 			Value::Object(altered) => altered,
 			other => return Err(NotCovered::internal(format!("a stored field that is {other:?}"))),
 		};
+		// An altered `TYPE` is written as `DEFINE FIELD` writes one: with the
+		// sub-field definitions it implies, derived from the fields already
+		// defined, and without the ones the kind it replaces implied that go
+		// with it. The stored field the statement finds, which the catalog it
+		// is lowered against holds, decides the clauses the statement leaves.
+		let kind_altered = !matches!(stmt.kind, AlterKind::None);
+		let mut nested = Vec::new();
+		let mut dropped = Vec::new();
+		if kind_altered && let Some(previous) = existing_field.as_deref() {
+			let formed = crate::catalog::FieldDefinition {
+				field_kind: match &stmt.kind {
+					AlterKind::Set(kind) => Some(kind.clone()),
+					AlterKind::Drop | AlterKind::None => None,
+				},
+				flexible: match stmt.flexible {
+					AlterKind::Set(()) => true,
+					AlterKind::Drop => false,
+					AlterKind::None => previous.flexible,
+				},
+				..previous.clone()
+			};
+			let implied =
+				crate::exec::field_rules::implied_definitions(&name, formed.field_kind.as_ref());
+			for (path, kind) in implied {
+				let existing = table_fields.iter().find(|f| f.name == path);
+				let sub =
+					crate::exec::field_rules::implied_definition(&formed, existing, path, kind);
+				nested.push((
+					surrealdb_types::ToSql::to_sql(&sub.name),
+					stored(&sub.to_stored(), "StoredFieldDefinition")?,
+				));
+			}
+			dropped = crate::exec::field_rules::implied_definitions_dropped(
+				&table_fields,
+				Some(previous),
+				&formed,
+			);
+		}
 		self.store(StoreInstr::RefuseNoWrite);
 		self.store(StoreInstr::Allow {
 			action: Action::Edit,
@@ -6341,6 +6476,21 @@ impl Lowering<'_, '_> {
 				},
 			});
 		}
+		// An altered kind still holds the fields nested in the field; an
+		// import replays definitions written before the rule held.
+		if kind_altered {
+			let import = self.store(StoreInstr::JumpIfImport {
+				target: 0,
+			});
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::Nesting {
+					field,
+					table: table_def,
+				},
+			});
+			let at = self.here();
+			self.patch(import, at);
+		}
 		if let Some(key) = scanned {
 			let table_reg = self.load(tb)?;
 			self.store(StoreInstr::ValidateRecordKeys {
@@ -6357,6 +6507,22 @@ impl Lowering<'_, '_> {
 			ty: TypeId::named("StoredFieldDefinition"),
 			value: field,
 		});
+		for (path, value) in nested {
+			let path = self.constant(Value::String(path.into()));
+			let key = self.object(&[("ns", ns_op), ("db", db_op), ("tb", tb), ("fd", path)])?;
+			let value = self.constant(value);
+			let value = self.load(value)?;
+			self.store(StoreInstr::Put {
+				route: RouteId::named("FieldKey"),
+				key,
+				ty: TypeId::named("StoredFieldDefinition"),
+				value,
+			});
+			self.release(key);
+			self.release(value);
+		}
+		// An import restores the reference keys of the ones dropped verbatim.
+		self.delete_field_definitions((ns, db, tb), &dropped, true)?;
 		// Dropping the reference or changing the record kind can strand the
 		// reference keys the field wrote; an import restores the keys
 		// verbatim.

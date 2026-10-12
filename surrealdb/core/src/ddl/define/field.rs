@@ -10,8 +10,12 @@ use crate::catalog::{self, DatabaseId, Error as CatalogError, NamespaceId, Relat
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::exec::Error as ExecError;
+use crate::exec::field_rules::{
+	define_field_nesting_restrictions, implied_definition, implied_definitions,
+	implied_definitions_dropped,
+};
 use crate::expr::statements::define::DefineKind;
-use crate::expr::{Base, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{Base, Idiom, Kind, KindLiteral};
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::FieldKey;
 use crate::kvs::Transaction;
@@ -171,6 +175,13 @@ pub(crate) async fn define_field_definition_apply(
 		}
 	}
 
+	// Refuse a field nested in something that cannot hold it, from either
+	// end. An import replays definitions written before the rule held.
+	if !opt.import {
+		let fields = txn.all_tb_fields(ns, db, &tb_name, None).await?;
+		define_field_nesting_restrictions(&fields, definition)?;
+	}
+
 	// A record id that names its components must admit every record the table
 	// holds; the scan is skipped when the stored `id` already has the same
 	// structure.
@@ -280,11 +291,14 @@ pub(crate) async fn define_field_definition_apply(
 
 	// The implied subtype fields are written before the table, so the
 	// catalog version `replace_tb` stamps last names a state that holds them.
+	// An import restores the reference keys of the ones dropped verbatim.
 	crate::ddl::define_field_statement_process_recursive_definitions(
 		ns,
 		db,
 		Arc::clone(&txn),
+		existing.as_deref(),
 		definition,
+		!opt.import,
 	)
 	.await?;
 
@@ -331,6 +345,42 @@ pub(crate) async fn define_field_statement_disallow_mismatched_types(
 	Ok(())
 }
 
+/// The keys a definition of field `name` can be stored under: the raw name
+/// [`TableProvider::put_tb_field`] writes, then, where it differs, the escaped
+/// one [`define_field_statement_process_recursive_definitions`] writes an
+/// implied definition under.
+pub(crate) fn field_key_spellings(name: &Idiom) -> Vec<String> {
+	let raw = name.to_raw_string();
+	let escaped = name.to_sql();
+	if escaped == raw {
+		vec![raw]
+	} else {
+		vec![raw, escaped]
+	}
+}
+
+/// Delete the definitions of the fields of table `tb` that `dropped` holds,
+/// each under every key it can be stored under ([`field_key_spellings`]), and
+/// with `purge_references` the reference keys they wrote.
+pub(crate) async fn del_tb_field_definitions(
+	txn: &Transaction,
+	(ns, db): (NamespaceId, DatabaseId),
+	tb: &TableName,
+	dropped: &[catalog::FieldDefinition],
+	purge_references: bool,
+) -> Result<()> {
+	for fd in dropped {
+		for key in field_key_spellings(&fd.name) {
+			txn.del_tb_field(ns, db, tb, &key).await?;
+		}
+		if purge_references {
+			crate::exec::reference_purge::purge_dropped_reference_keys(txn, ns, db, tb, fd, None)
+				.await?;
+		}
+	}
+	Ok(())
+}
+
 pub(crate) async fn define_field_statement_validate_flexible_restrictions(
 	txn: &Transaction,
 	ns: NamespaceId,
@@ -344,72 +394,39 @@ pub(crate) async fn define_field_statement_validate_flexible_restrictions(
 	crate::exec::field_rules::flexible_restrictions(definition, tb.as_deref())
 }
 
+/// Write the definitions `definition`'s kind implies for the elements of an
+/// array or set ([`implied_definitions`]), each over the one defined there
+/// ([`implied_definition`]), and delete the ones the kind of `previous`, the
+/// definition `definition` replaces, implied and that go with it
+/// ([`implied_definitions_dropped`]): with `purge_references`, the reference
+/// keys a deleted one wrote go too. A kind of `array` with no element kind
+/// implies nothing: its elements are already `any`.
 pub(crate) async fn define_field_statement_process_recursive_definitions(
 	ns: NamespaceId,
 	db: DatabaseId,
 	txn: Arc<Transaction>,
+	previous: Option<&catalog::FieldDefinition>,
 	definition: &catalog::FieldDefinition,
+	purge_references: bool,
 ) -> Result<()> {
-	// Find all existing field definitions
-	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await.ok();
-	// Process possible recursive_definitions
-	if let Some(mut cur_kind) = definition.field_kind.as_ref().and_then(|x| x.inner_kind()) {
-		let mut name = definition.name.clone();
-		loop {
-			// Check if the subtype is an `any` type
-			if let Kind::Any = cur_kind {
-				// There is no need to add a subtype
-				// field definition if the type is
-				// just specified as an `array`. This
-				// is because the following query:
-				//  DEFINE FIELD foo ON bar TYPE array;
-				// already implies that the immediate
-				// subtype is an any:
-				//  DEFINE FIELD foo[*] ON bar TYPE any;
-				// so we skip the subtype field.
-				break;
-			}
-			// Get the kind of this sub field
-			let new_kind = cur_kind.inner_kind();
-			// Add a new subtype
-			name.0.push(Part::All);
-			// Get the field name
-			let fd = name.to_sql();
-			// Set the subtype `DEFINE FIELD` definition
-			let key = FieldKey {
-				ns,
-				db,
-				tb: Cow::Borrowed(&definition.table),
-				fd: Cow::Borrowed(&fd),
-			};
-			let val = if let Some(existing) =
-				fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
-			{
-				catalog::FieldDefinition {
-					field_kind: Some(cur_kind.clone()),
-					flexible: existing.flexible || definition.flexible,
-					..existing.clone()
-				}
-			} else {
-				catalog::FieldDefinition {
-					name: name.clone(),
-					table: definition.table.clone(),
-					field_kind: Some(cur_kind.clone()),
-					flexible: definition.flexible,
-					..Default::default()
-				}
-			};
-			txn.set_key(&key, &val.to_stored()).await?;
-			// Process to any sub field
-			if let Some(new_kind) = new_kind {
-				cur_kind = new_kind;
-			} else {
-				break;
-			}
-		}
+	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
+	for (name, kind) in implied_definitions(&definition.name, definition.field_kind.as_ref()) {
+		// An implied definition is stored under its escaped name.
+		let fd = name.to_sql();
+		let key = FieldKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&definition.table),
+			fd: Cow::Borrowed(&fd),
+		};
+		let existing = fields.iter().find(|fd| fd.name == name);
+		let val = implied_definition(definition, existing, name, kind);
+		txn.set_key(&key, &val.to_stored()).await?;
 	}
-
-	Ok(())
+	let dropped = implied_definitions_dropped(&fields, previous, definition);
+	let dropped: Vec<catalog::FieldDefinition> =
+		fields.iter().filter(|fd| dropped.contains(&fd.name)).cloned().collect();
+	del_tb_field_definitions(&txn, (ns, db), &definition.table, &dropped, purge_references).await
 }
 
 pub(crate) async fn define_field_statement_validate_computed_options(

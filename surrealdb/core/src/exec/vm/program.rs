@@ -1914,6 +1914,22 @@ pub(crate) enum FieldRefusal {
 		existing_name: String,
 		existing_kind: String,
 	},
+	FieldParentUndefined {
+		name: String,
+		parent: String,
+	},
+	FieldParentCannotHold {
+		name: String,
+		parent: String,
+		kind: String,
+		rule: String,
+	},
+	FieldKindCannotHoldChild {
+		name: String,
+		kind: String,
+		child: String,
+		rule: String,
+	},
 	IdFieldKeywordConflict(String),
 	IdFieldUnsupportedKind(String),
 	IdComponentUnsupportedKind {
@@ -2046,6 +2062,35 @@ impl FieldRefusal {
 				kind: kind.clone(),
 				existing_name: existing_name.clone(),
 				existing_kind: existing_kind.clone(),
+			},
+			E::FieldParentUndefined {
+				name,
+				parent,
+			} => Self::FieldParentUndefined {
+				name: name.clone(),
+				parent: parent.clone(),
+			},
+			E::FieldParentCannotHold {
+				name,
+				parent,
+				kind,
+				rule,
+			} => Self::FieldParentCannotHold {
+				name: name.clone(),
+				parent: parent.clone(),
+				kind: kind.clone(),
+				rule: rule.clone(),
+			},
+			E::FieldKindCannotHoldChild {
+				name,
+				kind,
+				child,
+				rule,
+			} => Self::FieldKindCannotHoldChild {
+				name: name.clone(),
+				kind: kind.clone(),
+				child: child.clone(),
+				rule: rule.clone(),
 			},
 			E::IdFieldKeywordConflict(k) => Self::IdFieldKeywordConflict(k.clone()),
 			E::IdFieldUnsupportedKind(k) => Self::IdFieldUnsupportedKind(k.clone()),
@@ -2225,6 +2270,35 @@ impl FieldRefusal {
 				existing_name,
 				existing_kind,
 			},
+			Self::FieldParentUndefined {
+				name,
+				parent,
+			} => E::FieldParentUndefined {
+				name,
+				parent,
+			},
+			Self::FieldParentCannotHold {
+				name,
+				parent,
+				kind,
+				rule,
+			} => E::FieldParentCannotHold {
+				name,
+				parent,
+				kind,
+				rule,
+			},
+			Self::FieldKindCannotHoldChild {
+				name,
+				kind,
+				child,
+				rule,
+			} => E::FieldKindCannotHoldChild {
+				name,
+				kind,
+				child,
+				rule,
+			},
 			Self::IdFieldKeywordConflict(k) => E::IdFieldKeywordConflict(k),
 			Self::IdFieldUnsupportedKind(k) => E::IdFieldUnsupportedKind(k),
 			Self::IdComponentUnsupportedKind {
@@ -2374,6 +2448,15 @@ pub(super) enum FieldCheck {
 	/// object and the table defined in `table` is `SCHEMAFULL`
 	/// (`field_rules::flexible_restrictions`).
 	Flexible {
+		field: Reg,
+		table: Reg,
+	},
+	/// The definition in `field`, which replaces the table's definition of the
+	/// field, is held by the fields of the table defined in `table` it is
+	/// nested in, and its kind holds those nested in it, with the definitions
+	/// it implies for its elements in place of theirs — the table's fields read
+	/// when the check runs (`define_field_nesting_restrictions`).
+	Nesting {
 		field: Reg,
 		table: Reg,
 	},

@@ -262,6 +262,9 @@ InvalidRecursionTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: '
 ReferenceTypeConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword with `TYPE sample`. Specify only a `record` type, or a type containing only records, instead.' }
 ReferenceNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword on nested field `sample`. Specify a referencing field at the root level instead.' }
 MismatchedFieldTypes	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot set field `sample` with type `sample` as it mismatched with field `sample` with type `sample`' }
+FieldParentUndefined	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample`: the field `sample` it is nested in is not defined. Define `sample` first' }
+FieldParentCannotHold	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample` in field `sample` of type `sample`: sample' }
+FieldKindCannotHoldChild	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot give field `sample` the type `sample`: field `sample` is defined in it, and sample' }
 ComputedKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword with `COMPUTED`.' }
 ComputedNestedFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` since a nested field `sample` already exists.' }
 ComputedParentFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define nested field `sample` as parent field `sample` is a `COMPUTED` field.' }

@@ -10,8 +10,8 @@ current checkout converts on read. `ALTER FIELD` and `REMOVE FIELD` read the
 stored definition before rewriting or deleting it, so each must accept that
 revision: the altered field keeps its converted type, the removed one is gone,
 and writes afterwards are checked against what is left. Removing `tags`
-leaves the `tags.*` field its definition implied, as it does for a field the
-current checkout defines."""
+removes the `tags.*` field its definition implied with it, as it does for a
+field the current checkout defines."""
 # ALTER FIELD and the current INFO rendering are the current checkout's.
 version = ">=3.4.0-a"
 
@@ -25,7 +25,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ age: "DEFINE FIELD age ON person TYPE none | int COMMENT 'years' PERMISSIONS FULL", name: 'DEFINE FIELD name ON person TYPE string | int PERMISSIONS FULL', "tags.*": 'DEFINE FIELD tags.* ON person TYPE string PERMISSIONS FULL' }"""
+value = """{ age: "DEFINE FIELD age ON person TYPE none | int COMMENT 'years' PERMISSIONS FULL", name: 'DEFINE FIELD name ON person TYPE string | int PERMISSIONS FULL' }"""
 
 [[test.results]]
 value = "[{ age: 4, id: person:2, name: 2 }]"

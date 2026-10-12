@@ -482,6 +482,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -575,6 +581,12 @@ value = "NONE"
 
 [[test.results]]
 value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -919,7 +931,10 @@ DEFINE FIELD tags ON lo TYPE set<int>;
 CREATE lo:1 SET tags = <set>[1, 2] RETURN NONE;
 DEFINE TABLE lr SCHEMALESS;
 DEFINE FIELD r ON lr TYPE record<lo>;
+-- A field under a record link, which a stored schema may hold, is replayed by an import.
+OPTION IMPORT;
 DEFINE FIELD r.tags ON lr TYPE any;
+OPTION IMPORT = false;
 DEFINE INDEX ix ON lr FIELDS r.tags.*;
 CREATE lr:1 SET r = lo:1 RETURN NONE;
 SELECT VALUE id FROM lr WHERE r.tags.* CONTAINS 1;
@@ -960,8 +975,11 @@ DEFINE TABLE la8 SCHEMALESS;
 DEFINE FIELD child ON la8 TYPE record<lc8>;
 CREATE la8:1 SET child = lc8:1 RETURN NONE;
 DEFINE TABLE lm8 SCHEMALESS;
+-- A field defined before its parent, and under a record link, is replayed by an import too.
+OPTION IMPORT;
 DEFINE FIELD r.child ON lm8 TYPE option<record<lb8>>;
 DEFINE FIELD r ON lm8 TYPE record<la8>;
+OPTION IMPORT = false;
 DEFINE INDEX ix ON lm8 FIELDS r.child.tags.*;
 CREATE lm8:1 SET r = la8:1 RETURN NONE;
 SELECT VALUE id FROM lm8 WHERE r.child.tags CONTAINS 1;

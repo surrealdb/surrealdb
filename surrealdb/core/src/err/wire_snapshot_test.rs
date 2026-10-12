@@ -1163,6 +1163,31 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 				existing_kind: "sample".to_string(),
 			},
 		),
+		(
+			"FieldParentUndefined",
+			ExecError::FieldParentUndefined {
+				name: "sample".to_string(),
+				parent: "sample".to_string(),
+			},
+		),
+		(
+			"FieldParentCannotHold",
+			ExecError::FieldParentCannotHold {
+				name: "sample".to_string(),
+				parent: "sample".to_string(),
+				kind: "sample".to_string(),
+				rule: "sample".to_string(),
+			},
+		),
+		(
+			"FieldKindCannotHoldChild",
+			ExecError::FieldKindCannotHoldChild {
+				name: "sample".to_string(),
+				kind: "sample".to_string(),
+				child: "sample".to_string(),
+				rule: "sample".to_string(),
+			},
+		),
 		("ComputedKeywordConflict", ExecError::ComputedKeywordConflict("sample".to_string())),
 		(
 			"ComputedNestedFieldConflict",

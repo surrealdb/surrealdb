@@ -91,11 +91,14 @@ pub(crate) fn refuse_undefined_fields(
 
 		for k in current.each(&fd.name) {
 			defined.insert(&k, allows_nested);
-			// The ancestors of an expanded path are reachable too. One with no
-			// definition of its own is a schemaless object on the way to a
-			// defined field, so its interior is admitted.
+			// The ancestors of an expanded path are reachable too. One no
+			// definition reaches is a schemaless object on the way to a defined
+			// field, so its interior is admitted. One a definition does reach —
+			// an element `a[0]` of a defined `a.*` among them — keeps what that
+			// definition admits, whichever of the two is expanded first.
 			for i in 1..k.len() {
-				if !explicit.contains(&&k[..i]) {
+				let reached = matches!(defined.contains(&k[..i]), IdiomTrieContains::Exact(_));
+				if !explicit.contains(&&k[..i]) && !reached {
 					defined.insert(&k[..i], true);
 				}
 			}

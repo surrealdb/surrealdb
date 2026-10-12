@@ -1135,6 +1135,24 @@ async fn step_inner(
 							.map_err(ControlFlow::Err)?;
 					}
 				}
+				FieldCheck::Nesting {
+					field: reg,
+					table,
+				} => {
+					let field = field(*reg)?;
+					let stored: crate::catalog::StoredTableDefinition =
+						rust("StoredTableDefinition", &read(regs, *table))?;
+					let table = crate::catalog::TableDefinition::from_stored(&stored)
+						.map_err(ControlFlow::Err)?;
+					let descriptor = crate::exec::vm::descriptor::table_at(ctx, &table.name, None)
+						.await
+						.map_err(ControlFlow::Err)?;
+					crate::exec::field_rules::define_field_nesting_restrictions(
+						&descriptor.fields,
+						&field,
+					)
+					.map_err(ControlFlow::Err)?;
+				}
 				FieldCheck::KeyComponents {
 					field: reg,
 					ns,

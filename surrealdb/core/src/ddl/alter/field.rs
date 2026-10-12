@@ -1,4 +1,5 @@
 use std::ops::Deref;
+use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use uuid::Uuid;
@@ -236,6 +237,16 @@ pub(crate) async fn alter_field_statement_apply(
 		crate::exec::field_rules::flexible_restrictions(&df, tb.as_deref())?;
 	}
 
+	// A `TYPE` the statement alters is written as `DEFINE FIELD` writes one:
+	// it still holds the fields nested in the field, and the definitions it
+	// implies for the elements of an array or set are written with it. An
+	// import replays definitions written before the rule held.
+	let kind_altered = !matches!(this.kind, AlterKind::None);
+	if kind_altered && !opt.import {
+		let fields = txn.all_tb_fields(ns, db, &what, None).await?;
+		crate::exec::field_rules::define_field_nesting_restrictions(&fields, &df)?;
+	}
+
 	// A record id that names its components must admit every record the table
 	// holds; the scan is skipped when the stored `id` already has the same
 	// structure.
@@ -245,6 +256,17 @@ pub(crate) async fn alter_field_statement_apply(
 	}
 
 	txn.put_tb_field(ns, db, &what, &df).await?;
+	if kind_altered {
+		crate::ddl::define_field_statement_process_recursive_definitions(
+			ns,
+			db,
+			Arc::clone(&txn),
+			Some(&old_definition),
+			&df,
+			!opt.import,
+		)
+		.await?;
+	}
 	// Dropping the REFERENCE clause or narrowing/changing the record kind can
 	// strand reference keys under target tables the field no longer
 	// references. Purge them so the DELETE reference-purge gate stays sound.

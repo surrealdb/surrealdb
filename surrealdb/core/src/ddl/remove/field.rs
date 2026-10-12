@@ -3,7 +3,7 @@ use surrealdb_strand::TableName;
 use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Error, TableDefinition};
+use crate::catalog::{self, Error, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::val::Value;
@@ -53,9 +53,17 @@ pub(crate) async fn remove_field_statement_apply(
 			}
 		}
 	};
-	// Delete the definition
+	// Delete the definition, and every field nested in it: nothing is left
+	// nested in a field that is no longer defined.
+	let nested: Vec<catalog::FieldDefinition> = txn
+		.all_tb_fields(ns, db, &table_name, None)
+		.await?
+		.iter()
+		.filter(|nested| nested.name.len() > fd.name.len() && nested.name.starts_with(&fd.name))
+		.cloned()
+		.collect();
 	txn.del_tb_field(ns, db, &table_name, &name).await?;
-	// If the removed field declared a REFERENCE, purge the reference keys it
+	// If a removed field declared a REFERENCE, purge the reference keys it
 	// wrote. Those keys live under the referenced (target) record's range,
 	// keyed by the referencing (table, field) rather than under the removed
 	// field, so deleting the field definition above does not remove them.
@@ -78,6 +86,10 @@ pub(crate) async fn remove_field_statement_apply(
 		None,
 	)
 	.await?;
+	// The nested ones go under each key a definition is stored under, an
+	// implied one's among them, and their reference keys with them.
+	crate::ddl::define::field::del_tb_field_definitions(&txn, (ns, db), &table_name, &nested, true)
+		.await?;
 	// Refresh the table cache for fields
 	let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
 		return Err(Error::TbNotFound {

@@ -359,6 +359,35 @@ pub(crate) enum Error {
 		existing_kind: String,
 	},
 
+	/// A nested field is held by a field defined in its own right.
+	#[error(
+		"Cannot define field `{name}`: the field `{parent}` it is nested in is not defined. Define `{parent}` first"
+	)]
+	FieldParentUndefined {
+		name: String,
+		parent: String,
+	},
+
+	/// A nested field is held by a field whose kind can hold it.
+	#[error("Cannot define field `{name}` in field `{parent}` of type `{kind}`: {rule}")]
+	FieldParentCannotHold {
+		name: String,
+		parent: String,
+		kind: String,
+		rule: String,
+	},
+
+	/// A field's kind holds every field already defined in it.
+	#[error(
+		"Cannot give field `{name}` the type `{kind}`: field `{child}` is defined in it, and {rule}"
+	)]
+	FieldKindCannotHoldChild {
+		name: String,
+		kind: String,
+		child: String,
+		rule: String,
+	},
+
 	/// The `COMPUTED` clause cannot be used with other clauses altering or
 	/// working with the value
 	#[error("Cannot use the `{0}` keyword with `COMPUTED`.")]
@@ -597,6 +626,17 @@ impl LeafError for Error {
 			Error::AccessContextNotReadOnly | Error::AccessContextRequiresRecord => {
 				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
+			// A field definition that would nest a field in something that
+			// cannot hold it: the author of the statement corrects the schema.
+			Error::FieldParentUndefined {
+				..
+			}
+			| Error::FieldParentCannotHold {
+				..
+			}
+			| Error::FieldKindCannotHoldChild {
+				..
+			} => TypesError::validation(message, ValidationError::InvalidRequest),
 			// A record id whose components are named cannot take the definition:
 			// the DEFINE/ALTER/REMOVE or the existing data conflicts with the
 			// names, and the author of the statement can correct either.

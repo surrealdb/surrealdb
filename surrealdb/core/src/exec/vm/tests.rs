@@ -1941,8 +1941,8 @@ pub(super) const SCHEMA_STATEMENTS: &[&str] = &[
 	"DEFINE FIELD auto ON newtable TYPE string",
 	"DEFINE FIELD in ON knows TYPE record<person>",
 	"DEFINE FIELD out ON knows TYPE record<person>",
-	"DEFINE FIELD tags[0] ON person TYPE string",
-	"DEFINE FIELD tags[*] ON person TYPE string",
+	"{ DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[0] ON person TYPE string }",
+	"{ DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[*] ON person TYPE string }",
 	"DEFINE FIELD seen ON person PERMISSIONS FOR select WHERE $auth.id = id",
 	"DEFINE FIELD friend ON person TYPE option<record<person>>",
 	"DEFINE FIELD existing ON person",
@@ -2098,7 +2098,7 @@ pub(super) const SCHEMA_STATEMENTS: &[&str] = &[
 	"DEFINE FIELD out ON carried TYPE record<sale> ASSERT $value != NONE",
 	// ... against the catalog the block's schema statements before it leave,
 	// or, where a condition on data decides one, as the block reaches it.
-	"{ DEFINE FIELD obj.sub ON person TYPE int; DEFINE FIELD obj ON person COMPUTED 1 }",
+	"{ DEFINE FIELD obj ON person TYPE object; DEFINE FIELD obj.sub ON person TYPE int; DEFINE FIELD OVERWRITE obj ON person COMPUTED 1 }",
 	"{ DEFINE FIELD calc ON person COMPUTED 1; DEFINE FIELD calc.sub ON person TYPE int }",
 	"{ DEFINE FIELD a ON person COMPUTED b; DEFINE FIELD b ON person COMPUTED a }",
 	"{ DEFINE INDEX by_calc ON person FIELDS calc; DEFINE FIELD calc ON person COMPUTED 1 }",
@@ -2195,7 +2195,7 @@ pub(super) const SCHEMA_STATEMENTS: &[&str] = &[
 	// A field path, table or comment that is evaluated is resolved where the body resolves it.
 	"DEFINE FIELD ('fr' + 'esh') ON person TYPE int",
 	"DEFINE FIELD ('fr' + 'esh') ON ('per' + 'son') TYPE int COMMENT 'a ' + 'field'",
-	"DEFINE FIELD nested.deep ON ('per' + 'son') TYPE int",
+	"DEFINE FIELD loose.deep ON ('per' + 'son') TYPE int",
 	"DEFINE FIELD tags[$i] ON person TYPE string",
 	"DEFINE FIELD (1) ON person TYPE int",
 	"DEFINE FIELD ('a' + 'b') ON (1) TYPE int",
@@ -2767,6 +2767,22 @@ async fn a_field_definition_is_checked_when_it_is_lowered() {
 				kind: "int".to_owned(),
 				existing_name: "existing".to_owned(),
 				existing_kind: "string".to_owned(),
+			}],
+		),
+		(
+			"DEFINE FIELD orphan.leaf ON person TYPE int",
+			vec![FieldRefusal::FieldParentUndefined {
+				name: "orphan.leaf".to_owned(),
+				parent: "orphan".to_owned(),
+			}],
+		),
+		(
+			"DEFINE FIELD existing.sub ON person",
+			vec![FieldRefusal::FieldParentCannotHold {
+				name: "existing.sub".to_owned(),
+				parent: "existing".to_owned(),
+				kind: "string".to_owned(),
+				rule: "only an object holds a field".to_owned(),
 			}],
 		),
 	];
@@ -3482,7 +3498,7 @@ async fn a_record_user_reads_through_the_permissions() {
 	let db = TestDb::new_with_auth(
 		"
 		DEFINE TABLE bag PERMISSIONS FULL;
-		DEFINE FIELD arr ON bag TYPE array;
+		DEFINE FIELD arr ON bag TYPE array<object>;
 		DEFINE FIELD arr[*].secret ON bag PERMISSIONS FOR select NONE;
 		DEFINE FIELD hidden ON bag PERMISSIONS FOR select NONE;
 		CREATE bag:1 SET arr = [{ secret: 's1', shown: 1 }], hidden = 'h', open = 1;

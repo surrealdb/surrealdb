@@ -150,17 +150,19 @@ keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvknows\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbknows\x00 => 33cd2838a93b56f7 (113 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*knows\x00!fdout\x00 => 2077170ed9c82ebf (55 bytes)
-### DEFINE FIELD tags[0] ON person TYPE string
+### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[0] ON person TYPE string }
 NONE
 keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0e6fb3ae11f2f17e (114 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 528a4a286efe168b (48 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags[0]\x00 => 639ef56c765963c3 (52 bytes)
-### DEFINE FIELD tags[*] ON person TYPE string
+### { DEFINE FIELD tags ON person TYPE array; DEFINE FIELD tags[*] ON person TYPE string }
 NONE
 keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0e6fb3ae11f2f17e (114 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags\x00 => 528a4a286efe168b (48 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdtags.*\x00 => 2ae6ccc9c0b67fd2 (51 bytes)
 ### DEFINE FIELD seen ON person PERMISSIONS FOR select WHERE $auth.id = id
 NONE
@@ -902,7 +904,7 @@ keyspace:
 ### DEFINE FIELD out ON carried TYPE record<sale> ASSERT $value != NONE
 error: The field 'out' already exists
 keyspace:
-### { DEFINE FIELD obj.sub ON person TYPE int; DEFINE FIELD obj ON person COMPUTED 1 }
+### { DEFINE FIELD obj ON person TYPE object; DEFINE FIELD obj.sub ON person TYPE int; DEFINE FIELD OVERWRITE obj ON person COMPUTED 1 }
 error: Cannot define field `obj` as `COMPUTED` since a nested field `obj.sub` already exists.
 keyspace:
 ### { DEFINE FIELD calc ON person COMPUTED 1; DEFINE FIELD calc.sub ON person TYPE int }
@@ -1399,12 +1401,12 @@ keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0e6fb3ae11f2f17e (114 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdfresh\x00 => ddf93d7f064a0d20 (55 bytes)
-### DEFINE FIELD nested.deep ON ('per' + 'son') TYPE int
+### DEFINE FIELD loose.deep ON ('per' + 'son') TYPE int
 NONE
 keyspace:
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!cvperson\x00 => eba8d4f0aba80485 (17 bytes)
 /*\x00\x00\x00\x00*\x00\x00\x00\x00!tbperson\x00 => 0e6fb3ae11f2f17e (114 bytes)
-/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdnested.deep\x00 => 65a15d5edf184af8 (53 bytes)
+/*\x00\x00\x00\x00*\x00\x00\x00\x00*person\x00!fdloose.deep\x00 => d81a6e07b0ce0f6c (52 bytes)
 ### DEFINE FIELD tags[$i] ON person TYPE string
 error: Field path index must evaluate to an integer or string, found none
 keyspace:

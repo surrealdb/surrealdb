@@ -174,7 +174,9 @@ async fn unneeded_fields_keep_the_id_only_path(index: &str) -> anyhow::Result<()
 			DEFINE FIELD hidden ON pts PERMISSIONS FOR select NONE;
 			DEFINE FIELD owned ON pts PERMISSIONS FOR select WHERE owner = $auth.id;
 			DEFINE FIELD failing ON pts PERMISSIONS FOR select WHERE <int> code > 0;
+			DEFINE FIELD tags ON pts TYPE array;
 			DEFINE FIELD tags[*] ON pts PERMISSIONS FOR select NONE;
+			DEFINE FIELD meta ON pts TYPE object;
 			DEFINE FIELD meta.secret ON pts PERMISSIONS FOR select NONE;"
 		),
 	)

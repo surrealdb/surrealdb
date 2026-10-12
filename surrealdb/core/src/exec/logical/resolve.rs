@@ -3840,9 +3840,11 @@ mod tests {
 			"{plan}"
 		);
 		// A guard on `a.b` where `a` may hold an array sets the key per element
-		// too, as the runtime widens `a.b` over an array.
+		// too, as the runtime widens `a.b` over an array. Only an import
+		// defines a field whose parent is not defined.
 		let fixture = Fixture::new(
-			"DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
+			"OPTION IMPORT;
+			 DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
 			 DEFINE FIELD a.b ON t PERMISSIONS FOR select NONE;",
 		)
 		.await;
@@ -3931,9 +3933,11 @@ mod tests {
 				 DEFINE FIELD OVERWRITE arr.* ON t TYPE string PERMISSIONS FOR select WHERE $value != 'x';",
 				"SELECT arr FROM t",
 			),
-			// A `*` over a position that may hold an object.
+			// A `*` over a position that may hold an object, which only an
+			// import can define with no field over it.
 			(
-				"DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
+				"OPTION IMPORT;
+				 DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;
 				 DEFINE FIELD arr.*.secret ON t PERMISSIONS FOR select NONE;",
 				"SELECT arr FROM t",
 			),
