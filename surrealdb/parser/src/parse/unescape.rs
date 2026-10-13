@@ -1,8 +1,7 @@
 use ast::NodeId;
 use common::source_error::{AnnotationKind, Level, Snippet};
 use common::span::Span;
-use logos::Logos;
-use token::{BaseTokenKind, EscapeTokenKind, Token};
+use token::{BaseTokenKind, Token};
 
 use crate::parse::{ParseError, ParseResult, Parser};
 
@@ -45,166 +44,19 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		full_source: &'a str,
 		buffer: &'a mut String,
 	) -> ParseResult<&'a str> {
-		buffer.clear();
-
-		let mut lexer = EscapeTokenKind::lexer(unescape_source);
-		let mut pending_span = 0..0;
-		loop {
-			let Some(next) = lexer.next() else {
-				// Fast path for if there are no escape sequences.
-				if pending_span.len() == unescape_source.len() {
-					return Ok(unescape_source);
-				}
-				buffer.push_str(&unescape_source[pending_span]);
-				break;
-			};
-
-			let span = lexer.span();
-
-			let next =
-				match next {
-					Ok(x) => x,
-					Err(()) => {
-						let span = Span::from_usize_range(span)
-							.expect("Source to be shorter the u32::MAX");
-						return Err(ParseError::diagnostic(
-							Level::Error
-								.title("Invalid escape sequence")
-								.snippet(Snippet::source(full_source).annotate(
-									AnnotationKind::Primary.span(slice_span.sub_span(span)),
-								))
-								.to_diagnostic()
-								.to_owned(),
-						));
-					}
-				};
-
-			match next {
-				EscapeTokenKind::Chars => {
-					pending_span.end = span.end;
-				}
-				x => {
-					buffer.push_str(&unescape_source[pending_span]);
-					pending_span = span.end..span.end;
-					if !Self::handle_escape(buffer, &unescape_source[span.clone()], x) {
-						let span = Span::from_usize_range(span)
-							.expect("Source to be shorter the u32::MAX");
-						return Err(ParseError::diagnostic(
-							Level::Error
-								.title("Invalid escape sequence")
-								.snippet(Snippet::source(full_source).annotate(
-									AnnotationKind::Primary.span(slice_span.sub_span(span)),
-								))
-								.to_diagnostic()
-								.to_owned(),
-						));
-					}
-				}
-			}
-		}
-
-		Ok(buffer.as_str())
-	}
-
-	fn handle_escape(buffer: &mut String, slice: &str, token: EscapeTokenKind) -> bool {
-		match token {
-			EscapeTokenKind::EscNewline => {
-				buffer.push('\n');
-				true
-			}
-			EscapeTokenKind::EscCarriageReturn => {
-				buffer.push('\r');
-				true
-			}
-			EscapeTokenKind::EscTab => {
-				buffer.push('\t');
-				true
-			}
-			EscapeTokenKind::EscZeroByte => {
-				buffer.push('\0');
-				true
-			}
-			EscapeTokenKind::EscBackSlash => {
-				buffer.push('\\');
-				true
-			}
-			EscapeTokenKind::EscBackSpace => {
-				buffer.push('\x08');
-				true
-			}
-			EscapeTokenKind::EscFormFeed => {
-				buffer.push('\x0C');
-				true
-			}
-			EscapeTokenKind::EscQuote => {
-				buffer.push('\'');
-				true
-			}
-			EscapeTokenKind::EscDoubleQuote => {
-				buffer.push('\"');
-				true
-			}
-			EscapeTokenKind::EscBackTick => {
-				buffer.push('`');
-				true
-			}
-			EscapeTokenKind::EscBracketClose => {
-				buffer.push('⟩');
-				true
-			}
-
-			EscapeTokenKind::EscUnicodeFixed => {
-				let mut char = 0u32;
-				let slice = &slice.as_bytes()["\\u".len()..];
-				for c in slice.iter().copied() {
-					char <<= 4;
-					match c {
-						c @ b'0'..=b'9' => char += (c - b'0') as u32,
-						c @ b'a'..=b'f' => char += (c - b'a' + 10) as u32,
-						c @ b'A'..=b'F' => char += (c - b'A' + 10) as u32,
-						// Lexer already verified that there are only hex digits in the escape
-						// code.
-						_ => unreachable!(),
-					}
-				}
-
-				if let Some(x) = char::from_u32(char) {
-					buffer.push(x);
-					true
-				} else {
-					false
-				}
-			}
-			EscapeTokenKind::EscUnicodeBracket => {
-				let bytes = &slice.as_bytes()[b"\\u{".len()..slice.len() - 1];
-				let mut char = 0u32;
-				for b in bytes {
-					char <<= 4;
-					match *b {
-						x @ b'0'..=b'9' => {
-							char += (x - b'0') as u32;
-						}
-						x @ b'a'..=b'f' => {
-							char += (x - b'a' + 10) as u32;
-						}
-						x @ b'A'..=b'F' => {
-							char += (x - b'A' + 10) as u32;
-						}
-						// Lexer already verified that there are only hex digits in the escape
-						// code.
-						_ => unreachable!(),
-					}
-				}
-				if let Some(x) = char::from_u32(char) {
-					buffer.push(x);
-					true
-				} else {
-					false
-				}
-			}
-			// Caller should only call this on escape sequence tokens.
-			EscapeTokenKind::Chars => unreachable!(),
-		}
+		parse_common::unescape(unescape_source, buffer).map_err(|e| {
+			let span = Span::from_usize_range(e.span).expect("Source to be shorter the u32::MAX");
+			ParseError::diagnostic(
+				Level::Error
+					.title(e.message)
+					.snippet(
+						Snippet::source(full_source)
+							.annotate(AnnotationKind::Primary.span(slice_span.sub_span(span))),
+					)
+					.to_diagnostic()
+					.to_owned(),
+			)
+		})
 	}
 
 	fn unescape_bracket_ident<'a>(
@@ -290,96 +142,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(self.ast.push_set_entry(str))
 	}
 
-	/// Returns the offset in the unescaped_str for an offset derived from the escaped version of
-	/// the unescaped string.
-	///
-	/// For example `escape_str_offset("\\u{21}a",1)` will return `6` because `\u{21}` results in a
-	/// single escaped character.
+	/// Returns the offset in the escaped `unescaped_str` corresponding to `offset` in the
+	/// unescaped version of the string. See [`parse_common::unescaped_to_escaped_offset`].
 	///
 	/// # Panics
 	/// This function can panic if the escaped string has invalid escape sequences inside and
 	/// therefore should only be called on strings which are already verified to have correct
 	/// escape sequences.
 	pub(crate) fn escape_str_offset(unescaped_str: &str, offset: u32) -> u32 {
-		let mut lexer = EscapeTokenKind::lexer(unescaped_str);
-
-		let mut offset_idx = 0;
-		loop {
-			if offset_idx >= offset {
-				return lexer.span().end as u32;
-			}
-
-			let Some(t) = lexer.next() else {
-				break;
-			};
-
-			let t = t.expect("string should have already been checked to be correct");
-			match t {
-				EscapeTokenKind::EscNewline
-				| EscapeTokenKind::EscCarriageReturn
-				| EscapeTokenKind::EscTab
-				| EscapeTokenKind::EscZeroByte
-				| EscapeTokenKind::EscBackSlash
-				| EscapeTokenKind::EscBackSpace
-				| EscapeTokenKind::EscFormFeed
-				| EscapeTokenKind::EscQuote
-				| EscapeTokenKind::EscDoubleQuote
-				| EscapeTokenKind::EscBackTick => {
-					offset_idx += 1;
-				}
-				EscapeTokenKind::EscBracketClose => {
-					offset_idx += const { '⟩'.len_utf8() } as u32;
-				}
-				EscapeTokenKind::EscUnicodeFixed => {
-					let mut accum = 0u32;
-					let slice = lexer.slice();
-					let slice = &&slice.as_bytes()["\\u".len()..];
-					for i in 0..4 {
-						accum <<= 4;
-						match slice[i] {
-							c @ b'0'..=b'9' => accum += (c - b'0') as u32,
-							c @ b'a'..=b'f' => accum += (c - b'a' + 10) as u32,
-							c @ b'A'..=b'F' => accum += (c - b'A' + 10) as u32,
-							// Lexer already verified that there are only hex digits in the escape
-							// code.
-							_ => unreachable!(),
-						}
-					}
-
-					offset_idx += char::from_u32(accum)
-						.expect("escape string should be valid")
-						.len_utf8() as u32;
-				}
-				EscapeTokenKind::EscUnicodeBracket => {
-					let mut accum = 0u32;
-					let slice = lexer.slice().as_bytes();
-					let slice = &slice["\\u{".len()..(slice.len() - 1)];
-					for c in slice {
-						accum <<= 4;
-						match c {
-							b'0'..=b'9' => accum += (c - b'0') as u32,
-							b'a'..=b'f' => accum += (c - b'a' + 10) as u32,
-							b'A'..=b'F' => accum += (c - b'A' + 10) as u32,
-							// Lexer already verified that there are only hex digits in the escape
-							// code.
-							_ => unreachable!(),
-						}
-					}
-
-					offset_idx += char::from_u32(accum)
-						.expect("escape string should be valid")
-						.len_utf8() as u32;
-				}
-				EscapeTokenKind::Chars => {
-					let slice = lexer.span();
-					if offset_idx + slice.len() as u32 >= offset {
-						return (slice.start as u32) + (offset - offset_idx);
-					}
-					offset_idx += slice.len() as u32;
-				}
-			}
-		}
-
-		lexer.span().end as u32
+		parse_common::unescaped_to_escaped_offset(unescaped_str, offset as usize) as u32
 	}
 }

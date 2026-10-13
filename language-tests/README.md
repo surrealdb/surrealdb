@@ -339,6 +339,25 @@ same arguments, or drive the harness binary yourself:
 cargo run --features bench -- bench run [--save] [--dataset NAME] [--backend mem] [--quick] [--json PATH] [<filter>]
 ```
 
+### Determinism
+
+Two process-wide sources of randomness would otherwise make a bench measure a
+different amount of work on each run; the harness pins both, so a local run and a
+CI run see the same data and the same index structures:
+
+- **Generated data.** Every dataset build reseeds the engine RNG, so `rand::*`
+  values and `|record:N|` ids are identical across runs and independent of
+  benchmark order. Override with `SURREAL_RAND_SEED=<u64>` to redraw the datasets
+  from a different, still fixed, seed.
+- **HNSW graph construction.** HNSW picks each element's layer at random, so an
+  unseeded build gives the same kNN query a different graph to traverse on every
+  run — worth far more than any regression the suite could catch. The harness
+  pins the seed; override with `SURREAL_HNSW_BUILD_SEED=<u64>`.
+
+Re-run a surprising ANN result with a different `SURREAL_HNSW_BUILD_SEED` on both
+sides before trusting it: a fixed seed removes the variance between runs, but it
+does not prove the change generalises beyond that one graph.
+
 `scripts/bench/optimise.workflow.js` is a workflow recipe driving an AI
 optimisation loop: baseline → inspect the profile → propose & apply one engine
 change → re-measure → keep only if the harness reports a significant speedup. See
@@ -483,6 +502,22 @@ for upgrade tests where the upgrading datastore version can differ from the
 test running datastore.
 
 Defaults to `"*"`
+
+#### `[test.legacy-syntax]`
+
+Marks an upgrade helper written in the SurrealQL of the released binary that
+replays it, in a spelling the current parser no longer accepts. `DEFINE MODULE`
+is the standing example: the releases in the upgrade matrix spell the module
+source `AS f"bucket:/key"` and have no `UNSIGNED` keyword, so a script that
+writes one on those binaries cannot also be a document the current parser reads.
+
+The current parser's language-test corpus check reads this flag and leaves such
+a file alone, which is why it is a declared key and not a comment. Only a script
+replayed against a spawned release may set it — an `[env] imports` entry or a
+`[test.chain] setup`. A test body and a `[test.chain] mutate` run on the upgrade
+target, so the runner refuses the flag on either.
+
+Defaults to `false`
 
 #### `[test.results]`
 
@@ -751,17 +786,21 @@ temporal queries using the `VERSION` clause.
 Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
 shared datastore pool) since they require different datastore configuration.
 
+The memory backend no longer supports versioning (the surrealmx engine dropped its
+versioned-read API), so versioned tests are automatically skipped on the `mem`
+backend and run only on `rocksdb` and `surrealkv`, which retain native versioning.
+
 **Examples:**
 
 ```toml
-# Test that requires versioning on memory and SurrealKV backends
+# Test that requires versioning on the SurrealKV backend
 [env]
-backend = ["mem", "surrealkv"]
+backend = ["surrealkv"]
 versioned = true
 ```
 
 ```toml
-# Test with versioning on all backends that support it
+# Test with versioning on all backends that support it (mem is skipped)
 [env]
 versioned = true
 ```
@@ -873,7 +912,10 @@ database should be run. This can be used to disable functions, net targets,
 http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
-This field is not supported for upgrade tests.
+Upgrade tests accept exactly one key here, `allow-experimental`, which is
+passed to each spawned binary; every other key is rejected, and writing the
+table without that key is a load error. It must sit on the graded test case —
+on an import or a chain script it is inert.
 
 #### `[env.planner-strategy]`
 

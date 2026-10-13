@@ -1,8 +1,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use surrealdb_core::sql::Ast;
-use surrealdb_core::syn::ParserSettings;
+use surrealdb_sql::Ast;
+use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::ToSql;
 
 fuzz_target!(|query: Ast| {

@@ -1,12 +1,18 @@
 mod fake;
 mod notrack;
-mod registry;
 mod track;
+mod usable;
 
-pub use registry::{
-	MemoryReporter, cleanup_memory_reporters, memory_reporters_allocated_by_name,
-	memory_reporters_allocated_total, register_memory_reporter,
-};
+/// The configured memory ceiling in bytes, or `0` when the memory guard is
+/// disabled.
+///
+/// This is the value [`ALLOC`]'s `is_beyond_threshold` compares tracked bytes
+/// against. Exposed so the observability layer can publish the limit alongside
+/// the usage without depending on the configuration crate directly. Note that a
+/// non-zero threshold is only enforced when allocation tracking is compiled in.
+pub fn memory_threshold() -> usize {
+	*surrealdb_cnf::MEMORY_THRESHOLD
+}
 
 // --------------------------------------------------
 // No global allocator, or allocation tracking

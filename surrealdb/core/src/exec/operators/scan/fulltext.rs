@@ -6,13 +6,13 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
-use crate::catalog::Index;
-use crate::err::Error;
+use crate::catalog::{Error, Index};
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -26,15 +26,17 @@ use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::IndexKeyBase;
+use crate::idx::ft::MatchesHitsIterator;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::kvs::CachePolicy;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 
 /// Batch size for full-text result batching.
 ///
-/// Smaller than the default [`super::common::DEFAULT_SCAN_BATCH_SIZE`] because full-text
-/// results are ordered by relevance score, so smaller batches let downstream
-/// operators begin processing sooner.
+/// Smaller than the default
+/// [`ExecConfig::scan_batch_size`](crate::exec::config::ExecConfig::scan_batch_size) because
+/// full-text results are ordered by relevance score, so smaller batches let
+/// downstream operators begin processing sooner.
 const BATCH_SIZE: usize = 100;
 
 /// Full-text search scan operator.
@@ -50,7 +52,7 @@ pub struct FullTextScan {
 	/// The MATCHES operator configuration (reference number, scoring)
 	pub operator: MatchesOperator,
 	/// Table name for record fetching
-	pub table_name: crate::val::TableName,
+	pub table_name: surrealdb_strand::TableName,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
@@ -69,7 +71,7 @@ impl FullTextScan {
 		index_ref: IndexRef,
 		query: String,
 		operator: MatchesOperator,
-		table_name: crate::val::TableName,
+		table_name: surrealdb_strand::TableName,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {
@@ -134,7 +136,7 @@ impl ExecOperator for FullTextScan {
 		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Get namespace and database IDs
 			let db_ctx = ctx.database().context("FullTextScan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
@@ -170,7 +172,7 @@ impl ExecOperator for FullTextScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
+					convert_permission_to_physical_runtime(&def.permissions.select, &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
@@ -184,7 +186,7 @@ impl ExecOperator for FullTextScan {
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Resolve field state for computed fields and field-level
@@ -195,9 +197,7 @@ impl ExecOperator for FullTextScan {
 					if let Some(ref res) = resolved {
 						res.field_state_for_projection(nf.as_ref())
 					} else {
-						build_field_state(
-							&ctx, &table_name, check_perms, nf.as_ref(),
-						).await?
+						build_field_state(&ctx, &table_name, check_perms, nf.as_ref()).await?
 					}
 				}
 				None => super::pipeline::FieldState::empty(),
@@ -216,18 +216,24 @@ impl ExecOperator for FullTextScan {
 
 			// Get the FullText index parameters from the index definition
 			let index_def = index_ref.definition();
+			// Legacy (pre-shared-doc-ID) indexes resolve postings through their
+			// historical private doc-ID layout until explicitly rebuilt; the
+			// format version selects the resolver used below.
 			let ft_params = match &index_def.index {
 				Index::FullText(params) => params,
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Index '{}' is not a full-text index",
-						index_def.name
-					)))?
-				}
+				_ => Err(ControlFlow::Err(anyhow::anyhow!(
+					"Index '{}' is not a full-text index",
+					index_def.name
+				)))?,
 			};
 
 			// Create the index key base
-			let ikb = IndexKeyBase::new(ns.namespace_id, db.database_id, table_name.clone(), index_def.index_id);
+			let ikb = IndexKeyBase::new(
+				ns.namespace_id,
+				db.database_id,
+				table_name.clone(),
+				index_def.index_id,
+			);
 
 			// Open the full-text index
 			let fti = FullTextIndex::new(
@@ -235,16 +241,18 @@ impl ExecOperator for FullTextScan {
 				txn.as_ref(),
 				ikb,
 				ft_params,
-				&frozen_ctx.config.file_allowlist
+				&frozen_ctx.config.idx.file_allowlist,
+				index_def.format_version,
 			)
 			.await
 			.context("Failed to open full-text index")?;
 
 			// Extract query terms using TreeStack for stack management
 			let query_terms = {
+				let az_fn = LegacyAnalyzerFunction::new(frozen_ctx, opt);
 				let mut stack = TreeStack::new();
 				stack
-					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, opt, query.clone()))
+					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.clone()))
 					.finish()
 					.await
 					.context("Failed to extract query terms")?
@@ -252,7 +260,7 @@ impl ExecOperator for FullTextScan {
 
 			// If query terms are empty, no results
 			if query_terms.is_empty() {
-				return;
+				return Ok(());
 			}
 
 			// Get the boolean operator from the MATCHES operator
@@ -263,7 +271,7 @@ impl ExecOperator for FullTextScan {
 				Some(iter) => iter,
 				None => {
 					// No matching documents
-					return;
+					return Ok(());
 				}
 			};
 
@@ -274,8 +282,7 @@ impl ExecOperator for FullTextScan {
 
 			loop {
 				// Collect up to BATCH_SIZE record IDs from the hits iterator
-				let hit = hits_iter.next(txn.as_ref()).await
-					.context("Failed to get next hit")?;
+				let hit = hits_iter.next(txn.as_ref()).await.context("Failed to get next hit")?;
 
 				match hit {
 					Some((rid, _doc_id)) => {
@@ -292,10 +299,11 @@ impl ExecOperator for FullTextScan {
 								check_perms,
 								version,
 								CachePolicy::ReadOnly,
-							).await?;
+							)
+							.await?;
 							pipeline.process_batch(&mut values, &ctx).await?;
 							if !values.is_empty() {
-								yield ValueBatch { values };
+								yielder.emit(ValueBatch::new(values)).await;
 							}
 							rid_batch.clear();
 						}
@@ -319,13 +327,15 @@ impl ExecOperator for FullTextScan {
 					check_perms,
 					version,
 					CachePolicy::ReadOnly,
-				).await?;
+				)
+				.await?;
 				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder.emit(ValueBatch::new(values)).await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
 	}

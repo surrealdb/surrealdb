@@ -1,25 +1,33 @@
 use std::borrow::Cow;
-use std::ops::{Bound, Range};
+use std::ops::Bound;
 use std::sync::Arc;
 use std::vec;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::catalog::{DatabaseId, NamespaceId, Record, Relation};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
 use crate::doc::{DocumentContext, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
+use crate::expr::Mock;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
-use crate::expr::statements::relate::RelateThrough;
+use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
-use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
-use crate::key::{graph, record, r#ref};
-use crate::kvs::{KVKey, KVValue, Key, NORMAL_BATCH_SIZE, Transaction, Val};
+use crate::idx::planner::{IterationStage, RecordStrategy};
+use crate::key::schema::{
+	DbRoot, DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix, GraphIdPrefix, RecordKey,
+	RecordPrefix, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
+	ReferenceKey,
+};
+use crate::key::{AnyRange, KVKeyDecode, KVValue, RawRange, Resumable, TypedRange};
+use crate::kvs::lightweight::{LightweightEdgeScanner, lightweight_relation};
+use crate::kvs::{DatastoreError, Direction, NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 impl Iterable {
@@ -81,9 +89,9 @@ impl Iterable {
 }
 
 pub(super) enum Collectable {
-	Lookup(DocumentContext, LookupKind, Key),
-	RangeKey(DocumentContext, Key),
-	TableKey(DocumentContext, Key),
+	Lookup(DocumentContext, LookupKind, Vec<u8>),
+	RangeKey(DocumentContext, Vec<u8>),
+	TableKey(DocumentContext, Vec<u8>),
 	Relatable {
 		doc_ctx: DocumentContext,
 		f: RecordId,
@@ -96,7 +104,7 @@ pub(super) enum Collectable {
 	Value(NsDbCtx, Value),
 	Defer(DocumentContext, RecordId),
 	Mergeable(DocumentContext, TableName, Option<RecordIdKey>, Value),
-	KeyVal(DocumentContext, Key, Val),
+	KeyVal(DocumentContext, Vec<u8>, Val),
 	Count(DocumentContext, usize),
 	IndexItem(DocumentContext, IndexItemRecord),
 	IndexItemKey(DocumentContext, IndexItemRecord),
@@ -132,9 +140,9 @@ impl Collectable {
 				Self::process_lookup(doc_ctx, ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
-			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
+			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, &key).await,
 			// Table scan results - basic key-only processing for full table scans
-			Self::TableKey(doc_ctx, key) => Self::process_table_key(doc_ctx, key).await,
+			Self::TableKey(doc_ctx, key) => Self::process_table_key(doc_ctx, &key).await,
 			// Graph relationship records - handles complex from/via/to relationship processing
 			Self::Relatable {
 				doc_ctx,
@@ -177,18 +185,22 @@ impl Collectable {
 		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
-		key: Key,
+		key: Vec<u8>,
 		rid_only: bool,
 	) -> Result<Processable> {
 		// Parse the data from the store
 		let (ft, fk) = match kind {
 			LookupKind::Graph(_) => {
-				let gra = graph::Graph::decode_key(&key)?;
+				// The strict, validating decode: this path handles one key per
+				// lookup (cascade deletes above all), so the per-key cost of
+				// full validation is irrelevant and its corruption signal is
+				// not.
+				let gra = DecodedGraph::decode(&key)?;
 				(gra.edge.table, gra.edge.key)
 			}
 			LookupKind::Reference => {
-				let refe = r#ref::Ref::decode_key(&key)?;
-				(refe.ft.into_owned(), refe.fk.into_owned())
+				let refe = ReferenceKey::decode_key(&key)?;
+				(refe.foreign_table.into_owned(), refe.foreign_key.into_owned())
 			}
 		};
 
@@ -200,11 +212,11 @@ impl Collectable {
 		// SECURITY: when the surrounding statement carries a VERSION clause
 		// (`opt.version = Some(_)`), fetch the table definition AT that
 		// version. The table's SELECT permissions are taken from the
-		// resulting `TableDefinition`, so reading the current-catalog
+		// resulting `StoredTableDefinition`, so reading the current-catalog
 		// definition would apply the present-day permission clause to a
 		// historical query — bypassing any row-level WHERE that was in
 		// force when the version was captured.
-		if ft != doc_ctx.tb()?.name {
+		if ft.as_str() != doc_ctx.tb()?.name.as_str() {
 			let tb = txn
 				.get_or_add_tb(None, &doc_ctx.ns().name, &doc_ctx.db().name, &ft, opt.version)
 				.await?;
@@ -252,12 +264,12 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn process_range_key(doc_ctx: DocumentContext, key: Key) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(&key)?;
+	async fn process_range_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
+		let key = RecordKey::decode_key(key)?;
 		let val = Record::new(Value::Null);
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		// Create a new operable value
 		let val = Operable::Value(val.into());
@@ -274,11 +286,11 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn process_table_key(doc_ctx: DocumentContext, key: Key) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(&key)?;
+	async fn process_table_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
+		let key = RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		// Process the record
 		let pro = Processable {
@@ -371,8 +383,21 @@ impl Collectable {
 		record_id: RecordId,
 		rid_only: bool,
 	) -> Result<Processable> {
-		// if it is skippable we only need the record id
-		let val = if rid_only {
+		let val = if opt.for_update && matches!(doc_ctx, DocumentContext::NsDbTbCtx(_)) {
+			// A locked read registers the record key for commit-time conflict
+			// detection, so it outranks the `rid_only` value-fetch skip: the
+			// registration is a side effect of reading the record, not of
+			// returning it. Only read-only (SELECT) record fetches lock;
+			// mutating statements register conflicts through their own writes.
+			txn.get_record_for_update(
+				doc_ctx.ns().namespace_id,
+				doc_ctx.db().database_id,
+				&record_id.table,
+				&record_id.key,
+			)
+			.await?
+		} else if rid_only {
+			// if it is skippable we only need the record id
 			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(
@@ -476,11 +501,11 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	fn process_key_val(doc_ctx: DocumentContext, key: &Key, val: &[u8]) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(key)?;
+	fn process_key_val(doc_ctx: DocumentContext, key: &[u8], val: &[u8]) -> Result<Processable> {
+		let key = RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		let val = Record::kv_decode_value(val, rid.clone())?;
 		// Create a new operable value
@@ -681,6 +706,12 @@ pub(super) trait Collector {
 				self.collect(Collectable::RecordId(doc_ctx, v)).await?
 			}
 			Iterable::Defer(doc_ctx, v) => self.collect(Collectable::Defer(doc_ctx, v)).await?,
+			Iterable::MockDefer(doc_ctx, mock) => {
+				self.collect_mock(ctx, doc_ctx, mock, true).await?
+			}
+			Iterable::MockRecordId(doc_ctx, mock) => {
+				self.collect_mock(ctx, doc_ctx, mock, false).await?
+			}
 			Iterable::Lookup {
 				doc_ctx,
 				kind,
@@ -747,13 +778,16 @@ pub(super) trait Collector {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn start_skip(
+	async fn start_skip<R>(
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		mut rng: Range<Key>,
-		sc: ScanDirection,
-	) -> Result<Option<Range<Key>>> {
+		rng: R,
+		sc: Direction,
+	) -> Result<Option<R>>
+	where
+		R: AnyRange + Resumable + Clone,
+	{
 		// Fast-forward a key range by skipping the first N keys when a START clause is
 		// active.
 		//
@@ -770,7 +804,7 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut cursor = txn.open_keys_cursor(rng.clone(), sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng.clone(), sc, 0, opt.version).await?;
 		let mut skipped = 0;
 		let mut last_key: Vec<u8> = vec![];
 		'outer: loop {
@@ -798,17 +832,8 @@ pub(super) trait Collector {
 		}
 		// Update the iterator about the number of skipped keys
 		ite.skipped(skipped);
-		// We set the range for the next iteration
-		match sc {
-			ScanDirection::Forward => {
-				last_key.push(0xFF);
-				rng.start = last_key;
-			}
-			ScanDirection::Backward => {
-				rng.end = last_key;
-			}
-		}
-		Ok(Some(rng))
+		// Resume the next iteration after the last key this one consumed.
+		Ok(Some(rng.resume_after(&last_key, sc)))
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -818,23 +843,37 @@ pub(super) trait Collector {
 		opt: &Options,
 		doc_ctx: DocumentContext,
 		table: &TableName,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self.collect_lightweight(ctx, opt, doc_ctx, table, &rel, None, sc, false).await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, table)?;
-		let end = record::suffix(ns, db, table)?;
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(table),
+		}
+		.range()?;
 
 		// Optionally skip keys
-		let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? else {
+		let Some(rng) = self.start_skip(ctx, opt, range, sc).await? else {
 			return Ok(());
 		};
 
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_vals_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_vals_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -842,21 +881,41 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			// Materialise owned `(Key, Val)` pairs up front because the
-			// per-item `self.collect(...)` await may need to call back into
-			// the cursor's transaction, which can't co-exist with the
-			// outstanding `&mut self` borrow on the cursor.
-			let owned: Vec<(Key, Val)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (k, v) in owned {
+			for (k, v) in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k.to_vec(), v.to_vec())).await?;
 				count += 1;
 			}
 		}
 		// Everything ok
+		Ok(())
+	}
+
+	/// Drains a [`Mock`] target one id at a time, the same lazy-streaming
+	/// shape as [`Self::collect_table`] over a live key range: `Mock`'s own
+	/// iterator is already `O(1)`-state (see `expr::mock::IntoIter`), so
+	/// there is nothing to pre-materialize — only the per-id `Collectable`
+	/// this produces is real work.
+	#[instrument(level = "trace", skip_all)]
+	async fn collect_mock(
+		&mut self,
+		ctx: &FrozenContext,
+		doc_ctx: DocumentContext,
+		mock: Mock,
+		deferable: bool,
+	) -> Result<()> {
+		for (count, rid) in mock.into_iter().enumerate() {
+			if ctx.is_done(Some(count)).await? {
+				break;
+			}
+			if deferable {
+				self.collect(Collectable::Defer(doc_ctx.clone(), rid)).await?;
+			} else {
+				self.collect(Collectable::RecordId(doc_ctx.clone(), rid)).await?;
+			}
+		}
 		Ok(())
 	}
 
@@ -867,16 +926,30 @@ pub(super) trait Collector {
 		opt: &Options,
 		doc_ctx: DocumentContext,
 		table: &TableName,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self.collect_lightweight(ctx, opt, doc_ctx, table, &rel, None, sc, false).await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, table)?;
-		let end = record::suffix(ns, db, table)?;
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(table),
+		}
+		.range()?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, range, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -885,7 +958,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_keys_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -893,12 +966,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
-			for k in owned {
+			for k in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
+				self.collect(Collectable::TableKey(doc_ctx.clone(), k.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -914,45 +986,50 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		v: &TableName,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, v, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, v, &rel, None, Direction::Forward, true)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(v),
+		}
+		.range()?;
 		// Create a new iterable range
-		let count = ctx.tx().count(beg..end, opt.version).await?;
+		let count = ctx.tx().count(range, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
 		Ok(())
 	}
 
+	/// The range of records of `tb` whose id falls inside `r`.
+	///
+	/// A record's `id` comes from its key, so the range is untyped: callers read the
+	/// bytes and decode each record against the key it was stored under.
 	#[instrument(level = "trace", skip_all)]
 	async fn range_prepare(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 		r: RecordIdKeyRange,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let beg = match &r.start {
-			Bound::Unbounded => record::prefix(ns, db, tb)?,
-			Bound::Included(v) => record::new(ns, db, tb, v).encode_key()?,
-			Bound::Excluded(v) => {
-				let mut key = record::new(ns, db, tb, v).encode_key()?;
-				key.push(0x00);
-				key
-			}
-		};
-		// Prepare the range end key
-		let end = match &r.end {
-			Bound::Unbounded => record::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => record::new(ns, db, tb, v).encode_key()?,
-			Bound::Included(v) => {
-				let mut key = record::new(ns, db, tb, v).encode_key()?;
-				key.push(0x00);
-				key
-			}
-		};
-		Ok((beg, end))
+	) -> Result<RawRange> {
+		RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+		}
+		.range_where((r.start.as_ref().map(Cow::Borrowed), r.end.as_ref().map(Cow::Borrowed)))
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -963,14 +1040,26 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		table_name: &TableName,
 		r: RecordIdKeyRange,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) = ctx
+			.tx()
+			.get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, table_name, None)
+			.await? && let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, table_name, &rel, Some(&r), sc, false)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 		// Prepare
-		let (beg, end) = Self::range_prepare(ns, db, table_name, r).await?;
+		let rng = Self::range_prepare(ns, db, table_name, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, rng, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -979,7 +1068,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_vals_cursor(rng, sc, 0, None).await?;
+		let mut cursor = txn.open_vals_cursor_raw(rng, sc, 0, None).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -987,13 +1076,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<(Key, Val)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (k, v) in owned {
+			for (k, v) in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k.to_vec(), v.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -1009,17 +1096,28 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		tb: &TableName,
 		r: RecordIdKeyRange,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(ctx, opt, doc_ctx, tb, &rel, Some(&r), sc, false)
+				.await;
+		}
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
+		let rng = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, rng, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -1027,7 +1125,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut cursor = txn.open_keys_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -1035,12 +1133,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
-			for k in owned {
+			for k in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
+				self.collect(Collectable::RangeKey(doc_ctx.clone(), k.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -1057,16 +1154,143 @@ pub(super) trait Collector {
 		tb: &TableName,
 		r: RecordIdKeyRange,
 	) -> Result<()> {
+		// A lightweight relation has no record range: its edges are
+		// enumerated from its IN tables' adjacency instead.
+		if let Some(tbdef) =
+			ctx.tx().get_tb(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, None).await?
+			&& let Some(rel) = lightweight_relation(&tbdef.table_type)
+		{
+			let rel = rel.clone();
+			return self
+				.collect_lightweight(
+					ctx,
+					opt,
+					doc_ctx,
+					tb,
+					&rel,
+					Some(&r),
+					Direction::Forward,
+					true,
+				)
+				.await;
+		}
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) =
+		let range =
 			Self::range_prepare(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, r).await?;
 		// Create a new iterable range
-		let count = txn.count(beg..end, opt.version).await?;
+		let count = txn.count(range, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
+		Ok(())
+	}
+
+	/// Collects a lightweight relation's edges by scanning its `IN` tables'
+	/// adjacency (see `crate::kvs::lightweight`). The scan emits edges in
+	/// canonical-id order — `[in, out]` ids sort exactly as the
+	/// `(in vertex, out)` pointer keys the scan walks — streaming in either
+	/// direction, so memory stays bounded by the batch size and
+	/// cancellation is observed per row.
+	#[allow(clippy::too_many_arguments)]
+	#[instrument(level = "trace", skip_all)]
+	async fn collect_lightweight(
+		&mut self,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc_ctx: DocumentContext,
+		table: &TableName,
+		rel: &Relation,
+		range: Option<&RecordIdKeyRange>,
+		sc: Direction,
+		count_only: bool,
+	) -> Result<()> {
+		let ns = doc_ctx.ns().namespace_id;
+		let db = doc_ctx.db().database_id;
+		let txn = ctx.tx();
+		// An id range filters in the storekey byte domain, which the pinned
+		// array-id ordering test keeps aligned with value order.
+		let encode = |bound: &std::ops::Bound<RecordIdKey>| -> Result<std::ops::Bound<Vec<u8>>> {
+			Ok(match bound {
+				std::ops::Bound::Included(id) => std::ops::Bound::Included(
+					storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?,
+				),
+				std::ops::Bound::Excluded(id) => std::ops::Bound::Excluded(
+					storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?,
+				),
+				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+			})
+		};
+		let bounds = match range {
+			Some(r) => Some((encode(&r.start)?, encode(&r.end)?)),
+			None => None,
+		};
+		let in_bounds = |id: &RecordIdKey| -> Result<bool> {
+			let Some((start, end)) = &bounds else {
+				return Ok(true);
+			};
+			let bytes = storekey::encode_vec(id).map_err(anyhow::Error::from_boxed)?;
+			let after_start = match start {
+				std::ops::Bound::Included(b) => bytes >= *b,
+				std::ops::Bound::Excluded(b) => bytes > *b,
+				std::ops::Bound::Unbounded => true,
+			};
+			let before_end = match end {
+				std::ops::Bound::Included(b) => bytes <= *b,
+				std::ops::Bound::Excluded(b) => bytes < *b,
+				std::ops::Bound::Unbounded => true,
+			};
+			Ok(after_start && before_end)
+		};
+		let mut scanner = LightweightEdgeScanner::new(
+			&txn,
+			ns,
+			db,
+			table,
+			rel,
+			sc,
+			opt.version,
+			Some(ctx.get_index_stores().adjacency_resolve()),
+		);
+		if count_only {
+			let mut count = 0;
+			'outer: loop {
+				let batch = scanner.next_batch(NORMAL_BATCH_SIZE).await?;
+				if batch.is_empty() {
+					break;
+				}
+				for rid in batch {
+					if ctx.is_done(Some(count)).await? {
+						break 'outer;
+					}
+					if in_bounds(&rid.key)? {
+						count += 1;
+					}
+				}
+			}
+			return self.collect(Collectable::Count(doc_ctx, count)).await;
+		}
+		// START skipping is the collector's own: each `collect` call drops a
+		// row while the iterator still reports skippable rows, exactly as the
+		// mock collector relies on. A second skip here would double-count.
+		let mut count = 0;
+		'outer: loop {
+			let batch = scanner.next_batch(NORMAL_BATCH_SIZE).await?;
+			if batch.is_empty() {
+				break;
+			}
+			for rid in batch {
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				if !in_bounds(&rid.key)? {
+					continue;
+				}
+				count += 1;
+				self.collect(Collectable::RecordId(doc_ctx.clone(), rid)).await?;
+			}
+		}
 		Ok(())
 	}
 
@@ -1082,62 +1306,160 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
+		let prefix = DbRoot {
+			ns,
+			db,
+		};
 
 		// Pull out options
 		let tb = &from.table;
-		let id = &from.key;
-		// Fetch start and end key pairs
-		let keys = match (what.is_empty(), &kind) {
-			(true, LookupKind::Reference) => {
-				vec![(r#ref::prefix(ns, db, tb, id)?, r#ref::suffix(ns, db, tb, id)?)]
-			}
-			(true, LookupKind::Graph(dir)) => match dir {
-				// /ns/db/tb/id
-				Dir::Both => {
-					vec![(graph::prefix(ns, db, tb, id)?, graph::suffix(ns, db, tb, id)?)]
+		// Get the transaction
+		let txn = ctx.tx();
+
+		if matches!(kind, LookupKind::Reference) {
+			// Fetch start and end key pairs
+			let ranges = if what.is_empty() {
+				vec![
+					ReferenceIdPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+					}
+					.range()?,
+				]
+			} else {
+				what.iter()
+					.map(|v| reference_lookup_range(v, ns, db, tb, &from.key))
+					.collect::<Result<Vec<_>>>()?
+			};
+			// Loop over the reference ranges
+			'keys: for rng in ranges {
+				// Create a new iterable range
+				let mut cursor =
+					txn.open_keys_cursor(rng, Direction::Forward, 0, opt.version).await?;
+				// Loop until no more entries
+				let mut count = 0;
+				loop {
+					let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
+					if batch.is_empty() {
+						break;
+					}
+					for key in batch.iter() {
+						if ctx.is_done(Some(count)).await? {
+							break 'keys;
+						}
+						self.collect(Collectable::Lookup(
+							doc_ctx.clone(),
+							kind.clone(),
+							key.to_vec(),
+						))
+						.await?;
+						count += 1;
+					}
 				}
-				// /ns/db/tb/id/IN
-				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, *dir)?,
-					graph::egsuffix(ns, db, tb, id, *dir)?,
-				)],
-				// /ns/db/tb/id/OUT
-				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, *dir)?,
-					graph::egsuffix(ns, db, tb, id, *dir)?,
-				)],
+			}
+			return Ok(());
+		}
+
+		// Graph lookups go through the merged adjacency reader, which spans
+		// the per-edge pointer keys and — once the vertex table has folded —
+		// the packed blocks. Block-sourced entries carry the pointer-key
+		// bytes they had before folding, so the collectable's raw-key
+		// contract is unchanged. The vertex-delete cascade runs through this
+		// collector, so missing folded edges here would leak them. A
+		// lightweight-edge source synthesizes its edge-side adjacency from
+		// its id — gated on the edge still existing, since the id alone
+		// says nothing about that.
+		let adjacency = crate::idx::adjacency::vertex_adjacency(&txn, ns, db, tb).await?;
+		if adjacency == crate::idx::adjacency::VertexAdjacency::Lightweight
+			&& !txn.record_exists(ns, db, tb, &from.key, opt.version).await?
+		{
+			return Ok(());
+		}
+		let scopes: Vec<GraphLookupScope> = match (what.is_empty(), &kind) {
+			(true, LookupKind::Graph(dir)) => match dir {
+				// One scope spanning both directions, in key order.
+				Dir::Both => vec![GraphLookupScope {
+					dir: None,
+					edge_table: None,
+					fk_lower: None,
+					delta_range: GraphIdPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+					}
+					.range()?,
+				}],
+				x => vec![GraphLookupScope {
+					dir: Some(*x),
+					edge_table: None,
+					fk_lower: None,
+					delta_range: GraphDirPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+						dir: *x,
+					}
+					.range()?,
+				}],
 			},
 			(false, LookupKind::Graph(Dir::Both)) => what
 				.iter()
 				.flat_map(|v| {
 					[
-						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::In)),
-						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::Out)),
+						graph_lookup_scope(v, ns, db, tb, &from.key, Dir::In),
+						graph_lookup_scope(v, ns, db, tb, &from.key, Dir::Out),
 					]
 				})
 				.collect::<Result<Vec<_>>>()?,
-			(false, kind) => {
-				what.iter().map(|v| v.presuf(ns, db, tb, id, kind)).collect::<Result<Vec<_>>>()?
-			}
+			(false, LookupKind::Graph(dir)) => what
+				.iter()
+				.map(|v| graph_lookup_scope(v, ns, db, tb, &from.key, *dir))
+				.collect::<Result<Vec<_>>>()?,
+			(_, LookupKind::Reference) => unreachable!("handled above"),
 		};
-		// Get the transaction
-		let txn = ctx.tx();
-		// Loop over the chosen edge types
-		'keys: for (beg, end) in keys {
-			// Create a new iterable range
-			let mut cursor =
-				txn.open_keys_cursor(beg..end, ScanDirection::Forward, 0, opt.version).await?;
-			// Loop until no more entries
+		'scopes: for scope in &scopes {
+			let adjacency_scope = AdjacencyScope {
+				ns,
+				db,
+				vertex: &from,
+				dir: scope.dir,
+				edge_table: scope.edge_table.as_ref(),
+				fk_lower: scope.fk_lower.as_ref(),
+				delta_range: scope.delta_range.clone(),
+			};
+			let mut cursor = match adjacency {
+				crate::idx::adjacency::VertexAdjacency::Lightweight => {
+					MergedAdjacencyCursor::open_lightweight(&txn, &adjacency_scope)?
+				}
+				crate::idx::adjacency::VertexAdjacency::Normal {
+					folded,
+				} => {
+					MergedAdjacencyCursor::open(
+						&txn,
+						adjacency_scope,
+						folded,
+						opt.version,
+						Some(ctx.get_index_stores().adjacency_resolve()),
+					)
+					.await?
+				}
+			};
 			let mut count = 0;
 			loop {
-				let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
+				// Keys-only: the collectable forwards raw key bytes and
+				// `process_lookup` performs the one decode, so the cursor
+				// must not decode each item a second time.
+				let batch = cursor.next_batch_keys(NORMAL_BATCH_SIZE).await?;
 				if batch.is_empty() {
 					break;
 				}
-				let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
-				for key in owned {
+				for key in batch {
 					if ctx.is_done(Some(count)).await? {
-						break 'keys;
+						break 'scopes;
 					}
 					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
 					count += 1;
@@ -1157,7 +1479,7 @@ pub(super) trait Collector {
 		rs: RecordStrategy,
 	) -> Result<()> {
 		let Some(exe) = ctx.get_query_executor() else {
-			bail!(Error::QueryNotExecuted {
+			bail!(DatastoreError::QueryNotExecuted {
 				message: "No QueryExecutor has been found.".to_string(),
 			})
 		};
@@ -1165,7 +1487,7 @@ pub(super) trait Collector {
 		let Some(iterator) =
 			exe.new_iterator(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, irf).await?
 		else {
-			bail!(Error::QueryNotExecuted {
+			bail!(DatastoreError::QueryNotExecuted {
 				message: "No iterator has been found.".to_string(),
 			})
 		};
@@ -1253,4 +1575,175 @@ pub(super) trait Collector {
 		}
 		self.collect(Collectable::Count(doc_ctx, total_count)).await
 	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum RelateThrough {
+	RecordId(RecordId),
+	Table(TableName),
+}
+
+impl From<(TableName, Option<RecordIdKey>)> for RelateThrough {
+	fn from((table, id): (TableName, Option<RecordIdKey>)) -> Self {
+		if let Some(id) = id {
+			RelateThrough::RecordId(RecordId::new(table, id))
+		} else {
+			RelateThrough::Table(table)
+		}
+	}
+}
+
+impl TryFrom<Value> for RelateThrough {
+	type Error = anyhow::Error;
+	fn try_from(value: Value) -> Result<Self> {
+		match value {
+			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
+			Value::Table(table) => Ok(RelateThrough::Table(table)),
+			_ => bail!(ExecError::RelateStatementOut {
+				value: value.to_sql()
+			}),
+		}
+	}
+}
+
+impl From<RelateThrough> for Value {
+	fn from(v: RelateThrough) -> Self {
+		match v {
+			RelateThrough::RecordId(id) => Value::RecordId(id),
+			RelateThrough::Table(table) => Value::Table(table),
+		}
+	}
+}
+
+/// The reference back-link range one lookup subject reaches.
+fn reference_lookup_range(
+	this: &ComputedLookupSubject,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+) -> Result<TypedRange<()>> {
+	match this {
+		// Scan the entire range
+		ComputedLookupSubject::Table {
+			table,
+			referencing_field: None,
+		} => ReferenceForeignTablePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+			foreign_table: Cow::Borrowed(table),
+		}
+		.range(),
+		// Scan the entire range with a referencing field
+		ComputedLookupSubject::Table {
+			table,
+			referencing_field: Some(field),
+		} => ReferenceForeignFieldPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+			foreign_table: Cow::Borrowed(table),
+			foreign_field: Cow::Borrowed(field),
+		}
+		.range(),
+		// Scan a specific range
+		ComputedLookupSubject::Range {
+			table,
+			range,
+			referencing_field,
+		} => {
+			let Some(field) = referencing_field else {
+				bail!(
+					"Cannot scan a specific range of record references without a referencing field"
+				);
+			};
+
+			ReferenceForeignFieldPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+				foreign_table: Cow::Borrowed(table),
+				foreign_field: Cow::Borrowed(field),
+			}
+			.range_where((
+				range.start.as_ref().map(Cow::Borrowed),
+				range.end.as_ref().map(Cow::Borrowed),
+			))
+		}
+	}
+}
+
+/// One graph adjacency slice a lookup subject reaches in one direction: the
+/// vertex-side key range plus the fields the merged reader mirrors onto the
+/// packed-block side.
+struct GraphLookupScope {
+	/// `None` spans both directions in one key-ordered scan.
+	dir: Option<Dir>,
+	edge_table: Option<TableName>,
+	fk_lower: Option<RecordIdKey>,
+	delta_range: RawRange,
+}
+
+/// The adjacency slice one lookup subject reaches in `dir`.
+fn graph_lookup_scope(
+	this: &ComputedLookupSubject,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+	dir: Dir,
+) -> Result<GraphLookupScope> {
+	let table = match this {
+		ComputedLookupSubject::Table {
+			table,
+			..
+		}
+		| ComputedLookupSubject::Range {
+			table,
+			..
+		} => table,
+	};
+	let prefix = GraphForeignTablePrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(tb),
+		id: Cow::Borrowed(id),
+		dir,
+		foreign_table: Cow::Borrowed(table),
+	};
+	let (delta_range, fk_lower) = match this {
+		// Scan the entire range
+		ComputedLookupSubject::Table {
+			table: _,
+			..
+		} => (prefix.range()?, None),
+		// Scan a specific range. An edge key is a prefix of the pointer keys
+		// that extend it, so a bound on the foreign key covers that whole run.
+		ComputedLookupSubject::Range {
+			range,
+			..
+		} => {
+			let fk_lower = match &range.start {
+				Bound::Included(key) | Bound::Excluded(key) => Some(key.clone()),
+				Bound::Unbounded => None,
+			};
+			(
+				prefix.range_where((
+					range.start.as_ref().map(Cow::Borrowed),
+					range.end.as_ref().map(Cow::Borrowed),
+				))?,
+				fk_lower,
+			)
+		}
+	};
+	Ok(GraphLookupScope {
+		dir: Some(dir),
+		edge_table: Some(table.clone()),
+		fk_lower,
+		delta_range,
+	})
 }

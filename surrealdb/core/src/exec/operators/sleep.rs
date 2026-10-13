@@ -10,8 +10,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
@@ -79,29 +79,21 @@ impl ExecOperator for SleepPlan {
 				_ => duration.0,
 			};
 
-			// Sleep with cancellation support.
-			// On WASM we use wasmtimer (no CancellationToken support).
-			// On native we race against the CancellationToken so that
-			// client disconnects and query cancellations stop the sleep
-			// promptly.
-			#[cfg(target_family = "wasm")]
-			wasmtimer::tokio::sleep(effective_duration).await;
-
-			#[cfg(not(target_family = "wasm"))]
+			// Race the sleep against the cancellation token so that client
+			// disconnects and query cancellations stop it promptly rather
+			// than after the full duration.
 			tokio::select! {
-				_ = tokio::time::sleep(effective_duration) => {},
+				_ = common::time::sleep(effective_duration) => {},
 				_ = ctx.cancellation().cancelled() => {},
 			}
 
 			// Return Value::None as the result
-			Ok(ValueBatch {
-				values: vec![Value::None],
-			})
+			Ok(ValueBatch::new(vec![Value::None]))
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -137,7 +129,7 @@ mod tests {
 	#[test]
 	fn test_sleep_plan_is_scalar() {
 		let plan = test_sleep_plan(Duration(std::time::Duration::from_millis(100)));
-		assert!(plan.is_scalar());
+		assert!(plan.output_shape().is_scalar());
 	}
 
 	#[test]

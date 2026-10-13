@@ -12,7 +12,7 @@
 //! The general pattern for implementing parsing is peeking some token and then deciding ot advance
 //! or not based on that token.
 //!
-//! If an unexpect token is found you should create an error with the surrealdb_common::error api.
+//! If an unexpected token is found you should create an error with the surrealdb_common::error api.
 //! Error should be constructed within the closure in the `Parser::with_error` function. This way
 //! the parser can decide to not build an error when speculating for example.
 //!
@@ -113,6 +113,10 @@ pub struct Config {
 	pub quirk_block_first_no_semi: bool,
 	/// Does the parser allow specifying delete permissions of fields.
 	pub quirk_delete_permission_field: bool,
+	/// Does the parser allow place idioms which have previously allowed nonsensical syntax.
+	pub quirk_legacy_place_productions: bool,
+	/// Does the parser allow `BREAK` and `CONTINUE` outside of loop bodies..
+	pub quirk_no_controlflow_check: bool,
 }
 
 impl Config {
@@ -135,14 +139,16 @@ impl Default for Config {
 			quirk_redefine: false,
 			quirk_block_first_no_semi: false,
 			quirk_delete_permission_field: false,
+			quirk_legacy_place_productions: false,
+			quirk_no_controlflow_check: false,
 		}
 	}
 }
 
 bitflags! {
 	#[derive(Clone,Copy)]
-	struct ParserSettings: u8 {
-		/// Is the emmiting of warnings enabled.
+	struct ParserSettings: u16 {
+		/// Is the emission of warnings enabled.
 		const WARNINGS           = 1 << 0;
 		/// Is the parser parsing a partially available query.
 		const PARTIAL            = 1 << 1;
@@ -156,6 +162,10 @@ bitflags! {
 		const QUIRK_FIRST_SEMICOLON_BLOCK = 1 << 5;
 		/// Does the parser allow specifying delete permissions of fields.
 		const QUIRK_DELETE_PERMISSION_FIELD = 1 << 6;
+		/// Does the parser allow specifying delete permissions of fields.
+		const QUIRK_LEGACY_PLACE_PRODUCTIONS = 1 << 7;
+		/// Whether to allow `BREAK` and `CONTINUE` outside of loop bodies.
+		const QUIRK_NO_CONTROLFLOW_CHECK = 1 << 8;
 	}
 }
 
@@ -181,6 +191,12 @@ impl ParserSettings {
 		if cfg.quirk_block_first_no_semi {
 			settings |= ParserSettings::QUIRK_FIRST_SEMICOLON_BLOCK;
 		}
+		if cfg.quirk_legacy_place_productions {
+			settings |= ParserSettings::QUIRK_LEGACY_PLACE_PRODUCTIONS;
+		}
+		if cfg.quirk_no_controlflow_check {
+			settings |= ParserSettings::QUIRK_NO_CONTROLFLOW_CHECK;
+		}
 
 		settings
 	}
@@ -189,12 +205,12 @@ impl ParserSettings {
 bitflags! {
 	#[derive(Clone,Copy)]
 	pub(crate) struct ParserState: u8 {
-		/// Is the parser in a cancelable transaction.
+		/// Is the parser in a cancellable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
 		/// Used to reject `break` and `continue` statements which are outside of a loop.
 		const LOOP = 1 << 1;
-		/// Is the parser speculativily parsing.
+		/// Is the parser speculatively parsing.
 		const SPECULATING = 1 << 2;
 	}
 }
@@ -263,7 +279,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's savety guarentees within the parser.
+		// loops because we can maintain it's safety guarantees within the parser.
 		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
@@ -295,7 +311,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
-	) -> Result<Option<NodeId<P>>, TypedError<Diagnostic<'static>>> {
+	) -> Result<Option<(P, u32)>, TypedError<Diagnostic<'static>>> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
@@ -319,13 +335,18 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's savety guarentees within the parser.
+		// loops because we can maintain it's safety guarantees within the parser.
 		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
 			if let Some(x) = runner.step() {
 				match x {
-					Ok(x) => return Ok(Some(x)),
+					Ok(x) => {
+						std::mem::drop(runner);
+
+						let eaten = parser.last_span.end;
+						return Ok(Some((x, eaten)));
+					}
 					Err(e) => {
 						if e.is_missing_data() {
 							return Ok(None);
@@ -348,11 +369,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
-	/// Speculativily parse a branch.
+	/// Speculatively parse a branch.
 	///
 	/// If the callback returns `Ok(_)` then the lexer state advances like it would normally
 	/// and the function will return `Ok(Some(_))`.
-	/// If the callback returns `Err(ParseError::speculate())` then it rollsback the lexer to
+	/// If the callback returns `Err(ParseError::speculate())` then it rolls back the lexer to
 	/// before the function was called and will return Ok(None), otherwise it will return the
 	/// error from the callback.
 	///
@@ -368,10 +389,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// errors.
 	///
 	/// # Usage
-	/// This function is very powerfull but also has the drawbacks.
-	/// - First it enables ambigous grammar, when implementing new syntax using this function please
-	///   first see if it is possible to implement the feature using the peek functions an otherwise
-	///   maybe consider redesigning the syntax so it is `LL(n)`.
+	/// This function is very powerful but also has the drawbacks.
+	/// - First it enables ambiguous grammar, when implementing new syntax using this function
+	///   please first see if it is possible to implement the feature using the peek functions an
+	///   otherwise maybe consider redesigning the syntax so it is `LL(n)`.
 	///
 	/// - Second because it doesn't provide feedback on what exactly happened it can result in
 	///   errors being unpredictable
@@ -393,6 +414,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
 				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					// If we hit a speculating error but we also peeked until the lexer was empty
+					// we might have made a decision based on the absence of more data.
+					// So we must see if more data is available before rejecting the speculating
+					// branch.
+					if self.settings.contains(ParserSettings::PARTIAL)
+						&& self.lex.lexer().remainder().is_empty()
+					{
+						return Err(ParseError::missing_data());
+					}
+
 					self.lex = backup;
 					Ok(None)
 				} else {
@@ -416,6 +447,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
 				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					// If we hit a speculating error but we also peeked until the lexer was empty
+					// we might have made a decision based on the absence of more data.
+					// So we must see if more data is available before rejecting the speculating
+					// branch.
+					if self.settings.contains(ParserSettings::PARTIAL)
+						&& self.lex.lexer().remainder().is_empty()
+					{
+						return Err(ParseError::missing_data());
+					}
 					self.lex = backup;
 					Ok(None)
 				} else {
@@ -486,7 +526,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub(crate) async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
 	where
 		F1: FnOnce(ParserState) -> ParserState,
-		F2: AsyncFnOnce(&mut Parser) -> ParseResult<R>,
+		F2: for<'a> AsyncFnOnce(&'a mut Parser<'source, 'ast>) -> ParseResult<R>,
 	{
 		let old = self.state;
 		self.state = state_cb(old);
@@ -669,15 +709,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// and the token if it is.
 	pub fn expect(&mut self, kind: BaseTokenKind) -> ParseResult<Token> {
 		let Some(token) = self.peek()? else {
-			if self.state.contains(ParserState::SPECULATING) {
-				return Err(ParseError::speculate());
-			}
 			return Err(self.unexpected(kind.description()));
 		};
 		if token.token != kind {
-			if self.state.contains(ParserState::SPECULATING) {
-				return Err(ParseError::speculate());
-			}
 			return Err(self.unexpected(kind.description()));
 		}
 		self.lex.pop_peek();
@@ -693,11 +727,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Err(e) => e,
 			Ok(Some(token)) => self.unexpected_token(expected, token),
 			Ok(None) => {
-				if self.state.contains(ParserState::SPECULATING) {
-					return ParseError::speculate();
-				}
 				let span = self.peek_span();
-				self.error(format!("Unexpected end of query, expected {}", expected), span)
+				self.with_error(|this| {
+					basic_diagnostic(
+						this,
+						span,
+						format!("Unexpected end of query, expected {}", expected),
+					)
+				})
 			}
 		}
 	}
@@ -706,13 +743,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Expects a string specifying what was expected at this point.
 	#[cold]
 	pub fn unexpected_token(&mut self, expected: &str, token: Token) -> ParseError {
-		if self.state.contains(ParserState::SPECULATING) {
-			return ParseError::speculate();
-		}
-		self.error(
-			format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected),
-			token.span,
-		)
+		self.with_error(|p| {
+			Level::Error
+				.title(format!("Unexpected token `{}`, expected {}", p.slice(token.span), expected))
+				.snippet(p.snippet().annotate(AnnotationKind::Primary.span(token.span)))
+				.to_diagnostic()
+		})
 	}
 
 	/// Create an unexpected error but with a given label appied to the annotation.
@@ -726,19 +762,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Err(e) => return e,
 		};
 
-		if self.state.contains(ParserState::SPECULATING) {
-			return ParseError::speculate();
-		}
-
-		let message = match peek {
-			Some(token) => {
-				format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected)
-			}
-			None => format!("Unexpected token end of query, expected {}", expected),
-		};
-
 		let span = self.peek_span();
 		self.with_error(|this| {
+			let message = match peek {
+				Some(token) => {
+					format!("Unexpected token `{}`, expected {}", this.slice(token.span), expected)
+				}
+				None => format!("Unexpected token end of query, expected {}", expected),
+			};
+
 			Level::Error
 				.title(message)
 				.snippet(
@@ -817,6 +849,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	{
 		if self.state.contains(ParserState::SPECULATING) {
 			ParseError::speculate()
+		} else if self.settings.contains(ParserSettings::PARTIAL)
+			&& self.lex.lexer().remainder().is_empty()
+		{
+			ParseError::missing_data()
 		} else {
 			ParseError::diagnostic(cb(self).to_owned())
 		}
@@ -828,12 +864,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	where
 		Cow<'source, str>: From<T>,
 	{
-		self.with_error(|this| {
-			Level::Error
-				.title(msg)
-				.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-				.to_diagnostic()
-		})
+		self.with_error(|this| basic_diagnostic(this, span, msg))
 	}
 
 	/// Creates a parsing error for a lexing error.
@@ -845,18 +876,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					return ParseError::missing_data();
 				}
 				self.with_error(|this| {
-					Level::Error
-						.title("Unexpected end of query while lexing a token")
-						.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-						.to_diagnostic()
+					basic_diagnostic(this, span, "Unexpected end of query while lexing a token")
 				})
 			}
-			LexError::InvalidToken(span) => self.with_error(|this| {
-				Level::Error
-					.title("Invalid token")
-					.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-					.to_diagnostic()
-			}),
+			LexError::InvalidToken(span) => {
+				self.with_error(|this| basic_diagnostic(this, span, "Invalid token"))
+			}
 		}
 	}
 
@@ -952,4 +977,14 @@ impl<'source, 'ast> DerefMut for Parser<'source, 'ast> {
 	fn deref_mut(&mut self) -> &mut Ast {
 		self.ast
 	}
+}
+
+fn basic_diagnostic<'s, M>(parser: &Parser<'s, '_>, span: Span, msg: M) -> Diagnostic<'s>
+where
+	Cow<'s, str>: From<M>,
+{
+	Level::Error
+		.title(msg)
+		.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(span)))
+		.to_diagnostic()
 }

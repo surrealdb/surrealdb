@@ -13,11 +13,13 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
+use crate::err::EngineError;
 use crate::exec::field_path::FieldPath;
 use crate::exec::operators::SortDirection;
 use crate::exec::ordering::{OutputOrdering, SortProperty};
@@ -378,7 +380,7 @@ impl ExecOperator for UnionIndexScan {
 					stream,
 					input.access_mode(),
 					input.cardinality_hint(),
-					ctx.root().ctx.config.operator_buffer_size,
+					ctx.root().ctx.config.exec.operator_buffer_size,
 				)
 			};
 			sub_streams.push(sub_stream);
@@ -391,7 +393,7 @@ impl ExecOperator for UnionIndexScan {
 		let merge = self.merge.clone();
 		let ctx = ctx.clone();
 
-		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("UnionIndexScan requires database context")?;
 			let version = ctx.version_stamp();
 
@@ -408,7 +410,7 @@ impl ExecOperator for UnionIndexScan {
 					.context("Failed to get table")?;
 
 				if table_def.is_none() {
-					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
 						name: table_name.clone(),
 					})))?;
 				}
@@ -418,29 +420,27 @@ impl ExecOperator for UnionIndexScan {
 						Some(def) => def.permissions.select.clone(),
 						None => crate::catalog::Permission::None,
 					};
-					convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+					convert_permission_to_physical_runtime(&catalog_perm, &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {
 					PhysicalPermission::Allow
 				};
 
-				let field_state = build_field_state(
-					&ctx, &table_name, check_perms, needed_fields.as_ref(),
-				).await?;
+				let field_state =
+					build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref())
+						.await?;
 				(select_permission, field_state)
 			};
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Build the pipeline (no predicate/limit/start — outer operators handle those)
-			let mut pipeline = ScanPipeline::new(
-				select_permission, None, field_state,
-				check_perms, None, 0,
-			);
+			let mut pipeline =
+				ScanPipeline::new(select_permission, None, field_state, check_perms, None, 0);
 
 			if let Some(merge_mode) = merge {
 				// ─── K-way merge of sub-streams ────────────────────────
@@ -467,7 +467,7 @@ impl ExecOperator for UnionIndexScan {
 				for stream in &mut sub_streams {
 					if let Some(batch_result) = stream.next().await {
 						let batch: ValueBatch = batch_result?;
-						buffers.push(batch.values);
+						buffers.push(batch.into_values());
 						positions.push(0);
 					} else {
 						buffers.push(Vec::new());
@@ -498,9 +498,7 @@ impl ExecOperator for UnionIndexScan {
 				loop {
 					// Check for cancellation
 					if ctx.cancellation().is_cancelled() {
-						Err(ControlFlow::Err(
-							anyhow::anyhow!(crate::err::Error::QueryCancelled),
-						))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 					}
 
 					// Find the cursor with the best key.
@@ -512,10 +510,7 @@ impl ExecOperator for UnionIndexScan {
 						if positions[i] >= buffers[i].len() {
 							continue; // stream exhausted or buffer drained
 						}
-						let key = match extract_merge_key(
-							&merge_mode,
-							&buffers[i][positions[i]],
-						) {
+						let key = match extract_merge_key(&merge_mode, &buffers[i][positions[i]]) {
 							Some(k) => k,
 							None => continue,
 						};
@@ -546,7 +541,7 @@ impl ExecOperator for UnionIndexScan {
 						positions[idx] = 0;
 						if let Some(batch_result) = sub_streams[idx].next().await {
 							let batch: ValueBatch = batch_result?;
-							buffers[idx] = batch.values;
+							buffers[idx] = batch.into_values();
 						}
 					}
 
@@ -577,10 +572,10 @@ impl ExecOperator for UnionIndexScan {
 					let mut batch = vec![value];
 					let cont = pipeline.process_batch(&mut batch, &ctx).await?;
 					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						yielder.emit(ValueBatch::new(batch)).await;
 					}
 					if !cont {
-						return;
+						return Ok(());
 					}
 				}
 			} else {
@@ -590,14 +585,11 @@ impl ExecOperator for UnionIndexScan {
 					while let Some(batch_result) = sub_stream.next().await {
 						// Check for cancellation between batches
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(
-								anyhow::anyhow!(crate::err::Error::QueryCancelled),
-							))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 
 						let batch: ValueBatch = batch_result?;
 						let mut deduped: Vec<Value> = batch
-							.values
 							.into_iter()
 							.filter(|v| match extract_rid(v) {
 								Some(rid) => seen.insert(rid),
@@ -609,17 +601,18 @@ impl ExecOperator for UnionIndexScan {
 							// Apply permission pipeline (computed fields, field permissions)
 							let cont = pipeline.process_batch(&mut deduped, &ctx).await?;
 							if !deduped.is_empty() {
-								yield ValueBatch { values: deduped };
+								yielder.emit(ValueBatch::new(deduped)).await;
 							}
 							if !cont {
-								return;
+								return Ok(());
 							}
 						}
 					}
 				}
 			}
+			Ok(())
 		});
 
-		Ok(monitor_stream(stream, "UnionIndexScan", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "UnionIndexScan", &self.metrics))
 	}
 }

@@ -18,21 +18,21 @@ use crate::{define_async_function, register_functions};
 
 #[cfg(not(feature = "http"))]
 async fn http_disabled() -> Result<Value> {
-	Err(anyhow::anyhow!(crate::err::Error::HttpDisabled))
+	Err(anyhow::anyhow!(crate::dbs::capabilities::Error::HttpDisabled))
 }
 
 #[cfg(feature = "http")]
 fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	match args.first() {
 		Some(Value::String(s)) => Ok(s.as_str().to_owned()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		Some(v) => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!(
 				"The first argument should be a string containing a valid URI, got: {}",
 				v.kind_of()
 			),
 		})),
-		None => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		None => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: "Missing URI argument".to_string(),
 		})),
@@ -43,8 +43,8 @@ fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	match args.get(index) {
 		Some(Value::Object(o)) => Ok(o.clone()),
-		Some(Value::None) | None => Ok(Object::default()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		None => Ok(Object::default()),
+		Some(v) => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!("Options argument should be an object, got: {}", v.kind_of()),
 		})),
@@ -202,87 +202,92 @@ async fn http_request(
 	use http::header::CONTENT_TYPE;
 
 	use crate::err::Error;
-	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::types::{PublicBytes, PublicValue};
+	use crate::val::convert_public::convert_public_value_to_internal;
 
-	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
+	// On browser WASM the reqwest futures and response held across the awaits
+	// below are not `Send`; the wrapper asserts `Send` for the whole block.
+	common::future::assert_send(async move {
+		let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 
-	let client = ctx.exec_ctx.root().ctx.http_client();
+		let client = ctx.exec_ctx.root().ctx.http_client();
 
-	let is_head = matches!(method, reqwest::Method::HEAD);
+		let is_head = matches!(method, reqwest::Method::HEAD);
 
-	// Start the request
-	let mut req = client.request(method, url);
+		// Start the request
+		let mut req = client.request(method, url);
 
-	// Add custom headers from opts
-	for (k, v) in opts.iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
-	}
-
-	// Add body if present
-	if let Some(b) = body {
-		let public_body = crate::val::convert_value_to_public_value(b)?;
-		req = match public_body {
-			PublicValue::Bytes(v) => req.body(v.into_inner()),
-			PublicValue::String(v) => req.body(v),
-			_ if !public_body.is_nullish() => req.json(&public_body.into_json_value()),
-			_ => req,
-		};
-	}
-
-	// Send the request
-	let res = req.send().await.map_err(Error::from)?;
-
-	if is_head {
-		// For HEAD, just check status
-		match res.error_for_status() {
-			Ok(_) => Ok(Value::None),
-			Err(err) => match err.status() {
-				Some(s) => Err(anyhow::anyhow!(Error::Http(format!(
-					"{} {}",
-					s.as_u16(),
-					s.canonical_reason().unwrap_or_default(),
-				)))),
-				None => Err(anyhow::anyhow!(Error::Http(err.to_string()))),
-			},
+		// Add custom headers from opts
+		for (k, v) in opts.iter() {
+			req = req.header(k.as_str(), v.to_raw_string());
 		}
-	} else {
-		// Decode response
 
-		match res.error_for_status() {
-			Ok(res) => match res.headers().get(CONTENT_TYPE) {
-				Some(mime) => match mime.to_str() {
-					Ok(v) if v.starts_with("application/json") => {
-						let txt = res.text().await.map_err(Error::from)?;
-						let json: serde_json::Value = serde_json::from_str(&txt)
-							.map_err(|e| Error::Http(format!("Failed to parse JSON: {}", e)))?;
-						let val = crate::rpc::format::json::json_to_value(json);
-						Ok(convert_public_value_to_internal(val))
-					}
-					Ok(v) if v.starts_with("application/octet-stream") => {
-						let bytes = res.bytes().await.map_err(Error::from)?;
-						Ok(convert_public_value_to_internal(PublicValue::Bytes(PublicBytes::from(
-							bytes,
-						))))
-					}
-					Ok(v) if v.starts_with("text") => {
-						let txt = res.text().await.map_err(Error::from)?;
-						Ok(convert_public_value_to_internal(PublicValue::String(txt)))
-					}
+		// Add body if present
+		if let Some(b) = body {
+			let public_body = crate::val::convert_value_to_public_value(b)?;
+			req = match public_body {
+				PublicValue::Bytes(v) => req.body(v.into_inner()),
+				PublicValue::String(v) => req.body(v),
+				_ if !public_body.is_nullish() => req.json(&public_body.into_json_value()),
+				_ => req,
+			};
+		}
+
+		// Send the request
+		let res = req.send().await.map_err(Error::from)?;
+
+		if is_head {
+			// For HEAD, just check status
+			match res.error_for_status() {
+				Ok(_) => Ok(Value::None),
+				Err(err) => match err.status() {
+					Some(s) => Err(anyhow::anyhow!(Error::Http(format!(
+						"{} {}",
+						s.as_u16(),
+						s.canonical_reason().unwrap_or_default(),
+					)))),
+					None => Err(anyhow::anyhow!(Error::Http(err.to_string()))),
+				},
+			}
+		} else {
+			// Decode response
+
+			match res.error_for_status() {
+				Ok(res) => match res.headers().get(CONTENT_TYPE) {
+					Some(mime) => match mime.to_str() {
+						Ok(v) if v.starts_with("application/json") => {
+							let txt = res.text().await.map_err(Error::from)?;
+							let json: serde_json::Value = serde_json::from_str(&txt)
+								.map_err(|e| Error::Http(format!("Failed to parse JSON: {}", e)))?;
+							let val = crate::rpc::format::json::json_to_value(json);
+							Ok(convert_public_value_to_internal(val))
+						}
+						Ok(v) if v.starts_with("application/octet-stream") => {
+							let bytes = res.bytes().await.map_err(Error::from)?;
+							Ok(convert_public_value_to_internal(PublicValue::Bytes(
+								PublicBytes::from(bytes),
+							)))
+						}
+						Ok(v) if v.starts_with("text") => {
+							let txt = res.text().await.map_err(Error::from)?;
+							Ok(convert_public_value_to_internal(PublicValue::String(txt)))
+						}
+						_ => Ok(Value::None),
+					},
 					_ => Ok(Value::None),
 				},
-				_ => Ok(Value::None),
-			},
-			Err(err) => match err.status() {
-				Some(s) => Err(anyhow::anyhow!(Error::Http(format!(
-					"{} {}",
-					s.as_u16(),
-					s.canonical_reason().unwrap_or_default(),
-				)))),
-				None => Err(anyhow::anyhow!(Error::Http(err.to_string()))),
-			},
+				Err(err) => match err.status() {
+					Some(s) => Err(anyhow::anyhow!(Error::Http(format!(
+						"{} {}",
+						s.as_u16(),
+						s.canonical_reason().unwrap_or_default(),
+					)))),
+					None => Err(anyhow::anyhow!(Error::Http(err.to_string()))),
+				},
+			}
 		}
-	}
+	})
+	.await
 }
 
 // =========================================================================

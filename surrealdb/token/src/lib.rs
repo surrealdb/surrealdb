@@ -17,24 +17,16 @@ use logos::Lexer;
 #[macro_use]
 mod mac;
 mod base;
-mod datetime;
-mod duration;
-mod escaped;
 mod js_function;
 mod record_id_key;
 mod regex;
 #[cfg(test)]
 mod test;
-mod uuid;
 mod version;
 
-pub use datetime::DateTimeToken;
-pub use duration::DurationToken;
-pub use escaped::EscapeTokenKind;
 pub use js_function::{JsFunctionTemplateToken, JsFunctionToken};
 pub use record_id_key::RecordIdKeyToken;
 pub use regex::RegexToken;
-pub use uuid::UuidToken;
 pub use version::VersionToken;
 
 pub use crate::base::BaseTokenKind;

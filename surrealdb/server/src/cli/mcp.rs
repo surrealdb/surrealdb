@@ -8,7 +8,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::options::EngineOptions;
@@ -64,11 +63,7 @@ pub struct McpCommandArguments {
 
 /// Start the MCP server over stdio.
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ crate::observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + crate::observe::ObservabilityProvider,
 >(
 	composer: C,
 	McpCommandArguments {
@@ -81,7 +76,7 @@ pub async fn init<
 	}: McpCommandArguments,
 	runtime: ObservabilityRuntime,
 ) -> Result<()> {
-	C::path_valid(&path)?;
+	composer.path_valid(&path)?;
 
 	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {
@@ -94,6 +89,7 @@ pub async fn init<
 
 	let config = super::config::Config {
 		bind: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+		postgres_bind: None,
 		client_ip: crate::ntw::client_ip::ClientIp::Socket,
 		path,
 		user,
@@ -103,6 +99,7 @@ pub async fn init<
 		engine,
 		crt: None,
 		key: None,
+		durable_session_ttl: None,
 	};
 
 	crate::env::init()?;
@@ -120,8 +117,10 @@ pub async fn init<
 	let canceller = CancellationToken::new();
 	let (datastore, _recv, _router_state, pending_startup) =
 		dbs::init::<C>(composer, &config, canceller.clone(), observer, dbs_opts).await?;
-	// The MCP server has no HTTP listener to bind, so run the deferred startup
-	// work (import then credentials) inline before serving any tool requests.
+	// The MCP server has no HTTP listener to bind and no readiness endpoint to
+	// report through, so run the deferred startup work inline before serving any
+	// tool requests. A failure in either phase aborts the command.
+	dbs::initialise_datastore(&datastore, &pending_startup).await?;
 	dbs::finish_startup(&datastore, &pending_startup).await?;
 	let datastore = Arc::new(datastore);
 

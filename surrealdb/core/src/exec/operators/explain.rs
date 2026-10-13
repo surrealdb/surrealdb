@@ -7,13 +7,14 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
+use common::future::stream::{self, Yielder};
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream, buffer_stream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream, buffer_stream,
 };
 use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
@@ -71,16 +72,12 @@ impl ExecOperator for ExplainPlan {
 			}
 		};
 
-		Ok(Box::pin(stream::once(async move {
-			Ok(ValueBatch {
-				values: vec![output],
-			})
-		})))
+		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(vec![output]))))))
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// EXPLAIN returns a single scalar value (text or JSON)
-		true
+		OutputShape::Scalar
 	}
 }
 
@@ -145,20 +142,20 @@ impl ExecOperator for AnalyzePlan {
 			self.plan.execute(ctx)?,
 			self.plan.access_mode(),
 			self.plan.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;
 		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;
 
 		// Create a stream that first drains the inner plan, then formats output
-		let analyze_stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Drain all batches from the inner plan so metrics are populated
 			let mut total_rows: u64 = 0;
 			while let Some(batch_result) = inner_stream.next().await {
 				match batch_result {
 					Ok(batch) => {
-						total_rows += batch.values.len() as u64;
+						total_rows += batch.len() as u64;
 					}
 					// Flow control signals mean the inner plan stopped early.
 					// Stop draining and format the metrics we've collected so far.
@@ -174,28 +171,33 @@ impl ExecOperator for AnalyzePlan {
 			let output = match format {
 				ExplainFormat::Text => {
 					let mut plan_text = String::new();
-					format_analyze_plan(plan.as_ref(), &mut plan_text, "", redact_volatile_explain_attrs);
+					format_analyze_plan(
+						plan.as_ref(),
+						&mut plan_text,
+						"",
+						redact_volatile_explain_attrs,
+					);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
 					Value::String(plan_text.into())
 				}
 				ExplainFormat::Json => {
-					let mut plan_json = format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
+					let mut plan_json =
+						format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
 					plan_json.insert("total_rows", Value::from(total_rows as i64));
 					Value::Object(plan_json)
 				}
 			};
 
-			yield ValueBatch {
-				values: vec![output],
-			};
-		};
+			yielder.emit(ValueBatch::new(vec![output])).await;
+			Ok(())
+		});
 
-		Ok(Box::pin(analyze_stream))
+		Ok(Box::pin(stream))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -212,6 +214,14 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 	// Show context level
 	let context = plan.required_context();
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
+
+	// Show the output partitioning only when the operator produces more than one
+	// stream, so a plan built entirely from single-partition operators renders
+	// exactly as it did before partitioning existed.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		let _ = write!(output, " [partitions: {}]", partitioning.count());
+	}
 
 	// Show properties if any
 	if !properties.is_empty() {
@@ -261,6 +271,13 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 	obj.insert("operator", Value::String(plan.name().into()));
 
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
+
+	// Emitted only when the operator produces more than one stream, so a plan of
+	// single-partition operators renders the same keys it always did.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		obj.insert("partitions", Value::from(partitioning.count() as i64));
+	}
 
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {
@@ -326,8 +343,17 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> String {
 	let rows = metrics.output_rows();
 
+	// A bitmap branch that declined (budget overflow or a gate) is flagged so
+	// its `rows: 0` is distinguishable from a genuinely empty candidate set.
+	// Deterministic for a given dataset and configuration, so never redacted.
+	let dropped = if metrics.branch_dropped() {
+		", dropped: true"
+	} else {
+		""
+	};
+
 	if redact_volatile_explain_attrs {
-		return format!("rows: {}", rows);
+		return format!("rows: {}{}", rows, dropped);
 	}
 
 	let batches = metrics.output_batches();
@@ -347,17 +373,49 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	// Scan-side counters that depend on how far the scan progressed (volatile
 	// like batches/elapsed), rendered only when non-zero. `scanned` is the
 	// denominator for graph-traversal filter selectivity (matched = rows);
-	// `skipped` is the TopK threshold-pushdown reject count.
+	// `skipped` is the TopK threshold-pushdown reject count; `fetched` is the
+	// count of candidate records evaluated inside an ANN search (#548 drives
+	// it to zero for index-covered predicates).
 	let mut extra = String::new();
 	let scanned = metrics.edges_scanned();
 	if scanned > 0 {
 		extra.push_str(&format!(", scanned: {}", scanned));
 	}
+	// The storage-tier split of `scanned`: entries served from packed
+	// adjacency blocks vs per-edge pointer keys.
+	let block_hits = metrics.block_hits();
+	if block_hits > 0 {
+		extra.push_str(&format!(", block_hits: {}", block_hits));
+	}
+	let delta_hits = metrics.delta_hits();
+	if delta_hits > 0 {
+		extra.push_str(&format!(", delta_hits: {}", delta_hits));
+	}
+	let cache_hits = metrics.cache_hits();
+	if cache_hits > 0 {
+		extra.push_str(&format!(", cache_hits: {}", cache_hits));
+	}
+	let cache_misses = metrics.cache_misses();
+	if cache_misses > 0 {
+		extra.push_str(&format!(", cache_misses: {}", cache_misses));
+	}
+	let props_evals = metrics.props_evals();
+	if props_evals > 0 {
+		extra.push_str(&format!(", props_evals: {}", props_evals));
+	}
+	let props_fallbacks = metrics.props_fallbacks();
+	if props_fallbacks > 0 {
+		extra.push_str(&format!(", props_fallbacks: {}", props_fallbacks));
+	}
 	let skipped = metrics.skipped_rows();
 	if skipped > 0 {
 		extra.push_str(&format!(", skipped: {}", skipped));
 	}
-	format!("rows: {}, batches: {}, elapsed: {}{}", rows, batches, elapsed_str, extra)
+	let fetched = metrics.records_fetched();
+	if fetched > 0 {
+		extra.push_str(&format!(", fetched: {}", fetched));
+	}
+	format!("rows: {}, batches: {}, elapsed: {}{}{}", rows, batches, elapsed_str, extra, dropped)
 }
 
 /// Format an execution plan node as a text tree with metrics.
@@ -373,6 +431,14 @@ fn format_analyze_plan(
 	// Show context level
 	let context = plan.required_context();
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
+
+	// Show the output partitioning only when the operator produces more than one
+	// stream, so a plan built entirely from single-partition operators renders
+	// exactly as it did before partitioning existed.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		let _ = write!(output, " [partitions: {}]", partitioning.count());
+	}
 
 	// Show properties if any
 	if !properties.is_empty() {
@@ -438,6 +504,13 @@ fn format_analyze_plan_json(
 
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
 
+	// Emitted only when the operator produces more than one stream, so a plan of
+	// single-partition operators renders the same keys it always did.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		obj.insert("partitions", Value::from(partitioning.count() as i64));
+	}
+
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {
 		let mut attrs_obj = Object::default();
@@ -450,6 +523,13 @@ fn format_analyze_plan_json(
 	if let Some(metrics) = plan.metrics() {
 		let mut metrics_obj = Object::default();
 		metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
+		// Emitted only when a bitmap branch declined, so its `output_rows: 0`
+		// is distinguishable from a genuinely empty candidate set.
+		// Deterministic for a given dataset and configuration, so never
+		// redacted.
+		if metrics.branch_dropped() {
+			metrics_obj.insert("dropped", Value::Bool(true));
+		}
 		if !redact_volatile_explain_attrs {
 			metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
 			metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));
@@ -460,10 +540,39 @@ fn format_analyze_plan_json(
 			if scanned > 0 {
 				metrics_obj.insert("edges_scanned", Value::from(scanned as i64));
 			}
+			let block_hits = metrics.block_hits();
+			if block_hits > 0 {
+				metrics_obj.insert("block_hits", Value::from(block_hits as i64));
+			}
+			let delta_hits = metrics.delta_hits();
+			if delta_hits > 0 {
+				metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
+			}
+			let cache_hits = metrics.cache_hits();
+			if cache_hits > 0 {
+				metrics_obj.insert("cache_hits", Value::from(cache_hits as i64));
+			}
+			let cache_misses = metrics.cache_misses();
+			if cache_misses > 0 {
+				metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
+			}
+			let props_evals = metrics.props_evals();
+			if props_evals > 0 {
+				metrics_obj.insert("props_evals", Value::from(props_evals as i64));
+			}
+			let props_fallbacks = metrics.props_fallbacks();
+			if props_fallbacks > 0 {
+				metrics_obj.insert("props_fallbacks", Value::from(props_fallbacks as i64));
+			}
 			let skipped = metrics.skipped_rows();
 			if skipped > 0 {
 				metrics_obj.insert("skipped_rows", Value::from(skipped as i64));
 			}
+			// Deliberately rendered even at zero — unlike the counters above,
+			// `records_fetched: 0` is itself the claim worth asserting: an ANN
+			// search whose predicate was fully served by the allow-list bitmap
+			// performed no in-traversal record fetches (#548).
+			metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
 		}
 		obj.insert("metrics", Value::Object(metrics_obj));
 	}

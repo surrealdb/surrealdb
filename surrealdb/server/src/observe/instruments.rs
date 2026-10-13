@@ -65,6 +65,8 @@ pub mod scope {
 	pub static SLOW_QUERY: &str = "surrealdb.slow_query";
 	/// Storage-backend manifest gauges.
 	pub static STORAGE: &str = "surrealdb.storage";
+	/// Object-storage bucket traffic (`file::*`: bytes in/out, operation counts).
+	pub static BUCKET: &str = "surrealdb.bucket";
 	/// GraphQL operation lifecycle counters / histograms.
 	pub static GRAPHQL: &str = "surrealdb.graphql";
 	/// MCP (Model Context Protocol) tool invocation counters / histograms.
@@ -75,6 +77,7 @@ pub mod scope {
 	pub static ALL: &[&str] = &[
 		AUDIT,
 		AUTH,
+		BUCKET,
 		DS,
 		GRAPHQL,
 		HTTP,
@@ -107,6 +110,10 @@ pub mod names {
 	pub static BUILD_INFO: &str = "surrealdb.build.info";
 	pub static PROCESS_UPTIME: &str = "surrealdb.process.uptime";
 	pub static PROCESS_MEMORY: &str = "surrealdb.process.memory";
+	pub static PROCESS_MEMORY_ALLOCATED: &str = "surrealdb.process.memory_allocated";
+	pub static PROCESS_MEMORY_REQUESTED: &str = "surrealdb.process.memory_requested";
+	pub static PROCESS_MEMORY_RESERVED: &str = "surrealdb.process.memory_reserved";
+	pub static PROCESS_MEMORY_THRESHOLD: &str = "surrealdb.process.memory_threshold";
 	pub static PROCESS_CPU_PERCENT: &str = "surrealdb.process.cpu_percent";
 
 	// --- Statement (scope: STATEMENT) ----------------------------------
@@ -161,6 +168,12 @@ pub mod names {
 	pub static NETWORK_RECEIVED: &str = "surrealdb.network.received";
 	pub static NETWORK_SENT: &str = "surrealdb.network.sent";
 
+	// --- Bucket (scope: BUCKET) ----------------------------------------
+
+	pub static BUCKET_SENT_BYTES: &str = "surrealdb.bucket.sent_bytes";
+	pub static BUCKET_RECEIVED_BYTES: &str = "surrealdb.bucket.received_bytes";
+	pub static BUCKET_OPERATIONS: &str = "surrealdb.bucket.operations";
+
 	// --- HTTP (scope: HTTP) --------------------------------------------
 
 	pub static HTTP_REQUEST_TOTAL: &str = "surrealdb.http.request";
@@ -197,18 +210,18 @@ pub mod names {
 /// observers, tests, and the `safe` security audit all reference the same
 /// strings.
 pub mod attrs {
-	/// `success` / `error` / `cancelled` (from [`surrealdb_core::observe::Outcome::as_label`]).
+	/// `success` / `error` / `cancelled` (from [`surrealdb_observe::Outcome::as_label`]).
 	pub static OUTCOME: &str = "outcome";
 	/// Bounded statement classification (from
-	/// [`surrealdb_core::observe::StatementType::as_label`]).
+	/// [`surrealdb_observe::StatementType::as_label`]).
 	pub static STATEMENT_TYPE: &str = "statement_type";
 	/// Resolved namespace identifier (sentinel `"-"` when unset).
 	pub static NAMESPACE: &str = "namespace";
 	/// Resolved database identifier (sentinel `"-"` when unset).
 	pub static DATABASE: &str = "database";
 	/// Resolved user / actor identifier (sentinel `"-"` when unset, `<record>` for
-	/// record-access principals — see
-	/// [`surrealdb_core::observe::TenantIdentity::from_session`]).
+	/// record-access principals — see the `From<&Session>` impl for
+	/// [`surrealdb_observe::TenantIdentity`]).
 	pub static USER: &str = "user";
 	/// Bounded session protocol identifier (`websocket` / `http`).
 	pub static PROTOCOL: &str = "protocol";
@@ -220,7 +233,7 @@ pub mod attrs {
 	pub static WRITE: &str = "write";
 	/// KV operation classification (`get` / `scan` / `put` / `set` / `del`).
 	pub static KV_OP: &str = "op";
-	/// Bounded RPC method identifier (from [`surrealdb_core::rpc::Method::to_str`]).
+	/// Bounded RPC method identifier (from [`surrealdb_rpc::Method::to_str`]).
 	pub static RPC_METHOD: &str = "rpc.method";
 	/// Auth attempt type (`signin` / `signup` / `authenticate` / …).
 	pub static AUTH_ACTION: &str = "auth_action";
@@ -234,6 +247,10 @@ pub mod attrs {
 	pub static HTTP_STATUS_CODE: &str = "http.response.status_code";
 	/// Inbound / outbound (`received` / `sent`) on network byte counters.
 	pub static NETWORK_DIRECTION: &str = "direction";
+	/// Bucket storage backend label (`s3` / `gcs` / `azure` / `file` / `memory`).
+	pub static BACKEND: &str = "backend";
+	/// Bucket object-store operation (`put` / `get` / `list` / …).
+	pub static BUCKET_OP: &str = "op";
 	/// Bounded error classification recorded only when `outcome="error"`. Sourced
 	/// from [`error_class`] constants so cardinality stays closed.
 	pub static ERROR_CLASS: &str = "error_class";
@@ -251,9 +268,8 @@ pub mod attrs {
 /// classification, cancel/timeout paths), the kvs commit-failure path, and
 /// from the RPC dispatch shim. Server crates additionally use them via the
 /// shared classifier helpers ([`error_class::classify_types_error`],
-/// [`error_class::classify_anyhow_error`],
 /// [`error_class::classify_http_status`]) at the HTTP / GraphQL / MCP layers.
-pub use surrealdb_core::observe::error_class;
+pub use surrealdb_observe::error_class;
 
 #[cfg(test)]
 mod tests {
@@ -271,6 +287,9 @@ mod tests {
 	fn every_instrument_name_starts_with_surrealdb_prefix() {
 		const NAMES: &[&str] = &[
 			names::AUTH_TOTAL,
+			names::BUCKET_OPERATIONS,
+			names::BUCKET_RECEIVED_BYTES,
+			names::BUCKET_SENT_BYTES,
 			names::BUILD_INFO,
 			names::GRAPHQL_OPERATION_DURATION,
 			names::GRAPHQL_OPERATION_TOTAL,
@@ -288,6 +307,10 @@ mod tests {
 			names::NETWORK_SENT,
 			names::PROCESS_CPU_PERCENT,
 			names::PROCESS_MEMORY,
+			names::PROCESS_MEMORY_ALLOCATED,
+			names::PROCESS_MEMORY_REQUESTED,
+			names::PROCESS_MEMORY_RESERVED,
+			names::PROCESS_MEMORY_THRESHOLD,
 			names::PROCESS_UPTIME,
 			names::QUERY_DURATION,
 			names::QUERY_TOTAL,

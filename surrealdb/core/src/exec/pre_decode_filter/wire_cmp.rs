@@ -283,7 +283,8 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 
 /// Probe `value_bytes` against a [`LiteralSet`]. Returns `Some(true)` /
 /// `Some(false)` only when the value's wire tag dispatches to a wire-fast
-/// partition (Strand → `set.strands`, Number → `set.numbers`); otherwise
+/// partition (Strand via `strands_contain_wire`, Number via
+/// `numbers_contain_wire`); otherwise
 /// returns [`None`] so the caller falls back to full decode + `set.contains`.
 ///
 /// **Strand asymmetric-equality safety:** when the set has any element that
@@ -293,11 +294,10 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 /// their chance. See [`LiteralSet::has_strand_asymmetric_match`].
 ///
 /// **Number cross-variant safety:** `Number::PartialEq` treats
-/// `Int(1) == Float(1.0) == Decimal(1)` and `Number::Hash` agrees, so a
-/// `HashSet<Value>` containing those entries collapses to a single stored
-/// sub-variant per equivalence class. The wire-fast path inspects the
-/// runtime value's Number sub-variant against the set's stored
-/// sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
+/// `Int(1) == Float(1.0) == Decimal(1)`, so one equivalence class can be spelled
+/// three ways and the partition holds whichever spellings the set listed. The
+/// wire-fast path inspects the runtime value's Number sub-variant against the
+/// set's stored sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
 ///
 /// - Runtime sub-variant is the **only** one stored AND is byte-canonical (`Int` / `Decimal`) →
 ///   byte miss is definitive value miss.
@@ -308,7 +308,7 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 	let peek = peek_value(value_bytes)?;
 	match peek.tag.variant_id() {
 		variant_id::STRING => {
-			if set.strands.contains(value_bytes) {
+			if set.strands_contain_wire(value_bytes) {
 				return Some(true);
 			}
 			// On a miss, hand off to the decode path if the set has any
@@ -324,10 +324,10 @@ pub(crate) fn wire_value_in_set(value_bytes: &[u8], set: &LiteralSet) -> Option<
 			// short-circuit in the Strand arm (where `strand_asymmetric =
 			// false` collapses to `Some(false)` after a hash miss on an
 			// empty `strands`).
-			if set.numbers.is_empty() {
+			if set.has_no_numbers() {
 				return Some(false);
 			}
-			if set.numbers.contains(value_bytes) {
+			if set.numbers_contain_wire(value_bytes) {
 				return Some(true);
 			}
 			// Byte miss on the numbers partition. Decide between

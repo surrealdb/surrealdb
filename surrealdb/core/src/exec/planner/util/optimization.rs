@@ -50,7 +50,7 @@ pub(crate) fn order_is_scan_compatible(order: Option<&crate::expr::order::Orderi
 pub(crate) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
-	direction: crate::idx::planner::ScanDirection,
+	direction: crate::kvs::Direction,
 	order: &crate::expr::order::Ordering,
 ) -> bool {
 	use crate::exec::index::access_path::BTreeAccess;
@@ -66,7 +66,7 @@ pub(crate) fn index_covers_ordering(
 	let required: Vec<SortProperty> = order_list
 		.iter()
 		.filter_map(|field| {
-			crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
+			crate::exec::field_path_convert::field_path_from_idiom(&field.value).ok().map(|path| {
 				let direction = if field.direction {
 					SortDirection::Asc
 				} else {
@@ -97,7 +97,7 @@ pub(crate) fn index_covers_ordering(
 				.cols
 				.iter()
 				.take(prefix.len())
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect();
 			(prefix.len(), paths)
 		}
@@ -105,7 +105,7 @@ pub(crate) fn index_covers_ordering(
 			let paths: Vec<_> = ix_def
 				.cols
 				.iter()
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect();
 			(ix_def.cols.len(), paths)
 		}
@@ -120,19 +120,21 @@ pub(crate) fn index_covers_ordering(
 
 	// Build the index ordering (same as IndexScan::output_ordering())
 	let dir = match direction {
-		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
-		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
+		crate::kvs::Direction::Forward => SortDirection::Asc,
+		crate::kvs::Direction::Backward => SortDirection::Desc,
 	};
 	let mut cols: Vec<SortProperty> = ix_def
 		.cols
 		.iter()
 		.skip(skip_cols)
-		.filter_map(|idiom| {
-			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
-				path,
-				direction: dir,
-				collate: false,
-				numeric: false,
+		.filter_map(|s| {
+			crate::exec::field_path_convert::field_path_from_idiom(s).ok().map(|path| {
+				SortProperty {
+					path,
+					direction: dir,
+					collate: false,
+					numeric: false,
+				}
 			})
 		})
 		.collect();

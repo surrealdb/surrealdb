@@ -9,14 +9,14 @@ use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
-use surrealdb_core::dbs::QueryType;
-use surrealdb_core::rpc::DbResultStats;
+use surrealdb_engine_api::QUERY_STREAM_BUFFER;
+use surrealdb_rpc::{DbResultStats, QueryStreamItem, QueryType};
 use surrealdb_types::Error as TypesError;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
-use crate::conn::Command;
-use crate::method::live::Stream;
+use crate::conn::ctx_txn;
+use crate::method::live::{Stream, spawn};
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
@@ -96,17 +96,17 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, Value};
 	///
-	/// let id = RecordId::from_table_key("user", "john");
+	/// let id = RecordId::new("user", "john");
 	/// let mut response = db
 	///     .query("SELECT * FROM $id<-knows.*")
 	///     .query("SELECT * FROM $id->knows.*")
 	///     .bind(("id", id))
 	///     .await?;
 	///
-	/// let followers = response.take::<Vec<_>>(0)?;
-	/// let following = response.take::<Vec<_>>(1)?;
+	/// let followers = response.take::<Vec<Value>>(0)?;
+	/// let following = response.take::<Vec<Value>>(1)?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -114,6 +114,259 @@ where
 		self.queries.push(query.into());
 		self
 	}
+
+	/// Run the query and receive its results as they are produced, rather than
+	/// waiting for all of them.
+	///
+	/// Awaiting a [`Query`] gives [`IndexedResults`], which means holding the
+	/// whole result set in memory and seeing none of it until the last row is
+	/// read. This yields [`StreamItem`]s instead, so a large `SELECT` can be
+	/// processed — or forwarded — while the server is still producing it.
+	///
+	/// # Rows are provisional until their statement finishes
+	///
+	/// A statement's rows arrive before its outcome is known: it can still fail
+	/// on a later row, and a `BEGIN … COMMIT` block can still roll back. The
+	/// [`StatementEnd`](StreamItem::StatementEnd) item is what confirms them,
+	/// and one carrying an error retracts every row that preceded it. Anything
+	/// that acts on rows as they arrive has to be able to undo that.
+	///
+	/// Only some connections stream for real. The others answer from the
+	/// buffered path and replay the results, so this is always correct but only
+	/// sometimes earlier.
+	///
+	/// # `LIVE SELECT` is not for this
+	///
+	/// Awaiting a [`Query`] registers each `LIVE SELECT` it ran and hands back a
+	/// notification stream for it. This does not: a live query's id arrives as
+	/// an ordinary row, and nothing subscribes to it. Use the awaited form for
+	/// live queries, and this for reading rows.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # use futures::StreamExt;
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// use surrealdb::method::StreamItem;
+	///
+	/// let mut rows = db.query("SELECT * FROM person").stream_items()?;
+	/// while let Some(item) = rows.next().await {
+	///     match item? {
+	///         StreamItem::Row { value, .. } => println!("{value:?}"),
+	///         StreamItem::StatementEnd { result, .. } => result?,
+	///     }
+	/// }
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn stream_items(self) -> Result<ItemStream> {
+		let Self {
+			txn,
+			client,
+			queries,
+			variables,
+		} = self;
+		let engine = Arc::clone(&client.inner.router.extract()?.engine);
+		let query = join_queries(&queries);
+		let variables = variables?;
+		let ctx = ctx_txn(client.session_id, txn);
+		// The execution runs on a task of its own, and a session lasts only as
+		// long as a handle to it: an owned handle therefore travels with the
+		// execution, or the session it runs under would be released the moment
+		// this function returns. A borrowed one is the caller's to keep alive.
+		let keepalive = match client {
+			Cow::Owned(client) => Some(client),
+			Cow::Borrowed(_) => None,
+		};
+
+		let (out_tx, out_rx) = crate::channel::bounded(STREAM_ITEM_BUFFER);
+		let (raw_tx, raw_rx) = crate::channel::bounded(QUERY_STREAM_BUFFER);
+		// Closing this channel is what stops the execution, and a `Receiver`
+		// clone closes it for every holder — so the returned stream can stop the
+		// execution without also being the thing that drains it.
+		let stop = StopHandle {
+			items: Box::new(raw_rx.clone()),
+		};
+		// The execution and the drain have to make progress together -- the
+		// channel between them is bounded, so each blocks on the other -- and
+		// the caller only drains the far end. Both therefore run on a task of
+		// their own.
+		spawn(async move {
+			let _keepalive = keepalive;
+			let run = engine.query_stream(ctx, Cow::Owned(query), variables, raw_tx);
+			let forward = async {
+				while let Ok(item) = raw_rx.recv().await {
+					for item in stream_items_for(item) {
+						if out_tx.send(Ok(item)).await.is_err() {
+							// The caller stopped reading. Closing the execution's
+							// channel is what unparks it: it is bounded, and this
+							// loop was the only thing draining it.
+							raw_rx.close();
+							return;
+						}
+					}
+				}
+			};
+			// Joined, not selected: the execution owns an open transaction and
+			// finalises it as it completes, so it is driven to the end even once
+			// nothing is left to receive its results.
+			let (outcome, ()) = futures::future::join(run, forward).await;
+			// A failure belonging to no single statement ends the stream, as
+			// distinct from a statement reporting its own.
+			if let Err(error) = outcome {
+				let _ = out_tx.send(Err(error)).await;
+			}
+		});
+
+		Ok(ItemStream {
+			items: Box::pin(out_rx),
+			stop,
+		})
+	}
+}
+
+/// How far a streaming query may run ahead of the caller reading it.
+///
+/// Each item is one row, so this is deliberately larger than the batch-sized
+/// buffer the engine uses underneath. It still bounds the query by the caller's
+/// read speed, which is what stops an abandoned stream from running a scan to
+/// completion into memory nobody drains.
+const STREAM_ITEM_BUFFER: usize = 256;
+
+/// Rewrites one execution item as the items a caller sees.
+///
+/// Rows are flattened: whether a statement's value arrived as a batch of rows
+/// or as a single value is how the buffered API decides between an array and a
+/// bare value, but a caller reading rows one at a time has already made that
+/// choice.
+fn stream_items_for(item: QueryStreamItem) -> Vec<StreamItem> {
+	match item {
+		QueryStreamItem::Rows {
+			index,
+			values,
+		} => values
+			.into_iter()
+			.map(|value| StreamItem::Row {
+				statement: index,
+				value,
+			})
+			.collect(),
+		QueryStreamItem::Value {
+			index,
+			value,
+		} => vec![StreamItem::Row {
+			statement: index,
+			value,
+		}],
+		QueryStreamItem::Finished {
+			index,
+			time,
+			query_type,
+			error,
+		} => vec![StreamItem::StatementEnd {
+			statement: index,
+			stats: DbResultStats::default().with_execution_time(time).with_query_type(query_type),
+			result: match error {
+				Some(error) => Err(error),
+				None => Ok(()),
+			},
+		}],
+	}
+}
+
+/// One item of a query's results, as they are produced.
+///
+/// See [`Query::stream_items`], and note that a [`Row`](Self::Row) is
+/// provisional until its statement's [`StatementEnd`](Self::StatementEnd)
+/// confirms it.
+///
+/// Deliberately exhaustive, unlike most types here: a caller matches on every
+/// item a query produces, so a wildcard arm would silently discard any kind
+/// added later. Failing to compile is the right way to learn about one.
+#[derive(Debug)]
+pub enum StreamItem {
+	/// One row of a statement's results.
+	Row {
+		/// Which statement produced it, counting from zero.
+		statement: usize,
+		/// The row.
+		value: Value,
+	},
+	/// A statement is finished. No further item carries it.
+	StatementEnd {
+		/// Which statement, counting from zero.
+		statement: usize,
+		/// What the statement cost.
+		stats: DbResultStats,
+		/// Whether it succeeded. An error retracts every row it emitted.
+		result: Result<()>,
+	},
+}
+
+/// Stops the execution behind an [`ItemStream`] by closing the channel it sends
+/// its results into.
+///
+/// The execution's sends then fail and it reads the channel as closed, which is
+/// both what unparks one blocked on a full channel and what tells it to stop. It
+/// is observed only where the execution sends, so a statement in a phase that
+/// emits nothing runs on until it next produces something — reaching its own end,
+/// and finalising its transaction there, rather than stopping early.
+///
+/// The receiver is boxed only to keep it `Unpin`, which [`ItemStream`]'s own
+/// `Stream` impl needs; nothing here polls it.
+#[derive(Debug)]
+struct StopHandle {
+	items: Box<crate::channel::Receiver<QueryStreamItem>>,
+}
+
+impl StopHandle {
+	fn stop(&self) {
+		self.items.close();
+	}
+}
+
+/// A stream of a query's results, from [`Query::stream_items`].
+///
+/// Dropping this stops the query. The execution behind it holds an open
+/// transaction that it finalises as it completes, so it is stopped rather than
+/// abandoned: an execution left parked on a channel nobody drains would hold
+/// that transaction open for the lifetime of the process.
+#[derive(Debug)]
+#[must_use = "streams do nothing unless you poll them"]
+pub struct ItemStream {
+	items: Pin<Box<crate::channel::Receiver<Result<StreamItem>>>>,
+	stop: StopHandle,
+}
+
+impl futures::Stream for ItemStream {
+	type Item = Result<StreamItem>;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.items.as_mut().poll_next(cx)
+	}
+}
+
+impl Drop for ItemStream {
+	/// Stops the execution as the stream goes away.
+	///
+	/// Dropping the receiving end of the caller-facing channel is not enough on
+	/// its own: the execution sends into a channel further back, and that one
+	/// closing is what it observes. Left open, an execution that had already
+	/// filled it would stay parked on a send with nothing to drain it.
+	fn drop(&mut self) {
+		self.stop.stop();
+	}
+}
+
+/// Joins a builder's queries into one script.
+fn join_queries(queries: &[Cow<'_, str>]) -> String {
+	queries
+		.iter()
+		.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
+		.collect::<Vec<_>>()
+		.join("; ")
 }
 
 impl<'r, Client> IntoFuture for Query<'r, Client>
@@ -134,21 +387,10 @@ where
 		Box::pin(async move {
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
-			let query = queries
-				.iter()
-				.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
-				.collect::<Vec<_>>()
-				.join("; ");
+			let query = join_queries(&queries);
 
 			let results = router
-				.execute_query(
-					client.session_id,
-					Command::Query {
-						query: Cow::Owned(query),
-						txn,
-						variables: variables?,
-					},
-				)
+				.query_results(ctx_txn(client.session_id, txn), Cow::Owned(query), variables?)
 				.await?;
 
 			let mut indexed_results = IndexedResults::new();
@@ -237,11 +479,11 @@ where
 	/// Binding an object
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// #[derive(SurrealValue)]
+	/// struct User {
+	///     name: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -249,7 +491,7 @@ where
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(User {
-	///         name: "John Doe",
+	///         name: "John Doe".into(),
 	///     })
 	///     .await?;
 	/// # Ok(())
@@ -340,10 +582,9 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, SurrealValue};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -404,12 +645,10 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
 	/// use surrealdb::Notification;
-	/// use surrealdb::RecordId;
-	/// use surrealdb::Value;
+	/// use surrealdb::types::{RecordId, SurrealValue, Value};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -539,10 +778,9 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, SurrealValue};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String

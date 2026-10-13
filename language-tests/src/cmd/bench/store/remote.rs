@@ -205,17 +205,13 @@ impl RemoteStore {
 						);
 					}
 					Message::Binary(bytes) => {
-						let res =
-							match surrealdb_core::rpc::format::flatbuffers::decode::<Value>(&bytes)
-							{
-								Ok(x) => x,
-								Err(e) => {
-									println!(
-										"Warning, remote datastore returned invalid format: {e}"
-									);
-									continue;
-								}
-							};
+						let res = match surrealdb_types::decode::<Value>(&bytes) {
+							Ok(x) => x,
+							Err(e) => {
+								println!("Warning, remote datastore returned invalid format: {e}");
+								continue;
+							}
+						};
 
 						let resp = match Response::from_value(res) {
 							Err(e) => {
@@ -265,9 +261,7 @@ impl RemoteStore {
 						};
 						req_id += 1;
 
-						let bytes =
-							surrealdb_core::rpc::format::flatbuffers::encode(&req.into_value())
-								.unwrap();
+						let bytes = surrealdb_types::encode(&req.into_value()).unwrap();
 						if let Err(e) = s.send(Message::Binary(bytes.into())).await {
 							ws_error(e);
 						}
@@ -303,7 +297,9 @@ impl BenchDataStore for RemoteStore {
 		let mut params = Object::new();
 		params.insert("path", run.path.into_value());
 		params.insert("backend", run.backend.into_value());
-		params.insert("value", run.measurement.into_value());
+		// `commit` and `rows` ride alongside the statistics rather than inside
+		// them: `MeasurementData` is the sample maths and stays that way.
+		params.insert("value", super::measurement_content(run.measurement, run.commit, run.rows));
 
 		let res = self
 			.cmd_authed(
@@ -332,7 +328,7 @@ impl BenchDataStore for RemoteStore {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
-	) -> Result<Option<MeasurementData>> {
+	) -> Result<Option<super::Baseline>> {
 		let mut params = Object::new();
 		params.insert("path", path.into_value());
 		params.insert("backend", backend.into_value());
@@ -353,8 +349,15 @@ impl BenchDataStore for RemoteStore {
 		if res.status == "ERR" {
 			bail!("Got error trying to fetch latest measurement: {}", res.result.into_string()?)
 		}
-		Option::<MeasurementData>::from_value(res.result)
-			.context("Failed to deserialize latest measurement")
+		let (commit, datetime, rows) = super::baseline_meta(&res.result);
+		let measurement = Option::<MeasurementData>::from_value(res.result)
+			.context("Failed to deserialize latest measurement")?;
+		Ok(measurement.map(|measurement| super::Baseline {
+			measurement,
+			commit,
+			datetime,
+			rows,
+		}))
 	}
 
 	async fn close(&mut self) -> Result<()> {

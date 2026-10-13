@@ -110,8 +110,8 @@ should update their queries.
 | `surrealdb_query_errors_total` | `surrealdb_query_total{outcome="error"}` |
 | `surrealdb_query_duration_seconds` | `surrealdb_query_duration_seconds{outcome,namespace,database,user}` |
 | `surrealdb_query_dim_duration_seconds` | `surrealdb_query_duration_seconds` |
-| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome="success"}` |
-| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome="success"}` |
+| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome=~"success\|cancelled"}` |
+| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome=~"success\|cancelled"}` |
 | `surrealdb_transaction_errors_total` | `surrealdb_transaction_total{outcome="error"}` |
 | `surrealdb_rpcs_completed_total` | `surrealdb_rpc_total{outcome="success"}` |
 | `surrealdb_rpc_errors_total` | `surrealdb_rpc_total{outcome="error"}` |
@@ -210,6 +210,14 @@ no per-call, per-tenant, or per-protocol detail.
 | `target_info` | gauge | resource attrs | Emitted by the OTel SDK from the process Resource. Carries `service_edition`. |
 | `otel_scope_info` | gauge | scope attrs | Emitted by the OTel SDK per instrumentation scope. |
 
+On `surrealdb.transaction`, `outcome` separates durable work from discarded
+work. `success` counts transactions that committed, `cancelled` those that
+rolled back, and `error` those whose commit or cancel itself failed. A rollback
+is an ordinary outcome rather than a fault — read-only work and internal probes
+routinely end that way — so a query for every transaction that *finished* has to
+admit `cancelled` alongside `success`, as the two rows above do. Only `success`
+counts work that reached durability.
+
 ### Authenticated-only — primary signal families
 
 Recorded by the unified
@@ -247,6 +255,29 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_http_active_requests` | `surrealdb.http` | gauge | `http_request_method, http_route` (attribute-stripped to keep the gauge balanced) |
 | `surrealdb_live_query_active` | `surrealdb.live_query` | gauge | none |
 | `surrealdb_live_query_notifications_total` | `surrealdb.live_query` | counter | none |
+| `surrealdb_process_memory_allocated_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_requested_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_reserved_bytes` | `surrealdb.process` | gauge | none |
+| `surrealdb_process_memory_threshold_bytes` | `surrealdb.process` | gauge | none |
+
+The three memory gauges are deliberately **not** on the public allowlist,
+unlike `surrealdb_process_memory_bytes`: read together they describe how
+close the instance is to refusing queries, which is closer to capacity
+intelligence than the aggregate RSS figure is.
+
+Read as a set they answer three different questions:
+
+- `memory_allocated / memory_threshold` — how close this instance is to refusing queries. A
+  sustained ratio near `1` is the signal that preceded a `ServerOverloaded` refusal; alert on it.
+  When the threshold gauge reads `0` the guard is disabled and no refusal will ever happen.
+- `memory_bytes − memory_allocated` — resident memory the tracker cannot see (allocator overhead,
+  RocksDB memory outside its caches, mapped WebAssembly memory, thread stacks). This is the
+  headroom a memory threshold must leave below a container memory limit, and measuring it is how
+  that headroom should be chosen rather than guessed.
+- `memory_reserved − memory_requested` — internal fragmentation, the space the allocator reserved
+  beyond what was asked for. Use the reserved figure, not `memory_allocated`: that one also carries
+  the external reporters, so subtracting requested from it would report the whole RocksDB cache as
+  fragmentation.
 
 ### Authenticated-only — pipeline self-metrics
 
@@ -293,6 +324,48 @@ Storage backends publish a manifest of `u64` metrics through
 The server bridge registers each entry as an OTel observable gauge under
 the `surrealdb.storage.<backend>.<metric>` namespace; the Prometheus
 exporter renders them as `surrealdb_storage_<backend>_<metric>`.
+
+### Not a metric — index pending-queue depth
+
+Indexes that compact in the background (full-text, HNSW, DiskANN) queue
+each write and drain it later. The depth of that queue is what predicts
+a read's cost against the index, but it is deliberately **not** exposed
+as a gauge, for two reasons:
+
+- **Cardinality.** The only meaningful key is the index, so the series
+  would be labelled by namespace, database, table and index — all
+  user-chosen and unbounded. `PUBLIC_METRICS` aside, this is the
+  cardinality shape the rest of this document exists to avoid.
+- **Scrape cost.** No counter of queue depth is maintained; the depth is
+  the length of a key range. An observable gauge would therefore run a
+  range scan per index on every collection — the same O(backlog) work
+  the depth is a warning about.
+
+The signal is published as a **log record** instead, from the read path
+that already walks the queue and so counts it for free. An HNSW or
+DiskANN kNN search emits a `WARN` naming the index and the engine the
+first time one of its scans reads more pending data than a single
+materialisation batch holds — either because the entry count passed what
+one batch admits, or because admitting the current value alongside the
+cursor page and buffered candidates would force the batch to roll over.
+The second crossing is taken from the rollover predicate rather than from
+a byte threshold, because a batch shares its residency budget with the
+cursor page it is filled from: a queue of wide entries costs several
+batches well before its raw values add up to the budget, and a threshold
+over raw bytes would say nothing about it. This pre-check is conservative:
+it counts the already-read value even when decoding or an allow-list later
+discards it, just as the entry-count threshold counts discarded values.
+
+The record is emitted at that crossing rather than at the end of the
+scan, and the entry it crosses on is accounted before the scan's
+cancellation checkpoint for that entry, so a search that goes on to
+exhaust its deadline still reports. The entry count it carries is what
+the scan had read by then, which is a lower bound on the queue's depth.
+It fires once per crossing, not once per query: a sustained backlog
+produces one record, and a scan that completes inside both budgets
+re-arms it only if no newer scan observed another crossing after that
+scan began. The threshold is per index family, and each index re-arms
+its own.
 
 ---
 

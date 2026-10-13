@@ -1,3 +1,21 @@
+//! Failures raised by the `DEFINE API` layer.
+//!
+//! These describe an HTTP exchange the engine drives on behalf of a defined
+//! API: the request body and its framing, the headers and content types on
+//! either side, the middleware chain, and the path pattern the route is
+//! matched against.
+//!
+//! Unlike the other layer errors, these have a second public form as well as
+//! the wire one: [`ApiError::status_code`] is the HTTP status an API response
+//! carries. The two are decided independently and must be kept consistent with
+//! each other.
+
+// The mappers below are the only places this layer's failures become public.
+// A new variant must make both decisions explicitly rather than inheriting
+// whatever the last arm happened to be.
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use common::{LeafError, internal_todo};
 use http::StatusCode;
 use surrealdb_types::{Error as TypesError, SerializationError};
 use thiserror::Error;
@@ -127,21 +145,22 @@ impl ApiError {
 			Self::NotFound => StatusCode::NOT_FOUND,
 		}
 	}
+}
 
-	pub(crate) fn to_types_error(&self) -> TypesError {
-		let msg = self.to_string();
-		match &self {
-			Self::NotFound => TypesError::not_found(msg, None),
-			Self::PermissionDenied => TypesError::not_allowed(msg, None),
+impl LeafError for ApiError {
+	fn map_kind(self, message: String) -> TypesError {
+		match self {
+			Self::NotFound => TypesError::not_found(message, None),
+			Self::PermissionDenied => TypesError::not_allowed(message, None),
 			Self::BodyDecodeFailure | Self::InvalidApiResponse(_) => {
-				TypesError::serialization(msg, SerializationError::Deserialization)
+				TypesError::serialization(message, SerializationError::Deserialization)
 			}
 			Self::BodyEncodeFailure => {
-				TypesError::serialization(msg, SerializationError::Serialization)
+				TypesError::serialization(message, SerializationError::Serialization)
 			}
 			Self::MiddlewareFunctionNotFound {
 				..
-			} => TypesError::configuration(msg, None),
+			} => TypesError::configuration(message, None),
 			Self::MiddlewareRequestParseFailure {
 				..
 			}
@@ -163,12 +182,10 @@ impl ApiError {
 			| Self::RequestBodyNotBinary
 			| Self::RequestBodyTooLarge(_)
 			| Self::NoOutputStrategy
-			| Self::UnsupportedContentType(_) => TypesError::validation(msg, None),
-			_ => TypesError::internal(msg),
-		}
-	}
+			| Self::UnsupportedContentType(_) => TypesError::validation(message, None),
 
-	pub fn into_types_error(self) -> TypesError {
-		self.to_types_error()
+			// `Unreachable` is a broken invariant, so internal is the right kind.
+			Self::Unreachable(_) => internal_todo(message),
+		}
 	}
 }

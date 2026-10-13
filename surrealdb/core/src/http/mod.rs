@@ -1,32 +1,45 @@
+#[cfg(feature = "http")]
 use anyhow::Result;
+#[cfg(feature = "http")]
 use http::Method;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "http", not(target_family = "wasm")))]
 use reqwest::redirect::{Action, Attempt};
+#[cfg(feature = "http")]
 use reqwest::{Client, RequestBuilder};
+#[cfg(feature = "http")]
 use url::Url;
 
-use crate::cnf::CommonConfig;
+#[cfg(feature = "http")]
 use crate::dbs::capabilities::{NetTarget, Targets};
+#[cfg(feature = "http")]
+use crate::http::config::HttpConfig;
 
+/// The knobs every outbound client is built from. Not gated on the `http`
+/// feature: the JWKS fetch client reads them under `jwks` alone, where the
+/// client below is absent.
+pub(crate) mod config;
+
+#[cfg(feature = "http")]
 pub struct HttpClient {
 	client: Client,
 }
 
+#[cfg(feature = "http")]
 impl HttpClient {
 	#[cfg(not(target_family = "wasm"))]
-	pub fn new(
+	pub(crate) fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		config: &CommonConfig,
+		config: &HttpConfig,
 	) -> Result<Self> {
 		Self::new_with_redirect_policy(allow, deny, config, |policy| policy.follow())
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub fn new_with_redirect_policy<F>(
+	pub(crate) fn new_with_redirect_policy<F>(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		config: &CommonConfig,
+		config: &HttpConfig,
 		policy: F,
 	) -> Result<Self>
 	where
@@ -71,7 +84,9 @@ impl HttpClient {
 			let target = NetTarget::Host(host.to_owned(), port);
 
 			if !filter_clone.allow.matches(&target) || filter_clone.deny.matches(&target) {
-				return attempt.error(crate::err::Error::NetTargetNotAllowed(target.to_string()));
+				return attempt.error(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					target.to_string(),
+				));
 			}
 
 			policy(attempt)
@@ -100,15 +115,34 @@ impl HttpClient {
 		})
 	}
 
+	/// On `wasm32` the client cannot enforce network capabilities itself: the
+	/// `fetch` runtime exposes no DNS-resolver hook and no redirect-policy
+	/// control (unlike the native `reqwest` client, which installs a
+	/// `FilteringResolver` and a per-hop `redirect::Policy`). Enforcement
+	/// therefore lives entirely in
+	/// [`Context::check_allowed_net`](crate::ctx::Context), which validates the
+	/// initial request URL's host against `allow`/`deny` before the request is
+	/// made. Redirect hops are followed transparently by the runtime and are
+	/// NOT re-validated — see the WASM exception in `SECURITY_GUIDE.md` §11.
+	/// `allow`/`deny` are accepted for signature parity with the native
+	/// constructor.
+	///
+	/// The configured `User-Agent` is still applied — reqwest's wasm client
+	/// merges client default headers into every request, and the Workers `fetch`
+	/// runtime (unlike a browser) permits setting it — so hosts that reject
+	/// requests lacking a `User-Agent`, such as the GitHub API, are reachable.
 	#[cfg(target_family = "wasm")]
-	pub fn new(
+	// `allow`/`deny` are unused here by design, as documented above: they are
+	// taken by value so this constructor's signature matches the native one.
+	#[allow(clippy::needless_pass_by_value)]
+	pub(crate) fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		_config: &CommonConfig,
+		config: &HttpConfig,
 	) -> Result<Self> {
 		let _ = allow;
 		let _ = deny;
-		let client = Client::builder().build()?;
+		let client = Client::builder().user_agent(config.surrealdb_user_agent.as_str()).build()?;
 		Ok(HttpClient {
 			client,
 		})

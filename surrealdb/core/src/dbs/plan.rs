@@ -122,6 +122,14 @@ impl ExplainItem {
 				name: Value::String(Strand::new_static("Iterate Defer")),
 				details: vec![("record", Value::RecordId(t.clone()))],
 			},
+			Iterable::MockDefer(_doc_ctx, mock) => Self {
+				name: Value::String(Strand::new_static("Iterate Mock Defer")),
+				details: vec![("table", Value::String(mock.table().clone().into()))],
+			},
+			Iterable::MockRecordId(_doc_ctx, mock) => Self {
+				name: Value::String(Strand::new_static("Iterate Mock Record")),
+				details: vec![("table", Value::String(mock.table().clone().into()))],
+			},
 			Iterable::Lookup {
 				from,
 				kind,

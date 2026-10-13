@@ -5,8 +5,8 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use common::lazy_env_parse;
 use console_subscriber::ConsoleLayer;
-use surrealdb_core::lazy_env_parse;
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;

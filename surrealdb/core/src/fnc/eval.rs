@@ -12,8 +12,8 @@
 //! 3. the dedicated eval subject gate ([`Capabilities::allows_eval_query`]), which defaults to
 //!    denied for every subject.
 //!
-//! `eval::gql` additionally inherits the `gql` experimental gate, which
-//! [`crate::gql::parse_with_capabilities`] enforces itself.
+//! `eval::gql` routes through [`crate::gql::parse_with_capabilities`], which
+//! derives syntax gating from the live capabilities.
 //!
 //! ## Subject derivation
 //!
@@ -65,28 +65,23 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::capabilities::{ArbitraryQueryTarget, EvalQueryTarget};
+use crate::dbs::capabilities::{ArbitraryQueryTarget, Error as CapabilitiesError, EvalQueryTarget};
 use crate::dbs::{Capabilities, Force, Options, Variables};
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Block, FlowResultExt as _, LogicalPlan, TopLevelExpr};
+use crate::exe::FlowResultExt as _;
+use crate::exec::Error as ExecError;
+use crate::expr::{Block, LogicalPlan, TopLevelExpr};
 use crate::fnc::args::Optional;
 use crate::iam::Auth;
+use crate::kvs::Dialect;
 use crate::val::{Object, Value};
 
-/// Which query language the supplied string is written in.
-#[derive(Clone, Copy)]
-pub(crate) enum Dialect {
-	Surql,
-	Gql,
-}
-
-impl Dialect {
-	pub(crate) fn func_name(self) -> &'static str {
-		match self {
-			Dialect::Surql => "eval::surql",
-			Dialect::Gql => "eval::gql",
-		}
+/// The `eval::*` builtin that evaluates a string in `dialect`, for the
+/// capability gate and the error messages.
+fn func_name(dialect: Dialect) -> &'static str {
+	match dialect {
+		Dialect::SurrealQl => "eval::surql",
+		Dialect::Gql => "eval::gql",
 	}
 }
 
@@ -103,7 +98,7 @@ pub(crate) fn prepare(
 	dialect: Dialect,
 	query: &str,
 ) -> Result<Block> {
-	let name = dialect.func_name();
+	let name = func_name(dialect);
 
 	// --- Gates #2 and #3: subject checks against the current execution auth.
 	// Both must pass, so `eval` can never grant more query power than the
@@ -111,19 +106,19 @@ pub(crate) fn prepare(
 	if !caps.allows_query(&ArbitraryQueryTarget::from(auth))
 		|| !caps.allows_eval_query(&EvalQueryTarget::from(auth))
 	{
-		bail!(Error::FunctionNotAllowed(name.to_string()));
+		bail!(CapabilitiesError::FunctionNotAllowed(name.to_string()));
 	}
 
-	// --- Parse with the live capabilities (so the `gql` experimental gate
-	// and any SurrealQL experimental gates are honoured) and default parser
+	// --- Parse with the live capabilities (so any SurrealQL experimental
+	// gates are honoured) and default parser
 	// limits (matching the embedded-scripting `surrealdb.query()` bridge). Both
 	// dialects are normalised to a `LogicalPlan`: SurrealQL parses to a `sql::Ast`
 	// (converted via `From`); GQL lowers directly to a `PreparedGqlQuery`
 	// wrapping a `LogicalPlan`.
-	let config = crate::cnf::CommonConfig::default();
+	let config = crate::syn::ParserConfig::default();
 	let plan: LogicalPlan = match dialect {
-		Dialect::Surql => crate::syn::parse_with_capabilities(query, caps, &config)
-			.map_err(|e| Error::InvalidFunction {
+		Dialect::SurrealQl => crate::syn::parse_with_capabilities(query, caps, &config)
+			.map_err(|e| ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: e.to_string(),
 			})?
@@ -131,17 +126,17 @@ pub(crate) fn prepare(
 		#[cfg(feature = "gql")]
 		Dialect::Gql => {
 			crate::gql::parse_with_capabilities(query, caps, &config)
-				.map_err(|e| Error::InvalidFunction {
+				.map_err(|e| ExecError::InvalidFunction {
 					name: name.to_string(),
 					message: e.to_string(),
 				})?
 				.0
 		}
 		#[cfg(not(feature = "gql"))]
-		Dialect::Gql => bail!(Error::InvalidFunction {
-			name: name.to_string(),
-			message: "GQL support was not enabled at compile time".to_string(),
-		}),
+		Dialect::Gql => bail!(surrealdb_types::Error::configuration(
+			"This build does not support GQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		)),
 	};
 
 	// --- Collect the expression statements, rejecting top-level-only forms that
@@ -150,7 +145,7 @@ pub(crate) fn prepare(
 	for expr in plan.expressions {
 		match expr {
 			TopLevelExpr::Expr(expr) => statements.push(expr),
-			_ => bail!(Error::InvalidFunction {
+			_ => bail!(ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: "only query statements may be evaluated; transaction-control and \
 				          session statements (BEGIN, CANCEL, COMMIT, USE, LIVE, KILL, OPTION, \
@@ -165,8 +160,8 @@ pub(crate) fn prepare(
 	// wrapped in an explicit block `{ ... }`, which has well-defined last-value
 	// semantics. `eval::gql` is exempt: one GQL query lowers to several SurrealQL
 	// statements internally.
-	if matches!(dialect, Dialect::Surql) && statements.len() > 1 {
-		bail!(Error::InvalidFunction {
+	if matches!(dialect, Dialect::SurrealQl) && statements.len() > 1 {
+		bail!(ExecError::InvalidFunction {
 			name: name.to_string(),
 			message: "eval::surql evaluates a single statement; wrap multiple statements in a \
 			          block, e.g. eval::surql(\"{ ... }\")"
@@ -180,7 +175,7 @@ pub async fn surql(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(query, Optional(bindings)): (String, Optional<Object>),
 ) -> Result<Value> {
-	run_eval(stk, ctx, opt, doc, Dialect::Surql, query, bindings).await
+	run_eval(stk, ctx, opt, doc, Dialect::SurrealQl, query, bindings).await
 }
 
 pub async fn gql(
@@ -221,5 +216,5 @@ pub(crate) async fn run_eval(
 	// step against `max_computation_depth`, and the budget is carried in via
 	// `opt`, so a nested `eval` continues the count rather than resetting it.
 	let opt = opt.new_with_force(Force::None);
-	block.compute(stk, &child, &opt, doc).await.catch_return()
+	crate::legacy::block_compute(&block, stk, &child, &opt, doc).await.catch_return()
 }

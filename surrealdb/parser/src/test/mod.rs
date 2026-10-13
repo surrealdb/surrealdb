@@ -1,11 +1,26 @@
 #![cfg(test)]
 
+//! This crate has it's own small test suite.
+//! If you need to add a test which just tests the parsing of some surrealql source
+//! please add a file test instead of a function test.
+//!
+//! You generally should not have to add a test here unless you are testing some uncommon
+//! functionality of the parser or behavior not normally triggered.
+//!
+//! All `.surql` files under the `files` and `files_quirk` directory are tested in
+//! the `text_test` and `text_test_quirk` test and not only test for parsing errors
+//! but also tests against the generated AST.
+//!
+//! Test generation has a similar workflow to the language-test: First write some query to test the
+//! parser again, then run the test to see if the parser produces the expected output and finally
+//! use the `RESULT` environment variable setting it to either `RESULT=ACCEPT` to write expected
+//! output to tests which do not have an expected output yet or `RESULT=OVERWRITE` to write output
+//! to tests which already have an expected output but the actual expected output has changed.
+
+mod stream;
+mod text;
+
 use std::path::Path;
-use std::{env, fmt};
-
-use ast::Query;
-
-use crate::Config;
 
 const SEPERATOR: &str = "/* ===== result =====\n";
 const END: &str = "\n*/";
@@ -15,229 +30,19 @@ enum ResultMode {
 	Overwrite,
 	Fail,
 }
-
-fn assert_parses(source: &str) {
-	if let Err(e) = crate::Parser::enter_parse::<Query>(
-		source,
-		Config {
-			depth_limit: 1000,
-			generate_warnings: true,
-			feature_bearer_access: true,
-			feature_surrealism: true,
-			quirk_redefine: false,
-			quirk_block_first_no_semi: false,
-			quirk_delete_permission_field: false,
-		},
-	) {
-		panic!("failed to parse `{source}`:\n{}", e.render_char_buffer().write_to_string());
-	}
-}
-
 fn walk_dir<F: FnMut(&Path)>(path: &Path, f: &mut F) {
-	for r in std::fs::read_dir(path).unwrap() {
-		let r = r.unwrap();
-		let ft = r.file_type().unwrap();
-		let path = r.path();
-		if ft.is_file() {
-			f(&path)
-		}
-		if ft.is_dir() {
-			walk_dir(&path, f);
-		}
-	}
-}
-
-#[test]
-fn ann_keywords_parse_as_identifiers() {
-	for source in [
-		"SELECT alpha FROM alpha;",
-		"SELECT degree FROM degree;",
-		"SELECT diskann FROM diskann;",
-		"SELECT l_build FROM l_build;",
-	] {
-		assert_parses(source);
-	}
-}
-
-#[test]
-fn ann_keywords_keep_diskann_index_syntax() {
-	assert_parses(
-		"DEFINE INDEX pts_embedding_diskann ON pts FIELDS embedding DISKANN DIMENSION 4 DEGREE 16 L_BUILD 64 ALPHA 1.2 TYPE F32 DIST EUCLIDEAN;",
-	);
-}
-
-/// Text tests, implements a small language-test like testing suite where we test the parser
-/// against a text representation of the AST if the query parsed successfully and otherwise against
-/// the text formatted error.
-///
-/// The actual tests can be found in the `files` directory.
-#[test]
-fn text_test() {
-	let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("test").join("files");
-	println!("{}", path.display());
-
-	let mut successfull = true;
-
-	let env = env::var("RESULT");
-	let result_mode = match env.as_deref() {
-		Ok("ACCEPT") => ResultMode::Accept,
-		Ok("OVERWRITE") => ResultMode::Overwrite,
-		_ => ResultMode::Fail,
-	};
-
-	walk_dir(&path, &mut |path| {
-		if path.extension().and_then(|x| x.to_str()) != Some("surql") {
-			return;
-		}
-
-		let source = std::fs::read_to_string(path).unwrap();
-
-		let expect = source.split_once(SEPERATOR).map(|x| x.1.strip_suffix(END).unwrap_or(x.1));
-
-		let res = crate::Parser::enter_parse::<Query>(
-			&source,
-			Config {
-				depth_limit: 1000,
-				generate_warnings: true,
-				feature_bearer_access: true,
-				feature_surrealism: true,
-				quirk_redefine: false,
-				quirk_block_first_no_semi: false,
-				quirk_delete_permission_field: false,
-			},
-		);
-
-		let found = match res {
-			Ok((node, ast)) => {
-				fmt::from_fn(|fmt| ast::vis::visualize_ast(&node, &ast, fmt)).to_string()
+	let mut dirs = vec![path.to_path_buf()];
+	while let Some(path) = dirs.pop() {
+		for r in std::fs::read_dir(path).unwrap() {
+			let r = r.unwrap();
+			let ft = r.file_type().unwrap();
+			let path = r.path();
+			if ft.is_file() {
+				f(&path)
 			}
-			Err(e) => {
-				format!("ERROR:{}", e.render_char_buffer().write_to_string())
-			}
-		};
-
-		if let Some(expect) = expect {
-			if expect != found {
-				println!("RUNNING TEST: {}", path.display());
-				println!("Test failed!");
-				println!("Expected:");
-				println!("{}", expect);
-				println!("Got:");
-				println!("{}", found);
-
-				successfull = false;
-
-				if let ResultMode::Overwrite = result_mode {
-					let source = source.split_once(SEPERATOR).map(|x| x.0).unwrap_or(&source);
-					std::fs::write(path, format!("{}{}{}{}", source, SEPERATOR, found, END))
-						.unwrap();
-				}
-			}
-		} else {
-			println!("RUNNING TEST: {}", path.display());
-			println!("Test has no expectation");
-			println!("Got:");
-			println!("{}", found);
-
-			successfull = false;
-
-			if let ResultMode::Overwrite | ResultMode::Accept = result_mode {
-				let source = source.split_once(SEPERATOR).map(|x| x.0).unwrap_or(&source);
-				std::fs::write(path, format!("{}{}{}{}", source, SEPERATOR, found, END)).unwrap();
+			if ft.is_dir() {
+				dirs.push(path);
 			}
 		}
-	});
-
-	if !successfull {
-		panic!(
-			"Not all tests successfull.\nSet environment variable `RESULT` to:\n - `OVERWRITE` to overwrite the result of all tests.\n - `ACCEPT` to accept results for tests which do not have a result currently"
-		);
-	}
-}
-
-const IGNORE_TESTS: &[&str] = &[
-	"language/control_flow/transaction/cancel_behaviour.surql",
-	"language/control_flow/transaction/commit_behaviour.surql",
-	"language/graph/edge_clauses.surql",
-	"reproductions/7169_from_only_in_graph_lookup.surql",
-	// The new parser doesn't yet support `INFO FOR NAMESPACE VERSION …`
-	// (only `INFO FOR DATABASE VERSION …`); the legacy parser used by the
-	// language-test harness does.
-	"language/statements/info/version_clause.surql",
-];
-
-#[test]
-fn all_language_tests() {
-	// Parsing the full language-tests corpus can recurse deeply; the default test thread stack (~2
-	// MiB) overflows on some toolchains. Match surplus headroom used by other DB test harnesses.
-	const STACK: usize = 32 * 1024 * 1024;
-	std::thread::Builder::new()
-		.name("all_language_tests".to_string())
-		.stack_size(STACK)
-		.spawn(|| {
-			all_language_tests_impl();
-		})
-		.expect("spawn all_language_tests thread")
-		.join()
-		.expect("all_language_tests thread panicked");
-}
-
-fn all_language_tests_impl() {
-	let mut failed = 0;
-	let mut successfull = 0;
-	let tests_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("..")
-		.join("..")
-		.join("language-tests")
-		.join("tests");
-	walk_dir(&tests_path, &mut |path| {
-		if path.extension().and_then(|x| x.to_str()) != Some("surql") {
-			return;
-		}
-
-		if IGNORE_TESTS.iter().any(|x| path.ends_with(x)) {
-			return;
-		}
-
-		let source = std::fs::read_to_string(path).unwrap();
-		if source.contains("parsing-error") {
-			return;
-		}
-
-		let res = crate::Parser::enter_parse::<Query>(
-			&source,
-			Config {
-				depth_limit: 1000,
-				generate_warnings: true,
-				feature_bearer_access: true,
-				feature_surrealism: true,
-				quirk_redefine: true,
-				quirk_block_first_no_semi: true,
-				quirk_delete_permission_field: true,
-			},
-		);
-
-		match res {
-			Ok(_) => {
-				successfull += 1;
-			}
-			Err(e) => {
-				eprintln!(
-					"Language test `{}` failed to parse",
-					path.strip_prefix(&tests_path).unwrap().display()
-				);
-				let mut buf = Vec::new();
-				e.render_char_buffer().write_styled(&mut buf).unwrap();
-				let s = String::from_utf8(buf).unwrap();
-				eprintln!("{s}");
-
-				failed += 1;
-			}
-		}
-	});
-
-	if failed != 0 {
-		eprintln!("\nFailed {failed} tests, parsed {successfull} tests successfully.");
-		panic!("Did not parse all the tests correctly");
 	}
 }

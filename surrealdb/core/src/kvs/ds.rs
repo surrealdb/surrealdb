@@ -1,10 +1,10 @@
-use std::any::{Any, TypeId};
+use std::any::TypeId;
+use std::borrow::Cow;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
-#[cfg(target_family = "wasm")]
-use std::collections::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashSet};
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -16,38 +16,42 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, ensure};
+use arc_swap::ArcSwap;
 use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
+use common::time::{Instant, sleep, timeout, timeout_at};
 use futures::{Future, Stream};
 use rand::Rng;
+use rand::distr::{Alphanumeric, SampleString};
 use reblessive::TreeStack;
+use surrealdb_cnf::ConfigMap;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_datastore::triggers::CommitTriggers;
+use surrealdb_datastore::values::graph::GraphFoldScope;
+use surrealdb_kvs::TransactionType::*;
+use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::Notify;
-use tokio::time::{Instant, sleep, timeout, timeout_at};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
-use super::api::{BoxFut, Transactable};
-use super::tr::Transactor;
 use super::tx::Transaction;
-use super::version::MajorVersion;
-use super::{Key, Val, export};
+use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
+use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, migration};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
-	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
-	UserProvider,
+	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider,
+	TableProvider, UserProvider,
 };
-use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
-use crate::ctx::{CancelHandle, Context};
+use crate::catalog::{Index, NodeLiveQuery};
+use crate::config::RuntimeConfig;
+use crate::ctx::{CancelHandle, Context, FrozenContext};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
@@ -55,61 +59,154 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
-	Capabilities, Executor, MessageBroker, Options, QueryResult, QueryResultBuilder, Session,
+	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
+	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, TopLevelStatement,
+	durable_session, restore_session,
 };
-use crate::doc::AsyncEventRecord;
-use crate::err::Error;
+use crate::doc::process_next_events_batch;
+use crate::err::{EngineError, Error};
+use crate::exe::FlowResultExt as _;
+use crate::exec::Error as ExecError;
+use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
-use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
-#[cfg(feature = "gql")]
-use crate::gql::PreparedGqlQuery;
+use crate::expr::user::UserDuration;
+use crate::expr::{Base, Expr, Idiom, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
-use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
+use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::IndexCompactionKey;
-use crate::key::root::rc::{
-	RECLAIM_DATABASE, RECLAIM_INDEX, RECLAIM_NAMESPACE, ReclaimKey, ReclaimState,
+use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
+use crate::key::schema::{
+	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupIdentityPrefix, DocLookupPrefix, DocPendingPrefix,
+	GraphFoldDirPrefix, GraphFoldKey, GraphFoldPrefix, IdxRoot, IndexCompactionIxPrefix,
+	IndexCompactionKey, IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey,
+	NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey,
+	SessionPrefix, StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
 };
-use crate::kvs::LockType::*;
-use crate::kvs::TransactionType::*;
+use crate::key::{
+	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
+};
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
-use crate::kvs::ds::requirements::{
-	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
-};
-use crate::kvs::index::IndexBuilder;
+use crate::kvs::index::{IndexBuilder, build_owner_is_live, build_owner_is_live_locked};
+use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
+use crate::kvs::request::{Dialect, QueryRequest, QuerySource};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
-use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::testing::{
+	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
+	maybe_inject_retryable_conflict,
+};
 use crate::kvs::{
-	KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict,
+	CHANGEFEED_GC_PASS_KEY_BUDGET, DatastoreError, Direction, NORMAL_BATCH_SIZE,
+	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET, TransactionFactory,
+	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
-use crate::observe::{ExecutionObserver, NoopObserver};
+use crate::observe::ExecutionObserver;
+use crate::options::EngineOptions;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::syn::{ParseError, ParserConfig};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, syn};
 
 mod builder;
+pub(crate) mod config;
+
 pub use builder::Builder;
+pub use config::LiveQueryEngine;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long [`Datastore::shutdown`] waits for the maintenance tasks to finish
+/// their in-flight pass before giving up on a clean stop.
+///
+/// A pass is left to finish because the storage engine shutdown that follows
+/// refuses every commit, so an interrupted pass fails rather than completes.
+/// That cannot be an unbounded wait: an async event runs user-defined
+/// SurrealQL, whose duration nothing here bounds, so a single non-terminating
+/// event would otherwise hold shutdown open forever. On expiry the remaining
+/// handles are dropped and shutdown proceeds; the abandoned pass then has its
+/// commits refused, which is the same outcome as a crash at that instant.
+const MAINTENANCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long [`Datastore::retry_bootstrap`] waits for storage to become able to
+/// serve the version bootstrap before giving up.
+///
+/// Sized to outlast the cluster formation of a distributed backend, which is
+/// the condition it exists to wait out. The server's own
+/// `SURREAL_STARTUP_OPERATION_TIMEOUT` is a shorter ceiling by default and is
+/// the knob an operator reaches for; this bound only stops an embedder that has
+/// no such ceiling from waiting forever.
+const BOOTSTRAP_RETRY_BUDGET: Duration = Duration::from_secs(120);
+
+/// How long one bootstrap attempt may run before it is abandoned and retried.
+const BOOTSTRAP_RETRY_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The gap before the first bootstrap retry, doubled on each further attempt up
+/// to [`BOOTSTRAP_RETRY_MAX_BACKOFF`].
+const BOOTSTRAP_RETRY_MIN_BACKOFF: Duration = Duration::from_millis(100);
+
+/// The longest gap between two bootstrap attempts.
+const BOOTSTRAP_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(5);
+
+/// How many times the back-off may double, which is as many as it takes to
+/// reach [`BOOTSTRAP_RETRY_MAX_BACKOFF`] from
+/// [`BOOTSTRAP_RETRY_MIN_BACKOFF`].
+const BOOTSTRAP_RETRY_MAX_DOUBLINGS: u32 = 6;
+
+// Capping the exponent is only sound while the cap still reaches the ceiling:
+// stop short of it and the back-off would silently settle below its documented
+// maximum if either bound were retuned.
+const _: () = assert!(
+	BOOTSTRAP_RETRY_MIN_BACKOFF.as_millis() << BOOTSTRAP_RETRY_MAX_DOUBLINGS
+		>= BOOTSTRAP_RETRY_MAX_BACKOFF.as_millis(),
+	"the bootstrap back-off cannot double its way up to its own ceiling"
+);
+
+/// How often a bootstrap that is still retrying reports that it is still going.
+///
+/// The cadence is on the log, not on the retries: attempts run as fast as the
+/// back-off allows, and one in every interval is reported.
+const BOOTSTRAP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
+
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
+
+/// Whether a reclaim pass emptied the prefix it was given.
+///
+/// `Complete` licenses the caller to retire the queue entry. `Incomplete` means
+/// the entry's durable resume cursor has advanced but keys remain, so the entry
+/// must stay queued for a later pass to finish — retiring it then would orphan
+/// the remainder with nothing left to find it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReclaimOutcome {
+	Complete,
+	Incomplete,
+	/// The queue entry was deleted by someone else while the reclaim was
+	/// running, withdrawing the claim that the prefix is orphaned. Nothing more
+	/// may be deleted from it.
+	Cancelled,
+	/// The task lease passed to another node mid-reclaim. Like `Incomplete` for
+	/// this entry, but the pass itself must stop rather than move on to the next
+	/// entry: a lease check is throttled to one datastore read per maintenance
+	/// period, so the reclaim consumed the read a fresh check here would depend
+	/// on and that check would report the lease held without asking.
+	LeaseLost,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShutdownNodeDeleteOutcome {
@@ -130,16 +227,16 @@ where
 	if let Some(canceller) = canceller {
 		tokio::select! {
 			biased;
-			_ = canceller.cancelled() => bail!(Error::QueryCancelled),
+			_ = canceller.cancelled() => bail!(EngineError::QueryCancelled),
 			result = timeout_at(deadline, step) => match result {
 				Ok(result) => result,
-				Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+				Err(_) => bail!(EngineError::QueryTimedout(timeout_duration)),
 			},
 		}
 	} else {
 		match timeout_at(deadline, step).await {
 			Ok(result) => result,
-			Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+			Err(_) => bail!(EngineError::QueryTimedout(timeout_duration)),
 		}
 	}
 }
@@ -159,7 +256,7 @@ where
 			biased;
 			_ = canceller.cancelled() => {
 				let _ = txn.cancel().await;
-				bail!(Error::QueryCancelled);
+				bail!(EngineError::QueryCancelled);
 			}
 			result = timeout_at(deadline, step) => result,
 		}
@@ -175,7 +272,7 @@ where
 		}
 		Err(_) => {
 			let _ = txn.cancel().await;
-			bail!(Error::QueryTimedout(timeout_duration.into()))
+			bail!(EngineError::QueryTimedout(timeout_duration))
 		}
 	}
 }
@@ -187,7 +284,7 @@ fn archive_node_for_shutdown(
 	match result {
 		Ok(()) => ShutdownNodeDeleteOutcome::Archived,
 		Err(e) => {
-			if matches!(e.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))) {
+			if matches!(crate::err::engine_error(&e), Some(EngineError::QueryTimedout(_))) {
 				warn!(
 					target: TARGET,
 					timeout = ?timeout_duration,
@@ -209,8 +306,40 @@ fn archive_node_for_shutdown(
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
+	/// Cancellation for this datastore's own background work, tripped by
+	/// [`Self::shutdown`].
+	shutdown: CancellationToken,
+	/// Handles for this datastore's maintenance tasks, so [`Self::shutdown`]
+	/// can wait for them to stop.
+	///
+	/// A datastore is not a working database without them — index compaction,
+	/// tombstone reclaim, changefeed GC, index-build recovery and the cluster
+	/// heartbeat all live there — so the builder starts them rather than
+	/// leaving it to the embedder. `None` for a datastore built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
+	/// until [`Self::start_maintenance_tasks`] is called on it.
+	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
+	/// The cadences the maintenance tasks run at, kept so
+	/// [`Self::start_maintenance_tasks`] starts them on the same schedule the
+	/// builder was given rather than on whatever its caller passes in.
+	engine_options: EngineOptions,
+	/// Serialises [`Self::shutdown`] across the holders of this datastore.
+	///
+	/// The sequence has to run start to finish for exactly one caller at a time:
+	/// it stops the maintenance tasks *before* closing the storage engine, and a
+	/// second caller that skipped straight to the storage shutdown would close
+	/// the engine out from under a pass the first caller is still waiting on.
+	/// Later callers therefore block here and observe the completed sequence.
+	shutdown_lock: tokio::sync::Mutex<()>,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
+	/// Whether this process created the datastore's storage.
+	///
+	/// Latched by [`Self::check_version`], because the underlying signal is
+	/// one-shot: it comes from writing the version key, and a caller that
+	/// retries after a later failure would otherwise see the key already there
+	/// and be told the datastore is pre-existing.
+	created_here: std::sync::atomic::AtomicBool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
@@ -221,7 +350,7 @@ pub struct Datastore {
 	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
-	capabilities: Arc<Capabilities>,
+	capabilities: ArcSwap<Capabilities>,
 	/// Broker used to deliver live-query notifications after their write commits.
 	///
 	/// `Some` iff live-query subscribers exist for this datastore (the broker owns the sender
@@ -229,8 +358,9 @@ pub struct Datastore {
 	/// at the executor boundary.
 	live_query_broker: Option<Arc<dyn MessageBroker>>,
 	/// Per-node live-query router state (the tail cursor over the `lqe`
-	/// keyspace). Only used when `config.live_query_engine` is `Router`, where
-	/// the router is the sole notification delivery path. See [`crate::lq`].
+	/// keyspace). Only used when `config.datastore.live_query_engine` is
+	/// `Router`, where the router is the sole notification delivery path. See
+	/// [`crate::lq`].
 	live_query_router: Arc<LiveQueryRouter>,
 	/// Public HTTP endpoint this datastore publishes on its `Node` catalog row so other
 	/// cluster members can route cross-node messages (e.g. live-query relay) to it.
@@ -250,8 +380,9 @@ pub struct Datastore {
 	/// Registry of built-in scalar, aggregate, projection and index
 	/// functions, along with the method-dispatch table. Built once when the
 	/// datastore is constructed and shared across all transactions via the
-	/// `Arc`. Every `Context` clones this `Arc` rather than rebuilding the
-	/// registry, which is otherwise the single biggest per-query cost.
+	/// `Arc`. The executor clones this `Arc` onto the `RootContext` of every
+	/// statement rather than rebuilding the registry, which is otherwise the
+	/// single biggest per-query cost.
 	function_registry: Arc<FunctionRegistry>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
@@ -269,178 +400,25 @@ pub struct Datastore {
 	/// instead of being eagerly compiled at startup.
 	#[cfg(feature = "surrealism")]
 	lazy_surrealism: bool,
-	// Async event processing trigger
-	async_event_trigger: Arc<Notify>,
-	/// Config
-	config: Arc<CommonConfig>,
+	/// Post-commit wake-ups shared with every transaction: async event
+	/// processing, and index compaction so the compactor runs on the write
+	/// instead of waiting out its interval.
+	triggers: Arc<CommitTriggers>,
+	/// The per-layer configuration every query executed on this datastore
+	/// reaches through its context, plus the datastore's own knobs.
+	config: Arc<RuntimeConfig>,
+	/// The parser depth limits applied to every query text parsed for this
+	/// datastore. Shared with the transports, which decode request bodies
+	/// against the same limits.
+	parser_config: Arc<ParserConfig>,
 	// Http client used to make requests.
 	#[cfg(feature = "http")]
-	http_client: Arc<HttpClient>,
+	http_client: ArcSwap<HttpClient>,
 	/// Observer invoked on significant events. Defaults to [`NoopObserver`].
 	observer: Arc<dyn ExecutionObserver>,
 }
 
-/// Represents a collection of metrics for a specific datastore flavor.
-///
-/// This structure is used to expose datastore-specific metrics to the telemetry system.
-pub struct Metrics {
-	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
-	pub name: &'static str,
-	/// A list of u64-based metrics.
-	pub u64_metrics: Vec<Metric>,
-}
-
-/// Represents a single metric with a name and description.
-pub struct Metric {
-	/// The name of the metric.
-	pub name: &'static str,
-	/// A human-readable description of the metric.
-	pub description: &'static str,
-}
-
-#[derive(Clone)]
-pub(crate) struct TransactionFactory {
-	// The inner datastore type
-	builder: Arc<Box<dyn TransactionBuilder>>,
-	// Async event processing trigger
-	async_event_trigger: Arc<Notify>,
-	/// Observer invoked on transaction lifecycle events. Defaults to
-	/// [`NoopObserver`]; replaced by the datastore's observer when one is
-	/// configured.
-	observer: Arc<dyn ExecutionObserver>,
-	config: Arc<CommonConfig>,
-}
-
-impl TransactionFactory {
-	pub(super) fn new(
-		async_event_trigger: Arc<Notify>,
-		builder: Box<dyn TransactionBuilder>,
-		config: Arc<CommonConfig>,
-	) -> Self {
-		Self {
-			builder: Arc::new(builder),
-			async_event_trigger,
-			observer: Arc::new(NoopObserver),
-			config,
-		}
-	}
-
-	/// Replace the observer. Used by the datastore builder to propagate the
-	/// chosen observer to all transactions created after the swap.
-	pub(crate) fn with_observer(mut self, observer: Arc<dyn ExecutionObserver>) -> Self {
-		self.observer = observer;
-		self
-	}
-
-	/// Access the observer. Transaction instrumentation fires events through
-	/// this handle.
-	#[allow(dead_code)]
-	pub(crate) fn observer(&self) -> &Arc<dyn ExecutionObserver> {
-		&self.observer
-	}
-
-	#[allow(
-		unreachable_code,
-		unreachable_patterns,
-		unused_variables,
-		reason = "Some variables are unused when no backends are enabled."
-	)]
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		lock: LockType,
-		sequences: Sequences,
-	) -> Result<Transaction> {
-		// Specify if the transaction is writeable
-		let write = match write {
-			Read => false,
-			Write => true,
-		};
-		// Specify if the transaction is lockable
-		let lock = match lock {
-			Pessimistic => true,
-			Optimistic => false,
-		};
-		// Create a new transaction on the datastore
-		let (inner, local) = self.builder.new_transaction(write, lock).await?;
-		Ok(Transaction::new(
-			local,
-			sequences,
-			Arc::clone(&self.async_event_trigger),
-			Arc::clone(&self.observer),
-			Transactor {
-				inner,
-			},
-			&self.config,
-		))
-	}
-
-	/// Registers metrics for the current datastore flavor if supported.
-	fn register_metrics(&self) -> Option<Metrics> {
-		self.builder.register_metrics()
-	}
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
-		self.builder.collect_u64_metric(metric)
-	}
-}
-
-/// Abstraction over storage backends for creating and managing transactions.
-///
-/// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
-/// generic transaction parameters into a backend-specific transaction and
-/// report whether the transaction is considered "local" (used internally to
-/// enable some optimizations).
-///
-/// This was introduced to make the server more composable/embeddable. External
-/// crates can implement `TransactionBuilder` to plug in custom backends while
-/// reusing the rest of SurrealDB.
-pub trait TransactionBuilder: TransactionBuilderRequirements {
-	/// Create a new backend transaction.
-	///
-	/// - `write`: whether the transaction is writable (Write vs Read)
-	/// - `lock`: whether pessimistic locking is requested
-	///
-	/// Returns the backend transaction object and a flag indicating if the
-	/// transaction is local to the process (true) or requires external resources
-	/// (false).
-	fn new_transaction(
-		&self,
-		write: bool,
-		lock: bool,
-	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>>;
-
-	/// Perform any backend-specific shutdown/cleanup.
-	fn shutdown(&self) -> BoxFut<'_, Result<()>>;
-
-	/// Registers metrics for the current datastore flavor if supported.
-	///
-	/// This will return a list of available metrics and their descriptions.
-	fn register_metrics(&self) -> Option<Metrics>;
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	///
-	/// - `metric`: The name of the metric to collect.
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
-
-	/// Returns an immutable backend-specific extension handle.
-	///
-	/// Backends expose only stable, shareable handles through this hook. The
-	/// default implementation keeps community datastores free of extension
-	/// state.
-	///
-	/// This is the extension point for backend-specific operations that
-	/// don't fit the generic transaction interface: e.g. the TiKV backend
-	/// returns its [`crate::kvs::tikv::TikvOpsHandle`] (matched on
-	/// `TypeId`) so the engine can offer MVCC-GC / lock-cleanup /
-	/// `unsafe_destroy_range` to operators without polluting this trait
-	/// with TiKV-only signatures every other backend would have to no-op.
-	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		None
-	}
-}
+pub(crate) use surrealdb_kvs::{Metrics, TransactionBuilder};
 
 /// Transaction-builder construction result with router startup state.
 ///
@@ -479,7 +457,7 @@ impl TransactionBuilderParts<()> {
 ///
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
-pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
+pub trait TransactionBuilderFactory: Send + Sync + 'static {
 	/// Immutable state threaded into router construction after datastore startup.
 	type RouterState: Clone + Send + Sync + 'static;
 
@@ -488,7 +466,6 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// # Parameters
 	/// - `path`: Database connection path string
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	#[cfg(not(target_family = "wasm"))]
 	fn new_transaction_builder(
 		&self,
 		path: &str,
@@ -496,17 +473,8 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 		config: ConfigMap,
 	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>> + Send;
 
-	/// Create a new transaction builder for the datastore (WASM: no `Send` bound on the future).
-	#[cfg(target_family = "wasm")]
-	fn new_transaction_builder(
-		&self,
-		path: &str,
-		canceller: CancellationToken,
-		config: ConfigMap,
-	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>>;
-
 	/// Validate a datastore path string.
-	fn path_valid(v: &str) -> Result<String>;
+	fn path_valid(&self, v: &str) -> Result<String>;
 
 	/// Returns the stable datastore node id used for live-query ownership metadata.
 	///
@@ -537,346 +505,69 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	}
 }
 
-pub mod requirements {
-	use std::fmt::Display;
-
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionBuilderRequirements: Display {}
-
-	#[cfg(not(target_family = "wasm"))]
-	pub trait TransactionBuilderRequirements: Display + Send + Sync + 'static {}
-
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionBuilderFactoryRequirements {}
-
-	#[cfg(not(target_family = "wasm"))]
-	pub trait TransactionBuilderFactoryRequirements: Send + Sync + 'static {}
-}
-
-pub enum DatastoreFlavor {
-	#[cfg(feature = "kv-mem")]
-	Mem(super::mem::Datastore),
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-indxdb")]
-	IndxDB(super::indxdb::Datastore),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-surrealkv")]
-	SurrealKV(super::surrealkv::Datastore),
-}
-
-impl TransactionBuilderFactoryRequirements for CommunityComposer {}
-
 impl TransactionBuilderFactory for CommunityComposer {
 	type RouterState = ();
 
-	#[allow(unused_variables)]
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		_canceller: CancellationToken,
+		canceller: CancellationToken,
 		config: ConfigMap,
 	) -> Result<TransactionBuilderParts<Self::RouterState>> {
-		// Extract query parameters from the path before scheme extraction
-		let (raw_path, config_string) = match path.split_once('?') {
-			Some((p, q)) => (p, Some(q)),
-			None => (path, None),
-		};
-
-		let config = if let Some(config_string) = config_string {
-			config.join(
-				ConfigMap::from_config_string(config_string).map_keys(|x| format!("datastore_{x}")),
-			)
-		} else {
-			config
-		};
-
-		// Extract the scheme and path components
-		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
-		{
-			None if raw_path == "memory" => ("memory", ""),
-			// Treat "mem" as an alias for "memory"
-			None if raw_path == "mem" => ("memory", ""),
-			Some(("mem", path)) => ("memory", path),
-			Some((flavour, path)) => (flavour, path),
-			// Validated already in the CLI, should never happen
-			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
-		};
-
-		let path = if path.starts_with("/") {
-			// if absolute, remove all slashes except one
-			let normalised = format!("/{}", path.trim_start_matches("/"));
-			info!(target: TARGET, "Starting kvs store at absolute path {flavour}:{normalised}");
-			normalised
-		} else if path.is_empty() {
-			info!(target: TARGET, "Starting kvs store in memory");
-			"".to_string()
-		} else {
-			info!(target: TARGET, "Starting kvs store at relative path {flavour}://{path}");
-			path.to_string()
-		};
-		// Initiate the desired datastore
-		match (flavour, path) {
-			// Initiate an in-memory datastore
-			(flavour @ "memory", path) => {
-				#[cfg(feature = "kv-mem")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-
-					// Persist path comes from the URL path; do not inject an empty
-					// string or `parse_key_with` logs a spurious DATASTORE_PERSIST warning.
-					let config = if path.is_empty() {
-						config
-					} else {
-						config.with_key_value("datastore_persist", path)
-					};
-					// Parse SurrealMX configuration from URL path and query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
-					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-mem"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// The `file:` scheme has been removed. Catch it here so users
-			// with legacy paths get a targeted message instead of the
-			// generic fallback below.
-			("file", _) => {
-				bail!(Error::Kvs(crate::kvs::Error::Datastore(
-					"The `file://` scheme is no longer supported; use `rocksdb://` or `surrealkv://` instead"
-						.into()
-				)));
-			}
-			// Initiate a RocksDB datastore
-			(flavour @ "rocksdb", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Parse RocksDB-specific configuration from query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a SurrealKV database
-			(flavour @ "surrealkv", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Parse SurrealKV-specific configuration from query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate an IndxDB database
-			(flavour @ "indxdb", path) => {
-				#[cfg(feature = "kv-indxdb")]
-				{
-					let v =
-						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-indxdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a TiKV datastore
-			(flavour @ "tikv", path) => {
-				#[cfg(feature = "kv-tikv")]
-				{
-					// Parse TiKV-specific configuration from env vars
-					// (SURREAL_TIKV_*) and query parameters.
-					let tikv_config = config.load();
-					let v = super::tikv::Datastore::new(&path, tikv_config)
-						.await
-						.map(DatastoreFlavor::TiKV)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-tikv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// The datastore path is not valid
-			(flavour, path) => {
-				info!(target: TARGET, "Unable to load the specified datastore {flavour}{path}");
-				bail!(Error::Kvs(crate::kvs::Error::Datastore(
-					"Unable to load the specified datastore".into()
-				)))
-			}
-		}
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(path, canceller, config)
+			.await?;
+		Ok(TransactionBuilderParts::without_router_state(builder))
 	}
 
-	fn path_valid(v: &str) -> Result<String> {
-		// Strip query parameters before validating the scheme
-		let scheme_part = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
-		match scheme_part {
-			"memory" => Ok(v.to_string()),
-			"mem" => Ok(v.to_string()),
-			v_s if v_s.starts_with("file:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("rocksdb:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("surrealkv:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("mem:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("tikv:") => Ok(v.to_string()),
-			_ => bail!("Provide a valid database path parameter"),
-		}
-	}
-}
-
-impl TransactionBuilderRequirements for DatastoreFlavor {}
-
-impl TransactionBuilder for DatastoreFlavor {
-	#[allow(
-		unreachable_code,
-		unreachable_patterns,
-		unused_variables,
-		reason = "Some variables are unused when no backends are enabled."
-	)]
-	fn new_transaction(
-		&self,
-		write: bool,
-		lock: bool,
-	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
-		Box::pin(async move {
-			Ok(match self {
-				#[cfg(feature = "kv-mem")]
-				Self::Mem(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-rocksdb")]
-				Self::RocksDB(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-indxdb")]
-				Self::IndxDB(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-tikv")]
-				Self::TiKV(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, false)
-				}
-				#[cfg(feature = "kv-surrealkv")]
-				Self::SurrealKV(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				_ => unreachable!(),
-			})
-		})
-	}
-
-	/// Registers metrics for the current datastore flavor if supported.
-	fn register_metrics(&self) -> Option<Metrics> {
-		match self {
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	// Allow unused variable when kv-rocksdb feature is not enabled
-	#[allow(unused_variables)]
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
-		match self {
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(metric),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-
-	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			match self {
-				#[cfg(feature = "kv-mem")]
-				Self::Mem(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-rocksdb")]
-				Self::RocksDB(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-indxdb")]
-				Self::IndxDB(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-tikv")]
-				Self::TiKV(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-surrealkv")]
-				Self::SurrealKV(v) => Ok(v.shutdown().await?),
-				#[allow(unreachable_patterns)]
-				_ => unreachable!(),
-			}
-		})
-	}
-
-	#[allow(
-		unused_variables,
-		reason = "type_id is only consumed when a backend feature is enabled"
-	)]
-	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		match self {
-			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) if type_id == TypeId::of::<super::tikv::TikvOpsHandle>() => Some(v.ops_handle()),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-}
-
-impl Display for DatastoreFlavor {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Self::Mem(_) => write!(f, "memory"),
-			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(_) => write!(f, "indxdb"),
-			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+	fn path_valid(&self, v: &str) -> Result<String> {
+		Ok(surrealdb_kvs_any::Backends::community().path_valid(v)?)
 	}
 }
 
 impl Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.transaction_factory.builder.fmt(f)
+		f.write_str(self.transaction_factory.backend_name())
 	}
 }
+
+/// One reclaim queue entry in the running for this pass's key budget.
+///
+/// Ordered by how long the entry has been waiting — oldest observation first,
+/// and the queue's key order between entries observed in the same millisecond so
+/// selection is deterministic. Held in a max-heap capped at
+/// [`RECLAIM_PASS_ENTRY_QUOTA`], where "greatest" is the newest and so the first
+/// to lose its place.
+struct ReclaimCandidate {
+	/// When the reclaim task first observed the entry. Zero only where the grace
+	/// is disabled, in which case every candidate ties and key order decides.
+	observed_ms: u64,
+	/// The queue key, as the scan returned it.
+	key: Vec<u8>,
+	/// The state read during the walk, carrying the resume cursor the delete
+	/// continues from.
+	state: ReclaimState,
+}
+
+impl Ord for ReclaimCandidate {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.observed_ms.cmp(&other.observed_ms).then_with(|| self.key.cmp(&other.key))
+	}
+}
+
+impl PartialOrd for ReclaimCandidate {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl PartialEq for ReclaimCandidate {
+	fn eq(&self, other: &Self) -> bool {
+		self.cmp(other) == std::cmp::Ordering::Equal
+	}
+}
+
+impl Eq for ReclaimCandidate {}
 
 impl Datastore {
 	pub fn builder() -> Builder {
@@ -948,7 +639,16 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self> {
+	/// The datastore is returned shared, because it starts background
+	/// maintenance tasks that hold a [`Weak`](std::sync::Weak) reference to it.
+	/// Because those tasks write, this also settles the datastore's storage
+	/// version before any of them starts, so the datastore is handed back
+	/// already stamped; [`Self::check_version`] is still what checks that this
+	/// build can read what was found, and what runs any migrations owed.
+	///
+	/// Use [`Builder::without_maintenance_tasks`] for a quiescent datastore, or
+	/// for one whose tasks start later under the caller's own ordering.
+	pub async fn new(path: &str) -> Result<Arc<Self>> {
 		Builder::new().build_with_path(path).await
 	}
 
@@ -977,42 +677,57 @@ impl Datastore {
 
 	/// Create a new datastore with the same persistent data (inner), with
 	/// flushed cache. Simulating a server restart
+	///
+	/// The restarted datastore carries **no** maintenance tasks: it is returned
+	/// unshared, so there is nothing for a task to hold a `Weak` to. Callers
+	/// that need them call [`Self::start_maintenance_tasks`] once they have
+	/// shared it.
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
 		Self {
+			shutdown: CancellationToken::new(),
+			maintenance: parking_lot::Mutex::new(None),
+			engine_options: self.engine_options,
+			shutdown_lock: tokio::sync::Mutex::new(()),
 			id: self.id,
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: Arc::clone(&self.capabilities),
+			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker,
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint,
 			index_stores: IndexStores::new(
-				self.config.hnsw_cache_size,
-				self.config.diskann_cache_size,
+				self.config.idx.hnsw_cache_size,
+				self.config.idx.diskann_cache_size,
+				self.config.idx.graph_resolve_cache_size,
+				self.config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
-			async_event_trigger: self.async_event_trigger,
+			created_here: std::sync::atomic::AtomicBool::new(false),
+			triggers: self.triggers,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				self.config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
 			http_client: self.http_client,
 			observer: self.observer,
 			config: self.config,
+			parser_config: self.parser_config,
 		}
 	}
 
@@ -1030,39 +745,50 @@ impl Datastore {
 	pub(crate) fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
 		let transaction_factory = self.transaction_factory.clone();
 		Self {
+			// A fork is unshared, so it carries no maintenance tasks.
+			shutdown: CancellationToken::new(),
+			maintenance: parking_lot::Mutex::new(None),
+			engine_options: self.engine_options,
+			shutdown_lock: tokio::sync::Mutex::new(()),
 			id,
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: self.dynamic_configuration.clone(),
 			slow_log: self.slow_log.clone(),
 			transaction_timeout: self.transaction_timeout,
-			capabilities: Arc::clone(&self.capabilities),
+			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker.clone(),
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint.clone(),
 			index_stores: IndexStores::new(
-				self.config.hnsw_cache_size,
-				self.config.diskann_cache_size,
+				self.config.idx.hnsw_cache_size,
+				self.config.idx.diskann_cache_size,
+				self.config.idx.graph_resolve_cache_size,
+				self.config.idx.segment_dictionary_path.clone(),
 			),
 			index_builder: IndexBuilder::new(transaction_factory.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory.clone(),
-			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			buckets: self.buckets.clone(),
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
-			async_event_trigger: Arc::clone(&self.async_event_trigger),
+			created_here: std::sync::atomic::AtomicBool::new(false),
+			triggers: Arc::clone(&self.triggers),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				self.config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
-			http_client: Arc::clone(&self.http_client),
+			http_client: ArcSwap::new(self.http_client.load_full()),
 			observer: Arc::clone(&self.observer),
 			config: Arc::clone(&self.config),
+			parser_config: Arc::clone(&self.parser_config),
 		}
 	}
 
@@ -1083,6 +809,24 @@ impl Datastore {
 		self.transaction_timeout
 	}
 
+	/// The configured write-cardinality limit for statement transactions
+	/// (`transaction_max_write_keys`), or `None` when the guard is disabled.
+	pub(crate) fn transaction_max_write_keys(&self) -> Option<std::num::NonZeroU64> {
+		std::num::NonZeroU64::new(self.transaction_factory.max_write_keys())
+	}
+
+	/// Get the configured global query timeout, if any.
+	///
+	/// This is the deadline set by `--query-timeout` /
+	/// `SURREAL_QUERY_TIMEOUT`. Beyond being applied as an executor deadline
+	/// in [`Self::setup_ctx`], the transports reuse this value as a
+	/// wall-clock guard so a non-yielding hang (or engine work not bounded by
+	/// the deadline) still terminates the request. A return value of `None`
+	/// means no timeout is enforced.
+	pub fn query_timeout(&self) -> Option<Duration> {
+		self.dynamic_configuration.get_query_timeout()
+	}
+
 	/// Returns the broker used to flush live-query notifications after commit.
 	pub(crate) fn live_query_broker(&self) -> Option<Arc<dyn MessageBroker>> {
 		self.live_query_broker.clone()
@@ -1096,9 +840,11 @@ impl Datastore {
 	/// resolve the target node's address at delivery time without consulting
 	/// any in-memory cluster topology.
 	pub async fn lookup_node_endpoint(&self, node_id: Uuid) -> Result<Option<String>> {
-		let txn = self.transaction(Read, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(node_id);
-		let res = txn.get(&key, None).await?;
+		let txn = self.transaction(Read).await?;
+		let key = NodeKey {
+			nd: node_id,
+		};
+		let res = txn.get_key(&key, None).await?;
 		// Always cancel a read transaction; we don't write through it.
 		let _ = txn.cancel().await;
 		Ok(res.and_then(|node: Node| node.http_endpoint))
@@ -1139,35 +885,69 @@ impl Datastore {
 	}
 
 	/// Does the datastore allow excecuting an RPC method?
-	pub(crate) fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
-		self.capabilities.allows_rpc_method(method_target)
+	///
+	/// Dispatch enforces this itself, so a transport does not have to. It is
+	/// public so a transport can also *report* the answer ahead of time: the
+	/// gRPC service advertises the methods an operator has denied, so a client
+	/// can avoid calls it already knows will be refused.
+	pub fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
+		self.capabilities.load().allows_rpc_method(method_target)
 	}
 
 	/// Does the datastore allow requesting an HTTP route?
 	/// This function needs to be public to allow access from the CLI crate.
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
-		self.capabilities.allows_http_route(route_target)
+		self.capabilities.load().allows_http_route(route_target)
 	}
 
 	/// Is the user allowed to query?
 	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
-		self.capabilities.allows_query(&subject.into())
+		self.capabilities.load().allows_query(&subject.into())
 	}
 
 	/// Is the user allowed to invoke the `eval::*` functions?
 	pub fn allows_eval_query_by_subject(&self, subject: impl Into<EvalQueryTarget>) -> bool {
-		self.capabilities.allows_eval_query(&subject.into())
+		self.capabilities.load().allows_eval_query(&subject.into())
 	}
 
 	/// Does the datastore allow connections to a network target?
 	#[cfg(feature = "jwks")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
-		self.capabilities.allows_network_target(net_target)
+		self.capabilities.load().allows_network_target(net_target)
 	}
 
-	/// Set specific capabilities for this Datastore
-	pub fn get_capabilities(&self) -> &Capabilities {
-		&self.capabilities
+	/// The datastore's current capabilities snapshot.
+	pub fn get_capabilities(&self) -> Arc<Capabilities> {
+		self.capabilities.load_full()
+	}
+
+	/// Replace the datastore's capabilities at runtime.
+	///
+	/// The swap is atomic and lock-free. In-flight queries keep the snapshot
+	/// they captured when they started (the executor clones the `Arc` once at
+	/// query start), so only queries begun after this call observe the new
+	/// capabilities. This cannot exceed what the binary was compiled to
+	/// support — a capability whose machinery is not compiled in stays inert
+	/// regardless of what is set here.
+	///
+	/// When the `http` feature is enabled this also rebuilds the outbound HTTP
+	/// client so its redirect and DNS net filter track the new `allow_net` /
+	/// `deny_net`. Without that, a runtime net *tightening* would be enforced on
+	/// a request's initial URL (checked against the live snapshot) but not on
+	/// redirect hops, whose filter is baked in at client construction. Building
+	/// the client can fail, hence the `Result`; on failure the capabilities are
+	/// left unchanged.
+	pub fn set_capabilities(&self, capabilities: Capabilities) -> anyhow::Result<()> {
+		#[cfg(feature = "http")]
+		let http_client = HttpClient::new(
+			capabilities.allow_net.clone(),
+			capabilities.deny_net.clone(),
+			&self.config.http,
+		)?;
+		self.capabilities.store(Arc::new(capabilities));
+		#[cfg(feature = "http")]
+		self.http_client.store(Arc::new(http_client));
+		Ok(())
 	}
 
 	#[cfg(feature = "jwks")]
@@ -1175,81 +955,285 @@ impl Datastore {
 		&self.cache
 	}
 
+	/// The function registry every query on this datastore resolves names
+	/// through. Handed to the executor, which seats it on the `RootContext`
+	/// of each statement.
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.function_registry
+	}
+
 	pub(super) fn clock_now(&self) -> Timestamp {
 		SystemClock::new().now()
 	}
 
-	// Used for testing live queries
-	#[cfg(test)]
-	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
-		Arc::clone(&self.cache)
-	}
-
-	// Initialise the cluster and run bootstrap utilities
-	// Returns the current version and a flag indicating if this is a new datastore
+	/// Verifies the datastore's storage version and applies any data migrations
+	/// it owes, returning that version and whether this process created the
+	/// datastore.
+	///
+	/// **Call this before serving any query against a datastore that may
+	/// predate this build.** A datastore is not fully readable until its
+	/// migrations have run: [`Datastore::new`] and the builder do not call this,
+	/// so an embedder that skips it against pre-3.3 storage sees sequences that
+	/// appear not to exist — which `DEFINE SEQUENCE ... IF NOT EXISTS` will then
+	/// recreate, resetting an allocator that has already issued values.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
-		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
+		let (version, is_new) = self.settle_storage_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
-			bail!(Error::OutdatedStorageVersion {
+			bail!(DatastoreError::OutdatedStorageVersion {
 				expected: MajorVersion::latest().into(),
 				actual: version.into(),
 			});
 		}
+		// `get_version` reports a datastore as new only on the start that wrote
+		// `!v`. Everything below can fail transiently and be retried by the
+		// caller, and that retry finds the key present — so the flag is latched on
+		// the datastore rather than re-derived, or a caller keying default
+		// namespace creation off it would silently skip that on the second pass.
+		let is_new =
+			self.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst) || is_new;
+		// Bring the datastore's semantic version stamp up to this build, applying
+		// any data migrations the gap between the two calls for. Not wrapped in
+		// `retry`, which caps each attempt at ten seconds: a migration may run for
+		// much longer, and the driver handles contention itself through a task
+		// lease.
+		migration::run(self, is_new).await?;
 		// Everything ok
 		Ok((version, is_new))
 	}
 
-	// Initialise the cluster and run bootstrap utilities
-	// Returns the current version and a flag indicating if this is a new datastore
+	/// Settles the datastore's major storage version, stamping it if it carries
+	/// none, and reports whether this call was the one that stamped it.
+	///
+	/// The marker half of [`Self::check_version`], separated because the builder
+	/// owes it before it starts any writer but must not do the rest: the
+	/// migrations that follow the gate run under a lease with no bound on how
+	/// long they take, which is not something a constructor may hold a caller
+	/// for.
+	///
+	/// Retries because the storage layer may not be able to serve a transaction
+	/// yet, and because concurrent instances conflict over the version key.
+	/// Callers that want the gate — the check that this build can read what it
+	/// found — want [`Self::check_version`].
+	pub(crate) async fn settle_storage_version(&self) -> Result<(MajorVersion, bool)> {
+		Self::retry_bootstrap("Check version", || self.get_version()).await
+	}
+
+	/// The full semantic version the datastore has been advanced to.
+	///
+	/// `None` for a datastore last written before 3.3, the release that
+	/// introduced the stamp. Its major version is still available from
+	/// [`Self::get_version`].
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn storage_version(&self) -> Result<Option<StorageVersion>> {
+		let txn = self.transaction(Read).await?;
+		let version = catch!(txn, txn.get_key(&StorageVersionKey {}, None).await);
+		txn.cancel().await?;
+		Ok(version)
+	}
+
+	/// Every version this datastore has been advanced to, oldest first.
+	///
+	/// One entry per version transition, not per startup: a node that starts
+	/// against a datastore already stamped at its own version adds nothing.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn version_history(&self) -> Result<Vec<VersionHistoryEntry>> {
+		let txn = self.transaction(Read).await?;
+		let range = catch!(txn, VersionHistoryPrefix {}.range());
+		let entries = catch!(txn, txn.getr(range, None).await);
+		txn.cancel().await?;
+		Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+	}
+
+	/// Every data migration applied to this datastore, in the order they were
+	/// declared.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	/// Paired with the ledger id the entry was filed under, which is a
+	/// migration's identity; the name in the record is documentation and may be
+	/// reworded between releases.
+	pub async fn applied_migrations(&self) -> Result<Vec<(u32, MigrationRecord)>> {
+		Ok(self
+			.applied_migration_ids()
+			.await?
+			.into_iter()
+			.filter_map(|(id, record)| record.map(|r| (id, r)))
+			.collect())
+	}
+
+	/// Every applied migration's ledger id, with its record when that record is
+	/// readable by this build.
+	///
+	/// A record written in a revision this build does not know decodes to
+	/// `None` rather than failing the call. The id comes from the key, and the
+	/// key's presence is what marks a migration as applied — so a record this
+	/// build cannot read must still be reportable, since that is exactly the
+	/// state a downgrade needs to be told about.
+	pub async fn applied_migration_ids(&self) -> Result<Vec<(u32, Option<MigrationRecord>)>> {
+		let txn = self.transaction(Read).await?;
+		let range = catch!(txn, MigrationPrefix {}.range());
+		let rows = catch!(txn, txn.getr_raw(range, None).await);
+		txn.cancel().await?;
+		rows.into_iter()
+			.map(|(key, value)| {
+				let id = MigrationKey::decode_key(&key)?.id;
+				Ok((id, MigrationRecord::kv_decode_value(&value, ()).ok()))
+			})
+			.collect()
+	}
+
+	/// Reads the datastore's major storage version, stamping it on a datastore
+	/// that carries none, and reports whether this call was the one that
+	/// stamped it.
+	///
+	/// # What `!v`'s absence means
+	///
+	/// `!v` was introduced in 2.0, so a datastore that holds data but no `!v`
+	/// was either written by a build that predates it — a genuine v1 store,
+	/// which must be refused as out of date — or created by a later build whose
+	/// bootstrap was interrupted after something else wrote but before `!v`
+	/// landed. Nothing in the bytes tells those apart, so the second case
+	/// records itself: [`BootstrapKey`] is committed before `!v` and removed in
+	/// the same transaction that writes it, and its presence is what licenses
+	/// this call to complete the interrupted bootstrap instead of refusing it.
+	/// Without it, `MajorVersion::v1()` is the only safe reading, and an
+	/// interrupted bootstrap would be stamped v1 permanently.
+	///
+	/// # Ordering
+	///
+	/// The sentinel is only a fallback: nothing may write to a datastore before
+	/// its version is settled. That ordering is structural — the builder settles
+	/// the version before it starts any maintenance task, and a caller that
+	/// starts them itself does so after this has run (see
+	/// [`Datastore::start_maintenance_tasks`]). The sentinel is what keeps a
+	/// writer that escapes it anyway — a future job, a storage engine with keys
+	/// of its own — from turning a fresh datastore into an unstartable one.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapBegin, self.id)?;
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.enclose();
+		let txn = self.transaction(Write).await?.enclose();
 		// Create the key where the version is stored
-		let key = crate::key::version::new();
+		let key = VersionKey {};
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(&key, None).await) {
-			// There is a version set in the storage
-			Some(val) => {
-				// We didn't write anything, so just rollback
+		if let Some(val) = catch!(txn, txn.get_key(&key, None).await) {
+			// We didn't write anything, so just rollback
+			catch!(txn, txn.cancel().await);
+			// Return the current version
+			return Ok((val, false));
+		}
+		// No version is set. Either nothing has ever stamped this datastore, or
+		// a previous start began stamping it and did not finish.
+		if let Some(target) = catch!(txn, txn.get_key(&BootstrapKey {}, None).await) {
+			// An interrupted bootstrap left the sentinel behind, so whatever is
+			// in storage was written by a versioned build and no pre-versioning
+			// layout can be present: the sentinel is only ever written after the
+			// probe below has found the datastore empty, and from that moment
+			// the only writers are versioned builds, none of which can serve a
+			// query until this call has passed. That is what licenses completing
+			// the job rather than refusing it — but not at just any version.
+			//
+			// The two directions are not symmetric. Finishing a bootstrap an
+			// *older* build began is sound at this build's own version: the
+			// residue such a build can leave is cluster state a newer build
+			// reads, and no user data can exist to owe a migration, because
+			// serving a query requires the stamp this call has not yet written.
+			// Finishing one a *newer* build began is not: stamping the datastore
+			// down a major version would pass this build's own gate against
+			// bytes it may not understand, and would leave the build that
+			// started the job reading back a stamp it refuses. So that case is
+			// declined without writing, which keeps the sentinel intact for the
+			// build that can finish it, and returns the target so the gate above
+			// reports what is actually on disk.
+			if u16::from(target) > MajorVersion::LATEST {
 				catch!(txn, txn.cancel().await);
-				// Return the current version
-				(val, false)
+				warn!(
+					target: TARGET,
+					target = u16::from(target),
+					running = MajorVersion::LATEST,
+					"This datastore's initialisation was begun by a newer version of SurrealDB \
+					and can only be completed by it. Run that version, or use a clean storage \
+					directory if this is intended to be a new instance."
+				);
+				return Ok((target, false));
 			}
-			// There is no version set in the storage
-			None => {
-				// Fetch any keys immediately following the version key
-				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
-				// Check the storage if there are any other keys set
-				let version = if keys.is_empty() {
-					// There are no keys set in storage, so this is a new database
-					MajorVersion::latest()
-				} else {
-					// There were keys in storage, so this is an upgrade.
-					// Log the first key found for diagnostic purposes.
-					warn!(
-						target: TARGET,
-						first_key = ?keys.first().map(|k| format!("{:?}", k)),
-						"No version key found but existing data detected in storage. \
-						 This storage contains data from a previous SurrealDB version. \
-						 The server will not start until the data is migrated or removed."
-					);
-					MajorVersion::v1()
-				};
-				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(&key, &version).await);
-				// We set the version, so commit the transaction
-				catch!(txn, txn.commit().await);
-				// Return the current version
-				(version, true)
-			}
-		};
-		// Everything ok
-		Ok(val)
+			let version = MajorVersion::latest();
+			warn!(
+				target: TARGET,
+				target = u16::from(target),
+				version = u16::from(version),
+				"Completing a datastore initialisation that a previous start left unfinished."
+			);
+			catch!(txn, txn.replace_key(&key, &version).await);
+			catch!(txn, txn.del_key(&BootstrapKey {}).await);
+			catch!(txn, txn.commit().await);
+			return Ok((version, true));
+		}
+		// Fetch any key at all, other than the version keys themselves. This has
+		// to span the whole byte space rather than the declared root: the point
+		// of the probe is data this release does not describe, which by
+		// definition need not sit under `/`. Finding any such key means the
+		// store predates versioning and must not be stamped as current.
+		let range = RawRange::every_key_after(&VersionKey {}.encode_key()?);
+		let keys = catch!(txn, txn.keys_raw(range, 1, 0, None).await);
+		if !keys.is_empty() {
+			// There were keys in storage, so this is an upgrade.
+			// Log the first key found for diagnostic purposes.
+			warn!(
+				target: TARGET,
+				first_key = ?keys.first().map(|k| format!("{:?}", k)),
+				"No version key found but existing data detected in storage. \
+				This storage contains data from a previous SurrealDB version. \
+				The server will not start until the data is migrated or removed."
+			);
+			let version = MajorVersion::v1();
+			catch!(txn, txn.replace_key(&key, &version).await);
+			catch!(txn, txn.commit().await);
+			return Ok((version, true));
+		}
+		// The datastore is empty, so this start is creating it. Claim it with the
+		// sentinel in a transaction of its own: the two writes cannot share one,
+		// because the whole point is for the sentinel to outlive a failure of the
+		// stamp below. The sentinel sorts before `!v` and so below the probe
+		// above, which is what keeps a datastore holding nothing else reading as
+		// empty rather than as data of unknown provenance.
+		let version = MajorVersion::latest();
+		catch!(txn, txn.set_key(&BootstrapKey {}, &version).await);
+		catch!(txn, txn.commit().await);
+		// Stamp the version and retire the sentinel. Should this fail, the next
+		// attempt takes the resume branch above and finishes the job.
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapStamp, self.id)?;
+		self.finish_bootstrap(version).await
+	}
+
+	/// Stamps `!v` and retires the sentinel, completing a bootstrap this node
+	/// claimed.
+	///
+	/// Re-reads `!v` rather than writing over it blindly, for two reasons that
+	/// both come from this being a second transaction. Another node may have
+	/// claimed the same empty datastore, seen this node's sentinel and finished
+	/// the job in between, in which case this node did not create the datastore
+	/// and must not report that it did — two nodes both returning `is_new` have
+	/// both of them creating the default namespace, and the loser fails startup
+	/// on a namespace that already exists. And reading the key in the same
+	/// transaction that writes it is what arms a write conflict on backends that
+	/// detect one, which a blind replace would not.
+	pub(crate) async fn finish_bootstrap(
+		&self,
+		version: MajorVersion,
+	) -> Result<(MajorVersion, bool)> {
+		let key = VersionKey {};
+		let txn = self.transaction(Write).await?.enclose();
+		if let Some(existing) = catch!(txn, txn.get_key(&key, None).await) {
+			catch!(txn, txn.cancel().await);
+			return Ok((existing, false));
+		}
+		catch!(txn, txn.replace_key(&key, &version).await);
+		catch!(txn, txn.del_key(&BootstrapKey {}).await);
+		catch!(txn, txn.commit().await);
+		Ok((version, true))
 	}
 
 	// --------------------------------------------------
@@ -1268,7 +1252,7 @@ impl Datastore {
 	/// Separated from `initialise_credentials` so it can be wrapped in the retry loop.
 	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.enclose();
+		let txn = self.transaction(Write).await?.enclose();
 		// Fetch the root users from the storage
 		let users = catch!(txn, txn.all_root_users(None).await);
 		// Process credentials, depending on existing users
@@ -1276,19 +1260,24 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::new_with_password(
+			let stm = define_user_statement_new_with_password(
 				Base::Root,
 				user.to_owned(),
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new(&CommonConfig::default())
+			let opt = Options::new(&ExecConfig::default())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(Arc::clone(&txn));
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
-			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
+			let res = stack
+				.enter(|stk| {
+					crate::legacy::define_user_statement_compute(&stm, stk, &ctx, &opt, None)
+				})
+				.finish()
+				.await;
 			catch!(txn, res);
 			// We added a user, so commit the transaction
 			txn.commit().await
@@ -1308,9 +1297,9 @@ impl Datastore {
 		// Create the SQL statement
 		let sql = r"
 			DEFINE NAMESPACE $namespace COMMENT 'Default namespace generated by SurrealDB';
-			USE NS $namespace;
-			DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB';
-			DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
+		USE NS $namespace;
+		DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB';
+		DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
 		"
 		.to_string();
 
@@ -1337,9 +1326,45 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+	}
+
+	/// Starts this datastore's maintenance tasks, if they are not already
+	/// running.
+	///
+	/// The builder starts them itself, and settles the storage version first, so
+	/// this exists for a caller that built with
+	/// [`Builder::without_maintenance_tasks`] in order to own that ordering.
+	/// Such a caller owes the same sequence, because these tasks write: the
+	/// node-membership refresh blindly upserts this node's row, and every leased
+	/// job writes its lease. A write that lands before `!v` does makes a
+	/// datastore this process created indistinguishable from one written before
+	/// `!v` existed, which [`Datastore::get_version`] is obliged to refuse as
+	/// out of date. Call this only once [`Datastore::check_version`] has
+	/// returned.
+	///
+	/// Idempotent: a datastore that already carries its tasks is left alone.
+	pub fn start_maintenance_tasks(self: &Arc<Self>) {
+		let mut maintenance = self.maintenance.lock();
+		if maintenance.is_some() {
+			return;
+		}
+		*maintenance =
+			Some(crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options));
+	}
+
+	/// Whether this datastore's maintenance tasks are running.
+	///
+	/// A datastore that never starts them is a database with no index
+	/// compaction, no tombstone reclaim, no changefeed GC, no index-build
+	/// recovery and no cluster heartbeat — none of which announces itself, so a
+	/// caller that defers the start with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)
+	/// has this to assert against.
+	pub fn maintenance_tasks_running(&self) -> bool {
+		self.maintenance.lock().is_some()
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -1347,6 +1372,41 @@ impl Datastore {
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
+		// One caller runs the whole sequence at a time. The steps below are
+		// ordered — tasks stopped before the storage engine closes — and a
+		// concurrent caller that found the handles already taken would otherwise
+		// skip the wait and close the engine while the first caller's pass was
+		// still using it. Later callers block here and return once the sequence
+		// they were waiting on has finished.
+		let _shutting_down = self.shutdown_lock.lock().await;
+		// Stop this datastore's maintenance tasks first. They open transactions
+		// of their own, and the storage engine shutdown below refuses every
+		// commit once it has run, so a pass still in flight would fail rather
+		// than finish. Cancelling is idempotent, so a caller that already
+		// cancelled its own token — as the server and the embedded engine do —
+		// loses nothing by reaching here.
+		self.shutdown.cancel();
+		// Taken rather than borrowed: the guard must not be held across the
+		// await, and the handles are consumed by resolving them.
+		let tasks = self.maintenance.lock().take();
+		if let Some(tasks) = tasks {
+			// Bounded: a pass runs user-defined SurrealQL in the async event
+			// case, so waiting for one to finish cannot be waiting forever.
+			if timeout(MAINTENANCE_SHUTDOWN_TIMEOUT, tasks.resolve()).await.is_err() {
+				warn!(
+					target: TARGET,
+					"Maintenance tasks did not stop within {MAINTENANCE_SHUTDOWN_TIMEOUT:?}; \
+					 continuing shutdown without them"
+				);
+			}
+		}
+		// Local index builder tasks are deliberately left running: the storage
+		// engine shutdown below stops the commit coordinator first, after which
+		// every commit is refused before it applies (see the engine
+		// `Transaction::commit` gate). An in-flight build therefore makes no
+		// durable change during shutdown and stays at its last committed
+		// checkpoint, so the periodic resume scan continues it after restart —
+		// exactly as it would after a crash.
 		// Archive this datastore in the cluster, but don't let a blocked
 		// metadata transaction prevent storage engine shutdown.
 		let _ = archive_node_for_shutdown(
@@ -1354,24 +1414,55 @@ impl Datastore {
 			self.delete_node_with_timeout(NODE_DELETE_TIMEOUT).await,
 		);
 		// Run any storage engine shutdown tasks
-		self.transaction_factory.builder.shutdown().await
+		self.transaction_factory.shutdown().await
+	}
+
+	/// Waits until the storage backend is able to serve transactions.
+	///
+	/// Startup awaits this before opening its first transaction. A backend that
+	/// can serve as soon as it is built returns immediately; one that has to
+	/// join a cluster and catch up first blocks here for as long as that takes,
+	/// which keeps a legitimately slow join from being charged against a
+	/// caller's retry budget. `Err` means the backend will never serve.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn wait_until_serve_ready(&self) -> Result<()> {
+		self.transaction_factory.wait_until_serve_ready().await
 	}
 
 	/// Drop every version of every key in the half-open range `[start, end)`
 	/// **outside** any user transaction.
 	///
-	/// Routes through the backend's [`TransactionBuilder::extension`] hook.
-	/// Backends other than TiKV treat this as a no-op. Callers are
-	/// responsible for ensuring the data is already logically inaccessible
-	/// (typically by running this only after a committed catalog-clearing
-	/// transaction).
-	pub async fn unsafe_destroy_range(&self, start: Vec<u8>, end: Vec<u8>) -> Result<()> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return ops.unsafe_destroy_range(start, end).await.map_err(Into::into);
-		}
-		let _ = (start, end);
-		Ok(())
+	/// Resolves the backend's [`DestroyRange`] capability through the
+	/// [`TransactionBuilder::extension`] hook and delegates to it. A backend
+	/// that does not offer the capability yields
+	/// [`crate::kvs::Error::RangeDestroyNotSupported`]: nothing was deleted, so
+	/// a caller holding a transactional fallback matches on that error and
+	/// takes it, and every other caller propagates rather than mistaking an
+	/// unperformed destroy for a completed one.
+	///
+	/// The destruction bypasses MVCC, so the caller owns two guarantees: the
+	/// data is already logically inaccessible (typically because a committed
+	/// transaction cleared the catalog entry naming it), and any snapshot that
+	/// could still read it has expired.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self), fields(rng = range.to_string()))]
+	pub async fn unsafe_destroy_range(&self, range: KeyRange<'static>) -> Result<()> {
+		let Some(ops) = self.destroy_range_ops() else {
+			return Err(crate::kvs::Error::RangeDestroyNotSupported.into());
+		};
+		ops.destroy_range(range).await.map_err(Into::into)
+	}
+
+	/// Resolve the backend's out-of-transaction range-destroy capability.
+	///
+	/// `None` means the backend cannot destroy a range outside a transaction —
+	/// either it has no such primitive, or its current configuration cannot use
+	/// the one it has. Resolved by capability rather than by backend name, so
+	/// callers stay free of per-backend `cfg` arms and a new capable backend
+	/// needs no change here.
+	fn destroy_range_ops(&self) -> Option<Arc<dyn DestroyRange>> {
+		let ext = self.transaction_factory.extension(TypeId::of::<DestroyRangeHandle>())?;
+		let handle = ext.downcast::<DestroyRangeHandle>().ok()?;
+		Some(Arc::clone(&handle.0))
 	}
 
 	/// Advance the MVCC garbage-collection safepoint by `lifetime`.
@@ -1380,7 +1471,7 @@ impl Datastore {
 	/// no-op on backends other than TiKV. Background tasks call this on
 	/// `EngineOptions::tikv_gc_interval` and shutdown runs one final
 	/// advisory pass.
-	pub async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
+	pub(crate) async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
 		#[cfg(feature = "kv-tikv")]
 		if let Some(ops) = self.tikv_ops() {
 			return ops.run_mvcc_gc(lifetime).await.map_err(Into::into);
@@ -1394,7 +1485,7 @@ impl Datastore {
 	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
 	/// no-op on backends other than TiKV. Background tasks call this on
 	/// `EngineOptions::tikv_lock_cleanup_interval`.
-	pub async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
+	pub(crate) async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
 		#[cfg(feature = "kv-tikv")]
 		if let Some(ops) = self.tikv_ops() {
 			return ops.run_lock_cleanup(lifetime).await.map_err(Into::into);
@@ -1416,12 +1507,11 @@ impl Datastore {
 	/// Resolve the TiKV operational extension handle, if the backend is
 	/// TiKV. Returns `None` for every other flavour.
 	#[cfg(feature = "kv-tikv")]
-	fn tikv_ops(&self) -> Option<Arc<super::tikv::TikvOpsHandle>> {
+	fn tikv_ops(&self) -> Option<Arc<surrealdb_kvs_any::tikv::TikvOpsHandle>> {
 		let ext = self
 			.transaction_factory
-			.builder
-			.extension(TypeId::of::<super::tikv::TikvOpsHandle>())?;
-		ext.downcast::<super::tikv::TikvOpsHandle>().ok()
+			.extension(TypeId::of::<surrealdb_kvs_any::tikv::TikvOpsHandle>())?;
+		ext.downcast::<surrealdb_kvs_any::tikv::TikvOpsHandle>().ok()
 	}
 
 	// --------------------------------------------------
@@ -1439,7 +1529,7 @@ impl Datastore {
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 		use crate::surrealism::cache::SurrealismCacheLookup;
 
-		let txn = match self.transaction(Read, Optimistic).await {
+		let txn = match self.transaction(Read).await {
 			Ok(txn) => Arc::new(txn),
 			Err(e) => {
 				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to open transaction");
@@ -1613,6 +1703,134 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Runs a startup precondition until it succeeds or its budget runs out,
+	/// retrying *every* failure rather than only a transaction conflict.
+	///
+	/// Almost every failure [`Self::get_version`] can report is the storage
+	/// layer declining to serve a transaction. On a distributed backend that is
+	/// what forming a cluster looks like from the outside — a replica refuses
+	/// writes while a view change is in flight — and it clears on its own once
+	/// formation settles. Those refusals are not distinguishable from each other
+	/// by class, which is why the loop retries by default rather than by
+	/// allow-list.
+	///
+	/// The exception is [`Self::is_permanent_bootstrap_failure`]: a marker whose
+	/// bytes this build cannot read is a property of the disk, and waiting on it
+	/// costs twice over — the caller waits out the whole budget, and the server,
+	/// whose own ceiling is shorter, then reports a timeout in place of the error
+	/// that would have named the problem.
+	///
+	/// The wait is bounded, and progress is reported on a fixed cadence rather
+	/// than per attempt, so a long formation is visible in the log without the
+	/// log growing with the retry rate.
+	///
+	/// The server wraps this in its own `SURREAL_STARTUP_OPERATION_TIMEOUT`
+	/// budget, which is the operator-facing ceiling and is shorter than
+	/// [`BOOTSTRAP_RETRY_BUDGET`] by default. This bound is what stops an
+	/// embedder, which has no such wrapper, from waiting forever.
+	/// Whether a bootstrap failure is a property of the bytes on disk rather
+	/// than of the storage layer's availability.
+	///
+	/// These name a datastore this build cannot read, and no amount of waiting
+	/// changes that. Matched by type rather than by rendered text, which is what
+	/// the server's equivalent has to fall back on across the crate boundary.
+	fn is_permanent_bootstrap_failure(err: &anyhow::Error) -> bool {
+		err.chain().any(|e| {
+			matches!(
+				e.downcast_ref::<DatastoreError>(),
+				Some(
+					DatastoreError::InvalidStorageVersion
+						| DatastoreError::OutdatedStorageVersion { .. }
+						| DatastoreError::MigratedBeyondStorageVersion { .. }
+				)
+			)
+		})
+	}
+
+	async fn retry_bootstrap<F, Fut, R>(task: &str, func: F) -> Result<R>
+	where
+		F: Fn() -> Fut,
+		Fut: Future<Output = Result<R>>,
+	{
+		let started = Instant::now();
+		let mut last_reported = started;
+		let mut attempt = 1u32;
+		// `None` after an attempt that never answered, which has no error to
+		// carry; the report below distinguishes the two.
+		let mut last_error = None;
+		loop {
+			let remaining = BOOTSTRAP_RETRY_BUDGET.saturating_sub(started.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			// Bound the attempt itself as well as the budget: a backend that
+			// accepts the transaction and then never answers would otherwise
+			// spend the whole budget on one attempt.
+			let attempt_timeout = BOOTSTRAP_RETRY_ATTEMPT_TIMEOUT.min(remaining);
+			match timeout(attempt_timeout, func()).await {
+				Ok(Ok(result)) => {
+					if attempt > 1 {
+						info!(
+							target: TARGET,
+							task, attempt, elapsed = ?started.elapsed(),
+							"Storage became available and the startup step completed."
+						);
+					}
+					return Ok(result);
+				}
+				Ok(Err(e)) if Self::is_permanent_bootstrap_failure(&e) => return Err(e),
+				Ok(Err(e)) => last_error = Some(e),
+				Err(_) => last_error = None,
+			}
+			// One line per interval, whatever the attempt rate, and the first
+			// failure always reports so a wait is never silent.
+			if attempt == 1 || last_reported.elapsed() >= BOOTSTRAP_RETRY_LOG_INTERVAL {
+				last_reported = Instant::now();
+				match &last_error {
+					Some(e) => info!(
+						target: TARGET,
+						task, attempt, elapsed = ?started.elapsed(),
+						budget = ?BOOTSTRAP_RETRY_BUDGET, error = %e,
+						"Storage is not ready for the startup step yet; still retrying."
+					),
+					None => info!(
+						target: TARGET,
+						task, attempt, elapsed = ?started.elapsed(),
+						budget = ?BOOTSTRAP_RETRY_BUDGET,
+						timeout = ?attempt_timeout,
+						"The startup step did not answer within its attempt timeout; still retrying."
+					),
+				}
+			}
+			let remaining = BOOTSTRAP_RETRY_BUDGET.saturating_sub(started.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			// Exponential back-off with jitter, so the nodes of a cluster that
+			// all restarted together do not retry in lockstep. The exponent is
+			// capped before it is applied, not after: `Duration`'s multiplication
+			// panics on overflow, so a doubling left to run free would abort the
+			// process rather than saturate at the ceiling below it.
+			let doublings = (attempt - 1).min(BOOTSTRAP_RETRY_MAX_DOUBLINGS);
+			let backoff = (BOOTSTRAP_RETRY_MIN_BACKOFF * 2u32.pow(doublings))
+				.min(BOOTSTRAP_RETRY_MAX_BACKOFF)
+				.mul_f64(rand::rng().random_range(0.5..=1.5))
+				.min(remaining);
+			sleep(backoff).await;
+			attempt = attempt.saturating_add(1);
+		}
+		match last_error {
+			Some(e) => Err(e).context(format!(
+				"{task} failed after {attempt} attempts over {:?}",
+				started.elapsed()
+			)),
+			None => bail!(EngineError::Internal(format!(
+				"{task} timed out after {attempt} attempts over {:?}",
+				started.elapsed()
+			))),
+		}
+	}
+
 	/// Retries an async operation until it succeeds or the global timeout elapses.
 	///
 	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
@@ -1650,8 +1868,14 @@ impl Datastore {
 				match result {
 					Ok(result) => return Ok(result),
 					Err(e) => {
-						// Only retry on transaction conflict errors
-						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+						// Only retry on transaction conflict errors. Both the
+						// bare `kvs::Error` and the `err::Error::Kvs`-wrapped
+						// shape occur here: every `Transaction` write goes
+						// through `.map_err(Error::from)`, and the operations
+						// this loop retries all reach the store that way, so a
+						// backend that surfaces a conflict at set/delete time
+						// rather than at commit produces the wrapped one.
+						if crate::kvs::is_retryable_transaction_conflict(&e) {
 							last_error = Some(e);
 						} else {
 							return Err(e);
@@ -1677,7 +1901,9 @@ impl Datastore {
 		} else {
 			error!(target: TARGET, "{task} - All {attempt} attempts failed.");
 		}
-		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
+		bail!(EngineError::Internal(format!(
+			"{task} failed after {attempt} attempts due to timeout"
+		)));
 	}
 
 	/// Registers this node's cluster membership entry with a fresh heartbeat.
@@ -1696,11 +1922,13 @@ impl Datastore {
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(self.id);
+		let txn = self.transaction(Write).await?;
+		let key = NodeKey {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.set(&key, &node).await)
+		run!(txn, txn.set_key(&key, &node).await)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -1714,20 +1942,20 @@ impl Datastore {
 	pub async fn update_node(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
-		// Refresh system usage metrics
-		crate::sys::refresh().await;
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(self.id);
+		let txn = self.transaction(Write).await?;
+		let key = NodeKey {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.replace(&key, &node).await)
+		run!(txn, txn.replace_key(&key, &node).await)
 	}
 
 	/// Updates this node, bounding each step and explicitly cancelling any
 	/// open write transaction before returning on timeout or cancellation.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
-	pub async fn update_node_with_timeout(
+	pub(crate) async fn update_node_with_timeout(
 		&self,
 		timeout_duration: Duration,
 		canceller: &CancellationToken,
@@ -1736,20 +1964,12 @@ impl Datastore {
 
 		let deadline = Instant::now() + timeout_duration;
 
-		await_node_step(deadline, timeout_duration, Some(canceller), async {
-			crate::sys::refresh().await;
-			Ok(())
-		})
-		.await?;
-
-		let txn = await_node_step(
-			deadline,
-			timeout_duration,
-			Some(canceller),
-			self.transaction(Write, Optimistic),
-		)
-		.await?;
-		let key = crate::key::root::nd::new(self.id);
+		let txn =
+			await_node_step(deadline, timeout_duration, Some(canceller), self.transaction(Write))
+				.await?;
+		let key = NodeKey {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
 
@@ -1758,7 +1978,7 @@ impl Datastore {
 			deadline,
 			timeout_duration,
 			Some(canceller),
-			txn.replace(&key, &node),
+			txn.replace_key(&key, &node),
 		)
 		.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, Some(canceller), txn.commit()).await
@@ -1776,11 +1996,20 @@ impl Datastore {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(self.id);
-		let val = catch!(txn, txn.get_node(self.id).await);
+		let txn = self.transaction(Write).await?;
+		let key = NodeKey {
+			nd: self.id,
+		};
+		let Some(val) = catch!(txn, txn.get_node(self.id).await) else {
+			// Nothing to archive: this node either never registered, or a peer's
+			// expiry scan has already reaped the row. Neither is a failure of
+			// this shutdown, and reporting one would put an error above whatever
+			// actually stopped the node.
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
 		let node = val.as_ref().archive();
-		run!(txn, txn.replace(&key, &node).await)
+		run!(txn, txn.replace_key(&key, &node).await)
 	}
 
 	/// Archives this node, bounding each step and explicitly cancelling any
@@ -1791,14 +2020,20 @@ impl Datastore {
 
 		let deadline = Instant::now() + timeout_duration;
 		let txn =
-			await_node_step(deadline, timeout_duration, None, self.transaction(Write, Optimistic))
-				.await?;
-		let key = crate::key::root::nd::new(self.id);
+			await_node_step(deadline, timeout_duration, None, self.transaction(Write)).await?;
+		let key = NodeKey {
+			nd: self.id,
+		};
 		let val = await_node_tx_step(&txn, deadline, timeout_duration, None, txn.get_node(self.id))
 			.await?;
+		let Some(val) = val else {
+			// Nothing to archive; see `delete_node`.
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
 		let node = val.as_ref().archive();
 
-		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace(&key, &node))
+		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace_key(&key, &node))
 			.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.commit()).await
 	}
@@ -1816,7 +2051,7 @@ impl Datastore {
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
 		// Fetch all of the inactive nodes
 		let inactive = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			let now = self.clock_now();
 			catch!(txn, txn.cancel().await);
@@ -1834,20 +2069,49 @@ impl Datastore {
 		// Check if there are inactive nodes
 		if !inactive.is_empty() {
 			// Open a writeable transaction
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
+			// Whether any candidate still qualified once re-read below.
+			let mut expired = false;
 			// Archive the inactive nodes
 			for nd in inactive.iter() {
-				// Log the live query scanning
-				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
-				// Mark the node as archived
-				let node = nd.archive();
 				// Get the key for the node entry
-				let key = crate::key::root::nd::new(nd.id);
+				let key = NodeKey {
+					nd: nd.id,
+				};
+				// The candidate set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id,
+				// with a fresh heartbeat — and archiving it here would retire a
+				// live member. The write is therefore conditional on the heartbeat
+				// the scan saw: a row whose heartbeat has moved has re-registered
+				// or refreshed itself, and is no longer the row that expired.
+				//
+				// That closes the window in both directions. A commit that landed
+				// before this transaction's snapshot is visible to this re-read,
+				// and one racing this transaction writes the same key, which the
+				// engine's write-conflict detection rejects.
+				let current = catch!(txn, txn.get_key(&key, None).await);
+				let Some(current) =
+					current.filter(|n| n.is_active() && n.heartbeat == nd.heartbeat)
+				else {
+					trace!(target: TARGET, id = %nd.id, "Skipping node that is no longer expired");
+					continue;
+				};
+				// Log the node archival
+				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+				// Mark the node as archived, carrying the re-read row forward so
+				// no field of the stale snapshot is written back
+				let node = current.archive();
 				// Update the node entry
-				catch!(txn, txn.replace(&key, &node).await);
+				catch!(txn, txn.replace_key(&key, &node).await);
+				expired = true;
 			}
-			// Commit the changes
-			catch!(txn, txn.commit().await);
+			// Commit the changes, or release the transaction when every candidate
+			// turned out to be live after all
+			match expired {
+				true => catch!(txn, txn.commit().await),
+				false => catch!(txn, txn.cancel().await),
+			}
 		}
 		// Everything was successful
 		Ok(())
@@ -1866,7 +2130,7 @@ impl Datastore {
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
 		// Fetch all of the archived nodes
 		let archived = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			catch!(txn, txn.cancel().await);
 			// Filter the archived nodes
@@ -1875,31 +2139,64 @@ impl Datastore {
 		// Loop over the archived nodes
 		for id in archived.iter() {
 			// Open a writeable transaction
-			let beg = crate::key::node::lq::prefix(*id)?;
-			let end = crate::key::node::lq::suffix(*id)?;
-			let mut next = Some(beg..end);
-			let txn = self.transaction(Write, Optimistic).await?;
+			let mut next = Some(
+				NodeLiveQueryPrefix {
+					nd: *id,
+				}
+				.range()?,
+			);
+			let txn = self.transaction(Write).await?;
+			{
+				// The archived set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id
+				// — and reaping it here would delete a live member along with the
+				// live queries it has already registered. Re-read the row in this
+				// transaction and only proceed while it is still archived.
+				let key = NodeKey {
+					nd: *id,
+				};
+				let node = catch!(txn, txn.get_key(&key, None).await);
+				if !node.is_some_and(|nd| nd.is_archived()) {
+					trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
+					catch!(txn, txn.cancel().await);
+					continue;
+				}
+			}
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
 				// Scan the live queries for this node
 				while let Some(rng) = next {
 					// Fetch the next batch of keys and values
-					let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
-					next = res.next;
+					let res = catch!(
+						txn,
+						txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await
+					);
+					// A full page carries a continuation: resume the range after
+					// the last key this page returned.
+					next = match (&res.next, res.result.last()) {
+						(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
+						_ => None,
+					};
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
 						let val: NodeLiveQuery = KVValue::kv_decode_value(v, ())?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k));
+						let nlq = catch!(txn, NodeLiveQueryKey::decode_key(k));
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
-							let tlq = crate::key::table::lq::new(val.ns, val.db, &val.tb, nlq.lq);
+							let tlq = SubscriptionKey {
+								ns: val.ns,
+								db: val.db,
+								tb: Cow::Borrowed(&val.tb),
+								lq: nlq.lq,
+							};
 							// Delete the table live query
-							catch!(txn, txn.clr(&tlq).await);
+							catch!(txn, txn.clr_key(&tlq).await);
 							// Delete the node live query
-							catch!(txn, txn.clr(&nlq).await);
+							catch!(txn, txn.clr_key(&nlq).await);
 						}
 					}
 					// Pause and yield execution
@@ -1910,9 +2207,11 @@ impl Datastore {
 				// Log the node deletion
 				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
 				// Get the key for the node entry
-				let key = crate::key::root::nd::new(*id);
+				let key = NodeKey {
+					nd: *id,
+				};
 				// Delete the cluster node entry
-				catch!(txn, txn.clr(&key).await);
+				catch!(txn, txn.clr_key(&key).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -1921,99 +2220,362 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Clean up all other miscellaneous data.
+	// ------------------------------
+	// Durable RPC session functions
+	// ------------------------------
+
+	/// Creates or replaces the durable copy of a client-attached RPC session,
+	/// expiring `ttl` from now (an unconditional upsert).
 	///
-	/// This function should be run periodically at an interval.
+	/// Session creation goes through [`create_rpc_session`](Self::create_rpc_session)
+	/// (insert-if-absent), local changes through
+	/// [`update_rpc_session`](Self::update_rpc_session) (update-if-present),
+	/// and cross-node reconciliation through
+	/// [`load_rpc_session`](Self::load_rpc_session), so none resurrects or
+	/// duplicates a session across nodes. This blind upsert is retained as a
+	/// primitive for callers that own the id exclusively (and for test setup).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn persist_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Persisting durable RPC session");
+		// Capture the durable form with a refreshed expiry
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = durable_session(session, expires_at);
+		// Open transaction and set the session data
+		let key = SessionKey {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		run!(txn, txn.set_key(&key, &value).await)
+	}
+
+	/// Creates the durable copy of a client-attached RPC session, but only if
+	/// one does not already exist. Returns `true` if it created the entry,
+	/// `false` if a session with this id already exists.
 	///
-	/// This function clears up all data which might have been missed from
-	/// previous cleanup runs, or when previous runs failed. This function
-	/// currently deletes all live queries, for nodes which no longer exist
-	/// in the cluster, from all namespaces, databases, and tables. It uses
-	/// a number of transactions in order to prevent failure of large or
-	/// long-running transactions on distributed storage engines.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn garbage_collect(&self) -> Result<()> {
-		// Log the node deletion
-		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
-		// Fetch archived nodes
-		let archived = {
-			let txn = self.transaction(Read, Optimistic).await?;
-			let nds = catch!(txn, txn.all_nodes().await);
-			txn.cancel().await?;
-			// Filter the archived nodes
-			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
+	/// Uses a conditional insert (`put_compare_key` with no expected value),
+	/// which is atomic even on last-writer-wins backends (TiKV) — a blind
+	/// `set` is not — so two concurrent `attach`es for the same id on
+	/// different nodes cannot both create it: one wins and the other is
+	/// reported as an existing session, letting `attach` return
+	/// `session_exists` instead of silently overwriting.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn create_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<bool> {
+		trace!(target: TARGET, id = %id, "Creating durable RPC session");
+		let key = SessionKey {
+			id,
 		};
-		// Fetch all namespaces
-		let nss = {
-			let txn = self.transaction(Read, Optimistic).await?;
-			let res = catch!(txn, txn.all_ns(None).await);
-			txn.cancel().await?;
-			res
-		};
-		// Loop over all namespaces
-		for ns in nss.iter() {
-			// Log the namespace
-			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
-			// Fetch all databases
-			let dbs = {
-				let txn = self.transaction(Read, Optimistic).await?;
-				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
-				txn.cancel().await?;
-				res
-			};
-			// Loop over all databases
-			for db in dbs.iter() {
-				// Log the namespace
-				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
-				// Fetch all tables
-				let tbs = {
-					let txn = self.transaction(Read, Optimistic).await?;
-					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
-					txn.cancel().await?;
-					res
-				};
-				// Loop over all tables
-				for tb in tbs.iter() {
-					// Log the namespace
-					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
-					// Iterate over the table live queries
-					let beg =
-						crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
-					let end =
-						crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
-					let mut next = Some(beg..end);
-					let txn = self.transaction(Write, Optimistic).await?;
-					while let Some(rng) = next {
-						// Fetch the next batch of keys and values
-						let max = NORMAL_BATCH_SIZE;
-						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
-						next = res.next;
-						for (k, v) in res.result.iter() {
-							// Decode the LIVE query statement
-							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v, ())?;
-							// Get the node id and the live query id
-							let (nid, lid) = (stm.node, stm.id);
-							// Check that the node for this query is archived
-							if archived.contains(&stm.node) {
-								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
-								// Get the key for this table live query
-								let nlq = crate::key::node::lq::new(nid, lid);
-								// Delete the node live query
-								catch!(txn, txn.clr(&nlq).await);
-								// Delete the table live query
-								catch!(txn, txn.clr(&tlq).await);
-							}
-						}
-						// Pause and yield execution
-						yield_now!();
-					}
-					// Commit the changes
-					catch!(txn, txn.commit().await);
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = durable_session(session, expires_at);
+		let txn = self.transaction(Write).await?;
+		// `put_compare_key(.., None)` writes only if the key is absent.
+		match txn.put_compare_key(&key, &value, None).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(true),
+				// Cancel after any failed commit (a conflict or otherwise), so
+				// the transaction is rolled back consistently with the `run!`
+				// macro; only the error classification differs.
+				Err(e) if super::is_conditional_write_conflict(&e) => {
+					let _ = txn.cancel().await;
+					Ok(false)
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				if super::is_conditional_write_conflict(&e) {
+					Ok(false)
+				} else {
+					Err(e)
 				}
 			}
 		}
-		// All ok
+	}
+
+	/// Refreshes the durable copy of an *existing* RPC session with the given
+	/// value, expiring `ttl` from now, **without recreating it** if it is gone.
+	///
+	/// Returns `true` if the entry was present and updated, `false` if it no
+	/// longer exists (or was changed on another node). Uses a conditional
+	/// write (`put_compare_key` guarded by the value just read), so it is
+	/// atomic on last-writer-wins backends (TiKV): a session deleted elsewhere
+	/// between the read and the write is neither resurrected nor clobbered — a
+	/// blind `set` would be last-writer-wins and could resurrect it. This is
+	/// the "push a local change to storage" path (a session-mutating method);
+	/// the authoritative *reload* path is
+	/// [`load_rpc_session`](Self::load_rpc_session).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn update_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<bool> {
+		trace!(target: TARGET, id = %id, "Updating durable RPC session");
+		let key = SessionKey {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		// Read the current stored value to use as the conditional-write guard.
+		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
+			let _ = txn.cancel().await;
+			return Ok(false);
+		};
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = durable_session(session, expires_at);
+		// Write only if the stored value is still the one we read, so a delete
+		// or change committed on another node in between wins (no resurrection,
+		// no clobber) instead of being overwritten by this blind write.
+		match txn.put_compare_key(&key, &value, Some(&current)).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(true),
+				// Cancel after any failed commit (a conflict or otherwise), so
+				// the transaction is rolled back consistently with the `run!`
+				// macro; only the error classification differs.
+				Err(e) if super::is_conditional_write_conflict(&e) => {
+					let _ = txn.cancel().await;
+					Ok(false)
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				if super::is_conditional_write_conflict(&e) {
+					Ok(false)
+				} else {
+					Err(e)
+				}
+			}
+		}
+	}
+
+	/// Loads the current durable copy of a client-attached RPC session — the
+	/// authoritative cross-node state — returning the restored session and its
+	/// absolute expiry (ms since the UNIX epoch), or `None` if it is gone or
+	/// expired.
+	///
+	/// This is a pure read plus lazy expiry: an entry past its `expires_at` is
+	/// deleted and reported as a miss, but a live entry is returned **without**
+	/// being rewritten. It never extends a session's life, so it is safe to
+	/// call before the caller is authorized — both when `get_session`
+	/// rehydrates an evicted session and when the transport reconciles a
+	/// cached session against storage before dispatch. The TTL is slid only
+	/// after authorization, by [`update_rpc_session`](Self::update_rpc_session).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, u64)>> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Loading durable RPC session");
+		let key = SessionKey {
+			id,
+		};
+		let now = self.clock_now().value;
+		// Pure read.
+		let durable = {
+			let txn = self.transaction(Read).await?;
+			let val = catch!(txn, txn.get_key(&key, None).await);
+			catch!(txn, txn.cancel().await);
+			val
+		};
+		let Some(durable) = durable else {
+			return Ok(None);
+		};
+		// Lazily delete an expired entry with a conditional delete guarded by
+		// the value we read, so a refresh committed on another node between the
+		// read and the delete is not clobbered (a blind `clr` is
+		// last-writer-wins on TiKV). On a condition conflict the entry changed
+		// — leave it and report a miss for this request; it rehydrates fresh on
+		// the next one.
+		if durable.expires_at <= now {
+			trace!(target: TARGET, id = %id, "Durable RPC session has expired");
+			let txn = self.transaction(Write).await?;
+			match txn.del_compare_key(&key, Some(&durable)).await {
+				Ok(()) => match txn.commit().await {
+					Ok(()) => {}
+					Err(e) if super::is_conditional_write_conflict(&e) => {
+						let _ = txn.cancel().await;
+					}
+					Err(e) => {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+				},
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if !super::is_conditional_write_conflict(&e) {
+						return Err(e);
+					}
+				}
+			}
+			return Ok(None);
+		}
+		// Restore the in-memory session without touching the durable copy,
+		// handing back the stored expiry so the caller can enforce the TTL.
+		let expires_at = durable.expires_at;
+		restore_session(durable).map(|session| Some((session, expires_at)))
+	}
+
+	/// Deletes the durable copy of a client-attached RPC session, when it is
+	/// still the value being torn down.
+	///
+	/// Run on detach/teardown so the session cannot be rehydrated. It reads the
+	/// current value and deletes only that (`del_compare_key`), rather than
+	/// clearing the key blindly: a blind `clr` is last-writer-wins on TiKV, so
+	/// a slow detach could otherwise delete a *newer* session that another node
+	/// re-attached under the same id after the old one was removed. An entry
+	/// already absent is a no-op.
+	///
+	/// A condition conflict — the stored value changed between the read and the
+	/// delete (a concurrent refresh/re-attach on another node) — is surfaced as
+	/// an **error**, not swallowed: the durable copy was *not* removed, so
+	/// reporting success would let [`RpcProtocol::forget_session`]/`detach`
+	/// claim the session was torn down while it remains rehydratable. The
+	/// caller (whose `del_session` removes the durable copy before local state)
+	/// then fails the teardown and can retry, keeping detach fail-closed. In
+	/// the supported single-node-per-session model such a conflict does not
+	/// arise (the owning node serializes the session's writes).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn delete_rpc_session(&self, id: Uuid) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Deleting durable RPC session");
+		let key = SessionKey {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		// Read the value we intend to remove; if it is already gone, done.
+		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
+		// Delete only if the stored value is still the one we read. A conflict
+		// (value changed concurrently) means the delete did not happen, so it
+		// is surfaced as an error rather than reported as a successful teardown.
+		match txn.del_compare_key(&key, Some(&current)).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(()),
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				Err(e)
+			}
+		}
+	}
+
+	/// Purges expired durable RPC sessions.
+	///
+	/// This function should be run periodically at a regular interval.
+	///
+	/// It uses a distributed task lease so only one node in the cluster
+	/// performs the purge per interval. Entries are scanned in batches, and
+	/// only entries whose expiry has passed are deleted; an entry that fails
+	/// to decode (for example one written by a newer node during a rolling
+	/// upgrade) is skipped, never deleted.
+	///
+	/// # Arguments
+	/// * `interval` - The interval between purge runs, to calculate the lease duration
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting expired RPC session purge");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::RpcSessionCleanup,
+			*interval * 2,
+		)?;
+		// If we don't get the lease, another node is handling this task
+		if !lh.has_lease().await? {
+			return Ok(());
+		}
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Purging expired RPC sessions");
+		let now = self.clock_now().value;
+		// Scan the durable session entries in batches under read transactions,
+		// deleting each expired entry in its own conditional-delete write
+		// transaction. The delete is guarded by the value read
+		// (`del_compare_key`), so a request that refreshed the session after
+		// the scan read the old expired value is not clobbered — a blind `clr`
+		// is last-writer-wins on TiKV. A per-entry transaction keeps one such
+		// conflict from aborting the whole purge.
+		let mut next = Some(SessionPrefix {}.range()?);
+		while let Some(rng) = next {
+			// Fetch the next batch of keys and values under a read transaction.
+			let batch = {
+				let txn = self.transaction(Read).await?;
+				let res =
+					catch!(txn, txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await);
+				catch!(txn, txn.cancel().await);
+				res
+			};
+			// A full page carries a continuation: resume the range after the last
+			// key this page returned.
+			next = match (&batch.next, batch.result.last()) {
+				(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
+				_ => None,
+			};
+			for (k, v) in batch.result.iter() {
+				// Decode the data for this session entry. Skip (but never
+				// delete) an entry we cannot decode: it may have been written
+				// by a newer node during a rolling upgrade.
+				let val: DurableSession = match KVValue::kv_decode_value(v, ()) {
+					Ok(val) => val,
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable durable RPC session entry: {e}");
+						continue;
+					}
+				};
+				// Only delete an expired entry, and only if it is still the
+				// value we read.
+				if val.expires_at <= now {
+					let key = SessionKey::decode_key(k)?;
+					trace!(target: TARGET, id = %key.id, "Purging expired RPC session");
+					let txn = self.transaction(Write).await?;
+					match txn.del_compare_key(&key, Some(&val)).await {
+						Ok(()) => match txn.commit().await {
+							Ok(()) => {}
+							// Refreshed concurrently at commit (TiKV): leave it.
+							Err(e) if super::is_conditional_write_conflict(&e) => {
+								let _ = txn.cancel().await;
+							}
+							Err(e) => {
+								let _ = txn.cancel().await;
+								return Err(e);
+							}
+						},
+						Err(e) => {
+							let _ = txn.cancel().await;
+							if !super::is_conditional_write_conflict(&e) {
+								return Err(e);
+							}
+						}
+					}
+				}
+			}
+			// Pause and yield execution
+			yield_now!();
+		}
+		// Everything was successful
 		Ok(())
 	}
 
@@ -2034,21 +2596,32 @@ impl Datastore {
 		// Log the node deletion
 		trace!(target: TARGET, "Deleting live queries for a connection");
 		// Fetch expired nodes
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		// Loop over the live query unique ids
 		for id in ids {
 			// Get the key for this node live query
-			let nlq = crate::key::node::lq::new(self.id(), id);
+			let nlq = NodeLiveQueryKey {
+				nd: self.id(),
+				lq: id,
+			};
 			// Fetch the LIVE meta data node entry
-			if let Some(lq) = catch!(txn, txn.get(&nlq, None).await) {
+			if let Some(lq) = catch!(txn, txn.get_key(&nlq, None).await) {
 				// Get the key for this node live query
-				let nlq = crate::key::node::lq::new(self.id(), id);
+				let nlq = NodeLiveQueryKey {
+					nd: self.id(),
+					lq: id,
+				};
 				// Get the key for this table live query
-				let tlq = crate::key::table::lq::new(lq.ns, lq.db, &lq.tb, id);
+				let tlq = SubscriptionKey {
+					ns: lq.ns,
+					db: lq.db,
+					tb: Cow::Borrowed(&lq.tb),
+					lq: id,
+				};
 				// Delete the table live query
-				catch!(txn, txn.clr(&tlq).await);
+				catch!(txn, txn.clr_key(&tlq).await);
 				// Delete the node live query
-				catch!(txn, txn.clr(&nlq).await);
+				catch!(txn, txn.clr_key(&nlq).await);
 			}
 		}
 		// Commit the changes
@@ -2076,7 +2649,48 @@ impl Datastore {
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn changefeed_process(&self, interval: &Duration) -> Result<()> {
+	pub async fn changefeed_process(
+		&self,
+		interval: &Duration,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		self.changefeed_process_bounded(interval, CHANGEFEED_GC_PASS_KEY_BUDGET, canceller).await
+	}
+
+	/// [`Self::changefeed_process`] with the per-pass key budget lowered, so a
+	/// test can drive a pass that stops mid-backlog and inspect what it left
+	/// behind.
+	#[cfg(test)]
+	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
+	pub(crate) async fn changefeed_gc_with_budget(
+		&self,
+		interval: &Duration,
+		budget: u64,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		self.changefeed_process_bounded(interval, budget, canceller).await
+	}
+
+	/// One changefeed-collection pass, deleting at most `budget` entries from
+	/// each keyspace it collects.
+	///
+	/// The changefeed backlog and, under the Router engine, the live-query event
+	/// backlog are both sized by write throughput rather than by the catalog, so
+	/// neither is deleted in one transaction: each is paged behind committed
+	/// transactions of at most one page (see [`crate::kvs::paging`]). A pass
+	/// therefore costs a bounded amount of work however far either backlog has
+	/// run ahead, and the next tick resumes at the head of what survives.
+	///
+	/// The two keyspaces share this pass's lease but hold separate budgets. The
+	/// same writes fill both, so a budget spanning them would let whichever is
+	/// collected first spend it whenever the write rate outran it, leaving the
+	/// other uncollected on every pass and growing on disk without limit.
+	async fn changefeed_process_bounded(
+		&self,
+		interval: &Duration,
+		budget: u64,
+		canceller: &CancellationToken,
+	) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting changefeed garbage collection");
 		// Create a new lease handler
@@ -2093,22 +2707,25 @@ impl Datastore {
 		}
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Create a new transaction
-		let txn = self.transaction(Write, Optimistic).await?;
-		// Perform the changefeed garbage collection
-		catch!(txn, crate::cf::gc_all_at(&lh, &txn).await);
+		// Entries this pass may delete from the changefeed keyspace, shared out
+		// across the databases it visits.
+		let mut cf_budget = budget;
+		// Perform the changefeed garbage collection. A pass that lost the lease
+		// ends this one: the live-query collector below shares the lease, and its
+		// own first check would be answered from the maintenance throttle by the
+		// very check that lost it — so it would delete alongside the new holder.
+		if !crate::cf::gc_all_at(self, &lh, canceller, &mut cf_budget).await? {
+			return Ok(());
+		}
 		// When the Router engine is active, also garbage-collect the dedicated
 		// live-query event keyspace, retaining entries for the configured window so
-		// reconnecting/lagging subscribers can still replay. This rides the same
-		// lease and transaction as the changefeed GC above.
-		if self.config.live_query_engine == LiveQueryEngine::Router {
-			catch!(
-				txn,
-				crate::lq::gc::gc_all_at(&lh, &txn, self.config.live_query_retention).await
-			);
+		// reconnecting/lagging subscribers can still replay. This shares the
+		// pass's lease with the changefeed GC above and spends its own budget.
+		if self.config.datastore.live_query_engine == LiveQueryEngine::Router {
+			let retention = self.config.datastore.live_query_retention;
+			let mut lq_budget = budget;
+			crate::lq::gc::gc_all_at(self, &lh, retention, canceller, &mut lq_budget).await?;
 		}
-		// Commit the changes
-		catch!(txn, txn.commit().await);
 		// Everything ok
 		Ok(())
 	}
@@ -2123,9 +2740,9 @@ impl Datastore {
 	/// Unlike changefeed GC this runs on every node without a lease: each node
 	/// delivers only to the subscriptions it owns.
 	#[instrument(level = "trace", target = "surrealdb::core::lq", skip(self))]
-	pub async fn live_query_router_process(&self) -> Result<()> {
+	pub(crate) async fn live_query_router_process(&self) -> Result<()> {
 		// Only the Router engine delivers via the router.
-		if self.config.live_query_engine != LiveQueryEngine::Router {
+		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
 			return Ok(());
 		}
 		crate::lq::router::process(self, &self.live_query_router).await
@@ -2135,9 +2752,9 @@ impl Datastore {
 	// Indexing functions
 	// --------------------------------------------------
 
-	fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
+	pub(crate) fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
 		if canceller.is_cancelled() {
-			bail!(Error::QueryCancelled);
+			bail!(EngineError::QueryCancelled);
 		}
 		Ok(())
 	}
@@ -2190,9 +2807,17 @@ impl Datastore {
 	/// stalled builds manually (with `REBUILD INDEX`) can disable the scan by
 	/// setting its interval to zero.
 	///
+	/// Recovery is serialized: a pass adopts at most one stalled build, and
+	/// no pass adopts anything while a local builder task is still running.
+	/// A restart with several stranded builds (for example multiple full-text
+	/// indexes on a small instance) therefore rebuilds them one at a time
+	/// instead of multiplying the node's memory and CPU footprint; every
+	/// stalled build is still recovered, one scan pass after the previous one
+	/// finishes. User-initiated `REBUILD INDEX` is not throttled by this.
+	///
 	/// Returns the number of stalled builds adopted this pass.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
-	pub async fn resume_stalled_index_builds(
+	pub(crate) async fn resume_stalled_index_builds(
 		&self,
 		interval: Duration,
 		canceller: CancellationToken,
@@ -2211,18 +2836,35 @@ impl Datastore {
 		if !lh.has_lease().await? {
 			return Ok(0);
 		}
+		// Serialize recovery: while any local builder task is still running
+		// (a previously adopted build or a user-started one), defer further
+		// adoptions to a later pass. Without this, a restart with several
+		// stranded builds starts them all at once, and the concurrent initial
+		// scans can overwhelm a small instance's memory and CPU.
+		if self.index_builder.has_unfinished_build().await {
+			trace!(
+				target: TARGET,
+				"Deferring stalled index build adoption; a local index build is still running"
+			);
+			return Ok(0);
+		}
 		// Snapshot the (ns, db, table, index) hierarchy in a short read
 		// transaction. Index definitions are cloned out so the per-index
 		// build-state checks below don't hold the catalog transaction open.
 		let mut candidates = Vec::new();
 		{
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let res: Result<()> = async {
 				for ns in txn.all_ns(None).await?.iter() {
 					for db in txn.all_db(ns.namespace_id, None).await?.iter() {
 						for tb in txn.all_tb(ns.namespace_id, db.database_id, None).await?.iter() {
 							for ix in txn
-								.all_tb_indexes(ns.namespace_id, db.database_id, &tb.name, None)
+								.all_tb_indexes(
+									ns.namespace_id,
+									db.database_id,
+									&tb.name.clone(),
+									None,
+								)
 								.await?
 								.iter()
 							{
@@ -2272,6 +2914,10 @@ impl Datastore {
 						"Resuming stalled index build '{}' on table '{}'",
 						ix.name, ix.table_name
 					);
+					// One adoption per pass: a later pass adopts the next
+					// stalled build once this one has finished, keeping
+					// recovery sequential on this node.
+					break;
 				}
 				Ok(false) => {}
 				Err(e) => {
@@ -2286,6 +2932,32 @@ impl Datastore {
 		Ok(resumed)
 	}
 
+	/// Drains the index-compaction queue (`/!ic` keys) in bounded batches.
+	///
+	/// Each iteration scans at most [`INDEX_COMPACTION_QUEUE_BATCH_SIZE`]
+	/// queue keys, compacts every distinct index they reference, and then
+	/// deletes exactly those keys in one write transaction, so no single
+	/// transaction's key cardinality exceeds the batch size regardless of how
+	/// many entries have accumulated. Entries enqueued after a batch's scan
+	/// are untouched by its cleanup and are picked up by a later iteration
+	/// (or a later invocation), so a queue entry is only ever removed after
+	/// its index has been compacted at-or-after the entry was written.
+	///
+	/// Batches rotate across indexes: each batch's scan resumes past the last
+	/// index the previous batch covered and wraps at the end of the queue
+	/// range, so every index with pending entries is visited once per
+	/// rotation regardless of relative enqueue and drain rates — an index
+	/// sustaining a full batch of new entries per iteration still cannot pin
+	/// the scan to itself (a start-anchored or key-successor scan only stays
+	/// fair while the drain outpaces the enqueue).
+	///
+	/// Under sustained enqueue the drain keeps running — every iteration
+	/// stays bounded — and stops when the queue empties, the lease is lost,
+	/// or the task is cancelled.
+	///
+	/// Coordinated across the cluster by a [`TaskLeaseType::IndexCompaction`]
+	/// lease. Returns the number of processed batches and the number of
+	/// indexes that failed to compact.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,
@@ -2305,6 +2977,16 @@ impl Datastore {
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
+		// The queue range and a rotating window within it. After each batch
+		// the window resumes past the last index that batch covered, so
+		// indexes later in the keyspace are reached even while an
+		// earlier-sorting index keeps enqueueing new entries (queue keys
+		// sort by ns/db/tb/ix before their time-ordered UUID, so a hot
+		// index would otherwise pin a start-anchored scan to itself). When
+		// the scan reaches the end of the range it wraps to the start, and
+		// a wrap that finds nothing means the queue is drained.
+		let queue = IndexCompactionPrefix {}.range()?;
+		let mut window = queue.clone();
 		// We continue without interruptions while there are keys and the lease
 		'compaction: loop {
 			Self::ensure_not_cancelled(&canceller)?;
@@ -2316,41 +2998,88 @@ impl Datastore {
 			Self::ensure_not_cancelled(&canceller)?;
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
-			// Read the compaction queue in a short-lived read transaction
-			// to avoid holding a write lock across the entire compaction cycle
-			let (beg, end) = IndexCompactionKey::range();
-			let range = beg..end;
-			let items = {
-				let txn = dbs.transaction(Read, Optimistic).await?;
-				let res = txn.getr(range, None).await;
+			// Read one bounded batch of queue keys in a short-lived read
+			// transaction. The queue holds one entry per indexed record
+			// write since it last drained, so an unbounded snapshot would
+			// make the cleanup transaction below arbitrarily large — every
+			// key it deletes is a per-replica write reservation on
+			// distributed backends. Queue values carry no payload, so a
+			// keys-only scan suffices.
+			let keys = {
+				let txn = dbs.transaction(Read).await?;
+				let res =
+					txn.keys(window.clone(), INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
 			Self::ensure_not_cancelled(&canceller)?;
-			if items.is_empty() {
-				return Ok((count_iteration, count_error));
+			if keys.is_empty() {
+				if window.start() == queue.start() {
+					// Nothing left anywhere in the queue.
+					return Ok((count_iteration, count_error));
+				}
+				// End of the range: wrap to re-scan entries that were
+				// skipped when the window seeked past a partially-drained
+				// index.
+				window = queue.clone();
+				continue;
 			}
-			// Collect the keys so we can delete them after processing
-			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
-			// Process compaction for each index
+			// Compact each distinct index referenced by this batch before
+			// deleting the batch's queue entries: an entry may only be
+			// removed once its index has been compacted at-or-after the
+			// entry was enqueued.
 			count_iteration += 1;
 			count_error +=
-				Self::index_compaction_loop(Arc::clone(&dbs), &lh, items, canceller.clone())
+				Self::index_compaction_loop(Arc::clone(&dbs), &lh, &keys, canceller.clone())
 					.await?;
-			// Delete the processed queue entries in a separate write
-			// transaction. This avoids conflicts with concurrent user
-			// transactions that may enqueue new compaction requests.
-			// Failed indexes are not re-enqueued here; the next user
-			// write to the affected index will naturally trigger a new
-			// compaction request.
+			// Seek the next batch past the last index this batch covered.
+			// Entries of that index beyond this batch are picked up again
+			// after the window wraps, so a continuously-refilling index
+			// cannot starve later-sorting ones. A key that fails to decode
+			// cannot name an index to seek past: fall back to resuming
+			// immediately after the key itself, so the scan still advances and
+			// the cleanup below still removes the undecodable entry (it
+			// references no valid index, so deleting it cannot violate the
+			// compact-before-delete invariant).
+			if let Some(last_key) = keys.last() {
+				window = match IndexCompactionKey::decode_key(last_key) {
+					Ok(last) => {
+						// The first key ordering after the whole index's run of
+						// queue entries.
+						let covered = IndexCompactionIxPrefix {
+							ns: last.ns,
+							db: last.db,
+							tb: Cow::Owned(last.tb.into_owned()),
+							ix: last.ix,
+						}
+						.skip_extensions()?;
+						queue.clone().resume_after(&covered, Direction::Forward)
+					}
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+						queue.clone().resume_after(last_key, Direction::Forward)
+					}
+				};
+			}
+			// Delete this batch's queue entries in a separate write
+			// transaction, bounded by the batch size. This avoids conflicts
+			// with concurrent user transactions that may enqueue new
+			// compaction requests. Failed indexes are not re-enqueued here;
+			// the next user write to the affected index will naturally
+			// trigger a new compaction request.
 			loop {
-				let txn = dbs.transaction(Write, Optimistic).await?;
+				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
+				// Deleted as bytes rather than through the decoded key, because
+				// the batch deliberately includes entries that do not decode. An
+				// undecodable entry names no index, so it can never be compacted
+				// and a typed delete could never address it; leaving it would
+				// park it at the head of the queue forever.
 				for k in &keys {
-					if let Err(e) = txn.del(k).await {
+					if let Err(e) = txn.del(Key::from(k)).await {
 						warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
 					}
 				}
@@ -2404,17 +3133,33 @@ impl Datastore {
 	/// returns immediately and never trips a request/transaction timeout.
 	///
 	/// Coordinated across the cluster by a [`TaskLeaseType::ReclaimTombstones`]
-	/// lease so only one node reclaims at a time. The queue is read in a
-	/// short-lived read transaction; each prefix is destroyed independently
-	/// (idempotently — re-running on an already-empty prefix is a no-op) and the
-	/// processed queue entry is then deleted in a separate write transaction, so
-	/// a crash mid-reclaim simply retries on the next pass.
+	/// lease so only one node reclaims at a time. The queue is walked in batches
+	/// of at most [`RECLAIM_BATCH_SIZE`] entries, each read in a short-lived
+	/// read transaction and each retired or stamped in one write transaction of
+	/// its own, so neither the pass's snapshot nor its queue update grows with
+	/// the number of pending removals. Each prefix is then destroyed
+	/// independently and idempotently — in one out-of-transaction call on a
+	/// backend offering [`DestroyRange`], otherwise in bounded pages, each
+	/// committed together with the resume cursor that accounts for it. A queue
+	/// entry is retired only once its prefix is empty, so a crash or an
+	/// exhausted budget mid-reclaim resumes from the committed cursor on a later
+	/// pass instead of restarting the prefix.
+	///
+	/// One pass deletes at most [`RECLAIM_PASS_KEY_BUDGET`] data keys in total,
+	/// so a prefix larger than that is finished over several ticks rather than
+	/// monopolising the schedule this task shares. That budget is divided among
+	/// the entries a batch still has to visit, floored at one page each: an
+	/// entry naming an oversized prefix takes a page and yields to the next
+	/// instead of spending the whole pass on itself, so each of the first
+	/// `RECLAIM_PASS_KEY_BUDGET / RECLAIM_BATCH_SIZE` entries that still hold
+	/// data makes progress on every pass.
 	///
 	/// Snapshot safety: a queued removal is only reclaimed once it has been
 	/// *observed* by this task for at least `grace`. The reclaim task destroys
-	/// data out-of-band — on TiKV via `unsafe_destroy_range`, which bypasses
-	/// MVCC — so a read transaction whose snapshot predates the `REMOVE` must be
-	/// given time to finish first. On first sight the task stamps the entry's
+	/// data out-of-band, and on a backend offering out-of-transaction range
+	/// destruction that destruction bypasses MVCC, so a read transaction whose
+	/// snapshot predates the `REMOVE` must be given time to finish first. On
+	/// first sight the task stamps the entry's
 	/// [`ReclaimState::observed_ms`]; aging is measured from there, not from the
 	/// key's `uid` (a UUIDv7 stamped while the `REMOVE` statement runs, which can
 	/// be arbitrarily earlier than the commit inside a long `BEGIN`/`COMMIT`
@@ -2434,7 +3179,61 @@ impl Datastore {
 		grace: Duration,
 		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
+		Self::reclaim_tombstones_bounded(dbs, interval, grace, RECLAIM_PASS_KEY_BUDGET, canceller)
+			.await
+	}
+
+	/// [`Self::reclaim_tombstones`] with the per-pass key budget lowered, so a
+	/// test can drive a pass that stops mid-prefix and inspect what it left
+	/// behind.
+	#[cfg(test)]
+	#[cfg_attr(
+		not(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv")),
+		allow(dead_code)
+	)]
+	pub(crate) async fn reclaim_tombstones_with_budget(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		grace: Duration,
+		budget: u64,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
+		Self::reclaim_tombstones_bounded(dbs, interval, grace, budget, canceller).await
+	}
+
+	/// One reclaim pass, deleting at most `budget` data keys in total.
+	///
+	/// The pass walks the whole queue and spends its key budget on part of it,
+	/// which are two different bounds and are enforced separately.
+	///
+	/// The walk is unconditional. Stamping an entry's first sighting and ageing it
+	/// against the grace costs at most one write per entry, so that work scales
+	/// with the number of pending removals — catalog scale — and not with the data
+	/// they name. Gating it on the key budget would leave an entry beyond the
+	/// budget's reach unstamped, and an unstamped entry has `observed_ms == 0`, so
+	/// its grace has not started and it is not yet even a candidate for reclaim.
+	/// The queue is walked in bounded batches, each batch's stamps committed in one
+	/// transaction, so the walk's memory and write batches stay proportional to one
+	/// batch however long the queue is.
+	///
+	/// The key budget is then spent on the [`RECLAIM_PASS_ENTRY_QUOTA`]
+	/// longest-observed eligible entries, selected while walking so only that many
+	/// are ever held. Oldest-first rather than queue order: key order makes the
+	/// entries that happen to sort lowest the only ones ever served while they hold
+	/// data, whereas the wait an operator cares about is how long a removal has
+	/// gone unreclaimed. Spreading the budget across every eligible entry instead
+	/// would shrink each share towards one key as the queue grows.
+	async fn reclaim_tombstones_bounded(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		grace: Duration,
+		budget: u64,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
 		trace!(target: TARGET, "Attempting tombstone reclaim process");
+		// Data keys this pass may still delete, shared out across the entries it
+		// serves. Spent to zero ends the spend with every cursor committed.
+		let mut budget = budget;
 		// Coordinate across the cluster so only one node reclaims at a time.
 		let lh = LeaseHandler::new_with_canceller(
 			dbs.sequences.clone(),
@@ -2446,27 +3245,46 @@ impl Datastore {
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
-		// Continue without interruptions while there are entries and the lease.
+		// The queue range and a window within it, advanced past each batch the
+		// walk reads. Reading the queue in bounded batches is what keeps both the
+		// snapshot the pass holds and the write transaction that updates it
+		// proportional to one batch rather than to the number of pending removals.
+		let queue = ReclaimPrefix {}.range()?;
+		let mut window = queue.clone();
+		// The longest-observed eligible entries seen so far, at most
+		// `RECLAIM_PASS_ENTRY_QUOTA` of them. A max-heap ordered oldest-first, so
+		// the entry discarded when the quota is exceeded is the newest held.
+		let mut candidates: BinaryHeap<ReclaimCandidate> = BinaryHeap::new();
+		// Whether the walk finished holding the lease. Losing it mid-walk ends the
+		// pass: the deletes below would otherwise run against a prefix the node
+		// that holds the lease now is already working on.
+		let mut lease_held = true;
+		// Walk the queue: stamp, age, and select. No deletes, so no budget.
 		loop {
 			Self::ensure_not_cancelled(&canceller)?;
 			// If we don't hold the lease, another node is handling this task.
 			if !lh.has_lease().await? {
-				return Ok((count_iteration, count_error));
+				lease_held = false;
+				break;
 			}
 			Self::ensure_not_cancelled(&canceller)?;
-			// Read the reclaim queue in a short-lived read transaction to avoid
-			// holding a write lock across the entire reclaim cycle.
-			let (beg, end) = ReclaimKey::range();
+			// Read one bounded batch of queue entries in a short-lived read
+			// transaction, to avoid holding a write lock across the entire
+			// reclaim cycle. Values are read as bytes so that an entry this node
+			// cannot decode is skipped with a warning rather than failing the
+			// whole pass.
 			let items = {
-				let txn = dbs.transaction(Read, Optimistic).await?;
-				let res = txn.getr(beg..end, None).await;
+				let txn = dbs.transaction(Read).await?;
+				let res = txn.scan_raw(window.clone(), RECLAIM_BATCH_SIZE, 0, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
 			Self::ensure_not_cancelled(&canceller)?;
-			if items.is_empty() {
-				return Ok((count_iteration, count_error));
-			}
+			let Some((last, _)) = items.last().cloned() else {
+				// The window has run off the end of the queue: everything queued
+				// has been walked.
+				break;
+			};
 			count_iteration += 1;
 			// Current wall-clock time (unix millis), used to age each entry
 			// against `grace` and to stamp first observations.
@@ -2475,158 +3293,537 @@ impl Datastore {
 				.map(|d| d.as_millis() as u64)
 				.unwrap_or(0);
 			let grace_ms = grace.as_millis() as u64;
-			// `done`: entries reclaimed this pass (to delete from the queue).
-			// `to_stamp`: entries seen for the first time (to record an
-			// observation time so aging is measured from commit, not the
-			// pre-commit `uid`). Entries seen but still inside the grace window
-			// are left untouched for a later pass.
-			let mut done: Vec<Key> = Vec::with_capacity(items.len());
-			let mut to_stamp: Vec<Key> = Vec::new();
-			for (k, v) in &items {
+			// Queue states to initialise or repair. The raw value read with each
+			// one is the compare-and-set guard, so a concurrent cursor advance or
+			// cancellation cannot be overwritten by this batch.
+			let mut to_stamp: Vec<(Vec<u8>, Vec<u8>, ReclaimState)> = Vec::new();
+			for (k, v) in items.iter() {
 				Self::ensure_not_cancelled(&canceller)?;
-				lh.try_maintain_lease().await?;
-				let rc = match ReclaimKey::decode_key(k) {
-					Ok(rc) => rc,
-					Err(e) => {
-						count_error += 1;
-						warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
-						continue;
-					}
-				};
-				// Zero grace: reclaim immediately without the observe-then-age
-				// dance (tests / harness teardown — no concurrent readers).
-				if grace.is_zero() {
-					match dbs.reclaim_decoded(&rc).await {
-						Ok(()) => done.push(k.clone()),
-						Err(e) => {
-							count_error += 1;
-							warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
-						}
-					}
+				if let Err(e) = ReclaimKey::decode_key(k) {
+					count_error += 1;
+					warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
 					continue;
 				}
+				// The state carries both the observation stamp the grace is
+				// measured from and the resume cursor a partly-reclaimed prefix
+				// continues at, so it is read before either is consulted.
+				// A value this node cannot read still names a prefix whose catalog
+				// entry is committed-removed, so the entry is restarted rather than
+				// skipped: skipping it strands data that nothing else can reach,
+				// because the queue entry is the only remaining name for it.
+				// Restarting is safe in both fields — treating the entry as never
+				// observed keeps the grace gate conservative, and discarding an
+				// unreadable cursor only re-scans pages that may already be empty,
+				// which a delete tolerates.
 				let state = match ReclaimState::kv_decode_value(v, ()) {
 					Ok(s) => s,
 					Err(e) => {
 						count_error += 1;
-						warn!(target: TARGET, "Failed to decode reclaim queue state: {e}");
+						warn!(
+							target: TARGET,
+							"Restarting a reclaim queue entry whose state could not be read: {e}",
+						);
+						// Repair the unreadable state conditionally before attempting
+						// the reclaim. A typed cursor CAS cannot use unreadable bytes as
+						// its expected value, and a blind repair could resurrect a claim
+						// concurrently cancelled on another node.
+						let repaired = ReclaimState {
+							observed_ms: if grace.is_zero() {
+								0
+							} else {
+								now_ms
+							},
+							cursor: None,
+						};
+						to_stamp.push((k.clone(), v.clone(), repaired.clone()));
+						// Zero-grace callers may reclaim immediately after the
+						// conditional repair commits. If that repair loses a race, the
+						// page's own CAS sees that `repaired` is not current and stops.
+						if grace.is_zero() {
+							candidates.push(ReclaimCandidate {
+								observed_ms: repaired.observed_ms,
+								key: k.clone(),
+								state: repaired,
+							});
+							if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+								candidates.pop();
+							}
+						}
 						continue;
 					}
 				};
-				if state.observed_ms == 0 {
-					// First sighting of this committed entry — record an
-					// observation time (>= commit) and defer reclaim. Aging is
-					// measured from here, never from the pre-commit `uid`.
-					to_stamp.push(k.clone());
-					continue;
-				}
-				// Snapshot-safety gate: only destroy data once it has been
-				// observed for at least `grace`, by which point any transaction
-				// that could still read it is behind the MVCC GC safepoint.
-				if now_ms.saturating_sub(state.observed_ms) >= grace_ms {
-					match dbs.reclaim_decoded(&rc).await {
-						Ok(()) => done.push(k.clone()),
-						Err(e) => {
-							count_error += 1;
-							warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
-						}
+				// A zero grace reclaims immediately, skipping the
+				// observe-then-age dance (tests / harness teardown — no
+				// concurrent readers).
+				if !grace.is_zero() {
+					if state.observed_ms == 0 {
+						// First sighting of this committed entry — record an
+						// observation time (>= commit) and defer reclaim. Aging
+						// is measured from here, never from the pre-commit
+						// `uid`. Not a candidate this pass: its grace starts now.
+						to_stamp.push((
+							k.clone(),
+							v.clone(),
+							ReclaimState {
+								observed_ms: now_ms,
+								cursor: state.cursor.clone(),
+							},
+						));
+						continue;
+					}
+					// Snapshot-safety gate: only destroy data once it has been
+					// observed for at least `grace`, by which point any
+					// transaction that could still read it is behind the MVCC
+					// GC safepoint.
+					if now_ms.saturating_sub(state.observed_ms) < grace_ms {
+						continue;
 					}
 				}
+				candidates.push(ReclaimCandidate {
+					observed_ms: state.observed_ms,
+					key: k.clone(),
+					state,
+				});
+				if candidates.len() > RECLAIM_BATCH_SIZE as usize {
+					// The newest held entry gives up its place: it has waited
+					// least, so it loses to every other candidate. Held up to one
+					// batch rather than up to the share divisor, because an entry
+					// whose reclaim spends nothing — an already-empty prefix, or a
+					// backend that drops the range in one call — costs no budget,
+					// and the spend below walks through as many of those as it
+					// finds. Capping the set at the divisor would stop that at the
+					// divisor and throttle the backends where reclaim is cheapest.
+					// One batch of candidates is the memory the pass already holds
+					// for one batch of scanned entries.
+					candidates.pop();
+				}
 			}
-			// Persist queue changes in a single write transaction: stamp
-			// newly-observed entries and delete reclaimed ones. Done separately
-			// from the read scan so we don't conflict with concurrent enqueues.
-			if !done.is_empty() || !to_stamp.is_empty() {
-				let txn = dbs.transaction(Write, Optimistic).await?;
+			// Persist this batch's stamps in one write transaction, bounded by the
+			// batch as the paged data delete is bounded by the page. Done
+			// separately from the read scan so we don't conflict with concurrent
+			// enqueues.
+			if !to_stamp.is_empty() {
+				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
-				for k in &to_stamp {
-					if let Ok(rc) = ReclaimKey::decode_key(k) {
-						let state = ReclaimState {
-							observed_ms: now_ms,
-						};
-						if let Err(e) = txn.set(&rc, &state).await {
+				let mut condition_failed = false;
+				for (k, expected, state) in &to_stamp {
+					let value = match state.kv_encode_value() {
+						Ok(value) => value,
+						Err(e) => {
+							let _ = txn.cancel().await;
+							return Err(e);
+						}
+					};
+					match txn.put_compare(Key::from(k.clone()), value, Some(expected.clone())).await
+					{
+						Ok(()) => {}
+						Err(e) if super::is_conditional_write_conflict(&e) => {
+							condition_failed = true;
+							break;
+						}
+						Err(e) => {
 							warn!(target: TARGET, "Failed to stamp reclaim queue entry: {e}");
 						}
 					}
 				}
-				for k in &done {
-					if let Err(e) = txn.del(k).await {
+				if condition_failed {
+					let _ = txn.cancel().await;
+				} else {
+					// A stamp that does not land leaves the entry unobserved, so the
+					// next pass starts its grace instead. Counted rather than silent:
+					// an uncounted failure here reports as a healthy pass while the
+					// entry's clock never starts.
+					if let Err(e) = txn.commit().await {
+						let _ = txn.cancel().await;
+						if !super::is_conditional_write_conflict(&e) {
+							count_error += 1;
+							warn!(target: TARGET, "Failed to commit reclaim queue stamps: {e}");
+							return Ok((count_iteration, count_error));
+						}
+					}
+				}
+			}
+			// Seek past the batch just walked; the window advancing is also what
+			// terminates the walk, at the end of the queue.
+			window = queue.clone().resume_after(&last, Direction::Forward);
+		}
+		if !lease_held {
+			return Ok((count_iteration, count_error));
+		}
+		// Spend the key budget on the selected entries, longest-observed first.
+		// `into_sorted_vec` is ascending in the candidate order, which is the
+		// oldest observation first and the queue's key order between entries
+		// observed in the same millisecond.
+		let selected = candidates.into_sorted_vec();
+		// Entries whose prefix this pass emptied, to delete from the queue. An
+		// entry the pass only partly emptied is left queued for a later pass.
+		let mut done: Vec<Vec<u8>> = Vec::with_capacity(selected.len());
+		// How many of the selected entries are still to spend from the budget, so
+		// each takes its slice of what is left rather than all of it.
+		let mut remaining = selected.len() as u64;
+		for candidate in selected {
+			Self::ensure_not_cancelled(&canceller)?;
+			// Stop at the entry the lease was lost on. The queue update below
+			// still commits what this pass emptied, and whichever node holds
+			// the lease now continues from the durable cursors. The answer has
+			// to be read rather than discarded: a lease check is throttled to
+			// one datastore read per maintenance period, so a call that drops
+			// it consumes the read the page loop's own check depends on and
+			// leaves that check answering affirmatively without asking.
+			if !lh.try_maintain_lease().await? {
+				break;
+			}
+			let ReclaimCandidate {
+				key,
+				state,
+				..
+			} = candidate;
+			// Decoded during the walk that selected it, so this cannot fail; a
+			// failure is still counted rather than panicking on it.
+			let rc = match ReclaimKey::decode_key(&key) {
+				Ok(rc) => rc,
+				Err(e) => {
+					count_error += 1;
+					warn!(target: TARGET, "Failed to decode reclaim queue entry: {e}");
+					remaining = remaining.saturating_sub(1);
+					continue;
+				}
+			};
+			// Keys this entry may delete before the pass moves on: its share of
+			// what the budget has left, across the entries still to spend from
+			// it, capped at the budget so the tail of a pass hands out only what
+			// remains. An entry naming a prefix larger than its share therefore
+			// cannot take the whole budget and leave its siblings untouched.
+			// Floored at one key rather than one page: a share below a page
+			// still deletes, since the page size caps a transaction rather than
+			// setting a minimum.
+			// The divisor is the entries still to spend, capped at the quota: a
+			// pass holding a batch of candidates would otherwise cut every share
+			// to a thousandth of the budget, so no entry would delete a useful
+			// amount. Capped, each served entry gets about a page and the pass
+			// stops when the budget runs out — which is what makes the
+			// oldest-first order above decide who is served.
+			let divisor = remaining.min(RECLAIM_PASS_ENTRY_QUOTA as u64);
+			let share = (budget / divisor.max(1)).max(1).min(budget);
+			remaining = remaining.saturating_sub(1);
+			let mut left = share;
+			// Whether the lease passed to another node mid-entry. Recorded
+			// rather than broken on directly, so the budget below is charged
+			// for the pages this entry did commit before the pass ends.
+			let mut lease_lost = false;
+			match dbs.reclaim_decoded(&rc, &state, &lh, &canceller, &mut left).await {
+				// The prefix is empty, so the entry has nothing left to
+				// name and can be retired.
+				Ok(ReclaimOutcome::Complete) => done.push(key),
+				// Progress is durable but keys remain: leaving the entry
+				// queued is what lets a later pass resume it.
+				Ok(ReclaimOutcome::Incomplete) => {}
+				// The entry is already gone, so it must not be added to
+				// `done`: that would delete whatever a concurrent writer
+				// put at the same key.
+				Ok(ReclaimOutcome::Cancelled) => {}
+				// Whichever node holds the lease now resumes from the
+				// cursors this pass committed.
+				Ok(ReclaimOutcome::LeaseLost) => lease_lost = true,
+				// Shutdown. Not a failure of this entry, so it is neither
+				// counted nor logged; the queue update below refuses to
+				// commit and the pass ends there.
+				Err(e)
+					if matches!(
+						crate::err::engine_error(&e),
+						Some(EngineError::QueryCancelled)
+					) =>
+				{
+					break;
+				}
+				Err(e) => {
+					count_error += 1;
+					warn!(target: TARGET, "Tombstone reclaim failed for a queue entry: {e}");
+				}
+			}
+			// Charge what the entry deleted, not what it was offered.
+			budget = budget.saturating_sub(share.saturating_sub(left));
+			if lease_lost {
+				// The queue update below still commits what this pass
+				// emptied; the node holding the lease now takes the rest.
+				break;
+			}
+			if budget == 0 {
+				// The pass has spent its key budget. Every cursor it
+				// advanced is committed, so the next tick continues from
+				// there rather than repeating this work.
+				break;
+			}
+		}
+		// Retire the entries this pass emptied, in one write transaction bounded
+		// by the entry quota.
+		if !done.is_empty() {
+			let txn = dbs.transaction(Write).await?;
+			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+			// Retire only the value currently stored. This prevents a stale
+			// completion from deleting a state advanced by another node, and
+			// makes a concurrent cancellation win cleanly on TiKV.
+			let mut condition_failed = false;
+			for k in &done {
+				let current = match txn.get(Key::from(k), None).await {
+					Ok(Some(current)) => current,
+					Ok(None) => continue,
+					Err(e) => {
+						warn!(target: TARGET, "Failed to read reclaim queue entry: {e}");
+						continue;
+					}
+				};
+				match txn.del_compare(Key::from(k), Some(&current)).await {
+					Ok(()) => {}
+					Err(e) if super::is_conditional_write_conflict(&e) => {
+						condition_failed = true;
+						break;
+					}
+					Err(e) => {
 						warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
 					}
 				}
-				if let Err(e) = txn.commit().await {
-					let _ = txn.cancel().await;
-					warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
-					return Ok((count_iteration, count_error));
-				}
 			}
-			// If this pass reclaimed nothing, the remaining entries are still
-			// inside their grace window (or were just stamped, or are
-			// persistently failing) — stop now and let the next timer tick retry
-			// once they have aged, rather than busy-looping.
-			if done.is_empty() {
+			if condition_failed {
+				let _ = txn.cancel().await;
 				return Ok((count_iteration, count_error));
 			}
-		}
-	}
-
-	/// Destroy the data prefix of a decoded reclaim queue entry.
-	async fn reclaim_decoded(&self, rc: &ReclaimKey<'_>) -> Result<()> {
-		let expunge = rc.expunge != 0;
-		match rc.kind {
-			RECLAIM_NAMESPACE => {
-				let prefix = crate::key::namespace::all::new(rc.ns);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			RECLAIM_DATABASE => {
-				let prefix = crate::key::database::all::new(rc.ns, rc.db);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			RECLAIM_INDEX => {
-				let prefix = crate::key::index::all::new(rc.ns, rc.db, rc.tb.as_ref(), rc.ix);
-				self.reclaim_prefix(&prefix, expunge).await
-			}
-			other => {
-				warn!(target: TARGET, "Unknown reclaim queue entry kind {other}, skipping");
-				Ok(())
-			}
-		}
-	}
-
-	/// Destroy a key prefix out-of-band: `unsafe_destroy_range` on TiKV, a
-	/// transactional prefix delete on every other backend. Idempotent — a
-	/// re-run on an already-empty prefix is a no-op.
-	async fn reclaim_prefix<K>(&self, prefix: &K, expunge: bool) -> Result<()>
-	where
-		K: crate::kvs::KVKey + std::fmt::Debug,
-	{
-		#[cfg(feature = "kv-tikv")]
-		if self.tikv_ops().is_some() {
-			// `unsafe_destroy_range` hard-removes every version in the range
-			// in a single out-of-transaction call, so it ignores `expunge`
-			// (the catalog entry is already gone — there is nothing to retain).
-			let range = crate::kvs::util::to_prefix_range(prefix)?;
-			return self.unsafe_destroy_range(range.start, range.end).await;
-		}
-		// Non-TiKV backends: delete the prefix transactionally. This runs off
-		// the user request path, so even a large prefix delete here cannot trip
-		// a client deadline.
-		let txn = self.transaction(Write, Optimistic).await?;
-		let res = if expunge {
-			txn.clrp(prefix).await
-		} else {
-			txn.delp(prefix).await
-		};
-		match res {
-			Ok(()) => txn.commit().await,
-			Err(e) => {
+			// A pass whose queue update does not land has reclaimed data
+			// without recording that it did, so it is counted: an uncounted
+			// failure here reports as a healthy pass and leaves nothing for an
+			// operator to see but the next tick repeating the same work.
+			if let Err(e) = txn.commit().await {
 				let _ = txn.cancel().await;
-				Err(e)
+				if !super::is_conditional_write_conflict(&e) {
+					count_error += 1;
+					warn!(target: TARGET, "Failed to commit reclaim queue update: {e}");
+				}
 			}
 		}
+		Ok((count_iteration, count_error))
+	}
+
+	/// Whether the table a queue entry names still has a consumer of the
+	/// shared doc-ID space: a doc-ID index, or the `graph_doc_ids` marker a
+	/// numeric graph fold records (its blocks resolve through the space). A
+	/// table with no definition has no consumer — its whole keyspace is
+	/// reclaimed separately.
+	async fn tb_has_doc_id_consumer(&self, rc: &ReclaimKey<'_>) -> Result<bool> {
+		let txn = self.transaction(Read).await?;
+		let res = async {
+			let Some(tb) = txn.get_tb(rc.ns, rc.db, rc.tb.as_ref(), None).await? else {
+				return Ok(false);
+			};
+			if tb.graph_doc_ids {
+				return Ok(true);
+			}
+			let ixs = txn.all_tb_indexes(rc.ns, rc.db, rc.tb.as_ref(), None).await?;
+			Ok(ixs.iter().any(|ix| ix.uses_shared_doc_ids()))
+		}
+		.await;
+		let _ = txn.cancel().await;
+		res
+	}
+
+	/// Destroy the data prefix a decoded reclaim queue entry names.
+	///
+	/// Resolves the entry's kind to the byte range beneath it and hands that
+	/// range to [`Self::reclaim_range`]. All of these kinds name a subtree holding
+	/// keys of more than one type, so the range is resolved as bytes.
+	async fn reclaim_decoded(
+		&self,
+		rc: &ReclaimKey<'_>,
+		state: &ReclaimState,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		budget: &mut u64,
+	) -> Result<ReclaimOutcome> {
+		let prefix = match rc.kind {
+			ReclaimKind::Namespace => NsRoot {
+				ns: rc.ns,
+			}
+			.raw_range()?,
+			ReclaimKind::Database => DbRoot {
+				ns: rc.ns,
+				db: rc.db,
+			}
+			.raw_range()?,
+			ReclaimKind::Index => IdxRoot {
+				ns: rc.ns,
+				db: rc.db,
+				tb: Cow::Borrowed(rc.tb.as_ref()),
+				ix: rc.ix,
+			}
+			.raw_range()?,
+			// The bands of a table's shared doc-ID space, each its own entry so
+			// each carries its own resume cursor. `rc.ix` is unused for these:
+			// the space belongs to the table, not to any one index.
+			//
+			// The space is only orphaned while the table has no doc-ID consumer.
+			// A consumer present here means one was defined after the entry was
+			// queued without cancelling it — a node too old to know these kinds,
+			// or too old to know the `graph_doc_ids` marker, is the case that
+			// matters — so the reclaim obligation has lapsed and the entry is
+			// retired with whatever the space still holds left in place.
+			// Deleting from it would strip mappings the live consumer resolves
+			// its entries through.
+			//
+			// The consumer check is resolved once, ahead of the prefix arms
+			// below, because it opens a read transaction and scans the table's
+			// index list.
+			// Matched through the same predicate that keeps these kinds off the
+			// out-of-transaction destroy, so the two cannot disagree about which
+			// kinds hold a revocable claim.
+			kind if kind.is_doc_id() && self.tb_has_doc_id_consumer(rc).await? => {
+				// A cursor means this entry had already deleted part of the
+				// space, so what the consumer adopted is torn: a `!di` mapping
+				// whose `!dd` twin is gone resolves to no record. Nothing here
+				// can repair it — the keys are already deleted, and the reaper
+				// must not delete further from a space a live index is reading —
+				// so the tear is reported for an operator to rebuild the table's
+				// doc-ID indexes.
+				if state.cursor.is_some() {
+					warn!(
+						target: TARGET,
+						"A doc-ID index was defined over a partly-reclaimed doc-ID space \
+						 ({}:{}:{}): the space is torn and the table's doc-ID indexes \
+						 need rebuilding",
+						rc.ns,
+						rc.db,
+						rc.tb.as_ref(),
+					);
+				}
+				return Ok(ReclaimOutcome::Complete);
+			}
+			ReclaimKind::DocKey => {
+				DocKeyPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
+			}
+			ReclaimKind::DocLookup => {
+				DocLookupPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
+			}
+			ReclaimKind::DocLookupIdentity => {
+				DocLookupIdentityPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref()))
+					.raw_range()?
+			}
+			ReclaimKind::DocPending => {
+				DocPendingPrefix::new(rc.ns, rc.db, Cow::Borrowed(rc.tb.as_ref())).raw_range()?
+			}
+		};
+		self.reclaim_range(rc, state, prefix, lh, canceller, budget).await
+	}
+
+	/// Destroy every key beneath `prefix`, resuming from the queue entry's
+	/// committed cursor and stopping once `budget` keys have gone.
+	///
+	/// `budget` is this entry's allowance out of the pass's, and is decremented by
+	/// what the entry actually deletes. Returning [`ReclaimOutcome::Incomplete`]
+	/// with it spent leaves a durable cursor for the next turn this entry gets.
+	///
+	/// A backend offering [`DestroyRange`] empties the whole prefix in one
+	/// out-of-transaction call, and the pass is complete. Every other backend
+	/// pages the delete: each round opens one write transaction, scans a bounded
+	/// page of keys, deletes exactly those keys, writes the resume cursor, and
+	/// commits. Memory is therefore O(page) whatever the prefix's cardinality.
+	///
+	/// The cursor and the page of deletions it accounts for commit in the same
+	/// transaction, so every key at or before the cursor is durably gone and
+	/// progress is monotonic: a restart, a lost lease or an exhausted budget
+	/// resumes at the cursor instead of rescanning the prefix. Resuming is also
+	/// what keeps each scan off the delete tombstones the retired pages left
+	/// behind. [`ReclaimState::observed_ms`] is carried through every cursor
+	/// write unchanged — the grace gate measures from the first observation, and
+	/// restamping here would let a prefix too large for one pass reset its own
+	/// grace and never age past it.
+	///
+	/// Giving up single-transaction atomicity is sound because the catalog entry
+	/// naming this prefix is already committed-removed: a partly-destroyed
+	/// prefix is unreachable garbage, not partial state any reader can observe.
+	///
+	/// Idempotent: a re-run on an already-empty prefix scans one empty page and
+	/// reports [`ReclaimOutcome::Complete`].
+	async fn reclaim_range(
+		&self,
+		rc: &ReclaimKey<'_>,
+		state: &ReclaimState,
+		prefix: RawRange,
+		lh: &LeaseHandler,
+		canceller: &CancellationToken,
+		budget: &mut u64,
+	) -> Result<ReclaimOutcome> {
+		// A backend that can drop the range outside a transaction destroys
+		// every version in it in one call, so it needs neither pages nor a
+		// cursor and ignores `expunge` — the catalog entry is already gone, so
+		// there is nothing to retain. A failure here is propagated rather than
+		// retried through the paged path: the entry stays queued and the next
+		// pass tries again, so a transient storage failure is never mistaken
+		// for an absent capability.
+		//
+		// Not taken for a table's shared doc-ID prefixes, whose claim is
+		// revocable: `DEFINE INDEX` cancels the reclaim to keep the mappings the
+		// space still holds. An out-of-transaction destroy neither joins that
+		// transaction's conflict domain nor re-reads the claim, so it would go on
+		// to delete mappings the new index has already adopted, leaving entries
+		// pointing at doc-IDs that resolve to no record. The paged path re-reads
+		// the claim inside every page's transaction, which is what lets the
+		// cancellation stop it; its cursor is also what tells the next
+		// `DEFINE INDEX` that the space was left torn.
+		if !rc.kind.is_doc_id()
+			&& let Some(ops) = self.destroy_range_ops()
+		{
+			trace!(
+				target: TARGET,
+				mechanism = ops.mechanism(),
+				"Destroying a reclaimed prefix out-of-transaction",
+			);
+			ops.destroy_range(prefix.into_key_range()).await?;
+			return Ok(ReclaimOutcome::Complete);
+		}
+		// Resume past the last key whose deletion is durable, but only where the
+		// cursor names a key this prefix covers. A cursor at or past the prefix's
+		// end would leave an empty window, which the delete cannot tell from a
+		// drained prefix: it would report the entry complete, retire the only
+		// remaining name for the data, and strand whatever the prefix still holds.
+		// Restarting from the head instead re-scans pages that may already be
+		// empty, which a delete tolerates.
+		let resumable = state
+			.cursor
+			.as_deref()
+			.is_some_and(|c| c >= prefix.start().as_slice() && c < prefix.end().as_slice());
+		let window = match &state.cursor {
+			Some(cursor) if resumable => prefix.resume_after(cursor, Direction::Forward),
+			Some(_) => {
+				warn!(
+					target: TARGET,
+					"Restarting a reclaim from the head of its prefix: the resume cursor \
+					 names a key outside it",
+				);
+				prefix
+			}
+			None => prefix,
+		};
+		let outcome = PagedDelete {
+			window,
+			companion: PageCompanion::ReclaimEntry {
+				rc,
+				state: state.clone(),
+			},
+			expunge: rc.expunge == Expunge::Expunge,
+			page: RECLAIM_BATCH_SIZE,
+		}
+		.run(self, lh, canceller, budget)
+		.await?;
+		Ok(match outcome {
+			PagedOutcome::Complete => ReclaimOutcome::Complete,
+			PagedOutcome::Incomplete => ReclaimOutcome::Incomplete,
+			PagedOutcome::Cancelled => ReclaimOutcome::Cancelled,
+			PagedOutcome::LeaseLost => ReclaimOutcome::LeaseLost,
+		})
 	}
 
 	#[cfg(not(target_family = "wasm"))]
@@ -2639,7 +3836,10 @@ impl Datastore {
 			Ok(Ok(())) => {}
 			Ok(Err(e))
 				if canceller.is_cancelled()
-					&& matches!(e.downcast_ref::<Error>(), Some(Error::QueryCancelled)) => {}
+					&& matches!(
+						crate::err::engine_error(&e),
+						Some(EngineError::QueryCancelled)
+					) => {}
 			Ok(Err(e)) => {
 				warn!("Index compaction {ikb} fails while awaiting cancellation: {e}");
 			}
@@ -2659,8 +3859,289 @@ impl Datastore {
 		}
 	}
 
-	/// Compacts each distinct index found in the queue items.
+	/// Compacts each distinct index referenced by the given queue keys.
 	///
+	/// Folds queued graph adjacency scopes into packed blocks.
+	///
+	/// Modeled on [`Self::index_compaction`]: leased so one node drains the
+	/// queue at a time, a rotating window so a hot table cannot starve
+	/// later-sorting ones, bounded read batches, and queue cleanup in
+	/// separate bounded write transactions. Before the leased drain, this
+	/// node's read-path observations are flushed into the durable queue —
+	/// they are held in memory because a read cannot write a queue entry.
+	///
+	/// The pass runs regardless of `graph_fold_threshold`: a zero threshold
+	/// disables new read-path observations (fold initiation), never debt
+	/// repayment — edge deletes on already-folded tables keep writing
+	/// tombstones and queueing durable triggers whatever the threshold, and
+	/// leaving those queued would grow the queue and the per-read tombstone
+	/// subtraction without bound.
+	pub async fn graph_fold(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
+		trace!(target: TARGET, "Attempting graph fold process");
+		Self::flush_graph_fold_observations(&dbs).await?;
+		let lh = LeaseHandler::new_with_canceller(
+			dbs.sequences.clone(),
+			dbs.id,
+			dbs.transaction_factory.clone(),
+			TaskLeaseType::GraphFold,
+			interval * 2,
+			canceller.clone(),
+		)?;
+		let batch = dbs.config.idx.graph_fold_batch;
+		let mut count_iteration = 0;
+		let mut count_error = 0;
+		let queue = GraphFoldPrefix {}.range()?;
+		let mut window = queue.clone();
+		// Whether the sweep since the last window wrap deleted a queue entry
+		// or folded a scope. A wrap-around re-scan retries entries retained
+		// by failed folds; without progress between two wraps every remaining
+		// entry has just failed again, so the call yields to the next
+		// interval instead of hot-looping on a poison scope.
+		let mut progressed = false;
+		'fold: loop {
+			Self::ensure_not_cancelled(&canceller)?;
+			// Without the lease, another node is draining the queue.
+			if !lh.has_lease().await? {
+				break 'fold;
+			}
+			Self::ensure_not_cancelled(&canceller)?;
+			trace!(target: TARGET, "Running graph fold process");
+			// One bounded, keys-only batch of queue entries per iteration,
+			// in a short-lived read transaction.
+			let keys = {
+				let txn = dbs.transaction(Read).await?;
+				let res =
+					txn.keys(window.clone(), INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			Self::ensure_not_cancelled(&canceller)?;
+			if keys.is_empty() {
+				if window.start() == queue.start() || !progressed {
+					// Nothing left anywhere in the queue, or everything left
+					// belongs to scopes that failed this sweep.
+					break 'fold;
+				}
+				// End of the range: wrap to re-scan entries skipped when the
+				// window seeked past a partially-drained scope, or retained
+				// when a scope's fold failed.
+				progressed = false;
+				window = queue.clone();
+				continue;
+			}
+			count_iteration += 1;
+			// The distinct scopes this batch names, in queue order, and each
+			// entry's scope for the cleanup below. Entries that fail to
+			// decode name nothing foldable; the cleanup removes them.
+			let mut scopes: Vec<GraphFoldScope> = Vec::new();
+			let mut seen: HashSet<GraphFoldScope> = HashSet::new();
+			let mut key_scopes: Vec<Option<GraphFoldScope>> = Vec::with_capacity(keys.len());
+			for key in &keys {
+				match GraphFoldKey::decode_key(key) {
+					Ok(key) => {
+						let scope = GraphFoldScope {
+							ns: key.ns,
+							db: key.db,
+							tb: key.tb.into_owned(),
+							id: key.id.into_owned(),
+							dir: key.dir,
+						};
+						if seen.insert(scope.clone()) {
+							scopes.push(scope.clone());
+						}
+						key_scopes.push(Some(scope));
+					}
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable graph fold queue entry: {e}");
+						key_scopes.push(None);
+					}
+				}
+			}
+			// The scopes whose drain completed; only their queue entries are
+			// deleted below. A failed scope keeps its entries, so its fold
+			// debt survives for the wrap-around re-scan and later calls.
+			let mut folded: HashSet<GraphFoldScope> = HashSet::with_capacity(scopes.len());
+			for scope in scopes {
+				match Self::fold_queued_scope(&dbs, &scope, batch, &canceller).await {
+					Ok(()) => {
+						folded.insert(scope);
+					}
+					Err(e) => {
+						if canceller.is_cancelled() {
+							return Err(e);
+						}
+						count_error += 1;
+						warn!(target: TARGET, "Graph fold failed for a queued scope: {e}");
+					}
+				}
+			}
+			// Seek the next batch past the last scope's run of queue entries,
+			// so a scope that keeps re-enqueueing cannot pin the window.
+			if let Some(last_key) = keys.last() {
+				window = match GraphFoldKey::decode_key(last_key) {
+					Ok(last) => {
+						let covered = GraphFoldDirPrefix {
+							ns: last.ns,
+							db: last.db,
+							tb: Cow::Owned(last.tb.into_owned()),
+							id: Cow::Owned(last.id.into_owned()),
+							dir: last.dir,
+						}
+						.skip_extensions()?;
+						queue.clone().resume_after(&covered, Direction::Forward)
+					}
+					Err(_) => queue.clone().resume_after(last_key, Direction::Forward),
+				};
+			}
+			// Delete this batch's consumed queue entries in a separate bounded
+			// write transaction: entries whose scope folded, and undecodable
+			// entries — which can never be folded — deleted as bytes so they
+			// do not park at the head of the queue forever.
+			let deletable: Vec<&Vec<u8>> = keys
+				.iter()
+				.zip(&key_scopes)
+				.filter(|(_, scope)| scope.as_ref().is_none_or(|s| folded.contains(s)))
+				.map(|(k, _)| k)
+				.collect();
+			if deletable.is_empty() {
+				continue;
+			}
+			progressed = true;
+			loop {
+				let txn = dbs.transaction(Write).await?;
+				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+				for k in &deletable {
+					if let Err(e) = txn.del(Key::from(k.as_slice())).await {
+						warn!(target: TARGET, "Failed to delete graph fold queue entry: {e}");
+					}
+				}
+				if let Err(e) = txn.commit().await {
+					if Self::cancel_and_retry_index_operation_conflict(
+						&txn,
+						&e,
+						"Retryable conflict committing graph fold queue cleanup, retrying",
+					)
+					.await
+					{
+						continue;
+					}
+					warn!(target: TARGET, "Failed to commit graph fold queue cleanup: {e}");
+					break 'fold;
+				}
+				break;
+			}
+		}
+		Ok((count_iteration, count_error))
+	}
+
+	/// Writes this node's read-path fold observations into the durable
+	/// queue: blind puts of per-observation keys, so nothing contends.
+	async fn flush_graph_fold_observations(dbs: &Arc<Datastore>) -> Result<()> {
+		let observations = dbs.triggers.drain_graph_fold_observations();
+		if observations.is_empty() {
+			return Ok(());
+		}
+		let txn = dbs.transaction(Write).await?;
+		for scope in &observations {
+			let key = GraphFoldKey {
+				ns: scope.ns,
+				db: scope.db,
+				tb: Cow::Borrowed(&scope.tb),
+				id: Cow::Borrowed(&scope.id),
+				dir: scope.dir,
+				nid: dbs.id,
+				uid: Uuid::now_v7(),
+			};
+			if let Err(e) = txn.put_key(&key, &()).await {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+		}
+		txn.commit().await
+	}
+
+	/// Drains one queued scope: bounded fold passes, each in its own
+	/// transaction, retrying a bounded number of times when a concurrent
+	/// edge write conflicts with a pass.
+	async fn fold_queued_scope(
+		dbs: &Arc<Datastore>,
+		scope: &GraphFoldScope,
+		batch: usize,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		// The catalog write that marks the vertex table folded addresses the
+		// namespace and database by name. A namespace or database dropped
+		// since the entry was queued leaves nothing to fold.
+		let (ns_name, db_name) = {
+			let txn = dbs.transaction(Read).await?;
+			let ns = txn
+				.all_ns(None)
+				.await?
+				.iter()
+				.find(|n| n.namespace_id == scope.ns)
+				.map(|n| n.name.to_string());
+			let db = txn
+				.all_db(scope.ns, None)
+				.await?
+				.iter()
+				.find(|d| d.database_id == scope.db)
+				.map(|d| d.name.to_string());
+			let _ = txn.cancel().await;
+			match (ns, db) {
+				(Some(ns), Some(db)) => (ns, db),
+				_ => return Ok(()),
+			}
+		};
+		let vertex = crate::val::RecordId::new(scope.tb.clone(), scope.id.clone());
+		let mut retries = 0;
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let txn = Arc::new(dbs.transaction(Write).await?);
+			// The environment the fold's doc-ID assignment reads: the
+			// production `IndexEnv` is the query context, built the same way
+			// the index-compaction processors build theirs.
+			let mut env = dbs.setup_ctx()?;
+			env.set_transaction(Arc::clone(&txn));
+			let env = env.freeze();
+			let outcome = match crate::idx::adjacency::fold_scope(
+				&env, scope.ns, scope.db, &ns_name, &db_name, &vertex, scope.dir, batch,
+			)
+			.await
+			{
+				Ok(outcome) => outcome,
+				Err(e) => {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+			};
+			match txn.commit().await {
+				Ok(()) => {
+					retries = 0;
+					if !outcome.has_more {
+						return Ok(());
+					}
+				}
+				Err(e) => {
+					// A concurrent RELATE or DELETE on the scope beat this
+					// pass; take a fresh snapshot and try again, bounded so a
+					// write-hot vertex cannot spin the task.
+					if surrealdb_datastore::is_retryable_transaction_conflict(&e) && retries < 5 {
+						retries += 1;
+						continue;
+					}
+					return Err(e);
+				}
+			}
+		}
+	}
+
 	/// On native targets, compaction tasks are spawned in parallel — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
@@ -2671,14 +4152,23 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Key, Val)>,
+		keys: &[Vec<u8>],
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut compacted_indexes = HashMap::new();
-		for (k, _) in items {
+		for k in keys {
 			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
-			let ic = IndexCompactionKey::decode_key(&k)?;
+			// An undecodable entry names no index to compact; skip it here
+			// and let the batch cleanup delete it, so one corrupt key cannot
+			// wedge every future compaction cycle.
+			let ic = match IndexCompactionKey::decode_key(k) {
+				Ok(ic) => ic,
+				Err(e) => {
+					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+					continue;
+				}
+			};
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
 			if let Entry::Vacant(e) = compacted_indexes.entry(ikb) {
 				e.insert(());
@@ -2704,7 +4194,7 @@ impl Datastore {
 				_ = canceller.cancelled() => {
 					Self::await_index_compaction_handle(&ikb, &mut jh, &canceller).await;
 					Self::await_index_compaction_handles(&mut handles, &canceller).await;
-					bail!(Error::QueryCancelled);
+					bail!(EngineError::QueryCancelled);
 				}
 				res = &mut jh => res?,
 			};
@@ -2720,7 +4210,7 @@ impl Datastore {
 		Ok(error_count)
 	}
 
-	/// Compacts each distinct index found in the queue items.
+	/// Compacts each distinct index referenced by the given queue keys.
 	///
 	/// On wasm, `tokio::spawn` is unavailable so compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
@@ -2733,15 +4223,24 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Key, Val)>,
+		keys: &[Vec<u8>],
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut seen = HashSet::new();
 		let mut error_count = 0;
-		for (k, _) in items {
+		for k in keys {
 			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
-			let ic = IndexCompactionKey::decode_key(&k)?;
+			// An undecodable entry names no index to compact; skip it here
+			// and let the batch cleanup delete it, so one corrupt key cannot
+			// wedge every future compaction cycle.
+			let ic = match IndexCompactionKey::decode_key(k) {
+				Ok(ic) => ic,
+				Err(e) => {
+					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+					continue;
+				}
+			};
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
 			if !seen.insert(ikb.clone()) {
 				continue;
@@ -2772,35 +4271,82 @@ impl Datastore {
 		canceller: CancellationToken,
 	) -> Result<()> {
 		Self::ensure_not_cancelled(&canceller)?;
-		let ix = {
-			let txn = self.transaction(Read, Optimistic).await?;
-			let res =
-				txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await;
+		// The catalog definition and the index's durable build state, read
+		// together so the ownership decision below costs no extra transaction.
+		let (ix, build_owner_live) = {
+			let txn = self.transaction(Read).await?;
+			let res = async {
+				let ix = txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?;
+				let live = build_owner_is_live(&txn, ikb).await?;
+				Ok::<_, anyhow::Error>((ix, live))
+			}
+			.await;
 			let _ = txn.cancel().await;
 			res?
 		};
 		Self::ensure_not_cancelled(&canceller)?;
 		match ix {
-			Some(ix) if !ix.prepare_remove => match &ix.index {
-				Index::FullText(p) => {
-					self.process_fulltext_compaction(ikb, p, &canceller).await?;
+			Some(ix) if !ix.prepare_remove => {
+				// A vector index whose build is still in flight is left to that
+				// build's own drain, because only the drain knows which on-disk
+				// layout to compact into. A `REBUILD INDEX` that migrates
+				// `format_version` holds the new definition in its uncommitted
+				// statement transaction, so the catalog read above still reports the
+				// retired one. Compacting from here would fold the pendings into the
+				// retired layout and leave the published index without them; and
+				// because the process-local vector-index wrapper is keyed without the
+				// format version, the two compactors would also evict each other's
+				// graph on every access.
+				//
+				// Durable state is the whole test, on every node including the one
+				// running the build. It is committed before the builder is
+				// registered locally and held until the statement that publishes
+				// the definition closes its transaction, so it already covers every
+				// window in which this catalog read can be stale. A process-local
+				// check would only add the tail between that release and the
+				// builder task's exit, where the build has finished publishing and
+				// skipping would discard the request that release just queued.
+				//
+				// The queue entry that led here is dropped with the rest of its
+				// batch, and for these two kinds that loses nothing: their builders
+				// drain the index's pendings before returning, so the entry is
+				// already redundant. Full-text and count builders have no such drain,
+				// which is why the test is scoped to the kinds that do rather than
+				// applied to every index — dropping one of their requests would leave
+				// deltas uncompacted until the next write to the index.
+				let drains_own_pendings = match &ix.index {
+					Index::Hnsw(_) => true,
+					#[cfg(diskann)]
+					Index::DiskAnn(_) => true,
+					_ => false,
+				};
+				if drains_own_pendings && build_owner_live {
+					trace!(target: TARGET, "Index compaction: Index {ikb:?} is being built, leaving it to its builder");
+					return Ok(());
 				}
-				Index::Count(_) => {
-					self.process_count_compaction(ikb, &canceller).await?;
+				match &ix.index {
+					Index::FullText(p) => {
+						self.process_fulltext_compaction(ikb, p, &canceller).await?;
+					}
+					Index::Count(_) => {
+						self.process_count_compaction(ikb, &canceller).await?;
+					}
+					Index::Hnsw(_) => {
+						// HNSW compaction owns its pending-key allocation and pending-range
+						// drain semantics separately from full-text/count compaction.
+						self.process_hnsw_compaction(ikb, ix.format_version, &canceller).await?;
+					}
+					#[cfg(diskann)]
+					Index::DiskAnn(_) => {
+						self.process_diskann_compaction(ikb, &canceller).await?;
+					}
+					_ => {
+						trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+					}
 				}
-				Index::Hnsw(_) => {
-					// HNSW compaction owns its pending-key allocation and pending-range
-					// drain semantics separately from full-text/count compaction.
-					self.process_hnsw_compaction(ikb, &canceller).await?;
-				}
-				#[cfg(diskann)]
-				Index::DiskAnn(_) => {
-					self.process_diskann_compaction(ikb, &canceller).await?;
-				}
-				_ => {
-					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
-				}
-			},
+			}
 			_ => {
 				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
 			}
@@ -2808,21 +4354,54 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Discards the process-local HNSW wrapper and element caches for one index
+	/// after a compaction write that reached the graph and did not commit.
+	///
+	/// Neither half of that state can be validated against the store. The
+	/// element caches carry no version at all. A graph layer carries one, but
+	/// it is a counter each writer advances in its own copy as it applies, so
+	/// two writers applying the same batch from the same version reach the same
+	/// one: the rolled-back topology is then indistinguishable to a state check
+	/// from the topology the winning commit stored, and a later apply would
+	/// write node changes derived from it over the winner's nodes. An apply
+	/// that failed part-way is worse still — it can mutate a layer before
+	/// reaching the `save_nodes` that advances the version at all.
+	///
+	/// The next access rebuilds the wrapper and reloads every layer from
+	/// persisted state, which is the cost this pays. A write that stopped at
+	/// the compaction guards never reached the graph and must not come here.
+	async fn discard_hnsw_index(
+		&self,
+		tb: crate::catalog::TableId,
+		ikb: &IndexKeyBase,
+		format_version: u16,
+	) {
+		if let Err(e) = self.index_stores.remove_hnsw_index(tb, ikb.clone(), format_version).await {
+			warn!(target: TARGET, "Failed to evict HNSW index after an uncommitted compaction write: {e}");
+		}
+	}
+
 	/// Runs HNSW compaction as bounded read-plan/write-apply batches.
 	///
 	/// Pending entries are captured in a read transaction and conditionally
-	/// deleted in a short write transaction before graph mutation. If a write
-	/// fails after local graph mutation may have started, the cached HNSW index
-	/// is evicted so later use reloads persisted state.
+	/// deleted in a short write transaction before graph mutation. A write that
+	/// reached the graph and then did not commit leaves the process-local
+	/// wrapper holding a topology and caches the store never took, so the
+	/// wrapper is discarded; a write that stopped at the guards left the
+	/// wrapper untouched and keeps it. The discard targets the format version
+	/// the write phase applied through — a `REBUILD INDEX` can bump the catalog
+	/// format after `format_version` was captured, and both the wrapper and the
+	/// cache entries are scoped per format.
 	async fn process_hnsw_compaction(
 		&self,
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		canceller: &CancellationToken,
 	) -> Result<()> {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let prepared = {
-				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let txn = Arc::new(self.transaction(Read).await?);
 				let res: Result<
 					Option<(
 						crate::catalog::TableId,
@@ -2859,14 +4438,29 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let txn = Arc::new(self.transaction(Write).await?);
+			// The apply phase re-reads the catalog and mutates the wrapper and
+			// cache belonging to that fresh format, so every failure-side
+			// recovery below must clear the same format, not the one captured at
+			// dispatch time.
+			let mut applied_format = format_version;
 			let res: Result<bool> = async {
+				// Re-tested inside the write transaction, and under a conflict
+				// registration. The dispatch-time test was a snapshot in a
+				// transaction that has since been cancelled, so a build acquired
+				// after it would otherwise be invisible to this apply; the
+				// registration makes such an acquisition conflict this commit
+				// instead, and the retry re-reads it.
+				if build_owner_is_live_locked(&txn, ikb).await? {
+					return Ok(false);
+				}
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
 					.await?
 				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::Hnsw(p) => {
+							applied_format = ix.format_version;
 							let mut ctx = self.setup_ctx()?;
 							ctx.set_transaction(Arc::clone(&txn));
 							let ctx = ctx.freeze();
@@ -2874,8 +4468,8 @@ impl Datastore {
 								&ctx,
 								&self.index_stores,
 								ikb,
-								&ix,
 								p,
+								ix.format_version,
 								plan,
 							)
 							.await
@@ -2890,11 +4484,7 @@ impl Datastore {
 				Ok(true) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction cancellation: {evict}");
-						}
+						self.discard_hnsw_index(tb, ikb, applied_format).await;
 						return Err(e);
 					}
 					#[cfg(test)]
@@ -2903,11 +4493,7 @@ impl Datastore {
 						self.id,
 					) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
-						}
+						self.discard_hnsw_index(tb, ikb, applied_format).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -2922,11 +4508,7 @@ impl Datastore {
 					}
 					if let Err(e) = txn.commit().await {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
-						}
+						self.discard_hnsw_index(tb, ikb, applied_format).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -2946,9 +4528,7 @@ impl Datastore {
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if let Err(evict) = self.index_stores.remove_hnsw_index(tb, ikb.clone()).await {
-						warn!(target: TARGET, "Failed to evict HNSW index after compaction error: {evict}");
-					}
+					self.discard_hnsw_index(tb, ikb, applied_format).await;
 					if Self::retry_index_operation_conflict(
 						&e,
 						format!("Retryable conflict applying HNSW compaction for {ikb}, retrying"),
@@ -2984,7 +4564,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let prepared = {
-				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let txn = Arc::new(self.transaction(Read).await?);
 				let res: Result<
 					Option<(
 						crate::catalog::TableId,
@@ -3024,8 +4604,14 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let txn = Arc::new(self.transaction(Write).await?);
 			let res: Result<bool> = async {
+				// See the HNSW counterpart: the dispatch-time ownership test is
+				// a cancelled snapshot, so it is re-tested here under a conflict
+				// registration that a concurrent build acquisition trips.
+				if build_owner_is_live_locked(&txn, ikb).await? {
+					return Ok(false);
+				}
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
 					.await?
@@ -3039,8 +4625,8 @@ impl Datastore {
 								&ctx,
 								&self.index_stores,
 								ikb,
-								&ix,
 								p,
+								ix.format_version,
 								plan,
 							)
 							.await
@@ -3087,13 +4673,23 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let plan = {
-				let txn = self.transaction(Read, Optimistic).await?;
+				let txn = self.transaction(Read).await?;
+				let ix = txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+					.filter(|ix| !ix.prepare_remove);
 				let res = IndexOperation::prepare_fulltext_compaction(
 					&self.index_stores,
 					ikb,
 					&txn,
 					p,
-					&self.config.file_allowlist,
+					&self.config.idx.file_allowlist,
+					match &ix {
+						Some(ix) if matches!(ix.index, crate::catalog::Index::FullText(_)) => {
+							ix.format_version
+						}
+						_ => return Ok(()),
+					},
 				)
 				.await;
 				let _ = txn.cancel().await;
@@ -3105,7 +4701,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			let res = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -3118,7 +4714,8 @@ impl Datastore {
 								ikb,
 								&txn,
 								p,
-								&self.config.file_allowlist,
+								&self.config.idx.file_allowlist,
+								ix.format_version,
 								plan,
 							)
 							.await
@@ -3213,7 +4810,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let plan = {
-				let txn = self.transaction(Read, Optimistic).await?;
+				let txn = self.transaction(Read).await?;
 				let res = IndexOperation::prepare_count_compaction(ikb, &txn).await;
 				let _ = txn.cancel().await;
 				res?
@@ -3224,7 +4821,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			let res = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -3303,8 +4900,18 @@ impl Datastore {
 	/// Process queued async events using a distributed lease to coordinate batches.
 	/// Once a batch starts it runs to completion even if the lease expires, so
 	/// brief overlap is possible.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+	///
+	/// Returns as soon as `canceller` is tripped, at the next batch boundary. The
+	/// events themselves are user-defined SurrealQL that nothing here bounds, so
+	/// this bounds the wait to one batch rather than to the whole queue — which
+	/// is what stops a busy queue from holding [`Self::shutdown`] open for as
+	/// long as writes keep arriving.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	pub(crate) async fn event_processing(
+		&self,
+		interval: Duration,
+		canceller: &CancellationToken,
+	) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting event processing process");
 		// Create a new lease handler
@@ -3315,8 +4922,14 @@ impl Datastore {
 			TaskLeaseType::EventProcessing,
 			interval * 2,
 		)?;
-		// We continue without interruptions while there are keys and the lease
+		// We continue while there are keys, the lease, and no cancellation
 		loop {
+			// Stop between batches once shutdown starts. Cancellation is not a
+			// failure: the queue is durable, so whatever is left is processed by
+			// the next pass on this node or another.
+			if canceller.is_cancelled() {
+				return Ok(());
+			}
 			// Attempt to acquire a lease for the EventProcessing task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
@@ -3324,7 +4937,7 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running event processing process");
-			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
+			if process_next_events_batch(self, Some(&lh)).await? == 0 {
 				// The last batch didn't have any events to process,
 				// we can sleep until the next wake-up call
 				return Ok(());
@@ -3339,19 +4952,19 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb_core::kvs::{Datastore, TransactionType::*, LockType::*};
+	/// use surrealdb_core::kvs::{Datastore, TransactionType::*};
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("rocksdb://database.db").await?;
-	///     let mut tx = ds.transaction(Write, Optimistic).await?;
+	///     let mut tx = ds.transaction(Write).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
-		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	pub async fn transaction(&self, write: TransactionType) -> Result<Transaction> {
+		self.transaction_factory.transaction(write, self.sequences.clone()).await
 	}
 
 	pub(crate) fn sequences(&self) -> &Sequences {
@@ -3367,17 +4980,30 @@ impl Datastore {
 	pub(crate) fn index_builder(&self) -> &IndexBuilder {
 		&self.index_builder
 	}
-	pub fn async_event_trigger(&self) -> &Arc<Notify> {
-		&self.async_event_trigger
+	/// The post-commit wake-ups the background tasks wait on.
+	pub fn commit_triggers(&self) -> &Arc<CommitTriggers> {
+		&self.triggers
+	}
+
+	/// The live-query engine this datastore delivers notifications through.
+	///
+	/// Selected from the datastore configuration at construction and fixed for
+	/// the datastore's lifetime. The engine's background tasks read it to decide
+	/// whether to run the per-node live-query router at all: under
+	/// [`LiveQueryEngine::Inline`] the router has nothing to deliver, so no task
+	/// is spawned for it.
+	pub fn live_query_engine(&self) -> LiveQueryEngine {
+		self.config.datastore.live_query_engine
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
-		let tx = self.transaction(Read, Optimistic).await?;
+		let tx = self.transaction(Read).await?;
 
 		// Cancel the transaction
 		trace!("Cancelling health check transaction");
-		// Attempt to fetch data
-		match tx.get(&vec![0x00], None).await {
+		// Read a declared key rather than a probe byte: whether it is present says
+		// nothing here, only that the store answered.
+		match tx.get_key(&VersionKey {}, None).await {
 			Err(err) => {
 				// Ensure the transaction is cancelled
 				let _ = tx.cancel().await;
@@ -3394,7 +5020,7 @@ impl Datastore {
 	}
 
 	/// Returns how long ago the current node last refreshed its cluster
-	/// heartbeat.
+	/// heartbeat, or `None` when this node has no cluster membership row.
 	///
 	/// The node-membership refresh background task rewrites this node's
 	/// heartbeat to the KV store every `node_membership_refresh_interval`. A
@@ -3403,18 +5029,282 @@ impl Datastore {
 	/// heartbeat was recently committed) and read path (it is readable here in
 	/// a fresh transaction) are healthy. Readiness probes use this instead of a
 	/// dedicated health check to avoid duplicating that work.
-	pub async fn node_heartbeat_age(&self) -> Result<Duration> {
+	///
+	/// An absent row is `None` rather than an error, because it is an ordinary
+	/// state of a live node and not a failure to read: `insert_node` writes the
+	/// row during startup, a peer that archives this node deletes it again, and
+	/// either way the next refresh tick writes it back. A caller can therefore
+	/// tell "no heartbeat yet" from "storage did not answer", which only `Err`
+	/// reports. `/ready` depends on the distinction.
+	pub async fn node_heartbeat_age(&self) -> Result<Option<Duration>> {
 		// Open a fresh read transaction so the lookup misses the per-transaction
 		// cache and actually reads the node key from storage.
-		let tx = self.transaction(Read, Optimistic).await?;
+		let tx = self.transaction(Read).await?;
 		let res = tx.get_node(self.id).await;
 		// Always release the transaction, regardless of the lookup result.
 		let _ = tx.cancel().await;
-		let node = res?;
+		let Some(node) = res? else {
+			return Ok(None);
+		};
 		// Heartbeats are stored as milliseconds since the epoch; saturate to
 		// avoid underflow from minor clock skew between writes and this read.
 		let now = self.clock_now();
-		Ok(Duration::from_millis(now.value.saturating_sub(node.heartbeat.value)))
+		Ok(Some(Duration::from_millis(now.value.saturating_sub(node.heartbeat.value))))
+	}
+
+	/// Run a query.
+	///
+	/// Every buffered query entry point that takes a whole query is this one:
+	/// a [`QueryRequest`] describes what to run, who runs it, and the
+	/// conditions — a caller-owned transaction, bound variables, a
+	/// cancellation handle — independently of one another, so the
+	/// combinations do not need a method each. Import is the exception: it
+	/// consumes a byte stream and keeps its own preflight, whose session
+	/// errors differ from this one's.
+	///
+	/// The source is split into statements before the session preflight, so a
+	/// caller that submitted unparsable text learns that from the call
+	/// whatever else is wrong with the request. SurrealQL statements stay in
+	/// surface form; see [`Self::statements_for`].
+	///
+	/// See [`Self::run_streaming`] to receive results as they are produced
+	/// rather than all at once.
+	///
+	/// ```rust,no_run
+	/// use anyhow::Error;
+	/// use surrealdb_core::kvs::{Datastore, QueryRequest};
+	/// use surrealdb_core::dbs::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(),Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let sql = "USE NS test DB test; SELECT * FROM person;";
+	///     let res = ds.run(QueryRequest::new(sql, &ses)).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn run(
+		&self,
+		req: QueryRequest<'_>,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		let QueryRequest {
+			source,
+			session,
+			variables,
+			transaction,
+			cancel,
+		} = req;
+		let statements = self.statements_for(source)?;
+		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
+		match transaction {
+			Some(_) => {
+				Executor::execute_statements_with_transaction(self, ctx, opt, statements).await
+			}
+			None => Executor::execute_statements(self, ctx, opt, statements).await,
+		}
+		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
+		// holds a handful of residual variants, so a bare layer error
+		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
+		// reaches the client as `internal` where it used to be a validation
+		// failure. The helper walks the whole registry.
+		.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// Prepare a query to stream its results.
+	///
+	/// Where [`Self::run`] answers with every statement's result at once, this
+	/// sends [`QueryStreamItem`]s into `items` as the executor produces them,
+	/// so a caller can forward rows before the query finishes. See the
+	/// [`stream`](crate::dbs::QueryStreamItem) module for what a consumer may
+	/// assume about them — chiefly that rows are provisional until their
+	/// statement's terminal item arrives.
+	///
+	/// Parsing and the session checks happen here, so their failures are
+	/// reported instead of a job. Everything after that is reported by driving
+	/// [`QueryStreamJob::run`].
+	///
+	/// A streaming caller wants [`QueryRequest::cancel`]: a consumer that stops
+	/// reading is only noticed at the next send otherwise, so a query in a
+	/// phase that emits nothing for a while — a sort, an aggregate — would run
+	/// to completion after the client had gone.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub fn run_streaming(
+		self: &Arc<Self>,
+		req: QueryRequest<'_>,
+		items: Sender<QueryStreamItem>,
+	) -> std::result::Result<QueryStreamJob, TypesError> {
+		let QueryRequest {
+			source,
+			session,
+			variables,
+			transaction,
+			cancel,
+		} = req;
+		let statements = self.statements_for(source)?;
+		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
+		let in_transaction = transaction.is_some();
+		// The count is known now because parsing is done, which is what lets a
+		// transport announce it before the first result exists.
+		let statement_count = statements.len();
+		let kvs = Arc::clone(self);
+		Ok(QueryStreamJob {
+			statement_count,
+			run: Box::pin(async move {
+				let executed = if in_transaction {
+					Executor::execute_statements_streaming_with_transaction(
+						&kvs, ctx, opt, statements, items,
+					)
+					.await
+				} else {
+					Executor::execute_statements_streaming(&kvs, ctx, opt, statements, items).await
+				};
+				executed.map_err(crate::err::anyhow_to_types_error)
+			}),
+		})
+	}
+
+	/// Split a [`QuerySource`] into the statements the executor runs.
+	///
+	/// Parsed SurrealQL stays in surface form: the executor converts each
+	/// statement when it is about to run it, rather than converting the batch
+	/// before the first one does. GQL has no SurrealQL surface form — it lowers
+	/// straight to a plan — so it arrives at the executor already lowered, as
+	/// does a source a caller lowered itself.
+	fn statements_for(
+		&self,
+		source: QuerySource<'_>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		fn lowered(plan: LogicalPlan) -> Vec<TopLevelStatement> {
+			plan.expressions.into_iter().map(TopLevelStatement::Plan).collect()
+		}
+
+		let ast = match source {
+			QuerySource::Text {
+				text,
+				dialect: Dialect::SurrealQl,
+			} => syn::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
+				.map_err(|e| TypesError::validation(e.to_string(), None))?,
+			QuerySource::Text {
+				text,
+				dialect: Dialect::Gql,
+			} => return Ok(lowered(self.parse_gql(text)?)),
+			QuerySource::Ast(ast) => ast,
+			QuerySource::Plan(plan) => return Ok(lowered(plan)),
+		};
+		Ok(ast.expressions.into_iter().map(TopLevelStatement::Ast).collect())
+	}
+
+	/// Parse and lower GQL query text to the plan the executor runs.
+	///
+	/// The plan is returned bare rather than in its `PreparedGqlQuery`
+	/// wrapper: that type comes from the `gql` crate, so naming it here would
+	/// leave the signature unbuildable on a build without the feature.
+	#[cfg(feature = "gql")]
+	fn parse_gql(&self, text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+		crate::gql::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
+			.map(|prepared| prepared.0)
+			.map_err(|e| TypesError::validation(e.to_string(), None))
+	}
+
+	/// The dialect exists on every build because it is chosen from what a
+	/// client sent; the front end that would parse it does not.
+	#[cfg(not(feature = "gql"))]
+	fn parse_gql(&self, _text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+		Err(TypesError::configuration(
+			"This build does not support GQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		))
+	}
+
+	/// The preflight a query runs: the session checks, and the options and
+	/// context the statements execute against.
+	///
+	/// [`Self::execute_import`] does not come through here. It repeats these
+	/// checks inline and reports an expired session and an anonymous actor as
+	/// `DatastoreError`/`PolicyError` where this reports `TypesError`, so a
+	/// check added here does not reach the import path.
+	///
+	/// A caller-owned transaction is prepared here rather than by the executor.
+	/// It carries the session's tenant identity so the emitted
+	/// [`crate::observe::TransactionEvent`] names the active namespace,
+	/// database and user; and the write-cardinality guard is armed on it
+	/// because statements running inside a client-owned transaction (RPC
+	/// `begin`, SDK-managed transactions) are subject to the same configured
+	/// limit as executor-created statement transactions — wrapping a statement
+	/// in an explicit transaction must not bypass the guard.
+	fn setup_query(
+		&self,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Option<&Arc<Transaction>>,
+		cancel: Option<CancelHandle>,
+	) -> std::result::Result<(Options, FrozenContext), TypesError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		if let Err(e) = self.check_anon(sess) {
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context.
+		//
+		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
+		// holds a handful of residual variants, so a bare layer error
+		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
+		// reaches the client as `internal` where it used to be a validation
+		// failure. The helper walks the whole registry.
+		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
+
+		// Install the external cancellation handle if one was supplied. The
+		// executor checks `Context::done` between statements and in iterator
+		// hot loops, so flipping the flag mid-query causes the next yield to
+		// return `EngineError::QueryCancelled` and the executor's error path
+		// finalises the transaction cleanly. Bare-await sites (`SLEEP`)
+		// `select!` against the handle's awaitable view. This is a flag rather
+		// than the caller dropping the execution future because dropping the
+		// future would drop an open transaction with it.
+		if let Some(cancel) = cancel {
+			ctx.set_cancellation(&cancel);
+		}
+
+		// Start an execution context
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
+		}
+
+		// Prepare an externally-supplied transaction. See the method docs for
+		// why the identity and the guard are applied here.
+		if let Some(tx) = tx {
+			if let Some(identity) = ctx.tenant_identity() {
+				tx.set_tenant_identity(Arc::clone(identity));
+			}
+			tx.arm_write_keys_limit(self.transaction_max_write_keys());
+			ctx.set_transaction(Arc::clone(tx));
+		}
+
+		Ok((opt, ctx.freeze()))
 	}
 
 	/// Parse and execute an SQL query
@@ -3440,291 +5330,18 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST
-		self.process(ast, sess, vars).await
+		self.run(QueryRequest::new(txt, sess).with_variables(vars)).await
 	}
 
-	/// Parse and lower a GQL query into a [`PreparedGqlQuery`], checking that
-	/// the `gql` experimental capability is enabled.
-	#[cfg(feature = "gql")]
-	pub(crate) fn parse_gql(&self, txt: &str) -> std::result::Result<PreparedGqlQuery, TypesError> {
-		// Check if the experimental GQL capability is enabled. The
-		// wording deliberately matches the existing experimental-gate errors
-		// (`surrealism`, `files`) rather than naming the server's
-		// `--allow-experimental` flag: core is also used embedded, where the
-		// capability is enabled programmatically and no CLI flag exists.
-		if !self.capabilities.allows_experimental(&ExperimentalTarget::Gql) {
-			return Err(TypesError::not_allowed(
-				"Experimental capability `gql` is not enabled".to_string(),
-				None,
-			));
-		}
-		// Parse and lower the GQL query text
-		crate::gql::parse_with_capabilities(txt, &self.capabilities, &self.config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))
-	}
-
-	/// Parse and execute a GQL query
-	#[cfg(feature = "gql")]
+	/// Execute a pre-parsed SQL query
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_gql(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse and lower the GQL query text
-		let plan = self.parse_gql(txt)?;
-		// Process the lowered plan
-		self.process_gql(plan, sess, vars).await
-	}
-
-	/// Execute a pre-lowered GQL query.
-	///
-	/// Mirrors [`Self::process`] for the GQL dialect: the
-	/// [`PreparedGqlQuery`] already wraps a [`LogicalPlan`], so it is handed
-	/// directly to the shared plan-level executor.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_gql(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(q.0, sess, vars, None).await
-	}
-
-	/// Execute a pre-lowered GQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_cancel(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(q.0, sess, vars, Some(cancel)).await
-	}
-
-	/// Execute a pre-lowered GQL query with an existing transaction.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_transaction(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(q.0, sess, vars, tx, None).await
-	}
-
-	/// Execute a pre-lowered GQL query with an existing transaction and an
-	/// externally-owned cancellation handle. See
-	/// [`Self::process_with_transaction_and_cancel`] for the cancellation
-	/// semantics.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_transaction_and_cancel(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(q.0, sess, vars, tx, Some(cancel)).await
-	}
-
-	/// Execute a SurrealQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_cancel(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST
-		self.process_with_cancel(ast, sess, vars, cancel).await
-	}
-
-	/// Execute a query with an existing transaction
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_transaction(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST with the transaction
-		self.process_with_transaction(ast, sess, vars, tx).await
-	}
-
-	/// Execute a query with an existing transaction and an externally-owned
-	/// cancellation handle. See [`Self::process_with_transaction_and_cancel`]
-	/// for the cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_transaction_and_cancel(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST with the transaction
-		self.process_with_transaction_and_cancel(ast, sess, vars, tx, cancel).await
-	}
-
-	/// Process an AST with an existing transaction
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_transaction(
+	pub async fn process(
 		&self,
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_with_transaction_inner(ast, sess, vars, tx, None).await
-	}
-
-	/// Process an AST with an existing transaction and an externally-owned
-	/// cancellation handle. When the handle is tripped the executor's
-	/// `Context::done` walks short-circuit with `Reason::Canceled` at the
-	/// next yield point (statement boundary, iterator hot loop check, etc.)
-	/// and the transaction is finalised on the executor's normal error path.
-	/// Bare-await sites (e.g. `SLEEP`) `select!` against the handle's
-	/// awaitable view, so they are also interrupted instead of running to
-	/// completion.
-	///
-	/// Used by the WebSocket RPC layer so a client disconnect cancels the
-	/// in-flight query without waiting for it to run to completion. The
-	/// caller owns the [`CancelHandle`] and is responsible for tripping it.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_transaction_and_cancel(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_with_transaction_inner(ast, sess, vars, tx, Some(cancel)).await
-	}
-
-	/// Ast-level shim over [`Self::process_plan_with_transaction_inner`]: the
-	/// SurrealQL surface AST is converted to a [`LogicalPlan`] before the
-	/// shared plan-level body runs. Keeps the SurrealQL `Ast` entry points
-	/// unchanged while letting GQL (which already lowers to a `LogicalPlan`)
-	/// share the same execution path.
-	async fn process_with_transaction_inner(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: Option<CancelHandle>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(ast.into(), sess, vars, tx, cancel).await
-	}
-
-	/// Shared body for [`Self::process_with_transaction`],
-	/// [`Self::process_with_transaction_and_cancel`] and the GQL
-	/// `process_gql` variants. The public Ast variants exist to keep the
-	/// non-cancel API stable for SDK / embedded callers; `cancel: None`
-	/// reproduces the pre-cancellation behaviour exactly.
-	async fn process_plan_with_transaction_inner(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: Option<CancelHandle>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
-		})?;
-
-		// Install the external cancellation handle if one was supplied.
-		// The executor checks `Context::done` between statements and in
-		// iterator hot loops, so flipping the flag mid-query causes the
-		// next yield to return `Error::QueryCancelled` and the executor's
-		// error path finalises the transaction cleanly. Bare-await sites
-		// (`SLEEP`) `select!` against the handle's awaitable view.
-		if let Some(cancel) = cancel {
-			ctx.set_cancellation(&cancel);
-		}
-
-		// Start an execution context
-		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
-
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
-		}
-
-		// Propagate the resolved tenant identity onto the externally-supplied
-		// transaction so the emitted [`crate::observe::TransactionEvent`]
-		// carries the active session's namespace, database, user, etc.
-		if let Some(identity) = ctx.tenant_identity() {
-			tx.set_tenant_identity(Arc::clone(identity));
-		}
-
-		// Set the transaction in the context
-		ctx.set_transaction(tx);
-
-		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
-		})
+		self.run(QueryRequest::new(ast, sess).with_variables(vars)).await
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -3738,12 +5355,12 @@ impl Datastore {
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
+			Error::from(PolicyError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "process".to_string(),
 				resource: "query".to_string(),
@@ -3801,7 +5418,7 @@ impl Datastore {
 				if complete {
 					return match statements_stream.parse_complete(&mut buffer) {
 						Err(e) => {
-							Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))))
+							Poll::Ready(Some(Err(anyhow::Error::new(ParseError::InvalidQuery(e)))))
 						}
 						Ok(None) => Poll::Ready(None),
 						Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
@@ -3811,7 +5428,9 @@ impl Datastore {
 				// otherwise try to parse a single statement.
 				match statements_stream.parse_partial(&mut buffer) {
 					Err(e) => {
-						return Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))));
+						return Poll::Ready(Some(Err(anyhow::Error::new(
+							ParseError::InvalidQuery(e),
+						))));
 					}
 					Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
 					Ok(None) => {
@@ -3832,101 +5451,6 @@ impl Datastore {
 		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
 
-	/// Execute a pre-parsed SQL query
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		//TODO: Insert planner here.
-		self.process_plan_inner(ast.into(), sess, vars, None).await
-	}
-
-	/// Execute a pre-parsed SQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_cancel(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(ast.into(), sess, vars, Some(cancel)).await
-	}
-
-	pub(crate) async fn process_plan(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(plan, sess, vars, None).await
-	}
-
-	async fn process_plan_inner(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: Option<CancelHandle>,
-	) -> Result<Vec<QueryResult>, TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
-		})?;
-
-		// Install the external cancellation flag if one was supplied. See
-		// [`Self::process_with_transaction_and_cancel`].
-		if let Some(cancel) = cancel {
-			ctx.set_cancellation(&cancel);
-		}
-
-		// Start an execution context
-		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
-
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
-		}
-
-		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
-		})
-	}
-
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
@@ -3940,7 +5464,7 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> Result<PublicValue> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
@@ -3959,13 +5483,16 @@ impl Datastore {
 		};
 		// Start a new transaction. Tenant identity is attached up-front so the
 		// emitted [`crate::observe::TransactionEvent`] carries the session's
-		// namespace, database, user, etc.
+		// namespace, database, user, etc. The write-cardinality guard is
+		// armed like any other statement execution: this path evaluates
+		// owner-defined record-access clauses (SIGNUP/SIGNIN/AUTHENTICATE)
+		// on behalf of unauthenticated callers, so its fan-out must be
+		// subject to the same configured limit.
 		let txn = self
-			.transaction(txn_type, Optimistic)
+			.transaction(txn_type)
 			.await?
-			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from_session(
-				sess,
-			))))
+			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from(sess))))
+			.with_write_keys_limit(self.transaction_max_write_keys())
 			.enclose();
 		// Store the transaction
 		ctx.set_transaction(Arc::clone(&txn));
@@ -3980,8 +5507,11 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
+		let res = stack
+			.enter(|stk| crate::legacy::expr_compute(val, stk, &ctx, &opt, None))
+			.finish()
+			.await
+			.catch_return();
 		// Store any data
 		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
@@ -3998,7 +5528,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
@@ -4010,7 +5540,7 @@ impl Datastore {
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute_import(sess, None, stream).await
 	}
@@ -4023,7 +5553,7 @@ impl Datastore {
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<()>>> {
 		// Create a default export config
-		let cfg = super::export::Config::default();
+		let cfg = surrealdb_rpc::export::Config::default();
 		self.export_with_config(sess, chn, cfg).await
 	}
 
@@ -4033,19 +5563,19 @@ impl Datastore {
 		&self,
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
-		cfg: export::Config,
+		cfg: surrealdb_rpc::export::Config,
 	) -> Result<impl Future<Output = Result<()>> + 'static> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
-		let txn = self.transaction(Read, Optimistic).await?;
-		let batch_size = self.config.export_batch_size;
+		let txn = self.transaction(Read).await?;
+		let batch_size = self.config.datastore.export_batch_size;
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			let res = txn.export(&ns, &db, cfg, batch_size, chn).await;
+			let res = super::export::export(&txn, &ns, &db, cfg, batch_size, chn).await;
 			txn.cancel().await?;
 			res
 		})
@@ -4056,18 +5586,18 @@ impl Datastore {
 	#[allow(clippy::needless_pass_by_value)] // Public API: ergonomic for callers passing `ResourceKind::X.on_db(ns, db)` inline.
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<()> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
-			sess.au.is_allowed(action, &resource)?;
+			sess.au.is_allowed(action, &resource).map_err(crate::err::Error::from)?;
 		}
 		// All ok
 		Ok(())
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::new(&self.config)
+		Options::new(&self.config.exec)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_auth(Arc::clone(&sess.au))
@@ -4080,14 +5610,13 @@ impl Datastore {
 			self.dynamic_configuration.clone(),
 			self.dynamic_configuration.get_query_timeout(),
 			self.slow_log.clone(),
-			Arc::clone(&self.capabilities),
+			self.capabilities.load_full(),
 			self.index_stores.clone(),
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			Arc::clone(&self.cache),
-			Arc::clone(&self.function_registry),
 			#[cfg(feature = "http")]
-			Arc::clone(&self.http_client),
+			self.http_client.load_full(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -4099,9 +5628,10 @@ impl Datastore {
 	}
 
 	/// check for disallowed anonymous users
-	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
-		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
-			Err(IamError::NotAllowed {
+	pub fn check_anon(&self, sess: &Session) -> Result<(), PolicyError> {
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.load().allows_guest_access()
+		{
+			Err(PolicyError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: String::new(),
 				resource: String::new(),
@@ -4174,15 +5704,13 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
-		ctx: Option<&Context>,
+		ctx: Option<&dyn crate::catalog::providers::CancellationProbe>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
 	) -> std::result::Result<QueryResult, TypesError> {
 		let new_tx = || async {
-			self.transaction(Write, Optimistic)
-				.await
-				.map_err(|err| TypesError::internal(err.to_string()))
+			self.transaction(Write).await.map_err(|err| TypesError::internal(err.to_string()))
 		};
 		let commit_tx = |txn: Transaction| async move {
 			txn.commit().await.map_err(|err| TypesError::internal(err.to_string()))
@@ -4201,6 +5729,38 @@ impl Datastore {
 		// auto-created namespace they should not have been able to
 		// create. See `SECURITY_GUIDE.md` section 3.
 		let map_internal = |err: anyhow::Error| TypesError::internal(err.to_string());
+		// SECURITY (GHSA-2v9j): tenant-boundary gate, mirroring the SurrealQL
+		// `USE` statement handler (`dbs::executor`) and the RPC `use` handler
+		// (`rpc::protocol::yuse`). This path (`process_use`) serves the embedded
+		// SDK `Command::Use` and the PostgreSQL wire; the WS/HTTP/gRPC RPC `use`
+		// method carries its own copy of this gate in `yuse`. An authenticated
+		// Database-, Namespace- or Record-level principal must be verified as
+		// authorized for the target namespace/database before the session is
+		// pivoted, or it could switch into a foreign tenant and reach any table
+		// there with satisfiable PERMISSIONS. The authenticated Auth level is the
+		// source of truth; a switch that changes only one of ns/db keeps the
+		// other from the current session. Root and anonymous (`Level::No`, e.g.
+		// `use` before `signin`) principals are unrestricted by `can_access_ns_db`,
+		// preserving the pre-signin `use` pattern.
+		{
+			let target_ns = namespace.as_deref().or(session.ns.as_deref());
+			let target_db = database.as_deref().or(session.db.as_deref());
+			if let Some(ns_name) = target_ns {
+				let db_name = target_db.unwrap_or_default();
+				if !session.au.can_access_ns_db(ns_name, db_name) {
+					let err = if session.au.level().ns() == Some(ns_name) {
+						ExecError::DbNotAllowed {
+							db: db_name.to_owned(),
+						}
+					} else {
+						ExecError::NsNotAllowed {
+							ns: ns_name.to_owned(),
+						}
+					};
+					return Err(TypesError::not_allowed(err.to_string(), None));
+				}
+			}
+		}
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = new_tx().await?;
@@ -4259,10 +5819,74 @@ impl Datastore {
 				}
 				session.db = Some(db);
 			}
-			(None, None) => {
-				session.ns = None;
-				session.db = None;
+			// An empty `USE` asks for the configured default, not for the
+			// session to be cleared. A session that has already selected a
+			// namespace — from a token, say — keeps it, so this only ever fills
+			// in what is missing.
+			(None, None) if session.ns.is_none() => {
+				let tx = new_tx().await?;
+				let default = match tx.get_default_config().await {
+					Ok(config) => config.map(|c| (c.namespace.clone(), c.database.clone())),
+					Err(e) => {
+						let _ = tx.cancel().await;
+						return Err(map_internal(e));
+					}
+				};
+
+				// The default names a namespace and database a fresh datastore
+				// may not have materialised yet. Creating them is gated on the
+				// same authorization an explicit `DEFINE NAMESPACE` /
+				// `DEFINE DATABASE` needs, as the arms above are: a caller
+				// without it still gets the selection, and a later operation
+				// reports a clean `NsNotFound` rather than silently having
+				// created what it could not have defined. See
+				// `SECURITY_GUIDE.md` section 3.
+				if let Some((Some(ns), db)) = default {
+					// SECURITY (GHSA-2v9j): the default names a namespace/database
+					// to a scoped principal just as an explicit `USE` would, so gate
+					// the resolved default the same way before selecting or creating
+					// it. Root and anonymous principals are unrestricted by
+					// `can_access_ns_db`; a scoped principal is confined to its own
+					// namespace/database. Mirrors the executor's `USE DEFAULT` path.
+					if !session.au.can_access_ns_db(&ns, db.as_deref().unwrap_or_default()) {
+						let _ = tx.cancel().await;
+						let err = if session.au.level().ns() == Some(ns.as_str()) {
+							ExecError::DbNotAllowed {
+								db: db.clone().unwrap_or_default(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns.clone(),
+							}
+						};
+						return Err(TypesError::not_allowed(err.to_string(), None));
+					}
+					let create_ns = self
+						.should_materialize_ns_on_use(&tx, &session.au, &ns)
+						.await
+						.map_err(map_internal)?;
+					if create_ns && let Err(e) = tx.get_or_add_ns(ctx, &ns).await {
+						let _ = tx.cancel().await;
+						return Err(map_internal(e));
+					}
+					if let Some(db) = db {
+						let create_db = create_ns
+							&& self
+								.should_materialize_db_on_use(&tx, &session.au, &ns, &db)
+								.await
+								.map_err(map_internal)?;
+						if create_db && let Err(e) = tx.ensure_ns_db(ctx, &ns, &db).await {
+							let _ = tx.cancel().await;
+							return Err(map_internal(e));
+						}
+						session.db = Some(db);
+					}
+					session.ns = Some(ns);
+				}
+
+				commit_tx(tx).await?;
 			}
+			(None, None) => {}
 		}
 
 		let value = PublicValue::from_t(object! {
@@ -4283,14 +5907,14 @@ impl Datastore {
 		db: &str,
 		model_name: &str,
 		model_version: &str,
-	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
-		let tx = self.transaction(Read, Optimistic).await?;
+	) -> Result<Option<Arc<crate::catalog::StoredMlModelDefinition>>> {
+		let tx = self.transaction(Read).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
 		let model = tx
 			.get_db_model(db.namespace_id, db.database_id, model_name, model_version, None)
 			.await?;
 		tx.cancel().await?;
-		Ok(model)
+		Ok(model.map(|m| Arc::new(m.to_stored())))
 	}
 
 	/// Invoke an API handler.
@@ -4321,27 +5945,51 @@ impl Datastore {
 			return Ok(ApiResponse::from_error(ApiError::PermissionDenied, req.request_id.clone()));
 		}
 
-		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
+		let tx = Arc::new(self.transaction(TransactionType::Write).await?);
+		// Custom API handlers evaluate owner-defined expressions on behalf of
+		// external callers — statement execution in everything but name — so
+		// the write-cardinality guard applies exactly as it does to executor
+		// statements and explicit client-owned transactions.
+		tx.arm_write_keys_limit(self.transaction_max_write_keys());
 
-		let db = tx.ensure_ns_db(None, ns, db).await?;
+		// `tx` is open and writeable from here until the commit/cancel below, so
+		// every fallible step in between cancels before returning. A bare `?`
+		// would drop the transaction without committing or cancelling it,
+		// tripping `Transactor::drop`'s "a transaction was dropped without being
+		// committed or cancelled" error and leaving it to be reaped rather than
+		// rolled back promptly. `catch!` is the cancel-then-propagate form.
+		let db = catch!(tx, tx.ensure_ns_db(None, ns, db).await);
 
-		let apis = tx.all_db_apis(db.namespace_id, db.database_id, None).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-		let res = match ApiDefinition::find_definition(apis.as_ref(), &segments, req.method) {
+		// Routes on the stored definitions and compiles only the one that
+		// handles this request: this transaction is opened per request, so the
+		// compiled catalog cache is always cold, and compiling the whole list
+		// would parse every handler body in the database to dispatch one.
+		let routed = catch!(
+			tx,
+			tx.find_db_api(db.namespace_id, db.database_id, &segments, req.method).await
+		);
+		let res = match routed {
 			Some((api, params)) => {
+				let api = &api;
 				debug!(
 					request_id = %req.request_id,
 					path = %path,
 					"API definition found, dispatching to process_api_request"
 				);
-				req.params = params.try_into()?;
+				req.params = catch!(tx, params.try_into());
 
 				let opt = self.setup_options(session);
 
-				let mut ctx = self.setup_ctx()?;
+				let mut ctx = catch!(tx, self.setup_ctx());
 				ctx.set_transaction(Arc::clone(&tx));
-				ctx.attach_session(session)?;
+				// Not `catch!`: like `try_into` above, this error needs
+				// converting into the function's error type.
+				if let Err(e) = ctx.attach_session(session) {
+					let _ = tx.cancel().await;
+					return Err(e.into());
+				}
 				let ctx = &ctx.freeze();
 
 				process_api_request(ctx, &opt, api, req).await
@@ -4402,13 +6050,26 @@ impl Datastore {
 			))))],
 		};
 
-		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
+		self.run(QueryRequest::new(q, session)).await.map_err(|e| anyhow::anyhow!(e))?;
 
 		Ok(())
 	}
 
-	pub fn config(&self) -> Arc<CommonConfig> {
+	/// The per-layer configuration this datastore was built with. Cheap to
+	/// clone; the inner handle is an `Arc`. Crate-internal: these are operator
+	/// knobs, not API — callers outside core take the specific settings they
+	/// need, as the server does through [`Self::parser_config`].
+	pub(crate) fn config(&self) -> Arc<RuntimeConfig> {
 		Arc::clone(&self.config)
+	}
+
+	/// The parser depth limits this datastore parses query text with.
+	///
+	/// Transports that decode request bodies (RPC, WebSocket, export) apply the
+	/// same limits, so they read them from here rather than from their own
+	/// defaults. Cheap to clone; the inner handle is an `Arc`.
+	pub fn parser_config(&self) -> Arc<ParserConfig> {
+		Arc::clone(&self.parser_config)
 	}
 
 	/// Retrieve (or generate and cache) the GraphQL schema for the namespace
@@ -4426,7 +6087,7 @@ impl Datastore {
 
 	#[cfg(feature = "http")]
 	pub fn http_client(&self) -> Arc<HttpClient> {
-		Arc::clone(&self.http_client)
+		self.http_client.load_full()
 	}
 
 	/// Builds a [`NodeEndpointResolver`] backed by this datastore's catalog. Used by the
@@ -4472,16 +6133,34 @@ impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
 	) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + '_>> {
 		Box::pin(async move {
 			let uuid = Uuid::from_bytes(target_node);
-			let txn = self
-				.transaction_factory
-				.transaction(Read, Optimistic, self.sequences.clone())
-				.await
-				.ok()?;
-			let key = crate::key::root::nd::Nd::new(uuid);
-			let node: Option<Node> = txn.get(&key, None).await.ok()?;
+			let txn =
+				self.transaction_factory.transaction(Read, self.sequences.clone()).await.ok()?;
+			let key = NodeKey {
+				nd: uuid,
+			};
+			let node: Option<Node> = txn.get_key(&key, None).await.ok()?;
 			let _ = txn.cancel().await;
 			node.and_then(|n| n.http_endpoint)
 		})
+	}
+}
+
+pub(crate) fn define_user_statement_new_with_password(
+	base: Base,
+	user: String,
+	pass: &str,
+	role: String,
+) -> DefineUserStatement {
+	DefineUserStatement {
+		kind: DefineKind::Default,
+		base,
+		name: Expr::Idiom(Idiom::field(user)),
+		hash: crate::iam::hash_password(pass),
+		code: Alphanumeric.sample_string(&mut rand::rng(), 128),
+		roles: vec![role],
+		duration: UserDuration::default(),
+		comment: Expr::Literal(Literal::None),
+		scram: Some(ScramCredential::generate(pass)),
 	}
 }
 
@@ -4490,21 +6169,27 @@ mod test {
 	use std::collections::BTreeMap;
 	use std::future::pending;
 
+	use surrealdb_strand::TableName;
+
 	use super::*;
 	use crate::catalog::providers::{
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
+	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};
+	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
 		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
 	};
 	use crate::types::{PublicValue, PublicVariables};
-	use crate::val::TableName;
 
-	async fn new_index_compaction_test_ds() -> Result<(Datastore, Session)> {
-		let ds = Datastore::new("memory").await?;
+	async fn new_index_compaction_test_ds() -> Result<(Arc<Datastore>, Session)> {
+		// These tests decide when compaction runs and observe the wake-up that
+		// drives it. `CommitTriggers::index_compaction` is a `notify_one`, so a
+		// background compactor would take the permit a test is waiting on.
+		let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
 		let session = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		Ok((ds, session))
@@ -4517,56 +6202,191 @@ mod test {
 		Ok(())
 	}
 
-	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn execute_gql_requires_experimental_capability() -> Result<()> {
+	async fn record_auth_is_scoped_to_its_ns_db() -> Result<()> {
+		// A record-scoped principal is only authorized for the namespace and
+		// database it authenticated against. If the session context drifts to
+		// another namespace or database (via a USE statement or connection
+		// headers), every document operation must be rejected — even when the
+		// target table's PERMISSIONS clauses would otherwise allow the
+		// operation for record users.
 		let ds = Datastore::new("memory").await?;
-		let ses = Session::owner().with_ns("test").with_db("test");
-		let err = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await.unwrap_err();
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "first", "first").await?;
+		txn.ensure_ns_db(None, "first", "other").await?;
+		txn.ensure_ns_db(None, "second", "second").await?;
+		txn.commit().await?;
+		// Victim data in `second/second` with fully permissive permissions
+		let owner = Session::owner().with_ns("second").with_db("second");
+		execute_all(
+			&ds,
+			&owner,
+			"DEFINE TABLE thing SCHEMALESS PERMISSIONS FULL; CREATE thing:1 SET secret = 'v';",
+		)
+		.await?;
+		// A record principal authenticated against `first/first`, whose
+		// session context has drifted to `second/second`
+		let mut rec = Session::for_record(
+			"first",
+			"first",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "tester")),
+		);
+		rec.ns = Some("second".to_owned());
+		rec.db = Some("second".to_owned());
+		// Every write into the drifted scope must be rejected
+		for query in [
+			"CREATE thing:2 SET secret = 'w'",
+			"UPDATE thing:1 SET secret = 'w'",
+			"UPSERT thing:1 SET secret = 'w'",
+			"DELETE thing:1",
+			"INSERT INTO thing { id: thing:3, secret: 'w' }",
+		] {
+			let err = execute_all(&ds, &rec, query)
+				.await
+				.expect_err(&format!("record user expected to be denied: {query}"));
+			assert!(
+				err.to_string().contains("namespace"),
+				"expected a namespace authorization error for {query}, got: {err}"
+			);
+		}
+		// Reads from the drifted scope must be rejected as well
+		let err = execute_all(&ds, &rec, "SELECT * FROM thing")
+			.await
+			.expect_err("record user expected to be denied: SELECT");
 		assert!(
-			err.to_string().contains("Experimental capability `gql` is not enabled"),
-			"unexpected error: {err}"
+			err.to_string().contains("namespace"),
+			"expected a namespace authorization error for SELECT, got: {err}"
+		);
+		// A drift within the same namespace but to a different database must
+		// also be rejected
+		let owner = Session::owner().with_ns("first").with_db("other");
+		execute_all(
+			&ds,
+			&owner,
+			"DEFINE TABLE thing SCHEMALESS PERMISSIONS FULL; CREATE thing:1 SET secret = 'v';",
+		)
+		.await?;
+		let mut rec = Session::for_record(
+			"first",
+			"first",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "tester")),
+		);
+		rec.db = Some("other".to_owned());
+		let err = execute_all(&ds, &rec, "UPDATE thing:1 SET secret = 'w'")
+			.await
+			.expect_err("record user expected to be denied in a sibling database");
+		assert!(
+			err.to_string().contains("database"),
+			"expected a database authorization error, got: {err}"
+		);
+		// The victim data must be unchanged
+		let owner = Session::owner().with_ns("second").with_db("second");
+		let mut res = ds.execute("SELECT VALUE secret FROM thing", &owner, None).await?;
+		let val = res.remove(0).result?;
+		assert_eq!(
+			val,
+			PublicValue::Array(surrealdb_types::array!["v"]),
+			"victim data was modified by an out-of-scope record user"
 		);
 		Ok(())
 	}
 
 	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn execute_gql_parses_lowers_and_executes() -> Result<()> {
+	async fn gql_is_available_without_the_experimental_capability() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		// GQL is on by default: it must not be refused as an experimental
+		// capability (any other error — e.g. missing namespace — is irrelevant).
+		if let Err(err) =
+			ds.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) RETURN n"), &ses)).await
+		{
+			assert!(
+				!err.to_string().contains("Experimental capability `gql` is not enabled"),
+				"GQL was still gated: {err}"
+			);
+		}
+		Ok(())
+	}
+
+	#[cfg(feature = "gql")]
+	#[tokio::test]
+	async fn gql_text_parses_lowers_and_executes() -> Result<()> {
 		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
 			.build_with_path("memory")
 			.await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
 		// A valid GQL query parses, lowers, and executes through the
 		// SurrealQL pipeline
-		let mut res = ds.execute_gql("MATCH (n:person) RETURN n.name AS name", &ses, None).await?;
+		let mut res = ds
+			.run(QueryRequest::new(
+				QuerySource::gql("MATCH (n:person) RETURN n.name AS name"),
+				&ses,
+			))
+			.await?;
 		assert_eq!(res.len(), 1);
 		let val = res.remove(0).result?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "Tobie" }]));
 		// An invalid GQL query reports a parse error rather than a
 		// capability error
-		let err = ds.execute_gql("MATCH RETURN", &ses, None).await.unwrap_err();
+		let err =
+			ds.run(QueryRequest::new(QuerySource::gql("MATCH RETURN"), &ses)).await.unwrap_err();
 		assert!(!err.to_string().contains("experimental"), "unexpected error: {err}");
+		Ok(())
+	}
+
+	/// `set_capabilities` must take effect on an already-built datastore without
+	/// a rebuild: a capability-gated operation (scripting) flips from denied to
+	/// allowed after a live swap, proving the executor observes the new
+	/// `ArcSwap` snapshot.
+	#[cfg(feature = "scripting")]
+	#[tokio::test]
+	async fn set_capabilities_swaps_live() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+
+		// Default capabilities: scripting functions are denied.
+		let mut before = ds.execute("RETURN function() { return 1; }", &ses, None).await?;
+		assert!(
+			before.remove(0).result.is_err(),
+			"scripting should be denied under default capabilities"
+		);
+
+		// Swap in capabilities that enable scripting — no rebuild, same datastore.
+		ds.set_capabilities(Capabilities::all())?;
+
+		// The same datastore now permits scripting, proving the executor
+		// observes the new `ArcSwap` snapshot.
+		let mut after = ds.execute("RETURN function() { return 1; }", &ses, None).await?;
+		assert!(
+			after.remove(0).result.is_ok(),
+			"scripting should be allowed after the capability swap"
+		);
 		Ok(())
 	}
 
 	/// A datastore with the `gql` capability and an initialised `test/test`
 	/// namespace/database, for the GQL mutation tests.
 	#[cfg(feature = "gql")]
-	async fn gql_test_ds() -> Result<(Datastore, Session)> {
+	async fn gql_test_ds() -> Result<(Arc<Datastore>, Session)> {
 		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
 			.build_with_path("memory")
 			.await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		Ok((ds, ses))
@@ -4575,7 +6395,7 @@ mod test {
 	/// Run one GQL query, asserting a single statement result, and return it.
 	#[cfg(feature = "gql")]
 	async fn run_gql(ds: &Datastore, ses: &Session, query: &str) -> Result<PublicValue> {
-		let mut res = ds.execute_gql(query, ses, None).await?;
+		let mut res = ds.run(QueryRequest::new(QuerySource::gql(query), ses)).await?;
 		assert_eq!(res.len(), 1, "expected one result for {query:?}");
 		Ok(res.remove(0).result?)
 	}
@@ -4584,7 +6404,7 @@ mod test {
 	/// per-statement execution error), returning the rendered error.
 	#[cfg(feature = "gql")]
 	async fn run_gql_err(ds: &Datastore, ses: &Session, query: &str) -> String {
-		match ds.execute_gql(query, ses, None).await {
+		match ds.run(QueryRequest::new(QuerySource::gql(query), ses)).await {
 			Ok(mut res) => match res.remove(0).result {
 				Ok(value) => panic!("expected {query:?} to fail, got {value:?}"),
 				Err(e) => e.to_string(),
@@ -4638,7 +6458,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2;",
+			RELATE person:1->knows->person:2;",
 		)
 		.await?;
 		// NODETACH (the default) on a node that still has edges errors.
@@ -4689,7 +6509,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') MATCH (b:person WHERE b.name = 'B') \
-			 INSERT (a)-[:knows]->(b)",
+			INSERT (a)-[:knows]->(b)",
 		)
 		.await?;
 		let val = run_gql(
@@ -4767,7 +6587,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2 SET since = 2020;",
+			RELATE person:1->knows->person:2 SET since = 2020;",
 		)
 		.await?;
 		// SET a property on a bound edge.
@@ -4795,8 +6615,8 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A', age = 30; CREATE person:2 SET name = 'B'; \
-			 CREATE person:3 SET name = 'C'; RELATE person:1->knows->person:2; \
-			 RELATE person:1->knows->person:3;",
+			CREATE person:3 SET name = 'C'; RELATE person:1->knows->person:2; \
+			RELATE person:1->knows->person:3;",
 		)
 		.await?;
 		// `a` fans out to two rows; SET a.age = 7 must show a consistent AFTER image
@@ -4805,7 +6625,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person)-[:knows]->(b:person) WHERE a.name = 'A' SET a.age = 7 \
-			 RETURN a.age AS age, b.name AS b ORDER BY b",
+			RETURN a.age AS age, b.name AS b ORDER BY b",
 		)
 		.await?;
 		assert_eq!(
@@ -4826,7 +6646,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2 SET since = 2020;",
+			RELATE person:1->knows->person:2 SET since = 2020;",
 		)
 		.await?;
 		// DETACH DELETE on `a` cascades the `k` edge; the §3 fix nulls `k` in the
@@ -4835,7 +6655,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person)-[k:knows]->(b:person) WHERE a.name = 'A' DETACH DELETE a \
-			 RETURN a AS a, k AS k, b.name AS b",
+			RETURN a AS a, k AS k, b.name AS b",
 		)
 		.await?;
 		assert_eq!(
@@ -4860,7 +6680,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') MATCH (b:person WHERE b.name = 'B') \
-			 INSERT (a)<-[:knows]-(b)",
+			INSERT (a)<-[:knows]-(b)",
 		)
 		.await?;
 		let val = run_gql(
@@ -4944,8 +6764,8 @@ mod test {
 			&ds,
 			&ses,
 			"DEFINE TABLE person SCHEMALESS \
-			 PERMISSIONS FOR select FULL, FOR create NONE, FOR update NONE, FOR delete NONE; \
-			 CREATE person:1 SET name = 'A', age = 30;",
+			PERMISSIONS FOR select FULL, FOR create NONE, FOR update NONE, FOR delete NONE; \
+			CREATE person:1 SET name = 'A', age = 30;",
 		)
 		.await?;
 		// A record-scoped session: table PERMISSIONS clauses apply (a role-based
@@ -4958,9 +6778,15 @@ mod test {
 		);
 		// Each write goes through the native document pipeline, so each is denied:
 		// INSERT (create), SET (update), DELETE (delete) all leave the row intact.
-		let _ = ds.execute_gql("INSERT (p:person {name: 'B'})", &rec, None).await;
-		let _ = ds.execute_gql("MATCH (n:person) SET n.age = 99", &rec, None).await;
-		let _ = ds.execute_gql("MATCH (n:person) DETACH DELETE n", &rec, None).await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("INSERT (p:person {name: 'B'})"), &rec))
+			.await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) SET n.age = 99"), &rec))
+			.await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) DETACH DELETE n"), &rec))
+			.await;
 		// As owner: exactly the original row remains, unchanged.
 		let val =
 			run_gql(&ds, &ses, "MATCH (n:person) RETURN n.name AS name, n.age AS age").await?;
@@ -4981,11 +6807,11 @@ mod test {
 			&ds,
 			&ses,
 			"DEFINE TABLE person SCHEMALESS \
-			 PERMISSIONS FOR select FULL, FOR create FULL, FOR update FULL, FOR delete FULL; \
-			 DEFINE TABLE knows SCHEMALESS \
-			 PERMISSIONS FOR select NONE, FOR create FULL, FOR update FULL, FOR delete FULL; \
-			 CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2;",
+			PERMISSIONS FOR select FULL, FOR create FULL, FOR update FULL, FOR delete FULL; \
+			DEFINE TABLE knows SCHEMALESS \
+			PERMISSIONS FOR select NONE, FOR create FULL, FOR update FULL, FOR delete FULL; \
+			CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
+			RELATE person:1->knows->person:2;",
 		)
 		.await?;
 		let rec = Session::for_record(
@@ -5021,7 +6847,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A', tier = 'bronze'; \
-			 CREATE person:2 SET name = 'B', tier = 'gold';",
+			CREATE person:2 SET name = 'B', tier = 'gold';",
 		)
 		.await?;
 		// A read step after a write re-scans the live (post-write) state in the same
@@ -5031,7 +6857,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') SET n.tier = 'gold' \
-			 MATCH (m:person WHERE m.tier = 'gold') RETURN m.name AS name ORDER BY name",
+			MATCH (m:person WHERE m.tier = 'gold') RETURN m.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(
@@ -5055,7 +6881,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') DETACH DELETE n \
-			 MATCH (m:person) RETURN m.name AS name ORDER BY name",
+			MATCH (m:person) RETURN m.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "B" }]));
@@ -5073,7 +6899,7 @@ mod test {
 			&ds,
 			&ses,
 			"INSERT (a:person {name: 'New', age: 20}) \
-			 MATCH (b:person WHERE b.age = a.age) RETURN b.name AS name ORDER BY name",
+			MATCH (b:person WHERE b.age = a.age) RETURN b.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(
@@ -5101,8 +6927,8 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') SET n.tier = 'gold' \
-			 OPTIONAL MATCH (m:person WHERE m.tier = 'gold') \
-			 RETURN n.name AS n, m.name AS m",
+					OPTIONAL MATCH (m:person WHERE m.tier = 'gold') \
+					RETURN n.name AS n, m.name AS m",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { n: "A", m: "A" }]));
@@ -5121,8 +6947,8 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') INSERT (t:tag {name: 'X'}) \
-			 OPTIONAL MATCH (m:tag) \
-			 RETURN m.name AS m",
+			OPTIONAL MATCH (m:tag) \
+			RETURN m.name AS m",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { m: "X" }]));
@@ -5130,7 +6956,7 @@ mod test {
 	}
 
 	async fn index_key_base(ds: &Datastore, table: &str, index: &str) -> Result<IndexKeyBase> {
-		let txn = ds.transaction(Read, Optimistic).await?;
+		let txn = ds.transaction(Read).await?;
 		let ns = txn.get_ns_by_name("test", None).await?.unwrap();
 		let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
 		let table = TableName::from(table);
@@ -5160,24 +6986,24 @@ mod test {
 
 	const COUNT_COMPACTION_SQL: &str = "
 		DEFINE TABLE user SCHEMALESS;
-		DEFINE INDEX count_idx ON user COUNT;
-		CREATE user:1 SET name = 'one' RETURN NONE;
-		CREATE user:2 SET name = 'two' RETURN NONE;
+	DEFINE INDEX count_idx ON user COUNT;
+	CREATE user:1 SET name = 'one' RETURN NONE;
+	CREATE user:2 SET name = 'two' RETURN NONE;
 	";
 
 	const FULLTEXT_COMPACTION_SQL: &str = "
 		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
-		DEFINE TABLE doc SCHEMALESS;
-		DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
-		CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
-		CREATE doc:2 SET text = 'beta gamma' RETURN NONE;
+	DEFINE TABLE doc SCHEMALESS;
+	DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+	CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
+	CREATE doc:2 SET text = 'beta gamma' RETURN NONE;
 	";
 
 	const HNSW_COMPACTION_SQL: &str = "
 		DEFINE TABLE vec SCHEMALESS;
-		DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
-		CREATE vec:1 SET vector = [1, 2] RETURN NONE;
-		CREATE vec:2 SET vector = [2, 3] RETURN NONE;
+	DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+	CREATE vec:1 SET vector = [1, 2] RETURN NONE;
+	CREATE vec:2 SET vector = [2, 3] RETURN NONE;
 	";
 
 	#[tokio::test]
@@ -5213,6 +7039,255 @@ mod test {
 		.await
 	}
 
+	/// The process-local HNSW wrapper for one index, resolved the way the query
+	/// path resolves it, so a test holds the same instance the compaction and
+	/// the executor reach for.
+	async fn loaded_hnsw_index(
+		ds: &Datastore,
+		table: &str,
+		index: &str,
+	) -> Result<crate::idx::trees::store::hnsw::SharedHnswIndex> {
+		let table = TableName::from(table);
+		let txn = Arc::new(ds.transaction(Read).await?);
+		let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+		let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+		let tb = txn.get_tb(ns.namespace_id, db.database_id, &table, None).await?.unwrap();
+		let ix =
+			txn.get_tb_index(ns.namespace_id, db.database_id, &table, index, None).await?.unwrap();
+		let Index::Hnsw(p) = &ix.index else {
+			panic!("{index} is not an HNSW index");
+		};
+		let ikb = IndexKeyBase::new(ns.namespace_id, db.database_id, table, ix.index_id);
+		let mut ctx = ds.setup_ctx()?;
+		ctx.set_transaction(Arc::clone(&txn));
+		let ctx = ctx.freeze();
+		let hi =
+			ds.index_store().get_index_hnsw(&ctx, tb.table_id, &ikb, p, ix.format_version).await?;
+		txn.cancel().await?;
+		Ok(hi)
+	}
+
+	/// The entries an HNSW compaction still has to apply, across both pending
+	/// families.
+	async fn hnsw_pending_len(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+		let txn = ds.transaction(Read).await?;
+		let records = txn.getr(ikb.new_hr_range()?, None).await?.len();
+		let appends = txn.getr_raw(ikb.new_hp_range()?, None).await?.len();
+		txn.cancel().await?;
+		Ok(records + appends)
+	}
+
+	/// The layer versions the store holds for one HNSW index, layer 0 first.
+	async fn hnsw_layer_versions(ds: &Datastore, ikb: &IndexKeyBase) -> Result<Vec<u64>> {
+		let txn = ds.transaction(Read).await?;
+		let state: surrealdb_datastore::values::hnsw::HnswState =
+			txn.get_key(&ikb.new_hs_key(), None).await?.unwrap_or_default();
+		txn.cancel().await?;
+		let mut versions = Vec::with_capacity(1 + state.layers.len());
+		versions.push(state.layer0.version);
+		versions.extend(state.layers.iter().map(|l| l.version));
+		Ok(versions)
+	}
+
+	/// A filtered kNN search must not evaluate its residual condition against a
+	/// legacy pending entry that carries no vectors to score.
+	#[tokio::test]
+	async fn hnsw_legacy_pending_delete_entry_is_not_where_evaluated() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE vec SCHEMALESS;
+			 DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+			 CREATE vec:2 SET vector = [5, 5], bad = 5 RETURN NONE;
+			 CREATE vec:1 SET bad = 'x' RETURN NONE;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+
+		// Put vec:2 in the graph, then inject the shape of a pre-v3.1 legacy
+		// delete that an upgraded node can still encounter while draining `!hp`.
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		{
+			let txn = ds.transaction(Write).await?;
+			let key = surrealdb_datastore::key::schema::HnswPendingLegacyKey::new(
+				ikb.ns(),
+				ikb.db(),
+				Cow::Borrowed(ikb.table()),
+				ikb.index(),
+				0,
+			);
+			let pending = surrealdb_datastore::values::hnsw::VectorPendingUpdate {
+				id: surrealdb_datastore::values::hnsw::VectorId::RecordKey(Arc::new(
+					crate::val::RecordIdKey::Number(1),
+				)),
+				old_vectors: vec![],
+				new_vectors: vec![],
+			};
+			txn.set_key(&key, &pending).await?;
+			txn.commit().await?;
+		}
+
+		let mut response = ds
+			.execute(
+				"SELECT id FROM vec WHERE vector <|5,40|> [0, 0] AND type::int(bad) > 0;",
+				&session,
+				None,
+			)
+			.await?;
+		let rows = match response.remove(0).result {
+			Ok(PublicValue::Array(rows)) => rows,
+			Ok(other) => panic!("expected an array result, got {other:?}"),
+			Err(error) => panic!(
+				"the excluded vec:1 legacy delete must not have its residual condition evaluated: {error}"
+			),
+		};
+		assert_eq!(rows.len(), 1, "only vec:2 satisfies the query: {rows:?}");
+		Ok(())
+	}
+
+	/// A compaction apply that reached the graph and then failed to commit must
+	/// not leave that graph reachable.
+	///
+	/// The apply advances the in-memory version of every layer it writes, and
+	/// that version is a plain per-layer counter: a peer applying the same
+	/// batch from the same version lands on the same one. This fixture pins the
+	/// arithmetic — one staged record advances layer 0 by exactly one — so the
+	/// rolled-back copy and a peer's committed copy stand at the same version
+	/// with topologies that need not match, and a state check comparing
+	/// versions would keep the copy the store never took. The wrapper goes
+	/// instead, and the next access rebuilds it from persisted state.
+	///
+	/// The injected conflict classifies as retryable, so the compaction rolls
+	/// its write back, discards the wrapper, and applies again; the call
+	/// returns once that attempt commits. That attempt drains the queue, so the
+	/// records the index then answers over come from the graph alone.
+	#[tokio::test]
+	async fn hnsw_index_compaction_commit_failure_evicts_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		let site = RetryableConflictSite::HnswCompaction;
+		let node_id = ds.id();
+
+		// Hold the wrapper the query path uses, with its graph resident.
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		let versions = hnsw_layer_versions(&ds, &ikb).await?;
+
+		// One more pending, and a commit conflict to roll its apply back.
+		execute_all(&ds, &session, "CREATE vec:3 SET vector = [8, 9] RETURN NONE;").await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1, "the record must be staged, not indexed");
+		let _guard = inject_retryable_conflict(site, node_id);
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+		assert_eq!(retryable_conflict_count(site, node_id), 0, "the conflict must have fired");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			0,
+			"the attempt after the rollback must have applied the pending it rolled back"
+		);
+
+		// The advance the rolled-back apply staged in memory, and that the
+		// attempt after it then committed: one batch of one record, one layer-0
+		// version. A peer applying that same batch reproduces it exactly, which
+		// is why the version cannot certify the rolled-back topology.
+		let applied = hnsw_layer_versions(&ds, &ikb).await?;
+		assert_eq!(
+			applied[0],
+			versions[0] + 1,
+			"one staged record must advance layer 0 by exactly one: {versions:?} -> {applied:?}"
+		);
+
+		// The wrapper the rollback mutated is gone; the attempt after it ran on
+		// one rebuilt from the store.
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			!Arc::ptr_eq(&before, &after),
+			"a rolled-back compaction write must not leave its graph reachable"
+		);
+
+		// With the queue drained, every record answered for comes from the
+		// graph, which the rebuilt wrapper took from the store.
+		let mut response =
+			ds.execute("SELECT id FROM vec WHERE vector <|3,40|> [1, 2];", &session, None).await?;
+		let PublicValue::Array(rows) = response.remove(0).result? else {
+			panic!("expected an array result");
+		};
+		assert_eq!(rows.len(), 3, "the recovered index must return every record: {rows:?}");
+		Ok(())
+	}
+
+	/// An apply error can land after a layer mutates but before `save_nodes`
+	/// advances its version, leaving a resident topology the store never took
+	/// under the version the store already holds. That path must evict the
+	/// wrapper too.
+	#[tokio::test]
+	async fn hnsw_index_compaction_apply_error_evicts_the_loaded_index() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, HNSW_COMPACTION_SQL).await?;
+		let ikb = index_key_base(&ds, "vec", "hnsw_idx").await?;
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+
+		// Hold the query-path wrapper with the two-node graph resident. Element
+		// ids follow the two separately keyed pending records: vec:1 is 0 and
+		// vec:2 is 1.
+		let before = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		let (table_id, format_version, entry_point) = {
+			let txn = ds.transaction(Read).await?;
+			let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+			let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+			let table = TableName::from("vec");
+			let tb = txn.get_tb(ns.namespace_id, db.database_id, &table, None).await?.unwrap();
+			let ix = txn
+				.get_tb_index(ns.namespace_id, db.database_id, &table, "hnsw_idx", None)
+				.await?
+				.unwrap();
+			let state: surrealdb_datastore::values::hnsw::HnswState =
+				txn.get_key(&ikb.new_hs_key(), None).await?.unwrap();
+			txn.cancel().await?;
+			(tb.table_id, ix.format_version, state.enter_point.unwrap())
+		};
+		assert!(entry_point <= 1, "the two-node fixture has an unexpected entry point");
+
+		// Delete the non-entry-point record. Its layer-0 removal mutates the
+		// resident graph before resolving the remaining neighbour's vector.
+		let removed_element = 1 - entry_point;
+		let delete = format!("DELETE vec:{} RETURN NONE;", removed_element + 1);
+		execute_all(&ds, &session, &delete).await?;
+		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1);
+
+		// Force that neighbour lookup to the store, then corrupt its encoded
+		// vector. The apply now errors after `remove_node_and_bidirectional_edges`
+		// but before `save_nodes` can version the mutated layer.
+		ds.index_store().invalidate_hnsw_index_caches(table_id, &ikb, format_version).await;
+		let entry_vector_key = surrealdb_datastore::key::schema::HnswVectorKey::new(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			entry_point,
+		);
+		let txn = ds.transaction(Write).await?;
+		txn.set(entry_vector_key.encode_key()?, vec![0xff]).await?;
+		txn.commit().await?;
+
+		ds.process_index_compaction(&ikb, CancellationToken::new())
+			.await
+			.expect_err("the malformed neighbour vector must fail the graph apply");
+		assert_eq!(
+			hnsw_pending_len(&ds, &ikb).await?,
+			1,
+			"the failed apply must roll back its conditional pending delete"
+		);
+
+		let after = loaded_hnsw_index(&ds, "vec", "hnsw_idx").await?;
+		assert!(
+			!Arc::ptr_eq(&before, &after),
+			"an apply error before versioning must evict the mutated wrapper"
+		);
+		Ok(())
+	}
+
 	#[tokio::test]
 	async fn index_compaction_retries_queue_cleanup_commit_conflict() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
@@ -5221,15 +7296,517 @@ mod test {
 		let node_id = ds.id();
 		let _guard = inject_retryable_conflict(site, node_id);
 
-		let (_, errors) = Datastore::index_compaction(
-			Arc::new(ds),
-			Duration::from_secs(1),
-			CancellationToken::new(),
-		)
-		.await?;
+		let (_, errors) =
+			Datastore::index_compaction(ds, Duration::from_secs(1), CancellationToken::new())
+				.await?;
 
 		assert_eq!(errors, 0);
 		assert_eq!(retryable_conflict_count(site, node_id), 0);
+		Ok(())
+	}
+
+	/// The compaction-queue drain must never delete more than one batch of
+	/// `/!ic` entries per write transaction: the queue grows by one entry per
+	/// indexed record write, so an unbounded cleanup transaction would carry
+	/// one write per accumulated entry — the per-key reservation profile that
+	/// can starve distributed backends.
+	#[tokio::test]
+	async fn index_compaction_queue_cleanup_is_bounded() -> Result<()> {
+		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
+		// A backlog of 2.5 batches forces multiple drain iterations.
+		let backlog = batch * 2 + batch / 2;
+		let observer = Arc::new(WriteTxSizeObserver::default());
+		// Background jobs are off so the only transactions observed are the
+		// ones this test drives. The maintenance task runs this very function
+		// on the same datastore, and its lease admits a second pass on the same
+		// node, so one landing inside this drain both conflicts with the
+		// cleanup commit — making it retry and re-observe its keys — and
+		// commits batches of its own that the observer cannot distinguish from
+		// this drain's.
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+		// A real index for the queue entries to reference. The table stays
+		// empty (no record writes, which would each enqueue an entry of
+		// their own), so compacting it performs no index writes and the
+		// cycle's only large write transactions are the queue cleanups.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		// Enqueue the backlog directly: each key is unique, exactly as the
+		// per-record-write enqueue path produces them.
+		{
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..backlog {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await?;
+		}
+		// Only observe the compaction cycle's own transactions.
+		observer.clear();
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(batches, 3, "expected the backlog to drain in ceil(2.5) batches");
+
+		// The queue is fully drained.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
+
+		// No write transaction exceeded the batch bound, and the cleanups
+		// were exactly [batch, batch, batch/2].
+		let sizes = observer.sizes();
+		assert!(
+			sizes.iter().all(|&n| n <= batch as u64),
+			"a write transaction exceeded the {batch}-key bound: {sizes:?}"
+		);
+		let cleanups = cleanup_sizes(&sizes);
+		assert_eq!(
+			cleanups,
+			vec![batch as u64, batch as u64, (batch / 2) as u64],
+			"unexpected cleanup transaction sizes"
+		);
+		Ok(())
+	}
+
+	/// Queue keys sort by index before their time-ordered UUID, so a
+	/// start-anchored scan would keep serving an early-sorting index for as
+	/// long as it has (or keeps receiving) entries. The drain must instead
+	/// rotate: after a batch, the scan resumes past that batch's last index,
+	/// reaching later-sorting indexes before returning for the remainder.
+	#[tokio::test]
+	async fn index_compaction_queue_drain_rotates_across_indexes() -> Result<()> {
+		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
+		let observer = Arc::new(WriteTxSizeObserver::default());
+		// Background jobs are off, for the same reason as the bounded test
+		// above: the maintenance task runs this very function, and a second
+		// pass inside this drain would both conflict with the cleanup commits
+		// and contribute batches of its own to the observed sequence.
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+		// Two empty indexed tables whose names order their queue entries:
+		// `aaa` sorts before `zzz`.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE aaa SCHEMALESS;
+			 DEFINE TABLE zzz SCHEMALESS;
+			 DEFINE INDEX ft_a ON aaa FIELDS text FULLTEXT ANALYZER simple BM25;
+			 DEFINE INDEX ft_z ON zzz FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb_a = index_key_base(&ds, "aaa", "ft_a").await?;
+		let ikb_z = index_key_base(&ds, "zzz", "ft_z").await?;
+		let node_id = ds.id();
+		// 1.5 batches for the early index, a handful for the late one.
+		{
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..(batch + batch / 2) {
+				txn.set_key(&ikb_a.new_ic_key(node_id), &()).await?;
+			}
+			for _ in 0..10 {
+				txn.set_key(&ikb_z.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await?;
+		}
+		observer.clear();
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(batches, 3);
+
+		// The queue is fully drained. An abandoned cleanup leaves entries
+		// behind without moving `errors` or `batches`, so the sequence below
+		// cannot stand in for this.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
+
+		// Rotation signature: after the first full batch of the early index,
+		// the late index is served before the early index's remainder.
+		let sizes = observer.sizes();
+		let cleanups = cleanup_sizes(&sizes);
+		assert_eq!(
+			cleanups,
+			vec![batch as u64, 10, (batch / 2) as u64],
+			"expected the late-sorting index to be drained between the early index's batches"
+		);
+		Ok(())
+	}
+
+	/// One statement writing many documents must leave exactly one `!iu`
+	/// count-delta entry and one `/!ic` compaction request, not one of each per
+	/// document.
+	///
+	/// Reads of a COUNT index sum every un-compacted `!iu` entry, so the
+	/// per-document fan-out made `count()` cost scale with write volume and made
+	/// the compaction queue grow at the same rate. Aggregating per transaction
+	/// keeps the contention-free property the delta log exists for (the entry is
+	/// still a blind write under a key no other transaction shares) while
+	/// removing that scaling.
+	#[tokio::test]
+	async fn count_index_writes_one_delta_per_transaction() -> Result<()> {
+		const ROWS: usize = 500;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+
+		execute_all(&ds, &session, &format!("CREATE |item:1..={ROWS}| RETURN NONE")).await?;
+
+		let (deltas, queued) = {
+			let txn = ds.transaction(Read).await?;
+			let iu = IndexCountPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+			}
+			.range()?;
+			let deltas = catch!(txn, txn.keys(iu, u32::MAX, 0, None).await);
+			let queued =
+				catch!(txn, txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await);
+			let _ = txn.cancel().await;
+			(deltas, queued)
+		};
+
+		assert_eq!(
+			deltas.len(),
+			1,
+			"{ROWS} rows in one statement must leave one count-delta entry, found {}",
+			deltas.len()
+		);
+		assert_eq!(
+			queued.len(),
+			1,
+			"{ROWS} rows in one statement must enqueue one compaction request, found {}",
+			queued.len()
+		);
+
+		// The single entry carries the net delta, so the count is still right.
+		let sum = {
+			let mut sum: i64 = 0;
+			for key in &deltas {
+				let iu = IndexCountKey::decode_key(key)?;
+				let delta = i64::try_from(iu.count).expect("count delta out of range");
+				sum += if iu.pos {
+					delta
+				} else {
+					-delta
+				};
+			}
+			sum
+		};
+		assert_eq!(sum, ROWS as i64, "the aggregated entry must carry the net delta");
+		Ok(())
+	}
+
+	/// A commit that queues compaction work must wake the compactor, rather
+	/// than leaving the queue to sit until the next tick.
+	///
+	/// The compaction interval and the write rate are otherwise unrelated, and
+	/// that gap is what lets a count index's delta log — which every read of the
+	/// index sums — grow without bound. The notification is what ties the two
+	/// together.
+	#[tokio::test]
+	async fn commit_queuing_compaction_work_wakes_the_compactor() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+
+		// Wait on the trigger the background compactor waits on. Registering
+		// before the write is what makes this deterministic rather than a race:
+		// `Notify` also stores one permit, so a notification that lands before
+		// the await still satisfies it.
+		let triggers = Arc::clone(ds.commit_triggers());
+		let waiter = tokio::spawn(async move {
+			triggers.index_compaction.notified().await;
+		});
+
+		execute_all(&ds, &session, "CREATE item:1 RETURN NONE").await?;
+
+		tokio::time::timeout(Duration::from_secs(5), waiter)
+			.await
+			.expect("a commit that queues compaction work must notify the compactor")
+			.expect("the waiter task must not panic");
+		Ok(())
+	}
+
+	/// A commit that queues no compaction work must not wake the compactor, so
+	/// unrelated write traffic does not keep the lease check spinning.
+	#[tokio::test]
+	async fn commit_without_compaction_work_does_not_wake_the_compactor() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// No COUNT (or other compaction-eligible) index, so nothing to queue.
+		execute_all(&ds, &session, "DEFINE TABLE item SCHEMALESS;").await?;
+
+		let triggers = Arc::clone(ds.commit_triggers());
+		let waiter = tokio::spawn(async move {
+			triggers.index_compaction.notified().await;
+		});
+
+		execute_all(&ds, &session, "CREATE item:1 RETURN NONE").await?;
+
+		let woke = tokio::time::timeout(Duration::from_millis(300), waiter).await;
+		assert!(woke.is_err(), "a write with no compaction work must not wake the compactor");
+		Ok(())
+	}
+
+	/// Queues `count` async events and returns how many the event ran.
+	async fn queue_async_events(ds: &Datastore, session: &Session, count: usize) -> Result<()> {
+		execute_all(
+			ds,
+			session,
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE EVENT log ON person ASYNC THEN (CREATE logged SET who = $after.id);",
+		)
+		.await?;
+		execute_all(ds, session, &format!("CREATE |person:{count}| RETURN NONE;")).await
+	}
+
+	async fn logged_count(ds: &Datastore, session: &Session) -> Result<usize> {
+		let mut res = ds.execute("SELECT * FROM logged", session, None).await?;
+		match res.remove(0).result? {
+			PublicValue::Array(a) => Ok(a.len()),
+			other => panic!("expected an array, got {other:?}"),
+		}
+	}
+
+	/// A cancelled pass must return at the next batch boundary rather than drain
+	/// the queue. Async events run user-defined SurrealQL of unbounded duration,
+	/// so a pass that ignored cancellation would hold [`Datastore::shutdown`]
+	/// open for as long as the queue kept refilling.
+	#[test_log::test(tokio::test)]
+	async fn event_processing_returns_immediately_once_cancelled() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 50).await?;
+
+		let canceller = CancellationToken::new();
+		canceller.cancel();
+		// Cancellation is not an error: the queue is durable, so what is left is
+		// picked up by the next pass here or on another node.
+		ds.event_processing(Duration::from_secs(1), &canceller).await?;
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			0,
+			"a cancelled pass must not process the queue"
+		);
+		Ok(())
+	}
+
+	/// The control for the test above: with a live token the same queue drains,
+	/// so the early return is cancellation and not a broken pass.
+	#[test_log::test(tokio::test)]
+	async fn event_processing_drains_the_queue_when_not_cancelled() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 50).await?;
+
+		ds.event_processing(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			50,
+			"an uncancelled pass must drain the queue"
+		);
+		Ok(())
+	}
+
+	/// Two owners of one datastore may both call `shutdown`, which the sequence
+	/// serialises so a second caller cannot close the storage engine while the
+	/// first is still waiting on a maintenance pass.
+	///
+	/// This covers the liveness half of that: both callers complete and neither
+	/// blocks on the other's guard. The exclusion itself is a property of holding
+	/// the guard across the whole sequence, not something observable from
+	/// outside without a test hook in the shutdown path.
+	#[test_log::test(tokio::test)]
+	async fn concurrent_shutdown_calls_both_complete() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
+			tokio::join!(ds.shutdown(), ds.shutdown())
+		})
+		.await
+		.map_err(|_| anyhow::anyhow!("concurrent shutdown deadlocked"))?;
+		first?;
+		second?;
+		Ok(())
+	}
+
+	/// Mutations that cancel out within one transaction write no entry at all,
+	/// and a read inside that transaction still sees its own uncommitted work.
+	#[tokio::test]
+	async fn count_index_nets_out_within_a_transaction() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+
+		// A create and a delete of the same rows inside one transaction net to
+		// zero, so there is no delta worth recording.
+		execute_all(
+			&ds,
+			&session,
+			"BEGIN;
+			 CREATE |item:1..=50| RETURN NONE;
+			 DELETE item:1..=50 RETURN NONE;
+			 COMMIT;",
+		)
+		.await?;
+
+		let deltas = {
+			let txn = ds.transaction(Read).await?;
+			let iu = IndexCountPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+			}
+			.range()?;
+			let res = catch!(txn, txn.keys(iu, u32::MAX, 0, None).await);
+			let _ = txn.cancel().await;
+			res
+		};
+		assert!(
+			deltas.is_empty(),
+			"a net-zero transaction must write no delta, found {}",
+			deltas.len()
+		);
+
+		// A read later in the same transaction as its writes must observe them,
+		// even though the aggregate is not flushed until commit.
+		let res = ds
+			.execute(
+				"BEGIN;
+				 CREATE |item:100..=109| RETURN NONE;
+				 SELECT count() FROM item GROUP ALL;
+				 COMMIT;",
+				&session,
+				None,
+			)
+			.await?;
+		// Locate the SELECT's result by content rather than by position, so the
+		// assertion does not depend on how many results the surrounding
+		// BEGIN/COMMIT contribute.
+		let mut counted = None;
+		for r in res {
+			let rendered = format!("{:?}", r.result?);
+			if rendered.contains("count") {
+				counted = Some(rendered);
+			}
+		}
+		let counted = counted.expect("the SELECT must produce a result");
+		assert!(
+			counted.contains("Int(10)"),
+			"a read must see its own transaction's buffered deltas, got {counted}"
+		);
+		Ok(())
+	}
+
+	/// An undecodable `/!ic` entry must not wedge the drain: it names no
+	/// index to compact, so the cycle skips it with a warning, deletes it
+	/// with its batch, and continues serving the decodable entries.
+	#[tokio::test]
+	async fn index_compaction_quarantines_undecodable_queue_keys() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		let ds = ds;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		{
+			let txn = ds.transaction(Write).await?;
+			// The corrupt entry's 0xff lead byte sorts it after every valid
+			// entry, so it lands last in the batch and exercises the
+			// cursor-seek decode fallback as well as the dedupe-loop skip.
+			for _ in 0..5 {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.set(Key::from(b"/!ic\xff-not-a-valid-entry".to_vec()), vec![]).await?;
+			txn.commit().await?;
+		}
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert!(batches >= 1);
+		assert_eq!(errors, 0, "a corrupt queue entry must not count as a compaction failure");
+
+		// The queue is fully drained, corrupt entry included.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
 		Ok(())
 	}
 
@@ -5254,7 +7831,7 @@ mod test {
 	async fn archive_node_for_shutdown_reports_timeout() {
 		let outcome = archive_node_for_shutdown(
 			Duration::from_millis(1),
-			Err(anyhow::Error::new(Error::QueryTimedout(Duration::from_millis(1).into()))),
+			Err(anyhow::Error::new(EngineError::QueryTimedout(Duration::from_millis(1)))),
 		);
 
 		assert_eq!(outcome, ShutdownNodeDeleteOutcome::TimedOut);
@@ -5263,7 +7840,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_timeout() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 		let timeout_duration = Duration::from_millis(10);
 
 		let err = await_node_tx_step(
@@ -5276,14 +7853,14 @@ mod test {
 		.await
 		.unwrap_err();
 
-		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))));
+		assert!(matches!(crate::err::engine_error(&err), Some(EngineError::QueryTimedout(_))));
 		assert!(txn.closed());
 	}
 
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_cancellation() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 		let canceller = CancellationToken::new();
 		canceller.cancel();
 
@@ -5297,14 +7874,14 @@ mod test {
 		.await
 		.unwrap_err();
 
-		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)));
+		assert!(matches!(crate::err::engine_error(&err), Some(EngineError::QueryCancelled)));
 		assert!(txn.closed());
 	}
 
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_error() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 
 		let err = await_node_tx_step(
 			&txn,
@@ -5323,7 +7900,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_success_leaves_transaction_open() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 
 		await_node_tx_step(
 			&txn,
@@ -5345,8 +7922,21 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		// `insert_node` writes the current node's heartbeat at `clock_now()`.
 		ds.insert_node().await.unwrap();
-		let age = ds.node_heartbeat_age().await.unwrap();
+		let age = ds.node_heartbeat_age().await.unwrap().expect("the node row was just written");
 		assert!(age < Duration::from_secs(5), "heartbeat should be fresh, got {age:?}");
+	}
+
+	/// A node with no membership row reports no heartbeat, rather than the read
+	/// failure `get_node` raises for the same state. Readiness depends on the
+	/// distinction: before `insert_node` runs, and after a peer archives and
+	/// reaps this node, the row is legitimately absent.
+	#[tokio::test]
+	async fn node_heartbeat_age_is_absent_without_a_node_row() {
+		let ds = Datastore::new("memory").await.unwrap();
+		assert!(
+			ds.node_heartbeat_age().await.unwrap().is_none(),
+			"an unregistered node reported a heartbeat"
+		);
 	}
 
 	#[tokio::test]
@@ -5361,12 +7951,14 @@ mod test {
 			},
 			false,
 		);
-		let key = crate::key::root::nd::new(ds.id());
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
-		txn.set(&key, &stale).await.unwrap();
+		let key = NodeKey {
+			nd: ds.id(),
+		};
+		let txn = ds.transaction(Write).await.unwrap();
+		txn.set_key(&key, &stale).await.unwrap();
 		txn.commit().await.unwrap();
 		// The reported age should reflect the stale heartbeat.
-		let age = ds.node_heartbeat_age().await.unwrap();
+		let age = ds.node_heartbeat_age().await.unwrap().expect("the node row was just written");
 		assert!(age >= Duration::from_secs(59), "heartbeat should be stale, got {age:?}");
 	}
 
@@ -5378,13 +7970,13 @@ mod test {
 
 		// Setup the initial user if there are no root users
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 0);
 			txn.cancel().await.unwrap();
 		}
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 1);
 			txn.cancel().await.unwrap();
 		}
@@ -5396,7 +7988,7 @@ mod test {
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
 		let pass_hash = {
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			let res = txn.expect_root_user(username).await.unwrap().hash.clone();
 			txn.cancel().await.unwrap();
 			res
@@ -5404,7 +7996,7 @@ mod test {
 
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
 			txn.cancel().await.unwrap();
 		}
@@ -5444,7 +8036,7 @@ mod test {
 			.await
 			.unwrap();
 
-		let opt = Options::new(&dbs.config())
+		let opt = Options::new(&dbs.config().exec)
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_max_computation_depth(u32::MAX);
@@ -5452,7 +8044,7 @@ mod test {
 		// Create a default context
 		let mut ctx = dbs.setup_ctx()?;
 		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
+		let txn = dbs.transaction(TransactionType::Read).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(Arc::clone(&txn));
 		// Freeze the context
@@ -5460,7 +8052,7 @@ mod test {
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack
-			.enter(|stk| val.compute(stk, &ctx, &opt, None))
+			.enter(|stk| crate::legacy::expr_compute(&val, stk, &ctx, &opt, None))
 			.finish()
 			.await
 			.catch_return()
@@ -5472,47 +8064,44 @@ mod test {
 
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
-		let (send, _recv) = crate::channel::bounded(crate::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+		let (send, _recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
 			.with_notify(send)
 			.build_with_path("memory")
 			.await?;
-		let cache = ds.get_cache();
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 		let db = {
-			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Write).await?;
 			let db = txn.ensure_ns_db(None, "test", "test").await?;
 			txn.commit().await?;
 			db
 		};
 
 		// Define the table, set the initial uuids
-		let (initial, initial_live_query_version) = {
+		let initial = {
 			let sql = r"DEFINE TABLE test;".to_owned();
 			let res = &mut ds.execute(&sql, &ses, None).await?;
 			assert_eq!(res.len(), 1);
 			res.remove(0).result.unwrap();
 			// Obtain the initial uuids
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
-			let initial_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
-			(initial, initial_live_query_version)
+			initial
 		};
 
 		// Define some resources to refresh the UUIDs
 		let lqid = {
 			let sql = r"
-		DEFINE FIELD test ON test;
-		DEFINE EVENT test ON test WHEN {} THEN {};
-		DEFINE TABLE view AS SELECT * FROM test;
-		DEFINE INDEX test ON test FIELDS test;
-		LIVE SELECT * FROM test;
-	"
+				DEFINE FIELD test ON test;
+			DEFINE EVENT test ON test WHEN {} THEN {};
+			DEFINE TABLE view AS SELECT * FROM test;
+			DEFINE INDEX test ON test FIELDS test;
+			LIVE SELECT * FROM test;
+			"
 			.to_owned();
 			let res = &mut ds.execute(&sql, &ses, None).await?;
 			assert_eq!(res.len(), 5);
@@ -5526,32 +8115,31 @@ mod test {
 		};
 
 		// Obtain the uuids after definitions
-		let (after_define, after_define_live_query_version) = {
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+		let after_define = {
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let after_define =
 				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
-			let after_define_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
 			assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
 			assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
 			assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
-			assert_ne!(initial_live_query_version, after_define_live_query_version);
-			(after_define, after_define_live_query_version)
+			// LIVE bumped the committed live-query cache timestamp.
+			assert_ne!(initial.cache_lives_ts, after_define.cache_lives_ts);
+			after_define
 		};
 
 		// Remove the defined resources to refresh the UUIDs
 		{
 			let sql = r"
-		REMOVE FIELD test ON test;
-		REMOVE EVENT test ON test;
-		REMOVE TABLE view;
-		REMOVE INDEX test ON test;
-		KILL $lqid;
-	"
+				REMOVE FIELD test ON test;
+			REMOVE EVENT test ON test;
+			REMOVE TABLE view;
+			REMOVE INDEX test ON test;
+			KILL $lqid;
+			"
 			.to_owned();
 			let vars =
 				PublicVariables::from(BTreeMap::from_iter(map! { "lqid".to_string() => lqid }));
@@ -5565,21 +8153,248 @@ mod test {
 		}
 		// Obtain the uuids after definitions
 		{
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let after_remove =
 				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
-			let after_remove_live_query_version =
-				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
 			assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
 			assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-			assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+			// KILL bumped the committed live-query cache timestamp.
+			assert_ne!(after_define.cache_lives_ts, after_remove.cache_lives_ts);
 		}
 		//
 		Ok(())
+	}
+
+	/// Exact-count accounting for the durable commits an indexed write incurs
+	/// beyond its own statement transaction.
+	///
+	/// Groups every observed transaction completion by outcome, type and
+	/// `keys_written`, so a per-record commit is distinguishable from a
+	/// per-record cancel: a cancel costs nothing on a remote backend, a commit
+	/// is a full durability round trip.
+	#[derive(Default)]
+	struct TxOutcomeObserver(std::sync::Mutex<Vec<(&'static str, bool, u64)>>);
+
+	impl ExecutionObserver for TxOutcomeObserver {
+		fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
+			self.0.lock().unwrap().push((
+				event.safe.outcome.as_label(),
+				event.safe.write,
+				event.safe.metrics.keys_written,
+			));
+		}
+	}
+
+	impl TxOutcomeObserver {
+		fn take(&self) -> Vec<(&'static str, bool, u64)> {
+			let mut g = self.0.lock().unwrap();
+			std::mem::take(&mut *g)
+		}
+	}
+
+	#[tokio::test]
+	async fn doc_id_allocation_commits_per_record() -> Result<()> {
+		// Windowed allocation makes the commit count flat in the row count. The
+		// doc-ID window is `table_doc_ids_batch_size` wide (1000), so none of
+		// these sizes exhausts one, and the builder commits per batch of
+		// `INDEXING_BATCH_SIZE`. Persisting per allocation instead put this at
+		// one commit per row, which is what the bounds below rule out: they sit
+		// far under the smallest row count, so a per-row commit breaches them at
+		// every size.
+		const ROWS: [usize; 3] = [100, 200, 400];
+		const INSERT_MAX: usize = 16;
+		const BUILD_MAX: usize = 48;
+
+		let mut observed = Vec::with_capacity(ROWS.len());
+		for rows in ROWS {
+			let (insert, build) = measure_doc_id_commits(rows).await?;
+			assert!(
+				insert <= INSERT_MAX,
+				"{rows} indexed inserts took {insert} durable write commits, over the {INSERT_MAX} \
+				 a windowed allocator needs"
+			);
+			assert!(
+				build <= BUILD_MAX,
+				"a DEFINE INDEX over {rows} rows took {build} durable write commits, over the \
+				 {BUILD_MAX} a windowed allocator needs"
+			);
+			observed.push((insert, build));
+		}
+
+		// Flat in the row count, not merely bounded: quadrupling the rows must
+		// not multiply the commits. A per-row commit shows up here as growth
+		// proportional to `ROWS`, even were the caps above ever loosened.
+		let (first_insert, first_build) = observed[0];
+		let (last_insert, last_build) = observed[ROWS.len() - 1];
+		let (first_rows, last_rows) = (ROWS[0], ROWS[ROWS.len() - 1]);
+		assert!(
+			last_insert <= first_insert * 2,
+			"inserting {last_rows} rows took {last_insert} commits against {first_insert} for \
+			 {first_rows}: the cost is tracking the row count"
+		);
+		assert!(
+			last_build <= first_build * 2,
+			"building over {last_rows} rows took {last_build} commits against {first_build} for \
+			 {first_rows}: the cost is tracking the row count"
+		);
+
+		Ok(())
+	}
+
+	async fn measure_doc_id_commits(rows: usize) -> Result<(usize, usize)> {
+		let observer = Arc::new(TxOutcomeObserver::default());
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+
+		let report = |label: &str, obs: Vec<(&'static str, bool, u64)>| -> usize {
+			let mut h: BTreeMap<(&'static str, bool, u64), usize> = BTreeMap::new();
+			for e in &obs {
+				*h.entry(*e).or_default() += 1;
+			}
+			// A rollback reports `Outcome::Cancelled`, so a `success` write
+			// completion is exactly a durable commit. Of those, the single-key
+			// ones are the sequence state writes this test is about: nothing
+			// else on this path commits exactly one key.
+			let durable_writes = obs.iter().filter(|(o, w, _)| *o == "success" && *w).count();
+			let seq_state = obs.iter().filter(|(o, w, k)| *o == "success" && *w && *k == 1).count();
+			let per_row = durable_writes as f64 / rows as f64;
+			println!(
+				"  {label}: {durable_writes} durable write commits ({per_row:.3}/row), of which {seq_state} single-key sequence-state; {} completions total",
+				obs.len()
+			);
+			for ((outcome, write, keys), n) in h {
+				let kind = if write {
+					"write"
+				} else {
+					"read "
+				};
+				println!("      {n:>4} x [{outcome:>9} {kind} keys_written={keys}]");
+			}
+			durable_writes
+		};
+
+		// Case A: inserts into a table that already carries a b-tree index.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_name ON item FIELDS name;",
+		)
+		.await?;
+		let _ = observer.take();
+		execute_all(&ds, &session, &format!("CREATE |item:1..={rows}| SET name = 'x' RETURN NONE"))
+			.await?;
+		let insert_obs = observer.take();
+
+		// Case B: DEFINE INDEX over rows that already exist.
+		execute_all(&ds, &session, "DEFINE TABLE other SCHEMALESS;").await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE |other:1..={rows}| SET name = 'x' RETURN NONE"),
+		)
+		.await?;
+		let _ = observer.take();
+		execute_all(&ds, &session, "DEFINE INDEX idx_other ON other FIELDS name;").await?;
+		let build_obs = observer.take();
+
+		println!("\n  rows={rows}");
+		let insert = report("insert", insert_obs);
+		let build = report("build ", build_obs);
+
+		Ok((insert, build))
+	}
+
+	/// A doc-ID is issued once. The forward map (record -> id) and the reverse
+	/// map (id -> record) therefore hold one entry per record: reissuing an id
+	/// overwrites a reverse entry, which leaves the reverse map short while the
+	/// forward map stays whole.
+	///
+	/// The restart lands mid-window — the doc-ID batch is 1000 and far fewer
+	/// records are written — which is the case a persisted per-allocation
+	/// cursor used to cover and the window's committed end covers now. A
+	/// restart keeps the node id, which is what makes the persisted allocator
+	/// state reachable at all: it is keyed per node.
+	#[tokio::test]
+	async fn doc_ids_stay_unique_across_mid_batch_restart() -> Result<()> {
+		const BEFORE: usize = 30;
+		const AFTER: usize = 30;
+
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_tag ON item FIELDS tag;",
+		)
+		.await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE |item:1..={BEFORE}| SET tag = 'x' RETURN NONE"),
+		)
+		.await?;
+
+		let ds = Arc::new(Arc::into_inner(ds).expect("sole owner of the datastore").restart());
+		let lo = BEFORE + 1;
+		let hi = BEFORE + AFTER;
+		execute_all(&ds, &session, &format!("CREATE |item:{lo}..={hi}| SET tag = 'x' RETURN NONE"))
+			.await?;
+
+		let (forward, reverse) = doc_id_map_sizes(&ds, "item", "idx_tag").await?;
+
+		assert_eq!(forward, BEFORE + AFTER, "one forward doc-ID mapping per record");
+		assert_eq!(
+			reverse,
+			BEFORE + AFTER,
+			"a reissued doc-ID overwrites a reverse mapping, leaving this map short"
+		);
+
+		Ok(())
+	}
+
+	/// The sizes of a table's doc-ID maps: the forward map keyed by record and
+	/// the reverse map keyed by id. They hold one entry per record while every
+	/// id is distinct; a reissued id overwrites a reverse entry, so the reverse
+	/// map is where a collision becomes visible.
+	async fn doc_id_map_sizes(ds: &Datastore, tb: &str, ix: &str) -> Result<(usize, usize)> {
+		let ikb = index_key_base(ds, tb, ix).await?;
+		let txn = ds.transaction(Read).await?;
+		let forward = catch!(
+			txn,
+			txn.keys(
+				DocLookupPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table())).range()?,
+				u32::MAX,
+				0,
+				None
+			)
+			.await
+		);
+		let reverse = catch!(
+			txn,
+			txn.keys(
+				DocKeyPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table())).range()?,
+				u32::MAX,
+				0,
+				None
+			)
+			.await
+		);
+		let _ = txn.cancel().await;
+		Ok((forward.len(), reverse.len()))
 	}
 }

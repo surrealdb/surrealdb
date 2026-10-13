@@ -21,9 +21,10 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document};
+use crate::exe::FlowResultExt;
 use crate::expr::field::Fields;
 use crate::expr::part::Part;
-use crate::expr::{FlowResultExt, Idiom, Operation, Output, SelectStatement};
+use crate::expr::{Idiom, Operation, Output, SelectStatement};
 use crate::iam::{Action, AuthLimit};
 use crate::val::Value;
 
@@ -91,6 +92,11 @@ impl Document {
 			// Re-evaluate computed fields against the reduced view.
 			self.compute_fields(stk, ctx, opt, DocKind::CurrentReduced, needed_roots.as_ref())
 				.await?;
+			// SECURITY: those fields did not exist when the reduce applied
+			// field permissions, and the projection below can rename one,
+			// which puts it beyond the reach of the name-keyed pass in
+			// `apply_select_field_permissions`.
+			self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		}
 		// Re-borrow the view we just materialised
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -112,7 +118,7 @@ impl Document {
 				&& let Some(Part::Field(name)) = alias.first()
 			{
 				let val = stk
-					.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
+					.run(|stk| crate::legacy::expr_compute(&sel.expr, stk, ctx, opt, Some(current)))
 					.await
 					.catch_return()?;
 				if let Value::Object(ref mut obj) = doc {
@@ -126,12 +132,13 @@ impl Document {
 			// omitted field resolves to NONE in the VALUE result.
 			let mut doc = current.doc.as_ref().clone();
 			for field in omit {
-				doc.del(stk, ctx, opt, field).await?;
+				crate::legacy::value_del(&mut doc, stk, ctx, opt, field).await?;
 			}
 			let projection_doc = CursorDoc::new(current.rid.clone(), None, doc);
-			stmt.fields.compute(stk, ctx, opt, Some(&projection_doc)).await?
+			crate::legacy::fields_compute(&stmt.fields, stk, ctx, opt, Some(&projection_doc))
+				.await?
 		} else {
-			stmt.fields.compute(stk, ctx, opt, Some(current)).await?
+			crate::legacy::fields_compute(&stmt.fields, stk, ctx, opt, Some(current)).await?
 		};
 		// Apply field-level select permissions to the output
 		self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
@@ -141,7 +148,7 @@ impl Document {
 		// post-sort in `Results::project_value`).
 		if stmt.group.is_none() && !matches!(stmt.fields, Fields::Value(_)) {
 			for field in omit {
-				out.del(stk, ctx, opt, field).await?;
+				crate::legacy::value_del(&mut out, stk, ctx, opt, field).await?;
 			}
 		}
 		// Output the document
@@ -186,8 +193,19 @@ impl Document {
 				_ => return Err(IgnoreError::Ignore),
 			},
 		};
-		// Apply field-level select permissions to the output
-		self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
+		// Apply field-level select permissions to the output. `Output::Diff` is
+		// excluded because a patch-op list is not a record image: its objects
+		// are keyed `op` / `path` / `value`, and a field's name only ever
+		// matches one of those by coincidence — a table defining a field named
+		// `value` would have the op's payload cut out from under it, leaving a
+		// malformed op. Nor could the pass protect anything here, since it keys
+		// on field names and an op names its field inside a `path` string. The
+		// ops need no pass: `output_diff` diffs the two permission-reduced
+		// views, so a field the caller cannot select is absent from both sides
+		// and cannot reach a path in the first place.
+		if !matches!(output, Some(Output::Diff)) {
+			self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
+		}
 		// Output the document
 		Ok(out)
 	}
@@ -208,7 +226,7 @@ impl Document {
 		} else {
 			DocKind::Current
 		};
-		self.compute_fields(stk, ctx, opt, kind, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kind, None).await?;
 		// Re-borrow the view we just materialised
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
 		// Output the document
@@ -230,7 +248,7 @@ impl Document {
 		} else {
 			DocKind::Initial
 		};
-		self.compute_fields(stk, ctx, opt, kind, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kind, None).await?;
 		// Re-borrow the view we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		// Output the document
@@ -247,15 +265,21 @@ impl Document {
 		// Materialise the reduced views via the cached helpers.
 		let _ = self.reduce_initial(stk, ctx, opt).await?;
 		let _ = self.reduce_current(stk, ctx, opt).await?;
-		// Compute every computed field on both sides
+		// Compute every computed field on both sides. A creating statement has
+		// no pre-mutation record and a deleting one has no post-mutation record,
+		// and that view is left as it is rather than derived from nothing.
 		let reduced = self.initial_reduced.is_some();
 		let (ki, kc) = if reduced {
 			(DocKind::InitialReduced, DocKind::CurrentReduced)
 		} else {
 			(DocKind::Initial, DocKind::Current)
 		};
-		self.compute_fields(stk, ctx, opt, ki, None).await?;
-		self.compute_fields(stk, ctx, opt, kc, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
+		// SECURITY: those fields did not exist when the reduce applied field
+		// permissions, and a patch op naming one is beyond the reach of the
+		// name-keyed pass in `apply_select_field_permissions`.
+		self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -276,15 +300,22 @@ impl Document {
 		// Materialise the reduced views via the cached helpers.
 		let _ = self.reduce_initial(stk, ctx, opt).await?;
 		let _ = self.reduce_current(stk, ctx, opt).await?;
-		// Compute every computed field on both sides
+		// Compute every computed field on both sides. A creating statement has
+		// no pre-mutation record and a deleting one has no post-mutation record,
+		// and that view is left as it is rather than derived from nothing.
 		let reduced = self.initial_reduced.is_some();
 		let (ki, kc) = if reduced {
 			(DocKind::InitialReduced, DocKind::CurrentReduced)
 		} else {
 			(DocKind::Initial, DocKind::Current)
 		};
-		self.compute_fields(stk, ctx, opt, ki, None).await?;
-		self.compute_fields(stk, ctx, opt, kc, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
+		// SECURITY: those fields did not exist when the reduce applied field
+		// permissions, and this projection can rename one — or read it through
+		// `$before` / `$after` — which puts it beyond the reach of the
+		// name-keyed pass in `apply_select_field_permissions`.
+		self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -294,12 +325,17 @@ impl Document {
 		child_ctx.add_value("before", initial.doc.as_arc());
 		let child_ctx = child_ctx.freeze();
 		// Output the specified fields
-		fields.compute(stk, &child_ctx, opt, Some(current)).await
+		crate::legacy::fields_compute(fields, stk, &child_ctx, opt, Some(current)).await
 	}
 
 	/// Apply each field's `PERMISSIONS FOR select` clause to the
 	/// already-projected output value, cutting any fields the viewer
 	/// is not allowed to see.
+	///
+	/// `out` must be an image of the record — a projection of it, or the whole
+	/// thing. The pass matches field names against `out`'s own keys, so a value
+	/// shaped like anything else is matched against the wrong structure: this
+	/// is why `Output::Diff` does not come through here.
 	///
 	/// Uses `Value::cut` (sync) rather than `Value::del` (async,
 	/// idiom-aware): the extra `Part` variants `del` handles
@@ -338,7 +374,7 @@ impl Document {
 			// PERMISSIONS FOR select so the predicate runs under the
 			// definer's downgraded auth, not the caller's. Mirrors the
 			// pluck.rs / field.rs paths.
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			// Process the field permissions
 			match &fd.select_permission {
 				Permission::Full => (),
@@ -364,7 +400,15 @@ impl Document {
 						let child_ctx = child_ctx.freeze();
 						// Process the PERMISSION clause
 						if !stk
-							.run(|stk| e.compute(stk, &child_ctx, opt, Some(&self.current)))
+							.run(|stk| {
+								crate::legacy::expr_compute(
+									e,
+									stk,
+									&child_ctx,
+									opt,
+									Some(&self.current),
+								)
+							})
 							.await
 							.catch_return()?
 							.is_truthy()

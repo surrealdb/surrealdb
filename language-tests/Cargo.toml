@@ -15,10 +15,19 @@ backend-tikv = ["surrealdb-core/kv-tikv"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 bench = ["sha2","oorandom","clap/env", "surrealdb-core/kv-surrealkv"]
 bench-remote-store = ["bench","tokio-tungstenite", "tokio-tungstenite/native-tls"]
+# In-process sampling profiler for `bench run` (SIGPROF-based, so it works
+# where kernel perf events are locked down). See the `pprof` module.
+bench-pprof = ["bench", "dep:pprof"]
 
 [dependencies]
 # Crates for running surrealdb.
 surrealdb-core = { path = "../surrealdb/core", default-features = false, features = ["scripting", "kv-mem", "graphql", "gql"] }
+surrealdb-cnf = { path = "../surrealdb/cnf" }
+surrealdb-rpc = { path = "../surrealdb/rpc" }
+surrealdb-expr = { path = "../surrealdb/expr" }
+surrealdb-gql = { path = "../surrealdb/gql" }
+surrealdb-kvs = { path = "../surrealdb/kvs" }
+surrealdb-syn = { path = "../surrealdb/syn" }
 surrealdb-types = { path = "../surrealdb/types" }
 # Used to execute GraphQL (.graphql) test cases against the dynamic schema.
 # Same version as the root workspace pins for surrealdb-core.
@@ -51,6 +60,9 @@ similar = "2.7.0"
 # Used for for communicating with the surrealdb server during upgrade tests.
 tokio-tungstenite = { version = "0.28.0", optional = true }
 revision = { version = "0.19.0", optional = true }
+
+# In-process sampling profiler for benches (`bench-pprof` feature).
+pprof = { version = "0.15.0", features = ["flamegraph", "prost-codec"], optional = true }
 cfg-if = "1.0.4"
 serde_json = "1.0.149"
 
@@ -63,6 +75,36 @@ oorandom = { version = "11", optional = true }
 # profile below mirrors the root one: an optimised (release-like) build that
 # keeps frame symbolication for `samply`/`perf`/flamegraphs while rebuilding far
 # faster than full LTO. Used by `scripts/bench/profile.sh`.
+# Code-generate the bench binary the way the shipped server is built. Without
+# this, the workspace takes cargo's release defaults — `lto = false` and
+# `codegen-units = 16` — so the suite gates a configuration nobody runs: no
+# cross-crate inlining, and codegen-unit partitioning that shifts as code is
+# added, which moves measured times without any corresponding change in what a
+# user would see. These two keys mirror the root manifest.
+#
+# `panic` deliberately does not mirror it. The root ships `panic = 'abort'`;
+# here the runner isolates a panicking test with `catch_unwind`
+# (src/cmd/run/mod.rs), which `abort` would turn into a runner-wide abort on the
+# first panicking test. `opt-level = 3` is already the release default, and
+# `strip` is left off so backtraces stay resolvable.
+[profile.release]
+codegen-units = 1
+lto = true
+
+# Matches the codegen `release` uses — and therefore the codegen the bench suite
+# measures — adding only symbols. Use this profile, not `profiling`, when a
+# measured bench delta has to be attributed to a function: a profile taken of a
+# differently-optimised binary can attribute a cost to the wrong one. Expect
+# collapsed frames, since this inlines as aggressively as the measured build
+# does; `line-tables-only` keeps the inline frames resolvable.
+[profile.bench-profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = false
+
+# Trades the measured build's codegen for build speed and readable frames: thin
+# LTO and 16 codegen units compile far faster and inline less, which suits
+# exploring where time goes rather than attributing a regression.
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"
@@ -70,3 +112,47 @@ strip = false
 panic = "unwind"
 lto = "thin"
 codegen-units = 16
+
+# Password-hashing primitives are deliberately expensive by iteration count, so
+# their cost scales directly with how well the inner compression loop is
+# compiled. At `opt-level = 0` that loop runs one to two orders of magnitude
+# slower than optimised, which is enough to push the `crypto::*` tests past
+# their `[env] timeout` on a debug build of the runner. Optimising just these
+# packages keeps the runner itself debuggable while running the hash cores at
+# release speed; it changes no output, only how long producing it takes.
+#
+# This workspace does not inherit the root SurrealDB workspace's profiles, so
+# these mirror the overrides in the root manifest and must be kept in step with
+# them.
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.md-5]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.crypto-common]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.bcrypt]
+opt-level = 3
+[profile.dev.package.blowfish]
+opt-level = 3
+[profile.dev.package.password-hash]
+opt-level = 3
+[profile.dev.package.base64ct]
+opt-level = 3

@@ -5,16 +5,16 @@ use reblessive::tree::Stk;
 use tokio::sync::OnceCell;
 
 use super::document::Extras;
-use crate::cnf::LiveQueryEngine;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::idx::planner::RecordStrategy;
+use crate::kvs::LiveQueryEngine;
 use crate::lq::event::{LiveAction, LiveEvent};
 
 impl Document {
 	/// Capture a live-query event for this record change into the dedicated
-	/// live-query keyspace ([`crate::key::lqe`]).
+	/// live-query keyspace ([`LiveEventsKey`](crate::key::schema::LiveEventsKey)).
 	///
 	/// This runs only when the Router engine is selected and the table currently
 	/// has at least one subscriber, so it is a no-op on the default (Inline) write
@@ -27,7 +27,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<()> {
 		// Only the Router engine consumes live-query events.
-		if ctx.config.live_query_engine != LiveQueryEngine::Router {
+		if ctx.config.datastore.live_query_engine != LiveQueryEngine::Router {
 			return Ok(());
 		}
 		// Imports never produce live notifications.
@@ -63,8 +63,8 @@ impl Document {
 				db.database_id,
 				&tb.name,
 				id.as_ref(),
-				self.initial.doc.clone(),
-				self.current.doc.clone(),
+				self.initial.doc.clone().into_owned(),
+				self.current.doc.clone().into_owned(),
 			);
 		}
 		Ok(())
@@ -86,7 +86,7 @@ impl Document {
 	///
 	/// `doc_ctx` must be the mutating table context
 	/// ([`DocumentContext::NsDbTbMutCtx`]); it carries the table's
-	/// [`SubscriptionDefinition`](crate::catalog::SubscriptionDefinition)s that
+	/// [`StoredSubscriptionDefinition`](crate::catalog::StoredSubscriptionDefinition)s that
 	/// `process_table_lives` iterates. `ctx` must carry the (read) transaction
 	/// and the notification broker; `opt` only needs the namespace/database set,
 	/// because the per-subscription auth is applied inside the pipeline from each
@@ -139,27 +139,28 @@ impl Document {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
+
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::TransactionType::{Read, Write};
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{DatabaseId, NamespaceId};
-	use crate::cnf::ConfigMap;
 	use crate::dbs::{Capabilities, Session};
-	use crate::key::lqe;
-	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, KVKey, KVValue};
-	use crate::lq::event::{LiveAction, LiveEvent, LiveEvents};
+	use crate::key::schema::LiveEventsPrefix;
+	use crate::kvs::Datastore;
+	use crate::lq::event::{LiveAction, LiveEvent};
 	use crate::types::PublicValue;
 
 	/// Build an in-memory datastore with the given live-query engine selected.
-	async fn new_ds(engine: &str) -> Datastore {
+	async fn new_ds(engine: &str) -> Arc<Datastore> {
 		build_ds(engine, None).await
 	}
 
 	/// Build an in-memory datastore with a specific engine and (optional)
 	/// live-query retention (e.g. `"1us"`).
-	async fn build_ds(engine: &str, retention: Option<&str>) -> Datastore {
+	async fn build_ds(engine: &str, retention: Option<&str>) -> Arc<Datastore> {
 		let (send, _recv) = crate::channel::bounded(1000);
 		let mut config = ConfigMap::empty().with_key_value("live_query_engine", engine);
 		if let Some(r) = retention {
@@ -177,7 +178,7 @@ mod tests {
 
 	/// Create ns/db/table, returning the numeric ids for scanning the keyspace.
 	async fn setup(ds: &Datastore, ns: &str, db: &str, tb: &str) -> (NamespaceId, DatabaseId) {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let dbdef = tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let ses = Session::owner().with_ns(ns).with_db(db);
@@ -187,12 +188,16 @@ mod tests {
 
 	/// Read every live-query event persisted for the database's dedicated keyspace.
 	async fn live_events(ds: &Datastore, ns: NamespaceId, db: DatabaseId) -> Vec<LiveEvent> {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
-		let beg = lqe::prefix(ns, db).encode_key().unwrap();
-		let end = lqe::suffix(ns, db).encode_key().unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
+		let range = LiveEventsPrefix {
+			ns,
+			db,
+		}
+		.range()
+		.unwrap();
 		let mut events = Vec::new();
-		for (_k, v) in tx.scan(beg..end, 1000, 0, None).await.unwrap() {
-			events.extend(LiveEvents::kv_decode_value(&v, ()).unwrap().0);
+		for (_k, v) in tx.scan(range, 1000, 0, None).await.unwrap() {
+			events.extend(v.0);
 		}
 		tx.cancel().await.unwrap();
 		events
@@ -302,7 +307,9 @@ mod tests {
 		// but the already-written event must still be collected by retention.
 		ds.execute(&format!("KILL u'{lqid}'"), &live, None).await.unwrap();
 		tokio::time::sleep(Duration::from_millis(500)).await;
-		ds.changefeed_process(&Duration::from_secs(1)).await.unwrap();
+		ds.changefeed_process(&Duration::from_secs(1), &tokio_util::sync::CancellationToken::new())
+			.await
+			.unwrap();
 		assert!(
 			live_events(&ds, ns_id, db_id).await.is_empty(),
 			"orphaned live-query events must be GC'd by retention even with no current subscriber"

@@ -1,0 +1,706 @@
+name: 'Locate rolling build'
+description: >-
+  Resolve the requested ref to a concrete released commit and verify its
+  rolling artifacts exist (waiting for in-progress builds on versioned
+  releases). Extracted verbatim from release.yml; the interface is the ENV
+  VARS set on the calling step - EVENT, CHANNEL, ROLLING_BUCKET, AWS_REGION,
+  REQ_ENGINE, REQ_DOWNSTREAM, TEST, REQUESTED_REF, REQ_DOWNSTREAM_SHA,
+  GH_TOKEN, WAIT_MINUTES, and OWNER, DOWNSTREAM_REPO, DS_TOKEN (the downstream
+  repo coordinates + App token used to probe for the matching downstream release
+  branch) - which
+  propagate into this composite step's process environment. Needs the repo
+  checked out at the workspace root (it resolves refs with git) and AWS
+  credentials able to read the rolling bucket.
+
+outputs:
+  git-sha:
+    description: 'Resolved engine commit to release'
+    value: ${{ steps.locate.outputs.git-sha }}
+  git-branch:
+    description: 'Release-line branch the commit belongs to'
+    value: ${{ steps.locate.outputs.git-branch }}
+  branch-slug:
+    description: 'Slug of the branch (rolling S3 prefix component)'
+    value: ${{ steps.locate.outputs.branch-slug }}
+  source-name:
+    description: 'Rolling build name the artifacts were stored under'
+    value: ${{ steps.locate.outputs.source-name }}
+  s3-prefix:
+    description: 'S3 prefix the rolling artifacts live under'
+    value: ${{ steps.locate.outputs.s3-prefix }}
+  rolling-source-tag:
+    description: 'Rolling Docker source tag for the engine image (engine sha only)'
+    value: ${{ steps.locate.outputs.rolling-source-tag }}
+  downstream-source-tag:
+    description: 'Base rolling Docker source tag for the downstream image (compound <engine-short>.<downstream-short>, read verbatim from the manifest; the promote side appends the -dev / -licensed markers)'
+    value: ${{ steps.locate.outputs.downstream-source-tag }}
+  downstream-built:
+    description: 'Whether a promotable downstream image exists for this commit'
+    value: ${{ steps.locate.outputs.downstream-built }}
+  downstream-sha:
+    description: 'Downstream commit the image was built from'
+    value: ${{ steps.locate.outputs.downstream-sha }}
+  downstream-branch:
+    description: 'Downstream branch the image was built from'
+    value: ${{ steps.locate.outputs.downstream-branch }}
+  downstream-branch-missing:
+    description: 'Whether the matching downstream release branch is absent (no downstream image is or will be built for this line)'
+    value: ${{ steps.locate.outputs.downstream-branch-missing }}
+  downstream-licensed:
+    description: 'Whether the downstream build produced the licence-enforcing (-licensed) image, from downstream.json'
+    value: ${{ steps.locate.outputs.downstream-licensed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Locate rolling build
+      id: locate
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
+
+        # Shared S3 presence probe. Echoes aws's listing on stdout and returns
+        # its exit status, distinguishing the two ways `aws s3 ls` fails:
+        #   * genuine ABSENCE (artifact not built yet): non-zero exit, NO stderr.
+        #     This is the normal "keep waiting" case and stays quiet.
+        #   * real READ FAILURE (credentials, region, network, permissions):
+        #     non-zero exit WITH a diagnostic on stderr. Surfaced ONCE as a
+        #     warning - an unreadable bucket otherwise looks identical to a
+        #     not-yet-built artifact, so the wait would silently burn its whole
+        #     timeout and report "not built" for a build that in fact completed.
+        s3_read_warned=false
+        s3_ls() {
+          local out rc=0 errf
+          errf="$(mktemp)"
+          out="$(aws s3 ls "$1" 2>"${errf}")" || rc=$?
+          if [[ ${rc} -ne 0 && -s "${errf}" && "${s3_read_warned}" != "true" ]]; then
+            echo "::warning title=Rolling-artifact read failed::aws s3 ls '$1' failed (AWS_REGION=${AWS_REGION:-<unset>}): $(tr '\n' ' ' <"${errf}"). The wait treats an unreadable bucket the same as a not-yet-built artifact, so it will run to the ${WAIT_MINUTES}m timeout unless this is fixed - check this job's AWS credentials, AWS_REGION, and s3:ListBucket/GetObject on the bucket." >&2
+            s3_read_warned=true
+          fi
+          rm -f "${errf}"
+          printf '%s' "${out}"
+          return ${rc}
+        }
+
+        manifest_exists() {
+          s3_ls "s3://${ROLLING_BUCKET}/rolling-builds/$1/$2/engine.json" >/dev/null
+        }
+        # A commit is only engine-promotable if its release BINARIES still exist,
+        # not just its engine.json. prune deletes a superseded commit's heavy
+        # binaries but KEEPS its manifest, so checking the manifest alone would
+        # green-light a commit whose binaries are gone — publish-crates
+        # (irreversible) would run and only then promote would fail on the
+        # missing binaries, leaving a half-published release. Fail fast here.
+        binaries_exist() {
+          # Read the listing into a variable, THEN match. Piping `aws s3 ls |
+          # grep -q` under `set -o pipefail` is a false-negative trap: `grep -q`
+          # exits on the first match and closes the pipe, `aws` (which streams
+          # its output object-by-object) then dies with SIGPIPE (141), and
+          # pipefail propagates that as the pipeline's status - reporting "no
+          # binaries" for a prefix that is full of them. Reading into a variable
+          # removes the pipe entirely so only the presence of a match decides.
+          local listing
+          listing="$(s3_ls "s3://${ROLLING_BUCKET}/rolling-builds/$1/$2/")" || return 1
+          printf '%s\n' "${listing}" | grep -qE 'surreal-.*\.(tgz|exe)$'
+        }
+        # A downstream image is promotable for a commit iff its downstream.json
+        # manifest exists (written only by a promotable downstream build).
+        ds_manifest_exists() {
+          s3_ls "s3://${ROLLING_BUCKET}/rolling-builds/$1/$2/downstream.json" >/dev/null
+        }
+
+        # Minutes to wait for an in-progress rolling build (versioned releases
+        # only; see wait_for_build). Defaults to 120; guard against a bad input.
+        WAIT_MINUTES="${WAIT_MINUTES:-120}"
+        [[ "$WAIT_MINUTES" =~ ^[0-9]+$ ]] || WAIT_MINUTES=120
+
+        # Fetch the most recent run of workflow $1 that BUILT commit $2 as
+        # {workflow_runs: [...]} JSON on stdout (newest first), in two stages:
+        #   1. scan the newest 100 runs and keep those matching head_sha == $2
+        #      (push/schedule builds, whose head_sha IS the built commit) OR the
+        #      run-name's "@ <$2>" (a build DISPATCHED with a git-sha input, whose
+        #      head_sha is the dispatching ref, not the built commit). This picks
+        #      the newest run across BOTH match kinds, so a failed push followed by
+        #      a dispatched rebuild resolves to the rebuild, not the stale failure.
+        #   2. ONLY if the scan finds nothing (no matching run in the newest 100),
+        #      fall back to an exact server-side ?head_sha= lookup, which has NO age
+        #      limit, to catch an OLD push/schedule build. (A DISPATCHED rebuild
+        #      older than 100 runs is the sole residual gap; artifact presence stays
+        #      the authoritative success signal.)
+        # Scan-first matters: a commit on main almost always has a same-sha push
+        # run, so a head_sha-first short-circuit would never reach the dispatch
+        # scan and would return the stale push result over a newer rebuild.
+        # Exit status encodes API reachability, NOT whether a run exists:
+        #   0  -> HTTP 200; body emitted. An empty workflow_runs array is a
+        #         legitimate "this commit was never built" and still returns 0.
+        #   1  -> any other HTTP status or a transport failure. INDETERMINATE, not
+        #         "no run": a diagnostic (with the HTTP code) goes to stderr and
+        #         decision-path callers MUST fail closed. Treating an unreadable
+        #         API as "no run" is what silently skips a broken build. Requires
+        #         the job to grant `actions: read`.
+        gh_runs() {
+          local tmp http n scanned
+          # Stage 1: newest-100 scan; newest matching run across both match kinds.
+          tmp="$(mktemp)"
+          http="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o "${tmp}" -w '%{http_code}' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$1/runs?per_page=100" 2>/dev/null)" || http="000"
+          if [[ "${http}" != "200" ]]; then
+            echo "gh_runs: Actions API read failed for $1 (HTTP ${http}); this job needs 'actions: read' and api.github.com must be reachable." >&2
+            rm -f "${tmp}"
+            return 1
+          fi
+          # `contains` is a plain substring test (the sha is regex-safe hex); the
+          # API returns runs newest-first, so [0] downstream is the latest match.
+          scanned="$(jq --arg sha "$2" '{workflow_runs: [.workflow_runs[]
+            | select(.head_sha == $sha or ((.display_title // "") | contains($sha)))]}' "${tmp}" 2>/dev/null)"
+          rm -f "${tmp}"
+          n="$(printf '%s' "$scanned" | jq '.workflow_runs | length' 2>/dev/null || echo 0)"
+          if [ "${n:-0}" -gt 0 ]; then
+            printf '%s' "$scanned"
+            return 0
+          fi
+
+          # Stage 2 (fallback): no match in the newest 100 - the commit may still
+          # have an OLD push/schedule build. Exact server-side head_sha lookup, no
+          # age limit.
+          tmp="$(mktemp)"
+          http="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o "${tmp}" -w '%{http_code}' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/$1/runs?head_sha=$2&per_page=1" 2>/dev/null)" || http="000"
+          if [[ "${http}" != "200" ]]; then
+            echo "gh_runs: Actions API read failed for $1 (HTTP ${http}); this job needs 'actions: read' and api.github.com must be reachable." >&2
+            rm -f "${tmp}"
+            return 1
+          fi
+          cat "${tmp}"
+          rm -f "${tmp}"
+        }
+
+        # "<status>:<conclusion>" of the most recent run of workflow $1 that built
+        # commit $2 (e.g. "in_progress:" or "completed:failure"); empty string when
+        # no such run exists. Propagates gh_runs' non-zero exit on an API error (see
+        # gh_runs), so decision-path callers can fail closed. Used only to fail fast
+        # on a dead build — artifact presence is the success signal.
+        run_state() {
+          local json
+          json="$(gh_runs "$1" "$2")" || return 1
+          printf '%s' "$json" | jq -r '
+            if (.workflow_runs | length) == 0 then ""
+            else (.workflow_runs[0] | (.status // "") + ":" + (.conclusion // "")) end' 2>/dev/null
+        }
+
+        # Web URL of the most recent run of workflow $1 that built commit $2 (empty
+        # when none exists). Propagates gh_runs' non-zero exit on an API error. Used
+        # to point an operator straight at the rolling build whose failure blocks a
+        # release, so they read the real error there instead of inferring it from a
+        # missing-artifact message.
+        run_url() {
+          local json
+          json="$(gh_runs "$1" "$2")" || return 1
+          printf '%s' "$json" | jq -r '.workflow_runs[0].html_url // ""' 2>/dev/null
+        }
+
+        # Block until a rolling build's promotable artifacts exist, instead of
+        # failing the instant a freshly-pushed tip hasn't finished building. Polls
+        # S3 for the artifacts and the Actions API for the build's run state, so a
+        # build that already CONCLUDED unsuccessfully errors out immediately
+        # (rather than burning the whole window) and a truly-absent build still
+        # ends in a clear timeout. Args: <engine|downstream> <slug> <sha>.
+        wait_for_build() {
+          local kind="$1" s="$2" c="$3" wf st warned=false deadline
+          case "$kind" in
+            engine)     wf="rolling-build.yml" ;;
+            downstream) wf="rolling-downstream-build.yml" ;;
+          esac
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          while :; do
+            if [[ "$kind" == "engine" ]]; then
+              if manifest_exists "$s" "$c" && binaries_exist "$s" "$c"; then
+                echo "Engine rolling build present for ${c}."
+                return 0
+              fi
+            else
+              if ds_manifest_exists "$s" "$c"; then
+                echo "Downstream rolling build present for ${c}."
+                return 0
+              fi
+            fi
+            if (( $(date +%s) >= deadline )); then
+              if [[ "${s3_read_warned}" == "true" ]]; then
+                echo "::error::Timed out after ${WAIT_MINUTES}m, but reads of the artifact bucket were FAILING (see the warning above) - this is an S3 access problem in THIS job, not a missing ${kind} build. The rolling artifacts for ${c} are likely already present; fix the bucket access (AWS credentials / AWS_REGION / s3 permissions) and re-release rather than rebuilding."
+              else
+                echo "::error::Timed out after ${WAIT_MINUTES}m waiting for the ${kind} rolling build of ${c} (rolling-builds/${s}/${c}). Re-run ${wf} for this commit, or release a commit that is already built."
+              fi
+              exit 1
+            fi
+            # Unlike the one-shot walk-back below, this poll TOLERATES an API
+            # error (stderr from gh_runs suppressed, non-zero swallowed): the
+            # loop is bounded by ${WAIT_MINUTES} and the authoritative signal is
+            # artifact presence (checked above), so a transient failure just
+            # means "state unknown this poll" — keep waiting rather than abort.
+            st="$(run_state "$wf" "$c" 2>/dev/null || true)"
+            if [[ "$st" == completed:* && "$st" != completed:success ]]; then
+              echo "::error::The ${kind} rolling build for ${c} finished as '${st#completed:}' and produced no promotable artifacts. Fix the build and re-run ${wf} for this commit before releasing."
+              exit 1
+            fi
+            if [[ "$warned" != "true" ]]; then
+              echo "::warning::The ${kind} rolling build of ${c} is not ready yet (run state: ${st:-<none found>}). Waiting up to ${WAIT_MINUTES}m for it to finish before promoting."
+              warned=true
+            fi
+            echo "Waiting for ${kind} build of ${c}… (state: ${st:-<none>})"
+            sleep 45
+          done
+        }
+
+        # Fetch the newest 100 rolling-downstream-build runs (their run-name is
+        # "Rolling downstream build (... @ <engine> ⇢ ds:<downstream>)"). Echoes
+        # the JSON; non-zero on an API error (callers fail closed).
+        downstream_runs_json() {
+          local tmp http
+          tmp="$(mktemp)"
+          http="$(curl -sS \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o "${tmp}" -w '%{http_code}' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-downstream-build.yml/runs?per_page=100" 2>/dev/null)" || http="000"
+          if [[ "${http}" != "200" ]]; then
+            echo "downstream_runs_json: Actions API read failed (HTTP ${http}); needs 'actions: read' and api.github.com reachable." >&2
+            rm -f "${tmp}"; return 1
+          fi
+          cat "${tmp}"; rm -f "${tmp}"
+        }
+
+        # Block until the downstream image PAIRING requested for this release is
+        # built: the downstream.json at rolling-builds/<slug>/<engine-sha>/ must
+        # record the REQUESTED downstream commit (.sha == <ds>), not merely exist
+        # (that is wait_for_build's presence check, which would accept a stale
+        # pairing the engine commit happens to carry). That manifest check is the
+        # authoritative signal; the run list only decides whether to keep waiting:
+        #   * a run naming BOTH commits that finished unsuccessfully -> that exact
+        #     pairing build failed; error out with the rerun command.
+        #   * NO run naming EITHER commit (after a short grace for a just-dispatched
+        #     run to surface) -> nothing is building this and waiting would only
+        #     time out; fail fast with the rerun command. Matching on EITHER (not
+        #     both) keeps a build dispatched with only one sha in its run-name from
+        #     tripping a spurious fast-fail.
+        # The run-name records the raw engine/downstream INPUTS, which may be a
+        # branch or short sha rather than the resolved 40-char <ds>. So both
+        # run-list signals are best-effort: when the downstream build was
+        # dispatched with a ref that does not contain <ds> verbatim, a failed
+        # pairing is not fast-detected and the wait falls back to the (safe)
+        # timeout. The manifest .sha comparison is exact regardless, so a wrong
+        # pairing is never shipped.
+        # Args: <slug> <engine-sha> <downstream-sha>.
+        wait_for_downstream_pairing() {
+          local s="$1" eng="$2" ds="$3" deadline warned=false have runs pair_state any_ref absent_polls=0
+          # Consecutive polls where the runs API was READABLE but named neither
+          # commit, before we call it "never dispatched" rather than a run merely
+          # slow to surface. Only successful-but-empty reads count - an unreadable
+          # API is "unknown this poll", never "absent" - so at ~45s/poll this is
+          # ~90s of confirmed-empty reads (two sleeps between three reads).
+          local absent_grace=3
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          while :; do
+            # The per-pairing manifest is immutable and authoritative: its presence
+            # means the image for exactly this engine/downstream pairing was built
+            # and is promotable, whichever pairing the engine-level pointer names.
+            if aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${s}/${eng}/${ds}/downstream.json" - >/dev/null 2>&1; then
+              echo "Downstream pairing present: engine ${eng} ⇢ downstream ${ds}."
+              return 0
+            fi
+            have="$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${s}/${eng}/downstream.json" - 2>/dev/null | jq -r '.sha // ""' 2>/dev/null || true)"
+            # Backward compatibility: a pre-compound downstream build recorded the
+            # pairing only in the engine-level pointer (no per-pairing object), so
+            # accept the pointer when it names the requested pairing. New builds are
+            # caught by the immutable per-pairing check above; this read is otherwise
+            # diagnostic (which pairing is currently latest).
+            if [[ "$have" == "$ds" ]]; then
+              echo "Downstream pairing present (legacy pointer): engine ${eng} ⇢ downstream ${ds}."
+              return 0
+            fi
+            # API-tolerant (like wait_for_build): an UNREADABLE runs API is
+            # "unknown this poll" - the manifest above is the authoritative
+            # success signal - so it neither errors nor counts toward the
+            # never-dispatched grace. Only a readable-but-empty read advances the
+            # grace, and a run naming the exact pairing that FAILED ends the wait.
+            pair_state=""
+            if runs="$(downstream_runs_json 2>/dev/null)"; then
+              pair_state="$(printf '%s' "$runs" | jq -r --arg e "$eng" --arg d "$ds" '
+                [ .workflow_runs[]? | select(((.display_title // "") | contains($e)) and ((.display_title // "") | contains($d))) ]
+                | if length == 0 then "" else (.[0] | (.status // "") + ":" + (.conclusion // "")) end' 2>/dev/null || true)"
+              any_ref="$(printf '%s' "$runs" | jq -r --arg e "$eng" --arg d "$ds" '
+                [ .workflow_runs[]? | select(((.display_title // "") | contains($e)) or ((.display_title // "") | contains($d))) ] | length' 2>/dev/null || echo 0)"
+              if [[ "$pair_state" == completed:* && "$pair_state" != completed:success ]]; then
+                echo "::error::The downstream build pairing engine ${eng} ⇢ downstream ${ds} finished as '${pair_state#completed:}' and produced no promotable image. Fix it and re-run rolling-downstream-build.yml (engine-git-sha=${eng}, downstream-git-sha=${ds}) before releasing."
+                exit 1
+              fi
+              if [[ "${any_ref:-0}" -eq 0 ]]; then
+                absent_polls=$(( absent_polls + 1 ))
+                if (( absent_polls >= absent_grace )); then
+                  echo "::error::No rolling-downstream-build run references engine ${eng} or downstream ${ds} (the engine commit currently records downstream '${have:-none}'). Dispatch rolling-downstream-build.yml with engine-git-sha=${eng} and downstream-git-sha=${ds}, then retry the release."
+                  exit 1
+                fi
+              else
+                absent_polls=0
+              fi
+            fi
+            if (( $(date +%s) >= deadline )); then
+              echo "::error::Timed out after ${WAIT_MINUTES}m waiting for the downstream build pairing engine ${eng} ⇢ downstream ${ds} (pairing run state: ${pair_state:-<none>})."
+              exit 1
+            fi
+            if [[ "$warned" != "true" ]]; then
+              echo "::warning::The downstream build pairing engine ${eng} ⇢ downstream ${ds} is not ready yet (pairing run state: ${pair_state:-<none found>}). Waiting up to ${WAIT_MINUTES}m for it to finish."
+              warned=true
+            fi
+            echo "Waiting for downstream pairing engine ${eng} ⇢ downstream ${ds}… (pairing state: ${pair_state:-<none>})"
+            sleep 45
+          done
+        }
+
+        if [[ "$EVENT" == "schedule" ]]; then
+          # Walk back main history for the newest commit that has a completed
+          # rolling build, so a still-building HEAD doesn't fail the nightly. The
+          # engine and downstream nightlies are separate scheduled runs that walk
+          # for DIFFERENT artifacts on main, so each promotes the newest commit
+          # its own side actually built — fully decoupled.
+          chosen="main"
+          slug="main"
+          sha=""
+          if [[ "$REQ_DOWNSTREAM" == "true" && "$REQ_ENGINE" != "true" ]]; then
+            # Downstream nightly: newest main commit with a promotable downstream
+            # image (downstream.json), independent of whether the engine side of
+            # that commit built — the downstream image ships the engine as a compiled
+            # binary and doesn't need the engine's own rolling artifacts.
+            while read -r c; do
+              if ds_manifest_exists "$slug" "$c"; then sha="$c"; break; fi
+              # No promotable downstream image for $c. Fail if its build was
+              # ATTEMPTED and concluded unsuccessfully rather than walking past
+              # it: promoting an older nightly while the newest downstream build
+              # is broken hides the breakage. Not-yet-built / in-progress builds
+              # (run state not "completed:*") are skipped as before.
+              # Fail closed on an API error: an unreadable run state must NOT be
+              # mistaken for "not built yet" and skipped — that is the masking
+              # that lets a broken newest build be passed over and a stale
+              # nightly promoted.
+              if ! st="$(run_state rolling-downstream-build.yml "$c")"; then
+                echo "::error::Tonight's nightly cannot be promoted: could not read the Actions API to check the downstream rolling build of ${c} (see the log line above). Failing closed rather than skipping the check, which could promote a stale nightly while the newest build is broken. Ensure this job has 'actions: read', then re-run."
+                exit 1
+              fi
+              if [[ "$st" == completed:* && "$st" != completed:success ]]; then
+                url="$(run_url rolling-downstream-build.yml "$c" 2>/dev/null || true)"
+                echo "::error::Tonight's nightly cannot be promoted: the newest downstream rolling build on main (commit ${c}) finished as '${st#completed:}' and produced no image. Rather than silently ship an older nightly and hide this breakage, the promotion fails. Open the failed build run for the underlying error, fix it, and re-run the downstream build for this commit${url:+: ${url}}."
+                exit 1
+              fi
+            done < <(git rev-list origin/main | head -n 100)
+            if [[ -z "$sha" ]]; then
+              echo "::error::No commit in the last 100 on main has a promotable downstream image (downstream.json) to release."
+              exit 1
+            fi
+          else
+            # Engine nightly: newest commit that is fully promotable — both the
+            # manifest AND the binaries are present (a superseded commit keeps its
+            # manifest but not its pruned binaries), so the nightly never picks a
+            # commit that would fail at promote time.
+            while read -r c; do
+              if manifest_exists "$slug" "$c" && binaries_exist "$slug" "$c"; then sha="$c"; break; fi
+              # No promotable artifacts for $c. Fail if its build was ATTEMPTED
+              # and concluded unsuccessfully rather than silently walking back to
+              # an older build — that masks a broken newest build (the confusing
+              # "rolling build failed but the nightly passed" case). A
+              # completed:success with missing binaries is a SUPERSEDED commit
+              # (its binaries were pruned) and is skipped; a not-yet-built or
+              # in-progress commit (run state not "completed:*") is skipped too.
+              # Fail closed on an API error: an unreadable run state must NOT be
+              # mistaken for "not built yet" and skipped — that is the masking
+              # that lets a broken newest build be passed over and a stale
+              # nightly promoted.
+              if ! st="$(run_state rolling-build.yml "$c")"; then
+                echo "::error::Tonight's nightly cannot be promoted: could not read the Actions API to check the rolling build of ${c} (see the log line above). Failing closed rather than skipping the check, which could promote a stale nightly while the newest build is broken. Ensure this job has 'actions: read', then re-run."
+                exit 1
+              fi
+              if [[ "$st" == completed:* && "$st" != completed:success ]]; then
+                url="$(run_url rolling-build.yml "$c" 2>/dev/null || true)"
+                echo "::error::Tonight's nightly cannot be promoted: the newest rolling build on main (commit ${c}) finished as '${st#completed:}' and produced no releasable artifacts. Rather than silently ship an older nightly and hide this breakage, the promotion fails. Open the failed build run for the underlying error, fix it, and re-run the build for this commit${url:+: ${url}}."
+                exit 1
+              fi
+            done < <(git rev-list origin/main | head -n 100)
+            if [[ -z "$sha" ]]; then
+              echo "::error::No commit in the last 100 on main has a completed rolling build (manifest + binaries) to release."
+              exit 1
+            fi
+          fi
+          source_name="rolling-${sha}"
+        else
+          # Resolve the requested ref to the full 40-char SHA the rolling build
+          # stored artifacts under. The ref may be:
+          #   * empty    -> default to the tip of the highest releases/X.Y line
+          #                 (the usual "release the latest release branch" case),
+          #   * a branch -> use that branch's tip (e.g. releases/3.2, main),
+          #   * a commit  -> canonicalize whatever was supplied (short/cased SHA).
+          # origin/* refs are all present from the fetch above, so this holds
+          # regardless of which ref `Checkout sources` landed on.
+          if [[ -z "$REQUESTED_REF" ]]; then
+            if [[ "$CHANNEL" == "nightly" ]]; then
+              # A nightly must come from main, so default there.
+              target="origin/main"
+              echo "No ref supplied; defaulting to the tip of main for a nightly release."
+            else
+              latest_line=$(git branch -r --format='%(refname:short)' \
+                | sed -n 's#^origin/releases/##p' \
+                | grep -E '^[0-9]+\.[0-9]+$' \
+                | sort -t. -k1,1n -k2,2n | tail -n1)
+              if [[ -z "$latest_line" ]]; then
+                echo "::error::No releases/* branch exists to default to; pass an explicit git-sha (a commit or branch)."
+                exit 1
+              fi
+              target="origin/releases/${latest_line}"
+              echo "No ref supplied; defaulting to the tip of the latest release branch (releases/${latest_line})."
+            fi
+          elif git show-ref --verify --quiet "refs/remotes/origin/${REQUESTED_REF}"; then
+            target="origin/${REQUESTED_REF}"
+            echo "Resolving branch '${REQUESTED_REF}' to its tip."
+          else
+            target="$REQUESTED_REF"
+          fi
+          if ! sha=$(git rev-parse --verify --quiet "${target}^{commit}"); then
+            echo "::error::Could not resolve '${REQUESTED_REF:-<latest release branch>}' to a commit."
+            exit 1
+          fi
+
+          mapfile -t branches < <(git branch -r --contains "$sha" --format='%(refname:short)' 2>/dev/null | sed 's#^origin/##' || true)
+          on_main=false
+          for b in "${branches[@]}"; do [[ "$b" == "main" ]] && on_main=true && break; done
+
+          if [[ "$CHANNEL" == "nightly" ]]; then
+            if [[ "$on_main" != "true" ]]; then
+              echo "::error::Commit ${sha} is not on main; a nightly release must come from main."
+              exit 1
+            fi
+            chosen="main"
+            slug="main"
+            source_name="rolling-${sha}"
+          else
+            # A versioned release must map to exactly one release line. Fail
+            # loudly on ambiguity rather than guessing the wrong branch.
+            mapfile -t rel < <(printf '%s\n' "${branches[@]}" | grep -E '^releases/' || true)
+            if [[ "${#rel[@]}" -eq 0 ]]; then
+              echo "::error::Commit ${sha} is not on any releases/* branch."
+              exit 1
+            elif [[ "${#rel[@]}" -gt 1 ]]; then
+              echo "::error::Commit ${sha} is on multiple release branches (${rel[*]}); cannot determine which line to release."
+              exit 1
+            fi
+            chosen="${rel[0]}"
+            slug=$(echo "$chosen" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+            source_name="rolling-${sha}"
+            # `latest` is decided later (the "Determine latest release pointer"
+            # step), from the PUBLISHED stable versions rather than the branch:
+            # being the tip of the highest release branch is neither necessary
+            # nor sufficient to own `latest`.
+          fi
+
+          # Engine side. A VERSIONED (release-branch) release WAITS for the engine
+          # rolling build of this commit instead of failing the moment a
+          # freshly-pushed tip hasn't finished building. We wait even for a
+          # downstream-only versioned release: promoting the downstream image implies
+          # wanting to promote the engine at the same commit later, so the engine
+          # build must succeed too (this wait is deliberately release-branch only).
+          #
+          # The exception is a TEST release: it ships an ephemeral downstream image
+          # for internal testing WITHOUT coupling to the engine build, so it skips
+          # this engine wait (REQ_ENGINE is false). It still waits for its own
+          # downstream build below.
+          #
+          # A nightly (manual) dispatch keeps the original fail-fast and only when
+          # the engine side is actually being released.
+          if [[ "$CHANNEL" == "versioned" && "${TEST:-false}" != "true" ]]; then
+            wait_for_build engine "$slug" "$sha"
+          elif [[ "$REQ_ENGINE" == "true" ]]; then
+            if ! manifest_exists "$slug" "$sha"; then
+              # Manifest ABSENT (not the pruned case: prune keeps engine.json and
+              # only removes the binaries — that is the next check). So the
+              # rolling build for this commit never finished successfully. Lead
+              # with the plain reason and link the build run so the operator can
+              # read the real error there.
+              # The release cannot proceed either way (manifest absent). Consult
+              # the Actions API only to enrich the message: link the failed run
+              # if one exists, or say to build the commit if none does. If that
+              # read fails, say we couldn't check — never claim "no run exists"
+              # on an unreadable API.
+              if url="$(run_url rolling-build.yml "$sha")"; then
+                if [[ -n "$url" ]]; then
+                  echo "::error::This nightly cannot be promoted: the rolling build for commit ${sha} did not succeed, so it produced no releasable engine artifacts. Open the rolling build run for the underlying error, fix it, and re-run the build for this commit, then retry the release: ${url}"
+                else
+                  echo "::error::This nightly cannot be promoted: no rolling build has produced releasable engine artifacts for commit ${sha} (no rolling-build.yml run was found for it). Run rolling-build.yml for this commit and, once it succeeds, retry the release."
+                fi
+              else
+                echo "::error::This nightly cannot be promoted: no rolling build manifest exists for commit ${sha}, so it was never built successfully. Also could not reach the Actions API to link the specific build run (see the log line above); this job needs 'actions: read'."
+              fi
+              exit 1
+            fi
+            if ! binaries_exist "$slug" "$sha"; then
+              echo "::error::engine.json exists for ${sha} but its release binaries under rolling-builds/${slug}/${sha}/ are gone (a superseded commit whose binaries were pruned). Refusing to release: crate publishing would succeed but binary promotion would then fail. Re-run the rolling build for this commit to rebuild the binaries."
+              exit 1
+            fi
+          fi
+        fi
+
+        # For a versioned release that ships a downstream image (a downstream
+        # release or a test release) we normally WAIT for its downstream.json (same
+        # rationale as the engine wait above: a freshly-pushed release tip's
+        # downstream build may still be running). Nightly never reaches here (it
+        # resolved an already-built commit).
+        ds_branch_missing=false
+        if [[ "$CHANNEL" == "versioned" && ( "$REQ_DOWNSTREAM" == "true" || "${TEST:-false}" == "true" ) ]]; then
+          if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
+            # An explicit downstream commit was named: ship THAT pairing and always
+            # wait for it, regardless of the engine line's downstream branch. The
+            # requested commit may live on a different promotable ref (e.g. the
+            # downstream's main), so the matching-branch shortcut below must not
+            # override an explicit request.
+            wait_for_downstream_pairing "$slug" "$sha" "$REQ_DOWNSTREAM_SHA"
+          else
+            # No specific pairing requested. A promotable downstream image is only
+            # ever built for a release line that has a MATCHING downstream
+            # releases/X.Y branch: rolling-downstream marks a build promotable (and
+            # writes downstream.json) only when the downstream branch matches the
+            # engine line, falling back to the downstream's main otherwise. So with
+            # no matching downstream branch nothing promotable is ever written and
+            # the wait would only burn its whole timeout. Probe for the matching
+            # branch first:
+            #   * present  -> wait for the downstream build.
+            #   * absent   -> do NOT wait. Record downstream-branch-missing=true and
+            #     let resolve-release-components apply the policy: a public release
+            #     (the engine is shipping too) drops the downstream and ships the
+            #     engine only; an internal/test release (the downstream image is the
+            #     whole deliverable) fails.
+            #   * unknown (app unconfigured, or the repo could not be read) -> wait
+            #     for the downstream build rather than risk skipping a downstream
+            #     image that does in fact exist. Only a definitive "no such branch"
+            #     (ls-remote exit 2) counts as absent.
+            want_branch="$chosen"   # the engine release line, e.g. releases/3.1
+            branch_state="unknown"
+            if [[ -n "${DS_TOKEN:-}" && -n "${DOWNSTREAM_REPO:-}" && -n "${OWNER:-}" ]]; then
+              # Read refs over HTTPS with the App token via GIT_CONFIG (never in
+              # argv), and run git from RUNNER_TEMP, NOT the workspace: the checkout
+              # here leaves a host-scoped http.extraHeader bearing THIS repo's
+              # GITHUB_TOKEN that also matches the downstream URL, so git run in the
+              # workspace would send that (wrong) token and GitHub would answer
+              # "Repository not found", which we would misread as a missing branch.
+              # Mirrors release.yml's downstream-ref resolution, which reads the
+              # private downstream with this exact token.
+              ds_workdir="${RUNNER_TEMP:-/tmp}"
+              ds_url="https://github.com/${OWNER}/${DOWNSTREAM_REPO}.git"
+              ds_errf="$(mktemp)"
+              set +e
+              GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.extraHeader \
+              GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${DS_TOKEN}" | base64 | tr -d '\n')" \
+                git -C "$ds_workdir" ls-remote --exit-code --heads "$ds_url" "refs/heads/${want_branch}" >/dev/null 2>"$ds_errf"
+              ds_rc=$?
+              set -e
+              if [[ $ds_rc -eq 0 ]]; then
+                branch_state="present"
+              elif [[ $ds_rc -eq 2 ]]; then
+                branch_state="absent"
+              else
+                echo "::warning::Could not read ${OWNER}/${DOWNSTREAM_REPO} to check for the downstream '${want_branch}' branch (git ls-remote rc=${ds_rc}): $(tr '\n' ' ' <"$ds_errf"). Falling back to waiting for the downstream build."
+              fi
+              rm -f "$ds_errf"
+            else
+              echo "::warning::The downstream app/repo is not configured for this run, so the downstream '${want_branch}' branch cannot be checked; falling back to waiting for the downstream build."
+            fi
+
+            if [[ "$branch_state" == "absent" ]]; then
+              ds_branch_missing=true
+              echo "::warning::No matching downstream release branch '${want_branch}' exists, so no downstream image is (or will be) built for this line. Skipping the downstream build wait; resolve-release-components will ship the engine only (public) or fail (internal/test)."
+            else
+              # present or unknown: wait for the downstream build.
+              wait_for_build downstream "$slug" "$sha"
+            fi
+          fi
+        fi
+
+        # Downstream provenance: the engine and downstream sides write SEPARATE
+        # manifests. A downstream.json is written only when a promotable downstream
+        # image exists, so its PRESENCE is the authoritative "a downstream image
+        # exists" signal. It records which downstream commit was built and the base
+        # rolling tag the image was pushed under (no registry/account; those come
+        # from secrets at promote time). Absent simply means nothing to mirror.
+        #
+        # A specific pairing (downstream-git-sha override) reads its immutable
+        # per-pairing manifest at <engine-sha>/<downstream-sha>/downstream.json; a
+        # normal release reads the engine-level pointer to the latest pairing.
+        ds_built=false
+        ds_sha=""
+        ds_branch=""
+        # `.licensed` is whether the downstream build produced the licence-enforcing
+        # (`-licensed`) image. Manifests written before licence enforcement lack the
+        # field and default to false, so the licensed DockerHub mirror is skipped for
+        # those lines instead of failing to find an image.
+        ds_licensed=false
+        # `.tag` is the compound <engine-short>.<downstream-short> base rolling tag
+        # the build pushed. Manifests written before the compound tag existed lack
+        # it; those fall back to the legacy engine-only tag below.
+        ds_tag=""
+        if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
+          ds_manifest="rolling-builds/${slug}/${sha}/${REQ_DOWNSTREAM_SHA}/downstream.json"
+          ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+          if [[ -z "$ds_json" ]]; then
+            # Backward compatibility: a pre-compound build wrote only the engine-level
+            # pointer. Accept it here; the invariant check below still rejects it
+            # unless it records the requested pairing.
+            ds_manifest="rolling-builds/${slug}/${sha}/downstream.json"
+            ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+          fi
+        else
+          ds_manifest="rolling-builds/${slug}/${sha}/downstream.json"
+          ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+        fi
+        if [[ -n "$ds_json" ]]; then
+          ds_built=true
+          ds_sha=$(echo "$ds_json" | jq -r '.sha // ""')
+          ds_branch=$(echo "$ds_json" | jq -r '.branch // ""')
+          ds_licensed=$(echo "$ds_json" | jq -r 'if .licensed == true then "true" else "false" end')
+          ds_tag=$(echo "$ds_json" | jq -r '.tag // ""')
+        fi
+
+        # The downstream image source tag: the compound tag the build recorded, or
+        # the legacy engine-only tag for pre-compound manifests (still promotable
+        # because those older images were pushed under that engine-only tag).
+        if [[ -n "$ds_tag" ]]; then
+          ds_source_tag="$ds_tag"
+        else
+          ds_source_tag="rolling-${slug}-${sha}"
+        fi
+
+        # Invariant: an explicit override reads its own immutable per-pairing
+        # manifest, so the recorded downstream sha must be the requested one. A
+        # mismatch (or a missing manifest) means the intended pairing was never
+        # built; fail rather than promote the wrong downstream code.
+        if [[ -n "${REQ_DOWNSTREAM_SHA:-}" && "$ds_sha" != "$REQ_DOWNSTREAM_SHA" ]]; then
+          echo "::error::No promotable downstream image records the requested pairing engine ${sha} ⇢ downstream ${REQ_DOWNSTREAM_SHA} (manifest ${ds_manifest} records '${ds_sha:-none}'). Build it with rolling-downstream-build.yml (engine-git-sha=${sha}, downstream-git-sha=${REQ_DOWNSTREAM_SHA}) before releasing."
+          exit 1
+        fi
+
+        echo "Releasing ${sha} from ${chosen} (rolling-builds/${slug}/${sha}); downstream-built=${ds_built}"
+        {
+          echo "git-sha=${sha}"
+          echo "source-name=${source_name}"
+          echo "git-branch=${chosen}"
+          echo "branch-slug=${slug}"
+          echo "s3-prefix=rolling-builds/${slug}/${sha}"
+          echo "rolling-source-tag=rolling-${slug}-${sha}"
+          echo "downstream-source-tag=${ds_source_tag}"
+          echo "downstream-built=${ds_built}"
+          echo "downstream-sha=${ds_sha}"
+          echo "downstream-branch=${ds_branch}"
+          echo "downstream-branch-missing=${ds_branch_missing}"
+          echo "downstream-licensed=${ds_licensed}"
+        } >> "$GITHUB_OUTPUT"

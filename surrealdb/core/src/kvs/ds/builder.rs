@@ -5,16 +5,17 @@ use std::time::Duration;
 #[cfg(feature = "http")]
 use anyhow::Context as _;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use async_channel::Sender;
-use tokio::sync::Notify;
+use surrealdb_cnf::ConfigMap;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, ConfigMap};
+use crate::config::RuntimeConfig;
 use crate::dbs::{Capabilities, MessageBroker};
 use crate::exec::function::FunctionRegistry;
 #[cfg(feature = "http")]
@@ -26,10 +27,11 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::{
 	Datastore, TransactionBuilder, TransactionBuilderFactory, TransactionBuilderParts,
-	TransactionFactory,
+	TransactionConfig, TransactionFactory,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
+use crate::options::EngineOptions;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
 use crate::types::PublicNotification;
@@ -49,11 +51,24 @@ pub struct Builder {
 	http_endpoint: Option<String>,
 	id: Option<Uuid>,
 	slow_log: Option<SlowLog>,
+	/// The cadences the maintenance tasks run at.
+	engine_options: EngineOptions,
+	/// Whether to start the maintenance tasks. On by default; see
+	/// [`Builder::without_maintenance_tasks`].
+	maintenance: bool,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
 	authenticate: bool,
 	config: ConfigMap,
+	/// Overrides the built-in graph fold threshold; see
+	/// [`Builder::with_graph_fold_threshold`].
+	graph_fold_threshold: Option<usize>,
+	/// Object store provider for file buckets. When unset the datastore uses the
+	/// built-in [`CommunityComposer`] (memory, and — off wasm — file/S3/GCS/Azure).
+	/// Embedders on platforms the built-in backends can't reach (e.g. a wasm
+	/// Durable Object backing buckets with an R2 binding) install their own here.
+	bucket_store_provider: Option<Box<dyn BucketStoreProvider>>,
 	#[cfg(feature = "surrealism")]
 	lazy_surrealism: bool,
 	observer: Arc<dyn ExecutionObserver>,
@@ -75,11 +90,15 @@ impl Builder {
 			http_endpoint: None,
 			id: None,
 			slow_log: None,
+			engine_options: EngineOptions::default(),
+			maintenance: true,
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
 			authenticate: false,
 			config: ConfigMap::empty(),
+			graph_fold_threshold: None,
+			bucket_store_provider: None,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: false,
 			observer: Arc::new(NoopObserver),
@@ -89,6 +108,20 @@ impl Builder {
 	/// Sets config values for the builder.
 	pub fn with_config(mut self, config: ConfigMap) -> Self {
 		self.config = config;
+		self
+	}
+
+	/// Overrides the built-in graph fold threshold: how many unfolded
+	/// per-edge adjacency keys a traversal tolerates on one scope before
+	/// observing it for a background fold. The threshold is deliberately not
+	/// a config-map key — every node against a shared datastore must fold
+	/// identically — so this builder hook is the only override, for tests
+	/// and benchmarks that need eager folding (`1`) or no fold initiation
+	/// (`0`, which disables read-path observation; edge deletes on tables
+	/// already folded still queue their scopes and the background pass
+	/// still drains that debt).
+	pub fn with_graph_fold_threshold(mut self, threshold: usize) -> Self {
+		self.graph_fold_threshold = Some(threshold);
 		self
 	}
 
@@ -111,6 +144,41 @@ impl Builder {
 	/// Sets the capabilities for the datastore.
 	pub fn with_capabilities(mut self, cap: Capabilities) -> Self {
 		self.capabilities = cap;
+		self
+	}
+
+	/// Sets the cadences the datastore's maintenance tasks run at.
+	pub fn with_engine_options(mut self, options: EngineOptions) -> Self {
+		self.engine_options = options;
+		self
+	}
+
+	/// Builds a datastore with **no** maintenance tasks.
+	///
+	/// Intended for tests and benchmarks that need a quiescent datastore —
+	/// compaction running mid-benchmark measures something else, and a test
+	/// asserting on a delta log needs it to stay where the test put it. Such a
+	/// caller drives the individual passes itself (for example
+	/// [`Datastore::index_compaction`]), or starts the whole set later with
+	/// [`tasks::init`](crate::kvs::tasks::init).
+	///
+	/// Anything serving real queries wants the default. Without these tasks an
+	/// index's delta log grows unbounded and every read of that index sums it,
+	/// `REMOVE NAMESPACE` never destroys the data it detached, changefeed data
+	/// is never collected, an interrupted index build is never resumed, and this
+	/// node's cluster heartbeat never refreshes.
+	///
+	/// It also hands the caller the storage version. These tasks write, and a
+	/// write that reaches a datastore before its version is stamped makes a
+	/// datastore this process just created read as storage from before the
+	/// version key existed — so the branch that starts them settles the version
+	/// first, and opting out of the one opts out of the other. A caller that
+	/// takes this route and then serves queries owes that ordering itself:
+	/// [`Datastore::check_version`] first, then
+	/// [`Datastore::start_maintenance_tasks`], which is what every entry point
+	/// in this workspace does.
+	pub fn without_maintenance_tasks(mut self) -> Self {
+		self.maintenance = false;
 		self
 	}
 
@@ -192,13 +260,22 @@ impl Builder {
 		self
 	}
 
-	pub async fn build_with_path(self, path: &str) -> Result<Datastore> {
+	/// Install a custom [`BucketStoreProvider`] backing file buckets, overriding
+	/// the default [`CommunityComposer`]. Use this on platforms whose object
+	/// store the built-in backends can't reach — e.g. a wasm Durable Object that
+	/// serves buckets from an R2 binding.
+	pub fn with_bucket_store_provider(mut self, provider: Box<dyn BucketStoreProvider>) -> Self {
+		self.bucket_store_provider = Some(provider);
+		self
+	}
+
+	pub async fn build_with_path(self, path: &str) -> Result<Arc<Datastore>> {
 		self.build_with_factory_path(path, CommunityComposer()).await
 	}
 
-	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Datastore>
+	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Arc<Datastore>>
 	where
-		F: TransactionBuilderFactory + BucketStoreProvider + 'static,
+		F: TransactionBuilderFactory + 'static,
 	{
 		let (datastore, _) = self.build_with_factory_path_and_router_state(path, composer).await?;
 		Ok(datastore)
@@ -213,9 +290,9 @@ impl Builder {
 		self,
 		path: &str,
 		composer: F,
-	) -> Result<(Datastore, F::RouterState)>
+	) -> Result<(Arc<Datastore>, F::RouterState)>
 	where
-		F: TransactionBuilderFactory + BucketStoreProvider + 'static,
+		F: TransactionBuilderFactory + 'static,
 	{
 		let mut this = self;
 		let TransactionBuilderParts {
@@ -241,7 +318,13 @@ impl Builder {
 		{
 			this.live_query_broker = Some(composer.live_query_broker(channel.clone()));
 		}
-		let buckets = BucketsManager::new(Box::new(composer), this.config.load());
+		let bucket_store_provider =
+			this.bucket_store_provider.take().unwrap_or_else(|| Box::new(CommunityComposer()));
+		let buckets = BucketsManager::new(
+			bucket_store_provider,
+			this.config.load(),
+			Arc::clone(&this.observer),
+		);
 
 		let datastore = this.build_with_tx_builder_buckets(builder, buckets).await?;
 
@@ -268,24 +351,44 @@ impl Builder {
 		self,
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
-	) -> Result<Datastore> {
-		let async_event_trigger = Arc::new(Notify::new());
+	) -> Result<Arc<Datastore>> {
+		let triggers = Arc::new(surrealdb_datastore::triggers::CommitTriggers::new());
+		// Read before `self` is partially moved below.
+		let maintenance = self.maintenance;
+		let options = self.engine_options;
+		let shutdown = self.shutdown.clone();
 		let observer = self.observer;
-		let config = Arc::new(self.config.load::<CommonConfig>());
-		let tf =
-			TransactionFactory::new(Arc::clone(&async_event_trigger), builder, Arc::clone(&config))
-				.with_observer(Arc::clone(&observer));
+		let mut runtime_config = RuntimeConfig::load(&self.config);
+		if let Some(threshold) = self.graph_fold_threshold {
+			runtime_config.idx.graph_fold_threshold = threshold;
+		}
+		let config = Arc::new(runtime_config);
+		let tf = TransactionFactory::new(
+			Arc::clone(&triggers),
+			builder,
+			Arc::new(self.config.load::<TransactionConfig>()),
+		)
+		.with_observer(Arc::clone(&observer));
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
-		let capabilities = Arc::new(self.capabilities);
+		let capabilities = self.capabilities;
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 		#[cfg(feature = "http")]
 		let http_client = Arc::new(
-			HttpClient::new(capabilities.allow_net.clone(), capabilities.deny_net.clone(), &config)
-				.context("Could not create http client")?,
+			HttpClient::new(
+				capabilities.allow_net.clone(),
+				capabilities.deny_net.clone(),
+				&config.http,
+			)
+			.context("Could not create http client")?,
 		);
 
 		let datastore = Datastore {
+			shutdown,
+			maintenance: parking_lot::Mutex::new(None),
+			engine_options: options,
+			shutdown_lock: tokio::sync::Mutex::new(()),
+			created_here: std::sync::atomic::AtomicBool::new(false),
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,
@@ -295,25 +398,33 @@ impl Builder {
 			live_query_broker: self.live_query_broker,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint,
-			capabilities,
-			index_stores: IndexStores::new(config.hnsw_cache_size, config.diskann_cache_size),
+			capabilities: ArcSwap::from_pointee(capabilities),
+			index_stores: IndexStores::new(
+				config.idx.hnsw_cache_size,
+				config.idx.diskann_cache_size,
+				config.idx.graph_resolve_cache_size,
+				config.idx.segment_dictionary_path.clone(),
+			),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new(config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			buckets,
 			sequences: Sequences::new(tf, id),
-			async_event_trigger,
+			triggers,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
-			http_client,
+			http_client: ArcSwap::new(http_client),
 			observer,
+			parser_config: Arc::new(self.config.load::<crate::syn::ParserConfig>()),
 			config,
 		};
 		// Under the Router live-query engine, establish the router's baseline
@@ -322,13 +433,56 @@ impl Builder {
 		// strictly after the baseline. A lazy baseline on the first router tick
 		// would otherwise discard events captured in the startup window. Inline
 		// mode never runs the router, so it skips this entirely.
-		if datastore.config.live_query_engine == crate::cnf::LiveQueryEngine::Router {
-			let txn = datastore
-				.transaction(crate::kvs::TransactionType::Read, crate::kvs::LockType::Optimistic)
-				.await?;
+		if datastore.config.datastore.live_query_engine == crate::kvs::LiveQueryEngine::Router {
+			let txn = datastore.transaction(crate::kvs::TransactionType::Read).await?;
 			let baseline = txn.safe_timestamp().await?.as_versionstamp();
 			txn.cancel().await?;
 			datastore.live_query_router.set_baseline(baseline);
+		}
+		// Populate the system metrics cache before anyone can read it. The
+		// cache is process-wide and starts zeroed, and `INFO FOR ROOT` reports
+		// it verbatim — so without this a query arriving before the first
+		// `SystemMetricsRefresh` pass sees `physical_cores: 0`,
+		// `available_parallelism: 0` and no memory figures, which is wrong
+		// rather than merely stale. The scheduler already gives that job a
+		// `next_due` of `now`, but it runs on a spawned task, so its first pass
+		// lands some time after this constructor returns. Doing it here closes
+		// that window; the task keeps the values current from then on.
+		//
+		// Only when the cache is cold, because it is shared with every other
+		// datastore in the process: once one of them has warmed it the values
+		// are real and no older than one refresh interval, and refreshing again
+		// here would only cut short the CPU-percentage window of the scheduled
+		// refresher that owns the cadence.
+		crate::sys::refresh_if_cold().await;
+		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
+		// nothing hands out a bare `Datastore` any more.
+		let datastore = Arc::new(datastore);
+		// A datastore without its maintenance tasks is not a working database,
+		// so starting them is the constructor's job rather than every embedder's
+		// to remember. Opt out with `without_maintenance_tasks`.
+		if maintenance {
+			// Settle the storage version first. Every maintenance task writes,
+			// and a write that reaches storage before the version key does makes
+			// a datastore this process just created read as storage from before
+			// that key existed — which `check_version` is then obliged to refuse,
+			// permanently, on this and every later open. Starting the writers is
+			// what creates that obligation, so it is this branch that owes the
+			// ordering; a caller who opts out owns both halves and settles the
+			// version itself.
+			//
+			// Only the marker, not the whole of `check_version`: the migrations
+			// that follow it run under a lease and have no bound on how long they
+			// take, which is not something a constructor may do. The caller still
+			// calls `check_version`, which finds the marker already written and
+			// reports whether *this process* created the datastore from the latch
+			// set below.
+			let (_, is_new) = datastore.settle_storage_version().await?;
+			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
+			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
+			// This is the only writer, and it runs before the datastore is
+			// handed to anyone.
+			*datastore.maintenance.lock() = Some(tasks);
 		}
 		Ok(datastore)
 	}
@@ -342,6 +496,9 @@ mod tests {
 	use std::sync::Arc;
 
 	use anyhow::{Result, bail};
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::api::{BoxFut, Transactable};
+	use surrealdb_kvs::{Metrics, TransactionType};
 	use tokio_util::sync::CancellationToken;
 
 	use super::Builder;
@@ -349,13 +506,7 @@ mod tests {
 	use crate::buc::{
 		BucketStoreProvider, BucketStoreProviderRequirements, Config as BucketConfig,
 	};
-	use crate::cnf::ConfigMap;
-	use crate::kvs::api::BoxFut;
-	use crate::kvs::{
-		Metrics, Transactable, TransactionBuilder, TransactionBuilderFactory,
-		TransactionBuilderFactoryRequirements, TransactionBuilderParts,
-		TransactionBuilderRequirements,
-	};
+	use crate::kvs::{TransactionBuilder, TransactionBuilderFactory, TransactionBuilderParts};
 
 	#[derive(Clone)]
 	struct TestRouterState(Arc<usize>);
@@ -373,12 +524,10 @@ mod tests {
 			_global: bool,
 			_readonly: bool,
 			_config: BucketConfig,
-		) -> Pin<Box<dyn Future<Output = Result<Arc<dyn ObjectStore>>> + 'a + Send + Sync>> {
+		) -> Pin<Box<dyn Future<Output = Result<Arc<dyn ObjectStore>>> + 'a + Send>> {
 			Box::pin(async { bail!("test bucket connections are not used") })
 		}
 	}
-
-	impl TransactionBuilderFactoryRequirements for TestComposer {}
 
 	impl TransactionBuilderFactory for TestComposer {
 		type RouterState = TestRouterState;
@@ -392,7 +541,7 @@ mod tests {
 			Ok(TransactionBuilderParts::new(Box::new(TestTransactionBuilder), self.state.clone()))
 		}
 
-		fn path_valid(v: &str) -> Result<String> {
+		fn path_valid(&self, v: &str) -> Result<String> {
 			Ok(v.to_owned())
 		}
 	}
@@ -405,18 +554,19 @@ mod tests {
 		}
 	}
 
-	impl TransactionBuilderRequirements for TestTransactionBuilder {}
-
 	impl TransactionBuilder for TestTransactionBuilder {
+		fn name(&self) -> &'static str {
+			"test"
+		}
+
 		fn new_transaction(
 			&self,
-			_write: bool,
-			_lock: bool,
-		) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+			_write: TransactionType,
+		) -> BoxFut<'_, crate::kvs::err::Result<(Box<dyn Transactable>, bool)>> {
 			Box::pin(async move { unreachable!("test does not open transactions") })
 		}
 
-		fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		fn shutdown(&self) -> BoxFut<'_, crate::kvs::err::Result<()>> {
 			Box::pin(async move { Ok(()) })
 		}
 
@@ -429,6 +579,10 @@ mod tests {
 		}
 	}
 
+	/// Both of these assert how the builder plumbs a composer's router state,
+	/// which says nothing about storage — and the stub above opens no
+	/// transactions. They therefore build without maintenance tasks, because
+	/// that branch settles the storage version and so does open one.
 	#[tokio::test]
 	async fn build_with_factory_path_returns_router_state() -> Result<()> {
 		let expected = Arc::new(7);
@@ -436,8 +590,10 @@ mod tests {
 			state: TestRouterState(Arc::clone(&expected)),
 		};
 
-		let (_datastore, router_state) =
-			Builder::new().build_with_factory_path_and_router_state("test:", composer).await?;
+		let (_datastore, router_state) = Builder::new()
+			.without_maintenance_tasks()
+			.build_with_factory_path_and_router_state("test:", composer)
+			.await?;
 
 		assert!(Arc::ptr_eq(&expected, &router_state.0));
 		Ok(())
@@ -449,7 +605,10 @@ mod tests {
 			state: TestRouterState(Arc::new(7)),
 		};
 
-		let datastore = Builder::new().build_with_factory_path("test:", composer).await?;
+		let datastore = Builder::new()
+			.without_maintenance_tasks()
+			.build_with_factory_path("test:", composer)
+			.await?;
 
 		assert_eq!(datastore.to_string(), "test");
 		Ok(())

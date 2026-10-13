@@ -26,23 +26,15 @@
 //! the entire FieldState machinery (computed fields + field-level permissions),
 //! which would leak restricted fields into binding rows.
 
-// This FieldState-aware fetch helper is used only by the GQL v2 MATCH
-// operators, which are constructed only by the gql-gated planner
-// (`Expr::Match` is `#[cfg(feature = "gql")]`), so it is dead code when the
-// feature is off — suppress the lint there only, keeping dead-code detection
-// active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::pipeline::{
-	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
-};
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
+use crate::catalog::table_select_permission;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	resolve_select_permission, should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -129,8 +121,8 @@ impl FetchFieldStateCache {
 					.get_table_def(table, version)
 					.await
 					.context("Failed to get table definition")?;
-				let catalog_perm = resolve_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+				let catalog_perm = table_select_permission(table_def.as_deref());
+				convert_permission_to_physical_runtime(catalog_perm, ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -190,6 +182,11 @@ pub(crate) async fn resolve_with_field_state(
 		return Ok(Vec::new());
 	}
 
+	// SECURITY (GHSA-2v9j): confine record resolution to the caller's tenant. The
+	// MATCH operators materialize records through this shared path without a
+	// preceding validated scan, so enforce the namespace/database boundary here.
+	validate_record_user_access(ctx.database()?)?;
+
 	let check_perms = cache.resolve_check_perms(ctx)?;
 	let version = ctx.version_stamp();
 
@@ -248,14 +245,16 @@ pub(crate) async fn resolve_with_field_state(
 			Err(arc) => arc.data.clone(),
 		};
 
-		// 2. Computed fields: evaluated and injected before field permissions, exactly as
-		//    filter_and_process_batch orders it.
-		compute_fields_for_value(ctx, &table_state.field_state, &mut value, false).await?;
-
-		// 3. Field-level SELECT permissions: cut fields the caller cannot read.
-		if check_perms {
-			filter_fields_by_permission(ctx, &table_state.field_state, &mut value).await?;
-		}
+		// 2. Computed fields and field-level SELECT permissions, ordered exactly as
+		//    `filter_and_process_batch` orders them.
+		materialise_fields_with_permissions(
+			ctx,
+			&table_state.field_state,
+			&mut value,
+			false,
+			check_perms,
+		)
+		.await?;
 
 		out.push(Some(value));
 	}

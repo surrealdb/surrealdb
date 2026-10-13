@@ -26,6 +26,7 @@ use crate::catalog::{DatabaseDefinition, IndexDefinition, NamespaceDefinition, T
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
@@ -109,11 +110,21 @@ pub(crate) struct SessionInfo {
 /// - Datastore handle (for root-level operations)
 /// - Cancellation token (tokio-based, supplements FrozenContext's AtomicBool)
 /// - Legacy Options (for fallback to compute path)
+/// - Function registry (name resolution for every planned function call)
 #[derive(Clone)]
 pub struct RootContext {
 	/// The underlying FrozenContext -- single source of truth for
 	/// params, txn, capabilities, and all legacy context fields.
 	pub ctx: FrozenContext,
+	/// Registry of built-in scalar, aggregate, projection and index
+	/// functions, plus the method-dispatch table.
+	///
+	/// Built once per datastore and shared by `Arc`; every planner and every
+	/// function-call physical expression resolves names through it. It lives
+	/// on the root so that the whole hierarchy — namespace, database, and
+	/// every child derived by `with_new_ctx` or `Clone` — sees the same
+	/// registry.
+	pub(crate) function_registry: Arc<FunctionRegistry>,
 	/// Legacy Options for fallback to compute path when streaming executor
 	/// encounters unimplemented expressions.
 	/// Remove this when the streaming executor has full coverage.
@@ -144,6 +155,13 @@ pub struct RootContext {
 	/// so that permission predicate evaluation does not re-enter table permissions
 	/// and recurse infinitely on cyclic record links.
 	pub(crate) skip_fetch_perms: bool,
+	/// When true, a write reached from here is rejected.
+	///
+	/// Set while evaluating a `COMPUTED` field body, which runs on every read of
+	/// the field and under the definer's auth. The streaming engine plans no
+	/// writes of its own, so enforcement is the legacy fallback's
+	/// (`plan_or_compute::legacy_fallback_options`); this flag is what tells it.
+	pub(crate) computing_field: bool,
 	/// Evaluated VERSION timestamp for time-travel queries.
 	///
 	/// Set by the `VersionScope` operator when a SELECT has a VERSION clause.
@@ -162,6 +180,7 @@ impl std::fmt::Debug for RootContext {
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("skip_fetch_perms", &self.skip_fetch_perms)
+			.field("computing_field", &self.computing_field)
 			.field("version_stamp", &self.version_stamp)
 			.field("ctx", &"<FrozenContext>")
 			.finish()
@@ -395,7 +414,7 @@ impl ExecutionContext {
 	/// Returns an error if no namespace has been selected.
 	pub fn namespace(&self) -> Result<&NamespaceContext, Error> {
 		match self {
-			Self::Root(_) => Err(Error::NsEmpty),
+			Self::Root(_) => Err(ExecError::NsEmpty.into()),
 			Self::Namespace(n) => Ok(n),
 			Self::Database(d) => Ok(&d.ns_ctx),
 		}
@@ -406,7 +425,7 @@ impl ExecutionContext {
 	/// Returns an error if no database has been selected.
 	pub fn database(&self) -> Result<&DatabaseContext, Error> {
 		match self {
-			Self::Root(_) | Self::Namespace(_) => Err(Error::DbEmpty),
+			Self::Root(_) | Self::Namespace(_) => Err(ExecError::DbEmpty.into()),
 			Self::Database(d) => Ok(d),
 		}
 	}
@@ -431,8 +450,22 @@ impl ExecutionContext {
 	}
 
 	/// Get the transaction (delegates to FrozenContext).
+	///
+	/// Panics when the context carries no transaction. Callers that can be
+	/// reached under a transaction-less context must use [`Self::try_txn`] and
+	/// report the missing transaction as an error instead.
 	pub fn txn(&self) -> Arc<Transaction> {
 		self.root().ctx.tx()
+	}
+
+	/// Get the transaction, or `None` when this context carries none.
+	///
+	/// The executor always attaches one before running a plan, so operators
+	/// built by it can rely on [`Self::txn`]. Contexts assembled outside that
+	/// path — operator unit tests, for instance — may have none, and code
+	/// reachable from them uses this to fail rather than panic.
+	pub fn try_txn(&self) -> Option<Arc<Transaction>> {
+		self.root().ctx.try_tx().cloned()
 	}
 
 	/// Look up a parameter value by name (delegates to FrozenContext).
@@ -531,6 +564,7 @@ impl ExecutionContext {
 		match self {
 			Self::Root(r) => Self::Root(RootContext {
 				ctx,
+				function_registry: Arc::clone(&r.function_registry),
 				options: r.options.clone(),
 				datastore: r.datastore.clone(),
 				cancellation: r.cancellation.clone(),
@@ -538,11 +572,13 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
+				computing_field: r.computing_field,
 				version_stamp: r.version_stamp,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
 					ctx,
+					function_registry: Arc::clone(&n.root.function_registry),
 					options: n.root.options.clone(),
 					datastore: n.root.datastore.clone(),
 					cancellation: n.root.cancellation.clone(),
@@ -550,6 +586,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
+					computing_field: n.root.computing_field,
 					version_stamp: n.root.version_stamp,
 				},
 				ns: Arc::clone(&n.ns),
@@ -558,6 +595,7 @@ impl ExecutionContext {
 				ns_ctx: NamespaceContext {
 					root: RootContext {
 						ctx,
+						function_registry: Arc::clone(&d.ns_ctx.root.function_registry),
 						options: d.ns_ctx.root.options.clone(),
 						datastore: d.ns_ctx.root.datastore.clone(),
 						cancellation: d.ns_ctx.root.cancellation.clone(),
@@ -565,6 +603,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
+						computing_field: d.ns_ctx.root.computing_field,
 						version_stamp: d.ns_ctx.root.version_stamp,
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
@@ -617,6 +656,24 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.skip_fetch_perms = skip;
+		new
+	}
+
+	/// Derive a context in which a write is rejected.
+	///
+	/// Used while evaluating a `COMPUTED` field body. See
+	/// [`RootContext::computing_field`].
+	pub fn computing_field(self) -> Self {
+		if self.root().computing_field {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.computing_field = true;
 		new
 	}
 
@@ -718,11 +775,12 @@ impl ExecutionContext {
 
 	/// Get the function registry.
 	///
-	/// Returns the function registry from the underlying context.
-	/// This allows different contexts to have different registries,
-	/// enabling custom function registration (e.g., enterprise-only functions).
+	/// Returns the registry held by the root context, which every level of
+	/// the hierarchy shares. Carrying it per-root allows different roots to
+	/// have different registries, enabling custom function registration
+	/// (e.g., enterprise-only functions).
 	pub fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		self.root().ctx.function_registry()
+		&self.root().function_registry
 	}
 
 	/// Get the session information (if available).

@@ -198,7 +198,7 @@ relational frontend — see §10.)
 
 Conventions for all: `metrics: Arc<OperatorMetrics>` + `monitor_stream`;
 `buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint(),
-ctx.root().ctx.config.operator_buffer_size)`; `access_mode` combines children +
+ctx.root().ctx.config.exec.operator_buffer_size)`; `access_mode` combines children +
 embedded predicate exprs; `required_context` ≥ Database; WASM cfg patterns as in
 `scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via PhysicalExpr
 ToSql). First: extract `compute_graph_ranges`/`decode_graph_edge`/cursor batching
@@ -338,13 +338,15 @@ Project [columns: p, b]
   (+Debug+ToSql via MatchPlan renderer); `lower` / `parse_to_plan_with_settings`
   (replaces `parse_to_ast_with_settings`) / `parse_with_capabilities` return it;
   experimental gate unchanged.
-- `kvs/ds.rs`: `parse_gql` → `PreparedGqlQuery`; `execute_gql` signature
-  unchanged; new `pub process_gql(PreparedGqlQuery, sess, vars)` + pub(crate)
-  cancel/txn variants (split `process_with_transaction_inner` into ast-shim +
-  plan-level inner).
-- `rpc/protocol.rs`: `QueryForm::Plan(PreparedGqlQuery)` added; `Parsed(Ast)`
-  untouched (12 other call sites); run_query 8→12 arms; gql handler builds Plan.
-- language-tests arm: `parse_to_plan_with_settings` + `dbs.process_gql`.
+- `kvs/ds.rs`: `parse_gql` lowers the text and returns its `LogicalPlan`,
+  reached from `statements_for` when the request names `Dialect::Gql`. There is
+  no GQL-specific entry point: every dialect goes through `Datastore::run` /
+  `run_streaming` with a `QueryRequest`.
+- `rpc/protocol.rs`: the `gql` handler submits
+  `QueryForm::Text(&query, Dialect::Gql)`, which `run_query` turns into one
+  `QuerySource::in_dialect` call.
+- language-tests arm: `parse_to_plan_with_settings`, then
+  `dbs.run(QueryRequest::new(QuerySource::Plan(plan.0), session))`.
   (Deferred: there is no `[test] explain` harness key. Plan-shape coverage lives
   in Rust snapshot tests over the `MatchPlan` `ToSql` renderer —
   `surrealdb/core/src/gql/lower/test.rs` and the `to_sql_renders_*` tests in
@@ -383,10 +385,10 @@ Project [columns: p, b]
 ## 9. Guards (cnf knobs)
 
 `gql_max_path_rows` (1M), `gql_max_join_build_rows` (1M), `gql_max_output_rows`
-(1M) — `CommonConfig` fields in `surrealdb/core/src/cnf/mod.rs` (NOT global
-statics: every operator that reads them already holds the execution
-`CommonConfig` via `ctx.root().ctx.config`, so they are per-datastore and
-settable programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
+(1M) — `ExecConfig` fields in `surrealdb/core/src/exec/config.rs` (NOT global
+statics: every operator that reads them already holds the execution config via
+`ctx.root().ctx.config.exec`, so they are per-datastore and settable
+programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
 `ConfigMap::from_env` routes into the same fields). Errors name the env knob.
 `SURREAL_GQL_MAX_PATH_ROWS` is enforced **per source row** in `PathExpand` (the
 live+emitted counter resets for each input row), so it caps the single-source

@@ -10,6 +10,7 @@
 //! the outer scan's analysis.
 
 use std::collections::HashSet;
+use std::ops::Bound;
 
 use super::literals::try_literal_to_value;
 use crate::catalog::Distance;
@@ -110,11 +111,55 @@ pub(crate) struct BruteForceKnnParams {
 	/// The idiom path to the vector field.
 	pub field: Idiom,
 	/// The query vector.
-	pub vector: Vec<Number>,
+	pub vector: BruteForceKnnVector,
 	/// Number of nearest neighbors.
 	pub k: u32,
 	/// Distance metric.
 	pub distance: Distance,
+}
+
+/// The query-vector side of a brute-force KNN expression.
+pub(crate) enum BruteForceKnnVector {
+	/// A plan-time literal numeric array.
+	Literal(Vec<Number>),
+	/// A non-literal expression the legacy planner would compute once at
+	/// plan time with no document context (bind parameter, function call,
+	/// array with computed elements, binary of computables). Evaluated once
+	/// at stream open by `KnnTopK` and coerced to `array<number>` with the
+	/// same coercion the legacy tree applies.
+	Deferred(Expr),
+}
+
+/// Whether the legacy planner's `Tree::eval_value` would compute this
+/// expression at plan time (`Node::Computable` / `Node::Computed`). Idioms,
+/// subqueries, closures, prefix expressions and every other node kind are
+/// `Unsupported` there — a brute-force KNN with such a right-hand side never
+/// registers an executor entry and evaluates to `false` per row instead.
+fn is_plan_time_computable(expr: &Expr) -> bool {
+	match expr {
+		// `Tree::eval_array` fully computes array elements, whatever they are.
+		Expr::Literal(Literal::Array(_)) => true,
+		Expr::Literal(
+			Literal::Integer(_)
+			| Literal::Bool(_)
+			| Literal::String(_)
+			| Literal::RecordId(_)
+			| Literal::Duration(_)
+			| Literal::Uuid(_)
+			| Literal::Datetime(_)
+			| Literal::None
+			| Literal::Null
+			| Literal::Decimal(_)
+			| Literal::Float(_),
+		) => true,
+		Expr::Param(_) | Expr::FunctionCall(_) => true,
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => is_plan_time_computable(left) && is_plan_time_computable(right),
+		_ => false,
+	}
 }
 
 /// Extract brute-force KNN parameters from a WHERE clause.
@@ -162,6 +207,40 @@ pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 				..
 			} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
 		)
+	})
+	.map(Cond)
+}
+
+/// Strip handled KNN operators AND every conjunct containing a MATCHES
+/// operator from a WHERE clause, returning the in-traversal residual for a
+/// `KnnScan` (#548).
+///
+/// The residual is evaluated per candidate inside the ANN search through the
+/// legacy compute path, where MATCHES has no query executor and computes to
+/// `false` — leaving a MATCHES conjunct in would reject every candidate and
+/// return zero rows. Dropping a conjunct from the in-traversal residual only
+/// admits more candidates (the outer `Filter` re-applies the KNN-stripped
+/// WHERE — with `MATCHES` evaluated through its physical operator — so final
+/// rows stay correct); it can never produce wrong rows.
+///
+/// The user-visible trade-off when a MATCHES conjunct is NOT exactly
+/// bitmap-coverable (no FULLTEXT index, stale index format, negated MATCHES,
+/// ...): non-matching candidates occupy top-K slots inside the search, so
+/// the statement may return **fewer than k rows even when k matching rows
+/// exist** — the k nearest overall are found first and then filtered, rather
+/// than the k nearest *matching* rows. Strictly better than the zero rows
+/// this replaced, and covered conjuncts (an online, current-format FULLTEXT
+/// index) avoid it entirely by joining the allow-list.
+pub(crate) fn strip_knn_and_matches_from_condition(cond: &Cond) -> Option<Cond> {
+	use crate::exec::index::analysis::IndexAnalyzer;
+	strip_and_simplify(cond.0.clone(), |e| {
+		matches!(
+			e,
+			Expr::Binary {
+				op: BinaryOperator::NearestNeighbor(nn),
+				..
+			} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
+		) || IndexAnalyzer::expr_contains_matches(e)
 	})
 	.map(Cond)
 }
@@ -233,11 +312,20 @@ pub(crate) fn strip_index_conditions(
 /// Strip conditions covered by a union of BTree access paths from a WHERE
 /// clause.
 ///
-/// Recognises `field CONTAINSANY [v0, v1, ...]` (idiom on left) and the
-/// symmetric `[v0, v1, ...] ANYINSIDE field` (idiom on right) when every
-/// literal value appears as the leading equality/prefix value of some
-/// branch.  The branches must all share the same index and all use that
-/// index's leading array-element column (via `idiom_matches_containment`).
+/// Recognises `field CONTAINSANY [l0, l1, ...]` (idiom on left) and the
+/// symmetric `[l0, l1, ...] ANYINSIDE field` (idiom on right).  The branches
+/// must all share the same index and all use that index's leading
+/// array-element column (via `idiom_matches_containment`).
+///
+/// A union over branch values `V` emits every row whose indexed array holds
+/// *at least one* member of `V`, so a leaf `field CONTAINSANY L` is only
+/// implied — and hence only strippable — when `V ⊆ L`.  The converse
+/// (`L ⊆ V`) does **not** imply the leaf: the union may have been built from
+/// a different AND conjunct (a nested OR, or another containment leaf) whose
+/// values reach outside `L`, and a row admitted through one of those
+/// branches need not satisfy `L` at all.  Callers pass the whole WHERE
+/// clause, so every top-level AND leaf is tested independently of which
+/// conjunct produced the union.
 ///
 /// `CONTAINSALL` / `ALLINSIDE` leaves are deliberately **not** considered
 /// covered: their semantics require every value to match the *same* row,
@@ -253,11 +341,10 @@ pub(crate) fn strip_union_index_conditions(
 	use crate::val::Value;
 
 	// Collect (index_first_column, set_of_branch_values) from the paths.
-	// All branches must agree on the index and its first column.  A
-	// `HashSet<&Value>` keeps `union_covers_leaf`'s per-literal lookup
-	// at O(1) average — important when a query mixes a small union
-	// (≤ MAX_IN_EXPANSION_SIZE branches) with a large array literal on
-	// some other AND-leaf that the matcher still has to check.
+	// All branches must agree on the index and its first column.  The
+	// `HashSet<&Value>` collapses branches that repeat a value (a union
+	// built from `[a, a]`), so `union_covers_leaf` tests each distinct
+	// branch value once per candidate leaf.
 	let mut first_col: Option<&Idiom> = None;
 	let mut branch_values: HashSet<&Value> = HashSet::with_capacity(paths.len());
 	for path in paths {
@@ -304,7 +391,8 @@ pub(crate) fn strip_union_index_conditions(
 }
 
 /// Returns `true` when a `CONTAINSANY` (idiom-left) or `ANYINSIDE`
-/// (idiom-right) leaf is fully covered by the set of branch values.
+/// (idiom-right) leaf is implied by the union, i.e. every branch value is one
+/// of the leaf's literals so no branch can admit a row the leaf rejects.
 fn union_covers_leaf(
 	col: &Idiom,
 	branch_values: &HashSet<&crate::val::Value>,
@@ -334,23 +422,33 @@ fn union_covers_leaf(
 	let Some(Value::Array(arr)) = try_literal_to_value(lit) else {
 		return false;
 	};
-	// `field CONTAINSANY []` / `[] ANYINSIDE field` evaluates to FALSE
-	// (no values to match), so the leaf must stay in the residual
-	// filter to reject all rows.  `arr.0.iter().all(...)` would be
-	// vacuously true on the empty array, silently dropping the
-	// always-false constraint.
-	if arr.0.is_empty() {
+	// Every branch value must be one of the leaf's literals.  The union emits
+	// a row on the strength of a single branch, so a branch value outside the
+	// literals would admit rows the leaf rejects.  An empty union guarantees
+	// nothing about a row and must never cover a leaf; the `all` below would
+	// be vacuously true over it.
+	//
+	// This also keeps the always-false `field CONTAINSANY []` / `[]
+	// ANYINSIDE field` in the residual filter: no non-empty branch set is a
+	// subset of the empty literal array.
+	//
+	// A `HashSet<&Value>` of the literals keeps the per-branch lookup at
+	// O(1) average, so a small union checked against a large array literal
+	// stays linear.  A hash/`Eq` disagreement across numeric kinds can only
+	// miss a match, which leaves the leaf in the residual filter — the safe
+	// direction.
+	if branch_values.is_empty() {
 		return false;
 	}
-	// Every literal value must appear in some branch's prefix.
-	arr.0.iter().all(|v| branch_values.contains(v))
+	let leaf_values: HashSet<&Value> = arr.0.iter().collect();
+	branch_values.iter().all(|v| leaf_values.contains(*v))
 }
 
 /// Decides whether a single binary comparison leaf is covered by a chosen
 /// BTree access pattern. Used as the leaf predicate by
 /// [`strip_index_conditions`].
 struct IndexConditionMatcher<'a> {
-	/// Index columns in definition order.
+	/// Index columns in definition order (`IndexDefinition.cols`).
 	cols: &'a [Idiom],
 	/// The chosen access pattern describing which conditions are covered.
 	access: &'a crate::exec::index::access_path::BTreeAccess,
@@ -485,8 +583,7 @@ impl IndexConditionMatcher<'_> {
 				false
 			}
 			BTreeAccess::Range {
-				from,
-				to,
+				range,
 			} => {
 				let Some(col) = self.cols.first() else {
 					return false;
@@ -494,41 +591,41 @@ impl IndexConditionMatcher<'_> {
 				if idiom != col {
 					return false;
 				}
-				// Check the from (lower) bound.
-				if let Some(from) = from {
-					let expected_op = if from.inclusive {
-						BinaryOperator::MoreThanEqual
-					} else {
-						BinaryOperator::MoreThan
-					};
-					if effective_op == expected_op && value == from.value {
-						return true;
+				match &range.start {
+					Bound::Included(x) => {
+						if effective_op == BinaryOperator::MoreThanEqual && value == *x {
+							return true;
+						}
 					}
-					// `field != NONE` is equivalent to an exclusive lower bound
-					// at NONE because NONE sorts first in the BTree key
-					// ordering. `!= NULL` is NOT recognised here — that
-					// pushdown is unsafe (it would also drop NONE rows). See
-					// the matching note in
-					// `IndexAnalyzer::match_operator_to_access`.
-					if !from.inclusive
-						&& matches!(from.value, Value::None)
-						&& effective_op == BinaryOperator::NotEqual
-						&& value == from.value
-					{
-						return true;
+					Bound::Excluded(x) => {
+						if effective_op == BinaryOperator::MoreThan && value == *x {
+							return true;
+						}
+
+						if matches!(x, Value::None)
+							&& matches!(value, Value::None)
+							&& effective_op == BinaryOperator::NotEqual
+						{
+							return true;
+						}
 					}
+					Bound::Unbounded => {}
 				}
-				// Check the to (upper) bound.
-				if let Some(to) = to {
-					let expected_op = if to.inclusive {
-						BinaryOperator::LessThanEqual
-					} else {
-						BinaryOperator::LessThan
-					};
-					if effective_op == expected_op && value == to.value {
-						return true;
+
+				match &range.end {
+					Bound::Included(x) => {
+						if effective_op == BinaryOperator::LessThanEqual && value == *x {
+							return true;
+						}
 					}
+					Bound::Excluded(x) => {
+						if effective_op == BinaryOperator::LessThan && value == *x {
+							return true;
+						}
+					}
+					Bound::Unbounded => {}
 				}
+
 				false
 			}
 			// FullText and KNN access types have their own stripping logic.
@@ -558,16 +655,29 @@ impl MutVisitor for BruteForceKnnExtractor {
 			right,
 		} = expr && let NearestNeighbor::K(k, dist) = nn.as_ref()
 			&& let Expr::Idiom(idiom) = left.as_ref()
-			&& let Some(vector) = extract_literal_vector(right)
 		{
-			self.params = Some(BruteForceKnnParams {
-				field: idiom.clone(),
-				vector,
-				k: *k,
-				distance: dist.clone(),
-			});
-			*expr = Expr::Literal(Literal::Bool(true));
-			return Ok(());
+			// Literal arrays extract directly; other legacy-computable
+			// right-hand sides defer evaluation to stream open (see
+			// `BruteForceKnnVector`). Anything else (idiom, subquery, …)
+			// stays in the condition and evaluates to `false` per row,
+			// like a legacy KNN expression without an executor entry.
+			let vector = if let Some(vector) = extract_literal_vector(right) {
+				Some(BruteForceKnnVector::Literal(vector))
+			} else if is_plan_time_computable(right) {
+				Some(BruteForceKnnVector::Deferred(right.as_ref().clone()))
+			} else {
+				None
+			};
+			if let Some(vector) = vector {
+				self.params = Some(BruteForceKnnParams {
+					field: idiom.clone(),
+					vector,
+					k: *k,
+					distance: dist.clone().into(),
+				});
+				*expr = Expr::Literal(Literal::Bool(true));
+				return Ok(());
+			}
 		}
 		expr.visit_mut(self)
 	}
@@ -672,13 +782,16 @@ fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 /// Only matches point-key RecordIds (not range keys like `table:1..5`).
 pub(crate) fn extract_record_id_point_lookup(
 	cond: &Cond,
-	table_name: &crate::val::TableName,
+	table_name: &surrealdb_strand::TableName,
 ) -> Option<Expr> {
 	find_id_equality_in_and_chain(&cond.0, table_name)
 }
 
 /// Walk the top-level AND chain looking for `id = <RecordId literal>`.
-fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName) -> Option<Expr> {
+fn find_id_equality_in_and_chain(
+	expr: &Expr,
+	table_name: &surrealdb_strand::TableName,
+) -> Option<Expr> {
 	match expr {
 		// AND: check both branches
 		Expr::Binary {
@@ -706,7 +819,7 @@ fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName
 fn check_id_recordid_pair(
 	idiom_side: &Expr,
 	lit_side: &Expr,
-	table_name: &crate::val::TableName,
+	table_name: &surrealdb_strand::TableName,
 ) -> Option<Expr> {
 	if let Expr::Idiom(idiom) = idiom_side
 		&& idiom.is_id()
@@ -816,12 +929,158 @@ impl Visitor for MatchesCollector<'_> {
 	}
 }
 
-/// Try to extract the primary table name from the frozen context.
-pub(crate) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> crate::val::TableName {
-	if let Some(mc) = ctx.get_matches_context()
-		&& let Some(table) = mc.table()
-	{
+/// The primary table the in-scope MATCHES entries were collected against.
+///
+/// A scope only carries a table when the SELECT that built it had a literal
+/// table source, so this falls back to the placeholder `"unknown"` rather than
+/// naming a real table it cannot confirm. That placeholder matches no index, so
+/// the index function resolves against no full-text entry and yields `NONE` per
+/// row — the same outcome as a MATCHES whose index does not cover the idiom.
+pub(crate) fn extract_table_from_matches(
+	matches_context: &crate::exec::function::MatchesContext,
+) -> surrealdb_strand::TableName {
+	if let Some(table) = matches_context.table() {
 		return table.clone();
 	}
-	crate::val::TableName::from("unknown".to_string())
+	surrealdb_strand::TableName::from("unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::str::FromStr;
+	use std::sync::Arc;
+
+	use surrealdb_strand::Strand;
+	use surrealdb_types::ToSql;
+
+	use super::*;
+	use crate::catalog::{Index, IndexDefinition, IndexId};
+	use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef};
+	use crate::kvs::Direction;
+	use crate::val::Value;
+
+	fn parse_cond(snippet: &str) -> Cond {
+		let src = format!("SELECT * FROM t WHERE {snippet}");
+		let mut exprs = crate::syn::parse(&src).expect("parse").expressions;
+		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
+		match exprs.remove(0).into() {
+			crate::expr::TopLevelExpr::Expr(Expr::Select(s)) => s.cond.expect("WHERE"),
+			other => panic!("expected SELECT, got {other:?}"),
+		}
+	}
+
+	/// A union of equality scans over an index on `col`, one branch per value.
+	fn union_paths(col: &str, values: &[&str]) -> Vec<AccessPath> {
+		let def = IndexDefinition {
+			index_id: IndexId(1),
+			name: Strand::from("ix"),
+			table_name: "t".into(),
+			cols: vec![Idiom::from_str(col).expect("valid idiom")],
+			index: Index::Idx,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			format_version: 1,
+		};
+		let indexes: Arc<[IndexDefinition]> = Arc::from(vec![def].into_boxed_slice());
+		values
+			.iter()
+			.map(|v| AccessPath::BTreeScan {
+				index_ref: IndexRef::new(Arc::clone(&indexes), 0),
+				access: BTreeAccess::Equality(Value::from(*v)),
+				direction: Direction::Forward,
+			})
+			.collect()
+	}
+
+	/// Residual left after stripping, rendered for comparison. `None` means
+	/// the whole condition was consumed and no `Filter` survives.
+	fn residual(cond: &str, col: &str, branches: &[&str]) -> Option<String> {
+		strip_union_index_conditions(&parse_cond(cond), &union_paths(col, branches))
+			.map(|c| c.0.to_sql())
+	}
+
+	#[test]
+	fn strips_leaf_matching_the_branch_values() {
+		// The union was built from this leaf: branch values == literals.
+		assert_eq!(residual("tags CONTAINSANY ['a', 'b']", "tags.*", &["a", "b"]), None);
+		assert_eq!(residual("['a', 'b'] ANYINSIDE tags", "tags.*", &["a", "b"]), None);
+	}
+
+	#[test]
+	fn strips_leaf_wider_than_the_branch_values() {
+		// Every branch value is a literal, so each branch implies the leaf.
+		assert_eq!(residual("tags CONTAINSANY ['a', 'b', 'c']", "tags.*", &["a", "b"]), None);
+	}
+
+	#[test]
+	fn keeps_leaf_narrower_than_the_branch_values() {
+		// The `'b'` branch admits rows without `'a'`, so the leaf must be
+		// re-applied. This is the nested-OR shape: the union comes from the
+		// OR conjunct, and the sibling CONTAINSANY is strictly narrower.
+		assert_eq!(
+			residual(
+				"tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')",
+				"tags.*",
+				&["a", "b"],
+			)
+			.as_deref(),
+			Some("tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')"),
+		);
+		// Two containment siblings: the wider leaf is implied by the union,
+		// the narrower one is not.
+		assert_eq!(
+			residual(
+				"tags CONTAINSANY ['a', 'b'] AND tags CONTAINSANY ['a']",
+				"tags.*",
+				&["a", "b"]
+			)
+			.as_deref(),
+			Some("tags CONTAINSANY ['a']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_disjoint_from_the_branch_values() {
+		assert_eq!(
+			residual("tags CONTAINSANY ['z']", "tags.*", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSANY ['z']"),
+		);
+	}
+
+	#[test]
+	fn keeps_empty_containsany_leaf() {
+		// `tags CONTAINSANY []` is always FALSE and must reject every row.
+		assert_eq!(
+			residual("tags CONTAINSANY [] AND tags CONTAINSANY ['a']", "tags.*", &["a"]).as_deref(),
+			Some("tags CONTAINSANY []"),
+		);
+	}
+
+	#[test]
+	fn keeps_containsall_leaf() {
+		// CONTAINSALL needs intersection; a union of branches cannot prove it.
+		assert_eq!(
+			residual("tags CONTAINSALL ['a', 'b']", "tags.*", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSALL ['a', 'b']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_on_a_different_field() {
+		assert_eq!(
+			residual("other CONTAINSANY ['a', 'b']", "tags.*", &["a", "b"]).as_deref(),
+			Some("other CONTAINSANY ['a', 'b']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_when_index_column_is_not_an_array_flatten() {
+		// A scalar column's equality branch says `tags = 'a'`, not
+		// `'a' ∈ tags`, so it cannot imply a containment leaf.
+		assert_eq!(
+			residual("tags CONTAINSANY ['a', 'b']", "tags", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSANY ['a', 'b']"),
+		);
+	}
 }

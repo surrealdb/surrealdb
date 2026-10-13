@@ -1,19 +1,41 @@
-# SurrealDB Release Workflow
+# SurrealDB Release Workflow (promote-only)
 #
-# This workflow handles both nightly and versioned releases with full idempotency.
+# This workflow PROMOTES an existing rolling build into a release. It does not
+# build or test anything: the binaries and Docker images were already built,
+# scanned, and stored by rolling-build.yml on push (build-once / promote-many).
+# All that is needed to cut a release is the commit SHA.
+#
 # For comprehensive documentation, see doc/RELEASING.md
 #
-# Quick reference:
-# - Nightly: Automated daily builds from main (scheduled at midnight UTC)
-# - Versioned: Pre-releases (alpha/beta/rc), stable releases (X.Y.0), and patches (X.Y.Z)
-# - Always dry-run first (publish: false) before publishing
-# - Workflow is fully idempotent - safe to retry on failure
+# At release time this workflow:
+#   * verifies the commit has a complete rolling build (an engine.json manifest),
+#   * copies + renames the prebuilt binaries from rolling-builds/<branch>/<sha>/ to the
+#     release name (e.g. nightly/ or v3.1.2/), sets the download pointers, and
+#     creates the GitHub release,
+#   * publishes the crates from the exact SHA (versioned releases; nightly
+#     never publishes crates),
+#   * mirrors the prebuilt Docker image from private ECR to the public DockerHub
+#     (stripping build attestations),
+#   * for the downstream: promotes the enforcement-off Cloud image within the
+#     private ECR + Azure ACR (mirror-downstream), and mirrors the enforcement-on
+#     licensed image from ECR to the public DockerHub (mirror-downstream-licensed),
+#     and
+#   * propagates the binaries to all regions, then prunes superseded rolling
+#     artifacts for that branch line.
 #
-# Nightly releases are triggered automatically via schedule
+# Everything that ships something permanent (crates, binaries, the GitHub
+# release, the DockerHub + downstream images and the regional replication) sits
+# behind a single `approve` gate, so nothing is published until the run is
+# approved. The approval prompt carries the exact version + channel so the
+# approver can verify what is about to ship. Dry-runs (`publish: false`) and the
+# unattended nightly flow through without waiting (configure required reviewers
+# per channel: none on `nightly`, reviewers on the versioned channels).
+#
+# Releases are always triggered manually (or nightly on a schedule).
 
 name: Release
 
-run-name: "${{ github.event_name == 'schedule' && 'Nightly release' || format('Release {0} (type: {1}, publish: {2}, latest: {3})', inputs.git-ref, inputs.release-type, inputs.publish, inputs.latest) }}"
+run-name: "${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'Nightly release (internal)' || 'Nightly release (engine)') || format('{0}Release {1} (type: {2}, components: {3})', (!inputs.publish && '[dry-run] ' || ''), inputs.git-sha || 'latest release branch', inputs.release-type, inputs.components) }}"
 
 on:
   workflow_dispatch:
@@ -26,123 +48,1386 @@ on:
         options:
           - nightly
           - versioned
-      git-ref:
-        required: true
+      components:
+        required: false
+        type: choice
+        default: public
+        description: "What to release"
+        options:
+          - public
+          - internal
+          - test
+      git-sha:
+        required: false
+        default: ''
+        # A branch (e.g. releases/3.2) resolves to its tip; a commit is used as-is.
+        # Empty depends on release-type: nightly defaults to the tip of main,
+        # versioned to the tip of the latest releases/* branch. The commit must
+        # have a completed rolling build.
         type: string
-        default: main
-        description: "The git ref of this release"
+        description: "Engine commit or branch to release (empty: nightly=main, versioned=latest release branch)"
+      downstream-git-sha:
+        required: false
+        default: ''
+        # Names WHICH downstream commit to ship, independent of the engine commit
+        # above. Empty keeps today's behaviour: ship whatever pairing the engine
+        # commit's downstream build already recorded. A branch resolves to its
+        # tip; a commit/short-sha is resolved against the downstream repo. When
+        # set, the release WAITS for a downstream build that pairs this commit
+        # with the engine commit (or fails telling you to run one). Versioned
+        # releases that ship the downstream side only; ignored otherwise.
+        type: string
+        description: "Downstream commit or branch to release (empty: the pairing the engine build already recorded; a branch resolves to its tip). Versioned + downstream only."
       publish:
         required: false
         type: boolean
         default: false
         description: "Publish the release"
-      latest:
+      overwrite:
         required: false
         type: boolean
         default: false
-        description: "Mark as latest release"
-      update-main:
-        required: false
-        type: boolean
-        default: false
-        description: "Update main branch version"
-      main-version:
-        required: false
-        type: string
-        description: "Override auto-calculated main version"
-      extra-features:
+        # Clobbers an existing version's binaries, Docker tags and GitHub release
+        # — needed both to intentionally re-release and to resume/repair a release
+        # that half-completed (promote already wrote artifacts, a later job
+        # failed). Ignored for nightly.
+        description: "Allow overwriting existing release artifacts"
+      build-wait-minutes:
         required: false
         type: string
-        default: storage-tikv,jwks,ml
-        description: "Extra features enabled in the binary"
+        default: '120'
+        # Versioned (release-branch) releases only: minutes to wait for an
+        # in-progress rolling build of the commit before failing. The build must be
+        # present or complete within this window. Nightly never waits (it walks
+        # back to the newest already-built commit).
+        description: "Minutes to wait for an in-progress build (versioned only)"
+  # Two nightly channels, decoupled so a failure on one never blocks the other:
+  #   00:00 UTC -> engine nightly (promotes the newest built main commit).
+  #   00:30 UTC -> downstream nightly (mirrors the newest built downstream image).
+  # Both trail their rolling builds (20:00 UTC) by a buffer. The cron string is
+  # read in `config` (github.event.schedule) to pick which side to promote.
   schedule:
     - cron: "0 0 * * *"
+    - cron: "30 0 * * *"
 
 defaults:
   run:
     shell: bash
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+# Serialize releases that could contend for the same destination so two runs
+# never race the shared download pointers (latest.txt / v<major>.txt), publish
+# the same crate version twice, or let one run's prune delete artifacts another
+# is mid-promote.
+#
+# Concurrency keys on the RELEASE TARGET, so releases of DIFFERENT lines run in
+# parallel and only same-target dispatches serialize:
+#   * a MANUAL dispatch keys on inputs.git-sha (the requested branch/sha, or the
+#     empty string when left empty to default to the latest release line).
+#     Dispatching releases/3.1, releases/3.2 and releases/3.3 at once therefore
+#     runs three independent groups in parallel, while two dispatches of the SAME
+#     target queue so they never race that line's pointers/crates. Concurrency is
+#     evaluated at dispatch time, before git can resolve a ref to a line, so the
+#     key is the raw input rather than the resolved line: two dispatches that
+#     reach the same line via DIFFERENT inputs (an empty default and an explicit
+#     `releases/3.2`, or a sha and its branch) get different keys and are not
+#     serialized against each other. That narrow gap is accepted - releases are
+#     human-approved and infrequent.
+#   * the two scheduled nightlies use 'nightly-engine' / 'nightly-downstream'
+#     (distinct, so the two run in parallel and never cancel each other). A
+#     nightly is always a pre-release and never moves latest.txt / v<major>.txt,
+#     so a nightly and a manual release are safe to run in parallel.
+# A DRY-RUN (publish:false) publishes nothing and has no approval gate, so it is
+# isolated into its own per-run group: it can neither cancel a real release nor
+# be cancelled by one. Without this a dry-run of the same target would share the
+# real release's group and, because GitHub treats a run parked at the `approve`
+# gate as pending, cancel that live release while it waits for approval - a mere
+# preview must never do that.
+# Never cancel a release in flight - queue behind it instead.
+concurrency:
+  group: release-${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'nightly-downstream' || 'nightly-engine') || format('manual-{0}', inputs.git-sha) }}${{ (github.event_name == 'workflow_dispatch' && !inputs.publish) && format('-dryrun-{0}', github.run_id) || '' }}
+  cancel-in-progress: false
 
 jobs:
   # ----------------------------------------
-  # Validate inputs
+  # Prepare release variables
   # ----------------------------------------
+  # Resolves the SHA -> branch line, verifies a rolling build manifest exists
+  # (fail fast if the commit was never fully built or its artifacts were
+  # pruned), and computes the release name/version from the code at that SHA.
 
-  validate-inputs:
-    name: Validate inputs
-    runs-on: ubuntu-latest
+  prepare-vars:
+    name: Prepare vars
+    # prepare-vars gates the whole run: every other job needs it, so a single
+    # guard here short-circuits everything.
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    # locate-rolling-build queries the Actions API (a workflow's runs for a
+    # commit) to fail fast when that commit's rolling build errored instead of
+    # promoting an older one, and to link the failed run in the error. That read
+    # needs `actions: read`. Job-level permissions REPLACE the workflow default
+    # rather than merge, so `contents: read` (for checkout) is repeated here.
+    permissions:
+      contents: read
+      actions: read
+    # Private runner: locating the rolling build reads the manifest from the
+    # private CI bucket via the runner's ambient IAM role (no static keys). Label
+    # from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    outputs:
+      name: ${{ steps.vars.outputs.name }}
+      version: ${{ steps.vars.outputs.version }}
+      pre-release: ${{ steps.vars.outputs.pre-release }}
+      release-name: ${{ steps.vars.outputs.release-name }}
+      build-metadata: ${{ steps.vars.outputs.build-metadata }}
+      git-sha: ${{ steps.locate.outputs.git-sha }}
+      git-branch: ${{ steps.locate.outputs.git-branch }}
+      branch-slug: ${{ steps.locate.outputs.branch-slug }}
+      s3-prefix: ${{ steps.locate.outputs.s3-prefix }}
+      source-name: ${{ steps.locate.outputs.source-name }}
+      rolling-source-tag: ${{ steps.locate.outputs.rolling-source-tag }}
+      downstream-source-tag: ${{ steps.locate.outputs.downstream-source-tag }}
+      release-channel: ${{ steps.config.outputs.release-channel }}
+      nightly-release: ${{ steps.config.outputs.nightly-release }}
+      # "latest" is deduced, not an input: a stable ENGINE release whose version
+      # is >= the highest already-published stable version. Computed in the
+      # "Determine latest release pointer" step; false for pre-releases,
+      # nightlies, downstream-only releases, and any older/superseded version.
+      latest: ${{ steps.latest.outputs.latest }}
+      publish: ${{ steps.config.outputs.publish }}
+      # Which sides to release. Requested via the `components` input; the
+      # effective values (in `resolve`) also account for whether a downstream
+      # image actually exists. Used to gate the engine/downstream jobs.
+      components: ${{ steps.config.outputs.components }}
+      # A test release (components: 'test'): mirror an ephemeral Cloud image for
+      # internal testing without waiting on the engine build or pruning shared
+      # artifacts, tagged with build metadata so it never collides with a public
+      # release. Gates the engine wait, prune, and the release name below.
+      test: ${{ steps.config.outputs.test }}
+      release-engine: ${{ steps.resolve.outputs.release-engine }}
+      release-downstream: ${{ steps.resolve.outputs.release-downstream }}
+      # Downstream provenance. `downstream-built` is the authoritative "a
+      # promotable downstream image exists" flag, derived from whether a downstream.json
+      # manifest exists for this commit. Also carries which downstream commit it
+      # was built from.
+      downstream-built: ${{ steps.locate.outputs.downstream-built }}
+      downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
+      downstream-branch: ${{ steps.locate.outputs.downstream-branch }}
+      # Whether this commit's downstream build produced the licence-ENFORCING
+      # (`-licensed`) image, read from the downstream.json manifest. Release lines
+      # whose downstream build predates licence enforcement (e.g. releases/3.2) have
+      # no such field and read false, so the licensed DockerHub mirror is skipped
+      # for them instead of failing to find a `-licensed` image.
+      downstream-licensed: ${{ steps.locate.outputs.downstream-licensed }}
+      # Whether the resolved commit carries the npm package sources
+      # (surrealdb/node + surrealdb/wasm). Release lines that predate the packages
+      # (e.g. releases/3.1) have neither, so their promote skips the npm publish
+      # jobs rather than fail fetching a bundle that was never built.
+      has-npm: ${{ steps.npm.outputs.has-npm }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+      # CI tooling (actions + scripts) comes from the WORKFLOW ref (this repo's
+      # main when dispatched from main), not from the released/branch commit
+      # checked out above, so release tooling never needs backporting onto
+      # release lines.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          egress-policy: audit
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
 
-      - name: Validate release inputs
-        shell: bash
+
+      - name: Determine configuration
+        id: config
         env:
-          SEMVER_REGEX: '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
-        run: |
-          if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
-            if [[ "${{ inputs.update-main }}" == "true" ]]; then
-              echo "Warning: 'update-main' is ignored for nightly releases"
-            fi
-            if [[ "${{ inputs.latest }}" == "true" ]]; then
-              echo "Warning: 'latest' is ignored for nightly releases"
-            fi
-            if [[ -n "${{ inputs.main-version }}" ]]; then
-              echo "Warning: 'main-version' is ignored for nightly releases"
-            fi
-          fi
-
-          # Validate main-version if provided
-          if [[ -n "${{ inputs.main-version }}" ]]; then
-            if [[ "${{ inputs.update-main }}" != "true" ]]; then
-              echo "Warning: 'main-version' is specified but 'update-main' is false - it will be ignored"
-            fi
-            # Basic format validation - should look like a semver
-            if [[ ! "${{ inputs.main-version }}" =~ $SEMVER_REGEX ]]; then
-              echo "Error: 'main-version' must be a valid semver (e.g., 4.0.0-nightly, 3.1.0-beta)"
-              exit 1
-            fi
-          fi
-
-  # ----------------------------------------
-  # Update main branch version (optional)
-  # ----------------------------------------
-  # The release version is taken directly from the code on the checked-out
-  # git-ref (no version bump happens here). When update-main is true, this job
-  # opens a PR to move the main branch to its next development version:
-  #   * If main-version specified: uses that exact version
-  #   * Stable x.y.0: auto-bumps to next minor nightly (3.0.0 -> 3.1.0-nightly)
-  #   * Pre-releases / patches: main is left unchanged (always stays on -nightly)
-  #   * For major transitions, specify main-version explicitly (e.g., 4.0.0-nightly)
-
-  update-main:
-    needs: [validate-inputs]
-    name: Update main version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
+          EVENT: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          INPUT_GIT_SHA: ${{ inputs.git-sha }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_RELEASE_TYPE: ${{ inputs.release-type }}
+          INPUT_COMPONENTS: ${{ inputs.components }}
+        uses: ./.ci/.github/actions/determine-release-config
 
       - name: Checkout sources
-        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.git-ref }}
+          ref: ${{ steps.config.outputs.requested-ref }}
           fetch-depth: 0
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          # Protects .ci on RE-checkouts of an existing root repo (the default
+          # clean would git-clean it away). It does NOT protect the FIRST root
+          # checkout: on a non-repo workspace actions/checkout deletes the
+          # directory contents outright, `clean` notwithstanding — hence the
+          # .ci re-checkout below.
+          clean: false
 
-      # This orchestration job runs against a different branch than the code it
-      # checks out, so its CI tooling comes from the workflow ref, not git-ref.
+      # Restore the CI tooling: the root checkout above found a non-repo
+      # workspace (only .ci existed) and actions/checkout deletes such a
+      # directory's contents before cloning, taking .ci with it. From here on
+      # the root IS a matching repo, so later re-checkouts (clean: false)
+      # leave .ci alone.
+      - name: Checkout CI tooling from the workflow ref (again)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Whether the downstream App is configured. Gated on the PRIVATE KEY (a
+      # secret), not the client-id (a variable): variables are present in contexts
+      # where secrets are withheld, so gating on the id would mint a token without a
+      # key and hard-fail instead of no-opping. Read here because the `secrets`
+      # context is not available in a step-level `if:`. Mirrors check-milestones.
+      - name: Downstream app configured?
+        id: ds-cfg
+        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') }}
+        env:
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" && -n "${DOWNSTREAM_REPO}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A downstream-scoped App token for the two downstream reads this job makes
+      # against the private downstream repo:
+      #   * Locate checks whether the matching downstream release branch exists
+      #     before waiting for its build (a public release ships the engine only
+      #     when it is absent; an internal/test release fails), and
+      #   * the Resolve-downstream-ref step below expands an explicitly requested
+      #     downstream commit/branch to a full sha.
+      # Minted for every versioned release that ships a downstream image (a
+      # downstream/public release or a test release), and only when the downstream
+      # App is configured, so this no-ops rather than hard-failing where downstream
+      # is not set up. Nightly and engine-only releases never touch the downstream,
+      # so this step is skipped for them.
+      - name: Generate a token for the downstream repo
+        id: ds-token
+        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') && steps.ds-cfg.outputs.configured == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      - name: Resolve the requested downstream ref
+        id: ds-ref
+        if: ${{ inputs.downstream-git-sha != '' && steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.ds-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+          REF: ${{ inputs.downstream-git-sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOWNSTREAM_REPO}" || -z "${GH_TOKEN}" ]]; then
+            echo "::error::A downstream ref (${REF}) was requested but the downstream app/repo is not configured, so it cannot be resolved."
+            exit 1
+          fi
+
+          # Resolve the requested ref (branch, tag, or commit sha) to the full
+          # commit sha the downstream build records in downstream.json.
+          #
+          # Read refs over HTTPS with the App token supplied via GIT_CONFIG so it
+          # never lands in argv, and run git from RUNNER_TEMP, NOT the workspace:
+          # the checkout in this job leaves a host-scoped http.extraHeader bearing
+          # this repo's GITHUB_TOKEN, which also matches the downstream URL, so git
+          # run inside the workspace would send that token (which cannot see the
+          # private downstream) and GitHub returns "Repository not found". This
+          # matches rolling-downstream.yml, whose resolve reads the private
+          # downstream successfully with this exact token. The full API error is
+          # surfaced below rather than swallowed, so an auth failure is never
+          # misreported as a missing branch.
+          workdir="${RUNNER_TEMP:-/tmp}"
+          url="https://github.com/${OWNER}/${DOWNSTREAM_REPO}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraHeader
+          GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0
+
+          errfile="$(mktemp)"
+          set +e
+          refs="$(git -C "$workdir" ls-remote --exit-code "$url" \
+            "refs/heads/${REF}" "refs/tags/${REF}" "refs/tags/${REF}^{}" 2>"$errfile")"
+          rc=$?
+          set -e
+
+          sha=""
+          if [[ $rc -eq 0 && -n "$refs" ]]; then
+            # A branch tip or tag (the common case: naming releases/X.Y). Prefer an
+            # annotated tag's dereferenced commit (^{}) over the tag object itself.
+            sha="$(printf '%s\n' "$refs" | awk '/\^\{\}$/{c=$1} END{if(c)print c}')"
+            [[ -z "$sha" ]] && sha="$(printf '%s\n' "$refs" | head -n1 | cut -f1)"
+          elif [[ $rc -eq 2 ]]; then
+            # Reachable, but no such branch/tag: treat REF as a commit sha.
+            if [[ "${REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              # A full sha is already canonical; downstream.json keys on it and
+              # Locate confirms the pairing exists, so a wrong sha simply never
+              # pairs rather than resolving to something else.
+              sha="$(printf '%s' "${REF}" | tr '[:upper:]' '[:lower:]')"
+            elif [[ "${REF}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
+              # git cannot expand a short sha over the wire; the REST API can.
+              if ! sha="$(gh api "repos/${OWNER}/${DOWNSTREAM_REPO}/commits/${REF}" --jq '.sha' 2>"$errfile")" || [[ -z "$sha" ]]; then
+                echo "::error::Could not expand short downstream sha '${REF}' on ${OWNER}/${DOWNSTREAM_REPO}: $(cat "$errfile"). Pass a branch, tag, or full 40-char commit sha."
+                exit 1
+              fi
+            else
+              echo "::error::Downstream ref '${REF}' is not a branch or tag on ${OWNER}/${DOWNSTREAM_REPO}, nor a commit sha."
+              exit 1
+            fi
+          else
+            # rc not in {0,2}: the repo could not be read at all (auth/network).
+            echo "::error::Could not read ${OWNER}/${DOWNSTREAM_REPO} to resolve downstream ref '${REF}' (git ls-remote rc=${rc}): $(cat "$errfile"). A 'Repository not found'/auth failure means the release-automation App is missing Contents:read on the downstream install."
+            exit 1
+          fi
+
+          echo "Resolved downstream ref '${REF}' -> ${sha}"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      # Resolve the canonical commit + branch line and confirm a complete rolling
+      # build exists for it. The manifest only exists if every rolling job
+      # succeeded, so its absence means the commit is not releasable. Rolling
+      # artifacts live in the private CI bucket, read with the runner's ambient
+      # IAM creds (region is the bucket's home region).
+      - name: Locate rolling build
+        id: locate
+        uses: ./.ci/.github/actions/locate-rolling-build
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANNEL: ${{ steps.config.outputs.release-channel }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          # Requested sides (before `resolve` refines downstream). The engine.json
+          # + binaries checks below only matter when the engine side is released;
+          # a downstream-only release must not require an engine build to exist.
+          REQ_ENGINE: ${{ steps.config.outputs.release-engine }}
+          REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
+          # Test release: skip the versioned engine-build wait below (the whole
+          # point is not to block on the engine build).
+          TEST: ${{ steps.config.outputs.test }}
+          # The requested ref: a SHA, a branch, or empty (default to the latest
+          # release line). Resolved to a concrete SHA below.
+          REQUESTED_REF: ${{ steps.config.outputs.requested-ref }}
+          # The specific downstream commit to ship, already resolved to a full
+          # sha (empty when the release manager did not name one). Empty keeps
+          # the presence-based downstream wait; set makes Locate wait for the
+          # downstream build that pairs THIS commit with the engine commit.
+          REQ_DOWNSTREAM_SHA: ${{ steps.ds-ref.outputs.sha }}
+          # Used by wait_for_build to poll the Actions API for a build's run state
+          # (versioned releases wait for an in-progress build up to this many mins).
+          GH_TOKEN: ${{ github.token }}
+          WAIT_MINUTES: ${{ inputs.build-wait-minutes || '120' }}
+          # Downstream repo coordinates + an App token, so Locate can check whether
+          # the matching downstream release branch exists BEFORE waiting for its
+          # build. A promotable downstream image is only ever built for a line that
+          # has a matching downstream releases/X.Y branch, so without one the wait
+          # could only ever time out. Empty when the downstream App is unconfigured
+          # (Locate then waits for the downstream build instead of probing).
+          OWNER: ${{ github.repository_owner }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+          DS_TOKEN: ${{ steps.ds-token.outputs.token }}
+
+      # Resolve the effective sides to release against what actually exists. A
+      # downstream release requested for a commit whose rolling build produced no
+      # downstream image is a hard error on a manual dispatch — silently skipping
+      # it would be a footgun (you'd think a downstream image shipped when it
+      # didn't). The scheduled nightly is resilient instead: it degrades to
+      # engine-only with a warning so a broken downstream build never blocks the
+      # nightly engine release.
+      - name: Resolve components to release
+        id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          COMPONENTS: ${{ steps.config.outputs.components }}
+          REQ_ENGINE: ${{ steps.config.outputs.release-engine }}
+          REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
+          REQ_TEST: ${{ steps.config.outputs.test }}
+          DS_BUILT: ${{ steps.locate.outputs.downstream-built }}
+          # Whether the matching downstream release branch is absent (Locate probed
+          # the downstream repo). When true a public release ships the engine only,
+          # while an internal/test release fails: there is no downstream to ship.
+          DS_BRANCH_MISSING: ${{ steps.locate.outputs.downstream-branch-missing }}
+          SHA: ${{ steps.locate.outputs.git-sha }}
+        uses: ./.ci/.github/actions/resolve-release-components
+
+      # A public release publishes the licence-enforcing image, which the rolling
+      # build produces only on releases/* lines. Fail early (before the approval
+      # gate and any publish) if a public release is cut from a line that never
+      # built it, rather than letting the licensed mirror skip it via a misleading
+      # absence and then finalize green.
+      - name: Require a release line for a public (licensed) release
+        if: ${{ steps.resolve.outputs.release-engine == 'true' && steps.config.outputs.nightly-release != 'true' }}
+        shell: bash
+        env:
+          SLUG: ${{ steps.locate.outputs.branch-slug }}
+        run: |
+          set -euo pipefail
+          if [[ "$SLUG" != releases-* ]]; then
+            echo "::error::A public release publishes the licence-enforcing image, which is built only on releases/* lines, but this release's source line is '${SLUG}'. Cut the release from a releases/* branch (create it first if it does not exist), or use components=internal or test for a non-public build."
+            exit 1
+          fi
+
+      # Re-checkout the resolved commit so the release version is read from the
+      # exact commit being promoted (the scheduled nightly may resolve to an
+      # older commit than the branch HEAD checked out above).
+      - name: Checkout resolved commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.locate.outputs.git-sha }}
+          # Keep the .ci tooling checkout: `clean: true` (default) would git-clean
+          # it away as untracked. Tracked files still reset to the resolved commit.
+          clean: false
+
+      # Detect whether this commit carries the npm package sources. Release lines
+      # that predate @surrealdb/node-native + @surrealdb/wasm-native (e.g.
+      # releases/3.1) have neither, so their promote must SKIP the npm publish jobs
+      # rather than fail trying to fetch a bundle the rolling build never produced.
+      - name: Detect npm packages
+        id: npm
+        env:
+          GIT_SHA: ${{ steps.locate.outputs.git-sha }}
+        run: |
+          set -euo pipefail
+          if [ -f surrealdb/node/package.json ] && [ -f surrealdb/wasm/package.json ]; then
+            echo "has-npm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-npm=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::surrealdb/node and/or surrealdb/wasm absent at ${GIT_SHA}; the npm publish jobs will be skipped for this release."
+          fi
+
+      # Toolchain for `cargo metadata` in prepare-release-vars, hoisted out of
+      # that action so no nested `uses:` resolves against the released commit.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+
+      - name: Prepare release variables
+        id: vars
+        uses: ./.ci/.github/actions/prepare-release-vars
+        with:
+          nightly-release: ${{ steps.config.outputs.nightly-release }}
+          test: ${{ steps.config.outputs.test }}
+          # The downstream commit the image was built from; its short sha joins the
+          # engine short sha in a test release's tag metadata (locate resolved it
+          # from the downstream.json manifest).
+          downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
+
+      # Decide whether this release owns the `latest` pointers (latest.txt,
+      # v<major>.txt and the Docker `latest` tag). This is deliberately NOT "is
+      # this the tip of the highest releases/* branch" — that is neither necessary
+      # nor sufficient. The rules:
+      #   * Only an ENGINE release can move `latest`; a downstream-only release
+      #     never does (the public pointers are engine artifacts).
+      #   * A pre-release / nightly is never `latest`.
+      #   * `latest` follows the highest PUBLICLY RELEASED STABLE version, not the
+      #     highest branch. So a release is `latest` iff no strictly-higher stable
+      #     version has already been published:
+      #       - re-releasing the current latest (e.g. re-cutting compromised
+      #         binaries) keeps it latest;
+      #       - shipping a forgotten/older version (or its late component pair)
+      #         while a newer stable already exists does NOT steal latest;
+      #       - a higher releases/X.Y line with no published stable does not own
+      #         latest, so a lower line legitimately still can.
+      # The published set comes from THIS repo's GitHub releases (non-draft,
+      # non-prerelease) — the same source the overwrite guard trusts, written by
+      # every stable promote. If the releases API can't be read we FAIL rather
+      # than guess, since a wrong `latest` would mis-point the public pointers.
+      - name: Determine latest release pointer
+        id: latest
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          RELEASE_ENGINE: ${{ steps.resolve.outputs.release-engine }}
+          NIGHTLY: ${{ steps.config.outputs.nightly-release }}
+          GH_TOKEN: ${{ github.token }}
+        uses: ./.ci/.github/actions/determine-latest-pointer
+
+      # Guard against silently republishing an already-COMPLETED version (e.g.
+      # the post-release bump PR never merged and another commit landed on the
+      # line still carrying that version). Completion is per component: the
+      # finalize jobs write releases/<name>/<engine|downstream>.json to the
+      # release-artifacts bucket only once every persistence job for that
+      # component succeeded. Manifest present -> refuse without overwrite=true.
+      # Manifest absent -> proceed: this is either a first attempt or the
+      # resume of a partially published release, and every publish step skips
+      # or idempotently rewrites artefacts that already made it out, so no
+      # overwrite flag is needed to finish a partial release. Nightly is
+      # exempt - it overwrites the `nightly` name by design. Both guards read
+      # the bucket via the private runner's ambient IAM role.
+      - name: Guard against overwriting an existing engine release
+        if: ${{ steps.config.outputs.nightly-release != 'true' && steps.resolve.outputs.release-engine == 'true' }}
+        env:
+          NAME: ${{ steps.vars.outputs.name }}
+          COMPONENT: engine
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          OVERWRITE: ${{ inputs.overwrite }}
+        uses: ./.ci/.github/actions/guard-release-overwrite
+
+      - name: Guard against overwriting an existing downstream release
+        if: ${{ steps.config.outputs.nightly-release != 'true' && steps.resolve.outputs.release-downstream == 'true' }}
+        env:
+          NAME: ${{ steps.vars.outputs.name }}
+          COMPONENT: downstream
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          OVERWRITE: ${{ inputs.overwrite }}
+        uses: ./.ci/.github/actions/guard-release-overwrite
+
+  # Note: creating release branches and the main bump at cut time happen in
+  # cut.yml, not here. The one main bump that *does* happen at promote time is
+  # advance-main-version below: when a stable X.Y.0 ships while main still rides
+  # that line (a major line), it advances main to X.(Y+1).0-nightly.
+
+  # ----------------------------------------
+  # Milestone readiness check (advisory)
+  # ----------------------------------------
+  # If a milestone named after the release version (e.g. v3.2.1 / v3.2.1-beta.1)
+  # exists on the engine and/or downstream repo, warn about two things (issues are
+  # ignored — only PRs are considered):
+  #   * OPEN (unmerged) PRs — still need merging before they can ship.
+  #   * MERGED PRs that do NOT appear in the released commit — merging to `main`
+  #     is not enough; the change must be backported onto the release line and be
+  #     part of the exact commit being released. A PR may be backported directly
+  #     or bundled inside another backport PR, so presence is checked against the
+  #     history reachable from the released commit (not the PR's own merge).
+  # Backport presence is a best-effort heuristic (see the check step): a PR counts
+  # as present if the released commit descends from its merge commit, the released
+  # history references it by "(#N)" (GitHub's squash tag), a `git cherry-pick -x`
+  # trailer names its merge commit, OR — the message-agnostic signal — the PR's
+  # diff (patch-id) matches a commit on the release line. The patch-id match is
+  # what keeps this working when backports rewrite the commit message (e.g. drop
+  # the "(#N)" tag so PR numbers don't leak to the public repo) or cherry-pick
+  # without -x; the only residual gap is a backport whose diff was changed by
+  # conflict resolution, which is flagged for a human to confirm. Engine PRs are
+  # checked against the engine release commit; downstream PRs against the
+  # downstream commit the image was built from.
+  #
+  # Purely advisory: it never fails the run. Because the approval gate holds the
+  # approve job's steps until AFTER approval, the warning is surfaced where the
+  # approver actually looks before deciding: as run annotations + a summary here,
+  # folded into the approve job name (see below), and — because a green tick is
+  # easy to skim past — as a NEUTRAL check run on the released commit (a distinct
+  # non-green, non-red icon in the commit's checks list) when there is anything to
+  # review. Runs before approve so its output is available.
+  check-milestones:
+    name: Check release milestones
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    needs: [prepare-vars]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      # Publish the advisory NEUTRAL check run below. Best-effort: absent this
+      # grant the API call just warns (see that step), never failing the job.
+      checks: write
+    outputs:
+      # Open (unmerged) milestone PRs, and merged milestone PRs that don't appear
+      # to be backported into the released commit. Both are advisory.
+      has-unmerged: ${{ steps.check.outputs.has-unmerged }}
+      unmerged-count: ${{ steps.check.outputs.unmerged-count }}
+      has-unbackported: ${{ steps.check.outputs.has-unbackported }}
+      unbackported-count: ${{ steps.check.outputs.unbackported-count }}
+      # Combined, human-readable suffix for the approve job name ("" when clean).
+      warning: ${{ steps.check.outputs.warning }}
+    env:
+      NAME: ${{ needs.prepare-vars.outputs.name }}
+      VERSION: ${{ needs.prepare-vars.outputs.version }}
+      NIGHTLY: ${{ needs.prepare-vars.outputs.nightly-release }}
+      ENGINE_REPO: ${{ github.repository }}
+      OWNER: ${{ github.repository_owner }}
+      DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+      # The released commits each side is verified against: engine PRs must be
+      # backported into the engine release commit; downstream PRs into the
+      # downstream commit the image was built from.
+      ENGINE_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+      DS_SHA: ${{ needs.prepare-vars.outputs.downstream-sha }}
+      DS_BUILT: ${{ needs.prepare-vars.outputs.downstream-built }}
+      # Release-line branches, used to index merged backport PRs into the line.
+      ENGINE_BRANCH: ${{ needs.prepare-vars.outputs.git-branch }}
+      DS_BRANCH: ${{ needs.prepare-vars.outputs.downstream-branch }}
+    steps:
+      # Mint a downstream-scoped token (if the app is configured) so we can read
+      # the downstream repo's milestone PRs too. No-op when unconfigured.
+      - name: Check downstream app configuration
+        id: cfg
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" && -n "${DOWNSTREAM_REPO}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate a token for the downstream repo
+        id: app-token
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      # Full-history checkouts of the released commits, so the backport check can
+      # look for each merged PR in the history reachable from the released commit.
+      # Skipped for nightly (no versioned milestone / backport concept).
+      # CI tooling (actions + scripts) comes from the WORKFLOW ref (this repo's
+      # main when dispatched from main), not from the released/branch commit
+      # checked out above, so release tooling never needs backporting onto
+      # release lines.
       - name: Checkout CI tooling from the workflow ref
-        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Checkout engine at the released commit
+        if: ${{ needs.prepare-vars.outputs.nightly-release != 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+          fetch-depth: 0
+          path: engine
+
+      - name: Checkout downstream at the released commit
+        if: ${{ needs.prepare-vars.outputs.nightly-release != 'true' && steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-built == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ needs.prepare-vars.outputs.downstream-sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+          path: downstream
+
+      # Advisory-only, so this must never fail the job: `approve` needs
+      # check-milestones (no `always()`), so a non-zero exit here — a transient
+      # gh-api/jq/git error, NOT a milestone problem — would skip approve and
+      # block the release. Milestone incompleteness is surfaced via this step's
+      # outputs (the approve job-name warning suffix + the advisory check-run
+      # below), never by failing.
+      - name: Check milestone PRs
+        id: check
+        continue-on-error: true
+        uses: ./.ci/.github/actions/check-release-milestones
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DS_TOKEN: ${{ steps.app-token.outputs.token }}
+          DS_CONFIGURED: ${{ steps.cfg.outputs.configured }}
+
+      # Publish a NEUTRAL check run on the released commit when the milestone still
+      # has unmerged or unbackported PRs, so the run's checks list shows a distinct
+      # non-green icon ("review before approving") instead of a plain green tick.
+      # GitHub derives a
+      # job's own icon solely from its conclusion (success/failure only, from YAML),
+      # so a separate check run is the only way to surface a genuine advisory icon.
+      # Doubly best-effort — `continue-on-error` plus an internal guard — because a
+      # failure here must NOT fail this job: `approve` needs it, so a red
+      # check-milestones would skip approve and block the release.
+      - name: Publish advisory milestone check run
+        if: ${{ steps.check.outputs.has-unmerged == 'true' || steps.check.outputs.has-unbackported == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          WARNING: ${{ steps.check.outputs.warning }}
+        run: |
+          set -euo pipefail
+          title="${WARNING} for ${NAME}"
+          summary="The \`${NAME}\` milestone has ${WARNING} (unmerged = not yet merged; unbackported = merged but not found in the released commit, possibly bundled into another backport PR). Review them before approving this release — see the \"Check release milestones\" job summary for the list."
+          if ! gh api --method POST "repos/${GITHUB_REPOSITORY}/check-runs" \
+            -f name="Milestone readiness" \
+            -f head_sha="${HEAD_SHA}" \
+            -f status="completed" \
+            -f conclusion="neutral" \
+            -f "output[title]=${title}" \
+            -f "output[summary]=${summary}" >/dev/null; then
+            echo "::warning::Could not publish the advisory milestone check run (checks:write missing or API error). The release is unaffected; the warning is still in this job's summary, its annotations, and the approve job name."
+          fi
+
+  # ----------------------------------------
+  # Pending-release summary (pre-approval)
+  # ----------------------------------------
+  # The reviewer needs the release facts BEFORE they approve, so the summary
+  # table runs in its OWN ungated job: the approve job's environment gate holds
+  # all of that job's steps until after approval, so a table written there
+  # would appear too late to inform the decision. This mirrors why the
+  # milestone detail lives in check-milestones. Runs for dry-runs too (they
+  # flow through the gate unattended); harmless there.
+  summarize-pending-release:
+    name: Summarize the pending release
+    needs: [prepare-vars, check-milestones]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize the release awaiting approval
+        run: |
+          {
+            echo "## Release awaiting approval"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | ${{ needs.prepare-vars.outputs.name }} |"
+            echo "| Channel | ${{ needs.prepare-vars.outputs.release-name }} |"
+            echo "| Commit | ${{ needs.prepare-vars.outputs.git-sha }} |"
+            echo "| Branch | ${{ needs.prepare-vars.outputs.git-branch }} |"
+            echo "| Components | ${{ needs.prepare-vars.outputs.components }} |"
+            echo "| Publish | ${{ needs.prepare-vars.outputs.publish }} |"
+            echo "| Latest | ${{ needs.prepare-vars.outputs.latest }} |"
+            echo "| Milestone PRs | ${{ needs.check-milestones.outputs.warning != '' && format('⚠️ {0} - see the “Check release milestones” job', needs.check-milestones.outputs.warning) || 'none unmerged / all backported' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------
+  # Release approval gate
+  # ----------------------------------------
+  # Single human gate in front of EVERYTHING that ships something permanent
+  # (crates.io, the public download bucket + GitHub release, DockerHub, the
+  # downstream image mirror and the regional replication). Every persistence job
+  # `needs: approve`, so nothing is published until this job clears — the gate
+  # sits BEFORE publish-crates/promote, not after them.
+  #
+  # The environment (and therefore its required-reviewer rule) is only bound on a
+  # real publish; a dry-run (`publish: false`) evaluates to an empty environment
+  # and flows straight through. The environment is the channel
+  # (nightly/alpha/beta/rc/stable), so approval is configured per channel: leave
+  # `nightly` without reviewers to keep the scheduled nightly unattended, and
+  # require reviewers on the versioned channels.
+  #
+  # The job name carries the resolved version + channel + branch line, a
+  # "— sets 'latest'" suffix when this release will move the latest.txt /
+  # v<major>.txt / Docker `latest` pointers, and a WARNING suffix when the
+  # milestone check found unmerged and/or unbackported PRs (so the approver sees
+  # them in GitHub's approval modal / jobs list before approving). The fuller
+  # summary table and the milestone detail live in the separate, ungated
+  # summarize-pending-release and check-milestones jobs, since the approval gate
+  # holds this job's own steps until after approval.
+  approve:
+    name: "Approve release ${{ needs.prepare-vars.outputs.name }} (${{ needs.prepare-vars.outputs.release-name }}) from ${{ needs.prepare-vars.outputs.git-branch }}${{ needs.prepare-vars.outputs.latest == 'true' && ' — sets ''latest''' || '' }}${{ needs.check-milestones.outputs.warning != '' && format(' — WARNING: {0}', needs.check-milestones.outputs.warning) || '' }}"
+    needs: [prepare-vars, check-milestones]
+    # Empty string => no environment (no gate) for dry-runs; the channel
+    # environment (with its reviewers) only binds on a real publish.
+    environment: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.release-name || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      # The pre-approval facts are in summarize-pending-release; this step runs
+      # only once the gate clears, so it records that the release was approved.
+      - name: Record approval
+        run: echo "✅ Release ${{ needs.prepare-vars.outputs.name }} (${{ needs.prepare-vars.outputs.release-name }}) approved - publishing begins." >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------
+  # Publish crates (versioned releases)
+  # ----------------------------------------
+  # Published from the exact released SHA. Nightly never publishes crates.
+
+  publish-crates:
+    name: Publish crates
+    needs: [prepare-vars, approve]
+    # Engine side only: crates are never published for a downstream-only release.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' || needs.prepare-vars.outputs.nightly-release == 'true' }}
+    # publish-crates only checks out sources and runs `cargo publish` (auth via
+    # CARGO_REGISTRY_TOKEN), so the job token needs no more than Contents: read.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      # Load the publish-crate composite action from the workflow ref (this
+      # branch) instead of the released commit, matching how bump-release-version
+      # and tag-downstream pull their CI tooling. The crate SOURCE still comes
+      # from the released commit checked out above (GITHUB_WORKSPACE root); only
+      # the action tooling is taken from .ci, so an action fix on this branch is
+      # exercised without first backporting it onto the release line.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/actions
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted out of the publish-crate action so no nested `uses:` resolves
+      # against the released commit. free-disk-space: precautionary headroom on
+      # the GitHub-hosted runner (Linux-only, no-op elsewhere); publishing runs
+      # with --no-verify so this need not fit a full rebuild - kept as cheap
+      # insurance against packaging many large crates.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          free-disk-space: 'true'
+
+      - name: Publish crate
+        uses: ./.ci/.github/actions/publish-crate
+        with:
+          publish: ${{ needs.prepare-vars.outputs.publish }}
+          nightly-release: ${{ needs.prepare-vars.outputs.nightly-release }}
+          cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ----------------------------------------
+  # Publish the embedded-engine npm packages (versioned releases)
+  # ----------------------------------------
+  # `@surrealdb/node-native` (the NAPI addon) and `@surrealdb/wasm-native` (the
+  # WebAssembly module) each embed this exact engine and carry its version. Like
+  # the `surreal` binary and the Docker image they are part of the rolling build
+  # (rolling-channel.yml): compiled once at push time and stored under the commit's
+  # rolling prefix. Promotion only PUBLISHES them, compiling nothing.
+  #
+  # It takes TWO jobs because two constraints pull opposite ways:
+  #   * only the private runner can READ the rolling bucket (ambient IAM; the static
+  #     download-bucket keys have no access — verified), but
+  #   * npm TRUSTED PUBLISHING (OIDC, no token) rejects self-hosted runners, so the
+  #     publish must run on a GitHub-hosted runner.
+  # So stage-npm (self-hosted) downloads the bundles and hands them off as workflow
+  # artifacts, and publish-npm (hosted) downloads those and publishes via OIDC.
+  # Nightly publishes no packages (as with crates), and a line that predates the
+  # packages (has-npm == false) is skipped entirely.
+  stage-npm:
+    name: Stage npm bundles from S3
+    needs: [prepare-vars, approve]
+    # has-npm gates out release lines that predate the packages (e.g. releases/3.1),
+    # whose rolling build produced no bundle to promote.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.has-npm == 'true' }}
+    # Private runner: the prebuilt bundles live in the private CI bucket, read via
+    # the runner's ambient IAM role (no static keys). Label from a repo/org var.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      # Download both packages' prebuilt dist/ trees from the commit's rolling
+      # prefix. The guard distinguishes a genuinely-absent bundle (rebuild the
+      # rolling build) from a transient ls error (just retry), so the failure
+      # message points at the right fix. This must NOT be continue-on-error even on
+      # a dry-run: a missing bundle is a real problem worth surfacing.
+      - name: Download bundles from the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ needs.prepare-vars.outputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          for slot in node wasm; do
+            prefix="s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/${slot}/"
+            # `aws s3 ls` exits 1 with an EMPTY listing when the prefix simply holds
+            # no objects, and >1 (2, 25x) for a real failure — bad credentials, an
+            # S3 error, a missing bucket. So the two cases are told apart by the
+            # exit status; an empty listing alone never means "the call failed".
+            set +e
+            listing="$(aws s3 ls "$prefix")"
+            rc=$?
+            set -e
+            if [ "$rc" -gt 1 ]; then
+              echo "::error::Could not list ${prefix} — aws exited ${rc} (transient S3 or credentials error). Re-run this job."
+              exit 1
+            fi
+            if [ -z "$listing" ]; then
+              echo "::error::No prebuilt @surrealdb/${slot}-native bundle under ${S3_PREFIX}/npm/${slot}/. The commit's rolling build did not store one (built before npm moved into the rolling build, or the bundle was pruned). Rebuild it by dispatching rolling-build.yml FROM A REF THAT CARRIES THE NPM BUILD JOBS (e.g. main) with git-sha set to this commit: dispatching from the release line itself re-runs that line's own rolling-channel.yml, which may not build npm at all."
+              exit 1
+            fi
+            aws s3 cp --recursive "$prefix" "staged/${slot}/"
+          done
+          echo "Staged:" && ls -lR staged
+
+      - name: Upload the Node bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-bundle-node
+          if-no-files-found: error
+          path: staged/node/
+
+      - name: Upload the Wasm bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-bundle-wasm
+          if-no-files-found: error
+          path: staged/wasm/
+
+  publish-npm:
+    name: Publish ${{ matrix.package }}
+    needs: [prepare-vars, approve, stage-npm]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.has-npm == 'true' }}
+    # GitHub-hosted: npm trusted publishing (OIDC) rejects self-hosted runners, and
+    # this job needs no bucket access — it consumes the staged artifact.
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+    permissions:
+      contents: read
+      # Required for npm's OIDC trusted publishing (there is no NPM_TOKEN).
+      # Provenance is auto-skipped for a private source repo, so none is attempted.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: '@surrealdb/node-native'
+            dir: surrealdb/node
+            slot: node
+          - package: '@surrealdb/wasm-native'
+            dir: surrealdb/wasm
+            slot: wasm
+    steps:
+      # The released source supplies package.json + publish.ts; the built dist/
+      # comes from the staged artifact below. Nothing is compiled here.
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # @surrealdb/node-native's publish stages one npm package per platform
+      # with the NAPI CLI, so the package's dev dependencies are needed here and
+      # not only at build time. The wasm package stages nothing but installs
+      # from its own lockfile the same way.
+      - name: Install dependencies
+        working-directory: ${{ matrix.dir }}
+        run: bun install --frozen-lockfile
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing requires npm >= 11.5.1; node 24's bundled npm can be just
+      # under that, so upgrade explicitly. Pin to the 11.x line (proven with trusted
+      # publishing) rather than @latest, so a new npm major can't change publish/OIDC
+      # behaviour mid-release without a deliberate bump. publish.ts shells out to it.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@11
+          npm --version
+
+      - name: Download the staged bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-bundle-${{ matrix.slot }}
+          path: ${{ matrix.dir }}/dist/
+
+      - name: Distribution summary
+        working-directory: ${{ matrix.dir }}
+        run: ls -lR dist
+
+      # Auth is npm OIDC trusted publishing — no NODE_AUTH_TOKEN. Each package must
+      # have a trusted publisher configured on npm for this repo + this workflow
+      # (environment blank). npm >= 11.5.1 performs the OIDC exchange automatically.
+      # Provenance is intentionally not forced: npm skips it for a private source
+      # repo.
+      #
+      # "Each package" includes the eight @surrealdb/node-native-<platform>
+      # packages the node publish creates, which carry the native binaries so an
+      # installer downloads one platform's worth instead of all of them. A
+      # platform package without a trusted publisher fails to publish, and the
+      # root package is deliberately published last so it never lands naming one
+      # that did not.
+      - name: Publish to npm
+        working-directory: ${{ matrix.dir }}
+        env:
+          SURREAL_VERSION: ${{ needs.prepare-vars.outputs.version }}
+        run: |
+          bun run publish.ts \
+            ${{ needs.prepare-vars.outputs.latest == 'true' && '--latest' || '' }} \
+            ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
+
+  # ----------------------------------------
+  # Promote binaries
+  # ----------------------------------------
+
+  promote:
+    name: Promote binaries
+    permissions:
+      contents: write
+    needs: [prepare-vars, approve, publish-crates]
+    # Engine side only: binaries/GitHub release/download pointers are not
+    # produced for a downstream-only release.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
+    # Private runner: promote reads the rolling artifacts from the private CI
+    # bucket via the runner's ambient IAM role, then writes the permanent release
+    # to the public download bucket with static keys. Label from a repo/org
+    # variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      # CI tooling (actions + scripts) comes from the WORKFLOW ref (this repo's
+      # main when dispatched from main), not from the released/branch commit
+      # checked out above, so release tooling never needs backporting onto
+      # release lines.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Promote binaries
+        uses: ./.ci/.github/actions/promote-binaries
+        with:
+          name: ${{ needs.prepare-vars.outputs.name }}
+          source-name: ${{ needs.prepare-vars.outputs.source-name }}
+          rolling-bucket: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          rolling-prefix: ${{ needs.prepare-vars.outputs.s3-prefix }}
+          version: ${{ needs.prepare-vars.outputs.version }}
+          pre-release: ${{ needs.prepare-vars.outputs.pre-release }}
+          release-name: ${{ needs.prepare-vars.outputs.release-name }}
+          publish: ${{ needs.prepare-vars.outputs.publish }}
+          create-release: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+          latest: ${{ needs.prepare-vars.outputs.latest }}
+          git-ref: ${{ needs.prepare-vars.outputs.git-sha }}
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+  # ----------------------------------------
+  # Mirror Docker image (ECR -> DockerHub)
+  # ----------------------------------------
+
+  mirror-docker:
+    name: Mirror ${{ matrix.name }}
+    # Gated upstream by `approve` (single approval covers the whole publish
+    # chain), so no per-job environment here.
+    needs: [prepare-vars, approve, promote]
+    # Engine side only: the public DockerHub image is not mirrored for a
+    # downstream-only release.
+    # Runs on dry-runs too: the action's dry-run mode verifies the source
+    # manifests exist in ECR and computes the public tags, but pushes nothing.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
+    # Private runner: reads the source image from ECR using the runner's ambient
+    # IAM instance role. Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    # id-token: write lets the DockerHub mirror exchange the job's GitHub OIDC
+    # token for a short-lived DockerHub token, so no long-lived credential is used.
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            tag-suffix: ''
+          - name: Dev image
+            tag-suffix: -dev
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sanitize tag prefix
+        id: tag
+        run: |
+          tag_prefix=$(echo '${{ needs.prepare-vars.outputs.name }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
+
+      - name: Mirror Docker image
+        uses: ./.github/actions/mirror-docker
+        with:
+          dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+          ecr-registry: ${{ secrets.AWS_ECR_REGISTRY }}
+          ecr-repository: ${{ secrets.AWS_ECR_REPOSITORY }}
+          source-tag: ${{ needs.prepare-vars.outputs.rolling-source-tag }}
+          tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
+          tag-suffix: ${{ matrix.tag-suffix }}
+          environment: ${{ needs.prepare-vars.outputs.release-name }}
+          latest: ${{ needs.prepare-vars.outputs.latest }}
+          dest-repo: surrealdb/surrealdb
+          oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
+
+  # ----------------------------------------
+  # Mirror downstream image (ECR -> release tag + ACR)
+  # ----------------------------------------
+  # Promotes the prebuilt downstream rolling image to the release: re-tags it to
+  # the release tag inside the downstream ECR and mirrors it to ACR. Nothing is
+  # rebuilt. No-ops when the downstream was not built for this commit. All
+  # downstream registry coordinates/credentials come from secrets.
+  mirror-downstream:
+    name: Mirror downstream image
+    # Downstream side only. Independent of the engine promote so a downstream-only
+    # release can run on its own. prepare-vars already guaranteed a downstream image
+    # exists when release-downstream (or test) is set. Gated upstream by `approve`
+    # (no per-job environment). Runs for a `test` release too: `test` sets only the
+    # `test` flag (not release-downstream), so it mirrors the ephemeral image here
+    # but the downstream-repo tag / finalize / prune jobs, gated on release-downstream,
+    # skip it.
+    needs: [prepare-vars, approve]
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' && (needs.prepare-vars.outputs.release-downstream == 'true' || needs.prepare-vars.outputs.test == 'true') }}
+    # Private runner (downstream pipeline): the downstream ECR login
+    # uses the runner's ambient IAM instance role. Label from a repo/org
+    # variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+      ACR_REPO: ${{ secrets.DOWNSTREAM_ACR_REGISTRY }}/${{ secrets.DOWNSTREAM_ACR_REPOSITORY }}
+      # Compound <engine-short>.<downstream-short> base tag, so a specific downstream
+      # pairing is promoted rather than whatever last built for the engine commit.
+      SOURCE_TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}
+      LATEST: ${{ needs.prepare-vars.outputs.latest }}
+    steps:
+      - name: Sanitize tag prefix
+        id: tag
+        run: |
+          tag_prefix=$(echo '${{ needs.prepare-vars.outputs.name }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
+
+      # Ambient auth: the private runner's IAM instance role provides downstream
+      # ECR credentials, so no configure-aws-credentials / static keys are
+      # needed. The registry comes from a secret; the region is derived from the
+      # registry host.
+      - name: Login to the downstream ECR
+        env:
+          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Login to the downstream ACR
+        env:
+          ACR_REGISTRY: ${{ secrets.DOWNSTREAM_ACR_REGISTRY }}
+          ACR_CLIENT_ID: ${{ secrets.DOWNSTREAM_ACR_CLIENT_ID }}
+          ACR_CLIENT_SECRET: ${{ secrets.DOWNSTREAM_ACR_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$ACR_CLIENT_SECRET" \
+            | docker login "$ACR_REGISTRY" --username "$ACR_CLIENT_ID" --password-stdin
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Re-tag the multi-arch rolling image to the release tag (and `latest` when
+      # this is the latest line), in both the downstream ECR and ACR. imagetools
+      # copies the manifest + blobs without rebuilding.
+      - name: Promote + mirror downstream image
+        env:
+          PREFIX: ${{ steps.tag.outputs.tag-prefix }}
+        run: |
+          set -euo pipefail
+          src="${ECR_REPO}:${SOURCE_TAG}"
+          targets=("${ECR_REPO}:${PREFIX}" "${ACR_REPO}:${PREFIX}")
+          if [[ "${LATEST}" == "true" ]]; then
+            targets+=("${ECR_REPO}:latest" "${ACR_REPO}:latest")
+          fi
+          args=()
+          for t in "${targets[@]}"; do args+=(--tag "$t"); done
+          echo "Promoting ${src} -> ${targets[*]}"
+          docker buildx imagetools create "${args[@]}" "${src}"
+
+  # ----------------------------------------
+  # Mirror downstream licensed image (ECR -> DockerHub)
+  # ----------------------------------------
+  # Publishes the licence-ENFORCING downstream image to public DockerHub for
+  # self-hosted customers. The enforcement-off Cloud image (mirror-downstream above)
+  # never leaves the private ECR/ACR; this job takes the enforcement-on variant,
+  # built in the same rolling run under the `-licensed` ECR tag marker, and mirrors
+  # it with the shared mirror-docker action, which strips the ECR/account-bearing
+  # build attestations so nothing confidential reaches the public repo. DockerHub
+  # auth is keyless: the action exchanges this job's GitHub OIDC token (id-token:
+  # write) for a short-lived DockerHub token via the org OIDC connection, so there
+  # is no long-lived credential. Both the destination repo and the OIDC connection
+  # id come from repo VARIABLES, not secrets: neither is a credential (the repo is a
+  # public image name; the connection id only names the trust, which the signed OIDC
+  # token enforces), and a variable stays inspectable and prints unmasked in this
+  # job's own "Mirroring -> <repo>:<tag>" log lines.
+  # Tags follow the downstream convention (<name> + optional :latest),
+  # NOT the engine's moving major/minor tags. Skips the mirror when
+  # DOWNSTREAM_DOCKERHUB_REPOSITORY is unset. Runs on dry-runs too (the action
+  # verifies the source manifests and computes the public tags without pushing),
+  # matching the engine's mirror-docker.
+  #
+  # Published with the engine on a `public` release. The licensed image is a public
+  # customer artefact, so it ships whenever the engine is publicly released and never
+  # on its own: the gate is release-engine (which `public` sets) minus nightly. That
+  # excludes an `internal`/`test` release (downstream-only, release-engine is false)
+  # and the engine nightly (release-engine true but nightly). Because it runs only
+  # when the engine is released, `latest` is always the engine-computed value
+  # (determine-latest-pointer gates on release-engine), so the public `:latest`
+  # moves correctly without a downstream-specific pointer.
+  mirror-downstream-licensed:
+    name: Mirror downstream licensed image
+    # Gated upstream by `approve` (no per-job environment), same as mirror-downstream.
+    #
+    # Backwards compatible with pre-licensing release lines. release.yml is the one
+    # canonical (main) workflow, run manually to promote ANY line, so this job also
+    # runs when releasing an older commit (e.g. releases/3.1, releases/3.2) whose
+    # rolling build never produced a licensed image. Whether a licensed image exists
+    # is read from the downstream.json manifest (`downstream-licensed`), written by
+    # the rolling build that produced the image: a line whose downstream build
+    # predates licence enforcement has no such flag and reads false, so the mirror
+    # steps skip and the job no-ops green. The job still RUNS (only its steps skip)
+    # so finalize-engine's `result == 'success'` gate stays satisfied. The manifest
+    # flag is the source of truth for licensed presence, so no registry probe (and
+    # no ECR describe permission) is needed.
+    needs: [prepare-vars, approve]
+    if: >-
+      ${{ needs.prepare-vars.outputs.release-engine == 'true'
+          && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    # Private runner: reads the source image from the downstream ECR using the
+    # runner's ambient IAM instance role. Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    # id-token: write lets the DockerHub mirror exchange the job's GitHub OIDC
+    # token for a short-lived DockerHub token, so no long-lived credential is used.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Skip the mirror when the DockerHub target variable is unset.
+      - name: DockerHub target configured?
+        id: cfg
+        env:
+          HAS_REPO: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_REPO}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Mirror downstream licensed::DOWNSTREAM_DOCKERHUB_REPOSITORY not set; skipping the licensed DockerHub mirror."
+          fi
+
+      # Backwards compatibility with pre-licensing release lines: a `-licensed` image
+      # only exists when this commit's downstream build recorded it in downstream.json
+      # (`downstream-licensed`), so the mirror steps below gate on that flag directly.
+      # A releases/* line whose downstream build predates licence enforcement reads
+      # false and skips them, the job no-ops green, and this step records WHY in the
+      # log. When true the image is pulled with a docker login (get-login-password),
+      # which needs no ECR describe permission.
+      - name: Note a skipped licensed mirror
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed != 'true'
+        env:
+          TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}-licensed
+        run: echo "::notice title=Mirror downstream licensed::This commit's downstream build recorded no licensed (${TAG}) image; this release line predates licence enforcement, skipping the licensed DockerHub mirror."
+
+      - name: Checkout sources
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sanitize tag prefix
+        id: tag
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
+        env:
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+        run: |
+          tag_prefix=$(printf '%s' "$NAME" | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
+
+      - name: Mirror licensed image to DockerHub
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
+        uses: ./.github/actions/mirror-docker
+        with:
+          dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+          ecr-registry: ${{ secrets.AWS_ECR_REGISTRY }}
+          ecr-repository: ${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+          # The licensed variant is staged in the downstream ECR under the
+          # `-licensed` marker the rolling build added, on the same compound
+          # <engine-short>.<downstream-short> base; the public tags carry no marker
+          # (the DockerHub repo already distinguishes it).
+          source-tag: ${{ needs.prepare-vars.outputs.downstream-source-tag }}-licensed
+          tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
+          environment: ${{ needs.prepare-vars.outputs.release-name }}
+          latest: ${{ needs.prepare-vars.outputs.latest }}
+          dest-repo: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY }}
+          extra-stable-tags: 'false'
+          oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
+
+  # ----------------------------------------
+  # Tag the downstream repo
+  # ----------------------------------------
+  # Create a REPRODUCIBLE tag on the downstream repo for this release, so an
+  # engineer can clone it, `git checkout <tag>`, and rebuild the exact code that
+  # shipped in the released image.
+  #
+  # The released image is built from the downstream commit with a Cargo [patch]
+  # redirecting the engine dependency to a COLOCATED checkout of this engine at
+  # the released engine sha. The downstream manifest itself only tracks the engine
+  # by branch, so a plain checkout of the downstream commit would fetch the WRONG
+  # engine code. This job therefore pins the engine dependency to the exact
+  # released engine sha on top of the downstream commit, tags it, and pushes ONLY
+  # the tag (never a branch — the pin commit exists solely to anchor the tag).
+  # Every non-engine dependency is left exactly as the committed downstream
+  # Cargo.lock had it (the lock the image build started from), so the tag
+  # reproduces the shipped dependency graph by construction.
+  #
+  # Idempotent: an existing tag is left untouched unless `overwrite: true`. Runs on
+  # dry-runs too (it performs the pin + validation but does not push), so a dry-run
+  # surfaces a broken pin before a real release. No-ops green until the downstream
+  # App is configured; that App must have Contents: write on the downstream repo to
+  # push the tag (the rolling build uses the same App with only Contents: read).
+  tag-downstream:
+    name: Tag downstream release
+    # Source-side of the downstream release, independent of the image mirror. Gate
+    # on the release outcome the same way the follow-up PR jobs do: require the
+    # downstream mirror to have succeeded on a publish; on a dry-run the mirror is
+    # skipped, so still run (pin + validate, no push).
+    needs: [prepare-vars, mirror-downstream]
+    if: >-
+      ${{ always() && github.repository == vars.PRIVATE_ENGINE_REPO
+      && inputs.release-type == 'versioned'
+      && needs.prepare-vars.result == 'success'
+      && needs.prepare-vars.outputs.release-downstream == 'true'
+      && needs.prepare-vars.outputs.downstream-built == 'true'
+      && ((needs.prepare-vars.outputs.publish == 'true' && needs.mirror-downstream.result == 'success')
+          || (needs.prepare-vars.outputs.publish != 'true' && needs.mirror-downstream.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # No-op green until the downstream App is configured, so this can be merged
+      # before the secrets exist.
+      - name: Downstream App configured?
+        id: cfg
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Tag downstream::Not configured (DOWNSTREAM_* secrets absent) — skipping the downstream tag."
+          fi
+
+      # Repo-scoped, short-lived token for the downstream. Must carry Contents:
+      # write so it can push the tag.
+      - name: Generate a token for the downstream repo
+        id: app-token
+        if: steps.cfg.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      # The pin script and toolchain setup come from the workflow ref (this engine
+      # repo), not from the downstream checkout.
+      - name: Checkout CI tooling from the workflow ref
+        if: steps.cfg.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -151,426 +1436,75 @@ jobs:
           sparse-checkout-cone-mode: false
           path: .ci
 
+      # Check out the downstream at the exact built commit (detached). Credentials
+      # are persisted (the App token) so the tag push below is authenticated.
+      - name: Checkout downstream
+        if: steps.cfg.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ needs.prepare-vars.outputs.downstream-sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: downstream
+
       - name: Setup environment
-        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
+        if: steps.cfg.outputs.configured == 'true'
         uses: ./.ci/.github/actions/setup-environment
-
-      - name: Install cargo-edit
-        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
-        run: cargo install cargo-edit
-
-      - name: Create PR to update main
-        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .ci/.github/scripts/bump-nightly-version.sh "${{ inputs.publish }}" "${{ inputs.main-version }}"
-
-  # ----------------------------------------
-  # Prepare release variables
-  # ----------------------------------------
-
-  prepare-vars:
-    name: Prepare vars
-    needs: [validate-inputs]
-    runs-on: ubuntu-latest
-    outputs:
-      name: ${{ steps.vars.outputs.name }}
-      version: ${{ steps.vars.outputs.version }}
-      pre-release: ${{ steps.vars.outputs.pre-release }}
-      release-name: ${{ steps.vars.outputs.release-name }}
-      build-metadata: ${{ steps.vars.outputs.build-metadata }}
-      git-ref: ${{ steps.config.outputs.git-ref }}
-      nightly-release: ${{ steps.config.outputs.nightly-release }}
-      latest: ${{ steps.config.outputs.latest }}
-      extra-features: ${{ steps.config.outputs.extra-features }}
-      publish: ${{ steps.config.outputs.publish }}
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
-          egress-policy: audit
+          # The downstream repo is checked out under ./downstream, so its Cargo
+          # workspace is not at the job root. Point the rust-cache probe there;
+          # left at its default it runs `cargo metadata` against the (manifest
+          # -less) root and logs a red "could not find Cargo.toml" error before
+          # falling back to no cache.
+          workspaces: downstream
 
-      - name: Determine configuration
-        id: config
-        run: |
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            # Nightly scheduled release
-            echo "git-ref=main" >> $GITHUB_OUTPUT
-            echo "nightly-release=true" >> $GITHUB_OUTPUT
-            echo "latest=false" >> $GITHUB_OUTPUT
-            echo "extra-features=storage-tikv,jwks,ml" >> $GITHUB_OUTPUT
-            echo "publish=true" >> $GITHUB_OUTPUT
-          else
-            # Manual workflow dispatch
-            # The version is taken from the code on the provided git-ref
-            if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
-              echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
-              echo "nightly-release=false" >> $GITHUB_OUTPUT
-              # Respect latest input for versioned releases
-              echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
-            else
-              # Nightly release - use the input git-ref
-              echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
-              echo "nightly-release=true" >> $GITHUB_OUTPUT
-              # Force latest to false for nightly releases
-              echo "latest=false" >> $GITHUB_OUTPUT
-            fi
-            echo "extra-features=${{ inputs.extra-features }}" >> $GITHUB_OUTPUT
-            echo "publish=${{ inputs.publish }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ steps.config.outputs.git-ref }}
-
-      - name: Prepare release variables
-        id: vars
-        uses: ./.github/actions/prepare-release-vars
-        with:
-          nightly-release: ${{ steps.config.outputs.nightly-release }}
-
-  # ----------------------------------------
-  # Quality checks
-  # ----------------------------------------
-
-  format:
-    name: Check format
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Check format
-        uses: ./.github/actions/quality-format
-
-  clippy:
-    name: Check clippy
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Check clippy
-        uses: ./.github/actions/quality-clippy
-
-  check:
-    name: Check workspace
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Check workspace
-        uses: ./.github/actions/quality-check
-
-  check-wasm:
-    name: Check Wasm
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Check Wasm
-        uses: ./.github/actions/quality-check-wasm
-
-  check-docs:
-    name: Check docs
-    needs: [ prepare-vars ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Check docs
-        uses: ./.github/actions/quality-check-docs
-
-  # ----------------------------------------
-  # Workspace tests
-  # ----------------------------------------
-
-  test:
-    name: Test workspace
-    needs: [ prepare-vars ]
-    runs-on: [ runner-amd-32-cores ]
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Test workspace
-        uses: ./.github/actions/test-workspace
-
-  # ----------------------------------------
-  # Build release binaries
-  # ----------------------------------------
-
-  build:
-    name: Build ${{ matrix.arch }} binary
-    needs: [ prepare-vars ]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux amd64
-          - arch: x86_64-unknown-linux-gnu
-            platform: amd64
-            os: linux
-            runner: [ runner-amd-32-cores ]
-          # Linux arm64
-          - arch: aarch64-unknown-linux-gnu
-            platform: arm64
-            os: linux
-            runner: [ runner-arm-32-cores ]
-          # macOS amd64
-          - arch: x86_64-apple-darwin
-            platform: amd64
-            os: macos
-            runner: macos-15-xlarge
-          # macOS arm64
-          - arch: aarch64-apple-darwin
-            platform: arm64
-            os: macos
-            runner: macos-15-xlarge
-          # Windows amd64
-          - arch: x86_64-pc-windows-msvc
-            platform: amd64
-            os: windows
-            runner: windows-latest-32-cores
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Build Linux binary
-        if: matrix.os == 'linux'
-        uses: ./.github/actions/build-linux
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare-vars.outputs.name }}
-          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
-          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
-          extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
-          upload: true
-          release: true
-
-      - name: Build macOS binary
-        if: matrix.os == 'macos'
-        uses: ./.github/actions/build-macos
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare-vars.outputs.name }}
-          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
-          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
-          extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
-          upload: true
-          release: true
-
-      - name: Build Windows binary
-        if: matrix.os == 'windows'
-        uses: ./.github/actions/build-windows
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare-vars.outputs.name }}
-          version-override: ${{ needs.prepare-vars.outputs.nightly-release == 'true' && needs.prepare-vars.outputs.version || '' }}
-          build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
-          extra-features: ${{ needs.prepare-vars.outputs.extra-features }}
-          upload: true
-          release: true
-
-  # ----------------------------------------
-  # Publish crates
-  # ----------------------------------------
-
-  publish-crates:
-    name: Publish crates
-    needs: [ test, format, clippy, check, check-wasm, check-docs, build, prepare-vars ]
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' || needs.prepare-vars.outputs.nightly-release == 'true' }}
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Publish crate
-        uses: ./.github/actions/publish-crate
-        with:
-          publish: ${{ needs.prepare-vars.outputs.publish }}
-          nightly-release: ${{ needs.prepare-vars.outputs.nightly-release }}
-          cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-  # ----------------------------------------
-  # Publish binaries
-  # ----------------------------------------
-
-  publish:
-    name: Publish binaries
-    permissions:
-      contents: write
-    needs: [ prepare-vars, publish-crates ]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Publish binaries
-        uses: ./.github/actions/publish-binaries
-        with:
-          name: ${{ needs.prepare-vars.outputs.name }}
-          version: ${{ needs.prepare-vars.outputs.version }}
-          pre-release: ${{ needs.prepare-vars.outputs.pre-release }}
-          release-name: ${{ needs.prepare-vars.outputs.release-name }}
-          publish: ${{ needs.prepare-vars.outputs.publish }}
-          create-release: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-          latest: ${{ needs.prepare-vars.outputs.latest == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-          git-ref: ${{ needs.prepare-vars.outputs.git-ref }}
-          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
-
-  # ----------------------------------------
-  # Docker images
-  # ----------------------------------------
-
-  docker:
-    name: Build ${{ matrix.name }} (${{ matrix.build-target }})
-    needs: [ prepare-vars, publish ]
-    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
-    environment: ${{ needs.prepare-vars.outputs.release-name }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Prod image
-            build-target: prod-ci
-            tag-suffix: ''
-          - name: Dev image
-            build-target: dev-ci
-            tag-suffix: -dev
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Sanitize tag prefix
+      # Pin the engine dependency to the released engine sha, commit, tag, and push
+      # the tag. cargo must fetch the engine repo to re-lock, and the engine dep is
+      # declared with an ssh URL, so rewrite that URL to an https one authenticated
+      # with this repo's GITHUB_TOKEN (which can read this private engine repo) and
+      # use git-fetch-with-cli, so cargo honours the rewrite for transport while
+      # still recording the original ssh URL in the lock.
+      - name: Pin engine + tag downstream
         id: tag
+        if: steps.cfg.outputs.configured == 'true'
+        working-directory: downstream
+        env:
+          ENGINE_TOKEN: ${{ github.token }}
+          # The engine owner/repo, from CI config rather than hardcoded. Used both
+          # to authenticate the engine git fetch and (by the script, via this env)
+          # to identify the engine crates to pin.
+          ENGINE_REPO: ${{ vars.PRIVATE_ENGINE_REPO }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+          TAG: ${{ needs.prepare-vars.outputs.name }}
+          ENGINE_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+          OVERWRITE: ${{ inputs.overwrite }}
         run: |
-          tag_prefix=$(echo '${{ needs.prepare-vars.outputs.name }}' | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
-          echo "tag-prefix=${tag_prefix}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          git config --global \
+            "url.https://x-access-token:${ENGINE_TOKEN}@github.com/${ENGINE_REPO}.insteadOf" \
+            "ssh://git@github.com/${ENGINE_REPO}"
+          "${GITHUB_WORKSPACE}/.ci/.github/scripts/tag-downstream-release.sh" \
+            "${TAG}" "${ENGINE_SHA}" "${PUBLISH}" "${OVERWRITE}"
 
-      - name: Build and push Docker image
-        uses: ./.github/actions/docker-build
-        with:
-          environment: ${{ needs.prepare-vars.outputs.release-name }}
-          tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
-          build-target: ${{ matrix.build-target }}
-          tag-suffix: ${{ matrix.tag-suffix }}
-          push: true
-          latest: ${{ needs.prepare-vars.outputs.latest == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-          docker-user: ${{ secrets.DOCKER_USER }}
-          docker-pass: ${{ secrets.DOCKER_PASS }}
-
-  # ----------------------------------------
-  # macOS universal binary
-  # ----------------------------------------
-
-  package-macos:
-    name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
-    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
-    runs-on: macos-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
-
-      - name: Package macOS universal binary
-        uses: ./.github/actions/package-macos-universal
-        with:
-          name: ${{ needs.prepare-vars.outputs.name }}
-          publish: ${{ needs.prepare-vars.outputs.publish }}
-          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+      - name: Summarize the downstream tag
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          TAG: ${{ needs.prepare-vars.outputs.name }}
+          ENGINE_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          DS_SHA: ${{ needs.prepare-vars.outputs.downstream-sha }}
+          PUBLISH: ${{ needs.prepare-vars.outputs.publish }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Downstream tag ${TAG}"
+            echo ""
+            if [[ "${PUBLISH}" == "true" ]]; then
+              echo "Tagged the downstream repo \`${TAG}\` — downstream \`${DS_SHA}\`, engine pinned to \`${ENGINE_SHA}\`."
+            else
+              echo "[dry-run] Would tag the downstream repo \`${TAG}\` — downstream \`${DS_SHA}\`, engine pinned to \`${ENGINE_SHA}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ----------------------------------------
   # Propagate binaries
@@ -578,65 +1512,311 @@ jobs:
 
   propagate:
     name: Propagate binaries to all regions
-    if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
-    environment: ${{ needs.prepare-vars.outputs.release-name }}
-    needs: [ publish, package-macos, prepare-vars ]
+    # Engine side only: nothing to propagate for a downstream-only release.
+    # Gated upstream by `approve` (no per-job environment).
+    # Runs on dry-runs too (publish: false), passing dry-run to the action so
+    # `aws s3 sync --dryrun` exercises the fan-out without copying anything.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
+    needs: [prepare-vars, approve, promote]
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare-vars.outputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      # CI tooling (actions + scripts) comes from the WORKFLOW ref (this repo's
+      # main when dispatched from main), not from the released/branch commit
+      # checked out above, so release tooling never needs backporting onto
+      # release lines.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
 
       - name: Propagate binaries
-        uses: ./.github/actions/propagate-binaries
+        uses: ./.ci/.github/actions/propagate-binaries
         with:
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+
+  # ----------------------------------------
+  # Prune superseded rolling artifacts
+  # ----------------------------------------
+  # On a successful publish, delete the superseded rolling artifacts for commits
+  # on this branch line that are STRICTLY OLDER than the released commit. The
+  # released commit itself is kept (so the release stays re-runnable) and is
+  # pruned by the next release on the same line. Because the released commit is
+  # always kept, the common engine/downstream lag (releasing both from the SAME
+  # commit in either order) is always safe.
+  #
+  # Decoupling-aware pruning:
+  #   * the tiny manifests (engine.json + downstream.json) are RETAINED (only the
+  #     heavy binaries are deleted), so a still-pending downstream promotion
+  #     of an ancestor can still resolve its manifest;
+  #   * downstream images are pruned only when the downstream side is part of
+  #     THIS release (see prune-images), so an engine-only release never deletes a
+  #     downstream image that has not been promoted yet.
+  # Runs on releases that include the engine side; a downstream-only release
+  # prunes nothing here (the next release with the engine side cleans up).
+
+  # S3 pruning keeps its existing key-based auth (AMAZON_*), unchanged. It
+  # computes which superseded commits to prune (strict ancestors of the released
+  # commit) and hands that list to prune-images below. Kept as its own job so the
+  # AMAZON_* S3 credentials never coexist with the ambient ECR role in one job
+  # (env-injected keys would otherwise shadow the instance role).
+  prune:
+    name: Prune superseded S3 artifacts
+    needs: [prepare-vars, promote, mirror-docker, mirror-downstream, propagate]
+    # Run once the side(s) actually being released have succeeded, so pruning is
+    # symmetric with promotion: the engine side prunes engine artifacts, the
+    # downstream side prunes downstream images, and a `public` release prunes both.
+    # Each side is gated independently — a side NOT part of this release imposes no
+    # requirement (its jobs are skipped), and a side that IS released must have
+    # shipped successfully before we delete anything it supersedes. This is what
+    # lets a later release of a side clean up artifacts an earlier partial release
+    # deliberately left behind.
+    #
+    # prepare-vars MUST have succeeded: `publish` is emitted by its early
+    # "Determine configuration" step, so it is already 'true' even when a later
+    # prepare-vars step (e.g. "Locate rolling build") fails. Without the explicit
+    # result check this job would still run on a failed prepare-vars — with empty
+    # SLUG/RELEASED/RELEASE_ENGINE — and only avoid deleting anything by luck (an
+    # empty RELEASED makes the merge-base ancestry check fail for every entry).
+    # Gate on success so a failed release never reaches the prune logic at all.
+    # Runs on dry-runs too (deletions become `aws s3 rm --dryrun`), so the
+    # superseded-commit SELECTION logic - the dangerous part of a prune - is
+    # exercised and reported without deleting anything. promote, mirror-docker
+    # and propagate all run on dry-runs, so their success is required in both
+    # modes; mirror-downstream stays publish-gated, so a dry-run accepts it
+    # skipped.
+    #
+    # A TEST release never prunes: it is an ephemeral build that must not delete
+    # the shared rolling artifacts a later public release of this line still
+    # depends on.
+    if: >-
+      ${{ always() && needs.prepare-vars.result == 'success'
+      && needs.prepare-vars.outputs.test != 'true'
+      && (needs.prepare-vars.outputs.release-engine != 'true'
+          || (needs.promote.result == 'success'
+              && needs.mirror-docker.result == 'success'
+              && needs.propagate.result == 'success'))
+      && (needs.prepare-vars.outputs.release-downstream != 'true'
+          || needs.mirror-downstream.result == 'success'
+          || (needs.prepare-vars.outputs.publish != 'true'
+              && needs.mirror-downstream.result == 'skipped')) }}
+    # Private runner: rolling artifacts live in the private CI bucket, pruned via
+    # the runner's ambient IAM role (no static keys). Label from a repo/org
+    # variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    outputs:
+      # Space-separated list of superseded commit SHAs, consumed by prune-images.
+      older: ${{ steps.prune-s3.outputs.older }}
+    env:
+      SLUG: ${{ needs.prepare-vars.outputs.branch-slug }}
+      RELEASED: ${{ needs.prepare-vars.outputs.git-sha }}
+      # Gates engine-artifact deletion below (the heavy S3 binaries are engine
+      # artifacts); the downstream image deletion is gated in prune-images. The
+      # ancestry list is computed regardless of side.
+      RELEASE_ENGINE: ${{ needs.prepare-vars.outputs.release-engine }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+          fetch-depth: 0
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - see the
+      # same pattern in the other jobs. Placed after the root checkout so
+      # the default clean cannot remove it.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Fetch branch history
+        run: git fetch --no-tags --prune origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
+
+      - name: Prune superseded S3 artifacts
+        id: prune-s3
+        env:
+          DRY_RUN: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        uses: ./.ci/.github/actions/prune-superseded-artifacts
+
+  # ECR pruning (upstream + downstream) on a private runner, authenticating with
+  # the runner's ambient IAM instance role (no static keys). Consumes the
+  # superseded-commit list computed by the S3 prune job above.
+  prune-images:
+    name: Prune superseded ECR images
+    needs: [prepare-vars, prune]
+    # Runs on dry-runs too (deletions become a logged preview), so the
+    # destructive ECR tag selection is validated at release time rather than
+    # surprising us on the first real prune. An internal release is excluded for
+    # free: `prune` is skipped for it, and this job requires `prune` to have
+    # succeeded, so it never runs.
+    if: >-
+      ${{ always()
+      && needs.prune.result == 'success'
+      && needs.prune.outputs.older != '' }}
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+      SLUG: ${{ needs.prepare-vars.outputs.branch-slug }}
+      OLDER: ${{ needs.prune.outputs.older }}
+      DRY_RUN: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+    steps:
+      # Engine ECR images: gated on the engine side being part of THIS release,
+      # symmetric with the downstream step below and the S3 binary prune. A
+      # downstream-only release must NOT delete an ancestor's engine images, since
+      # a later engine promotion of that ancestor still needs them; the next
+      # release that includes the engine side cleans them up.
+      - name: Prune superseded ECR images
+        if: ${{ needs.prepare-vars.outputs.release-engine == 'true' }}
+        run: |
+          set -euo pipefail
+          [[ -n "${OLDER// }" ]] || { echo "No superseded images to prune"; exit 0; }
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          for d in $OLDER; do
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "[dry-run] would prune engine ECR images (repo ${ECR_REPOSITORY}): rolling-${SLUG}-${d}, rolling-${SLUG}-${d}-dev"
+              continue
+            fi
+            aws ecr batch-delete-image --region "$region" \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-ids "imageTag=rolling-${SLUG}-${d}" "imageTag=rolling-${SLUG}-${d}-dev" \
+              >/dev/null 2>&1 || true
+            echo "Pruned ECR images for rolling-${SLUG}-${d}"
+          done
+
+      # Prune the matching downstream images from the downstream ECR (same
+      # ancestry). A superseded engine commit carries one image PER downstream
+      # pairing built against it, each under a compound
+      # rolling-<slug>-<engine-short>.<downstream-short> base plus its -licensed
+      # marker and per-arch tags. The pairings are recovered from the
+      # retained per-pairing manifests in S3
+      # (rolling-builds/<slug>/<engine>/<downstream>/downstream.json, kept even
+      # after the heavy binaries are pruned), whose `.tag` is the authoritative base
+      # to delete and whose `.licensed` says whether the enforcement-on variant
+      # exists. Reading S3 (already used to write/read these manifests) avoids
+      # needing an ECR list permission. Legacy pre-compound commits have no
+      # per-pairing manifests and fall back to the engine-only base they were pushed
+      # under. Builder cache tags (builder-<arch>-<slug>) are never derived from a
+      # manifest and are left in place.
+      #
+      # Gated on the downstream side being part of THIS release: an engine-only
+      # release must NOT delete downstream images for ancestors, because they may
+      # still be waiting on a downstream promotion. They are cleaned up by
+      # the next release that includes the downstream side.
+      - name: Prune superseded downstream ECR images
+        if: ${{ needs.prepare-vars.outputs.release-downstream == 'true' }}
+        env:
+          DS_REPO: ${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          [[ -n "${OLDER// }" ]] || { echo "No superseded downstream images to prune"; exit 0; }
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+
+          # Every tag shape a single base pushes: the multi-arch tag and the two
+          # per-arch tags.
+          tag_shapes() {
+            local base="$1"
+            printf '%s\n' \
+              "${base}" \
+              "${base}-linux-amd64" "${base}-linux-arm64"
+          }
+          ids=()
+          add_base() {   # queue a base, plus its -licensed sibling when built
+            local base="$1" licensed="$2" t
+            while IFS= read -r t; do ids+=("imageTag=${t}"); done < <(tag_shapes "$base")
+            if [[ "$licensed" == "true" ]]; then
+              while IFS= read -r t; do ids+=("imageTag=${t}"); done < <(tag_shapes "${base}-licensed")
+            fi
+          }
+
+          for d in $OLDER; do
+            # Recover this engine commit's pairings from its retained per-pairing
+            # manifests; each `.tag` is the exact base that was pushed.
+            found=false
+            while IFS= read -r ds; do
+              [[ -n "$ds" ]] || continue
+              json="$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${SLUG}/${d}/${ds}downstream.json" - 2>/dev/null || true)"
+              [[ -n "$json" ]] || continue   # not a pairing dir (e.g. npm/)
+              base="$(printf '%s' "$json" | jq -r '.tag // ""')"
+              [[ -n "$base" ]] || continue
+              licensed="$(printf '%s' "$json" | jq -r 'if .licensed == true then "true" else "false" end')"
+              add_base "$base" "$licensed"
+              found=true
+            done < <(aws s3 ls "s3://${ROLLING_BUCKET}/rolling-builds/${SLUG}/${d}/" 2>/dev/null | awk '$1=="PRE"{print $2}')
+            # Legacy pre-compound commit: no per-pairing manifests; images were
+            # keyed by the full engine sha (Cloud + licensed).
+            [[ "$found" == "true" ]] || add_base "rolling-${SLUG}-${d}" "true"
+          done
+
+          if [[ ${#ids[@]} -eq 0 ]]; then
+            echo "No superseded downstream image tags resolved to prune"; exit 0
+          fi
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "[dry-run] would prune ${#ids[@]} downstream ECR image tags (repo ${DS_REPO}): ${ids[*]#imageTag=}"
+            exit 0
+          fi
+          # batch-delete-image accepts at most 100 image-ids per call.
+          for ((i=0; i<${#ids[@]}; i+=100)); do
+            aws ecr batch-delete-image --region "$region" \
+              --repository-name "$DS_REPO" \
+              --image-ids "${ids[@]:i:100}" \
+              >/dev/null 2>&1 || true
+          done
+          echo "Pruned ${#ids[@]} superseded downstream ECR image tags (Cloud + licensed, all pairings)"
 
   # ----------------------------------------
   # Bump release branch version
   # ----------------------------------------
   # After a versioned release cut from a permanent release branch (e.g.
-  # releases/3.1), open a PR that bumps the surrealdb crates on that branch to
-  # the next patch version (e.g. 3.1.3 -> 3.1.4), readying it as the release
-  # candidate for the next patch. This fires automatically whenever the release
-  # git-ref is a release branch - every release needs a follow-up version bump.
-  # Runs only after the release has propagated successfully (or in a dry-run,
-  # where it just reports what it would do).
+  # releases/3.1), open a PR bumping that branch to its next version (next patch
+  # for a stable release, next pre-release number for a pre-release).
 
   bump-release-version:
     name: Bump release branch version
-    needs: [ prepare-vars, propagate ]
-    # Gate on the actual release outcome:
-    #   * publish run  -> require propagate to have succeeded
-    #   * dry-run      -> propagate is skipped (its `if` is false), so allow skipped
-    # A publish run whose upstream jobs failed leaves propagate `skipped`, which
-    # must NOT be treated as success - hence the explicit publish/skipped split.
-    if: ${{ always() && inputs.release-type == 'versioned' && startsWith(inputs.git-ref, 'releases/') && needs.prepare-vars.result == 'success' && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success') || (needs.prepare-vars.outputs.publish != 'true' && needs.propagate.result == 'skipped')) }}
+    needs: [prepare-vars, propagate]
+    # Engine side only: a downstream-only release (internal or not) ships an image
+    # and never touches the engine's release-branch version, so it must not bump.
+    # propagate is the engine-release signal here (it runs whenever the engine side
+    # is released, in `--dryrun` mode on a dry-run), so requiring its success both
+    # gates on the engine side and confirms the release chain completed.
+    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.release-engine == 'true' && startsWith(needs.prepare-vars.outputs.branch-slug, 'releases-') && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr-url: ${{ steps.bump.outputs.pr-url }}
+      merged: ${{ steps.bump.outputs.merged }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.git-ref }}
+          ref: ${{ needs.prepare-vars.outputs.git-branch }}
           fetch-depth: 0
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       # This orchestration job runs against a different branch than the code it
-      # checks out, so its CI tooling comes from the workflow ref, not git-ref.
+      # checks out, so its CI tooling comes from the workflow ref, not git-branch.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -648,10 +1828,472 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
 
+      # cargo-edit provides `cargo set-version` for the bump script. Install a
+      # prebuilt, checksum-verified binary instead of `cargo install`, which
+      # compiled it from source on every run (~2.5 minutes per job).
       - name: Install cargo-edit
-        run: cargo install cargo-edit
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-edit@0.13.11
+
+      # A PR opened with GITHUB_TOKEN does NOT trigger pull_request CI. When the
+      # release-PR App is configured (installed on this repo with Contents +
+      # Pull requests write), open the PR with its token so the bump PR's checks
+      # run automatically. Optional: falls back to GITHUB_TOKEN (unchanged
+      # behaviour) when the App is not configured.
+      - name: Release-PR App configured?
+        id: prapp
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
+          fi
+
+      - name: Generate a token to open the PR
+        id: pr-app-token
+        if: steps.prapp.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
 
       - name: Create PR to bump release branch
+        id: bump
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .ci/.github/scripts/bump-release-version.sh "${{ inputs.git-ref }}" "${{ inputs.publish }}"
+          GH_TOKEN: ${{ steps.pr-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        # Use prepare-vars' publish output (the single source of truth the gate
+        # above also uses) rather than inputs.publish directly.
+        run: .ci/.github/scripts/bump-release-version.sh "${{ needs.prepare-vars.outputs.git-branch }}" "${{ needs.prepare-vars.outputs.publish }}" "${{ needs.prepare-vars.outputs.version }}"
+
+  # ----------------------------------------
+  # Advance main development version
+  # ----------------------------------------
+  # When a stable X.Y.0 ships, the X.Y line has gone stable. If main is still the
+  # in-flight development version for that exact line (X.Y.0-nightly), open a PR
+  # moving main to the next minor's development version (X.(Y+1).0-nightly).
+  #
+  # This is what carries main forward after a *major* cut: a major cut creates
+  # releases/X.0 at X.0.0-alpha.1 and parks main at X.0.0-nightly, and main only
+  # advances to X.1.0-nightly once X.0.0 actually ships stable. For minor lines
+  # the cut already advanced main past X.Y.0-nightly, so the guard inside the
+  # script finds main on a later version and no-ops. Pre-releases and patches
+  # (the `pre-release` gate / the script's X.Y.0 check) never advance main.
+
+  advance-main-version:
+    name: Advance main development version
+    needs: [prepare-vars, propagate]
+    # Engine side only (like bump-release-version): a downstream-only release
+    # never advances main's engine dev version. propagate is the engine-release
+    # signal (runs in `--dryrun` mode on a dry-run), so requiring its success gates
+    # on the engine side and confirms the release chain completed.
+    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.pre-release == 'false' && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      pr-url: ${{ steps.advance.outputs.pr-url }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      # This orchestration job runs against main while its CI tooling must come
+      # from the workflow ref (the released commit), not from main.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github/actions
+            .github/scripts
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+
+      # cargo-edit provides `cargo set-version` for the bump script. Install a
+      # prebuilt, checksum-verified binary instead of `cargo install`, which
+      # compiled it from source on every run (~2.5 minutes per job).
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-edit@0.13.11
+
+      # A PR opened with GITHUB_TOKEN does NOT trigger pull_request CI. When the
+      # release-PR App is configured (installed on this repo with Contents +
+      # Pull requests write), open the PR with its token so the bump PR's checks
+      # run automatically. Optional: falls back to GITHUB_TOKEN (unchanged
+      # behaviour) when the App is not configured.
+      - name: Release-PR App configured?
+        id: prapp
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Release-PR App::Not configured; opening the PR with GITHUB_TOKEN, so its CI will not run automatically until RELEASE_AUTOMATION_APP_* is set."
+          fi
+
+      - name: Generate a token to open the PR
+        id: pr-app-token
+        if: steps.prapp.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+
+      - name: Create PR to advance main
+        id: advance
+        env:
+          GH_TOKEN: ${{ steps.pr-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        # Use prepare-vars' publish output (the single source of truth the gate
+        # above also uses) rather than inputs.publish directly.
+        run: .ci/.github/scripts/advance-main-after-release.sh "${{ needs.prepare-vars.outputs.version }}" "${{ needs.prepare-vars.outputs.publish }}"
+
+  # ----------------------------------------
+  # Update the Homebrew tap
+  # ----------------------------------------
+  # After a latest stable release, open a PR on the Homebrew tap bumping the
+  # `surreal` formula to the new version (like homebrew-tap#54). The tap owns the
+  # formula generation: its release.sh regenerates the formula, run here with
+  # SKIP_GIT=1 and the exact released version pinned as an argument, so this job
+  # creates the branch and PR (opened under the App so the tap's own CI runs).
+  # Left for a human to merge.
+  #
+  # Only the latest stable line touches Homebrew: `latest` is true only for a
+  # stable (non-prerelease) release from the highest releases/* line, so betas
+  # and patches to older lines never bump the formula. Runs after promote so the
+  # darwin-universal hash release.sh reads for the pinned version already exists.
+  # No-ops (green) without the App secrets.
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: [prepare-vars, promote, propagate]
+    # Runs on dry-runs too (the action regenerates the formula and shows the diff
+    # but skips the push / PR / merge), so the tap bump is previewed at release
+    # time instead of first surfacing on a real release.
+    if: >-
+      ${{ always() && github.repository == vars.PRIVATE_ENGINE_REPO
+      && inputs.release-type == 'versioned'
+      && needs.prepare-vars.result == 'success'
+      && needs.prepare-vars.outputs.latest == 'true'
+      && needs.promote.result == 'success'
+      && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success')
+          || (needs.prepare-vars.outputs.publish != 'true' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped'))) }}
+    runs-on: ubuntu-latest
+    # The Homebrew tap is a public repo, so its name is not a secret and is
+    # hardcoded here. The job is gated only on the release App being configured.
+    env:
+      TAP_REPO: homebrew-tap
+    outputs:
+      pr-url: ${{ steps.open-pr.outputs.pr-url }}
+      merged: ${{ steps.open-pr.outputs.merged }}
+    steps:
+      - name: Preflight (Homebrew tap configured?)
+        id: preflight
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and hard-fail
+          # instead of no-opping. Matches downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Update Homebrew tap::Not configured (release App secrets absent) — skipping."
+          fi
+
+      - name: Generate a token for the Homebrew tap
+        id: app-token
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          repositories: ${{ env.TAP_REPO }}
+
+      - name: Checkout the Homebrew tap
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ env.TAP_REPO }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - see the
+      # same pattern in the other jobs. The tap checkout above owns the
+      # workspace root; .ci is just a subdirectory beside it.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Open Homebrew bump PR
+        id: open-pr
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.prepare-vars.outputs.name }}
+          # `working-directory` is not valid on `uses:` steps; the action cds
+          # into the tap checkout itself.
+          TAP_DIR: homebrew-tap
+          DRY_RUN: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+        uses: ./.ci/.github/actions/open-homebrew-bump-pr
+
+  # After any successful VERSIONED release (stable or pre-release; not nightly),
+  # kick off the public release sync. On a real release this dispatches a live
+  # "push (releases)" sync that previews via `plan` and waits at the `upstream`
+  # approval gate; on a dry-run release (publish:false) it dispatches the sync
+  # in dry-run too, so the whole path is exercised without pushing. main is
+  # never auto-pushed - that stays a deliberate manual dispatch.
+  #
+  # No GitHub App permission is needed: workflow_dispatch is the documented
+  # exception to the GITHUB_TOKEN recursion guard, so the built-in token with a
+  # job-scoped `actions: write` can start the sync run. That scope is set on
+  # GITHUB_TOKEN in this workflow, not on any App.
+  trigger-upstream-sync:
+    name: Trigger public release sync
+    # Wait for the FULL engine release, not just the GitHub release object:
+    # propagate (regional download mirrors) and mirror-docker must succeed too,
+    # or we would advertise a release on surrealdb/surrealdb whose mirrors are
+    # still stale. All three are engine-gated (release-engine == true) and this
+    # job has no always(), so it fires only for engine releases (as before) and
+    # only once every artifact side has landed.
+    needs: [prepare-vars, promote, propagate, mirror-docker]
+    if: >-
+      github.repository == vars.PRIVATE_ENGINE_REPO
+      && inputs.release-type == 'versioned'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch public release sync (push releases; awaits approval)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Execute the sync only when this release actually publishes; a dry-run
+          # release previews the sync (execute=false) instead.
+          SYNC_EXECUTE: ${{ needs.prepare-vars.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+          # Releases only - main is never auto-pushed. Bounded to the version being
+          # released (releases_up_to), so a backport release never leaks a newer tag
+          # that already exists here. A real run still waits for human approval at
+          # the `upstream` gate before publishing; a dry-run only previews.
+          #
+          # Dispatched against the ref this release is running from
+          # (github.ref_name), so the sync definition always matches the
+          # release.yml that dispatches it: they agree on inputs and logic by
+          # construction, never a stale-schema mismatch (e.g. a new input this
+          # release passes that a hardcoded main does not yet accept). In
+          # production a release runs from main, so this resolves to main's
+          # current sync; testing from a branch dispatches that same branch's
+          # sync. The sync reads repo-wide data, not the ref's tree, so the ref
+          # only selects which sync DEFINITION runs, not what gets synced.
+          gh workflow run sync-upstream.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref_name }}" \
+            -f direction="push (releases)" \
+            -f releases_up_to="v${{ needs.prepare-vars.outputs.version }}" \
+            -f execute="${SYNC_EXECUTE}"
+
+  # ----------------------------------------
+  # Summarise the follow-up PRs
+  # ----------------------------------------
+  # A promoted release fans out into several follow-up PRs (bump the release
+  # branch, advance main, bump the Homebrew formula). Collect whichever ones
+  # were actually opened into a single
+  # clickable list in the run summary, so they are easy to find, review and
+  # merge. Runs after all PR-opening jobs regardless of their individual
+  # outcome; jobs that were skipped or opened no PR contribute an empty URL and
+  # are simply omitted.
+  summarize-prs:
+    name: Summarize opened PRs
+    needs:
+      - prepare-vars
+      - bump-release-version
+      - advance-main-version
+      - update-homebrew-tap
+    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.result == 'success' && needs.prepare-vars.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Render the PR list
+        env:
+          RELEASE_NAME: ${{ needs.prepare-vars.outputs.name }}
+          BUMP_PR: ${{ needs.bump-release-version.outputs.pr-url }}
+          BUMP_MERGED: ${{ needs.bump-release-version.outputs.merged }}
+          ADVANCE_PR: ${{ needs.advance-main-version.outputs.pr-url }}
+          HOMEBREW_PR: ${{ needs.update-homebrew-tap.outputs.pr-url }}
+          HOMEBREW_MERGED: ${{ needs.update-homebrew-tap.outputs.merged }}
+        run: |
+          set -euo pipefail
+
+          # The release-branch bump and Homebrew formula PRs land automatically
+          # via the release-automation App's bypass, so each carries a `merged`
+          # flag: true when it landed here (report it as done), false when the
+          # direct merge did not land and only auto-merge was enabled (still
+          # awaiting requirements, so it needs a look). main advances through a
+          # merge queue and review, so it is never auto-merged here.
+          merged_lines=""
+          review_lines=""
+          add() { # $1=merged flag  $2=markdown bullet
+            if [[ "$1" == "true" ]]; then
+              merged_lines+="$2 - auto-merged, no action needed"$'\n'
+            else
+              review_lines+="$2"$'\n'
+            fi
+          }
+          [[ -n "${BUMP_PR}" ]] && add "${BUMP_MERGED}" "- [Bump release branch to its next version](${BUMP_PR})"
+          [[ -n "${HOMEBREW_PR}" ]] && add "${HOMEBREW_MERGED}" "- [Bump the Homebrew \`surreal\` formula](${HOMEBREW_PR})"
+          [[ -n "${ADVANCE_PR}" ]] && add "false" "- [Advance \`main\` to the next development version](${ADVANCE_PR})"
+
+          {
+            echo "## ${RELEASE_NAME} - release follow-ups"
+            echo ""
+            if [[ -n "${merged_lines}" ]]; then
+              echo "### Merged automatically"
+              echo ""
+              printf '%s' "${merged_lines}"
+              echo ""
+            fi
+            echo "### To review & merge"
+            echo ""
+            if [[ -n "${review_lines}" ]]; then
+              printf '%s' "${review_lines}"
+            else
+              echo "_None - any follow-up PRs merged automatically, or none were opened._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------
+  # Finalize the release (completion manifests)
+  # ----------------------------------------
+  # Writing releases/<name>/<component>.json to the release-artifacts bucket
+  # marks that component of this version as FULLY released. The overwrite
+  # guards in prepare-vars refuse to run the same version+component again
+  # without overwrite=true once the manifest exists, while a missing manifest
+  # lets a partially published release be re-run without any flags: every
+  # publish step skips or idempotently rewrites artefacts that already made it
+  # out. Mirrors the rolling build's engine.json/downstream.json completion
+  # manifests. Jobs that can legitimately skip on this channel count as
+  # satisfied: Homebrew when not `latest` and the upstream sync on forks are
+  # accepted as skipped (their upstream deps are separately required to
+  # succeed, so a skip can only be the legitimate kind), while npm is accepted
+  # only when the commit ships no packages (has-npm) - a bare skipped-check
+  # would also accept publish-npm skipping because staging FAILED. A failed
+  # job keeps the release resumable rather than final. The post-release
+  # version bumps are deliberately not gated on: they alter branches, not
+  # release artefacts, and re-running the release would not fix a failed bump.
+  finalize-engine:
+    name: Finalize engine release
+    # The licensed image ships with the engine (mirror-downstream-licensed gates on
+    # release-engine), so it is release-critical here: a failed licensed push leaves
+    # the engine release un-finalized (and the run red) rather than silently
+    # recording a release whose customer image is missing. That job reports success
+    # when it skips (DOWNSTREAM_DOCKERHUB_REPOSITORY unset, or the commit has no
+    # licensed image), so an unconfigured or pre-licensing line does not block this.
+    needs: [prepare-vars, publish-crates, publish-npm, promote, mirror-docker, mirror-downstream-licensed, propagate, update-homebrew-tap, trigger-upstream-sync]
+    if: >-
+      ${{ always()
+          && needs.prepare-vars.result == 'success'
+          && needs.prepare-vars.outputs.publish == 'true'
+          && needs.prepare-vars.outputs.nightly-release != 'true'
+          && needs.prepare-vars.outputs.release-engine == 'true'
+          && needs.publish-crates.result == 'success'
+          && needs.promote.result == 'success'
+          && needs.mirror-docker.result == 'success'
+          && needs.mirror-downstream-licensed.result == 'success'
+          && needs.propagate.result == 'success'
+          && (needs.publish-npm.result == 'success' || needs.prepare-vars.outputs.has-npm != 'true')
+          && (needs.update-homebrew-tap.result == 'success' || needs.update-homebrew-tap.result == 'skipped')
+          && (needs.trigger-upstream-sync.result == 'success' || needs.trigger-upstream-sync.result == 'skipped') }}
+    # Private runner: writes the manifest to the release-artifacts bucket via
+    # the runner's ambient IAM role (no static keys).
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Write the engine completion manifest
+        env:
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          GIT_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg name "$NAME" \
+            --arg version "$VERSION" \
+            --arg sha "$GIT_SHA" \
+            --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg completed "$(date -u +%FT%TZ)" \
+            '{name: $name, version: $version, component: "engine", "git-sha": $sha, run: $run, completed: $completed}' \
+            | aws s3 cp - "s3://${BUCKET}/releases/${NAME}/engine.json"
+          echo "Engine release ${NAME} finalized (s3://${BUCKET}/releases/${NAME}/engine.json)."
+
+  finalize-downstream:
+    name: Finalize downstream release
+    # The downstream release is finalized once the downstream image published (via
+    # mirror-downstream) and the downstream repo was tagged. Runs for `public` and
+    # `internal` (both set release-downstream); a `test` release sets only `test`, so
+    # it skips this. The licensed public image is gated on the engine side instead
+    # (finalize-engine), since it ships with the engine.
+    needs: [prepare-vars, mirror-downstream, tag-downstream]
+    if: >-
+      ${{ always()
+          && needs.prepare-vars.result == 'success'
+          && needs.prepare-vars.outputs.publish == 'true'
+          && needs.prepare-vars.outputs.nightly-release != 'true'
+          && needs.prepare-vars.outputs.release-downstream == 'true'
+          && needs.mirror-downstream.result == 'success'
+          && needs.tag-downstream.result == 'success' }}
+    # Private runner: writes the manifest to the release-artifacts bucket via
+    # the runner's ambient IAM role (no static keys).
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Write the downstream completion manifest
+        env:
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+          VERSION: ${{ needs.prepare-vars.outputs.version }}
+          GIT_SHA: ${{ needs.prepare-vars.outputs.git-sha }}
+          DOWNSTREAM_SHA: ${{ needs.prepare-vars.outputs.downstream-sha }}
+          BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg name "$NAME" \
+            --arg version "$VERSION" \
+            --arg sha "$GIT_SHA" \
+            --arg ds_sha "$DOWNSTREAM_SHA" \
+            --arg run "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg completed "$(date -u +%FT%TZ)" \
+            '{name: $name, version: $version, component: "downstream", "git-sha": $sha, "downstream-sha": $ds_sha, run: $run, completed: $completed}' \
+            | aws s3 cp - "s3://${BUCKET}/releases/${NAME}/downstream.json"
+          echo "Downstream release ${NAME} finalized (s3://${BUCKET}/releases/${NAME}/downstream.json)."

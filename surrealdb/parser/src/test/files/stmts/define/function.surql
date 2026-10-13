@@ -330,7 +330,7 @@ Query
                                 .left: Expr::Param
                                     Param
                                         .text: "session"
-                                .op: Equal
+                                .op: BinaryOperator::Equal
                                 .right: Expr::String
                                     StringLit
                                         .text: "bla"

@@ -83,11 +83,7 @@ impl conn::Sealed for super::Client {
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -185,6 +181,10 @@ pub(crate) async fn run_router(
 	}
 
 	let (socket_sink, socket_stream) = socket.split();
+	// The wasm socket halves are neither `Send` nor `Sync`, so this `Arc` buys no
+	// cross-thread sharing over an `Rc`. It mirrors the native router's shape,
+	// which shares the same state across genuinely concurrent tasks.
+	#[allow(clippy::arc_with_non_send_sync)]
 	let state = Arc::new(RouterState::new(socket_sink, socket_stream));
 
 	'router: loop {
@@ -233,7 +233,7 @@ pub(crate) async fn run_router(
 					match result {
 						Some(Ok(message)) => {
 							match handle_response::<Message, _, _>(
-								&message, &state.sessions, &state.sink
+								&message, None, &state.sessions, &state.sink
 							).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {

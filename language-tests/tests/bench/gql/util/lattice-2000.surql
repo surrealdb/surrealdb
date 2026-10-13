@@ -20,9 +20,9 @@ value = "'OK'"
 {
 	DEFINE TABLE node SCHEMALESS;
 
-	CREATE |node:1..2000| SET name = 'n' RETURN NONE;
+	CREATE |node:1..=2000| SET name = 'n' RETURN NONE;
 
-	FOR $n IN array::range(1, 2000) {
+	FOR $n IN array::range(1, 2001) {
 		LET $s = type::record('node', $n);
 		FOR $d IN [1, 2] {
 			-- wrap into 1..=2000: ((n - 1 + d) mod 2000) + 1

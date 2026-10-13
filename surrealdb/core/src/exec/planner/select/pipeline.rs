@@ -223,7 +223,7 @@ pub(crate) fn compute_topk_pushdown_request(
 				if inner_idiom.len() == 1
 					&& !inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_))) =>
 			{
-				match FieldPath::try_from(inner_idiom) {
+				match crate::exec::field_path_convert::field_path_from_idiom(inner_idiom) {
 					Ok(path) => path,
 					Err(_) => {
 						return TopKPushdownRequest::Ineligible(
@@ -235,7 +235,7 @@ pub(crate) fn compute_topk_pushdown_request(
 			_ => return TopKPushdownRequest::Ineligible(TopKPushdownReason::UnsupportedOrder),
 		}
 	} else {
-		match FieldPath::try_from(idiom) {
+		match crate::exec::field_path_convert::field_path_from_idiom(idiom) {
 			Ok(path) => path,
 			Err(_) => return TopKPushdownRequest::Ineligible(TopKPushdownReason::UnsupportedOrder),
 		}
@@ -429,19 +429,21 @@ impl<'ctx> Planner<'ctx> {
 			.iter()
 			.filter_map(|field| {
 				// Only simple field paths can be matched
-				crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
-					let direction = if field.direction {
-						SortDirection::Asc
-					} else {
-						SortDirection::Desc
-					};
-					SortProperty {
-						path,
-						direction,
-						collate: field.collate,
-						numeric: field.numeric,
-					}
-				})
+				crate::exec::field_path_convert::field_path_from_idiom(&field.value).ok().map(
+					|path| {
+						let direction = if field.direction {
+							SortDirection::Asc
+						} else {
+							SortDirection::Desc
+						};
+						SortProperty {
+							path,
+							direction,
+							collate: field.collate,
+							numeric: field.numeric,
+						}
+					},
+				)
 			})
 			.collect();
 
@@ -495,7 +497,7 @@ impl<'ctx> Planner<'ctx> {
 
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit
-						<= self.ctx.config.max_order_limit_priority_queue_size as usize
+						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					return Ok(Arc::new(SortTopK::new(input, order_by, effective_limit))
 						as Arc<dyn ExecOperator>);
@@ -563,7 +565,9 @@ impl<'ctx> Planner<'ctx> {
 										.await?;
 									FieldPath::field(name)
 								} else {
-									match FieldPath::try_from(inner_idiom) {
+									match crate::exec::field_path_convert::field_path_from_idiom(
+										inner_idiom,
+									) {
 										Ok(path) => path,
 										Err(_) => {
 											let name = registry
@@ -592,7 +596,7 @@ impl<'ctx> Planner<'ctx> {
 							}
 						}
 					} else {
-						match FieldPath::try_from(idiom) {
+						match crate::exec::field_path_convert::field_path_from_idiom(idiom) {
 							Ok(path) => path,
 							Err(_) => {
 								let expr = Expr::Idiom(idiom.clone());
@@ -647,7 +651,7 @@ impl<'ctx> Planner<'ctx> {
 				// Use heap-based TopK when the effective limit is small.
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit
-						<= self.ctx.config.max_order_limit_priority_queue_size as usize
+						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					let mut topk = SortTopKByKey::new(computed, sort_keys, effective_limit);
 					// Install the TopK threshold publish side only when the

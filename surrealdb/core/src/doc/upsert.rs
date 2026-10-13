@@ -5,7 +5,7 @@ use super::IgnoreError;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
+use crate::doc::{Document, Error as DocError};
 use crate::err::Error;
 use crate::val::Value;
 
@@ -17,6 +17,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Error for tracking initial failures
 		let mut error: Option<anyhow::Error> = None;
 		// Skip the create attempt when we already have the document
@@ -38,34 +42,56 @@ impl Document {
 				return Err(IgnoreError::Ignore);
 			}
 			// There was an error creating the record
-			Err(IgnoreError::Error(e)) => match e.downcast() {
-				// We got an index exists error
-				Ok(Error::IndexExists {
-					record,
-					..
-				}) if !self.is_specific_record_id() => record,
-				// This record already exists
-				Ok(Error::RecordExists {
-					record,
-				}) => record,
-				// There was a possible schema error
-				Ok(e) if e.is_schema_related() && stm.is_repeatable() => {
-					error = Some(e.into());
-					self.inner_id()?
+			Err(IgnoreError::Error(e)) => {
+				// A unique-index conflict is raised by the index layer, so it is
+				// recovered ahead of the core-error ladder below, which cannot
+				// see it. The recovery only borrows, so `e` stays whole for the
+				// arms that re-raise it.
+				let index_conflict = crate::idx::index_exists_record(&e);
+				match index_conflict {
+					// We got an index exists error
+					Some(record) if !self.is_specific_record_id() => record,
+					// An index conflict against a record id the statement named
+					// itself cannot be retried, so it is reported like any other
+					// create conflict
+					Some(_) => {
+						ctx.tx().rollback_to_save_point().await?;
+						self.mutated = false;
+						return Err(IgnoreError::Error(e));
+					}
+					None => match e.downcast::<DocError>() {
+						// This record already exists
+						Ok(DocError::RecordExists {
+							record,
+						}) => record,
+						// There was a possible schema error
+						Ok(e) if e.is_schema_related() && stm.is_repeatable() => {
+							error = Some(e.into());
+							self.inner_id()?
+						}
+						// Any other document failure is a conflict
+						Ok(e) => {
+							ctx.tx().rollback_to_save_point().await?;
+							self.mutated = false;
+							return Err(IgnoreError::Error(anyhow!(e)));
+						}
+						Err(e) => match e.downcast::<Error>() {
+							// There was a conflict error
+							Ok(e) => {
+								ctx.tx().rollback_to_save_point().await?;
+								self.mutated = false;
+								return Err(IgnoreError::Error(anyhow!(e)));
+							}
+							// Unrelated error — always surface
+							Err(e) => {
+								ctx.tx().rollback_to_save_point().await?;
+								self.mutated = false;
+								return Err(IgnoreError::Error(e));
+							}
+						},
+					},
 				}
-				// There was a conflict error
-				Ok(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					return Err(IgnoreError::Error(anyhow!(e)));
-				}
-				// Unrelated error — always surface
-				Err(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					return Err(IgnoreError::Error(e));
-				}
-			},
+			}
 		};
 		// Roll back the create attempt before falling through to update
 		ctx.tx().rollback_to_save_point().await?;
@@ -129,6 +155,10 @@ impl Document {
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Create).await?;
@@ -161,12 +191,15 @@ impl Document {
 		self.check_update_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
+		// Check if the WHERE condition is truthy BEFORE evaluating the data
+		// clause, so a data clause with side effects runs only for records the
+		// condition accepts. This also matches the index-backed plan, where
+		// records rejected by the condition never enter this pipeline at all.
+		self.check_where_condition(stk, ctx, opt, stm.cond()).await?;
 		// Ensure any input data is computed
 		self.compute_input_data(stk, ctx, opt, stm).await?;
 		// Ensure all special fields are valid
 		self.check_data_fields()?;
-		// Check if the WHERE condition is truthy
-		self.check_where_condition(stk, ctx, opt, stm.cond()).await?;
 		// Set the specified record content
 		self.process_record_data(stk, ctx, opt).await?;
 		// Set the default record field values
@@ -179,7 +212,12 @@ impl Document {
 		self.recheck_update_permissions(stk, ctx, opt, &self.current).await?;
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
+		self.store_inline_adjacency_data(ctx, opt).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Update).await?;

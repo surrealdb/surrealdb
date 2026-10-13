@@ -1,6 +1,8 @@
 pub mod format;
+pub mod grpc;
 pub mod http;
 pub mod response;
+pub mod streaming;
 pub mod websocket;
 
 use std::collections::HashMap;
@@ -11,8 +13,9 @@ use futures::stream::FuturesUnordered;
 use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::graphql::NotificationRouter;
-use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::Notification;
+use surrealdb_core::rpc::RpcProtocol;
+use surrealdb_rpc::{DbResponse, DbResult};
+use surrealdb_types::{Action, Notification};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -53,6 +56,9 @@ pub struct RpcState {
 	pub live_queries: LiveQueries,
 	/// HTTP RPC handler with persistent sessions
 	pub http: Arc<crate::rpc::http::Http>,
+	/// gRPC RPC handler, holding the sessions, transactions and live query
+	/// subscriptions of the gRPC transport
+	pub grpc: Arc<crate::rpc::grpc::Grpc>,
 	/// Prometheus observer for per-protocol network byte counters. `None`
 	/// when `SURREAL_METRICS_ENABLED=false` so the byte counter path is
 	/// entirely inert for unconfigured deployments.
@@ -70,10 +76,22 @@ impl RpcState {
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
 	) -> Self {
+		Self::new_with_options(datastore, metrics_observer, None)
+	}
+
+	pub fn new_with_options(
+		datastore: Arc<surrealdb_core::kvs::Datastore>,
+		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
+		durable_session_ttl: Option<std::time::Duration>,
+	) -> Self {
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
-			http: Arc::new(crate::rpc::http::Http::new(datastore)),
+			http: Arc::new(crate::rpc::http::Http::new_with_durability(
+				Arc::clone(&datastore),
+				durable_session_ttl,
+			)),
+			grpc: Arc::new(crate::rpc::grpc::Grpc::new(datastore, metrics_observer.clone())),
 			metrics_observer,
 			#[cfg(feature = "graphql")]
 			notification_router: Arc::new(NotificationRouter::new(
@@ -88,34 +106,67 @@ impl RpcState {
 /// The helper is intentionally independent of the datastore notification channel so embedded
 /// products can inject an already-authenticated notification received over an internal relay.
 /// Unknown live-query ids and disconnected WebSocket sessions are no-ops.
+///
+/// An [`Action::Killed`] notification also ends the registration it names: this is the only
+/// signal that carries the id of a subscription the datastore has ended, so nothing else can
+/// drop the entry.
 pub async fn dispatch_live_notification(notification: Notification, state: Arc<RpcState>) {
 	#[cfg(feature = "graphql")]
 	if state.notification_router.has_subscribers() {
 		state.notification_router.dispatch(&notification);
 	}
+	// A live query belongs to exactly one transport: whichever one's
+	// `handle_live` registered it. Ask gRPC first, and stop if it owns this
+	// one, so the WebSocket lookup below is only reached for live queries
+	// registered over a WebSocket.
+	if state.grpc.dispatch_notification(&notification).await {
+		return;
+	}
 	// Copy the lookup result out and drop the `live_queries` read guard BEFORE acquiring
 	// `web_sockets`. Keeping those locks independent prevents cleanup paths from being blocked
 	// by a client send on the hot notification path.
-	let live_query = state.live_queries.read().await.get(&notification.id).cloned();
+	//
+	// A killed subscription is deleted from storage before this notification is sent, so this
+	// is the last one its id will ever carry and the registration ends with it. Leaving it
+	// would hold the entry -- and keep the active-LQ gauge counting it -- until the connection
+	// closes. `KILL` is not the only source: removing a table, database, or namespace, and
+	// revoking a principal, all end subscriptions this way. The entry is taken out of the map
+	// before the frame is sent, so a second notification for the same id cannot decrement the
+	// gauge twice, and the labels come from the entry itself so the gauge stays balanced
+	// against the registration that incremented it.
+	let live_query = if notification.action == Action::Killed {
+		let entry = state.live_queries.write().await.remove(&notification.id);
+		if let Some(entry) = entry.as_ref()
+			&& let Some(obs) = state.metrics_observer.as_ref()
+		{
+			obs.adjust_live_query_active(-1, entry.namespace.as_deref(), entry.database.as_deref());
+		}
+		entry
+	} else {
+		state.live_queries.read().await.get(&notification.id).cloned()
+	};
 	if let Some(entry) = live_query
 		&& let Some(rpc) = state.web_sockets.read().await.get(&entry.websocket_id).cloned()
 	{
-		// Count the notification once we know it will actually be delivered to a client. Drops
-		// (unknown LQ id or disconnected WS) are deliberately not counted.
-		if let Some(obs) = state.metrics_observer.as_ref() {
-			obs.record_live_query_notification(
-				entry.namespace.as_deref(),
-				entry.database.as_deref(),
-			);
-		}
 		// Hide the connection's implicit session UUID from the client: when a LIVE query was
 		// registered without an explicit session_id it resolves to `rpc.id`, which is an
 		// internal connection identifier the client never supplied.
 		let wire_session_id = (entry.session_id != rpc.id).then_some(entry.session_id);
 		let message = DbResponse::success(None, wire_session_id, DbResult::Live(notification));
-		let format = rpc.format;
-		let sender = rpc.channel.clone();
-		crate::rpc::response::send(message, format, sender).await;
+		// Delivery never waits: see [`Websocket::deliver_notification`]. That is what bounds the
+		// in-flight set this function is spawned into -- every call returns without parking, so
+		// the dispatcher cannot accumulate one pending send per notification produced.
+		if rpc.deliver_notification(message) {
+			// Count the notification once it is actually on its way to a client. Drops (unknown
+			// LQ id, disconnected WS, or a client that fell behind and is being closed) are
+			// deliberately not counted.
+			if let Some(obs) = state.metrics_observer.as_ref() {
+				obs.record_live_query_notification(
+					entry.namespace.as_deref(),
+					entry.database.as_deref(),
+				);
+			}
+		}
 	}
 }
 
@@ -135,6 +186,13 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 /// This is called automatically by
 /// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
 /// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
+///
+/// The loop keeps receiving whether or not the deliveries it has already
+/// started have finished, so what bounds the set of them in flight is that no
+/// delivery waits on a client: both transports queue a notification without
+/// blocking and end a connection that has stopped reading. A delivery
+/// therefore only ever waits on the registry locks it consults, which no
+/// client paces.
 pub async fn notifications(
 	channel: Receiver<Notification>,
 	state: Arc<RpcState>,
@@ -164,6 +222,15 @@ pub async fn notifications(
 /// Signals each connected WebSocket to shut down and then waits until all
 /// connections have been drained from the [`RpcState`].
 pub async fn graceful_shutdown(state: Arc<RpcState>) {
+	// End gRPC subscriptions with a reason, so a subscriber learns the server
+	// is going away and that re-subscribing later is reasonable, rather than
+	// seeing its stream close without explanation.
+	state.grpc.cleanup_all_lqs().await;
+	// Cancel the transactions gRPC clients left open. A WebSocket's are
+	// cancelled when its socket closes, but a gRPC session outlives any one
+	// connection, so shutdown is the only point at which they are all known to
+	// be finished with.
+	state.grpc.cleanup_all_txns().await;
 	// Close WebSocket connections, ensuring queued messages are processed
 	for (_, rpc) in state.web_sockets.read().await.iter() {
 		rpc.shutdown.cancel();

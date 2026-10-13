@@ -8,17 +8,20 @@
 //! - [`math`]: Mathematical aggregations (sum, mean, min, max, stddev, variance, median)
 //! - [`time`]: Datetime aggregations (min, max)
 //! - [`array`]: Array collection operations (group, join, distinct)
+//! - [`vector`]: Elementwise vector aggregations (sum)
 
 mod array;
 mod count;
 mod math;
 mod time;
+mod vector;
 
 // Re-export all aggregate functions
 pub use array::{ArrayDistinct, ArrayGroup, ArrayJoin};
 pub use count::{Count, CountField};
 pub use math::{MathMax, MathMean, MathMedian, MathMin, MathStddev, MathSum, MathVariance};
 pub use time::{TimeMax, TimeMin};
+pub use vector::VectorSum;
 
 use crate::exec::function::FunctionRegistry;
 
@@ -45,4 +48,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 	registry.register_aggregate(ArrayGroup);
 	registry.register_aggregate(ArrayJoin);
 	registry.register_aggregate(ArrayDistinct);
+
+	// Vector aggregates
+	registry.register_aggregate(VectorSum);
 }

@@ -19,28 +19,18 @@ defaults:
   run:
     shell: bash
 
-# sccache → S3 backend (drop-in for the former Depot Cache). See ci.yml for rationale.
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
-  SCCACHE_IDLE_TIMEOUT: "0"
-  # Dedicated bucket-scoped creds, not the release-publishing AMAZON_* keys.
-  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
-
 jobs:
   bench:
     name: Nightly benchmark
     runs-on: runner-arm-bench
-    if: ${{ github.repository == 'surrealdb/surrealdb-private' }} # Don't run outside the private repo
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     timeout-minutes: 240
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
           toolchain: stable
 
@@ -48,8 +38,12 @@ jobs:
         run: |
           cd language-tests
 
-          cargo build --release --features bench,bench-remote-store
+          cargo build --locked --release --features bench,bench-remote-store
 
+      # The harness pins the HNSW graph seed itself, so the ANN benches build the
+      # same graph here as in a local `cargo make bench` and their run-to-run
+      # spread reflects timing noise rather than graph-construction variance.
+      # Export `SURREAL_HNSW_BUILD_SEED` on this step to override it for a run.
       - name: Run language suite
         run: |
           sudo ./.github/scripts/quiet_system.py ./language-tests/target/release/surrealql-test bench \
@@ -67,19 +61,25 @@ jobs:
   regression-7318:
     name: DiskANN #7318 regression
     runs-on: ubuntu-latest-8-cores
-    if: ${{ github.repository == 'surrealdb/surrealdb-private' }}
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 compile cache shared with the rest of CI, reached with
+          # dedicated bucket-scoped creds - not the release-publishing AMAZON_*
+          # keys the other workflows pass.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+          kache-secret-access-key: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
           save-cache: false
           free-disk-space: 'false'
 
       - name: Run reproduction test
         run: |
-          cargo test -p surreal --release --no-default-features \
+          cargo test --locked -p surreal --release --no-default-features \
             --features 'storage-mem,http' \
             --test reproduce_issue_7318 -- --ignored --nocapture

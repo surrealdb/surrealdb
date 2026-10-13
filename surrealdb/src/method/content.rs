@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use uuid::Uuid;
 
-use crate::conn::Command;
+use crate::conn::QueryRequest;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
@@ -18,7 +18,7 @@ pub struct Content<'r, C: Connection, R> {
 	#[allow(dead_code)]
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) command: Result<Command>,
+	pub(super) command: Result<QueryRequest>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -28,7 +28,7 @@ where
 {
 	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, txn: Option<Uuid>, f: F) -> Self
 	where
-		F: FnOnce() -> Result<Command>,
+		F: FnOnce() -> Result<QueryRequest>,
 	{
 		Content {
 			txn,
@@ -71,7 +71,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {run_query_value}
 }
 
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Option<R>>
@@ -82,7 +82,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {run_query_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Content<'r, Client, Vec<R>>
@@ -93,5 +93,5 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {run_query_vec}
 }

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 
-use crate::catalog;
-use crate::cnf::CommonConfig;
 use crate::err::Error;
+use crate::exec::Error as ExecError;
+use crate::exec::config::ExecConfig;
 use crate::expr::Base;
 use crate::iam::Auth;
 
@@ -33,18 +33,30 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
-	/// Are we evaluating a `PERMISSIONS` predicate (WHERE clause)?
+	/// The [`Self::perms`] value the actor's own statement carried.
 	///
-	/// Permission predicates are computed with `perms` disabled so they don't
-	/// recurse into their own table's gates. While that is in effect, mutating
-	/// statements (CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL) must be
-	/// rejected so a predicate cannot produce observable side effects
-	/// (see `SECURITY_GUIDE.md`).
-	pub(crate) permission_predicate: bool,
+	/// Equal to `perms` in every frame except one: a `REFERENCE ON DELETE
+	/// CASCADE` disables `perms` so the referencing record's own gate cannot
+	/// block referential integrity. `perms` is a single frame-wide flag, so
+	/// that also disables it for everything the nested delete reaches —
+	/// including the graph-edge cascade, whose contract is the opposite (it
+	/// must run as the caller, so an edge table's `PERMISSIONS FOR delete`
+	/// still applies to an endpoint delete). A frame that needs the actor's
+	/// real permission state rather than the integrity bypass reads this.
+	pub(crate) caller_perms: bool,
+	/// Why a data-modifying statement is rejected in this frame, if it is.
+	///
+	/// Both reasons are stored expressions that a *read* evaluates, so a write
+	/// reached from one is a side effect the reading statement never asked for.
+	/// See [`NoWriteFrame`] and `SECURITY_GUIDE.md`.
+	pub(crate) no_write: Option<NoWriteFrame>,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as a timestamp
 	pub(crate) version: Option<u64>,
+	/// Whether record reads must lock the fetched records for the duration
+	/// of the transaction (`SELECT ... FOR UPDATE`)
+	pub(crate) for_update: bool,
 	/// Tracks async event nesting depth for enforcing event MAXDEPTH.
 	async_event_depth: Option<u16>,
 }
@@ -53,21 +65,45 @@ pub struct Options {
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[catalog::TableDefinition]>),
+}
+
+/// The kind of stored expression being evaluated, for frames where a
+/// data-modifying statement must be rejected.
+///
+/// Each variant is a body the database evaluates on behalf of a reader who did
+/// not write it and cannot see it. This frame is where the rejection happens:
+/// it fires at the point a write is actually reached, so it holds regardless of
+/// how many function calls deep the write sits or which branch selected it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoWriteFrame {
+	/// A stored `SELECT` `PERMISSIONS` predicate. Evaluated with `perms`
+	/// disabled so it does not recurse into its own table's gates, which is
+	/// exactly why it must not be able to write (GHSA-66r2-5gwj-gxm2). The
+	/// create/update/delete clauses are reached from a write and use
+	/// [`Options::new_for_mutable_permission_predicate`] instead.
+	PermissionPredicate,
+	/// A `COMPUTED` field body. Evaluated on every read of the field, under the
+	/// definer's auth rather than the reader's, so a write here would let a
+	/// read mutate the database as somebody else. `DEFINE FIELD` rejects a
+	/// mutation written directly into the body; this frame covers the writes
+	/// that only a call can reach.
+	ComputedField,
 }
 
 impl Options {
-	pub(crate) fn new(config: &CommonConfig) -> Self {
+	pub(crate) fn new(config: &ExecConfig) -> Self {
 		Self {
 			ns: None,
 			db: None,
 			dive: config.max_computation_depth,
 			perms: true,
-			permission_predicate: false,
+			caller_perms: true,
+			no_write: None,
 			force: Force::None,
 			import: false,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			for_update: false,
 			async_event_depth: None,
 		}
 	}
@@ -132,11 +168,45 @@ impl Options {
 		self
 	}
 
+	/// Return a copy of these options with the auth narrowed by the given limit.
+	pub fn limited_by(&self, limit: &crate::iam::AuthLimit) -> Options {
+		self.clone().with_auth(Arc::new(self.auth.new_limited(limit)))
+	}
+
 	/// Specify whether permissions should be run for
 	/// code which uses this `Options`, with chaining.
+	///
+	/// Moves [`Self::caller_perms`] in step: this is a statement of the actor's
+	/// permission state, not a referential-integrity bypass. Use
+	/// [`Self::new_for_reference_cascade`] for the latter.
 	pub fn with_perms(mut self, perms: bool) -> Self {
 		self.perms = perms;
+		self.caller_perms = perms;
 		self
+	}
+
+	/// Disable permission checks for a `REFERENCE ON DELETE` cascade, keeping
+	/// [`Self::caller_perms`] at the actor's real permission state.
+	///
+	/// The cascade must be able to modify or delete the referencing record
+	/// whatever the actor may do to it, or referential integrity could not be
+	/// maintained. That bypass is scoped to the referencing record itself:
+	/// nested work with its own permission contract — the graph-edge cascade in
+	/// [`crate::doc::Document::purge_edges`] — restores `caller_perms`.
+	pub(crate) fn new_for_reference_cascade(&self) -> Self {
+		Self {
+			perms: false,
+			..self.clone()
+		}
+	}
+
+	/// Restore the actor's own permission state, undoing a
+	/// [`Self::new_for_reference_cascade`] bypass.
+	pub(crate) fn new_with_caller_perms(&self) -> Self {
+		Self {
+			perms: self.caller_perms,
+			..self.clone()
+		}
 	}
 
 	/// Specify whether tables/events should re-run
@@ -162,6 +232,12 @@ impl Options {
 		self
 	}
 
+	// Set whether record reads lock the fetched records
+	pub fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
+		self
+	}
+
 	/// Set the current async event nesting depth (0 for top-level).
 	/// Used to enforce MAXDEPTH when async events trigger async events.
 	pub fn with_async_event_depth(mut self, depth: u16) -> Self {
@@ -184,9 +260,13 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
+	///
+	/// Moves [`Self::caller_perms`] in step, for the reason given on
+	/// [`Self::with_perms`].
 	pub fn new_with_perms(&self, perms: bool) -> Self {
 		Self {
 			perms,
+			caller_perms: perms,
 			..self.clone()
 		}
 	}
@@ -201,7 +281,37 @@ impl Options {
 	pub fn new_for_permission_predicate(&self) -> Self {
 		Self {
 			perms: false,
-			permission_predicate: true,
+			caller_perms: false,
+			no_write: Some(NoWriteFrame::PermissionPredicate),
+			..self.clone()
+		}
+	}
+
+	/// Create a new Options object for evaluating a `PERMISSIONS FOR
+	/// create/update/delete` predicate.
+	///
+	/// Like [`Self::new_for_permission_predicate`] it disables permission
+	/// recursion, but it leaves `no_write` unset so a data-modifying statement
+	/// in the predicate runs instead of being rejected. Only the clauses a
+	/// *write* triggers use this frame; a `SELECT` predicate never does. The
+	/// write runs with `perms` disabled, like the blocking frame.
+	pub fn new_for_mutable_permission_predicate(&self) -> Self {
+		Self {
+			perms: false,
+			caller_perms: false,
+			no_write: None,
+			..self.clone()
+		}
+	}
+
+	/// Create a new Options object for evaluating a `COMPUTED` field body.
+	///
+	/// Unlike [`Self::new_for_permission_predicate`] this leaves `perms`
+	/// untouched: a computed body reads the database as the field's definer and
+	/// those reads stay permission-checked. Only the write rejection is shared.
+	pub fn new_for_computed_field(&self) -> Self {
+		Self {
+			no_write: Some(NoWriteFrame::ComputedField),
 			..self.clone()
 		}
 	}
@@ -228,7 +338,7 @@ impl Options {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
 			(Some(_), Some(_)) => Ok(Base::Db),
-			(None, Some(_)) => Err(Error::NsEmpty),
+			(None, Some(_)) => Err(ExecError::NsEmpty.into()),
 		}
 	}
 
@@ -238,7 +348,7 @@ impl Options {
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
-			return Err(Error::ComputationDepthExceeded);
+			return Err(ExecError::ComputationDepthExceeded.into());
 		}
 		Ok(Self {
 			dive: self.dive - cost as u32,
@@ -251,21 +361,21 @@ impl Options {
 	/// Get currently selected NS
 	#[inline(always)]
 	pub fn ns(&self) -> Result<&str> {
-		self.ns.as_deref().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+		self.ns.as_deref().ok_or_else(|| ExecError::NsEmpty).map_err(anyhow::Error::new)
 	}
 
 	pub(crate) fn arc_ns(&self) -> Result<Arc<str>> {
-		self.ns.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+		self.ns.clone().ok_or_else(|| ExecError::NsEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str> {
-		self.db.as_deref().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
+		self.db.as_deref().ok_or_else(|| ExecError::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	pub(crate) fn arc_db(&self) -> Result<Arc<str>> {
-		self.db.clone().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
+		self.db.clone().ok_or_else(|| ExecError::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS and DB
@@ -286,7 +396,7 @@ impl Options {
 	#[inline(always)]
 	pub fn valid_for_ns(&self) -> Result<()> {
 		if self.ns.is_none() {
-			bail!(Error::NsEmpty);
+			bail!(ExecError::NsEmpty);
 		}
 		Ok(())
 	}
@@ -295,10 +405,10 @@ impl Options {
 	#[inline(always)]
 	pub fn valid_for_db(&self) -> Result<()> {
 		if self.ns.is_none() {
-			bail!(Error::NsEmpty);
+			bail!(ExecError::NsEmpty);
 		}
 		if self.db.is_none() {
-			bail!(Error::DbEmpty);
+			bail!(ExecError::DbEmpty);
 		}
 		Ok(())
 	}

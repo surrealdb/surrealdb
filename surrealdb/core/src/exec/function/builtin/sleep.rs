@@ -31,7 +31,7 @@ async fn sleep_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 
 	// Sleep with cancellation support
 	tokio::select! {
-		_ = tokio::time::sleep(duration.0) => Ok(Value::None),
+		_ = common::time::sleep(duration.0) => Ok(Value::None),
 		_ = cancellation.cancelled() => {
 			// Cancelled, return None without error
 			Ok(Value::None)

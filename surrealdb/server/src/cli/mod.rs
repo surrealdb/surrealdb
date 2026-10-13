@@ -4,7 +4,6 @@ pub(crate) mod abstraction;
 mod config;
 mod export;
 mod fix;
-mod fmt;
 mod import;
 mod isready;
 #[cfg(feature = "mcp")]
@@ -30,10 +29,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-pub use config::{Config, ConfigCheck, ConfigCheckRequirements};
+pub use config::{Config, ConfigCheck};
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
-use fmt::FormatCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 #[cfg(feature = "mcp")]
@@ -45,7 +43,6 @@ use semver::Version;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
@@ -198,8 +195,6 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
-	#[command(about = "Format SurrealQL query", visible_alias = "fmt")]
-	Format(FormatCommandArguments),
 	#[command(about = "Run commands in version 2 of the database for backwards compatibility")]
 	V2(V2Commands),
 }
@@ -241,11 +236,7 @@ impl LogFileRotation {
 ///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ crate::observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + crate::observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {
@@ -255,13 +246,6 @@ pub async fn init<
 	// Print debug mode warning
 	#[cfg(debug_assertions)]
 	println!("{DEBUG_BUILD_WARNING}");
-	// Start a new CPU profiler
-	#[cfg(feature = "performance-profiler")]
-	let guard = pprof::ProfilerGuardBuilder::default()
-		.frequency(1000)
-		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
-		.build()
-		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
@@ -330,31 +314,13 @@ pub async fn init<
 		Commands::Module(args) => module::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init::<C>(args).await,
-		Commands::Format(args) => fmt::init(args).await,
+		Commands::Fix(args) => fix::init::<C>(composer, args).await,
 		Commands::V2(args) => v2::init(args).await,
 	};
 	// Flush every provider's batch processor so audit / slow-query
 	// records and metric exports are written before the runtime is
 	// dropped.
 	runtime.shutdown();
-	// Save the flamegraph and profile
-	#[cfg(feature = "performance-profiler")]
-	if let Ok(report) = guard.report().build() {
-		// Import necessary traits
-		use std::io::Write;
-
-		use pprof::protos::Message;
-		// Output a flamegraph
-		let file = std::fs::File::create("flamegraph.svg").unwrap();
-		report.flamegraph(file).unwrap();
-		// Output a pprof
-		let mut file = std::fs::File::create("profile.pb").unwrap();
-		let profile = report.pprof().unwrap();
-		let mut content = Vec::new();
-		profile.encode(&mut content).unwrap();
-		file.write_all(&content).unwrap();
-	};
 	// Error and exit the program
 	let res = if let Err(e) = output {
 		// Output any error

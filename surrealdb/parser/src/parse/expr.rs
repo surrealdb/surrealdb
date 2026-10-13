@@ -629,9 +629,7 @@ async fn parse_recurse(
 
 	let mut expr = Expr::Document(push_span);
 	while let Some(new_expr) = parser
-		.enter(async |parser| {
-			try_parse_infix_postfix_op(parser, IDIOM_BP, Expr::Document(push_span), span).await
-		})
+		.enter(async |parser| try_parse_infix_postfix_op(parser, IDIOM_BP, expr, span).await)
 		.await?
 	{
 		expr = new_expr
@@ -990,6 +988,8 @@ impl Parse for ast::Lookup {
 
 					let _ = parser.expect(T![FROM])?;
 
+					let only = parser.eat(T![ONLY])?.is_some();
+
 					let from = parse_lookup_from(parser).await?;
 					let condition = if parser.eat(T![WHERE])?.is_some() {
 						Some(parser.parse_enter().await?)
@@ -1059,6 +1059,7 @@ impl Parse for ast::Lookup {
 					let span = parser.span_since(peek.span);
 					Ok(ast::Lookup::Select(ast::SelectLookup {
 						fields,
+						only,
 						from,
 						condition,
 						split,

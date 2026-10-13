@@ -7,6 +7,7 @@ pub mod export;
 pub mod gql;
 #[cfg(feature = "graphql")]
 pub mod graphql;
+pub mod grpc;
 pub(crate) mod headers;
 pub mod health;
 pub mod import;
@@ -17,6 +18,7 @@ pub mod mcp;
 pub mod ml;
 pub(crate) mod output;
 mod params;
+mod rate_limit;
 mod ready;
 pub mod rpc;
 mod signals;
@@ -24,6 +26,7 @@ pub mod signin;
 pub mod signup;
 pub mod sql;
 pub mod sync;
+pub(crate) mod timeout;
 mod tracer;
 pub mod version;
 
@@ -161,6 +164,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(export::router())
 		.merge(import::router())
 		.merge(rpc::router())
+		.merge(grpc::router())
 		.merge(version::router())
 		.merge(sync::router())
 		.merge(sql::router())
@@ -228,6 +232,7 @@ pub struct Readiness {
 /// - `client_ip`: [`ClientIp::Socket`] (extract the client IP from the raw socket)
 /// - `no_identification_headers`: `false` (include `Server` and version headers)
 /// - `allow_origin`: empty (allow all origins)
+/// - `durable_session_ttl`: `None` (HTTP RPC sessions are in-memory only)
 ///
 /// # Example
 ///
@@ -241,6 +246,7 @@ pub struct Readiness {
 ///     client_ip: ClientIp::None,
 ///     no_identification_headers: true,
 ///     allow_origin: vec!["https://example.com".to_string()],
+///     durable_session_ttl: None,
 /// };
 /// ```
 #[derive(Clone, Debug)]
@@ -252,6 +258,11 @@ pub struct RouterOptions {
 	/// Allowed CORS origins. When empty (the default), all origins are allowed.
 	/// Each entry should be a valid origin string (e.g. `"https://example.com"`).
 	pub allow_origin: Vec<String>,
+	/// When set, client-attached HTTP RPC sessions are persisted in the
+	/// datastore — surviving server restarts and shared across cluster nodes
+	/// — and expire after this idle TTL. `None` (the default) keeps sessions
+	/// in-memory only.
+	pub durable_session_ttl: Option<Duration>,
 }
 
 impl Default for RouterOptions {
@@ -260,6 +271,7 @@ impl Default for RouterOptions {
 			client_ip: client_ip::ClientIp::Socket,
 			no_identification_headers: false,
 			allow_origin: Vec::new(),
+			durable_session_ttl: None,
 		}
 	}
 }
@@ -270,6 +282,7 @@ impl From<&Config> for RouterOptions {
 			client_ip: cfg.client_ip,
 			no_identification_headers: cfg.no_identification_headers,
 			allow_origin: cfg.allow_origin.clone(),
+			durable_session_ttl: cfg.durable_session_ttl,
 		}
 	}
 }
@@ -498,10 +511,10 @@ impl SurrealRouter {
 			// ahead of auth so gated requests short-circuit before authentication
 			// touches the (still-initialising) datastore.
 			.layer(middleware::from_fn_with_state(gate_ready, ready::readiness_gate))
-			.layer(auth::SurrealAuthLayer)
-			.layer(headers::add_server_header(!opt.no_identification_headers)?)
-			.layer(headers::add_version_header(!opt.no_identification_headers)?)
-			// Apply CORS headers to relevant responses
+			// Apply CORS headers to relevant responses. Sits ahead of the rate
+			// limiter and the auth layer so the responses they emit — 429s
+			// with Retry-After in particular — carry CORS headers that
+			// cross-origin browser clients are allowed to read.
 			.layer({
 				let cors = CorsLayer::new()
 					.allow_methods([
@@ -516,11 +529,26 @@ impl SurrealRouter {
 					.allow_origin(allow_origin)
 					.max_age(Duration::from_secs(86400));
 
+				// Expose Retry-After so cross-origin browser clients can read
+				// the backoff hint on rate-limited responses.
+				#[cfg(not(feature = "mcp"))]
+				let expose_headers = vec![header::RETRY_AFTER];
 				#[cfg(feature = "mcp")]
-				let cors = cors.expose_headers(mcp_expose_headers);
+				let expose_headers = {
+					let mut expose = vec![header::RETRY_AFTER];
+					expose.extend(mcp_expose_headers);
+					expose
+				};
 
-				cors
-			});
+				cors.expose_headers(expose_headers)
+			})
+			// Throttle authentication attempts per client address ahead of the
+			// auth layer, so a limited request performs no credential
+			// verification work at all.
+			.layer(middleware::from_fn(rate_limit::auth_rate_limit_middleware))
+			.layer(auth::SurrealAuthLayer)
+			.layer(headers::add_server_header(!opt.no_identification_headers)?)
+			.layer(headers::add_version_header(!opt.no_identification_headers)?);
 
 		// Build the route tree from the RouterFactory
 		let axum_app = F::configure_router(router_state);
@@ -542,7 +570,11 @@ impl SurrealRouter {
 		// (if metrics are enabled) is threaded through so the WebSocket I/O
 		// paths can increment per-protocol byte counters without grabbing any
 		// global state.
-		let rpc_state = Arc::new(RpcState::new_with_metrics(Arc::clone(&ds), prometheus_observer));
+		let rpc_state = Arc::new(RpcState::new_with_options(
+			Arc::clone(&ds),
+			prometheus_observer,
+			opt.durable_session_ttl,
+		));
 
 		// Apply state
 		let axum_app = axum_app.with_state(Arc::clone(&rpc_state));

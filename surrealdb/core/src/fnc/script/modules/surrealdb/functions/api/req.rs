@@ -9,4 +9,5 @@ impl_module_def!(
 	Package,
 	"api::req",
 	"body" => fut Async,
+	"max_body" => fut Async,
 );

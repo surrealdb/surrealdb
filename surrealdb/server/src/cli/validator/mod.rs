@@ -2,12 +2,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use surrealdb_core::dbs::capabilities::{
+use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
-use surrealdb_types::Duration;
+use surrealdb_rpc::export::{ExcludedTables, TableConfig};
 
 pub(crate) mod parser;
 
@@ -51,9 +50,8 @@ pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
 	}
 	// Validate the scheme
 	match split_endpoint(v).0 {
-		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "tikv" => {
-			Ok(v.to_string())
-		}
+		"http" | "https" | "ws" | "wss" | "grpc" | "grpcs" | "mem" | "rocksdb" | "surrealkv"
+		| "tikv" => Ok(v.to_string()),
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -68,7 +66,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 }
 
 pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
-	Duration::from_str(v).map(|d| d.into_inner()).map_err(|_| String::from("invalid duration"))
+	parse_common::duration(v).map_err(|e| format!("Invalid duration: {}", e.message))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

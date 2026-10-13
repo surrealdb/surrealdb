@@ -10,7 +10,7 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: Add
+                    .op: BinaryOperator::Add
                     .right: Expr::Binary
                         BinaryExpr
                             .left: Expr::Path
@@ -18,7 +18,7 @@ Query
                                     .start: Ident
                                         .text: "b"
                                     .parts: None
-                            .op: Multiply
+                            .op: BinaryOperator::Multiply
                             .right: Expr::Path
                                 Path
                                     .start: Ident

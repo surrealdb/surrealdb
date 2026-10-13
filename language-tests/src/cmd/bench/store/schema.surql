@@ -20,6 +20,11 @@ DEFINE FIELD IF NOT EXISTS average_times ON measurement TYPE array<float>;
 DEFINE FIELD IF NOT EXISTS labels ON measurement TYPE array<"HighMild" | "HighSevere" | "LowMild" | "LowSevere" | "NotAnOutlier">;
 DEFINE FIELD IF NOT EXISTS fences ON measurement TYPE array<float,4>;
 DEFINE FIELD IF NOT EXISTS commit ON measurement TYPE string | none;
+-- Rows the benched statement returned. A bench whose row count moved is not
+-- measuring the same work as its baseline however comparable the two timings
+-- look, so the comparison reports it as a changed workload rather than as a
+-- speed difference. `none` on rows written before this field existed.
+DEFINE FIELD IF NOT EXISTS rows ON measurement TYPE int | none;
 DEFINE FIELD IF NOT EXISTS mean ON measurement TYPE { point: float, standard_error: float, confidence_level: float, lower_bound: float, upper_bound: float };
 DEFINE FIELD IF NOT EXISTS median ON measurement TYPE { point: float, standard_error: float, confidence_level: float, lower_bound: float, upper_bound: float };
 DEFINE FIELD IF NOT EXISTS std_dev ON measurement TYPE { point: float, standard_error: float, confidence_level: float, lower_bound: float, upper_bound: float };

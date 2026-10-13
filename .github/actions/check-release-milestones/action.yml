@@ -1,0 +1,244 @@
+name: 'Check release milestones'
+description: >-
+  Advisory check that every PR in the release-version milestone is merged
+  and backported into the released commit(s), on the engine and (when
+  configured) the downstream repo. Extracted verbatim from release.yml; the
+  interface is the ENV VARS visible to the calling step - NAME, VERSION,
+  NIGHTLY, ENGINE_REPO, OWNER, DOWNSTREAM_REPO, ENGINE_SHA, DS_SHA,
+  DS_BUILT, ENGINE_BRANCH, DS_BRANCH (job env) plus GH_TOKEN, DS_TOKEN,
+  DS_CONFIGURED (step env) - which propagate into this composite step's
+  process environment. Expects full-history checkouts of the released
+  commits at engine/ and (optionally) downstream/. Never fails the run.
+
+outputs:
+  has-unmerged:
+    description: 'Whether the milestone has open (unmerged) PRs'
+    value: ${{ steps.check.outputs.has-unmerged }}
+  unmerged-count:
+    description: 'Number of open milestone PRs'
+    value: ${{ steps.check.outputs.unmerged-count }}
+  has-unbackported:
+    description: 'Whether merged milestone PRs appear missing from the released commit'
+    value: ${{ steps.check.outputs.has-unbackported }}
+  unbackported-count:
+    description: 'Number of apparently-unbackported milestone PRs'
+    value: ${{ steps.check.outputs.unbackported-count }}
+  warning:
+    description: 'Human-readable suffix for the approve job name (empty when clean)'
+    value: ${{ steps.check.outputs.warning }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check milestone PRs
+      id: check
+      shell: bash
+      run: |
+        set -euo pipefail
+        has_unmerged=false;     total_unmerged=0
+        has_unbackported=false; total_unbackported=0
+
+        # Nightly has no versioned milestone; nothing to check.
+        if [[ "${NIGHTLY}" == "true" || "${NAME}" == "nightly" ]]; then
+          echo "Nightly release — no version milestone to check."
+          {
+            echo "has-unmerged=false"
+            echo "unmerged-count=0"
+            echo "has-unbackported=false"
+            echo "unbackported-count=0"
+            echo "warning="
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        {
+          echo "## Milestone readiness (\`${NAME}\`)"
+          echo ""
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # --- backport presence indexes (per repo checkout) --------------------
+        # Built from a local checkout of a repo's released commit. Three indexes,
+        # any of which is enough to call a merged PR "present" (see pr_present):
+        #   * _present_prs: PR numbers referenced by "(#N)" anywhere in the
+        #     history reachable from the released commit (GitHub's squash tag,
+        #     which cherry-pick / backport usually preserves).
+        #   * _cherry: source SHAs recorded by `git cherry-pick -x`.
+        #   * _rel_pids: patch-ids of every commit added on THIS release line
+        #     since it forked from main. This is the message-agnostic signal: a
+        #     backport keeps the upstream commit's diff, hence its patch-id, so it
+        #     still matches even when the "(#N)" tag was stripped or `-x` wasn't
+        #     used (as long as the backport applied cleanly, without conflict
+        #     edits that change the diff).
+        _present_prs=(); _cherry=(); _rel_pids=(); _backport_prs=(); _pids_ok=false; _dir=""; _rel=""
+        load_indexes() {
+          _dir="$1"; _rel="$2"; _present_prs=(); _cherry=(); _rel_pids=(); _pids_ok=false
+          [[ -n "$_dir" && -d "$_dir/.git" && -n "$_rel" ]] || { _dir=""; return 0; }
+          mapfile -t _present_prs < <(git -C "$_dir" log "$_rel" --format='%s%n%b' 2>/dev/null \
+            | grep -oE '\(#[0-9]+\)' | tr -cd '0-9\n' | sort -u)
+          mapfile -t _cherry < <(git -C "$_dir" log "$_rel" --format='%b' 2>/dev/null \
+            | grep -oiE 'cherry picked from commit [0-9a-f]{7,40}' | awk '{print tolower($NF)}' | sort -u)
+          # Patch-ids of commits unique to the release line (added since it forked
+          # from main). Streamed in one `git log -p | git patch-id` pass. Bounded
+          # by the number of backports the line carries, not all of history.
+          local base
+          if base="$(git -C "$_dir" merge-base "$_rel" origin/main 2>/dev/null)" && [[ -n "$base" ]]; then
+            mapfile -t _rel_pids < <(git -C "$_dir" log --no-merges -p "${base}..${_rel}" 2>/dev/null \
+              | git -C "$_dir" patch-id --stable 2>/dev/null | awk '{print $1}' | sort -u)
+            _pids_ok=true
+          fi
+        }
+        # Index every original PR referenced by a merged backport PR INTO the
+        # release line whose merge commit is contained in the released history:
+        # the conventional backport head branch (backport/<line>/<N>) and any
+        # "#N" mention in the PR title/body. This recognises a backport whose
+        # diff was reshaped by conflict resolution or split/bundled across
+        # commits, where the "(#N)" tag, cherry-pick -x and patch-id signals
+        # all fail (e.g. a merge-queue PR manually backported under a new
+        # shape, like #576 -> #605 on releases/3.2). Advisory, like the rest.
+        load_backports() {
+          local repo="$1" token="$2" branch="$3" rows n msha bhead btext ref
+          _backport_prs=()
+          [[ -n "$repo" && -n "$branch" && -n "$_dir" && -n "$_rel" ]] || return 0
+          rows="$(GH_TOKEN="$token" gh api --paginate \
+            "repos/${repo}/pulls?base=${branch}&state=closed&per_page=100" \
+            --jq '.[] | select(.merged_at != null) | [.number, (.merge_commit_sha // ""), (.head.ref // ""), (((.title // "") + " " + (.body // "")) | gsub("[\r\n\t]"; " "))] | @tsv' 2>/dev/null || true)"
+          while IFS=$'\t' read -r n msha bhead btext; do
+            [[ -z "$n" || -z "$msha" ]] && continue
+            # Only count backport PRs that are part of the released commit.
+            git -C "$_dir" merge-base --is-ancestor "$msha" "$_rel" 2>/dev/null || continue
+            [[ "$bhead" =~ ^backport[/-].*[/-]([0-9]+)$ ]] && _backport_prs+=("${BASH_REMATCH[1]}")
+            for ref in $(printf '%s' "$btext" | grep -oE '#[0-9]+' | tr -d '#'); do
+              _backport_prs+=("$ref")
+            done
+          done <<< "$rows"
+        }
+        # Does merged PR #$1 (merge/squash commit $2) appear in the released
+        # commit indexed by load_indexes? Advisory heuristic (see header).
+        pr_present() {
+          local num="$1" msha="${2,,}" cs pid
+          # 0) A merged backport PR into the release line references it.
+          if [[ ${#_backport_prs[@]} -gt 0 ]] && printf '%s\n' "${_backport_prs[@]}" | grep -qx "$num"; then
+            return 0
+          fi
+          # 1) "(#N)" tag somewhere in the released history.
+          if [[ ${#_present_prs[@]} -gt 0 ]] && printf '%s\n' "${_present_prs[@]}" | grep -qx "$num"; then
+            return 0
+          fi
+          if [[ -n "$msha" && -n "$_dir" ]]; then
+            # 2) The released commit descends from the PR's merge commit.
+            git -C "$_dir" merge-base --is-ancestor "$msha" "$_rel" 2>/dev/null && return 0
+            # 3) A `git cherry-pick -x` trailer names the PR's merge commit.
+            for cs in ${_cherry[@]+"${_cherry[@]}"}; do
+              [[ "$msha" == "$cs"* || "$cs" == "$msha"* ]] && return 0
+            done
+            # 4) Message-agnostic: the PR's diff (patch-id) appears on the release
+            #    line. Survives a stripped "(#N)" tag or a cherry-pick without -x.
+            if [[ "$_pids_ok" == "true" && ${#_rel_pids[@]} -gt 0 ]]; then
+              pid="$(git -C "$_dir" show "$msha" 2>/dev/null | git -C "$_dir" patch-id --stable 2>/dev/null | awk '{print $1}')"
+              if [[ -n "$pid" ]] && printf '%s\n' "${_rel_pids[@]}" | grep -qx "$pid"; then
+                return 0
+              fi
+            fi
+          fi
+          return 1
+        }
+
+        # Check one repo's milestone: warn about OPEN (unmerged) PRs, and about
+        # MERGED PRs that do not appear in the released commit (not backported).
+        # Args: <label> <owner/repo> <token> <checkout-dir|""> <released-sha|"">.
+        # Best-effort: a repo we cannot read is reported as skipped, never fatal.
+        check_repo() {
+          local label="$1" repo="$2" token="$3" dir="$4" rel="$5" branch="$6"
+          local titles num rows n st merged url title msha okmsg
+          local unmerged=() unbackported=() unverified=false
+          if ! titles="$(GH_TOKEN="$token" gh api --paginate "repos/${repo}/milestones?state=all" --jq '.[] | [.title, .number] | @tsv' 2>/dev/null)"; then
+            echo "- **${label}** (\`${repo}\`): could not read milestones — the token needs Issues: read + Pull requests: read on this repo (for the downstream repo, grant them to the Downstream App) — skipped." >> "$GITHUB_STEP_SUMMARY"
+            return 0
+          fi
+          # Match the milestone whose title is the release name (or bare version).
+          num="$(printf '%s\n' "$titles" | awk -F'\t' -v n="${NAME}" -v v="${VERSION}" '$1==n || $1==v {print $2; exit}')"
+          if [[ -z "$num" ]]; then
+            echo "- **${label}** (\`${repo}\`): no milestone \`${NAME}\` — skipping." >> "$GITHUB_STEP_SUMMARY"
+            return 0
+          fi
+
+          load_indexes "$dir" "$rel"
+          load_backports "$repo" "$token" "$branch"
+
+          # Every PR in the milestone (open + closed), with its merged flag.
+          rows="$(GH_TOKEN="$token" gh api --paginate "repos/${repo}/issues?milestone=${num}&state=all" \
+            --jq '.[] | select(.pull_request != null) | [.number, .state, (.pull_request.merged_at // ""), .html_url, .title] | @tsv' 2>/dev/null || true)"
+          while IFS=$'\t' read -r n st merged url title; do
+            [[ -z "$n" ]] && continue
+            if [[ "$st" == "open" ]]; then
+              unmerged+=("#${n} ${title} — ${url}")
+            elif [[ -n "$merged" ]]; then
+              # Merged into main/base — must also be backported into the release.
+              if [[ -z "$dir" ]]; then
+                unverified=true
+                continue
+              fi
+              msha="$(GH_TOKEN="$token" gh api "repos/${repo}/pulls/${n}" --jq '.merge_commit_sha // ""' 2>/dev/null || true)"
+              pr_present "$n" "$msha" || unbackported+=("#${n} ${title} — ${url}")
+            fi
+          done <<< "$rows"
+
+          if [[ ${#unmerged[@]} -eq 0 && ${#unbackported[@]} -eq 0 ]]; then
+            okmsg="all PRs merged"
+            [[ -n "$dir" ]] && okmsg="all PRs merged and backported into \`${rel:0:12}\`"
+            echo "- **${label}** (\`${repo}\`): milestone \`${NAME}\` — ${okmsg}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ ${#unmerged[@]} -gt 0 ]]; then
+            total_unmerged=$(( total_unmerged + ${#unmerged[@]} )); has_unmerged=true
+            echo "::warning title=Milestone ${NAME} (${label})::${#unmerged[@]} unmerged PR(s) in milestone ${NAME} on ${repo}; merge them before releasing."
+            {
+              echo "- **${label}** (\`${repo}\`): **${#unmerged[@]}** unmerged PR(s):"
+              printf '%s\n' "${unmerged[@]}" | sed 's/^/    - /'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ ${#unbackported[@]} -gt 0 ]]; then
+            total_unbackported=$(( total_unbackported + ${#unbackported[@]} )); has_unbackported=true
+            echo "::warning title=Milestone ${NAME} (${label})::${#unbackported[@]} merged PR(s) in milestone ${NAME} not found in the released ${label} commit (${rel:0:12}); confirm they are backported (possibly via another PR)."
+            {
+              echo "- **${label}** (\`${repo}\`): **${#unbackported[@]}** merged PR(s) not found in the released commit \`${rel:0:12}\` — verify they were backported (possibly bundled into another PR):"
+              printf '%s\n' "${unbackported[@]}" | sed 's/^/    - /'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$unverified" == "true" ]]; then
+            echo "- **${label}** (\`${repo}\`): merged PRs present, but no released commit was available to verify backports — skipped that check." >> "$GITHUB_STEP_SUMMARY"
+          fi
+        }
+
+        check_repo "engine" "${ENGINE_REPO}" "${GH_TOKEN}" "engine" "${ENGINE_SHA}" "${ENGINE_BRANCH}"
+        if [[ "${DS_CONFIGURED}" == "true" ]]; then
+          # Only verify downstream backports when a downstream image is actually
+          # being released (i.e. there is a downstream commit to check against).
+          ds_dir=""; [[ "${DS_BUILT}" == "true" ]] && ds_dir="downstream"
+          check_repo "downstream" "${OWNER}/${DOWNSTREAM_REPO}" "${DS_TOKEN}" "${ds_dir}" "${DS_SHA}" "${DS_BRANCH}"
+        else
+          echo "- **downstream**: app not configured — skipped." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        # Combined, human-readable warning suffix for the approve job name.
+        warning=""
+        [[ "$has_unmerged" == "true" ]] && warning="${total_unmerged} unmerged"
+        if [[ "$has_unbackported" == "true" ]]; then
+          [[ -n "$warning" ]] && warning="${warning}, "
+          warning="${warning}${total_unbackported} unbackported"
+        fi
+        [[ -n "$warning" ]] && warning="${warning} milestone PR(s)"
+
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        if [[ -n "$warning" ]]; then
+          echo "**${warning}** — review before approving the release." >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No unmerged or unbackported milestone PRs found." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        {
+          echo "has-unmerged=${has_unmerged}"
+          echo "unmerged-count=${total_unmerged}"
+          echo "has-unbackported=${has_unbackported}"
+          echo "unbackported-count=${total_unbackported}"
+          echo "warning=${warning}"
+        } >> "$GITHUB_OUTPUT"

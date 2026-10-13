@@ -14,222 +14,87 @@
 //!   database
 //! - `mem`: in-memory database
 
-pub mod config;
-pub mod export;
+pub(crate) use surrealdb_kvs::{Direction, TransactionBuilder, TransactionType, Val, consts, err};
 
-mod api;
-mod batch;
+pub(crate) mod export;
+pub mod tasks;
+
 mod clock;
-mod consts;
-mod cursor;
-mod direction;
-mod ds;
-mod err;
-mod into;
-mod key;
-mod threadpool;
-mod timestamp;
-mod tr;
-mod tx;
-mod util;
+pub(crate) mod ds;
 
-mod indxdb;
-mod mem;
-mod rocksdb;
-mod surrealkv;
-mod tikv;
+#[cfg(test)]
+pub(crate) mod compat;
+pub(crate) mod index;
+pub(crate) mod lightweight;
+pub(crate) mod migration;
+pub(crate) mod paging;
+pub mod request;
+pub(crate) mod slowlog;
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 
-pub(crate) mod cache;
-pub(crate) mod index;
-pub(crate) mod sequences;
-pub(crate) mod slowlog;
-pub(crate) mod tasklease;
-pub(crate) mod version;
-
-pub use api::{
-	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+pub(crate) use consts::{
+	CHANGEFEED_GC_BATCH_SIZE, CHANGEFEED_GC_PASS_KEY_BUDGET, INDEX_COMPACTION_QUEUE_BATCH_SIZE,
+	INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
+	RECLAIM_BATCH_SIZE, RECLAIM_PASS_ENTRY_QUOTA, RECLAIM_PASS_KEY_BUDGET,
 };
-pub use consts::{
-	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV, INDEXING_BATCH_SIZE,
-	NORMAL_BATCH_SIZE,
-};
-pub use direction::Direction;
-pub(crate) use ds::TransactionFactory;
-pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
-	Builder, Datastore, DatastoreFlavor, Metric, Metrics, TransactionBuilder,
-	TransactionBuilderFactory, TransactionBuilderParts,
+	Builder, Datastore, LiveQueryEngine, TransactionBuilderFactory, TransactionBuilderParts,
 };
-pub use err::{Error, Result};
-pub use into::IntoBytes;
-pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
-pub use timestamp::{
-	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
-	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
+pub(crate) use err::Error;
+pub use request::{Dialect, QueryRequest, QuerySource};
+pub(crate) use surrealdb_datastore::IntoBytes;
+// Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
+// the storage backend's, and a datastore failure is a different thing.
+pub(crate) use surrealdb_datastore::error::DatastoreError;
+// The transaction layer and the keyspace live one crate down, in
+// `surrealdb-datastore`; these bind them to core's own `crate::kvs::…` paths.
+// Depend on that crate directly to reach them from outside core.
+pub(crate) use surrealdb_datastore::{
+	TransactionConfig, TransactionFactory, cache, sequences, tasklease, tx, util, version,
 };
-pub use tr::{LockType, TransactionType, Transactor};
-pub(crate) use tx::CachePolicy;
-pub use tx::Transaction;
+// Recognising a storage failure descends with the transaction layer: the code
+// that classifies one sits on both sides of the crate boundary. Both shapes stay
+// recognised from below because recognition follows the source chain instead of
+// naming `crate::err::Error::Kvs`, which is the wrapper the layer above puts on
+// a storage failure re-raised from a function typed on core's error.
+pub(crate) use surrealdb_datastore::{
+	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
+};
+pub(crate) use tx::Transaction;
 
-/// The key part of a key-value pair. An alias for [`Vec<u8>`].
-pub type Key = Vec<u8>;
+pub(crate) use crate::catalog::providers::CachePolicy;
 
-/// The value part of a key-value pair. An alias for [`Vec<u8>`].
-pub type Val = Vec<u8>;
-
-/// The Version part of a key-value pair. An alias for [`u64`].
-pub type Version = u64;
-
-pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
-	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {
-		return kvs_err.is_retryable();
+/// Whether a conditional write (`put_compare_key` / `del_compare_key`) failed
+/// because its condition was not met — the key already existed, was deleted,
+/// or changed since the guard value was read. On last-writer-wins backends
+/// (TiKV) the condition is validated at commit, so this can surface from the
+/// conditional call itself or from the subsequent `commit`; callers must check
+/// both. This is how the durable RPC session writes stay atomic on TiKV, where
+/// a blind `set`/`clr` is last-writer-wins (see the `multiwriter_same_keys_*`
+/// KV coverage).
+///
+/// The error arrives either as a bare [`Error`] or wrapped, which
+/// [`storage_error`] unifies — mirroring [`is_retryable_transaction_conflict`].
+pub(crate) fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
+	fn is_condition_error(e: &self::err::Error) -> bool {
+		matches!(
+			e,
+			self::err::Error::TransactionConditionNotMet
+				| self::err::Error::TransactionKeyAlreadyExists
+		)
 	}
-	matches!(
-		err.downcast_ref::<crate::err::Error>(),
-		Some(crate::err::Error::Kvs(kvs_err)) if kvs_err.is_retryable()
-	)
+	storage_error(err).is_some_and(is_condition_error)
 }
 
+// The fault-injection registry descends with the transaction layer: the code that
+// consults it is on both sides of the crate boundary, and a registry duplicated
+// per crate would have the test inject into one and the engine read the other.
 #[cfg(test)]
-pub(crate) mod testing {
-	use std::collections::HashMap;
-	use std::sync::{Mutex, OnceLock};
-
-	use anyhow::Result;
-	use uuid::Uuid;
-
-	#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-	pub(crate) enum RetryableConflictSite {
-		ConcurrentIndexInitialCleanup,
-		ConcurrentIndexInitialBatch,
-		ConcurrentIndexReservationRelease,
-		IndexCompactionQueueCleanup,
-		FullTextCompaction,
-		CountCompaction,
-		HnswCompaction,
-	}
-
-	#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-	pub(crate) enum NonRetryableErrorSite {
-		ConcurrentIndexAfterReservationRegistration,
-		ConcurrentIndexReservationRelease,
-	}
-
-	static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
-		OnceLock::new();
-	static NON_RETRYABLE_ERRORS: OnceLock<Mutex<HashMap<(NonRetryableErrorSite, Uuid), usize>>> =
-		OnceLock::new();
-
-	fn retryable_conflicts() -> &'static Mutex<HashMap<(RetryableConflictSite, Uuid), usize>> {
-		RETRYABLE_CONFLICTS.get_or_init(|| Mutex::new(HashMap::new()))
-	}
-
-	fn non_retryable_errors() -> &'static Mutex<HashMap<(NonRetryableErrorSite, Uuid), usize>> {
-		NON_RETRYABLE_ERRORS.get_or_init(|| Mutex::new(HashMap::new()))
-	}
-
-	pub(crate) fn inject_retryable_conflict(
-		site: RetryableConflictSite,
-		node_id: Uuid,
-	) -> RetryableConflictGuard {
-		inject_retryable_conflicts(site, node_id, 1)
-	}
-
-	pub(crate) fn inject_retryable_conflicts(
-		site: RetryableConflictSite,
-		node_id: Uuid,
-		count: usize,
-	) -> RetryableConflictGuard {
-		assert!(count > 0);
-		retryable_conflicts().lock().unwrap().insert((site, node_id), count);
-		RetryableConflictGuard {
-			site,
-			node_id,
-		}
-	}
-
-	pub(crate) fn maybe_inject_retryable_conflict(
-		site: RetryableConflictSite,
-		node_id: Uuid,
-	) -> Result<()> {
-		let mut conflicts = retryable_conflicts().lock().unwrap();
-		let Some(remaining) = conflicts.get_mut(&(site, node_id)) else {
-			return Ok(());
-		};
-		*remaining -= 1;
-		if *remaining == 0 {
-			conflicts.remove(&(site, node_id));
-		}
-		Err(super::Error::TransactionConflict(format!("injected conflict at {site:?}")).into())
-	}
-
-	pub(crate) fn retryable_conflict_count(site: RetryableConflictSite, node_id: Uuid) -> usize {
-		retryable_conflicts().lock().unwrap().get(&(site, node_id)).copied().unwrap_or(0)
-	}
-
-	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
-	pub(crate) fn inject_non_retryable_error(
-		site: NonRetryableErrorSite,
-		node_id: Uuid,
-	) -> NonRetryableErrorGuard {
-		inject_non_retryable_errors(site, node_id, 1)
-	}
-
-	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
-	pub(crate) fn inject_non_retryable_errors(
-		site: NonRetryableErrorSite,
-		node_id: Uuid,
-		count: usize,
-	) -> NonRetryableErrorGuard {
-		assert!(count > 0);
-		non_retryable_errors().lock().unwrap().insert((site, node_id), count);
-		NonRetryableErrorGuard {
-			site,
-			node_id,
-		}
-	}
-
-	pub(crate) fn maybe_inject_non_retryable_error(
-		site: NonRetryableErrorSite,
-		node_id: Uuid,
-	) -> Result<()> {
-		let mut errors = non_retryable_errors().lock().unwrap();
-		let Some(remaining) = errors.get_mut(&(site, node_id)) else {
-			return Ok(());
-		};
-		*remaining -= 1;
-		if *remaining == 0 {
-			errors.remove(&(site, node_id));
-		}
-		Err(super::Error::Internal(format!("injected non-retryable error at {site:?}")).into())
-	}
-
-	pub(crate) struct RetryableConflictGuard {
-		site: RetryableConflictSite,
-		node_id: Uuid,
-	}
-
-	impl Drop for RetryableConflictGuard {
-		fn drop(&mut self) {
-			retryable_conflicts().lock().unwrap().remove(&(self.site, self.node_id));
-		}
-	}
-
-	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
-	pub(crate) struct NonRetryableErrorGuard {
-		site: NonRetryableErrorSite,
-		node_id: Uuid,
-	}
-
-	impl Drop for NonRetryableErrorGuard {
-		fn drop(&mut self) {
-			non_retryable_errors().lock().unwrap().remove(&(self.site, self.node_id));
-		}
-	}
-}
+pub(crate) use surrealdb_datastore::testing;
 
 #[cfg(test)]
 mod retry_conflict_tests {

@@ -14,9 +14,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use surrealdb_strand::TableName;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::TableName;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TableKey {
@@ -82,8 +82,9 @@ impl Drop for CycleGuardEntry {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::TableName;
+
 	use super::*;
-	use crate::val::TableName;
 
 	fn key(name: &str) -> (NamespaceId, DatabaseId, TableName) {
 		(NamespaceId(1), DatabaseId(2), TableName::new(name))

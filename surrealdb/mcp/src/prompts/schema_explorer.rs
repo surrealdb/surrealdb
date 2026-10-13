@@ -1,6 +1,6 @@
 //! Schema exploration prompt template.
 
-use rmcp::model::{GetPromptResult, PromptMessage, PromptMessageRole};
+use rmcp::model::{GetPromptResult, PromptMessage, Role};
 
 pub fn get_prompt(arguments: &serde_json::Value) -> GetPromptResult {
 	let focus = arguments.get("focus").and_then(|v| v.as_str()).unwrap_or("all");
@@ -26,6 +26,6 @@ pub fn get_prompt(arguments: &serde_json::Value) -> GetPromptResult {
 		)
 	};
 
-	GetPromptResult::new(vec![PromptMessage::new_text(PromptMessageRole::User, instruction)])
+	GetPromptResult::new(vec![PromptMessage::new_text(Role::User, instruction)])
 		.with_description("Database schema exploration")
 }

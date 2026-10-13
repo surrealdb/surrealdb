@@ -139,7 +139,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .output: None
@@ -174,7 +174,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .output: None
@@ -212,7 +212,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .output: None

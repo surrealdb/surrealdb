@@ -38,8 +38,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::array::Array;
 pub use self::bytes::Bytes;
-pub use self::datetime::Datetime;
-pub use self::duration::Duration;
+pub use self::datetime::{Datetime, fmt_datetime_sql};
+pub use self::duration::{Duration, fmt_duration_sql};
 pub use self::file::File;
 pub use self::geometry::Geometry;
 pub use self::number::Number;

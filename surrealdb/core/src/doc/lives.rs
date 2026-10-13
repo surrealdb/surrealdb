@@ -11,15 +11,16 @@ use reblessive::tree::Stk;
 use tracing::instrument;
 
 use super::IgnoreError;
-use crate::catalog::{Permission, SubscriptionDefinition, SubscriptionFields};
-use crate::cnf::LiveQueryEngine;
+use crate::catalog::{
+	CompiledSubscription, Permission, SubscriptionDefinition, SubscriptionFields,
+};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{MessageBroker, Options, RoutedNotification};
 use crate::doc::{Action, CursorDoc, Document};
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
+use crate::err::EngineError;
+use crate::exe::FlowResultExt as _;
 use crate::expr::paths::{AC, ID, RD, TK};
-use crate::kvs::Transaction;
+use crate::kvs::{LiveQueryEngine, Transaction};
 use crate::types::{PublicAction, PublicNotification};
 use crate::val::{Value, convert_value_to_public_value};
 
@@ -43,7 +44,7 @@ impl Document {
 		// this is the flip that removes per-subscriber cost from the mutator's
 		// transaction. (Capture into the `lqe` keyspace still happens; see
 		// `Document::process_live_events`.)
-		if ctx.config.live_query_engine == LiveQueryEngine::Router {
+		if ctx.config.datastore.live_query_engine == LiveQueryEngine::Router {
 			return Ok(());
 		}
 		self.process_table_lives_inner(stk, ctx, opt, action).await
@@ -91,8 +92,9 @@ impl Document {
 			Action::Update => (Value::from("UPDATE").into(), false),
 		};
 
-		// Get the current and initial docs
-		// These are only used for EVENTS, so they should not be reduced
+		// The pre- and post-mutation records, unreduced. Reduction is
+		// per-subscriber (each subscription carries its own auth), so it happens
+		// inside `process_table_lives_inner` rather than here.
 		let initial = self.initial.doc.as_arc();
 		let current = self.current.doc.as_arc();
 
@@ -160,6 +162,13 @@ impl Document {
 		(met, initial, current): (Arc<Value>, Arc<Value>, Arc<Value>),
 		is_delete: bool,
 	) -> Result<()> {
+		// A subscription whose stored text no longer compiles can never match
+		// another document. It stays in the list so that teardown and `INFO`
+		// can still see it (and so its client can still be told it is dead),
+		// but there is nothing to evaluate here.
+		let Some(compiled) = live_subscription.query.compiled() else {
+			return Ok(());
+		};
 		// Ensure that a session exists on the LIVE query
 		let sess = match live_subscription.session.as_ref() {
 			Some(v) => v,
@@ -195,62 +204,107 @@ impl Document {
 			.id
 			.clone()
 			.ok_or_else(|| {
-				Error::unreachable("Processing live query for record without a Record ID")
+				EngineError::unreachable("Processing live query for record without a Record ID")
 			})
 			.map_err(anyhow::Error::new)?;
 
-		// We need to create a new context which we will
-		// use for processing this LIVE query statement.
-		// This ensures that we are using the session
-		// of the user who created the LIVE query.
-		let mut ctx = Context::background(ctx);
-		// Set the current transaction on the new LIVE
-		// query context to prevent unreachable behaviour
-		// and ensure that queries can be executed.
-		ctx.set_transaction(tx);
-		// SECURITY: captured user variables MUST be added first so the
-		// trusted LIVE / session params below overwrite any user-named
-		// `$value` / `$before` / `$after` / `$event` / `$session` /
-		// `$auth` / `$access` / `$token`. Otherwise a subscriber could
-		// shadow the real document context that table permission
-		// expressions read.
-		ctx.add_values(live_subscription.vars.clone());
-		// Add the session params to this LIVE query, so
-		// that queries can use these within field
-		// projections and WHERE clauses.
-		ctx.add_value("access", sess.pick(AC.as_ref()).into());
-		ctx.add_value("auth", sess.pick(RD.as_ref()).into());
-		ctx.add_value("token", sess.pick(TK.as_ref()).into());
-		ctx.add_value("session", sess.clone().into());
-		// Add $before, $after, $value, and $event params
-		// to this LIVE query so the user can use these
-		// within field projections and WHERE clauses.
-		ctx.add_value("event", met);
-		ctx.add_value("value", Arc::clone(&current));
-		ctx.add_value("after", current);
-		ctx.add_value("before", initial);
-		// Freeze the context
-		let ctx = ctx.freeze();
-
-		// Get the document to check against and to return based on lq context.
-		// `prepare_live_doc` clones+reduces the source, populates computed
-		// fields under the LIVE owner's auth, then re-cuts computed fields
-		// that the owner does not have permission to read. It returns
-		// `None` if any step fails so the notification is skipped rather
-		// than the triggering write being aborted.
-		let source = if is_delete {
-			&self.initial
-		} else {
-			&self.current
+		// Build a context for processing this LIVE query statement. This
+		// ensures that we are using the session of the user who created the
+		// LIVE query.
+		//
+		// SECURITY: captured user variables MUST be added first so the trusted
+		// LIVE / session params below overwrite any user-named `$value` /
+		// `$before` / `$after` / `$event` / `$session` / `$auth` / `$access` /
+		// `$token`. Otherwise a subscriber could shadow the real document
+		// context that table permission expressions read.
+		let build_ctx = |docs: Option<(Arc<Value>, Arc<Value>)>| {
+			let mut ctx = Context::background(ctx);
+			// Set the current transaction on the new LIVE query context to
+			// prevent unreachable behaviour and ensure that queries can be
+			// executed.
+			ctx.set_transaction(Arc::clone(&tx));
+			ctx.add_values(live_subscription.vars.clone());
+			// Add the session params to this LIVE query, so that queries can
+			// use these within field projections and WHERE clauses.
+			ctx.add_value("access", sess.pick(AC.as_ref()).into());
+			ctx.add_value("auth", sess.pick(RD.as_ref()).into());
+			ctx.add_value("token", sess.pick(TK.as_ref()).into());
+			ctx.add_value("session", sess.clone().into());
+			ctx.add_value("event", Arc::clone(&met));
+			// Add $before, $after and $value so the subscription can use them
+			// within field projections and WHERE clauses.
+			if let Some((before, after)) = docs {
+				ctx.add_value("value", Arc::clone(&after));
+				ctx.add_value("after", after);
+				ctx.add_value("before", before);
+			}
+			ctx.freeze()
 		};
-		let Some(doc) = self.prepare_live_doc(stk, &ctx, &opt, source).await else {
+
+		// Materialise the per-subscriber views. `prepare_live_doc` clones and
+		// reduces its source, populates computed fields under the LIVE owner's
+		// auth, then re-cuts the computed fields that owner has no permission
+		// to read. It returns `None` if any step fails, so the notification is
+		// skipped rather than the triggering write being aborted.
+		//
+		// The context this runs under binds the *unreduced* record to `$value`
+		// / `$after` / `$before`, because the only expressions it evaluates are
+		// the schema owner's own field-permission predicates and computed-field
+		// bodies. Those are answered against the record by design — the same
+		// choice `reduce_document` makes — since a predicate reading the view
+		// its own clause is about to cut from would decide on a document with
+		// the field already missing.
+		let prep_ctx = build_ctx(Some((Arc::clone(&initial), Arc::clone(&current))));
+		// `self.current` is cleared before a delete reaches this point, so the
+		// delivered document comes from `self.initial` for a delete and from
+		// `self.current` otherwise. Both sides are reduced regardless, so
+		// `$before` and `$after` are each authorisation-consistent.
+		let (source, counterpart) = if is_delete {
+			(&self.initial, &self.current)
+		} else {
+			(&self.current, &self.initial)
+		};
+		let Some(doc) = self.prepare_live_doc(stk, &prep_ctx, &opt, source).await else {
 			return Ok(());
 		};
+		// The counterpart is the opposite image — `$before` on a create,
+		// `$after` on a delete — and is absent for exactly those two actions. An
+		// absent record has no fields to reduce or derive: running
+		// `prepare_live_doc` on it would evaluate every COMPUTED body against
+		// NONE, and a TYPE-constrained field then fails to coerce and yields
+		// `None`, which would drop the whole notification. Bind the empty view
+		// directly; a present counterpart (an update's pre-image) is prepared as
+		// before.
+		let counterpart = if counterpart.doc.as_ref().is_nullish() {
+			counterpart.clone()
+		} else {
+			let Some(prepared) = self.prepare_live_doc(stk, &prep_ctx, &opt, counterpart).await
+			else {
+				return Ok(());
+			};
+			prepared
+		};
+
+		// SECURITY: `$value`, `$after` and `$before` are rebound to the reduced
+		// views before any subscriber-authored expression runs. The projection
+		// and the `WHERE` clause of a LIVE query are subscriber-authored and
+		// may root an idiom at these params, so binding the record itself would
+		// let a subscriber denied a field read it through
+		// `LIVE SELECT $after.<field>`, or test it through
+		// `WHERE $after.<field> = ...` and use notification delivery as a
+		// boolean oracle — the reduced document handed to `lq_check` and the
+		// projection notwithstanding.
+		let (before, after) = if is_delete {
+			(doc.doc.as_arc(), counterpart.doc.as_arc())
+		} else {
+			(counterpart.doc.as_arc(), doc.doc.as_arc())
+		};
+		let ctx = build_ctx(Some((before, after)));
 
 		// First of all, let's check to see if the WHERE
 		// clause of the LIVE query is matched by this
 		// document. If it is then we can continue.
-		match self.lq_check(stk, &ctx, &opt, &live_subscription, &doc).await {
+		match self.lq_check(stk, &ctx, &opt, compiled, &doc).await {
 			Err(IgnoreError::Ignore) => return Ok(()),
 			Err(IgnoreError::Error(e)) => {
 				tracing::debug!(
@@ -286,7 +340,7 @@ impl Document {
 		// Let's check what type of statement
 		// caused this LIVE query to run, and obtain
 		// the relevant result.
-		let (action, mut result) = match live_subscription.fields {
+		let (action, mut result) = match &compiled.fields {
 			SubscriptionFields::Diff => {
 				// DIFF mode: return JSON patch operations instead of full document
 				if is_delete {
@@ -338,20 +392,22 @@ impl Document {
 				// BREAK, CONTINUE, closure result, etc.) skips this
 				// notification without aborting the write — the projection
 				// belongs to the LIVE query, not the triggering statement.
-				let result =
-					match x.compute(stk, &ctx, &opt, Some(&doc)).await.map_err(IgnoreError::from) {
-						Err(IgnoreError::Ignore) => return Ok(()),
-						Err(IgnoreError::Error(e)) => {
-							tracing::debug!(
-								target: "surrealdb::core::doc::lives",
-								subscription_id = %live_subscription.id,
-								error = %e,
-								"LIVE notification skipped: projection evaluation failed",
-							);
-							return Ok(());
-						}
-						Ok(x) => x,
-					};
+				let result = match crate::legacy::fields_compute(x, stk, &ctx, &opt, Some(&doc))
+					.await
+					.map_err(IgnoreError::from)
+				{
+					Err(IgnoreError::Ignore) => return Ok(()),
+					Err(IgnoreError::Error(e)) => {
+						tracing::debug!(
+							target: "surrealdb::core::doc::lives",
+							subscription_id = %live_subscription.id,
+							error = %e,
+							"LIVE notification skipped: projection evaluation failed",
+						);
+						return Ok(());
+					}
+					Ok(x) => x,
+				};
 				let action = if is_delete {
 					PublicAction::Delete
 				} else if self.is_new() {
@@ -367,10 +423,14 @@ impl Document {
 		// Any evaluation error (invalid function arguments, unsupported
 		// expressions, etc.) skips this notification rather than
 		// aborting the triggering write transaction.
-		if let Some(fetchs) = live_subscription.fetch {
+		if let Some(fetchs) = &compiled.fetch {
 			let mut idioms = BTreeSet::new();
-			for fetch in fetchs.iter() {
-				if let Err(e) = fetch.compute(stk, &ctx, &opt, &mut idioms).await {
+			for expr in fetchs {
+				// On the expression directly: wrapping it in a `Fetch` would
+				// deep-clone the tree once per subscriber per record.
+				if let Err(e) =
+					crate::legacy::fetch_compute_expr(expr, stk, &ctx, &opt, &mut idioms).await
+				{
 					tracing::debug!(
 						target: "surrealdb::core::doc::lives",
 						subscription_id = %live_subscription.id,
@@ -381,7 +441,10 @@ impl Document {
 				}
 			}
 			for i in &idioms {
-				if let Err(e) = stk.run(|stk| result.fetch(stk, &ctx, &opt, &i.0)).await {
+				if let Err(e) = stk
+					.run(|stk| crate::legacy::value_fetch(&mut result, stk, &ctx, &opt, &i.0))
+					.await
+				{
 					tracing::debug!(
 						target: "surrealdb::core::doc::lives",
 						subscription_id = %live_subscription.id,
@@ -510,8 +573,15 @@ impl Document {
 			// are populated, so it can't filter them; apply the
 			// computed-field `FOR select` permissions now so a
 			// subscriber without permission to read a computed field
-			// never receives its value in the LIVE notification.
-			if let Err(e) = self.filter_computed_field_permissions(stk, ctx, opt, &mut doc).await {
+			// never receives its value in the LIVE notification. The
+			// predicates read `source`, the record this payload was
+			// reduced from, so a clause naming a field the subscriber
+			// cannot select is answered by the record rather than by the
+			// reduced view that already dropped it.
+			if let Err(e) =
+				Document::filter_computed_field_permissions(stk, ctx, opt, fields, source, &mut doc)
+					.await
+			{
 				tracing::debug!(
 					target: "surrealdb::core::doc::lives",
 					error = %e,
@@ -529,14 +599,14 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		live_subscription: &SubscriptionDefinition,
+		query: &CompiledSubscription,
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		// Check where condition
-		if let Some(cond) = live_subscription.cond.as_ref() {
+		if let Some(cond) = query.cond.as_ref() {
 			// Check if the expression is truthy
 			if !stk
-				.run(|stk| cond.compute(stk, ctx, opt, Some(doc)))
+				.run(|stk| crate::legacy::expr_compute(cond, stk, ctx, opt, Some(doc)))
 				.await
 				.catch_return()?
 				.is_truthy()
@@ -559,10 +629,9 @@ impl Document {
 		// Should we run permissions checks?
 		// Live queries are always
 		if ctx.check_perms(opt, crate::iam::Action::View)? {
-			// Get the table
-			let tb = self.doc_ctx.tb()?;
-			// Process the table permissions
-			match &tb.permissions.select {
+			// Process the table permissions, compiled once per statement on
+			// the document context
+			match &self.doc_ctx.tb()?.permissions.select {
 				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
@@ -577,7 +646,7 @@ impl Document {
 					let opt = &opt.new_for_permission_predicate();
 					// Process the PERMISSION clause
 					if !stk
-						.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+						.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
 						.await
 						.catch_return()
 						.is_ok_and(|x| x.is_truthy())
@@ -626,20 +695,21 @@ impl MessageBroker for DefaultBroker {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
+
 	use anyhow::Result;
 	use chrono::Utc;
+	use surrealdb_kvs::TransactionType::Write;
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::Write;
 	use crate::types::{
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};
 
-	async fn new_ds_with_broker() -> Result<(Receiver<PublicNotification>, Datastore)> {
+	async fn new_ds_with_broker() -> Result<(Receiver<PublicNotification>, Arc<Datastore>)> {
 		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
@@ -651,7 +721,7 @@ mod tests {
 	}
 
 	async fn setup_ns_db_table(ds: &Datastore, ns: &str, db: &str, tb: &str) {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let ses = Session::owner().with_ns(ns).with_db(db);
@@ -772,7 +842,7 @@ mod tests {
 	async fn test_live_create_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -818,7 +888,7 @@ mod tests {
 	async fn test_live_delete_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -866,7 +936,7 @@ mod tests {
 	async fn test_live_diff_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -922,7 +992,7 @@ mod tests {
 	async fn test_live_conditional_permission_filters_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -989,7 +1059,7 @@ mod tests {
 	async fn test_live_diff_does_not_leak_restricted_field_name() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -1049,7 +1119,7 @@ mod tests {
 	async fn test_live_diff_delete_does_not_leak_restricted_field_name() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -1184,7 +1254,7 @@ mod tests {
 	async fn test_live_field_permission_error_does_not_abort_create() {
 		let (_, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -1244,5 +1314,87 @@ mod tests {
 		let mut res =
 			ds.execute("DELETE person:3", &ses_write, None).await.expect("execute should not Err");
 		res.remove(0).result.expect("DELETE should succeed");
+	}
+
+	/// A CREATE notification must still fire for a table with a TYPE-constrained
+	/// COMPUTED field. The `$before` image of a create is absent, and deriving
+	/// the computed field against it coerces `NONE` to the declared type and
+	/// fails; the counterpart must be bound as the empty view rather than run
+	/// through computed-field evaluation, or the whole notification is dropped.
+	#[tokio::test]
+	async fn test_live_create_notification_survives_typed_computed_field() {
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db) = ("test", "test");
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.ensure_ns_db(None, ns, db).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let owner_ses = Session::owner().with_ns(ns).with_db(db);
+		// `derived` computes to a plain `string`, so it is `NONE` on the absent
+		// pre-image and fails the `TYPE string` coercion there.
+		ds.execute(
+			"DEFINE TABLE person PERMISSIONS FOR select FULL; \
+			 DEFINE FIELD name ON person TYPE string; \
+			 DEFINE FIELD derived ON person TYPE string COMPUTED name",
+			&owner_ses,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let live_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute("LIVE SELECT * FROM person", &live_ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		ds.execute("CREATE person:1 SET name = 'foo'", &owner_ses, None).await.unwrap();
+
+		let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+			.await
+			.expect("a CREATE notification must fire despite the typed computed field")
+			.expect("channel should not be closed");
+		assert_eq!(notif.action, PublicAction::Create);
+		let PublicValue::Object(obj) = notif.result else {
+			panic!("CREATE result should be an object, got: {:?}", notif.result);
+		};
+		assert_eq!(
+			obj.get("derived"),
+			Some(&PublicValue::String("foo".to_string())),
+			"the present record's computed field must be delivered; got: {obj:?}",
+		);
+	}
+
+	/// The DELETE counterpart (`$after`) is likewise absent, so the same drop
+	/// applies to deletes: the notification must still fire.
+	#[tokio::test]
+	async fn test_live_delete_notification_survives_typed_computed_field() {
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db) = ("test", "test");
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.ensure_ns_db(None, ns, db).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let owner_ses = Session::owner().with_ns(ns).with_db(db);
+		ds.execute(
+			"DEFINE TABLE person PERMISSIONS FOR select FULL; \
+			 DEFINE FIELD name ON person TYPE string; \
+			 DEFINE FIELD derived ON person TYPE string COMPUTED name",
+			&owner_ses,
+			None,
+		)
+		.await
+		.unwrap();
+		ds.execute("CREATE person:1 SET name = 'foo'", &owner_ses, None).await.unwrap();
+
+		let live_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute("LIVE SELECT * FROM person", &live_ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		ds.execute("DELETE person:1", &owner_ses, None).await.unwrap();
+
+		let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+			.await
+			.expect("a DELETE notification must fire despite the typed computed field")
+			.expect("channel should not be closed");
+		assert_eq!(notif.action, PublicAction::Delete);
 	}
 }

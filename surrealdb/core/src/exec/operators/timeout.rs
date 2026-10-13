@@ -6,9 +6,10 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
@@ -90,11 +91,11 @@ impl ExecOperator for Timeout {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		// If no timeout is specified, just pass through the input stream
@@ -106,7 +107,7 @@ impl ExecOperator for Timeout {
 		let timeout_expr = Arc::clone(timeout_expr);
 		let ctx = ctx.clone();
 
-		let timeout_stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			use crate::exec::EvalContext;
 
 			// Evaluate the timeout expression (no row context needed)
@@ -114,34 +115,29 @@ impl ExecOperator for Timeout {
 			let timeout_value = timeout_expr.evaluate(eval_ctx).await?;
 
 			// Convert to duration
-			let duration: Duration = timeout_value
-				.coerce_to::<Duration>()
-				.context("Invalid timeout value")?;
+			let duration: Duration =
+				timeout_value.coerce_to::<Duration>().context("Invalid timeout value")?;
 
 			// Convert our Duration to std::time::Duration for tokio
 			let std_duration: std::time::Duration = duration.0;
 
 			// Create a timeout future
-			let timeout_instant = tokio::time::Instant::now() + std_duration;
-
-			futures::pin_mut!(input_stream);
+			let timeout_instant = common::time::Instant::now() + std_duration;
 
 			loop {
 				// Check if we've exceeded the timeout
-				let remaining = timeout_instant.saturating_duration_since(tokio::time::Instant::now());
+				let remaining =
+					timeout_instant.saturating_duration_since(common::time::Instant::now());
 				if remaining.is_zero() {
-					Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryTimedout(duration))))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryTimedout(duration.0))))?;
 				}
 
 				// Wait for next batch with timeout
-				let batch_result = tokio::time::timeout(
-					remaining,
-					input_stream.next()
-				).await;
+				let batch_result = common::time::timeout(remaining, input_stream.next()).await;
 
 				match batch_result {
 					Ok(Some(batch)) => {
-						yield batch?;
+						yielder.emit(batch?).await;
 					}
 					Ok(None) => {
 						// Stream completed normally
@@ -149,12 +145,15 @@ impl ExecOperator for Timeout {
 					}
 					Err(_) => {
 						// Timeout expired
-						Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryTimedout(duration))))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryTimedout(
+							duration.0
+						))))?;
 					}
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(timeout_stream), "Timeout", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "Timeout", &self.metrics))
 	}
 }

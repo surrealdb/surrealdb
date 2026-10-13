@@ -9,6 +9,8 @@ use std::time::Duration;
 #[cfg(feature = "surrealism")]
 use anyhow::Context as _;
 use anyhow::{Result, bail};
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_strand::Strand;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
@@ -19,17 +21,18 @@ use url::Url;
 use uuid::Uuid;
 use web_time::Instant;
 
+use crate::buc::Error as BucError;
 use crate::buc::manager::BucketsManager;
 #[cfg(feature = "surrealism")]
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
+use crate::catalog::{DatabaseDefinition, DatabaseId, Error as CatalogError, NamespaceId};
+use crate::config::RuntimeConfig;
 use crate::ctx::cancel::CancelHandle;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::capabilities::Error as CapabilitiesError;
 #[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
@@ -39,8 +42,8 @@ use crate::dbs::capabilities::Targets;
 use crate::dbs::{
 	Capabilities, MessageBroker, NewPlannerStrategy, Options, Session, StatementCounters, Variables,
 };
-use crate::err::Error;
-use crate::exec::function::FunctionRegistry;
+use crate::err::{EngineError, Error};
+use crate::exec::Error as ExecError;
 use crate::expr::Base;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
@@ -48,17 +51,17 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{DatastoreError, Transaction};
 use crate::mem::ALLOC;
-use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 use crate::types::PublicVariables;
 use crate::val::Value;
+use crate::val::convert_public::convert_public_value_to_internal;
 
 pub type FrozenContext = Arc<Context>;
 
@@ -115,8 +118,6 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
-	// Function registry for built-in and custom functions
-	function_registry: Arc<FunctionRegistry>,
 	// Strategy for the new streaming planner/executor
 	new_planner_strategy: NewPlannerStrategy,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
@@ -132,10 +133,6 @@ pub struct Context {
 	// `*Ctx` half of every emitted [`crate::observe`] event without
 	// re-walking the session value tree on every emit.
 	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
-	// Matches context for index functions (search::highlight, search::score, etc.)
-	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
-	// KNN context for index functions (vector::distance::knn)
-	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Client for making http requests.
 	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
@@ -149,8 +146,9 @@ pub struct Context {
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
-	// Executor config
-	pub config: Arc<CommonConfig>,
+	/// The per-layer configuration a running query reads. Crate-internal: these
+	/// are operator knobs, not API.
+	pub(crate) config: Arc<RuntimeConfig>,
 }
 
 impl Debug for Context {
@@ -178,9 +176,14 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::clone(&parent.capabilities),
-			index_stores: IndexStores::new(
-				parent.config.hnsw_cache_size,
-				parent.config.diskann_cache_size,
+			// Derived rather than new: this context is built per unit of work
+			// (one LIVE query delivery), and a segmentation dictionary is far
+			// too expensive to load and drop that often, so those are shared
+			// with the parent while the other caches stay isolated.
+			index_stores: parent.index_stores.derive(
+				parent.config.idx.hnsw_cache_size,
+				parent.config.idx.diskann_cache_size,
+				parent.config.idx.graph_resolve_cache_size,
 			),
 			cache: None,
 			index_builder: None,
@@ -192,12 +195,9 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			function_registry: Arc::clone(&parent.function_registry),
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -250,12 +250,9 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: Arc::clone(&parent.function_registry),
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
@@ -294,12 +291,9 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: Arc::clone(&parent.function_registry),
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -355,12 +349,9 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: Arc::clone(&from.function_registry),
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -407,12 +398,9 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: Arc::clone(&from.function_registry),
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -438,11 +426,10 @@ impl Context {
 		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
-		function_registry: Arc<FunctionRegistry>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
-		config: Arc<CommonConfig>,
+		config: Arc<RuntimeConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
 		let planner_strategy = *capabilities.planner_strategy();
@@ -468,12 +455,9 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
-			function_registry,
 			new_planner_strategy: planner_strategy,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config,
 			#[cfg(feature = "http")]
 			http_client,
@@ -504,7 +488,12 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024),
+			index_stores: IndexStores::new(
+				256 * 1024 * 1024,
+				256 * 1024 * 1024,
+				64 * 1024 * 1024,
+				None,
+			),
 			cache: None,
 			index_builder: None,
 			sequences: None,
@@ -515,12 +504,9 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config: Default::default(),
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
@@ -571,7 +557,7 @@ impl Context {
 	/// applied in [`Context::attach_session`]).
 	pub(crate) fn realtime(&self) -> Result<()> {
 		if !self.live {
-			bail!(Error::RealtimeDisabled);
+			bail!(DatastoreError::RealtimeDisabled);
 		}
 		Ok(())
 	}
@@ -605,7 +591,7 @@ impl Context {
 			return Ok(());
 		}
 
-		opt.auth.is_allowed(action, &res)
+		Ok(opt.auth.is_allowed(action, &res).map_err(crate::err::Error::from)?)
 	}
 
 	/// Table-level permission check frequency (mirrors former [`Options::check_perms`]).
@@ -649,7 +635,7 @@ impl Context {
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let Some(ns_def) = self.tx().get_ns_by_name(ns, None).await? else {
-			return Err(Error::NsNotFound {
+			return Err(CatalogError::NsNotFound {
 				name: ns.to_string(),
 			}
 			.into());
@@ -688,7 +674,7 @@ impl Context {
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
-			return Err(Error::DbNotFound {
+			return Err(CatalogError::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
@@ -777,13 +763,13 @@ impl Context {
 	/// Add a timeout to the context. If the current timeout is sooner than
 	/// the provided timeout, this method does nothing. If the result of the
 	/// addition causes an overflow, this method returns an error.
-	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), DatastoreError> {
 		match Instant::now().checked_add(timeout) {
 			Some(deadline) => {
 				self.add_deadline(deadline, timeout);
 				Ok(())
 			}
-			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+			None => Err(DatastoreError::InvalidTimeout(timeout.as_secs())),
 		}
 	}
 
@@ -879,7 +865,9 @@ impl Context {
 		if let Some(sqs) = self.get_sequences() {
 			Ok(sqs)
 		} else {
-			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+			bail!(
+				EngineError::Internal("Sequences are not supported in this context.".to_string(),)
+			)
 		}
 	}
 
@@ -918,7 +906,7 @@ impl Context {
 		}
 		if deep_check {
 			if ALLOC.is_beyond_threshold() {
-				bail!(Error::QueryBeyondMemoryThreshold);
+				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
 			let now = Instant::now();
 			if let Some((deadline, timeout)) = self.deadline
@@ -981,7 +969,7 @@ impl Context {
 
 	pub(crate) async fn expect_not_timedout(&self) -> Result<()> {
 		if let Some(d) = self.is_timedout().await? {
-			bail!(Error::QueryTimedout(d.into()))
+			bail!(EngineError::QueryTimedout(d))
 		} else {
 			Ok(())
 		}
@@ -1056,8 +1044,7 @@ impl Context {
 		}
 		// Pre-resolve the tenant identity so emit sites do not need to
 		// re-walk the session value tree on every event dispatch.
-		self.tenant_identity =
-			Some(Arc::new(crate::observe::TenantIdentity::from_session(session)));
+		self.tenant_identity = Some(Arc::new(crate::observe::TenantIdentity::from(session)));
 		Ok(())
 	}
 
@@ -1070,9 +1057,10 @@ impl Context {
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name: name.into_string(),
-				});
+				}
+				.into());
 			}
 			self.add_value(name, Arc::new(val));
 		}
@@ -1082,9 +1070,10 @@ impl Context {
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name,
-				});
+				}
+				.into());
 			}
 			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
 		}
@@ -1098,33 +1087,6 @@ impl Context {
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		Arc::clone(&self.capabilities)
-	}
-
-	/// Get the function registry for this context
-	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		&self.function_registry
-	}
-
-	/// Set the matches context for index functions (search::highlight, etc.)
-	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
-		self.matches_context = Some(Arc::new(ctx));
-	}
-
-	/// Get the matches context for index functions
-	pub(crate) fn get_matches_context(
-		&self,
-	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
-		self.matches_context.as_ref()
-	}
-
-	/// Set the KNN context for index functions (vector::distance::knn)
-	pub(crate) fn set_knn_context(&mut self, ctx: Arc<crate::exec::function::KnnContext>) {
-		self.knn_context = Some(ctx);
-	}
-
-	/// Get the KNN context for index functions
-	pub(crate) fn get_knn_context(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
-		self.knn_context.as_ref()
 	}
 
 	/// Get the new planner strategy for this context
@@ -1142,7 +1104,7 @@ impl Context {
 	pub(crate) fn check_allowed_scripting(&self) -> Result<()> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");
-			bail!(Error::ScriptingNotAllowed);
+			bail!(CapabilitiesError::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
 		Ok(())
@@ -1152,7 +1114,7 @@ impl Context {
 	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
 		if !self.capabilities.allows_function_name(target) {
 			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			bail!(Error::FunctionNotAllowed(target.to_string()));
+			bail!(CapabilitiesError::FunctionNotAllowed(target.to_string()));
 		}
 		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
@@ -1199,7 +1161,7 @@ impl Context {
 		let match_any_deny_net = |t| {
 			if self.capabilities.matches_any_deny_net(t) {
 				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
-				bail!(Error::NetTargetNotAllowed(t.to_string()));
+				bail!(CapabilitiesError::NetTargetNotAllowed(t.to_string()));
 			}
 			Ok(())
 		};
@@ -1212,15 +1174,15 @@ impl Context {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
-					bail!(Error::NetTargetNotAllowed(target.to_string()));
+					bail!(CapabilitiesError::NetTargetNotAllowed(target.to_string()));
 				}
 				// Check against the deny list
 				match_any_deny_net(&target)?;
 				// Resolve the domain name to a vector of IP addresses
 				#[cfg(not(target_family = "wasm"))]
-				let targets = target.resolve().await?;
+				let targets = crate::net::resolve_net_target(&target).await?;
 				#[cfg(target_family = "wasm")]
-				let targets = target.resolve()?;
+				let targets = crate::net::resolve_net_target(&target)?;
 				for t in &targets {
 					match_any_deny_net(t)?;
 				}
@@ -1246,7 +1208,7 @@ impl Context {
 		if let Some(buckets) = &self.buckets {
 			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
 		} else {
-			bail!(Error::BucketUnavailable(bu.into()))
+			bail!(BucError::BucketUnavailable(bu.into()))
 		}
 	}
 
@@ -1269,47 +1231,101 @@ impl Context {
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};
-		let max_pool_size = self.config.surrealism_max_pool_size;
-		let max_memory = self.config.surrealism_max_memory;
+		let max_pool_size = self.config.surrealism.surrealism_max_pool_size;
+		let max_memory = self.config.surrealism.surrealism_max_memory;
 		let max_execution_time =
-			self.config.surrealism_max_execution_time.map(Duration::from_millis);
-		let max_kv_entries = self.config.surrealism_max_kv_entries;
-		let max_kv_value_bytes = self.config.surrealism_max_kv_value_bytes;
+			self.config.surrealism.surrealism_max_execution_time.map(Duration::from_millis);
+		let max_kv_entries = self.config.surrealism.surrealism_max_kv_entries;
+		let max_kv_value_bytes = self.config.surrealism.surrealism_max_kv_value_bytes;
 		#[cfg(feature = "http")]
-		let config = Arc::clone(&self.config);
+		let config = self.config.http.clone();
 
 		cache
 			.get_or_insert_with(&lookup, async || {
-				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
-					bail!("silo lookups are not supported yet");
+				// Both executable forms resolve to the bytes of one `.surli`
+				// archive; only where those bytes come from differs.
+				let (surli, temp_prefix) = match lookup {
+					SurrealismCacheLookup::File(ns, db, bucket, key) => {
+						let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+						let key = ObjectKey::new(key);
+						let surli = bucket
+							.get(&key)
+							.await
+							.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+
+						let Some(surli) = surli else {
+							bail!("file not found");
+						};
+
+						let safe_key = key.to_string().replace(['/', '\\'], "_");
+						(surli, format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"))
+					}
+					SurrealismCacheLookup::Silo(ns, db, org, pkg, major, minor, patch) => {
+						#[cfg(not(feature = "http"))]
+						{
+							let _ = (ns, db, org, pkg, major, minor, patch);
+							bail!(
+								"Failed to get surrealism runtime: silo module packages are fetched over HTTP, which this build does not support"
+							);
+						}
+						#[cfg(feature = "http")]
+						{
+							let endpoint = &self.config.surrealism.surrealism_silo_endpoint;
+							let url = crate::surrealism::silo::package_url(
+								endpoint, org, pkg, major, minor, patch,
+							)?;
+							// A silo fetch is first-party package resolution
+							// rather than user-directed traffic, so it needs no
+							// `allow_net` grant. An operator's explicit deny is
+							// still honoured.
+							let allow = match url.host() {
+								Some(host) => Targets::Some(
+									[NetTarget::Host(
+										host.to_owned(),
+										url.port_or_known_default(),
+									)]
+									.into_iter()
+									.collect(),
+								),
+								None => bail!("The silo module endpoint `{endpoint}` has no host"),
+							};
+							let client = HttpClient::new(
+								allow,
+								self.capabilities.denied_network_targets_ref().clone(),
+								&config,
+							)
+							.context("Failed to create http client for silo module packages")?;
+
+							let surli = crate::surrealism::silo::fetch_package(
+								&client, &url, org, pkg, major, minor, patch,
+							)
+							.await?;
+
+							(
+								surli,
+								format!(
+									"SURREAL_MODFS_silo_{ns}_{db}_{org}_{pkg}_{major}_{minor}_{patch}_"
+								),
+							)
+						}
+					}
 				};
 
-				let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-				let key = ObjectKey::new(key);
-				let surli = bucket
-					.get(&key)
-					.await
-					.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
-
-				let Some(surli) = surli else {
-					bail!("file not found");
-				};
-
-				let safe_key = key.to_string().replace(['/', '\\'], "_");
-				let temp_prefix = format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_");
 				let unpack_opts = UnpackOptions {
 					#[cfg(storage)]
 					temp_base: self.temporary_directory().map(|p| p.as_path()),
 					#[cfg(not(storage))]
 					temp_base: None,
 					temp_prefix: &temp_prefix,
-					max_fs_bytes: self.config.surrealism_max_fs_bytes,
+					max_fs_bytes: self.config.surrealism.surrealism_max_fs_bytes,
 				};
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				self.get_capabilities()
-					.validate_surrealism_capabilities(&package.config.capabilities)?;
+				crate::surrealism::validate_surrealism_capabilities(
+					&self.get_capabilities(),
+					&package.config.capabilities,
+				)?;
 
 				let org = package.config.meta.organisation.clone();
 				let name = package.config.meta.name.clone();
@@ -1376,18 +1392,54 @@ impl Context {
 	}
 }
 
+impl crate::catalog::providers::CancellationProbe for Context {
+	fn expect_not_timedout(&self) -> crate::catalog::providers::BoxProviderFut<'_, Result<()>> {
+		Box::pin(Context::expect_not_timedout(self))
+	}
+}
+
+/// The context is the index engines' environment.
+///
+/// A `&FrozenContext` — what every caller into the engines already holds —
+/// coerces straight to `&dyn IndexEnv`: both `IndexEnv` and its supertrait
+/// `CancellationProbe` declare a blanket `Arc` forward beside the trait itself.
+impl crate::idx::env::IndexEnv for Context {
+	fn tx(&self) -> Arc<Transaction> {
+		Context::tx(self)
+	}
+
+	fn is_done(&self, count: Option<usize>) -> crate::idx::env::BoxEnvFut<'_> {
+		Box::pin(Context::is_done(self, count))
+	}
+
+	fn index_stores(&self) -> &IndexStores {
+		Context::get_index_stores(self)
+	}
+
+	fn node_id(&self) -> Uuid {
+		Context::node_id(self)
+	}
+
+	fn sequences(&self) -> Result<&Sequences> {
+		Context::try_get_sequences(self)
+	}
+
+	fn config(&self) -> &crate::idx::config::IdxConfig {
+		&self.config.idx
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
 	use std::time::Duration;
 
+	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
+	use surrealdb_cnf::MEMORY_THRESHOLD;
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	use crate::cnf::CommonConfig;
-	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	use crate::cnf::MEMORY_THRESHOLD;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
@@ -1400,7 +1452,7 @@ mod tests {
 
 	#[test]
 	fn is_allowed_respects_context_auth_toggle_and_base() {
-		let config = CommonConfig::default();
+		let config = crate::exec::config::ExecConfig::default();
 
 		// Auth disabled: anonymous allowed without IAM; still needs valid NS/DB for bases.
 		{
@@ -1624,7 +1676,7 @@ mod tests {
 		// 3. Deadline (checked when deep_check=true, returns Reason::Timedout)
 
 		// When ALLOC.is_beyond_threshold() returns true, done() will bail with
-		// Error::QueryBeyondMemoryThreshold before checking the deadline.
+		// DatastoreError::QueryBeyondMemoryThreshold before checking the deadline.
 		// This ensures memory violations are always detected before timeout errors.
 
 		let ctx = Context::new_test();
@@ -1636,98 +1688,64 @@ mod tests {
 		assert_eq!(result.unwrap(), None);
 	}
 
-	/// Integration test that actually tests memory threshold detection.
+	/// A crossed memory threshold makes `done` bail with
+	/// [`DatastoreError::QueryBeyondMemoryThreshold`].
 	///
-	/// This test requires:
-	/// 1. The "allocation-tracking" feature to be enabled
-	/// 2. The "allocator" feature to be enabled (for tracking to work)
-	/// 3. Running with #[serial] to avoid interference from other tests
+	/// `MEMORY_THRESHOLD` is a process-wide `LazyLock` read once on first use,
+	/// and this binary's other tests assert the no-pressure path, so the
+	/// threshold has to come from the environment rather than be installed
+	/// here. Ignored by default so that it reports as skipped rather than
+	/// passing without asserting anything:
 	///
-	/// The test sets SURREAL_MEMORY_THRESHOLD environment variable, allocates memory
-	/// to exceed the threshold, and verifies that context.done(true) detects the violation.
+	/// ```text
+	/// SURREAL_MEMORY_THRESHOLD=1mb cargo test -p surrealdb-core \
+	///   --features allocator,allocation-tracking \
+	///   test_context_memory_threshold_enforced
+	/// ```
 	#[tokio::test]
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	#[serial_test::serial]
-	async fn test_context_memory_threshold_integration() {
-		use crate::err::Error;
-		use crate::str::ParseBytes;
+	#[ignore = "requires SURREAL_MEMORY_THRESHOLD in the process environment"]
+	async fn test_context_memory_threshold_enforced() {
+		use crate::kvs::DatastoreError;
 
-		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
-		// This must happen before any code accesses cnf::MEMORY_THRESHOLD
-		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
-		// so there's no risk of data races when modifying the environment variable.
-		unsafe {
-			std::env::set_var(
-				"SURREAL_MEMORY_THRESHOLD",
-				"1MB".parse_bytes::<u64>().unwrap().to_string(),
+		// The most this test will allocate to cross the threshold. Reaching a
+		// production-shaped threshold would mean allocating that much for real,
+		// so the environment is not allowed to ask for more than this: crossing
+		// the guard at a small threshold proves the same code path.
+		const BALLAST_LIMIT: usize = 256 * 1024 * 1024;
+		const BALLAST_CHUNK: usize = 1024 * 1024;
+
+		let threshold = *MEMORY_THRESHOLD;
+		assert_ne!(
+			threshold, 0,
+			"SURREAL_MEMORY_THRESHOLD must be set in this process for the guard to be enforceable"
+		);
+		assert!(
+			threshold <= BALLAST_LIMIT,
+			"SURREAL_MEMORY_THRESHOLD is {threshold} bytes, above the {BALLAST_LIMIT}-byte ceiling \
+			 this test will allocate to cross it; re-run with a smaller value"
+		);
+
+		// Cross the threshold in bounded steps. A single threshold-sized
+		// request would route an allocation failure to `handle_alloc_error`,
+		// aborting the binary with no failure message.
+		let mut ballast: Vec<Vec<u8>> = Vec::new();
+		while crate::mem::ALLOC.memory_allocated() <= threshold {
+			ballast.push(vec![0u8; BALLAST_CHUNK]);
+			assert!(
+				ballast.len().saturating_mul(BALLAST_CHUNK) <= BALLAST_LIMIT,
+				"allocated {BALLAST_LIMIT} bytes without the {threshold}-byte guard tripping"
 			);
 		}
-		// Assert that SURREAL_MEMORY_THRESHOLD shows up as MEMORY_THRESHOLD with the expected value
-		assert_eq!(*MEMORY_THRESHOLD, 1048576);
+		let ctx = Context::new_test().freeze();
 
-		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
-		// Instead, we rely on this test running in isolation with #[serial]
-		// and being run in a fresh process where MEMORY_THRESHOLD hasn't been accessed yet
-
-		// Note: This test may not work reliably if MEMORY_THRESHOLD was already accessed
-		// elsewhere in the test suite. The #[serial] attribute ensures tests run one at a time,
-		// but doesn't guarantee a fresh process. For reliable testing, this should be run
-		// as a separate integration test binary.
-
-		// Allocate a large vector (10MB) to exceed the threshold
-		// Using Vec::with_capacity to ensure the memory is actually allocated
-		let _large_allocation: Vec<u8> = Vec::with_capacity(20 * 1024 * 1024);
-
-		// Give the allocator tracking time to register the allocation
-		tokio::time::sleep(Duration::from_millis(10)).await;
-
-		let ctx = Context::new_test();
-		let ctx = ctx.freeze();
-
-		// The memory threshold check should detect that we've exceeded the limit
-		let result = ctx.done(true);
-
-		// We expect either:
-		// 1. An error if memory tracking properly detected the threshold violation
-		// 2. Ok(None) if MEMORY_THRESHOLD was already initialized with default (0) before we set
-		//    the environment variable
-		match result {
-			Err(e) => {
-				// Verify it's the correct error type
-				match e.downcast_ref::<Error>() {
-					Some(Error::QueryBeyondMemoryThreshold) => {
-						// Success! Memory threshold was properly detected
-						println!("✓ Memory threshold violation detected as expected");
-					}
-					other => {
-						panic!("Expected QueryBeyondMemoryThreshold error, got: {:?}", other);
-					}
-				}
-			}
-			Ok(None) => {
-				// This means MEMORY_THRESHOLD was already initialized before we set the env var
-				// This is expected behavior in the test suite - document it
-				println!(
-					"⚠ Memory threshold not enforced - MEMORY_THRESHOLD was already initialized"
-				);
-				println!("  This is expected when running as part of the full test suite.");
-				println!(
-					"  To properly test memory threshold enforcement, run this test in isolation:"
-				);
-				println!(
-					"  cargo test --package surrealdb-core --features allocation-tracking,allocator test_context_memory_threshold_integration"
-				);
-				panic!("MEMORY_THRESHOLD was already initialized")
-			}
-			Ok(Some(reason)) => {
-				panic!("Unexpected reason returned: {:?}", reason);
-			}
-		}
-
-		// Clean up the environment variable
-		// Safety: Same as above - #[serial] ensures no concurrent access
-		unsafe {
-			std::env::remove_var("SURREAL_MEMORY_THRESHOLD");
-		}
+		let err = ctx.done(true).expect_err("expected the memory threshold to be enforced");
+		assert!(
+			matches!(
+				err.downcast_ref::<DatastoreError>(),
+				Some(DatastoreError::QueryBeyondMemoryThreshold)
+			),
+			"expected QueryBeyondMemoryThreshold, got: {err:?}"
+		);
 	}
 }

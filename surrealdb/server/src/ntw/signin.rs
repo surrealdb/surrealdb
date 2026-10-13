@@ -6,10 +6,10 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::Token;
 use surrealdb_core::iam::signin::signin;
 use surrealdb_core::syn;
+use surrealdb_rpc::Token;
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 
@@ -17,7 +17,7 @@ use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
-use crate::cnf::HTTP_MAX_SIGNUP_BODY_SIZE;
+use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
 
@@ -45,7 +45,7 @@ where
 	Router::new()
 		.route("/signin", options(|| async {}).post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNUP_BODY_SIZE))
+		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNIN_BODY_SIZE))
 }
 
 async fn handler(

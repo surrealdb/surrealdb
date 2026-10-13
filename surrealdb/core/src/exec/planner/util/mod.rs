@@ -21,16 +21,18 @@ mod optimization;
 mod params;
 
 pub(crate) use conditions::{
-	all_value_sources, extract_bruteforce_knn, extract_matches_context,
-	extract_record_id_point_lookup, extract_table_from_context, has_knn_k_operator,
+	BruteForceKnnVector, all_value_sources, extract_bruteforce_knn, extract_matches_context,
+	extract_record_id_point_lookup, extract_table_from_matches, has_knn_k_operator,
 	has_knn_ktree_operator, has_knn_operator, has_top_level_or, strip_fts_condition,
-	strip_index_conditions, strip_knn_from_condition, strip_union_index_conditions,
+	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	strip_union_index_conditions,
 };
 pub(crate) use fields::{
 	check_forbidden_group_by_params, derive_field_name, idiom_to_field_name, idiom_to_field_path,
 };
 pub(crate) use literals::{
-	fold_condition_expressions, key_lit_to_expr, literal_to_value, try_literal_to_value,
+	fold_condition_expressions, key_lit_to_expr, literal_to_value, source_field_reads_are_inert,
+	try_literal_to_value,
 };
 pub(crate) use optimization::{
 	extract_count_field_names, extract_version, get_effective_limit_literal, index_covers_ordering,

@@ -1,0 +1,14 @@
+/**
+[env]
+namespace = true
+database = true
+imports = ["gql/_numeric_variant_schema.surql"]
+
+[test]
+reason = "RETURN DISTINCT deduplicates by the equality the language uses, so numerically equal values spelled with different numeric variants are one row"
+
+[[test.results]]
+value = "[{ v: 0.1f }, { v: 0.2f }, { v: 1 }, { v: 1.5f }]"
+*/
+
+MATCH (n:num) RETURN DISTINCT n.v AS v ORDER BY v

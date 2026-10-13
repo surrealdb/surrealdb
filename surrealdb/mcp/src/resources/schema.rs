@@ -7,7 +7,6 @@
 //! [`crate::resources`] module docs for the reasoning.
 
 use rmcp::ErrorData;
-use rmcp::model::ProtocolVersion;
 use serde_json::json;
 
 use crate::session::McpSession;
@@ -16,16 +15,17 @@ use crate::tools::validate_table_name;
 
 /// Emit the `surrealdb://info` resource.
 ///
-/// The protocol version is taken from [`ProtocolVersion::LATEST`] so this
-/// value cannot drift from what we actually negotiate during the MCP
-/// handshake. Capabilities mirror what [`crate::service::McpService::get_info`]
-/// advertises so clients can introspect server features from a single
-/// resource fetch without re-reading the initialize response.
+/// The protocol version is read from
+/// [`crate::service::ADVERTISED_PROTOCOL_VERSION`], the same constant
+/// `get_info` advertises during the handshake, so the two can never disagree.
+/// Capabilities mirror what [`crate::service::McpService::get_info`] declares
+/// so clients can introspect server features from a single resource fetch
+/// without re-reading the initialize response.
 pub fn get_server_info() -> String {
 	json!({
 		"name": "SurrealDB",
 		"version": env!("CARGO_PKG_VERSION"),
-		"protocol_version": ProtocolVersion::LATEST.to_string(),
+		"protocol_version": crate::service::ADVERTISED_PROTOCOL_VERSION.to_string(),
 		"capabilities": {
 			"tools": true,
 			"resources": true,
@@ -330,14 +330,12 @@ mod tests {
 	/// follow-up `INFO FOR TABLE` calls.
 	#[tokio::test]
 	async fn database_schema_includes_per_table_fields() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");
@@ -396,14 +394,12 @@ mod tests {
 	/// resource silently loses the table's fields/indexes/events.
 	#[tokio::test]
 	async fn database_schema_enriches_backtick_quoted_tables() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");
@@ -456,14 +452,12 @@ mod tests {
 	/// parser cannot read.
 	#[tokio::test]
 	async fn fetch_table_schema_rejects_quote_breaking_names() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");

@@ -8,6 +8,14 @@
 //! evaluated once in a `Compute` operator and then referenced by field name in
 //! downstream operators (`Sort`, `Project`, etc.).
 //!
+//! Registration is keyed by expression *and* alias, and a registered expression
+//! is evaluated exactly once per row. That is a semantic guarantee, not only an
+//! optimisation: for a non-deterministic expression such as `rand()`, ORDER BY
+//! on the alias sorts by the value the projection reports, so
+//! `SELECT rand() AS r FROM t ORDER BY r` is ascending in the `r` values it
+//! returns. Two aliases over the same expression are two entries, hence two
+//! independent values per row.
+//!
 //! # Current Usage
 //!
 //! The registry is created once per SELECT pipeline in `plan_select_pipeline` and

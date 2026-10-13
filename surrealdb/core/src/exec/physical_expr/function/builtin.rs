@@ -10,6 +10,12 @@ use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+/// Whether the named builtin can evaluate arbitrary nested statements, and so
+/// needs a write transaction regardless of what its arguments look like.
+pub(crate) fn builtin_can_write(name: &str) -> bool {
+	crate::expr::method::is_writer_builtin(name)
+}
+
 /// Built-in function expression - math::abs(), string::len(), etc.
 ///
 /// These functions are registered in the FunctionRegistry at startup.
@@ -54,6 +60,20 @@ impl PhysicalExpr for BuiltinFunctionExec {
 			// Evaluate all arguments
 			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
+			// A pure built-in behind an experimental target carries no context
+			// of its own, so the gate the legacy dispatcher applies is applied
+			// here instead — after the arguments, which is where the legacy
+			// dispatcher applies it, so an argument's own error surfaces first.
+			if let Some(target) = crate::exec::function::experimental_target(&self.name)
+				&& !ctx.capabilities().allows_experimental(&target)
+			{
+				return Err(crate::exec::Error::InvalidFunction {
+					name: self.name.clone(),
+					message: format!("Experimental feature {target} is not enabled"),
+				}
+				.into());
+			}
+
 			// Invoke the function based on whether it's pure or needs context
 			if func.is_pure() && !func.is_async() {
 				Ok(func.invoke(args)?)
@@ -69,10 +89,7 @@ impl PhysicalExpr for BuiltinFunctionExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// `api::invoke` and the `eval::*` functions can run nested writes, so they
-		// are read-write; everything else is read-only.
-		let func_mode = if matches!(self.name.as_str(), "api::invoke" | "eval::surql" | "eval::gql")
-		{
+		let func_mode = if builtin_can_write(&self.name) {
 			AccessMode::ReadWrite
 		} else {
 			AccessMode::ReadOnly

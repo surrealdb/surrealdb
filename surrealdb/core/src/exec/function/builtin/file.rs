@@ -7,16 +7,17 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 
-use crate::buc::BucketOperation;
 use crate::buc::store::{ListOptions, ObjectKey, ObjectStore};
+use crate::buc::{BucketOperation, Error as BucError};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::err::Error;
-use crate::exec::ExecutionContext;
+use crate::err::EngineError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 use crate::exec::planner::Planner;
+use crate::exec::{Error as ExecError, ExecutionContext};
+use crate::expr::Error as ExprError;
 use crate::fnc::args::FromArgs;
 use crate::val::{Bytes, File, Object, Value};
 use crate::{define_async_function, define_pure_function, register_functions};
@@ -29,7 +30,7 @@ use crate::{define_async_function, define_pure_function, register_functions};
 ///
 /// Accepts `Bytes` or `String` values and converts them into `bytes::Bytes`.
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
-	value.cast_to::<Bytes>().map(|x| x.0).map_err(Error::from).map_err(anyhow::Error::new)
+	value.cast_to::<Bytes>().map(|x| x.0).map_err(ExprError::from).map_err(anyhow::Error::new)
 }
 
 /// Helper struct for bucket operations without needing the full BucketController.
@@ -48,7 +49,7 @@ impl<'a> StreamingBucketOps<'a> {
 		// Check experimental capability
 		let caps = ctx.capabilities();
 		if !caps.allows_experimental(&ExperimentalTarget::Files) {
-			return Err(Error::InvalidFunction {
+			return Err(ExecError::InvalidFunction {
 				name: "file::*".to_string(),
 				message: "Experimental capability `files` is not enabled".to_string(),
 			}
@@ -58,7 +59,7 @@ impl<'a> StreamingBucketOps<'a> {
 		// Get FrozenContext and Options (same approach as fnc::file)
 		let frozen_ctx = ctx.exec_ctx.ctx();
 		let opt = ctx.exec_ctx.options().ok_or_else(|| {
-			Error::Internal("No options available for file operation".to_string())
+			EngineError::Internal("No options available for file operation".to_string())
 		})?;
 
 		// Get namespace and database IDs from the Options
@@ -80,7 +81,7 @@ impl<'a> StreamingBucketOps<'a> {
 
 	/// Checks if the bucket allows writes.
 	fn require_writeable(&self) -> Result<()> {
-		ensure!(!self.bucket.readonly, Error::ReadonlyBucket(self.bucket.name.to_string()));
+		ensure!(!self.bucket.readonly, BucError::ReadonlyBucket(self.bucket.name.to_string()));
 		Ok(())
 	}
 
@@ -96,7 +97,7 @@ impl<'a> StreamingBucketOps<'a> {
 			// Guest and Record users are not allowed to list files in buckets
 			ensure!(
 				!op.is_list(),
-				Error::BucketPermissions {
+				BucError::BucketPermissions {
 					name: self.bucket.name.to_string(),
 					op,
 				}
@@ -104,14 +105,16 @@ impl<'a> StreamingBucketOps<'a> {
 
 			match &self.bucket.permissions {
 				Permission::None => {
-					bail!(Error::BucketPermissions {
+					bail!(BucError::BucketPermissions {
 						name: self.bucket.name.to_string(),
 						op,
 					})
 				}
 				Permission::Full => (),
 				Permission::Specific(e) => {
-					let expr = Planner::new(self.exec_ctx.ctx()).physical_expr(e.clone()).await?;
+					let expr = Planner::new(self.exec_ctx.ctx(), self.exec_ctx.function_registry())
+						.physical_expr(e.clone())
+						.await?;
 					let mut exec_ctx =
 						self.exec_ctx.with_param("action", Value::from(op.to_string()));
 					if let Some(key) = key {
@@ -141,11 +144,11 @@ impl<'a> StreamingBucketOps<'a> {
 					let res = expr
 						.evaluate(eval_ctx)
 						.await
-						.map_err(|e| Error::Internal(e.to_string()))?;
+						.map_err(|e| EngineError::Internal(e.to_string()))?;
 
 					ensure!(
 						res.is_truthy(),
-						Error::BucketPermissions {
+						BucError::BucketPermissions {
 							name: self.bucket.name.to_string(),
 							op,
 						}
@@ -166,7 +169,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.put(key, payload)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -180,7 +183,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.put_if_not_exists(key, payload)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -193,7 +196,7 @@ impl<'a> StreamingBucketOps<'a> {
 			.store
 			.get(key)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?
 		{
 			Some(v) => v,
 			None => return Ok(None),
@@ -210,7 +213,7 @@ impl<'a> StreamingBucketOps<'a> {
 			.store
 			.head(key)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(meta.map(|m| m.into_value(self.bucket.name.to_string())))
 	}
@@ -223,7 +226,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.delete(key)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -236,7 +239,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.copy(src, &dst)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -249,7 +252,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.copy_if_not_exists(src, &dst)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -262,7 +265,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.rename(src, &dst)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -275,7 +278,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.rename_if_not_exists(src, &dst)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -287,7 +290,7 @@ impl<'a> StreamingBucketOps<'a> {
 		self.store
 			.exists(key)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -299,7 +302,7 @@ impl<'a> StreamingBucketOps<'a> {
 			.store
 			.list(opts)
 			.await
-			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| BucError::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(items.into_iter().map(|m| m.into_value(self.bucket.name.to_string())).collect())
 	}

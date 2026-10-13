@@ -162,11 +162,7 @@ impl conn::Sealed for super::Client {
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -301,7 +297,7 @@ pub(crate) async fn run_router(
 					match result {
 						Ok(message) => {
 							match handle_response::<Message, _, _>(
-								&message, &state.sessions, &state.sink
+								&message, config.max_message_size, &state.sessions, &state.sink
 							).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {
@@ -349,7 +345,6 @@ mod tests {
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::Rng;
-	use surrealdb_core::rpc;
 	use web_time::SystemTime;
 
 	use crate::types::{Array, Value};
@@ -377,51 +372,26 @@ mod tests {
 			vector.push(rng.random());
 		}
 		let mut results = vec![];
-		let ref_payload;
-		let ref_compressed;
 
 		let vector = Value::Array(Array::from(vector));
 
 		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
 		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
 		{
-			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::flatbuffers::encode(&vector).unwrap());
-			ref_payload = payload.len() as f32;
+			let (duration, payload) = timed(&|| surrealdb_types::encode(&vector).unwrap());
 			results.push((payload.len(), FLATBUFFERS, duration, 1.0));
 
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
-			ref_compressed = payload.len() as f32;
 			results.push((payload.len(), FLATBUFFERS_COMPRESSED, duration, 1.0));
 		}
 
-		const CBOR: &str = "CBor Vec<Value>";
-		const CBOR_COMPRESSED: &str = "Compressed CBor Vec<Value>";
-		{
-			let (duration, payload) = timed(&|| {
-				let cbor = rpc::format::cbor::encode(vector.clone()).unwrap();
-				let mut res = Vec::new();
-				ciborium::into_writer(&cbor, &mut res).unwrap();
-				res
-			});
-			results.push((payload.len(), CBOR, duration, payload.len() as f32 / ref_payload));
-
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				CBOR_COMPRESSED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
 		results.sort_by_key(|(a, _, _, _)| *a);
 		for (size, name, duration, factor) in &results {
 			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
 		}
 
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(results, vec![CBOR_COMPRESSED, CBOR, FLATBUFFERS_COMPRESSED, FLATBUFFERS])
+		assert_eq!(results, vec![FLATBUFFERS_COMPRESSED, FLATBUFFERS])
 	}
 }

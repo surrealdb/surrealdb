@@ -1,7 +1,14 @@
 // RUST_LOG=warn cargo make ci-ws-integration
 mod common;
 
+/// Every test in this suite must live under this module. The `ci-ws-integration`
+/// and `ci-workspace-test` tasks select and skip the suite by the `ws_integration::`
+/// name prefix, so a test declared at the file root is silently excluded from the
+/// former and not excluded by the latter.
 mod ws_integration {
+	use serde_json::json;
+
+	use crate::common::{Format, Socket, StartServerArguments, start_server};
 
 	/// Tests for the empty protocol format
 	mod none {
@@ -19,6 +26,52 @@ mod ws_integration {
 	mod cbor {
 		use crate::common::Format;
 		crate::include_tests!(Some(Format::Cbor), Format::Cbor);
+	}
+
+	/// Defense-in-depth: the WebSocket `attach` method must enforce
+	/// `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` so a single connection
+	/// cannot create an unbounded number of per-connection sessions.
+	///
+	/// We run the server with a deliberately tiny cap, then attach
+	/// `cap + 1` sessions over a single WebSocket. The first `cap`
+	/// attaches must succeed; the last one must be refused.
+	#[test_log::test(tokio::test)]
+	async fn websocket_attach_session_cap() {
+		use std::collections::HashMap;
+
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS".to_string(), "3".to_string());
+		let (addr, mut server) = start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+
+		let socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await.unwrap();
+
+		// The cap (3) already includes the implicit connection session
+		// keyed by `self.id`, so the first two explicit attaches should
+		// succeed (bringing the count to 3) and the third must be refused.
+		let session_ids =
+			["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
+
+		for sid in &session_ids {
+			let res = socket.send_request_with_session("attach", json!([]), sid).await.unwrap();
+			assert!(
+				res.get("error").is_none(),
+				"attach within cap must succeed for {sid}: {res:?}"
+			);
+		}
+
+		// One past the cap must be refused.
+		let res = socket
+			.send_request_with_session("attach", json!([]), "33333333-3333-3333-3333-333333333333")
+			.await
+			.unwrap();
+		assert!(res.get("error").is_some(), "attach past cap must be refused: {res:?}");
+
+		server.finish().unwrap();
 	}
 }
 
@@ -1925,14 +1978,14 @@ pub async fn session_use_change_database(cfg_server: Option<Format>, cfg_format:
 	// Verify that the authenticated session corresponds with the original user
 	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
-	// Swtich to the different database without signing in again
-	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
-	// Verify that the authenticated session is unable to query data
+	// Attempt to switch to a different database without signing in again. The
+	// tenant-boundary gate (GHSA-2v9j) rejects the cross-tenant pivot at `use`
+	// itself, so a database user cannot reach a database outside its level.
+	let res = socket.send_message_use(Some(NS), Some("different")).await;
+	assert!(res.is_err(), "cross-tenant RPC use must be rejected, got: {res:?}");
+	// The session was not pivoted: it still reads its own database.
 	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
-	// The query succeeds but the results does not contain the value with
-	// permissions
-	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
-	assert_eq!(res[0]["result"], json!([]), "result: {:?}", res);
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
 	// Test passed
 	server.finish().unwrap();
 }
@@ -2021,18 +2074,14 @@ pub async fn session_use_change_database_scope(cfg_server: Option<Format>, cfg_f
 	// Verify that the authenticated session corresponds with the original user
 	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
-	// Swtich to the different database without signing in again
-	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
-	// Verify that the authenticated session is unable to query data
+	// Attempt to switch to a different database without signing in again. The
+	// tenant-boundary gate (GHSA-2v9j) rejects the cross-tenant pivot at `use`
+	// itself, so a record user cannot reach a database outside its level.
+	let res = socket.send_message_use(Some(NS), Some("different")).await;
+	assert!(res.is_err(), "cross-tenant RPC use must be rejected, got: {res:?}");
+	// The session was not pivoted; $auth still resolves in the original database.
 	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
-	// The following statement would be true when the bug was present:
-	// assert_eq!(res[0]["result"], json!(["different"]), "result: {:?}", res);
-	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
-	assert_eq!(
-		res[0]["result"], "You don't have permission to change to the different database",
-		"result: {:?}",
-		res
-	);
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
 	// Test passed
 	server.finish().unwrap();
 }
@@ -2665,6 +2714,65 @@ pub async fn live_query_cleared_on_record_identity_change(
 	server.finish().unwrap();
 }
 
+/// RFC 6455 section 5.5.1: an endpoint that receives a close frame MUST send
+/// one in response.
+///
+/// The server's read loop trips the connection canceller as soon as it reads
+/// the client's close frame, and its write loop polls that canceller ahead of
+/// everything else, so the reply only reaches the socket if the write task
+/// finishes the handshake as it tears down. When it does not, the client sees
+/// the transport drop and reports `Protocol(ResetWithoutClosingHandshake)`
+/// rather than a clean close.
+///
+/// Driven with a raw client rather than [`Socket`], whose reader task consumes
+/// the end of the stream and so cannot report how the connection finished.
+pub async fn close_handshake(cfg_server: Option<Format>, _cfg_format: Format) {
+	use futures_util::SinkExt;
+	use tokio_stream::StreamExt;
+	use tokio_tungstenite::tungstenite::Message as WsMessage;
+	use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to the WebSocket, negotiating the same subprotocol the rest of
+	// these tests do -- axum only echoes the protocol header when one was
+	// negotiated, so the close path is worth covering under each.
+	let mut req = format!("ws://{addr}/rpc").into_client_request().unwrap();
+	if let Some(format) = cfg_server.map(|v| v.to_string()) {
+		req.headers_mut().insert("Sec-WebSocket-Protocol", format.parse().unwrap());
+	}
+	let (mut stream, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+	// Start the closing handshake
+	stream.send(WsMessage::Close(None)).await.unwrap();
+	// Read until the connection ends, and report how it ended
+	let answered = loop {
+		let next = tokio::time::timeout(Duration::from_secs(10), stream.next())
+			.await
+			.expect("the connection ends within 10s");
+		match next {
+			// The keepalive ping runs on its own schedule and can land here
+			Some(Ok(WsMessage::Ping(_) | WsMessage::Pong(_))) => continue,
+			// The close frame we are owed
+			Some(Ok(WsMessage::Close(_))) => break true,
+			// A data frame after a close frame is a protocol violation
+			Some(Ok(other)) => panic!("frame sent after the close frame: {other:?}"),
+			// The transport dropped instead of answering
+			Some(Err(err)) => panic!("connection failed instead of closing: {err}"),
+			// The stream ended without the close frame
+			None => break false,
+		}
+	};
+	assert!(answered, "the connection ended without a close frame from the server");
+	// The handshake is only complete if the stream then ends cleanly: a close
+	// frame followed by a reset is still a reset.
+	let after = tokio::time::timeout(Duration::from_secs(10), stream.next())
+		.await
+		.expect("the stream ends within 10s");
+	assert!(after.is_none(), "the connection did not end cleanly after the close frame: {after:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
 /// A macro which defines a macro which can be used to define tests running the
 /// above functions with a set of given paramenters.
 macro_rules! define_include_tests {
@@ -3115,47 +3223,6 @@ define_include_tests! {
 	live_notification_default_session_is_null,
 	#[test_log::test(tokio::test)]
 	detach_connection_session_rejected,
-}
-
-/// Defense-in-depth: the WebSocket `attach` method must enforce
-/// `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` so a single connection
-/// cannot create an unbounded number of per-connection sessions.
-///
-/// We run the server with a deliberately tiny cap, then attach
-/// `cap + 1` sessions over a single WebSocket. The first `cap`
-/// attaches must succeed; the last one must be refused.
-#[test_log::test(tokio::test)]
-async fn websocket_attach_session_cap() {
-	use std::collections::HashMap;
-
-	let mut vars = HashMap::new();
-	vars.insert("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS".to_string(), "3".to_string());
-	let (addr, mut server) = common::start_server(StartServerArguments {
-		vars: Some(vars),
-		..Default::default()
-	})
-	.await
-	.unwrap();
-
-	let socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await.unwrap();
-
-	// The cap (3) already includes the implicit connection session
-	// keyed by `self.id`, so the first two explicit attaches should
-	// succeed (bringing the count to 3) and the third must be refused.
-	let session_ids =
-		["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
-
-	for sid in &session_ids {
-		let res = socket.send_request_with_session("attach", json!([]), sid).await.unwrap();
-		assert!(res.get("error").is_none(), "attach within cap must succeed for {sid}: {res:?}");
-	}
-
-	// One past the cap must be refused.
-	let res = socket
-		.send_request_with_session("attach", json!([]), "33333333-3333-3333-3333-333333333333")
-		.await
-		.unwrap();
-	assert!(res.get("error").is_some(), "attach past cap must be refused: {res:?}");
-
-	server.finish().unwrap();
+	#[test_log::test(tokio::test)]
+	close_handshake,
 }

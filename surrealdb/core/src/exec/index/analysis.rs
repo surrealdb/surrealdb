@@ -3,17 +3,20 @@
 //! The [`IndexAnalyzer`] examines query conditions and ORDER BY clauses to find
 //! indexes that can accelerate the query.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
+use super::access_path::{
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
+};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
-use crate::idx::planner::ScanDirection;
-use crate::val::{Number, Value};
+use crate::kvs::Direction;
+use crate::val::{Number, Range, Value};
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
@@ -61,9 +64,17 @@ impl<'a> IndexAnalyzer<'a> {
 			self.analyze_order(ordering, &mut candidates);
 		}
 
-		// Filter out indexes not allowed by WITH hints
+		// Filter out indexes not allowed by WITH hints. A KNN candidate is
+		// exempt: the KNN operator can only be computed by its KnnScan, so it
+		// must survive to `select_access_path`, whose must-drive rule
+		// overrides the hint (with a warning) — otherwise the operator lands
+		// in a per-row residual where it is never truthy and the query
+		// silently returns zero rows.
 		if let Some(With::Index(names)) = self.with_hints {
-			candidates.retain(|c| names.iter().any(|n| n.as_str() == c.index_ref.name.as_str()));
+			candidates.retain(|c| {
+				matches!(c.access, BTreeAccess::Knn { .. })
+					|| names.iter().any(|n| n.as_str() == c.index_ref.name.as_str())
+			});
 		}
 
 		// Merge half-bounded ranges on the same index into bounded ranges
@@ -83,11 +94,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// into an `AccessPath::Union`. If any branch lacks an index candidate, the
 	/// union cannot be used and `None` is returned (the caller should fall back
 	/// to a table scan).
-	pub fn try_or_union(
-		&self,
-		cond: Option<&Cond>,
-		direction: ScanDirection,
-	) -> Option<AccessPath> {
+	pub fn try_or_union(&self, cond: Option<&Cond>, direction: Direction) -> Option<AccessPath> {
 		let cond = cond?;
 
 		// Check for WITH NOINDEX
@@ -95,9 +102,28 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 
-		// Flatten OR branches from the condition tree
+		self.or_union_from_expr(&cond.0, direction).map(|(path, _)| path)
+	}
+
+	/// Build a multi-index union `AccessPath` from a single OR expression.
+	///
+	/// Flattens the OR into branches, analyzes each independently, and — if
+	/// EVERY branch has at least one index candidate — combines the best
+	/// candidate from each into an `AccessPath::Union`. Returns the union
+	/// together with its *effective score*: the minimum branch score. An OR
+	/// reads the union of all branches' rows, so it is only as selective as
+	/// its least-selective branch, and the min lets the caller compare the
+	/// union against a single-index driver on the same scale as
+	/// [`IndexCandidate::score`]. Returns `None` if any branch lacks an index
+	/// candidate (the caller must fall back to a table scan).
+	fn or_union_from_expr(
+		&self,
+		or_expr: &Expr,
+		direction: Direction,
+	) -> Option<(AccessPath, u32)> {
+		// Flatten OR branches from the expression tree
 		let mut branches = Vec::new();
-		Self::flatten_or(&cond.0, &mut branches);
+		Self::flatten_or(or_expr, &mut branches);
 
 		// Need at least 2 branches for a union to make sense
 		if branches.len() < 2 {
@@ -106,6 +132,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// Analyze each branch independently
 		let mut branch_paths = Vec::with_capacity(branches.len());
+		let mut min_score = u32::MAX;
 		for branch_expr in branches {
 			let branch_cond = Cond(branch_expr.clone());
 			let candidates = self.analyze(Some(&branch_cond), None);
@@ -113,6 +140,7 @@ impl<'a> IndexAnalyzer<'a> {
 				// This branch has no index — cannot use union
 				return None;
 			}
+			let branch_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
 			let path = select_access_path(candidates, self.with_hints, direction);
 			match path {
 				AccessPath::TableScan => {
@@ -126,29 +154,889 @@ impl<'a> IndexAnalyzer<'a> {
 					// and would error otherwise.
 					continue;
 				}
-				_ => branch_paths.push(path),
+				_ => {
+					branch_paths.push(path);
+					min_score = min_score.min(branch_score);
+				}
 			}
 		}
 
 		// If every branch turned out to be empty the whole OR is empty.
 		if branch_paths.is_empty() {
-			return Some(AccessPath::EmptyScan);
+			return Some((AccessPath::EmptyScan, u32::MAX));
 		}
 
 		// A single surviving branch is a degenerate union — return it
 		// directly rather than wrapping in `AccessPath::Union(...)`
 		// (the planner's union dispatch expects ≥ 2 sub-paths).
 		if branch_paths.len() == 1 {
-			return branch_paths.into_iter().next();
+			return branch_paths.into_iter().next().map(|p| (p, min_score));
 		}
 
 		// OR branches are independent predicates that may both hold
 		// on the same row, so the union can emit the same record
 		// from multiple branches — dedupe required.
-		Some(AccessPath::Union {
-			paths: branch_paths,
-			dedupe: true,
+		Some((
+			AccessPath::Union {
+				paths: branch_paths,
+				dedupe: true,
+			},
+			min_score,
+		))
+	}
+
+	/// Try to build a multi-index union from an OR nested inside an AND.
+	///
+	/// [`Self::try_or_union`] only fires when the *whole* WHERE clause is an
+	/// OR. When the OR is one conjunct of an AND — e.g.
+	/// `type = $t AND (title @1@ $q OR body @2@ $q)` — the single-index
+	/// analyzer drives from the other conjunct (`type`) and evaluates the OR
+	/// as a per-row residual filter, which is catastrophic for full-text
+	/// matches (every `type` row is re-scored against the FT index).
+	///
+	/// This walks the top-level AND conjuncts and, for each conjunct that is
+	/// itself an OR of independently-indexable predicates, builds the union.
+	/// The union covers only that OR; the remaining conjuncts are enforced by
+	/// the residual `Filter` the SELECT planner installs above the
+	/// `UnionIndexScan`.  Those conjuncts must survive
+	/// `strip_union_index_conditions`, which is why it only drops a
+	/// containment leaf whose literals contain *every* branch value — a
+	/// sibling conjunct narrower than the OR's branch values is not implied
+	/// by the union and stays in the filter.
+	///
+	/// Returns the best such union (the one whose weakest branch is most
+	/// selective) with its effective score, so the caller can compare it
+	/// against the chosen single-index driver and only switch when the union
+	/// is heuristically better. Skipped under explicit `WITH` hints — the
+	/// user has already pinned the plan.
+	pub fn try_and_nested_or_union(
+		&self,
+		cond: Option<&Cond>,
+		direction: Direction,
+	) -> Option<(AccessPath, u32)> {
+		let cond = cond?;
+
+		// Respect explicit index hints; leave the pinned plan alone.
+		if self.with_hints.is_some() {
+			return None;
+		}
+
+		// A KNN (nearest-neighbour) operator must be consumed by a KnnScan:
+		// it is stripped from the WHERE before residual filtering and cannot
+		// be evaluated as a per-row residual (unlike a MATCHES `@@`, which is
+		// correct — if slower — as a filter). Substituting a higher-scoring OR
+		// union here would demote the KNN to a residual that no longer
+		// restricts rows to the neighbour set, returning rows outside it. Leave
+		// any KNN query to drive from its KnnScan.
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+
+		// Only meaningful for a conjunction. A top-level OR is already
+		// handled by `try_or_union`.
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+
+		// Among the OR conjuncts that form a valid union, keep the one whose
+		// weakest branch is the most selective (highest effective score).
+		let mut best: Option<(AccessPath, u32)> = None;
+		for conjunct in conjuncts {
+			if !matches!(
+				conjunct,
+				Expr::Binary {
+					op: BinaryOperator::Or,
+					..
+				}
+			) {
+				continue;
+			}
+			if let Some((path, score)) = self.or_union_from_expr(conjunct, direction)
+				&& best.as_ref().is_none_or(|(_, best_score)| score > *best_score)
+			{
+				best = Some((path, score));
+			}
+		}
+
+		best
+	}
+
+	/// Try to build a bitmap fusion plan for an AND-composed WHERE clause
+	/// (issue #547).
+	///
+	/// The plan intersects per-branch candidate bitmaps over the table's
+	/// shared doc-ID space instead of driving from a single index and
+	/// filtering per row. Members of the intersection are:
+	///
+	/// - the standard per-index candidates from [`Self::analyze`] (equality, merged ranges,
+	///   compound prefixes, MATCHES), greedily deduplicated so a branch is only kept when it pins
+	///   at least one column no earlier (higher-scoring) branch already pins;
+	/// - AND-conjuncts that are themselves ORs / `IN [...]` / containment expansions whose every
+	///   branch is independently bitmap-capable ([`BitmapPlan::Or`]);
+	/// - `NOT <predicate>` conjuncts composed via [`BitmapPlan::AndNot`] — only when the subtracted
+	///   bitmap provably equals the predicate's truth set (see [`Self::bitmap_exact_plan`]); an
+	///   inexact subtraction would drop rows the residual filter can never restore.
+	///
+	/// Every b-tree branch requires an index whose entries carry doc-IDs
+	/// ([`StoredIndexDefinition::has_entry_doc_ids`]). Conjuncts that don't qualify simply stay
+	/// out of the plan — the caller keeps the whole WHERE clause as the
+	/// residual filter, so the bitmap only needs to over-approximate the
+	/// result per omitted conjunct.
+	///
+	/// Returns `None` (caller falls back to the streaming plans) unless the
+	/// plan has at least two positive members, or one positive member plus a
+	/// subtraction. Order/limit/version gating is the caller's
+	/// responsibility; `exact_col` reports whether a column's declared
+	/// field kind guarantees scalar values (array values fan out to one
+	/// index entry per element, making b-tree bitmaps over-approximate and
+	/// therefore unusable for subtraction).
+	pub(crate) fn try_bitmap_fusion(
+		&self,
+		cond: Option<&Cond>,
+		candidates: &[IndexCandidate],
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		let cond = cond?;
+		// Explicit hints pin the plan (NOINDEX is handled before analysis).
+		if self.with_hints.is_some() {
+			return None;
+		}
+		// A KNN operator must be consumed by its KnnScan (see
+		// `try_and_nested_or_union`); a KNN query's sibling conjuncts are
+		// fused by [`Self::try_knn_prefilter`] into the scan's allow-list
+		// bitmap instead (#548) — the query never becomes a plain
+		// `BitmapFusion` source.
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+		// A provably-empty candidate empties the whole conjunction; leave
+		// that to the EmptyScan path.
+		if candidates.iter().any(|c| c.empty) {
+			return None;
+		}
+
+		// Positive single-index branches, most selective (by score) first —
+		// the leading AND child anchors the intersection and is drained
+		// without a drained-entry budget.
+		let mut leaves: Vec<&IndexCandidate> =
+			candidates.iter().filter(|c| Self::bitmap_capable_candidate(c)).collect();
+		leaves.sort_by_key(|c| std::cmp::Reverse(c.score()));
+
+		let mut and_children: Vec<BitmapPlan> = Vec::new();
+		let mut covered: Vec<Idiom> = Vec::new();
+		let mut anchor_at_most_one_row = false;
+		for c in leaves {
+			let cols = Self::candidate_pinned_columns(c);
+			if cols.is_empty() || cols.iter().all(|col| covered.contains(col)) {
+				// Redundant with an already-selected branch (e.g. a
+				// single-column index shadowed by a selected compound
+				// prefix): another intersection cannot narrow the result.
+				continue;
+			}
+			covered.extend(cols);
+			if let Some(leaf) = Self::bitmap_leaf_from_candidate(c) {
+				if and_children.is_empty() {
+					anchor_at_most_one_row = Self::candidate_returns_at_most_one_row(c);
+				}
+				and_children.push(leaf);
+			}
+		}
+
+		// OR / IN / containment conjuncts become union members when every
+		// branch is independently bitmap-capable.
+		for conjunct in &conjuncts {
+			let path = match conjunct {
+				Expr::Binary {
+					op: BinaryOperator::Or,
+					..
+				} => self.or_union_from_expr(conjunct, Direction::Forward).map(|(p, _)| p),
+				Expr::Binary {
+					op:
+						BinaryOperator::Inside
+						| BinaryOperator::ContainAll
+						| BinaryOperator::ContainAny
+						| BinaryOperator::AllInside
+						| BinaryOperator::AnyInside,
+					..
+				} => {
+					let single = Cond((*conjunct).clone());
+					self.try_in_expansion(Some(&single), Direction::Forward).or_else(|| {
+						self.try_containment_expansion(Some(&single), Direction::Forward)
+					})
+				}
+				_ => None,
+			};
+			if let Some(path) = path
+				&& let Some(node) = Self::bitmap_plan_from_access_path(&path)
+			{
+				and_children.push(node);
+			}
+		}
+
+		// Graph reachability semi-joins (issue #549): a single-hop
+		// `->edge->vertex CONTAINS <literal id>` conjunct anchors at the
+		// literal and walks the inverse direction back to the candidate
+		// rows, entirely from adjacency pointer keys. Appended after the
+		// index leaves so a graph leaf never anchors the intersection — an
+		// adjacency band has no selectivity guarantee — and only alongside
+		// at least one index-backed branch, so it is always droppable on
+		// overflow. Skipped entirely when the anchoring branch guarantees
+		// at most one row: draining an adjacency band to intersect against
+		// a ≤1-row anchor can never beat the residual per-row traversal,
+		// which is a single adjacency-band lookup for that row.
+		if !and_children.is_empty() && !anchor_at_most_one_row {
+			for conjunct in &conjuncts {
+				if let Some(leaf) = Self::graph_semijoin_leaf(conjunct) {
+					and_children.push(leaf);
+				}
+			}
+		}
+
+		// `NOT <predicate>` conjuncts, folded into one subtraction:
+		// `A AND NOT B AND NOT C` ⇒ `A \ (B ∪ C)`.
+		let mut nots: Vec<BitmapPlan> = Vec::new();
+		for conjunct in &conjuncts {
+			if let Some(inner) = Self::as_negated_expr(conjunct)
+				&& let Some(node) = self.bitmap_exact_plan(inner, exact_col)
+			{
+				nots.push(node);
+			}
+		}
+
+		// Worth fusing only with ≥2 positive members, or one positive plus a
+		// subtraction; a single positive member is better served by the
+		// streaming single-index plan, and a subtraction with no positive
+		// anchor would need a table-universe bitmap we don't maintain.
+		if and_children.is_empty() || (and_children.len() < 2 && nots.is_empty()) {
+			return None;
+		}
+
+		let base = if and_children.len() == 1 {
+			and_children.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(and_children)
+		};
+		Some(if nots.is_empty() {
+			base
+		} else {
+			let subtract = if nots.len() == 1 {
+				nots.pop().expect("checked non-empty")
+			} else {
+				BitmapPlan::Or(nots)
+			};
+			BitmapPlan::AndNot {
+				base: Box::new(base),
+				subtract: Box::new(subtract),
+			}
 		})
+	}
+
+	/// Build a bitmap union plan for a top-level OR (issue #550): every
+	/// branch's best candidate drains to a doc-ID bitmap and the union
+	/// resolves once, inherently deduplicated — replacing the
+	/// `UnionIndexScan` RecordId merge, whose dedupe set grows with the
+	/// result size. The [`AccessPath::Union`] the plan was derived from is
+	/// returned alongside it, as the executor's overflow fallback: a union
+	/// branch exceeding its drained-entry budget abandons the bitmap plan
+	/// and streams the union instead.
+	///
+	/// Returns `None` unless every branch is independently bitmap-capable
+	/// (a union missing a branch would silently drop rows) and at least two
+	/// branches survive: a degenerate single-branch OR is better served by
+	/// the streaming single-index plan, and a provably-empty OR by the
+	/// EmptyScan path. The caller gates on the query shape: LIMIT without
+	/// ORDER BY keeps streaming early termination, and an ORDER BY declines
+	/// fusion only when an index covers the ordering or the ordering is
+	/// record-id order — both of which the union scan can satisfy without a
+	/// Sort; an ordering nothing covers installs a Sort above either plan.
+	pub(crate) fn try_bitmap_union_fusion(
+		&self,
+		cond: Option<&Cond>,
+		direction: Direction,
+	) -> Option<(BitmapPlan, AccessPath)> {
+		let cond = cond?;
+		// Explicit hints pin the plan (NOINDEX is handled before analysis).
+		if self.with_hints.is_some() {
+			return None;
+		}
+		// A KNN operator must be consumed by its KnnScan; see
+		// [`Self::try_bitmap_fusion`].
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		if !matches!(
+			cond.0,
+			Expr::Binary {
+				op: BinaryOperator::Or,
+				..
+			}
+		) {
+			return None;
+		}
+		let (path, _) = self.or_union_from_expr(&cond.0, direction)?;
+		match Self::bitmap_plan_from_access_path(&path)? {
+			BitmapPlan::Or(children)
+				if children.len() >= 2 && !Self::equality_branches_disjoint(&children) =>
+			{
+				Some((BitmapPlan::Or(children), path))
+			}
+			_ => None,
+		}
+	}
+
+	/// Whether every union member is an equality lookup on the same index
+	/// with pairwise-distinct values — record-disjoint branches (barring
+	/// array-valued fan-out, where declining is merely conservative). The
+	/// fused plan's structural win over the streaming union is dedupe, so
+	/// with no duplicates to save the union's direct row streaming beats the
+	/// bitmap's extra doc-ID resolve step: the caller declines fusion and
+	/// the streaming `UnionIndexScan` keeps the query.
+	fn equality_branches_disjoint(children: &[BitmapPlan]) -> bool {
+		let mut shared_index: Option<&IndexRef> = None;
+		let mut values: Vec<&Value> = Vec::with_capacity(children.len());
+		for child in children {
+			let BitmapPlan::BTree {
+				index_ref,
+				access: BTreeAccess::Equality(value),
+			} = child
+			else {
+				return false;
+			};
+			match shared_index {
+				None => shared_index = Some(index_ref),
+				Some(seen) if seen == index_ref => {}
+				Some(_) => return false,
+			}
+			if values.contains(&value) {
+				return false;
+			}
+			values.push(value);
+		}
+		true
+	}
+
+	/// Match a negated expression: the `!` prefix operator, or the builtin
+	/// `not()` function — the parsed form of `NOT (...)`. Both negate
+	/// truthiness identically.
+	pub(crate) fn as_negated_expr(expr: &Expr) -> Option<&Expr> {
+		match expr {
+			Expr::Prefix {
+				op: PrefixOperator::Not,
+				expr: inner,
+			} => Some(inner),
+			Expr::FunctionCall(call)
+				if call.arguments.len() == 1
+					&& matches!(
+						&call.receiver,
+						crate::expr::function::Function::Normal(name) if name == "not"
+					) =>
+			{
+				Some(&call.arguments[0])
+			}
+			_ => None,
+		}
+	}
+
+	/// Whether a candidate can produce a bitmap branch: b-tree accesses need
+	/// entry doc-IDs, full-text needs the current format, KNN never
+	/// participates (its operator is consumed by the KnnScan the bitmap
+	/// feeds, see [`Self::try_knn_prefilter`]), and a full-range scan (no
+	/// WHERE selectivity) contributes nothing to an intersection.
+	fn bitmap_capable_candidate(c: &IndexCandidate) -> bool {
+		if c.empty {
+			return false;
+		}
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Compound {
+				..
+			} => c.index_ref.definition().has_entry_doc_ids(),
+			BTreeAccess::Range {
+				range,
+			} => {
+				!matches!((&range.start, &range.end), (Bound::Unbounded, Bound::Unbounded))
+					&& c.index_ref.definition().has_entry_doc_ids()
+			}
+			BTreeAccess::FullText {
+				..
+			} => c.index_ref.definition().uses_shared_doc_ids(),
+			BTreeAccess::Knn {
+				..
+			} => false,
+		}
+	}
+
+	/// The index columns a candidate pins, used to skip branches made
+	/// redundant by an already-selected candidate.
+	fn candidate_pinned_columns(c: &IndexCandidate) -> Vec<Idiom> {
+		let cols = &c.index_ref.definition().cols;
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::FullText {
+				..
+			} => cols.first().cloned().into_iter().collect(),
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => {
+				let n = (prefix.len() + usize::from(range.is_some())).min(cols.len());
+				cols[..n].to_vec()
+			}
+			BTreeAccess::Knn {
+				..
+			} => Vec::new(),
+		}
+	}
+
+	/// Whether a candidate's access is guaranteed to match at most one row:
+	/// it pins the entire key of a unique index, either as a single-column
+	/// equality (multi-column indexes always surface as `Compound`, see
+	/// [`Self::try_match_comparison`]) or as a rangeless compound prefix
+	/// covering every column.
+	fn candidate_returns_at_most_one_row(c: &IndexCandidate) -> bool {
+		if !c.index_ref.is_unique() {
+			return false;
+		}
+		match &c.access {
+			BTreeAccess::Equality(_) => true,
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => range.is_none() && prefix.len() >= c.index_ref.definition().cols.len(),
+			_ => false,
+		}
+	}
+
+	/// Convert a positive candidate into a bitmap leaf.
+	fn bitmap_leaf_from_candidate(c: &IndexCandidate) -> Option<BitmapPlan> {
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::Compound {
+				..
+			} => Some(BitmapPlan::BTree {
+				index_ref: c.index_ref.clone(),
+				access: c.access.clone(),
+			}),
+			BTreeAccess::FullText {
+				query,
+				operator,
+			} => Some(BitmapPlan::FullText {
+				index_ref: c.index_ref.clone(),
+				query: query.clone(),
+				operator: operator.clone(),
+			}),
+			BTreeAccess::Knn {
+				..
+			} => None,
+		}
+	}
+
+	/// Convert an OR-union access path into a bitmap union.
+	///
+	/// Returns `None` when any branch is not bitmap-capable — a union
+	/// missing a branch would silently drop rows, so partial conversion is
+	/// never allowed. `EmptyScan` converts to an empty union (a provably
+	/// empty conjunct).
+	fn bitmap_plan_from_access_path(path: &AccessPath) -> Option<BitmapPlan> {
+		match path {
+			AccessPath::BTreeScan {
+				index_ref,
+				access,
+				..
+			} => {
+				if !index_ref.definition().has_entry_doc_ids() {
+					return None;
+				}
+				Some(BitmapPlan::BTree {
+					index_ref: index_ref.clone(),
+					access: access.clone(),
+				})
+			}
+			AccessPath::FullTextSearch {
+				index_ref,
+				query,
+				operator,
+			} if index_ref.definition().uses_shared_doc_ids() => Some(BitmapPlan::FullText {
+				index_ref: index_ref.clone(),
+				query: query.clone(),
+				operator: operator.clone(),
+			}),
+			AccessPath::FullTextSearch {
+				..
+			} => None,
+			AccessPath::Union {
+				paths,
+				..
+			} => {
+				let mut children = Vec::with_capacity(paths.len());
+				for p in paths {
+					children.push(Self::bitmap_plan_from_access_path(p)?);
+				}
+				Some(BitmapPlan::Or(children))
+			}
+			AccessPath::EmptyScan => Some(BitmapPlan::Or(Vec::new())),
+			AccessPath::TableScan
+			| AccessPath::KnnSearch {
+				..
+			}
+			| AccessPath::BitmapFusion {
+				..
+			} => None,
+		}
+	}
+
+	/// Recognize a single-hop graph containment conjunct as a reachability
+	/// semi-join leaf (issue #549): `->edge->vertex CONTAINS vertex:lit` or
+	/// the flipped `vertex:lit INSIDE ->edge->vertex`.
+	///
+	/// Admitted only when the truth set is exactly "rows adjacent to the
+	/// literal": two bare lookup parts in one fixed direction, plain table
+	/// subjects, no lookup clauses, and a plan-time record-id literal whose
+	/// table the vertex hop names. The produced leaf traverses the INVERSE
+	/// direction from the literal. Anything else — multi-hop, `<->`,
+	/// ranges, edge conditions, unfolded parameters — keeps today's
+	/// per-row evaluation.
+	fn graph_semijoin_leaf(conjunct: &Expr) -> Option<BitmapPlan> {
+		use crate::expr::part::Part;
+		let (idiom, lit) = match conjunct {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Contain,
+				right,
+			} => match (&**left, &**right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => (idiom, lit),
+				_ => return None,
+			},
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Inside,
+				right,
+			} => match (&**left, &**right) {
+				(Expr::Literal(lit), Expr::Idiom(idiom)) => (idiom, lit),
+				_ => return None,
+			},
+			_ => return None,
+		};
+		let Some(Value::RecordId(anchor)) = try_literal_to_value(lit) else {
+			return None;
+		};
+		let [Part::Lookup(edge_hop), Part::Lookup(vertex_hop)] = idiom.0.as_slice() else {
+			return None;
+		};
+		let (edge_tables, dir) = Self::plain_graph_hop(edge_hop)?;
+		let (vertex_tables, vertex_dir) = Self::plain_graph_hop(vertex_hop)?;
+		if dir != vertex_dir || edge_tables.is_empty() {
+			return None;
+		}
+		// The vertex hop names the tables the far end may belong to; the
+		// anchor must be one of them or the predicate cannot hold — leave
+		// that shape to the ordinary filter.
+		if !vertex_tables.contains(&anchor.table) {
+			return None;
+		}
+		let direction = match dir {
+			crate::expr::Dir::Out => crate::expr::Dir::In,
+			crate::expr::Dir::In => crate::expr::Dir::Out,
+			crate::expr::Dir::Both => return None,
+		};
+		Some(BitmapPlan::Graph {
+			source: anchor,
+			direction,
+			edge_tables,
+		})
+	}
+
+	/// A lookup part usable in a semi-join hop: a bare graph lookup in one
+	/// fixed direction over plain table subjects, with no clauses — the
+	/// shapes whose truth set is pure adjacency.
+	fn plain_graph_hop(
+		lookup: &crate::expr::lookup::Lookup,
+	) -> Option<(Vec<surrealdb_strand::TableName>, crate::expr::Dir)> {
+		use crate::expr::lookup::{Lookup, LookupKind, LookupSubject};
+		let Lookup {
+			kind,
+			expr,
+			only,
+			what,
+			cond,
+			split,
+			group,
+			order,
+			limit,
+			start,
+			alias,
+		} = lookup;
+		let LookupKind::Graph(dir) = kind else {
+			return None;
+		};
+		if matches!(dir, crate::expr::Dir::Both) {
+			return None;
+		}
+		if expr.is_some()
+			|| *only || cond.is_some()
+			|| split.is_some()
+			|| group.is_some()
+			|| order.is_some()
+			|| limit.is_some()
+			|| start.is_some()
+			|| alias.is_some()
+		{
+			return None;
+		}
+		let mut tables = Vec::with_capacity(what.len());
+		for s in what {
+			match s {
+				LookupSubject::Table {
+					table,
+					referencing_field: None,
+				} => tables.push(table.clone()),
+				_ => return None,
+			}
+		}
+		Some((tables, *dir))
+	}
+
+	/// Build an *exact* bitmap fusion plan for an index-only COUNT
+	/// (issue #547): `SELECT count() FROM t WHERE <fully index-backed AND>
+	/// GROUP ALL` becomes the cardinality of the fused bitmap, with zero
+	/// record fetches.
+	///
+	/// Unlike [`Self::try_bitmap_fusion`] there is no residual filter to
+	/// correct any approximation, so *every* conjunct must be exactly
+	/// represented by its branch bitmap (see [`Self::bitmap_exact_plan`]);
+	/// a single non-qualifying conjunct disqualifies the plan. Single-conjunct
+	/// WHERE clauses are left to the existing single-index key-only count.
+	pub(crate) fn try_bitmap_count_fusion(
+		&self,
+		cond: &Cond,
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		if self.with_hints.is_some() {
+			return None;
+		}
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+		let mut positives: Vec<BitmapPlan> = Vec::new();
+		let mut nots: Vec<BitmapPlan> = Vec::new();
+		for conjunct in conjuncts {
+			if let Some(inner) = Self::as_negated_expr(conjunct) {
+				nots.push(self.bitmap_exact_plan(inner, exact_col)?);
+			} else {
+				positives.push(self.bitmap_exact_plan(conjunct, exact_col)?);
+			}
+		}
+		// A subtraction needs a positive base; `NOT`-only clauses would need
+		// a table-universe bitmap that is deliberately not maintained.
+		if positives.is_empty() {
+			return None;
+		}
+		let base = if positives.len() == 1 {
+			positives.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(positives)
+		};
+		Some(if nots.is_empty() {
+			base
+		} else {
+			let subtract = if nots.len() == 1 {
+				nots.pop().expect("checked non-empty")
+			} else {
+				BitmapPlan::Or(nots)
+			};
+			BitmapPlan::AndNot {
+				base: Box::new(base),
+				subtract: Box::new(subtract),
+			}
+		})
+	}
+
+	/// Build a bitmap plan that *exactly* equals a predicate's truth set —
+	/// `bitmap(B) == truth(B)` — as required wherever no residual filter can
+	/// correct an approximation: the subtract side of an AND-NOT (an inexact
+	/// subtraction would drop rows where `NOT B` holds) and every branch of
+	/// an index-only COUNT. That admits:
+	///
+	/// - full-text MATCHES leaves — the posting bitmap *is* the operator's truth set (the MATCHES
+	///   filter path evaluates membership on the same bitmaps);
+	/// - b-tree equality/range/compound leaves whose pinned columns are declared with an array-free
+	///   field kind (`exact_col`) — array values fan out to one index entry per element, which
+	///   would make the bitmap a superset of the predicate's truth set;
+	/// - an OR of such leaves (`B OR C` is exactly `B ∪ C`).
+	///
+	/// Anything else returns `None`.
+	fn bitmap_exact_plan(
+		&self,
+		inner: &Expr,
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		// `NOT (B OR C)` — subtract the union when every branch is exact.
+		if let Expr::Binary {
+			op: BinaryOperator::Or,
+			..
+		} = inner
+		{
+			let mut branches = Vec::new();
+			Self::flatten_or(inner, &mut branches);
+			let mut children = Vec::with_capacity(branches.len());
+			for branch in branches {
+				children.push(self.bitmap_exact_plan(branch, exact_col)?);
+			}
+			return Some(BitmapPlan::Or(children));
+		}
+
+		// Only a single simple predicate can be subtracted exactly from the
+		// analyzer's output. `NOT (A AND B)` is out: `analyze` may cover the
+		// conjunction only partially (one candidate per index), and a
+		// partially-covering bitmap is a superset of `A AND B` — subtracting
+		// it would drop rows where only one conjunct holds.
+		if matches!(
+			inner,
+			Expr::Binary {
+				op: BinaryOperator::And,
+				..
+			}
+		) {
+			return None;
+		}
+
+		// A single predicate: analyze it in isolation and keep the best
+		// exact candidate.
+		let single = Cond(inner.clone());
+		let candidates = self.analyze(Some(&single), None);
+		candidates
+			.into_iter()
+			.filter(|c| {
+				if !Self::bitmap_capable_candidate(c) {
+					return false;
+				}
+				match &c.access {
+					BTreeAccess::FullText {
+						..
+					} => true,
+					_ => Self::candidate_pinned_columns(c).iter().all(exact_col),
+				}
+			})
+			.max_by_key(|c| c.score())
+			.as_ref()
+			.and_then(Self::bitmap_leaf_from_candidate)
+	}
+
+	/// Split a KNN query's stripped WHERE into an exact allow-list bitmap
+	/// plan and a true residual (#548, pre-filtered vector search).
+	///
+	/// Per conjunct of the AND chain:
+	/// - a conjunct containing a MATCHES operator joins the prefilter when it is exactly
+	///   bitmap-representable (its full-text index is online in the current format); otherwise it
+	///   is dropped entirely — MATCHES is not evaluable inside the ANN traversal (no query executor
+	///   there, it computes to `false` and would reject every candidate), so an uncovered MATCHES
+	///   is enforced only by the outer `Filter` re-applying the KNN-stripped WHERE;
+	/// - a negated conjunct always stays residual (no table-universe bitmap is maintained, and
+	///   index-NOT is inexact for records missing the field);
+	/// - any other conjunct joins the prefilter iff its truth set is *exactly* a candidate bitmap
+	///   ([`Self::bitmap_exact_plan`]). Exactness is mandatory: covered conjuncts are dropped from
+	///   the in-traversal filter, and a superset bitmap would let non-matching candidates consume
+	///   top-K slots (the outer `Filter` would drop them, silently returning fewer than k rows).
+	///
+	/// One covered conjunct suffices — unlike [`Self::try_bitmap_fusion`]'s
+	/// ≥ 2 rule — because it already eliminates in-traversal record fetches.
+	pub(crate) fn try_knn_prefilter(
+		&self,
+		stripped: &Cond,
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<KnnPrefilterPlan> {
+		// Explicit hints pin the plan.
+		if self.with_hints.is_some() {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&stripped.0, &mut conjuncts);
+		let mut covered: Vec<BitmapPlan> = Vec::new();
+		let mut residual: Vec<&Expr> = Vec::new();
+		let mut uncovered_matches = false;
+		for conjunct in conjuncts {
+			if Self::expr_contains_matches(conjunct) {
+				if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
+					covered.push(leaf);
+				} else {
+					// Not exactly coverable and excluded from the residual
+					// (see the method doc): flag it so the scan keeps its
+					// MATCHES-aware condition active alongside the allow-list.
+					uncovered_matches = true;
+				}
+			} else if Self::as_negated_expr(conjunct).is_some() {
+				residual.push(conjunct);
+			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
+				covered.push(leaf);
+			} else {
+				residual.push(conjunct);
+			}
+		}
+		if covered.is_empty() {
+			return None;
+		}
+		let root = if covered.len() == 1 {
+			covered.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(covered)
+		};
+		let residual = residual
+			.into_iter()
+			.cloned()
+			.reduce(|left, right| Expr::Binary {
+				left: Box::new(left),
+				op: BinaryOperator::And,
+				right: Box::new(right),
+			})
+			.map(Cond);
+		Some(KnnPrefilterPlan {
+			root,
+			residual,
+			uncovered_matches,
+		})
+	}
+
+	/// Returns `true` if the expression tree contains a full-text MATCHES
+	/// operator. MATCHES needs a query executor and is not evaluable inside
+	/// an ANN traversal's record-fetch filter (it computes to `false` there),
+	/// so such conjuncts must never be pushed down as an in-traversal
+	/// residual (#548) — the outer `Filter` enforces them instead.
+	pub(crate) fn expr_contains_matches(expr: &Expr) -> bool {
+		match expr {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				matches!(op, BinaryOperator::Matches(_))
+					|| Self::expr_contains_matches(left)
+					|| Self::expr_contains_matches(right)
+			}
+			Expr::Prefix {
+				expr: inner,
+				..
+			} => Self::expr_contains_matches(inner),
+			Expr::FunctionCall(call) => call.arguments.iter().any(Self::expr_contains_matches),
+			_ => false,
+		}
 	}
 
 	/// Maximum number of array elements to expand for `field IN [...]`.
@@ -181,7 +1069,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub fn try_in_expansion(
 		&self,
 		cond: Option<&Cond>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
 
@@ -285,7 +1173,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub fn try_containment_expansion(
 		&self,
 		cond: Option<&Cond>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
 
@@ -450,6 +1338,50 @@ impl<'a> IndexAnalyzer<'a> {
 			_ => {
 				branches.push(expr);
 			}
+		}
+	}
+
+	/// Flatten nested AND expressions into a list of conjuncts.
+	///
+	/// `A AND B AND C` (parsed as `(A AND B) AND C`) becomes `[A, B, C]`.
+	/// Non-AND nodes (including OR sub-trees) are returned as single
+	/// conjuncts so the caller can inspect them.
+	fn flatten_and<'b>(expr: &'b Expr, conjuncts: &mut Vec<&'b Expr>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				Self::flatten_and(left, conjuncts);
+				Self::flatten_and(right, conjuncts);
+			}
+			_ => {
+				conjuncts.push(expr);
+			}
+		}
+	}
+
+	/// Returns `true` if the expression tree contains a KNN (nearest-neighbour)
+	/// operator. Such an operator is consumed by a `KnnScan` and stripped from
+	/// the WHERE before residual filtering, so it must not be left behind as a
+	/// residual by an index substitution (see `try_and_nested_or_union`).
+	fn expr_contains_knn(expr: &Expr) -> bool {
+		match expr {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				matches!(op, BinaryOperator::NearestNeighbor(_))
+					|| Self::expr_contains_knn(left)
+					|| Self::expr_contains_knn(right)
+			}
+			Expr::Prefix {
+				expr: inner,
+				..
+			} => Self::expr_contains_knn(inner),
+			_ => false,
 		}
 	}
 
@@ -652,125 +1584,31 @@ impl<'a> IndexAnalyzer<'a> {
 			let mut j = i + 1;
 			while j < candidates.len() && candidates[j].index_ref.idx == candidates[i].index_ref.idx
 			{
-				match Self::try_merge_ranges(&candidates[i].access, &candidates[j].access) {
-					Some(Ok(merged_access)) => {
-						let covers_order = candidates[i].covers_order || candidates[j].covers_order;
-						candidates[i].access = merged_access;
-						candidates[i].covers_order = covers_order;
-						candidates.remove(j);
-						// Don't increment j — the next candidate shifted into slot j
-					}
-					Some(Err(())) => {
-						// Contradiction — flag the surviving candidate as
-						// empty so it converts to `AccessPath::EmptyScan`.
+				if let BTreeAccess::Range {
+					range: a,
+				} = &candidates[i].access
+					&& let BTreeAccess::Range {
+						range: b,
+					} = &candidates[j].access
+				{
+					let range = a.clone().intersect(b.clone());
+					if range.is_empty() {
 						candidates[i].empty = true;
 						candidates.remove(j);
+					} else {
+						let covers_order = candidates[i].covers_order || candidates[j].covers_order;
+						candidates[i].access = BTreeAccess::Range {
+							range,
+						};
+						candidates[i].covers_order = covers_order;
+						candidates.remove(j);
 					}
-					None => {
-						j += 1;
-					}
+				} else {
+					j += 1;
 				}
 			}
 			i += 1;
 		}
-	}
-
-	/// Try to merge two BTreeAccess::Range values into a single tighter range.
-	///
-	/// Handles three cases:
-	/// - One side provides `from`, the other provides `to` → produce a bounded range with both.
-	/// - Both sides provide `from` → keep the tighter (larger) bound.
-	/// - Both sides provide `to`   → keep the tighter (smaller) bound.
-	///
-	/// Returns:
-	/// - `Some(Ok(merged))` — a strictly tighter range than either input.
-	/// - `Some(Err(()))`    — the bounds are mutually unsatisfiable; the caller should set the
-	///   candidate's `empty` flag so the planner short-circuits to [`AccessPath::EmptyScan`].
-	/// - `None`             — the inputs cannot be merged (different value kinds, NaN, non-Range
-	///   variants); leave the candidates as-is.
-	#[allow(clippy::result_unit_err)]
-	fn try_merge_ranges(a: &BTreeAccess, b: &BTreeAccess) -> Option<Result<BTreeAccess, ()>> {
-		let (
-			BTreeAccess::Range {
-				from: from_a,
-				to: to_a,
-			},
-			BTreeAccess::Range {
-				from: from_b,
-				to: to_b,
-			},
-		) = (a, b)
-		else {
-			return None;
-		};
-
-		// Skip merges where neither input contributes any bound — that
-		// would just produce a second copy of `Range { None, None }`.
-		if from_a.is_none() && to_a.is_none() && from_b.is_none() && to_b.is_none() {
-			return None;
-		}
-
-		// Tighten `from` bounds: keep the larger value (exclusive wins on
-		// ties so `> 5 AND >= 5` becomes `> 5`).
-		let merged_from = match (from_a, from_b) {
-			(Some(fa), Some(fb)) => Some(Self::tighter_from(fa, fb)?),
-			(Some(f), None) | (None, Some(f)) => Some(f.clone()),
-			(None, None) => None,
-		};
-
-		// Tighten `to` bounds: keep the smaller value (exclusive wins).
-		let merged_to = match (to_a, to_b) {
-			(Some(ta), Some(tb)) => Some(Self::tighter_to(ta, tb)?),
-			(Some(t), None) | (None, Some(t)) => Some(t.clone()),
-			(None, None) => None,
-		};
-
-		// Detect contradiction: from > to (or equal with at least one exclusive).
-		if let (Some(f), Some(t)) = (merged_from.as_ref(), merged_to.as_ref())
-			&& bounds_are_unsatisfiable(f, t)
-		{
-			return Some(Err(()));
-		}
-
-		Some(Ok(BTreeAccess::Range {
-			from: merged_from,
-			to: merged_to,
-		}))
-	}
-
-	/// Pick the tighter (larger) of two `from` bounds. Returns `None` if
-	/// the two values are not comparable (e.g. different `Value::kind`).
-	fn tighter_from(a: &RangeBound, b: &RangeBound) -> Option<RangeBound> {
-		let cmp = a.value.partial_cmp(&b.value)?;
-		Some(match cmp {
-			std::cmp::Ordering::Less => b.clone(),
-			std::cmp::Ordering::Greater => a.clone(),
-			std::cmp::Ordering::Equal => {
-				// Equal values: exclusive (non-inclusive) is tighter.
-				if !a.inclusive {
-					a.clone()
-				} else {
-					b.clone()
-				}
-			}
-		})
-	}
-
-	/// Pick the tighter (smaller) of two `to` bounds. Returns `None` if
-	/// the two values are not comparable.
-	fn tighter_to(a: &RangeBound, b: &RangeBound) -> Option<RangeBound> {
-		let cmp = a.value.partial_cmp(&b.value)?;
-		Some(match cmp {
-			std::cmp::Ordering::Less => a.clone(),
-			std::cmp::Ordering::Greater => b.clone(),
-			std::cmp::Ordering::Equal => {
-				if !a.inclusive {
-					a.clone()
-				} else {
-					b.clone()
-				}
-			}
-		})
 	}
 
 	/// Remove duplicate candidates, preferring compound over simple.
@@ -892,21 +1730,6 @@ impl<'a> IndexAnalyzer<'a> {
 							prefix: vec![v],
 							range: None,
 						},
-						BTreeAccess::Range {
-							from,
-							to,
-						} => {
-							// A range on the first column of a compound index
-							// cannot use Compound prefix+range (that's for
-							// equality prefix + range on next column).
-							// Keep it as a simple range -- the IndexScan compound
-							// path won't be reached, but deduplication may
-							// prefer a compound candidate if one exists.
-							BTreeAccess::Range {
-								from,
-								to,
-							}
-						}
 						other => other,
 					}
 				} else {
@@ -939,47 +1762,44 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Less than (field < value)
-			(BinaryOperator::LessThan, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::exclusive(value.clone())),
+			// More then (value > value)
+			(BinaryOperator::LessThan, IdiomPosition::Left)
+			| (BinaryOperator::MoreThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Unbounded,
+					end: Bound::Excluded(value.clone()),
+				},
 			}),
 
 			// Less than or equal (field <= value)
-			(BinaryOperator::LessThanEqual, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::inclusive(value.clone())),
+			// More than or equal (value >= field)
+			(BinaryOperator::LessThanEqual, IdiomPosition::Left)
+			| (BinaryOperator::MoreThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Unbounded,
+					end: Bound::Included(value.clone()),
+				},
 			}),
 
 			// Greater than (field > value)
-			(BinaryOperator::MoreThan, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::exclusive(value.clone())),
-				to: None,
+			// Less than (value < field)
+			(BinaryOperator::MoreThan, IdiomPosition::Left)
+			| (BinaryOperator::LessThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Excluded(value.clone()),
+					end: Bound::Unbounded,
+				},
 			}),
 
 			// Greater than or equal (field >= value)
-			(BinaryOperator::MoreThanEqual, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::inclusive(value.clone())),
-				to: None,
+			// Less than or equal (value <= field)
+			(BinaryOperator::MoreThanEqual, IdiomPosition::Left)
+			| (BinaryOperator::LessThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Included(value.clone()),
+					end: Bound::Unbounded,
+				},
 			}),
-
-			// Handle reversed comparisons (value < field means field > value)
-			(BinaryOperator::LessThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::exclusive(value.clone())),
-				to: None,
-			}),
-			(BinaryOperator::LessThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::inclusive(value.clone())),
-				to: None,
-			}),
-			(BinaryOperator::MoreThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::exclusive(value.clone())),
-			}),
-			(BinaryOperator::MoreThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::inclusive(value.clone())),
-			}),
-
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
 				// Single-element array: treat as equality (field IN [v] → field = v)
@@ -1005,8 +1825,10 @@ impl<'a> IndexAnalyzer<'a> {
 			// + filter path handle `!= NULL` correctly.
 			(BinaryOperator::NotEqual, _) if matches!(value, Value::None) => {
 				Some(BTreeAccess::Range {
-					from: Some(RangeBound::exclusive(value.clone())),
-					to: None,
+					range: Range {
+						start: Bound::Excluded(value.clone()),
+						end: Bound::Unbounded,
+					},
 				})
 			}
 
@@ -1185,7 +2007,7 @@ impl<'a> IndexAnalyzer<'a> {
 			let ef = match &ix_def.index {
 				Index::Hnsw(hnsw) => {
 					if let Some(d) = required_distance
-						&& *d != hnsw.distance
+						&& crate::catalog::Distance::from((*d).clone()) != hnsw.distance
 					{
 						continue;
 					}
@@ -1193,7 +2015,7 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 				Index::DiskAnn(diskann) => {
 					if let Some(d) = required_distance
-						&& *d != diskann.distance
+						&& crate::catalog::Distance::from((*d).clone()) != diskann.distance
 					{
 						continue;
 					}
@@ -1262,8 +2084,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 			let full_range = BTreeAccess::Range {
-				from: None,
-				to: None,
+				range: Range::unbounded(),
 			};
 			if covers_ordering_either_direction(
 				&index_ref,
@@ -1290,10 +2111,10 @@ fn covers_ordering_either_direction<F>(
 	covers: F,
 ) -> bool
 where
-	F: Fn(&IndexRef, &BTreeAccess, ScanDirection, &Ordering) -> bool,
+	F: Fn(&IndexRef, &BTreeAccess, Direction, &Ordering) -> bool,
 {
-	covers(index_ref, access, ScanDirection::Forward, ordering)
-		|| covers(index_ref, access, ScanDirection::Backward, ordering)
+	covers(index_ref, access, Direction::Forward, ordering)
+		|| covers(index_ref, access, Direction::Backward, ordering)
 }
 
 /// A candidate index access path.
@@ -1383,13 +2204,15 @@ impl IndexCandidate {
 				}
 			}
 			BTreeAccess::Range {
-				from,
-				to,
+				range: Range {
+					start,
+					end,
+				},
 			} => {
-				score += match (from.is_some(), to.is_some()) {
-					(true, true) => 300,
-					(true, false) | (false, true) => 200,
-					(false, false) => 50,
+				score += match (start, end) {
+					(Bound::Unbounded, Bound::Unbounded) => 50,
+					(_, Bound::Unbounded) | (Bound::Unbounded, _) => 200,
+					(_, _) => 300,
 				};
 			}
 			BTreeAccess::FullText {
@@ -1412,7 +2235,7 @@ impl IndexCandidate {
 	}
 
 	/// Convert this candidate to an AccessPath.
-	pub fn to_access_path(&self, direction: ScanDirection) -> AccessPath {
+	pub fn to_access_path(&self, direction: Direction) -> AccessPath {
 		if self.empty {
 			return AccessPath::EmptyScan;
 		}
@@ -1434,6 +2257,9 @@ impl IndexCandidate {
 				vector: vector.clone(),
 				k: *k,
 				ef: *ef,
+				// The prefilter is a plan-level concern; the SELECT planner
+				// attaches it after path selection (#548).
+				prefilter: None,
 			},
 			_ => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),
@@ -1512,24 +2338,6 @@ pub(crate) fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -
 	col_without_all == expr_without_all
 }
 
-/// Decide whether a `from`/`to` pair describes an unsatisfiable range.
-///
-/// Returns `true` when no value can satisfy both bounds simultaneously:
-/// either `from.value > to.value`, or the values are equal but at least
-/// one bound is exclusive. Returns `false` when at least one value can
-/// satisfy both, **and also** when the values are not comparable — the
-/// caller treats incomparable bounds as "leave it alone" rather than
-/// silently emitting an EmptyScan that could be wrong.
-fn bounds_are_unsatisfiable(from: &RangeBound, to: &RangeBound) -> bool {
-	use std::cmp::Ordering;
-	match from.value.partial_cmp(&to.value) {
-		Some(Ordering::Greater) => true,
-		Some(Ordering::Equal) => !(from.inclusive && to.inclusive),
-		Some(Ordering::Less) => false,
-		None => false,
-	}
-}
-
 /// Normalize a range operator based on the position of the idiom in the
 /// comparison expression.
 ///
@@ -1566,10 +2374,10 @@ mod tests {
 	//!
 	//! These lock in plan-choice behaviour against intentional changes and
 	//! act as regression cover for the analyzer + `select_access_path`
-	//! helpers.  They use small `IndexDefinition` fixtures and parse WHERE /
-	//! ORDER BY snippets via the SurrealQL parser, then drive the analyzer
-	//! directly and assert about the candidate set or the access path that
-	//! `select_access_path` picks.
+	//! helpers.  They use small `IndexDefinition` fixtures and parse
+	//! WHERE / ORDER BY snippets via the SurrealQL parser, then drive the
+	//! analyzer directly and assert about the candidate set or the access
+	//! path that `select_access_path` picks.
 	//!
 	//! Tests are grouped by concern in nested modules so a failure tells you
 	//! which category regressed at a glance.
@@ -1579,27 +2387,28 @@ mod tests {
 	use surrealdb_strand::Strand;
 
 	use super::*;
-	use crate::catalog::{Index, IndexDefinition, IndexId};
+	use crate::catalog::{FullTextParams, Index, IndexDefinition, IndexId, Scoring};
 	use crate::expr::order::Ordering;
 	use crate::expr::with::With;
 	use crate::expr::{Cond, Expr, Idiom};
-	use crate::val::TableName;
 
 	// ------------------------------------------------------------------
 	// Fixture helpers
 	// ------------------------------------------------------------------
 
-	/// Build a minimal `IndexDefinition`.  Tests use synthetic `index_id`s
-	/// that don't have to match any real catalog state.
+	/// Build a minimal `IndexDefinition`.  Tests use synthetic
+	/// `index_id`s that don't have to match any real catalog state.
 	fn idx_def(id: u32, name: &str, cols: &[&str], kind: Index) -> IndexDefinition {
 		IndexDefinition {
 			index_id: IndexId(id),
 			name: Strand::from(name),
-			table_name: TableName::from("t"),
+			table_name: "t".into(),
 			cols: cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect(),
 			index: kind,
+			count_cond: None,
 			comment: None,
 			prepare_remove: false,
+			format_version: 1,
 		}
 	}
 
@@ -1609,6 +2418,22 @@ mod tests {
 
 	fn idx_uniq(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 		idx_def(id, name, cols, Index::Uniq)
+	}
+
+	fn idx_ft(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+		idx_def(
+			id,
+			name,
+			cols,
+			Index::FullText(FullTextParams {
+				analyzer: "simple".into(),
+				highlight: false,
+				scoring: Scoring::Bm {
+					k1: 1.2,
+					b: 0.75,
+				},
+			}),
+		)
 	}
 
 	fn analyzer<'a>(defs: Vec<IndexDefinition>, with: Option<&'a With>) -> IndexAnalyzer<'a> {
@@ -1661,6 +2486,330 @@ mod tests {
 	// ------------------------------------------------------------------
 	// 1. Equality / single-column
 	// ------------------------------------------------------------------
+	// 0. Bitmap fusion (issue #547)
+	// ------------------------------------------------------------------
+	mod bitmap_fusion {
+		use super::*;
+		use crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+
+		/// A b-tree index at the doc-ID entry format (bitmap-capable).
+		pub(super) fn idx_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			let mut def = idx_basic(id, name, cols);
+			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def
+		}
+
+		/// Run `try_bitmap_fusion` the way `resolve_access_path` does: analyze
+		/// without ORDER BY, then attempt the fusion. `exact` stands in for
+		/// the field-kind check gating NOT subtraction.
+		fn fuse(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<BitmapPlan> {
+			let candidates = az.analyze(Some(cond), None);
+			az.try_bitmap_fusion(Some(cond), &candidates, &move |_| exact)
+		}
+
+		#[test]
+		fn two_equality_branches_fuse() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			let plan = fuse(&az, &cond, false).expect("two capable branches fuse");
+			assert!(matches!(plan, BitmapPlan::And(ref children) if children.len() == 2));
+		}
+
+		/// Run `try_bitmap_union_fusion` the way `resolve_access_path` does.
+		fn fuse_union(az: &IndexAnalyzer<'_>, cond: &Cond) -> Option<BitmapPlan> {
+			az.try_bitmap_union_fusion(Some(cond), Direction::Forward).map(|(plan, _)| plan)
+		}
+
+		#[test]
+		fn top_level_or_of_capable_branches_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 OR b = 2");
+			let plan = fuse_union(&az, &cond).expect("two capable branches union");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 2));
+		}
+
+		#[test]
+		fn or_trees_flatten_into_one_union() {
+			let az = analyzer(
+				vec![
+					idx_v2(1, "idx_a", &["a"]),
+					idx_v2(2, "idx_b", &["b"]),
+					idx_v2(3, "idx_c", &["c"]),
+				],
+				None,
+			);
+			let cond = parse_cond("a = 1 OR b = 2 OR c = 3");
+			let plan = fuse_union(&az, &cond).expect("nested OR flattens");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 3));
+		}
+
+		#[test]
+		fn union_fusion_declines_conjunctions() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse_union(&az, &cond).is_none(), "AND is try_bitmap_fusion's shape");
+		}
+
+		#[test]
+		fn disjoint_same_index_equalities_decline() {
+			// Same-index equality branches with distinct values are
+			// record-disjoint: no duplicate fetches to save, so the
+			// streaming union keeps the query.
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR a = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn same_index_range_branches_still_fuse() {
+			// A range branch can overlap an equality branch on the same
+			// index, so the disjointness decline does not apply.
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR a > 5");
+			let plan = fuse_union(&az, &cond).expect("overlappable branches union");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 2));
+		}
+
+		#[test]
+		fn a_pre_doc_id_branch_blocks_the_union() {
+			// One branch's index predates entry doc-IDs: a union missing a
+			// branch would silently drop rows, so nothing fuses.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_basic(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 OR b = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn an_unindexed_branch_blocks_the_union() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR unindexed = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn a_with_hint_pins_the_union_plan() {
+			let with = With::Index(vec!["idx_a".to_owned()]);
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], Some(&with));
+			let cond = parse_cond("a = 1 OR b = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		/// The graph semi-join leaf lands after the index leaves, in both
+		/// containment spellings, traversing the inverse direction.
+		#[test]
+		fn a_graph_conjunct_joins_the_intersection() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			for cond in ["a = 1 AND ->wrote->doc CONTAINS doc:x", "a = 1 AND doc:x IN ->wrote->doc"]
+			{
+				let plan = fuse(&az, &parse_cond(cond), false).expect("graph conjunct fuses");
+				let BitmapPlan::And(children) = plan else {
+					panic!("expected an intersection for `{cond}`")
+				};
+				assert_eq!(children.len(), 2, "`{cond}`");
+				assert!(
+					matches!(
+						&children[1],
+						BitmapPlan::Graph {
+							direction: crate::expr::Dir::In,
+							..
+						}
+					),
+					"graph leaf must follow the index leaf for `{cond}`"
+				);
+			}
+		}
+
+		/// A unique index at the doc-ID entry format (bitmap-capable).
+		fn idx_uniq_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			let mut def = idx_uniq(id, name, cols);
+			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def
+		}
+
+		/// A unique-equality anchor guarantees at most one candidate row, so
+		/// the graph conjunct must not join the intersection — draining an
+		/// adjacency band to intersect against a ≤1-row anchor can never beat
+		/// the residual per-row traversal. With no other member the fusion
+		/// declines entirely, keeping the streaming single-index plan.
+		#[test]
+		fn a_unique_anchor_skips_the_graph_leaf() {
+			let az = analyzer(vec![idx_uniq_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 AND ->wrote->doc CONTAINS doc:x");
+			assert!(fuse(&az, &cond, false).is_none(), "unique anchor keeps the streaming plan");
+		}
+
+		/// The guard only drops the graph leaf: sibling index branches still
+		/// fuse around the unique anchor.
+		#[test]
+		fn a_unique_anchor_with_a_sibling_fuses_without_the_graph_leaf() {
+			let az =
+				analyzer(vec![idx_uniq_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2 AND ->wrote->doc CONTAINS doc:x");
+			let plan = fuse(&az, &cond, false).expect("two b-tree branches fuse");
+			let BitmapPlan::And(children) = plan else {
+				panic!("expected an intersection")
+			};
+			assert_eq!(children.len(), 2);
+			assert!(
+				children.iter().all(|c| !matches!(c, BitmapPlan::Graph { .. })),
+				"the graph leaf must stay out of a unique-anchored intersection"
+			);
+		}
+
+		/// A compound prefix on a unique index is a ≤1-row anchor only when
+		/// it pins every column with no range; a partial prefix can match
+		/// many rows and keeps the graph leaf.
+		#[test]
+		fn only_a_fully_pinned_unique_compound_anchor_skips_the_graph_leaf() {
+			let az = analyzer(vec![idx_uniq_v2(1, "idx_ab", &["a", "b"])], None);
+			let full = parse_cond("a = 1 AND b = 2 AND ->wrote->doc CONTAINS doc:x");
+			assert!(fuse(&az, &full, false).is_none(), "fully pinned unique prefix declines");
+			let partial = parse_cond("a = 1 AND ->wrote->doc CONTAINS doc:x");
+			let plan = fuse(&az, &partial, false).expect("partial prefix keeps the graph leaf");
+			assert!(matches!(plan, BitmapPlan::And(ref c) if c.len() == 2));
+		}
+
+		/// Every shape outside the single-hop literal-anchored contract
+		/// declines, and a graph conjunct alone cannot anchor a plan.
+		#[test]
+		fn graph_conjuncts_outside_the_contract_decline() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			for cond in [
+				// No index-backed sibling to anchor the intersection.
+				"->wrote->doc CONTAINS doc:x AND unindexed = 2",
+				// Multi-hop.
+				"a = 1 AND ->wrote->doc->wrote->doc CONTAINS doc:x",
+				// Both-direction traversal.
+				"a = 1 AND <->wrote<->doc CONTAINS doc:x",
+				// The anchor's table is not a vertex table the hop names.
+				"a = 1 AND ->wrote->doc CONTAINS person:1",
+				// A clause on the lookup changes its truth set.
+				"a = 1 AND ->(wrote WHERE weight > 1)->doc CONTAINS doc:x",
+			] {
+				assert!(fuse(&az, &parse_cond(cond), false).is_none(), "`{cond}`");
+			}
+		}
+
+		#[test]
+		fn pre_doc_id_indexes_do_not_fuse() {
+			// format_version 1 b-tree entries carry no doc-IDs.
+			let az =
+				analyzer(vec![idx_basic(1, "idx_a", &["a"]), idx_basic(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn single_branch_does_not_fuse() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2");
+			assert!(fuse(&az, &cond, false).is_none(), "one branch is a streaming plan");
+		}
+
+		#[test]
+		fn with_hint_pins_the_plan() {
+			let with = With::Index(vec!["idx_a".to_owned()]);
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], Some(&with));
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn conjunctive_not_subtracts_when_exact() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND !(b = 2)");
+			let plan = fuse(&az, &cond, true).expect("exact NOT subtracts");
+			assert!(matches!(plan, BitmapPlan::AndNot { .. }));
+			// Without the field-kind exactness guarantee the NOT stays a
+			// residual-only filter, and a single positive branch is not
+			// worth fusing.
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn standalone_not_never_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("!(a = 1) AND !(b = 2)");
+			assert!(fuse(&az, &cond, true).is_none(), "a subtraction needs a positive anchor");
+		}
+
+		#[test]
+		fn not_of_conjunction_is_not_subtracted() {
+			// `NOT (b = 2 AND c = 3)` cannot be subtracted from partial
+			// candidates — a partially-covering bitmap over-subtracts.
+			let az = analyzer(
+				vec![
+					idx_v2(1, "idx_a", &["a"]),
+					idx_v2(2, "idx_b", &["b"]),
+					idx_v2(3, "idx_c", &["c"]),
+				],
+				None,
+			);
+			let cond = parse_cond("a = 1 AND !(b = 2 AND c = 3)");
+			assert!(fuse(&az, &cond, true).is_none());
+		}
+
+		#[test]
+		fn or_conjunct_becomes_union_member() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND (b = 2 OR b = 3)");
+			let plan = fuse(&az, &cond, false).expect("indexable OR conjunct fuses");
+			let BitmapPlan::And(children) = plan else {
+				panic!("expected And root");
+			};
+			assert!(
+				children
+					.iter()
+					.any(|c| matches!(c, BitmapPlan::Or(branches) if branches.len() == 2))
+			);
+		}
+
+		#[test]
+		fn or_with_unindexed_branch_stays_residual() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND (b = 2 OR unindexed = 3)");
+			assert!(fuse(&az, &cond, false).is_none(), "partial OR would drop rows");
+		}
+
+		#[test]
+		fn knn_condition_never_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2 AND vec <|2|> [1, 2]");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn redundant_same_column_branch_is_skipped() {
+			// Two indexes with the same leading column: intersecting both is
+			// pointless; the second is skipped so only one branch remains,
+			// which is below the fusion threshold.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a1", &["a"]), idx_v2(2, "idx_a2", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn count_fusion_requires_every_conjunct_exact() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			// Fully covered: eligible.
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_some());
+			// One conjunct not index-covered: ineligible (no residual filter
+			// exists to repair the count).
+			let cond = parse_cond("a = 1 AND b = 2 AND unindexed = 3");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_none());
+			// Array-admitting field kinds are ineligible (entry fan-out
+			// would inflate the count).
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| false).is_none());
+		}
+	}
+
+	// ------------------------------------------------------------------
 	mod equality {
 		use super::*;
 
@@ -1696,7 +2845,7 @@ mod tests {
 			let path = super::super::super::access_path::select_access_path(
 				cands,
 				None,
-				crate::idx::planner::ScanDirection::Forward,
+				crate::kvs::Direction::Forward,
 			);
 			match path {
 				AccessPath::BTreeScan {
@@ -1742,6 +2891,8 @@ mod tests {
 	// 2. Range / inequality
 	// ------------------------------------------------------------------
 	mod range {
+		use std::ops::Bound;
+
 		use super::*;
 
 		#[test]
@@ -1752,12 +2903,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_none());
-					assert!(!from.as_ref().unwrap().inclusive, "MoreThan is exclusive");
+					assert!(matches!(range.start, Bound::Excluded(_)));
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -1771,10 +2920,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
+					range,
 					..
 				} => {
-					assert!(from.as_ref().unwrap().inclusive, "MoreThanEqual is inclusive");
+					assert!(matches!(range.start, Bound::Included(_)));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -1789,11 +2938,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_some());
+					assert!(!matches!(range.start, Bound::Unbounded));
+					assert!(!matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected merged Range, got {other:?}"),
 			}
@@ -1808,11 +2956,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_none());
+					assert!(!matches!(range.start, Bound::Unbounded));
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected Range from-bound, got {other:?}"),
 			}
@@ -1995,8 +3142,10 @@ mod tests {
 			assert!(matches!(
 				c.access,
 				BTreeAccess::Range {
-					from: None,
-					to: None
+					range: Range {
+						start: Bound::Unbounded,
+						end: Bound::Unbounded,
+					}
 				}
 			));
 		}
@@ -2034,7 +3183,7 @@ mod tests {
 			let path = super::super::super::access_path::select_access_path(
 				cands,
 				Some(&with),
-				crate::idx::planner::ScanDirection::Forward,
+				crate::kvs::Direction::Forward,
 			);
 			assert!(matches!(path, AccessPath::TableScan), "NOINDEX → TableScan");
 		}
@@ -2088,13 +3237,13 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate for != NONE");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range: Range {
+						start,
+						end,
+					},
 				} => {
-					let from = from.as_ref().expect("from bound");
-					assert!(matches!(from.value, crate::val::Value::None));
-					assert!(!from.inclusive);
-					assert!(to.is_none());
+					assert!(matches!(start, Bound::Excluded(crate::val::Value::None)));
+					assert!(matches!(end, Bound::Unbounded));
 				}
 				other => panic!("expected exclusive Range from NONE, got {other:?}"),
 			}
@@ -2112,7 +3261,7 @@ mod tests {
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a IN [1, 2, 3]");
 			let path = a
-				.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("IN expansion");
 			match path {
 				AccessPath::Union {
@@ -2132,7 +3281,7 @@ mod tests {
 			// 33 elements exceeds MAX_IN_EXPANSION_SIZE (32).
 			let lit = (1..=33).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
 			let cond = parse_cond(&format!("a IN [{lit}]"));
-			let path = a.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward);
+			let path = a.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward);
 			assert!(path.is_none(), "33-element IN should not expand");
 		}
 
@@ -2142,7 +3291,7 @@ mod tests {
 			let lit = (1..=32).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
 			let cond = parse_cond(&format!("a IN [{lit}]"));
 			let path = a
-				.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("32-element IN expands");
 			match path {
 				AccessPath::Union {
@@ -2168,9 +3317,7 @@ mod tests {
 			let defs = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
 			let a = analyzer(defs, None);
 			let cond = parse_cond("a = 1 OR b = 2");
-			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-				.expect("union");
+			let path = a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union");
 			match path {
 				AccessPath::Union {
 					paths,
@@ -2188,7 +3335,7 @@ mod tests {
 			// b has no index → union fails → caller falls back to TableScan.
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a = 1 OR b = 2");
-			let path = a.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward);
+			let path = a.try_or_union(Some(&cond), crate::kvs::Direction::Forward);
 			assert!(path.is_none(), "unindexed branch defeats union");
 		}
 
@@ -2203,7 +3350,7 @@ mod tests {
 				analyzer(vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])], None);
 			let cond = parse_cond("(a > 10 AND a < 5) OR b = 1");
 			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_or_union(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("union or degenerate path");
 			match path {
 				AccessPath::BTreeScan {
@@ -2228,10 +3375,214 @@ mod tests {
 			// Every branch's range contradicts, so the OR is empty.
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("(a > 10 AND a < 5) OR (a > 100 AND a < 50)");
-			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-				.expect("union path");
+			let path =
+				a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union path");
 			assert!(matches!(path, AccessPath::EmptyScan));
+		}
+
+		#[test]
+		fn nested_or_in_and_builds_ft_union() {
+			// `type = 'doc' AND (title @@ 'q' OR body @@ 'q')`: the OR of two
+			// full-text matches nested inside the AND must still form a union
+			// over the two FT indexes. `try_or_union` alone misses it because
+			// the top level is an AND, not an OR.
+			let defs = vec![
+				idx_basic(1, "ix_type", &["type"]),
+				idx_ft(2, "ft_title", &["title"]),
+				idx_ft(3, "ft_body", &["body"]),
+			];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
+			let (path, score) = a
+				.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward)
+				.expect("nested OR union");
+			match path {
+				AccessPath::Union {
+					paths,
+					dedupe,
+				} => {
+					assert_eq!(paths.len(), 2, "one branch per FT match");
+					assert!(dedupe, "a row may match both FT branches");
+				}
+				other => panic!("expected Union, got {other:?}"),
+			}
+			// Effective score is the min branch score. Both branches are
+			// full-text (800), which outranks the non-unique `type` equality
+			// (500), so the SELECT planner switches to the union.
+			assert_eq!(score, 800, "min branch score is the FT score");
+		}
+
+		#[test]
+		fn nested_or_skipped_under_with_index_hint() {
+			// WITH INDEX pins the plan; the nested-OR optimisation must bow out.
+			let with = With::Index(vec!["ft_title".to_string(), "ft_body".to_string()]);
+			let defs = vec![
+				idx_basic(1, "ix_type", &["type"]),
+				idx_ft(2, "ft_title", &["title"]),
+				idx_ft(3, "ft_body", &["body"]),
+			];
+			let a = analyzer(defs, Some(&with));
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
+				"WITH INDEX hint disables the nested-OR union"
+			);
+		}
+
+		#[test]
+		fn nested_or_unindexed_branch_no_union() {
+			// One OR branch (`note @@ 'q'`) has no FT index → the OR cannot be
+			// unioned, so no nested-OR union is offered (the SELECT planner
+			// keeps driving from the `type` equality and filters the OR).
+			let defs = vec![idx_basic(1, "ix_type", &["type"]), idx_ft(2, "ft_title", &["title"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR note @@ 'q')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
+				"an unindexed OR branch defeats the union"
+			);
+		}
+
+		#[test]
+		fn and_without_or_conjunct_no_union() {
+			// A pure conjunction has no OR conjunct to drive a union.
+			let defs = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
+				"no OR conjunct means no nested-OR union"
+			);
+		}
+
+		#[test]
+		fn nested_or_skipped_when_knn_present() {
+			// A KNN operator must drive from its KnnScan (it is stripped from
+			// the WHERE, not evaluated as a residual). Even though the email OR
+			// would otherwise union (unique index, score 1000 > KNN's 800), the
+			// presence of the KNN operator must disable the substitution so the
+			// nearest-neighbour restriction is not silently dropped.
+			let defs = vec![idx_uniq(1, "ix_email", &["email"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("vec <|2,100|> [0.0, 0.0] AND (email = 'a' OR email = 'b')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
+				"a KNN operator in the condition must disable the nested-OR union"
+			);
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// KNN prefilter split (#548)
+	// ------------------------------------------------------------------
+	mod knn_prefilter {
+		use super::bitmap_fusion::idx_v2;
+		use super::*;
+		use crate::catalog::{Distance, HnswParams, VectorType};
+		use crate::kvs::Direction;
+
+		fn idx_hnsw(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			idx_def(
+				id,
+				name,
+				cols,
+				Index::Hnsw(HnswParams {
+					dimension: 2,
+					distance: Distance::Euclidean,
+					vector_type: VectorType::F32,
+					m: 12,
+					m0: 24,
+					ml: 0.4.into(),
+					ef_construction: 150,
+					extend_candidates: false,
+					keep_pruned_connections: false,
+					use_hashed_vector: false,
+				}),
+			)
+		}
+
+		/// Split the KNN-stripped WHERE the way `try_knn_prefilter_plan` does.
+		fn split(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<KnnPrefilterPlan> {
+			let stripped = crate::exec::planner::util::strip_knn_from_condition(cond)
+				.expect("a non-KNN residual remains");
+			az.try_knn_prefilter(&stripped, &move |_| exact)
+		}
+
+		#[test]
+		fn covered_and_residual_conjuncts_split() {
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2 AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the equality on `a` is coverable");
+			assert!(
+				matches!(plan.root, BitmapPlan::BTree { .. }),
+				"single covered conjunct forms the bitmap root: {:?}",
+				plan.root
+			);
+			let residual = plan.residual.expect("the unindexed conjunct stays residual");
+			assert_eq!(surrealdb_types::ToSql::to_sql(&residual.0), "unindexed = 2");
+		}
+
+		#[test]
+		fn inexact_column_stays_residual() {
+			// Without a declared array-free field kind the equality is not
+			// provably exact, so nothing is covered and no prefilter forms.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND vec <|2,100|> [0.0, 0.0]");
+			assert!(split(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn negation_stays_residual() {
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND !(a = 2) AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the positive equality is coverable");
+			let residual = plan.residual.expect("the negation stays residual");
+			assert!(
+				surrealdb_types::ToSql::to_sql(&residual.0).contains('!'),
+				"negation kept: {}",
+				surrealdb_types::ToSql::to_sql(&residual.0)
+			);
+		}
+
+		#[test]
+		fn uncoverable_matches_conjunct_excluded_from_residual() {
+			// MATCHES is not evaluable inside the ANN traversal; with no
+			// full-text index it cannot be covered either, so it must vanish
+			// from the split entirely (the outer Filter enforces it).
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND body @@ 'x' AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the equality is coverable");
+			assert!(
+				plan.residual.is_none(),
+				"an uncoverable MATCHES must not become an in-traversal residual: {:?}",
+				plan.residual
+			);
+		}
+
+		#[test]
+		fn knn_candidate_drives_over_unique_equality() {
+			// #548 regression: the unique equality outscores KNN (1000 > 800)
+			// but a KNN operator can only be computed by its KnnScan, so the
+			// KNN candidate must drive unconditionally.
+			let az = analyzer(
+				vec![idx_uniq(1, "ix_email", &["email"]), idx_hnsw(2, "hn_vec", &["vec"])],
+				None,
+			);
+			let cond = parse_cond("email = 'a@x.com' AND vec <|2,100|> [0.0, 0.0]");
+			let candidates = az.analyze(Some(&cond), None);
+			let path = crate::exec::index::access_path::select_access_path(
+				candidates,
+				None,
+				Direction::Forward,
+			);
+			assert!(
+				matches!(path, AccessPath::KnnSearch { .. }),
+				"the KNN candidate must drive the plan: {path:?}"
+			);
 		}
 	}
 
@@ -2240,14 +3591,10 @@ mod tests {
 	// ------------------------------------------------------------------
 	mod range_merge {
 		use super::*;
-		use crate::idx::planner::ScanDirection;
+		use crate::kvs::Direction;
 
 		fn select_path(cands: Vec<IndexCandidate>) -> AccessPath {
-			super::super::super::access_path::select_access_path(
-				cands,
-				None,
-				ScanDirection::Forward,
-			)
+			super::super::super::access_path::select_access_path(cands, None, Direction::Forward)
 		}
 
 		#[test]
@@ -2272,11 +3619,13 @@ mod tests {
 			assert!(!c.empty, "inclusive both sides on same value is non-empty");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range: Range {
+						start,
+						end,
+					},
 				} => {
-					assert!(from.as_ref().unwrap().inclusive);
-					assert!(to.as_ref().unwrap().inclusive);
+					assert!(matches!(start, Bound::Included(_)));
+					assert!(matches!(end, Bound::Included(_)));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -2302,15 +3651,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					let from = from.as_ref().expect("from bound present");
-					assert!(matches!(&from.value,
-						crate::val::Value::Number(n) if n.to_int() == 10
-					));
-					assert!(!from.inclusive, "exclusive `>` survives");
-					assert!(to.is_none());
+					assert!(
+						matches!(range.start, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 10)
+					);
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected single tightened Range, got {other:?}"),
 			}
@@ -2325,15 +3671,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_none());
-					let to = to.as_ref().expect("to bound present");
-					assert!(matches!(&to.value,
-						crate::val::Value::Number(n) if n.to_int() == 50
-					));
-					assert!(!to.inclusive);
+					assert!(matches!(range.start, Bound::Unbounded));
+					assert!(
+						matches!(range.end, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 50)
+					);
 				}
 				other => panic!("expected single tightened Range, got {other:?}"),
 			}
@@ -2348,13 +3691,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					..
-				} => {
-					let from = from.as_ref().expect("from");
-					assert!(!from.inclusive, "exclusive wins on ties");
-				}
-				other => panic!("expected Range, got {other:?}"),
+					range: Range {
+						start: Bound::Excluded(_),
+						..
+					},
+				} => {}
+				other => panic!("expected Range with inclusive start bound, got {other:?}"),
 			}
 		}
 	}
@@ -2403,19 +3745,17 @@ mod tests {
 					0,
 				),
 				access: BTreeAccess::Range {
-					from: if from_some {
-						Some(RangeBound::inclusive(crate::val::Value::Number(
-							crate::val::Number::Int(0),
-						)))
-					} else {
-						None
-					},
-					to: if to_some {
-						Some(RangeBound::inclusive(crate::val::Value::Number(
-							crate::val::Number::Int(10),
-						)))
-					} else {
-						None
+					range: Range {
+						start: if from_some {
+							Bound::Included(crate::val::Value::Number(crate::val::Number::Int(0)))
+						} else {
+							Bound::Unbounded
+						},
+						end: if to_some {
+							Bound::Included(crate::val::Value::Number(crate::val::Number::Int(10)))
+						} else {
+							Bound::Unbounded
+						},
 					},
 				},
 				covers_order: false,
@@ -2476,10 +3816,12 @@ mod tests {
 					0,
 				),
 				access: BTreeAccess::Range {
-					from: Some(RangeBound::inclusive(crate::val::Value::Number(
-						crate::val::Number::Int(0),
-					))),
-					to: None,
+					range: Range {
+						start: Bound::Included(crate::val::Value::Number(crate::val::Number::Int(
+							0,
+						))),
+						end: Bound::Unbounded,
+					},
 				},
 				covers_order: covers,
 				empty: false,

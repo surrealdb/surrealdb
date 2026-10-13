@@ -44,7 +44,7 @@ value = "[{ age: 25, count: 3, id: person_stats:[25], score_stddev: 10f, score_v
 value = "[{ age: 25, id: person:three, score: 80 }]"
 
 [[test.results]]
-value = "[{ age: 25, count: 3, id: person_stats:[25], score_stddev: 7.637626158259654f, score_variance: 58.33333333333212f }, { age: 30, count: 2, id: person_stats:[30], score_stddev: 2.8284271247461903f, score_variance: 8f }]"
+value = "[{ age: 25, count: 3, id: person_stats:[25], score_stddev: 7.637626158259733f, score_variance: 58.333333333333336f }, { age: 30, count: 2, id: person_stats:[30], score_stddev: 2.8284271247461903f, score_variance: 8f }]"
 */
 
 DEFINE TABLE person SCHEMALESS;

@@ -39,47 +39,32 @@ use std::sync::Arc;
 
 use futures::Stream;
 
-use crate::err::Error;
+use crate::exe::FlowResultExt;
 // Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
-pub(crate) use crate::expr::{ControlFlowExt, FlowResult, FlowResultExt};
-use crate::val::Value;
+pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
 
-// =========================================================================
-// WASM-compat helpers: conditional Send/Sync bounds
-// =========================================================================
-
-/// Conditional `Send + Sync` requirement.
-///
-/// On non-WASM targets this requires `Send + Sync`; on WASM (single-threaded)
-/// it is a blanket trait satisfied by every type.
-#[cfg(target_family = "wasm")]
-pub(crate) trait SendSyncRequirement {}
-#[cfg(target_family = "wasm")]
-impl<T> SendSyncRequirement for T {}
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) trait SendSyncRequirement: Send + Sync {}
-#[cfg(not(target_family = "wasm"))]
-impl<T: Send + Sync> SendSyncRequirement for T {}
-
-/// A boxed future that is `Send` only on non-WASM targets.
-#[cfg(target_family = "wasm")]
-pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
-/// A boxed future that is `Send` only on non-WASM targets.
-#[cfg(not(target_family = "wasm"))]
+/// A boxed `Send` future, used at trait boundaries to keep async state
+/// machines from inflating the parent future.
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
+pub(crate) mod batch;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
+pub(crate) mod config;
 pub(crate) mod context;
+pub(crate) mod error;
 pub(crate) mod expression_registry;
-pub(crate) mod field_path;
+pub(crate) mod fan_out;
+pub(crate) use crate::val::field_path;
+pub(crate) mod field_path_convert;
 pub(crate) mod function;
 pub(crate) mod index;
 pub(crate) mod metrics;
+pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;
+pub(crate) mod partitioning;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
@@ -90,37 +75,51 @@ pub(crate) mod topk_pushdown;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+// Re-export the operator data unit
+pub(crate) use batch::ValueBatch;
 // Re-export buffer helper
 pub(crate) use buffer::buffer_stream;
 // Re-export cardinality hint
 pub(crate) use cardinality::CardinalityHint;
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
+pub(crate) use error::Error;
 // Re-export metrics types
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
 // Re-export ordering types
 pub(crate) use ordering::OutputOrdering;
+// Re-export the output-partitioning property
+pub(crate) use partitioning::Partitioning;
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
-/// A batch of values returned by an execution plan.
+/// The shape an operator's output takes when it is a statement's result.
 ///
-/// Idea: In the future, this could become an `enum` to support columnar execution as well:
-/// ```rust
-/// enum ValueBatch {
-///     Values(Vec<Value>),
-///     Columnar(arrow::RecordBatch),
-/// }
-/// ```
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ValueBatch {
-	pub(crate) values: Vec<Value>,
+/// The plan declares this rather than the executor inferring it from how many
+/// values arrived, because a consumer that forwards values as they are produced
+/// has to know the shape before it knows the count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputShape {
+	/// The statement's value is an array of every value emitted.
+	Rows,
+	/// The statement's value is the one value emitted, unwrapped. `SELECT ONLY`
+	/// and every non-query expression (`RETURN 1 + 2`, `IF …`, a block) have
+	/// this shape.
+	///
+	/// An operator declaring it emits exactly one value; emitting none or
+	/// several is a bug in that operator, not a shape the caller chooses
+	/// between.
+	Scalar,
 }
 
-#[cfg(target_family = "wasm")]
-pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>>>>;
-#[cfg(not(target_family = "wasm"))]
+impl OutputShape {
+	/// Whether the statement's value is the single emitted value rather than an
+	/// array of them.
+	pub(crate) fn is_scalar(self) -> bool {
+		matches!(self, OutputShape::Scalar)
+	}
+}
+
 pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
 
 /// A trait for execution plans that can be executed and produce a stream of value batches.
@@ -128,7 +127,7 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
-pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
+pub(crate) trait ExecOperator: Debug + Send + Sync {
 	fn name(&self) -> &'static str;
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -181,10 +180,22 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
+	///
+	/// Returns `FlowResult` for the same reason `execute` does: computing the
+	/// context runs the bound expression, and a `BREAK` or `CONTINUE` raised in
+	/// there belongs to an enclosing loop, which sits above this call. Flattening
+	/// the signal into an error here would strand it at the binding site, so the
+	/// loop never sees it.
+	///
+	/// `ControlFlow::Err` carries an `anyhow::Error` rather than a concrete enum
+	/// so that a failure raised while evaluating the bound expression reaches the
+	/// boundary with its type intact. Flattening it cost the transactor's retry
+	/// loop its ability to see a write conflict, and cancellation and timeout
+	/// their classification.
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+	) -> BoxFut<'a, crate::expr::FlowResult<ExecutionContext>> {
 		Box::pin(async move { Ok(input.clone()) })
 	}
 
@@ -212,13 +223,27 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 		CardinalityHint::Unbounded
 	}
 
-	/// Returns true if this plan represents a scalar expression.
+	/// How this operator's output is divided across parallel streams.
 	///
-	/// Scalar expressions return a single value directly, while queries
-	/// return results wrapped in an array. This is used by the executor
-	/// to format results correctly.
-	fn is_scalar(&self) -> bool {
-		false
+	/// The default is [`Partitioning::Single`]: one stream carrying every row,
+	/// which is what every operator produces. An operator that passes rows
+	/// through unchanged should delegate to its input, the way it delegates
+	/// [`output_ordering`](Self::output_ordering); an operator that must see
+	/// every row together must declare `Single` and merge its input rather than
+	/// let a partial view reach anything downstream.
+	///
+	/// Only a `ReadOnly` subtree may ever be partitioned; see
+	/// [`Partitioning`] for why a write cannot be.
+	fn output_partitioning(&self) -> Partitioning {
+		Partitioning::Single
+	}
+
+	/// The shape this operator's output takes when it is a statement's result.
+	///
+	/// See [`OutputShape`]. The default is [`OutputShape::Rows`]: an operator
+	/// that emits rows.
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Rows
 	}
 
 	/// Returns the operator-level metrics for this node, if available.
@@ -239,6 +264,15 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	fn enable_metrics(&self) {
 		if let Some(m) = self.metrics() {
 			m.enable();
+		}
+		// Operator trees embedded in this operator's expressions — a lookup
+		// part's pre-planned scan, for example — are rendered by EXPLAIN
+		// ANALYZE exactly like children, so they must be instrumented like
+		// children too.
+		for (_, expr) in self.expressions() {
+			for (_, embedded) in expr.embedded_operators() {
+				embedded.enable_metrics();
+			}
 		}
 		for child in self.children() {
 			child.enable_metrics();

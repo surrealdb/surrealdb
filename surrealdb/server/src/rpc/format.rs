@@ -3,8 +3,9 @@ use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::request::Request;
-use surrealdb_core::rpc::{DbResponse, invalid_request, parse_error};
+use surrealdb_rpc::DbResponse;
+use surrealdb_rpc::error::{invalid_request, parse_error};
+use surrealdb_rpc::request::Request;
 use surrealdb_types::{Error as TypesError, SurrealValue, Value};
 
 use crate::ntw::headers::{Accept, ContentType};
@@ -76,8 +77,7 @@ impl WsFormat for Format {
 			}
 			Format::Flatbuffers => {
 				//FIXME: Flatbuffers should probably also implement a recursion_limit.
-				let val = surrealdb_core::rpc::format::flatbuffers::decode(&val)
-					.map_err(|_| parse_error())?;
+				let val = surrealdb_types::decode(&val).map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -103,8 +103,7 @@ impl WsFormat for Format {
 			}
 			Format::Flatbuffers => {
 				let res_value = res.into_value();
-				let val = surrealdb_core::rpc::format::flatbuffers::encode(&res_value)
-					.map_err(|_| parse_error())?;
+				let val = surrealdb_types::encode(&res_value).map_err(|_| parse_error())?;
 				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Unsupported => Err(invalid_request()),
@@ -142,8 +141,7 @@ impl HttpFormat for Format {
 				}
 			}
 			Format::Flatbuffers => {
-				let val = surrealdb_core::rpc::format::flatbuffers::decode(&body)
-					.map_err(|_| parse_error())?;
+				let val = surrealdb_types::decode(&body).map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -164,8 +162,7 @@ impl HttpFormat for Format {
 				.map_err(|_| parse_error())?,
 			Format::Flatbuffers => {
 				let res_value = res.into_value();
-				surrealdb_core::rpc::format::flatbuffers::encode(&res_value)
-					.map_err(|_| parse_error())?
+				surrealdb_types::encode(&res_value).map_err(|_| parse_error())?
 			}
 			Format::Unsupported => return Err(invalid_request()),
 		};

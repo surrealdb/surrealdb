@@ -2,20 +2,41 @@
 //!
 //! Thin wrapper over [`crate::sys`] so the observability layer can read CPU
 //! and memory stats without the private module being exposed to every
-//! consumer. Both fields are aggregate, host-wide, and free of tenant
-//! attribution — safe to surface even on the unauthenticated `/metrics`
-//! endpoint.
+//! consumer. Every field is aggregate, host-wide, and free of tenant
+//! attribution.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// Instantaneous view of the current process resource usage.
 ///
-/// Fields mirror the subset of [`crate::sys::Information`] that is safe to
-/// expose to external observers.
+/// Fields mirror the subset of [`crate::sys::Information`] that carries no
+/// tenant attribution. That makes them safe to aggregate, not automatically
+/// safe to publish anonymously: the memory figures together describe how close
+/// an instance is to refusing queries, so the metrics layer withholds them from
+/// unauthenticated callers.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct ProcessSnapshot {
 	/// Resident set size in bytes, as reported by `sysinfo`.
 	pub memory_bytes: u64,
+	/// Tracked bytes: reserved Rust-heap allocations plus every registered
+	/// external memory reporter. This is the quantity
+	/// `SURREAL_MEMORY_THRESHOLD` is compared against, and it is a lower bound
+	/// on [`Self::memory_bytes`] — the gap is allocator overhead plus any
+	/// memory neither term covers. Always `0` in builds without allocation
+	/// tracking compiled in.
+	pub memory_allocated_bytes: u64,
+	/// Bytes the program requested, before the allocator rounded each request
+	/// up to a size class. Always `0` in builds without allocation tracking
+	/// compiled in.
+	pub memory_requested_bytes: u64,
+	/// Reserved Rust-heap bytes: the size classes the allocator rounded those
+	/// requests up into. Subtracting [`Self::memory_requested_bytes`] from this
+	/// gives internal fragmentation — note that
+	/// [`Self::memory_allocated_bytes`] is the wrong term for that subtraction,
+	/// because it also carries the external reporters. Always `0` in builds
+	/// without allocation tracking compiled in.
+	pub memory_reserved_bytes: u64,
 	/// Process CPU usage as a percentage. May exceed 100% on multi-core
 	/// hosts because `sysinfo` sums across cores.
 	pub cpu_percent: f32,
@@ -25,6 +46,9 @@ pub struct ProcessSnapshot {
 /// Read synchronously by [`process_snapshot`] from any context (including
 /// OpenTelemetry observable-gauge callbacks, which are not async).
 static SYNC_MEMORY_BYTES: AtomicU64 = AtomicU64::new(0);
+static SYNC_MEMORY_ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
+static SYNC_MEMORY_REQUESTED_BYTES: AtomicU64 = AtomicU64::new(0);
+static SYNC_MEMORY_RESERVED_BYTES: AtomicU64 = AtomicU64::new(0);
 static SYNC_CPU_PERCENT_BITS: AtomicU32 = AtomicU32::new(0);
 
 /// Read the cached process snapshot without awaiting a refresh.
@@ -34,6 +58,9 @@ static SYNC_CPU_PERCENT_BITS: AtomicU32 = AtomicU32::new(0);
 pub fn process_snapshot() -> ProcessSnapshot {
 	ProcessSnapshot {
 		memory_bytes: SYNC_MEMORY_BYTES.load(Ordering::Relaxed),
+		memory_allocated_bytes: SYNC_MEMORY_ALLOCATED_BYTES.load(Ordering::Relaxed),
+		memory_requested_bytes: SYNC_MEMORY_REQUESTED_BYTES.load(Ordering::Relaxed),
+		memory_reserved_bytes: SYNC_MEMORY_RESERVED_BYTES.load(Ordering::Relaxed),
 		cpu_percent: f32::from_bits(SYNC_CPU_PERCENT_BITS.load(Ordering::Relaxed)),
 	}
 }
@@ -50,29 +77,129 @@ pub async fn refresh_process_snapshot() -> ProcessSnapshot {
 	let info = crate::sys::INFORMATION.lock().await;
 	let snapshot = ProcessSnapshot {
 		memory_bytes: info.memory_usage,
+		memory_allocated_bytes: info.memory_allocated as u64,
+		memory_requested_bytes: info.memory_requested as u64,
+		memory_reserved_bytes: info.memory_reserved as u64,
 		cpu_percent: info.cpu_usage,
 	};
 	SYNC_MEMORY_BYTES.store(snapshot.memory_bytes, Ordering::Relaxed);
+	SYNC_MEMORY_ALLOCATED_BYTES.store(snapshot.memory_allocated_bytes, Ordering::Relaxed);
+	SYNC_MEMORY_REQUESTED_BYTES.store(snapshot.memory_requested_bytes, Ordering::Relaxed);
+	SYNC_MEMORY_RESERVED_BYTES.store(snapshot.memory_reserved_bytes, Ordering::Relaxed);
 	SYNC_CPU_PERCENT_BITS.store(snapshot.cpu_percent.to_bits(), Ordering::Relaxed);
 	snapshot
+}
+
+/// Whether some holder currently has the process-wide refresh claim.
+static PROCESS_REFRESH_CLAIMED: AtomicBool = AtomicBool::new(false);
+
+/// One holder's claim on refreshing the process snapshot on a schedule.
+///
+/// [`refresh_process_snapshot`] reads a single `sysinfo` handle per process and
+/// `sysinfo` derives CPU percentage as a delta since that handle's previous
+/// refresh, so the reading is only meaningful when one scheduler owns the
+/// cadence. Every datastore schedules the refresh — the datastore that has this
+/// claim performs it and the rest skip — which is what keeps the reading
+/// independent of how many datastores a process builds.
+///
+/// The claim is sticky: a holder that has taken it keeps it across passes, so
+/// the delta window stays one refresh interval rather than alternating between
+/// holders. It is released when the last clone of a holder is dropped, so it
+/// passes to another datastore when the owning task ends — including when that
+/// task is dropped rather than returning.
+#[derive(Clone)]
+pub(crate) struct RefreshClaim(Arc<Holder>);
+
+struct Holder {
+	/// The claim being competed for; process-wide in production.
+	slot: &'static AtomicBool,
+	/// Whether this holder is the one that took `slot`. Read and written only
+	/// by the task that owns the holder, so it carries no ordering of its own —
+	/// the claim itself is published through `slot`.
+	held: AtomicBool,
+}
+
+impl Drop for Holder {
+	fn drop(&mut self) {
+		if *self.held.get_mut() {
+			self.slot.store(false, Ordering::Release);
+		}
+	}
+}
+
+impl RefreshClaim {
+	/// A holder competing for the process-wide claim, not yet holding it.
+	pub(crate) fn process() -> Self {
+		Self::on(&PROCESS_REFRESH_CLAIMED)
+	}
+
+	fn on(slot: &'static AtomicBool) -> Self {
+		Self(Arc::new(Holder {
+			slot,
+			held: AtomicBool::new(false),
+		}))
+	}
+
+	/// Whether this holder may refresh, taking the claim when it is free.
+	///
+	/// Call it on every pass: a holder that is refused now takes over once the
+	/// current holder is dropped, so the refresh does not stop with whichever
+	/// datastore happened to start first.
+	pub(crate) fn take(&self) -> bool {
+		if self.0.held.load(Ordering::Relaxed) {
+			return true;
+		}
+		let taken =
+			self.0.slot.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok();
+		if taken {
+			self.0.held.store(true, Ordering::Relaxed);
+		}
+		taken
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
 
+	/// The claim admits one holder at a time, keeps it across passes, and hands
+	/// it on once that holder is gone.
+	///
+	/// Competes for a slot of its own rather than the process-wide one, which
+	/// every datastore built anywhere in this test binary is also competing for.
+	#[test]
+	fn claim_admits_one_holder_and_hands_over_on_drop() {
+		static SLOT: AtomicBool = AtomicBool::new(false);
+		let first = RefreshClaim::on(&SLOT);
+		let second = RefreshClaim::on(&SLOT);
+
+		assert!(first.take(), "an unclaimed slot must admit the first holder");
+		assert!(!second.take(), "a second holder must be refused while the first holds the claim");
+		assert!(first.take(), "the holder keeps its claim across passes");
+
+		// A clone is the same holder, so the claim survives until the last one
+		// is dropped — the scheduler hands a clone to every pass.
+		let clone = first.clone();
+		drop(first);
+		assert!(!second.take(), "the claim must outlive a clone of its holder");
+
+		drop(clone);
+		assert!(second.take(), "the claim must pass on once its holder is gone");
+	}
+
 	#[tokio::test]
 	async fn refresh_populates_sync_snapshot_cache() {
-		// Cold cache: nothing has run yet, so the sync getter returns
-		// the all-zero default.
-		let cold = process_snapshot();
-		// CPU% may legitimately read zero on a quiet test thread, so
-		// we only assert the memory-bytes field which is always > 0
-		// for a running process.
-
-		// One refresh cycle should populate the sync atomics. After
-		// the await the synchronous getter must observe the same
-		// memory value the async refresh just returned.
+		// One refresh cycle must publish into the sync atomics: after the await
+		// the synchronous getter has to observe the same memory value the async
+		// refresh just returned. This is what the OTel observable-gauge
+		// callbacks read on the OTLP push path, and they have no async context
+		// of their own — if the hand-off regresses they report nothing.
+		//
+		// The two samples are compared for equality rather than for growth. The
+		// cache is process-wide, so a reading taken before the refresh is not
+		// guaranteed to be the zeroed default — anything else in this binary
+		// that built a datastore has already populated it — and two real RSS
+		// samples are not ordered.
 		let refreshed = refresh_process_snapshot().await;
 		assert!(refreshed.memory_bytes > 0, "sysinfo failed to read RSS");
 		let after = process_snapshot();
@@ -80,10 +207,21 @@ mod tests {
 			after.memory_bytes, refreshed.memory_bytes,
 			"sync cache did not pick up the async refresh result",
 		);
-		// Cold-state guard: the cache must transition strictly upward
-		// from (0, 0.0) to a populated reading. If this regresses, the
-		// background refresh task will not actually publish values to
-		// OTel observable-gauge callbacks on the OTLP push path.
-		assert!(after.memory_bytes >= cold.memory_bytes);
+		// Every published figure needs its own assertion: a store dropped for
+		// one of them leaves that gauge reading a constant zero while the rest
+		// keep working. Equality rather than growth, because all three are
+		// legitimately zero in a build without allocation tracking.
+		assert_eq!(
+			after.memory_allocated_bytes, refreshed.memory_allocated_bytes,
+			"sync cache did not pick up the tracked-memory figure",
+		);
+		assert_eq!(
+			after.memory_requested_bytes, refreshed.memory_requested_bytes,
+			"sync cache did not pick up the requested-memory figure",
+		);
+		assert_eq!(
+			after.memory_reserved_bytes, refreshed.memory_reserved_bytes,
+			"sync cache did not pick up the reserved-memory figure",
+		);
 	}
 }

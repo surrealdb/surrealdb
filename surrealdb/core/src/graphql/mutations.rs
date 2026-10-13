@@ -109,7 +109,7 @@ fn graphql_input_to_sql_object(
 				_ => None,
 			})
 			.unwrap_or_else(|| key_str.to_owned());
-		let kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
+		let kind: Kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
 		let enum_scope = format!("{tb_name}_{key_str}");
 		let sql_val = graphql_to_sql_kind_with_scope(val, kind, Some(&enum_scope))?;
 		map.insert(storage_key.into(), sql_val);
@@ -211,7 +211,7 @@ fn generate_input_types(
 
 	// Add fields from field definitions
 	for fd in fds.iter() {
-		let Some(ref kind) = fd.field_kind else {
+		let Some(kind) = fd.field_kind.clone() else {
 			continue;
 		};
 		if fd.name.is_id() {
@@ -374,7 +374,7 @@ pub async fn process_mutations(
 		let tb_name_str = tb_name.as_str().to_string();
 		let is_relation = matches!(tb.table_type, TableType::Relation(_));
 
-		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb.name, None).await?;
+		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb_name, None).await?;
 
 		// Generate input types — fields are camelCased / aliased via the
 		// shared `naming` helpers (see GitHub issues #4537 and #4552).

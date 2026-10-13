@@ -13,11 +13,14 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::kvs::Direction::Forward;
-use surrealdb_core::kvs::LockType::Optimistic;
-use surrealdb_core::kvs::{Datastore, TransactionType, Transactor};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_datastore::Transactor;
+use surrealdb_kvs::Direction::Forward;
+use surrealdb_kvs::TransactionType;
 use temp_dir::TempDir;
 use tokio::runtime::Runtime;
 
@@ -28,13 +31,13 @@ fn runtime() -> Runtime {
 /// Seed a rocksdb-backed datastore with `prefix_count` prefixes, each
 /// containing `per_prefix` keys (raw KV, not SurrealQL). Returns the
 /// datastore and the temp dir (keep alive for the bench's lifetime).
-fn setup(prefix_count: usize, per_prefix: usize) -> (Datastore, TempDir) {
+fn setup(prefix_count: usize, per_prefix: usize) -> (Arc<Datastore>, TempDir) {
 	let tmp = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", tmp.path().to_string_lossy());
 	let ds = runtime().block_on(async {
 		let ds =
 			Datastore::builder().build_with_factory_path(&path, CommunityComposer()).await.unwrap();
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		// Insert raw bytes via the Transactor (`tx.set` on the typed
 		// Transaction wrapper now requires a `KVKey`; we want raw byte
 		// keys for the bench, so go one level lower).
@@ -42,7 +45,7 @@ fn setup(prefix_count: usize, per_prefix: usize) -> (Datastore, TempDir) {
 		for p in 0..prefix_count {
 			for k in 0..per_prefix {
 				let key = format!("p_{p:06}/k_{k:06}");
-				tr.set(key.into_bytes(), vec![0u8; 8]).await.unwrap();
+				tr.set(key.into_bytes().into(), vec![0u8; 8]).await.unwrap();
 			}
 		}
 		tx.commit().await.unwrap();
@@ -73,13 +76,13 @@ fn bench_nested_edge(c: &mut Criterion) {
 			|b, &prefix_count| {
 				let rt = runtime();
 				b.to_async(&rt).iter(|| async {
-					let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+					let tx = ds.transaction(TransactionType::Read).await.unwrap();
 					let tr: &Transactor = &tx;
 					let mut count = 0u64;
 					for p in 0..prefix_count {
 						let rng = prefix_range(&format!("p_{p:06}/"));
 						let mut cursor =
-							tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+							tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 						let batch = cursor.next_batch(10).await.unwrap();
 						count += batch.len() as u64;
 						drop(cursor);
@@ -103,10 +106,11 @@ fn bench_bulk_scan(c: &mut Criterion) {
 		group.bench_with_input(BenchmarkId::new("next_batch_2000", count), &count, |b, &count| {
 			let rt = runtime();
 			b.to_async(&rt).iter(|| async {
-				let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+				let tx = ds.transaction(TransactionType::Read).await.unwrap();
 				let tr: &Transactor = &tx;
 				let rng = prefix_range("p_000000/");
-				let mut cursor = tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+				let mut cursor =
+					tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 				let mut total = 0u64;
 				while total < count {
 					let batch = cursor.next_batch(2000).await.unwrap();
@@ -131,10 +135,11 @@ fn bench_bulk_scan(c: &mut Criterion) {
 			|b, &count| {
 				let rt = runtime();
 				b.to_async(&rt).iter(|| async {
-					let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+					let tx = ds.transaction(TransactionType::Read).await.unwrap();
 					let tr: &Transactor = &tx;
 					let rng = prefix_range("p_000000/");
-					let mut cursor = tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+					let mut cursor =
+						tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 					let mut total = 0u64;
 					while total < count {
 						let batch = cursor.next_batch(2000).await.unwrap();

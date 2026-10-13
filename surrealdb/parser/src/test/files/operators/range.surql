@@ -7,7 +7,7 @@ Query
                 BinaryExpr
                     .left: Expr::Integer
                         +1
-                    .op: Range
+                    .op: BinaryOperator::Range
                     .right: Expr::Integer
                         +2
 */

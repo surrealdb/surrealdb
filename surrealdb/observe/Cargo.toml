@@ -1,0 +1,21 @@
+[package]
+name = "surrealdb-observe"
+publish = true
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+surrealdb-types = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-iam = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[lints]
+workspace = true

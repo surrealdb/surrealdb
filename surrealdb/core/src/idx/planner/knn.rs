@@ -15,6 +15,7 @@ struct Inner {
 	docs: HashSet<Arc<RecordId>>,
 	priority_list: BTreeMap<Number, HashSet<Arc<RecordId>>>,
 }
+
 impl KnnPriorityList {
 	pub(super) fn new(knn: usize) -> Self {
 		Self(Arc::new(Mutex::new(Inner {

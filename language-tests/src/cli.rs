@@ -238,10 +238,16 @@ pub fn parse() -> ArgMatches {
 				.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
 			)
 			.arg(
-				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").value_delimiter(',').value_parser(DsVersion::from_str)
+				.required_unless_present("chain").conflicts_with("chain")
 			)
 			.arg(
-				arg!(-t --to <VERSIONS> "The version to upgrade to. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
+				arg!(-t --to <VERSIONS> "The version to upgrade to. This can be either a version number or a path to the surrealdb codebase.").value_delimiter(',').value_parser(DsVersion::from_str)
+				.required_unless_present("chain").conflicts_with("chain")
+			)
+			.arg(
+				arg!(--chain <VERSIONS> "Walk one datastore through every listed version in order, instead of testing an isolated pair. Selects tests declaring `[test.chain]`.")
+				.value_delimiter(',').value_parser(DsVersion::from_str)
 			)
 			.arg(
 				arg!(--"allow-download" "Skip the confirmation for downloading binaries from github")

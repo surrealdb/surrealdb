@@ -40,8 +40,14 @@ pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
 
+#[cfg(feature = "parse")]
 pub mod parse {
-	pub use surrealdb_core::syn::value;
+	//! Parse SurrealQL text without connecting to a database.
+
+	/// Parses a SurrealQL value from its textual representation.
+	pub fn value(input: &str) -> anyhow::Result<crate::types::Value> {
+		surrealdb_syn::value(input).map_err(anyhow::Error::new)
+	}
 }
 
 #[doc(inline)]
@@ -67,6 +73,7 @@ use std::sync::{Arc, OnceLock};
 use async_channel::{Receiver, Sender};
 use method::BoxFuture;
 use semver::{Version, VersionReq};
+use surrealdb_engine_api::SessionId;
 #[doc(inline)]
 pub use surrealdb_types::Error;
 use surrealdb_types::NotAllowedError;
@@ -109,6 +116,11 @@ where
 	/// are so high that the client is running out of memory,
 	/// it might be helpful to set this to a number that works best
 	/// for you.
+	///
+	/// This applies to the remote engines. An embedded connection queues
+	/// nothing between the caller and the datastore — each request is awaited
+	/// where it is made — so there is no channel for it to bound, and it is
+	/// ignored.
 	///
 	/// # Examples
 	///
@@ -193,17 +205,6 @@ where
 pub(crate) enum ExtraFeatures {
 	Backup,
 	LiveQueries,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-enum SessionId {
-	Initial(Uuid),
-	Clone {
-		old: Uuid,
-		new: Uuid,
-	},
-	Drop(Uuid),
 }
 
 #[derive(Debug, Clone)]

@@ -1,0 +1,55 @@
+[package]
+name = "surrealdb-catalog"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-catalog/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+graphql = []
+arbitrary = [
+    "dep:arbitrary",
+    "surrealdb-expr/arbitrary",
+    "surrealdb-sql/arbitrary",
+    "surrealdb-types/arbitrary",
+    "surrealdb-strand/arbitrary",
+    "common/arbitrary",
+]
+
+[dependencies]
+ahash.workspace = true
+anyhow.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+chrono = { workspace = true, features = ["serde"] }
+common = { workspace = true }
+md-5.workspace = true
+surrealdb-collections = { workspace = true }
+revision = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+sha2.workspace = true
+storekey.workspace = true
+surrealdb-expr = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-sql = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-syn = { workspace = true }
+surrealdb-types = { workspace = true }
+thiserror.workspace = true
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[package.metadata.cargo-machete]
+# md-5 crate is imported as md5::
+ignored = ["md-5"]
+
+[lints]
+workspace = true

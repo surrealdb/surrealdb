@@ -3,19 +3,38 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
+use crate::catalog::table_select_permission;
+use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	resolve_select_permission, should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlowExt;
-use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
+
+/// A single step of a FETCH field path.
+///
+/// Parts other than a computed index are kept as the original AST `Part` and
+/// walked exactly as before; `Part::Value` (a computed index/key, e.g.
+/// `refs[0]`, `refs[$i]`) is pre-planned into a `PhysicalExpr` at query-plan
+/// time instead of being re-planned on every row.
+///
+/// Invariant: `Static` never holds a `Part::Value` — the sole production
+/// constructor (`Planner::convert_fetch_idioms`) maps those to `Index`. A
+/// stray one would degrade safely to the unsupported-part skip in
+/// `fetch_field_path`, not a wrong result.
+#[derive(Debug, Clone)]
+pub(crate) enum FetchStep {
+	Static(Part),
+	Index(Arc<dyn PhysicalExpr>),
+}
 
 /// Fetches related records for specified fields.
 ///
@@ -25,17 +44,25 @@ use crate::val::{RecordId, Value};
 #[derive(Debug, Clone)]
 pub struct Fetch {
 	pub(crate) input: Arc<dyn ExecOperator>,
-	/// The fields to fetch. Each idiom points to a field that may contain
-	/// record IDs to be resolved.
-	pub(crate) fields: Vec<Idiom>,
+	/// SQL rendering of the fetch paths, captured at plan time. Kept only for
+	/// EXPLAIN's `attrs()`; execution walks `physical_fields`.
+	pub(crate) fields_sql: String,
+	/// The fetch paths to walk, with each part converted to a `FetchStep` --
+	/// see `FetchStep` for why `Part::Value` needs this.
+	pub(crate) physical_fields: Vec<Vec<FetchStep>>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
 impl Fetch {
-	pub(crate) fn new(input: Arc<dyn ExecOperator>, fields: Vec<Idiom>) -> Self {
+	pub(crate) fn new(
+		input: Arc<dyn ExecOperator>,
+		fields_sql: String,
+		physical_fields: Vec<Vec<FetchStep>>,
+	) -> Self {
 		Self {
 			input,
-			fields,
+			fields_sql,
+			physical_fields,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -46,11 +73,7 @@ impl ExecOperator for Fetch {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		use surrealdb_types::ToSql;
-		vec![(
-			"fields".to_string(),
-			self.fields.iter().map(|f| f.to_sql()).collect::<Vec<_>>().join(", "),
-		)]
+		vec![("fields".to_string(), self.fields_sql.clone())]
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -75,8 +98,8 @@ impl ExecOperator for Fetch {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
-		self.input.is_scalar()
+	fn output_shape(&self) -> OutputShape {
+		self.input.output_shape()
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {
@@ -88,9 +111,9 @@ impl ExecOperator for Fetch {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
-		let fields = self.fields.clone();
+		let fields = self.physical_fields.clone();
 		let ctx = ctx.clone();
 
 		let fetch_stream = input_stream.then(move |batch_result| {
@@ -99,16 +122,14 @@ impl ExecOperator for Fetch {
 
 			async move {
 				let batch = batch_result?;
-				let mut fetched_values = Vec::with_capacity(batch.values.len());
+				let mut fetched_values = Vec::with_capacity(batch.len());
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let fetched = fetch_fields(&ctx, value, &fields).await?;
 					fetched_values.push(fetched);
 				}
 
-				Ok(ValueBatch {
-					values: fetched_values,
-				})
+				Ok(ValueBatch::new(fetched_values))
 			}
 		});
 
@@ -120,10 +141,10 @@ impl ExecOperator for Fetch {
 async fn fetch_fields(
 	ctx: &ExecutionContext,
 	mut value: Value,
-	fields: &[Idiom],
+	fields: &[Vec<FetchStep>],
 ) -> crate::expr::FlowResult<Value> {
 	for field in fields {
-		fetch_field_path(ctx, &mut value, &field.0).await?;
+		fetch_field_path(ctx, &mut value, field).await?;
 	}
 	Ok(value)
 }
@@ -137,7 +158,7 @@ async fn fetch_fields(
 fn fetch_field_path<'a>(
 	ctx: &'a ExecutionContext,
 	value: &'a mut Value,
-	path: &'a [Part],
+	path: &'a [FetchStep],
 ) -> crate::exec::BoxFut<'a, crate::expr::FlowResult<()>> {
 	Box::pin(async move {
 		let mut current = value;
@@ -156,7 +177,7 @@ fn fetch_field_path<'a>(
 			}
 
 			match &path[depth] {
-				Part::Field(name) => match current {
+				FetchStep::Static(Part::Field(name)) => match current {
 					Value::Object(obj) => {
 						current = match obj.get_mut(name.as_str()) {
 							Some(child) => child,
@@ -170,7 +191,7 @@ fn fetch_field_path<'a>(
 					}
 					_ => return Ok(()),
 				},
-				Part::All => match current {
+				FetchStep::Static(Part::All) => match current {
 					Value::Array(arr) => {
 						return fetch_each(ctx, arr.iter_mut(), &path[depth + 1..]).await;
 					}
@@ -179,7 +200,7 @@ fn fetch_field_path<'a>(
 					}
 					_ => return Ok(()),
 				},
-				Part::First => {
+				FetchStep::Static(Part::First) => {
 					current = match current {
 						Value::Array(arr) => match arr.first_mut() {
 							Some(v) => v,
@@ -189,7 +210,7 @@ fn fetch_field_path<'a>(
 					};
 					depth += 1;
 				}
-				Part::Last => {
+				FetchStep::Static(Part::Last) => {
 					current = match current {
 						Value::Array(arr) => match arr.last_mut() {
 							Some(v) => v,
@@ -199,8 +220,29 @@ fn fetch_field_path<'a>(
 					};
 					depth += 1;
 				}
+				// A computed index/key part, e.g. `refs[0]`, `refs[-1]`, `refs[$i]`.
+				// Evaluate it, then mutably index into an array (numeric,
+				// negative/out-of-range skips silently) or key into an object
+				// (string or numeric-as-string key); anything else is a no-op,
+				// matching the other unsupported-part fallthrough below.
+				FetchStep::Index(phys_expr) => {
+					let index_value = phys_expr.evaluate(EvalContext::from_exec_ctx(ctx)).await?;
+					let next = match (&mut *current, &index_value) {
+						(Value::Array(arr), Value::Number(n)) => {
+							n.as_array_index().and_then(|idx| arr.get_mut(idx))
+						}
+						(Value::Object(obj), Value::String(key)) => obj.get_mut(key.as_str()),
+						(Value::Object(obj), Value::Number(n)) => obj.get_mut(&n.to_string()),
+						_ => None,
+					};
+					current = match next {
+						Some(v) => v,
+						None => return Ok(()),
+					};
+					depth += 1;
+				}
 				// For other path parts, we don't support fetching through them
-				_ => return Ok(()),
+				FetchStep::Static(_) => return Ok(()),
 			}
 		}
 	})
@@ -213,7 +255,7 @@ fn fetch_field_path<'a>(
 async fn fetch_each<'a>(
 	ctx: &'a ExecutionContext,
 	values: impl Iterator<Item = &'a mut Value>,
-	remaining_path: &'a [Part],
+	remaining_path: &'a [FetchStep],
 ) -> crate::expr::FlowResult<()> {
 	for item in values {
 		fetch_field_path(ctx, item, remaining_path).await?;
@@ -270,6 +312,37 @@ pub(crate) async fn fetch_raw_record(
 	Ok(Some(record.data.clone()))
 }
 
+/// Fetch a single raw record value as a locked read, registering the
+/// record key for commit-time conflict detection.
+///
+/// Reads exactly what [`fetch_raw_record`] reads at the current version,
+/// except that the read is always issued to the underlying datastore —
+/// never served from the transaction read cache — so the conflict
+/// registration reaches the storage engine even for a record that does
+/// not exist. There is no versioned form: a locked read of a historical
+/// snapshot could never be validated at commit.
+pub(crate) async fn fetch_raw_record_for_update(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+) -> crate::expr::FlowResult<Option<Value>> {
+	let db_ctx = ctx.database().context("fetch_raw_record_for_update requires database context")?;
+	let txn = db_ctx.txn();
+	let record = txn
+		.get_record_for_update(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+		)
+		.await
+		.context("Failed to fetch record")?;
+	if record.data.is_none() {
+		return Ok(None);
+	}
+
+	Ok(Some(record.data.clone()))
+}
+
 /// Process a fetched record: check table-level permissions, evaluate computed
 /// fields, and apply field-level permissions.
 ///
@@ -285,6 +358,11 @@ pub(crate) async fn process_fetched_record(
 	val: &mut Value,
 ) -> crate::expr::FlowResult<bool> {
 	let db_ctx = ctx.database().context("process_fetched_record requires database context")?;
+	// SECURITY (GHSA-2v9j): confine record materialization to the caller's
+	// tenant. This path serves record dereference and the FETCH clause, which
+	// resolve records by id with no preceding scan, so it is the fetch-side
+	// equivalent of the scan-operator tenant guard.
+	validate_record_user_access(db_ctx)?;
 	let check_perms =
 		should_check_perms(db_ctx, Action::View).context("Failed to check permissions")?;
 
@@ -294,8 +372,8 @@ pub(crate) async fn process_fetched_record(
 			.get_table_def(&rid.table, ctx.version_stamp())
 			.await
 			.context("Failed to get table definition")?;
-		let catalog_perm = resolve_select_permission(table_def.as_deref());
-		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+		let catalog_perm = table_select_permission(table_def.as_deref());
+		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx)
 			.await
 			.context("Failed to convert permission")?;
 
@@ -317,13 +395,15 @@ pub(crate) async fn process_fetched_record(
 	let field_state =
 		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, None).await?;
 
-	// 3. Evaluate computed fields via the modern PhysicalExpr path
-	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, val, false).await?;
-
-	// 4. Apply field-level permissions
-	if check_perms {
-		super::scan::pipeline::filter_fields_by_permission(ctx, &field_state, val).await?;
-	}
+	// 3. Evaluate computed fields and apply field-level permissions
+	super::scan::pipeline::materialise_fields_with_permissions(
+		ctx,
+		&field_state,
+		val,
+		false,
+		check_perms,
+	)
+	.await?;
 
 	Ok(true)
 }
@@ -366,11 +446,11 @@ pub(crate) async fn fetch_record(
 	Ok(val)
 }
 
-/// Batch fetch multiple records by their IDs concurrently.
+/// Fetch several records by id, overlapping the fetches.
 ///
-/// This function fetches multiple records in parallel using `try_join_all`,
-/// which is more efficient than sequential fetching for larger batches.
-/// The transaction cache will deduplicate repeated IDs automatically.
+/// The transaction cache deduplicates repeated ids automatically. The only
+/// expressions that run are each target's own, which is what
+/// [`RECORD_DEREFERENCE`] names.
 ///
 /// # Arguments
 ///
@@ -385,27 +465,7 @@ pub(crate) async fn batch_fetch_records(
 	ctx: &ExecutionContext,
 	rids: &[RecordId],
 ) -> crate::expr::FlowResult<Vec<Value>> {
-	if rids.is_empty() {
-		return Ok(Vec::new());
-	}
-
-	// For small batches, sequential fetch may be more efficient
-	// due to lower overhead. Threshold chosen empirically.
-	const PARALLEL_THRESHOLD: usize = 4;
-
-	if rids.len() < PARALLEL_THRESHOLD {
-		// Sequential fetch for small batches
-		let mut results = Vec::with_capacity(rids.len());
-		for rid in rids {
-			results.push(fetch_record(ctx, rid).await?);
-		}
-		return Ok(results);
-	}
-
-	// Parallel fetch for larger batches
-	let futures: Vec<_> = rids.iter().map(|rid| fetch_record(ctx, rid)).collect();
-
-	futures::future::try_join_all(futures).await
+	evaluate_each(ctx, RECORD_DEREFERENCE, rids, |rid| fetch_record(ctx, rid)).await
 }
 
 /// Batch fetch records and replace RecordIds in an array in place.
@@ -470,7 +530,8 @@ mod tests {
 		use crate::exec::operators::scan::DynamicScan;
 		use crate::expr::part::Part;
 
-		let fields = vec![Idiom(vec![Part::Field(Strand::new_static("author"))])];
+		let physical_fields =
+			vec![vec![FetchStep::Static(Part::Field(Strand::new_static("author")))]];
 
 		// Create a minimal scan for testing
 		let scan = Arc::new(DynamicScan::new(
@@ -485,7 +546,7 @@ mod tests {
 			None,
 		));
 
-		let fetch = Fetch::new(scan, fields);
+		let fetch = Fetch::new(scan, "author".to_string(), physical_fields);
 
 		assert_eq!(fetch.name(), "Fetch");
 	}

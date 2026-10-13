@@ -82,8 +82,26 @@ fn parse_forwarded_for(header: &str) -> Option<String> {
 	//   value             = token / quoted-string
 	// Elements are comma-separated, pairs within an element are
 	// semicolon-separated. We only care about the first element's `for=`.
-	let first_element = split_top_level(header, ',').next()?;
-	for pair in split_top_level(first_element, ';') {
+	forwarded_for_param(split_top_level(header, ',').next()?)
+}
+
+/// Parses an RFC 7239 `Forwarded` header value and returns the `for=`
+/// identifier from the last forwarded element.
+///
+/// Intermediaries append their element to the end of the header, so the last
+/// element is the one added by the proxy immediately in front of this server
+/// and is the only element a client cannot supply. Empty elements (from
+/// leading, trailing or repeated commas) are skipped. Returns `None` if the
+/// header has no non-empty element or that element has no `for=` parameter.
+pub(super) fn parse_forwarded_for_last(header: &str) -> Option<String> {
+	let last = split_top_level(header, ',').filter(|e| !e.trim().is_empty()).last()?;
+	forwarded_for_param(last)
+}
+
+/// Returns the `for=` identifier of a single forwarded element, with quoting
+/// removed. Returns `None` when the element carries no `for=` parameter.
+fn forwarded_for_param(element: &str) -> Option<String> {
+	for pair in split_top_level(element, ';') {
 		// RFC 7239 allows empty pairs (`;;` or leading/trailing `;`); skip them.
 		let Some((name, value)) = pair.trim().split_once('=') else {
 			continue;
@@ -233,7 +251,7 @@ pub(super) async fn client_ip_middleware(
 
 #[cfg(test)]
 mod tests {
-	use super::parse_forwarded_for;
+	use super::{parse_forwarded_for, parse_forwarded_for_last};
 
 	#[test]
 	fn forwarded_simple() {
@@ -311,6 +329,42 @@ mod tests {
 	#[test]
 	fn forwarded_empty() {
 		assert_eq!(parse_forwarded_for(""), None);
+	}
+
+	#[test]
+	fn forwarded_last_takes_the_proxy_appended_element() {
+		// An intermediary appends its element, so the last one is the address
+		// observed by the proxy in front of this server.
+		assert_eq!(
+			parse_forwarded_for_last("for=192.0.2.43, for=198.51.100.17"),
+			Some("198.51.100.17".to_owned())
+		);
+		assert_eq!(parse_forwarded_for_last("for=192.0.2.43"), Some("192.0.2.43".to_owned()));
+	}
+
+	#[test]
+	fn forwarded_last_is_unaffected_by_client_supplied_elements() {
+		// A comma inside a quoted client-supplied identifier must not be
+		// mistaken for an element boundary.
+		assert_eq!(
+			parse_forwarded_for_last(r#"for="1.1.1.1,9.9.9.9", for=198.51.100.17"#),
+			Some("198.51.100.17".to_owned())
+		);
+	}
+
+	#[test]
+	fn forwarded_last_skips_empty_elements() {
+		assert_eq!(
+			parse_forwarded_for_last("for=192.0.2.43, for=198.51.100.17, ,"),
+			Some("198.51.100.17".to_owned())
+		);
+		assert_eq!(parse_forwarded_for_last(""), None);
+		assert_eq!(parse_forwarded_for_last(", ,"), None);
+	}
+
+	#[test]
+	fn forwarded_last_requires_a_for_parameter() {
+		assert_eq!(parse_forwarded_for_last("for=192.0.2.43, by=203.0.113.43"), None);
 	}
 
 	#[test]

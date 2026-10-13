@@ -4,11 +4,10 @@ use anyhow::bail;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId, Permission};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
 use crate::expr::FlowResult;
 use crate::expr::mock::Mock;
 use crate::iam::Action;
@@ -52,6 +51,97 @@ impl ToSql for Literal {
 	}
 }
 
+/// A constant field chain the planner resolved once, at plan time.
+///
+/// `$session.data.orgs` inside a permission or `WHERE` clause would otherwise
+/// re-derive itself on every row: `IdiomExpr` evaluates its start first, and
+/// both [`Param::evaluate`] and [`Literal::evaluate`] hand back a *clone* — so
+/// each row deep-clones the entire `$session` object just to read one field out
+/// of it. Resolving the chain at plan time replaces the whole `IdiomExpr` with
+/// the value it denotes.
+///
+/// Behaves exactly like [`Literal`] at runtime, `try_literal` included, so the
+/// `field op literal` fast path ([`super::SimpleBinaryOp`]) still fires and the
+/// per-row cost drops to a direct field lookup with no cloning at all.
+///
+/// What it does *not* do is make the predicate index-eligible. This node is
+/// built during physical-expression construction, after index analysis has
+/// already chosen the plan off the AST, so `WHERE org IN $session.data.orgs`
+/// still scans the table and still walks the payload once per row. The saving
+/// is the clone, not the scan. See the ALTITUDE note at the fold site in
+/// `planner/idiom.rs` for why the fold lives there and what moving it up would
+/// take.
+///
+/// Its own [`ToSql`] renders the idiom it came from rather than its value — but
+/// that is **not** a guarantee that `EXPLAIN` never prints the payload, and must
+/// not be relied on as one. It holds only while this node is what gets printed.
+/// In the case the fold exists for it is not: once `try_literal` makes the
+/// `field op literal` fast path eligible, the planner drops the `FoldedIdiom`
+/// and keeps only the `Value`, and [`super::SimpleBinaryOp`]'s `fmt_sql` prints
+/// that. So `EXPLAIN SELECT * FROM doc WHERE org IN $session.data` prints
+/// `org INSIDE ['acme','globex']`, and a folded permission predicate puts the
+/// `CONTEXT` payload into plan text.
+///
+/// Confidentiality impact is low — it is the caller's own payload, in their own
+/// plan — but two consequences are real. Plan text for identical SQL is now
+/// session-dependent (it varies with the token, the selected ns/db, and the
+/// payload), which destabilises plan strings for fixtures and telemetry;
+/// `redact_volatile_explain_attrs` does not cover it, since it redacts only
+/// elapsed times and batch counts. And a reader of this type should not assume
+/// the display survives into the plan.
+///
+/// Carrying a display override into `SimpleBinaryOp` — so the fast path prints
+/// the idiom it folded rather than the value — would restore the property for
+/// both nodes. That is a change to `SimpleBinaryOp` and the planner site that
+/// builds it, not to this type.
+#[derive(Debug, Clone)]
+pub struct FoldedIdiom {
+	/// The idiom as written, kept for display only.
+	display: String,
+	value: Value,
+}
+
+impl FoldedIdiom {
+	pub(crate) fn new(display: String, value: Value) -> Self {
+		Self {
+			display,
+			value,
+		}
+	}
+}
+
+impl PhysicalExpr for FoldedIdiom {
+	fn name(&self) -> &'static str {
+		"FoldedIdiom"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		crate::exec::ContextLevel::Root
+	}
+
+	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move { Ok(self.value.clone()) })
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		AccessMode::ReadOnly
+	}
+
+	fn try_literal(&self) -> Option<&Value> {
+		Some(&self.value)
+	}
+}
+
+impl ToSql for FoldedIdiom {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.display);
+	}
+}
+
 /// Parameter reference - $foo
 #[derive(Debug, Clone)]
 pub struct Param(pub(crate) Strand);
@@ -72,41 +162,40 @@ impl Param {
 					match &param_def.permissions {
 						Permission::Full => {}
 						Permission::None => {
-							bail!(Error::ParamPermissions {
+							bail!(ExecError::ParamPermissions {
 								name: self.0.to_string()
 							})
 						}
 						Permission::Specific(perm_expr) => {
-							// Plan and evaluate the permission expression
+							// Plan and evaluate the permission expression.
 							match crate::exec::planner::expr_to_physical_expr(
 								perm_expr.clone(),
 								ctx.exec_ctx.ctx(),
+								ctx.exec_ctx.function_registry(),
 							)
 							.await
 							{
-								Ok(phys_expr) => {
-									match phys_expr.evaluate(ctx.clone()).await {
-										Ok(result) if result.is_truthy() => {
-											// Permission granted
-										}
-										Ok(_) => {
-											bail!(Error::ParamPermissions {
-												name: self.0.to_string()
-											})
-										}
-										Err(crate::expr::ControlFlow::Err(e)) => {
-											return Err(e);
-										}
-										Err(_) => {
-											bail!(Error::ParamPermissions {
-												name: self.0.to_string()
-											})
-										}
+								Ok(phys_expr) => match phys_expr.evaluate(ctx.clone()).await {
+									Ok(result) if result.is_truthy() => {
+										// Permission granted
 									}
-								}
+									Ok(_) => {
+										bail!(ExecError::ParamPermissions {
+											name: self.0.to_string()
+										})
+									}
+									Err(crate::expr::ControlFlow::Err(e)) => {
+										return Err(e);
+									}
+									Err(_) => {
+										bail!(ExecError::ParamPermissions {
+											name: self.0.to_string()
+										})
+									}
+								},
 								Err(_) => {
 									// If we can't plan the expression, deny by default
-									bail!(Error::ParamPermissions {
+									bail!(ExecError::ParamPermissions {
 										name: self.0.to_string()
 									})
 								}
@@ -117,7 +206,7 @@ impl Param {
 				Ok(param_def.value.clone())
 			}
 			Err(e) => {
-				if matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {
+				if matches!(e.downcast_ref(), Some(CatalogError::PaNotFound { .. })) {
 					Ok(Value::None)
 				} else {
 					Err(e)
@@ -206,20 +295,38 @@ impl PhysicalExpr for Param {
 				// Check if namespace/database are set - if not, throw appropriate error
 				let ns_name = match opts.ns() {
 					Ok(ns) => ns,
-					Err(_) => return Err(Error::NsEmpty.into()),
+					Err(_) => return Err(ExecError::NsEmpty.into()),
 				};
 				let db_name = match opts.db() {
 					Ok(db) => db,
-					Err(_) => return Err(Error::DbEmpty.into()),
+					Err(_) => return Err(ExecError::DbEmpty.into()),
 				};
 
 				let txn = ctx.exec_ctx.txn();
-				// Look up database definition by name to get the IDs
+				// Look up the database definition by name to get the IDs
 				if let Ok(Some(db_def)) =
 					txn.get_db_by_name(ns_name, db_name, ctx.exec_ctx.version_stamp()).await
 				{
 					let ns_id = db_def.namespace_id;
 					let db_id = db_def.database_id;
+
+					// A database-defined param's PERMISSIONS predicate may dereference
+					// records (e.g. `$auth.admin`), whose fetch needs a database-level
+					// context. Root/namespace-level execution carries none, so evaluate
+					// the param under a database context built from its own ns/db, as a
+					// function call already does. `with_database` clones the current
+					// root, preserving auth, session, options, and the permission-
+					// predicate isolation flags.
+					if let Ok(Some(ns_def)) =
+						txn.get_ns_by_name(ns_name, ctx.exec_ctx.version_stamp()).await
+					{
+						let db_level = ctx.exec_ctx.with_database(ns_def, db_def);
+						let db_ctx = EvalContext {
+							exec_ctx: &db_level,
+							..ctx.clone()
+						};
+						return Ok(self.fetch_db_param(db_ctx, &txn, ns_id, db_id).await?);
+					}
 
 					return Ok(self.fetch_db_param(ctx, &txn, ns_id, db_id).await?);
 				}
@@ -240,7 +347,7 @@ impl PhysicalExpr for Param {
 
 impl ToSql for Param {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		use crate::fmt::EscapeKwFreeIdent;
+		use common::fmt::EscapeKwFreeIdent;
 		write_sql!(f, fmt, "${}", EscapeKwFreeIdent(self.0.as_str()))
 	}
 }
@@ -273,7 +380,7 @@ impl PhysicalExpr for MockExpr {
 				.1
 				.map(|x| {
 					x.saturating_mul(std::mem::size_of::<Value>())
-						> ctx.exec_ctx.root().ctx.config.generation_allocation_limit
+						> ctx.exec_ctx.root().ctx.config.exec.generation_allocation_limit
 				})
 				.unwrap_or(true)
 			{

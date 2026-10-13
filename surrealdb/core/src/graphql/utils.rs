@@ -11,7 +11,7 @@ use async_graphql::{Name, Value as GraphqlValue};
 use super::error::GraphqlError;
 use crate::dbs::Session;
 use crate::expr::LogicalPlan;
-use crate::kvs::Datastore;
+use crate::kvs::{Datastore, QueryRequest};
 use crate::val::Value as SqlValue;
 
 /// Convenience accessors for extracting typed data from an `async_graphql::Value`.
@@ -76,7 +76,7 @@ pub(crate) async fn execute_plan(
 	plan: LogicalPlan,
 ) -> Result<SqlValue, GraphqlError> {
 	let results = ds
-		.process_plan(plan, sess, None)
+		.run(QueryRequest::new(plan, sess))
 		.await
 		.map_err(|e| GraphqlError::InternalError(format!("Failed to execute query plan: {}", e)))?;
 

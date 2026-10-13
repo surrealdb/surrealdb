@@ -172,6 +172,9 @@ macro_rules! T {
 	(AT) => {
 		$crate::BaseTokenKind::KwAt
 	};
+	(AUDIENCE) => {
+		$crate::BaseTokenKind::KwAudience
+	};
 	(AUTHENTICATE) => {
 		$crate::BaseTokenKind::KwAuthenticate
 	};
@@ -256,6 +259,9 @@ macro_rules! T {
 	(CONTENT) => {
 		$crate::BaseTokenKind::KwContent
 	};
+	(CONTEXT) => {
+		$crate::BaseTokenKind::KwContext
+	};
 	(CONTINUE) => {
 		$crate::BaseTokenKind::KwContinue
 	};
@@ -333,6 +339,15 @@ macro_rules! T {
 	};
 	(ENFORCED) => {
 		$crate::BaseTokenKind::KwEnforced
+	};
+	(LIGHTWEIGHT) => {
+		$crate::BaseTokenKind::KwLightweight
+	};
+	(EDGES) => {
+		$crate::BaseTokenKind::KwEdges
+	};
+	(INLINE) => {
+		$crate::BaseTokenKind::KwInline
 	};
 	(EXCLUDE) => {
 		$crate::BaseTokenKind::KwExclude
@@ -562,6 +577,9 @@ macro_rules! T {
 	(PASSHASH) => {
 		$crate::BaseTokenKind::KwPasshash
 	};
+	(PASSSCRAM) => {
+		$crate::BaseTokenKind::KwPassscram
+	};
 	(PASSWORD) => {
 		$crate::BaseTokenKind::KwPassword
 	};
@@ -750,6 +768,9 @@ macro_rules! T {
 	};
 	(UNSET) => {
 		$crate::BaseTokenKind::KwUnset
+	};
+	(UNSIGNED) => {
+		$crate::BaseTokenKind::KwUnsigned
 	};
 	(UPDATE) => {
 		$crate::BaseTokenKind::KwUpdate

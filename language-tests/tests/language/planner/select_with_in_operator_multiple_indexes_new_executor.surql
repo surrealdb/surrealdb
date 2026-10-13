@@ -28,25 +28,13 @@ Total rows: 1''''
 value = "[{ id: notes:3, kind: 1, pubkey: 123, published: 2023 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}
-    Filter [ctx: Db] [predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4}
-        UnionIndexScan [ctx: Db] [table: notes, branches: 2] {rows: 4}
-            IndexScan [ctx: Db] [index: index_note_published, access: <2022, direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: index_note_published, access: >2022, direction: Forward] {rows: 3}
-
-Total rows: 4''''
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}\n    Filter [ctx: Db] [predicate: published < 2022 OR kind INSIDE [1, 2] OR pubkey INSIDE [123] AND published > 2022] {rows: 4}\n        BitmapResolve [ctx: Db] [table: notes] {rows: 4}\n            BitmapOr [ctx: Db] {rows: 4}\n                BitmapIndexScan [ctx: Db] [index: index_note_published, access: <2022] {rows: 1}\n                BitmapIndexScan [ctx: Db] [index: index_note_published, access: >2022] {rows: 3}\n\nTotal rows: 4''''
 
 [[test.results]]
 value = "[{ id: notes:1, kind: 1, pubkey: 123, published: 2021 }, { id: notes:3, kind: 1, pubkey: 123, published: 2023 }, { id: notes:4, kind: 2, pubkey: 123, published: 2024 }, { id: notes:5, kind: 1, pubkey: 123, published: 2025 }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}
-    Filter [ctx: Db] [predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4}
-        UnionIndexScan [ctx: Db] [table: notes, branches: 2] {rows: 5}
-            IndexScan [ctx: Db] [index: index_note_published, access: <2022, direction: Forward] {rows: 1}
-            IndexScan [ctx: Db] [index: index_note_pubkey, access: = 123, direction: Forward] {rows: 5}
-
-Total rows: 4''''
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}\n    Filter [ctx: Db] [predicate: kind INSIDE [1, 2] AND published < 2022 OR pubkey INSIDE [123] AND published > 2022] {rows: 4}\n        BitmapResolve [ctx: Db] [table: notes] {rows: 5}\n            BitmapOr [ctx: Db] {rows: 5}\n                BitmapIndexScan [ctx: Db] [index: index_note_published, access: <2022] {rows: 1}\n                BitmapIndexScan [ctx: Db] [index: index_note_pubkey, access: = 123] {rows: 5}\n\nTotal rows: 4''''
 
 [[test.results]]
 value = "[{ id: notes:1, kind: 1, pubkey: 123, published: 2021 }, { id: notes:3, kind: 1, pubkey: 123, published: 2023 }, { id: notes:4, kind: 2, pubkey: 123, published: 2024 }, { id: notes:5, kind: 1, pubkey: 123, published: 2025 }]"

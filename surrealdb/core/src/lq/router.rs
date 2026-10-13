@@ -14,20 +14,21 @@
 //! it owns (enforced by `MessageBroker::should_emit`). One pass is driven per
 //! tick by the engine's background task ([`Datastore::live_query_router_process`]).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use parking_lot::Mutex;
+use surrealdb_kvs::TransactionType::Read;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::key::lqe;
-use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::Read;
-use crate::kvs::{Datastore, KVKey, KVValue};
+use crate::key::schema::{LiveEventsKey, LiveEventsPrefix};
+use crate::key::{KVKeyDecode, KVValue};
+use crate::kvs::Datastore;
 use crate::lq::event::{LiveEvent, LiveEvents};
 use crate::lq::subscriber::replay_table_live_events;
-use crate::val::TableName;
 
 /// Per-node live-query router state: the tail cursor over the global
 /// versionstamp space of the `lqe` keyspace.
@@ -104,7 +105,7 @@ pub(crate) async fn process(ds: &Datastore, router: &LiveQueryRouter) -> Result<
 	let Some(broker) = ds.live_query_broker() else {
 		return Ok(());
 	};
-	let txn = Arc::new(ds.transaction(Read, Optimistic).await?);
+	let txn = Arc::new(ds.transaction(Read).await?);
 	let ts_impl = txn.timestamp_impl();
 	// The safe/closed watermark: deliver and advance only up to here.
 	let safe_vs = txn.safe_timestamp().await?.as_versionstamp();
@@ -121,9 +122,9 @@ pub(crate) async fn process(ds: &Datastore, router: &LiveQueryRouter) -> Result<
 		return Ok(());
 	}
 
-	// Encode the lower bound (the cursor) for the range scans. `prefix_ts(cursor)`
-	// includes events at exactly `cursor`; those were already delivered, so the
-	// scan loop skips `vs <= cursor`.
+	// Encode the lower bound (the cursor) for the range scans. The bound is
+	// inclusive, so events at exactly `cursor` are scanned; those were already
+	// delivered, so the scan loop skips `vs <= cursor`.
 	let cursor_ts = ts_impl.create_from_versionstamp(cursor).unwrap_or_else(|| ts_impl.earliest());
 	let mut cursor_buf = [0u8; _];
 	let cursor_bytes = cursor_ts.encode(&mut cursor_buf);
@@ -132,13 +133,21 @@ pub(crate) async fn process(ds: &Datastore, router: &LiveQueryRouter) -> Result<
 	for ns in nss.iter() {
 		let dbs = txn.all_db(ns.namespace_id, None).await?;
 		for db in dbs.iter() {
-			let beg = lqe::prefix_ts(db.namespace_id, db.database_id, cursor_bytes).encode_key()?;
-			let end = lqe::suffix(db.namespace_id, db.database_id).encode_key()?;
+			// Everything from the cursor timestamp to the end of this database's
+			// events.
+			let range = LiveEventsPrefix {
+				ns: db.namespace_id,
+				db: db.database_id,
+			}
+			.range_where(Cow::Borrowed(cursor_bytes)..)?;
 			// Group this database's events per table, preserving the ascending
 			// (versionstamp, table) scan order within each table's vec.
 			let mut per_table: HashMap<TableName, Vec<LiveEvent>> = HashMap::new();
-			for (k, v) in txn.scan(beg..end, u32::MAX, 0, None).await? {
-				let key = lqe::Lqe::decode_key(&k)?;
+			// The values stay encoded through the window check below: the lower bound
+			// is inclusive and the upper bound is the end of the band, so most of what
+			// this scan returns is outside the delivery window and is dropped unread.
+			for (k, v) in txn.scan_raw(range, u32::MAX, 0, None).await? {
+				let key = LiveEventsKey::decode_key(&k)?;
 				let vs = ts_impl.decode(key.ts.as_ref())?.as_versionstamp();
 				// Skip already-delivered events and anything not yet safe.
 				if vs <= cursor || vs > safe_vs {

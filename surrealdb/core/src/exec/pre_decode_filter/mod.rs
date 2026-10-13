@@ -50,16 +50,17 @@ pub(crate) use compile::{
 };
 use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
-use wire_literal::{LiteralSet, LiteralWire};
+use wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 
-use crate::expr::operator::BinaryOperator;
-use crate::fnc::operate;
-use crate::key::record::RecordKey;
-use crate::val::object_extract::{
+use crate::exec::object_extract::{
 	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr,
 	descend_to_value_walker_parts, extract_field_from_record_bytes, record_data_bytes,
 	scan_record_object_at_path_with_slots,
 };
+use crate::expr::operator::BinaryOperator;
+use crate::fnc::operate;
+use crate::key::KVKeyDecode;
+use crate::key::schema::RecordKey;
 use crate::val::{RecordId, Value};
 
 /// When a streaming leaf walk bails or misses, re-apply this op against a decoded leaf or
@@ -104,7 +105,7 @@ pub(crate) struct FusedFlatClause {
 	/// `key_utf8`, built once at construction. The fused object scan's
 	/// needle-driven branch uses it as the `find_value_bytes` needle so the
 	/// per-row hot loop never re-serialises the key. Mirrors
-	/// [`PathSegment`](crate::val::object_extract::PathSegment)'s pre-encoded
+	/// [`PathSegment`](crate::exec::object_extract::PathSegment)'s pre-encoded
 	/// `wire`.
 	pub(crate) key_wire: Box<[u8]>,
 	pub(crate) ops: Vec<FlatClauseOp>,
@@ -116,7 +117,7 @@ impl FusedFlatClause {
 	/// (`flat_clauses_from_specs`) and the test single-clause constructor.
 	pub(crate) fn new(key_utf8: Vec<u8>, ops: Vec<FlatClauseOp>) -> Self {
 		let key_wire =
-			crate::val::object_extract::strand_wire_bytes_from_utf8(&key_utf8).into_boxed_slice();
+			crate::exec::object_extract::strand_wire_bytes_from_utf8(&key_utf8).into_boxed_slice();
 		Self {
 			key_utf8,
 			key_wire,
@@ -155,7 +156,7 @@ impl FusedFlatClause {
 /// plus its plan-time pre-encoded `key_wire`, so evaluation can pass
 /// `&[FusedFlatClause]` directly with no per-row projection or re-encoding.
 ///
-/// [`scan_record_object_at_path_with_slots`]: crate::val::object_extract::scan_record_object_at_path_with_slots
+/// [`scan_record_object_at_path_with_slots`]: crate::exec::object_extract::scan_record_object_at_path_with_slots
 impl NeedleKey for FusedFlatClause {
 	#[inline]
 	fn key_utf8(&self) -> &[u8] {
@@ -330,9 +331,9 @@ pub(crate) enum Evidence {
 pub(crate) struct PreDecodeFilter {
 	pub(crate) root: PredNode,
 	/// Hard cap on path-segment count for any pre-decode descent. Sourced
-	/// from `ctx.config.idiom_recursion_limit` at the planner; bounds the
+	/// from `ctx.config.exec.idiom_recursion_limit` at the planner; bounds the
 	/// stack and intermediate allocations done by
-	/// [`crate::val::object_extract`]'s walker descent. Paths longer than
+	/// [`crate::exec::object_extract`]'s walker descent. Paths longer than
 	/// the limit fall back to full-record decode + post-decode evaluation.
 	pub(crate) depth_limit: u32,
 }
@@ -541,7 +542,7 @@ impl PreDecodeFilter {
 		// Single descent: try the wire-fast partition probe on the
 		// borrowed value bytes; on any wire-bail (compound tag, mixed
 		// Strand-vs-Regex set, etc.) decode just this one value and probe
-		// the original `set` so `fallback` membership is exact.
+		// the original `set`.
 		//
 		// `wire_value_in_set` is sound on Strand/Number tags only when the
 		// set has no asymmetric Regex peers — see
@@ -552,7 +553,7 @@ impl PreDecodeFilter {
 			}
 			let mut r: &[u8] = value_bytes;
 			match <Value as revision::DeserializeRevisioned>::deserialize_revisioned(&mut r) {
-				Ok(v) => Some(Self::set_evidence_for(op, set.contains(&v))),
+				Ok(v) => Some(hash_set_evidence_for(op, set.contains(&v), &v, literal_set)),
 				Err(_) => None,
 			}
 		});
@@ -585,7 +586,7 @@ impl PreDecodeFilter {
 			};
 			let v = Value::RecordId(RecordId {
 				table: k.tb.into_owned(),
-				key: k.id,
+				key: k.id.into_owned(),
 			});
 			return evidence_from_binary_cmp(op, literal, reversed, &v);
 		}
@@ -749,6 +750,26 @@ impl PreDecodeFilter {
 	}
 }
 
+/// [`Evidence`] for a set-membership probe that went through a `HashSet<Value>`.
+///
+/// A hit is always a hit. A **miss** only proves absence when
+/// [`hash_miss_is_decisive`] says so —
+/// numbers break the `Hash`/`Eq` contract, so `0.1f` misses a set holding
+/// `0.1dec` even though the two compare equal. An inconclusive miss sends the
+/// row to the authoritative predicate.
+#[inline]
+fn hash_set_evidence_for(
+	op: &BinaryOperator,
+	inside: bool,
+	value: &Value,
+	literal_set: &LiteralSet,
+) -> Evidence {
+	if !inside && !hash_miss_is_decisive(value, literal_set) {
+		return Evidence::Unknown;
+	}
+	PreDecodeFilter::set_evidence_for(op, inside)
+}
+
 /// Three-state AND of [`Evidence`] values.
 ///
 /// Short-circuits on the first [`Evidence::ProvablyFalse`]. An empty input or any
@@ -860,7 +881,7 @@ mod tests {
 	use crate::val::{Number, Object, Value};
 
 	/// Depth limit used in test fixtures. Matches the default
-	/// `ctx.config.idiom_recursion_limit` (256) so test behaviour reflects
+	/// `ctx.config.exec.idiom_recursion_limit` (256) so test behaviour reflects
 	/// the production planner's wiring.
 	const TEST_DEPTH_LIMIT: u32 = 256;
 
@@ -963,6 +984,74 @@ mod tests {
 		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
 		let obj =
 			Object::from(BTreeMap::from([(Strand::from("a"), Value::Number(Number::Int(99)))]));
+		let rec = wire_record_plain_object(obj);
+		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+	}
+
+	/// `0.1f` and `0.1dec` compare equal but hash apart, so the decoded probe
+	/// misses a set that does contain the value. A miss like that must not
+	/// reject the row — the authoritative predicate decides.
+	#[test]
+	fn eval_set_membership_cross_variant_number_miss_needs_full_decode() {
+		let float = Value::Number(Number::Float(0.1));
+		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
+		// Precondition: the two are one value to `==` and two keys to `Hash`.
+		assert_eq!(float, decimal);
+		assert!(!HashSet::from([decimal.clone()]).contains(&float));
+
+		for (stored, field) in [(&decimal, &float), (&float, &decimal)] {
+			let set = Arc::new(HashSet::from([stored.clone()]));
+			let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			let obj = Object::from(BTreeMap::from([(Strand::from("a"), field.clone())]));
+			let rec = wire_record_plain_object(obj);
+			assert_eq!(
+				pf.apply(&[], &rec),
+				PreDecodeFilterOutcome::NeedFullDecode,
+				"stored {stored:?} field {field:?}"
+			);
+		}
+	}
+
+	/// The same hazard one level down: both sides take the decode path because
+	/// an object element has no wire partition.
+	#[test]
+	fn eval_set_membership_nested_number_miss_needs_full_decode() {
+		let nested =
+			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+		let set = Arc::new(HashSet::from([nested(Value::Number(Number::Decimal(
+			"0.1".parse().unwrap(),
+		)))]));
+		let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
+		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+		let obj = Object::from(BTreeMap::from([(
+			Strand::from("a"),
+			nested(Value::Number(Number::Float(0.1))),
+		)]));
+		let rec = wire_record_plain_object(obj);
+		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode);
+	}
+
+	/// A number-free value keeps its rejection even against a set full of
+	/// numbers: equality needs matching variants, so the miss is decisive.
+	#[test]
+	fn eval_set_membership_number_free_value_still_rejects() {
+		let set = Arc::new(HashSet::from([
+			Value::Number(Number::Decimal("0.1".parse().unwrap())),
+			Value::Object(Object::from(BTreeMap::from([(
+				Strand::from("v"),
+				Value::Number(Number::Float(2.5)),
+			)]))),
+		]));
+		let root = set_membership(vec!["a".into()], BinaryOperator::Inside, set, false);
+		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+		let obj = Object::from(BTreeMap::from([(
+			Strand::from("a"),
+			Value::Object(Object::from(BTreeMap::from([(
+				Strand::from("v"),
+				Value::String("z".into()),
+			)]))),
+		)]));
 		let rec = wire_record_plain_object(obj);
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
@@ -1244,7 +1333,7 @@ mod tests {
 	/// only the *source* of the bytes changes, never the bytes.
 	#[test]
 	fn fused_clause_key_wire_matches_on_demand_encoding() {
-		use crate::val::object_extract::{NeedleKey, strand_wire_bytes_from_utf8};
+		use crate::exec::object_extract::{NeedleKey, strand_wire_bytes_from_utf8};
 		for key in [b"a".as_slice(), b"number", b"geography", b"a_longer_field_name_here"] {
 			let clause = fused_clause(key.to_vec(), BinaryOperator::Equal, Value::None, false);
 			assert_eq!(
@@ -1344,6 +1433,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::Any,
 		});
 		let root = PredNode::LeafStreaming {
@@ -1374,6 +1464,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::All,
 		});
 		let root = PredNode::LeafStreaming {
@@ -1394,6 +1485,135 @@ mod tests {
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
 	}
 
+	/// A bit index identifies a literal value, not a spelling of one. A set that
+	/// spells one value twice (`0.1f` and `0.1dec` compare equal but hash apart,
+	/// so a `HashSet` keeps both) asks for that value once, so an array holding
+	/// either spelling satisfies `ContainAll`.
+	#[test]
+	fn streaming_array_overlap_all_collapses_equal_literal_spellings() {
+		let float = Value::Number(Number::Float(0.1));
+		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
+		let set = Arc::new(HashSet::from([float.clone(), decimal.clone()]));
+		// Precondition: the `HashSet` really did keep both spellings.
+		assert_eq!(set.len(), 2);
+
+		let tables = overlap_streaming_from_set(set.as_ref());
+		assert_eq!(tables.literal_count, 1, "both spellings share one bit");
+		assert_eq!(tables.literal_to_idx.len(), 2, "both spellings stay addressable");
+
+		for element in [&float, &decimal] {
+			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+				literal_to_idx: Arc::clone(&tables.literal_to_idx),
+				wire_to_idx: Arc::clone(&tables.wire_to_idx),
+				literal_set: Arc::clone(&tables.literal_set),
+				literal_count: tables.literal_count,
+				mode: OverlapMode::All,
+			});
+			let root = PredNode::LeafStreaming {
+				path: vec!["tags".into()],
+				evaluator: eval,
+				fallback: LeafFallback {
+					op: BinaryOperator::ContainAll,
+					literal: Value::from(vec![float.clone(), decimal.clone()]),
+					reversed: false,
+				},
+			};
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			let obj = Object::from(BTreeMap::from([(
+				Strand::from("tags"),
+				Value::from(vec![element.clone()]),
+			)]));
+			let rec = wire_record_plain_object(obj);
+			assert_eq!(
+				pf.apply(&[], &rec),
+				PreDecodeFilterOutcome::NeedFullDecode,
+				"element {element:?} satisfies the whole set"
+			);
+		}
+	}
+
+	/// Two genuinely distinct literals still need both present, so an array
+	/// holding one of them is provably rejected.
+	#[test]
+	fn streaming_array_overlap_all_still_rejects_a_missing_literal() {
+		let set = Arc::new(HashSet::from([
+			Value::Number(Number::Decimal("0.1".parse().unwrap())),
+			Value::Number(Number::Decimal("0.2".parse().unwrap())),
+		]));
+		let tables = overlap_streaming_from_set(set.as_ref());
+		assert_eq!(tables.literal_count, 2);
+		let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+			literal_to_idx: tables.literal_to_idx,
+			wire_to_idx: tables.wire_to_idx,
+			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
+			mode: OverlapMode::All,
+		});
+		let root = PredNode::LeafStreaming {
+			path: vec!["tags".into()],
+			evaluator: eval,
+			fallback: LeafFallback {
+				op: BinaryOperator::ContainAll,
+				literal: Value::from(vec![
+					Value::Number(Number::Decimal("0.1".parse().unwrap())),
+					Value::Number(Number::Decimal("0.2".parse().unwrap())),
+				]),
+				reversed: false,
+			},
+		};
+		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+		let obj = Object::from(BTreeMap::from([(
+			Strand::from("tags"),
+			Value::from(vec![Value::Number(Number::Decimal("0.1".parse().unwrap()))]),
+		)]));
+		let rec = wire_record_plain_object(obj);
+		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+	}
+
+	/// The array-overlap evaluators resolve compound elements through the same
+	/// `HashMap<Value, _>`, so a cross-variant number miss must abort the whole
+	/// evaluation rather than count as "this element matches nothing".
+	#[test]
+	fn streaming_array_overlap_cross_variant_number_miss_needs_full_decode() {
+		// Wrapped in an object so the element takes the decode path rather than
+		// the Number wire partition.
+		let wrap = |v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+		let stored = wrap(Value::Number(Number::Decimal("0.1".parse().unwrap())));
+		let field = wrap(Value::Number(Number::Float(0.1)));
+
+		for (mode, op) in [
+			(OverlapMode::Any, BinaryOperator::ContainAny),
+			(OverlapMode::All, BinaryOperator::ContainAll),
+			(OverlapMode::None, BinaryOperator::ContainNone),
+		] {
+			let set = Arc::new(HashSet::from([stored.clone()]));
+			let tables = overlap_streaming_from_set(set.as_ref());
+			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+				literal_to_idx: tables.literal_to_idx,
+				wire_to_idx: tables.wire_to_idx,
+				literal_set: tables.literal_set,
+				literal_count: tables.literal_count,
+				mode,
+			});
+			let root = PredNode::LeafStreaming {
+				path: vec!["tags".into()],
+				evaluator: eval,
+				fallback: LeafFallback {
+					op,
+					literal: Value::from(vec![stored.clone()]),
+					reversed: false,
+				},
+			};
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			let obj = Object::from(BTreeMap::from([(
+				Strand::from("tags"),
+				Value::from(vec![field.clone()]),
+			)]));
+			let rec = wire_record_plain_object(obj);
+			assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::NeedFullDecode, "{mode:?}");
+		}
+	}
+
 	#[test]
 	fn streaming_array_containsnone_rejects_on_first_hit() {
 		let lit = Value::from(vec![Value::String("a".into()), Value::String("b".into())]);
@@ -1403,6 +1623,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::None,
 		});
 		let root = PredNode::LeafStreaming {

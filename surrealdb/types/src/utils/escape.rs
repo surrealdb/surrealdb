@@ -156,3 +156,66 @@ impl ToSql for EscapeRecordKey<'_> {
 		}
 	}
 }
+
+/// Decode a backtick-quoted table name or record-id key fragment.
+///
+/// If `s` is wrapped in a pair of backticks, strips them and unescapes the interior with
+/// [`parse_common::unescape_cow`], so every escape sequence the SurrealQL lexer accepts is
+/// accepted here too. Otherwise `s` is returned unchanged, which keeps plain `table:key`
+/// fragments — and fragments with an unclosed quote — working.
+///
+/// Errors if the interior contains an escape sequence the lexer would reject.
+pub fn decode_backtick_ident(s: &str) -> anyhow::Result<String> {
+	let Some(interior) = s.strip_prefix('`').and_then(|rest| rest.strip_suffix('`')) else {
+		return Ok(s.to_string());
+	};
+	parse_common::unescape_cow(interior)
+		.map(|unescaped| unescaped.into_owned())
+		.map_err(|e| anyhow::anyhow!("{} in `{interior}`", e.message))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn decode_backtick_ident_plain() {
+		assert_eq!(decode_backtick_ident("tobie").unwrap(), "tobie");
+		assert_eq!(decode_backtick_ident("needs escaping").unwrap(), "needs escaping");
+	}
+
+	#[test]
+	fn decode_backtick_ident_roundtrips_escape_writer() {
+		let mut escaped = String::new();
+		EscapeRecordKey("needs escaping").fmt_sql(&mut escaped, SqlFormat::SingleLine);
+		assert_eq!(escaped, "`needs escaping`");
+		assert_eq!(decode_backtick_ident(&escaped).unwrap(), "needs escaping");
+
+		let mut escaped = String::new();
+		EscapeRecordKey("he said `hi`").fmt_sql(&mut escaped, SqlFormat::SingleLine);
+		assert_eq!(decode_backtick_ident(&escaped).unwrap(), "he said `hi`");
+
+		let mut escaped = String::new();
+		EscapeRecordKey("tab\there\nand \0 null").fmt_sql(&mut escaped, SqlFormat::SingleLine);
+		assert_eq!(decode_backtick_ident(&escaped).unwrap(), "tab\there\nand \0 null");
+	}
+
+	#[test]
+	fn decode_backtick_ident_accepts_every_lexer_escape() {
+		// Escapes the lexer accepts which `EscapeWriter` never emits itself, so a
+		// hand-written record id is decoded the same way the parser would decode it.
+		assert_eq!(decode_backtick_ident(r"`a\bc`").unwrap(), "a\x08c");
+		assert_eq!(decode_backtick_ident(r"`a\'c`").unwrap(), "a'c");
+		assert_eq!(decode_backtick_ident(r#"`a\"c`"#).unwrap(), "a\"c");
+		assert_eq!(decode_backtick_ident(r"`a\⟩c`").unwrap(), "a⟩c");
+		// Fixed-width unicode escape, as opposed to the braced form `EscapeWriter` emits.
+		assert_eq!(decode_backtick_ident("`\\u0021`").unwrap(), "!");
+		assert_eq!(decode_backtick_ident(r"`\u{1F600}`").unwrap(), "😀");
+	}
+
+	#[test]
+	fn decode_backtick_ident_rejects_invalid_escape() {
+		assert!(decode_backtick_ident(r"`a\xc`").is_err());
+		assert!(decode_backtick_ident(r"`a\`").is_err());
+	}
+}

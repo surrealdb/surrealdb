@@ -59,6 +59,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
@@ -68,14 +69,12 @@ use super::path_expand::{
 	node_passes_label, path_rows_exceeded, scan_dir, source_record_id, step_kind, target_field,
 };
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
-use crate::idx::planner::ScanDirection;
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{RecordId, TableName, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
@@ -433,11 +432,11 @@ impl ExecOperator for ShortestPathExpand {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
@@ -454,13 +453,13 @@ impl ExecOperator for ShortestPathExpand {
 		let reversed = self.reversed;
 		let emits_at = move |d: u32| d >= min && max.is_none_or(|m| d <= m);
 		let extends_past = move |d: u32| max.is_none_or(|m| d < m);
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let path_row_limit = ctx.root().ctx.config.gql_max_path_rows;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
+		let path_row_limit = ctx.root().ctx.config.exec.gql_max_path_rows;
 		let dir = scan_dir(direction);
 		let tgt_field = target_field(direction);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -468,14 +467,16 @@ impl ExecOperator for ShortestPathExpand {
 
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
+			// Per-table adjacency classifications, cached for the whole stream
+			// (path tips can span tables).
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				for row in batch.values {
+				for row in batch.into_values() {
 					let Some(source_rid) = source_record_id(&row, &source) else {
 						debug!(
 							target: "surrealdb::exec::shortest_path_expand",
@@ -515,7 +516,7 @@ impl ExecOperator for ShortestPathExpand {
 						);
 						out.push(assembled);
 						if out.len() >= scan_batch_size {
-							yield ValueBatch { values: std::mem::take(&mut out) };
+							yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 							out = Vec::with_capacity(scan_batch_size);
 						}
 					}
@@ -538,38 +539,30 @@ impl ExecOperator for ShortestPathExpand {
 						crate::exec::operators::check_cancelled(&ctx)?;
 						let depth = path.depth();
 
-						// Enumerate the tip's adjacency, skipping edges already on
-						// the path (DIFFERENT EDGES). Identical to `PathExpand`.
-						let ranges = compute_graph_ranges(
-							ns_id, db_id, &path.tip, dir, &edge_specs, &ctx,
-						).await?;
-
+						// Enumerate the tip's adjacency, retaining only edges
+						// not already on the path (DIFFERENT EDGES), filtered
+						// per streamed item. Identical to `PathExpand`.
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for (beg, end) in ranges {
-							let mut cursor = txn
-								.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
-								.await
-								.context("Failed to open ShortestPathExpand graph cursor")?;
-							loop {
-								crate::exec::operators::check_cancelled(&ctx)?;
-								let keys = cursor
-									.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-									.await
-									.context("Failed to scan ShortestPathExpand graph edge")?;
-								if keys.is_empty() {
-									break;
+						collect_adjacency(
+							&txn,
+							ns_id,
+							db_id,
+							&path.tip,
+							dir,
+							&edge_specs,
+							&ctx,
+							version,
+							&mut adjacency_memo,
+							|item| {
+								if !path.contains_edge(&item.edge) {
+									edge_ids.push(item.edge);
+									decoded_targets.push(item.target);
 								}
-								for key in &keys {
-									let decoded = decode_graph_edge(key)?;
-									if !path.contains_edge(&decoded.edge) {
-										edge_ids.push(decoded.edge);
-										decoded_targets.push(decoded.target);
-									}
-								}
-							}
-							drop(cursor);
-						}
+								Ok(())
+							},
+						)
+						.await?;
 
 						if edge_ids.is_empty() {
 							continue;
@@ -603,8 +596,7 @@ impl ExecOperator for ShortestPathExpand {
 							resolve_with_field_state(&ctx, &mut node_cache, &node_ids).await?;
 
 						let new_depth = depth + 1;
-						for ((edge_id, edge_obj), node_obj) in
-							step_edges.into_iter().zip(node_objs)
+						for ((edge_id, edge_obj), node_obj) in step_edges.into_iter().zip(node_objs)
 						{
 							let Some(node_obj) = node_obj else {
 								continue;
@@ -648,7 +640,7 @@ impl ExecOperator for ShortestPathExpand {
 								);
 								out.push(assembled);
 								if out.len() >= scan_batch_size {
-									yield ValueBatch { values: std::mem::take(&mut out) };
+									yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 									out = Vec::with_capacity(scan_batch_size);
 								}
 							}
@@ -676,9 +668,10 @@ impl ExecOperator for ShortestPathExpand {
 			}
 
 			if !out.is_empty() {
-				yield ValueBatch { values: out };
+				yielder.emit(ValueBatch::new(out)).await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "ShortestPathExpand", &self.metrics))
 	}

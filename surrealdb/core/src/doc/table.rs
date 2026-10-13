@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -10,15 +11,15 @@ use crate::catalog::{Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, Extras, NsDbCtx};
-use crate::err::Error;
+use crate::exe::FlowResultExt as _;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
-	BinaryOperator, Cond, Expr, Fields, FlowResultExt as _, Function, FunctionCall, Groups, Literal,
+	BinaryOperator, Cond, Error, Expr, Fields, Function, FunctionCall, Groups, Literal,
 };
 use crate::idx::planner::RecordStrategy;
-use crate::key;
-use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
+use crate::key::schema::RecordKey;
+use crate::val::{Array, RecordId, RecordIdKey, TableName, TryAdd, Value};
 struct Recalculation {
 	function: String,
 	stat: usize,
@@ -62,7 +63,7 @@ impl Document {
 		let opt = &opt.new_with_perms(false);
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
-			// Get the table definition
+			// Get the view definition
 			let Some(tb) = ft.view.as_ref() else {
 				fail!("Table stored as view table did not have a view");
 			};
@@ -99,10 +100,12 @@ impl Document {
 				let id = &self.id()?.key;
 
 				let set = if let Some(cond) = condition {
-					stk.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
-						.await
-						.catch_return()?
-						.is_truthy()
+					stk.run(|stk| {
+						crate::legacy::expr_compute(cond, stk, ctx, opt, Some(&self.current))
+					})
+					.await
+					.catch_return()?
+					.is_truthy()
 				} else {
 					action != Action::Delete
 				};
@@ -110,7 +113,9 @@ impl Document {
 				let db = self.doc_ctx.db();
 
 				if set {
-					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
+					let data =
+						crate::legacy::fields_compute(fields, stk, ctx, opt, Some(&self.current))
+							.await?;
 					let record = Arc::new(Record::new(data));
 
 					ctx.tx()
@@ -147,8 +152,7 @@ impl Document {
 		match action {
 			Action::Create => {
 				if let Some(cond) = condition
-					&& !cond
-						.compute(stk, ctx, opt, Some(&self.current))
+					&& !crate::legacy::expr_compute(cond, stk, ctx, opt, Some(&self.current))
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -159,7 +163,11 @@ impl Document {
 
 				let mut group = Vec::with_capacity(aggr.group_expressions.len());
 				for g in aggr.group_expressions.iter() {
-					group.push(g.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?);
+					group.push(
+						crate::legacy::expr_compute(g, stk, ctx, opt, Some(&self.current))
+							.await
+							.catch_return()?,
+					);
 				}
 
 				self.process_view_record_create(stk, ctx, opt, group, view_table_name, aggr)
@@ -167,7 +175,7 @@ impl Document {
 			}
 			Action::Update => {
 				let before_cond = if let Some(cond) = condition {
-					cond.compute(stk, ctx, opt, Some(&self.initial))
+					crate::legacy::expr_compute(cond, stk, ctx, opt, Some(&self.initial))
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -179,7 +187,9 @@ impl Document {
 					let mut group = Vec::with_capacity(aggr.group_expressions.len());
 					for g in aggr.group_expressions.iter() {
 						group.push(
-							g.compute(stk, ctx, opt, Some(&self.initial)).await.catch_return()?,
+							crate::legacy::expr_compute(g, stk, ctx, opt, Some(&self.initial))
+								.await
+								.catch_return()?,
 						);
 					}
 					Some(group)
@@ -188,7 +198,7 @@ impl Document {
 				};
 
 				let after_cond = if let Some(cond) = condition {
-					cond.compute(stk, ctx, opt, Some(&self.current))
+					crate::legacy::expr_compute(cond, stk, ctx, opt, Some(&self.current))
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -200,7 +210,9 @@ impl Document {
 					let mut group = Vec::with_capacity(aggr.group_expressions.len());
 					for g in aggr.group_expressions.iter() {
 						group.push(
-							g.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?,
+							crate::legacy::expr_compute(g, stk, ctx, opt, Some(&self.current))
+								.await
+								.catch_return()?,
 						);
 					}
 					Some(group)
@@ -271,8 +283,7 @@ impl Document {
 			}
 			Action::Delete => {
 				if let Some(cond) = condition
-					&& !cond
-						.compute(stk, ctx, opt, Some(&self.initial))
+					&& !crate::legacy::expr_compute(cond, stk, ctx, opt, Some(&self.initial))
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -283,7 +294,11 @@ impl Document {
 
 				let mut group = Vec::with_capacity(aggr.group_expressions.len());
 				for g in aggr.group_expressions.iter() {
-					group.push(g.compute(stk, ctx, opt, Some(&self.initial)).await.catch_return()?);
+					group.push(
+						crate::legacy::expr_compute(g, stk, ctx, opt, Some(&self.initial))
+							.await
+							.catch_return()?,
+					);
 				}
 
 				self.process_view_record_delete(stk, ctx, opt, group, view_table_name, aggr)
@@ -310,9 +325,14 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		let mut action = Action::Update;
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			// View-table aggregation rows store their `data` as an `Object`
 			// without an `id` field (the group key is the row's identity
 			// but is not duplicated into the body). Decoding via
@@ -340,7 +360,11 @@ impl Document {
 
 		let mut args = Vec::with_capacity(aggr.aggregate_arguments.len());
 		for a in aggr.aggregate_arguments.iter() {
-			args.push(a.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?)
+			args.push(
+				crate::legacy::expr_compute(a, stk, ctx, opt, Some(&self.current))
+					.await
+					.catch_return()?,
+			)
 		}
 
 		aggregation::add_to_aggregation_stats(&args, &mut meta.aggregation_stats)?;
@@ -358,10 +382,10 @@ impl Document {
 			AggregateFields::Fields(items) => {
 				for (name, expr) in items {
 					let res = stk
-						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
-					data.set(stk, ctx, opt, name.as_ref(), res).await?;
+					crate::legacy::value_set(&mut data, stk, ctx, opt, name.as_ref(), res).await?;
 				}
 			}
 		};
@@ -423,11 +447,16 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		// View-table aggregation rows store `data` without an `id`; see the
 		// note on the matching read in the `Update` path above. Use raw
 		// decode so we don't splice the group key back into `data`.
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
@@ -445,7 +474,7 @@ impl Document {
 
 		if count == 1 {
 			// Only one record, we can just delete the record.
-			tx.del(&k).await?;
+			tx.del_key(&k).await?;
 
 			let ns = self.doc_ctx.ns();
 			let db = self.doc_ctx.db();
@@ -483,7 +512,11 @@ impl Document {
 
 		let mut args = Vec::with_capacity(aggr.aggregate_arguments.len());
 		for a in aggr.aggregate_arguments.iter() {
-			args.push(a.compute(stk, ctx, opt, Some(&self.initial)).await.catch_return()?)
+			args.push(
+				crate::legacy::expr_compute(a, stk, ctx, opt, Some(&self.initial))
+					.await
+					.catch_return()?,
+			)
 		}
 
 		let mut recalculations = Vec::new();
@@ -592,12 +625,14 @@ impl Document {
 				}
 				AggregationStat::Variance {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
 					count,
 				}
 				| AggregationStat::StdDev {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
 					count,
@@ -606,9 +641,7 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					*count -= 1;
-					*sum = *sum - *n;
-					*sum_of_squares = *sum_of_squares - n.try_pow(Number::from(2))?;
+					aggregation::shifted_remove(shift, sum, sum_of_squares, count, *n)?;
 				}
 				AggregationStat::Accumulate {
 					..
@@ -673,9 +706,14 @@ impl Document {
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 
-			let value = stk.run(|stk| recalc_stmt.compute(stk, ctx, opt, None)).await?;
+			let value = stk
+				.run(|stk| {
+					crate::legacy::select_statement_compute(&recalc_stmt, stk, ctx, opt, None)
+				})
+				.await?;
 
 			let Value::Array(Array(values)) = value else {
 				fail!("Aggregate recalculation select statement return an invalid result");
@@ -732,10 +770,10 @@ impl Document {
 			AggregateFields::Fields(items) => {
 				for (name, expr) in items {
 					let res = stk
-						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
-					data.set(stk, ctx, opt, name.as_ref(), res).await?;
+					crate::legacy::value_set(&mut data, stk, ctx, opt, name.as_ref(), res).await?;
 				}
 			}
 		};
@@ -796,11 +834,16 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		// View-table aggregation rows store `data` without an `id`; see the
 		// note on the matching read in the `Update` path above. Use raw
 		// decode so we don't splice the group key back into `data`.
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
@@ -813,12 +856,20 @@ impl Document {
 
 		let mut before_args = Vec::with_capacity(aggr.aggregate_arguments.len());
 		for a in aggr.aggregate_arguments.iter() {
-			before_args.push(a.compute(stk, ctx, opt, Some(&self.initial)).await.catch_return()?)
+			before_args.push(
+				crate::legacy::expr_compute(a, stk, ctx, opt, Some(&self.initial))
+					.await
+					.catch_return()?,
+			)
 		}
 
 		let mut after_args = Vec::with_capacity(aggr.aggregate_arguments.len());
 		for a in aggr.aggregate_arguments.iter() {
-			after_args.push(a.compute(stk, ctx, opt, Some(&self.current)).await.catch_return()?)
+			after_args.push(
+				crate::legacy::expr_compute(a, stk, ctx, opt, Some(&self.current))
+					.await
+					.catch_return()?,
+			)
 		}
 
 		let mut recalculations = Vec::new();
@@ -997,15 +1048,17 @@ impl Document {
 				}
 				AggregationStat::Variance {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
-					..
+					count,
 				}
 				| AggregationStat::StdDev {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
-					..
+					count,
 				} => {
 					let Value::Number(before) = &before_args[*arg] else {
 						fail!("Old record wasn't a number but was created with a number");
@@ -1015,10 +1068,12 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					*sum = *sum - *before;
-					*sum_of_squares = *sum_of_squares - before.try_mul(*before)?;
-					*sum = *sum + *after;
-					*sum_of_squares = *sum_of_squares + after.try_mul(*after)?;
+					// Remove-then-add rather than two in-place adjustments: the
+					// shift and count must move together with the sums, and
+					// `shifted_remove` resets an emptied group so the re-add
+					// picks a fresh shift.
+					aggregation::shifted_remove(shift, sum, sum_of_squares, count, *before)?;
+					aggregation::shifted_accumulate(shift, sum, sum_of_squares, count, *after)?;
 				}
 				AggregationStat::Accumulate {
 					..
@@ -1083,9 +1138,14 @@ impl Document {
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 
-			let value = stk.run(|stk| recalc_stmt.compute(stk, ctx, opt, None)).await?;
+			let value = stk
+				.run(|stk| {
+					crate::legacy::select_statement_compute(&recalc_stmt, stk, ctx, opt, None)
+				})
+				.await?;
 
 			let Value::Array(Array(values)) = value else {
 				fail!("Aggregate recalculation select statement return an invalid result");
@@ -1142,10 +1202,10 @@ impl Document {
 			AggregateFields::Fields(items) => {
 				for (name, expr) in items {
 					let res = stk
-						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
-					data.set(stk, ctx, opt, name.as_ref(), res).await?;
+					crate::legacy::value_set(&mut data, stk, ctx, opt, name.as_ref(), res).await?;
 				}
 			}
 		};

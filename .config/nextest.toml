@@ -8,6 +8,10 @@ slow-timeout = "15s"
 global-timeout = "30m"
 
 [[profile.default.overrides]]
+filter = 'test(tikv::) + package(surrealdb-kvs-tikv)'
+test-group = 'serial-kvs'
+
+[[profile.default.overrides]]
 filter = 'test(kvs::tests::)'
 test-group = 'serial-kvs'
 

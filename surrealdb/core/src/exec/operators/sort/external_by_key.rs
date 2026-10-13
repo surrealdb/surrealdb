@@ -19,7 +19,8 @@ use tokio::task::spawn_blocking;
 
 use super::common::{SortDirection, SortKey, compare_keys_by_sort_key};
 use super::external_common::{KeyedValue, KeyedValueExternalChunk, TempFileReader, TempFileWriter};
-use crate::err::Error;
+use crate::dbs::SortError;
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -112,11 +113,11 @@ impl ExecOperator for ExternalSortByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let temp_dir = self.temp_dir.clone();
@@ -131,12 +132,12 @@ impl ExecOperator for ExternalSortByKey {
 			let mut writer =
 				TempFileWriter::new(&dir).context("Failed to create temp file writer")?;
 			let mut count = 0usize;
+			let mut seq = 0usize;
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -144,19 +145,21 @@ impl ExecOperator for ExternalSortByKey {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> =
 						sort_keys.iter().map(|k| k.path.extract(&value).into_owned()).collect();
 
 					let keyed = KeyedValue {
 						keys,
+						seq,
 						value,
 					};
+					seq += 1;
 
 					let mut w = writer;
 					w = spawn_blocking(move || {
 						w.push(&keyed)?;
-						Ok::<TempFileWriter, Error>(w)
+						Ok::<TempFileWriter, SortError>(w)
 					})
 					.await
 					.context("Write task join error")?
@@ -168,9 +171,7 @@ impl ExecOperator for ExternalSortByKey {
 			}
 
 			if count == 0 {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			writer.flush().context("Flush error")?;
@@ -185,38 +186,37 @@ impl ExecOperator for ExternalSortByKey {
 
 				let sorter: ExternalSorter<
 					KeyedValue,
-					Error,
+					SortError,
 					LimitedBufferBuilder,
 					KeyedValueExternalChunk,
 				> = ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
 					.with_buffer(LimitedBufferBuilder::new(
-						ctx.root().ctx.config.external_sorting_buffer_limit,
+						ctx.root().ctx.config.exec.external_sorting_buffer_limit,
 						true,
 					))
 					.build()?;
 
 				let sorted = sorter.sort_by(reader, |a, b| {
 					compare_keys_by_sort_key(&a.keys, &b.keys, &sort_keys_clone)
+						.then_with(|| a.seq.cmp(&b.seq))
 				})?;
 
 				let values: Vec<Value> =
 					sorted.map(|r| r.map(|kv| kv.value)).collect::<Result<Vec<_>, _>>()?;
 
-				Ok::<Vec<Value>, Error>(values)
+				Ok::<Vec<Value>, SortError>(values)
 			})
 			.await
 			.context("Sort task join error")?
 			.context("Sort error")?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

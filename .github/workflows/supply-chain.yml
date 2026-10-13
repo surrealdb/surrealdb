@@ -9,10 +9,14 @@ on:
       - Cargo.lock
       - Cargo.toml
       - surrealdb/core/Cargo.toml
+      - surrealdb/common/Cargo.toml
+      - surrealdb/kvs/Cargo.toml
+      - surrealdb/kvs-*/Cargo.toml
       - surrealdb/server/Cargo.toml
       - surrealdb/Cargo.toml
       - build.rs
       - surrealdb/build.rs
+      - deny.toml
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -24,10 +28,14 @@ on:
       - Cargo.lock
       - Cargo.toml
       - surrealdb/core/Cargo.toml
+      - surrealdb/common/Cargo.toml
+      - surrealdb/kvs/Cargo.toml
+      - surrealdb/kvs-*/Cargo.toml
       - surrealdb/server/Cargo.toml
       - surrealdb/Cargo.toml
       - build.rs
       - surrealdb/build.rs
+      - deny.toml
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -54,12 +62,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # (Actions must be pinned by commit hash) v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -83,12 +91,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # (Actions must be pinned by commit hash) v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment

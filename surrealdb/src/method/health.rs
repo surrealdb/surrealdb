@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Result, Surreal};
 
@@ -36,7 +36,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			router.execute_unit(self.client.session_id, Command::Health).await
+			router.engine.health(ctx(self.client.session_id)).await
 		})
 	}
 }

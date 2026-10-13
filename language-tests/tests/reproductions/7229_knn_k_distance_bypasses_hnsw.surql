@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "KNN operator <|K, DISTANCE|> should use HNSW index instead of falling back to brute-force scan"

@@ -10,7 +10,7 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, Extension};
 use axum::response::IntoResponse;
 use axum::routing::post;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 use tokio::sync::OnceCell;
 use tower_http::limit::RequestBodyLimitLayer;
 

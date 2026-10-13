@@ -229,8 +229,11 @@ pub async fn start_server_with_import_file(path: &str) -> Result<(String, Child)
 }
 
 pub async fn start_server_with_versioning() -> Result<(String, Child), Box<dyn Error>> {
+	// The memory backend no longer supports versioning after the surrealmx 0.23
+	// upgrade; use the surrealkv backend, which retains native versioning.
+	let path = tmp_file("versioned.db");
 	start_server(StartServerArguments {
-		path: Some("memory?versioned=true".to_string()),
+		path: Some(format!("surrealkv://{path}?versioned=true&retention=1h")),
 		auth: false,
 		..Default::default()
 	})

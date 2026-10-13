@@ -18,7 +18,7 @@ run = false
 
 	DEFINE FIELD friends ON user TYPE array<record<user>>;
 
-	CREATE |user:1..5000| SET
+	CREATE |user:1..=5000| SET
 		name = rand::string(12),
 		friends = [
 			type::record('user', rand::int(1, 5000)),

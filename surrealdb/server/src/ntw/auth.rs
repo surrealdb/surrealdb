@@ -12,7 +12,7 @@ use http::request::Parts;
 use hyper::{Request, Response};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{basic, token};
-use surrealdb_core::observe::HttpRequestEventCtx;
+use surrealdb_observe::HttpRequestEventCtx;
 use tower::{Layer, Service};
 use uuid::Uuid;
 
@@ -90,7 +90,7 @@ where
 					// metrics layer can attribute the per-request
 					// telemetry (HttpRequestEvent + NetworkBytesEvent)
 					// without reaching back into request state.
-					let ctx = HttpRequestEventCtx::from_session(&sess);
+					let ctx = HttpRequestEventCtx::from(&sess);
 					parts.extensions.insert(sess);
 					let mut response = inner.call(Request::from_parts(parts, body)).await?;
 					response.extensions_mut().insert(ctx);
@@ -195,6 +195,21 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
 		token(kvs, &mut session, au.token()).await?;
 	};
+
+	// SECURITY (GHSA-2v9j): the `Surreal-NS`/`Surreal-DB` headers select the
+	// session's namespace/database independently of the authenticated level —
+	// Basic auth verifies credentials against `Surreal-Auth-NS`/`Surreal-Auth-DB`,
+	// and a token carries its own ns/db. A Database- or Namespace-level principal
+	// must not be able to point the selected context at a foreign tenant and
+	// query it without a `USE`, so reject a context the authenticated level is
+	// not permitted to access. Root and anonymous (`Level::No`) principals are
+	// unrestricted by `can_access_ns_db`; the check only applies once both a
+	// namespace and database are selected.
+	if let (Some(ns), Some(db)) = (session.ns.as_deref(), session.db.as_deref())
+		&& !session.au.can_access_ns_db(ns, db)
+	{
+		bail!(NetError::InvalidAuth);
+	}
 
 	Ok(session)
 }

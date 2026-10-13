@@ -57,7 +57,21 @@ impl StdoutStream for CallbackStdoutStream {
 	}
 }
 
+/// Maximum number of bytes held for a line that has not yet been terminated.
+///
+/// This buffer is host-side heap allocation: it is not part of the WASM guest's
+/// linear memory, so it is not counted against the store's memory limiter and
+/// is unconstrained by the module's configured memory ceiling. Draining happens
+/// on a newline or an explicit flush/shutdown, so a module that writes without
+/// ever emitting a newline would grow it without bound and exhaust host memory.
+/// On reaching the cap the pending bytes are forwarded as their own chunk, so
+/// the buffer is bounded without any output being discarded.
+const MAX_PENDING_LINE_BYTES: usize = 1 << 20;
+
 /// Line-buffered [`AsyncWrite`] that forwards complete lines to a [`StdioCallback`].
+///
+/// A pending, newline-free run is bounded by [`MAX_PENDING_LINE_BYTES`]; see
+/// there for why that bound cannot be left to the guest memory limiter.
 struct CallbackWriter {
 	callback: StdioCallback,
 	buffer: Vec<u8>,
@@ -76,6 +90,31 @@ impl CallbackWriter {
 			cb(&line);
 			self.buffer.drain(..=pos);
 		}
+	}
+
+	/// Forwards the pending bytes once they reach [`MAX_PENDING_LINE_BYTES`]
+	/// without a newline, bounding the buffer.
+	///
+	/// The chunk is cut on a UTF-8 character boundary and any trailing
+	/// incomplete sequence is left pending, so a multi-byte character spanning
+	/// the cut is not turned into a replacement character. A pending run whose
+	/// very first byte is invalid has no such boundary; it is released whole so
+	/// the bound still holds.
+	fn emit_oversized_pending(&mut self) {
+		if self.buffer.len() < MAX_PENDING_LINE_BYTES {
+			return;
+		}
+		let split = match std::str::from_utf8(&self.buffer) {
+			Ok(_) => self.buffer.len(),
+			Err(e) => match e.valid_up_to() {
+				0 => self.buffer.len(),
+				n => n,
+			},
+		};
+		let cb = self.snapshot_callback();
+		let chunk = String::from_utf8_lossy(&self.buffer[..split]);
+		cb(&chunk);
+		self.buffer.drain(..split);
 	}
 
 	fn flush_remaining(&mut self) {
@@ -97,6 +136,7 @@ impl AsyncWrite for CallbackWriter {
 		let this = self.get_mut();
 		this.buffer.extend_from_slice(buf);
 		this.emit_lines();
+		this.emit_oversized_pending();
 		Poll::Ready(Ok(buf.len()))
 	}
 
@@ -152,4 +192,124 @@ pub fn build(
 			.prefix_err(|| "Failed to preopen filesystem directory")?;
 	}
 	Ok((builder.build(), ResourceTable::new()))
+}
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+	use std::task::{Context, Poll, Wake, Waker};
+
+	use parking_lot::Mutex;
+	use tokio::io::AsyncWrite;
+
+	use super::{CallbackWriter, MAX_PENDING_LINE_BYTES};
+
+	struct NoopWake;
+	impl Wake for NoopWake {
+		fn wake(self: Arc<Self>) {}
+	}
+
+	/// A writer whose callback records everything forwarded to it.
+	fn writer() -> (CallbackWriter, Arc<Mutex<Vec<String>>>) {
+		let sink: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+		let recorder = Arc::clone(&sink);
+		let writer = CallbackWriter {
+			callback: Arc::new(Mutex::new(Arc::new(move |line: &str| {
+				recorder.lock().push(line.to_owned());
+			}))),
+			buffer: Vec::new(),
+		};
+		(writer, sink)
+	}
+
+	fn write_all(writer: &mut CallbackWriter, chunk: &[u8]) {
+		let waker = Waker::from(Arc::new(NoopWake));
+		let mut cx = Context::from_waker(&waker);
+		match std::pin::Pin::new(writer).poll_write(&mut cx, chunk) {
+			Poll::Ready(Ok(n)) => assert_eq!(n, chunk.len()),
+			other => panic!("poll_write did not accept the chunk: {other:?}"),
+		}
+	}
+
+	// The pending buffer is host-side heap allocation outside the guest memory
+	// limiter, so a module writing without newlines must not be able to grow it
+	// without bound.
+	#[test]
+	fn newline_free_writes_stay_bounded() {
+		let (mut writer, sink) = writer();
+		let chunk = vec![b'a'; 64 * 1024];
+		// Well past the cap: without the bound the buffer would hold all of it.
+		let total = MAX_PENDING_LINE_BYTES * 4;
+		let writes = total / chunk.len();
+		for _ in 0..writes {
+			write_all(&mut writer, &chunk);
+			assert!(
+				writer.buffer.len() < MAX_PENDING_LINE_BYTES,
+				"pending buffer must stay under the cap, got {}",
+				writer.buffer.len()
+			);
+		}
+		// Nothing was discarded: every byte written was forwarded or is pending.
+		let forwarded: usize = sink.lock().iter().map(|s| s.len()).sum();
+		assert_eq!(
+			forwarded + writer.buffer.len(),
+			total,
+			"all written bytes must be forwarded or still pending"
+		);
+	}
+
+	// Baseline: the ordinary line-buffered path is unchanged, so the bound is
+	// not what is doing the draining in normal use.
+	#[test]
+	fn newline_terminated_writes_drain_per_line() {
+		let (mut writer, sink) = writer();
+		write_all(&mut writer, b"first\nsecond\n");
+		assert!(writer.buffer.is_empty(), "a newline must drain the buffer");
+		assert_eq!(*sink.lock(), vec!["first".to_owned(), "second".to_owned()]);
+		// A trailing partial line stays pending until flushed.
+		write_all(&mut writer, b"third");
+		assert_eq!(writer.buffer, b"third");
+		writer.flush_remaining();
+		assert!(writer.buffer.is_empty());
+		assert_eq!(sink.lock().len(), 3);
+	}
+
+	// A multi-byte character straddling the cut must not be mangled: the chunk
+	// is cut on a character boundary and the incomplete tail stays pending.
+	#[test]
+	fn oversized_pending_cut_respects_utf8_boundaries() {
+		let (mut writer, sink) = writer();
+		// Fill to one byte short of the cap, so the next write crosses it.
+		write_all(&mut writer, &vec![b'a'; MAX_PENDING_LINE_BYTES - 1]);
+		assert!(sink.lock().is_empty(), "nothing forwarded before the cap");
+		// Write only the *first* byte of a two-byte character, so the pending
+		// run ends mid-character exactly as the cap is reached.
+		let e_acute = "é".as_bytes();
+		write_all(&mut writer, &e_acute[..1]);
+		let forwarded = sink.lock().clone();
+		assert_eq!(forwarded.len(), 1, "the cap must forward exactly one chunk");
+		assert!(
+			!forwarded[0].contains('\u{fffd}'),
+			"the chunk must not be cut mid-character into a replacement character"
+		);
+		assert_eq!(forwarded[0].len(), MAX_PENDING_LINE_BYTES - 1);
+		// The incomplete sequence is held so the rest of it can be appended.
+		assert_eq!(writer.buffer, &e_acute[..1]);
+		write_all(&mut writer, &e_acute[1..]);
+		writer.flush_remaining();
+		assert_eq!(sink.lock()[1], "é", "the character must survive the split intact");
+	}
+
+	// A complete character sitting either side of the cap needs no split: the
+	// whole pending run is valid UTF-8 and is forwarded as one chunk.
+	#[test]
+	fn oversized_pending_forwards_complete_sequences_whole() {
+		let (mut writer, sink) = writer();
+		write_all(&mut writer, &vec![b'a'; MAX_PENDING_LINE_BYTES - 1]);
+		write_all(&mut writer, "é".as_bytes());
+		let forwarded = sink.lock().clone();
+		assert_eq!(forwarded.len(), 1);
+		assert!(forwarded[0].ends_with('é'));
+		assert!(writer.buffer.is_empty(), "a fully valid run leaves nothing pending");
+	}
 }

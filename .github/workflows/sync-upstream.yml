@@ -3,18 +3,29 @@
 # Scheduled and manual runs update main from surrealdb/surrealdb. A manual "push"
 # run sends any missing releases (and their tags) to surrealdb/surrealdb; the
 # variant that includes main also pushes main (which may carry unreleased fixes).
+#
+# A "push" dispatch is gated by the `upstream` environment. Because the approval
+# happens BEFORE the gated job runs, an ungated `plan` preflight computes exactly
+# what would be published (the main commit range and the new/updated releases +
+# tags) and writes it to the run summary, so the reviewer can see precisely what
+# they are approving or rejecting before releasing the gate.
 
 name: Sync with upstream
 
 run-name: >-
-  ${{ inputs.dry_run && '[dry-run] ' || '' }}${{
+  ${{ (github.event_name == 'workflow_dispatch' && !inputs.execute) && '[dry-run] ' || '' }}${{
       github.event_name == 'workflow_dispatch' && startsWith(inputs.direction, 'push')
       && (contains(inputs.direction, 'main')
           && 'Sync releases + main → surrealdb/surrealdb (manual)'
           || 'Sync releases → surrealdb/surrealdb (manual)')
       || (github.event_name == 'workflow_dispatch'
           && 'Pull surrealdb/surrealdb main → main (manual)'
-          || 'Pull surrealdb/surrealdb main → main') }}
+          || 'Pull surrealdb/surrealdb main → main') }}${{
+      (github.event_name == 'workflow_dispatch'
+       && startsWith(inputs.direction, 'push')
+       && contains(inputs.direction, 'main')
+       && inputs.main_commit != '')
+      && format(' (main up to {0})', inputs.main_commit) || '' }}
 
 on:
   schedule:
@@ -29,14 +40,44 @@ on:
           - pull
           - push (releases)
           - push (releases + main)
-      dry_run:
-        description: "Dry run (validate but make no changes)"
+      main_commit:
+        description: "Commit to sync main up to (push + main only; blank = entire main)"
+        type: string
+        default: ""
+        required: false
+      releases_up_to:
+        description: "Only push release tags at or below this version, semver (releases only; blank = all releases)"
+        type: string
+        default: ""
+        required: false
+      execute:
+        description: "Execute the sync (unchecked performs a dry-run: validate and preview, make no changes). Scheduled pulls always execute regardless."
         type: boolean
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-sync-main
-  cancel-in-progress: false
+  # A DRY-RUN pushes nothing, so it is isolated into its own per-run group and can
+  # neither cancel a real run nor be cancelled by one. This matters because GitHub
+  # treats a run parked at the `upstream` approval gate as PENDING, and any new run
+  # entering that run's group cancels it (the "previously pending run is cancelled"
+  # rule, which cancel-in-progress: false does NOT prevent) - so a dry-run sharing a
+  # real lane would cancel a live sync waiting for approval, which is exactly what a
+  # preview must never do.
+  #
+  # Real runs share three lanes so runs touching the same upstream destination
+  # serialize: pull (scheduled/manual, separate so a routine pull never contends
+  # with a push), plus push-releases and push-main (separate so a release-triggered
+  # `push (releases)` never lands in an operator's `push (main)` lane).
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.direction, 'push')) && (contains(inputs.direction, 'main') && 'push-main' || 'push-releases') || 'pull' }}${{ (github.event_name == 'workflow_dispatch' && !inputs.execute) && format('-dryrun-{0}', github.run_id) || '' }}
+  # push-main supersedes within its lane (the newest main push wins). push-releases
+  # and pull keep cancel-in-progress FALSE so an actively-running sync is never
+  # cancelled mid-push by a newer one (the pull lane runs on a */30 cron and can
+  # overrun a tick; release pushes must not be interrupted). A gate-PARKED run of
+  # the same real lane can still be superseded by GitHub's pending rule above -
+  # acceptable, since release pushes only fast-forward tags so the newer run covers
+  # the same or more releases; the dry-run isolation is what keeps a mere preview
+  # from being the thing that supersedes it.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && contains(inputs.direction, 'main') }}
 
 defaults:
   run:
@@ -47,27 +88,21 @@ permissions: {}
 jobs:
   pull:
     name: Sync main from surrealdb/surrealdb
-    if: github.repository != 'surrealdb/surrealdb'
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       issues: write
     steps:
-      - name: Harden the runner (audit egress)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
           persist-credentials: false
 
-      # Defaults to an installation token for this repo (no owner/repositories),
-      # which also keeps this repo's name out of this publicly-synced file.
+      # Defaults to an installation token for this repo (no owner/repositories).
       - name: Generate a token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -108,14 +143,14 @@ jobs:
       # main; it mirrors the gate on "Pull upstream main" above.
       - name: Push to origin main
         if: >-
-          (steps.pull.outputs.updated == 'true' || inputs.dry_run)
+          (steps.pull.outputs.updated == 'true' || (github.event_name == 'workflow_dispatch' && !inputs.execute))
           && (github.event_name != 'workflow_dispatch'
               || !startsWith(inputs.direction, 'push')
               || contains(inputs.direction, 'main'))
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.execute }}
           UPDATED: ${{ steps.pull.outputs.updated }}
         run: |
           set -euo pipefail
@@ -177,7 +212,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && !inputs.execute }}
         run: |
           set -euo pipefail
           # A dry run makes no changes, so report instead of filing an issue. The
@@ -219,41 +254,270 @@ jobs:
             --label "upstream-sync" \
             --body "$body"
 
-  push:
-    name: Sync releases and main back to surrealdb/surrealdb
+  # Preflight (ungated): compute and publish, to the run summary, exactly what a
+  # "push" dispatch would send to the public repo — the main commit range (the
+  # unreleased code that would become public) and the new/updated releases and
+  # tags. It runs BEFORE the `upstream` environment gate on `push`, so the
+  # reviewer can read the plan and know precisely what they are approving. It is
+  # read-only (no write token, no pushes) and reads only public data on the
+  # destination, so it is safe to run before approval.
+  plan:
+    name: Plan sync to surrealdb/surrealdb
     needs: [pull]
     if: >-
-      github.repository != 'surrealdb/surrealdb'
+      github.repository == vars.PRIVATE_ENGINE_REPO
       && github.event_name == 'workflow_dispatch'
       && startsWith(inputs.direction, 'push')
       && needs.pull.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # CI tooling (scripts) comes from the WORKFLOW ref - the ref this run
+      # was dispatched from - not from the main checkout above, which serves
+      # the sync content itself. Scripts therefore never need to exist on the
+      # synced main to be usable here.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+          persist-credentials: false
+
+      # github.token reads this repo's releases (private, authorized) and the
+      # destination's public releases/tags (public, so no write token needed).
+      - name: Build sync plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC_REPO: ${{ github.repository }}
+          DST_REPO: surrealdb/surrealdb
+          DIRECTION: ${{ inputs.direction }}
+          MAIN_COMMIT: ${{ inputs.main_commit }}
+          RELEASES_UP_TO: ${{ inputs.releases_up_to }}
+          DRY_RUN: ${{ !inputs.execute }}
+        run: |
+          set -euo pipefail
+          S="$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "## Sync plan → ${DST_REPO}"
+            echo ""
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "> **Dry run** — nothing will be pushed even if approved."
+              echo ""
+            fi
+            echo "Approving this run publishes the items below to the **public** \`${DST_REPO}\` repository."
+            echo ""
+            echo "- **Direction:** \`${DIRECTION}\`"
+          } >> "$S"
+
+          git remote add public https://github.com/surrealdb/surrealdb.git
+          git fetch --quiet public main || true
+          git fetch --quiet --tags public || true
+
+          # ---- main plan (only when the "+ main" variant is selected) ----
+          if grep -q main <<<"$DIRECTION"; then
+            if [ -n "${MAIN_COMMIT:-}" ]; then
+              if ! target="$(git rev-parse --verify --quiet "${MAIN_COMMIT}^{commit}")"; then
+                { echo ""; echo "### main → ${DST_REPO}@main"; echo ""; echo "> ❌ ERROR: requested commit \`${MAIN_COMMIT}\` does not exist in this repository."; } >> "$S"
+                echo "::error::commit '${MAIN_COMMIT}' could not be resolved to a commit in this repository"
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "$target" HEAD; then
+                { echo ""; echo "### main → ${DST_REPO}@main"; echo ""; echo "> ❌ ERROR: \`${MAIN_COMMIT}\` is not an ancestor of main; only work merged into main can be synced."; } >> "$S"
+                echo "::error::commit '${MAIN_COMMIT}' is not an ancestor of main"
+                exit 1
+              fi
+            else
+              target="$(git rev-parse HEAD)"
+            fi
+            {
+              echo ""
+              echo "### main → ${DST_REPO}@main"
+              echo ""
+              echo "Target commit: \`$(git rev-parse --short "$target")\` — $(git log -1 --pretty=%s "$target")"
+            } >> "$S"
+            if git merge-base --is-ancestor public/main "$target" 2>/dev/null; then
+              count="$(git rev-list --count "public/main..$target")"
+              if [ "$count" -eq 0 ]; then
+                { echo ""; echo "Fast-forward: yes. \`${DST_REPO}@main\` is already up to date — no commits to publish."; } >> "$S"
+              else
+                {
+                  echo ""
+                  echo "Fast-forward: yes. **${count} commit(s)** would become public:"
+                  echo ""
+                  echo '```'
+                  git log --max-count=200 --pretty='%h %s' "public/main..$target"
+                  [ "$count" -gt 200 ] && echo "... (showing first 200 of ${count})"
+                  echo '```'
+                } >> "$S"
+              fi
+            else
+              { echo ""; echo "> ⚠️ WARNING: not a fast-forward from \`${DST_REPO}@main\` (or its main could not be read). A real push would be rejected until this repo pulls upstream again."; } >> "$S"
+            fi
+          else
+            { echo ""; echo "### main"; echo ""; echo "_Not included in this run (releases only)._"; } >> "$S"
+          fi
+
+          # ---- releases plan ----
+          # New releases are the real new exposures (a new tag reaches new
+          # commits); existing releases are only reconciled for metadata/asset
+          # drift, so they are summarized as a count.
+          { echo ""; echo "### Releases → ${DST_REPO}"; echo ""; } >> "$S"
+
+          source_tags_tsv="$(gh api --paginate "repos/$SRC_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | "\(.tag_name)\t\(.prerelease)"')"
+          source_tags="$(printf '%s\n' "$source_tags_tsv" | cut -f1 | sort -u)"
+          source_stable_tags="$(printf '%s\n' "$source_tags_tsv" | awk -F'\t' '$2 == "false" {print $1}' | sort -u)"
+          if [ -z "$source_tags" ]; then
+            echo "_No source releases to sync._" >> "$S"
+            exit 0
+          fi
+
+          # Bound the releases sync to a version when requested: drop every tag
+          # newer than releases_up_to so publishing vX.Y.Z never leaks a later tag
+          # (vX.Y.(Z+1), v(X).(Y+1).0, a newer line's pre-release, ...) that already
+          # exists here. Semver-correct (sort -V mis-orders pre-releases).
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            source_tags="$(printf '%s\n' "$source_tags" | python3 "${GITHUB_WORKSPACE}/.ci/.github/scripts/release-tags-le.py" "$RELEASES_UP_TO")"
+            source_stable_tags="$(printf '%s\n' "$source_stable_tags" | python3 "${GITHUB_WORKSPACE}/.ci/.github/scripts/release-tags-le.py" "$RELEASES_UP_TO")"
+            { echo ""; echo "- **Bounded to:** \`${RELEASES_UP_TO}\` — newer release tags are excluded."; } >> "$S"
+            if [ -z "$source_tags" ]; then
+              { echo ""; echo "_No source releases at or below \`${RELEASES_UP_TO}\` to sync._"; } >> "$S"
+              exit 0
+            fi
+          fi
+          # The plan is the approval surface: a failed destination read must turn
+          # the plan red rather than render a plausible-looking summary from
+          # empty data (every source release would list as "new", and the
+          # latest headline would claim the pointer is unset).
+          if ! dst_tags="$(gh api --paginate "repos/$DST_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | .tag_name' | sort -u)"; then
+            echo "::error::Could not enumerate ${DST_REPO}'s releases; the plan would be misleading. Re-run once the API is reachable."
+            exit 1
+          fi
+
+          # Preview of the public `latest` pointer, computed with the same
+          # shared selection the push job applies (sync-latest-candidate.sh),
+          # so the approver sees the pointer move before releasing the gate.
+          # The promoted tag can be a release that is ALREADY public (e.g. a
+          # prerelease bound promotes the newest stable beneath it), so this
+          # headline is stated independently of the new-releases table below.
+          # A missing latest (HTTP 404: no releases yet) is legitimately empty;
+          # any other failure must abort rather than read as "no latest" - the
+          # selection promotes unconditionally over an empty destination, so a
+          # transient error here could demote a newer public release.
+          if dst_latest_json="$( gh api "repos/$DST_REPO/releases/latest" 2>&1)"; then
+            dst_latest_tag="$(jq -r .tag_name <<<"$dst_latest_json")"
+          elif grep -q 'HTTP 404' <<<"$dst_latest_json"; then
+            dst_latest_tag=""
+          else
+            echo "::error::Could not read ${DST_REPO}'s latest release (${dst_latest_json}). Failing rather than risking a latest-pointer demotion."
+            exit 1
+          fi
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            plan_latest="$(printf '%s\n' "$source_stable_tags" | "${GITHUB_WORKSPACE}/.ci/.github/scripts/sync-latest-candidate.sh" "$dst_latest_tag")"
+          else
+            plan_latest="$(gh release view --repo "$SRC_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+          fi
+          if [ -n "$plan_latest" ] && [ "$plan_latest" != "$dst_latest_tag" ]; then
+            { echo ""; echo "- **Public \`latest\` pointer after this run:** \`${plan_latest}\` (currently \`${dst_latest_tag:-unset}\`)"; } >> "$S"
+          else
+            { echo ""; echo "- **Public \`latest\` pointer:** unchanged (\`${dst_latest_tag:-unset}\`)"; } >> "$S"
+          fi
+          public_tags="$(git ls-remote --tags public \
+            | awk '{print $2}' | sed -e 's#^refs/tags/##' -e 's/\^{}$//' | sort -u)"
+
+          new_tags="$(comm -23 <(printf '%s\n' "$source_tags") <(printf '%s\n' "$dst_tags"))"
+          n_new="$(printf '%s' "$new_tags" | grep -c . || true)"
+          n_existing="$(comm -12 <(printf '%s\n' "$source_tags") <(printf '%s\n' "$dst_tags") | grep -c . || true)"
+
+          if [ "$n_new" -eq 0 ]; then
+            echo "No new releases — the ${n_existing} shared release(s) will be reconciled only if their metadata or assets have drifted." >> "$S"
+            exit 0
+          fi
+
+          {
+            echo "**${n_new} new release(s)** would be created (and ${n_existing} existing release(s) reconciled if drifted):"
+            echo ""
+            echo "| Tag | Title | Pre-release | Latest | Assets | Tag push |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+          } >> "$S"
+
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            meta="$(gh release view --repo "$SRC_REPO" --json name,isPrerelease,assets -- "$tag" 2>/dev/null || true)"
+            if [ -z "$meta" ]; then
+              echo "| \`$tag\` | (could not read source metadata) | ? | ? | ? | ? |" >> "$S"
+              continue
+            fi
+            title="$(printf '%s' "$meta" | jq -r '.name // ""')"; [ -z "$title" ] && title="$tag"
+            is_pre="$(printf '%s' "$meta" | jq -r '.isPrerelease')"
+            n_assets="$(printf '%s' "$meta" | jq -r '.assets | length')"
+            if [ "$tag" = "$plan_latest" ] && [ "$tag" != "$dst_latest_tag" ]; then is_latest="**yes**"; else is_latest="no"; fi
+            if grep -qxF "$tag" <<<"$public_tags"; then tagnote="exists"; else tagnote="**new tag**"; fi
+            echo "| \`$tag\` | ${title//|/\\|} | $is_pre | $is_latest | $n_assets | $tagnote |" >> "$S"
+          done <<< "$new_tags"
+
+  push:
+    name: >-
+      ${{ contains(inputs.direction, 'main')
+          && 'Sync releases and main back to surrealdb/surrealdb'
+          || 'Sync releases back to surrealdb/surrealdb' }}
+    needs: [pull, plan]
+    if: >-
+      github.repository == vars.PRIVATE_ENGINE_REPO
+      && github.event_name == 'workflow_dispatch'
+      && startsWith(inputs.direction, 'push')
+      && needs.pull.result == 'success'
+      && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Bind the `upstream` environment unconditionally, including for a dry-run.
+    # It carries BOTH the approval gate and the credentials for pushing to the
+    # public repo, and by design those credentials are reachable only through
+    # this gated environment. A dry-run push runs a credentialed preflight (auth
+    # and ruleset checks), so it needs those credentials and therefore takes the
+    # same approval; a real push additionally performs the push.
     environment: upstream
     permissions:
       contents: read
     steps:
-      # This job holds a token that can write to the public repo, so egress is
-      # blocked to a known allowlist. Validate this list against the detected
-      # endpoints of an `audit` run before relying on it; expand if a new
-      # GitHub asset host appears.
-      - name: Harden the runner (block egress)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-            uploads.github.com:443
-
+      # This job holds a token that can write to the public repo. Runtime
+      # egress enforcement is not available here (StepSecurity is licensed for
+      # the public repo only, and this workflow runs only on the private one),
+      # so containment relies on keeping this job's step and dependency
+      # surface minimal: pinned first-party checkouts and gh/git only.
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           fetch-depth: 0
+          persist-credentials: false
+
+      # CI tooling (scripts) comes from the WORKFLOW ref - the ref this run
+      # was dispatched from - not from the main checkout above, which serves
+      # the sync content itself. Scripts therefore never need to exist on the
+      # synced main to be usable here.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
           persist-credentials: false
 
       - name: Generate a token for surrealdb/surrealdb
@@ -282,26 +546,47 @@ jobs:
         if: contains(inputs.direction, 'main')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ !inputs.execute }}
+          MAIN_COMMIT: ${{ inputs.main_commit }}
         run: |
           set -euo pipefail
           git fetch public main
+          # Resolve which commit on main to publish. With no commit supplied the
+          # whole main branch (HEAD) is synced; otherwise only history up to the
+          # given commit is pushed and anything merged after it is ignored, so
+          # the operator keeps full control of what is sent upstream. The commit
+          # must already be on main (an ancestor of HEAD) so only work that has
+          # actually been merged here can ever be published.
+          if [ -n "${MAIN_COMMIT:-}" ]; then
+            if ! target="$(git rev-parse --verify --quiet "${MAIN_COMMIT}^{commit}")"; then
+              echo "::error::commit '${MAIN_COMMIT}' could not be resolved to a commit in this repository"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$target" HEAD; then
+              echo "::error::commit '${MAIN_COMMIT}' is not an ancestor of main; only commits merged into main can be synced"
+              exit 1
+            fi
+            echo "Syncing main up to commit ${target} (requested: ${MAIN_COMMIT})"
+          else
+            target="$(git rev-parse HEAD)"
+            echo "Syncing entire main branch (${target})"
+          fi
           if [ "${DRY_RUN:-false}" = "true" ]; then
             echo "[dry-run] preflight: push main to surrealdb/surrealdb (no changes will be made)"
             problems=0
             # Assert the push would be a fast-forward; never rewrite history.
-            if git merge-base --is-ancestor public/main HEAD; then
+            if git merge-base --is-ancestor public/main "$target"; then
               echo "[dry-run] fast-forward check: OK"
             else
-              echo "::error::[dry-run] public/main is not an ancestor of HEAD; a real push would be rejected (non-fast-forward; pull first)"
+              echo "::error::[dry-run] public/main is not an ancestor of the target commit; a real push would be rejected (non-fast-forward; pull first)"
               problems=$((problems + 1))
             fi
             # Client-side check: auth works and the update is a fast-forward. It
             # cannot see branch rules, so the ruleset probe below covers those.
-            if git push --dry-run public HEAD:main; then
+            if git push --dry-run public "$target":main; then
               echo "[dry-run] client-side push check: OK"
             else
-              echo "::error::[dry-run] 'git push --dry-run public HEAD:main' failed (auth or non-fast-forward)"
+              echo "::error::[dry-run] 'git push --dry-run public <target>:main' failed (auth or non-fast-forward)"
               problems=$((problems + 1))
             fi
             # Confirm the app can bypass any pull_request rule on main. Unlike the
@@ -333,11 +618,11 @@ jobs:
             exit 0
           fi
           # Assert the push is a fast-forward; never rewrite remote history.
-          if ! git merge-base --is-ancestor public/main HEAD; then
-            echo "::error::public main is not an ancestor of HEAD; re-run after pulling again."
+          if ! git merge-base --is-ancestor public/main "$target"; then
+            echo "::error::public main is not an ancestor of the target commit; re-run after pulling again."
             exit 1
           fi
-          git push public HEAD:main
+          git push public "$target":main
 
       - name: Sync releases (and their tags) to surrealdb/surrealdb
         env:
@@ -345,31 +630,81 @@ jobs:
           DST_TOKEN: ${{ steps.app-token.outputs.token }}
           SRC_REPO: ${{ github.repository }}
           DST_REPO: surrealdb/surrealdb
-          DRY_RUN: ${{ inputs.dry_run }}
+          RELEASES_UP_TO: ${{ inputs.releases_up_to }}
+          DRY_RUN: ${{ !inputs.execute }}
         run: |
           set -euo pipefail
 
           # Enumerate every non-draft source release (paginated to the end so
-          # nothing is missed past a fixed limit). Pre-releases are kept.
-          source_releases="$(GH_TOKEN="$SRC_TOKEN" gh api --paginate "repos/$SRC_REPO/releases?per_page=100" \
-            --jq '.[] | select(.draft | not) | .tag_name' | sort -u)"
+          # nothing is missed past a fixed limit). Pre-releases are kept for
+          # syncing; the stable-only subset feeds the `latest` pointer below,
+          # which GitHub forbids pointing at a draft or prerelease.
+          source_releases_tsv="$(GH_TOKEN="$SRC_TOKEN" gh api --paginate "repos/$SRC_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | "\(.tag_name)\t\(.prerelease)"')"
+          source_releases="$(printf '%s\n' "$source_releases_tsv" | cut -f1 | sort -u)"
+          source_stable_releases="$(printf '%s\n' "$source_releases_tsv" | awk -F'\t' '$2 == "false" {print $1}' | sort -u)"
 
           if [ -z "$source_releases" ]; then
             echo "No source releases to sync"
             exit 0
           fi
 
-          # The source's "latest" defines the desired latest pointer. When the
-          # source has no "latest" we leave the destination pointer to GitHub's
-          # own heuristic instead of forcing every release non-latest (which would
-          # otherwise unset a valid latest pointer and show as perpetual drift).
-          latest_tag="$(GH_TOKEN="$SRC_TOKEN" gh release view --repo "$SRC_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
-          if [ -n "$latest_tag" ]; then manage_latest=true; else manage_latest=false; fi
+          # Bound the releases sync to a version when requested (same rule and
+          # script as the plan job): publishing vX.Y.Z must not push a newer tag
+          # that already exists here. Semver-correct (sort -V mis-orders pre-releases).
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            source_releases="$(printf '%s\n' "$source_releases" | python3 "${GITHUB_WORKSPACE}/.ci/.github/scripts/release-tags-le.py" "$RELEASES_UP_TO")"
+            source_stable_releases="$(printf '%s\n' "$source_stable_releases" | python3 "${GITHUB_WORKSPACE}/.ci/.github/scripts/release-tags-le.py" "$RELEASES_UP_TO")"
+            if [ -z "$source_releases" ]; then
+              echo "No source releases at or below ${RELEASES_UP_TO} to sync"
+              exit 0
+            fi
+          fi
 
-          # The destination's current latest tag. `gh release view` has no
-          # isLatest field, so the latest pointer is derived from the destination's
-          # latest release (empty when it has none yet).
-          dst_latest_tag="$(GH_TOKEN="$DST_TOKEN" gh release view --repo "$DST_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+          # The destination's current latest tag, from its latest release.
+          # A missing latest (HTTP 404: no releases yet) is legitimately empty;
+          # any other failure must abort rather than read as "no latest" - the
+          # selection promotes unconditionally over an empty destination, so a
+          # transient error here could demote a newer public release.
+          if dst_latest_json="$(GH_TOKEN="$DST_TOKEN" gh api "repos/$DST_REPO/releases/latest" 2>&1)"; then
+            dst_latest_tag="$(jq -r .tag_name <<<"$dst_latest_json")"
+          elif grep -q 'HTTP 404' <<<"$dst_latest_json"; then
+            dst_latest_tag=""
+          else
+            echo "::error::Could not read ${DST_REPO}'s latest release (${dst_latest_json}). Failing rather than risking a latest-pointer demotion."
+            exit 1
+          fi
+
+          # Desired "latest" pointer.
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            # Bounded sync: the pointer target comes from the shared selection
+            # (see sync-latest-candidate.sh for the promotion rules), the same
+            # one the plan preview renders, so the approval summary and this
+            # reconciler cannot disagree. We still explicitly manage every
+            # bounded release (--latest true/false), because a newly-created
+            # full release would otherwise DEFAULT to latest on GitHub and
+            # wrongly demote a newer public one. Fails safe: an empty
+            # selection leaves latest_tag empty (nothing promoted).
+            manage_latest=true
+            latest_tag="$(printf '%s\n' "$source_stable_releases" | "${GITHUB_WORKSPACE}/.ci/.github/scripts/sync-latest-candidate.sh" "$dst_latest_tag")"
+          else
+            # Unbounded sync: the source's own "latest" defines the pointer. When the
+            # source has no latest, leave the destination's to GitHub's heuristic
+            # instead of forcing every release non-latest (which would unset a valid
+            # pointer and show as perpetual drift).
+            latest_tag="$(GH_TOKEN="$SRC_TOKEN" gh release view --repo "$SRC_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+            if [ -n "$latest_tag" ]; then manage_latest=true; else manage_latest=false; fi
+          fi
+
+          # The pointer decision is the run's most visible public side effect
+          # and can differ from the bound (a prerelease bound promotes the
+          # newest stable beneath it), so state it up front - on dry-runs this
+          # is the operator's preview of where public `latest` will land.
+          if [ "$manage_latest" = "true" ] && [ -n "$latest_tag" ] && [ "$latest_tag" != "$dst_latest_tag" ]; then
+            echo "::notice::Public latest release pointer after this sync: ${latest_tag} (currently ${dst_latest_tag:-unset})."
+          else
+            echo "Public latest release pointer unchanged (${dst_latest_tag:-unset})."
+          fi
 
           # Tags are only ever created as part of a release, so the release set is
           # the complete set of tags we may publish. A release's tag is pushed
@@ -397,11 +732,30 @@ jobs:
             [ -z "$title" ] && title="$tag"
             is_prerelease="$(printf '%s' "$src_meta" | jq -r '.isPrerelease')"
             printf '%s' "$src_meta" | jq -r '.body // ""' > "$workdir/body.md"
+            # Strip the internal-only build-provenance trailer before syncing:
+            # everything from the boundary to end of file is internal-only
+            # (engine + downstream commit SHAs). The boundary is the
+            # `<!-- internal-only -->` marker the promote action emits, or the
+            # provenance heading itself - source bodies may carry the heading
+            # without the marker, and no public body legitimately contains
+            # either. Cutting before the drift check means the reconciler
+            # compares the same body we publish, so a public body carrying the
+            # trailer converges on the next pass - no perpetual re-edit loop.
+            # The heading match is whole-line (CRLF-tolerant) so a public
+            # heading that merely starts with the same words is never cut.
+            sed -i -E '/<!-- internal-only -->|^### Build provenance[[:space:]]*$/,$d' "$workdir/body.md"
             body="$(cat "$workdir/body.md")"
+            # Rewrite the file from the trimmed value so --notes-file matches the
+            # drift comparison exactly (command substitution already dropped any
+            # trailing newlines).
+            printf '%s' "$body" > "$workdir/body.md"
             # name<TAB>size identifies an asset; size also catches a file that was
             # replaced under the same name. Sorted for an order-independent diff.
             src_assets="$(printf '%s' "$src_meta" | jq -r '.assets[] | "\(.name)\t\(.size)"' | sort)"
-            if [ "$manage_latest" = "true" ] && [ "$tag" = "$latest_tag" ]; then is_latest=true; else is_latest=false; fi
+            # A prerelease is never marked latest, whatever the pointer says:
+            # GitHub rejects it (422, "Latest release cannot be draft or
+            # prerelease").
+            if [ "$manage_latest" = "true" ] && [ "$tag" = "$latest_tag" ] && [ "$is_prerelease" != "true" ]; then is_latest=true; else is_latest=false; fi
 
             # The latest flag is only reconciled when the source has a latest.
             latest_args=()
@@ -449,7 +803,7 @@ jobs:
 
             # Whether the tag already exists on the destination.
             tag_on_dst=false
-            printf '%s\n' "$public_tags" | grep -qxF "$tag" && tag_on_dst=true
+            grep -qxF "$tag" <<<"$public_tags" && tag_on_dst=true
 
             if [ "${DRY_RUN:-false}" = "true" ]; then
               if [ "$exists" = "true" ]; then

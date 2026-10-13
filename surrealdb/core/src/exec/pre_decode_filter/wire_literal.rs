@@ -70,6 +70,18 @@ impl NumberSubVariant {
 	}
 }
 
+/// Whether a `HashSet<Value>` / `HashMap<Value, _>` **miss** on `value` proves
+/// that `set` does not hold it.
+///
+/// The single rule every decode-fallback membership probe in this module shares:
+/// a miss is decisive as soon as one side of the probe is number-free. See
+/// [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
+/// meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side.
+#[inline]
+pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
+	set.hash_agrees_with_eq() || value.hash_agrees_with_eq()
+}
+
 /// One predicate literal, optionally pre-encoded into rev-2 wire bytes.
 #[derive(Debug, Clone)]
 pub(crate) enum LiteralWire {
@@ -249,11 +261,17 @@ impl LiteralWire {
 /// trade buys per-row probes with zero allocation, which is the right call
 /// for the hot scan path but is worth knowing if a future change wants to
 /// drop the redundancy.
+/// **Invariant:** the three derived flags below ([`Self::strand_asymmetric`],
+/// [`Self::number_sub_variants`], [`Self::hash_eq_mismatch`]) describe the
+/// partitions and are computed once in [`Self::from_set`]. The partitions are
+/// private so no other code can add an element without the flags being
+/// recomputed — a stale flag would silently restore the wrong-results behaviour
+/// each flag exists to prevent. Readers use the accessors.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LiteralSet {
-	pub(crate) strands: HashSet<Vec<u8>>,
-	pub(crate) numbers: HashSet<Vec<u8>>,
-	pub(crate) fallback: HashSet<Value>,
+	strands: HashSet<Vec<u8>>,
+	numbers: HashSet<Vec<u8>>,
+	fallback: HashSet<Value>,
 	/// True iff any element in `fallback` could equal-match a Strand-tagged
 	/// value asymmetrically via `Value::equal` (today: `Value::Regex`). When
 	/// set, `wire_cmp::wire_value_in_set` must hand a Strand-tag miss off to
@@ -263,10 +281,9 @@ pub(crate) struct LiteralSet {
 	/// (bit 0 = `Int`, bit 1 = `Float`, bit 2 = `Decimal`).
 	///
 	/// `Number::PartialEq` is cross-variant — `Int(1) == Float(1.0) ==
-	/// Decimal(1)` — and `Number::Hash` agrees, so `HashSet<Value>`
-	/// collapses cross-variant duplicates to a single stored sub-variant
-	/// (whichever was inserted first). Knowing exactly which
-	/// sub-variants are in the set lets `wire_cmp::wire_value_in_set`
+	/// Decimal(1)` — so one equivalence class can be spelled three ways and a
+	/// byte partition stores whichever spellings were inserted. Knowing exactly
+	/// which sub-variants are in the set lets `wire_cmp::wire_value_in_set`
 	/// decide a Number-tag miss precisely:
 	///
 	/// - **Runtime sub-variant matches a stored one AND is byte-canonical (`Int` / `Decimal`)** →
@@ -276,12 +293,20 @@ pub(crate) struct LiteralSet {
 	///   Number** → cross-variant value equality may still hold (`Number::PartialEq`), defer to
 	///   fallback.
 	number_sub_variants: u8,
+	/// True iff some element's `Hash` disagrees with its `PartialEq` — in
+	/// practice, iff some element holds a `Number` (see
+	/// [`Value::hash_agrees_with_eq`] for why numbers break the contract). When
+	/// set, a `HashSet<Value>` miss against this set does **not** prove a value
+	/// miss, and the decode-fallback path must treat it as inconclusive unless
+	/// the probed value is itself number-free.
+	hash_eq_mismatch: bool,
 }
 
 impl LiteralSet {
 	pub(crate) fn from_set(set: &HashSet<Value>) -> Self {
 		let mut out = LiteralSet::default();
 		for v in set {
+			out.hash_eq_mismatch |= !v.hash_agrees_with_eq();
 			match v {
 				Value::String(_) => {
 					let mut full = Vec::new();
@@ -333,6 +358,36 @@ impl LiteralSet {
 		self.number_sub_variants
 	}
 
+	/// Whether the Strand partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn strands_contain_wire(&self, wire: &[u8]) -> bool {
+		self.strands.contains(wire)
+	}
+
+	/// Whether the Number partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn numbers_contain_wire(&self, wire: &[u8]) -> bool {
+		self.numbers.contains(wire)
+	}
+
+	/// Whether the set holds no `Number` at all, in which case no stored entry
+	/// can match a Number-tagged value.
+	#[inline]
+	pub(crate) fn has_no_numbers(&self) -> bool {
+		self.numbers.is_empty()
+	}
+
+	/// True iff a `HashSet<Value>` miss against this set proves a value miss.
+	///
+	/// False once any element holds a `Number`, because `Number: Hash` and
+	/// `Number: PartialEq` disagree — see [`Value::hash_agrees_with_eq`]. A
+	/// caller whose probed value is number-free may still trust a miss, since
+	/// equality requires matching variants on both sides.
+	#[inline]
+	pub(crate) fn hash_agrees_with_eq(&self) -> bool {
+		!self.hash_eq_mismatch
+	}
+
 	/// True iff [`Self::numbers`] holds more than one Number sub-variant
 	/// (`Int` / `Float` / `Decimal`). When set, the cross-variant equality
 	/// arms of `Number::PartialEq` matter and a wire-fast partition miss
@@ -360,10 +415,25 @@ impl LiteralSet {
 mod tests {
 	use std::collections::HashSet;
 
+	use common::decimal::DecimalExt;
 	use rust_decimal::Decimal;
 
 	use super::*;
 	use crate::val::Number;
+
+	#[test]
+	fn literal_set_reports_whether_a_miss_is_decisive() {
+		let clean = LiteralSet::from_set(&HashSet::from([Value::String("x".into())]));
+		assert!(clean.hash_agrees_with_eq());
+		// The empty set has nothing to disagree about.
+		assert!(LiteralSet::from_set(&HashSet::new()).hash_agrees_with_eq());
+		// One number anywhere in the set is enough.
+		let numeric = LiteralSet::from_set(&HashSet::from([
+			Value::String("x".into()),
+			Value::Number(Number::Decimal(Decimal::from_str_normalized("0.1").unwrap())),
+		]));
+		assert!(!numeric.hash_agrees_with_eq());
+	}
 
 	#[test]
 	fn from_value_strand_round_trips_and_extracts_utf8() {

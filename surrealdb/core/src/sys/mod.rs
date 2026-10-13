@@ -3,31 +3,6 @@ use std::sync::LazyLock;
 use futures::lock::Mutex;
 use sysinfo::{Pid, System};
 
-/// Detected total system memory in bytes, cached at first access.
-/// Falls back to cgroup limits when running inside a container, and
-/// uses a conservative 1 GiB default when `/proc` is inaccessible
-/// (e.g. systemd `ProcSubset=pid` hardening).
-#[cfg_attr(not(any(feature = "kv-rocksdb", feature = "kv-surrealkv")), allow(dead_code))]
-pub(crate) static TOTAL_SYSTEM_MEMORY: LazyLock<u64> = LazyLock::new(|| {
-	// Load the system attributes
-	let mut system = System::new();
-	// Refresh the system memory
-	system.refresh_memory();
-	// Get the total system memory
-	let host_memory = system.total_memory();
-	// If the total system memory is 0, use a safe default
-	if host_memory == 0 {
-		return 1024 * 1024 * 1024;
-	}
-	// Prefer cgroup limits when available (container environments)
-	match system.cgroup_limits() {
-		// If the limit has been configured, use it
-		Some(l) if l.total_memory > 0 => l.total_memory,
-		// Otherwise use the host memory
-		_ => host_memory,
-	}
-});
-
 /// The current system environment which is used to
 /// periodically fetch and compute the system metrics.
 pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
@@ -38,6 +13,19 @@ pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
 pub static INFORMATION: LazyLock<Mutex<Information>> =
 	LazyLock::new(|| Mutex::new(Information::default()));
 
+/// Refreshes the cache only if nothing has populated it yet.
+///
+/// [`Information`] starts at its all-zero default and `physical_cores` is at
+/// least one on every host, so a zero there means no refresh has completed.
+/// Two callers racing the check both refresh, which costs one extra pass and
+/// leaves the same state.
+pub async fn refresh_if_cold() {
+	let cold = INFORMATION.lock().await.physical_cores == 0;
+	if cold {
+		refresh().await;
+	}
+}
+
 pub async fn refresh() {
 	// Get the environment
 	let mut environment = ENVIRONMENT.lock().await;
@@ -46,6 +34,8 @@ pub async fn refresh() {
 	let mut information = INFORMATION.lock().await;
 	// Update the cached information metrics
 	information.cpu_usage = environment.cpu_usage();
+	information.memory_requested = crate::mem::ALLOC.memory_requested();
+	information.memory_reserved = crate::mem::ALLOC.memory_reserved();
 	information.memory_allocated = crate::mem::ALLOC.memory_allocated();
 	information.memory_usage = environment.memory_usage();
 	information.load_average = environment.load_average();
@@ -59,7 +49,22 @@ pub struct Information {
 	pub available_parallelism: usize,
 	pub cpu_usage: f32,
 	pub load_average: [f64; 3],
+	/// Tracked memory: reserved Rust-heap bytes plus external reporters. The
+	/// figure `SURREAL_MEMORY_THRESHOLD` is compared against.
 	pub memory_allocated: usize,
+	/// Bytes the program requested, before the allocator rounded each request
+	/// up to a size class.
+	pub memory_requested: usize,
+	/// Reserved Rust-heap bytes: the size classes those requests were rounded
+	/// up into. [`Self::memory_allocated`] is this plus the external memory
+	/// reporters, so internal fragmentation is this figure less
+	/// [`Self::memory_requested`] — not the allocated figure less requested,
+	/// which would fold in the whole RocksDB cache.
+	pub memory_reserved: usize,
+	/// Resident set size of the process, as the operating system reports it.
+	/// Sits above [`Self::memory_allocated`]; the gap is memory the tracker
+	/// cannot see, chiefly allocator overhead and mapped (rather than
+	/// heap-allocated) regions.
 	pub memory_usage: u64,
 	pub physical_cores: usize,
 }

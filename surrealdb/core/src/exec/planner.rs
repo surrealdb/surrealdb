@@ -21,7 +21,7 @@
 //! ```ignore
 //! use surrealdb_core::exec::planner::Planner;
 //!
-//! let planner = Planner::new(&ctx);
+//! let planner = Planner::new(&ctx, &registry);
 //! let plan = planner.plan(expr)?;
 //! ```
 //!
@@ -62,9 +62,7 @@
 mod aggregate;
 mod cycle_guard;
 mod idiom;
-// GQL `MATCH` planning (`plan_match`). Gated like the IR it consumes
-// (`expr::Expr::Match` is `#[cfg(feature = "gql")]`).
-#[cfg(feature = "gql")]
+// GQL `MATCH` planning (`plan_match`).
 mod match_plan;
 mod row_scope;
 mod select;
@@ -79,8 +77,7 @@ pub(crate) use cycle_guard::CycleGuard;
 use self::util::literal_to_value;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
-use crate::err::Error;
-use crate::exec::ExecOperator;
+use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::operators::{
 	AnalyzePlan, DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, ForeachPlan, IfElsePlan,
@@ -94,6 +91,7 @@ use crate::exec::physical_expr::{
 	RecordIdExpr, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
 	UserDefinedFunctionExec,
 };
+use crate::exec::{Error as ExecError, ExecOperator};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::{Expr, Function, FunctionCall};
 
@@ -145,6 +143,14 @@ pub struct Planner<'ctx> {
 	/// Propagated to `GraphEdgeScan` operators created during idiom
 	/// conversion so that graph edge traversals respect the VERSION clause.
 	pub(crate) version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+	/// Whether the SELECT statement being planned carries `FOR UPDATE`.
+	///
+	/// Set by `plan_select_core` on the inner planner it spawns for a
+	/// SELECT statement, and consumed by `plan_source` so the source
+	/// operators it creates perform locked record reads (registering the
+	/// fetched keys for commit-time conflict detection). Always `false`
+	/// on freshly constructed planners.
+	pub(crate) for_update: bool,
 	/// Optional auth principal for the planning statement.
 	///
 	/// Forwarded by the executor / macro layer when the calling
@@ -175,6 +181,28 @@ pub struct Planner<'ctx> {
 	/// Cached `new_planner_strategy()` snapshot — the strategy doesn't
 	/// change during a single planning pass.
 	planner_strategy: NewPlannerStrategy,
+	/// Per-SELECT MATCHES registration scope, set by `plan_select_core` on the
+	/// inner planner it spawns for a SELECT statement. Mirrors which MATCHES
+	/// expressions the legacy planner registers on a table's `QueryExecutor`
+	/// so [`MatchesOp`](crate::exec::physical_expr::MatchesOp) can reproduce
+	/// the legacy evaluate/error/false decision per row. `None` outside
+	/// SELECT planning (RETURN, LET, the literal record-id fast path, …),
+	/// where the legacy executor has no query planner and MATCHES evaluates
+	/// to `false`.
+	pub(crate) matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
+	/// MATCHES clauses of the WHERE condition being planned, keyed by match
+	/// reference, resolved by index functions such as `search::highlight` into
+	/// the entry they report against. Written only by
+	/// [`Self::set_planning_scopes`], which owns the inherit-then-override rule.
+	/// `None` where no MATCHES is in scope, which is what makes those functions
+	/// report a missing MATCHES clause.
+	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
+	/// Shared KNN distance slot for the WHERE condition being planned, through
+	/// which the ANN scan publishes each candidate's distance and
+	/// `vector::distance::knn()` reads it back. Written only by
+	/// [`Self::set_planning_scopes`], and `None` when no KNN operator is in
+	/// scope.
+	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Re-entry nesting depth for this planner, the streaming engine's analogue
 	/// of the legacy executor's `Options::dive` (and bounded by the same
 	/// `max_computation_depth`).
@@ -195,23 +223,65 @@ pub struct Planner<'ctx> {
 }
 
 impl<'ctx> Planner<'ctx> {
+	/// Declines planning when the named table is a lightweight relation:
+	/// its edges have no record range, so every streaming scan shape over
+	/// it is wrong-empty. The fallback executor's collectors enumerate the
+	/// edges from the relation's IN tables' adjacency instead. Callable
+	/// only where a static table name is known; runtime-resolved scans
+	/// perform the equivalent check at execute time and fail closed. A
+	/// catalog read failure also declines rather than failing open: the
+	/// fallback executor re-reads the catalog itself, surfacing a
+	/// persistent datastore error and executing correctly a transient one.
+	pub(crate) async fn decline_lightweight_table(
+		&self,
+		table: &surrealdb_strand::TableName,
+	) -> Result<(), crate::exec::Error> {
+		use crate::catalog::providers::TableProvider;
+		if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
+			let def = match txn.get_tb_by_name(ns, db, table, None).await {
+				Ok(def) => def,
+				Err(_) => {
+					return Err(crate::exec::Error::PlannerUnsupported(
+						"the table catalog could not be read at plan time".to_owned(),
+					));
+				}
+			};
+			if def.is_some_and(|def| {
+				crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
+			}) {
+				return Err(crate::exec::Error::PlannerUnsupported(
+					"lightweight relations are scanned by the fallback executor".to_owned(),
+				));
+			}
+		}
+		Ok(())
+	}
+
 	/// Create a new planner with the given context (no transaction).
 	///
 	/// Table sources will use the generic `Scan` operator that resolves
 	/// indexes at execution time. This is used by `physical_expr` for
 	/// scalar subqueries and by callers that don't have transaction access.
-	pub fn new(ctx: &'ctx FrozenContext) -> Self {
+	///
+	/// `registry` is the function registry every function name in the planned
+	/// expression resolves against; callers holding an `ExecutionContext` pass
+	/// its `function_registry()`.
+	pub fn new(ctx: &'ctx FrozenContext, registry: &'ctx FunctionRegistry) -> Self {
 		Self {
 			ctx,
-			function_registry: ctx.function_registry(),
+			function_registry: registry,
 			txn: None,
 			ns: None,
 			db: None,
 			version: None,
+			for_update: false,
 			auth: None,
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
+			matches_scope: None,
+			matches_context: None,
+			knn_context: None,
 			depth: 0,
 		}
 	}
@@ -222,23 +292,30 @@ impl<'ctx> Planner<'ctx> {
 	/// definitions and indexes at plan time, producing concrete scan
 	/// operators (IndexScan, TableScan, etc.) and enabling optimizations
 	/// like sort elimination.
+	///
+	/// `registry` is as in [`Planner::new`].
 	pub fn with_txn(
 		ctx: &'ctx FrozenContext,
+		registry: &'ctx FunctionRegistry,
 		txn: Arc<crate::kvs::Transaction>,
 		ns: Option<String>,
 		db: Option<String>,
 	) -> Self {
 		Self {
 			ctx,
-			function_registry: ctx.function_registry(),
+			function_registry: registry,
 			txn: Some(txn),
 			ns,
 			db,
 			version: None,
+			for_update: false,
 			auth: None,
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
+			matches_scope: None,
+			matches_context: None,
+			knn_context: None,
 			depth: 0,
 		}
 	}
@@ -260,10 +337,11 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn for_database(
 		ctx: &'ctx FrozenContext,
 		txn: Arc<crate::kvs::Transaction>,
-		db_ctx: &crate::exec::DatabaseContext,
+		db_ctx: &'ctx crate::exec::DatabaseContext,
 	) -> Self {
 		Self::with_txn(
 			ctx,
+			&db_ctx.ns_ctx.root.function_registry,
 			txn,
 			Some(db_ctx.ns_name().to_owned()),
 			Some(db_ctx.db_name().to_owned()),
@@ -273,6 +351,14 @@ impl<'ctx> Planner<'ctx> {
 	/// Set the VERSION expression for propagation to graph edge scans.
 	pub fn with_version(mut self, version: Option<Arc<dyn crate::exec::PhysicalExpr>>) -> Self {
 		self.version = version;
+		self
+	}
+
+	/// Set whether the SELECT being planned carries `FOR UPDATE` (see the
+	/// `for_update` field).
+	#[must_use]
+	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 
@@ -337,6 +423,40 @@ impl<'ctx> Planner<'ctx> {
 		self.cycle_guard.clone()
 	}
 
+	/// Set the per-SELECT MATCHES registration scope (see the field docs).
+	/// Called by `plan_select_core` on the inner planner it spawns, after
+	/// the WHERE condition has been param-resolved and folded.
+	#[inline]
+	pub(crate) fn set_matches_scope(
+		&mut self,
+		scope: Arc<crate::exec::physical_expr::MatchesScope>,
+	) {
+		self.matches_scope = Some(scope);
+	}
+
+	/// Establish the MATCHES and KNN planning scopes for the SELECT about to be
+	/// planned here (see the [`matches_context`](Self::matches_context) and
+	/// [`knn_context`](Self::knn_context) field docs).
+	///
+	/// `own_matches` is what this SELECT's own WHERE declares and `has_knn`
+	/// whether it declares a KNN operator; either one present replaces the
+	/// enclosing scope. What the SELECT does not declare is inherited from
+	/// `parent`, so an index function in a nested SELECT still resolves against
+	/// the MATCHES or KNN operator that introduced it.
+	pub(crate) fn set_planning_scopes(
+		&mut self,
+		own_matches: Option<Arc<crate::exec::function::MatchesContext>>,
+		has_knn: bool,
+		parent: &Planner<'_>,
+	) {
+		self.matches_context = own_matches.or_else(|| parent.matches_context.clone());
+		self.knn_context = if has_knn {
+			Some(Arc::new(crate::exec::function::KnnContext::new()))
+		} else {
+			parent.knn_context.clone()
+		};
+	}
+
 	/// Seed the re-entry nesting depth (see the `depth` field).
 	///
 	/// Used when a runtime re-entry (`eval` re-planning its query string, a
@@ -364,8 +484,8 @@ impl<'ctx> Planner<'ctx> {
 	/// instead of growing the native stack.
 	#[inline]
 	fn check_depth(&self) -> Result<(), Error> {
-		if self.depth > self.ctx.config.max_computation_depth {
-			return Err(Error::ComputationDepthExceeded);
+		if self.depth > self.ctx.config.exec.max_computation_depth {
+			return Err(ExecError::ComputationDepthExceeded.into());
 		}
 		Ok(())
 	}
@@ -396,34 +516,85 @@ impl<'ctx> Planner<'ctx> {
 		self.function_registry
 	}
 
+	/// Resolve the access mode of a user-defined function's body at plan time,
+	/// by walking the call graph in the plan-time snapshot
+	/// ([`crate::fnc::mutability`], conservative polarity).
+	///
+	/// Returns `AccessMode::ReadWrite` — the safe over-approximation — when the
+	/// planner lacks the transaction or namespace/database context to resolve,
+	/// or when the resolution errors. [`Self::resolve_module_writeable`] takes
+	/// the same write-side default for missing context, though it propagates a
+	/// resolution error rather than absorbing it. A `ReadOnly` answer is
+	/// returned only when the whole reachable call graph is provably write-free
+	/// in this snapshot, so a `ReadWrite` fallback can never mis-license a
+	/// write onto a read-only fast path.
+	async fn resolve_custom_access_mode(&self, name: &str) -> crate::exec::AccessMode {
+		use crate::catalog::providers::DatabaseProvider;
+		use crate::exec::AccessMode;
+
+		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
+			return AccessMode::ReadWrite;
+		};
+		// A UDF call reaches its callee's body through the call graph; the call
+		// itself contributes exactly that one edge.
+		let mut facts = crate::expr::function_facts::FunctionFacts::default();
+		facts.calls.insert(name.to_owned());
+
+		let resolved = async {
+			let db_def = txn.get_db_by_name(ns, db, None).await?.ok_or_else(|| {
+				anyhow::anyhow!("database `{ns}/{db}` not found while resolving `fn::{name}`")
+			})?;
+			crate::fnc::mutability::resolve_mutability(
+				txn,
+				db_def.namespace_id,
+				db_def.database_id,
+				&facts,
+			)
+			.await
+		}
+		.await;
+		match resolved {
+			Ok(r) if !r.possibly_writes() => AccessMode::ReadOnly,
+			// A write is possible, or the snapshot could not be read: keep the
+			// safe over-approximation.
+			Ok(_) | Err(_) => AccessMode::ReadWrite,
+		}
+	}
+
 	/// Resolve the `writeable` flag for a Surrealism module function from
 	/// the cached runtime's exports manifest.
 	///
-	/// Returns `Ok(false)` when the planner lacks the transaction or
-	/// namespace/database context needed for the lookup. In all other cases
-	/// the module is loaded (blocking on first use if necessary) and the
-	/// signature is read so the flag is always consistent with the module's
-	/// declaration.
+	/// Returns `Ok(true)` — the safe over-approximation — when the planner
+	/// lacks the transaction or namespace/database context the lookup needs.
+	/// `ReadWrite` costs a write transaction and serialised evaluation, whereas
+	/// a wrong `ReadOnly` would license a writing module onto the partitioned
+	/// and parallel fan-out paths, which are sound only for readers. In all
+	/// other cases the module is loaded (blocking on first use if necessary)
+	/// and the signature is read so the flag is always consistent with the
+	/// module's declaration.
 	#[cfg(feature = "surrealism")]
 	async fn resolve_module_writeable(
 		&self,
 		module: &str,
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
+		use crate::catalog::Error as CatalogError;
 		use crate::catalog::providers::DatabaseProvider;
 		use crate::ctx::Context;
 		use crate::expr::module::ModuleExecutable;
 
 		let Some(txn) = &self.txn else {
-			return Ok(false);
+			return Ok(true);
 		};
 		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
-			return Ok(false);
+			return Ok(true);
 		};
-		let Some(db_def) =
-			txn.get_db_by_name(ns, db, None).await.map_err(|e| Error::Internal(e.to_string()))?
+		let Some(db_def) = txn
+			.get_db_by_name(ns, db, None)
+			.await
+			.map_err(|e| EngineError::Internal(e.to_string()))?
 		else {
-			return Ok(false);
+			return Ok(true);
 		};
 		let mod_name = format!("mod::{module}");
 		let val =
@@ -431,13 +602,16 @@ impl<'ctx> Planner<'ctx> {
 			{
 				Ok(v) => v,
 				Err(e) => {
-					if let Some(Error::MdNotFound {
+					if let Some(CatalogError::MdNotFound {
 						..
-					}) = e.downcast_ref::<Error>()
+					}) = e.downcast_ref::<CatalogError>()
 					{
+						// Not an unresolved flag but a resolved absence: the
+						// invocation repeats this lookup and fails on it, so the
+						// call cannot reach a module body and cannot write.
 						return Ok(false);
 					}
-					return Err(Error::Internal(e.to_string()));
+					return Err(EngineError::Internal(e.to_string()).into());
 				}
 			};
 		let executable: ModuleExecutable = val.executable.clone().into();
@@ -448,10 +622,15 @@ impl<'ctx> Planner<'ctx> {
 		let mut plan_ctx = Context::new_child(self.ctx);
 		plan_ctx.set_transaction(Arc::clone(txn));
 		let frozen = plan_ctx.freeze();
-		let sig = executable
-			.signature(&frozen, &db_def.namespace_id, &db_def.database_id, sub)
-			.await
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let sig = crate::legacy::module_executable_signature(
+			&executable,
+			&frozen,
+			&db_def.namespace_id,
+			&db_def.database_id,
+			sub,
+		)
+		.await
+		.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
@@ -466,6 +645,14 @@ impl<'ctx> Planner<'ctx> {
 
 	/// Resolve the `writeable` flag for a Silo package function from
 	/// the cached runtime's exports manifest.
+	///
+	/// A silo runtime is cached per namespace/database, so without the
+	/// planner's transaction and those ids there is no key to resolve the
+	/// signature under. Those cases return `Ok(true)`, the safe
+	/// over-approximation: `ReadWrite` costs a write transaction and serialised
+	/// evaluation, whereas a wrong `ReadOnly` would license a writing module
+	/// onto the partitioned and parallel fan-out paths, which are sound only
+	/// for readers.
 	#[cfg(feature = "surrealism")]
 	async fn resolve_silo_writeable(
 		&self,
@@ -476,9 +663,23 @@ impl<'ctx> Planner<'ctx> {
 		patch: u32,
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
+		use crate::catalog::providers::DatabaseProvider;
 		use crate::ctx::Context;
 		use crate::expr::module::SiloExecutable;
 
+		let Some(txn) = &self.txn else {
+			return Ok(true);
+		};
+		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
+			return Ok(true);
+		};
+		let Some(db_def) = txn
+			.get_db_by_name(ns, db, None)
+			.await
+			.map_err(|e| EngineError::Internal(e.to_string()))?
+		else {
+			return Ok(true);
+		};
 		let executable = SiloExecutable {
 			organisation: org.to_string(),
 			package: pkg.to_string(),
@@ -488,15 +689,18 @@ impl<'ctx> Planner<'ctx> {
 		};
 		// Same as resolve_module_writeable: derive a context with the
 		// planner's transaction so signature resolution can access stores.
-		let ctx = if let Some(txn) = &self.txn {
-			let mut plan_ctx = Context::new_child(self.ctx);
-			plan_ctx.set_transaction(Arc::clone(txn));
-			plan_ctx.freeze()
-		} else {
-			Arc::clone(self.ctx)
-		};
-		let sig =
-			executable.signature(&ctx, sub).await.map_err(|e| Error::Internal(e.to_string()))?;
+		let mut plan_ctx = Context::new_child(self.ctx);
+		plan_ctx.set_transaction(Arc::clone(txn));
+		let frozen = plan_ctx.freeze();
+		let sig = crate::legacy::silo_executable_signature(
+			&executable,
+			&frozen,
+			&db_def.namespace_id,
+			&db_def.database_id,
+			sub,
+		)
+		.await
+		.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
@@ -583,8 +787,13 @@ impl<'ctx> Planner<'ctx> {
 			// Compound expressions
 			Expr::IfElse(stmt) => Box::pin(self.physical_if_else(*stmt)).await,
 			Expr::Mock(m) => Ok(Arc::new(MockExpr(m))),
+			// The block's statements are planned at evaluation time, so this
+			// planner's MATCHES registrations travel with it — a MATCHES the
+			// enclosing SELECT's WHERE registered resolves against the same
+			// query executor inside the block as outside it.
 			Expr::Block(b) => Ok(Arc::new(BlockPhysicalExpr {
 				block: *b,
+				matches_scope: self.matches_scope.clone(),
 			})),
 
 			// Control flow
@@ -622,17 +831,19 @@ impl<'ctx> Planner<'ctx> {
 
 			// LET is only valid as a top-level statement or inside a block; reject any
 			// other position (function arg, array element, object value, etc.).
-			Expr::Let(_) => Err(Error::InvalidStatement(
+			Expr::Let(_) => Err(ExecError::InvalidStatement(
 				"LET statements can only appear at the top level of a query or inside a block \
 				 expression"
 					.to_string(),
-			)),
+			)
+			.into()),
 
 			// DDL — cannot be used in expression context
 			Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-				Err(Error::PlannerUnsupported(
+				Err(ExecError::PlannerUnsupported(
 					"DDL statements cannot be used in expression context".to_string(),
-				))
+				)
+				.into())
 			}
 
 			// DML subqueries — not yet implemented
@@ -641,16 +852,17 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Upsert(_)
 			| Expr::Delete(_)
 			| Expr::Relate(_)
-			| Expr::Insert(_) => Err(Error::PlannerUnsupported(
+			| Expr::Insert(_) => Err(ExecError::PlannerUnsupported(
 				"DML subqueries not yet supported in execution plans".to_string(),
-			)),
+			)
+			.into()),
 
 			// GQL MATCH is only ever planned as a top-level operator tree
 			// (`plan_match`), never as a scalar sub-expression.
-			#[cfg(feature = "gql")]
-			Expr::Match(_) => Err(Error::PlannerUnsupported(
+			Expr::Match(_) => Err(ExecError::PlannerUnsupported(
 				"GQL MATCH cannot be used as a sub-expression".to_string(),
-			)),
+			)
+			.into()),
 		}
 	}
 
@@ -660,6 +872,14 @@ impl<'ctx> Planner<'ctx> {
 		lit: crate::expr::literal::Literal,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 		use crate::expr::literal::Literal;
+
+		// A literal that already denotes a value becomes that value, once, at
+		// plan time. Without this a whole object or array literal is rebuilt
+		// per row from its per-entry physical expressions, which is the bulk of
+		// the cost of importing records.
+		if let Some(value) = lit.as_static_value() {
+			return Ok(Arc::new(crate::exec::physical_expr::Literal(value)));
+		}
 
 		match lit {
 			Literal::Array(elements) => {
@@ -708,60 +928,92 @@ impl<'ctx> Planner<'ctx> {
 		op: crate::expr::operator::BinaryOperator,
 		right: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		// For MATCHES operators with idiom left and string-literal or
-		// bind-parameter right, create a MatchesOp that evaluates via
-		// the full-text index.
-		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
-			&& let Expr::Idiom(idiom) = left
-		{
-			let resolved_query = match &right {
-				Expr::Literal(crate::expr::literal::Literal::String(s)) => {
-					Some(s.as_str().to_owned())
+		// Every MATCHES becomes a `MatchesOp`, which owns the operator's whole
+		// per-row decision tree (see that type's module docs). An idiom left
+		// with a plan-time-resolvable right additionally carries a
+		// `MatchProbe`, naming the field and query string an index can be
+		// resolved from; the shapes that cannot name an index carry none and so
+		// answer `false` for rows no legacy `QueryExecutor` would have seen and
+		// `NoIndexFoundForMatch` for the rest — the same two outcomes the legacy
+		// executor reaches for them, since its tree registers neither shape.
+		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op {
+			// Determine whether this exact expression is registered in the
+			// enclosing SELECT's WHERE condition (legacy executor parity — see
+			// `MatchesScope`). The lookup key is the node as written; the
+			// allowlist contains both the original and the
+			// param-resolved/folded condition forms, so both the
+			// projection-side and residual-cond-side conversions of the same
+			// source expression hit it.
+			let (registered, executor_tables) = match &self.matches_scope {
+				Some(scope) => {
+					let key = Expr::Binary {
+						left: Box::new(left.clone()),
+						op: crate::expr::operator::BinaryOperator::Matches(matches_op.clone()),
+						right: Box::new(right.clone()),
+					};
+					(scope.allowlist.contains(&key), Arc::clone(&scope.executor_tables))
 				}
-				Expr::Param(param) => self.ctx.value(param.as_str()).and_then(|v| {
-					if let crate::val::Value::String(s) = v {
-						Some(s.as_str().to_owned())
-					} else {
-						None
-					}
-				}),
+				None => (false, Arc::from(Vec::<surrealdb_strand::TableName>::new())),
+			};
+
+			// The probe mirrors legacy `Tree::eval_matches_operator`: an idiom
+			// left, and a right operand the legacy tree would see as a computed
+			// node, rendered with `Value::to_raw_string()`. That keeps a bare
+			// string literal as its own contents and renders every other value
+			// the way the legacy analyzer receives it — `title @@ 42` searches
+			// for the term `42`.
+			let probe = |query: &crate::val::Value, idiom: &crate::expr::Idiom| {
+				crate::exec::physical_expr::MatchProbe {
+					idiom: idiom.clone(),
+					query: query.to_raw_string(),
+				}
+			};
+			let probe = match (&left, &right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => {
+					util::try_literal_to_value(lit).map(|v| probe(&v, idiom))
+				}
+				(Expr::Idiom(idiom), Expr::Param(param)) => {
+					self.ctx.value(param.as_str()).map(|v| probe(v, idiom))
+				}
 				_ => None,
 			};
-			if let Some(query) = resolved_query {
-				// Multi-part idioms (e.g. `t.name`) may traverse record links
-				// to fields on other tables. MatchesOp can only evaluate
-				// MATCHES against a fulltext index on the source table — it
-				// cannot resolve cross-table record links.
-				if idiom.0.len() > 1 {
-					return Err(Error::PlannerUnimplemented(
-						"MATCHES with multi-part field path not yet supported \
-						 in streaming executor"
-							.to_string(),
-					));
+
+			// The right side is rendered from the resolved query when there is
+			// one, so `ToSql` shows what was actually searched for rather than
+			// the unresolved parameter.
+			let right_source = match &probe {
+				Some(probe) => {
+					Expr::Literal(crate::expr::literal::Literal::String(probe.query.clone().into()))
 				}
-				let idiom_clone = idiom.clone();
-				let query_clone = query.clone();
-				let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
-				let right_phys = Box::pin(self.physical_expr(Expr::Literal(
-					crate::expr::literal::Literal::String(query.into()),
-				)))
-				.await?;
-				return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
-					left_phys,
-					right_phys,
-					matches_op.clone(),
-					idiom_clone,
-					query_clone,
-				)));
-			}
-			// Left was idiom but right wasn't resolvable — reassemble
-			let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
+				None => right,
+			};
+			let left_phys = Box::pin(self.physical_expr(left)).await?;
+			let right_phys = Box::pin(self.physical_expr(right_source)).await?;
+			return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
+				left_phys,
+				right_phys,
+				matches_op.clone(),
+				probe,
+				registered,
+				executor_tables,
+			)));
+		}
+
+		// KNN operators evaluated as expressions (projection position, a
+		// residual conjunct no KNN source consumed, bare expressions):
+		// per-row membership in the statement's KNN result set, `false`
+		// without one — the legacy checker / missing-entry semantics. The
+		// KnnContext is bound here because the execution context does not
+		// carry it.
+		if matches!(op, crate::expr::operator::BinaryOperator::NearestNeighbor(_)) {
+			let left_phys = Box::pin(self.physical_expr(left)).await?;
 			let right_phys = Box::pin(self.physical_expr(right)).await?;
-			return Ok(Arc::new(BinaryOp {
-				left: left_phys,
+			return Ok(Arc::new(crate::exec::physical_expr::KnnMembershipOp::new(
+				left_phys,
+				right_phys,
 				op,
-				right: right_phys,
-			}));
+				self.knn_context.clone(),
+			)));
 		}
 
 		// All other binary operators (and non-standard MATCHES patterns)
@@ -823,8 +1075,8 @@ impl<'ctx> Planner<'ctx> {
 			} = cur
 			{
 				d += 1;
-				if d > self.ctx.config.max_computation_depth {
-					return Err(Error::ComputationDepthExceeded);
+				if d > self.ctx.config.exec.max_computation_depth {
+					return Err(ExecError::ComputationDepthExceeded.into());
 				}
 				cur = inner;
 			}
@@ -864,6 +1116,64 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Convert a function call to a physical expression.
+	/// Recognizes the `count(->edge)` projection shape the degree fast path
+	/// serves: one argument, a single-part idiom holding a pure graph
+	/// lookup — no clauses, no ONLY, plain table subjects — counted for a
+	/// session whose permission checks are provably skipped (the id-only
+	/// resolve today's path takes for such a session never fetches records
+	/// either, so the raw adjacency cardinality is exactly its answer) and
+	/// reading current data.
+	fn graph_degree_shape(
+		&self,
+		name: &str,
+		arguments: &[Expr],
+	) -> Option<(crate::exec::parts::LookupDirection, Vec<surrealdb_strand::TableName>)> {
+		use crate::expr::lookup::{LookupKind, LookupSubject};
+		use crate::expr::part::Part;
+		if name != "count" || arguments.len() != 1 || self.version.is_some() {
+			return None;
+		}
+		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
+			return None;
+		};
+		if self.should_check_perms_for_view(ns, db) {
+			return None;
+		}
+		let Expr::Idiom(idiom) = &arguments[0] else {
+			return None;
+		};
+		let [Part::Lookup(lookup)] = idiom.0.as_slice() else {
+			return None;
+		};
+		let LookupKind::Graph(dir) = &lookup.kind else {
+			return None;
+		};
+		if lookup.only
+			|| lookup.expr.is_some()
+			|| lookup.cond.is_some()
+			|| lookup.split.is_some()
+			|| lookup.group.is_some()
+			|| lookup.order.is_some()
+			|| lookup.limit.is_some()
+			|| lookup.start.is_some()
+			|| lookup.alias.is_some()
+		{
+			return None;
+		}
+		let mut tables = Vec::with_capacity(lookup.what.len());
+		for subject in &lookup.what {
+			let LookupSubject::Table {
+				table,
+				referencing_field: None,
+			} = subject
+			else {
+				return None;
+			};
+			tables.push(table.clone());
+		}
+		Some(((*dir).into(), tables))
+	}
+
 	async fn physical_function_call(
 		&self,
 		func_call: FunctionCall,
@@ -881,6 +1191,13 @@ impl<'ctx> Planner<'ctx> {
 					return Box::pin(self.plan_index_function(&name, arguments)).await;
 				}
 
+				// A `count(->edge)`-shaped projection over a pure graph
+				// lookup is a degree question the adjacency storage can
+				// often answer without materializing the edges — wrap the
+				// normal expression in the degree fast path when the
+				// count's answer is provably the raw adjacency cardinality.
+				let degree = self.graph_degree_shape(&name, &arguments);
+
 				let arguments = self.physical_args(arguments).await?;
 				if registry.is_projection(&name) {
 					let func_ctx = registry
@@ -897,24 +1214,38 @@ impl<'ctx> Planner<'ctx> {
 						.get(&name)
 						.map(|f| f.required_context())
 						.unwrap_or(crate::exec::ContextLevel::Root);
-					Ok(Arc::new(BuiltinFunctionExec {
-						name,
-						arguments,
-						func_required_context: func_ctx,
-						// Recorded so `eval::*` can continue the depth count from
-						// here when it re-plans its query string at runtime.
-						plan_depth: self.current_depth(),
-					}))
+					let normal: Arc<dyn crate::exec::PhysicalExpr> =
+						Arc::new(BuiltinFunctionExec {
+							name,
+							arguments,
+							func_required_context: func_ctx,
+							// Recorded so `eval::*` can continue the depth count from
+							// here when it re-plans its query string at runtime.
+							plan_depth: self.current_depth(),
+						});
+					if let Some((direction, edge_tables)) = degree {
+						return Ok(Arc::new(
+							crate::exec::physical_expr::graph_degree::GraphDegreeExpr::new(
+								direction,
+								edge_tables,
+								normal,
+							)
+							.map_err(|e| EngineError::Internal(e.to_string()))?,
+						));
+					}
+					Ok(normal)
 				}
 			}
 			Function::Custom(name) => {
 				let arguments = self.physical_args(arguments).await?;
+				let body_access_mode = self.resolve_custom_access_mode(&name).await;
 				Ok(Arc::new(UserDefinedFunctionExec {
 					name,
 					arguments,
 					// Recorded so the function body, planned lazily on call,
 					// continues the depth count from here rather than resetting.
 					plan_depth: self.current_depth(),
+					body_access_mode,
 				}))
 			}
 			Function::Script(script) => {
@@ -1048,11 +1379,12 @@ impl<'ctx> Planner<'ctx> {
 					expr = ?other,
 					"physical_statement_subquery dispatched with non-statement expr"
 				);
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"physical_statement_subquery dispatched with non-statement expr; \
 					 only Select/Info/Foreach/Sleep/Explain are valid here"
 						.into(),
-				));
+				)
+				.into());
 			}
 		};
 		Ok(Arc::new(ScalarSubquery {
@@ -1162,18 +1494,19 @@ impl<'ctx> Planner<'ctx> {
 	// Internal Planning
 	// ========================================================================
 
-	/// When `AllReadOnlyStatements` strategy is active, convert `Error::PlannerUnimplemented`
-	/// into `Error::Query` so it becomes a hard error instead of a silent fallback.
+	/// When `AllReadOnlyStatements` strategy is active, convert `ExecError::PlannerUnimplemented`
+	/// into `ExecError::Query` so it becomes a hard error instead of a silent fallback.
 	///
 	/// `PlannerUnsupported` (DML/DDL) is left untouched — those always fall back to compute.
 	fn require_planned<T>(&self, result: Result<T, Error>) -> Result<T, Error> {
 		match result {
-			Err(Error::PlannerUnimplemented(msg))
+			Err(Error::Exec(ExecError::PlannerUnimplemented(msg)))
 				if self.planner_strategy == NewPlannerStrategy::AllReadOnlyStatements =>
 			{
-				Err(Error::Query {
+				Err(ExecError::Query {
 					message: format!("New executor does not support: {msg}"),
-				})
+				}
+				.into())
 			}
 			other => other,
 		}
@@ -1231,20 +1564,21 @@ impl<'ctx> Planner<'ctx> {
 				| Expr::Upsert(_)
 				| Expr::Delete(_)
 				| Expr::Insert(_)
-				| Expr::Relate(_) => Err(Error::PlannerUnsupported(
+				| Expr::Relate(_) => Err(ExecError::PlannerUnsupported(
 					"DML statements not yet supported in execution plans".to_string(),
-				)),
+				)
+				.into()),
 				Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-					Err(Error::PlannerUnsupported(
+					Err(ExecError::PlannerUnsupported(
 						"DDL statements not yet supported in execution plans".to_string(),
-					))
+					)
+					.into())
 				}
 
 				// GQL MATCH is planned into an operator tree by `plan_match`
 				// (`exec/planner/match_plan.rs`). It never returns
 				// PlannerUnsupported/Unimplemented — a MatchPlan only reaches here
 				// because it lowered cleanly, so any failure is a real error.
-				#[cfg(feature = "gql")]
 				Expr::Match(m) => self.plan_match(*m).await,
 			}
 		})
@@ -1279,7 +1613,8 @@ impl<'ctx> Planner<'ctx> {
 			if fields.is_empty() {
 				inner
 			} else {
-				Arc::new(Fetch::new(inner, fields)) as Arc<dyn ExecOperator>
+				let (fields_sql, physical_fields) = self.convert_fetch_idioms(fields).await?;
+				Arc::new(Fetch::new(inner, fields_sql, physical_fields)) as Arc<dyn ExecOperator>
 			}
 		} else {
 			inner
@@ -1321,45 +1656,52 @@ impl<'ctx> Planner<'ctx> {
 
 		// Reject protected parameter names at plan time. Mirrors
 		// `SetStatement::compute` and the top-level `Expr::Let` executor arm —
-		// both raise `Error::InvalidParam` at runtime; we error one step
+		// both raise `ExecError::InvalidParam` at runtime; we error one step
 		// earlier so callers in blocks / FOR bodies see the same rejection.
-		if crate::cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-			return Err(Error::InvalidParam {
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+			return Err(ExecError::InvalidParam {
 				name: name.to_string(),
-			});
+			}
+			.into());
 		}
 
 		let value: Arc<dyn ExecOperator> = match what {
 			Expr::Select(select) => self.plan_select_statement(*select).await?,
 			Expr::Create(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"CREATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Update(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"UPDATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Upsert(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"UPSERT statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Delete(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"DELETE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Insert(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"INSERT statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Relate(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"RELATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			other => {
 				let expr = Box::pin(self.physical_expr(other)).await?;
@@ -1469,21 +1811,27 @@ impl<'ctx> Planner<'ctx> {
 // ============================================================================
 
 macro_rules! try_plan_expr {
-	// Three-arg form preserved for compilation contexts that don't have an
+	// Four-arg form preserved for compilation contexts that don't have an
 	// auth principal in scope (deep nested permission / computed-field
 	// compilation, planner tests, etc.). Delegates with `auth = None` so
 	// the planner stays on its conservative defaults.
-	($expr:expr, $ctx:expr, $txn:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $txn, None) }};
-	// Four-arg form: caller has the session's `Arc<Auth>` available
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $registry, $txn, None) }};
+	// Five-arg form: caller has the session's `Arc<Auth>` available
 	// (typically via `Options` or `ExecutionContext`) and forwards it so
 	// the planner can make plan-time decisions that depend on whether
 	// permissions will actually run at execute time.
-	($expr:expr, $ctx:expr, $txn:expr, $auth:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $txn, $auth, 0u32) }};
-	// Five-arg form: as above, plus a seed for the expression-nesting depth
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr, $auth:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $registry, $txn, $auth, 0u32) }};
+	// Six-arg form: as above, plus a seed for the expression-nesting depth
 	// counter. Non-zero only when re-planning a nested query at runtime (an
 	// `eval` string) so the depth limit continues across the re-entry rather
 	// than resetting — see `Planner::with_depth`.
-	($expr:expr, $ctx:expr, $txn:expr, $auth:expr, $depth:expr) => {{
+	//
+	// `$txn` is expanded only on the branch that plans, and must stay there: the
+	// DML/DDL and `ComputeOnly` branches hand the expression to the legacy
+	// `compute` path and need no transaction. Callers whose transaction lookup
+	// is fallible rely on that, passing a `?` expression that runs only when
+	// planning proceeds.
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr, $auth:expr, $depth:expr) => {{
 		let __expr: &$crate::expr::Expr = $expr;
 		if matches!(
 			__expr,
@@ -1498,11 +1846,12 @@ macro_rules! try_plan_expr {
 				| $crate::expr::Expr::Rebuild(_)
 				| $crate::expr::Expr::Alter(_)
 		) {
-			Err($crate::err::Error::PlannerUnsupported(String::new()))
+			Err($crate::err::Error::Exec($crate::exec::Error::PlannerUnsupported(String::new())))
 		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
-			Err($crate::err::Error::PlannerUnsupported(String::new()))
+			Err($crate::err::Error::Exec($crate::exec::Error::PlannerUnsupported(String::new())))
 		} else {
-			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn, $auth, $depth).await
+			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $registry, $txn, $auth, $depth)
+				.await
 		}
 	}};
 }
@@ -1524,6 +1873,7 @@ pub(crate) use try_plan_expr;
 pub(crate) async fn plan_expr_inner(
 	expr: &Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 	txn: Arc<crate::kvs::Transaction>,
 	auth: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
@@ -1543,7 +1893,7 @@ pub(crate) async fn plan_expr_inner(
 				_ => None,
 			}
 		});
-	let mut planner = Planner::with_txn(ctx, txn, ns, db).with_depth(depth);
+	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db).with_depth(depth);
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}
@@ -1594,8 +1944,9 @@ pub(crate) async fn plan_expr_inner(
 pub(crate) async fn expr_to_physical_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	Planner::new(ctx).physical_expr(expr).await
+	Planner::new(ctx, registry).physical_expr(expr).await
 }
 
 /// As [`expr_to_physical_expr`], but seeds the expression-nesting depth counter
@@ -1606,12 +1957,25 @@ pub(crate) async fn expr_to_physical_expr(
 /// [`crate::exec::physical_expr::block`], which passes the depth recorded on the
 /// calling node so nested `eval`/UDF recursion stays bounded by the same
 /// `max_computation_depth` the legacy path counts against.
+///
+/// `matches_scope` carries the registrations of the SELECT whose expression tree
+/// the body belongs to, so a MATCHES that SELECT's WHERE registered resolves
+/// against the same query executor here as it does in the eagerly planned parts
+/// of the tree. It is `None` for a body planned in its own scope — a
+/// user-defined function, a closure — which must not inherit the caller's
+/// registrations.
 pub(crate) async fn expr_to_physical_expr_at_depth(
 	expr: Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 	depth: u32,
+	matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	Planner::new(ctx).with_depth(depth).physical_expr(expr).await
+	let mut planner = Planner::new(ctx, registry).with_depth(depth);
+	if let Some(scope) = matches_scope {
+		planner.set_matches_scope(scope);
+	}
+	planner.physical_expr(expr).await
 }
 
 // ============================================================================
@@ -1668,7 +2032,8 @@ mod planner_tests {
 		}));
 
 		let ctx = Arc::new(Context::new_test());
-		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
+		let registry = FunctionRegistry::with_builtins();
+		let plan = Planner::new(&ctx, &registry).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
 		assert!(plan.mutates_context());
@@ -1679,9 +2044,10 @@ mod planner_tests {
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
 		let ctx = Arc::new(Context::new_test());
-		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
+		let registry = FunctionRegistry::with_builtins();
+		let plan = Planner::new(&ctx, &registry).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");
-		assert!(plan.is_scalar());
+		assert!(plan.output_shape().is_scalar());
 	}
 }

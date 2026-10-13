@@ -9,7 +9,7 @@ define_pure_function!(GeoCentroid, "geo::centroid", (geometry: Any) -> Any, crat
 define_pure_function!(GeoDistance, "geo::distance", (a: Any, b: Any) -> Float, crate::fnc::geo::distance);
 
 // Geo hash functions
-define_pure_function!(GeoHashDecode, "geo::hash::decode", (hash: String) -> Any, crate::fnc::geo::hash::decode);
+define_pure_function!(GeoHashDecode, "geo::hash::decode", (hash: Any) -> Any, crate::fnc::geo::hash::decode);
 define_pure_function!(GeoHashEncode, "geo::hash::encode", (point: Any, ?precision: Int) -> String, crate::fnc::geo::hash::encode);
 
 // Geo validation

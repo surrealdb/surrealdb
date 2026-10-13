@@ -26,8 +26,8 @@ use crate::catalog::providers::{
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -104,14 +104,12 @@ impl ExecOperator for DatabaseInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_database_info(&ctx, structured, version.as_deref()).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -154,13 +152,13 @@ async fn execute_database_info(
 			"analyzers" => process(&txn.all_db_analyzers(ns, db, version).await?),
 			"buckets" => process(&txn.all_db_buckets(ns, db, version).await?),
 			"functions" => process(&txn.all_db_functions(ns, db, version).await?),
-			"modules" => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
+			"modules" => crate::legacy::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
 			"models" => process(&txn.all_db_models(ns, db, version).await?),
 			"params" => process(&txn.all_db_params(ns, db, version).await?),
 			"tables" => process(&txn.all_tb(ns, db, version).await?),
 			"users" => process(&txn.all_db_users(ns, db, version).await?),
 			"configs" => process(&txn.all_db_configs(ns, db, version).await?),
-			"sequences" => process(&txn.all_db_sequences(ns, db, version).await?),
+			"sequences" => crate::legacy::process_sequences(&txn, ns, db, txn.all_db_sequences(ns, db, version).await?, version).await?,
 		};
 		Ok(Value::Object(Object::from(object)))
 	} else {

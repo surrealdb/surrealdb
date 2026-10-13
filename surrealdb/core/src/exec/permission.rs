@@ -9,16 +9,16 @@ use std::sync::Arc;
 
 use reblessive::tree::Stk;
 
-use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::FrozenContext;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::catalog::{Permission, Record};
+use crate::err::{EngineError, Error};
 use crate::exec::planner::Planner;
-use crate::exec::{DatabaseContext, EvalContext, ExecutionContext, PhysicalExpr};
-use crate::expr::FlowResultExt as _;
+use crate::exec::{
+	DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, PhysicalExpr,
+};
+use crate::expr::ControlFlow;
 use crate::iam::Action;
-use crate::val::Value;
+use crate::idx::trees::gate::{BoxGateFut, TableSelectGate};
+use crate::val::{RecordId, Value};
 
 /// Result of a permission check.
 #[derive(Debug, Clone)]
@@ -31,8 +31,8 @@ pub enum PhysicalPermission {
 	Conditional(Arc<dyn PhysicalExpr>),
 }
 
-/// Convert a catalog Permission to a PhysicalPermission via the given
-/// planner. Inner subqueries inherit the planner's `CycleGuard`, so a
+/// Convert a catalog [`Permission`] to a PhysicalPermission via the
+/// given planner. Inner subqueries inherit the planner's `CycleGuard`, so a
 /// self-referential permission (`WHERE (SELECT FROM same_table) != NONE`)
 /// falls back to runtime resolution for that subtree instead of recursing.
 pub(crate) async fn convert_permission_to_physical(
@@ -65,20 +65,10 @@ pub(crate) async fn convert_permission_to_physical(
 #[inline]
 pub(crate) async fn convert_permission_to_physical_runtime(
 	permission: &Permission,
-	ctx: &FrozenContext,
+	ctx: &ExecutionContext,
 ) -> Result<PhysicalPermission, Error> {
-	convert_permission_to_physical(permission, &Planner::new(ctx)).await
-}
-
-/// Resolve the SELECT permission for a table.
-///
-/// If the table doesn't exist (schemaless mode), returns `Permission::None`
-/// which will deny access for record users.
-pub(crate) fn resolve_select_permission(table_def: Option<&TableDefinition>) -> &Permission {
-	match table_def {
-		Some(def) => &def.permissions.select,
-		None => &Permission::None,
-	}
+	convert_permission_to_physical(permission, &Planner::new(ctx.ctx(), ctx.function_registry()))
+		.await
 }
 
 /// Check if permission should be checked for the given action.
@@ -122,39 +112,75 @@ pub(crate) fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Re
 	}
 }
 
-/// Validate that a record user has access to the current namespace and database.
+/// Whether every table in `tables` carries `Permission::Full` for `SELECT`.
 ///
-/// Record users (tokens scoped to a specific record) should only be able to access
-/// data within their authenticated namespace and database. This check ensures that
-/// a record user cannot access data in other namespaces or databases.
+/// `Permission::Full` is the only declaration under which a fast path may
+/// resolve a value embedded in an index or adjacency key — a doc-ID, a
+/// target vertex — without fetching and permission-checking the record
+/// itself: with no per-row predicate to evaluate, skipping the fetch
+/// changes nothing observable. A missing table or catalog error is
+/// conservatively `false`.
+///
+/// This only ever gates an optimization, never a correctness requirement,
+/// so callers always have a slower, per-record-checked path to fall back
+/// to. Callers are responsible for their own `should_check_perms` /
+/// `should_check_perms_for_view` gate: when permission evaluation would be
+/// skipped for the session regardless, the fast path is safe independent
+/// of the declared permission, and this function should not be reached.
+pub(crate) async fn tables_have_full_select_permission(
+	txn: &crate::kvs::Transaction,
+	ns: &str,
+	db: &str,
+	tables: &[crate::val::TableName],
+) -> bool {
+	use crate::catalog::providers::TableProvider;
+	for table in tables {
+		let Ok(Some(td)) = txn.get_tb_by_name(ns, db, table, None).await else {
+			return false;
+		};
+		if !matches!(td.permissions.select, Permission::Full) {
+			return false;
+		}
+	}
+	true
+}
+
+/// Validate that the authenticated principal may read in the current namespace
+/// and database (GHSA-2v9j tenant-boundary gate for the read path).
+///
+/// The session's *selected* ns/db can be steered with `USE` - including the RPC
+/// `use` method, which sets the context without rejecting a cross-tenant switch -
+/// so it must not be trusted on its own. The authenticated auth level is the
+/// source of truth: root and anonymous principals are unconfined, a namespace
+/// principal may read any database within its namespace, and database and record
+/// principals are pinned to their exact namespace/database. Enforcing this here,
+/// before table/field `PERMISSIONS` are consulted, stops a principal that has
+/// pivoted into a foreign tenant from reading a table there whose `PERMISSIONS`
+/// happen to be satisfiable.
 ///
 /// Returns `Ok(())` if access is allowed, `Err` with an appropriate error if denied.
 pub(crate) fn validate_record_user_access(db_ctx: &DatabaseContext) -> Result<(), Error> {
 	let root = &db_ctx.ns_ctx.root;
 
-	// Only check for record users
-	if !root.auth.is_record() {
-		return Ok(());
-	}
-
 	let ns = db_ctx.ns_name();
 	let db = db_ctx.db_name();
 
-	// Verify namespace matches
-	if root.auth.level().ns() != Some(ns) {
-		return Err(Error::NsNotAllowed {
-			ns: ns.into(),
-		});
+	if root.auth.can_access_ns_db(ns, db) {
+		return Ok(());
 	}
 
-	// Verify database matches
-	if root.auth.level().db() != Some(db) {
-		return Err(Error::DbNotAllowed {
+	// A namespace match with a database mismatch is a database-scope violation;
+	// otherwise the namespace itself is out of the principal's reach.
+	if root.auth.level().ns() == Some(ns) {
+		return Err(ExecError::DbNotAllowed {
 			db: db.into(),
-		});
+		}
+		.into());
 	}
-
-	Ok(())
+	Err(ExecError::NsNotAllowed {
+		ns: ns.into(),
+	}
+	.into())
 }
 
 /// Check a physical permission against a specific record value.
@@ -169,7 +195,7 @@ pub(crate) async fn check_permission_for_value(
 	value: &Value,
 	value_param: Option<&Value>,
 	ctx: &ExecutionContext,
-) -> Result<bool, Error> {
+) -> anyhow::Result<bool> {
 	match permission {
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
@@ -189,112 +215,514 @@ pub(crate) async fn check_permission_for_value(
 				}
 				None => ctx,
 			};
-			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(value);
+			// Bind the record as both the current value and the document root.
+			// The legacy path passes it as the `CursorDoc`
+			// (`doc/check.rs::process_permissions`, `doc/reduce.rs`), which is
+			// what lets `$parent` inside an idiom-level filter — e.g.
+			// `PERMISSIONS FOR select WHERE acl[WHERE $parent.owner = $auth.id]`
+			// — resolve to the row under test. `$parent` is the one reader that
+			// does not fall back to `current_value`, so binding only the value
+			// left it unresolved and the whole predicate falsy, denying every row.
+			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value_and_doc(value);
 			eval_ctx.skip_fetch_perms = true;
 
-			let result = physical_expr
-				.evaluate(eval_ctx)
-				.await
-				.map_err(|e| Error::Internal(e.to_string()))?;
+			// The concrete error is carried through rather than collapsed to
+			// `Internal`: this runs per permission-checked row, and a write
+			// conflict raised inside a predicate has to stay downcastable for
+			// the transactor to retry it, while a cancelled query has to keep
+			// reporting as cancelled rather than as an internal failure.
+			//
+			// A predicate that signals control flow has nowhere to send it —
+			// there is no surrounding block — so those stay an error, as
+			// before.
+			let result = physical_expr.evaluate(eval_ctx).await.map_err(|ctrl| match ctrl {
+				ControlFlow::Err(e) => e,
+				other => anyhow::Error::new(EngineError::Internal(format!(
+					"unexpected control flow in a permission predicate: {other}"
+				))),
+			})?;
 			Ok(result.is_truthy())
 		}
 	}
 }
 
-/// Evaluate a catalog SELECT [`Permission`] against a [`CursorDoc`] using the
-/// legacy compute path. Returns `true` when access is allowed.
+/// The streaming executor's SELECT-permission gate for ANN truthy-document
+/// filters.
 ///
-/// Used by KNN truthy-document filters (HNSW, DiskANN) where the table's
-/// SELECT permission must be checked per candidate before the
-/// caller-supplied WHERE condition runs. Without this gate, a caller can
-/// probe restricted fields by crafting a WHERE on them and observing the
-/// resulting count / order / timing.
-///
-/// `Specific` expressions are evaluated with `opt.new_with_perms(false)` so
-/// the permission expression itself doesn't recurse into permission checks
-/// against its own table.
-pub(crate) async fn evaluate_table_select_for_doc(
-	stk: &mut Stk,
-	ctx: &FrozenContext,
-	opt: &Options,
-	permission: &Permission,
-	cursor_doc: &CursorDoc,
-) -> anyhow::Result<bool> {
-	match permission {
-		Permission::None => Ok(false),
-		Permission::Full => Ok(true),
-		Permission::Specific(e) => {
-			let opt_no_perms = opt.new_for_permission_predicate();
-			Ok(stk
-				.run(|stk| e.compute(stk, ctx, &opt_no_perms, Some(cursor_doc)))
-				.await
-				.catch_return()?
-				.is_truthy())
+/// Pairs a permission already resolved for the surrounding scan with the
+/// context it is evaluated against, so the ANN search gates each candidate on
+/// exactly the permission that filters the fetched batch after the search and
+/// the two checks cannot disagree.
+pub(crate) struct PhysicalTableSelect {
+	permission: PhysicalPermission,
+	ctx: ExecutionContext,
+}
+
+impl PhysicalTableSelect {
+	pub(crate) fn new(permission: PhysicalPermission, ctx: ExecutionContext) -> Self {
+		Self {
+			permission,
+			ctx,
 		}
 	}
 }
 
-/// Cached resolution of a table's SELECT permission check, for callers that
-/// need to evaluate the permission per candidate row (e.g. KNN truthy-doc
-/// filters). Resolve once per filter via [`resolve_cached_table_select`],
-/// then check each candidate via [`check_cached_table_select_for_doc`].
-#[derive(Clone)]
-pub(crate) enum CachedTableSelect {
-	/// Permission checks are bypassed (auth disabled / privileged session).
-	Skip,
-	/// Permission must be evaluated against each candidate document.
-	Apply(Permission),
-}
-
-/// Resolve a table's SELECT permission for caching across per-row checks in
-/// an ANN truthy-doc filter. Returns `Skip` when [`crate::ctx::Context::check_perms`]
-/// reports `false`; otherwise returns `Apply(p)` with the table's SELECT
-/// permission (or `Permission::None` if the table is missing — which denies
-/// access by design).
-pub(crate) async fn resolve_cached_table_select(
-	ctx: &FrozenContext,
-	opt: &Options,
-	table_def: Option<&TableDefinition>,
-) -> anyhow::Result<CachedTableSelect> {
-	if !ctx.check_perms(opt, Action::View)? {
-		return Ok(CachedTableSelect::Skip);
-	}
-	Ok(CachedTableSelect::Apply(resolve_select_permission(table_def).clone()))
-}
-
-/// Check a previously-resolved [`CachedTableSelect`] against a [`CursorDoc`].
-/// Companion to [`resolve_cached_table_select`].
-pub(crate) async fn check_cached_table_select_for_doc(
-	stk: &mut Stk,
-	ctx: &FrozenContext,
-	opt: &Options,
-	cached: &CachedTableSelect,
-	cursor_doc: &CursorDoc,
-) -> anyhow::Result<bool> {
-	match cached {
-		CachedTableSelect::Skip => Ok(true),
-		CachedTableSelect::Apply(p) => {
-			evaluate_table_select_for_doc(stk, ctx, opt, p, cursor_doc).await
+impl TableSelectGate for PhysicalTableSelect {
+	fn allows_every_doc(&self) -> Option<bool> {
+		match self.permission {
+			PhysicalPermission::Allow => Some(true),
+			PhysicalPermission::Deny => Some(false),
+			PhysicalPermission::Conditional(_) => None,
 		}
 	}
+
+	fn allows_doc<'a>(
+		&'a self,
+		_stk: &'a mut Stk,
+		_rid: &'a Arc<RecordId>,
+		record: &'a Arc<Record>,
+	) -> BoxGateFut<'a> {
+		Box::pin(async move {
+			check_permission_for_value(&self.permission, &record.data, None, &self.ctx).await
+		})
+	}
 }
 
-/// Populate `slot` with the table's cached SELECT permission on first call,
-/// then return a reference to it. Subsequent calls reuse the cached value
-/// without re-fetching the table definition. Shared between the HNSW and
-/// DiskANN truthy-doc filters, both of which resolve the permission once per
-/// filter and reuse it for every candidate.
-pub(crate) async fn ensure_cached_table_select<'a>(
-	ctx: &FrozenContext,
-	opt: &Options,
-	txn: &crate::kvs::Transaction,
-	ikb: &crate::idx::IndexKeyBase,
-	slot: &'a mut Option<CachedTableSelect>,
-) -> anyhow::Result<&'a CachedTableSelect> {
-	use crate::catalog::providers::TableProvider;
-	if slot.is_none() {
-		let table = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await?;
-		*slot = Some(resolve_cached_table_select(ctx, opt, table.as_deref()).await?);
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::dbs::Session;
+	use crate::exec::operators::test_util::{TestDb, parse_expr, physical_expr, root_ctx, val};
+	use crate::iam::{Level, Role};
+	use crate::kvs::TransactionType;
+
+	// =========================================================================
+	// convert_permission_to_physical
+	// =========================================================================
+
+	#[tokio::test]
+	async fn catalog_permission_maps_onto_the_three_physical_arms() {
+		let ctx = root_ctx();
+		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
+
+		let none = convert_permission_to_physical(&Permission::None, &planner).await.unwrap();
+		assert!(matches!(none, PhysicalPermission::Deny));
+
+		let full = convert_permission_to_physical(&Permission::Full, &planner).await.unwrap();
+		assert!(matches!(full, PhysicalPermission::Allow));
+
+		let specific = Permission::Specific(parse_expr("owner = $auth.id"));
+		let conditional = convert_permission_to_physical(&specific, &planner).await.unwrap();
+		assert!(matches!(conditional, PhysicalPermission::Conditional(_)));
 	}
-	Ok(slot.as_ref().expect("just populated above"))
+
+	#[tokio::test]
+	async fn runtime_conversion_matches_the_planner_conversion() {
+		let ctx = root_ctx();
+		let permission = Permission::Specific(parse_expr("age > 18"));
+
+		let resolved = convert_permission_to_physical_runtime(&permission, &ctx).await.unwrap();
+		let PhysicalPermission::Conditional(expr) = resolved else {
+			panic!("a Specific permission resolves to Conditional");
+		};
+
+		// The txn-less runtime path must still produce an evaluable predicate,
+		// not a deferred/unsupported placeholder.
+		let allowed = check_permission_for_value(
+			&PhysicalPermission::Conditional(expr),
+			&val("{ age: 21 }").await,
+			None,
+			&ctx,
+		)
+		.await
+		.unwrap();
+		assert!(allowed);
+	}
+
+	// =========================================================================
+	// should_check_perms
+	// =========================================================================
+
+	/// Build a database context for `session` and ask whether `action` needs
+	/// permission enforcement.
+	async fn checks_perms(db: &TestDb, session: &Session, action: Action) -> bool {
+		let ctx = db.exec_ctx_as(session, TransactionType::Read).await;
+		should_check_perms(ctx.database().unwrap(), action).unwrap()
+	}
+
+	#[tokio::test]
+	async fn root_owner_is_exempt_from_both_actions() {
+		let db = TestDb::new("").await;
+		let owner = TestDb::owner();
+		assert!(!checks_perms(&db, &owner, Action::View).await);
+		assert!(!checks_perms(&db, &owner, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn viewer_is_exempt_from_view_but_not_from_edit() {
+		let db = TestDb::new("").await;
+		let viewer =
+			Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), Role::Viewer);
+		assert!(!checks_perms(&db, &viewer, Action::View).await);
+		// A Viewer has no editor role, so writes stay permission-checked.
+		assert!(checks_perms(&db, &viewer, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn a_role_outside_the_target_database_is_not_exempt() {
+		let db = TestDb::new("").await;
+		// Owner of a *different* database: has the role, but the database under
+		// query is not inside its actor level, so checks stay on.
+		let elsewhere =
+			Session::for_level(Level::Database("test".to_owned(), "other".to_owned()), Role::Owner);
+		assert!(checks_perms(&db, &elsewhere, Action::View).await);
+		assert!(checks_perms(&db, &elsewhere, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn record_users_are_always_permission_checked() {
+		let db = TestDb::new("").await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			crate::types::PublicValue::String("user:tobie".to_owned()),
+		);
+		assert!(checks_perms(&db, &record, Action::View).await);
+		assert!(checks_perms(&db, &record, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn anonymous_is_exempt_only_while_server_auth_is_disabled() {
+		let anon = Session::default().with_ns("test").with_db("test");
+
+		let open = TestDb::new("").await;
+		assert!(!checks_perms(&open, &anon, Action::View).await);
+
+		let secured = TestDb::new_with_auth("").await;
+		assert!(checks_perms(&secured, &anon, Action::View).await);
+	}
+
+	#[tokio::test]
+	async fn skip_fetch_perms_disables_every_check() {
+		let db = TestDb::new_with_auth("").await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			crate::types::PublicValue::String("user:tobie".to_owned()),
+		);
+		let ctx = db.exec_ctx_as(&record, TransactionType::Read).await;
+
+		// Sanity: this identity is checked before the bypass is set.
+		assert!(should_check_perms(ctx.database().unwrap(), Action::View).unwrap());
+
+		let ExecutionContext::Database(mut inner) = ctx else {
+			panic!("exec_ctx_as builds a Database context");
+		};
+		inner.ns_ctx.root.skip_fetch_perms = true;
+		assert!(!should_check_perms(&inner, Action::View).unwrap());
+		assert!(!should_check_perms(&inner, Action::Edit).unwrap());
+	}
+
+	// =========================================================================
+	// validate_record_user_access
+	// =========================================================================
+
+	#[tokio::test]
+	async fn root_and_anonymous_identities_are_unconfined() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+	}
+
+	#[tokio::test]
+	async fn a_database_user_is_confined_to_its_own_database() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		// A database Viewer of test/test reading its own database is allowed.
+		let own = Session {
+			au: Arc::new(crate::iam::Auth::for_db(crate::iam::Role::Viewer, "test", "test")),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&own, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// The same principal whose authenticated level names a different database
+		// than the one it is operating in (the state left by an RPC `use` pivot)
+		// is denied at the read gate, before any table PERMISSIONS are consulted.
+		let pivoted = Session {
+			au: Arc::new(crate::iam::Auth::for_db(crate::iam::Role::Viewer, "test", "other")),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&pivoted, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::DbNotAllowed { .. })),
+			"expected DbNotAllowed, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_namespace_user_is_confined_to_its_own_namespace() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		// A namespace Viewer of `test` may read within its own namespace
+		// (a namespace level authorizes any database inside it).
+		let own_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_ns(crate::iam::Role::Viewer, "test")),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&own_ns, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// A namespace principal operating in a different namespace is refused.
+		let other_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_ns(crate::iam::Role::Viewer, "other")),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&other_ns, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::NsNotAllowed { .. })),
+			"expected NsNotAllowed, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_record_user_is_confined_to_its_own_namespace_and_database() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		let matching = Session::for_record("test", "test", "user", rid.clone());
+		let ctx = db.exec_ctx_as(&matching, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// The session names test/test (so the context resolves), but the token's
+		// own level names a different namespace / database.
+		let wrong_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_record(
+				"user:tobie".to_owned(),
+				"other",
+				"test",
+				"user",
+			)),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&wrong_ns, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::NsNotAllowed { .. })),
+			"expected NsNotAllowed, got {err:?}"
+		);
+
+		let wrong_db = Session {
+			au: Arc::new(crate::iam::Auth::for_record(
+				"user:tobie".to_owned(),
+				"test",
+				"other",
+				"user",
+			)),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&wrong_db, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::DbNotAllowed { .. })),
+			"expected DbNotAllowed, got {err:?}"
+		);
+	}
+
+	// =========================================================================
+	// check_permission_for_value
+	// =========================================================================
+
+	#[tokio::test]
+	async fn unconditional_arms_short_circuit_without_evaluating() {
+		let ctx = root_ctx();
+		let row = val("{ id: person:tobie }").await;
+
+		assert!(
+			check_permission_for_value(&PhysicalPermission::Allow, &row, None, &ctx).await.unwrap()
+		);
+		assert!(
+			!check_permission_for_value(&PhysicalPermission::Deny, &row, None, &ctx).await.unwrap()
+		);
+	}
+
+	#[tokio::test]
+	async fn a_conditional_permission_is_evaluated_against_the_record() {
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await);
+
+		let allowed = check_permission_for_value(&perm, &val("{ public: true }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(allowed);
+
+		let denied = check_permission_for_value(&perm, &val("{ public: false }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(!denied);
+
+		// A missing field is NONE, which is not truthy — deny, not error.
+		let absent = check_permission_for_value(&perm, &val("{ other: 1 }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(!absent);
+	}
+
+	#[tokio::test]
+	async fn value_param_binds_the_picked_field_for_field_level_checks() {
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(physical_expr("$value > 10", &ctx).await);
+		let row = val("{ score: 42 }").await;
+
+		let allowed =
+			check_permission_for_value(&perm, &row, Some(&Value::from(42)), &ctx).await.unwrap();
+		assert!(allowed);
+
+		let denied =
+			check_permission_for_value(&perm, &row, Some(&Value::from(3)), &ctx).await.unwrap();
+		assert!(!denied);
+	}
+
+	#[tokio::test]
+	async fn the_record_is_bound_as_the_document_root_so_parent_resolves() {
+		// `$parent` is the one reader that does not fall back to the current
+		// value, so binding only the value would leave this predicate falsy and
+		// deny every row.
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(
+			physical_expr("acl[WHERE $parent.owner = 'tobie'] != []", &ctx).await,
+		);
+
+		let row = val("{ owner: 'tobie', acl: [{ read: true }] }").await;
+		assert!(check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
+
+		let other = val("{ owner: 'jaime', acl: [{ read: true }] }").await;
+		assert!(!check_permission_for_value(&perm, &other, None, &ctx).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn skip_fetch_perms_allows_a_conditional_permission_unconditionally() {
+		let ctx = root_ctx();
+		// A predicate that would otherwise deny.
+		let perm = PhysicalPermission::Conditional(physical_expr("false", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+		assert!(!check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
+
+		let ExecutionContext::Root(mut root) = ctx else {
+			panic!("root_ctx builds a Root context");
+		};
+		root.skip_fetch_perms = true;
+		let inner = ExecutionContext::Root(root);
+		assert!(check_permission_for_value(&perm, &row, None, &inner).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn control_flow_out_of_a_predicate_becomes_an_error_not_a_panic() {
+		let ctx = root_ctx();
+		// BREAK has no surrounding loop inside a permission predicate, so it has
+		// nowhere to go and must surface as an error.
+		let perm = PhysicalPermission::Conditional(physical_expr("BREAK", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+
+		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
+		assert!(
+			err.to_string().contains("unexpected control flow"),
+			"expected the control-flow message, got {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn an_error_inside_a_predicate_is_carried_through_unwrapped() {
+		let ctx = root_ctx();
+		// A thrown error must stay downcastable rather than collapse to
+		// `Internal`, so a write conflict raised per row can still be retried.
+		let perm = PhysicalPermission::Conditional(physical_expr("THROW 'boom'", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+
+		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
+		assert!(err.to_string().contains("boom"), "expected the thrown message, got {err}");
+		assert!(
+			!err.to_string().contains("unexpected control flow"),
+			"a THROW is an error, not a stray control-flow signal: {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_conditional_permission_reads_through_a_record_link() {
+		// A table permission that dereferences a link needs a transaction, so
+		// this is the path that `root_ctx` cannot serve.
+		let db = TestDb::new(
+			"DEFINE TABLE org SCHEMALESS;
+			 DEFINE TABLE doc SCHEMALESS;
+			 CREATE org:acme SET public = true;
+			 CREATE org:secret SET public = false;
+			 CREATE doc:1 SET org = org:acme;
+			 CREATE doc:2 SET org = org:secret;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let perm = PhysicalPermission::Conditional(physical_expr("org.public = true", &ctx).await);
+
+		let doc1 = val("{ id: doc:1, org: org:acme }").await;
+		let doc2 = val("{ id: doc:2, org: org:secret }").await;
+		assert!(check_permission_for_value(&perm, &doc1, None, &ctx).await.unwrap());
+		assert!(!check_permission_for_value(&perm, &doc2, None, &ctx).await.unwrap());
+	}
+
+	// =========================================================================
+	// PhysicalTableSelect
+	// =========================================================================
+
+	#[tokio::test]
+	async fn the_ann_gate_reports_whole_index_decisions_up_front() {
+		let ctx = root_ctx();
+
+		let allow = PhysicalTableSelect::new(PhysicalPermission::Allow, ctx.clone());
+		assert_eq!(allow.allows_every_doc(), Some(true));
+
+		let deny = PhysicalTableSelect::new(PhysicalPermission::Deny, ctx.clone());
+		assert_eq!(deny.allows_every_doc(), Some(false));
+
+		// Conditional cannot be decided for the whole index, so the search must
+		// gate each candidate individually.
+		let conditional = PhysicalTableSelect::new(
+			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
+			ctx.clone(),
+		);
+		assert_eq!(conditional.allows_every_doc(), None);
+	}
+
+	#[tokio::test]
+	async fn the_ann_gate_decides_a_candidate_with_the_same_predicate() {
+		let ctx = root_ctx();
+		let gate = PhysicalTableSelect::new(
+			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
+			ctx.clone(),
+		);
+
+		let rid = Arc::new(RecordId {
+			table: "doc".into(),
+			key: crate::val::RecordIdKey::Number(1),
+		});
+		let allowed = Arc::new(Record::new(val("{ public: true }").await));
+		let denied = Arc::new(Record::new(val("{ public: false }").await));
+
+		let mut stack = reblessive::tree::TreeStack::new();
+		let (yes, no) = stack
+			.enter(|stk| async {
+				let yes = gate.allows_doc(stk, &rid, &allowed).await.unwrap();
+				let no = gate.allows_doc(stk, &rid, &denied).await.unwrap();
+				(yes, no)
+			})
+			.finish()
+			.await;
+		assert!(yes);
+		assert!(!no);
+	}
 }

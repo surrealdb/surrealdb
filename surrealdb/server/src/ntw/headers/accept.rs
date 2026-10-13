@@ -21,13 +21,11 @@ pub enum Accept {
 impl std::fmt::Display for Accept {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Accept::TextPlain => f.write_str(surrealdb_core::api::format::PLAIN),
-			Accept::ApplicationJson => f.write_str(surrealdb_core::api::format::JSON),
-			Accept::ApplicationCbor => f.write_str(surrealdb_core::api::format::CBOR),
-			Accept::ApplicationOctetStream => {
-				f.write_str(surrealdb_core::api::format::OCTET_STREAM)
-			}
-			Accept::ApplicationFlatbuffers => f.write_str(surrealdb_core::api::format::FLATBUFFERS),
+			Accept::TextPlain => f.write_str(surrealdb_rpc::format::PLAIN),
+			Accept::ApplicationJson => f.write_str(surrealdb_rpc::format::JSON),
+			Accept::ApplicationCbor => f.write_str(surrealdb_rpc::format::CBOR),
+			Accept::ApplicationOctetStream => f.write_str(surrealdb_rpc::format::OCTET_STREAM),
+			Accept::ApplicationFlatbuffers => f.write_str(surrealdb_rpc::format::FLATBUFFERS),
 		}
 	}
 }
@@ -46,12 +44,12 @@ impl Header for Accept {
 			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
 		match parts[0] {
-			surrealdb_core::api::format::ANY => Ok(Accept::ApplicationJson),
-			surrealdb_core::api::format::PLAIN => Ok(Accept::TextPlain),
-			surrealdb_core::api::format::JSON => Ok(Accept::ApplicationJson),
-			surrealdb_core::api::format::CBOR => Ok(Accept::ApplicationCbor),
-			surrealdb_core::api::format::OCTET_STREAM => Ok(Accept::ApplicationOctetStream),
-			surrealdb_core::api::format::FLATBUFFERS => Ok(Accept::ApplicationFlatbuffers),
+			surrealdb_rpc::format::ANY => Ok(Accept::ApplicationJson),
+			surrealdb_rpc::format::PLAIN => Ok(Accept::TextPlain),
+			surrealdb_rpc::format::JSON => Ok(Accept::ApplicationJson),
+			surrealdb_rpc::format::CBOR => Ok(Accept::ApplicationCbor),
+			surrealdb_rpc::format::OCTET_STREAM => Ok(Accept::ApplicationOctetStream),
+			surrealdb_rpc::format::FLATBUFFERS => Ok(Accept::ApplicationFlatbuffers),
 			_ => Err(headers::Error::invalid()),
 		}
 	}

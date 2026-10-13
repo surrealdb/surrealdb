@@ -11,10 +11,11 @@ use futures::FutureExt as _;
 use provisioner::Provisioner;
 use semver::Version;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::{gql, syn};
+use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
+use surrealdb_gql as gql;
+use surrealdb_rpc::capabilities::ExperimentalTarget;
+use surrealdb_syn::parser;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
@@ -73,11 +74,20 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
 		// Only run test for which run is enabled.
 		.with_filter(|x| x.test.config.parsed.test.run)
+		// A `[test.chain]` test has no meaning here. Its fixture is created by
+		// the chain runner's `setup` on whichever version first supports the
+		// feature, and its body asserts against `$hop`, which only a walk binds
+		// — run standalone it would query a table nothing created.
+		.with_filter(|x| x.test.config.parsed.test.chain.is_none())
 		// Only run test for this backend.
 		.with_filter(|x| {
 			let config_backend = &x.test.config.parsed.env.backend;
 			config_backend.is_empty() || config_backend.contains(&backend)
 		})
+		// The memory backend no longer supports versioned (MVCC time-travel)
+		// queries after the surrealmx 0.23 upgrade; versioned coverage runs on
+		// the rocksdb and surrealkv backends, which retain native versioning.
+		.with_filter(|x| !x.test.config.parsed.env.versioned || !matches!(backend, Backend::Memory))
 		// Run for all config the test has configured.
 		.with_expander(|x| {
 			x.test
@@ -121,6 +131,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 		if let Some(x) = &x.test.config.parsed.test.importing_version
 			&& !x.matches(&core_version)
+		{
+			return false;
+		}
+
+		// A feature this build cannot create is not testable against it, and the
+		// test's fixture would fail to parse or apply. Matched the same way the
+		// upgrade expander matches it: strict semver rejects every prerelease,
+		// and the workspace version is one, so a strict check here would drop
+		// every gated test from this runner.
+		if let Some(x) = &x.test.config.parsed.test.introduced
+			&& !crate::version::version_matches(x, &core_version)
 		{
 			return false;
 		}
@@ -349,13 +370,11 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// infrastructure that legitimately persists, not leaked test data.
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic", b"/!tl"];
 
-	let txn = dbs
-		.transaction(
-			surrealdb_core::kvs::TransactionType::Read,
-			surrealdb_core::kvs::LockType::Pessimistic,
-		)
-		.await?;
-	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;
+	// The point of this check is to find keys the declared keyspace does *not*
+	// describe, which is the one scan no key bound can express.
+	let range = surrealdb_kvs::key::RawRange::every_key();
+	let res = txn.keys_raw(range, 1000, 0, None).await?;
 	txn.cancel().await?;
 	Ok(res
 		.into_iter()
@@ -462,7 +481,7 @@ async fn run_test_body(
 
 	let (did_timeout, result) = match run.case.test.dialect {
 		Dialect::SurrealQl => {
-			let settings = syn::parser::ParserSettings {
+			let settings = parser::ParserSettings {
 				files_enabled: dbs
 					.get_capabilities()
 					.allows_experimental(&ExperimentalTarget::Files),
@@ -473,7 +492,7 @@ async fn run_test_body(
 			};
 
 			let source = &run.case.test.source.as_bytes();
-			let mut parser = syn::parser::Parser::new_with_settings(source, settings);
+			let mut parser = parser::Parser::new_with_settings(source, settings);
 			let mut stack = reblessive::Stack::new();
 
 			let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
@@ -502,16 +521,16 @@ async fn run_test_body(
 		}
 		Dialect::Gql => {
 			// GQL has no capability-gated syntax; the default recursion
-			// limit matches `syn::parser::ParserSettings::default()` above.
+			// limit matches `parser::ParserSettings::default()` above.
 			// Lowering produces a `PreparedGqlQuery` (a `MatchPlan` embedded
-			// in a logical plan); it executes through the streaming engine via
-			// `process_gql`, so `.gql` cases default away from the
-			// compute-only strategy (see `Dialect::Gql` default in the
-			// schema's planner-strategy seam).
+			// in a logical plan), which is submitted as an already-lowered
+			// `QuerySource::Plan`. It executes through the streaming engine,
+			// so `.gql` cases default away from the compute-only strategy
+			// (see `Dialect::Gql` default in the schema's planner-strategy
+			// seam).
 			let settings = gql::GqlParserSettings::default();
 			let source = &run.case.test.source.as_bytes();
-			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings)
-			{
+			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings) {
 				Ok(x) => x,
 				Err(e) => {
 					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(
@@ -521,7 +540,7 @@ async fn run_test_body(
 			};
 
 			let start = Instant::now();
-			let result = dbs.process_gql(query, &*session, None).await;
+			let result = dbs.run(QueryRequest::new(QuerySource::Plan(query.0), &*session)).await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result
 				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
@@ -621,14 +640,29 @@ async fn cleanup_environment(dbs: &Arc<Datastore>, session: &Session) -> Result<
 	// datastore with no concurrent readers, so the snapshot-safety grace that
 	// production uses is unnecessary here and would leave residue for the
 	// retained-key check.
-	Datastore::reclaim_tombstones(
-		Arc::clone(dbs),
-		std::time::Duration::from_secs(1),
-		std::time::Duration::ZERO,
-		tokio_util::sync::CancellationToken::new(),
-	)
-	.await
-	.context("failed to drain tombstone reclaim queue")?;
+	// One pass deletes a bounded number of keys, so draining a prefix larger than
+	// that budget takes several. Repeat until a pass reads no queue entry at all,
+	// which is the only state that leaves nothing behind for the retained-key
+	// check — `/!rc` is not one of the prefixes it tolerates.
+	//
+	// Bounded rather than unconditional: an entry the engine cannot act on stays
+	// queued by design, so keying the loop on the queue being read would hang the
+	// harness on it. Falling out leaves the residue for the retained-key check to
+	// report, which names the test and the keys instead of stalling the run.
+	const MAX_RECLAIM_PASSES: usize = 64;
+	for _ in 0..MAX_RECLAIM_PASSES {
+		let (batches, _) = Datastore::reclaim_tombstones(
+			Arc::clone(dbs),
+			std::time::Duration::from_secs(1),
+			std::time::Duration::ZERO,
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await
+		.context("failed to drain tombstone reclaim queue")?;
+		if batches == 0 {
+			break;
+		}
+	}
 
 	Ok(())
 }
@@ -638,9 +672,8 @@ mod tests {
 	use std::sync::Arc;
 	use std::time::SystemTime;
 
-	use surrealdb_core::dbs::Capabilities;
-	use surrealdb_core::dbs::capabilities::Targets;
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::{Capabilities, Targets};
 
 	use super::*;
 	use crate::tests::case::{CaseId, Dialect, Origin, TestCase};
@@ -651,13 +684,14 @@ mod tests {
 	/// provisioner hands out (all capabilities + experimental targets, auth on).
 	async fn base_datastore() -> Arc<Datastore> {
 		let ds = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
 			.with_auth(true)
 			.build_with_path("memory")
 			.await
 			.unwrap();
 		ds.bootstrap().await.unwrap();
-		Arc::new(ds)
+		ds
 	}
 
 	fn case_from_source(id: usize, path: &str, source: &str) -> Arc<TestCase> {
@@ -684,6 +718,9 @@ mod tests {
 			case: Arc::new(CaseImports {
 				test,
 				imports,
+				chain_setup: Vec::new(),
+				chain_mutate: Vec::new(),
+				repairs: Vec::new(),
 			}),
 			config: TestRunConfig {
 				planner_config: NewPlannerStrategyConfig::ComputeOnly,

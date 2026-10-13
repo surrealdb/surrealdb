@@ -14,7 +14,7 @@ error = "An error occurred: value::expect assertion failed"
 error = "An error occurred: value::expect assertion failed with message: 'Should equal nine'"
 
 [[test.results]]
-error = "An error occurred: value::expect assertion failed"
+error = "An error occurred: value::expect assertion failed with message: 1"
 
 [[test.results]]
 value = "[{ num: 2 }, { num: 4 }, { num: 6 }]"

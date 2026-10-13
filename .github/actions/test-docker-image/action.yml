@@ -1,0 +1,181 @@
+name: 'Test Docker image'
+description: 'Standardised image gate: Trivy scan + smoke test (version, startup, HTTP health) for the engine and downstream images. With expect-start-failure it instead asserts the server refuses to start (the licence-enforcing image).'
+
+inputs:
+  image-ref:
+    description: 'Image reference to scan and smoke-test (local tag or registry ref)'
+    required: true
+  platform:
+    description: 'Platform to run the smoke test on'
+    required: false
+    default: 'linux/amd64'
+  start-args:
+    description: 'Arguments passed to the image entrypoint to start the server'
+    required: false
+    default: 'start --log trace memory'
+  container-port:
+    description: 'Container port the server listens on. It is published to an EPHEMERAL host port (chosen by Docker), so parallel smoke tests on the same host never collide.'
+    required: false
+    default: '8000'
+  ready-timeout-seconds:
+    description: 'How long to wait for /health to respond before failing'
+    required: false
+    default: '60'
+  trivy-severity:
+    description: 'Trivy severities that fail the scan'
+    required: false
+    default: 'CRITICAL,HIGH'
+  trivy-vuln-type:
+    description: 'Trivy vulnerability types to scan'
+    required: false
+    default: 'os,library'
+  expect-start-failure:
+    description: >-
+      When 'true', invert the smoke test: the server must REFUSE to start rather
+      than become healthy. Used for the licence-enforcing image, which exits
+      non-zero at startup when no licence key is configured. The scan still runs;
+      the container must exit non-zero within ready-timeout-seconds, must never
+      answer /health, and its logs must contain refusal-pattern.
+    required: false
+    default: 'false'
+  refusal-pattern:
+    description: >-
+      Substring the container logs must contain when expect-start-failure is
+      'true', so an unrelated crash is not mistaken for a licence refusal. The
+      enforcing build logs "refusing to start: <reason>" at error level.
+    required: false
+    default: 'refusing to start:'
+
+runs:
+  using: 'composite'
+  steps:
+    # OS/library scan. Fail on CRITICAL/HIGH so a vulnerable image never becomes
+    # a promotable artifact (the pushed engine image / the stitched downstream manifest).
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: 'table'
+        exit-code: '1'
+        vuln-type: ${{ inputs.trivy-vuln-type }}
+        severity: ${{ inputs.trivy-severity }}
+
+    # Functional smoke test: the entrypoint is the server binary, so `version`
+    # runs it directly; then boot the server and wait for the HTTP /health
+    # endpoint. Polling /health (rather than exec-ing the binary's readiness
+    # subcommand) is binary-agnostic, so the same test works for the engine and
+    # downstream images, whose entrypoint binaries and readiness subcommands differ.
+    #
+    # With expect-start-failure the startup check is inverted: the licence-enforcing
+    # image must refuse to start (non-zero exit, never healthy, refusal logged) when
+    # no licence key is configured. `version` still runs first (the one cheap check
+    # that the binary is runnable at all); only the health poll is replaced by the
+    # refusal assertion.
+    - name: Smoke test the image
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        PLATFORM: ${{ inputs.platform }}
+        START_ARGS: ${{ inputs.start-args }}
+        CONTAINER_PORT: ${{ inputs.container-port }}
+        READY_TIMEOUT: ${{ inputs.ready-timeout-seconds }}
+        EXPECT_START_FAILURE: ${{ inputs.expect-start-failure }}
+        REFUSAL_PATTERN: ${{ inputs.refusal-pattern }}
+      run: |
+        set -euo pipefail
+
+        # Publish to an EPHEMERAL host port (127.0.0.1:0) rather than a fixed one:
+        # this action's matrix legs (prod/dev) can land on the same self-hosted host
+        # sharing one Docker daemon, and a fixed host port would collide.
+        # START_ARGS is intentionally word-split into separate CLI arguments.
+        start_container() {
+          # shellcheck disable=SC2086
+          docker run -d -p "127.0.0.1:0:${CONTAINER_PORT}" --platform "$PLATFORM" "$IMAGE_REF" ${START_ARGS}
+        }
+
+        if [ "${EXPECT_START_FAILURE}" = "true" ]; then
+          echo "== ${IMAGE_REF}: version =="
+          docker run --platform "$PLATFORM" --rm "$IMAGE_REF" version
+
+          echo "== ${IMAGE_REF}: startup MUST be refused (licence enforcement, no key) =="
+          cid=$(start_container)
+          trap 'docker stop "$cid" >/dev/null 2>&1 || true; docker rm "$cid" >/dev/null 2>&1 || true' EXIT
+
+          refused=false
+          exit_code=
+          for _ in $(seq 1 "$READY_TIMEOUT"); do
+            running=$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)
+            if [ "$running" = "false" ]; then
+              exit_code=$(docker inspect -f '{{.State.ExitCode}}' "$cid" 2>/dev/null || echo unknown)
+              refused=true
+              break
+            fi
+            # It must never begin serving. If /health ever answers 200, enforcement
+            # is not actually compiled in, a fail-open image we must not ship.
+            hostport=$(docker port "$cid" "${CONTAINER_PORT}/tcp" 2>/dev/null | head -n1 | sed 's/.*://' || true)
+            if [ -n "$hostport" ]; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${hostport}/health" || echo 000)
+              if [ "$code" = "200" ]; then
+                echo "::error::${IMAGE_REF} became healthy, but licence enforcement should have refused startup"
+                echo "---- container logs ----"
+                docker logs "$cid" || true
+                exit 1
+              fi
+            fi
+            sleep 1
+          done
+
+          logs="$(docker logs "$cid" 2>&1 || true)"
+          echo "---- container logs ----"
+          printf '%s\n' "$logs"
+
+          if [ "$refused" != "true" ]; then
+            echo "::error::${IMAGE_REF} did not exit within ${READY_TIMEOUT}s; enforcement should refuse startup promptly"
+            exit 1
+          fi
+          if [ "$exit_code" = "0" ]; then
+            echo "::error::${IMAGE_REF} exited 0; a licence refusal must be a non-zero exit"
+            exit 1
+          fi
+          if ! printf '%s' "$logs" | grep -qF -- "${REFUSAL_PATTERN}"; then
+            echo "::error::${IMAGE_REF} exited ${exit_code} but its logs lack '${REFUSAL_PATTERN}'; the failure may be unrelated to licence enforcement"
+            exit 1
+          fi
+          echo "Confirmed: ${IMAGE_REF} refused to start without a licence (exit ${exit_code}, matched '${REFUSAL_PATTERN}')."
+          exit 0
+        fi
+
+        echo "== ${IMAGE_REF}: version =="
+        docker run --platform "$PLATFORM" --rm "$IMAGE_REF" version
+
+        echo "== ${IMAGE_REF}: startup =="
+        cid=$(start_container)
+        trap 'docker stop "$cid" >/dev/null 2>&1 || true; docker rm "$cid" >/dev/null 2>&1 || true' EXIT
+
+        # Ask Docker which host port it mapped the container port to.
+        hostport=$(docker port "$cid" "${CONTAINER_PORT}/tcp" 2>/dev/null | head -n1 | sed 's/.*://' || true)
+        if [ -z "$hostport" ]; then
+          echo "::error::Could not determine the mapped host port for ${IMAGE_REF}"
+          docker logs "$cid" || true
+          exit 1
+        fi
+        health="http://127.0.0.1:${hostport}/health"
+
+        echo "Waiting up to ${READY_TIMEOUT}s for ${health} ..."
+        ready=false
+        for _ in $(seq 1 "$READY_TIMEOUT"); do
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$health" || echo 000)
+          if [ "$code" = "200" ]; then
+            ready=true
+            echo "Container is healthy (HTTP ${code})"
+            break
+          fi
+          sleep 1
+        done
+
+        if [ "$ready" != "true" ]; then
+          echo "::error::${IMAGE_REF} did not become healthy within ${READY_TIMEOUT}s"
+          echo "---- container logs ----"
+          docker logs "$cid" || true
+          exit 1
+        fi

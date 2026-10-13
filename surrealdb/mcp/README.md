@@ -101,8 +101,9 @@ forward the audit target to your SIEM as-is.
 
 ## Configuration
 
-All MCP-specific knobs are read once on first use via `LazyLock` from
-their `SURREAL_MCP_*` environment variables. HTTP body limits live with
+All MCP-specific knobs are loaded once at service construction from their
+`SURREAL_MCP_*` environment variables into an `McpConfig`, then shared via
+an `Arc` across the service and every session. HTTP body limits live with
 the rest of the server's body caps.
 
 | Variable | Default | Effect |
@@ -111,6 +112,10 @@ the rest of the server's body caps.
 | `SURREAL_MCP_MAX_RESULT_BYTES` | 256 KiB | Per-call cap on serialized tool / resource bodies; over-cap responses are replaced with a truncation marker. `0` disables. |
 | `SURREAL_MCP_RUN_MAX_ARGS` | 64 | Maximum arguments for a single `run` invocation. |
 | `SURREAL_MCP_PARAMS_MAX_KEYS` | 256 | Maximum top-level keys in a `parameters` / `*_data` JSON object. |
+| `SURREAL_MCP_PARAMS_MAX_QL_BYTES` | 4 KiB | Maximum byte length of a single `$ql` SurrealQL pass-through string inside a `*_data` payload. Cannot be disabled (values ≤ 0 fall back to the default). |
+| `SURREAL_MCP_SCHEMA_RESOURCE_MAX_TABLES` | 200 | Maximum tables the database-level schema resource enriches with per-table fields / indexes / events; tables beyond the cap keep their bare `DEFINE TABLE` and the body carries a `tables_truncated_at` marker. Cannot be disabled (values ≤ 0 fall back to the default). |
+| `SURREAL_MCP_ALLOWED_HOSTS` | loopback-only | Comma-separated exact hostnames the HTTP `/mcp` transport accepts in the `Host` header (drives rmcp's DNS-rebinding guard). Empty keeps rmcp's loopback default (`localhost`, `127.0.0.1`, `::1`); a non-empty list *replaces* it, so include `localhost` yourself if you still need loopback. Entries without a port match any port. Ignored when `SURREAL_MCP_ALLOW_ALL_HOSTS` is set. |
+| `SURREAL_MCP_ALLOW_ALL_HOSTS` | `false` | Disable the `Host`-header allowlist entirely (accept any `Host`). Escape hatch for deployments behind a trusted proxy / load balancer. Takes precedence over `SURREAL_MCP_ALLOWED_HOSTS`. |
 | `SURREAL_HTTP_MAX_MCP_BODY_SIZE` | 4 MiB | Maximum HTTP request body for `/mcp`. |
 
 JSON nesting depth is not capped at the MCP layer because `serde_json`

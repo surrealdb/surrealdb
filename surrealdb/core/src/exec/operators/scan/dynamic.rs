@@ -1,14 +1,17 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
+	table_read_restricted_fields,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, NamespaceId, table_select_permission};
+use crate::err::EngineError;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::pipeline::ScanPipeline;
@@ -18,7 +21,8 @@ use crate::exec::permission::{
 };
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
-	resolve_condition_params, resolve_projection_field_idioms, strip_knn_from_condition,
+	resolve_condition_params, resolve_projection_field_idioms,
+	strip_knn_and_matches_from_condition, strip_knn_from_condition,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
 use crate::exec::{
@@ -29,8 +33,8 @@ use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
-use crate::key::record;
+use crate::key::schema::RecordPrefix;
+use crate::kvs::Direction;
 use crate::val::{TableName, Value};
 
 /// Full table scan - iterates over all records in a table.
@@ -79,6 +83,10 @@ pub struct DynamicScan {
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
 	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
+	/// Whether the scan is a locked read (`SELECT ... FOR UPDATE`). The
+	/// source must then resolve to a specific record id at execution time;
+	/// every other value shape is rejected.
+	pub(crate) for_update: bool,
 }
 
 impl DynamicScan {
@@ -108,12 +116,19 @@ impl DynamicScan {
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context: None,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
+			for_update: false,
 		}
 	}
 
 	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
 	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
 		self.pre_decode_filter_status = status;
+		self
+	}
+
+	/// Set whether the scan performs a locked read (`FOR UPDATE`).
+	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 
@@ -144,6 +159,9 @@ impl ExecOperator for DynamicScan {
 		}
 		if let Some(s) = self.pre_decode_filter_status.explain_text() {
 			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
+		}
+		if self.for_update {
+			attrs.push(("for_update".to_string(), "true".to_string()));
 		}
 		attrs
 	}
@@ -187,8 +205,15 @@ impl ExecOperator for DynamicScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but expressions could contain subqueries with mutations.
-		let mut mode = self.source.access_mode();
+		// Scan is read-only, but expressions could contain subqueries with
+		// mutations, and a locked read registers conflict-detection state on
+		// the storage engine, which requires a writeable transaction.
+		let mut mode = if self.for_update {
+			AccessMode::ReadWrite
+		} else {
+			AccessMode::ReadOnly
+		};
+		mode = mode.combine(self.source.access_mode());
 		if let Some(ref version) = self.version {
 			mode = mode.combine(version.access_mode());
 		}
@@ -227,9 +252,10 @@ impl ExecOperator for DynamicScan {
 		let start_expr = self.start.clone();
 		let knn_context = self.knn_context.clone();
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
+		let for_update = self.for_update;
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("Scan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
@@ -238,149 +264,172 @@ impl ExecOperator for DynamicScan {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let table_value = source_expr.evaluate(eval_ctx).await?;
 
+			// FOR UPDATE targets must resolve to specific record ids so the
+			// locked read is never silently skipped for other shapes.
+			if for_update && !matches!(table_value, Value::RecordId(_)) {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::Query {
+					message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+				})));
+			}
+
 			// Determine scan target: either a table name or a record ID
 			let table_name = match table_value {
 				Value::Table(t) => t,
-			Value::RecordId(rid) => {
-				// === RECORD LOOKUP (point or range) ===
-				// Delegate to the shared execute_record_lookup helper which
-				// handles both point lookups and range scans. For plan-time-
-				// known RecordIds the planner emits RecordLookup directly;
-				// this path handles runtime-discovered RecordIds (e.g. from
-				// `type::thing(...)` or other dynamic expressions).
-				//
-				// The planner marks predicate/limit/start as consumed for
-				// FunctionCall/Postfix sources, so the outer Filter/Limit
-				// operators are removed. We must forward the pushdowns here
-				// to ensure WHERE/LIMIT/START are still applied.
+				Value::RecordId(rid) => {
+					// === RECORD LOOKUP (point or range) ===
+					// Delegate to the shared execute_record_lookup helper which
+					// handles both point lookups and range scans. For plan-time-
+					// known RecordIds the planner emits RecordLookup directly;
+					// this path handles runtime-discovered RecordIds (e.g. from
+					// `type::thing(...)` or other dynamic expressions).
+					//
+					// The planner marks predicate/limit/start as consumed for
+					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// operators are removed. We must forward the pushdowns here
+					// to ensure WHERE/LIMIT/START are still applied.
 
-				// Evaluate VERSION expression
-				let version: Option<u64> = match &version {
-					Some(expr) => {
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-						let v = expr.evaluate(eval_ctx).await?;
-						Some(
-							v.cast_to::<crate::val::Datetime>()
-								.map_err(|e| anyhow::anyhow!("{e}"))?
-								.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
-						)
+					// Evaluate VERSION expression
+					let version: Option<u64> = match &version {
+						Some(expr) => {
+							let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+							let v = expr.evaluate(eval_ctx).await?;
+							Some(
+								v.cast_to::<crate::val::Datetime>()
+									.map_err(|e| anyhow::anyhow!("{e}"))?
+									.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
+							)
+						}
+						None => ctx.version_stamp(),
+					};
+
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
+
+					// Early exit if limit is 0. A FOR UPDATE source must still
+					// reach `execute_record_lookup` so the locked read
+					// registers the key for conflict detection: the lookup
+					// performs the read first and discards the row for a zero
+					// limit afterwards, keeping this plan in agreement with
+					// the literal RecordIdScan plan for the same query.
+					if limit_val == Some(0) && !for_update {
+						return Ok(());
 					}
-					None => ctx.version_stamp(),
-				};
 
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
+					let results = super::record_id::execute_record_lookup(
+						&rid,
+						version,
+						for_update,
+						check_perms,
+						needed_fields.as_ref(),
+						&ctx,
+						predicate.as_ref(),
+						limit_val,
+						start_val,
+						None,
+						&pre_decode_filter_status,
+					)
+					.await?;
 
-				// Early exit if limit is 0
-				if limit_val == Some(0) {
-					return;
+					if !results.is_empty() {
+						yielder.emit(ValueBatch::new(results)).await;
+					}
+					return Ok(());
 				}
+				Value::Array(arr) => {
+					// === ARRAY SOURCE ===
+					// The planner marks predicate/limit/start as consumed for
+					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// operators are removed. We must apply them here.
 
-				let results = super::record_id::execute_record_lookup(
-					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					predicate.as_ref(), limit_val, start_val, None,
-					&pre_decode_filter_status,
-				).await?;
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
 
-				if !results.is_empty() {
-					yield ValueBatch { values: results };
-				}
-				return;
-			}
-			Value::Array(arr) => {
-				// === ARRAY SOURCE ===
-				// The planner marks predicate/limit/start as consumed for
-				// FunctionCall/Postfix sources, so the outer Filter/Limit
-				// operators are removed. We must apply them here.
+					// Early exit if limit is 0
+					if limit_val == Some(0) {
+						return Ok(());
+					}
 
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
-
-				// Early exit if limit is 0
-				if limit_val == Some(0) {
-					return;
-				}
-
-				// Apply pushed-down predicate
-				let mut values = arr.0;
-				if let Some(ref pred) = predicate {
-					let mut write_idx = 0;
-					for read_idx in 0..values.len() {
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
-						if pred.evaluate(eval_ctx).await?.is_truthy() {
-							if write_idx != read_idx {
-								values.swap(write_idx, read_idx);
+					// Apply pushed-down predicate
+					let mut values = arr.0;
+					if let Some(ref pred) = predicate {
+						let mut write_idx = 0;
+						for read_idx in 0..values.len() {
+							let eval_ctx =
+								EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
+							if pred.evaluate(eval_ctx).await?.is_truthy() {
+								if write_idx != read_idx {
+									values.swap(write_idx, read_idx);
+								}
+								write_idx += 1;
 							}
-							write_idx += 1;
+						}
+						values.truncate(write_idx);
+					}
+
+					// Apply start offset
+					if start_val > 0 {
+						if start_val >= values.len() {
+							return Ok(());
+						}
+						values.drain(..start_val);
+					}
+
+					// Apply limit
+					if let Some(limit) = limit_val {
+						values.truncate(limit);
+					}
+
+					if !values.is_empty() {
+						yielder.emit(ValueBatch::new(values)).await;
+					}
+					return Ok(());
+				}
+				// For any other value type, yield as a single row.
+				// This matches legacy FROM behavior for non-table values.
+				other => {
+					// === SCALAR SOURCE ===
+					// Same pushdown logic as the array branch above.
+
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
+
+					// Early exit if limit is 0 or start skips past the single value
+					if limit_val == Some(0) || start_val > 0 {
+						return Ok(());
+					}
+
+					// Apply pushed-down predicate
+					if let Some(ref pred) = predicate {
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
+						if !pred.evaluate(eval_ctx).await?.is_truthy() {
+							return Ok(());
 						}
 					}
-					values.truncate(write_idx);
+
+					yielder.emit(ValueBatch::new(vec![other])).await;
+					return Ok(());
 				}
-
-				// Apply start offset
-				if start_val > 0 {
-					if start_val >= values.len() {
-						return;
-					}
-					values.drain(..start_val);
-				}
-
-				// Apply limit
-				if let Some(limit) = limit_val {
-					values.truncate(limit);
-				}
-
-				if !values.is_empty() {
-					yield ValueBatch { values };
-				}
-				return;
-			}
-			// For any other value type, yield as a single row.
-			// This matches legacy FROM behavior for non-table values.
-			other => {
-				// === SCALAR SOURCE ===
-				// Same pushdown logic as the array branch above.
-
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
-
-				// Early exit if limit is 0 or start skips past the single value
-				if limit_val == Some(0) || start_val > 0 {
-					return;
-				}
-
-				// Apply pushed-down predicate
-				if let Some(ref pred) = predicate {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
-					if !pred.evaluate(eval_ctx).await?.is_truthy() {
-						return;
-					}
-				}
-
-				yield ValueBatch { values: vec![other] };
-				return;
-			}
 			};
 
 			// === TABLE SCAN PATH ===
@@ -423,11 +472,8 @@ impl ExecOperator for DynamicScan {
 			}
 
 			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => Permission::None,
-				};
-				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+				let catalog_perm = table_select_permission(table_def.as_deref());
+				convert_permission_to_physical_runtime(catalog_perm, &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -436,15 +482,16 @@ impl ExecOperator for DynamicScan {
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			if limit_val == Some(0) {
-				return;
+				return Ok(());
 			}
 
 			// Eagerly initialize field state (computed fields + field permissions)
-			let field_state = build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
+			let field_state =
+				build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 
 			// SECURITY (value-ordering oracle): runtime counterpart to the
 			// plan-time guard in `planner/select`. The plan-time guard only
@@ -472,12 +519,19 @@ impl ExecOperator for DynamicScan {
 
 			// Row-filtering (permissions, WHERE) prevents positional pushdown;
 			// row-modifying ops (computed fields, field perms) do not.
-			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
-				&select_permission, predicate.as_ref(),
-			);
+			let needs_row_filtering =
+				ScanPipeline::compute_needs_row_filtering(&select_permission, predicate.as_ref());
 
-			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
-			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
+			let pre_skip = if !needs_row_filtering {
+				start_val
+			} else {
+				0
+			};
+			let effective_storage_limit = if !needs_row_filtering {
+				limit_val
+			} else {
+				None
+			};
 
 			let direction = determine_scan_direction(order.as_ref());
 
@@ -488,13 +542,14 @@ impl ExecOperator for DynamicScan {
 				&pre_decode_filter_status,
 				&field_state,
 				check_perms,
-				ctx.ctx().config.idiom_recursion_limit,
+				ctx.ctx().config.exec.idiom_recursion_limit,
 			);
 
 			let (mut source, applied_pre_skip) = {
 				// Table scan (with runtime index selection)
 				resolve_table_scan_stream(
-					&ctx, TableScanConfig {
+					&ctx,
+					TableScanConfig {
 						ns_id: ns.namespace_id,
 						db_id: db.database_id,
 						table_name,
@@ -506,37 +561,43 @@ impl ExecOperator for DynamicScan {
 						storage_limit: effective_storage_limit,
 						pre_skip,
 						has_pushed_limit: effective_storage_limit.is_some(),
-						limit_hint: limit_val.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
+						limit_hint: limit_val
+							.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
 						knn_context: knn_context.clone(),
 						pre_decode_filter,
+						field_permissions: Arc::clone(&field_state.field_permissions),
 					},
-				).await?
+				)
+				.await?
 			};
 
 			// Build the pipeline with start adjusted for any pre-skipping.
 			let mut pipeline = ScanPipeline::new(
-				select_permission, predicate, field_state,
-				check_perms, limit_val, start_val.saturating_sub(applied_pre_skip),
+				select_permission,
+				predicate,
+				field_state,
+				check_perms,
+				limit_val,
+				start_val.saturating_sub(applied_pre_skip),
 			);
 
 			// Unified consumption loop for all stream-based sources.
 			while let Some(batch_result) = source.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
-					Err(ControlFlow::Err(
-						anyhow::anyhow!(crate::err::Error::QueryCancelled),
-					))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 				}
 				let mut batch = batch_result?;
-				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
-				if !batch.values.is_empty() {
-					yield ValueBatch { values: batch.values };
+				let cont = pipeline.process_batch(batch.values_mut(), &ctx).await?;
+				if !batch.is_empty() {
+					yielder.emit(batch).await;
 				}
 				if !cont {
 					break;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "Scan", &self.metrics))
 	}
@@ -578,6 +639,29 @@ fn order_touches_restricted_select_field(
 		.any(|o| field_permissions.iter().any(|(field, _)| o.value.starts_with(field.0.as_slice())))
 }
 
+/// SECURITY: whether any column of an index is governed by a non-`Full` SELECT
+/// permission for the current actor.
+///
+/// An index scan answers its predicate from index entries and drops the covered
+/// condition, so the document-level reduction never runs on the data the
+/// decision was made from — index membership then reports something about a
+/// value the actor may not read. Withholding the index leaves the predicate to
+/// be answered from the reduced document.
+///
+/// `field_permissions` is empty when permission enforcement is skipped
+/// (owner/root), so a privileged actor never matches here. Mirrors the
+/// plan-time `RestrictedPrefixes::index_touches` guard in `planner/select`.
+fn index_touches_restricted_select_field(
+	cols: &[crate::expr::Idiom],
+	field_permissions: &[(crate::expr::Idiom, PhysicalPermission)],
+) -> bool {
+	if field_permissions.is_empty() {
+		return false;
+	}
+	cols.iter()
+		.any(|col| field_permissions.iter().any(|(field, _)| col.starts_with(field.0.as_slice())))
+}
+
 /// Configuration bundle for [`resolve_table_scan_stream`].
 struct TableScanConfig {
 	ns_id: NamespaceId,
@@ -586,7 +670,7 @@ struct TableScanConfig {
 	cond: Option<Cond>,
 	order: Option<Ordering>,
 	with: Option<With>,
-	direction: ScanDirection,
+	direction: Direction,
 	/// VERSION expression for time-travel queries (evaluated inside
 	/// [`resolve_table_scan_stream`] and passed to child operators).
 	version: Option<Arc<dyn PhysicalExpr>>,
@@ -605,6 +689,13 @@ struct TableScanConfig {
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Optional structural WHERE pre-decode filter for raw KV table scans.
 	pre_decode_filter: Option<Arc<crate::exec::pre_decode_filter::PreDecodeFilter>>,
+	/// The actor's resolved per-field SELECT permissions, shared with the
+	/// scan's [`FieldState`] rather than copied. Empty when enforcement is
+	/// skipped (owner/root). Used to withhold indexes whose columns the actor
+	/// may not read from access-path selection.
+	///
+	/// [`FieldState`]: crate::exec::operators::scan::pipeline::FieldState
+	field_permissions: Arc<Vec<(crate::expr::Idiom, PhysicalPermission)>>,
 }
 
 /// Resolve the optimal access path for a table scan and return the source
@@ -643,7 +734,31 @@ async fn resolve_table_scan_stream(
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
 			let mut cond =
 				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
-			fold_condition_expressions(&mut cond, ctx.function_registry());
+			let capabilities = ctx.root().ctx.get_capabilities();
+			// This path scans a table, so every row reaching the condition is
+			// a record. A field read off one is still only inert while
+			// materialising that row evaluates nothing.
+			// Mirror the scan's own enforcement decision: a session that skips
+			// permission evaluation never runs those expressions.
+			let check_perms = match ctx.database() {
+				Ok(db_ctx) => should_check_perms(db_ctx, Action::View).unwrap_or(true),
+				Err(_) => true,
+			};
+			let restricted_fields = table_read_restricted_fields(
+				&txn,
+				cfg.ns_id,
+				cfg.db_id,
+				&cfg.table_name,
+				version_stamp,
+				check_perms,
+			)
+			.await;
+			fold_condition_expressions(
+				&mut cond,
+				ctx.function_registry(),
+				&capabilities,
+				restricted_fields.as_ref(),
+			);
 			resolve_projection_field_idioms(&mut cond, ctx.function_registry());
 			Some(cond)
 		}
@@ -672,6 +787,25 @@ async fn resolve_table_scan_stream(
 			.get_table_indexes(&cfg.table_name, version_stamp)
 			.await
 			.context("Failed to fetch indexes")?;
+		// SECURITY: drop indexes whose columns the actor may not select, for
+		// the reason given on `index_touches_restricted_select_field`. The
+		// actor's real field permissions are known here, so this cannot
+		// over-apply the way a conservative plan-time assumption would.
+		let indexes: std::sync::Arc<[_]> = if indexes
+			.iter()
+			.any(|ix| index_touches_restricted_select_field(&ix.cols, &cfg.field_permissions))
+		{
+			indexes
+				.iter()
+				.filter(|ix| {
+					!index_touches_restricted_select_field(&ix.cols, &cfg.field_permissions)
+				})
+				.cloned()
+				.collect::<Vec<_>>()
+				.into()
+		} else {
+			indexes
+		};
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(resolved_cond.as_ref(), cfg.order.as_ref());
@@ -746,10 +880,43 @@ async fn resolve_table_scan_stream(
 			vector,
 			k,
 			ef,
+			// Runtime-resolved access paths never carry a prefilter — the
+			// bitmap split is a plan-time-only analysis (#548).
+			prefilter: _,
 		}) => {
-			// Strip KNN operators from the resolved condition to get the
-			// residual (non-KNN predicates) for HNSW pushdown.
-			let residual_cond = resolved_cond.as_ref().and_then(strip_knn_from_condition);
+			// Strip KNN operators — and MATCHES conjuncts, which are not
+			// evaluable inside the ANN search — from the resolved condition
+			// to get the residual for HNSW pushdown.
+			let residual_cond =
+				resolved_cond.as_ref().and_then(strip_knn_and_matches_from_condition);
+			// This path never builds an allow-list bitmap, so MATCHES
+			// conjuncts must stay evaluable during the ANN traversal for
+			// every index format — otherwise the top-k is chosen among all
+			// records and matching neighbours outside it are unrecoverable.
+			// Compile the KNN-stripped condition — MATCHES kept — into the
+			// scan's matches condition, which supersedes the residual above.
+			// The compile reproduces the select planner's MATCHES
+			// registration scope (allowlist from both condition forms, this
+			// table as the executor table); an unregistered MATCHES compiles
+			// to an operator that answers `false` for every row.
+			let matches_condition = match resolved_cond.as_ref().and_then(strip_knn_from_condition)
+			{
+				Some(c) => {
+					let mut allowlist = std::collections::HashSet::new();
+					if let Some(orig) = cfg.cond.as_ref() {
+						crate::exec::physical_expr::collect_cond_matches(&orig.0, &mut allowlist);
+					}
+					crate::exec::physical_expr::collect_cond_matches(&c.0, &mut allowlist);
+					let mut planner =
+						crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
+					planner.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
+						allowlist,
+						executor_tables: Arc::from(vec![cfg.table_name.clone()]),
+					}));
+					Some(planner.physical_expr(c.0).await.map_err(|e| anyhow::anyhow!("{e}"))?)
+				}
+				None => None,
+			};
 			let knn_op = KnnScan::new(
 				index_ref,
 				vector,
@@ -760,7 +927,9 @@ async fn resolve_table_scan_stream(
 				cfg.knn_context.clone(),
 				residual_cond,
 				None,
-			);
+				None,
+			)
+			.with_matches_condition(matches_condition);
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -795,12 +964,30 @@ async fn resolve_table_scan_stream(
 		// Fall back to table KV scan (NOINDEX, BTree rejected by ordering
 		// check, etc.)
 		_ => {
-			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
-			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
+			// Fail closed: a record-range scan over a lightweight relation
+			// would be wrong-empty, and a runtime-resolved source cannot fall
+			// back to the legacy collectors.
+			{
+				use crate::catalog::providers::TableProvider;
+				if txn.get_tb(cfg.ns_id, cfg.db_id, &cfg.table_name, None).await?.is_some_and(
+					|def| crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some(),
+				) {
+					return Err(ControlFlow::Err(anyhow::anyhow!(
+						"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+						 reference the table statically so the record-less scan can serve it"
+					)));
+				}
+			}
+			let range = RecordPrefix {
+				ns: cfg.ns_id,
+				db: cfg.db_id,
+				tb: Cow::Borrowed(&cfg.table_name),
+			}
+			.range()?;
+
 			let stream = kv_scan_stream(
 				txn,
-				beg,
-				end,
+				range,
 				version_stamp,
 				cfg.storage_limit,
 				cfg.direction,
@@ -860,8 +1047,9 @@ fn create_index_operator(
 			vector,
 			k,
 			ef,
+			prefilter: _,
 		} => {
-			let residual_cond = resolved_cond.and_then(strip_knn_from_condition);
+			let residual_cond = resolved_cond.and_then(strip_knn_and_matches_from_condition);
 			Arc::new(KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),
@@ -872,15 +1060,20 @@ fn create_index_operator(
 				cfg.knn_context.clone(),
 				residual_cond,
 				None,
+				None,
 			))
 		}
 		// Provably empty: emit a single EmptyScan operator.
 		AccessPath::EmptyScan => Arc::new(super::EmptyScan::new()),
-		// TableScan and nested Union should not appear as sub-paths.
-		// Fall back to a table scan operator which will produce all
-		// records (safe but sub-optimal).
+		// TableScan, nested Union and BitmapFusion should not appear as
+		// sub-paths (bitmap fusion is a plan-time-only path; the runtime
+		// analyzer never emits it). Fall back to a table scan operator
+		// which will produce all records (safe but sub-optimal).
 		AccessPath::TableScan
 		| AccessPath::Union {
+			..
+		}
+		| AccessPath::BitmapFusion {
 			..
 		} => Arc::new(super::TableScan::new(
 			cfg.table_name.clone(),
@@ -903,9 +1096,11 @@ mod tests {
 	/// Helper to create a Scan with all fields for testing
 	async fn create_test_scan(table_name: &str, with_index_hints: bool) -> DynamicScan {
 		let ctx = std::sync::Arc::new(Context::new_test());
+		let registry = crate::exec::function::FunctionRegistry::with_builtins();
 		let source = expr_to_physical_expr(
 			crate::expr::Expr::Literal(crate::expr::literal::Literal::String(table_name.into())),
 			&ctx,
+			&registry,
 		)
 		.await
 		.expect("Failed to create physical expression");
@@ -960,7 +1155,7 @@ mod tests {
 	fn test_determine_scan_direction_no_order() {
 		// No order -> Forward
 		let direction = determine_scan_direction(None);
-		assert!(matches!(direction, ScanDirection::Forward));
+		assert!(matches!(direction, Direction::Forward));
 	}
 
 	#[test]
@@ -970,6 +1165,6 @@ mod tests {
 		// Random order -> Forward
 		let order = Ordering::Random;
 		let direction = determine_scan_direction(Some(&order));
-		assert!(matches!(direction, ScanDirection::Forward));
+		assert!(matches!(direction, Direction::Forward));
 	}
 }

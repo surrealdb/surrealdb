@@ -47,10 +47,11 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
-use surrealdb_core::observe::{
-	AuthEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent,
-	TransactionEvent, process_snapshot,
+use surrealdb_core::observe::process_snapshot;
+use surrealdb_observe::{
+	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
+	NetworkBytesEvent, NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent,
+	StatementEvent, TransactionEvent,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -124,6 +125,10 @@ pub struct MetricsObserver {
 	// Network (scope: surrealdb.network)
 	network_received: Counter<u64>,
 	network_sent: Counter<u64>,
+	// Bucket object storage (scope: surrealdb.bucket)
+	bucket_sent: Counter<u64>,
+	bucket_received: Counter<u64>,
+	bucket_operations: Counter<u64>,
 	// HTTP (scope: surrealdb.http)
 	http_request_total: Counter<u64>,
 	http_request_duration: Histogram<f64>,
@@ -167,6 +172,7 @@ impl MetricsObserver {
 		let auth = runtime.meter(scope::AUTH);
 		let sess = runtime.meter(scope::SESSION);
 		let net = runtime.meter(scope::NETWORK);
+		let buc = runtime.meter(scope::BUCKET);
 		let http = runtime.meter(scope::HTTP);
 		let lq = runtime.meter(scope::LIVE_QUERY);
 		let slow = runtime.meter(scope::SLOW_QUERY);
@@ -286,6 +292,20 @@ impl MetricsObserver {
 					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
 				)
 				.with_unit("By")
+				.build(),
+			bucket_sent: buc
+				.u64_counter(names::BUCKET_SENT_BYTES)
+				.with_description("Cumulative bytes uploaded to bucket object storage")
+				.with_unit("By")
+				.build(),
+			bucket_received: buc
+				.u64_counter(names::BUCKET_RECEIVED_BYTES)
+				.with_description("Cumulative bytes downloaded from bucket object storage")
+				.with_unit("By")
+				.build(),
+			bucket_operations: buc
+				.u64_counter(names::BUCKET_OPERATIONS)
+				.with_description("Cumulative count of bucket object-storage operations")
 				.build(),
 			http_request_total: http
 				.u64_counter(names::HTTP_REQUEST_TOTAL)
@@ -419,12 +439,12 @@ impl MetricsObserver {
 	/// `operation_type` should be a stable lower-case identifier from the
 	/// closed set `{"query", "mutation", "subscription", "unknown"}`.
 	/// `error_class` is `Some` only when `outcome` is
-	/// [`surrealdb_core::observe::Outcome::Error`].
+	/// [`surrealdb_observe::Outcome::Error`].
 	#[allow(clippy::too_many_arguments)]
 	pub fn record_graphql_operation(
 		&self,
 		operation_type: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 		namespace: Option<&str>,
@@ -451,7 +471,7 @@ impl MetricsObserver {
 		&self,
 		tool: &'static str,
 		transport: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 	) {
@@ -572,6 +592,70 @@ pub fn register_process_metrics(runtime: &ObservabilityRuntime) {
 		.with_callback(|obs| {
 			let snap = process_snapshot();
 			obs.observe(snap.memory_bytes as i64, &[]);
+		})
+		.build();
+	// The quantity the memory threshold is actually compared against. Paired
+	// with `PROCESS_MEMORY` (resident set size) it shows how far tracked bytes
+	// sit below the real footprint, and paired with `PROCESS_MEMORY_THRESHOLD`
+	// it shows how close the instance is to refusing queries. Reports 0 in
+	// builds without allocation tracking compiled in.
+	let _memory_allocated = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_ALLOCATED)
+		.with_description(
+			"Tracked memory of the surreal process: live Rust-heap allocations plus external \
+			 memory reporters. This is the value compared against SURREAL_MEMORY_THRESHOLD",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_allocated_bytes as i64, &[]);
+		})
+		.build();
+	// The logical size of the process's data, before size-class rounding.
+	// Unlike the reserved and allocated gauges it is comparable across builds
+	// and architectures. Pair it with `PROCESS_MEMORY_RESERVED` for internal
+	// fragmentation — not with `PROCESS_MEMORY_ALLOCATED`, which also carries
+	// the external reporters. Reports 0 in builds without allocation tracking
+	// compiled in.
+	let _memory_requested = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_REQUESTED)
+		.with_description(
+			"Bytes requested by the surreal process for live heap allocations, before the \
+			 allocator rounded each request up to a size class",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_requested_bytes as i64, &[]);
+		})
+		.build();
+	// The heap half of `PROCESS_MEMORY_ALLOCATED`, excluding the external
+	// reporters. This is the term that makes the fragmentation subtraction
+	// meaningful, and the one to compare against a heap-only budget. Reports 0
+	// in builds without allocation tracking compiled in.
+	let _memory_reserved = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_RESERVED)
+		.with_description(
+			"Reserved Rust-heap bytes of the surreal process: the size classes the allocator \
+			 rounded live requests up into, excluding external memory reporters",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			let snap = process_snapshot();
+			obs.observe(snap.memory_reserved_bytes as i64, &[]);
+		})
+		.build();
+	// Emitted so a dashboard can plot the limit alongside the usage without the
+	// operator having to restate it. Constant for the process lifetime, since
+	// the threshold is read once from the environment.
+	let _memory_threshold = meter
+		.i64_observable_gauge(names::PROCESS_MEMORY_THRESHOLD)
+		.with_description(
+			"Configured SURREAL_MEMORY_THRESHOLD in bytes, or 0 when the memory guard is disabled",
+		)
+		.with_unit("By")
+		.with_callback(|obs| {
+			obs.observe(surrealdb_core::mem::memory_threshold() as i64, &[]);
 		})
 		.build();
 	let _cpu = meter
@@ -766,6 +850,21 @@ impl ExecutionObserver for MetricsObserver {
 		}
 	}
 
+	fn on_bucket_operation(&self, event: &BucketOperationEvent) {
+		let attrs = [
+			KeyValue::new(attrs::BACKEND, event.safe.backend),
+			KeyValue::new(attrs::BUCKET_OP, event.safe.op.as_label()),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+		];
+		self.bucket_operations.add(1, &attrs);
+		if event.safe.sent > 0 {
+			self.bucket_sent.add(event.safe.sent, &attrs);
+		}
+		if event.safe.received > 0 {
+			self.bucket_received.add(event.safe.received, &attrs);
+		}
+	}
+
 	fn on_http_request_started(&self, event: &HttpRequestStartEvent) {
 		// Active-request gauge is attribute-stripped to method / route
 		// so the `+1` here and the `-1` from completion stay balanced
@@ -829,7 +928,7 @@ mod tests {
 	use opentelemetry_sdk::metrics::data::ResourceMetrics;
 	use opentelemetry_sdk::metrics::reader::MetricReader;
 	use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, SdkMeterProvider, Temporality};
-	use surrealdb_core::observe::{
+	use surrealdb_observe::{
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, ExecutionObserver,
 		HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 		HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
@@ -1173,7 +1272,7 @@ mod tests {
 		});
 		obs.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {
-				method: surrealdb_core::rpc::Method::Select,
+				method: surrealdb_rpc::Method::Select,
 				outcome: Outcome::Success,
 				duration: Duration::from_millis(1),
 				error_class: None,

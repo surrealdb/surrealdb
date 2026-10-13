@@ -2,7 +2,7 @@
 //!
 //! Core deliberately has no `prometheus` / `opentelemetry` dependencies,
 //! so server-only hooks cannot ride on
-//! [`surrealdb_core::observe::ObservabilityProvider`]. The server crate
+//! [`surrealdb_observe::ObservabilityProvider`]. The server crate
 //! therefore exposes its own [`ObservabilityProvider`] trait that
 //! supertraits the core one and adds optional accessors used by the unified
 //! `SdkMeterProvider` setup at startup. Every method defaults to [`None`]
@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::observe::ExecutionObserver;
+use surrealdb_observe::ExecutionObserver;
 
 use super::runtime::ObservabilityRuntime;
 
@@ -50,7 +50,7 @@ pub trait PipelineCounters: Send + Sync + 'static {
 }
 
 /// Server-side composer extension supertraiting the core
-/// [`surrealdb_core::observe::ObservabilityProvider`].
+/// [`surrealdb_observe::ObservabilityProvider`].
 ///
 /// Composers contribute optional pipeline-counter handles that the unified
 /// meter provider registers as observable gauges. They also opt into the
@@ -58,10 +58,10 @@ pub trait PipelineCounters: Send + Sync + 'static {
 /// [`Self::create_observer_with_runtime`] when their observers need to
 /// register instruments or claim audit-log scopes; the default
 /// implementation delegates to the core
-/// [`surrealdb_core::observe::ObservabilityProvider::create_observer`]
+/// [`surrealdb_observe::ObservabilityProvider::create_observer`]
 /// for community composers that have no enterprise instruments to
 /// register.
-pub trait ObservabilityProvider: surrealdb_core::observe::ObservabilityProvider {
+pub trait ObservabilityProvider: surrealdb_observe::ObservabilityProvider {
 	/// Construct the composer's [`ExecutionObserver`] with access to the
 	/// process-local
 	/// [`ObservabilityRuntime`](super::runtime::ObservabilityRuntime).
@@ -71,13 +71,13 @@ pub trait ObservabilityProvider: surrealdb_core::observe::ObservabilityProvider 
 	/// override this to register instruments against `runtime.meter(...)`
 	/// and to claim `runtime.audit_logger(...)` for log emission. The
 	/// default delegates to
-	/// [`surrealdb_core::observe::ObservabilityProvider::create_observer`]
+	/// [`surrealdb_observe::ObservabilityProvider::create_observer`]
 	/// so existing community composers keep working unchanged.
 	fn create_observer_with_runtime(
 		&self,
 		_runtime: &ObservabilityRuntime,
 	) -> Arc<dyn ExecutionObserver> {
-		<Self as surrealdb_core::observe::ObservabilityProvider>::create_observer(self)
+		<Self as surrealdb_observe::ObservabilityProvider>::create_observer(self)
 	}
 
 	/// Optional read-only view of an audit pipeline's queue counters.

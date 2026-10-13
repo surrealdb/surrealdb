@@ -1,11 +1,11 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::Error as CatalogError;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::expr::paths::ID;
 use crate::val::{RecordId, Value};
 
@@ -14,15 +14,18 @@ pub async fn exists(
 	(arg,): (RecordId,),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		let v = match Value::RecordId(arg).get(stk, ctx, opt, doc, ID.as_ref()).await.catch_return()
-		{
-			Ok(v) => v,
-			// An undefined table means the record cannot exist.
-			Err(e) if matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) => {
-				return Ok(Value::Bool(false));
-			}
-			Err(e) => return Err(e),
-		};
+		let v =
+			match crate::legacy::value_get(&Value::RecordId(arg), stk, ctx, opt, doc, ID.as_ref())
+				.await
+				.catch_return()
+			{
+				Ok(v) => v,
+				// An undefined table means the record cannot exist.
+				Err(e) if matches!(e.downcast_ref(), Some(CatalogError::TbNotFound { .. })) => {
+					return Ok(Value::Bool(false));
+				}
+				Err(e) => return Err(e),
+			};
 		Ok(Value::Bool(!v.is_none()))
 	} else {
 		Ok(Value::None)
@@ -45,8 +48,7 @@ pub mod is {
 	use crate::ctx::FrozenContext;
 	use crate::dbs::Options;
 	use crate::doc::CursorDoc;
-	use crate::err::Error;
-	use crate::expr::Base;
+	use crate::expr::{Base, Error};
 	use crate::iam::{Action, ResourceKind};
 	use crate::val::value::Cast;
 	use crate::val::{RecordId, Value};

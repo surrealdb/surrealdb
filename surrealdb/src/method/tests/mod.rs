@@ -167,11 +167,14 @@ async fn api() {
 	let _: Version = DB.version().await.unwrap();
 }
 
-fn assert_send_sync(_: impl Send + Sync) {}
+fn assert_send(_: impl Send) {}
 
+/// The SDK's futures must stay `Send`, so callers can spawn them and hold
+/// them across threads. They are deliberately not `Sync` (see
+/// [`BoxFuture`](crate::method::BoxFuture)).
 #[test]
-fn futures_are_send_sync() {
-	assert_send_sync(async {
+fn futures_are_send() {
+	assert_send(async {
 		let db = Surreal::new::<Test>(()).await.unwrap();
 		db.signin(Root {
 			username: "root".to_string(),

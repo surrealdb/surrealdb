@@ -6,16 +6,44 @@ members = [
     # SurrealDB crates
     "surrealdb",
     "surrealdb/ast",
+    "surrealdb/cnf",
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/datastore",
+    "surrealdb/embedded",
+    "surrealdb/catalog",
+    "surrealdb/engine-api",
+    "surrealdb/engine-local",
+    "surrealdb/expr",
+    "surrealdb/gql",
+    "surrealdb/iam",
+    "surrealdb/idx",
+    "surrealdb/keyspace-macro",
+    "surrealdb/kvs",
+    "surrealdb/kvs-any",
+    "surrealdb/kvs-indxdb",
+    "surrealdb/kvs-mem",
+    "surrealdb/kvs-rocksdb",
+    "surrealdb/kvs-surrealkv",
+    "surrealdb/kvs-test",
+    "surrealdb/kvs-tikv",
     "surrealdb/mcp",
+    "surrealdb/node",
+    "surrealdb/observe",
+    "surrealdb/parse-common",
     "surrealdb/parser",
+    "surrealdb/rpc",
+    "surrealdb/runtime",
     "surrealdb/server",
+    "surrealdb/sql",
+    "surrealdb/sqon",
     "surrealdb/strand",
+    "surrealdb/syn",
     "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
+    "surrealdb/wasm",
     # SurrealML crates
     "surrealml/core",
     # Surrealism crates
@@ -33,7 +61,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.3.0-nightly"
+version = "3.3.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -48,30 +76,61 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.3.0-nightly", path = "surrealdb", default-features = false }
-surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", default-features = false }
-surrealdb-core = { version = "3.3.0-nightly", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.3.0-nightly", path = "surrealdb/server", default-features = false }
-surrealdb-mcp = { version = "3.3.0-nightly", path = "surrealdb/mcp", default-features = false }
-surrealdb-types = { version = "3.3.0-nightly", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.3.0-nightly", path = "surrealdb/types/derive" }
-ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
-token = { package = "surrealdb-token", path = "surrealdb/token" }
-parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
-common = { package = "surrealdb-common", path = "surrealdb/common" }
-surrealdb-collections = { version = "3.3.0-nightly", path = "surrealdb/collections" }
+surrealdb = { version = "3.3.0", path = "surrealdb", default-features = false }
+surrealdb-catalog = { version = "3.3.0", path = "surrealdb/catalog" }
+surrealdb-expr = { version = "3.3.0", path = "surrealdb/expr" }
+surrealdb-gql = { version = "3.3.0", path = "surrealdb/gql" }
+surrealdb-sql = { version = "3.3.0", path = "surrealdb/sql" }
+surrealdb-strand = { version = "3.3.0", path = "surrealdb/strand", default-features = false }
+surrealdb-syn = { version = "3.3.0", path = "surrealdb/syn" }
+surrealdb-core = { version = "3.3.0", path = "surrealdb/core", default-features = false }
+surrealdb-embedded = { version = "3.3.0", path = "surrealdb/embedded", default-features = false }
+surrealdb-datastore = { version = "3.3.0", path = "surrealdb/datastore" }
+surrealdb-engine-api = { version = "3.3.0", path = "surrealdb/engine-api" }
+surrealdb-engine-local = { version = "3.3.0", path = "surrealdb/engine-local", default-features = false }
+surrealdb-server = { version = "3.3.0", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "3.3.0", path = "surrealdb/mcp", default-features = false }
+surrealdb-types = { version = "3.3.0", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.3.0", path = "surrealdb/types/derive" }
+ast = { version = "3.3.0", package = "surrealdb-ast", path = "surrealdb/ast" }
+token = { version = "3.3.0", package = "surrealdb-token", path = "surrealdb/token" }
+parser = { version = "3.3.0", package = "surrealdb-parser", path = "surrealdb/parser" }
+parse-common = { version = "3.3.0", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
+sqon = { version = "3.3.0", package = "surrealdb-sqon", path = "surrealdb/sqon" }
+common = { version = "3.3.0", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-cnf = { version = "3.3.0", path = "surrealdb/cnf" }
+surrealdb-runtime = { version = "3.3.0", path = "surrealdb/runtime" }
+surrealdb-rpc = { version = "3.3.0", path = "surrealdb/rpc" }
+surrealdb-iam = { version = "3.3.0", path = "surrealdb/iam" }
+surrealdb-idx = { version = "3.3.0", path = "surrealdb/idx" }
+surrealdb-observe = { version = "3.3.0", path = "surrealdb/observe" }
+surrealdb-keyspace-macro = { version = "3.3.0", path = "surrealdb/keyspace-macro" }
+surrealdb-kvs = { version = "3.3.0", path = "surrealdb/kvs" }
+surrealdb-kvs-any = { version = "3.3.0", path = "surrealdb/kvs-any", default-features = false }
+surrealdb-kvs-indxdb = { version = "3.3.0", path = "surrealdb/kvs-indxdb" }
+surrealdb-kvs-mem = { version = "3.3.0", path = "surrealdb/kvs-mem" }
+surrealdb-kvs-rocksdb = { version = "3.3.0", path = "surrealdb/kvs-rocksdb" }
+surrealdb-kvs-surrealkv = { version = "3.3.0", path = "surrealdb/kvs-surrealkv" }
+# Dev-only, `publish = false`: declared WITHOUT a version so cargo strips it
+# from published manifests. A version here would make cargo package/publish
+# demand it from crates.io, where a publish=false crate can never appear -
+# breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
+surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
+surrealdb-kvs-tikv = { version = "3.3.0", path = "surrealdb/kvs-tikv" }
+surrealdb-collections = { version = "3.3.0", path = "surrealdb/collections" }
 
 # SurrealML crates
-surrealml-core = { version = "0.1", path = "surrealml/core" }
+surrealml-core = { version = "0.3.0", path = "surrealml/core" }
 # Surrealism crates
-surrealism = { version = "0.5.0-beta.1", path = "surrealism" }
-surrealism-macros = { version = "0.5.0-beta.1", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.5.0-beta.1", path = "surrealism/runtime" }
-surrealism-types = { version = "0.5.0-beta.1", path = "surrealism/types", default-features = false }
+surrealism = { version = "0.6.0", path = "surrealism" }
+surrealism-macros = { version = "0.6.0", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.6.0", path = "surrealism/runtime" }
+surrealism-types = { version = "0.6.0", path = "surrealism/types", default-features = false }
+
+
 # External surreal crates
-affinitypool = "0.7.0"
+affinitypool = "0.8.0"
 dmp = "0.2.3"
-indxdb = "0.12.0"
 lexicmp = "0.2.0"
 revision = { version = "0.30.0", features = [
     "bytes",
@@ -85,8 +144,8 @@ revision = { version = "0.30.0", features = [
 ] }
 
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "0.21.2"
-surrealmx = "0.22.0"
+surrealkv = "0.21.4"
+surrealmx = "0.27.0"
 web-time = "1.1.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
@@ -100,12 +159,11 @@ tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.12"
-ammonia = "4.1.2"
+ammonia = "4.1.4"
 anyhow = "1.0.102"
 arbitrary = "1.4.2"
 argon2 = "0.5.3"
 async-channel = "2.5.0"
-async-stream = "0.3.6"
 async-graphql = { version = "7.2.1", default-features = false, features = ["custom-error-conversion"] }
 async-graphql-axum = "7.2.1"
 async-trait = "0.1.89"
@@ -122,9 +180,9 @@ clap = "4.6.1"
 dashmap = "6.1.0"
 dialoguer = "0.11"
 deunicode = "1.6.2"
-diskann = { version = "=0.54.0", default-features = false }
-diskann-utils = "=0.54.0"
-diskann-vector = "=0.54.0"
+diskann = { version = "=0.56.0", default-features = false }
+diskann-utils = "=0.56.0"
+diskann-vector = "=0.56.0"
 ext-sort = "^0.1.5"
 fastnum = "0.7.4"
 flatbuffers = { version = "25.12.19", features = ["serde"] }
@@ -136,20 +194,39 @@ half = "2.7.1"
 geo = { version = "0.32.0", default-features = false }
 geo-types = "0.7.19"
 getrandom = "0.3.4"
+# `geo` reaches `rand 0.8`, which needs getrandom 0.2 rather than the 0.3 above.
+getrandom_02 = { version = "0.2.17", package = "getrandom" }
 hashbrown = "0.16.1"
 hex = "0.4.3"
+hmac = "0.12"
 http = "1.4.0"
 http-body-util = "0.1.3"
 hyper = "1.9"
 humantime = "2.3.0"
 indexmap = "2.14.0"
+inventory = "0.3.24"
 ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
+# Raw jemalloc bindings, for `nallocx`: the allocation-tracking allocator
+# records the size class jemalloc reserves for a layout rather than the
+# requested size. Version-matched to `jemallocator`, which owns the vendored
+# jemalloc build.
+jemalloc-sys = { version = "0.6.1", package = "tikv-jemalloc-sys" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
+js-sys = { version = "0.3.103", default-features = false }
 logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 memchr = "2.8.0"
-mimalloc = "0.1.49"
+mimalloc = { version = "0.1.49", features = ["extended"] }
+# Raw mimalloc bindings, for `mi_good_size`; `mimalloc`'s `extended` feature
+# above forwards to this crate's, which gates the module declaring it. Must
+# stay on the version `mimalloc` itself requires so cargo resolves one shared
+# copy: a divergent pin would build a second vendored mimalloc whose size
+# classes need not match the allocator actually installed.
+mimalloc-sys = { version = "0.1.47", package = "libmimalloc-sys" }
+napi = { version = "3.12.0", default-features = false }
+napi-build = "2.4.0"
+napi-derive = "3.6.2"
 native-tls = "0.2.18"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
@@ -164,8 +241,8 @@ path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
 phf = "0.13.1"
 pin-project-lite = "0.2.17"
-pprof = "0.15.0"
 opentelemetry-prometheus-text-exporter = "0.2.1"
+prost = "0.14.1"
 quick_cache = "0.6.21"
 rand = "0.9.4"
 rand_core = "0.6"
@@ -174,22 +251,25 @@ regex = "1.12.3"
 regex-syntax = "0.8.10"
 reqwest = { version = "0.13.2", default-features = false }
 ring = "0.17.14"
-rmcp = { version = "1.4.0", default-features = false }
+rmcp = { version = "3.1.2", default-features = false }
 roaring = "0.11.3"
 rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.41.0"
+lindera = { version = "6.0.0", default-features = false, features = ["mmap"] }
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 schemars = "1.2.1"
 scrypt = "0.11.0"
 semver = "1.0.28"
 serde = "1.0.228"
 serde_json = "1.0.149"
+serde-wasm-bindgen = "0.6.5"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 snap = "1.1.1"
+stringprep = "0.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.10.1", default-features = false }
+surrealdb-protocol = { version = "0.13.1", default-features = false }
 sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"
@@ -198,13 +278,18 @@ tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
 tokio-tungstenite-wasm = "0.8.2"
 tokio-util = "0.7.18"
+tonic = "0.14.5"
 tracing = { version = "0.1.44", features = ["release_max_level_debug"] }
 ulid = "1.2.1"
 unicase = "2.9.0"
 url = "2.5.8"
 uuid = "1.23.1"
+wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
+wasm-bindgen-test = "0.3.58"
+wasm-streams = "0.5.0"
 wasmtimer = { version = "0.4.3", default-features = false }
+web-sys = { version = "0.3.85", default-features = false }
 
 # Dev dependencies
 criterion = "0.8"
@@ -217,6 +302,7 @@ test-log = "0.2"
 time = "0.3"
 tracing-subscriber = "0.3"
 wiremock = "0.6"
+libtest-mimic = "0.8.2"
 
 # SurrealML specific dependencies
 ort = { version = "2.0.0-rc.12", features = ["cuda", "ndarray"] }
@@ -227,8 +313,8 @@ toml = "0.9.12"
 wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
 wasmparser = "0.245"
-wasmtime = { version = "46.0.1", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
-wasmtime-wasi = { version = "46.0.1", features = ["p1", "p2"] }
+wasmtime = { version = "46.0.3", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime-wasi = { version = "46.0.3", features = ["p1", "p2"] }
 wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = { version = "0.13.3", default-features = false }
 
@@ -246,25 +332,17 @@ categories.workspace = true
 license-file.workspace = true
 
 [features]
-default = [
-    "allocator",
-    "allocation-tracking",
-    "storage-mem",
-    "storage-surrealkv",
-    "storage-rocksdb",
-    "storage-tikv",
-    "scripting",
-    "http",
-    "surrealism",
-    "graphql",
-    "gql",
-    "mcp",
-    "cli",
-]
+# Inherit the shared default feature set from `surrealdb-server` so the two
+# crates don't duplicate the list. This includes `cli`, so the binary and the
+# enterprise binary both get the `sql` subcommand by default.
+default = ["surrealdb-server/default"]
 
 allocator = ["surrealdb-server/allocator"]
 allocation-tracking = ["surrealdb-server/allocation-tracking"]
 http = ["surrealdb-server/http"]
+# Embedded CJK segmentation dictionaries. Enabled for the shipped binaries
+# (and so for the Docker images built from them); see the release workflow.
+cjk = ["surrealdb-server/cjk"]
 jwks = ["surrealdb-server/jwks"]
 ml = ["surrealdb-server/ml"]
 scripting = ["surrealdb-server/scripting"]
@@ -280,18 +358,23 @@ graphql = ["surrealdb-server/graphql"]
 gql = ["surrealdb-server/gql"]
 # MCP (Model Context Protocol) server support
 mcp = ["surrealdb-server/mcp"]
+# Postgres wire protocol support
+postgres = ["surrealdb-server/postgres"]
 # Interactive SQL CLI support
 cli = ["surrealdb-server/cli"]
 
 [dependencies]
 # workspace internal dependencies
 surrealdb = { workspace = true, features = [
+    "protocol-grpc",
     "protocol-http",
     "protocol-ws",
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-rpc.workspace = true
 surrealdb-server.workspace = true
+surrealdb-syn.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "user"] }
@@ -321,6 +404,7 @@ test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio-postgres = { version = "0.7.15", features = ["with-serde_json-1"] }
 tokio-stream.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 tracing.workspace = true
@@ -507,6 +591,61 @@ used_underscore_binding = "warn"
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 
+# The suite crate registers its tests through `inventory` module
+# constructors. wasm-ld extracts archive members only to satisfy symbol
+# references (it has no special handling for init-array members, unlike
+# ELF linkers), so the registrations must share one object with the
+# `run_all` entry point the consumer references — i.e. one codegen unit —
+# or the browser test runner sees an empty registry.
+[profile.dev.package.surrealdb-kvs-test]
+codegen-units = 1
+incremental = false
+
+# Password hashing is deliberately expensive by iteration count, so its cost
+# scales directly with how well the inner compression loop is compiled. At
+# `opt-level = 0` these cores run one to two orders of magnitude slower than
+# optimised — enough that a single `crypto::scrypt::generate` takes over ten
+# seconds and the `crypto::*` language tests exceed their per-test timeout.
+# Optimising only these packages leaves every workspace crate debuggable while
+# the hash cores run at release speed. Output is unchanged; only the time taken
+# to produce it differs, so nothing here relaxes a cost parameter and the hashes
+# a debug build produces stay the ones a release build would.
+#
+# `language-tests` is a separate workspace and does not inherit this, so it
+# carries the same overrides in its own manifest.
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.md-5]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.crypto-common]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.bcrypt]
+opt-level = 3
+[profile.dev.package.blowfish]
+opt-level = 3
+[profile.dev.package.password-hash]
+opt-level = 3
+[profile.dev.package.base64ct]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -519,6 +658,27 @@ strip = true
 inherits = "release"
 lto = false
 codegen-units = 16
+
+# The browser engine (`surrealdb/wasm`). A wasm module is downloaded before it
+# can run, so its size is a latency cost every page load pays and `opt-level`
+# trades against — which is the one setting that differs from `release`.
+# `wasm-opt -Oz` runs afterwards and shrinks the module further, but it works on
+# the emitted code and cannot recover a monomorphisation `-O3` chose to inline.
+#
+# Profiles have to live here: cargo reads them only from the workspace root and
+# silently ignores a `[profile]` in a member manifest.
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+
+# Keeps the symbol names a browser stack trace needs, and the panic messages
+# `panic = "abort"` would otherwise let the runtime discard. Paired with the
+# crate's `debug` feature, which installs the console panic hook that reports
+# them.
+[profile.wasm-release-debug]
+inherits = "wasm-release"
+strip = false
+panic = 'unwind'
 
 [profile.bench]
 strip = false

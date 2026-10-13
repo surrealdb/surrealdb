@@ -30,10 +30,10 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON `user.csv` FIELDS email' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { compacting: false, initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: *]

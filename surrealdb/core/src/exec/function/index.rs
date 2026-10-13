@@ -28,14 +28,15 @@ use anyhow::Result;
 use super::Signature;
 use crate::catalog::Index;
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
+use crate::exec::{BoxFut, ContextLevel};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::kvs::index::filter_online_indexes;
-use crate::val::{Number, RecordId, TableName, Value};
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
+use crate::val::{Number, RecordId, RecordIdentity, TableName, Value};
 
 // =========================================================================
 // IndexContextKind - what kind of index context a function requires
@@ -92,7 +93,7 @@ impl Debug for IndexContext {
 ///
 /// The planner dispatches generically based on [`index_context_kind()`] to
 /// resolve the appropriate [`IndexContext`], without hardcoding function names.
-pub trait IndexFunction: SendSyncRequirement + Debug {
+pub trait IndexFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "search::highlight", "search::score")
 	fn name(&self) -> &'static str;
 
@@ -167,8 +168,12 @@ pub struct MatchContext {
 	pub query: String,
 	/// The table name for index lookup.
 	pub table: TableName,
-	/// Lazily initialized full-text index resources.
-	ft_cache: tokio::sync::OnceCell<(FullTextIndex, QueryTerms, Option<Scorer>)>,
+	/// Lazily initialized full-text index resources. The inner `Option` is
+	/// `None` when no full-text index on `table` covers `idiom` — e.g. a
+	/// MATCHES traversing a record link to an index on another table — in
+	/// which case score/highlight/offsets yield `NONE`, matching the legacy
+	/// executor's missing-match-ref-entry behaviour.
+	ft_cache: tokio::sync::OnceCell<Option<(FullTextIndex, QueryTerms, Option<Scorer>)>>,
 }
 
 impl MatchContext {
@@ -186,11 +191,13 @@ impl MatchContext {
 	///
 	/// On first call, this looks up the full-text index definition for the
 	/// table/idiom, opens the FullTextIndex, extracts QueryTerms, and
-	/// optionally creates a Scorer. Subsequent calls return the cached result.
+	/// optionally creates a Scorer. Subsequent calls return the cached
+	/// result. Returns `Ok(None)` when no full-text index on the table
+	/// covers the idiom (see the `ft_cache` field docs).
 	pub async fn ft_resources(
 		&self,
 		ctx: &EvalContext<'_>,
-	) -> Result<&(FullTextIndex, QueryTerms, Option<Scorer>)> {
+	) -> Result<&Option<(FullTextIndex, QueryTerms, Option<Scorer>)>> {
 		self.ft_cache
 			.get_or_try_init(|| async {
 				use crate::catalog::providers::TableProvider;
@@ -221,19 +228,15 @@ impl MatchContext {
 				} else {
 					indexes
 				};
-				let index_def = indexes
-					.iter()
-					.find(|idx| {
-						matches!(&idx.index, Index::FullText(_))
-							&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
-					})
-					.ok_or_else(|| {
-						anyhow::anyhow!(
-							"No full-text index found for field {:?} on table {}",
-							self.idiom,
-							self.table
-						)
-					})?;
+				let index_def = match indexes.iter().find(|idx| {
+					matches!(&idx.index, Index::FullText(_)) && idx.cols.contains(&self.idiom)
+				}) {
+					Some(def) => def,
+					// No index on this table covers the idiom (e.g. the
+					// MATCHES traverses a record link) → score/highlight/
+					// offsets yield NONE, like the legacy executor.
+					None => return Ok(None),
+				};
 
 				let ft_params = match &index_def.index {
 					Index::FullText(params) => params,
@@ -248,16 +251,18 @@ impl MatchContext {
 					tx.as_ref(),
 					ikb,
 					ft_params,
-					&frozen.config.file_allowlist,
+					&frozen.config.idx.file_allowlist,
+					index_def.format_version,
 				)
 				.await?;
 
 				// Extract query terms
 				let query_terms = {
+					let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 					let mut stack = reblessive::TreeStack::new();
 					stack
 						.enter(|stk| {
-							fti.extract_querying_terms(stk, frozen, opt, self.query.clone())
+							fti.extract_querying_terms(stk, frozen, &az_fn, self.query.clone())
 						})
 						.finish()
 						.await?
@@ -266,7 +271,7 @@ impl MatchContext {
 				// Create scorer if BM25 is configured
 				let scorer = fti.new_scorer(frozen).await?;
 
-				Ok((fti, query_terms, scorer))
+				Ok(Some((fti, query_terms, scorer)))
 			})
 			.await
 	}
@@ -297,11 +302,17 @@ impl Debug for MatchContext {
 /// This is the KNN equivalent of [`MatchContext`] -- same lifecycle pattern
 /// (plan-time creation, shared via `Arc`, deferred population at execution time).
 pub struct KnnContext {
-	/// Per-row distances keyed by RecordId, populated by the KNN scan operator.
+	/// Per-row distances keyed by the record each row is, populated by the KNN
+	/// scan operator.
+	///
+	/// The key compares record ids by the record they address, not with
+	/// `RecordId`'s own equality, which compares numbers across variants: under
+	/// it `k:[1]` and `k:[1dec]` are one key, and the two records would share
+	/// whichever distance was written last.
 	///
 	/// Uses `tokio::sync::RwLock` so lock acquisition is async and cannot
 	/// block the tokio runtime.
-	distances: tokio::sync::RwLock<HashMap<RecordId, Number>>,
+	distances: tokio::sync::RwLock<HashMap<(TableName, RecordIdentity), Number>>,
 }
 
 impl KnnContext {
@@ -314,12 +325,13 @@ impl KnnContext {
 
 	/// Record the distance for a record. Called by KnnScan after HNSW search.
 	pub async fn insert(&self, rid: RecordId, dist: Number) {
-		self.distances.write().await.insert(rid, dist);
+		self.distances.write().await.insert((rid.table, RecordIdentity(rid.key)), dist);
 	}
 
 	/// Look up the distance for a record. Called by vector::distance::knn().
 	pub async fn get(&self, rid: &RecordId) -> Option<Number> {
-		self.distances.read().await.get(rid).copied()
+		let key = (rid.table.clone(), RecordIdentity(rid.key.clone()));
+		self.distances.read().await.get(&key).copied()
 	}
 }
 

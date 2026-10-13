@@ -4,6 +4,7 @@ use std::ops::Bound;
 
 use anyhow::{Context, Result, anyhow};
 use ciborium::Value as CborValue;
+use common::decimal::DecimalExt;
 use geo::{LineString, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use rust_decimal::Decimal;
@@ -14,7 +15,6 @@ use crate::types::{
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
 	PublicSet, PublicTable, PublicUuid, PublicValue,
 };
-use crate::val::DecimalExt;
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
 const TAG_SPEC_DATETIME: u64 = 0;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn::error::RenderedError;
+use surrealdb_syn::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
@@ -50,6 +50,47 @@ fn strip_api_request_id_for_comparison(expected: &SurValue, got: SurValue) -> Su
 	}
 }
 
+/// Everything a matcher expression is evaluated against.
+///
+/// `vars` carries the bindings the expression may reference in addition to
+/// `$result`/`$error`. For a chain run this is the walk position, which is what
+/// lets one body assert exactly at every hop even though `mutate` grows the
+/// data underneath it.
+pub struct MatchContext<'a> {
+	pub datastore: &'a Datastore,
+	pub vars: Variables,
+}
+
+impl<'a> MatchContext<'a> {
+	pub fn new(datastore: &'a Datastore) -> Self {
+		MatchContext {
+			datastore,
+			vars: Variables::default(),
+		}
+	}
+
+	pub fn with_vars(datastore: &'a Datastore, vars: Variables) -> Self {
+		MatchContext {
+			datastore,
+			vars,
+		}
+	}
+}
+
+/// One version's turn in a cumulative chain walk.
+#[derive(Debug)]
+pub struct ChainHopResult {
+	/// Version whose binary produced this result, as displayed to the user.
+	pub version: String,
+	/// 1-based position among the hops that actually ran the body.
+	pub hop: usize,
+	/// Total number of hops that were expected to run the body.
+	pub hops: usize,
+	/// Chain bindings offered to matcher expressions for this hop.
+	pub vars: Variables,
+	pub result: TestTaskResult,
+}
+
 #[derive(Debug)]
 pub enum TestTaskResult {
 	ParserError(RenderedError),
@@ -61,6 +102,30 @@ pub enum TestTaskResult {
 	Results {
 		did_timeout: bool,
 		res: Vec<Result<SurValue, String>>,
+	},
+	/// A cumulative chain walk: the body's outcome at every version that ran it,
+	/// in walk order. Graded hop by hop, and the first hop that does not match
+	/// is the one reported.
+	///
+	/// Only the upgrade runner constructs this, so without that feature the
+	/// variant is dead — the grading arms below still compile either way, which
+	/// is what keeps them from drifting out of sync with the runner.
+	#[cfg_attr(not(feature = "upgrade"), allow(dead_code))]
+	Chain(Vec<ChainHopResult>),
+	/// A bracketed `[[test.repair]]`: the body's outcome before the repair ran
+	/// and after it. The declaration holds only if `before` shows the damage it
+	/// claims; `after` is then graded as an ordinary result.
+	///
+	/// Constructed only by the upgrade runner; see [`TestTaskResult::Chain`].
+	#[cfg_attr(not(feature = "upgrade"), allow(dead_code))]
+	Repair {
+		index: usize,
+		since: String,
+		reason: String,
+		unrepaired: schema::Unrepaired,
+		target: String,
+		before: Box<TestTaskResult>,
+		after: Box<TestTaskResult>,
 	},
 }
 
@@ -189,6 +254,20 @@ pub enum TestReportKind {
 		expected: String,
 	},
 	MismatchedValues(Vec<Mismatch>),
+	/// A chain walk failed at one specific version. The inner kind is that
+	/// hop's own grade; the fields locate it in the walk.
+	ChainHop {
+		version: String,
+		hop: usize,
+		hops: usize,
+		/// The reported hop's own values, so `--results accept` rewrites the
+		/// expectations from the hop that failed rather than from the first one
+		/// that happened to complete.
+		outputs: Option<TestOutputs>,
+		inner: Box<TestReportKind>,
+	},
+	/// A `[[test.repair]]` declaration is no longer true of the code.
+	RepairContract(String),
 }
 
 #[derive(Clone)]
@@ -325,13 +404,20 @@ impl TestReport {
 			| TestReportKind::MismatchedSignin {
 				..
 			}
-			| TestReportKind::MismatchedValues(_) => {
+			| TestReportKind::MismatchedValues(_)
+			| TestReportKind::ChainHop {
+				..
+			} => {
 				if self.is_wip() {
 					TestGrade::Warning
 				} else {
 					TestGrade::Failed
 				}
 			}
+			// A repair declaration that no longer describes the code is a hard
+			// failure even for a work-in-progress test: the whole point is that
+			// it cannot rot into a mask.
+			TestReportKind::RepairContract(_) => TestGrade::Failed,
 			TestReportKind::Error(_) => {
 				if self.is_wip() {
 					TestGrade::Warning
@@ -375,10 +461,41 @@ impl TestReport {
 				did_timeout,
 				res,
 			} => (*did_timeout, Some(TestOutputs::Values(res.clone()))),
+			// The outputs of the hop the grader will report: the first that does
+			// not match, or the last if they all do. Surfacing them is what lets
+			// `--results accept` bootstrap a chain test's expectations the way it
+			// does a pairwise one.
+			// Filled in from the graded result below: which hop is reported is
+			// only known once the hops have been graded.
+			TestTaskResult::Chain(_) => (false, None),
+			// The post-repair run is the one graded, so it is the one whose
+			// values an author would accept.
+			TestTaskResult::Repair {
+				after,
+				..
+			} => (
+				false,
+				match &**after {
+					TestTaskResult::Results {
+						res,
+						..
+					} => Some(TestOutputs::Values(res.clone())),
+					_ => None,
+				},
+			),
 		};
 
 		let cfg = &run.case.test.config.parsed;
-		let kind = Self::grade_result(cfg, job_result, matching_datastore).await;
+		let kind = Self::grade_result(cfg, job_result, &MatchContext::new(matching_datastore)).await;
+		// A chain reports one hop; its values are the ones worth showing and the
+		// ones `--results accept` should write.
+		let outputs = match &kind {
+			TestReportKind::ChainHop {
+				outputs: Some(TestOutputs::Values(values)),
+				..
+			} => Some(TestOutputs::Values(values.clone())),
+			_ => outputs,
+		};
 
 		TestReport {
 			id: run.id,
@@ -415,7 +532,7 @@ impl TestReport {
 	async fn grade_result(
 		config: &TestConfig,
 		job_result: TestTaskResult,
-		matcher_datastore: &Datastore,
+		match_ctx: &MatchContext<'_>,
 	) -> TestReportKind {
 		match job_result {
 			TestTaskResult::RunningError(e) => {
@@ -534,7 +651,96 @@ impl TestReport {
 				..
 			} => {
 				let expectation = TestExpectation::from_test_config(config);
-				Self::grade_value_results(expectation, res, matcher_datastore).await
+				Self::grade_value_results(expectation, res, match_ctx).await
+			}
+			TestTaskResult::Repair {
+				index,
+				since,
+				reason,
+				unrepaired,
+				target,
+				before,
+				after,
+			} => {
+				let before_kind = Box::pin(Self::grade_result(config, *before, match_ctx)).await;
+				let before_passed = matches!(before_kind, TestReportKind::Valid);
+
+				// Both arms are derived from the graded outcome rather than from
+				// raw statement results. A test may legitimately expect an error
+				// somewhere — a duplicate insert against a unique index, say — so
+				// keying on "any statement errored" would make `degraded`
+				// unsatisfiable for it, and would leave `broken` true forever
+				// once the repair stopped being needed.
+				//
+				// `broken` is an error the expectations do not allow; `degraded`
+				// is every statement landing where it should and a value still
+				// coming back wrong.
+				let unexpected_error = matches!(
+					&before_kind,
+					TestReportKind::MismatchedValues(m)
+						if m.iter().any(|x| matches!(
+							x.kind,
+							MismatchKind::Value(ValueMismatchKind::ExpectedValue { .. })
+								| MismatchKind::Value(ValueMismatchKind::InvalidError { .. })
+						))
+				) || matches!(before_kind, TestReportKind::Error(_));
+				let holds = match unrepaired {
+					schema::Unrepaired::Broken => !before_passed && unexpected_error,
+					schema::Unrepaired::Degraded => !before_passed && !unexpected_error,
+				};
+
+				if !holds {
+					let seen = if before_passed {
+						"the body passed unchanged"
+					} else if unexpected_error {
+						"a statement errored in a way the expectations do not allow"
+					} else {
+						"every statement landed as expected, but a value came back wrong"
+					};
+					return TestReportKind::RepairContract(format!(
+						"`[[test.repair]]` #{index} declares `unrepaired = \"{unrepaired:?}\"` \
+						 for targets matching `{since}`, but on {target} {seen}.\n\
+						 Declared reason: {reason}\n\
+						 If the requirement is gone, delete the declaration and its script and \
+						 assert the un-repaired read directly — leaving it in place means the \
+						 repair, not the upgrade, is what the test proves."
+					));
+				}
+
+				Box::pin(Self::grade_result(config, *after, match_ctx)).await
+			}
+			TestTaskResult::Chain(hops) => {
+				// Every hop is graded against the same expectations. The first
+				// one that does not hold is the report: a walk that breaks at
+				// 3.1.4 and stays broken afterwards should name 3.1.4, not the
+				// last version in the chain.
+				let total = hops.len();
+				for hop in hops {
+					let hop_ctx = MatchContext::with_vars(match_ctx.datastore, hop.vars);
+					let values = match &hop.result {
+						TestTaskResult::Results {
+							res,
+							..
+						} => Some(TestOutputs::Values(res.clone())),
+						_ => None,
+					};
+					let kind =
+						Box::pin(Self::grade_result(config, hop.result, &hop_ctx)).await;
+					if !matches!(kind, TestReportKind::Valid) {
+						return TestReportKind::ChainHop {
+							version: hop.version,
+							hop: hop.hop,
+							outputs: values,
+							hops: if hop.hops == 0 {
+								total
+							} else {
+								hop.hops
+							},
+							inner: Box::new(kind),
+						};
+					}
+				}
+				TestReportKind::Valid
 			}
 		}
 	}
@@ -542,7 +748,7 @@ impl TestReport {
 	async fn grade_value_results(
 		expectation: Option<TestExpectation>,
 		results: Vec<Result<SurValue, String>>,
-		matcher_datastore: &Datastore,
+		match_ctx: &MatchContext<'_>,
 	) -> TestReportKind {
 		// Ensure we expect a value.
 		let expected_values = match expectation {
@@ -583,7 +789,7 @@ impl TestReport {
 					},
 				},
 				(Some(e), Some(v)) => {
-					match Self::match_value_to_expectation(v, e, matcher_datastore).await {
+					match Self::match_value_to_expectation(v, e, match_ctx).await {
 						Some(kind) => Mismatch {
 							index,
 							kind,
@@ -610,7 +816,7 @@ impl TestReport {
 	async fn match_value_to_expectation(
 		value: Result<SurValue, String>,
 		expectation: &TestValueExpectation,
-		matcher_datastore: &Datastore,
+		match_ctx: &MatchContext<'_>,
 	) -> Option<MismatchKind> {
 		match expectation {
 			TestValueExpectation::Error(expected) => match value {
@@ -668,7 +874,7 @@ impl TestReport {
 				}
 			},
 			TestValueExpectation::Matcher(x) => {
-				Self::match_value_to_matcher(value, x, matcher_datastore)
+				Self::match_value_to_matcher(value, x, match_ctx)
 					.await
 					.map(MismatchKind::Matcher)
 			}
@@ -678,7 +884,7 @@ impl TestReport {
 	async fn match_value_to_matcher(
 		value: Result<SurValue, String>,
 		expectation: &MatcherExpectation,
-		matcher_datastore: &Datastore,
+		match_ctx: &MatchContext<'_>,
 	) -> Option<MatcherMismatch> {
 		match expectation.matcher_value_type {
 			MatchValueType::Both => {}
@@ -698,18 +904,19 @@ impl TestReport {
 			}
 		};
 
-		let run_vars = match value {
-			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
-			Err(ref e) => {
-				Variables::from_iter([("error".to_string(), SurValue::String(e.clone()).clone())])
-			}
+		// Context bindings first, so a `$result`/`$error` supplied by the run
+		// itself always wins over anything the context happens to carry.
+		let mut run_vars = match_ctx.vars.clone();
+		match value {
+			Ok(ref x) => run_vars.insert("result".to_string(), x.clone()),
+			Err(ref e) => run_vars.insert("error".to_string(), SurValue::String(e.clone())),
 		};
 
 		let session = Session::viewer().with_ns("match").with_db("match");
 
 		// Instead of creating an Ast directly, we'll execute the expression as a query string
 		let query = format!("RETURN {}", expectation.value_str);
-		let res = matcher_datastore.execute(&query, &session, Some(run_vars)).await;
+		let res = match_ctx.datastore.execute(&query, &session, Some(run_vars)).await;
 
 		let x = match res {
 			Err(e) => {

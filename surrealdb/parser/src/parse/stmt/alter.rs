@@ -6,7 +6,7 @@ use crate::parse::utils::{
 	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
 	parse_unordered_clause_sync, redefined_error,
 };
-use crate::parse::{ParseResult, ParserSettings};
+use crate::parse::{ParseResult, ParserSettings, ParserState};
 use crate::{Parse, Parser};
 
 fn parse_if_exists(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
@@ -121,6 +121,8 @@ impl Parse for ast::AlterTable {
 		let mut permissions = None;
 		let mut schema = None;
 		let mut table_kind = None;
+		let mut inline_edges_cap = None;
+		let mut inline_refs_cap = None;
 		loop {
 			let Some(peek) = parser.peek()? else {
 				break;
@@ -129,7 +131,7 @@ impl Parse for ast::AlterTable {
 			match peek.token {
 				T![DROP] => {
 					let _ = parser.next();
-					let expect = "`CHANGEFEED` or `COMMENT`";
+					let expect = "`CHANGEFEED`, `COMMENT` or `INLINE`";
 					let drop = parser.peek_expect(expect)?;
 					match drop.token {
 						T![COMMENT] => {
@@ -145,6 +147,30 @@ impl Parse for ast::AlterTable {
 							parse_unordered_clause_sync(parser, &mut changefeed, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
+						}
+						T![INLINE] => {
+							let _ = parser.next();
+							let span = parser.span_since(peek.span);
+							if parser.eat(T![EDGES])?.is_some() {
+								parse_unordered_clause_sync(
+									parser,
+									&mut inline_edges_cap,
+									span,
+									|_| Ok(AlterKind::Drop(span)),
+								)?;
+							} else if parser.eat(T![REFERENCES])?.is_some() {
+								parse_unordered_clause_sync(
+									parser,
+									&mut inline_refs_cap,
+									span,
+									|_| Ok(AlterKind::Drop(span)),
+								)?;
+							} else {
+								return Err(parser.unexpected_label(
+									"`EDGES` or `REFERENCES`",
+									"the inline cache to drop",
+								));
+							}
 						}
 						_ => return Err(parser.unexpected(expect)),
 					}
@@ -191,6 +217,29 @@ impl Parse for ast::AlterTable {
 						Parser::parse_sync,
 					)?;
 				}
+				T![INLINE] => {
+					let _ = parser.next();
+					if parser.eat(T![EDGES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_edges_cap,
+							peek.span,
+							|parser| parser.parse_sync().map(AlterKind::Set),
+						)?;
+					} else if parser.eat(T![REFERENCES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_refs_cap,
+							peek.span,
+							|parser| parser.parse_sync().map(AlterKind::Set),
+						)?;
+					} else {
+						return Err(parser.unexpected_label(
+							"`EDGES` or `REFERENCES`",
+							"the inline cache to configure",
+						));
+					}
+				}
 				_ => break,
 			}
 		}
@@ -205,6 +254,8 @@ impl Parse for ast::AlterTable {
 			permissions: permissions.map(|x| x.0),
 			schema: schema.map(|x| x.0),
 			table_kind: table_kind.map(|x| x.0),
+			inline_edges_cap: inline_edges_cap.map(|x| x.0),
+			inline_refs_cap: inline_refs_cap.map(|x| x.0),
 			span,
 		})
 	}
@@ -270,8 +321,11 @@ impl Parse for ast::AlterEvent {
 				}
 				T![WHEN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut condition, peek.span, async |x| {
-						Ok(AlterKind::Set(x.parse_enter().await?))
+					parse_unordered_clause(parser, &mut condition, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
@@ -279,7 +333,16 @@ impl Parse for ast::AlterEvent {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut then, peek.span, async |x| {
 						Ok(AlterKind::Set(
-							parse_seperated_list(x, T![,], Parser::parse_enter).await?.1,
+							parse_seperated_list(x, T![,], async |parser| {
+								parser
+									.with_state(
+										|s| s.difference(ParserState::LOOP),
+										Parser::parse_enter,
+									)
+									.await
+							})
+							.await?
+							.1,
 						))
 					})
 					.await?;
@@ -588,6 +651,7 @@ impl Parse for ast::AlterField {
 		let mut ty = None;
 		let mut flexible = None;
 		let mut readonly = None;
+		let mut inline = None;
 		let mut value = None;
 		let mut assert = None;
 		let mut default = None;
@@ -623,6 +687,13 @@ impl Parse for ast::AlterField {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
 							parse_unordered_clause_sync(parser, &mut readonly, span, |_| {
+								Ok(AlterKind::Drop(span))
+							})?;
+						}
+						T![INLINE] => {
+							let _ = parser.next();
+							let span = parser.span_since(drop.span);
+							parse_unordered_clause_sync(parser, &mut inline, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -684,6 +755,12 @@ impl Parse for ast::AlterField {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
+				T![INLINE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut inline, peek.span, |_| {
+						Ok(AlterKind::Set(()))
+					})?;
+				}
 				T![VALUE] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut value, peek.span, async |parser| {
@@ -694,26 +771,36 @@ impl Parse for ast::AlterField {
 				T![ASSERT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut assert, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
 				T![DEFAULT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
-						if parser.eat(T![ALWAYS])?.is_some() {
-							parser
-								.parse_enter()
-								.await
-								.map(ast::FieldDefault::Always)
-								.map(AlterKind::Set)
-						} else {
-							parser
-								.parse_enter()
-								.await
-								.map(ast::FieldDefault::Some)
-								.map(AlterKind::Set)
-						}
+						parser
+							.with_state(
+								|s| s.difference(ParserState::LOOP),
+								async |parser| {
+									if parser.eat(T![ALWAYS])?.is_some() {
+										parser
+											.parse_enter()
+											.await
+											.map(ast::FieldDefault::Always)
+											.map(AlterKind::Set)
+									} else {
+										parser
+											.parse_enter()
+											.await
+											.map(ast::FieldDefault::Some)
+											.map(AlterKind::Set)
+									}
+								},
+							)
+							.await
 					})
 					.await?;
 				}
@@ -749,6 +836,7 @@ impl Parse for ast::AlterField {
 			default: default.map(|x| x.0),
 			flexible: flexible.map(|x| x.0),
 			readonly: readonly.map(|x| x.0),
+			inline: inline.map(|x| x.0),
 			comment: comment.map(|x| x.0),
 			on_delete: on_delete.map(|x| x.0),
 			permissions: permissions.map(|x| x.0),
@@ -977,6 +1065,7 @@ impl Parse for ast::AlterUser {
 		let base = parser.parse_sync()?;
 
 		let mut secret = None;
+		let mut scram = None;
 		let mut comment = None;
 		let mut roles = None;
 		let mut session_duration = None;
@@ -1012,6 +1101,16 @@ impl Parse for ast::AlterUser {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(ast::UserSecret::PassWord)
+					})?;
+				}
+				T![PASSSCRAM] => {
+					let _ = parser.next();
+					// Syntax only: captured verbatim, not semantically validated here
+					// (this parser resolves no literals and cannot reach core's
+					// `ScramCredential`). Lowering this AST to an executable statement
+					// MUST validate via `from_verifier_string`, as the `syn` parser does.
+					parse_unordered_clause_sync(parser, &mut scram, peek.span, |parser| {
+						parser.parse_sync::<ast::NodeId<ast::StringLit>>()
 					})?;
 				}
 				T![ROLES] => {
@@ -1091,6 +1190,7 @@ impl Parse for ast::AlterUser {
 			base,
 			span,
 			secret: secret.map(|x| x.0),
+			scram: scram.map(|x| x.0),
 			roles: roles.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),
@@ -1112,6 +1212,7 @@ impl Parse for ast::AlterAccess {
 
 		let mut comment = None;
 		let mut authenticate = None;
+		let mut context = None;
 		let mut grant_duration = None;
 		let mut session_duration = None;
 		let mut token_duration = None;
@@ -1122,13 +1223,20 @@ impl Parse for ast::AlterAccess {
 			match peek.token {
 				T![DROP] => {
 					let _ = parser.next();
-					let expect = "`AUTHENTICATE` or `COMMENT`";
+					let expect = "`AUTHENTICATE`, `CONTEXT` or `COMMENT`";
 					let drop = parser.peek_expect(expect)?;
 					match drop.token {
 						T![AUTHENTICATE] => {
 							let _ = parser.next();
 							let span = parser.span_since(peek.span);
 							parse_unordered_clause_sync(parser, &mut authenticate, span, |_| {
+								Ok(AlterKind::Drop(span))
+							})?;
+						}
+						T![CONTEXT] => {
+							let _ = parser.next();
+							let span = parser.span_since(peek.span);
+							parse_unordered_clause_sync(parser, &mut context, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -1215,7 +1323,20 @@ impl Parse for ast::AlterAccess {
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
+					})
+					.await?;
+				}
+				T![CONTEXT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut context, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
@@ -1236,6 +1357,7 @@ impl Parse for ast::AlterAccess {
 			name,
 			base,
 			authenticate: authenticate.map(|x| x.0),
+			context: context.map(|x| x.0),
 			grant_duration: grant_duration.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),
@@ -1344,7 +1466,15 @@ impl Parse for ast::AlterApi {
 									parser,
 									&mut fallback,
 									next.span,
-									async |parser| parser.parse_enter().await.map(AlterKind::Set),
+									async |parser| {
+										parser
+											.with_state(
+												|s| s.difference(ParserState::LOOP),
+												Parser::parse_enter,
+											)
+											.await
+											.map(AlterKind::Set)
+									},
 								)
 								.await?;
 							}

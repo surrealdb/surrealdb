@@ -25,6 +25,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -41,6 +42,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -57,6 +59,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -76,6 +79,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -96,9 +100,10 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Integer
                                 +1
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -121,6 +126,7 @@ Query
                     Expr::Duration
                         1s
                     .authenticate: None
+                    .context: None
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -137,6 +143,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -146,7 +153,7 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +1
                             .issue: Some
@@ -158,9 +165,10 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +2
+                            .audience: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess
@@ -176,6 +184,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Jwt
                         Jwt
@@ -184,10 +193,11 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +1
                             .issue: None
+                            .audience: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess
@@ -203,6 +213,7 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: None
+                    .context: None
                     .ty: Some
                     AccessType::Record
                         RecordAccess
@@ -211,7 +222,7 @@ Query
                                 BinaryExpr
                                     .left: Expr::Integer
                                         +1
-                                    .op: Add
+                                    .op: BinaryOperator::Add
                                     .right: Expr::Integer
                                         +2
                             .signin: Some
@@ -219,7 +230,7 @@ Query
                                 BinaryExpr
                                     .left: Expr::Integer
                                         +1
-                                    .op: Add
+                                    .op: BinaryOperator::Add
                                     .right: Expr::Integer
                                         +1
                             .jwt: Some
@@ -229,9 +240,10 @@ Query
                                         BinaryExpr
                                             .left: Expr::Integer
                                                 +1
-                                            .op: Add
+                                            .op: BinaryOperator::Add
                                             .right: Expr::Integer
                                                 +3
                                 .issue: None
+                                .audience: None
                             .refresh: true
 */

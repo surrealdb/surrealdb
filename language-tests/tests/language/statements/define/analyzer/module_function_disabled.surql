@@ -3,15 +3,15 @@
 allow-experimental = []
 
 [test]
-reason = "Analyzer FUNCTION mod:: requires the surrealism experimental capability"
+reason = "An analyzer FUNCTION reference to a `mod::` module function is rejected at parse time when Surrealism modules are not enabled, with the caret on the `mod` keyword."
 
 [test.results]
 parsing-error = """
-Experimental capability `surrealism` is not enabled
+Surrealism modules are not enabled
   --> [18:30]
    |
 18 | DEFINE ANALYZER ana FUNCTION mod::demo::alter TOKENIZERS class;
-   |                              ^^^ Use of `mod::` is still experimental
+   |                              ^^^ Use of `mod::` requires Surrealism modules
 """
 */
 

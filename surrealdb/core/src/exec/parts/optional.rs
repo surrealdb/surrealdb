@@ -71,3 +71,108 @@ impl ToSql for OptionalChainPart {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::{eval_on, root_ctx, val};
+	use crate::exec::parts::FieldPart;
+
+	/// A tail of plain field accesses, as the planner builds for `.?.a.b`.
+	fn field_tail(names: &[&str]) -> Vec<Arc<dyn PhysicalExpr>> {
+		names
+			.iter()
+			.map(|name| {
+				Arc::new(FieldPart {
+					name: (*name).to_owned(),
+				}) as Arc<dyn PhysicalExpr>
+			})
+			.collect()
+	}
+
+	#[tokio::test]
+	async fn none_and_null_skip_the_tail_and_keep_their_own_kind() {
+		let ctx = root_ctx();
+		// NULL is the load-bearing case: the tail would turn it into NONE, so a
+		// NULL result is proof the tail never ran.
+		assert_eq!(eval_on("a.?.b", &val("{ a: NULL }").await, &ctx).await.unwrap(), Value::Null);
+		assert_eq!(eval_on("a.?.b", &val("{ a: NONE }").await, &ctx).await.unwrap(), Value::None);
+		// A missing field is NONE and short-circuits the same way.
+		assert_eq!(eval_on("a.?.b", &val("{ }").await, &ctx).await.unwrap(), Value::None);
+	}
+
+	#[tokio::test]
+	async fn a_present_value_is_threaded_through_the_whole_tail() {
+		let ctx = root_ctx();
+		let doc = val("{ a: { b: { c: 7 } } }").await;
+		assert_eq!(eval_on("a.?.b.c", &doc, &ctx).await.unwrap(), Value::from(7));
+		// The tail runs even when it produces NONE — only the *input* is
+		// short-circuited.
+		assert_eq!(
+			eval_on("a.?.missing", &val("{ a: { b: 1 } }").await, &ctx).await.unwrap(),
+			Value::None
+		);
+		// Only the top-level value is checked: an array that merely contains
+		// NONE is present, so the tail maps over it.
+		assert_eq!(
+			eval_on("a.?.b", &val("{ a: [NONE, { b: 1 }] }").await, &ctx).await.unwrap(),
+			val("[NONE, 1]").await
+		);
+		// A scalar is present too; the tail simply finds no field on it.
+		assert_eq!(eval_on("a.?.b", &val("{ a: 42 }").await, &ctx).await.unwrap(), Value::None);
+	}
+
+	#[tokio::test]
+	async fn nested_optionals_stop_at_the_first_none_or_null() {
+		let ctx = root_ctx();
+		// The planner nests one part per `.?`, so the inner chain is skipped as
+		// soon as its own input is NONE/NULL.
+		assert_eq!(
+			eval_on("a.?.b.?.c", &val("{ a: { b: NULL } }").await, &ctx).await.unwrap(),
+			Value::Null
+		);
+		assert_eq!(
+			eval_on("a.?.b.?.c", &val("{ a: NULL }").await, &ctx).await.unwrap(),
+			Value::Null
+		);
+		assert_eq!(
+			eval_on("a.?.b.?.c", &val("{ a: { b: { c: 1 } } }").await, &ctx).await.unwrap(),
+			Value::from(1)
+		);
+	}
+
+	#[tokio::test]
+	async fn an_empty_tail_passes_the_input_through() {
+		// A trailing `.?` with nothing after it leaves the value alone, apart
+		// from the same NONE/NULL short-circuit.
+		let ctx = root_ctx();
+		let part = OptionalChainPart {
+			tail: vec![],
+		};
+		let base = EvalContext::from_exec_ctx(&ctx);
+		for src in ["42", "'text'", "{ a: 1 }", "NULL", "NONE"] {
+			let value = val(src).await;
+			let out = part.evaluate(base.with_value(&value)).await.unwrap();
+			assert_eq!(out, value, "an empty tail should pass {src} through");
+		}
+	}
+
+	#[tokio::test]
+	async fn declared_metadata_is_the_maximum_over_the_tail() {
+		// The executor validates a plan's `required_context` before running it,
+		// so an optional chain must report the strictest requirement of the
+		// parts it hides — and nothing more when it hides none.
+		let empty = OptionalChainPart {
+			tail: vec![],
+		};
+		assert_eq!(empty.required_context(), ContextLevel::Root);
+		assert_eq!(empty.access_mode(), AccessMode::ReadOnly);
+
+		// A field access may dereference a record id, so it needs Database.
+		let with_field = OptionalChainPart {
+			tail: field_tail(&["a", "b"]),
+		};
+		assert_eq!(with_field.required_context(), ContextLevel::Database);
+		assert_eq!(with_field.access_mode(), AccessMode::ReadOnly);
+	}
+}

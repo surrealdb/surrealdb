@@ -1,12 +1,11 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
-use crate::err::Error;
+use crate::doc::{Document, Error as DocError};
 use crate::val::Value;
 
 impl Document {
@@ -17,6 +16,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Skip the create attempt when we already have the document
 		if !self.is_iteration_initial() {
 			return self.insert_update(stk, ctx, opt, stm).await;
@@ -50,33 +53,50 @@ impl Document {
 				}
 			}
 			// There was an error creating the record
-			Err(IgnoreError::Error(e)) => match e.downcast() {
-				// We got an index exists error
-				Ok(Error::IndexExists {
-					record,
-					..
-				}) if !self.is_specific_record_id() => record,
-				// This record already exists
-				Ok(Error::RecordExists {
-					record,
-				}) => record,
-				// There was a conflict error
-				Ok(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					if stm.is_ignore() {
-						return Err(IgnoreError::Ignore);
-					} else {
-						return Err(IgnoreError::Error(anyhow!(e)));
+			Err(IgnoreError::Error(e)) => {
+				// Only two failures name an existing record the update can be
+				// retried against. A unique-index conflict is raised by the
+				// index layer and a duplicate record id by the document layer,
+				// so each is recovered on its own. Both recoveries only borrow,
+				// so `e` stays whole for the arm that re-raises it.
+				let conflict = match crate::idx::index_exists_record(&e) {
+					// An index conflict against a record id the statement named
+					// itself cannot be retried, so it is reported like any other
+					// create conflict
+					Some(record) if !self.is_specific_record_id() => Some(record),
+					Some(_) => None,
+					None => match e.downcast_ref::<DocError>() {
+						Some(DocError::RecordExists {
+							record,
+						}) => Some(record.clone()),
+						_ => None,
+					},
+				};
+				match conflict {
+					Some(record) => record,
+					// Every other create failure belongs to this row whichever
+					// layer raised it, so `INSERT IGNORE` skips the row exactly
+					// as it does when there is no `ON DUPLICATE KEY UPDATE`
+					// clause. Classifying by error type instead would silently
+					// stop ignoring a failure the moment it moved layers, which
+					// `reproductions/insert_ignore_on_duplicate_key_leaf_error`
+					// pins: a `VALUE (THROW ...)` is raised outside the document
+					// layer and must still be skipped.
+					//
+					// This is wider than the pre-split behaviour, which surfaced
+					// anything that did not downcast to `err::Error`. That is a
+					// deliberate behaviour change, not an oversight.
+					None => {
+						ctx.tx().rollback_to_save_point().await?;
+						self.mutated = false;
+						if stm.is_ignore() {
+							return Err(IgnoreError::Ignore);
+						} else {
+							return Err(IgnoreError::Error(e));
+						}
 					}
 				}
-				// Unrelated error — always surface
-				Err(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					return Err(IgnoreError::Error(e));
-				}
-			},
+			}
 		};
 		// Roll back the create attempt before falling through to update
 		ctx.tx().rollback_to_save_point().await?;
@@ -131,6 +151,10 @@ impl Document {
 		self.store_record_data(ctx, stm).await?;
 		self.store_edges_data(ctx, opt).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Create).await?;
@@ -180,7 +204,12 @@ impl Document {
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_edges_data(ctx, opt).await?;
+		self.store_inline_adjacency_data(ctx, opt).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Update).await?;

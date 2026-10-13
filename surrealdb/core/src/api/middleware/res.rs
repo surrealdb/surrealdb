@@ -5,17 +5,17 @@ use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue};
 use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM, Mime, Name, TEXT_PLAIN};
+use surrealdb_rpc::format as api_format;
 
 use crate::api::err::ApiError;
-use crate::api::format as api_format;
 use crate::api::middleware::common::{
 	APPLICATION_CBOR, APPLICATION_SDB_FB, APPLICATION_SDB_NATIVE, BodyStrategy,
 };
 use crate::api::response::ApiResponse;
 use crate::rpc::format;
-use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicBytes, PublicValue};
 use crate::val::Bytes;
+use crate::val::convert_public::convert_public_value_to_internal;
 
 pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Option<BodyStrategy> {
 	let Some(accepted) = headers.get(ACCEPT) else {

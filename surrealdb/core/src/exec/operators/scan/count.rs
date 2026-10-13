@@ -14,17 +14,19 @@
 //! - **Conditional** – per-record evaluation is required, so the operator falls back to a full scan
 //!   + count at runtime.
 
+use std::borrow::Cow;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use common::future::stream::{Yielder, try_async_stream};
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permission};
+use crate::err::EngineError;
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
@@ -32,9 +34,9 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::key::record;
-use crate::kvs::{KVKey, KVValue};
-use crate::val::{Number, Object, RecordIdKey, TableName, Value};
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode, KVValue, RawRange};
+use crate::val::{Number, Object, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 /// Optimized operator for `SELECT count() FROM <table> GROUP ALL`.
 ///
@@ -127,7 +129,7 @@ impl ExecOperator for CountScan {
 		let field_names = self.field_names.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("CountScan requires database context")?;
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
@@ -164,10 +166,8 @@ impl ExecOperator for CountScan {
 			};
 
 			// Verify that the table exists.
-			let table_def = db_ctx
-				.get_table_def(&table_name, version)
-				.await
-				.context("Failed to get table")?;
+			let table_def =
+				db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
 
 			if table_def.is_none() {
 				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -175,13 +175,24 @@ impl ExecOperator for CountScan {
 				})))?;
 			}
 
+			// Fail closed: a lightweight relation stores no records, so every
+			// key-space count below — point, range, table, or the conditional
+			// permission fallback — would be wrong-zero. Statically-named
+			// sources were declined at plan time; only runtime-resolved
+			// sources reach this.
+			if table_def.as_deref().is_some_and(|def| {
+				crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
+			}) {
+				Err(ControlFlow::Err(anyhow::anyhow!(
+					"a LIGHTWEIGHT relation cannot be scanned by this execution path; \
+					 reference the table statically so the record-less scan can serve it"
+				)))?;
+			}
+
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => Permission::None,
-				};
-				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+				let catalog_perm = table_select_permission(table_def.as_deref());
+				convert_permission_to_physical_runtime(catalog_perm, &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -191,7 +202,7 @@ impl ExecOperator for CountScan {
 			match select_permission {
 				PhysicalPermission::Deny => {
 					// Table is invisible – yield nothing (empty result → no GROUP ALL row).
-					return;
+					return Ok(());
 				}
 				PhysicalPermission::Conditional(_) => {
 					// Per-record permissions – fall back to a full scan + count.
@@ -199,11 +210,17 @@ impl ExecOperator for CountScan {
 					// emitting CountScan for conditional permissions, but we handle
 					// it defensively.
 					let count = count_with_perm_fallback(
-						&ctx, ns.namespace_id, db.database_id,
-						&table_name, rid.as_ref(), version, &select_permission,
-					).await?;
-					yield make_count_batch(count, &field_names);
-					return;
+						&ctx,
+						ns.namespace_id,
+						db.database_id,
+						&table_name,
+						rid.as_ref(),
+						version,
+						&select_permission,
+					)
+					.await?;
+					yielder.emit(make_count_batch(count, &field_names)).await;
+					return Ok(());
 				}
 				PhysicalPermission::Allow => {
 					// Proceed with the fast KV count path.
@@ -213,53 +230,39 @@ impl ExecOperator for CountScan {
 			// ── Fast path: count KV keys without deserializing ──────────
 			let count = if let Some(ref rid) = rid {
 				// Range source
-				count_range(
-					ns.namespace_id, db.database_id, &rid.table,
-					&rid.key, &txn, version,
-				).await?
+				count_range(ns.namespace_id, db.database_id, &rid.table, &rid.key, &txn, version)
+					.await?
 			} else {
 				// Check for an unconditional COUNT index first (O(deltas) vs O(records))
-				let count_from_index = if version.is_none() {
-					let indexes = db_ctx
-						.get_table_indexes(&table_name, version)
-						.await
-						.ok();
-					if let Some(indexes) = indexes {
-						let matching = indexes.iter().find(|ix| {
-							matches!(&ix.index, Index::Count(None))
-						});
-						if let Some(ix_def) = matching {
-							sum_index_count_deltas(
-								&ctx,
-								&txn,
-								ns.namespace_id,
-								db.database_id,
-								&table_name,
-								ix_def.index_id,
-							).await.ok()
-						} else {
-							None
-						}
-					} else {
-						None
-					}
-				} else {
-					None
-				};
-
-				if let Some(count) = count_from_index {
-					count
+				if let None = version
+					&& let Some(indexes) = db_ctx.get_table_indexes(&table_name, version).await.ok()
+					&& let Some(ix_def) =
+						indexes.iter().find(|ix| matches!(&ix.index, Index::Count(None)))
+				{
+					sum_index_count_deltas(
+						&ctx,
+						&txn,
+						ns.namespace_id,
+						db.database_id,
+						&table_name,
+						ix_def.index_id,
+					)
+					.await?
 				} else {
 					// Fallback: iterate all KV keys
-					let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
-					let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
-					txn.count(beg..end, version).await
-						.context("Failed to count table records")?
+					let range = RecordPrefix {
+						ns: ns.namespace_id,
+						db: db.database_id,
+						tb: Cow::Borrowed(&table_name),
+					}
+					.range()?;
+					txn.count(range, version).await.context("Failed to count table records")?
 				}
 			};
 
-			yield make_count_batch(count, &field_names);
-		};
+			yielder.emit(make_count_batch(count, &field_names)).await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "CountScan", &self.metrics))
 	}
@@ -283,9 +286,7 @@ fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
 	for name in field_names {
 		obj.insert(name.clone(), count_val.clone());
 	}
-	ValueBatch {
-		values: vec![Value::Object(obj)],
-	}
+	ValueBatch::new(vec![Value::Object(obj)])
 }
 
 /// Count records in a record-id range using `txn.count()`.
@@ -299,15 +300,19 @@ async fn count_range(
 ) -> Result<usize, ControlFlow> {
 	match key {
 		RecordIdKey::Range(range) => {
-			let beg = range_start_key(ns_id, db_id, table, &range.start)?;
-			let end = range_end_key(ns_id, db_id, table, &range.end)?;
-			txn.count(beg..end, version).await.context("Failed to count range records")
+			let range = record_key_range(ns_id, db_id, table, range)?;
+			txn.count(range, version).await.context("Failed to count range records")
 		}
 		_ => {
 			// Single record ID: count is 0 or 1. Use a point lookup.
-			let record_key = record::new(ns_id, db_id, table, key);
+			let record_key = RecordKey {
+				ns: ns_id,
+				db: db_id,
+				tb: Cow::Borrowed(table),
+				id: Cow::Borrowed(key),
+			};
 			let exists = txn
-				.exists(&record_key, version)
+				.exists_key(&record_key, version)
 				.await
 				.context("Failed to check record existence")?;
 			Ok(usize::from(exists))
@@ -315,52 +320,29 @@ async fn count_range(
 	}
 }
 
-/// Compute the start key for a range count (mirrors scan.rs helpers).
-fn range_start_key(
+/// The record keys a record-id range covers.
+pub(crate) fn record_key_range(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::prefix(ns_id, db_id, table).context("Failed to create prefix key")
-		}
-		Bound::Included(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create begin key")
-		}
-		Bound::Excluded(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create begin key")?;
-			key.push(0x00);
-			Ok(key)
-		}
+	range: &RecordIdKeyRange,
+) -> Result<RawRange, ControlFlow> {
+	let start = match &range.start {
+		Bound::Unbounded => Bound::Unbounded,
+		Bound::Included(v) => Bound::Included(Cow::Borrowed(v)),
+		Bound::Excluded(v) => Bound::Excluded(Cow::Borrowed(v)),
+	};
+	let end = match &range.end {
+		Bound::Unbounded => Bound::Unbounded,
+		Bound::Included(v) => Bound::Included(Cow::Borrowed(v)),
+		Bound::Excluded(v) => Bound::Excluded(Cow::Borrowed(v)),
+	};
+	Ok(RecordPrefix {
+		ns: ns_id,
+		db: db_id,
+		tb: Cow::Borrowed(table),
 	}
-}
-
-/// Compute the end key for a range count (mirrors scan.rs helpers).
-fn range_end_key(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::suffix(ns_id, db_id, table).context("Failed to create suffix key")
-		}
-		Bound::Excluded(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create end key")
-		}
-		Bound::Included(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create end key")?;
-			key.push(0x00);
-			Ok(key)
-		}
-	}
+	.range_where((start, end))?)
 }
 
 /// Fallback: scan all records, checking per-record permissions, and count
@@ -377,13 +359,9 @@ async fn count_with_perm_fallback(
 	let txn = ctx.txn();
 
 	// Determine key range
-	let (beg, end) = if let Some(rid) = rid {
+	let range = if let Some(rid) = rid {
 		match &rid.key {
-			RecordIdKey::Range(range) => {
-				let beg = range_start_key(ns_id, db_id, &rid.table, &range.start)?;
-				let end = range_end_key(ns_id, db_id, &rid.table, &range.end)?;
-				(beg, end)
-			}
+			RecordIdKey::Range(range) => record_key_range(ns_id, db_id, &rid.table, range)?,
 			_ => {
 				// Single record – do a point check with permission evaluation
 				let Some(value) =
@@ -396,21 +374,24 @@ async fn count_with_perm_fallback(
 			}
 		}
 	} else {
-		let beg = record::prefix(ns_id, db_id, table_name)?;
-		let end = record::suffix(ns_id, db_id, table_name)?;
-		(beg, end)
+		RecordPrefix {
+			ns: ns_id,
+			db: db_id,
+			tb: Cow::Borrowed(table_name),
+		}
+		.range()?
 	};
 
 	// Walk the cursor batch-by-batch, decoding records inline from
 	// borrowed bytes — no per-row `Vec<u8>` allocation.
 	let mut cursor = txn
-		.open_vals_cursor(beg..end, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
 	loop {
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let batch = cursor
 			.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
@@ -420,27 +401,20 @@ async fn count_with_perm_fallback(
 			break;
 		}
 		for (key, val) in &batch {
-			let decoded_key = crate::key::record::RecordKey::decode_key(key)
-				.context("Failed to decode record key")?;
+			let decoded_key = RecordKey::decode_key(key).context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
-				key: decoded_key.id,
+				key: decoded_key.id.into_owned(),
 			};
 			let record = crate::catalog::Record::kv_decode_value(val, rid_val)
 				.context("Failed to deserialize record")?;
 			let value = record.data;
 
-			// Check per-record permission
-			let allowed = match permission {
-				PhysicalPermission::Allow => true,
-				PhysicalPermission::Deny => false,
-				PhysicalPermission::Conditional(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&value);
-					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
-					})?
-				}
-			};
+			// Check per-record permission through the same helper the scan path
+			// uses, so a count and the SELECT it counts agree on visibility.
+			let allowed = check_permission_for_value(permission, &value, None, ctx)
+				.await
+				.map_err(ControlFlow::Err)?;
 			if allowed {
 				count += 1;
 			}
@@ -456,15 +430,5 @@ async fn check_perm_value(
 	value: &Value,
 	permission: &PhysicalPermission,
 ) -> Result<bool, ControlFlow> {
-	match permission {
-		PhysicalPermission::Allow => Ok(true),
-		PhysicalPermission::Deny => Ok(false),
-		PhysicalPermission::Conditional(expr) => {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
-			expr.evaluate(eval_ctx)
-				.await
-				.map(|v| v.is_truthy())
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))
-		}
-	}
+	check_permission_for_value(permission, value, None, ctx).await.map_err(ControlFlow::Err)
 }

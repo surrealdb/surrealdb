@@ -1,0 +1,56 @@
+name: 'Determine latest release pointer'
+description: >-
+  Determine latest release pointer.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  latest:
+    description: 'latest (see step body)'
+    value: ${{ steps.latest.outputs.latest }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine latest release pointer
+      id: latest
+      shell: bash
+      run: |
+        set -euo pipefail
+        latest=false
+        # Only a stable ENGINE release can ever own `latest`.
+        if [[ "$RELEASE_ENGINE" == "true" && "$NIGHTLY" != "true" && "$VERSION" != *-* ]]; then
+          # Collect every publicly released STABLE version (non-draft,
+          # non-prerelease), paginating the releases API. gh may be absent on the
+          # private runner, so use curl+jq (as the overwrite guard does). Fail
+          # hard on an API error instead of guessing which version is latest.
+          published=""
+          page=1
+          while (( page <= 50 )); do
+            if ! resp=$(curl -fsS --retry 3 --retry-delay 2 \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100&page=${page}"); then
+              echo "::error::Could not read GitHub releases to determine the 'latest' pointer (page ${page}). Refusing to guess which stable version is latest — re-run once the API is reachable."
+              exit 1
+            fi
+            n=$(printf '%s' "$resp" | jq 'length')
+            (( n > 0 )) || break
+            published+="$(printf '%s' "$resp" | jq -r '.[] | select(.draft==false and .prerelease==false) | .tag_name')"$'\n'
+            (( n < 100 )) && break
+            page=$(( page + 1 ))
+          done
+          # Highest of {published stables} ∪ {this version}: normalise tags
+          # (vX.Y.Z -> X.Y.Z), keep only stable triples, version-sort. If the max
+          # is this version, this release becomes (or, on a re-release, remains)
+          # latest; if a strictly-higher stable exists, it does not.
+          highest=$(
+            { printf '%s\n' "$published" \
+                | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p'
+              printf '%s\n' "$VERSION"; } \
+              | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+          [[ "$highest" == "$VERSION" ]] && latest=true
+        fi
+        echo "Computed latest=${latest} (version=${VERSION}, engine=${RELEASE_ENGINE}, nightly=${NIGHTLY})."
+        echo "latest=${latest}" >> "$GITHUB_OUTPUT"

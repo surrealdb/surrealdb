@@ -10,7 +10,7 @@ use crate::parse::utils::{
 	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
 	parse_unordered_clause_sync, redefined_error,
 };
-use crate::parse::{ParseError, ParseResult, ParserSettings};
+use crate::parse::{ParseError, ParseResult, ParserSettings, ParserState};
 use crate::{Parse, ParseSync, Parser};
 
 impl ParseSync for ast::DefineKind {
@@ -47,7 +47,10 @@ impl Parse for ast::Permission {
 			}
 			T![WHERE] => {
 				let _ = parser.next();
-				let expr = parser.parse_enter().await?;
+
+				let expr = parser
+					.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+					.await?;
 				ast::Permission::Where(expr)
 			}
 			_ => return Err(parser.unexpected("`NONE`, `FULL` or `WHERE`")),
@@ -184,7 +187,8 @@ impl Parse for ast::DefineFunction {
 			None
 		};
 
-		let body = parser.parse().await?;
+		let body =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 
 		let mut comment = None;
 		let mut permissions = None;
@@ -223,22 +227,28 @@ impl Parse for ast::DefineModule {
 		let _ = parser.expect(T![MODULE])?;
 		let kind = parser.parse_sync()?;
 
-		let peek = parser.peek_expect("a file literal or a path")?;
-		let subject = match peek.token {
-			BaseTokenKind::FileString => ast::ModuleName::File(parser.parse_sync()?),
-			x if x.is_identifier() => ast::ModuleName::Path(parser.parse_sync()?),
-			_ => return Err(parser.unexpected("a file literal or a path")),
-		};
-		let alias = if parser.eat(T![AS])?.is_some() {
-			Some(parser.parse_sync()?)
+		let name = parser.parse_sync()?;
+
+		let source = if parser.eat(T![FROM])?.is_some() {
+			let peek = parser.peek_expect("a file literal or a path")?;
+			match peek.token {
+				BaseTokenKind::FileString => Some(ast::ModuleSource::File(parser.parse_sync()?)),
+				x if x.is_identifier() => Some(ast::ModuleSource::Path(parser.parse_sync()?)),
+				_ => return Err(parser.unexpected("a file literal or a path")),
+			}
 		} else {
 			None
 		};
 
+		let mut unsigned = None;
 		let mut comment = None;
 		let mut permissions = None;
 		while let Some(x) = parser.peek()? {
 			match x.token {
+				T![UNSIGNED] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut unsigned, x.span, |_| Ok(()))?;
+				}
 				T![COMMENT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter)
@@ -253,10 +263,20 @@ impl Parse for ast::DefineModule {
 		}
 
 		let span = parser.span_since(define.span);
+
+		// Signature verification does not exist for any executable form yet,
+		// so the opt-out keyword is mandatory rather than optional.
+		if unsigned.is_none() {
+			return Err(
+				parser.error("expected the `UNSIGNED` keyword on this module definition", span)
+			);
+		}
+
 		Ok(ast::DefineModule {
 			kind,
-			subject,
-			alias,
+			name,
+			source,
+			unsigned: true,
 			comment: comment.map(|x| x.0),
 			permission: permissions.map(|x| x.0),
 			span,
@@ -474,13 +494,26 @@ impl ParseSync for ast::TableKind {
 					}
 				}
 
-				let enforced = parser.eat(T![ENFORCED])?.is_some();
+				// Trailing flags, accepted in either order; rendered
+				// canonically as `ENFORCED LIGHTWEIGHT`.
+				let mut enforced = false;
+				let mut lightweight = false;
+				loop {
+					if !enforced && parser.eat(T![ENFORCED])?.is_some() {
+						enforced = true;
+					} else if !lightweight && parser.eat(T![LIGHTWEIGHT])?.is_some() {
+						lightweight = true;
+					} else {
+						break;
+					}
+				}
 
 				let span = parser.span_since(peek.span);
 				Ok(ast::TableKind::Relation(RelationTable {
 					from: from.map(|x| x.0),
 					to: to.map(|x| x.0),
 					enforced,
+					lightweight,
 					span,
 				}))
 			}
@@ -504,12 +537,37 @@ impl Parse for ast::DefineTable {
 		let mut view = None;
 		let mut changefeed = None;
 		let mut table_kind = None;
+		let mut inline_edges_cap = None;
+		let mut inline_refs_cap = None;
 		while let Some(x) = parser.peek()? {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter)
 						.await?;
+				}
+				T![INLINE] => {
+					let _ = parser.next();
+					if parser.eat(T![EDGES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_edges_cap,
+							x.span,
+							Parser::parse_sync,
+						)?;
+					} else if parser.eat(T![REFERENCES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_refs_cap,
+							x.span,
+							Parser::parse_sync,
+						)?;
+					} else {
+						return Err(parser.unexpected_label(
+							"`EDGES` or `REFERENCES`",
+							"the inline cache to configure",
+						));
+					}
 				}
 				T![DROP] => {
 					let _ = parser.next();
@@ -570,6 +628,8 @@ impl Parse for ast::DefineTable {
 			view: view.map(|x| x.0),
 			changefeed: changefeed.map(|x| x.0),
 			table_kind: table_kind.map(|x| x.0),
+			inline_edges_cap: inline_edges_cap.map(|x| x.0),
+			inline_refs_cap: inline_refs_cap.map(|x| x.0),
 			span,
 		})
 	}
@@ -627,7 +687,8 @@ impl Parse for ast::ApiAction {
 
 		let _ = parser.expect(T![THEN])?;
 
-		let action = parser.parse_enter().await?;
+		let action =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 
 		Ok(ast::ApiAction {
 			middleware: middleware.map(|x| x.0),
@@ -742,8 +803,15 @@ impl Parse for ast::DefineApi {
 
 					if let Some(x) = parser.eat(T![THEN])? {
 						did_parse = true;
-						parse_unordered_clause(parser, &mut fallback, x.span, Parser::parse_enter)
-							.await?;
+						parse_unordered_clause(parser, &mut fallback, x.span, async |parser| {
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await
+						})
+						.await?;
 					}
 
 					if !did_parse {
@@ -873,13 +941,26 @@ impl Parse for ast::DefineEvent {
 				T![WHEN] => {
 					let _ = parser.next();
 
-					parse_unordered_clause(parser, &mut condition, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut condition, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![THEN] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut then, peek.span, async |parser| {
-						parse_seperated_list(parser, T![,], Parser::parse_enter).await.map(|x| x.1)
+						parse_seperated_list(parser, T![,], async |parser| {
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await
+						})
+						.await
+						.map(|x| x.1)
 					})
 					.await?
 				}
@@ -1101,6 +1182,7 @@ impl Parse for ast::DefineField {
 		let mut ty = None;
 		let mut flexible = None;
 		let mut readonly = None;
+		let mut inline = None;
 		let mut value = None;
 		let mut assert = None;
 		let mut computed = None;
@@ -1130,6 +1212,10 @@ impl Parse for ast::DefineField {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| Ok(()))?
 				}
+				T![INLINE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut inline, peek.span, |_| Ok(()))?
+				}
 				T![VALUE] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut value, peek.span, Parser::parse_enter)
@@ -1137,13 +1223,21 @@ impl Parse for ast::DefineField {
 				}
 				T![COMPUTED] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut computed, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut computed, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![ASSERT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut assert, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut assert, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![PERMISSIONS] => {
 					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
@@ -1152,11 +1246,18 @@ impl Parse for ast::DefineField {
 				T![DEFAULT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
-						if parser.eat(T![ALWAYS])?.is_some() {
-							Ok(ast::FieldDefault::Always(parser.parse_enter().await?))
-						} else {
-							Ok(ast::FieldDefault::Some(parser.parse_enter().await?))
-						}
+						parser
+							.with_state(
+								|s| s.difference(ParserState::LOOP),
+								async |parser| {
+									if parser.eat(T![ALWAYS])?.is_some() {
+										Ok(ast::FieldDefault::Always(parser.parse_enter().await?))
+									} else {
+										Ok(ast::FieldDefault::Some(parser.parse_enter().await?))
+									}
+								},
+							)
+							.await
 					})
 					.await?
 				}
@@ -1175,6 +1276,7 @@ impl Parse for ast::DefineField {
 			ty: ty.map(|x| x.0),
 			flexible: flexible.is_some(),
 			readonly: readonly.is_some(),
+			inline: inline.is_some(),
 			value: value.map(|x| x.0),
 			assert: assert.map(|x| x.0),
 			computed: computed.map(|x| x.0),
@@ -2097,6 +2199,7 @@ impl Parse for ast::DefineUser {
 
 		let mut comment = None;
 		let mut secret = None;
+		let mut scram = None;
 		let mut roles = None;
 		let mut token_duration = None;
 		let mut session_duration = None;
@@ -2120,6 +2223,19 @@ impl Parse for ast::DefineUser {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(UserSecret::PassHash)
+					})?;
+				}
+				T![PASSSCRAM] => {
+					let _ = parser.next();
+					// Syntax only: the verifier string is captured verbatim and NOT
+					// semantically validated here (this parser resolves no literals and
+					// depends on neither `surrealdb-core` nor its `ScramCredential`).
+					// When this AST is lowered to an executable statement, the lowering
+					// MUST validate via `iam::scram::ScramCredential::from_verifier_string`
+					// — the `syn` parser validates eagerly and the core `From` impls
+					// assume a validated verifier.
+					parse_unordered_clause_sync(parser, &mut scram, peek.span, |parser| {
+						parser.parse_sync::<NodeId<ast::StringLit>>()
 					})?;
 				}
 				T![ROLES] => {
@@ -2174,6 +2290,7 @@ impl Parse for ast::DefineUser {
 			base,
 			comment: comment.map(|x| x.0),
 			secret: secret.map(|x| x.0),
+			scram: scram.map(|x| x.0),
 			roles: roles.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),
@@ -2232,6 +2349,12 @@ impl Parse for ast::Jwt {
 			_ => return Err(parser.unexpected(expect)),
 		};
 
+		let audience = if parser.eat(T![AUDIENCE])?.is_some() {
+			Some(parse_seperated_list(parser, T![,], Parser::parse_enter).await?.1)
+		} else {
+			None
+		};
+
 		let issue = if parser.eat(T![WITH])?.is_some() {
 			let _ = parser.expect(T![ISSUER])?;
 			let mut algorithm = None;
@@ -2269,6 +2392,7 @@ impl Parse for ast::Jwt {
 		Ok(ast::Jwt {
 			verify,
 			issue,
+			audience,
 		})
 	}
 }
@@ -2286,13 +2410,21 @@ impl Parse for ast::RecordAccess {
 			match peek.token {
 				T![SIGNIN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut signin, peek.span, Parser::parse_enter)
-						.await?;
+					parse_unordered_clause(parser, &mut signin, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
 				}
 				T![SIGNUP] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut signup, peek.span, Parser::parse_enter)
-						.await?;
+					parse_unordered_clause(parser, &mut signup, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
 				}
 				T![WITH] => {
 					let _ = parser.next();
@@ -2353,6 +2485,7 @@ impl Parse for ast::DefineAccess {
 		let mut duration_token = None;
 		let mut duration_grant = None;
 		let mut authenticate = None;
+		let mut context = None;
 		let mut ty = None;
 		loop {
 			let Some(peek) = parser.peek()? else {
@@ -2366,12 +2499,20 @@ impl Parse for ast::DefineAccess {
 				}
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
-					parse_unordered_clause(
-						parser,
-						&mut authenticate,
-						peek.span,
-						Parser::parse_enter,
-					)
+					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
+				}
+				T![CONTEXT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut context, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
 					.await?;
 				}
 				T![DURATION] => {
@@ -2517,6 +2658,7 @@ impl Parse for ast::DefineAccess {
 			duration_session: duration_session.map(|x| x.0),
 			duration_token: duration_token.map(|x| x.0),
 			authenticate: authenticate.map(|x| x.0),
+			context: context.map(|x| x.0),
 			ty: ty.map(|x| x.0),
 			span,
 		})

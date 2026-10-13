@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-RELEASE_BRANCH="$1"
+RELEASE_BRANCH="${1:-}"
 PUBLISH="${2:-false}"
+# The released version, anchored from the release job (prepare-vars.outputs.version)
+# rather than read from the branch tip. This keeps the bump idempotent: on an
+# overwrite=true re-run of the same release, NEXT_VERSION is still computed from
+# the version that was RELEASED, so the branch (already bumped to NEXT) shows no
+# diff below and the run no-ops - instead of reading the already-bumped tip and
+# advancing a second time. Falls back to the checked-out code when not supplied.
+RELEASED_VERSION="${3:-}"
 
 if [[ -z "$RELEASE_BRANCH" ]]; then
 	echo "Error: release branch argument required"
@@ -11,21 +18,25 @@ if [[ -z "$RELEASE_BRANCH" ]]; then
 fi
 
 if [[ "$RELEASE_BRANCH" == "main" ]]; then
-	echo "Error: refusing to bump a patch version on main (use bump-nightly-version.sh instead)"
+	echo "Error: refusing to bump a patch version on main (main bumps happen at cut time via cut.yml / cut-release.sh)"
 	exit 1
 fi
 
-# The released version is taken from the code on the currently checked-out
-# git ref (the release branch), not passed in as an argument.
-VERSION=$(cargo metadata --format-version 1 --no-deps | \
-	jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+# Prefer the released version passed by the caller (the idempotent anchor above);
+# fall back to the version in the checked-out code when it isn't supplied.
+if [[ -n "$RELEASED_VERSION" ]]; then
+	VERSION="$RELEASED_VERSION"
+	echo "Released version (from caller): ${VERSION}"
+else
+	VERSION=$(cargo metadata --format-version 1 --no-deps | \
+		jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+	echo "Released version (from code): ${VERSION}"
+fi
 
 if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
-	echo "Error: Could not determine the released version from the code"
+	echo "Error: Could not determine the released version"
 	exit 1
 fi
-
-echo "Released version (from code): ${VERSION}"
 
 # Compute the next version:
 #   * stable X.Y.Z            -> X.Y.(Z+1)         (e.g. 3.1.3        -> 3.1.4)
@@ -71,16 +82,61 @@ git fetch origin "${RELEASE_BRANCH}"
 git checkout "${RELEASE_BRANCH}"
 git pull origin "${RELEASE_BRANCH}"
 
-# Dynamically build list of surrealdb-* packages (excludes surrealism-*)
+# The engine crates all inherit the workspace version, so bumping any one of them
+# via cargo set-version moves `[workspace.package] version` and every inheriting
+# crate follows. Pick them out by name (`surrealdb*`; `surreal`, the CLI, and the
+# rest inherit the same version and come along for free).
 PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 	jq -r '.packages[].name' | \
 	grep '^surrealdb' | \
 	sed 's/^/--package /' | \
 	tr '\n' ' ')
 
-# Bump version for surrealdb packages only
+# Bump the inherited workspace version.
+# shellcheck disable=SC2086 # PACKAGES is an intentional list of --package args
 cargo set-version $PACKAGES "${NEXT_VERSION}"
-cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
+
+# Bump the independently-versioned publishable crates (e.g. surrealism*,
+# surrealml-core) in LOCKSTEP with the workspace, so none is left sitting at an
+# already-published version when the next release tries to publish it - the whole
+# reason for bumping after every release. Each keeps its own major.minor and
+# adopts the workspace's new patch/pre-release TAIL (everything after major.minor:
+# `0-beta.5` when the workspace moves to 3.3.0-beta.5, `4` when it moves to 3.1.4),
+# so surrealism 0.6.0-beta.4 -> 0.6.0-beta.5 and a crate that fell a step behind at
+# 0.x.0-beta.3 snaps straight to 0.x.0-beta.5. Only crates.io-publishable crates
+# (`.publish == null`) are touched; a crate that inherits the workspace version was
+# already bumped above, and one somehow already ahead of the target is left alone
+# rather than moved backwards.
+TAIL="${NEXT_VERSION#*.}"; TAIL="${TAIL#*.}"
+while IFS=$'\t' read -r name ver manifest; do
+	if grep -qE '^version\.workspace *= *true|^version *= *\{[^}]*workspace *= *true' "${manifest}"; then
+		continue
+	fi
+	rest="${ver#*.}"
+	target="${ver%%.*}.${rest%%.*}.${TAIL}"
+	[[ "${ver}" == "${target}" ]] && continue
+	highest=$(printf '%s\n%s\n' "${ver}" "${target}" | sort -V | tail -n1)
+	if [[ "${highest}" != "${target}" ]]; then
+		echo "::warning::${name} is at ${ver}, ahead of the lockstep target ${target}; leaving it unchanged."
+		continue
+	fi
+	echo "Bumping ${name} from ${ver} to ${target}"
+	cargo set-version --package "${name}" "${target}"
+done < <(cargo metadata --format-version 1 --no-deps | \
+	jq -r '.packages[] | select(.publish == null) | "\(.name)\t\(.version)\t\(.manifest_path)"')
+
+# Refresh the root lockfile for every workspace member just rewritten - the
+# inherited bump and the independent crates - without touching any third-party
+# dependency: --workspace restricts the update to workspace packages, keeping a
+# deliberate dependency upgrade its own PR rather than a side effect of this bump.
+cargo update --workspace
+
+# The workspaces outside the root one depend on the crates just rewritten by
+# path, so their lockfiles now name a version that no longer exists. Resolved
+# from this script's own directory so the tooling comes from wherever this
+# script was run from, matching how the workflow checks it out separately from
+# the tree being bumped.
+"$(dirname "${BASH_SOURCE[0]}")/reconcile-satellite-lockfiles.sh"
 
 # Commit changes only if there are any (idempotency)
 if git diff --quiet; then
@@ -93,21 +149,20 @@ fi
 
 # Create a branch for the PR
 PR_BRANCH="dev/ci/v${NEXT_VERSION}"
+git checkout -B "${PR_BRANCH}"
 
-# Delete PR branch if it exists (idempotency)
-if git ls-remote --exit-code --heads origin "${PR_BRANCH}" >/dev/null 2>&1; then
-	echo "PR branch ${PR_BRANCH} already exists, deleting it"
-	git push origin --delete "${PR_BRANCH}" || true
-fi
-if git show-ref --verify --quiet "refs/heads/${PR_BRANCH}"; then
-	git branch -D "${PR_BRANCH}"
-fi
-
-git checkout -b "${PR_BRANCH}"
-
-# Only push and create PR if publishing
+# Only push and create/update the PR if publishing
 if [[ "$PUBLISH" == "true" ]]; then
-	git push origin "${PR_BRANCH}"
+	# Update the remote PR branch IN PLACE rather than deleting + recreating it,
+	# so an existing PR keeps its identity and review state across retries.
+	# --force-with-lease, leased to the tip we just observed, makes the overwrite
+	# safe (it refuses if the branch moved since); a missing branch is a plain
+	# create.
+	if remote_sha="$(git ls-remote --exit-code origin "refs/heads/${PR_BRANCH}" 2>/dev/null | cut -f1)"; then
+		git push --force-with-lease="${PR_BRANCH}:${remote_sha}" origin "HEAD:${PR_BRANCH}"
+	else
+		git push origin "HEAD:${PR_BRANCH}"
+	fi
 
 	# Define PR title and body (avoid duplication)
 	PR_TITLE="Bump version to ${NEXT_VERSION}"
@@ -128,15 +183,93 @@ Review and merge this PR to prepare \`${RELEASE_BRANCH}\` for the next patch rel
 		gh pr edit "${existing_pr}" \
 			--title "${PR_TITLE}" \
 			--body "${PR_BODY}"
+		PR_URL=$(gh pr view "${existing_pr}" --json url -q '.url')
 	else
 		# Create PR
-		gh pr create \
+		PR_URL=$(gh pr create \
 			--base "${RELEASE_BRANCH}" \
 			--head "${PR_BRANCH}" \
 			--title "${PR_TITLE}" \
-			--body "${PR_BODY}"
+			--body "${PR_BODY}")
 
 		echo "Created PR to bump ${RELEASE_BRANCH} to ${NEXT_VERSION}"
+	fi
+
+	echo "PR: ${PR_URL}"
+
+	# Track this bump against the milestone for the version it introduces. If the
+	# auto-merge below is ever dropped (a PR can fall out of the merge queue), the
+	# PR stays visible as open work on the v${NEXT_VERSION} milestone rather than
+	# being silently forgotten before the next release. The milestone is created
+	# when it does not exist yet. Non-fatal end to end: a milestone hiccup never
+	# fails the release.
+	MILESTONE_TITLE="v${NEXT_VERSION}"
+	REPO="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q '.nameWithOwner')}"
+	PR_NUMBER="${PR_URL##*/}"
+	milestone_number="$(gh api --paginate "repos/${REPO}/milestones?state=all&per_page=100" \
+		--jq ".[] | select(.title == \"${MILESTONE_TITLE}\") | .number" 2>/dev/null | head -n1)"
+	if [[ -z "$milestone_number" ]]; then
+		milestone_number="$(gh api -X POST "repos/${REPO}/milestones" \
+			-f title="${MILESTONE_TITLE}" --jq '.number' 2>/dev/null || true)"
+		[[ -n "$milestone_number" ]] && echo "Created milestone ${MILESTONE_TITLE} (#${milestone_number})"
+	fi
+	if [[ -n "$milestone_number" ]]; then
+		if gh api -X PATCH "repos/${REPO}/issues/${PR_NUMBER}" \
+			-F milestone="${milestone_number}" >/dev/null 2>&1; then
+			echo "Assigned ${PR_URL} to milestone ${MILESTONE_TITLE}"
+		else
+			echo "::warning title=Milestone::could not assign ${PR_URL} to milestone ${MILESTONE_TITLE}; assign it manually"
+		fi
+	else
+		echo "::warning title=Milestone::could not find or create milestone ${MILESTONE_TITLE}; PR left unassigned"
+	fi
+
+	# These version-bump PRs are mechanical and must land before the next
+	# release, so merge them without waiting for checks or a review. The
+	# release-automation App that opens the PR is a ruleset bypass actor on the
+	# release-branch rules, so it may squash-merge even while required checks are
+	# still queued and no review exists.
+	#
+	# The merge MUST go through the REST endpoint directly rather than
+	# `gh pr merge --squash`: gh inspects the PR's merge-state client-side first
+	# and, the instant after creation, sees it as BLOCKED (checks not started, no
+	# review) and refuses locally - it never calls the merge endpoint, so the
+	# App's bypass never gets a chance to apply. `--auto` would enable GitHub
+	# auto-merge, but that still honours the required approving review, so it sits
+	# waiting for a human. Calling PUT .../merge as the App lets the bypass take
+	# effect immediately. Squash is the branch's only allowed merge method.
+	#
+	# Mergeability is computed asynchronously right after a PR is created, so a
+	# transient failure on the first call can just mean "not computed yet"; retry
+	# a few times with a short backoff before falling back to auto-merge (so the
+	# PR still lands eventually, after a review) and, failing that, a warning.
+	# Non-fatal end to end: a merge that cannot proceed leaves the PR open rather
+	# than failing the release.
+	merged=false
+	merge_err=""
+	for attempt in 1 2 3 4; do
+		if merge_err="$(gh api -X PUT "repos/${REPO}/pulls/${PR_NUMBER}/merge" \
+			-f merge_method=squash 2>&1)"; then
+			merged=true
+			break
+		fi
+		[[ "$attempt" -lt 4 ]] && sleep 3
+	done
+	if [[ "$merged" == "true" ]]; then
+		echo "Merged ${PR_URL} (squash) via the release-automation App's ruleset bypass"
+	else
+		echo "Direct merge did not succeed (last error: ${merge_err}); enabling auto-merge instead."
+		gh pr merge --auto --squash "${PR_URL}" \
+			|| echo "::warning title=Auto-merge::could not merge ${PR_URL}; merge it manually"
+	fi
+
+	# Surface the PR URL and whether it already merged as step outputs, so the
+	# release summary can list it under "auto-merged" vs "review & merge".
+	# `merged` is true only when the direct squash landed here; the auto-merge
+	# fallback leaves it awaiting its requirements, so it stays false.
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
+		echo "merged=${merged}" >> "$GITHUB_OUTPUT"
 	fi
 else
 	echo "[Dry-run] Would create PR to bump ${RELEASE_BRANCH} to ${NEXT_VERSION}"

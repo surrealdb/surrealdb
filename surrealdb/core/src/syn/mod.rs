@@ -3,18 +3,13 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::CommonConfig;
+pub(crate) use surrealdb_syn::{ParseError, ParserConfig, lexer, parser};
+
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
-use crate::err::Error;
 use crate::sql::kind::KindLiteral;
 use crate::sql::{Ast, Block, Expr, Function, Idiom, Kind};
 use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
-
-pub mod error;
-pub mod lexer;
-pub mod parser;
-pub mod token;
 
 #[cfg(test)]
 pub trait Parse<T> {
@@ -26,54 +21,51 @@ mod test;
 
 use anyhow::{Result, bail, ensure};
 use lexer::Lexer;
-pub use parser::ParserSettings;
+pub(crate) use parser::ParserSettings;
 use parser::{ParseResult, Parser};
-use reblessive::{Stack, Stk};
-use token::t;
+use reblessive::Stk;
 
 const TARGET: &str = "surrealdb::core::syn";
 
 /// Takes a string and returns if it could be a reserved keyword in certain
 /// contexts.
 pub fn could_be_reserved_keyword(s: &str) -> bool {
-	lexer::keywords::could_be_reserved(s)
+	surrealdb_syn::could_be_reserved_keyword(s)
 }
 
 pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
 where
 	F: AsyncFnOnce(&mut Parser<'_>, &mut Stk) -> ParseResult<R>,
 {
-	parse_with_settings(input, ParserSettings::default(), f)
+	lift(surrealdb_syn::parse_with(input, f))
 }
 
 pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
 where
 	F: for<'a> AsyncFnOnce(&'a mut Parser<'a>, &'a mut Stk) -> ParseResult<R>,
 {
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-	let mut parser = Parser::new_with_settings(input, settings);
-	let mut stack = Stack::new();
-	stack
-		.enter(|stk| f(&mut parser, stk))
-		.finish()
-		.map_err(|e| e.render_on_bytes(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	lift(surrealdb_syn::parse_with_settings(input, settings, f))
+}
+
+/// Raises a parse failure into the `anyhow` chain unchanged.
+///
+/// [`ParseError`] is already the public form of a parse failure - core neither
+/// reclassifies it nor restates its message - so this only changes the error
+/// type, never its meaning.
+fn lift<T>(result: std::result::Result<T, ParseError>) -> Result<T> {
+	result.map_err(anyhow::Error::new)
 }
 
 /// Creates the parser settings struct from the global configuration values as
 /// wel as the capabilities  struct.
 pub fn settings_from_capabilities_config(
 	cap: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> ParserSettings {
 	ParserSettings {
-		object_recursion_limit: config.max_object_parsing_depth as usize,
-		query_recursion_limit: config.max_query_parsing_depth as usize,
-		expr_recursion_limit: config.max_expression_parsing_depth as usize,
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
-		..Default::default()
+		..ParserSettings::from_config(config)
 	}
 }
 
@@ -90,7 +82,7 @@ pub fn settings_from_capabilities_config(
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Ast> {
 	let capabilities = Capabilities::all();
-	parse_with_capabilities(input, &capabilities, &CommonConfig::default())
+	parse_with_capabilities(input, &capabilities, &ParserConfig::default())
 }
 
 /// Parses a SurrealQL query.
@@ -107,7 +99,7 @@ pub fn parse(input: &str) -> Result<Ast> {
 pub fn parse_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
@@ -123,7 +115,7 @@ pub fn parse_with_capabilities(
 #[allow(dead_code)]
 pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
-	expr_with_capabilities(input, &capabilities, &CommonConfig::default())
+	expr_with_capabilities(input, &capabilities, &ParserConfig::default())
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -132,7 +124,7 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 pub(crate) fn expr_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
@@ -148,7 +140,7 @@ pub(crate) fn expr_with_capabilities(
 pub fn function_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Function> {
 	trace!(target: TARGET, "Parsing SurrealQL function name");
 
@@ -187,12 +179,12 @@ pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 pub fn datetime(input: &str) -> Result<PublicDatetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, ParseError::QueryTooLarge);
 
 	match Lexer::lex_datetime(input) {
 		Ok(x) => Ok(x),
 		Err(e) => {
-			bail!(Error::InvalidQuery(e.render_on(input)))
+			bail!(ParseError::InvalidQuery(e.render_on(input)))
 		}
 	}
 }
@@ -202,14 +194,14 @@ pub fn datetime(input: &str) -> Result<PublicDatetime> {
 pub fn duration(input: &str) -> Result<PublicDuration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, ParseError::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	parser
 		.next_token_value::<PublicDuration>()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
+		.map_err(ParseError::InvalidQuery)
 		.map_err(anyhow::Error::new)
 }
 
@@ -223,43 +215,32 @@ pub fn record_id(input: &str) -> Result<PublicRecordId> {
 
 /// Parse a table name from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn table(input: &str) -> Result<crate::val::TableName> {
+pub fn table(input: &str) -> Result<surrealdb_strand::TableName> {
 	trace!(target: TARGET, "Parsing SurrealQL table name");
 
 	parse_with(input.as_bytes(), async |parser, _stk| {
 		let ident = parser.parse_ident()?;
-		Ok(crate::val::TableName::new(ident))
+		Ok(surrealdb_strand::TableName::new(ident))
 	})
 }
 
-/// Parse a block, expects the value to be wrapped in `{}`.
+/// Parses a `{ ... }` block of fresh input, under the configured depth limits.
+///
+/// Distinct from [`surrealdb_syn::block_for_definition`], which parses under the
+/// unbounded stored-text profile. That profile is safe only for text this engine
+/// wrote: parsing is heap-stacked and survives arbitrary nesting, but the
+/// lowering to `expr::Block` and the value's recursive `Drop` descend the call
+/// stack, and a stack overflow aborts the process instead of returning an error.
+/// Fresh input therefore keeps the limits, whoever hands it in.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	parse_with_settings(
-		input.as_bytes(),
-		ParserSettings {
-			legacy_strands: false,
-			flexible_record_id: true,
-			files_enabled: true,
-			surrealism_enabled: true,
-			..Default::default()
-		},
-		async |parser, stk| {
-			let token = parser.peek();
-			match token.kind {
-				t!("{") => {
-					let start = parser.pop_peek().span;
-					parser.parse_block(stk, start).await
-				}
-				found => Err(error::SyntaxError::new(format_args!(
-					"Unexpected token `{found}` expected `{{`"
-				))
-				.with_span(token.span, error::MessageKind::Error)),
-			}
-		},
-	)
+	lift(surrealdb_syn::block_with_settings(
+		input,
+		ParserSettings::all_features(&ParserConfig::default()),
+		false,
+	))
 }
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
@@ -297,7 +278,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
+pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -315,7 +296,7 @@ pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicV
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
+pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {

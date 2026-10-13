@@ -1,0 +1,21 @@
+[package]
+name = "surrealdb-parse-common"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish = true
+version.workspace = true
+#rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+chrono.workspace = true
+logos.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

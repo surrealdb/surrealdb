@@ -16,26 +16,34 @@ categories.workspace = true
 # Public features
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 allocator = ["surrealdb-core/allocator"]
+# Shared default feature set, inherited by the `surreal` binary crate via
+# `surrealdb-server/default` so the two crates don't duplicate the list.
+# `cli` is included here because the enterprise binary depends on this crate
+# and needs the `sql` subcommand it provides.
 default = [
     "allocator",
     "allocation-tracking",
     "storage-mem",
     "storage-surrealkv",
     "storage-rocksdb",
+    "storage-tikv",
+    "jwks",
     "scripting",
     "http",
     "surrealism",
     "graphql",
     "gql",
+    "mcp",
+    "postgres",
     "cli",
 ]
 http = ["surrealdb-core/http"]
+cjk = ["surrealdb-core/cjk"]
 jwks = ["surrealdb-core/jwks"]
 # Build against AWS-LC FIPS 3.0.x (NIST CMVP cert #4816).
 # Restricts TLS to FIPS-approved cipher suites at runtime.
 fips = ["rustls/fips"]
-ml = ["surrealdb/ml"]
-performance-profiler = ["dep:pprof"]
+ml = ["surrealdb/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
@@ -60,6 +68,8 @@ graphql = [
 gql = ["surrealdb-core/gql"]
 # MCP (Model Context Protocol) server support
 mcp = ["dep:surrealdb-mcp", "surrealdb-mcp/server-http", "surrealdb-mcp/transport-io"]
+# Postgres wire protocol support
+postgres = ["dep:base64", "dep:chrono", "dep:rust_decimal"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 # Tokio Console support, off by default for production builds.
@@ -73,12 +83,27 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
-surrealdb-types.workspace = true
+surrealdb-cnf.workspace = true
+common.workspace = true
+surrealdb-catalog.workspace = true
+surrealdb-collections.workspace = true
+surrealdb-datastore.workspace = true
+surrealdb-iam.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-observe.workspace = true
+surrealdb-rpc.workspace = true
+surrealdb-sql.workspace = true
+surrealml-core = { workspace = true, optional = true }
+surrealdb-syn.workspace = true
+surrealdb-protocol = { workspace = true, features = ["rpc"] }
+surrealdb-types = { workspace = true, features = ["proto"] }
+parse-common.workspace = true
 
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 async-trait.workspace = true
 axum = { version = "0.8.9", features = ["tracing", "ws"] }
+blake3.workspace = true
 axum-extra = { version = "0.12.6", features = [
     "query",
     "typed-routing",
@@ -120,7 +145,7 @@ tower-http = { version = "0.6.8", features = [
     "add-extension",
     "compression-full",
 ] }
-tonic = { version = "0.14.5", features = ["tls-native-roots"] }
+tonic = { version = "0.14.5", features = ["tls-native-roots", "gzip", "zstd"] }
 tower-service = "0.3.3"
 tracing-appender = "0.2.5"
 tracing-opentelemetry = "0.32.1"
@@ -130,12 +155,16 @@ dirs = "6.0.0"
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
 async-graphql-axum = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 bytes.workspace = true
+chrono = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
 futures.workspace = true
 futures-util.workspace = true
 http.workspace = true
 num_cpus.workspace = true
 pin-project-lite.workspace = true
+quick_cache.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = [
     "blocking",
@@ -143,6 +172,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "http2",
 ] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
+tokio-rustls = { version = "0.26.4", default-features = false }
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -157,10 +187,6 @@ web-time.workspace = true
 
 # Optional crates
 dialoguer = { workspace = true, optional = true }
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "prost-codec",
-], optional = true }
 surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }
@@ -187,15 +213,27 @@ opentelemetry-proto = { version = "0.31.0", features = [
 rcgen = "0.14.7"
 
 # Other crates
-chrono.workspace = true
 env_logger.workspace = true
 jsonwebtoken.workspace = true
 serial_test.workspace = true
 test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["test-util"] }
 ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true
 surrealdb-types.workspace = true
+# The gRPC engine, so the transport can be tested against the client it
+# serves. A dev-dependency: the server has no reason to carry a gRPC *client*
+# in a release build.
+surrealdb = { workspace = true, features = ["protocol-grpc"] }
+# A raw WebSocket client, so the WebSocket wire protocol -- envelope shapes,
+# streaming frames -- can be tested as any SDK would observe it, without an
+# SDK's own buffering in between.
+tokio-tungstenite.workspace = true
+futures.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["http2"] }
+tempfile.workspace = true
+tokio-util.workspace = true
 
 [lints]
 workspace = true

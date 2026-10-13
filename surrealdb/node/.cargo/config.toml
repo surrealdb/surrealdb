@@ -1,0 +1,18 @@
+# Cross-compilation settings for the NAPI addon. Merged with the workspace
+# config at the repository root, which the addon inherits for everything not
+# named here.
+#
+# The addon is a `cdylib` loaded into an already-running Node process, so it
+# must link against the same C runtime that process uses. That is the opposite
+# of what the static `surreal` binary wants, and it is why the musl entry below
+# turns `crt-static` off. Where the root config sets a conflicting
+# `target.<triple>.rustflags` (x86_64 musl and MSVC), the release workflow
+# passes `RUSTFLAGS` instead — that replaces the config's flags outright rather
+# than appending to them.
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
+rustflags = ["-C", "target-feature=-crt-static"]

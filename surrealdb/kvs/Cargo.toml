@@ -1,0 +1,46 @@
+[package]
+name = "surrealdb-kvs"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Use a deterministic incrementing counter for the default
+# `Transactable::timestamp` implementation instead of an HLC timestamp.
+# Intended for tests only.
+test-inc-timestamp = []
+
+[dependencies]
+anyhow.workspace = true
+roaring = { workspace = true, features = ["serde"] }
+revision = { workspace = true }
+common.workspace = true
+surrealdb-cnf.workspace = true
+surrealdb-types.workspace = true
+
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+web-time = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+affinitypool = { workspace = true }
+num_cpus = { workspace = true }
+
+[dev-dependencies]
+rstest.workspace = true
+# Tests call `Utc::now()`, which requires chrono's `now` feature. Keep it a
+# dev-dependency so the published crate does not pull in a system clock.
+chrono = { workspace = true, features = ["now"] }
+
+[lints]
+workspace = true

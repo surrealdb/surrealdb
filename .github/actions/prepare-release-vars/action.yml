@@ -6,6 +6,14 @@ inputs:
     description: 'Whether this is a nightly release'
     required: false
     default: 'true'
+  test:
+    description: 'Whether this is a test release (the release name carries build metadata so it never collides with a public tag)'
+    required: false
+    default: 'false'
+  downstream-sha:
+    description: 'Full downstream commit sha the test image was built from; its short form goes into the test release metadata so distinct engine/downstream pairings never collide'
+    required: false
+    default: ''
 
 outputs:
   name:
@@ -21,15 +29,15 @@ outputs:
     description: 'Release environment name (nightly, alpha, beta, stable)'
     value: ${{ steps.outputs.outputs.release-name }}
   build-metadata:
-    description: 'Build metadata for nightly releases'
+    description: 'Build metadata (nightly and test releases)'
     value: ${{ steps.outputs.outputs.build-metadata }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-
+    # setup-environment is provided by the CALLING JOB (hoisted): a nested
+    # `uses: ./...` here would resolve against the released commit in the
+    # workspace, not the workflow ref this action was checked out from.
     - name: Set outputs
       id: outputs
       shell: bash
@@ -37,10 +45,19 @@ runs:
         set -x
 
         cargo_version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+        # Fail loudly rather than proceed with a bogus version: jq prints the
+        # string "null" if the crate is absent, and this value names the whole
+        # release (tag, GitHub release, download pointers).
+        if [ -z "${cargo_version}" ] || [ "${cargo_version}" = "null" ]; then
+          echo "::error::could not resolve the 'surrealdb' crate version from cargo metadata"
+          exit 1
+        fi
 
         if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
           # Nightly release - compute version based on main's version
-          nightly_version=$(./.github/scripts/compute-nightly-version.sh "$cargo_version")
+          # Action-relative path: the script travels with this action's checkout
+          # (.ci) instead of resolving against the released commit in the workspace.
+          nightly_version=$("${GITHUB_ACTION_PATH}/../../scripts/compute-nightly-version.sh" "$cargo_version")
           echo "version=${nightly_version}" >> $GITHUB_OUTPUT
 
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
@@ -53,7 +70,28 @@ runs:
         else
           # Versioned release - use version from Cargo.toml
           echo "version=${cargo_version}" >> $GITHUB_OUTPUT
-          echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
+          # Test releases carry build metadata in the release name, so the git tag
+          # becomes v<version>+<metadata> and the image tag v<version>-<metadata>
+          # (the mirror sanitizer maps '+' to '-'). The metadata is the engine and
+          # downstream short shas (<engine>.<downstream>) that identify the exact
+          # pairing the test image was built from, so it is unique whichever side is
+          # iterated (back-to-back test builds against a fixed engine never collide)
+          # and stays distinct from the public v<version> tag, so a test release
+          # never claims or clobbers the real release. The binary's own version stays
+          # clean (it is the same build-once artifact the public release promotes), so
+          # the metadata lives in the tag, not in `surreal version`.
+          if [[ "${{ inputs.test }}" == "true" ]]; then
+            ds_sha="${{ inputs.downstream-sha }}"
+            if [[ -z "$ds_sha" ]]; then
+              echo "::error::test release: downstream-sha is empty, cannot build the test tag metadata."
+              exit 1
+            fi
+            build_metadata="$(git rev-parse --short HEAD).${ds_sha:0:9}"
+            echo "build-metadata=${build_metadata}" >> $GITHUB_OUTPUT
+            echo "name=v${cargo_version}+${build_metadata}" >> $GITHUB_OUTPUT
+          else
+            echo "name=v${cargo_version}" >> $GITHUB_OUTPUT
+          fi
           if [[ $cargo_version == *"-"* ]]; then
             echo "pre-release=true" >> $GITHUB_OUTPUT
             suffix=$(echo $cargo_version | tr "-" "\n" | sed -n 2p)

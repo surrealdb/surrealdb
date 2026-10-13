@@ -16,6 +16,16 @@ path = "../surrealdb/core"
 features = ["kv-mem", "arbitrary", "gql"]
 default-features = false
 
+[dependencies.surrealdb-gql]
+path = "../surrealdb/gql"
+
+[dependencies.surrealdb-syn]
+path = "../surrealdb/syn"
+
+[dependencies.surrealdb-sql]
+path = "../surrealdb/sql"
+features = ["arbitrary"]
+
 [dependencies.surrealdb-types]
 path = "../surrealdb/types"
 features = ["arbitrary"]

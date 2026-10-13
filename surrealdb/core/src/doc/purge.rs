@@ -1,26 +1,30 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_datastore::values::graph::{AdjacencyValue, GraphFoldScope};
 use surrealdb_types::ToSql;
 
-use crate::catalog::FieldDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, FieldDefinition, Relation, TableType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::doc::{CursorDoc, Document};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError};
+use crate::exe::FlowResultExt as _;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::LookupKind;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
-use crate::idx::planner::ScanDirection;
-use crate::key::graph;
-use crate::key::r#ref::Ref;
-use crate::kvs::NORMAL_BATCH_SIZE;
+use crate::expr::{AssignOperator, Data, Expr, Idiom, Literal, Lookup, Part};
+use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor, vertex_table_folded};
+use crate::key::KVKeyDecode;
+use crate::key::schema::{
+	GraphIdPrefix, GraphKey, GraphPointerKey, ReferenceIdPrefix, ReferenceKey,
+};
+use crate::kvs::{Direction, NORMAL_BATCH_SIZE};
 use crate::val::{RecordId, TableName, Value};
 
 impl Document {
@@ -57,6 +61,10 @@ impl Document {
 			let db = self.doc_ctx.db().database_id;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.table, &rid.key).await?;
+			// Purge the record's own inline cache keys, if its table
+			// maintains any. The edge cascade below updates the caches of
+			// *other* records; these are this record's own.
+			crate::idx::inline_cache::purge_record_caches(&txn, ns, db, &rid).await?;
 			// Mark this row as having mutated the KV store so the
 			// iterator bumps the per-statement affected-row counter.
 			self.mutated = true;
@@ -125,8 +133,24 @@ impl Document {
 		// `etl` / `etr` are edge-side ("inner") keys: their adjacency
 		// already names the vertex in (ft, fk), so they keep the legacy
 		// layout without an embedded target — same across both variants.
-		let etl = graph::new(ns, db, &rid.table, &rid.key, Dir::In, l);
-		let etr = graph::new(ns, db, &rid.table, &rid.key, Dir::Out, r);
+		let etl = GraphKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir: Dir::In,
+			foreign_table: Cow::Borrowed(&l.table),
+			foreign_key: Cow::Borrowed(&l.key),
+		};
+		let etr = GraphKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&r.table),
+			foreign_key: Cow::Borrowed(&r.key),
+		};
 		// Vertex-side keys are written in exactly one of two layouts and
 		// the record's `RecordType::Edge { variant }` stamp tells us
 		// which. Variant 1 records (legacy or pre-target-vertex layout)
@@ -138,17 +162,120 @@ impl Document {
 		// disk, halving the txn ops compared to probing both formats.
 		let variant = self.initial.doc.edge_variant().unwrap_or_default();
 		// Detect which variant the edge is currently
-		match variant {
-			1 => {
-				let ltr = graph::new(ns, db, &l.table, &l.key, Dir::Out, rid);
-				let rtl = graph::new(ns, db, &r.table, &r.key, Dir::In, rid);
-				futures::try_join!(txn.del(&ltr), txn.del(&etl), txn.del(&etr), txn.del(&rtl))?;
+		if variant == 1 {
+			let ltr = GraphKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+			};
+
+			let rtl = GraphKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&r.table),
+				id: Cow::Borrowed(&r.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+			};
+			futures::try_join!(
+				txn.del_key(&ltr),
+				txn.del_key(&etl),
+				txn.del_key(&etr),
+				txn.del_key(&rtl)
+			)?;
+			// A legacy-format edge can never sit in a live inline cache (a
+			// backfill that observes one spills), so these calls settle to
+			// no-ops; they run for uniformity with the pointer branch.
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, l, Dir::Out, rid).await?;
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, r, Dir::In, rid).await?;
+		} else {
+			let ltr = GraphPointerKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&r.table),
+				target_key: Cow::Borrowed(&r.key),
+			};
+			let rtl = GraphPointerKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(&r.table),
+				id: Cow::Borrowed(&r.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&l.table),
+				target_key: Cow::Borrowed(&l.key),
+			};
+			// A vertex table with folded adjacency may hold this edge in a
+			// packed block, which a key deletion cannot reach: write a
+			// tombstone over the pointer key instead — blind either way —
+			// which the merged reader subtracts and the next fold consumes.
+			// On a never-folded table the key deletion is exact, as always.
+			// Both writes are blind: neither reads the pointer key first.
+			let (l_folded, r_folded) = futures::try_join!(
+				vertex_table_folded(&txn, ns, db, &l.table),
+				vertex_table_folded(&txn, ns, db, &r.table)
+			)?;
+			let tombstone = AdjacencyValue::tombstone();
+			// A tombstone is debt the next fold repays; queue that fold at
+			// commit so it happens even if the scope is never read again.
+			for (folded, vertex, dir) in [(l_folded, &l, Dir::Out), (r_folded, &r, Dir::In)] {
+				if folded {
+					txn.buffer_graph_fold_trigger(
+						GraphFoldScope {
+							ns,
+							db,
+							tb: vertex.table.clone(),
+							id: vertex.key.clone(),
+							dir,
+						},
+						ctx.node_id(),
+					);
+				}
 			}
-			_ => {
-				let ltr = graph::new_pointer(ns, db, &l.table, &l.key, Dir::Out, rid, r);
-				let rtl = graph::new_pointer(ns, db, &r.table, &r.key, Dir::In, rid, l);
-				futures::try_join!(txn.del(&ltr), txn.del(&etl), txn.del(&etr), txn.del(&rtl))?;
+			match (l_folded, r_folded) {
+				(false, false) => {
+					futures::try_join!(txn.del_key(&ltr), txn.del_key(&rtl))?;
+				}
+				(true, false) => {
+					futures::try_join!(txn.set_key(&ltr, &tombstone), txn.del_key(&rtl))?;
+				}
+				(false, true) => {
+					futures::try_join!(txn.del_key(&ltr), txn.set_key(&rtl, &tombstone))?;
+				}
+				(true, true) => {
+					futures::try_join!(
+						txn.set_key(&ltr, &tombstone),
+						txn.set_key(&rtl, &tombstone)
+					)?;
+				}
 			}
+			// A lightweight edge never wrote edge-side keys.
+			if !matches!(
+				&self.doc_ctx.tb()?.table_type,
+				TableType::Relation(Relation {
+					lightweight: true,
+					..
+				})
+			) {
+				futures::try_join!(txn.del_key(&etl), txn.del_key(&etr))?;
+			}
+			// Remove the edge from each endpoint's inline adjacency cache.
+			// The cache sits above the merged (blocks ∪ delta) tiers, so the
+			// removal is the same whether the key above was deleted or
+			// tombstoned.
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, l, Dir::Out, rid).await?;
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, r, Dir::In, rid).await?;
 		}
 		// Carry on
 		Ok(())
@@ -190,20 +317,57 @@ impl Document {
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
+		// Nothing can connect to a lightweight edge — it is rejected as a
+		// graph endpoint — and its synthesized adjacency derives from its id
+		// regardless of existence, so the peek below would see its own
+		// endpoints and cascade a delete over them. Skip outright.
+		if matches!(
+			&self.doc_ctx.tb()?.table_type,
+			TableType::Relation(Relation {
+				lightweight: true,
+				..
+			})
+		) {
+			return Ok(());
+		}
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the namespace id
 		let ns = self.doc_ctx.ns().namespace_id;
 		// Get the database id
 		let db = self.doc_ctx.db().database_id;
-		// Get the key range of the graph keys
-		let prefix = crate::key::graph::prefix(ns, db, &rid.table, &rid.key)?;
-		let suffix = crate::key::graph::suffix(ns, db, &rid.table, &rid.key)?;
-		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor =
-			txn.open_keys_cursor(prefix..suffix, ScanDirection::Forward, 0, None).await?;
-		// Check if there are any edges to purge by fetching at most one key.
-		let batch = cursor.next_batch(1).await?;
+		// Peek the record's adjacency through the merged reader, which spans
+		// the per-edge pointer keys and — once the table has folded — the
+		// packed blocks, subtracting tombstones so a fully-deleted-but-not-
+		// yet-folded vertex does not trigger a cascade over nothing.
+		let folded = self.doc_ctx.tb()?.graph_folded;
+		let scope = AdjacencyScope {
+			ns,
+			db,
+			vertex: rid,
+			dir: None,
+			edge_table: None,
+			fk_lower: None,
+			delta_range: GraphIdPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+			}
+			.range()?,
+		};
+		let mut cursor = MergedAdjacencyCursor::open(
+			&txn,
+			scope,
+			folded,
+			None,
+			Some(ctx.get_index_stores().adjacency_resolve()),
+		)
+		.await?;
+		// Check if there are any edges to purge by fetching at most one key:
+		// only emptiness matters here, so nothing is decoded.
+		let batch = cursor.next_batch_keys(1).await?;
+		drop(cursor);
 		// Only proceed if there are edges for this record.
 		if !batch.is_empty() {
 			// Create a `DELETE FROM record:id<->` statement. `Part::Lookup`
@@ -219,13 +383,18 @@ impl Document {
 				]))],
 				..Default::default()
 			};
-			// Execute the delete statement. We deliberately do NOT disable
-			// permissions here: an edge table's `PERMISSIONS FOR delete`
-			// clause must still apply even when the cascade is triggered by
-			// deleting one of the endpoint vertices, otherwise an actor with
-			// vertex-delete permission could erase edges they are not
-			// allowed to remove directly.
-			stm.compute(stk, ctx, opt, None).await?;
+			// Execute the delete statement under the caller's own permission
+			// state. An edge table's `PERMISSIONS FOR delete` clause must
+			// still apply even when the cascade is triggered by deleting one
+			// of the endpoint vertices, otherwise an actor with vertex-delete
+			// permission could erase edges they are not allowed to remove
+			// directly. `new_with_caller_perms` matters when this delete was
+			// itself reached through a `REFERENCE ON DELETE CASCADE`, which
+			// disables `perms` for the referencing record: that bypass exists
+			// to complete referential integrity and must not extend to the
+			// edge cascade.
+			let opt = opt.new_with_caller_perms();
+			crate::legacy::delete_statement_compute(&stm, stk, ctx, &opt, None).await?;
 		}
 		// Carry on
 		Ok(())
@@ -264,11 +433,8 @@ impl Document {
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
-		// Get the transaction
 		let txn = ctx.tx();
-		// Get the namespace id
 		let ns = self.doc_ctx.ns().namespace_id;
-		// Get the database id
 		let db = self.doc_ctx.db().database_id;
 		// Skip the scan when no reference field in the database can target this
 		// table. A reference key under this record's range is only ever written
@@ -289,18 +455,22 @@ impl Document {
 		if !txn.table_may_have_incoming_references(ns, db, &rid.table).await? {
 			return Ok(());
 		}
-		// Get the key range of the reference keys
-		let prefix = crate::key::r#ref::prefix(ns, db, &rid.table, &rid.key)?;
-		let suffix = crate::key::r#ref::suffix(ns, db, &rid.table, &rid.key)?;
-		let range = prefix..suffix;
+
+		let range = ReferenceIdPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+		}
+		.range()?;
+
 		// Cache the last field definition to avoid redundant lookups
 		let mut prev: Option<(TableName, String, Arc<FieldDefinition>)> = None;
 		// Track whether any reference key was actually observed; if none
 		// were, the trailing range delete is a no-op we can skip.
 		let mut saw_reference_key = false;
 		// Obtain a cursor over the reference range.
-		let mut cursor =
-			txn.open_keys_cursor(range.clone(), ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range.clone(), Direction::Forward, 0, None).await?;
 		// Loop until no more entries
 		loop {
 			// Pull the next batch of reference keys from the cursor.
@@ -309,22 +479,25 @@ impl Document {
 			if batch.is_empty() {
 				break;
 			}
-			// Copy each borrowed key into an owned `Vec<u8>` up front so
-			// that the downstream `await`s (which call back into the same
-			// transaction via `get_tb_field` etc.) don't conflict with
-			// the cursor's `&mut self` borrow.
-			let keys: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
+			// Decode the batch into owned references up front, so that the
+			// downstream `await`s (which call back into the same transaction
+			// via `get_tb_field` etc.) don't conflict with the cursor's
+			// `&mut self` borrow. Owning here rather than copying the bytes
+			// also means the `into_owned` calls below move out of the decoded
+			// key instead of cloning out of the batch.
+			let keys = batch
+				.iter()
+				.map(|k| Ok(ReferenceKey::decode_key(k)?.into_owned()))
+				.collect::<Result<Vec<_>>>()?;
 			// Process each key in the batch
 			for key in keys {
 				yield_now!();
 				// We saw a reference key
 				saw_reference_key = true;
-				// Decode the key into a reference
-				let key = Ref::decode_key(&key)?;
 				// Extract the foreign table name
-				let ft = key.ft.as_ref();
+				let ft = key.foreign_table.as_ref();
 				// Extract the foreign field name
-				let ff = key.ff.as_ref();
+				let ff = key.foreign_field.as_ref();
 				// Get the reference field definition
 				let fd = match prev {
 					// If the field definition is in the cache, return it
@@ -352,17 +525,20 @@ impl Document {
 						// Reject the delete operation, as indicated by the reference
 						ReferenceDeleteStrategy::Reject => {
 							let record = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
-							bail!(Error::DeleteRejectedByReference(rid.to_sql(), record.to_sql(),));
+							bail!(DocError::DeleteRejectedByReference(
+								rid.to_sql(),
+								record.to_sql(),
+							));
 						}
 						// Delete the remote record which referenced this record
 						ReferenceDeleteStrategy::Cascade => {
 							let record_id = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							// Setup the delete statement
@@ -373,23 +549,35 @@ impl Document {
 								..DeleteStatement::default()
 							};
 							// Execute the delete statement
-							stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
-								.await
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
-								})?;
+							crate::legacy::delete_statement_compute(
+								&stm,
+								stk,
+								ctx,
+								&opt.new_for_reference_cascade(),
+								None,
+							)
+							.await
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+							})?;
 						}
 						// Delete only the reference on the remote record
 						ReferenceDeleteStrategy::Unset => {
 							let opt = opt.clone().with_perms(false);
 							let record = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
-							if let Some(doc) =
-								record.clone().select_document(stk, ctx, &opt, None).await?
+							if let Some(doc) = crate::legacy::record_id_select_document(
+								record.clone(),
+								stk,
+								ctx,
+								&opt,
+								None,
+							)
+							.await?
 							{
 								let doc = Value::Object(doc);
 								let data = match doc.pick(&fd.name) {
@@ -425,23 +613,25 @@ impl Document {
 									};
 
 									// Execute the update statement
-									stm.compute(stk, ctx, &opt, None)
-										.await
-										// Wrap any error in an error explaining what went wrong
-										.map_err(|e| {
-											Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
-										})?;
+									crate::legacy::update_statement_compute(
+										&stm, stk, ctx, &opt, None,
+									)
+									.await
+									// Wrap any error in an error explaining what went wrong
+									.map_err(|e| {
+										DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+									})?;
 								}
 							}
 						}
 						// Process a custom delete strategy
-						ReferenceDeleteStrategy::Custom(v) => {
+						ReferenceDeleteStrategy::Custom(expr) => {
 							// Value for the `$reference` variable is the current record
 							let reference = Value::from(rid.clone());
 							// Value for the document is the remote record
 							let this = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							// Set the `$reference` variable in the context
@@ -460,13 +650,15 @@ impl Document {
 							);
 
 							// Compute the custom instruction.
-							stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&doc)))
-								.await
-								.catch_return()
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
-								})?;
+							stk.run(|stk| {
+								crate::legacy::expr_compute(expr, stk, &ctx, &opt, Some(&doc))
+							})
+							.await
+							.catch_return()
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+							})?;
 						}
 					}
 				}

@@ -12,7 +12,7 @@ use axum::routing::get;
 use axum::{Extension, Router};
 use futures_util::{SinkExt, StreamExt, future};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 use tracing::instrument;
 
 use crate::graphql::GraphQLService;

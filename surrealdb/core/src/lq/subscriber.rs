@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::TreeStack;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::dbs::{MessageBroker, Session};
 use crate::doc::{Document, DocumentContext, NsDbCtx};
 use crate::kvs::{Datastore, Transaction};
 use crate::lq::event::LiveEvent;
-use crate::val::TableName;
 
 /// Compute and deliver live-query notifications for a batch of captured
 /// [`LiveEvent`]s on a single table, entirely off the write path.
@@ -86,17 +86,19 @@ pub(crate) async fn replay_table_live_events(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
 
+	use surrealdb_cnf::ConfigMap;
+
 	use crate::channel::Receiver;
-	use crate::cnf::ConfigMap;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::types::{PublicNotification, PublicValue};
 
 	/// Build a datastore with the given live-query engine and a notification
 	/// channel.
-	async fn new_ds(engine: &str) -> (Receiver<PublicNotification>, Datastore) {
+	async fn new_ds(engine: &str) -> (Receiver<PublicNotification>, Arc<Datastore>) {
 		let (send, recv) = crate::channel::bounded(1000);
 		let config = ConfigMap::empty().with_key_value("live_query_engine", engine);
 		let ds = Datastore::builder()
@@ -251,13 +253,13 @@ mod tests {
 	/// and silently dropped the captured event.)
 	#[tokio::test]
 	async fn router_delivers_events_captured_before_first_pass() {
+		use surrealdb_kvs::TransactionType::Write;
+
 		use crate::catalog::providers::CatalogProvider;
-		use crate::kvs::LockType::Optimistic;
-		use crate::kvs::TransactionType::Write;
 
 		let (recv, ds) = new_ds("router").await;
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let owner = Session::owner().with_ns(ns).with_db(db);

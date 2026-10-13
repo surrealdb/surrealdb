@@ -5,9 +5,10 @@
 
 use anyhow::Result;
 
+use crate::catalog::aggregation;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
 use crate::expr::Kind;
-use crate::val::{Number, Value};
+use crate::val::{Number, TryAdd as _, Value};
 
 // ============================================================================
 // Sum
@@ -367,14 +368,10 @@ impl Accumulator for MaxAccumulator {
 }
 
 // ============================================================================
-// Stddev (using Welford's online algorithm)
+// Stddev / Variance (shifted sum-of-squares)
 // ============================================================================
 
-/// math::stddev - calculates sample standard deviation using Welford's algorithm
-///
-/// Welford's online algorithm is numerically stable and avoids catastrophic
-/// cancellation that can occur with the naive sum-of-squares approach for
-/// large numbers or numbers close in value.
+/// math::stddev - sample standard deviation.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MathStddev;
 
@@ -384,7 +381,7 @@ impl AggregateFunction for MathStddev {
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		Box::new(WelfordAccumulator::default())
+		Box::new(SpreadAccumulator::deviation())
 	}
 
 	fn signature(&self) -> Signature {
@@ -392,121 +389,7 @@ impl AggregateFunction for MathStddev {
 	}
 }
 
-/// Welford's online algorithm accumulator for computing variance/stddev.
-///
-/// This algorithm maintains a running mean and sum of squared differences
-/// from the mean (M2), which provides better numerical stability than
-/// the naive sum and sum-of-squares approach.
-///
-/// Reference: Welford, B. P. (1962). "Note on a method for calculating
-/// corrected sums of squares and products"
-#[derive(Debug, Clone, Default)]
-struct WelfordAccumulator {
-	count: i64,
-	mean: f64,
-	m2: f64, // Sum of squared differences from mean
-}
-
-impl WelfordAccumulator {
-	/// Update with a new value using Welford's algorithm
-	fn update_value(&mut self, x: f64) {
-		self.count += 1;
-		let delta = x - self.mean;
-		self.mean += delta / self.count as f64;
-		let delta2 = x - self.mean;
-		self.m2 += delta * delta2;
-	}
-
-	/// Merge another Welford accumulator using parallel algorithm.
-	///
-	/// Uses Chan's parallel algorithm for combining partial results.
-	/// Reference: Chan et al. (1979) "Updating Formulae and a Pairwise
-	/// Algorithm for Computing Sample Variances"
-	#[allow(unused)]
-	fn merge_welford(&mut self, other: &WelfordAccumulator) {
-		if other.count == 0 {
-			return;
-		}
-		if self.count == 0 {
-			self.count = other.count;
-			self.mean = other.mean;
-			self.m2 = other.m2;
-			return;
-		}
-
-		let total_count = self.count + other.count;
-		let delta = other.mean - self.mean;
-
-		// Combined mean
-		let new_mean = self.mean + delta * (other.count as f64 / total_count as f64);
-
-		// Combined M2 using Chan's formula
-		let new_m2 = self.m2
-			+ other.m2
-			+ delta * delta * (self.count as f64 * other.count as f64 / total_count as f64);
-
-		self.count = total_count;
-		self.mean = new_mean;
-		self.m2 = new_m2;
-	}
-
-	/// Compute sample variance (using n-1 divisor)
-	fn sample_variance(&self) -> f64 {
-		if self.count <= 1 {
-			0.0
-		} else {
-			self.m2 / (self.count - 1) as f64
-		}
-	}
-}
-
-impl Accumulator for WelfordAccumulator {
-	fn update(&mut self, value: Value) -> Result<()> {
-		if let Value::Number(n) = value {
-			self.update_value(n.to_float());
-		}
-		Ok(())
-	}
-
-	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
-		let other = other
-			.as_any()
-			.downcast_ref::<WelfordAccumulator>()
-			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.merge_welford(other);
-		Ok(())
-	}
-
-	fn finalize(&self) -> Result<Value> {
-		// Match the scalar `math::stddev`: an empty group has no defined
-		// deviation. A single element has deviation 0.
-		if self.count == 0 {
-			return Ok(Value::Number(Number::Float(f64::NAN)));
-		}
-		let stddev = self.sample_variance().sqrt();
-		Ok(Value::Number(Number::Float(stddev)))
-	}
-
-	fn reset(&mut self) {
-		self.count = 0;
-		self.mean = 0.0;
-		self.m2 = 0.0;
-	}
-
-	fn clone_box(&self) -> Box<dyn Accumulator> {
-		Box::new(self.clone())
-	}
-
-	fn as_any(&self) -> &dyn std::any::Any {
-		self
-	}
-}
-
-// ============================================================================
-// Variance (using Welford's online algorithm)
-// ============================================================================
-
-/// math::variance - calculates sample variance using Welford's algorithm
+/// math::variance - sample variance.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MathVariance;
 
@@ -516,7 +399,7 @@ impl AggregateFunction for MathVariance {
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
-		Box::new(VarianceAccumulator::default())
+		Box::new(SpreadAccumulator::variance())
 	}
 
 	fn signature(&self) -> Signature {
@@ -524,16 +407,59 @@ impl AggregateFunction for MathVariance {
 	}
 }
 
-/// Variance accumulator using Welford's algorithm (same as stddev, different finalize)
-#[derive(Debug, Clone, Default)]
-struct VarianceAccumulator {
-	welford: WelfordAccumulator,
+/// Whether a [`SpreadAccumulator`] finalises to a variance or its square root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spread {
+	Variance,
+	Deviation,
 }
 
-impl Accumulator for VarianceAccumulator {
+/// Shared accumulator for `math::variance` and `math::stddev`.
+///
+/// Delegates to [`aggregation::shifted_accumulate`] and
+/// [`aggregation::shifted_sample_variance`], the same functions the legacy
+/// `GROUP BY` collector and materialized-view maintenance use, so all three
+/// paths produce bit-identical results over the same input order. Arithmetic
+/// stays in `Number`, so a group of `Decimal` inputs finalises as `Decimal`.
+#[derive(Debug, Clone)]
+struct SpreadAccumulator {
+	spread: Spread,
+	shift: Number,
+	sum: Number,
+	sum_of_squares: Number,
+	count: i64,
+}
+
+impl SpreadAccumulator {
+	fn new(spread: Spread) -> Self {
+		Self {
+			spread,
+			shift: 0.0.into(),
+			sum: 0.0.into(),
+			sum_of_squares: 0.0.into(),
+			count: 0,
+		}
+	}
+
+	fn variance() -> Self {
+		Self::new(Spread::Variance)
+	}
+
+	fn deviation() -> Self {
+		Self::new(Spread::Deviation)
+	}
+}
+
+impl Accumulator for SpreadAccumulator {
 	fn update(&mut self, value: Value) -> Result<()> {
 		if let Value::Number(n) = value {
-			self.welford.update_value(n.to_float());
+			aggregation::shifted_accumulate(
+				&mut self.shift,
+				&mut self.sum,
+				&mut self.sum_of_squares,
+				&mut self.count,
+				n,
+			)?;
 		}
 		Ok(())
 	}
@@ -541,24 +467,59 @@ impl Accumulator for VarianceAccumulator {
 	fn merge(&mut self, other: Box<dyn Accumulator>) -> Result<()> {
 		let other = other
 			.as_any()
-			.downcast_ref::<VarianceAccumulator>()
+			.downcast_ref::<SpreadAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		self.welford.merge_welford(&other.welford);
+		// Both functions share this accumulator, so the downcast above no longer
+		// distinguishes them the way the two separate Welford types used to.
+		// Finalising against the wrong one would return a variance where a
+		// deviation was asked for, silently.
+		anyhow::ensure!(
+			self.spread == other.spread,
+			"Cannot merge a {:?} accumulator into a {:?} one",
+			other.spread,
+			self.spread
+		);
+		if other.count == 0 {
+			return Ok(());
+		}
+		if self.count == 0 {
+			self.shift = other.shift;
+			self.sum = other.sum;
+			self.sum_of_squares = other.sum_of_squares;
+			self.count = other.count;
+			return Ok(());
+		}
+
+		// The two halves were shifted against different assumed means, so
+		// re-base `other` onto ours before adding.
+		let (rebased_sum, rebased_sum_of_squares) = aggregation::shifted_rebase(
+			other.sum,
+			other.sum_of_squares,
+			other.count,
+			other.shift,
+			self.shift,
+		)?;
+
+		self.sum = self.sum.try_add(rebased_sum)?;
+		self.sum_of_squares = self.sum_of_squares.try_add(rebased_sum_of_squares)?;
+		self.count += other.count;
 		Ok(())
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// Match the scalar `math::variance`: NaN for an empty group, 0 for
-		// a single element.
-		if self.welford.count == 0 {
-			return Ok(Value::Number(Number::Float(f64::NAN)));
-		}
-		let variance = self.welford.sample_variance();
-		Ok(Value::Number(Number::Float(variance)))
+		let num = match self.spread {
+			Spread::Variance => {
+				aggregation::shifted_sample_variance(self.sum, self.sum_of_squares, self.count)
+			}
+			Spread::Deviation => {
+				aggregation::shifted_sample_deviation(self.sum, self.sum_of_squares, self.count)
+			}
+		};
+		Ok(Value::Number(num))
 	}
 
 	fn reset(&mut self) {
-		self.welford.reset();
+		*self = Self::new(self.spread);
 	}
 
 	fn clone_box(&self) -> Box<dyn Accumulator> {

@@ -14,6 +14,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Ensure we can write to the table at all
 		self.check_permissions_quick_create(ctx, opt)?;
 		// Reject writes to read-only view tables (after the permission gate)
@@ -34,11 +38,17 @@ impl Document {
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		// Clean up table fields and NONE values
 		self.cleanup_table_fields()?;
-		// Check table permissions after create
+		// Check table permissions after create. A predicate naming a COMPUTED
+		// field is evaluated against that field's value, materialised on a scratch
+		// copy so the derived value never reaches storage.
 		self.check_create_permissions(stk, ctx, opt, &self.current).await?;
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Create).await?;

@@ -46,9 +46,9 @@ impl McpMetricsRecorder for McpRecorderAdapter {
 		// already-bounded canonical strings used by the rest of the
 		// observability surface.
 		let metric_outcome = match outcome {
-			McpToolOutcome::Success => surrealdb_core::observe::Outcome::Success,
+			McpToolOutcome::Success => surrealdb_observe::Outcome::Success,
 			McpToolOutcome::ToolError | McpToolOutcome::ProtocolError => {
-				surrealdb_core::observe::Outcome::Error
+				surrealdb_observe::Outcome::Error
 			}
 		};
 		self.inner.record_mcp_tool(

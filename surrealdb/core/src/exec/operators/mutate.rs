@@ -18,9 +18,11 @@
 //! evaluated against the current binding row first (with the row as the cursor
 //! document), then embedded as concrete literals in the statement.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
+use common::future::stream::{self, Yielder};
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -37,8 +39,10 @@ use crate::expr::data::Assignment;
 use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
-use crate::idx::planner::ScanDirection;
-use crate::key::graph;
+use crate::idx::adjacency::{
+	AdjacencyScope, MergedAdjacencyCursor, VertexAdjacency, vertex_adjacency,
+};
+use crate::key::schema::GraphIdPrefix;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
@@ -94,24 +98,23 @@ impl ExecOperator for UpdateBinding {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		let target = self.target.clone();
 		let data = self.data.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Pipeline breaker: drain the whole input before writing.
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			// Apply per row, in textual row order: a row-scoped value (`SET a.x =
@@ -127,8 +130,9 @@ impl ExecOperator for UpdateBinding {
 				}
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder.emit(ValueBatch::new(out)).await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "UpdateBinding", &self.metrics))
 	}
@@ -194,11 +198,11 @@ impl ExecOperator for DeleteBinding {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		// Namespace/database ids for the connected-edge graph-key peek (resolved
@@ -212,12 +216,11 @@ impl ExecOperator for DeleteBinding {
 		let is_edge = self.is_edge;
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			// Apply per row, in textual row order. A fan-out can bind the SAME
@@ -240,8 +243,9 @@ impl ExecOperator for DeleteBinding {
 				}
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder.emit(ValueBatch::new(out)).await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "DeleteBinding", &self.metrics))
 	}
@@ -358,7 +362,7 @@ async fn apply_delete(
 		&& matches!(detach, DetachMode::NoDetach)
 		&& has_connected_edges(rid, ns, db, frozen).await?
 	{
-		return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(
+		return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 			format!(
 				"Cannot DELETE `{}` because it still has connected edges; use `DETACH DELETE` to \
 				 remove the edges as well",
@@ -376,13 +380,16 @@ async fn apply_delete(
 
 /// Whether `rid` has any connected graph edge (in either direction).
 ///
-/// Peeks the record's graph-key range directly off the transaction — exactly the
+/// Peeks the record's adjacency through the merged reader — exactly the
 /// permission-independent check the native cascade uses
-/// (`doc::purge::purge_edges`), fetching at most one key. This deliberately does
-/// NOT go through a SELECT/idiom read: the `NODETACH` guard must reflect the
-/// record's actual adjacency, never the caller's SELECT visibility, or a
-/// record-scoped user who cannot read the incident edges would slip past the
-/// guard and the native DELETE would silently cascade them.
+/// (`doc::purge::purge_edges`), fetching at most one entry across the
+/// per-edge pointer keys and, once the table has folded, the packed blocks
+/// (tombstones subtracted, so deleted-but-unfolded edges do not trip the
+/// guard). This deliberately does NOT go through a SELECT/idiom read: the
+/// `NODETACH` guard must reflect the record's actual adjacency, never the
+/// caller's SELECT visibility, or a record-scoped user who cannot read the
+/// incident edges would slip past the guard and the native DELETE would
+/// silently cascade them.
 async fn has_connected_edges(
 	rid: &RecordId,
 	ns: NamespaceId,
@@ -390,13 +397,42 @@ async fn has_connected_edges(
 	frozen: &FrozenContext,
 ) -> Result<bool, ControlFlow> {
 	let txn = frozen.tx();
-	let prefix = graph::prefix(ns, db, &rid.table, &rid.key).map_err(ControlFlow::Err)?;
-	let suffix = graph::suffix(ns, db, &rid.table, &rid.key).map_err(ControlFlow::Err)?;
-	let mut cursor = txn
-		.open_keys_cursor(prefix..suffix, ScanDirection::Forward, 0, None)
+	let adjacency = vertex_adjacency(&txn, ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
+	let scope = AdjacencyScope {
+		ns,
+		db,
+		vertex: rid,
+		dir: None,
+		edge_table: None,
+		fk_lower: None,
+		delta_range: GraphIdPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+		}
+		.range()?,
+	};
+	let mut cursor = match adjacency {
+		// A lightweight edge's synthesized adjacency mirrors the edge-side
+		// keys a classic edge carries, so NODETACH treats both alike.
+		VertexAdjacency::Lightweight => {
+			MergedAdjacencyCursor::open_lightweight(&txn, &scope).map_err(ControlFlow::Err)?
+		}
+		VertexAdjacency::Normal {
+			folded,
+		} => MergedAdjacencyCursor::open(
+			&txn,
+			scope,
+			folded,
+			None,
+			Some(frozen.get_index_stores().adjacency_resolve()),
+		)
 		.await
-		.map_err(ControlFlow::Err)?;
-	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;
+		.map_err(ControlFlow::Err)?,
+	};
+	// Only emptiness matters here, so nothing is decoded.
+	let batch = cursor.next_batch_keys(1).await.map_err(ControlFlow::Err)?;
 	Ok(!batch.is_empty())
 }
 
@@ -509,23 +545,22 @@ impl ExecOperator for InsertGraph {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		let nodes = self.nodes.clone();
 		let edges = self.edges.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			for mut row in rows {
@@ -533,8 +568,9 @@ impl ExecOperator for InsertGraph {
 				insert_row(&nodes, &edges, &mut row, &frozen, &opt).await?;
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder.emit(ValueBatch::new(out)).await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "InsertGraph", &self.metrics))
 	}
@@ -583,7 +619,7 @@ async fn insert_row(
 /// The error for an `INSERT` edge whose endpoint binding does not resolve to a
 /// record (e.g. a referenced variable that is `NULL`).
 fn endpoint_error(name: &str) -> ControlFlow {
-	ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(format!(
+	ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
 		"INSERT edge endpoint `{name}` did not resolve to a record"
 	))))
 }
@@ -632,10 +668,8 @@ impl ExecOperator for SingleRowScan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let batch = ValueBatch {
-			values: vec![Value::Object(Object::default())],
-		};
-		let stream = stream::once(async move { Ok(batch) });
+		let batch = ValueBatch::new(vec![Value::Object(Object::default())]);
+		let stream = futures::stream::once(async move { Ok(batch) });
 		Ok(monitor_stream(Box::pin(stream), "SingleRowScan", &self.metrics))
 	}
 }
@@ -684,25 +718,21 @@ impl ExecOperator for DrainSink {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let ctx = ctx.clone();
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |_: Yielder<_>| {
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
 				// Drive the writes; discard the rows.
 				let _ = batch?;
 			}
-			// Yield one empty batch: contributes no result rows, but pins the
-			// stream's item type (a `try_stream!` that never yields cannot infer
-			// it).
-			yield ValueBatch { values: Vec::new() };
-		};
+			Ok(())
+		});
 		Ok(monitor_stream(Box::pin(stream), "DrainSink", &self.metrics))
 	}
 }

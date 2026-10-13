@@ -1,0 +1,110 @@
+name: 'Determine release configuration'
+description: >-
+  Decide what this run releases: channel, publish flag, components and
+  requested ref, from the trigger (schedule vs dispatch).
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  components:
+    description: 'components (see step body)'
+    value: ${{ steps.config.outputs.components }}
+  test:
+    description: 'test (see step body)'
+    value: ${{ steps.config.outputs.test }}
+  nightly-release:
+    description: 'nightly-release (see step body)'
+    value: ${{ steps.config.outputs.nightly-release }}
+  publish:
+    description: 'publish (see step body)'
+    value: ${{ steps.config.outputs.publish }}
+  release-channel:
+    description: 'release-channel (see step body)'
+    value: ${{ steps.config.outputs.release-channel }}
+  release-downstream:
+    description: 'release-downstream (see step body)'
+    value: ${{ steps.config.outputs.release-downstream }}
+  release-engine:
+    description: 'release-engine (see step body)'
+    value: ${{ steps.config.outputs.release-engine }}
+  requested-ref:
+    description: 'requested-ref (see step body)'
+    value: ${{ steps.config.outputs.requested-ref }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine release configuration
+      id: config
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${EVENT}" == "schedule" ]]; then
+          # Scheduled nightly: resolve the SHA from main history in the locate
+          # step (the newest commit that actually has a rolling build), so we
+          # never race a still-running rolling build for the current HEAD.
+          requested_ref="${GITHUB_REF_NAME}"
+          channel=nightly
+          publish=true
+          # Two decoupled nightly schedules, distinguished by their cron string:
+          # the 00:30 run promotes the downstream nightly image; every other
+          # scheduled run promotes the engine nightly. Keeping them on separate
+          # runs (and separate concurrency keys) means a failure on one side never
+          # blocks the other.
+          if [[ "${EVENT_SCHEDULE}" == "30 0 * * *" ]]; then
+            components=internal
+          else
+            components=engine
+          fi
+          # engine-nightly = engine side only; internal-nightly = downstream side
+          # only. Neither is a manual choice (see the case below).
+        else
+          requested_ref="${INPUT_GIT_SHA}"
+          publish="${INPUT_PUBLISH}"
+          channel="${INPUT_RELEASE_TYPE}"
+          components="${INPUT_COMPONENTS}"
+        fi
+        # nightly is the only channel that does not publish crates.
+        if [[ "$channel" == "nightly" ]]; then nightly=true; else nightly=false; fi
+
+        # What to release, by intention. `release-engine` and `release-downstream`
+        # are the internal flags every job gates on:
+        #   * public   - the full release: engine binaries, crates, the GitHub
+        #     release, the engine DockerHub image, the licence-enforcing image, and
+        #     the downstream image to the private registries. The default. (Both
+        #     flags true; the licensed mirror gates on release-engine, so it ships
+        #     with the engine and never on its own.)
+        #   * internal - the downstream image to the private registries only: mirror,
+        #     downstream-repo tag, finalize, prune. No public artefacts.
+        #   * test     - an ephemeral downstream image for internal testing. Sets
+        #     only `test` (NOT release-downstream), so it mirrors the image but does
+        #     not tag the downstream repo, finalize, or prune; `test=true` also skips
+        #     the engine-build wait and shifts the release name to carry build
+        #     metadata so it never collides with a public tag. Manual, versioned-only.
+        # The scheduled nightlies set `components` themselves and never reach here as
+        # a manual choice: `engine` (engine side only) and `internal` (downstream
+        # side only). `engine` is not offered as a manual option.
+        [[ -z "$components" ]] && components="public"
+        test=false
+        case "$components" in
+          public)   release_engine=true;  release_downstream=true;  test=false ;;
+          internal) release_engine=false; release_downstream=true;  test=false ;;
+          test)     release_engine=false; release_downstream=false; test=true  ;;
+          engine)   release_engine=true;  release_downstream=false; test=false ;;
+          *) echo "::error::Unknown components value '${components}' (expected public|internal|test)"; exit 1 ;;
+        esac
+        if [[ "$test" == "true" && "$channel" != "versioned" ]]; then
+          echo "::error::'test' is only valid for a versioned release (release-type: versioned), not '${channel}'."
+          exit 1
+        fi
+        {
+          echo "requested-ref=${requested_ref}"
+          echo "release-channel=${channel}"
+          echo "nightly-release=${nightly}"
+          echo "publish=${publish}"
+          echo "components=${components}"
+          echo "test=${test}"
+          echo "release-engine=${release_engine}"
+          echo "release-downstream=${release_downstream}"
+        } >> "$GITHUB_OUTPUT"

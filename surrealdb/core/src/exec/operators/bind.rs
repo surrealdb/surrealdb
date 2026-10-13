@@ -10,15 +10,9 @@
 //! `Bind` is structurally transparent: it neither reorders nor drops rows, so
 //! it delegates `cardinality_hint` and `output_ordering` to its input.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::TryStreamExt;
 
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
@@ -88,25 +82,21 @@ impl ExecOperator for Bind {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let name = self.name.clone();
-		let ctx = ctx.clone();
 
-		let bound = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
-			while let Some(batch_result) = input_stream.next().await {
-				crate::exec::operators::check_cancelled(&ctx)?;
-				let batch = batch_result?;
-				let mut values = Vec::with_capacity(batch.values.len());
-				for value in batch.values {
+		let bound = input_stream.map_ok(move |x| {
+			let values = x
+				.into_iter()
+				.map(|x| {
 					let mut row = Object::default();
-					row.insert(name.clone(), value);
-					values.push(Value::Object(row));
-				}
-				yield ValueBatch { values };
-			}
-		};
+					row.insert(name.clone(), x);
+					Value::Object(row)
+				})
+				.collect();
+			ValueBatch::new(values)
+		});
 
 		Ok(monitor_stream(Box::pin(bound), "Bind", &self.metrics))
 	}

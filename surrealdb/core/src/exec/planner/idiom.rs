@@ -6,16 +6,17 @@
 use std::sync::Arc;
 
 use super::Planner;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::operators::{CurrentValueSource, RecursionOp};
 use crate::exec::parts::{
 	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, FieldPart, FirstPart,
 	FlattenPart, IndexPart, LastPart, LookupDirection, LookupPart, MethodPart, OptionalChainPart,
 	PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
 };
-use crate::exec::physical_expr::IdiomExpr;
-use crate::exec::{ExecOperator, PhysicalExpr};
+use crate::exec::physical_expr::{FoldedIdiom, IdiomExpr};
+use crate::exec::{Error as ExecError, ExecOperator, PhysicalExpr};
 use crate::expr::part::{DestructurePart as AstDestructurePart, Part, RecurseInstruction};
+use crate::val::Value;
 
 // ============================================================================
 // impl Planner — Idiom Conversion
@@ -36,19 +37,57 @@ impl<'ctx> Planner<'ctx> {
 		let display = idiom.to_sql();
 		let mut parts = idiom.0;
 
+		// Constant field chains (`$session.data.orgs`) resolve once, here,
+		// instead of on every row. See `try_fold_constant_field_chain`.
+		//
+		// ALTITUDE, so nobody reads more into this than it does: physical-
+		// expression construction runs *after* index analysis has chosen the
+		// plan. `exec/index/analysis.rs` and `planner/util/conditions.rs` match
+		// `Expr::Literal` on the AST and cannot see a `FoldedIdiom`, so
+		// `WHERE org IN $session.data.orgs` still full-scans. What this buys is
+		// the removal of a per-row deep clone of the whole `$session` object —
+		// real, and the reason it is here — not an index and not O(rows): `IN`
+		// still walks the payload once per row.
+		//
+		// The repo's own AST-level pipeline for this is
+		// `planner/select/mod.rs`: `resolve_condition_params` ->
+		// `fold_condition_expressions` -> `fold_constant_record_idioms`, whose
+		// `record_fold.rs` is the object-rooted sibling of this fold, one layer
+		// up. The reason a fold had to be bolted in down here is that
+		// permission predicates never enter it: `convert_permission_to_physical`
+		// (`exec/permission.rs`) goes straight from a catalog `Expr` to a
+		// `PhysicalExpr` with no param resolution and no folding, so a
+		// permission cannot use an index however it is written, and
+		// `plan_idiom` is the only hook it passes through.
+		//
+		// Running that pipeline over `Permission::Specific`, plus an
+		// `Expr::Idiom`-with-constant-start arm in `fold_condition_expressions`,
+		// would give this fold, `$auth`/`$token` substitution and index-driven
+		// permission checks at once, and would let the `name.as_str() ==
+		// "session"` special case in `constant_start_value` become a general
+		// rule. That is a restructuring of the permission planning path, not a
+		// move of these few lines, and it is deliberately not attempted here.
+		if let Some(Part::Start(start)) = parts.first()
+			&& parts.len() > 1
+			&& let Some(root) = self.constant_start_value(start)
+			&& let Some(value) = try_fold_constant_field_chain(&root, &parts[1..])
+		{
+			return Ok(Arc::new(FoldedIdiom::new(display, value)));
+		}
+
 		if let Some(Part::Start(_)) = parts.first() {
 			// `peek + remove` instead of one destructure because we need
 			// the index check separately. The `else` arm is provably
 			// unreachable given the `peek` succeeded — degraded to a typed
-			// `Error::Internal` so a future Part::Start variant change
+			// `EngineError::Internal` so a future Part::Start variant change
 			// surfaces a useful planner-bug message rather than a panic on
 			// production user input.
 			let start_part = parts.remove(0);
 			let Part::Start(start_expr) = start_part else {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"convert_idiom: parts.first() reported Part::Start but parts.remove(0) was not Part::Start"
 						.into(),
-				));
+				).into());
 			};
 			let start_phys = self.physical_expr(start_expr).await?;
 			let remaining_parts = self.convert_parts(parts).await?;
@@ -78,7 +117,7 @@ impl<'ctx> Planner<'ctx> {
 			while let Some(part) = iter.next() {
 				// Handle implicit recursion (Recurse with no inner path absorbs remaining parts)
 				if let Part::Recurse(recurse, None, instruction) = part {
-					let system_limit = self.ctx.config.idiom_recursion_limit;
+					let system_limit = self.ctx.config.exec.idiom_recursion_limit;
 					let (min_depth, max_depth) = match recurse {
 						crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 						crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
@@ -86,18 +125,18 @@ impl<'ctx> Planner<'ctx> {
 
 					// Validate bounds (same checks as expr/part.rs)
 					if min_depth < 1 {
-						return Err(Error::InvalidBound {
+						return Err(Error::Exec(ExecError::InvalidBound {
 							found: min_depth.to_string(),
 							expected: "at least 1".into(),
-						});
+						}));
 					}
 					if let Some(max) = max_depth
 						&& max > system_limit
 					{
-						return Err(Error::InvalidBound {
+						return Err(Error::Exec(ExecError::InvalidBound {
 							found: max.to_string(),
 							expected: format!("{} at most", system_limit),
-						});
+						}));
 					}
 
 					let remaining: Vec<Part> = iter.collect();
@@ -107,7 +146,7 @@ impl<'ctx> Planner<'ctx> {
 					// AND the path contains a repeat recurse (@), the two
 					// conflict -- match the old compute path's check.
 					if instruction.is_some() && has_repeat_recurse {
-						return Err(Error::RecursionInstructionPlanConflict);
+						return Err(Error::Exec(ExecError::RecursionInstructionPlanConflict));
 					}
 
 					// When the path contains @, split at the @ marker.
@@ -186,10 +225,10 @@ impl<'ctx> Planner<'ctx> {
 					let mut lookups: Vec<crate::expr::lookup::Lookup> = vec![*first_lookup];
 					while matches!(iter.peek(), Some(Part::Lookup(_))) {
 						let Some(Part::Lookup(lu)) = iter.next() else {
-							return Err(Error::Internal(
+							return Err(EngineError::Internal(
 								"convert_parts lookup fusion: iter.peek() reported Part::Lookup but iter.next() did not yield one"
 									.into(),
-							));
+							).into());
 						};
 						lookups.push(*lu);
 					}
@@ -311,9 +350,10 @@ impl<'ctx> Planner<'ctx> {
 				}))
 			}
 
-			Part::Start(_) => Err(Error::Unreachable(
+			Part::Start(_) => Err(EngineError::Unreachable(
 				"Start parts should be handled at the idiom level".to_string(),
-			)),
+			)
+			.into()),
 
 			Part::Lookup(lookup) => {
 				// Extract metadata before consuming lookup
@@ -337,7 +377,7 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			Part::Recurse(recurse, inner_path, instruction) => {
-				let system_limit = self.ctx.config.idiom_recursion_limit;
+				let system_limit = self.ctx.config.exec.idiom_recursion_limit;
 				let (min_depth, max_depth) = match recurse {
 					crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 					crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
@@ -345,18 +385,20 @@ impl<'ctx> Planner<'ctx> {
 
 				// Validate bounds (same checks as expr/part.rs)
 				if min_depth < 1 {
-					return Err(Error::InvalidBound {
+					return Err(ExecError::InvalidBound {
 						found: min_depth.to_string(),
 						expected: "at least 1".into(),
-					});
+					}
+					.into());
 				}
 				if let Some(max) = max_depth
 					&& max > system_limit
 				{
-					return Err(Error::InvalidBound {
+					return Err(ExecError::InvalidBound {
 						found: max.to_string(),
 						expected: format!("{} at most", system_limit),
-					});
+					}
+					.into());
 				}
 
 				let (path, has_repeat_recurse) = if let Some(p) = inner_path {
@@ -412,14 +454,15 @@ impl<'ctx> Planner<'ctx> {
 						// to the path. This occurs when the parser wraps non-idiom
 						// expressions (like $this or level * 2) in Part::Start
 						// within destructure aliases. The `else` arm is provably
-						// unreachable; converted to `Error::Internal` for the
+						// unreachable; converted to `EngineError::Internal` for the
 						// same reason as the matching site in `convert_idiom`.
 						let start_expr = if matches!(parts.first(), Some(Part::Start(_))) {
 							let Part::Start(expr) = parts.remove(0) else {
-								return Err(Error::Internal(
+								return Err(EngineError::Internal(
 									"convert_destructure: parts.first() reported Part::Start but parts.remove(0) was not Part::Start"
 										.into(),
-								));
+								)
+								.into());
 							};
 							Some(self.physical_expr(expr).await?)
 						} else {
@@ -581,4 +624,188 @@ fn ast_contains_repeat_recurse(parts: &[Part]) -> bool {
 		}
 	}
 	false
+}
+
+impl Planner<'_> {
+	/// The constant value an idiom's start denotes, when it denotes one.
+	///
+	/// Two shapes qualify, and only two:
+	///
+	/// * `Expr::Literal` — already a constant in the tree, so reading it needs no environment at
+	///   all. This is the shape a `WHERE` clause has by the time it reaches here, because
+	///   `resolve_condition_params` has already substituted its parameters for literals.
+	/// * `$session` — read out of the very context this plan will run in, so the value folded in is
+	///   the one the evaluator would have read. `LET`, `UNSET`, `db.set` and RPC `set` all refuse
+	///   the name (it is in `PROTECTED_PARAM_NAMES`), so no *statement* can rebind it mid-plan.
+	///
+	/// Every other parameter is left alone. A `DEFINE PARAM` carries permissions
+	/// that belong at runtime, and an ordinary binding may be rebound by an
+	/// enclosing construct after the plan is built.
+	///
+	/// SECURITY: `$session` is **not** unshadowable, and nothing here should be
+	/// read as claiming it is. `PROTECTED_PARAM_NAMES` is consulted only by the
+	/// statement forms listed above; the constructs that bind a user-chosen
+	/// parameter name — `FOR $session IN [...]`, closure parameters, user-defined
+	/// function arguments — bind it unchecked, and `Context::value` prefers a
+	/// local insert over the parent chain. The same routes shadow `$auth`, which
+	/// every record permission already depends on, so folding `$session` here
+	/// neither adds nor removes trust: it inherits exactly `$auth`'s boundary.
+	///
+	/// SECURITY: folding bakes one session's values into a physical plan. That is
+	/// sound only because plans are never shared between sessions — there is no
+	/// cross-session plan cache in the engine today, and a plan built under one
+	/// binding of `$session` is never reused under another. If such a cache is
+	/// ever added it must either key on the folded session values or exclude
+	/// plans that carry them, or this turns into a cross-tenant leak.
+	fn constant_start_value(&self, start: &crate::expr::Expr) -> Option<Value> {
+		use crate::expr::Expr;
+		match start {
+			Expr::Literal(_) => start.as_static_value(),
+			// Resolved from the ambient planning context. `None` when no
+			// session is attached, in which case nothing folds.
+			Expr::Param(name) if name.as_str() == "session" => self.ctx.value("session").cloned(),
+			_ => None,
+		}
+	}
+}
+
+/// Walk a chain of plain field accesses over constant objects.
+///
+/// Deliberately narrow: every part must be a `Part::Field`, and every value it
+/// steps through must be a `Value::Object`. Requiring an object at each step is
+/// what preserves record-link semantics — `$auth.email` starts at a
+/// `Value::RecordId`, whose field access is a *fetch of the stored row at
+/// runtime*, so it never folds. It also keeps the fold away from every part
+/// kind that has runtime behaviour of its own (`[WHERE ...]`, `.*`, method
+/// calls, recursion, destructuring).
+///
+/// A missing key folds to `NONE`, which is what the field access evaluates to.
+///
+/// Deliberately *not* guarded by `substitution_is_lossy`. That predicate exists
+/// for `ParamResolver`, which rewrites the AST (`*expr = value.into_literal()`)
+/// — and `Value::Set`'s literal form is an array literal, which evaluates to an
+/// array and compares unequal to a set. Nothing here round-trips through SQL:
+/// `FoldedIdiom::evaluate` hands back `self.value.clone()` verbatim and
+/// `try_literal` hands out a `&Value` that `SimpleBinaryOp` and the pre-decode
+/// filter consume as a `Value`, through the same `operate::*` functions the
+/// unfolded `BinaryOp` would have used. A set folds correctly, and refusing one
+/// only meant that `CONTEXT (SELECT VALUE org FROM ...)` returning a set — or
+/// any object payload holding one at any depth — fell back to cloning the whole
+/// `$session` object per row, which is the exact cost this fold exists to
+/// remove.
+fn try_fold_constant_field_chain(root: &Value, parts: &[Part]) -> Option<Value> {
+	let mut current = root;
+	for (i, part) in parts.iter().enumerate() {
+		let Part::Field(name) = part else {
+			return None;
+		};
+		let Value::Object(object) = current else {
+			return None;
+		};
+		match object.get(name.as_str()) {
+			Some(next) => current = next,
+			// A missing key evaluates to NONE, but only the last step can be
+			// folded that way. Anything after it operates on NONE and has its
+			// own behaviour there — `{}.prop.is_bool()` is `false`, not NONE —
+			// so the rest is left to the evaluator.
+			None if i + 1 == parts.len() => return Some(Value::None),
+			None => return None,
+		}
+	}
+	Some(current.clone())
+}
+
+#[cfg(test)]
+mod fold_tests {
+	use super::*;
+	use crate::val::{Object, RecordId, Value};
+
+	fn field(name: &str) -> Part {
+		Part::Field(surrealdb_strand::Strand::new(name))
+	}
+
+	fn object(pairs: Vec<(&str, Value)>) -> Value {
+		let mut obj = Object::default();
+		for (k, v) in pairs {
+			obj.insert(k, v);
+		}
+		Value::Object(obj)
+	}
+
+	#[test]
+	fn folds_a_chain_of_object_fields() {
+		let root = object(vec![("data", object(vec![("org", Value::from("acme"))]))]);
+		assert_eq!(
+			try_fold_constant_field_chain(&root, &[field("data"), field("org")]),
+			Some(Value::from("acme"))
+		);
+	}
+
+	#[test]
+	fn a_missing_key_folds_to_none_only_as_the_last_step() {
+		let root = object(vec![("data", Value::None)]);
+		assert_eq!(try_fold_constant_field_chain(&root, &[field("absent")]), Some(Value::None));
+		// `{}.prop.is_bool()` is `false`, not NONE: once a step is missing,
+		// whatever follows has its own behaviour on NONE and must be left to
+		// the evaluator.
+		assert_eq!(try_fold_constant_field_chain(&root, &[field("absent"), field("deeper")]), None);
+	}
+
+	/// The stopping rule that preserves record-link semantics: `$auth.email`
+	/// must stay a runtime fetch of the stored row, never a plan-time pick.
+	#[test]
+	fn refuses_to_step_through_a_record_link() {
+		let root = object(vec![(
+			"rd",
+			Value::RecordId(RecordId::new(crate::val::TableName::new("user"), 1)),
+		)]);
+		assert_eq!(try_fold_constant_field_chain(&root, &[field("rd"), field("email")]), None);
+		// And a record id as the whole root is refused for the same reason.
+		let rid = Value::RecordId(RecordId::new(crate::val::TableName::new("user"), 1));
+		assert_eq!(try_fold_constant_field_chain(&rid, &[field("email")]), None);
+	}
+
+	/// Anything with runtime behaviour of its own stops the fold.
+	#[test]
+	fn refuses_non_field_parts() {
+		let root = object(vec![("data", Value::from("acme"))]);
+		assert_eq!(try_fold_constant_field_chain(&root, &[Part::All]), None);
+		assert_eq!(try_fold_constant_field_chain(&root, &[field("data"), Part::First]), None);
+	}
+
+	/// A set folds, and folds as a set.
+	///
+	/// `ParamResolver` refuses one because it substitutes a *literal* into the
+	/// AST and `Value::Set`'s literal form is an array literal. Nothing here
+	/// goes through SQL text, so the set survives — and it has to, because a
+	/// `CONTEXT` clause returning a set is exactly the payload shape this fold
+	/// exists for. Folding it to an array instead would be the bug.
+	#[test]
+	fn folds_a_set_without_flattening_it_to_an_array() {
+		let mut set = crate::val::Set::new();
+		set.insert(Value::from("acme"));
+		set.insert(Value::from("globex"));
+		let folded = try_fold_constant_field_chain(
+			&object(vec![("orgs", Value::Set(set.clone()))]),
+			&[field("orgs")],
+		);
+		assert_eq!(folded, Some(Value::Set(set.clone())));
+		assert!(!matches!(folded, Some(Value::Array(_))), "a set must not fold to an array");
+
+		// And nested at depth, which is where `substitution_is_lossy`'s
+		// recursion into `Object::values` used to disable the fold for a whole
+		// payload because of one key.
+		let root = object(vec![(
+			"data",
+			object(vec![("orgs", Value::Set(set.clone())), ("name", Value::from("alice"))]),
+		)]);
+		assert_eq!(
+			try_fold_constant_field_chain(&root, &[field("data"), field("name")]),
+			Some(Value::from("alice"))
+		);
+		assert_eq!(
+			try_fold_constant_field_chain(&root, &[field("data")]),
+			Some(object(vec![("orgs", Value::Set(set)), ("name", Value::from("alice"))]))
+		);
+	}
 }

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -8,13 +9,16 @@ use surrealdb_types::ToSql;
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
+use crate::doc::{Document, Error};
+use crate::exe::FlowResultExt as _;
+use crate::expr::Expr;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
-use crate::expr::kind::{Kind, KindLiteral};
+use crate::expr::kind::Kind;
+use crate::expr::part::Part;
+use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit};
+use crate::key::schema::ReferenceKey;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
 
@@ -67,26 +71,15 @@ impl Document {
 				explicit_field_names.insert(fd.name.clone());
 			}
 
-			// Check if the kind contains object (including option<object>, array<object>, etc.)
-			fn kind_contains_object(kind: &Kind) -> bool {
-				match kind {
-					Kind::Object => true,
-					Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
-					Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
-					Kind::Literal(KindLiteral::Object(_)) => true,
-					Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
-					_ => false,
-				}
-			}
-
 			// Loop through all field definitions
 			for fd in self.doc_ctx.fd()?.iter() {
+				let field_kind = fd.field_kind.as_ref();
 				// Check if the field type is an any
-				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
+				let is_any = field_kind.is_some_and(Kind::is_any);
 				// Check if the field type is a literal
-				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_literal = field_kind.is_some_and(Kind::contains_literal);
 				// Check if the field type contains an object
-				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
+				let contains_object = field_kind.is_some_and(kind_contains_object);
 				// In SCHEMAFULL tables:
 				// - TYPE any: allows nested
 				// - TYPE literal: literal types allow nested
@@ -186,20 +179,40 @@ impl Document {
 
 	/// Processes all DEFINE FIELD statements for each matching field in the document.
 	///
-	/// Applies field-level logic in the following order:
+	/// Runs after the data clause, against the record's new values, so a clause
+	/// reading a field sees what this statement wrote to it rather than the
+	/// pre-mutation snapshot the data clause read.
+	///
+	/// Runs in two passes, because producing a value and validating one have
+	/// different ordering requirements.
+	///
+	/// The **production** pass visits fields in the dependency order carried by
+	/// [`FieldEvalOrder`](crate::doc::document::FieldEvalOrder), not the name
+	/// order the field list arrives in, so a clause reading another field runs
+	/// after that field has been produced. A cycle between producing clauses has
+	/// no such order and is rejected. Within a field:
 	/// - READONLY keyword - prevents modification of readonly fields
 	/// - DEFAULT clause - applies default values for missing fields on new records
 	/// - TYPE clause - validates the field value against the field type
 	/// - VALUE clause - sets or processes the field value
-	/// - ASSERT clause - validates field constraints
 	/// - REFERENCE clause - manages foreign key references
 	/// - PERMISSIONS clause - enforces field-level permissions
+	///
+	/// The **validation** pass then runs every `ASSERT` clause. Order is not a
+	/// question there — each one reads the record as it will be stored, so a
+	/// clause reading a sibling sees that sibling's final value however
+	/// production was ordered, and two fields asserting against each other see
+	/// one consistent record. `$value` is read back from the document rather
+	/// than carried over from production, because the `PERMISSIONS` clause may
+	/// have reverted it.
 	///
 	/// Certain fields have special behaviors:
 	/// - `id` field: readonly after creation, and enforced for existing records
 	/// - Optional fields: child fields are skipped when parent is NONE and type allows it
 	/// - READONLY fields: reverted to old value when omitted within CONTENT clause
-	/// - COMPUTED fields: any value is removed, as computed fields are processed later
+	/// - COMPUTED fields: derived rather than processed, and stripped before storage. One is
+	///   evaluated here only when another field's clause reads it; the rest are left to the read
+	///   side, which evaluates only what a projection asks for.
 	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -215,14 +228,52 @@ impl Document {
 		let rid = self.id()?;
 		// Get the user applied input
 		let inp = self.compute_input_value(stk, ctx, opt, stm).await?.unwrap_or_default();
+		// Get the field definitions and the order to process them in
+		let fields = self.doc_ctx.fd()?;
+		let field_order = Arc::clone(self.doc_ctx.field_order()?);
+		// A cycle between field clauses has no evaluation order at all, so
+		// there is no correct record to write
+		if let Some(cycle) = &field_order.cycle {
+			bail!(Error::FieldDependencyCycle {
+				table: self.doc_ctx.tb()?.name.as_str().to_string(),
+				fields: cycle.join(", "),
+			});
+		}
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
 		let mut skip: Option<&Idiom> = None;
-		// Loop through all field statements
-		for fd in self.doc_ctx.fd()?.iter() {
+		// Paths whose ASSERT clause runs in the validation pass below, as
+		// (index into `fields`, path within the document)
+		let mut deferred_asserts: Vec<(usize, Idiom)> = Vec::new();
+		// Loop through all field statements, in dependency order so a clause
+		// reading another field sees that field's processed value
+		for &field_idx in field_order.order.iter() {
+			let fd = &fields[field_idx];
+			// A COMPUTED field's value is derived, never taken from the record,
+			// so it is not processed like the others. Materialise it here only
+			// when some other field's clause reads it — that clause is ordered
+			// after this point, so the value is in place by the time it runs.
+			// Everything else is left to the read side, which evaluates only
+			// the computed fields a projection asks for. Either way the value
+			// is stripped again below, before the record is stored.
+			if let Some(computed) = &fd.computed {
+				if field_order.required_computed.contains(&field_idx) {
+					Document::compute_one_field(
+						stk,
+						ctx,
+						opt,
+						&rid,
+						fd,
+						computed,
+						&mut self.current,
+					)
+					.await?;
+				}
+				continue;
+			}
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
@@ -273,11 +324,15 @@ impl Document {
 							// used, then we assume that the field was omitted
 							// and we revert the value to the old value.
 							Some(Data::ContentExpression(_)) if val.is_none() => {
-								self.current
-									.doc
-									.to_mut()
-									.set(stk, ctx, &opt, &k, old.as_ref().clone())
-									.await?;
+								crate::legacy::value_set(
+									self.current.doc.to_mut(),
+									stk,
+									ctx,
+									&opt,
+									&k,
+									old.as_ref().clone(),
+								)
+								.await?;
 								continue;
 							}
 							// If the field has been modified and the user
@@ -309,36 +364,34 @@ impl Document {
 				};
 				// Skip this field?
 				if !skipped {
-					// Check if this is a COMPUTED field
-					if field.def.computed.is_some() {
-						// The value will be computed later, so we set it to NONE
-						val = Value::None;
-					} else {
-						// Process any DEFAULT clause
-						val = field.process_default_clause(val).await?;
-						// Check for the existance of a VALUE clause
-						if field.def.value.is_some() {
-							// If the value is NONE (field doesn't exist), process VALUE first
-							// Otherwise, do TYPE check first to validate explicit input
-							if val.is_none() {
-								// Process any VALUE clause first when field is missing
-								val = field.process_value_clause(val).await?;
-								// Process any TYPE clause
-								val = field.process_type_clause(val).await?;
-							} else {
-								// Process any TYPE clause first for explicit values
-								val = field.process_type_clause(val).await?;
-								// Process any VALUE clause
-								val = field.process_value_clause(val).await?;
-								// Re-validate that VALUE output conforms to TYPE
-								val = field.process_type_clause(val).await?;
-							}
-						} else {
+					// Process any DEFAULT clause
+					val = field.process_default_clause(val).await?;
+					// Check for the existance of a VALUE clause
+					if field.def.value.is_some() {
+						// If the value is NONE (field doesn't exist), process VALUE first
+						// Otherwise, do TYPE check first to validate explicit input
+						if val.is_none() {
+							// Process any VALUE clause first when field is missing
+							val = field.process_value_clause(val).await?;
 							// Process any TYPE clause
 							val = field.process_type_clause(val).await?;
+						} else {
+							// Process any TYPE clause first for explicit values
+							val = field.process_type_clause(val).await?;
+							// Process any VALUE clause
+							val = field.process_value_clause(val).await?;
+							// Re-validate that VALUE output conforms to TYPE
+							val = field.process_type_clause(val).await?;
 						}
-						// Process any ASSERT clause
-						val = field.process_assert_clause(val).await?;
+					} else {
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+					}
+					// Defer this path's ASSERT clause to the validation pass, so
+					// it reads the record as it will be stored rather than as it
+					// stands part-way through production
+					if fd.assert.is_some() {
+						deferred_asserts.push((field_idx, k.clone()));
 					}
 				}
 				// Process any PERMISSIONS clause
@@ -356,15 +409,67 @@ impl Document {
 					self.current.doc.to_mut().put(&k, val);
 				}
 			}
+			// VALUE for individual elements can normalise distinct stored
+			// values to the same value (for example trimming whitespace).
+			// Rebuild set parents so uniqueness is restored.
+			if matches!(fd.name.0.last(), Some(Part::All)) && fd.name.0.len() > 1 {
+				let parent = Idiom(fd.name.0[..fd.name.0.len() - 1].to_vec());
+				if let Value::Set(set) = self.current.doc.as_ref().pick(&parent) {
+					self.current.doc.to_mut().put(&parent, Value::Set(set.normalize()));
+				}
+			}
 		}
-		// Note: COMPUTED fields are NOT evaluated here. Storing
-		// computed values at write time produces incorrect behaviour
-		// for selective projections — a computed field that the read
-		// did not request must not be evaluated (issue #7094). The
-		// `output_document!` macro on the read side invokes
-		// `Document::compute_fields(needed_roots = ...)` after
-		// reduction and only evaluates the closure of computed fields
-		// the projection actually consumes.
+		// Validation pass. Every `ASSERT` runs after every field has been
+		// produced, so each one reads the record as it will be stored: sibling
+		// fields hold their final values whatever order production happened in,
+		// and two fields asserting against each other (`ASSERT in != out`) see
+		// the same record rather than each other's half-built state. `$value`
+		// is read back from the document for the same reason — a `PERMISSIONS`
+		// clause may have reverted it after the value was produced.
+		for (field_idx, path) in deferred_asserts {
+			let fd = &fields[field_idx];
+			// Limit auth
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
+			// Rebuild the clause context around the final value
+			let val = self.current.doc.as_ref().pick(&path);
+			let old = Arc::new(self.initial.doc.as_ref().pick(&path));
+			let user_input = Arc::new(inp.pick(&path));
+			let mut field = FieldEditContext {
+				context: None,
+				doc: self,
+				rid: Arc::clone(&rid),
+				def: fd,
+				stk,
+				ctx,
+				opt: &opt,
+				old,
+				user_input,
+			};
+			// The clause only validates, so the value it returns is the value
+			// it was given
+			field.process_assert_clause(val).await?;
+		}
+		// A computed value is never stored: the read side derives it from the
+		// stored fields, so that a projection which does not ask for a computed
+		// field never pays to evaluate it (issue #7094). Drop whatever the loop
+		// above materialised for the field clauses that read it, along with any
+		// value the user tried to assign to a computed field, and clear the
+		// flag so the read side re-derives from the values just written.
+		//
+		// SECURITY: the write permission gate depends on this reset. It runs
+		// after `process_table_fields` on the create/update paths and evaluates
+		// its predicate against a scratch clone of `self.current`
+		// (`Document::gate_doc`); if `fields_computed` were left `true` here with
+		// the values stripped, the clone would inherit the stale flag and a
+		// full-compute plan would skip materialisation, so a predicate naming a
+		// computed field would read `NONE` again (GHSA-f6h4-5xf2-86q9). Keep this
+		// strip-and-reset ahead of the gate.
+		for fd in fields.iter() {
+			if fd.computed.is_some() {
+				self.current.doc.to_mut().cut(&fd.name);
+			}
+		}
+		self.current.fields_computed = false;
 		// Carry on
 		Ok(())
 	}
@@ -392,7 +497,7 @@ impl Document {
 			}
 
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 
 			// Loop over each field in the current document
 			for (k, val) in self.current.doc.as_ref().walk(&fd.name) {
@@ -442,7 +547,7 @@ impl Document {
 			}
 
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 
 			// Loop over each value in document
 			for (_, val) in self.current.doc.as_ref().walk(&fd.name) {
@@ -476,7 +581,7 @@ impl Document {
 struct FieldEditContext<'a> {
 	/// The mutable request context
 	context: Option<Context>,
-	/// The defined field statement
+	/// The compiled runtime form of the field definition
 	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
@@ -537,8 +642,8 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// Get the default value
-		let def = match &self.def.default {
-			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
+		let def: Option<&Expr> = match &self.def.default {
+			catalog::DefineDefault::Set(expr) | catalog::DefineDefault::Always(expr) => Some(expr),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),
@@ -570,8 +675,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let val = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
@@ -608,8 +716,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let val = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
@@ -652,8 +763,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let res = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -706,8 +820,13 @@ impl FieldEditContext<'_> {
 					let now = Arc::new(val.clone());
 					// Get the current document
 					let doc = Some(&self.doc.current);
-					// Disable permission recursion and block side effects
-					let opt = &self.opt.new_for_permission_predicate();
+					// Disable permission recursion. These create/update field
+					// clauses are reached from a write, so they are not
+					// write-blocked.
+					let opt = &crate::doc::check::permission_predicate_frame(
+						self.opt,
+						crate::doc::check::PermissionClauseKind::Write,
+					);
 					// Configure the context
 					// Configure the context
 					let ctx = match self.context.take() {
@@ -730,7 +849,7 @@ impl FieldEditContext<'_> {
 					// Process the PERMISSION clause
 					let res = self
 						.stk
-						.run(|stk| expr.compute(stk, &ctx, opt, doc))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, opt, doc))
 						.await
 						.catch_return()?;
 					// Unfreeze the new context
@@ -798,31 +917,56 @@ impl FieldEditContext<'_> {
 				match action {
 					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::new(
+						let key = ReferenceKey {
 							ns,
 							db,
-							&rid.table,
-							&rid.key,
+							tb: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+							foreign_table: Cow::Borrowed(&self.rid.table),
+							foreign_field: Cow::Borrowed(&ff),
+							foreign_key: Cow::Borrowed(&self.rid.key),
+						};
+						let txn = self.ctx.tx();
+						txn.set_key(&key, &()).await?;
+						// Fold the back-link into the referenced record's
+						// inline cache — after the key write, so a
+						// first-write backfill's scan already includes it.
+						crate::idx::inline_cache::record_ref_write(
+							&txn,
+							ns,
+							db,
+							rid,
 							&self.rid.table,
 							&ff,
 							&self.rid.key,
-						);
-
-						self.ctx.tx().set(&key, &()).await?;
+						)
+						.await?;
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::new(
+						let key = ReferenceKey {
 							ns,
 							db,
-							&rid.table,
-							&rid.key,
+							tb: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+							foreign_table: Cow::Borrowed(&self.rid.table),
+							foreign_field: Cow::Borrowed(&ff),
+							foreign_key: Cow::Borrowed(&self.rid.key),
+						};
+						let txn = self.ctx.tx();
+						txn.del_key(&key).await?;
+						// Remove the back-link from the referenced record's
+						// inline cache.
+						crate::idx::inline_cache::record_ref_delete(
+							&txn,
+							ns,
+							db,
+							rid,
 							&self.rid.table,
 							&ff,
 							&self.rid.key,
-						);
-
-						self.ctx.tx().del(&key).await?;
+						)
+						.await?;
 					}
 				}
 			}

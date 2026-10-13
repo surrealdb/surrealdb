@@ -29,20 +29,6 @@ defaults:
 permissions:
   contents: read
 
-# sccache → S3 backend (a drop-in replacement for the former Depot Cache).
-# Set at workflow level so the values are in the environment when the
-# sccache-action daemon starts (it reads its backend config at start time).
-# Fork PRs have no secrets, so SCCACHE_BUCKET is empty there and sccache
-# transparently falls back to a local cache — builds still succeed, just
-# without the shared cache (the same behaviour forks had under Depot).
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
-  SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
-
 jobs:
   # ----------------------------------------
   # Server build
@@ -62,34 +48,58 @@ jobs:
             # amd64 leg stays on-demand (no amd spot pool); arm builds spot on PRs.
             runner: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     env:
-      SCCACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'debug' || '' }}
-      SCCACHE_ERROR_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && '/tmp/sccache.log' || '' }}
+      # Verbose cache tracing on the branches whose cache behaviour is worth
+      # inspecting. kache writes it to stderr, so it lands in the build step's
+      # own log; empty leaves the action's default filter in place.
+      KACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'kache=debug' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          # The WASI target is needed to pack the Surrealism demo module below.
+          targets: wasm32-wasip2
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        run: cargo build --target ${{ matrix.target }}
+        run: cargo build --locked --target ${{ matrix.target }}
 
-      - name: sccache stats
-        if: ${{ always() }}
-        run: sccache --show-stats || true
+      # rust-toolchain.toml pins the toolchain every cargo invocation resolves
+      # to, which is not the one the setup action installs targets for, so the
+      # WASI target has to be added to the pinned toolchain as well.
+      - name: Install wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
 
-      - name: Upload sccache debug log
-        if: ${{ always() && (github.event_name == 'push' || github.event_name == 'merge_group') }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+      # The Surrealism demo archive is the fixture the conformance suite loads
+      # via `DEFINE MODULE`. Every leg packs it: the archive itself is a WASM
+      # component and so portable, but packing exercises host-architecture code
+      # paths — compiling the guest's C dependencies for wasm32, and running the
+      # component through wasmtime to extract its exports — so each architecture
+      # covers its own. Packing here also keeps a failure attached to a job the
+      # required-checks gate already watches, and keeps the conformance job free
+      # of a Rust toolchain.
+      - name: Pack Surrealism demo module
+        run: >-
+          target/${{ matrix.target }}/debug/surreal module build --debug
+          -o ${{ github.workspace }}/demo.surli surrealism/demo
+
+      - name: Upload Surrealism demo module
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
-          name: sccache-debug-build-${{ matrix.name }}
-          path: /tmp/sccache.log
-          if-no-files-found: warn
+          name: demo-surli-${{ matrix.name }}
+          path: demo.surli
+
+      - name: kache stats
+        if: ${{ always() }}
+        run: kache stats || true
 
       - name: Upload artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: surreal-${{ matrix.name }}
           path: target/${{ matrix.target }}/debug/surreal
@@ -103,7 +113,7 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Lookup the nightly toolchain
         id: info
@@ -114,10 +124,13 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -130,11 +143,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -144,17 +160,23 @@ jobs:
       - name: Run clippy
         run: cargo make ci-clippy
 
+      - name: Run clippy (surrealism off)
+        run: cargo make ci-clippy-no-surrealism
+
   clippy-release:
     name: Check clippy (release)
     if: github.ref == 'refs/heads/main'
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -164,16 +186,39 @@ jobs:
       - name: Run clippy release
         run: cargo make ci-clippy-release
 
+  miri:
+    name: Test unsafe code with miri
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          toolchain: nightly
+          components: miri
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run miri
+        run: cargo +nightly miri test --locked -p surrealdb-common --lib
+
   check-debug:
     name: Check workspace (debug)
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -188,11 +233,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -208,11 +256,14 @@ jobs:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ env.msrv }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -227,11 +278,15 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          components: clippy
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -241,18 +296,46 @@ jobs:
       - name: Check wasm
         run: cargo make ci-check-wasm
 
+  test-wasm:
+    name: Test Wasm (IndexedDB)
+    # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
+    # the wasm-bindgen-test browser harness needs.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install wasm-pack
+        run: cargo install --locked wasm-pack@=0.15.0
+
+      - name: Test the IndexedDB backend in headless Chrome
+        working-directory: surrealdb/kvs-indxdb
+        run: wasm-pack test --headless --chrome
+
   check-revision:
     name: Check revision
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install revision-lock
         run: cargo install revision-lock --version 0.2.0 --locked
@@ -265,11 +348,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -278,25 +364,31 @@ jobs:
       - name: Check docs
         run: cargo make ci-docs
 
+      - name: Run doctests
+        run: cargo make ci-doctests
+
   feature-check:
     name: Check feature combinations
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
 
       - name: Install cargo-hack
-        run: cargo install cargo-hack
+        run: cargo install --locked cargo-hack
 
       - name: Check feature combinations
         run: cargo make ci-feature-check
@@ -306,22 +398,75 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: "false"
+          enable-kache: "false"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
 
       - name: Install cargo-machete
-        run: cargo install cargo-machete
+        run: cargo install --locked cargo-machete
 
       - name: Check unused dependencies
         run: cargo make ci-unused-deps
+
+  check-versions:
+    name: Check crate versions
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          # This job only runs `cargo package --no-verify`, which compiles
+          # nothing, so the compile cache would never be exercised (like the other
+          # no-compile jobs above).
+          enable-kache: "false"
+
+      # Catches PRs that change a published crate (e.g. surrealism, surrealml)
+      # without bumping its version, so it's surfaced at review time instead of
+      # only on main / at release time. Reads crates.io only (no secrets), so
+      # this also runs on fork PRs.
+      - name: Check crate versions
+        uses: ./.github/actions/check-crate-versions
+
+  # ----------------------------------------
+  # Lockfile freshness
+  # ----------------------------------------
+
+  # The only `--locked` assertion in CI that is guaranteed to be about the
+  # commit. Every other one is sequenced after the shared setup action, whose
+  # cache step resolves each workspace it is handed without `--locked` and so
+  # rewrites a stale lockfile before the assertion reads it. This job therefore
+  # runs bare — no setup action, no cache, no other cargo step — and resolves
+  # only, so it covers every workspace in the repository in seconds.
+  check-lockfiles:
+    name: Check lockfiles
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
+        with:
+          toolchain: stable
+
+      - name: Check every lockfile satisfies its manifests
+        run: ./.github/scripts/check-lockfiles.sh
 
   # ----------------------------------------
   # Integration tests
@@ -337,11 +482,14 @@ jobs:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -352,9 +500,9 @@ jobs:
       - name: Run integration tests
         run: cargo make ci-integration-all
 
-      - name: sccache stats
+      - name: kache stats
         if: success() || failure()
-        run: sccache -s || true
+        run: kache stats || true
 
   # ----------------------------------------
   # Workspace tests
@@ -362,6 +510,8 @@ jobs:
 
   test:
     name: Test workspace (${{ matrix.arch }})
+    env:
+      RUST_MIN_STACK: "8388608" # 8 MiB — some debug tests overflow nextest's default thread stack
     # ARM on every trigger; amd64 added only on merge-queue and push to main.
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
@@ -370,12 +520,40 @@ jobs:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Test workspace
         uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+  # The `cjk-embed-*` features are off in every other lane, so the segmentation
+  # tests behind them are built nowhere else — `Check features` only runs
+  # `cargo check`, which does not build test code. This lane is what makes them
+  # run at all. It is separate because enabling the features makes each
+  # dictionary crate download its dictionary at build time.
+  test-cjk:
+    name: Test CJK segmentation
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          preset: test
+
+      - name: Test CJK segmentation
+        run: cargo make ci-cjk-test
 
   # ----------------------------------------
   # Storage engine tests
@@ -391,13 +569,20 @@ jobs:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs
+          # Each engine compiles its own feature set, and the manifest default
+          # cannot see the matrix - without this the legs overwrite each other's
+          # manifest and the next run prefetches whichever finished last.
+          kache-manifest-key: kvs-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -421,20 +606,23 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
         working-directory: tests/sdk/local
-        run: cargo build
+        run: cargo build --locked
 
       - name: Build remote
         working-directory: tests/sdk/remote
-        run: cargo build
+        run: cargo build --locked
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
@@ -445,14 +633,20 @@ jobs:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: sdk
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: sdk-${{ matrix.engine }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -472,24 +666,32 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: SurrealQL tests - ${{ matrix.engine }} (${{ matrix.arch }})
+    name: Language tests - ${{ matrix.engine }} (${{ matrix.arch }})
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [mem, surrealkv, rocksdb, tikv]
+        # tikv takes ~30-45 min, far longer than the other engines, so it's
+        # excluded from pull_request and merge_group and only runs post-merge.
+        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem", "surrealkv", "rocksdb"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: lang-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -513,9 +715,13 @@ jobs:
 
       - name: Upload language test coverage to Codecov
         if: matrix.engine == 'mem' && matrix.arch == 'arm'
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # (Actions must be pinned by commit hash) v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # (Actions must be pinned by commit hash) v7.0.0
         with:
           files: language-tests-lcov.info
+          # The report's contents are validated by `ci-lang-test-coverage`
+          # before this step runs, so a coverage regression fails there rather
+          # than here. This step is best-effort delivery of an already-checked
+          # artifact, and does not gate the job.
           fail_ci_if_error: false
           flags: language-tests
           name: language-test-coverage
@@ -526,8 +732,8 @@ jobs:
   # SurrealQL language upgrade tests
   # ----------------------------------------
 
-  lang-upgrade-tests:
-    name: SurrealQL upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
+  upgrade-tests:
+    name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -536,12 +742,18 @@ jobs:
         engine: [surrealkv, rocksdb]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The WASI target is needed to build the Surrealism module the upgrade
+          # tests load through DEFINE MODULE.
+          targets: wasm32-wasip2
           # Both workspaces are cached: `language-tests` for the test harness,
           # and the root workspace because the final `..` hop builds the
           # current checkout's surreal binary via cargo.
@@ -550,20 +762,26 @@ jobs:
             .
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang-upgrade
+          # The compiled artifacts are not engine-independent, so the manifest
+          # is scoped per engine (see kvs-engines).
+          kache-manifest-key: lang-upgrade-${{ matrix.engine }}-${{ matrix.arch }}
 
       - name: Resolve upgrade version chain
         id: vers
         run: |
-          # Extract the comma-separated chain, then translate commas to '_' so
-          # the value is usable inside an `actions/cache` key (which forbids
-          # commas).
-          chain=$(grep -E '^LANG_UPGRADE_VERSIONS = ' Makefile.ci.toml \
-            | sed -E 's/.*value = "([^"]+)".*/\1/' \
-            | tr ',' '_')
-          echo "chain=$chain" >> "$GITHUB_OUTPUT"
+          # Extract the version chains, then translate their ',' and ';'
+          # separators to '_' so the value is usable inside an `actions/cache`
+          # key (which forbids commas).
+          extract() {
+            grep -E "^$1 = " Makefile.ci.toml \
+              | sed -E 's/.*value = "([^"]+)".*/\1/' \
+              | tr ',;' '__'
+          }
+          # All three lists name binaries the run downloads, so all three belong in the key.
+          echo "chain=$(extract LANG_UPGRADE_VERSIONS)_$(extract LANG_UPGRADE_SEEDS)_$(extract LANG_UPGRADE_CHAIN)" >> "$GITHUB_OUTPUT"
 
       - name: Cache upgrade binaries
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
         with:
           # Pre-built surreal-vX.Y.Z tarballs from download.surrealdb.com.
           # Release tarballs are immutable, so stale-key restores are safe.
@@ -576,6 +794,12 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-make
+
+      # rust-toolchain.toml pins the toolchain every cargo invocation resolves
+      # to, which is not the one the setup action installs targets for, so the
+      # WASI target has to be added to the pinned toolchain as well.
+      - name: Install wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
 
       - name: Run language upgrade tests
         run: cargo make ci-lang-upgrade-test-${{ matrix.engine }}
@@ -591,15 +815,249 @@ jobs:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check tokio-console feature
-        run: cargo check --package surrealdb-server --features tokio-console
+        run: cargo check --locked --package surrealdb-server --features tokio-console
+
+  # ----------------------------------------
+  # Language-test bench harness
+  # ----------------------------------------
+
+  # The `bench`/`bench-remote-store` features build a separate binary (the
+  # `Benchmark PR` workflow) that nothing else in CI compiles, so a break there
+  # would otherwise go unnoticed until that label-gated job runs. `cargo check`
+  # in debug catches a broken build far cheaper than the full release build
+  # the benchmark job needs to actually run benches.
+  check-bench:
+    name: Check language-test bench harness
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: language-tests
+          cache-key: lang-bench
+
+      - name: Check bench harness compiles
+        run: cargo check --locked --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
+
+  # ----------------------------------------
+  # JS SDK conformance suite
+  # ----------------------------------------
+
+  conformance-tests:
+    name: Conformance tests
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    needs: build
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Download Surrealism demo module
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: demo-surli-arm64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: tests/conformance-js
+        run: bun install --frozen-lockfile
+
+      # The downloaded server is a debug build, so its per-request startup is
+      # slow enough that the default 5s test timeout flakes under the suite's
+      # parallel per-file servers; 30s is generous headroom, not a real budget.
+      - name: Run conformance suite
+        working-directory: tests/conformance-js
+        env:
+          SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
+          SURREAL_DEMO_SURLI: ${{ github.workspace }}/artifacts/demo.surli
+        run: bun test --timeout 30000
+
+  # ----------------------------------------
+  # MCP server
+  # ----------------------------------------
+
+  # The MCP server needs a job of its own. The workspace test tasks run with
+  # `--no-default-features`, which leaves `surrealdb-mcp/server-http` off and so
+  # compiles the HTTP-transport and audit test files — both gated on that
+  # feature — down to empty binaries. The Rust half here runs those suites with
+  # the transports actually enabled. The JS half drives the built server through
+  # the official MCP TypeScript SDK, covering the advertised tool surface and
+  # the protocol-version negotiation matrix against a real client rather than
+  # against our own in-process assumptions.
+  mcp-tests:
+    name: MCP tests
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    needs: build
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          preset: test
+
+      - name: Run MCP crate tests
+        run: cargo make ci-mcp-test
+
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: tests/mcp-js
+        run: bun install --frozen-lockfile
+
+      # Each test file spawns its own debug-build server and waits for /health
+      # in a `beforeAll`, so the per-test timeout has to cover process startup
+      # on a loaded runner, not just a request. 60s is headroom for that hook,
+      # not a real budget — the suite settles in well under a minute.
+      - name: Run MCP conformance suite
+        working-directory: tests/mcp-js
+        env:
+          SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
+        run: bun test --timeout 90000
+
+  # ----------------------------------------
+  # Embedded Node.js engine
+  # ----------------------------------------
+
+  # Builds the `@surrealdb/node-native` NAPI addon for the host platform and
+  # drives the built package directly — the SDK engine that wraps it lives in the
+  # surrealdb.js repository. The addon is published from this repo alongside the
+  # engine it embeds, so a change that breaks it has to fail here rather than at
+  # release time.
+  node-engine:
+    name: Node engine
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The addon is a release build into its own target triple directory,
+          # so it shares nothing with the debug-profile jobs.
+          cache-key: node
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        run: bun run build
+
+      - name: Test the addon
+        working-directory: surrealdb/node
+        run: bun test
+
+  wasm-engine:
+    name: Wasm engine
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The module is a release build into its own target triple directory,
+          # so it shares nothing with the debug-profile jobs.
+          cache-key: wasm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs.
+      - name: Install wasm-bindgen-cli
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          echo "Installing wasm-bindgen-cli $version"
+          cargo install --locked -f wasm-bindgen-cli --version "$version"
+
+      - name: Install wasm-opt
+        run: cargo install --locked wasm-opt --version 0.116.1
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Test the module
+        working-directory: surrealdb/wasm
+        run: bun test
 
   # ----------------------------------------
   # Required checks
@@ -625,11 +1083,15 @@ jobs:
       - check-release
       - check-msrv
       - check-wasm
+      - test-wasm
       - check-revision
       - check-docs
       - feature-check
       - check-tokio-console
+      - check-bench
       - unused-deps
+      - check-versions
+      - check-lockfiles
       # Integration tests
       - integration-tests
       # Workspace tests
@@ -641,7 +1103,15 @@ jobs:
       - kvs-engines
       # SurrealQL language tests
       - lang-tests
-      - lang-upgrade-tests
+      - upgrade-tests
+      # JS SDK conformance
+      - conformance-tests
+      # MCP server
+      - mcp-tests
+      # Embedded Node.js engine
+      - node-engine
+      # Embedded browser engine
+      - wasm-engine
     steps:
       - name: Check for failures
         run: |
@@ -657,18 +1127,26 @@ jobs:
             "${{ needs.check-release.result }}"
             "${{ needs.check-msrv.result }}"
             "${{ needs.check-wasm.result }}"
+            "${{ needs.test-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
             "${{ needs.feature-check.result }}"
             "${{ needs.check-tokio-console.result }}"
+            "${{ needs.check-bench.result }}"
             "${{ needs.unused-deps.result }}"
+            "${{ needs.check-versions.result }}"
+            "${{ needs.check-lockfiles.result }}"
             "${{ needs.integration-tests.result }}"
             "${{ needs.test.result }}"
             "${{ needs.sdk-build.result }}"
             "${{ needs.sdk-engines.result }}"
             "${{ needs.kvs-engines.result }}"
             "${{ needs.lang-tests.result }}"
-            "${{ needs.lang-upgrade-tests.result }}"
+            "${{ needs.upgrade-tests.result }}"
+            "${{ needs.conformance-tests.result }}"
+            "${{ needs.mcp-tests.result }}"
+            "${{ needs.node-engine.result }}"
+            "${{ needs.wasm-engine.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

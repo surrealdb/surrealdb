@@ -27,7 +27,7 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .then: 
@@ -50,7 +50,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +2
-                                .op: Add
+                                .op: BinaryOperator::Add
                                 .right: Expr::Integer
                                     +3
                     .comment: None
@@ -77,7 +77,7 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .then: 
@@ -100,7 +100,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +2
-                                .op: Add
+                                .op: BinaryOperator::Add
                                 .right: Expr::Integer
                                     +3
                     .comment: Some
@@ -130,7 +130,7 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .then: 
@@ -153,7 +153,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +2
-                                .op: Add
+                                .op: BinaryOperator::Add
                                 .right: Expr::Integer
                                     +3
                     .comment: None
@@ -183,7 +183,7 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .then: 
@@ -206,7 +206,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +2
-                                .op: Add
+                                .op: BinaryOperator::Add
                                 .right: Expr::Integer
                                     +3
                     .comment: None

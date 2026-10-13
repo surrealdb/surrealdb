@@ -63,20 +63,27 @@ impl SurrealismCache {
 	}
 }
 
+/// Identity of a cached module runtime.
+///
+/// Every variant is scoped by namespace and database. A cached [`Runtime`] is
+/// not stateless — it owns the module's KV store and pools controllers whose
+/// WASM linear memory (heap, statics) survives between invocations — so two
+/// databases resolving the same package must not share one entry, or module
+/// state written under one tenant becomes readable by another.
 #[derive(Clone, Hash, Eq, PartialEq)]
 pub enum SurrealismCacheKey {
 	// NS - DB - BUCKET - KEY
 	File(NamespaceId, DatabaseId, String, String),
-	// Organisation - Package - MAJOR - MINOR - PATCH
-	Silo(String, String, u32, u32, u32),
+	// NS - DB - Organisation - Package - MAJOR - MINOR - PATCH
+	Silo(NamespaceId, DatabaseId, String, String, u32, u32, u32),
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub enum SurrealismCacheLookup<'a> {
 	// NS - DB - BUCKET - KEY
 	File(&'a NamespaceId, &'a DatabaseId, &'a str, &'a str),
-	// Organisation - Package - MAJOR - MINOR - PATCH
-	Silo(&'a str, &'a str, u32, u32, u32),
+	// NS - DB - Organisation - Package - MAJOR - MINOR - PATCH
+	Silo(&'a NamespaceId, &'a DatabaseId, &'a str, &'a str, u32, u32, u32),
 }
 
 impl SurrealismCacheLookup<'_> {
@@ -85,8 +92,16 @@ impl SurrealismCacheLookup<'_> {
 			SurrealismCacheLookup::File(ns, db, bucket, key) => {
 				SurrealismCacheKey::File(**ns, **db, (*bucket).to_string(), (*key).to_string())
 			}
-			SurrealismCacheLookup::Silo(org, pkg, maj, min, pat) => {
-				SurrealismCacheKey::Silo((*org).to_string(), (*pkg).to_string(), *maj, *min, *pat)
+			SurrealismCacheLookup::Silo(ns, db, org, pkg, maj, min, pat) => {
+				SurrealismCacheKey::Silo(
+					**ns,
+					**db,
+					(*org).to_string(),
+					(*pkg).to_string(),
+					*maj,
+					*min,
+					*pat,
+				)
 			}
 		}
 	}
@@ -104,8 +119,14 @@ impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
 			(Self::File(a1, b1, c1, d1), SurrealismCacheKey::File(a2, b2, c2, d2)) => {
 				a1.0 == a2.0 && b1.0 == b2.0 && c1 == c2 && d1 == d2
 			}
-			(Self::Silo(a1, b1, c1, d1, e1), SurrealismCacheKey::Silo(a2, b2, c2, d2, e2)) => {
-				a1 == a2 && b1 == b2 && c1 == c2 && d1 == d2 && e1 == e2
+			(
+				Self::Silo(a1, b1, c1, d1, e1, f1, g1),
+				SurrealismCacheKey::Silo(a2, b2, c2, d2, e2, f2, g2),
+			) => {
+				a1.0 == a2.0
+					&& b1.0 == b2.0 && c1 == c2
+					&& d1 == d2 && e1 == e2
+					&& f1 == f2 && g1 == g2
 			}
 			_ => false,
 		}
@@ -142,5 +163,55 @@ impl Weighter<SurrealismCacheKey, SurrealismCacheValue> for Weight {
 		// all round to weight=1 anyway, defeating the budget, and (b) higher
 		// weights for large modules caused them to be evicted too aggressively.
 		1
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::hash_map::DefaultHasher;
+	use std::hash::Hasher;
+
+	use super::*;
+
+	fn hash_of<T: Hash>(value: &T) -> u64 {
+		let mut hasher = DefaultHasher::new();
+		value.hash(&mut hasher);
+		hasher.finish()
+	}
+
+	/// The same silo package in two databases must be two cache entries, or the
+	/// stateful runtime behind one entry is shared across tenants.
+	#[test]
+	fn silo_entries_are_scoped_per_database() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(1);
+		let other_ns = NamespaceId(2);
+		let other_db = DatabaseId(2);
+
+		let base = SurrealismCacheLookup::Silo(&ns, &db, "org", "pkg", 1, 2, 3);
+		let key = base.to_key();
+
+		assert!(base.equivalent(&key));
+		assert!(
+			!SurrealismCacheLookup::Silo(&other_ns, &db, "org", "pkg", 1, 2, 3).equivalent(&key)
+		);
+		assert!(
+			!SurrealismCacheLookup::Silo(&ns, &other_db, "org", "pkg", 1, 2, 3).equivalent(&key)
+		);
+		assert!(!SurrealismCacheLookup::Silo(&ns, &db, "org", "pkg", 1, 2, 4).equivalent(&key));
+	}
+
+	/// `quick_cache` looks a key up by the lookup's hash before comparing with
+	/// `Equivalent`, so the borrowed and owned forms must hash identically.
+	#[test]
+	fn lookup_and_key_hash_identically() {
+		let ns = NamespaceId(7);
+		let db = DatabaseId(9);
+
+		let silo = SurrealismCacheLookup::Silo(&ns, &db, "org", "pkg", 1, 2, 3);
+		assert_eq!(hash_of(&silo), hash_of(&silo.to_key()));
+
+		let file = SurrealismCacheLookup::File(&ns, &db, "bucket", "key");
+		assert_eq!(hash_of(&file), hash_of(&file.to_key()));
 	}
 }

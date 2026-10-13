@@ -1,0 +1,46 @@
+name: 'Guard against re-releasing a completed release'
+description: >-
+  Refuse to run a release whose component (engine or downstream) already
+  completed, unless overwrite is set. Completion is defined by the manifest at
+  s3://<bucket>/releases/<name>/<component>.json, which the finalize jobs
+  write only after every persistence job for that component succeeded. A
+  missing manifest means the version was never attempted or only partially
+  published; the release may proceed - every publish step skips or
+  idempotently rewrites artefacts that already made it out. The interface is
+  the ENV VARS set on the calling step (they propagate into this composite
+  step's process environment): NAME, COMPONENT (engine|downstream), BUCKET,
+  AWS_REGION, OVERWRITE, plus ambient AWS credentials able to read the
+  bucket. See the call sites in release.yml.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Guard against re-releasing a completed release
+      id: guard
+      shell: bash
+      run: |
+        set -euo pipefail
+        key="releases/${NAME}/${COMPONENT}.json"
+
+        # This guard protects shipped releases, so an S3 error must fail
+        # closed - only a definitive 404 counts as "absent". head-object
+        # reports missing keys as 404 (not 403) because the runner role
+        # carries s3:ListBucket on this bucket.
+        if out=$(aws s3api head-object --bucket "${BUCKET}" --key "${key}" 2>&1); then
+          exists=true
+        elif grep -q '(404)' <<<"$out"; then
+          exists=false
+        else
+          echo "::error::Could not determine whether the ${COMPONENT} completion manifest s3://${BUCKET}/${key} exists (${out}). Failing closed to avoid republishing a completed release; re-run once S3 is reachable."
+          exit 1
+        fi
+
+        if [[ "$exists" == "true" ]]; then
+          if [[ "$OVERWRITE" != "true" ]]; then
+            echo "::error::Refusing to release ${COMPONENT} ${NAME}: this version's ${COMPONENT} release already completed (manifest present at s3://${BUCKET}/${key}). Bump the version, or re-run with overwrite: true to intentionally republish it."
+            exit 1
+          fi
+          echo "::warning::${COMPONENT} ${NAME} already completed; republishing because overwrite=true."
+        else
+          echo "No completion manifest for ${COMPONENT} ${NAME}; proceeding (first attempt, or resuming a partially published release)."
+        fi

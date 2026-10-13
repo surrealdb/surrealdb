@@ -67,34 +67,28 @@
 //! ### Deterministic emission order
 //!
 //! Given a fixed KV adjacency order (the order `compute_graph_ranges` +
-//! `decode_graph_edge` enumerate edges), the emission order is fully
+//! the per-scan key decoder enumerate edges), the emission order is fully
 //! deterministic: successors are pushed onto the DFS stack in reverse decoded
 //! order so they are popped — and thus explored and emitted — in decoded order.
 //! Within one source row this yields a pre-order DFS: a node at depth `d` is
 //! emitted before the deeper paths that extend through it.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
 use super::expand::ExpandDir;
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::idx::planner::ScanDirection;
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{Array, Object, RecordId, TableName, Value};
 
 /// The storage-layer [`Dir`] scanned from a source vertex for an expand
@@ -437,11 +431,11 @@ impl ExecOperator for PathExpand {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
@@ -458,13 +452,13 @@ impl ExecOperator for PathExpand {
 		// Window predicates captured as closures so the stream body stays terse.
 		let emits_at = move |d: u32| d >= min && max.is_none_or(|m| d <= m);
 		let extends_past = move |d: u32| max.is_none_or(|m| d < m);
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let path_row_limit = ctx.root().ctx.config.gql_max_path_rows;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
+		let path_row_limit = ctx.root().ctx.config.exec.gql_max_path_rows;
 		let dir = scan_dir(direction);
 		let tgt_field = target_field(direction);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -476,15 +470,17 @@ impl ExecOperator for PathExpand {
 			// caches avoid churn (mirrors `Expand`'s edge/target split).
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
+			// Per-table adjacency classifications, cached for the whole stream
+			// (path tips can span tables).
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			// Output batch, flushed when it reaches the configured batch size.
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				for row in batch.values {
+				for row in batch.into_values() {
 					// Drop rows whose source is absent / not a record id.
 					let Some(source_rid) = source_record_id(&row, &source) else {
 						debug!(
@@ -524,7 +520,7 @@ impl ExecOperator for PathExpand {
 						);
 						out.push(assembled);
 						if out.len() >= scan_batch_size {
-							yield ValueBatch { values: std::mem::take(&mut out) };
+							yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 							out = Vec::with_capacity(scan_batch_size);
 						}
 					}
@@ -552,40 +548,33 @@ impl ExecOperator for PathExpand {
 						let depth = path.depth();
 
 						// Enumerate the tip's adjacency for this direction,
-						// collecting (edge id, decoded target) pairs and
-						// skipping edges already used on this path
-						// (DIFFERENT-EDGES). The cursor must be dropped before
-						// the FieldState fetch can borrow `txn` again.
-						let ranges = compute_graph_ranges(
-							ns_id, db_id, &path.tip, dir, &edge_specs, &ctx,
-						).await?;
-
+						// retaining only the (edge id, decoded target) pairs
+						// not already used on this path (DIFFERENT-EDGES) —
+						// the filter runs per streamed item, so the whole
+						// unfiltered fan-out is never buffered. The cursor is
+						// dropped before the FieldState fetch can borrow
+						// `txn` again.
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for (beg, end) in ranges {
-							let mut cursor = txn
-								.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
-								.await
-								.context("Failed to open PathExpand graph cursor")?;
-							loop {
-								crate::exec::operators::check_cancelled(&ctx)?;
-								let keys = cursor
-									.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-									.await
-									.context("Failed to scan PathExpand graph edge")?;
-								if keys.is_empty() {
-									break;
+						collect_adjacency(
+							&txn,
+							ns_id,
+							db_id,
+							&path.tip,
+							dir,
+							&edge_specs,
+							&ctx,
+							version,
+							&mut adjacency_memo,
+							|item| {
+								if !path.contains_edge(&item.edge) {
+									edge_ids.push(item.edge);
+									decoded_targets.push(item.target);
 								}
-								for key in &keys {
-									let decoded = decode_graph_edge(key)?;
-									if !path.contains_edge(&decoded.edge) {
-										edge_ids.push(decoded.edge);
-										decoded_targets.push(decoded.target);
-									}
-								}
-							}
-							drop(cursor);
-						}
+								Ok(())
+							},
+						)
+						.await?;
 
 						if edge_ids.is_empty() {
 							continue;
@@ -608,8 +597,8 @@ impl ExecOperator for PathExpand {
 							let Some(edge_obj) = edge_obj else {
 								continue;
 							};
-							let next_id = decoded_target
-								.or_else(|| edge_target(&edge_obj, tgt_field));
+							let next_id =
+								decoded_target.or_else(|| edge_target(&edge_obj, tgt_field));
 							let Some(next_id) = next_id else {
 								// No usable endpoint ⇒ this edge can't extend the
 								// path; prune the branch.
@@ -631,8 +620,7 @@ impl ExecOperator for PathExpand {
 						// emission given a fixed adjacency order.
 						let new_depth = depth + 1;
 						let mut successors: Vec<PartialPath> = Vec::new();
-						for ((edge_id, edge_obj), node_obj) in
-							step_edges.into_iter().zip(node_objs)
+						for ((edge_id, edge_obj), node_obj) in step_edges.into_iter().zip(node_objs)
 						{
 							let Some(node_obj) = node_obj else {
 								// Permission-denied / missing next node prunes the
@@ -682,7 +670,7 @@ impl ExecOperator for PathExpand {
 								);
 								out.push(assembled);
 								if out.len() >= scan_batch_size {
-									yield ValueBatch { values: std::mem::take(&mut out) };
+									yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 									out = Vec::with_capacity(scan_batch_size);
 								}
 							}
@@ -713,9 +701,10 @@ impl ExecOperator for PathExpand {
 			}
 
 			if !out.is_empty() {
-				yield ValueBatch { values: out };
+				yielder.emit(ValueBatch::new(out)).await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "PathExpand", &self.metrics))
 	}

@@ -8,7 +8,7 @@ use rmcp::ErrorData;
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 use surrealdb_types::Variables;
 
 use super::{
@@ -25,7 +25,7 @@ use crate::session::McpSession;
 /// SurrealDB value. See [`json_to_surreal_value`] for the recognised
 /// shapes.
 fn bind_data(session: &McpSession, json: &serde_json::Value) -> Result<Variables, ErrorData> {
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let mut vars = Variables::new();
 	vars.insert("data", json_to_surreal_value(json, session.config(), core.as_ref())?);
 	Ok(vars)
@@ -75,6 +75,11 @@ pub struct SelectParams {
 	/// references in one round-trip rather than issuing follow-up
 	/// queries.
 	pub fetch_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn select(session: &McpSession, p: SelectParams) -> Result<CallToolResult, ErrorData> {
@@ -116,6 +121,11 @@ pub struct CreateParams {
 	/// uuid, ...) -- e.g. `{"price": {"$ql": "9.99dec"}, "customer":
 	/// {"$ql": "customer:alice"}}`.
 	pub data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn create(session: &McpSession, p: CreateParams) -> Result<CallToolResult, ErrorData> {
@@ -143,6 +153,11 @@ pub struct InsertParams {
 	/// Whether this is a relation insert.
 	#[serde(default)]
 	pub relation: bool,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn insert(session: &McpSession, p: InsertParams) -> Result<CallToolResult, ErrorData> {
@@ -185,6 +200,11 @@ pub struct UpsertParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn upsert(session: &McpSession, p: UpsertParams) -> Result<CallToolResult, ErrorData> {
@@ -214,6 +234,11 @@ pub struct UpdateParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn update(session: &McpSession, p: UpdateParams) -> Result<CallToolResult, ErrorData> {
@@ -235,6 +260,11 @@ pub struct DeleteParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn delete(session: &McpSession, p: DeleteParams) -> Result<CallToolResult, ErrorData> {
@@ -259,6 +289,11 @@ pub struct RelateParams {
 	/// Embed typed SurrealDB values via `{"$ql": "<expr>"}` (e.g.
 	/// `{"order": {"$ql": "order:o1"}, "quantity": 2}`).
 	pub content_data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn relate(session: &McpSession, p: RelateParams) -> Result<CallToolResult, ErrorData> {
@@ -296,7 +331,6 @@ fn resolve_update_mode<'a>(
 
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
 
 	use serde_json::json;
 	use surrealdb_core::dbs::Session;
@@ -305,7 +339,7 @@ mod tests {
 	use super::*;
 
 	async fn session() -> McpSession {
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 		ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None)
 			.await
@@ -344,6 +378,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -366,6 +401,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: Some("owner".into()),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -417,6 +453,7 @@ mod tests {
 			CreateParams {
 				target: "product:bad".into(),
 				data: Some(json!({ "price": "9.99" })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -434,6 +471,7 @@ mod tests {
 			CreateParams {
 				target: "product:good".into(),
 				data: Some(json!({ "price": { "$ql": "9.99dec" } })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -464,6 +502,7 @@ mod tests {
 				]),
 				ignore: true,
 				relation: true,
+				scope: Default::default(),
 			},
 		)
 		.await

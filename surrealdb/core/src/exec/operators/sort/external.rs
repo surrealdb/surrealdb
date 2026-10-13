@@ -17,7 +17,8 @@ use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
 use super::external_common::{KeyedValue, KeyedValueExternalChunk, TempFileReader, TempFileWriter};
-use crate::err::Error;
+use crate::dbs::SortError;
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -135,11 +136,11 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
@@ -158,13 +159,13 @@ impl ExecOperator for ExternalSort {
 
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let mut count = 0usize;
+			let mut seq = 0usize;
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -176,7 +177,7 @@ impl ExecOperator for ExternalSort {
 				let num_fields = order_by.len();
 				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
 				for field in order_by.iter() {
-					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
 					key_columns.push(keys);
 				}
 
@@ -184,7 +185,7 @@ impl ExecOperator for ExternalSort {
 				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
 					key_columns.into_iter().map(|col| col.into_iter()).collect();
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> = key_iters
 						.iter_mut()
 						.map(|iter| iter.next().expect("key column length matches batch size"))
@@ -193,14 +194,16 @@ impl ExecOperator for ExternalSort {
 					// Write keyed value to temp file
 					let keyed = KeyedValue {
 						keys,
+						seq,
 						value,
 					};
+					seq += 1;
 
 					// Use spawn_blocking for file I/O
 					let mut w = writer;
 					w = spawn_blocking(move || {
 						w.push(&keyed)?;
-						Ok::<TempFileWriter, Error>(w)
+						Ok::<TempFileWriter, SortError>(w)
 					})
 					.await
 					.context("Write task join error")?
@@ -212,9 +215,7 @@ impl ExecOperator for ExternalSort {
 			}
 
 			if count == 0 {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Flush and prepare for reading
@@ -233,39 +234,38 @@ impl ExecOperator for ExternalSort {
 
 				let sorter: ExternalSorter<
 					KeyedValue,
-					Error,
+					SortError,
 					LimitedBufferBuilder,
 					KeyedValueExternalChunk,
 				> = ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
 					.with_buffer(LimitedBufferBuilder::new(
-						ctx.root().ctx.config.external_sorting_buffer_limit,
+						ctx.root().ctx.config.exec.external_sorting_buffer_limit,
 						true,
 					))
 					.build()?;
 
-				let sorted = sorter
-					.sort_by(reader, |a, b| compare_keys(&a.keys, &b.keys, &order_by_clone))?;
+				let sorted = sorter.sort_by(reader, |a, b| {
+					compare_keys(&a.keys, &b.keys, &order_by_clone).then_with(|| a.seq.cmp(&b.seq))
+				})?;
 
 				// Collect sorted values
 				let values: Vec<Value> =
 					sorted.map(|r| r.map(|kv| kv.value)).collect::<Result<Vec<_>, _>>()?;
 
-				Ok::<Vec<Value>, Error>(values)
+				Ok::<Vec<Value>, SortError>(values)
 			})
 			.await
 			.context("Sort task join error")?
 			.context("Sort error")?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

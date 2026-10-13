@@ -1,20 +1,63 @@
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use super::IgnoreError;
-use crate::catalog::Permission;
+use crate::catalog::{Permission, TableType};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::compute::DocKind;
-use crate::doc::{CursorDoc, Document, Extras};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
+use crate::exe::FlowResultExt;
+use crate::exec::Error as ExecError;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{Cond, FlowResultExt};
+use crate::expr::{Cond, Error};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
 impl Document {
+	/// Tenant-boundary gate for the write pipeline (GHSA-2v9j).
+	///
+	/// The read path enforces the same boundary in
+	/// [`crate::exec::permission::validate_record_user_access`], but that gate
+	/// is only reachable through the scan operators, so it never runs for
+	/// `CREATE` / `UPDATE` / `DELETE`, which perform no scan. Without this
+	/// mirror, a principal that has pivoted into a foreign namespace/database
+	/// (for example via the RPC `use` method, which sets the context without
+	/// rejecting the switch) could blind-write (create, tamper, or delete) any
+	/// table there whose write `PERMISSIONS` are satisfiable, even though the
+	/// same session's reads are denied.
+	///
+	/// The authenticated auth level is the source of truth; the session's
+	/// *selected* ns/db can be steered by `USE` and must not be trusted. Root
+	/// and anonymous principals are unconfined, a namespace principal may write
+	/// any database within its namespace, and database and record principals are
+	/// pinned to their exact namespace/database.
+	#[inline]
+	pub(super) fn check_record_user_access(&self, opt: &Options) -> Result<()> {
+		// Root and anonymous principals carry no tenant to confine; skip the
+		// ns/db lookup so tenant-less contexts are unaffected.
+		if opt.auth.is_root() || opt.auth.is_anon() {
+			return Ok(());
+		}
+		let (ns, db) = opt.ns_db()?;
+		if opt.auth.can_access_ns_db(ns, db) {
+			return Ok(());
+		}
+		// A namespace match with a database mismatch is a database-scope
+		// violation; otherwise the namespace itself is out of reach.
+		if opt.auth.level().ns() == Some(ns) {
+			bail!(ExecError::DbNotAllowed {
+				db: db.to_owned(),
+			});
+		}
+		bail!(ExecError::NsNotAllowed {
+			ns: ns.to_owned(),
+		});
+	}
+
 	/// Checks that a specifically selected record
 	/// actually exists in the underlying datastore.
 	/// If the user specifies a record directly
@@ -41,7 +84,7 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_normal(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: false,
 				target_type: tb.table_type.to_sql(),
@@ -62,7 +105,7 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_normal(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: false,
 				target_type: tb.table_type.to_sql(),
@@ -83,13 +126,37 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_relation(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: true,
 				target_type: tb.table_type.to_sql(),
 			}
 		);
 		// Carry on
+		Ok(())
+	}
+
+	/// Whether this document's table is a lightweight relation — one whose
+	/// edges are vertex-side adjacency keys alone, synthesized on read from
+	/// their canonical `[in, out]` ids.
+	#[inline]
+	pub(super) fn table_is_lightweight(&self) -> Result<bool> {
+		let tb = self.doc_ctx.tb()?;
+		Ok(matches!(&tb.table_type, TableType::Relation(rel) if rel.lightweight))
+	}
+
+	/// Rejects a mutation of a lightweight relation's edges. Their whole
+	/// state is the canonical id: there is nothing to set, and readers
+	/// synthesize the record, so a stored mutation could never be observed
+	/// consistently.
+	#[inline]
+	pub(super) fn check_table_not_lightweight(&self, action: &str) -> Result<()> {
+		ensure!(
+			!self.table_is_lightweight()?,
+			crate::exec::Error::Thrown(format!(
+				"a LIGHTWEIGHT relation's edges cannot be {action}: they carry no data beyond `id`, `in` and `out`"
+			))
+		);
 		Ok(())
 	}
 
@@ -106,17 +173,20 @@ impl Document {
 			Extras::Relate(_, _, _) => {
 				ensure!(
 					tb.allows_relation(),
-					Error::TableCheck {
+					DocError::TableCheck {
 						record: self.id()?.to_sql(),
 						relation: true,
 						target_type: tb.table_type.to_sql(),
 					}
 				);
+				// INSERT RELATION is the data-bearing edge-write form, and a
+				// lightweight edge carries no data; RELATE is the only way in.
+				self.check_table_not_lightweight("written with INSERT")?;
 			}
 			_ => {
 				ensure!(
 					tb.allows_normal(),
-					Error::TableCheck {
+					DocError::TableCheck {
 						record: self.id()?.to_sql(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
@@ -156,7 +226,7 @@ impl Document {
 		// Ensure the table is not a computed view
 		ensure!(
 			tb.view.is_none(),
-			Error::TableIsView {
+			DocError::TableIsView {
 				table: tb.name.to_string(),
 			}
 		);
@@ -239,7 +309,7 @@ impl Document {
 				v if expected.key == v => Ok(()),
 				// Anything else is an error
 				v => {
-					bail!(Error::IdMismatch {
+					bail!(DocError::IdMismatch {
 						value: v.to_sql()
 					})
 				}
@@ -310,40 +380,18 @@ impl Document {
 		let Some(cond) = cond else {
 			return Ok(());
 		};
-		// Check if we need to reduce the document
-		if self.reduction_required(ctx, opt)? {
-			// Materialise the reduced view via the cached helper. On
-			// UPDATE / UPSERT this is a cache hit because
-			// `compute_input_data` has already built it against the same
-			// pre-mutation `self.current` — saves one `reduce_document`
-			// call per row. On DELETE / SELECT this is the first reduce.
-			let _ = self.reduce_current(stk, ctx, opt).await?;
-			// Populate computed fields on the reduced view so predicates
-			// like `WHERE flag` see the materialised value.
-			self.compute_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
-			// Re-borrow the reduced view we just materialised
-			let doc: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
-			// Check the WHERE clause against the reduced view
-			if !stk
-				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
-				return Err(IgnoreError::Ignore);
-			}
-		} else {
-			// Compute the fields on the current document
-			self.compute_fields(stk, ctx, opt, DocKind::Current, None).await?;
-			// Check the WHERE clause against the computed document
-			if !stk
-				.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
-				return Err(IgnoreError::Ignore);
-			}
+		// Materialise the pre-mutation snapshot. On a mutating statement the
+		// data clause reads this same image, so the predicate and the data
+		// clause cannot disagree about a computed field's value.
+		let doc: &CursorDoc = self.materialise_current_snapshot(stk, ctx, opt).await?;
+		// Check the WHERE clause against the snapshot
+		if !stk
+			.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(doc)))
+			.await
+			.catch_return()?
+			.is_truthy()
+		{
+			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
 		Ok(())
@@ -360,8 +408,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::View)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.select)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.select,
+				PermissionClauseKind::Read,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -377,10 +432,68 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.create)
+			let perm = &self.doc_ctx.tb()?.permissions.create;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
 				.await?;
 		}
 		Ok(())
+	}
+
+	/// Build the document a write `PERMISSIONS` predicate is evaluated against:
+	/// `doc` with the computed fields that predicate reads materialised onto a
+	/// scratch copy.
+	///
+	/// Computed fields are stripped before storage, so the record about to be
+	/// written (`self.current`, passed as `doc`) carries none of them. A
+	/// `Permission::Specific` predicate naming a computed field would resolve it
+	/// to `NONE`, so a clause written to *deny* (`WHERE blocked != true`,
+	/// `WHERE status != 'final'`) is satisfied by `NONE != true` and lets every
+	/// caller through.
+	///
+	/// The values are materialised on a copy, never on `doc` itself, because
+	/// `store_record_data` persists `self.current` verbatim: computing them in
+	/// place would write the derived values into storage. `Cow::Borrowed(doc)`
+	/// is returned whenever nothing needs materialising, so a table with no
+	/// computed fields — or a predicate that reads none — pays only a dependency
+	/// scan and no clone.
+	///
+	/// Only the fields the predicate reads are evaluated, resolved the same way
+	/// [`Document::compute_fields`] resolves a projection's roots; an
+	/// unresolvable dependency set falls back to evaluating every computed
+	/// field. The bodies run under the definer's auth in a write frame, exactly
+	/// as on the read path, so evaluating them ahead of the gate grants the
+	/// caller nothing — though a body that errors surfaces its error rather than
+	/// the permission denial, as the `SELECT` gate already does.
+	async fn gate_doc<'a>(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		perm: &Permission,
+		doc: &'a CursorDoc,
+	) -> Result<Cow<'a, CursorDoc>> {
+		// Only a `Specific` predicate reads the document; `Full` / `None` decide
+		// without it.
+		let Permission::Specific(e) = perm else {
+			return Ok(Cow::Borrowed(doc));
+		};
+		// A temporary document with no id, or a table with no computed fields,
+		// has nothing to prepare.
+		if self.id.is_none() || !self.has_computed_fields() {
+			return Ok(Cow::Borrowed(doc));
+		}
+		let deps = crate::expr::computed_deps::extract_computed_deps(e);
+		// A fully-resolved predicate that names no computed field needs no copy.
+		if deps.is_complete && deps.fields.is_empty() {
+			return Ok(Cow::Borrowed(doc));
+		}
+		// `None` roots means "evaluate every computed field", which is how
+		// `compute_fields` reads an unresolvable dependency set.
+		let roots = deps.is_complete.then(|| deps.fields.into_iter().collect::<HashSet<String>>());
+		let mut scratch = doc.clone();
+		self.compute_fields_into(stk, ctx, opt, &mut scratch, roots.as_ref()).await?;
+		Ok(Cow::Owned(scratch))
 	}
 
 	/// Check the `PERMISSIONS FOR update` clause on this table. Short-
@@ -394,7 +507,9 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.update)
+			let perm = &self.doc_ctx.tb()?.permissions.update;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
 				.await?;
 		}
 		Ok(())
@@ -411,7 +526,9 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.delete)
+			let perm = &self.doc_ctx.tb()?.permissions.delete;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
 				.await?;
 		}
 		Ok(())
@@ -445,6 +562,9 @@ impl Document {
 	/// is computed against `doc` with permission checks disabled on the
 	/// nested `Options`, so the predicate itself cannot recursively trip
 	/// table-level permission gates.
+	///
+	/// A `Read` clause (`SELECT`) is evaluated write-blocked; a `Write` clause
+	/// (create/update/delete) is not (see [`permission_predicate_frame`]).
 	async fn process_permissions(
 		&self,
 		stk: &mut Stk,
@@ -452,16 +572,34 @@ impl Document {
 		opt: &Options,
 		doc: &CursorDoc,
 		perms: &Permission,
+		clause: PermissionClauseKind,
 	) -> Result<(), IgnoreError> {
+		// Check that record authentication matches the execution scope,
+		// mirroring validate_record_user_access on the streaming path
+		if opt.auth.is_record() {
+			let ns: &str = &self.doc_ctx.ns().name;
+			if opt.auth.level().ns() != Some(ns) {
+				return Err(IgnoreError::from(anyhow::Error::new(ExecError::NsNotAllowed {
+					ns: ns.into(),
+				})));
+			}
+			let db: &str = &self.doc_ctx.db().name;
+			if opt.auth.level().db() != Some(db) {
+				return Err(IgnoreError::from(anyhow::Error::new(ExecError::DbNotAllowed {
+					db: db.into(),
+				})));
+			}
+		}
 		match perms {
 			Permission::None => Err(IgnoreError::Ignore),
 			Permission::Full => Ok(()),
 			Permission::Specific(e) => {
-				// Disable permission recursion and block side effects
-				let opt = &opt.new_for_permission_predicate();
+				// Disable permission recursion, and block side effects on the
+				// clauses a read evaluates.
+				let opt = &permission_predicate_frame(opt, clause);
 				// Process the PERMISSION clause
 				if !stk
-					.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+					.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
 					.await
 					.catch_return()?
 					.is_truthy()
@@ -471,5 +609,30 @@ impl Document {
 				Ok(())
 			}
 		}
+	}
+}
+
+/// Which kind of permission clause is being evaluated, for the runtime
+/// write-frame decision.
+#[derive(Clone, Copy)]
+pub(crate) enum PermissionClauseKind {
+	/// `PERMISSIONS FOR select` — evaluated on reads; always write-blocked.
+	Read,
+	/// `PERMISSIONS FOR create/update/delete` — evaluated during a write, and
+	/// free to carry side effects of its own.
+	Write,
+}
+
+/// Derive the `Options` frame for evaluating a permission predicate.
+///
+/// Always disables permission recursion. A `Read` clause is evaluated under
+/// the frame that rejects data-modifying statements (GHSA-66r2-5gwj-gxm2): it
+/// runs on behalf of a reader who did not write it, with permission
+/// enforcement already disabled. A `Write` clause is reached only from a
+/// statement that is writing anyway, so its predicate may write too.
+pub(crate) fn permission_predicate_frame(opt: &Options, clause: PermissionClauseKind) -> Options {
+	match clause {
+		PermissionClauseKind::Read => opt.new_for_permission_predicate(),
+		PermissionClauseKind::Write => opt.new_for_mutable_permission_predicate(),
 	}
 }

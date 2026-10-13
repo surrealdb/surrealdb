@@ -39,18 +39,20 @@ impl conn::Sealed for Any {
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.url.scheme()) {
+			let endpoint_kind = EndpointKind::from(address.url.scheme());
+			match endpoint_kind {
 				EndpointKind::IndxDb => {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -63,13 +65,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -82,13 +85,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -99,13 +103,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -118,13 +123,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -180,11 +186,7 @@ impl conn::Sealed for Any {
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

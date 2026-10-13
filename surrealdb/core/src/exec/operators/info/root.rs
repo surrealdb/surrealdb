@@ -20,8 +20,8 @@ use crate::catalog::providers::{
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -96,14 +96,12 @@ impl ExecOperator for RootInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_root_info(&ctx, structured, version.as_deref()).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -201,5 +199,6 @@ async fn system() -> Value {
 		"memory_usage" => info.memory_usage.into(),
 		"physical_cores" => info.physical_cores.into(),
 		"memory_allocated" => info.memory_allocated.into(),
+		"memory_requested" => info.memory_requested.into(),
 	})
 }

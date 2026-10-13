@@ -15,17 +15,36 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
-allocator = ["surrealdb-core/allocator"]
+default = ["protocol-ws", "rustls", "parse"]
+# Tuning features for the embedded engine. They forward unconditionally, so
+# selecting one brings the engine (and with it the database core) into the
+# build even without a `kv-*` backend, as they always have.
+allocator = ["surrealdb-engine-local/allocator"]
+parse = ["dep:surrealdb-syn"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
-kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
-kv-indxdb = ["surrealdb-core/kv-indxdb"]
-kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
-kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
-kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
-scripting = ["surrealdb-core/scripting"]
-http = ["surrealdb-core/http"]
+# Native only: tonic does not build for wasm32.
+protocol-grpc = [
+    "dep:tonic",
+    "tonic?/gzip",
+    "tonic?/zstd",
+    "dep:surrealdb-protocol",
+    "surrealdb-types/proto",
+    "tokio/time",
+]
+# The `kv-*` features select a storage backend for the embedded engine. The
+# engine crate is the only route from the SDK to the database core.
+kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
+kv-indxdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-indxdb"]
+kv-rocksdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-rocksdb", "dep:surrealdb-kvs", "tokio/time"]
+kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "tokio/time"]
+kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
+scripting = ["surrealdb-engine-local/scripting"]
+http = ["surrealdb-engine-local/http"]
+# Embedded CJK segmentation dictionaries. Without this an embedded engine
+# cannot resolve a `SEGMENT` analyzer that the server resolves fine, so a
+# schema that works in production fails against an in-process test engine.
+cjk = ["surrealdb-engine-local/cjk"]
 native-tls = [
     "dep:native-tls",
     "reqwest?/native-tls",
@@ -35,29 +54,38 @@ rustls = [
     "dep:rustls",
     "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
+    "tonic?/tls-webpki-roots",
+    "tonic?/tls-aws-lc",
 ]
-ml = ["surrealdb-core/ml"]
-jwks = ["surrealdb-core/jwks"]
-arbitrary = ["surrealdb-core/arbitrary"]
-allocation-tracking = ["surrealdb-core/allocation-tracking"]
+ml = ["surrealdb-engine-local/ml"]
+jwks = ["surrealdb-engine-local/jwks"]
+arbitrary = ["surrealdb-engine-local/arbitrary"]
+allocation-tracking = ["surrealdb-engine-local/allocation-tracking"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws",
     "protocol-http",
+    "protocol-grpc",
     "kv-mem",
     "kv-rocksdb",
     "rustls",
     "native-tls",
     "http",
     "scripting",
+    "parse",
 ]
 targets = []
 
 [dependencies]
 # workspace internal dependencies
-surrealdb-core = { workspace = true, default-features = false }
+surrealdb-engine-api = { workspace = true }
+surrealdb-engine-local = { workspace = true, default-features = false, optional = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true, optional = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-syn = { workspace = true, optional = true }
 surrealdb-types = { workspace = true, features = ["convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
@@ -103,6 +131,7 @@ web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Re
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rustls = { workspace = true, optional = true, features = ["aws_lc_rs"] }
+surrealdb-protocol = { workspace = true, optional = true, features = ["rpc"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -113,16 +142,18 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
+tonic = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
 ciborium.workspace = true
+surrealdb-cnf = { workspace = true }
+surrealdb-syn = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 parking_lot.workspace = true
 web-time.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
@@ -130,7 +161,6 @@ rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
-time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
@@ -149,31 +179,7 @@ name = "surrealdb" # Needed for the nightly crate as we will be renaming it
 bench = false
 
 [[bench]]
-name = "parser"
-harness = false
-
-[[bench]]
-name = "processor"
-harness = false
-
-[[bench]]
-name = "live_query_scaling"
-harness = false
-
-[[bench]]
-name = "hash_btree"
-harness = false
-
-[[bench]]
-name = "index_ann"
-harness = false
-
-[[bench]]
 name = "sdb"
-harness = false
-
-[[bench]]
-name = "hashset_vs_vector"
 harness = false
 
 [[bench]]

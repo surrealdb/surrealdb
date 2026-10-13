@@ -10,9 +10,10 @@ use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
+use crate::exe::FlowResultExt as _;
+use crate::expr::Idiom;
 use crate::expr::order::Ordering;
 use crate::expr::part::Part;
-use crate::expr::{FlowResultExt as _, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -47,7 +48,7 @@ impl Results {
 			return Ok(Self::File(Box::new(FileCollector::new(
 				temp_dir,
 				stm.order().cloned(),
-				ctx.config.external_sorting_buffer_limit,
+				ctx.config.exec.external_sorting_buffer_limit,
 			)?)));
 		}
 		if let Some(ordering) = stm.order() {
@@ -63,7 +64,7 @@ impl Results {
 						//   records)
 						// Otherwise, fall back to full in-memory ordering.
 						if stm.split().is_none()
-							&& limit <= ctx.config.max_order_limit_priority_queue_size
+							&& limit <= ctx.config.exec.max_order_limit_priority_queue_size
 						{
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
@@ -211,7 +212,7 @@ impl Results {
 				_ => None,
 			};
 			for field in omit {
-				v.del(stk, ctx, opt, field).await?;
+				crate::legacy::value_del(&mut v, stk, ctx, opt, field).await?;
 			}
 			let val = if let Some(alias) = materialized_alias
 				&& let Value::Object(ref obj) = v
@@ -229,9 +230,11 @@ impl Results {
 				v.pick(alias)
 			} else {
 				let doc = crate::doc::CursorDoc::new(rid, None, v);
-				stk.run(|stk| selector.expr.compute(stk, ctx, opt, Some(&doc)))
-					.await
-					.catch_return()?
+				stk.run(|stk| {
+					crate::legacy::expr_compute(&selector.expr, stk, ctx, opt, Some(&doc))
+				})
+				.await
+				.catch_return()?
 			};
 			projected.push(val);
 		}

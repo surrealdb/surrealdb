@@ -80,6 +80,42 @@ impl PhysicalExpr for IdiomExpr {
 		start_ctx.max(parts_ctx)
 	}
 
+	/// Batch evaluation. An idiom that executes a lookup plan per row is
+	/// CPU-bound work the cooperative default cannot overlap, so read-only
+	/// batches of those spawn one runtime task per row (bounded, results
+	/// in input order); every other idiom keeps the sequential default —
+	/// plain part walks are too cheap for task dispatch to pay.
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			#[cfg(not(target_family = "wasm"))]
+			{
+				let threshold = ctx.exec_ctx.root().ctx.config.exec.fan_out_row_threshold.max(2);
+				if self.access_mode() == crate::exec::AccessMode::ReadOnly
+					&& ctx.recursion_ctx.is_none()
+					&& values.len() >= threshold
+					&& self.parts.iter().any(|p| p.name() == "Lookup")
+				{
+					return crate::exec::fan_out::evaluate_rows_spawned(
+						Arc::new(self.clone()),
+						&ctx,
+						values,
+						crate::exec::fan_out::SpawnedDocRoot::RowValue,
+					)
+					.await;
+				}
+			}
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
+			}
+			Ok(results)
+		})
+	}
+
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			// Fast path: single-part idiom without a start expression (e.g., simple

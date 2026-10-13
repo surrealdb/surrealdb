@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use uuid::Uuid;
 
-use crate::conn::Command;
+use crate::conn::QueryRequest;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::{PatchOp, PatchOps, Resource};
 use crate::types::{SurrealValue, Value, Variables};
@@ -69,7 +69,7 @@ macro_rules! into_future {
 
 				variables.insert("_patches".to_string(), patches);
 
-				let cmd = Command::Query {
+				let cmd = QueryRequest {
 					txn,
 					query: Cow::Owned(format!("{operation} {what} PATCH $_patches RETURN AFTER")),
 					variables,
@@ -88,7 +88,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {run_query_value}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
@@ -99,7 +99,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {run_query_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
@@ -110,7 +110,7 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {run_query_vec}
 }
 
 impl<'r, C, R> Patch<'r, C, R>

@@ -25,12 +25,14 @@ use anyhow::Result;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::dbs::Variables;
+use crate::exe::FlowResultExt as _;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::exec::plan_or_compute::evaluate_expr_at_depth;
-use crate::expr::{FlowResultExt as _, Kind};
+use crate::expr::Kind;
 use crate::fnc::args::{FromArgs, Optional};
-use crate::fnc::eval::{Dialect, prepare};
+use crate::fnc::eval::prepare;
+use crate::kvs::Dialect;
 use crate::val::{Object, Value};
 
 /// Evaluate a prepared eval query on the streaming engine, isolated from the
@@ -71,6 +73,15 @@ async fn evaluate_streaming(
 	}
 	let isolated = isolated.freeze();
 	let mut eval_ctx = exec_ctx.with_new_ctx(isolated);
+
+	// Carry the permission-predicate no-write signal onto the root of the
+	// re-entered context. Inside a `PERMISSIONS` predicate the flag lives on
+	// the caller's `EvalContext` (set in `exec::permission`), not on the root
+	// this builtin rebuilds from; without this, a write reached through
+	// `eval` from a predicate body would bypass the frame that
+	// `plan_or_compute` derives from the root (GHSA-66r2-5gwj-gxm2). The
+	// COMPUTED-field signal is already a root flag, so it needs no mirror.
+	eval_ctx = eval_ctx.with_skip_fetch_perms(ctx.skip_fetch_perms);
 
 	// Promote to Database level when a database is selected, so nested table /
 	// GQL MATCH queries have the context they require. `eval`'s `required_context`
@@ -133,7 +144,7 @@ impl ScalarFunction for EvalSurql {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let (query, Optional(bindings)) = FromArgs::from_args("eval::surql", args)?;
-			evaluate_streaming(ctx, Dialect::Surql, query, bindings).await
+			evaluate_streaming(ctx, Dialect::SurrealQl, query, bindings).await
 		})
 	}
 }

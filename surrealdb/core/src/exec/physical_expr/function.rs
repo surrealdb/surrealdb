@@ -23,6 +23,8 @@ mod user_defined;
 
 // Re-export all expression types
 pub(crate) use builtin::BuiltinFunctionExec;
+#[cfg(test)]
+pub(crate) use builtin::builtin_can_write;
 pub(crate) use closure::{ClosureCallExec, ClosureExec};
 pub(crate) use helpers::validate_return;
 pub(crate) use index::IndexFunctionExec;

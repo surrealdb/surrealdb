@@ -13,6 +13,7 @@ DEFINE FIELD f ON t REFERENCE ON DELETE REJECT;
 DEFINE FIELD f ON t REFERENCE ON DELETE CASCADE;
 DEFINE FIELD f ON t REFERENCE ON DELETE UNSET;
 DEFINE FIELD f ON t REFERENCE ON DELETE THEN 1 - 2;
+DEFINE FIELD score ON likes TYPE number INLINE;
 /* ===== result =====
 Query
     .exprs: Some
@@ -33,6 +34,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -66,6 +68,7 @@ Query
                                                     -PrimeType::Integer
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -99,6 +102,7 @@ Query
                                                     -PrimeType::Integer
                     .flexible: true
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -123,6 +127,7 @@ Query
                     .ty: None
                     .flexible: true
                     .readonly: true
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -147,6 +152,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: true
+                    .inline: false
                     .value: Some
                     Expr::Integer
                         +1
@@ -173,6 +179,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: Some
                     Expr::Integer
                         +1
@@ -181,7 +188,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .computed: None
@@ -206,13 +213,14 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: Some
                     Expr::Binary
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .computed: Some
@@ -239,6 +247,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: Some
@@ -268,6 +277,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -302,6 +312,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -336,6 +347,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -364,6 +376,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -389,6 +402,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -414,6 +428,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -439,6 +454,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -451,7 +467,34 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +1
-                                .op: Subtract
+                                .op: BinaryOperator::Subtract
                                 .right: Expr::Integer
                                     +2
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "score"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "likes"
+                            .parts: None
+                    .ty: Some
+                    Type::Prime
+                            -PrimeType::Number
+                    .flexible: false
+                    .readonly: false
+                    .inline: true
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: None
 */

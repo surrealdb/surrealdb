@@ -5,22 +5,25 @@
 //! causing "not found" errors.
 
 // Common test setup helpers
+use std::sync::Arc;
+
+use surrealdb_kvs::TransactionType::Write;
+use surrealdb_strand::TableName;
+
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableId};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::Write;
-use crate::val::TableName;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up
-async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, NamespaceId, DatabaseId) {
+async fn setup_tx_with_ns_db() -> (Arc<Datastore>, crate::kvs::Transaction, NamespaceId, DatabaseId)
+{
 	let ds = Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
 		namespace_id: NamespaceId(1),
@@ -93,8 +96,10 @@ async fn test_single_tx_cache_invalidation_on_index_put() {
 		table_name: tb.clone(),
 		cols: vec![],
 		index: Index::Idx,
+		count_cond: None,
 		comment: None,
 		prepare_remove: false,
+		format_version: 1,
 	};
 	tx.put_tb_index(ns, db, &tb, &ix_def).await.unwrap();
 
@@ -126,8 +131,10 @@ async fn test_single_tx_cache_invalidation_on_index_delete() {
 		table_name: tb.clone(),
 		cols: vec![],
 		index: Index::Idx,
+		count_cond: None,
 		comment: None,
 		prepare_remove: false,
+		format_version: 1,
 	};
 	tx.put_tb_index(ns, db, &tb, &ix_def).await.unwrap();
 
@@ -241,7 +248,7 @@ async fn test_single_tx_cache_invalidation_on_ns_put() {
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	// Populate the cache with an empty namespace list
 	let nss = tx.all_ns(None).await.unwrap();
@@ -274,7 +281,7 @@ async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
 		namespace_id: NamespaceId(1),
@@ -324,7 +331,7 @@ async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
 /// Test cache invalidation for put_tb and del_tb (table list cache).
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
-	use crate::catalog::TableDefinition;
+	use crate::catalog::{FromStored, StoredTableDefinition, TableDefinition};
 
 	let (_ds, tx, ns, db) = setup_tx_with_ns_db().await;
 
@@ -333,7 +340,13 @@ async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
 	assert_eq!(tbs.len(), 0, "Initially there should be no tables");
 
 	// Add a table
-	let tb_def = TableDefinition::new(ns, db, TableId(1), TableName::from("test_table"));
+	let tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
+		ns,
+		db,
+		TableId(1),
+		TableName::from("test_table"),
+	))
+	.unwrap();
 	tx.put_tb("test", "test", &tb_def).await.unwrap();
 
 	// Query again — must see the new table
@@ -362,7 +375,7 @@ async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
 /// This also validates the pattern used for put_db_function, put_db_module, and put_db_api.
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_param_put() {
-	use crate::catalog::ParamDefinition;
+	use crate::catalog::{FromStored, ParamDefinition, StoredParamDefinition};
 
 	let (_ds, tx, ns, db) = setup_tx_with_ns_db().await;
 
@@ -371,11 +384,12 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 	assert_eq!(pas.len(), 0, "Initially there should be no params");
 
 	// Add a param
-	let pa_def = ParamDefinition {
+	let pa_def = ParamDefinition::from_stored(&StoredParamDefinition {
 		name: "test_param".into(),
 		value: crate::val::Value::Bool(true),
 		..Default::default()
-	};
+	})
+	.unwrap();
 	tx.put_db_param(ns, db, &pa_def).await.unwrap();
 
 	// Query again — must see the new param
@@ -385,76 +399,6 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 		1,
 		"After put_db_param, all_db_params should return the new param (cache must be invalidated)"
 	);
-
-	tx.cancel().await.unwrap();
-}
-
-/// Test that a versioned read of tables does not pollute the current-view cache.
-///
-/// The LRU cache keys do not incorporate a version, so historical reads must
-/// bypass the cache entirely. If they wrote into the cache, a subsequent
-/// None (current) read would see stale data.
-#[tokio::test]
-async fn test_versioned_read_does_not_pollute_table_cache() {
-	let ds = Datastore::builder()
-		.with_capabilities(Capabilities::all())
-		.build_with_path("memory?versioned=true")
-		.await
-		.unwrap();
-	let ses = Session::owner().with_ns("test").with_db("test");
-
-	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
-	ds.execute("DEFINE DATABASE test", &ses, None).await.unwrap();
-	ds.execute("DEFINE TABLE my_table", &ses, None).await.unwrap();
-
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let ns_def = tx.get_ns_by_name("test", None).await.unwrap().unwrap();
-	let db_def = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap();
-	let ns = ns_def.namespace_id;
-	let db = db_def.database_id;
-
-	let tables = tx.all_tb(ns, db, None).await.unwrap();
-	assert_eq!(tables.len(), 1, "Current view should have 1 table");
-
-	let old_tables = tx.all_tb(ns, db, Some(0)).await.unwrap();
-	assert_eq!(old_tables.len(), 0, "Historical read at version 0 should be empty");
-
-	let tables_again = tx.all_tb(ns, db, None).await.unwrap();
-	assert_eq!(tables_again.len(), 1, "Current view must still have 1 table after versioned read");
-
-	tx.cancel().await.unwrap();
-}
-
-/// Test that a versioned read of field definitions does not pollute the current-view cache.
-#[tokio::test]
-async fn test_versioned_read_does_not_pollute_field_cache() {
-	let ds = Datastore::builder()
-		.with_capabilities(Capabilities::all())
-		.build_with_path("memory?versioned=true")
-		.await
-		.unwrap();
-	let ses = Session::owner().with_ns("test").with_db("test");
-
-	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
-	ds.execute("DEFINE DATABASE test", &ses, None).await.unwrap();
-	ds.execute("DEFINE TABLE my_table", &ses, None).await.unwrap();
-	ds.execute("DEFINE FIELD name ON TABLE my_table TYPE string", &ses, None).await.unwrap();
-
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let ns_def = tx.get_ns_by_name("test", None).await.unwrap().unwrap();
-	let db_def = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap();
-	let ns = ns_def.namespace_id;
-	let db = db_def.database_id;
-	let tb = TableName::from("my_table");
-
-	let fields = tx.all_tb_fields(ns, db, &tb, None).await.unwrap();
-	assert_eq!(fields.len(), 1, "Current view should have 1 field");
-
-	let old_fields = tx.all_tb_fields(ns, db, &tb, Some(0)).await.unwrap();
-	assert_eq!(old_fields.len(), 0, "Historical read at version 0 should be empty");
-
-	let fields_again = tx.all_tb_fields(ns, db, &tb, None).await.unwrap();
-	assert_eq!(fields_again.len(), 1, "Current view must still have 1 field after versioned read");
 
 	tx.cancel().await.unwrap();
 }

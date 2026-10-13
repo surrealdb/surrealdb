@@ -40,6 +40,11 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub event_processing_interval: Duration,
+	/// Interval between graph adjacency fold passes, which pack queued
+	/// (vertex, direction) scopes' per-edge keys into adjacency blocks.
+	///
+	/// Default: 5 seconds
+	pub graph_fold_interval: Duration,
 	/// Interval at which the per-node live-query router tails the dedicated
 	/// `lqe` keyspace and delivers notifications off the write path.
 	///
@@ -64,12 +69,12 @@ pub struct EngineOptions {
 	/// data is physically reclaimed.
 	///
 	/// This is a snapshot-safety grace period, not a convenience delay. The
-	/// reclaim task destroys data out-of-band — on TiKV via `unsafe_destroy_range`,
-	/// which bypasses MVCC — so a read transaction whose snapshot predates the
-	/// `REMOVE` must be given time to finish before its data is physically
-	/// removed. A removal is only reclaimed once it is older than this window,
-	/// which is equivalent to requiring its commit timestamp to fall behind the
-	/// MVCC GC safepoint.
+	/// reclaim task destroys data out-of-band, and on a backend offering
+	/// out-of-transaction range destruction that destruction bypasses MVCC — so
+	/// a read transaction whose snapshot predates the `REMOVE` must be given
+	/// time to finish before its data is physically removed. A removal is only
+	/// reclaimed once it is older than this window, which is equivalent to
+	/// requiring its commit timestamp to fall behind the MVCC GC safepoint.
 	///
 	/// This MUST be `>= tikv_gc_lifetime` (the safepoint lag): a removal older
 	/// than the grace is also older than the safepoint, so any transaction that
@@ -105,6 +110,32 @@ pub struct EngineOptions {
 	///
 	/// Default: 60 seconds
 	pub tikv_lock_cleanup_interval: Duration,
+	/// Interval for purging expired durable RPC sessions.
+	///
+	/// When RPC session persistence is enabled, client-attached sessions are
+	/// mirrored to the KV store with an absolute expiry. Expired entries are
+	/// already dropped lazily on load; this task additionally sweeps the
+	/// session keyspace so entries that are never loaded again do not
+	/// accumulate. Set to `Duration::ZERO` to disable the sweep.
+	///
+	/// Default: 60 seconds
+	pub rpc_session_gc_interval: Duration,
+	/// Interval for refreshing the cached process/system utilisation metrics.
+	///
+	/// Both `INFO FOR ROOT` and the `surrealdb.process.*` gauges read a cached
+	/// snapshot rather than sampling on demand, so a periodic refresh is what
+	/// keeps them current. Exactly one refresher runs per process, whatever the
+	/// number of datastores: `sysinfo` derives CPU percentage as a delta since
+	/// the previous refresh of one process-wide handle, so a second concurrent
+	/// refresher would shorten that window unpredictably and skew the reading.
+	/// Every datastore schedules the job on this interval; the claim in
+	/// [`observe::process`](crate::observe::process) settles which one performs
+	/// it, and hands it on when that datastore goes away. Construction warms the
+	/// cache once per process on top of that, so the first query never reads the
+	/// zeroed default.
+	///
+	/// Default: 30 seconds
+	pub system_metrics_refresh_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -117,12 +148,15 @@ impl Default for EngineOptions {
 			index_compaction_interval: Duration::from_secs(5),
 			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
+			graph_fold_interval: Duration::from_secs(5),
 			live_query_router_interval: Duration::from_millis(100),
 			reclaim_interval: Duration::from_secs(60),
 			reclaim_grace: Duration::from_secs(600),
 			tikv_gc_interval: Duration::from_secs(600),
 			tikv_gc_lifetime: Duration::from_secs(600),
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
+			rpc_session_gc_interval: Duration::from_secs(60),
+			system_metrics_refresh_interval: Duration::from_secs(30),
 		}
 	}
 }
@@ -152,6 +186,12 @@ impl EngineOptions {
 
 	pub fn with_index_build_resume_interval(mut self, interval: Duration) -> Self {
 		self.index_build_resume_interval = interval;
+		self
+	}
+
+	/// Set the graph adjacency fold interval
+	pub fn with_graph_fold_interval(mut self, interval: Duration) -> Self {
+		self.graph_fold_interval = interval;
 		self
 	}
 
@@ -187,6 +227,16 @@ impl EngineOptions {
 
 	pub fn with_tikv_lock_cleanup_interval(mut self, interval: Duration) -> Self {
 		self.tikv_lock_cleanup_interval = interval;
+		self
+	}
+
+	pub fn with_rpc_session_gc_interval(mut self, interval: Duration) -> Self {
+		self.rpc_session_gc_interval = interval;
+		self
+	}
+
+	pub fn with_system_metrics_refresh_interval(mut self, interval: Duration) -> Self {
+		self.system_metrics_refresh_interval = interval;
 		self
 	}
 }

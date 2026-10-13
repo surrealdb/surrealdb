@@ -15,4 +15,4 @@ run = false
 */
 
 -- 1000 records starting at the 60th percentile of the keyspace.
-SELECT * FROM record:60000..61000;
+SELECT * FROM record:6000..7000;

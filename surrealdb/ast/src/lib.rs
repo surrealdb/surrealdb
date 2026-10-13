@@ -41,8 +41,6 @@ library! {
 		top_level_expr: Vec<TopLevelExpr>,
 		top_level_exprs: Vec<NodeList<TopLevelExpr>>,
 
-		transactions: Vec<Transaction>,
-
 		kill: Vec<Kill>,
 		use_stmt: Vec<Use>,
 		option_stmt: Vec<OptionStmt>,
@@ -237,19 +235,14 @@ ast_type! {
 
 ast_type! {
 	pub enum TopLevelExpr {
-		Transaction(NodeId<Transaction>),
+		Begin(NodeId<Span>),
+		Commit(NodeId<Span>),
+		Cancel(NodeId<Span>),
 		Use(NodeId<Use>),
 		Option(NodeId<OptionStmt>),
 		Kill(NodeId<Kill>),
 		Show(NodeId<Show>),
 		Expr(NodeId<Expr>),
-	}
-}
-
-ast_type! {
-	pub struct Transaction {
-		pub statements: Option<NodeListId<TopLevelExpr>>,
-		pub commits: bool,
 	}
 }
 
@@ -268,13 +261,20 @@ ast_type! {
 
 impl_vis_type! {
 	#[derive(Debug)]
+	/// The namespace and database are expressions, not identifiers: a name may
+	/// be computed, as it may anywhere else a resource is named (`USE DB $db`,
+	/// `USE DB type::string(..)`). Evaluation coerces the result to a string.
 	pub enum UseKind {
-		Namespace(NodeId<Ident>),
+		Namespace(NodeId<Expr>),
 		NamespaceDatabase{
-			namespace: NodeId<Ident>,
-			database: NodeId<Ident>
+			namespace: NodeId<Expr>,
+			database: NodeId<Expr>
 		},
-		Database(NodeId<Ident>),
+		Database(NodeId<Expr>),
+		/// `USE DEFAULT` takes no arguments: the namespace and database come
+		/// from the root-scoped default config, so a session that runs it
+		/// lands wherever `DEFINE CONFIG DEFAULT` currently points.
+		Default,
 	}
 }
 
@@ -333,7 +333,9 @@ impl_vis_type! {
 	#[derive(Debug)]
 	pub enum InfoKind {
 		Root,
-		Namespace,
+		Namespace{
+			version: Option<NodeId<Expr>>,
+		},
 		Database {
 			version: Option<NodeId<Expr>>,
 		},
@@ -565,6 +567,7 @@ ast_type! {
 		pub version: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
 		pub fetch: Option<NodeListId<Expr>>,
+		pub for_update: bool,
 		pub tempfiles: bool,
 		pub explain: Option<ExplainClause>,
 	}
@@ -670,7 +673,7 @@ impl_vis_type! {
 ast_type! {
 	pub struct AccessPurge{
 		pub kind: PurgeKind,
-		pub grace: NodeId<Spanned<Duration>>,
+		pub grace: Option<NodeId<Spanned<Duration>>>,
 	}
 }
 
@@ -752,7 +755,7 @@ ast_type! {
 	}
 }
 ast_type! {
-	pub enum ModuleName{
+	pub enum ModuleSource{
 		File(NodeId<FileLit>),
 		Path(NodeId<Path>),
 	}
@@ -761,8 +764,9 @@ ast_type! {
 ast_type! {
 	pub struct DefineModule{
 		pub kind: DefineKind,
-		pub subject: ModuleName,
-		pub alias: Option<NodeId<Path>>,
+		pub name: NodeId<Path>,
+		pub source: Option<ModuleSource>,
+		pub unsigned: bool,
 		pub comment: Option<NodeId<Expr>>,
 		pub permission: Option<Permission>,
 	}
@@ -783,6 +787,7 @@ ast_type! {
 		pub from: Option<NodeListId<Ident>>,
 		pub to: Option<NodeListId<Ident>>,
 		pub enforced: bool,
+		pub lightweight: bool,
 	}
 }
 
@@ -822,6 +827,8 @@ ast_type! {
 		pub permission: Option<TablePermissions>,
 		pub changefeed: Option<ChangeFeed>,
 		pub view: Option<NodeId<Select>>,
+		pub inline_edges_cap: Option<NodeId<Integer>>,
+		pub inline_refs_cap: Option<NodeId<Integer>>,
 	}
 }
 
@@ -918,6 +925,7 @@ ast_type! {
 		pub ty: Option<NodeId<Type>>,
 		pub flexible: bool,
 		pub readonly: bool,
+		pub inline: bool,
 		pub value: Option<NodeId<Expr>>,
 		pub assert: Option<NodeId<Expr>>,
 		pub computed: Option<NodeId<Expr>>,
@@ -1155,6 +1163,9 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub secret: Option<UserSecret>,
+		/// SCRAM-SHA-256 verifier string (`PASSSCRAM`). Additive: may coexist with
+		/// a `PASSHASH`/`PASSWORD` secret.
+		pub scram: Option<NodeId<StringLit>>,
 		pub roles: Option<NodeListId<Ident>>,
 		pub session_duration: Option<NodeId<Expr>>,
 		pub token_duration: Option<NodeId<Expr>>,
@@ -1207,6 +1218,7 @@ impl_vis_type! {
 	pub struct Jwt{
 		pub verify: JwtVerify,
 		pub issue: Option<JwtIssue>,
+		pub audience: Option<NodeListId<Expr>>,
 	}
 }
 
@@ -1255,6 +1267,7 @@ ast_type! {
 		pub duration_token: Option<NodeId<Expr>>,
 		pub duration_grant: Option<NodeId<Expr>>,
 		pub authenticate: Option<NodeId<Expr>>,
+		pub context: Option<NodeId<Expr>>,
 		pub ty: Option<AccessType>,
 	}
 }
@@ -1427,6 +1440,8 @@ ast_type! {
 		pub table_kind: Option<TableKind>,
 		pub compact: bool,
 		pub permissions: Option<TablePermissions>,
+		pub inline_edges_cap: Option<AlterKind<NodeId<Integer>>>,
+		pub inline_refs_cap: Option<AlterKind<NodeId<Integer>>>,
 	}
 }
 
@@ -1460,6 +1475,7 @@ ast_type! {
 		pub ty: Option<AlterKind<NodeId<Type>>>,
 		pub flexible: Option<AlterKind<()>>,
 		pub readonly: Option<AlterKind<()>>,
+		pub inline: Option<AlterKind<()>>,
 		pub value: Option<AlterKind<NodeId<Expr>>>,
 		pub assert: Option<AlterKind<NodeId<Expr>>>,
 		pub default: Option<AlterKind<FieldDefault>>,
@@ -1529,6 +1545,8 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub secret: Option<UserSecret>,
+		/// SCRAM-SHA-256 verifier string (`PASSSCRAM`).
+		pub scram: Option<NodeId<StringLit>>,
 		pub roles: Option<NodeListId<Ident>>,
 		pub session_duration: Option<AlterKind<Spanned<Duration>>>,
 		pub token_duration: Option<AlterKind<Spanned<Duration>>>,
@@ -1542,6 +1560,7 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub authenticate: Option<AlterKind<NodeId<Expr>>>,
+		pub context: Option<AlterKind<NodeId<Expr>>>,
 		pub grant_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
 		pub token_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
 		pub session_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
@@ -1941,106 +1960,110 @@ impl_vis_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum MatchesOperator {
-	And,
-	Or,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum MatchesOperator {
+		And,
+		Or,
+	}
 }
 
-#[derive(Debug)]
-pub enum BinaryOperator {
-	/// `-`
-	Subtract,
-	/// `+`
-	Add,
-	/// `*`, `×`
-	Multiply,
-	/// `/`
-	Divide,
-	/// `%`
-	Remainder,
-	/// `**`
-	Power,
-	/// `=`
-	Equal,
-	/// `==`
-	ExactEqual,
-	/// `!=`
-	NotEqual,
-	/// `*=`
-	AllEqual,
-	/// `?=`
-	AnyEqual,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum BinaryOperator {
+		/// `-`
+		Subtract,
+		/// `+`
+		Add,
+		/// `*`, `×`
+		Multiply,
+		/// `/`
+		Divide,
+		/// `%`
+		Remainder,
+		/// `**`
+		Power,
+		/// `=`
+		Equal,
+		/// `==`
+		ExactEqual,
+		/// `!=`
+		NotEqual,
+		/// `*=`
+		AllEqual,
+		/// `?=`
+		AnyEqual,
 
-	/// `||`, `OR`
-	Or,
-	/// `&&`, `AND`
-	And,
-	/// `??`
-	NullCoalescing,
-	/// `?:`
-	TenaryCondition,
+		/// `||`, `OR`
+		Or,
+		/// `&&`, `AND`
+		And,
+		/// `??`
+		NullCoalescing,
+		/// `?:`
+		TenaryCondition,
 
-	/// `<`
-	LessThan,
-	/// `<=`
-	LessThanEqual,
-	/// `>`
-	GreaterThan,
-	/// `>=`
-	GreaterThanEqual,
+		/// `<`
+		LessThan,
+		/// `<=`
+		LessThanEqual,
+		/// `>`
+		GreaterThan,
+		/// `>=`
+		GreaterThanEqual,
 
-	/// `∋`
-	Contain,
-	/// `∌`
-	NotContain,
-	/// `⊇`
-	ContainAll,
-	/// `⊃`
-	ContainAny,
-	/// `⊅`
-	ContainNone,
-	/// `∈`
-	Inside,
-	/// `∉`
-	NotInside,
-	/// `⊆`
-	AllInside,
-	/// `⊂`
-	AnyInside,
-	/// `⊄`
-	NoneInside,
+		/// `∋`
+		Contain,
+		/// `∌`
+		NotContain,
+		/// `⊇`
+		ContainAll,
+		/// `⊃`
+		ContainAny,
+		/// `⊅`
+		ContainNone,
+		/// `∈`
+		Inside,
+		/// `∉`
+		NotInside,
+		/// `⊆`
+		AllInside,
+		/// `⊂`
+		AnyInside,
+		/// `⊄`
+		NoneInside,
 
-	/// `OUTSIDE`
-	Outside,
-	/// `INTERSECTS`
-	Intersects,
+		/// `OUTSIDE`
+		Outside,
+		/// `INTERSECTS`
+		Intersects,
 
-	/// `..`
-	Range,
-	/// `..=`
-	RangeInclusive,
-	/// `>..`
-	RangeSkip,
-	/// `>..=`
-	RangeSkipInclusive,
+		/// `..`
+		Range,
+		/// `..=`
+		RangeInclusive,
+		/// `>..`
+		RangeSkip,
+		/// `>..=`
+		RangeSkipInclusive,
 
-	// `@@`
-	Matches {
-		reference: Option<NodeId<Integer>>,
-		operator: Option<MatchesOperator>,
-	},
-	KNearestNeighbour {
-		k: NodeId<Integer>,
-		distance: Distance,
-	},
-	KTree {
-		k: NodeId<Integer>,
-	},
-	KApproximate {
-		k: NodeId<Integer>,
-		ef: NodeId<Integer>,
-	},
+		// `@@`
+		Matches {
+			reference: Option<NodeId<Integer>>,
+			operator: Option<MatchesOperator>,
+		},
+		KNearestNeighbour {
+			k: NodeId<Integer>,
+			distance: Distance,
+		},
+		KTree {
+			k: NodeId<Integer>,
+		},
+		KApproximate {
+			k: NodeId<Integer>,
+			ef: NodeId<Integer>,
+		},
+	}
 }
 
 ast_type! {
@@ -2157,6 +2180,7 @@ ast_type! {
 ast_type! {
 	pub struct SelectLookup{
 		pub fields: NodeId<Fields>,
+		pub only: bool,
 		pub from: Option<NodeListId<LookupSubject>>,
 		pub condition:  Option<NodeId<Expr>>,
 		pub split: Option<NodeListId<Expr>>,
@@ -2258,10 +2282,27 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct AllPlace{
+		pub lhs: NodeId<Place>,
+	}
+}
+
+ast_type! {
+	pub struct LastPlace{
+		pub lhs: NodeId<Place>,
+	}
+}
+
+ast_type! {
 	pub enum Place{
 		Field(NodeId<Ident>),
 		Member(MemberPlace),
 		Index(IndexPlace),
+		All(AllPlace),
+		Last(LastPlace),
+		/// Marks that the rest of the place contains syntax which was allowed, but
+		/// doesn't actually do anything, nor make real sense.
+		Legacy(Span),
 	}
 }
 

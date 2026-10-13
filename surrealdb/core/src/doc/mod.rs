@@ -6,10 +6,12 @@
 //! - `id`: traditionally an integer but can be an object or collection such as an array
 
 pub(crate) use self::document::*;
-pub use self::event::AsyncEventRecord;
+pub(crate) use self::error::Error;
+pub use self::event::process_next_events_batch;
 pub(crate) use self::lives::DefaultBroker;
 
 mod document; // The entry point for a document to be processed
+mod error; // The failures raised while validating and writing a document
 
 mod create; // Processes a CREATE statement for this document
 mod delete; // Processes a DELETE statement for this document
@@ -24,6 +26,8 @@ mod changefeeds; // Processes any change feeds relevant for this document
 mod check; // Data and condition checking for this document
 pub(crate) mod compute; // Compute computed fields for this document
 mod edges; // Attempts to store the edge data for this document
+mod inline; // Keeps inline edge-property payloads in step with the record
+pub(crate) use inline::{inline_field_name, inline_fields};
 mod event; // Processes any table events relevant for this document
 mod field; // Processes any schema-defined fields for this document
 mod index; // Attempts to store the index data for this document
@@ -34,6 +38,9 @@ mod purge; // Deletes this document, and any edges or indexes
 mod reduce; // Reduces the permissioned fields in this document
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document'
+
+#[cfg(test)]
+mod tests; // Datastore-backed tests for the document processing pipeline
 
 /// Error result used when a function can result in the value being processed
 /// being ignored.

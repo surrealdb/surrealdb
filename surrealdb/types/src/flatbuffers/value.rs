@@ -115,7 +115,10 @@ impl FromFlatbuffers for Value {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		match input.value_type() {
-			proto_fb::ValueType::NONE => Ok(Value::None),
+			// `NONE` is the union's implicit-unset sentinel; `None` (tag 21)
+			// is the explicit variant a newer peer may send instead. Both
+			// read as `Value::None`; only encoding chooses between them.
+			proto_fb::ValueType::NONE | proto_fb::ValueType::None => Ok(Value::None),
 			proto_fb::ValueType::Null => Ok(Value::Null),
 			proto_fb::ValueType::Bool => {
 				Ok(Value::Bool(input.value_as_bool().expect("Guaranteed to be a Bool").value()))
@@ -278,5 +281,28 @@ mod tests {
 			::flatbuffers::root::<proto_fb::Value>(buf).expect("Failed to read FlatBuffer");
 		let value = Value::from_fb(value_fb).expect("Failed to convert from FlatBuffer");
 		assert_eq!(input, value, "Roundtrip conversion failed for input: {:?}", input);
+	}
+
+	#[test]
+	fn test_decode_explicit_none_variant() {
+		// A peer using the explicit `ValueType::None` union member (protocol
+		// 0.11+) rather than the implicit unset sentinel this crate still
+		// emits. Both must decode to `Value::None`.
+		let mut builder = ::flatbuffers::FlatBufferBuilder::new();
+		let none_value =
+			proto_fb::NoneValue::create(&mut builder, &proto_fb::NoneValueArgs {}).as_union_value();
+		let value_fb = proto_fb::Value::create(
+			&mut builder,
+			&proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::None,
+				value: Some(none_value),
+			},
+		);
+		builder.finish_minimal(value_fb);
+		let buf = builder.finished_data();
+		let value_fb =
+			::flatbuffers::root::<proto_fb::Value>(buf).expect("Failed to read FlatBuffer");
+		let value = Value::from_fb(value_fb).expect("Failed to convert from FlatBuffer");
+		assert_eq!(value, Value::None);
 	}
 }

@@ -9,12 +9,11 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Permission};
+use crate::exe::FlowResultExt as _;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::visit::MutVisitor;
-use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
-};
+use crate::expr::visit::{MutVisitor, Visit, Visitor};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -38,6 +37,10 @@ pub(super) struct Tree {
 	pub(super) all_and: bool,
 	/// Does a group contain only AND relations?
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
+	/// Is there at least one AND operator in the condition?
+	/// (`all_and_groups` cannot answer this: a group is flagged `false` as
+	/// soon as an OR is seen, whether or not an AND is nested below it.)
+	pub(super) has_and: bool,
 }
 
 impl Tree {
@@ -65,6 +68,7 @@ impl Tree {
 				&& b.leaf_nodes_with_index_count == b.leaf_nodes_count,
 			all_and: b.all_and.unwrap_or(true),
 			all_and_groups: b.all_and_groups,
+			has_and: b.has_and,
 		})
 	}
 }
@@ -88,12 +92,18 @@ struct TreeBuilder<'a> {
 	leaf_nodes_with_index_count: usize,
 	all_and: Option<bool>,
 	all_and_groups: HashMap<GroupRef, bool>,
+	has_and: bool,
 	/// Set when planning encounters an idiom that resolves to a field whose
 	/// SELECT permission is not `Full`. Used to disable index fast paths
 	/// (in particular the count-only `Iterate Index Count` and dedicated
 	/// `Index::Count` indexes) that would otherwise leak the cardinality of
 	/// values the current user cannot read.
 	cond_touches_restricted_field: bool,
+	/// Set when the statement's WHERE condition contains a MATCHES operator
+	/// anywhere. Legacy vector indexes cannot evaluate MATCHES in traversal
+	/// (the legacy executor is not yet installed when their filter is built),
+	/// so they are excluded from indexed KNN planning when this is set.
+	cond_contains_matches: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -132,9 +142,11 @@ impl<'a> TreeBuilder<'a> {
 			knn_condition: None,
 			all_and: None,
 			all_and_groups: Default::default(),
+			has_and: false,
 			leaf_nodes_count: 0,
 			leaf_nodes_with_index_count: 0,
 			cond_touches_restricted_field: false,
+			cond_contains_matches: false,
 		}
 	}
 
@@ -172,6 +184,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_cond(&mut self, stk: &mut Stk, cond: &Cond) -> Result<()> {
+		self.cond_contains_matches = Self::expr_contains_matches(&cond.0);
 		self.root = Some(self.eval_value(stk, 0, &cond.0).await?);
 		self.knn_condition = if self.knn_expressions.is_empty() {
 			None
@@ -185,6 +198,36 @@ impl<'a> TreeBuilder<'a> {
 			}
 		};
 		Ok(())
+	}
+
+	/// Whether the expression tree contains a MATCHES operator anywhere.
+	///
+	/// Uses the generated [`Visitor`] traversal, which walks every expression
+	/// shape — subqueries, blocks, if-else chains, closures, idiom parts, and
+	/// literal containers included — so a MATCHES nested in any evaluable
+	/// position is detected and legacy vector indexes are excluded from
+	/// indexed KNN planning.
+	fn expr_contains_matches(expr: &Expr) -> bool {
+		// Marker error that aborts the walk as soon as a MATCHES is found.
+		struct FoundMatches;
+		struct MatchesDetector;
+
+		impl Visitor for MatchesDetector {
+			type Error = FoundMatches;
+
+			fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+				if let Expr::Binary {
+					op: BinaryOperator::Matches(_),
+					..
+				} = e
+				{
+					return Err(FoundMatches);
+				}
+				e.visit(self)
+			}
+		}
+
+		MatchesDetector.visit_expr(expr).is_err()
 	}
 
 	async fn eval_count(&mut self, table: &TableName) -> Result<()> {
@@ -208,9 +251,14 @@ impl<'a> TreeBuilder<'a> {
 				if ix.prepare_remove {
 					continue;
 				}
-				if let Index::Count(cond) = &ix.index
-					&& self.ctx.cond.eq(&cond.as_ref())
-				{
+				// The index's guard condition (pre-parsed into `count_cond`,
+				// `None` for an unguarded count index) must match the query's
+				// WHERE clause structurally for the fast path to be used.
+				let cond_matches = match &ix.index {
+					Index::Count(_) => self.ctx.cond == ix.count_cond.as_ref(),
+					_ => false,
+				};
+				if cond_matches {
 					let index_reference = schema.new_reference(pos);
 					if self.check_allowed_by_with_indexes(&index_reference) {
 						self.index_map.index_count = Some(IndexOption::new(
@@ -313,7 +361,10 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn compute(&self, stk: &mut Stk, v: &Expr, n: Node) -> Result<Node> {
 		Ok(if n == Node::Computable {
-			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
+			match stk
+				.run(|stk| crate::legacy::expr_compute(v, stk, self.ctx.ctx, self.ctx.opt, None))
+				.await
+			{
 				Ok(v) => Node::Computed(v.into()),
 				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v.to_sql())),
 			}
@@ -327,9 +378,11 @@ impl<'a> TreeBuilder<'a> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in a {
 			values.push(
-				stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None))
-					.await
-					.catch_return()?,
+				stk.run(|stk| {
+					crate::legacy::expr_compute(v, stk, self.ctx.ctx, self.ctx.opt, None)
+				})
+				.await
+				.catch_return()?,
 			);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array(values)))))
@@ -347,7 +400,7 @@ impl<'a> TreeBuilder<'a> {
 			&& matches!(x, Expr::Param(_))
 		{
 			let v = stk
-				.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+				.run(|stk| crate::legacy::idiom_compute(i, stk, self.ctx.ctx, self.ctx.opt, None))
 				.await
 				.catch_return()?;
 			let v = v.into_literal();
@@ -371,7 +424,7 @@ impl<'a> TreeBuilder<'a> {
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
 		let n = {
-			let irs = self.resolve_indexes(self.table, &i, &schema);
+			let irs = self.resolve_indexes(self.table.as_str(), &i, &schema);
 			if !irs.is_empty() {
 				Node::IndexedField(Arc::clone(&i), irs)
 			} else if let Some(ro) =
@@ -399,7 +452,7 @@ impl<'a> TreeBuilder<'a> {
 			if ix.prepare_remove {
 				continue;
 			}
-			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
+			if let Some(idiom_index) = ix.cols.iter().position(|p| p == i) {
 				// SECURITY: when permissions are being enforced, refuse to use
 				// an index whose columns reference a field with a restrictive
 				// SELECT permission. Otherwise the index-only `Iterate Index
@@ -492,12 +545,12 @@ impl<'a> TreeBuilder<'a> {
 				}
 				let local_field = Idiom(local_field.to_vec());
 				let schema = self.lazy_load_schema_resolver(tx, self.table).await?;
-				let locals = self.resolve_indexes(self.table, &local_field, &schema);
+				let locals = self.resolve_indexes(self.table.as_str(), &local_field, &schema);
 				let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 				let mut remotes = vec![];
 				for table in tables {
 					let schema = self.lazy_load_schema_resolver(tx, table).await?;
-					let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+					let remote_irs = self.resolve_indexes(table.as_str(), &remote_field, &schema);
 					remotes.push((Arc::clone(&remote_field), remote_irs));
 				}
 				let ro = RecordOptions {
@@ -520,6 +573,7 @@ impl<'a> TreeBuilder<'a> {
 				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
 			}
 			BinaryOperator::And => {
+				self.has_and = true;
 				if self.all_and.is_none() {
 					self.all_and = Some(true);
 				}
@@ -591,8 +645,24 @@ impl<'a> TreeBuilder<'a> {
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::Hnsw(h) if *col == 0 => self.eval_hnsw_knn(e, op, n, h)?,
-				Index::DiskAnn(d) if *col == 0 => self.eval_diskann_knn(e, op, n, d)?,
+				// Legacy vector indexes resolve candidates through private
+				// doc-ID spaces. Their in-traversal filter is built by the
+				// legacy executor before the full-text planner is installed,
+				// so it cannot evaluate a MATCHES conjunct. When the statement
+				// contains MATCHES anywhere, fall back to brute-force KNN so
+				// the outer filter can enforce MATCHES correctly.
+				Index::Hnsw(h)
+					if *col == 0
+						&& !(index_reference.format_version == 0 && self.cond_contains_matches) =>
+				{
+					self.eval_hnsw_knn(e, op, n, h)?
+				}
+				Index::DiskAnn(d)
+					if *col == 0
+						&& !(index_reference.format_version == 0 && self.cond_contains_matches) =>
+				{
+					self.eval_diskann_knn(e, op, n, d)?
+				}
 				_ => None,
 			};
 			if res.is_none()
@@ -638,7 +708,9 @@ impl<'a> TreeBuilder<'a> {
 
 		let (k, ef) = match &**nn {
 			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			NearestNeighbor::K(k, d) if *d == hnsw.distance => {
+			NearestNeighbor::K(k, d)
+				if crate::catalog::Distance::from(d.clone()) == hnsw.distance =>
+			{
 				(*k, (*k).max(hnsw.ef_construction as u32))
 			}
 			_ => return Ok(None),
@@ -667,7 +739,9 @@ impl<'a> TreeBuilder<'a> {
 
 		let (k, l) = match &**nn {
 			NearestNeighbor::Approximate(k, l) => (*k, *l),
-			NearestNeighbor::K(k, d) if *d == diskann.distance => {
+			NearestNeighbor::K(k, d)
+				if crate::catalog::Distance::from(d.clone()) == diskann.distance =>
+			{
 				(*k, (*k).max(diskann.l_build as u32))
 			}
 			_ => return Ok(None),
@@ -707,7 +781,7 @@ impl<'a> TreeBuilder<'a> {
 			self.knn_expressions.insert(Arc::clone(exp));
 			self.knn_brute_force_expressions.insert(
 				Arc::clone(exp),
-				KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()),
+				KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone().into()),
 			);
 		}
 		Ok(())
@@ -732,12 +806,12 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
+					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
+					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
@@ -1011,5 +1085,41 @@ impl From<ResolvedExpression> for Node {
 			right: re.right,
 			exp: re.exp,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::TreeBuilder;
+
+	fn contains_matches(input: &str) -> bool {
+		let expr: crate::expr::Expr = crate::syn::expr(input).unwrap().into();
+		TreeBuilder::expr_contains_matches(&expr)
+	}
+
+	#[test]
+	fn matches_detection_covers_boolean_compositions() {
+		assert!(contains_matches("content @@ 'x'"));
+		assert!(contains_matches("content @1@ 'x'"));
+		assert!(contains_matches("flag = true AND content @@ 'x'"));
+		assert!(contains_matches("!(content @@ 'x')"));
+		assert!(contains_matches("flag = true OR (count > 3 AND content @@ 'x')"));
+	}
+
+	#[test]
+	fn matches_detection_covers_nested_shapes() {
+		// Shapes the boolean-composition walk alone would miss: the
+		// traversal-time evaluator can still reach a MATCHES inside these.
+		assert!(contains_matches("array::len([content @@ 'x']) > 0"));
+		assert!(contains_matches("[content @@ 'x'] CONTAINS true"));
+		assert!(contains_matches("IF content @@ 'x' { true } ELSE { false }"));
+		assert!(contains_matches("flag = true OR (SELECT VALUE v FROM t WHERE c @@ 'x')[0]"));
+	}
+
+	#[test]
+	fn matches_detection_ignores_conditions_without_matches() {
+		assert!(!contains_matches("flag = true AND count > 3"));
+		assert!(!contains_matches("point <|2|> [1.0, 2.0]"));
+		assert!(!contains_matches("point <|2|> [1.0, 2.0] AND flag = true"));
 	}
 }

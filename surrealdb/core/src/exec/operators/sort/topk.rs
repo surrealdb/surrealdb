@@ -16,6 +16,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_keys_by_sort_key};
+use crate::err::EngineError;
 use crate::exec::topk_pushdown::TopKThresholdCell;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
@@ -166,11 +167,11 @@ impl ExecOperator for SortTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;
@@ -185,12 +186,11 @@ impl ExecOperator for SortTopK {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 			// Process all input values
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -202,7 +202,7 @@ impl ExecOperator for SortTopK {
 				let num_fields = order_by.len();
 				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
 				for field in order_by.iter() {
-					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
 					key_columns.push(keys);
 				}
 
@@ -210,7 +210,7 @@ impl ExecOperator for SortTopK {
 				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
 					key_columns.into_iter().map(|col| col.into_iter()).collect();
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> = key_iters
 						.iter_mut()
 						.map(|iter| iter.next().expect("key column length matches batch size"))
@@ -251,15 +251,13 @@ impl ExecOperator for SortTopK {
 			}
 			sorted.reverse();
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});
@@ -532,11 +530,11 @@ impl ExecOperator for SortTopKByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;
@@ -546,11 +544,10 @@ impl ExecOperator for SortTopKByKey {
 		let sorted_stream = futures::stream::once(async move {
 			let mut acc = TopKByKeyAccumulator::new(sort_keys, limit, threshold_cell);
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -558,19 +555,17 @@ impl ExecOperator for SortTopKByKey {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					acc.insert(value);
 				}
 			}
 
-			Ok(ValueBatch {
-				values: acc.into_sorted(),
-			})
+			Ok(ValueBatch::new(acc.into_sorted()))
 		});
 
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

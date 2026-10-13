@@ -27,11 +27,7 @@ value = "[{ id: i:B, t: t:2 }]"
 value = "[{ id: i:A, t: t:1 }, { id: i:B, t: t:2 }]"
 
 [[test.results]]
-value = """
-"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}
-
-Total rows: 2""""
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "NONE"
@@ -64,11 +60,7 @@ value = "[{ id: i:A, t: t:1 }]"
 value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
-value = """
-"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}
-
-Total rows: 2""""
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: i:A, t: t:1 }, { id: i:B, t: t:2 }]"
@@ -104,11 +96,7 @@ value = "[{ id: i:A, t: t:1 }]"
 value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
-value = """
-"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}
-
-Total rows: 2""""
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h', pre_decode_filter: yes] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: i:A, t: t:1 }, { id: i:B, t: t:2 }]"
@@ -144,11 +132,7 @@ value = "[{ id: i:A, t: t:1 }]"
 value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
-value = """
-"SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name INSIDE ['a', 'b'], pre_decode_filter: yes] {rows: 2}
-
-Total rows: 2""""
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name INSIDE ['a', 'b'], pre_decode_filter: yes] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: i:A, t: t:1 }, { id: i:B, t: t:2 }]"
@@ -181,10 +165,10 @@ value = "[{ id: t:1, name: 'Hello World' }]"
 value = "[{ id: i:A, t: t:1 }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name @@ 'world', pre_decode_filter: no (unsupported predicate)] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = "[{ id: i:A, t: t:1 }]"
 
 [[test.results]]
 value = "NONE"
@@ -211,16 +195,16 @@ value = "[{ id: t:1, name: 'Hello World' }]"
 value = "[{ id: i:A, t: t:1 }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}\n    TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name @@ 'world', pre_decode_filter: no (unsupported predicate)] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = "[{ id: i:A, t: t:1 }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = "[{ id: i:A, t: t:1 }]"
 
 [[test.results]]
-error = "Invalid query: New executor does not support: MATCHES with multi-part field path not yet supported in streaming executor"
+value = "[{ id: i:A, t: t:1 }]"
 */
 
 -- No index on link field

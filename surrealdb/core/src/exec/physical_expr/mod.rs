@@ -8,9 +8,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::{
-	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, SendSyncRequirement,
-};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
@@ -21,7 +19,9 @@ mod collections;
 mod conditional;
 mod control_flow;
 pub(crate) mod function;
+pub(crate) mod graph_degree;
 mod idiom;
+mod knn_membership;
 mod literal;
 mod matches;
 mod ops;
@@ -38,8 +38,11 @@ pub(crate) use function::{
 	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
-pub(crate) use literal::{Literal, MockExpr, Param};
-pub(crate) use matches::MatchesOp;
+pub(crate) use knn_membership::KnnMembershipOp;
+pub(crate) use literal::{FoldedIdiom, Literal, MockExpr, Param};
+pub(crate) use matches::{
+	MatchProbe, MatchesOp, MatchesScope, collect_cond_matches, first_unregistered_cond_matches,
+};
 pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};
 pub(crate) use record_id::RecordIdExpr;
 pub(crate) use subquery::ScalarSubquery;
@@ -107,12 +110,10 @@ pub struct EvalContext<'a> {
 	/// links with conditional table permissions.
 	pub skip_fetch_perms: bool,
 
-	/// RecordId currently having its computed fields evaluated.
-	/// When a field dereference targets this same RecordId, raw data is
-	/// returned without re-evaluating computed fields, breaking what would
-	/// otherwise be infinite recursion (e.g. `$this.id.prop` on a record
-	/// whose computed field accesses `$this.id.prop`).
-	pub computing_record: Option<RecordId>,
+	/// The record currently having its computed fields evaluated, and the view
+	/// a dereference of that same record resolves against. See
+	/// [`ComputingRecord`].
+	pub computing_record: Option<Arc<ComputingRecord>>,
 
 	/// Expression-nesting depth recorded at plan time for a re-entry node (an
 	/// `eval` / user-defined-function body). Carries the planner's depth across
@@ -120,6 +121,45 @@ pub struct EvalContext<'a> {
 	/// re-planned `eval` strings continue counting toward `max_computation_depth`
 	/// instead of resetting to 0. Zero for ordinary per-row evaluation.
 	pub plan_depth: u32,
+}
+
+/// The record whose computed fields are being evaluated, and what a
+/// dereference of that same record reads.
+///
+/// A field dereference that targets `rid` must not re-enter computed-field
+/// evaluation for it: a body like `$this.id.prop` would recurse until the
+/// stack gave out. The dereference is answered directly instead, from `stored`
+/// when the caller supplied one and from storage otherwise.
+pub struct ComputingRecord {
+	/// The record being computed.
+	pub rid: RecordId,
+	/// The row's stored fields as this caller is permitted to read them.
+	///
+	/// SECURITY: a self-dereference answered from storage sees the record as
+	/// written, not as reduced, so a computed field spelled `id.secret` returns
+	/// a field the caller's `PERMISSIONS FOR select` removed. A caller that has
+	/// reduced the row supplies it here so the dereference reads the same view
+	/// the caller will receive.
+	///
+	/// Computed field names are deliberately absent from this view: they are
+	/// not stored, so resolving one against it yields `NONE`, which is what a
+	/// read of storage yields and what keeps the result independent of how far
+	/// computed-field evaluation has progressed.
+	///
+	/// `None` restores the read from storage, for a caller that has applied no
+	/// reduction and holds no view to offer.
+	pub stored: Option<Value>,
+}
+
+impl ComputingRecord {
+	/// A self-read served from storage, for a caller with no reduced view.
+	#[cfg(test)]
+	pub(crate) fn raw(rid: RecordId) -> Arc<Self> {
+		Arc::new(Self {
+			rid,
+			stored: None,
+		})
+	}
 }
 
 impl<'a> EvalContext<'a> {
@@ -215,7 +255,7 @@ impl<'a> EvalContext<'a> {
 	/// Returns an error if the URL is not allowed by the capabilities.
 	#[cfg(feature = "http")]
 	pub async fn check_allowed_net(&self, url: &url::Url) -> anyhow::Result<()> {
-		use crate::dbs::capabilities::NetTarget;
+		use crate::dbs::capabilities::{Error as CapabilitiesError, NetTarget};
 		use crate::err::Error;
 
 		let capabilities = self.capabilities();
@@ -227,23 +267,23 @@ impl<'a> EvalContext<'a> {
 
 		// Check the domain name (if any) matches the allow list
 		if !capabilities.matches_any_allow_net(&target) {
-			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+			return Err(CapabilitiesError::NetTargetNotAllowed(target.to_string()).into());
 		}
 
 		// Check against the deny list by hostname
 		if capabilities.matches_any_deny_net(&target) {
-			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+			return Err(CapabilitiesError::NetTargetNotAllowed(target.to_string()).into());
 		}
 
 		// Resolve the domain name to IP addresses and check each against the deny list
 		#[cfg(not(target_family = "wasm"))]
-		let resolved = target.resolve().await?;
+		let resolved = crate::net::resolve_net_target(&target).await?;
 		#[cfg(target_family = "wasm")]
-		let resolved = target.resolve()?;
+		let resolved = crate::net::resolve_net_target(&target)?;
 
 		for t in &resolved {
 			if capabilities.matches_any_deny_net(t) {
-				return Err(Error::NetTargetNotAllowed(t.to_string()).into());
+				return Err(CapabilitiesError::NetTargetNotAllowed(t.to_string()).into());
 			}
 		}
 
@@ -254,10 +294,10 @@ impl<'a> EvalContext<'a> {
 	///
 	/// Returns an error if the function is not allowed.
 	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
-		use crate::err::Error;
+		use crate::dbs::capabilities::Error as CapabilitiesError;
 
 		if !self.capabilities().allows_function_name(name) {
-			return Err(Error::FunctionNotAllowed(name.to_string()).into());
+			return Err(CapabilitiesError::FunctionNotAllowed(name.to_string()).into());
 		}
 		Ok(())
 	}
@@ -271,7 +311,7 @@ impl<'a> EvalContext<'a> {
 
 type ProjectionEvalFut<'a> = BoxFut<'a, FlowResult<Option<Vec<(Idiom, Value)>>>>;
 
-pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug + 'static {
+pub trait PhysicalExpr: ToSql + Send + Sync + Debug + 'static {
 	fn name(&self) -> &'static str;
 
 	/// The minimum context level required to evaluate this expression.

@@ -1,0 +1,116 @@
+name: 'Derive rolling build vars'
+description: 'Derive the channel identity (name, slug, S3 prefix, version, build metadata) for a rolling build of the checked-out commit'
+
+# Shared by the engine and downstream rolling entry points so the two stay in
+# lockstep: both key their artifacts under the SAME rolling-builds/<slug>/<sha>/
+# prefix, computed the one way here. Assumes the caller has already checked out
+# the commit to build (needs Cargo.toml + git history on disk).
+
+outputs:
+  build-metadata:
+    description: 'Build metadata baked into the binary (date.rev)'
+    value: ${{ steps.vars.outputs.build-metadata }}
+  name:
+    description: 'Artifact/file name prefix (rolling-<sha>)'
+    value: ${{ steps.vars.outputs.name }}
+  slug:
+    description: 'Branch slug (non-alphanumerics -> -, lowercased)'
+    value: ${{ steps.vars.outputs.slug }}
+  s3-prefix:
+    description: 'S3 prefix the artifacts live under (rolling-builds/<slug>/<sha>)'
+    value: ${{ steps.vars.outputs.s3-prefix }}
+  version:
+    description: 'Workspace version read from Cargo.toml at the checked-out commit'
+    value: ${{ steps.vars.outputs.version }}
+  branch:
+    description: 'Branch name the artifacts were built from (e.g. main or releases/4.0)'
+    value: ${{ steps.vars.outputs.branch }}
+  sha:
+    description: 'Full commit sha of the checked-out HEAD (the commit being built)'
+    value: ${{ steps.vars.outputs.sha }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Derive vars
+      id: vars
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Derive everything from the checked-out commit (HEAD), NOT github.sha, so
+        # a manual rebuild that checks out an arbitrary ancestor keys its artifacts
+        # under that ancestor (github.sha would be the branch tip on dispatch).
+        full_sha=$(git rev-parse HEAD)
+        date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+        rev=$(git rev-parse --short HEAD)
+
+        # The branch that namespaces the artifacts must be the line the BUILT
+        # commit belongs to, not the ref the workflow file ran from: the release
+        # workflow resolves a commit's line by ancestry and looks the artifacts
+        # up under that line's slug, so keying them by the dispatched ref would
+        # strand a cross-ref rebuild (e.g. a main dispatch rebuilding a
+        # releases/* commit) where the release can never find them.
+        #
+        # On the hot paths (push / schedule / tip dispatch) HEAD IS the
+        # dispatched ref's tip, so the dispatched ref is used as-is with no
+        # extra fetches. Only an override that builds some other commit pays
+        # for the ancestry resolution: prefer the dispatched ref if it still
+        # contains the commit, otherwise the first promotion line that does
+        # (main, then releases/* in ref order). A commit on no line keeps the
+        # dispatched ref's name - such builds are throwaway by the callers'
+        # promotability gates, and the name only labels their temporary
+        # artifacts.
+        branch="${GITHUB_REF_NAME}"
+        if [ "${full_sha}" != "${GITHUB_SHA}" ]; then
+          # Ancestry needs history connecting HEAD to the promotion lines; the
+          # rolling checkout is shallow, so deepen (no-op when complete), then
+          # bring in main + every releases/* tip.
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            git fetch --no-tags --quiet --unshallow origin 2>/dev/null \
+              || git fetch --no-tags --quiet --deepen=2147483647 origin 2>/dev/null \
+              || true
+          fi
+          git fetch --no-tags --quiet origin \
+            '+refs/heads/main:refs/remotes/origin/main' \
+            '+refs/heads/releases/*:refs/remotes/origin/releases/*'
+          if ! git merge-base --is-ancestor "${full_sha}" \
+              "refs/remotes/origin/${GITHUB_REF_NAME}" 2>/dev/null; then
+            for ref in $(git for-each-ref --format='%(refname)' \
+              refs/remotes/origin/main 'refs/remotes/origin/releases/*'); do
+              if git merge-base --is-ancestor "${full_sha}" "${ref}" 2>/dev/null; then
+                branch="${ref#refs/remotes/origin/}"
+                break
+              fi
+            done
+          fi
+        fi
+
+        # Build metadata (date.rev) is baked into the binary version, via
+        # SURREAL_BUILD_METADATA, ONLY for the nightly line (main). Every main
+        # commit shares the same X.Y.Z-nightly Cargo version, so the metadata is
+        # what tells one nightly binary from another. A versioned line
+        # (releases/*) already carries a unique version (e.g. 3.3.0-beta.3), so
+        # metadata there is redundant noise: leave it empty so `surreal version`
+        # reads the clean release version. This governs both the engine binaries
+        # and the downstream image, since both compile the engine from the commit
+        # checked out here, and it is the ONLY thing build metadata affects (the
+        # artifacts are keyed by sha, not by version string).
+        if [ "${branch}" = "main" ]; then
+          build_metadata="${date}.${rev}"
+        else
+          build_metadata=""
+        fi
+
+        # Slug the branch for namespacing: non-alphanumerics -> '-', lowercased.
+        ref_slug=$(echo "${branch}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+        name="rolling-${full_sha}"
+        cargo_version=$(awk '/^\[workspace.package\]/{f=1} f&&/^version[[:space:]]*=/{gsub(/version[[:space:]]*=[[:space:]]*"|"/,""); print; exit}' Cargo.toml)
+        {
+          echo "build-metadata=${build_metadata}"
+          echo "name=${name}"
+          echo "slug=${ref_slug}"
+          echo "s3-prefix=rolling-builds/${ref_slug}/${full_sha}"
+          echo "version=${cargo_version}"
+          echo "branch=${branch}"
+          echo "sha=${full_sha}"
+        } >> "$GITHUB_OUTPUT"

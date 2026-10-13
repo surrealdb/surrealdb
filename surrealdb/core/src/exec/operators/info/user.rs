@@ -8,13 +8,13 @@ use std::sync::Arc;
 use futures::stream;
 use surrealdb_types::ToSql;
 
+use crate::catalog::Error;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvider};
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
@@ -102,14 +102,12 @@ impl ExecOperator for UserInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_user_info(&ctx, &*user, base, structured).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

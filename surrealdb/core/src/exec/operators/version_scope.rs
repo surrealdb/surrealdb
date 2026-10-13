@@ -4,11 +4,12 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
+	OperatorMetrics, OutputShape, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 
 /// Evaluates the VERSION expression once and propagates the resulting
@@ -65,8 +66,8 @@ impl ExecOperator for VersionScope {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
-		self.inner.is_scalar()
+	fn output_shape(&self) -> OutputShape {
+		self.inner.output_shape()
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {
@@ -82,7 +83,7 @@ impl ExecOperator for VersionScope {
 		let inner = Arc::clone(&self.inner);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let v = version_expr.evaluate(eval_ctx).await?;
 			let stamp = v
@@ -91,12 +92,12 @@ impl ExecOperator for VersionScope {
 				.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?;
 
 			let versioned_ctx = ctx.with_version_stamp(Some(stamp));
-			let inner_stream = inner.execute(&versioned_ctx)?;
-			futures::pin_mut!(inner_stream);
+			let mut inner_stream = inner.execute(&versioned_ctx)?;
 			while let Some(batch) = inner_stream.next().await {
-				yield batch?;
+				yielder.emit(batch?).await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "VersionScope", &self.metrics))
 	}

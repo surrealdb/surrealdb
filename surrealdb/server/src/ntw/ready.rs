@@ -14,10 +14,11 @@ use crate::ntw::error::Error as NetError;
 
 /// The `/ready` route: the Kubernetes startup/readiness signal.
 ///
-/// Returns `200` only once the instance has finished starting up (import +
-/// credentials) **and**, when a heartbeat budget is configured, the current
-/// node's cluster heartbeat is fresh. Returns `503` while still starting up or
-/// when the heartbeat is stale, and `500` if the heartbeat can't be read.
+/// Returns `200` only once the instance has finished starting up (datastore
+/// initialisation, import and credentials) **and**, when a heartbeat budget is
+/// configured, the current node's cluster heartbeat is fresh. Returns `503`
+/// while still starting up or when the heartbeat is stale, and `500` if the
+/// heartbeat can't be read.
 /// Contrast with `/status` (process/listener liveness only) and `/health`
 /// (backend reachability only).
 pub(super) fn router<S>() -> Router<S>
@@ -35,11 +36,11 @@ async fn ready_handler(Extension(state): Extension<AppState>) -> Result<(), NetE
 /// edition that overrides `/ready` can reuse it for the community half of its
 /// own check.
 ///
-/// Returns `Ok(())` once the deferred startup work (import + credentials) has
-/// completed and, when a heartbeat budget is configured, the current node's
-/// cluster heartbeat is fresh. Returns `Err(NotReady)` while still starting up
-/// or when the heartbeat is stale, and `Err(InvalidStorage)` if the heartbeat
-/// cannot be read.
+/// Returns `Ok(())` once the deferred startup work has completed and, when a
+/// heartbeat budget is configured, the current node's cluster heartbeat is
+/// fresh. Returns `Err(NotReady)` while still starting up, when this node has
+/// no cluster membership row, or when the heartbeat is stale, and
+/// `Err(InvalidStorage)` if the heartbeat cannot be read.
 pub async fn community_readiness(state: &AppState) -> Result<(), NetError> {
 	// Not ready until the deferred startup work has completed.
 	if !state.readiness.ready.load(Ordering::SeqCst) {
@@ -56,6 +57,14 @@ pub async fn community_readiness(state: &AppState) -> Result<(), NetError> {
 			tracing::error!("Readiness check could not read the node heartbeat: {err}");
 			NetError::InvalidStorage
 		})?;
+		// A node with no cluster row has either not registered yet or has been
+		// archived and reaped by a peer. Both mean this node is not currently a
+		// serving member — a 503 that the next registration clears — rather than
+		// the storage failure a 500 would report.
+		let Some(age) = age else {
+			tracing::warn!("Node is not registered in the cluster; reporting not ready");
+			return Err(NetError::NotReady);
+		};
 		if age > max_age {
 			tracing::warn!("Node heartbeat is stale ({age:?} > {max_age:?}); reporting not ready");
 			return Err(NetError::NotReady);
@@ -65,7 +74,7 @@ pub async fn community_readiness(state: &AppState) -> Result<(), NetError> {
 }
 
 /// Paths that stay reachable while the instance is still starting up (i.e.
-/// before the startup import completes). Everything else is gated.
+/// before the deferred startup work completes). Everything else is gated.
 ///
 /// `/ready` is allowed through so its handler can report not-ready (503) during
 /// startup; `/status` is liveness; `/health` is backend reachability; `/version`
@@ -75,11 +84,13 @@ fn always_available(path: &str) -> bool {
 }
 
 /// Middleware that returns `503 Service Unavailable` for user-facing endpoints
-/// until the instance is ready to serve (the startup import has completed).
+/// until the instance is ready to serve (the deferred startup work has
+/// completed).
 ///
-/// The web server binds its listener before the startup import runs, so this
-/// gate keeps query/auth endpoints from being hit against a half-initialised
-/// datastore while liveness/version/metrics and the probe endpoints stay
+/// The web server binds its listener before any of that work runs — including
+/// the version check and this node's cluster registration — so this gate keeps
+/// query/auth endpoints from being hit against a datastore that is not yet
+/// initialised, while liveness/version/metrics and the probe endpoints stay
 /// reachable. It sits ahead of the auth layer so gated requests short-circuit
 /// before authentication touches the datastore.
 pub(super) async fn readiness_gate(
@@ -160,6 +171,45 @@ mod tests {
 			.unwrap();
 		assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 		assert_eq!(res.headers().get(RETRY_AFTER).unwrap().to_str().unwrap(), "1");
+	}
+
+	/// A node with no cluster membership row reports not-ready, rather than the
+	/// storage failure a missing row used to read as. The row is absent until
+	/// this node registers during startup, and again once a peer archives and
+	/// reaps it; both clear on the next registration.
+	#[cfg(feature = "storage-mem")]
+	#[tokio::test]
+	async fn an_unregistered_node_is_not_ready() {
+		use std::time::Duration;
+
+		use surrealdb_core::kvs::Datastore;
+
+		use crate::ntw::Readiness;
+		use crate::ntw::client_ip::ClientIp;
+
+		let state = AppState {
+			client_ip: ClientIp::None,
+			datastore: Datastore::new("memory").await.unwrap(),
+			metrics_observer: None,
+			// Started: only the heartbeat is left to decide readiness.
+			readiness: Readiness {
+				ready: Arc::new(AtomicBool::new(true)),
+				max_heartbeat_age: Some(Duration::from_secs(9)),
+			},
+		};
+
+		assert!(
+			matches!(community_readiness(&state).await, Err(NetError::NotReady)),
+			"an unregistered node should report not-ready"
+		);
+
+		// And a registered node with a fresh heartbeat is ready, so the arm above
+		// is reporting the missing row rather than refusing everything.
+		state.datastore.insert_node().await.unwrap();
+		assert!(
+			community_readiness(&state).await.is_ok(),
+			"a freshly registered node should report ready"
+		);
 	}
 
 	#[tokio::test]

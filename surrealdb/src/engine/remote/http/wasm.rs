@@ -9,6 +9,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
+use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
@@ -40,11 +41,7 @@ impl conn::Sealed for Client {
 			features.insert(ExtraFeatures::Backup);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -122,7 +119,7 @@ pub(crate) async fn run_router(
 
 				// Spawn the request handling in a background task
 				// SessionState uses RwLock internally, so we can share the Arc directly
-				let router_state = state.clone();
+				let router_state = Arc::clone(&state);
 				spawn_local(async move {
 					let result = super::router(
 						route.request,

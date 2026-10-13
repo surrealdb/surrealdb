@@ -4,10 +4,10 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::exe::FlowResultExt;
 use crate::expr::cond::Cond;
 use crate::expr::data::Data;
 use crate::expr::fetch::Fetchs;
@@ -16,7 +16,6 @@ use crate::expr::group::Groups;
 use crate::expr::limit::Limit;
 use crate::expr::order::Ordering;
 use crate::expr::output::Output;
-use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
 use crate::expr::statements::LiveFields;
@@ -30,8 +29,9 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
+use crate::expr::{Explain, Expr, Idiom, With};
 use crate::idx::planner::QueryPlanner;
+use crate::legacy::exprs_to_fields;
 use crate::val::Duration;
 
 #[derive(Clone, Debug)]
@@ -159,10 +159,97 @@ impl ToSql for Statement<'_> {
 	}
 }
 
+/// Rejection message for a `FOR UPDATE` FROM target that is not a
+/// specific record id. Shared by the plan-time guards and the runtime
+/// re-validation in the scan operators so both executors report the same
+/// error for the same query.
+pub(crate) const FOR_UPDATE_TARGETS_ERROR: &str =
+	"SELECT ... FOR UPDATE requires record ids as targets";
+
+/// Rejection message for a `FOR UPDATE` read combined with a version,
+/// whether from a statement-level VERSION clause or an enclosing version
+/// scope. Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_VERSION_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with VERSION";
+
+/// Validate the clause combinations a `FOR UPDATE` SELECT permits.
+///
+/// `FOR UPDATE` locks the selected records for the duration of the
+/// enclosing transaction, so it only supports plain reads of specific
+/// records: VERSION, GROUP BY, and SPLIT are rejected, and every FROM
+/// target must be a record id (see [`check_for_update_targets`]).
+///
+/// LIMIT is also rejected alongside more than one FROM target: both
+/// executors stop pulling from the sources once the limit is filled, so
+/// the targets past that point would never be read and never registered
+/// for conflict detection. A single target is unaffected — it is read
+/// before the limit discards its row.
+///
+/// A no-op when the statement does not carry `FOR UPDATE`.
+pub(crate) fn validate_for_update(
+	stm: &SelectStatement,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::{Expr, Literal};
+	if !stm.for_update {
+		return Ok(());
+	}
+	if !matches!(stm.version, Expr::Literal(Literal::None)) {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_VERSION_ERROR.to_string(),
+		});
+	}
+	if stm.group.is_some() || stm.split.is_some() {
+		return Err(crate::exec::Error::Query {
+			message: "SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT".to_string(),
+		});
+	}
+	if stm.limit.is_some() && stm.what.len() > 1 {
+		return Err(crate::exec::Error::Query {
+			message: "SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets"
+				.to_string(),
+		});
+	}
+	check_for_update_targets(&stm.what)
+}
+
+/// Check that every statically-classifiable FROM target of a
+/// `FOR UPDATE` SELECT is a specific (non-range) record id.
+///
+/// Targets whose shape is only known at runtime — params, function
+/// calls, and call/method postfix expressions — pass this check and
+/// must be re-validated at the site where they resolve to a value.
+pub(crate) fn check_for_update_targets(
+	what: &[crate::expr::Expr],
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::{Expr, Literal, PostfixOperator, RecordIdKeyLit};
+	for expr in what {
+		match expr {
+			Expr::Literal(Literal::RecordId(rid))
+				if !matches!(rid.key, RecordIdKeyLit::Range(_)) => {}
+			Expr::Param(_) | Expr::FunctionCall(_) => {}
+			Expr::Postfix {
+				op: PostfixOperator::MethodCall(..) | PostfixOperator::Call(..),
+				..
+			} => {}
+			_ => {
+				return Err(crate::exec::Error::Query {
+					message: FOR_UPDATE_TARGETS_ERROR.to_string(),
+				});
+			}
+		}
+	}
+	Ok(())
+}
+
 impl Statement<'_> {
 	/// Check if this is a SELECT statement
 	pub(crate) fn is_select(&self) -> bool {
 		matches!(self, Statement::Select { .. })
+	}
+
+	/// Check if this is a `SELECT ... FOR UPDATE` statement
+	pub(crate) fn is_for_update(&self) -> bool {
+		matches!(self, Statement::Select { stmt, .. } if stmt.for_update)
 	}
 
 	/// Check if this is a CREATE statement
@@ -534,24 +621,6 @@ impl Statement<'_> {
 		}
 	}
 
-	/// Returns a reference to the appropriate `Permission` field within the
-	/// `TableDefinition` structure based on the type of the statement.
-	pub(crate) fn permissions<'b>(
-		&self,
-		table: &'b TableDefinition,
-		doc_is_new: bool,
-	) -> &'b Permission {
-		if self.is_delete() {
-			&table.permissions.delete
-		} else if self.is_select() {
-			&table.permissions.select
-		} else if doc_is_new {
-			&table.permissions.create
-		} else {
-			&table.permissions.update
-		}
-	}
-
 	pub(crate) fn timeout(&self) -> Option<&Expr> {
 		match self {
 			Statement::Create(s) => Some(&s.timeout),
@@ -575,7 +644,7 @@ impl Statement<'_> {
 	) -> Result<Cow<'a, FrozenContext>> {
 		if let Some(t) = self.timeout() {
 			let Some(x) = stk
-				.run(|stk| t.compute(stk, ctx, opt, doc))
+				.run(|stk| crate::legacy::expr_compute(t, stk, ctx, opt, doc))
 				.await
 				.catch_return()?
 				.cast_to::<Option<Duration>>()?

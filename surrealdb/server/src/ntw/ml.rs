@@ -31,10 +31,10 @@ mod implementation {
 	use futures_util::StreamExt;
 	use http::StatusCode;
 	use surrealdb_core::dbs::Session;
-	use surrealdb_core::dbs::capabilities::RouteTarget;
 	use surrealdb_core::iam::check::check_ns_db;
-	use surrealdb_core::iam::{Action, ResourceKind};
-	use surrealdb_core::ml::storage::surml_file::SurMlFile;
+	use surrealdb_iam::{Action, ResourceKind};
+	use surrealdb_rpc::capabilities::RouteTarget;
+	use surrealml_core::storage::surml_file::SurMlFile;
 
 	use crate::ntw::AppState;
 	use crate::ntw::error::{Error as NetError, ResponseError};
@@ -142,7 +142,7 @@ mod implementation {
 	use axum::body::Body;
 	use axum::extract::Path;
 	use surrealdb_core::dbs::Session;
-	use surrealdb_core::dbs::capabilities::RouteTarget;
+	use surrealdb_rpc::capabilities::RouteTarget;
 
 	use crate::ntw::AppState;
 	use crate::ntw::error::{Error as NetError, ResponseError};

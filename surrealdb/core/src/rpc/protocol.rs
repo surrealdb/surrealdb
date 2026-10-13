@@ -1,6 +1,14 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
+use async_channel::Sender;
+use surrealdb_rpc::args::extract_args;
+use surrealdb_rpc::error::{
+	bad_lq_config, invalid_params, method_not_allowed, method_not_found, session_exists,
+	session_expired, session_not_found,
+};
+use surrealdb_rpc::{DbResult, Method, Token, check_protected_param};
 use surrealdb_types::{HashMap, object};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -8,18 +16,16 @@ use uuid::Uuid;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::CancelHandle;
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
-use crate::dbs::{QueryResult, QueryType, Session};
-use crate::iam::token::Token;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::dbs::{
+	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
+};
+use crate::exec::Error as ExecError;
+use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
 };
-use crate::rpc::args::extract_args;
-use crate::rpc::{
-	DbResult, Method, bad_lq_config, invalid_params, method_not_allowed, method_not_found,
-	session_exists, session_expired, session_not_found, types_error_from_anyhow,
-};
+use crate::rpc::error::{query_timeout_error, types_error_from_anyhow};
 use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
@@ -33,7 +39,7 @@ use crate::types::{
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		PublicValue::String(s) => Expr::Table(crate::val::TableName::new(s)),
+		PublicValue::String(s) => Expr::Table(surrealdb_strand::TableName::new(s).into()),
 		x => Expr::from_public_value(x),
 	}
 }
@@ -50,32 +56,6 @@ fn singular(value: &PublicValue) -> bool {
 	}
 }
 
-// SECURITY: LIVE queries capture the session's auth principal at registration
-// time (see `surrealdb/core/src/dbs/session.rs`). When an auth-lifecycle RPC
-// changes the principal on the same WebSocket, those captured snapshots would
-// continue to dispatch notifications under the prior context, bypassing the
-// access controls that should now apply (GHSA-2xrp-m9c6-75rj). Callers
-// snapshot the principal before the operation and tear LIVE subscriptions
-// down when it changes. Token refresh against the same identity leaves the
-// principal unchanged and preserves the subscriptions.
-struct AuthPrincipalSnapshot {
-	id: String,
-	level: crate::iam::Level,
-}
-
-impl AuthPrincipalSnapshot {
-	fn capture(session: &Session) -> Self {
-		Self {
-			id: session.au.id().to_string(),
-			level: session.au.level().clone(),
-		}
-	}
-
-	fn differs_from(&self, session: &Session) -> bool {
-		session.au.id() != self.id || session.au.level() != &self.level
-	}
-}
-
 /// Map an RPC [`Method`] to an [`AuthAction`] when it represents an auth
 /// lifecycle operation. Returns `None` for non-auth methods so the caller can
 /// skip emitting an [`AuthEvent`] without branching on every variant.
@@ -89,6 +69,89 @@ const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
 		Method::Revoke => Some(AuthAction::Revoke),
 		_ => None,
 	}
+}
+
+/// Deletes the live queries an execution registered after its caller had
+/// already been answered.
+///
+/// An execution that outlives its wall-clock guard carries on detached, so that
+/// it can finalise its transaction rather than be dropped holding it. Its
+/// caller has been given a timeout by then, and no transport will ever see the
+/// results, so a `LIVE SELECT` it commits afterwards has nobody to register it:
+/// notifications for it would be produced and silently discarded for the
+/// lifetime of the datastore, and no cleanup path could find it. Deleting the
+/// rows is what keeps it from becoming that orphan.
+async fn settle_detached_live_queries(
+	kvs: &Datastore,
+	results: Result<Vec<QueryResult>, surrealdb_types::Error>,
+) {
+	let Ok(results) = results else {
+		return;
+	};
+	let orphans: Vec<Uuid> = results
+		.iter()
+		.filter(|result| matches!(result.query_type, QueryType::Live))
+		.filter_map(|result| match &result.result {
+			Ok(PublicValue::Uuid(id)) => Some(id.into_inner()),
+			_ => None,
+		})
+		.collect();
+	if !orphans.is_empty()
+		&& let Err(err) = kvs.delete_queries(orphans).await
+	{
+		error!(
+			target: "surrealdb::core::rpc",
+			"Error cleaning up the live queries of a detached streaming query: {err}"
+		);
+	}
+}
+
+/// How long a streaming execution is given to stop itself after its wall-clock
+/// timeout has tripped its cancel handle, before it is abandoned.
+///
+/// A cooperative stop needs the execution to reach a yield point. One parked
+/// sending into a full `items` channel reaches none until its consumer drains,
+/// so this bounds the wait rather than trusting the consumer to.
+const QUERY_STREAM_STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// The session a streaming execution's `LIVE SELECT`s may be registered
+/// against, held so that registering them cannot race the teardown that would
+/// have removed them.
+///
+/// A buffered query registers its live queries while still holding the session
+/// read guard it ran under, so an auth-lifecycle operation — `invalidate`,
+/// `reset`, a `signin` that changes principal — either runs first and is
+/// followed by a registration under the *new* principal, or runs second and its
+/// `cleanup_lqs` finds the registration and removes it. A streaming query
+/// cannot hold that guard: a stream lives as long as its consumer reads, and
+/// holding it would block every `use` / `set` / `signin` on the session behind a
+/// slow client. So it drops the guard and takes this at the end instead.
+///
+/// Two things have to be true, and only both together close the window:
+///
+/// - The session must still be acting as the principal the execution ran as. Checking that the
+///   session merely still *exists* is not enough — `invalidate` clears the authentication and keeps
+///   the session, so its `cleanup_lqs` would sweep an empty map and the registration would land
+///   afterwards, delivering change data under an authorization that had been torn down. That is the
+///   shape GHSA-2xrp-m9c6-75rj describes.
+/// - The guard must be *held* across the registration. Releasing it between the check and the
+///   insert reopens the same window from the other side: a teardown could pass through the gap,
+///   sweep nothing, and leave the registration behind it.
+///
+/// `None` means the live queries have no owner and must be deleted rather than
+/// registered: the session has gone, or it is no longer the principal that
+/// created them. A caller that already told its consumer about an id it must now
+/// discard has to say so — the id will never deliver.
+///
+/// The returned guard is why [`RpcProtocol::handle_live`] must not acquire the
+/// session lock.
+pub async fn live_query_owner(
+	sessions: &HashMap<Uuid, Arc<RwLock<Session>>>,
+	session_id: Uuid,
+	principal: &AuthPrincipalSnapshot,
+) -> Option<tokio::sync::OwnedRwLockReadGuard<Session>> {
+	let session = sessions.get(&session_id)?.read_owned().await;
+	(!principal.differs_from(&session)).then_some(session)
 }
 
 #[expect(async_fn_in_trait)]
@@ -141,16 +204,35 @@ pub trait RpcProtocol {
 
 	/// Detaches a session from the given ID
 	async fn detach(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
-		self.del_session(&session_id).await;
+		self.del_session(&session_id).await?;
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	/// The current session for this RPC context
-	fn get_session(&self, id: &Uuid) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
-		match self.session_map().get(id) {
-			Some(session) => Ok(session),
-			None => Err(session_not_found(*id)),
+	/// The current session for this RPC context.
+	///
+	/// A session absent from the in-memory [`session_map`](Self::session_map)
+	/// is rehydrated from durable storage via
+	/// [`load_session`](Self::load_session) and reinstalled, so a client can
+	/// resume an attached session after the node or isolate that held it is
+	/// gone — the case that matters for edge deployments, where an idle
+	/// Durable Object or Worker is evicted between requests. This branch is
+	/// const-gated to nothing unless
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set, so in-memory-only
+	/// implementations keep the plain map lookup.
+	async fn get_session(&self, id: &Uuid) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
+		if let Some(session) = self.session_map().get(id) {
+			return Ok(session);
 		}
+		if Self::PERSIST_SESSIONS
+			&& self.persist_sessions_enabled()
+			&& let Some(restored) = self.load_session(id).await
+		{
+			self.set_session(*id, Arc::new(RwLock::new(restored)));
+			if let Some(session) = self.session_map().get(id) {
+				return Ok(session);
+			}
+		}
+		Err(session_not_found(*id))
 	}
 
 	/// Stores a session for the given ID
@@ -158,10 +240,28 @@ pub trait RpcProtocol {
 		self.session_map().insert(id, session);
 	}
 
-	/// Deletes a session
-	async fn del_session(&self, id: &Uuid) {
+	/// Deletes a session.
+	///
+	/// The durable copy is removed **first**, and a failure there aborts the
+	/// teardown with the local session left intact, so a caller (e.g.
+	/// [`detach`](Self::detach) / logout) never reports success while a
+	/// durable copy survives that could be rehydrated on this or another node.
+	/// The durable removal is const-gated to nothing for in-memory-only
+	/// implementations, whose teardown cannot fail.
+	async fn del_session(&self, id: &Uuid) -> Result<(), surrealdb_types::Error> {
+		// Remove the durable copy first, propagating any failure before we
+		// touch local state — otherwise a `detach`/logout could return success
+		// with the session still resurrectable.
+		if Self::PERSIST_SESSIONS && self.persist_sessions_enabled() {
+			self.forget_session(id).await?;
+		}
+		// Drop the in-memory session
 		self.session_map().remove(id);
+		// Cancel any live queries owned by this session
 		self.cleanup_lqs(id).await;
+		// Cancel any open transactions owned by this session
+		self.cleanup_txns(id).await;
+		Ok(())
 	}
 
 	/// Lists all sessions
@@ -173,6 +273,90 @@ pub trait RpcProtocol {
 			.map(|(key, _)| PublicValue::Uuid(PublicUuid::from(key)))
 			.collect();
 		Ok(DbResult::Other(PublicValue::Array(array)))
+	}
+
+	// ------------------------------
+	// Durable sessions
+	// ------------------------------
+
+	/// Whether this implementation persists attached sessions to durable
+	/// storage so they outlive the process (or serverless isolate) that
+	/// holds `session_map`. Off by default: sessions are in-memory only, and
+	/// the three hooks below are never called, so
+	/// [`get_session`](Self::get_session), [`execute`](Self::execute), and
+	/// [`del_session`](Self::del_session) behave exactly as before.
+	///
+	/// When on, the session lifecycle mirrors to durable storage:
+	/// [`get_session`](Self::get_session) rehydrates a session missing from
+	/// `session_map` via [`load_session`](Self::load_session), so a client
+	/// transparently resumes an attached session after the node or isolate
+	/// that attached it is gone — the case that matters for edge deployments,
+	/// where an idle Durable Object or Worker is evicted between requests.
+	/// [`execute`](Self::execute) writes the session back via
+	/// [`persist_session`](Self::persist_session) when a method changed it,
+	/// and [`del_session`](Self::del_session) removes the durable copy via
+	/// [`forget_session`](Self::forget_session).
+	///
+	/// This seam is about session *durability* only; it performs no
+	/// request-level authorization. As in the in-memory model, a session id
+	/// grants access to that session, so an implementation reachable by
+	/// untrusted callers is responsible for its own per-request check (e.g.
+	/// binding an authenticated session to the principal that authenticated
+	/// it) — persistence neither adds nor removes that obligation.
+	///
+	/// The persist happens after the handler releases the session write lock,
+	/// so an implementation that enables this **must serialize dispatch per
+	/// session** (one in-flight RPC per session id); otherwise two concurrent
+	/// mutations of the same session can persist out of order and drop the
+	/// losing one (e.g. an `invalidate` racing a `signin`). A per-connection
+	/// runtime — one Durable Object or Worker per session — satisfies this by
+	/// construction.
+	///
+	/// This const is the compile-time *capability* gate; the runtime switch is
+	/// [`persist_sessions_enabled`](Self::persist_sessions_enabled). Every
+	/// durability branch checks both, so an implementation whose const is
+	/// `false` pays nothing, while one that exposes persistence behind
+	/// operator configuration sets the const to `true` and overrides the
+	/// method.
+	const PERSIST_SESSIONS: bool = false;
+
+	/// Runtime companion to [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS),
+	/// consulted only when the const is `true`. The default returns the
+	/// const, so a compile-time-only implementation needs no override; an
+	/// implementation that exposes persistence behind operator configuration
+	/// (e.g. a CLI flag) overrides this with its runtime setting. When it
+	/// returns `false`, sessions behave exactly as if the const were `false`:
+	/// no snapshot, no rehydration, no persistence.
+	fn persist_sessions_enabled(&self) -> bool {
+		Self::PERSIST_SESSIONS
+	}
+
+	/// Load a session from durable storage. Called by
+	/// [`get_session`](Self::get_session) on a `session_map` miss to
+	/// rehydrate an evicted session. Returns `None` (the default) for
+	/// in-memory-only implementations, and is only ever called when
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn load_session(&self, _id: &Uuid) -> Option<Session> {
+		None
+	}
+
+	/// Persist a session that a method changed, so the change outlives
+	/// eviction of `session_map`. The default is a no-op, and it is only ever
+	/// called when [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn persist_session(&self, _id: &Uuid, _session: &Session) {}
+
+	/// Remove a session's durable copy, called from
+	/// [`del_session`](Self::del_session) so teardown (`detach`, logout) is
+	/// symmetric with persistence — a deleted session must not resurrect on
+	/// a later [`load_session`](Self::load_session). An `Err` aborts the
+	/// teardown so the caller does not report success while the durable copy
+	/// survives; unlike [`persist_session`](Self::persist_session) (which is
+	/// best-effort — a lost persist merely fails to save state), a lost
+	/// forget is fail-open and must be surfaced. The default is a no-op that
+	/// succeeds, and it is only ever called when
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn forget_session(&self, _id: &Uuid) -> Result<(), surrealdb_types::Error> {
+		Ok(())
 	}
 
 	// ------------------------------
@@ -213,6 +397,18 @@ pub trait RpcProtocol {
 	/// any concurrent session-mutating RPC on the same WebSocket
 	/// (signin / signup / authenticate / set / unset / yuse / refresh /
 	/// invalidate / revoke / reset).
+	///
+	/// That rule is load-bearing beyond the deadlock: a streaming caller
+	/// registers with the read guard still held, which is what stops a
+	/// registration racing the teardown that would have removed it. See
+	/// [`live_query_owner`].
+	///
+	/// There is no counterpart hook for ending a registration. A statement that
+	/// ends a subscription does not report the id it ended -- `KILL` resolves to
+	/// `NONE`, and removing a table, database or namespace, or revoking a
+	/// principal, ends subscriptions without naming them at all. The only signal
+	/// carrying the id is the `Action::Killed` notification, so an implementation
+	/// must drop the registration when it dispatches one.
 	fn handle_live(
 		&self,
 		_lqid: &Uuid,
@@ -222,16 +418,20 @@ pub trait RpcProtocol {
 	) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
 	}
-	/// Handles the execution of a KILL statement
-	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
-	}
 
 	/// Handles the cleanup of live queries
 	fn cleanup_lqs(&self, session_id: &Uuid) -> impl std::future::Future<Output = ()> + Send;
 
 	/// Handles the cleanup of all live queries
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
+
+	/// Handles the cleanup (cancellation) of any open transactions belonging to
+	/// a specific session, run when the session is detached or reset. Default
+	/// no-op: only transports that hold client-managed transactions (WebSocket)
+	/// override this.
+	fn cleanup_txns(&self, _session_id: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
 
 	// ------------------------------
 	// Method execution
@@ -268,7 +468,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let start = web_time::Instant::now();
-		let result: Result<DbResult, surrealdb_types::Error> = async {
+		let dispatch = async {
 			// Check if capabilities allow executing the requested RPC method
 			if !self.kvs().allows_rpc_method(&MethodTarget {
 				method,
@@ -276,8 +476,29 @@ pub trait RpcProtocol {
 				warn!("Capabilities denied RPC method call attempt, target: '{method}'");
 				return Err(method_not_allowed(method.to_string()));
 			}
+			// Snapshot the session before dispatch so a change can be detected
+			// and persisted afterwards (below). The outer `Some` marks "this
+			// request is tracked for persistence"; the inner `Option` is the
+			// session's pre-dispatch value, or `None` if it did not exist yet
+			// (an `attach` about to create it). Only client-named sessions are
+			// durable — a per-request ephemeral (no `client_session`) is never
+			// persisted — and `get_session` rehydrates an evicted session on
+			// the way, so this also covers the "evicted, first request" case.
+			// Const-gated to nothing for in-memory-only implementations, which
+			// never clone.
+			let tracked: Option<Option<Session>> = if Self::PERSIST_SESSIONS
+				&& self.persist_sessions_enabled()
+				&& client_session.is_some()
+			{
+				Some(match self.get_session(&session).await {
+					Ok(lock) => Some(lock.read().await.clone()),
+					Err(_) => None,
+				})
+			} else {
+				None
+			};
 			// Execute the desired method
-			match method {
+			let dispatched = match method {
 				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
 				Method::Info => self.info(txn, session).await,
 				Method::Use => self.yuse(session, params).await,
@@ -320,26 +541,87 @@ pub trait RpcProtocol {
 				Method::Relate => self.relate(txn, session, params).await,
 				Method::Run => self.run(txn, session, params).await,
 				Method::InsertRelation => self.insert_relation(txn, session, params).await,
+				// A streaming query is answered with a sequence of frames, so
+				// it cannot come through this single-response dispatch: a
+				// transport that supports it serves the method before ever
+				// reaching `execute`, and every other transport reports it
+				// absent.
+				Method::QueryStream => Err(method_not_found(method.to_string())),
+				Method::QueryCancel => self.query_cancel(params).await,
 				_ => Err(method_not_found(method.to_string())),
+			};
+			// On success, persist the session if dispatch changed it (or
+			// created it — `attach`). Comparing against the pre-dispatch
+			// snapshot means there is no list of "mutating methods" to keep
+			// in sync with the handlers: whatever alters the session is
+			// written and a read-only method writes nothing. A session the
+			// handler removed (`detach`) is gone from the map, so the lookup
+			// misses and deletion rides `del_session` instead. The snapshot
+			// is taken outside the handler's write lock, so correctness
+			// relies on the per-session dispatch serialization
+			// `PERSIST_SESSIONS` requires.
+			if dispatched.is_ok()
+				&& let Some(before) = tracked
+				&& let Ok(lock) = self.get_session(&session).await
+			{
+				let after = lock.read().await;
+				if before.as_ref() != Some(&*after) {
+					self.persist_session(&session, &after).await;
+				}
 			}
+			dispatched
+		};
+		// Apply an MCP-style wall-clock guard around the dispatch, reusing the
+		// global `--query-timeout` value as its duration (default off, so no
+		// behaviour change unless an operator sets it). The deadline plumbed
+		// into the executor via `Datastore::setup_ctx` only fires at yield
+		// points and does not bound the GraphQL engine's own work; this
+		// wall-clock backstop bounds the whole method call. Transaction-control
+		// methods (`begin` / `commit` / `cancel`) are exempt because dropping a
+		// commit future mid-flight would be unsafe; the statements executed
+		// inside an explicit transaction are still guarded individually (see
+		// `Method::is_transaction_control`).
+		let result: Result<DbResult, surrealdb_types::Error> = match self.kvs().query_timeout() {
+			Some(timeout) if !method.is_transaction_control() => {
+				match common::time::timeout(timeout, dispatch).await {
+					Ok(inner) => inner,
+					Err(_elapsed) => {
+						warn!(
+							target: "surrealdb::core::rpc",
+							timeout = ?timeout,
+							method = method.to_str(),
+							"RPC method exceeded the configured query timeout"
+						);
+						Err(query_timeout_error(timeout))
+					}
+				}
+			}
+			_ => dispatch.await,
+		};
+		let observer = self.kvs().observer();
+		// Nothing is observing, so none of the event context below is ever read.
+		// Building it costs a session lookup, a read-lock acquisition and several
+		// `String` clones on every single RPC, which is the default configuration
+		// for an embedded datastore and for a server with metrics disabled.
+		if observer.is_noop() {
+			return result;
 		}
-		.await;
 		let outcome = Outcome::from(&result);
 		// Resolve session context for the observer event. An unknown
 		// session ID yields an empty `TenantIdentity` rather than an
 		// error, keeping the metrics path infallible. We capture the
 		// scope inside the same lock acquisition to avoid a second
 		// lookup for auth events. Routing through
-		// `TenantIdentity::from_session` applies the documented
+		// `TenantIdentity::from(&Session)` applies the documented
 		// record/anonymous collapsing rule (anon -> `None`,
 		// record-access -> `<record>` sentinel) so per-tenant /
 		// dimensional dashboards stay bounded and audit destinations
 		// never receive raw record-access principal ids.
-		let (identity, scope) = match self.get_session(&session) {
+		let (identity, scope) = match self.get_session(&session).await {
 			Ok(session_lock) => {
 				let s = session_lock.read().await;
 				let scope = AuthScope::from(s.au.level());
-				(TenantIdentity::from_session(&s), scope)
+				(TenantIdentity::from(&*s), scope)
 			}
 			Err(_) => (TenantIdentity::default(), AuthScope::None),
 		};
@@ -352,7 +634,6 @@ pub trait RpcProtocol {
 		// `-` sentinel.
 		let error_class =
 			result.as_ref().err().map(crate::observe::error_class::classify_types_error);
-		let observer = self.kvs().observer();
 		observer.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {
 				method,
@@ -399,7 +680,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -418,6 +699,46 @@ pub trait RpcProtocol {
 			.ok_or(invalid_params("Expected (ns, db)".to_string()))?;
 		// Get a write lock on the session to modify it
 		let mut session = session_lock.write().await;
+		// SECURITY (GHSA-2v9j): tenant-boundary gate, mirroring the SurrealQL
+		// `USE` handler (`dbs::executor`) and the embedded `process_use`. The RPC
+		// `use` method dispatches here, so an authenticated Database-, Namespace-
+		// or Record-level principal must be verified as authorized for the target
+		// namespace/database before the session is pivoted; otherwise it could
+		// switch into a foreign tenant and reach any table there with satisfiable
+		// PERMISSIONS. Resolve the target the same way the mutation below does (a
+		// string changes it, `None` leaves it, `Null` unsets it) and check the
+		// authenticated Auth level, which is the source of truth. Root and
+		// anonymous (`Level::No`, e.g. `use` before `signin`) principals are
+		// unrestricted by `can_access_ns_db`, preserving the pre-signin pattern.
+		{
+			let resolved_ns = match &ns {
+				PublicValue::String(ns) => Some(ns.as_str()),
+				PublicValue::Null => None,
+				// `None` (leave unchanged) or an invalid type (rejected below)
+				// keeps the current selection for the boundary check.
+				_ => session.ns.as_deref(),
+			};
+			let resolved_db = match &db {
+				PublicValue::String(db) => Some(db.as_str()),
+				PublicValue::Null => None,
+				_ => session.db.as_deref(),
+			};
+			if let Some(ns_name) = resolved_ns {
+				let db_name = resolved_db.unwrap_or_default();
+				if !session.au.can_access_ns_db(ns_name, db_name) {
+					let err = if session.au.level().ns() == Some(ns_name) {
+						ExecError::DbNotAllowed {
+							db: db_name.to_owned(),
+						}
+					} else {
+						ExecError::NsNotAllowed {
+							ns: ns_name.to_owned(),
+						}
+					};
+					return Err(surrealdb_types::Error::not_allowed(err.to_string(), None));
+				}
+			}
+		}
 		// Empty USE call: apply defaults only if session doesn't already have ns/db
 		if ns.is_none() && db.is_none() {
 			// Skip applying defaults if ns is already set (e.g., from token authentication)
@@ -425,7 +746,7 @@ pub trait RpcProtocol {
 				// Fetch defaults from database configuration
 				let kvs = self.kvs();
 				let tx = kvs
-					.transaction(TransactionType::Write, LockType::Optimistic)
+					.transaction(TransactionType::Write)
 					.await
 					.map_err(types_error_from_anyhow)?;
 				let (ns, db) = if let Some(x) = match tx.get_default_config().await {
@@ -439,6 +760,27 @@ pub trait RpcProtocol {
 				} else {
 					(None, None)
 				};
+
+				// SECURITY (GHSA-2v9j): gate the resolved default the same way an
+				// explicit `use` is gated, so an empty `use` cannot pivot a scoped
+				// principal onto a foreign default tenant. Root and anonymous
+				// principals are unrestricted by `can_access_ns_db`.
+				if let Some(ns_name) = &ns {
+					let db_name = db.as_deref().unwrap_or_default();
+					if !session.au.can_access_ns_db(ns_name, db_name) {
+						let _ = tx.cancel().await;
+						let err = if session.au.level().ns() == Some(ns_name.as_str()) {
+							ExecError::DbNotAllowed {
+								db: db_name.to_owned(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns_name.to_owned(),
+							}
+						};
+						return Err(surrealdb_types::Error::not_allowed(err.to_string(), None));
+					}
+				}
 
 				if let Some(ns) = ns {
 					match tx.get_or_add_ns(None, &ns).await {
@@ -486,13 +828,24 @@ pub trait RpcProtocol {
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
 					let tx = kvs
-						.transaction(TransactionType::Write, LockType::Optimistic)
+						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					let create = kvs
-						.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns)
-						.await
-						.map_err(types_error_from_anyhow)?;
+					// Cancel before returning: this check runs with `tx` already
+					// open, so propagating its error directly would drop a
+					// writeable transaction without committing or cancelling it,
+					// tripping `Transactor::drop`'s "a transaction was dropped
+					// without being committed or cancelled" error and leaving the
+					// transaction to be reaped instead of rolled back promptly.
+					let create =
+						match kvs.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns).await
+						{
+							Ok(create) => create,
+							Err(e) => {
+								let _ = tx.cancel().await;
+								return Err(types_error_from_anyhow(e));
+							}
+						};
 					if create {
 						run!(tx, tx.get_or_add_ns(None, &ns).await)
 							.map_err(types_error_from_anyhow)?;
@@ -524,13 +877,23 @@ pub trait RpcProtocol {
 					};
 					let kvs = self.kvs();
 					let tx = kvs
-						.transaction(TransactionType::Write, LockType::Optimistic)
+						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					let create = kvs
+					// Cancel before returning, as in the namespace branch above: a
+					// bare `?` here would drop `tx` while it is still open. A
+					// single `use(ns, db)` call passes through both branches, so
+					// the unguarded form could leak two transactions per call.
+					let create = match kvs
 						.should_materialize_db_on_use(&tx, session.au.as_ref(), &ns, &db)
 						.await
-						.map_err(types_error_from_anyhow)?;
+					{
+						Ok(create) => create,
+						Err(e) => {
+							let _ = tx.cancel().await;
+							return Err(types_error_from_anyhow(e));
+						}
+					};
 					if create {
 						run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
 							.map_err(types_error_from_anyhow)?;
@@ -581,7 +944,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signup, mutating the session
@@ -615,7 +978,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signin, mutating the session
@@ -649,7 +1012,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (token:string)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Log before authentication
@@ -716,7 +1079,7 @@ pub trait RpcProtocol {
 			return Err(unexpected());
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt token refresh, which will:
@@ -724,8 +1087,9 @@ pub trait RpcProtocol {
 		// - Revoke the old refresh token
 		// - Create new access and refresh tokens
 		// - Update the session with the new authentication state
-		let out: Result<PublicValue> =
-			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
+		let out: Result<PublicValue> = crate::iam::token::refresh(token, self.kvs(), &mut session)
+			.await
+			.map(Token::into_value);
 		let principal_changed = snapshot.differs_from(&session);
 		drop(session);
 		if principal_changed {
@@ -737,7 +1101,7 @@ pub trait RpcProtocol {
 
 	async fn invalidate(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		// Clear the current session
 		crate::iam::clear::clear(&mut session).map_err(types_error_from_anyhow)?;
@@ -786,19 +1150,23 @@ pub trait RpcProtocol {
 		};
 		// Revoke the refresh token by removing the grant record from the database.
 		// This prevents the refresh token from being used to obtain new access tokens.
-		token.revoke_refresh_token(self.kvs()).await.map_err(types_error_from_anyhow)?;
+		crate::iam::token::revoke_refresh_token(token, self.kvs())
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
 	async fn reset(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		// Reset the current session
 		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(&session_id).await;
+		// Cancel any open transactions owned by this session
+		self.cleanup_txns(&session_id).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -812,7 +1180,7 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		let vars = Some(session.variables.clone());
 		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
@@ -832,7 +1200,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -860,7 +1228,7 @@ pub trait RpcProtocol {
 		match val {
 			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
-				crate::rpc::check_protected_param(&key)?;
+				check_protected_param(&key)?;
 				session.variables.insert(key, val)
 			}
 		}
@@ -874,7 +1242,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -907,7 +1275,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -926,7 +1294,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -939,7 +1307,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -951,7 +1319,7 @@ pub trait RpcProtocol {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
 			x => Expr::from_public_value(x),
 		};
 
@@ -974,7 +1342,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 
@@ -993,7 +1361,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1012,7 +1380,7 @@ pub trait RpcProtocol {
 
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
 			x => Expr::from_public_value(x),
 		};
 
@@ -1034,13 +1402,14 @@ pub trait RpcProtocol {
 			timeout: Expr::Literal(Literal::None),
 			explain: None,
 			tempfiles: false,
+			for_update: false,
 		};
 		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
 
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1058,7 +1427,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1070,8 +1439,10 @@ pub trait RpcProtocol {
 
 		let into = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
-			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
+			PublicValue::Table(x) => {
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+			}
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
 			x => Some(Expr::from_public_value(x)),
 		};
 
@@ -1089,7 +1460,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1103,7 +1474,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1115,8 +1486,10 @@ pub trait RpcProtocol {
 
 		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
-			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
+			PublicValue::Table(x) => {
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+			}
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
 			x => Some(Expr::from_public_value(x)),
 		};
 
@@ -1136,7 +1509,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1154,7 +1527,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1190,7 +1563,7 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), None)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1208,7 +1581,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1248,7 +1621,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1266,7 +1639,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1321,7 +1694,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1357,7 +1730,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1375,7 +1748,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1440,7 +1813,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1498,7 +1871,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1521,7 +1894,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1554,41 +1927,276 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
-		let (query, vars) =
-			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-				.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
-
-		let PublicValue::String(query) = query else {
-			return Err(invalid_params("Expected query to be string".to_string()));
-		};
-
-		// Specify the query variables
-		let vars = match vars {
-			Some(PublicValue::Object(v)) => {
-				let mut merged = session.variables.clone();
-				merged.extend(v.into());
-				Some(merged)
-			}
-			None | Some(PublicValue::None | PublicValue::Null) => Some(session.variables.clone()),
-			unexpected => {
-				return Err(invalid_params(format!(
-					"Expected vars to be object, got {unexpected:?}"
-				)));
-			}
-		};
+		let (query, vars) = extract_query_params(params, &session)?;
 
 		Ok(DbResult::Query(
-			run_query(self, txn, session_id, QueryForm::Text(&query), vars)
-				.await
-				.map_err(types_error_from_anyhow)?,
+			run_query(
+				self,
+				txn,
+				session_id,
+				&session,
+				QueryForm::Text(&query, Dialect::SurrealQl),
+				vars,
+			)
+			.await
+			.map_err(types_error_from_anyhow)?,
 		))
+	}
+
+	/// Prepare SurrealQL to stream its results, rather than answering with all
+	/// of them at once.
+	///
+	/// Returns the parsed statement count together with the execution, because
+	/// a transport has to announce that count before the first result exists.
+	/// Drive [`QueryStreamJob::run`] while draining `items`.
+	///
+	/// This applies the same gates as [`Self::execute`] does for
+	/// [`Method::Query`] — the capability check and the wall-clock guard —
+	/// since a streaming call reaches the datastore without passing through it.
+	/// The wall-clock guard bounds the whole execution rather than only its
+	/// setup, so a client that reads slowly cannot hold a read snapshot open
+	/// past the configured timeout.
+	/// `cancel` is the caller's own handle on the execution, tripped when the
+	/// consumer goes away. It is cooperative on purpose: the execution stops at
+	/// its next yield point and finalises its transaction, where dropping the
+	/// future instead would drop that transaction unfinished. A transport with
+	/// a connection-level handle of its own is used as a fallback.
+	///
+	/// The principal returned alongside the job is the one the execution runs
+	/// as. A caller registering the `LIVE SELECT`s the execution creates must
+	/// pass it to [`live_query_owner`], because by then the session may be
+	/// acting as someone else.
+	async fn query_stream(
+		&self,
+		txn: Option<Uuid>,
+		session_id: Uuid,
+		params: PublicArray,
+		cancel: Option<CancelHandle>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<(QueryStreamJob, AuthPrincipalSnapshot), surrealdb_types::Error> {
+		// The capability gate lives in `execute`, which this does not go
+		// through: a denied `query` must be denied here too.
+		if !self.kvs().allows_rpc_method(&MethodTarget {
+			method: Method::Query,
+		}) {
+			warn!("Capabilities denied RPC method call attempt, target: 'query'");
+			return Err(method_not_allowed(Method::Query.to_string()));
+		}
+
+		// One acquisition, and everything the execution needs taken from it:
+		// reading twice would let a concurrent `set` or `use` land in between,
+		// so the variables and the session could come from states that never
+		// existed together.
+		//
+		// The guard is then dropped rather than held across the execution, as
+		// the buffered path holds it: a stream lives for as long as its
+		// consumer reads, and holding the guard that long would block every
+		// `use` / `set` / `signin` on the session behind a slow client. The
+		// execution runs against the session as it was when the query started,
+		// which is what the buffered path effectively gives it too — there, a
+		// concurrent mutation simply waits instead.
+		let (query, vars, session, principal) = {
+			let session_lock = self.get_session(&session_id).await?;
+			let session = session_lock.read().await;
+			// Check if the user is allowed to query
+			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
+				return Err(method_not_allowed(Method::Query.to_string()));
+			}
+			if !Self::LQ_SUPPORT && session.rt {
+				return Err(bad_lq_config());
+			}
+			let (query, vars) = extract_query_params(params, &session)?;
+			// Captured under the same guard as everything else the execution
+			// needs, so it names the principal the query actually runs as rather
+			// than whoever the session belongs to by the time it finishes.
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			(query, vars, session.clone(), principal)
+		};
+
+		// Kept so the wall-clock guard below can stop the execution
+		// cooperatively rather than by dropping it. Deliberately the caller's
+		// own handle and never the connection-level fallback below: tripping
+		// that would cancel every other query on the same connection because
+		// this one timed out.
+		let guard_cancel = cancel.clone();
+		let cancel = cancel.or_else(|| self.cancel_handle());
+		let kvs = self.kvs_arc();
+		let transaction = match txn {
+			Some(txn_id) => Some(self.get_tx(txn_id).await?),
+			None => None,
+		};
+		let job = kvs.run_streaming(
+			QueryRequest::new(query.as_str(), &session)
+				.with_variables(vars)
+				.with_optional_transaction(transaction)
+				.with_optional_cancel(cancel),
+			items,
+		)?;
+
+		// Bound the execution the way `execute` bounds a buffered one. The
+		// guard wraps the run future, so it covers producing every row rather
+		// than only reaching the first.
+		//
+		// It stops the execution by tripping its cancel handle and then
+		// awaiting it, never by dropping it: the execution owns an open
+		// transaction, and dropping the future would leave that transaction
+		// neither committed nor cancelled. The executor short-circuits at its
+		// next yield and finalises the transaction on its normal error path,
+		// which is the same route a client-driven cancellation takes.
+		//
+		// The wait for it to stop is itself bounded. A cooperative stop needs
+		// the execution to reach a yield point, and one parked sending into a
+		// full `items` channel reaches none until its consumer drains -- so a
+		// consumer that has stopped draining would otherwise turn a bounded
+		// timeout into an indefinite wait. Past that grace the caller is
+		// answered with its timeout and the execution carries on detached,
+		// finalising its own transaction; its results settle themselves, since
+		// nothing is left to hand them to.
+		let timeout = self.kvs().query_timeout();
+		// The observer event `execute` emits on completion. A streaming query
+		// does not pass through `execute`, so it reports itself: the identity
+		// comes from the session already cloned above rather than a second
+		// lookup, and the duration covers producing every row, which is the
+		// span a caller comparing it against a buffered query means.
+		//
+		// There is no auth event to match it: `method_to_auth_action` maps
+		// `Query` to `None`, so `execute` emits none either.
+		//
+		// `None` when nothing is observing, which also skips building the
+		// identity — the same short-circuit `execute` applies.
+		let observer = Arc::clone(self.kvs().observer());
+		let identity = (!observer.is_noop()).then(|| TenantIdentity::from(&session));
+		let started = web_time::Instant::now();
+		let QueryStreamJob {
+			statement_count,
+			mut run,
+		} = job;
+		let job = QueryStreamJob {
+			statement_count,
+			run: Box::pin(async move {
+				let result = match timeout {
+					Some(timeout) => {
+						let deadline = common::time::sleep(timeout);
+						tokio::pin!(deadline);
+						let mut elapsed = false;
+						loop {
+							tokio::select! {
+								// The execution is polled first so that it wins
+								// a tie: a run that completes in the same poll
+								// as the deadline has produced a real answer,
+								// and an unbiased choice would discard it and
+								// report a timeout roughly half the time.
+								biased;
+								result = &mut run => {
+									// The deadline may have fired first, in
+									// which case the execution has just
+									// finished stopping and the timeout is the
+									// caller's answer.
+									break if elapsed {
+										warn!(
+											target: "surrealdb::core::rpc",
+											timeout = ?timeout,
+											"Streaming query exceeded the configured query timeout"
+										);
+										Err(query_timeout_error(timeout))
+									} else {
+										result
+									};
+								}
+							_ = &mut deadline => {
+									if elapsed {
+										// The grace elapsed: the execution did
+										// not stop cooperatively. It is handed
+										// on rather than dropped -- dropping it
+										// would leave its transaction neither
+										// committed nor cancelled -- so the
+										// caller gets its timeout now while the
+										// execution finalises itself.
+										error!(
+											target: "surrealdb::core::rpc",
+											timeout = ?timeout,
+											"Streaming query did not stop within the grace period \
+											 after its timeout; detaching it to finalise on its own"
+										);
+										#[cfg(not(target_family = "wasm"))]
+										{
+											let kvs = Arc::clone(&kvs);
+											tokio::spawn(async move {
+												settle_detached_live_queries(&kvs, run.await).await;
+											});
+											break Err(query_timeout_error(timeout));
+										}
+										// No task to hand it to here, and
+										// dropping it is the one thing that
+										// must not happen, so keep polling it:
+										// the tripped handle and the
+										// execution's own context deadline are
+										// what end it.
+										#[cfg(target_family = "wasm")]
+										{
+											settle_detached_live_queries(&kvs, run.await).await;
+											break Err(query_timeout_error(timeout));
+										}
+									}
+									elapsed = true;
+									// Cooperative: the execution keeps being
+									// polled until it returns, so it finalises
+									// its transaction itself. Its consumer is
+									// what drains `items`, and it is driving
+									// this future, so closing the channel here
+									// is neither needed nor ours to do.
+									if let Some(cancel) = &guard_cancel {
+										cancel.trip();
+									}
+									// Re-arm as the abandonment deadline.
+									deadline.as_mut().reset(
+										common::time::Instant::now() + QUERY_STREAM_STOP_GRACE,
+									);
+								}
+							}
+						}
+					}
+					None => run.await,
+				};
+				if let Some(identity) = &identity {
+					observer.on_rpc_complete(&RpcEvent {
+						safe: RpcEventSafe {
+							method: Method::Query,
+							outcome: Outcome::from(&result),
+							duration: started.elapsed(),
+							error_class: result
+								.as_ref()
+								.err()
+								.map(crate::observe::error_class::classify_types_error),
+						},
+						ctx: identity.to_rpc_ctx(),
+					});
+				}
+				result
+			}),
+		};
+		Ok((job, principal))
+	}
+
+	/// Cancels an in-flight streaming query by its originating request id.
+	///
+	/// The registry of in-flight streams is transport state — a stream is
+	/// reachable only from the connection that started it — so the base
+	/// implementation reports the method as absent, exactly as a server
+	/// without streaming would. A transport that serves `query_stream`
+	/// overrides this with a lookup into its own registry. `execute` applies
+	/// the capability gate for [`Method::QueryCancel`] before dispatching
+	/// here, as it does for every method.
+	async fn query_cancel(&self, params: PublicArray) -> Result<DbResult, surrealdb_types::Error> {
+		let _ = params;
+		Err(method_not_found(Method::QueryCancel.to_string()))
 	}
 
 	async fn gql(
@@ -1604,7 +2212,7 @@ pub trait RpcProtocol {
 		}
 		#[cfg(feature = "gql")]
 		{
-			let session_lock = self.get_session(&session_id)?;
+			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1636,13 +2244,17 @@ pub trait RpcProtocol {
 				}
 			};
 
-			// Parse and lower the GQL query into a prepared plan
-			let plan = self.kvs().parse_gql(&query)?;
-
 			Ok(DbResult::Query(
-				run_query(self, txn, session_id, QueryForm::Plan(plan), vars)
-					.await
-					.map_err(types_error_from_anyhow)?,
+				run_query(
+					self,
+					txn,
+					session_id,
+					&session,
+					QueryForm::Text(&query, Dialect::Gql),
+					vars,
+				)
+				.await
+				.map_err(types_error_from_anyhow)?,
 			))
 		}
 	}
@@ -1677,7 +2289,7 @@ pub trait RpcProtocol {
 			// is no HTTP route in play here, so -- as agreed -- access is gated
 			// purely on the query capability for the subject, exactly like the
 			// `query` and `gql` RPC methods.
-			let session_lock = self.get_session(&session_id)?;
+			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Graphql.to_string()));
@@ -1739,7 +2351,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1881,7 +2493,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the function on the database
-		let mut res = run_query(self, None, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, None, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1924,116 +2536,557 @@ pub trait RpcProtocol {
 }
 
 enum QueryForm<'a> {
-	Text(&'a str),
+	/// Query text in the given dialect. The `gql` handler is the only caller
+	/// that names a dialect; every other one submits SurrealQL.
+	Text(&'a str, Dialect),
 	Parsed(Ast),
-	/// A pre-lowered GQL query. Only constructed by the `gql` handler, which
-	/// is itself gated behind the `gql` feature.
-	#[cfg(feature = "gql")]
-	Plan(crate::gql::PreparedGqlQuery),
 }
 
+/// Read a `query` call's arguments: the SurrealQL text, and the variables to
+/// run it with.
+///
+/// The call's own variables are layered over the session's rather than
+/// replacing them, so a query sees both, and a missing or null `vars` leaves
+/// the session's in place.
+fn extract_query_params(
+	params: PublicArray,
+	session: &Session,
+) -> Result<(String, Option<PublicVariables>), surrealdb_types::Error> {
+	let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
+		.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
+
+	let PublicValue::String(query) = query else {
+		return Err(invalid_params("Expected query to be string".to_string()));
+	};
+
+	// Specify the query variables
+	let vars = match vars {
+		Some(PublicValue::Object(v)) => {
+			let mut merged = session.variables.clone();
+			merged.extend(v.into());
+			Some(merged)
+		}
+		None | Some(PublicValue::None | PublicValue::Null) => Some(session.variables.clone()),
+		unexpected => {
+			return Err(invalid_params(format!("Expected vars to be object, got {unexpected:?}")));
+		}
+	};
+
+	Ok((query, vars))
+}
+
+/// Runs a query against a session the caller already holds a read guard on.
+///
+/// The session is passed in rather than looked up again on purpose. Every caller
+/// reaches here holding a read guard on `RwLock<Session>`, and that lock is
+/// task-fair: a writer queued between two acquisitions blocks the second read,
+/// while the caller's outer guard blocks the writer. Re-locking here would
+/// therefore deadlock against any concurrent `set` / `use` / `signin` /
+/// `authenticate` on the same session, all of which a transport may apply
+/// concurrently with this call. The same reasoning already keeps `handle_live`
+/// off the lock — see the snapshot below.
 async fn run_query<T>(
 	this: &T,
 	txn: Option<Uuid>,
 	session_id: Uuid,
+	session: &Session,
 	query: QueryForm<'_>,
 	vars: Option<PublicVariables>,
 ) -> Result<Vec<QueryResult>>
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session_lock = this.get_session(&session_id).map_err(anyhow::Error::from)?;
-	let session = session_lock.read().await;
 	if !T::LQ_SUPPORT && session.rt {
 		return Err(bad_lq_config().into());
 	}
 
-	// If a transaction UUID is provided, retrieve it and execute with it
 	let cancel = this.cancel_handle();
-	let res = if let Some(txn_id) = txn {
-		// Retrieve the transaction - fail if not found
-		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
-		// Execute with the existing transaction by passing it through context
-		match (query, cancel) {
-			(QueryForm::Text(query), Some(cancel)) => {
-				this.kvs()
-					.execute_with_transaction_and_cancel(query, &session, vars, tx, cancel)
-					.await?
-			}
-			(QueryForm::Text(query), None) => {
-				this.kvs().execute_with_transaction(query, &session, vars, tx).await?
-			}
-			(QueryForm::Parsed(ast), Some(cancel)) => {
-				this.kvs()
-					.process_with_transaction_and_cancel(ast, &session, vars, tx, cancel)
-					.await?
-			}
-			(QueryForm::Parsed(ast), None) => {
-				this.kvs().process_with_transaction(ast, &session, vars, tx).await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), Some(cancel)) => {
-				this.kvs()
-					.process_gql_with_transaction_and_cancel(plan, &session, vars, tx, cancel)
-					.await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), None) => {
-				this.kvs().process_gql_with_transaction(plan, &session, vars, tx).await?
-			}
-		}
-	} else {
-		// No transaction - execute normally
-		match (query, cancel) {
-			(QueryForm::Text(query), Some(cancel)) => {
-				this.kvs().execute_with_cancel(query, &session, vars, cancel).await?
-			}
-			(QueryForm::Text(query), None) => this.kvs().execute(query, &session, vars).await?,
-			(QueryForm::Parsed(ast), Some(cancel)) => {
-				this.kvs().process_with_cancel(ast, &session, vars, cancel).await?
-			}
-			(QueryForm::Parsed(ast), None) => this.kvs().process(ast, &session, vars).await?,
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), Some(cancel)) => {
-				this.kvs().process_gql_with_cancel(plan, &session, vars, cancel).await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), None) => this.kvs().process_gql(plan, &session, vars).await?,
-		}
+	let source = match query {
+		QueryForm::Text(text, dialect) => QuerySource::in_dialect(text, dialect),
+		QueryForm::Parsed(ast) => QuerySource::Ast(ast),
 	};
+	// A transaction UUID names a client-owned transaction to run inside — fail
+	// if it is not one this connection holds. Without one the executor creates
+	// and finalises a transaction per statement.
+	let transaction = match txn {
+		Some(txn_id) => Some(this.get_tx(txn_id).await.map_err(anyhow::Error::from)?),
+		None => None,
+	};
+	let res = this
+		.kvs()
+		.run(
+			QueryRequest::new(source, session)
+				.with_variables(vars)
+				.with_optional_transaction(transaction)
+				.with_optional_cancel(cancel),
+		)
+		.await?;
 
 	// Post-process hooks for web layer.
 	//
 	// `handle_live` needs the registering session's namespace / database
 	// for the `surrealdb.live_query.active` gauge labelling. We snapshot
-	// those off the read guard we already hold here rather than letting
+	// those off the session the caller lent us rather than letting
 	// `handle_live` re-lock the same `RwLock<Session>`: that would be a
 	// recursive read on a write-preferring lock, and any concurrent
 	// session-mutating RPC on the same WebSocket would queue a writer
 	// between the two reads and deadlock both futures.
+	//
+	// Registration is the only hook here. A statement that ends a subscription
+	// does not report the id it ended, so the transport drops the registration
+	// on that id's `Action::Killed` notification instead.
 	let live_namespace = session.ns.clone();
 	let live_database = session.db.clone();
 	for response in &res {
-		match &response.query_type {
-			QueryType::Live => {
-				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(
-						lqid,
-						session_id,
-						live_namespace.clone(),
-						live_database.clone(),
-					)
-					.await;
-				}
-			}
-			QueryType::Kill => {
-				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_kill(lqid).await;
-				}
-			}
-			_ => {}
+		if response.query_type == QueryType::Live
+			&& let Ok(PublicValue::Uuid(lqid)) = &response.result
+		{
+			this.handle_live(lqid, session_id, live_namespace.clone(), live_database.clone()).await;
 		}
 	}
 	// Return the result to the client
 	Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+	/// A streaming execution's live queries belong to the principal that created
+	/// them, so the owner is only granted while the session is still acting as
+	/// that principal — not merely while a session of that id exists.
+	///
+	/// `invalidate` keeps the session and clears its authentication, which is the
+	/// case that made "does the session exist" the wrong question: it answers yes
+	/// for a session whose `cleanup_lqs` has already swept the map.
+	mod live_query_ownership {
+		use std::sync::Arc;
+
+		use surrealdb_iam::{Auth, Level};
+		use surrealdb_types::HashMap;
+		use tokio::sync::RwLock;
+		use uuid::Uuid;
+
+		use crate::dbs::{AuthPrincipalSnapshot, Session};
+		use crate::rpc::live_query_owner;
+
+		fn registered(session: Session) -> (HashMap<Uuid, Arc<RwLock<Session>>>, Uuid) {
+			let id = Uuid::now_v7();
+			let sessions = HashMap::new();
+			sessions.insert(id, Arc::new(RwLock::new(session)));
+			(sessions, id)
+		}
+
+		#[tokio::test]
+		async fn an_unchanged_principal_owns_them() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_some(),
+				"the session is still who it was",
+			);
+		}
+
+		#[tokio::test]
+		async fn a_cleared_principal_does_not() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			// What `invalidate` does: the session stays, its authentication goes.
+			let entry = sessions.get(&id).expect("the session is registered");
+			crate::iam::clear::clear(&mut *entry.write().await).expect("clear");
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_none(),
+				"an invalidated session does not own what it created before",
+			);
+		}
+
+		#[tokio::test]
+		async fn a_different_level_does_not() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			let entry = sessions.get(&id).expect("the session is registered");
+			entry.write().await.au = Arc::new(Auth::for_ns(surrealdb_iam::Role::Owner, "ns"));
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_none(),
+				"the same actor at a different level is a different principal",
+			);
+			// Guard against the assertion passing for the wrong reason.
+			assert!(matches!(entry.read().await.au.level(), Level::Namespace(_)));
+		}
+
+		#[tokio::test]
+		async fn a_session_that_has_gone_does_not() {
+			let session = Session::default();
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, _) = registered(session);
+
+			assert!(
+				live_query_owner(&sessions, Uuid::now_v7(), &principal).await.is_none(),
+				"a session that was never registered owns nothing",
+			);
+		}
+	}
+
+	use std::collections::HashMap as StdHashMap;
+	use std::sync::atomic::{AtomicBool, Ordering};
+	use std::sync::{Arc, Mutex};
+
+	use surrealdb_types::HashMap;
+	use tokio::sync::RwLock;
+	use uuid::Uuid;
+
+	use super::{DbResult, Method, RpcProtocol};
+	use crate::dbs::Session;
+	use crate::kvs::Datastore;
+	use crate::types::{PublicArray, PublicValue};
+
+	/// A minimal persisting `RpcProtocol`: sessions live in `sessions` (the
+	/// in-memory map the trait requires) and are mirrored into `durable`
+	/// (a stand-in for durable storage, holding serialized sessions).
+	struct DurableRpc {
+		ds: Arc<Datastore>,
+		sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
+		durable: Mutex<StdHashMap<Uuid, Vec<u8>>>,
+		/// When set, [`forget_session`] fails, simulating a durable-storage
+		/// error during teardown.
+		fail_forget: AtomicBool,
+	}
+
+	impl DurableRpc {
+		fn new(ds: Arc<Datastore>) -> Self {
+			Self {
+				ds,
+				sessions: HashMap::new(),
+				durable: Mutex::new(StdHashMap::new()),
+				fail_forget: AtomicBool::new(false),
+			}
+		}
+	}
+
+	impl RpcProtocol for DurableRpc {
+		const PERSIST_SESSIONS: bool = true;
+
+		fn kvs(&self) -> &Datastore {
+			&self.ds
+		}
+		fn kvs_arc(&self) -> Arc<Datastore> {
+			Arc::clone(&self.ds)
+		}
+		fn version_data(&self) -> DbResult {
+			DbResult::Other(PublicValue::String("surrealdb-test".to_owned()))
+		}
+		fn session_map(&self) -> &HashMap<Uuid, Arc<RwLock<Session>>> {
+			&self.sessions
+		}
+		fn cleanup_lqs(&self, _id: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+			std::future::ready(())
+		}
+		fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
+			std::future::ready(())
+		}
+
+		async fn load_session(&self, id: &Uuid) -> Option<Session> {
+			let bytes = self.durable.lock().unwrap().get(id).cloned()?;
+			serde_json::from_slice(&bytes).ok()
+		}
+		async fn persist_session(&self, id: &Uuid, session: &Session) {
+			let bytes = serde_json::to_vec(session).unwrap();
+			self.durable.lock().unwrap().insert(*id, bytes);
+		}
+		async fn forget_session(&self, id: &Uuid) -> Result<(), surrealdb_types::Error> {
+			if self.fail_forget.load(Ordering::SeqCst) {
+				return Err(surrealdb_types::Error::internal("durable delete failed".to_owned()));
+			}
+			self.durable.lock().unwrap().remove(id);
+			Ok(())
+		}
+	}
+
+	fn use_params(ns: &str, db: &str) -> PublicArray {
+		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	/// Regression (GHSA-2v9j): the RPC `use` handler (`yuse`) enforces the same
+	/// tenant boundary as the SurrealQL `USE` statement and `process_use` - a
+	/// Database-level principal cannot pivot into a foreign tenant over RPC.
+	#[tokio::test]
+	async fn use_rpc_denies_cross_tenant_pivot_for_database_user() {
+		use surrealdb_iam::{Level, Role};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(41);
+
+		// A Database Editor confined to ns_a/db_a, already on its own tenant.
+		let sess =
+			Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+				.with_ns("ns_a")
+				.with_db("db_a");
+		rpc.set_session(sid, Arc::new(RwLock::new(sess)));
+
+		let err = rpc
+			.execute(None, sid, Some(sid), Method::Use, use_params("ns_b", "db_b"))
+			.await
+			.expect_err("cross-tenant RPC use must be denied");
+		assert!(
+			err.to_string().contains("ns_b"),
+			"expected a tenant-boundary denial naming the foreign namespace, got: {err}"
+		);
+
+		// The session must not have been pivoted into tenant B.
+		let lock = rpc.get_session(&sid).await.unwrap();
+		let session = lock.read().await;
+		assert_eq!(session.ns.as_deref(), Some("ns_a"));
+		assert_eq!(session.db.as_deref(), Some("db_a"));
+	}
+
+	/// Sanity: the RPC `use` gate still lets a principal re-select its own tenant.
+	#[tokio::test]
+	async fn use_rpc_allows_same_tenant_for_database_user() {
+		use surrealdb_iam::{Level, Role};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(42);
+
+		let sess =
+			Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+				.with_ns("ns_a")
+				.with_db("db_a");
+		rpc.set_session(sid, Arc::new(RwLock::new(sess)));
+
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("ns_a", "db_a"))
+			.await
+			.expect("own-tenant RPC use must be allowed");
+	}
+
+	/// Counts `on_rpc_complete` calls, reporting itself as a no-op shell or not.
+	///
+	/// A real observer never lies about [`ExecutionObserver::is_noop`] — only
+	/// `NoopObserver` overrides it. This one does so it can observe the
+	/// short-circuit from the outside: with the flag set, a counted event means
+	/// the gate did not fire.
+	struct RpcCounter {
+		noop: bool,
+		count: std::sync::atomic::AtomicUsize,
+	}
+
+	impl crate::observe::ExecutionObserver for RpcCounter {
+		fn on_rpc_complete(&self, _event: &crate::observe::RpcEvent) {
+			self.count.fetch_add(1, Ordering::SeqCst);
+		}
+		fn is_noop(&self) -> bool {
+			self.noop
+		}
+	}
+
+	async fn count_rpc_events(noop: bool) -> usize {
+		let observer = Arc::new(RpcCounter {
+			noop,
+			count: std::sync::atomic::AtomicUsize::new(0),
+		});
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(31);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		observer.count.load(Ordering::SeqCst)
+	}
+
+	/// The gate must not silence a live observer.
+	#[tokio::test]
+	async fn an_observed_rpc_still_reports_its_event() {
+		assert_eq!(count_rpc_events(false).await, 1, "a live observer received no RPC event");
+	}
+
+	/// And with nothing observing, the whole event path — a session lookup, a
+	/// read-lock acquisition and the identity clones — is skipped.
+	#[tokio::test]
+	async fn an_unobserved_rpc_builds_no_event() {
+		assert_eq!(count_rpc_events(true).await, 0, "the no-op short-circuit did not fire");
+	}
+
+	/// A query and a session mutation on the same session must both complete.
+	///
+	/// `Session` sits behind a task-fair `RwLock`, so a queued writer blocks
+	/// later readers. Any method that acquires a read guard and then reaches a
+	/// second acquisition of the same lock therefore deadlocks against a
+	/// concurrent `set` / `use` / `signin`: the writer waits on the outer guard
+	/// while the inner read waits behind the writer.
+	///
+	/// A transport applies one connection's RPCs concurrently, so this is
+	/// reachable from a single client. The two tasks race, so a run that happens
+	/// not to interleave passes vacuously — but once the re-lock is gone no
+	/// interleaving can hang, so this cannot fail spuriously.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_query_and_a_concurrent_session_mutation_both_complete() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = Arc::new(DurableRpc::new(ds));
+		let sid = Uuid::from_u128(21);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+
+		const ROUNDS: usize = 200;
+		let queries = {
+			let rpc = Arc::clone(&rpc);
+			tokio::spawn(async move {
+				for i in 0..ROUNDS {
+					let params: PublicArray =
+						vec![PublicValue::String(format!("RETURN {i};"))].into();
+					rpc.execute(None, sid, Some(sid), Method::Query, params).await.unwrap();
+				}
+			})
+		};
+		let mutations = {
+			let rpc = Arc::clone(&rpc);
+			tokio::spawn(async move {
+				for i in 0..ROUNDS {
+					let params: PublicArray = vec![
+						PublicValue::String("k".to_owned()),
+						PublicValue::Number(surrealdb_types::Number::Int(i as i64)),
+					]
+					.into();
+					rpc.execute(None, sid, Some(sid), Method::Set, params).await.unwrap();
+				}
+			})
+		};
+
+		tokio::time::timeout(std::time::Duration::from_secs(30), async {
+			queries.await.unwrap();
+			mutations.await.unwrap();
+		})
+		.await
+		.expect("a query deadlocked against a concurrent session mutation");
+	}
+
+	#[tokio::test]
+	async fn mutations_persist_and_an_evicted_session_is_rehydrated() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(7);
+
+		// An attached, authenticated session (as `signin` would leave it).
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+
+		// A session-mutating method (USE) must write the session through to
+		// durable storage.
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid), "USE did not persist the session");
+
+		// Simulate isolate eviction: the in-memory session map is gone.
+		rpc.session_map().remove(&sid);
+		assert!(!rpc.session_map().contains_key(&sid));
+
+		// `get_session` rehydrates the evicted session from durable storage
+		// and reinstalls it, keeping its auth — so every caller (the gate, the
+		// handlers, the observer) resumes it transparently.
+		let restored = rpc.get_session(&sid).await.expect("session was not rehydrated");
+		assert!(restored.read().await.au.is_root(), "auth lost on rehydrate");
+		assert!(rpc.session_map().contains_key(&sid), "rehydrated session was not reinstalled");
+
+		// And a full request against the evicted id succeeds end to end.
+		rpc.session_map().remove(&sid);
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn attach_persists_so_a_bare_session_survives_eviction() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(13);
+
+		// `attach` creates the session; the change-detection treats a
+		// create as a change, so it is persisted (nothing pre-existed).
+		rpc.execute(None, sid, Some(sid), Method::Attach, PublicArray::new()).await.unwrap();
+		assert!(
+			rpc.durable.lock().unwrap().contains_key(&sid),
+			"attach did not persist the session"
+		);
+
+		// Evicted before any further call, the bare session still resumes.
+		rpc.session_map().remove(&sid);
+		assert!(rpc.get_session(&sid).await.is_ok(), "bare attached session lost on eviction");
+	}
+
+	#[tokio::test]
+	async fn read_only_methods_do_not_persist() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(9);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+
+		// `version` touches no session state, so it must not persist.
+		rpc.execute(None, sid, Some(sid), Method::Version, PublicArray::new()).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().is_empty(), "a read-only method persisted a session");
+	}
+
+	#[tokio::test]
+	async fn detach_deletes_the_durable_copy() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(11);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid));
+
+		// Detach must remove the durable copy, so the session cannot be
+		// rehydrated (resurrected) afterwards.
+		rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await.unwrap();
+		assert!(
+			rpc.durable.lock().unwrap().is_empty(),
+			"detach left a resurrectable durable session"
+		);
+
+		// A later request for the same id finds nothing to rehydrate.
+		let err = rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await;
+		assert!(err.is_err(), "a detached session was still usable");
+	}
+
+	#[tokio::test]
+	async fn detach_fails_and_keeps_the_session_when_the_durable_delete_fails() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(15);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid));
+
+		// A failing durable delete must abort the detach with an error, and
+		// leave the session fully intact (both the durable copy and the local
+		// entry) so a client cannot believe a still-resurrectable session was
+		// torn down.
+		rpc.fail_forget.store(true, Ordering::SeqCst);
+		let err = rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await;
+		assert!(err.is_err(), "detach must fail when the durable delete fails");
+		assert!(
+			rpc.durable.lock().unwrap().contains_key(&sid),
+			"durable copy must survive a failed detach"
+		);
+		assert!(rpc.session_map().contains_key(&sid), "local session must survive a failed detach");
+
+		// Once the durable store recovers, the detach succeeds and tears down.
+		rpc.fail_forget.store(false, Ordering::SeqCst);
+		rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().is_empty());
+		assert!(!rpc.session_map().contains_key(&sid));
+	}
 }

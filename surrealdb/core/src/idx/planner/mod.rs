@@ -7,11 +7,11 @@ pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
 use std::sync::atomic::{self, AtomicU8};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
@@ -25,7 +25,7 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use crate::val::TableName;
+use crate::kvs::Direction;
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.
@@ -47,21 +47,6 @@ pub(crate) enum RecordStrategy {
 	Count,
 	KeysOnly,
 	KeysAndValues,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ScanDirection {
-	Forward,
-	Backward,
-}
-
-impl Display for ScanDirection {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		match self {
-			ScanDirection::Forward => f.write_str("forward"),
-			ScanDirection::Backward => f.write_str("backward"),
-		}
-	}
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -109,7 +94,16 @@ impl<'a> StatementContext<'a> {
 		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
 		match self.ctx.tx().get_tb(ns, db, tb, None).await? {
 			Some(table) => {
-				let perms = self.stm.permissions(&table, self.stm.is_create());
+				// Pick the permission clause governing this statement type.
+				let perms = if self.stm.is_delete() {
+					&table.permissions.delete
+				} else if self.stm.is_select() {
+					&table.permissions.select
+				} else if self.stm.is_create() {
+					&table.permissions.create
+				} else {
+					&table.permissions.update
+				};
 				if perms.is_specific() {
 					return Ok(GrantedPermission::Specific);
 				}
@@ -127,17 +121,24 @@ impl<'a> StatementContext<'a> {
 	/// Decide whether to fetch just record keys, keys and values, or only a
 	/// COUNT.
 	///
+	/// `index_covers_cond` must only be `true` when the plan's index access
+	/// returns exactly the records matching the WHERE clause: the Count and
+	/// KeysOnly strategies skip the per-record evaluation of the condition
+	/// (see `Document::check_where_condition`), so an index scan answering
+	/// only part of the clause (e.g. one conjunct of an AND) requires
+	/// fetching values.
+	///
 	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
 	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
 	/// select the most efficient record retrieval strategy:
 	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE; WHERE not fully
-	///   covered by indexes; GROUP BY with fields; ORDER BY with fields; non-count projections; or
-	///   when table permissions are Specific).
+	///   covered by the plan's index access; GROUP BY with fields; ORDER BY with fields; non-count
+	///   projections; or when table permissions are Specific).
 	/// - Count: when we only need COUNT(*) and GROUP ALL.
 	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(
 		&self,
-		all_expressions_with_index: bool,
+		index_covers_cond: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy> {
 		// Update / Upsert / Delete need to retrieve the values:
@@ -146,10 +147,9 @@ impl<'a> StatementContext<'a> {
 		if matches!(self.stm, Statement::Update(_) | Statement::Upsert(_) | Statement::Delete(_)) {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
-		// If there is an index backs a WHERE clause but not all expressions,
-		// then we need to fetch and process
-		// record content values too.
-		if !all_expressions_with_index && self.cond.is_some() {
+		// If the WHERE clause is not fully answered by the plan's index
+		// access, then we need to fetch and process record content values too.
+		if !index_covers_cond && self.cond.is_some() {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
 
@@ -214,15 +214,15 @@ impl<'a> StatementContext<'a> {
 	///
 	/// We reverse the direction when the first ORDER BY is `id DESC`.
 	/// Otherwise, we default to forward scan direction.
-	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+	pub(crate) fn check_scan_direction(&self) -> Direction {
 		if let Some(Ordering::Order(o)) = self.order
 			&& let Some(o) = o.first()
 			&& !o.direction
 			&& o.value.is_id()
 		{
-			return ScanDirection::Backward;
+			return Direction::Backward;
 		}
-		ScanDirection::Forward
+		Direction::Forward
 	}
 }
 
@@ -308,6 +308,7 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
+			has_and: tree.has_and,
 		};
 		match PlanBuilder::build(stm_ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
@@ -328,8 +329,7 @@ impl QueryPlanner {
 					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
-					let ie =
-						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
+					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, Direction::Forward);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}

@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -82,11 +83,11 @@ impl ExecOperator for RandomShuffle {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();
@@ -94,24 +95,21 @@ impl ExecOperator for RandomShuffle {
 		let shuffled_stream = futures::stream::once(async move {
 			// Collect all values from input
 			let mut all_values: Vec<Value> = Vec::new();
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				match batch_result {
-					Ok(batch) => all_values.extend(batch.values),
+					Ok(batch) => all_values.extend(batch.into_values()),
 					Err(e) => return Err(e),
 				}
 			}
 
 			if all_values.is_empty() {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Apply shuffle or reservoir sampling
@@ -121,15 +119,13 @@ impl ExecOperator for RandomShuffle {
 				full_shuffle(all_values).await
 			};
 
-			Ok(ValueBatch {
-				values: shuffled,
-			})
+			Ok(ValueBatch::new(shuffled))
 		});
 
 		// Filter out empty batches
 		let filtered = shuffled_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

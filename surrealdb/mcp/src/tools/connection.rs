@@ -20,6 +20,22 @@ pub struct UseParams {
 	pub database: Option<String>,
 }
 
+/// Rejection returned when `use` is called under the stateless protocol.
+///
+/// From `2026-07-28` onwards nothing persists between requests, so switching a
+/// namespace has nothing to switch: the next call would arrive without it. The
+/// message names the replacement rather than just refusing, because the caller
+/// is an LLM that can retry correctly if told how.
+pub fn use_unsupported_when_stateless() -> CallToolResult {
+	tool_error(
+		"Validation",
+		"`use` is not available under MCP protocol 2026-07-28, which does not \
+		 persist state between requests. Pass `namespace` and/or `database` \
+		 directly to each tool call instead, or send the `surreal-ns` / \
+		 `surreal-db` headers.",
+	)
+}
+
 /// Switch the active namespace, the active database, or both at once. Mirrors
 /// SurrealQL's `USE NS <x> DB <y>` one-shot so an LLM never needs two calls to
 /// change context.

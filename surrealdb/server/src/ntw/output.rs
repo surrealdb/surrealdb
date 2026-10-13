@@ -49,7 +49,7 @@ impl Output {
 
 	#[deprecated]
 	pub fn flatbuffers(val: &Value) -> Output {
-		let val = surrealdb_core::rpc::format::flatbuffers::encode(val);
+		let val = surrealdb_types::encode(val);
 		match val {
 			Ok(v) => Output::Flatbuffers(v),
 			Err(_) => Output::Fail,

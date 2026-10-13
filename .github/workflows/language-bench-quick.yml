@@ -35,14 +35,6 @@ env:
   GH_TOKEN: ${{ github.token }}
   MARKER: "<!-- lang-bench-quick -->"
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-  # sccache → S3 compile cache (read by setup-environment); fail-open if the
-  # backend is unreachable. Same block as ci.yml.
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
-  SCCACHE_IDLE_TIMEOUT: "0"
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
 
 jobs:
   # Post the opt-in instructions on open/reopen when the label isn't set yet.
@@ -54,7 +46,7 @@ jobs:
       !contains(github.event.pull_request.labels.*.name, 'benchmark')
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Post instructions comment
         run: |
@@ -76,7 +68,7 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'benchmark'))
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Benchmark the PR's own commit (not the merge ref), so the comparison
           # is this branch's code vs nightly `main`.
@@ -95,20 +87,26 @@ jobs:
           bash .github/scripts/upsert_pr_comment.sh \
             "${{ github.event.pull_request.number }}" "$MARKER" "$RUNNER_TEMP/comment.md"
 
-      - name: Setup environment (toolchain + sccache + cache)
+      - name: Setup environment (toolchain + kache + cache)
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 compile cache shared with the rest of CI.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           workspaces: language-tests
 
       - name: Build benchmark suite
-        run: cargo build --release --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
+        run: cargo build --locked --release --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
 
       - name: Benchmark PR head (compare vs nightly main in the shared store)
         run: |
           # Read-only against the shared store (NO --save): the harness fetches the
           # latest `main` measurement (written by the nightly run) and compares this
           # PR's `--quick` run against it. quiet_system.py mirrors the nightly run's
-          # environment so the two are measured the same way.
+          # environment so the two are measured the same way, and the harness pins
+          # the HNSW graph seed, so the ANN benches compare against a nightly
+          # baseline built from an identical graph.
           sudo ./.github/scripts/quiet_system.py \
             language-tests/target/release/surrealql-test bench \
             --store-url ${{ secrets.BENCH_DS_URL }} \

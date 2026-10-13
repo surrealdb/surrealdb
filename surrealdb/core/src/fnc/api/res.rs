@@ -54,7 +54,8 @@ pub async fn body(
 		Optional<FromPublic<BodyStrategy>>,
 	),
 ) -> Result<Value> {
-	let res = next.invoke(stk, ctx, opt, doc, vec![req.clone().into()]).await?;
+	let res =
+		crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.clone().into()]).await?;
 	let mut res: ApiResponse = res.try_into()?;
 
 	let strategy = strategy.map(|x| x.0).unwrap_or_default();
@@ -92,7 +93,7 @@ pub async fn status(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, status): (Value, Box<Closure>, i64),
 ) -> Result<Value> {
-	let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
 	let mut res: ApiResponse = res.try_into()?;
 
 	// Validate status code: must be a valid u16 and a valid HTTP status code (100-599)
@@ -131,7 +132,7 @@ pub async fn header(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, name, Optional(value)): (Value, Box<Closure>, String, Optional<String>),
 ) -> Result<Value> {
-	let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
 	let mut res: ApiResponse = res.try_into()?;
 
 	let name: HeaderName =
@@ -183,7 +184,7 @@ pub async fn headers(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(req, next, headers): (Value, Box<Closure>, BTreeMap<String, Option<String>>),
 ) -> Result<Value> {
-	let res = next.invoke(stk, ctx, opt, doc, vec![req]).await?;
+	let res = crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await?;
 	let mut res: ApiResponse = res.try_into()?;
 
 	for (k, value) in headers {

@@ -1,0 +1,19 @@
+{
+	"name": "surrealdb-conformance-js",
+	"private": true,
+	"type": "module",
+	"description": "Server-behavior conformance tests driven through the JavaScript SDK: authentication, live queries, sessions, and other connection-level behavior that .surql language tests cannot express.",
+	"scripts": {
+		"test": "bun test"
+	},
+	"dependencies": {
+		"graphql": "^17.0.2",
+		"graphql-request": "^7.4.0",
+		"graphql-ws": "^6.1.0",
+		"surrealdb": "^2.0.8",
+		"ws": "^8.21.1"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.18.1"
+	}
+}

@@ -1,24 +1,5 @@
 # CLAUDE.md
 
-This file provides essential context for AI assistants working with the SurrealDB codebase.
-
-## Project Overview
-
-SurrealDB is a multi-model database built in Rust supporting document, graph, relational, time-series, geospatial, and key-value data models. It can run embedded, in browser (WASM), at the edge, or as a distributed cluster.
-
-## Project Structure
-
-```
-surrealdb/           # Main SDK crate
-surrealdb/core/      # Core database engine (query execution, storage)
-surrealdb/mcp/       # Model Context Protocol server (stdio + HTTP)
-surrealdb/server/    # HTTP, WebSocket, gRPC server
-surrealdb/types/     # Public types and derive macros
-surrealism/          # Surrealism (WASM plugin system) crates
-language-tests/      # SurrealQL test suite (.surql files)
-tests/               # Integration tests (CLI, HTTP, WebSocket, GraphQL)
-```
-
 ## Common Commands
 
 ```bash
@@ -30,51 +11,38 @@ cargo make fmt
 
 # Run clippy lints
 cargo make ci-clippy
-
-# Run all tests
-cargo test
-
-# Run language tests
-cd language-tests && cargo run run
-
-# Run specific language test
-# Note: all paths are relative to the language-tests/tests directory
-cd language-tests && cargo run run path/to/test.surql
-
-# Auto-generate test results
-# Note: The test results must be empty for the auto-generation to work.
-cd language-tests && cargo run run --results accept path/to/test.surql
-
-# Benchmark a language-test bench (measures by default; --profile records a flamegraph)
-# Pass the bench filter and flags after `--`. See language-tests/README.md > Benchmarking.
-cargo make bench -- scans/where_integer_in_many_full --save
-cargo make bench -- scans/where_integer_in_many_full --profile --dataset indexed
 ```
 
 ## Testing Conventions
 
-### Language Tests (`language-tests/tests/*.surql`, `*.gql`)
+Language tests, upgrade tests, and benchmarks: `language-tests/CLAUDE.md`.
+Parser tests: `surrealdb/parser/CLAUDE.md`.
 
-Test SurrealQL queries with expected results (`.gql` files test the GQL dialect). Bug reproductions go in `language-tests/tests/reproductions/ISSUE_NUMBER_description.surql`.
+### Keep the upgrade tests current
 
-**Test file format:**
-```surql
-/**
-[env]
-namespace = true
-database = true
-auth = { level = "owner" }
+State written by a released binary must stay readable by every later one. That
+property is only checked by `language-tests/tests/upgrade/`, and it fails
+silently — an unreadable index falls back to a table scan and returns the same
+rows. Three changes oblige you to touch that suite:
 
-[test]
-reason = "Description of what this tests"
-issue = 1234  # Optional GitHub issue
+- **Changing a persisted format** — a storage key, an index layout, a revisioned
+  catalog struct. Extend the pair that produces the old shape from an old binary
+  and reads it on the new one. `revision.lock` and the frozen byte fixtures in
+  `surrealdb/core/src/kvs/compat/` are separate guards and do not substitute:
+  they prove a type decodes, not that the read path around it still works. If an
+  operator must intervene, declare `[[test.repair]]` — never write `REBUILD
+  INDEX` into a test body, which the loader rejects because it masks the failure.
+- **Adding a durable SurrealQL construct** — add the pair once a release can
+  write it, prefixed and gated with that release. Before then no axis can reach
+  it, so it belongs in the ordinary language tests.
+- **Cutting a release** — add it to all three version lists in
+  `Makefile.ci.toml`. Verify the hop first: release order is not version order,
+  and a patch shipped after a newer line can carry a revision that line cannot
+  decode.
 
-[[test.results]]
-value = "expected_result"
-*/
-
--- SurrealQL queries here
-```
+Nothing goes red when this is skipped; the suite just quietly tests less than it
+appears to. How it works: `language-tests/tests/upgrade/README.md`. Conventions
+and the repair contract: `language-tests/CLAUDE.md`.
 
 ### SDK/Integration Tests
 
@@ -86,11 +54,35 @@ Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing convent
 - Never use `.unwrap_or_default()` when debugging - it masks errors
 - Propagate datastore errors via `crate::err::Error`
 - Performance matters: think about impact of every change
-- WASM compatibility: maintain `#[cfg_attr]` patterns (e.g., `async_trait(?Send)`)
 - Use `web_time::Instant` and `web_time::SystemTime` instead of `std::time` equivalents (WASM-safe, enforced by clippy)
 - Don't add dependencies without confirmation
 - Instrument public async functions with `#[instrument(...)]`
 - Never log sensitive user data or credentials
+
+## Build reproducibility (`--locked`)
+
+So that a commit plus its `Cargo.lock` reproduces the build, every cargo command that resolves dependencies passes `--locked`: `build`, `check`, `test`/`nextest`, `clippy`, `run`, `doc`, `bench`, `install`, `publish`, `hack`, and dependency-resolving `metadata`. Two categories are intentionally exempt:
+
+- Commands that resolve nothing, so `--locked` is inert or rejected: `cargo metadata --no-deps` and `cargo fmt`.
+- Steps that re-lock or re-resolve by design, e.g. a targeted `cargo update` before a benchmark build, `reconcile-satellite-lockfiles.sh`, or a check run against a `[patch]`-ed dependency tree.
+
+The shipped-binary builds are enforced by `.github/workflows/release-lock-guard.yml`.
+
+## Comment discipline — describe the contract, not the narrative
+
+Applies to in-source comments and doc comments, and to standalone docs in this repo.
+
+**Describe what the code currently does and why it must be that way** — the invariants it upholds, the ordering it relies on, and the inputs, outputs, and error modes callers must respect. The reader is someone understanding the code as it is now, not reconstructing how it got here.
+
+**Never** bake transient development context into long-lived comments or docs:
+
+- No change narration — "previously did X, now does Y", "the old behaviour was…", "this used to…", "no longer gated".
+- No mention of a bug or behaviour that has since been fixed. Once a fix lands, drop the mention and describe the correct behaviour.
+- No references to a specific PR, review comment, branch, ticket, or commit — the git log already records that; readers don't have it loaded.
+- No one-off empirical numbers from a single run (e.g. "37/42 entries were stale") — those belong in the commit message that introduced the change.
+- No in-flight refactoring scaffolding ("for now…", "until the X migration lands…"). If it's the current behaviour, document that; if it's a genuine temporary, leave a TODO with a tracking link and document the contract the temporary upholds.
+
+The right home for change/PR/incident narrative is the **commit message** or **PR description**. A comment should read the same six months and ten unrelated PRs later as it does today. When you touch a comment that already drifts into narrative, rewrite it into contract form rather than appending another layer.
 
 ## Bug Investigation Protocol
 

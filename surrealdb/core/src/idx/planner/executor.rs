@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -11,28 +12,32 @@ use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, DocumentContext};
-use crate::err::Error;
+use crate::exe::FlowResultExt as _;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
-use crate::idx::IndexKeyBase;
+use crate::expr::{Cond, Expr, Idiom};
+use crate::idx::count::IndexCountThingIterator;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
+use crate::idx::planner::IterationStage;
 use crate::idx::planner::iterators::{
-	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
-	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
-	IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult, MatchesThingIterator,
-	RecordIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
+	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeReverseThingIterator,
+	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
+	MatchesThingIterator, RecordIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
 	UniqueRangeReverseThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
-use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-use crate::idx::planner::{IterationStage, ScanDirection};
 #[cfg(diskann)]
 use crate::idx::trees::store::diskann::SharedDiskAnnIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
+use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
+use crate::idx::{Error, IndexKeyBase};
+use crate::kvs::Direction;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
+use crate::legacy::knn::knn_cond_filter;
 use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
@@ -105,7 +110,7 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 
 pub(super) enum IteratorEntry {
 	Single(Option<Arc<Expr>>, IndexOption),
-	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue, ScanDirection),
+	Range(HashSet<Arc<Expr>>, IndexReference, Bound<Arc<Value>>, Bound<Arc<Value>>, Direction),
 }
 
 impl IteratorEntry {
@@ -115,8 +120,38 @@ impl IteratorEntry {
 			Self::Range(_, ir, from, to, sc) => {
 				let mut e = HashMap::default();
 				e.insert("index", Value::from(ir.name.clone()));
-				e.insert("from", Value::from(from));
-				e.insert("to", Value::from(to));
+
+				let from = match from {
+					Bound::Included(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => true.into(),
+					}),
+					Bound::Excluded(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => false.into(),
+					}),
+					Bound::Unbounded => Value::from(map! {
+						"value" => Value::None,
+						"inclusive" => false.into(),
+					}),
+				};
+
+				e.insert("from", from);
+				let to = match to {
+					Bound::Included(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => true.into(),
+					}),
+					Bound::Excluded(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => false.into(),
+					}),
+					Bound::Unbounded => Value::from(map! {
+						"value" => Value::None,
+						"inclusive" => false.into(),
+					}),
+				};
+				e.insert("to", to);
 				e.insert("direction", Value::from(sc.to_string()));
 				Value::from(Object::from(e))
 			}
@@ -170,7 +205,8 @@ impl InnerQueryExecutor {
 									&ctx.tx(),
 									ikb,
 									p,
-									&ctx.config.file_allowlist,
+									&ctx.config.idx.file_allowlist,
+									ix.format_version,
 								)
 								.await?;
 								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
@@ -200,6 +236,15 @@ impl InnerQueryExecutor {
 				}
 				Index::Hnsw(p) => {
 					if let IndexOperator::Ann(a, k, ef) = io.op() {
+						let cond_filter = knn_cond_filter(
+							ctx,
+							opt,
+							doc_ctx.ns().namespace_id,
+							doc_ctx.db().database_id,
+							&index_reference.table_name,
+							knn_condition.clone(),
+						)
+						.await?;
 						let he = match ir_map.entry(index_reference.clone()) {
 							Entry::Occupied(e) => {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
@@ -207,12 +252,11 @@ impl InnerQueryExecutor {
 										HnswEntry::new(
 											stk,
 											ctx,
-											opt,
 											Arc::clone(hi),
 											a,
 											*k,
 											*ef,
-											knn_condition.clone(),
+											cond_filter,
 										)
 										.await?,
 									)
@@ -226,18 +270,23 @@ impl InnerQueryExecutor {
 									.expect_tb(
 										doc_ctx.ns().namespace_id,
 										doc_ctx.db().database_id,
-										&index_reference.table_name,
+										&index_reference.table_name.clone(),
 									)
 									.await?;
+								let ikb = crate::idx::IndexKeyBase::new(
+									doc_ctx.ns().namespace_id,
+									doc_ctx.db().database_id,
+									index_reference.table_name.clone(),
+									index_reference.index_id,
+								);
 								let hi = ctx
 									.get_index_stores()
 									.get_index_hnsw(
-										doc_ctx.ns().namespace_id,
-										doc_ctx.db().database_id,
 										ctx,
 										tb.table_id,
-										index_reference,
+										&ikb,
 										p,
+										index_reference.format_version,
 									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
@@ -246,12 +295,11 @@ impl InnerQueryExecutor {
 								let entry = HnswEntry::new(
 									stk,
 									ctx,
-									opt,
 									Arc::clone(&hi),
 									a,
 									*k,
 									*ef,
-									knn_condition.clone(),
+									cond_filter,
 								)
 								.await?;
 								e.insert(PerIndexReferenceIndex::Hnsw(hi));
@@ -266,6 +314,15 @@ impl InnerQueryExecutor {
 				#[cfg(diskann)]
 				Index::DiskAnn(p) => {
 					if let IndexOperator::Ann(a, k, ef) = io.op() {
+						let cond_filter = knn_cond_filter(
+							ctx,
+							opt,
+							doc_ctx.ns().namespace_id,
+							doc_ctx.db().database_id,
+							&index_reference.table_name,
+							knn_condition.clone(),
+						)
+						.await?;
 						let de = match ir_map.entry(index_reference.clone()) {
 							Entry::Occupied(e) => {
 								if let PerIndexReferenceIndex::DiskAnn(di) = e.get() {
@@ -273,12 +330,11 @@ impl InnerQueryExecutor {
 										DiskAnnEntry::new(
 											stk,
 											ctx,
-											opt,
 											Arc::clone(di),
 											a,
 											*k,
 											*ef,
-											knn_condition.clone(),
+											cond_filter,
 										)
 										.await?,
 									)
@@ -292,16 +348,21 @@ impl InnerQueryExecutor {
 									.expect_tb(
 										doc_ctx.ns().namespace_id,
 										doc_ctx.db().database_id,
-										&index_reference.table_name,
+										&index_reference.table_name.clone(),
 									)
 									.await?;
+								let ikb = crate::idx::IndexKeyBase::new(
+									doc_ctx.ns().namespace_id,
+									doc_ctx.db().database_id,
+									index_reference.table_name.clone(),
+									index_reference.index_id,
+								);
 								let di = ctx
 									.get_index_stores()
 									.get_index_diskann(
-										doc_ctx.ns().namespace_id,
-										doc_ctx.db().database_id,
+										index_reference.format_version,
 										tb.table_id,
-										index_reference,
+										&ikb,
 										p,
 									)
 									.await?;
@@ -311,12 +372,11 @@ impl InnerQueryExecutor {
 								let entry = DiskAnnEntry::new(
 									stk,
 									ctx,
-									opt,
 									Arc::clone(&di),
 									a,
 									*k,
 									*ef,
-									knn_condition.clone(),
+									cond_filter,
 								)
 								.await?;
 								e.insert(PerIndexReferenceIndex::DiskAnn(di));
@@ -374,9 +434,11 @@ impl QueryExecutor {
 			if let Some(PerExpressionEntry::KnnBruteForce((p, id, val, dist))) =
 				self.0.exp_entries.get(exp)
 			{
-				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
+				let v =
+					crate::legacy::idiom_compute(id, stk, ctx, opt, doc).await.catch_return()?;
 				if let Ok(v) = v.coerce_to()
-					&& let Ok(dist) = dist.compute(&v, val.as_ref())
+					&& let Ok(dist) =
+						crate::idx::trees::vector::distance_compute(dist, &v, val.as_ref())
 				{
 					p.add(dist, thg).await;
 					return Ok(Value::Bool(true));
@@ -444,8 +506,8 @@ impl QueryExecutor {
 						ns,
 						db,
 						index_reference,
-						from.clone(),
-						to.clone(),
+						from.as_ref().map(|x| &**x),
+						to.as_ref().map(|x| &**x),
 						*sc,
 					)?),
 			}
@@ -543,7 +605,7 @@ impl QueryExecutor {
 			IndexOperator::Count => Some(RecordIterator::IndexCount(IndexCountThingIterator::new(
 				ns,
 				db,
-				&ix.table_name,
+				&ix.table_name.clone(),
 				ix.index_id,
 			)?)),
 			_ => None,
@@ -567,16 +629,16 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
-		sc: ScanDirection,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+		sc: Direction,
 	) -> Result<Option<RecordIterator>> {
 		match ix.index {
 			Index::Idx => {
 				return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			Index::Uniq => {
-				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, &from, &to, sc)?));
+				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			_ => {}
 		}
@@ -588,15 +650,15 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
-		sc: ScanDirection,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+		sc: Direction,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
-			ScanDirection::Forward => {
+			Direction::Forward => {
 				RecordIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			ScanDirection::Backward => RecordIterator::IndexRangeReverse(
+			Direction::Backward => RecordIterator::IndexRangeReverse(
 				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
@@ -607,15 +669,15 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: &RangeValue,
-		to: &RangeValue,
-		sc: ScanDirection,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+		sc: Direction,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
-			ScanDirection::Forward => RecordIterator::UniqueRange(UniqueRangeThingIterator::new(
+			Direction::Forward => RecordIterator::UniqueRange(UniqueRangeThingIterator::new(
 				ir, ns, db, ix, from, to,
 			)?),
-			ScanDirection::Backward => RecordIterator::UniqueRangeReverse(
+			Direction::Backward => RecordIterator::UniqueRangeReverse(
 				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
@@ -828,13 +890,18 @@ impl QueryExecutor {
 		if fte.0.qt.is_empty() {
 			return Ok(false);
 		}
+		// Analyze the value on the idiom side of the expression (the document's
+		// field value, e.g. the record-link target's text for `t.name @@ 'x'`),
+		// not the query literal on the other side — analyzing the query against
+		// its own terms would make every candidate match.
 		let v = match fte.0.io.idiom_position() {
-			IdiomPosition::Left => r,
-			IdiomPosition::Right => l,
+			IdiomPosition::Left => l,
+			IdiomPosition::Right => r,
 			IdiomPosition::None => return Ok(false),
 		};
 		// Check if the value matches the query terms
-		fti.matches_value(stk, ctx, opt, &fte.0.qt, fte.0.bo, v).await
+		let az_fn = LegacyAnalyzerFunction::new(ctx, opt);
+		fti.matches_value(stk, &az_fn, &fte.0.qt, fte.0.bo, v).await
 	}
 
 	fn get_match_ref_entry(&self, match_ref: &Value) -> Option<&PerMatchRefEntry> {
@@ -946,7 +1013,8 @@ impl FullTextEntry {
 		io: IndexOption,
 	) -> Result<Option<Self>> {
 		if let Matches(qs, mo) = io.op() {
-			let qt = fti.extract_querying_terms(stk, ctx, opt, qs.to_owned()).await?;
+			let az_fn = LegacyAnalyzerFunction::new(ctx, opt);
+			let qt = fti.extract_querying_terms(stk, ctx, &az_fn, qs.to_owned()).await?;
 			let scorer = fti.new_scorer(ctx).await?;
 			Ok(Some(Self(Arc::new(InnerFullTextEntry {
 				bo: mo.operator,
@@ -966,19 +1034,17 @@ pub(super) struct HnswEntry {
 }
 
 impl HnswEntry {
-	#[expect(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
-		opt: &Options,
 		h: SharedHnswIndex,
 		v: &[Number],
 		n: u32,
 		ef: u32,
-		cond: Option<Arc<Cond>>,
+		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<Self> {
-		let cond_filter = cond.map(|cond| (opt, cond));
-		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
+		// The legacy planner never builds an allow-list.
+		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter, None).await?;
 		Ok(Self {
 			res,
 		})
@@ -996,19 +1062,17 @@ pub(super) struct DiskAnnEntry {
 #[cfg(diskann)]
 impl DiskAnnEntry {
 	/// Executes one DiskANN KNN lookup and stores the iterator-ready result queue.
-	#[expect(clippy::too_many_arguments)]
 	async fn new(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
-		opt: &Options,
 		d: SharedDiskAnnIndex,
 		v: &[Number],
 		n: u32,
 		l: u32,
-		cond: Option<Arc<Cond>>,
+		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<Self> {
-		let cond_filter = cond.map(|cond| (opt, cond));
-		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter).await?;
+		// The legacy planner never builds an allow-list.
+		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter, None).await?;
 		Ok(Self {
 			res,
 		})

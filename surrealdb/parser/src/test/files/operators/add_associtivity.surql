@@ -12,13 +12,13 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Path
                                 Path
                                     .start: Ident
                                         .text: "b"
                                     .parts: None
-                    .op: Add
+                    .op: BinaryOperator::Add
                     .right: Expr::Path
                         Path
                             .start: Ident

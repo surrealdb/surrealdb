@@ -10,9 +10,8 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, Error as ExecError};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::val::Value;
 
@@ -44,7 +43,7 @@ impl std::fmt::Display for ControlFlowKind {
 ///
 /// Produces a control flow signal rather than a value:
 /// - BREAK/CONTINUE: signal immediately (no inner expression)
-/// - THROW: evaluate inner expression, signal `Error::Thrown`
+/// - THROW: evaluate inner expression, signal `ExecError::Thrown`
 /// - RETURN: evaluate inner expression, signal `ControlFlow::Return`
 #[derive(Debug, Clone)]
 pub struct ControlFlowExpr {
@@ -74,7 +73,9 @@ impl PhysicalExpr for ControlFlowExpr {
 				ControlFlowKind::Throw => {
 					let inner = self.inner.as_ref().expect("THROW must have inner expression");
 					let value = inner.evaluate(ctx).await?;
-					Err(ControlFlow::Err(anyhow::Error::new(Error::Thrown(value.to_raw_string()))))
+					Err(ControlFlow::Err(anyhow::Error::new(ExecError::Thrown(
+						value.to_raw_string(),
+					))))
 				}
 				ControlFlowKind::Return => {
 					let inner = self.inner.as_ref().expect("RETURN must have inner expression");

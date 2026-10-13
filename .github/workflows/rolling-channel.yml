@@ -1,0 +1,1038 @@
+# Rolling channel (reusable)
+#
+# Builds and stores ONE channel's release-ready engine artifact set for a single
+# commit: the binary matrix (+ macOS universal), the multi-arch Docker images
+# (scanned before push to the registry), the npm packages that embed the engine
+# (@surrealdb/node-native + @surrealdb/wasm-native, on releases/* lines only), and
+# the rolling-builds/<slug>/<sha>/engine.json manifest that marks the engine side
+# of the commit as releasable for that channel. The downstream side records its
+# own separate downstream.json (see rolling-downstream.yml), built by the separate
+# rolling-downstream-build.yml workflow.
+#
+# rolling-build.yml calls this once per push for the branch's channel (the
+# `nightly` channel on main, or the line's channel on releases/*), with its
+# version, artifact name and S3/registry namespace.
+#
+# Crate packaging / version-drift checks run as channel gates here (in parallel
+# with the artifact matrix, see check-versions/package below). They don't block
+# the build, but they gate the engine.json manifest, so a commit that fails a
+# gate produces artifacts that can never be promoted.
+
+name: Rolling channel
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: 'Artifact/file name prefix (e.g. rolling-<sha>)'
+        required: true
+        type: string
+      build-metadata:
+        description: 'Build metadata baked into the binary (date.rev)'
+        required: true
+        type: string
+      version-override:
+        description: 'SURREAL_BUILD_VERSION override; empty falls back to the Cargo.toml version'
+        required: false
+        default: ''
+        type: string
+      branch-slug:
+        description: 'Slug the artifacts are namespaced under (e.g. main or releases-4-0)'
+        required: true
+        type: string
+      branch:
+        description: 'Branch name the artifacts were built from (e.g. main or releases/4.0)'
+        required: true
+        type: string
+      s3-prefix:
+        description: 'S3 prefix for this channel (rolling-builds/<slug>/<sha>)'
+        required: true
+        type: string
+      release-version:
+        description: 'Version recorded in the manifests (e.g. 4.0.0-nightly or 4.0.0-alpha.3)'
+        required: true
+        type: string
+      git-ref:
+        description: 'The exact commit to build, tag and key artifacts under. Normally the pushed commit; a manual rebuild passes the target sha so it reproduces that commit rather than the branch tip.'
+        required: true
+        type: string
+      engine-promotable:
+        description: 'Sha half of promotability: whether the built commit is on a promotion line (main or releases/*). Defaults true (push/schedule/tip build the dispatched ref tip); a git-sha override that points off-line passes false. finalize also requires the workflow ref itself to be a release line or main.'
+        required: false
+        default: 'true'
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} binary
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [runner-amd-32-cores]
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [runner-arm-32-cores]
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-latest-32-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # Read from the sources just checked out, so it must precede the CI-tooling
+      # checkout below. The build actions come from the workflow ref while the
+      # sources come from `git-ref`, so a manual rebuild of a commit older than a
+      # feature would otherwise ask cargo for a feature that commit's manifest
+      # does not define, and every matrix job would fail on it.
+      #
+      # `extra-features` REPLACES the build actions' default rather than
+      # extending it, so the default set is spelled out here too; dropping any of
+      # it would silently ship binaries without TiKV storage, JWKS or ML.
+      - name: Resolve the binary feature set
+        id: features
+        shell: bash
+        run: |
+          features="storage-tikv,jwks,ml"
+          if grep -qE '^cjk = ' Cargo.toml; then
+            features="${features},cjk"
+          else
+            echo "::notice::This commit predates the cjk feature; building without the embedded CJK dictionaries."
+          fi
+          echo "extra=${features}" >> "$GITHUB_OUTPUT"
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted here (loaded from .ci = the workflow ref) rather than nested
+      # inside the build-{linux,macos,windows} actions: a nested `uses: ./...`
+      # resolves against $GITHUB_WORKSPACE (the built commit checked out above),
+      # which would reopen the backport hole for the binary-build tooling.
+      # Compiler caching comes from the shared S3 kache backend (inputs below)
+      # on macOS and Windows, which compile on the runner itself, so no per-OS
+      # disk-cache persistence is needed. The Linux legs compile inside the
+      # builder container instead: it carries neither the kache binary nor the
+      # host's store, and the `docker run` passes an explicit environment that
+      # does not include RUSTC_WRAPPER, so the wrapper could not reach their
+      # compiler. They opt out rather than take a cache backend's failure modes
+      # for a cache they cannot use.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-branch: ${{ inputs.branch }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          enable-kache: ${{ matrix.os != 'linux' }}
+          targets: ${{ matrix.arch }}
+          # Both macOS targets build on one arm64 runner, so only the target
+          # triple separates their artifact sets.
+          kache-manifest-key: ${{ matrix.arch }}
+
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.ci/.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+          # Builder-image layer cache: one moving tag per line and platform.
+          # BUILDER_CACHE_ECR_IMAGE is the full <registry>/<repository> prefix
+          # of an ECR repo that THIS JOB'S runner pool can push to via its
+          # ambient IAM role - the build matrix runs on a different pool than
+          # the docker/publish jobs, with push rights to a different, dedicated
+          # builder repo. Unset, the cache-image input stays empty and the
+          # build falls back to a cold local cache (never a failure). Image
+          # lifecycle in the cache repo - untagged predecessors orphaned by the
+          # moving tag, and tags left by throwaway branch slugs - is owned by
+          # an ECR lifecycle policy on that repository; the cleanup/prune jobs
+          # here never touch it.
+          cache-image: ${{ secrets.BUILDER_CACHE_ECR_IMAGE != '' && format('{0}:builder-cache-{1}-{2}', secrets.BUILDER_CACHE_ECR_IMAGE, inputs.branch-slug, matrix.platform) || '' }}
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.ci/.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.ci/.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          # Resolved above: the default extras, plus `cjk` when this commit has
+          # it. The CJK dictionaries ship inside the released binaries, and the
+          # Docker images repackage these same artifacts and inherit them.
+          extra-features: ${{ steps.features.outputs.extra }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+
+  macos-universal:
+    name: Package macOS universal binary
+    needs: [build]
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Package macOS universal binary
+        uses: ./.ci/.github/actions/package-macos-universal
+        with:
+          name: ${{ inputs.name }}
+
+  publish-s3:
+    name: Publish binaries to S3
+    # Waits on the crate gates: never upload binaries to S3 for a commit that a
+    # failed gate would make unpromotable. `build` still runs in parallel with
+    # the gates; only this persisting step waits.
+    needs: [build, macos-universal, check-versions, package]
+    # Private runner: rolling artifacts are transient build outputs kept in the
+    # private CI bucket, reached via the runner's ambient IAM role (no static
+    # keys). The label comes from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      # Only this channel's artifacts, keeping the per-artifact directory layout.
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ inputs.name }}.*
+
+      # Rolling binaries are transient build outputs, so they go to the private
+      # CI bucket (not the public download bucket). Ambient IAM creds from the
+      # private runner; region is the bucket's home region.
+      - name: Upload to the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for file in artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe; do
+            aws s3 cp --cache-control 'no-store' "$file" "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"
+          done
+
+  docker:
+    name: Docker ${{ matrix.name }}
+    # Waits on the crate gates: never build/push an image to ECR for a commit a
+    # failed gate would make unpromotable. `build` overlaps the gates, so this
+    # adds no latency (the image build already waits for the binaries anyway).
+    needs: [build, check-versions, package]
+    # Private runner: pushes to ECR using the runner's ambient IAM instance role
+    # (no static keys). Label comes from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            build-target: prod-ci
+            tag-suffix: ''
+          - name: Dev image
+            build-target: dev-ci
+            tag-suffix: -dev
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ inputs.name }}.*
+
+      # binfmt/QEMU for the arm64 image: the Dockerfile's CI targets have RUN
+      # steps that execute in the target arch, so the multi-arch build emulates
+      # arm64 on this amd64 runner. GitHub-hosted runners ship binfmt, but a
+      # self-hosted private runner may not, so register it explicitly.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Ambient auth: the private runner's IAM instance role provides ECR
+      # credentials, so no configure-aws-credentials / static keys are needed.
+      - name: Login to Amazon ECR
+        run: |
+          set -euo pipefail
+          # Region is derived from the registry host
+          # (<account>.dkr.ecr.<region>.amazonaws.com) so it can never drift from
+          # AWS_ECR_REGISTRY: an auth token for the wrong region is rejected on push.
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # Build the amd64 image locally first (no attestations, so it can be
+      # loaded into the docker daemon) so it can be smoke-tested and scanned
+      # BEFORE anything is pushed to ECR. A vulnerable image never reaches the
+      # registry, and therefore can never be promoted to a release.
+      - name: Build image locally for scanning (amd64)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: artifacts
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: false
+          sbom: false
+          tags: surrealdb-rolling-local:amd64
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.name }}
+
+      # Scan + smoke-test the local amd64 image BEFORE pushing to ECR, so a
+      # vulnerable or non-booting image never reaches the registry (and hence can
+      # never be promoted). amd64-only: the runtime base digest is shared across
+      # arches, so arm64 findings would match. Uses the shared test-docker-image
+      # action so the engine and downstream images run the identical gate (Trivy +
+      # version + startup + HTTP health).
+      - name: Test the Docker image (scan + smoke test)
+        uses: ./.ci/.github/actions/test-docker-image
+        with:
+          image-ref: surrealdb-rolling-local:amd64
+
+      - name: Build and push rolling image to ECR
+        # NOTE: provenance (mode=max) / SBOM attestations are stored in the
+        # *private* ECR here, which is fine and gives us an internal audit trail.
+        # The public DockerHub copy (release.yml) MUST NOT copy these attestations
+        # verbatim: their in-toto subject/materials encode the ECR registry host
+        # (and therefore the AWS account ID). The mirror strips them by
+        # recreating the index from the per-platform manifests only.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:rolling-${{ inputs.branch-slug }}-${{ inputs.git-ref }}${{ matrix.tag-suffix }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ inputs.branch-slug }}${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.name }}
+
+      # Advisory audit-trail check that the engine image we just pushed carries the
+      # provenance + SBOM attestations we expect. Warning-only (and
+      # continue-on-error) so a missing attestation never blocks a release.
+      - name: Verify engine image attestations
+        continue-on-error: true
+        uses: ./.ci/.github/actions/verify-attestations
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:rolling-${{ inputs.branch-slug }}-${{ inputs.git-ref }}${{ matrix.tag-suffix }}
+
+  # Channel quality gates. These run in PARALLEL with the binary compile (the
+  # `build` matrix) — the two most expensive jobs overlap instead of running
+  # back-to-back. But every job that PERSISTS an artifact (publish-s3, docker)
+  # waits on these gates, so a commit that fails a gate — a publishable crate
+  # changed without a version bump, or a crate that no longer packages cleanly
+  # for crates.io — never has binaries pushed to S3 or images pushed to a
+  # registry. `finalize` also waits on them, so no engine.json is written and the
+  # commit is unpromotable.
+  check-versions:
+    name: Check crate versions (rolling)
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted from check-crate-versions so it too loads from the workflow ref
+      # (.ci), not the built commit.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-branch: ${{ inputs.branch }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Check crate versions
+        uses: ./.ci/.github/actions/check-crate-versions
+
+  package:
+    name: Package crates (rolling)
+    # Runs `cargo publish --workspace --dry-run` (see quality-package): the same
+    # command the real ordered publish uses, with verify ON so each crate is
+    # compiled from its packaged tarball - the form a crates.io consumer builds.
+    # That verify compile is the bottleneck (it runs about as long as a per-
+    # target binary build), and it overflows a hosted runner's default disk, so
+    # the job frees disk in setup-environment and runs on a modest runner rather
+    # than paying for a bigger one that wouldn't shorten the compile.
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted from quality-package so it too loads from the workflow ref
+      # (.ci), not the built commit. free-disk-space: the verify compile in
+      # quality-package overflows a hosted runner's default disk.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-branch: ${{ inputs.branch }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          free-disk-space: 'true'
+
+      - name: Package crates
+        uses: ./.ci/.github/actions/quality-package
+
+  # ============================================================================
+  # npm packages (@surrealdb/node-native + @surrealdb/wasm-native)
+  # ============================================================================
+  # These embed this exact engine and carry its version, built here so the promote
+  # workflow only has to publish them (build-once / promote-many, like the binaries
+  # and the Docker image). The artifacts are version-agnostic (the version is
+  # injected at publish time), so one rolling build serves whatever version the
+  # commit is ultimately promoted as. The build jobs run on every releases/* push
+  # and on any manual workflow_dispatch (so a rebuild or a test-branch dispatch
+  # exercises them; throwaway lines have their bundles cleaned up by cleanup-test,
+  # like the binaries and images). The unattended scheduled nightly on main skips
+  # them: nightly publishes no npm packages (as with crates), so a daily 8-target
+  # native matrix would be pure waste. See build-node-addon / build-wasm-engine
+  # below.
+  #
+  # npm-preflight gates all of the above on the packages actually being present at
+  # the built commit. Release lines cut before @surrealdb/node-native +
+  # @surrealdb/wasm-native existed (e.g. releases/3.1, releases/3.2) have no
+  # surrealdb/node or surrealdb/wasm, so npm is skipped for them — at build AND
+  # promote time. Building a missing package directory would fail and, because
+  # finalize waits on the npm jobs, block the engine promote for a line that never
+  # shipped npm. (Gated to the same channels the npm build runs on, so the
+  # scheduled nightly skips this preflight too.)
+  npm-preflight:
+    name: Detect npm packages
+    if: ${{ startsWith(inputs.branch, 'releases/') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    outputs:
+      build-npm: ${{ steps.detect.outputs.build-npm }}
+    steps:
+      # Sparse, blobless checkout of just the two package manifests — this job only
+      # needs to know whether they exist, not the whole (large) repo. Non-cone
+      # patterns match the exact paths; if the commit lacks them, the working tree
+      # is simply empty and the detect step reports no packages.
+      - name: Checkout package manifests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+          filter: blob:none
+          sparse-checkout: |
+            surrealdb/node/package.json
+            surrealdb/wasm/package.json
+          sparse-checkout-cone-mode: false
+
+      # Both packages were introduced together and travel together, so treat
+      # "either absent" as "this line has no npm packages" and skip the build.
+      - name: Detect npm package sources
+        id: detect
+        env:
+          GIT_REF: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          if [ -f surrealdb/node/package.json ] && [ -f surrealdb/wasm/package.json ]; then
+            echo "build-npm=true" >> "$GITHUB_OUTPUT"
+            echo "npm package sources present at ${GIT_REF}; the npm build will run."
+          else
+            echo "build-npm=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::surrealdb/node and/or surrealdb/wasm absent at ${GIT_REF}; skipping the npm build (this line ships no npm packages)."
+          fi
+
+  # `@surrealdb/node-native`: the NAPI addon, one native binary per platform.
+  build-node-addon:
+    name: Build Node addon (${{ matrix.name }})
+    needs: [npm-preflight]
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x86_64
+            host: macos-latest
+            target: x86_64-apple-darwin
+          - name: macOS aarch64
+            host: macos-latest
+            target: aarch64-apple-darwin
+          # The repository-root cargo config links the `surreal` binary against
+          # the static CRT. An addon is loaded into an already-running node.exe
+          # and has to share that process's dynamic CRT, so the flags are
+          # replaced here — `RUSTFLAGS` overrides the config's `rustflags`
+          # outright rather than appending to them.
+          - name: Windows x86_64
+            host: windows-latest
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-feature=-crt-static
+          - name: Windows aarch64
+            host: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: Linux x86_64 (gnu)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: true
+          - name: Linux x86_64 (musl)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            rustflags: -C target-feature=-crt-static
+          - name: Linux aarch64 (gnu)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - name: Linux aarch64 (musl)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref, not the
+      # built commit checked out above - same reasoning as the engine build job.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Toolchain, the shared S3 compiler cache (inputs below), and
+      # cargo registry/git + installed-binary (~/.cargo/bin) caching keyed per
+      # target. finalize blocks on this job, so its wall-clock is part of
+      # time-to-promotable for every release-line push.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-branch: ${{ inputs.branch }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: ${{ matrix.target }}
+          cache-key: npm-addon-${{ matrix.target }}
+          save-cache: 'true'
+
+      # napi/cargo compile with the repo-pinned toolchain (rust-toolchain.toml),
+      # NOT the `stable` one setup-environment installs - so the target's std has
+      # to be added to the pinned toolchain. The `targets:` input adds it to
+      # `stable`, which the build never uses, so on a cross target the pinned
+      # toolchain lacks the std and the build dies with "can't find crate for
+      # `core`". Running rustup at the repo root resolves the pinned toolchain via
+      # rust-toolchain.toml (auto-installing it), the same way build-macos adds
+      # its cross slice. A no-op for the native (host) target.
+      - name: Add the target to the pinned toolchain
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # Only the gnu aarch64 target links with the GNU toolchain; the musl
+      # targets are linked by zig via cargo-zigbuild.
+      - name: Install cross-compilation toolchain
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      # Zig provides the cross linker for the musl/gnu cross targets (via
+      # cargo-zigbuild below). Installed by direct download from ziglang.org
+      # with a pinned version and checksum rather than through a marketplace
+      # action: the compiler ships as a self-contained static tarball, every
+      # cross entry runs on an x86_64 Linux host, and the pinned checksum
+      # (from https://ziglang.org/download/index.json) makes the supply chain
+      # ours to verify instead of a third-party action's.
+      - name: Install ziglang
+        if: ${{ matrix.cross }}
+        env:
+          ZIG_VERSION: 0.14.1
+          ZIG_SHA256: 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+        run: |
+          set -euo pipefail
+          dist="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSL --retry 5 -o zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${dist}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          sudo tar -C /opt -xJf zig.tar.xz
+          rm zig.tar.xz
+          echo "/opt/${dist}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
+
+      # Namespaced by inputs.name like every other artifact in this workflow, so
+      # concurrent channel entries can never collide on artifact names or
+      # cross-match each other's download patterns.
+      - name: Upload the native binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-addon-${{ inputs.name }}-${{ matrix.target }}
+          if-no-files-found: error
+          path: surrealdb/node/dist/*.node
+
+      # The JavaScript entry point and type declarations are identical for
+      # every target, so one build's copy is enough.
+      - name: Upload the package bundle
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-addon-${{ inputs.name }}-bundle
+          if-no-files-found: error
+          path: |
+            surrealdb/node/dist/
+            !surrealdb/node/dist/*.node
+
+  # `@surrealdb/wasm-native`: the embedded browser engine. One artefact rather
+  # than a matrix — WebAssembly is the only target.
+  build-wasm-engine:
+    name: Build Wasm engine
+    needs: [npm-preflight]
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref, not the
+      # built commit checked out above - same reasoning as the engine build job.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Toolchain, the shared S3 compiler cache (inputs below), and
+      # cargo registry/git + installed-binary (~/.cargo/bin) caching.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          kache-branch: ${{ inputs.branch }}
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          targets: wasm32-unknown-unknown
+          cache-key: npm-wasm
+          save-cache: 'true'
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs. wasm-opt wraps
+      # binaryen's C++ (a multi-minute build), so both installs are skipped
+      # when the exact version is already present in the cached ~/.cargo/bin;
+      # `cargo install --list` is the authority on what is installed at which
+      # version.
+      - name: Install wasm-bindgen-cli + wasm-opt
+        run: |
+          set -euo pipefail
+          installed() { cargo install --list | grep -q "^$1 v$2:"; }
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          if installed wasm-bindgen-cli "$version"; then
+            echo "wasm-bindgen-cli $version already installed (cache)"
+          else
+            echo "Installing wasm-bindgen-cli $version"
+            cargo install --locked -f wasm-bindgen-cli --version "$version"
+          fi
+          if installed wasm-opt 0.116.1; then
+            echo "wasm-opt 0.116.1 already installed (cache)"
+          else
+            cargo install --locked -f wasm-opt --version 0.116.1
+          fi
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Upload the package bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wasm-engine-${{ inputs.name }}-bundle
+          if-no-files-found: error
+          path: surrealdb/wasm/dist/
+
+  # Store the built npm bundles under the channel's rolling prefix so the promote
+  # workflow can publish them without rebuilding. Waits on the crate gates for the
+  # same reason publish-s3/docker do: never persist artifacts for a commit a failed
+  # gate would make unpromotable. Assembles each package's dist/ (for the addon:
+  # every platform's native binary plus the shared JS/typings) exactly as the
+  # publish step expects to find it, then uploads it verbatim.
+  publish-npm-s3:
+    name: Publish npm bundles to S3
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    needs: [npm-preflight, build-node-addon, build-wasm-engine, check-versions, package]
+    # Private runner: rolling artifacts live in the private CI bucket, reached via
+    # the runner's ambient IAM role (no static keys). Label from a repo/org var.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      # One pattern download assembles the whole node dist/: the pattern matches
+      # both this channel entry's shared JS/typings bundle (…-bundle) and every
+      # platform's native binary (…-<target>), merged into one directory. The
+      # inputs.name segment scopes the match to THIS channel entry's artifacts.
+      - name: Download the Node bundle + native binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: node-addon-${{ inputs.name }}-*
+          path: node/dist/
+          merge-multiple: true
+
+      - name: Download the Wasm package bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wasm-engine-${{ inputs.name }}-bundle
+          path: wasm/dist/
+
+      - name: Distribution summary
+        run: |
+          echo "node/dist:" && ls -l node/dist
+          echo "wasm/dist:" && ls -lR wasm/dist
+
+      # The assembled dist/ trees are uploaded verbatim under npm/<pkg>/ so the
+      # promote workflow can drop them straight into the package's dist/ and
+      # publish. Ambient IAM creds from the private runner; region is the bucket's
+      # home region.
+      - name: Upload to the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          aws s3 cp --recursive --cache-control 'no-store' \
+            node/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/node/"
+          aws s3 cp --recursive --cache-control 'no-store' \
+            wasm/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/wasm/"
+
+  # Single source of truth for "the engine side of this commit is releasable" on
+  # this channel. Runs after every engine artifact-producing job AND both channel
+  # gates have succeeded, then writes engine.json — the manifest the promote
+  # workflow looks for to release the engine. If any engine job or gate fails,
+  # this job is skipped and no engine.json is written, so the engine cannot be
+  # released.
+  #
+  # Release lines only, on both axes: the manifest is written only when the
+  # triggering workflow ref is main (nightly) or a releases/* line and the commit
+  # being built is itself reachable from a promotion line (inputs.engine-promotable
+  # — see prepare in rolling-build.yml). The branches need not match: a main
+  # dispatch may rebuild a releases/3.2 commit and vice versa. A manual dispatch
+  # against any other branch, or a git-sha override pointing at an off-line commit,
+  # still builds, scans and pushes (so you can test that a branch/commit builds a
+  # correct image), but writes no manifest — it is never promotable — and the
+  # cleanup-test job below deletes its artifacts. github.ref here is the caller's
+  # triggering ref.
+  #
+  # The downstream image is built by a separate workflow
+  # (rolling-downstream-build.yml) and records its own downstream.json under the
+  # same prefix, so the two sides never share an object and finalize never waits
+  # on or records downstream state. The promote workflow decides what to release
+  # from which manifests exist for the commit.
+  finalize:
+    name: Finalize channel
+    needs: [build, macos-universal, publish-s3, docker, check-versions, package, npm-preflight, build-node-addon, build-wasm-engine, publish-npm-s3]
+    # Run once the engine side is green. !cancelled() keeps the manifest from
+    # being written when the run was cancelled. The ref check keeps throwaway test
+    # builds (dispatched against non-release branches) unpromotable.
+    #
+    # The npm packages are REQUIRED for promotability only on a releases/* line —
+    # the only channel that ever PUBLISHES npm (a versioned release). There,
+    # npm-preflight must itself have SUCCEEDED (a failed preflight leaves
+    # build-npm empty, which must not be read as "this line has no packages"), and
+    # if it reports packages then all three npm jobs must have succeeded. Every
+    # other channel does not require them:
+    #   * nightly (main, scheduled) builds no npm at all;
+    #   * a manual main dispatch may build npm to exercise it, but main is promoted
+    #     as nightly and never publishes npm, so an npm failure there must NOT block
+    #     the engine (binary + Docker) promote;
+    #   * a release line that predates the packages (build-npm == false, e.g.
+    #     releases/3.1) has none to build.
+    # Requiring explicit successes (rather than tolerating a bare 'skipped' result)
+    # keeps a FAILED npm build — which surfaces as 'skipped' on its dependants —
+    # from slipping through as promotable on a releases/* line, while never
+    # coupling a main rebuild to npm health. npm-preflight always runs on a
+    # releases/* line, so demanding its success there can never deadlock.
+    if: >-
+      ${{ !cancelled()
+      && needs.build.result == 'success'
+      && needs.macos-universal.result == 'success'
+      && needs.publish-s3.result == 'success'
+      && needs.docker.result == 'success'
+      && needs.check-versions.result == 'success'
+      && needs.package.result == 'success'
+      && (!startsWith(inputs.branch, 'releases/')
+          || (needs.npm-preflight.result == 'success'
+              && (needs.npm-preflight.outputs.build-npm != 'true'
+                  || (needs.build-node-addon.result == 'success'
+                      && needs.build-wasm-engine.result == 'success'
+                      && needs.publish-npm-s3.result == 'success'))))
+      && inputs.engine-promotable == 'true'
+      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+    # Private runner: the manifest lives next to the rolling binaries in the
+    # private CI bucket, reached via the runner's ambient IAM role (no static
+    # keys). Label from a repo/org variable so it is not hardcoded here.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      # engine.json lives in the private CI bucket alongside the rolling binaries.
+      # It carries the engine side only — zero downstream metadata — and only
+      # public-safe fields (no registry/account/repo): the registry coordinates
+      # are reconstructed at promote time from secrets plus the deterministic
+      # rolling-<branch>-<sha> tag. The downstream side records its own separate
+      # downstream.json (written by rolling-downstream-build), so the two never
+      # share an object.
+      - name: Write engine manifest
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          BRANCH: ${{ inputs.branch }}
+          BUILD_METADATA: ${{ inputs.build-metadata }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          VERSION: ${{ inputs.release-version }}
+          GIT_SHA: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          # Store the branch name (lossless), not the slug: the slug is derived
+          # from the branch (non-alphanumerics -> '-') and cannot be reversed
+          # (branches containing '-' are ambiguous). Consumers recompute the slug
+          # from the branch when they need it.
+          jq -n \
+            --arg sha "${GIT_SHA}" \
+            --arg branch "${BRANCH}" \
+            --arg ver "${VERSION}" \
+            --arg meta "${BUILD_METADATA}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{sha: $sha, branch: $branch, version: $ver, build_metadata: $meta, created_at: $created}' \
+            > engine.json
+          cat engine.json
+          aws s3 cp --cache-control 'no-store' engine.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/engine.json"
+
+  # Throwaway test builds: a manual dispatch against a branch that is neither main
+  # nor a releases/* line produces no manifest (finalize above is skipped), so the
+  # artifacts can never be promoted. Delete them so we don't accumulate unusable
+  # rolling binaries/images. Runs regardless of build outcome (always()) so it also
+  # clears partial artifacts from a failed test build, and is keyed strictly by
+  # this run's slug + sha, so it can only ever remove what this run created.
+  cleanup-test:
+    name: Clean up test artifacts
+    # Waits on the npm jobs too so a throwaway dispatch's npm bundles (uploaded by
+    # publish-npm-s3) are removed by the recursive prefix delete below rather than
+    # racing it. always() tolerates them being skipped on a non-dispatch throwaway.
+    needs: [build, macos-universal, publish-s3, docker, build-node-addon, build-wasm-engine, publish-npm-s3]
+    # Runs ONLY for a genuinely throwaway build and NEVER against a promotable
+    # prefix. Gate on the artifact SLUG - the line containing the built commit,
+    # which is what names the shared rolling-builds/<slug>/<sha> prefix - not the
+    # workflow ref and not engine-promotable:
+    #   * a dispatch from a feature branch that rebuilds a real release-line commit
+    #     is keyed under that line's slug (e.g. releases-3-3), so a ref-based guard
+    #     would delete the real release's artifacts;
+    #   * an empty-git-sha dispatch off a feature branch builds the feature tip,
+    #     keyed under the feature slug (a genuine throwaway), yet engine-promotable
+    #     reports it promotable (it short-circuits to true whenever git-sha is
+    #     empty), so that guard would leak its binaries.
+    # `main` and `releases-*` are the promotable slugs; every other slug is a
+    # throwaway prefix no promotable build ever writes to, so deleting it is safe.
+    if: ${{ always() && inputs.branch-slug != 'main' && !startsWith(inputs.branch-slug, 'releases-') }}
+    # Private runner: reaches the private CI bucket and the ECR via the runner's
+    # ambient IAM role (no static keys). Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+    steps:
+      - name: Delete rolling binaries from S3
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+        run: |
+          set -euo pipefail
+          echo "Removing s3://${ROLLING_BUCKET}/${S3_PREFIX}/ (throwaway test build)"
+          # Best-effort: cleanup of throwaway test artifacts must never fail the run.
+          # The most common cause of a non-zero exit here is the runner role lacking
+          # s3:DeleteObject (uploads are permitted, deletes are not), which would leave
+          # orphaned test objects but has no bearing on any promotable build.
+          if ! aws s3 rm --recursive "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"; then
+            echo "::warning::Could not delete throwaway test binaries under ${S3_PREFIX} (often a missing s3:DeleteObject grant on the runner role). Leaving them in place; this does not affect releases."
+          fi
+
+      - name: Delete rolling images from ECR
+        # Always attempt ECR cleanup even if the S3 step above failed, so the two
+        # resources are cleaned independently rather than the first failure skipping
+        # the second.
+        if: ${{ always() }}
+        env:
+          SLUG: ${{ inputs.branch-slug }}
+          SHA: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          # Region derived from the registry host so it can't drift from the secret.
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          # The docker job pushes both the immutable rolling-<slug>-<sha> tag and
+          # the floating <slug> tag, each in prod ('') and dev ('-dev') variants.
+          # batch-delete-image is a no-op (not an error) for tags already absent.
+          aws ecr batch-delete-image --region "$region" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids \
+              imageTag="rolling-${SLUG}-${SHA}" \
+              imageTag="rolling-${SLUG}-${SHA}-dev" \
+              imageTag="${SLUG}" \
+              imageTag="${SLUG}-dev" \
+            || echo "::warning::ECR cleanup returned non-zero; some tags may have been absent."

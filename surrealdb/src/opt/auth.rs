@@ -176,16 +176,13 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 /// use surrealdb::opt::auth::{Token, AccessToken, RefreshToken};
 ///
 /// // Create a token with only access token (legacy mode)
-/// let legacy_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: None,
-/// };
+/// let legacy_token = Token::from(AccessToken::from("access_token_string"));
 ///
 /// // Create a token with both access and refresh tokens
-/// let modern_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: Some(RefreshToken::from("refresh_token_string")),
-/// };
+/// let modern_token = Token::from((
+///     AccessToken::from("access_token_string"),
+///     RefreshToken::from("refresh_token_string"),
+/// ));
 ///
 /// // Access token values securely
 /// let access_value = modern_token.access.as_insecure_token();
@@ -383,6 +380,38 @@ impl From<String> for Token {
 		Self {
 			access: AccessToken(SecureToken(token)),
 			refresh: None,
+		}
+	}
+}
+
+/// Wraps the wire form an engine returns in the secrecy-preserving type the
+/// SDK hands to callers.
+impl From<surrealdb_rpc::Token> for Token {
+	fn from(token: surrealdb_rpc::Token) -> Self {
+		match token {
+			surrealdb_rpc::Token::Access(access) => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: None,
+			},
+			surrealdb_rpc::Token::WithRefresh {
+				access,
+				refresh,
+			} => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: Some(RefreshToken(SecureToken(refresh))),
+			},
+		}
+	}
+}
+
+impl From<Token> for surrealdb_rpc::Token {
+	fn from(token: Token) -> Self {
+		match token.refresh {
+			Some(refresh) => Self::WithRefresh {
+				access: token.access.0.0,
+				refresh: refresh.0.0,
+			},
+			None => Self::Access(token.access.0.0),
 		}
 	}
 }

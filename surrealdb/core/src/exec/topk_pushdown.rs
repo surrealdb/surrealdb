@@ -45,11 +45,11 @@ use std::sync::{Arc, RwLock};
 
 use crate::exec::OperatorMetrics;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::operators::{SortDirection, SortKey, compare_values};
 use crate::exec::pre_decode_filter::{PreDecodeFilterReason, field_state_blocks_raw_read};
 use crate::val::Value;
-use crate::val::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
 
 /// Shared, monotonically-tightening threshold between the sort operator (top
 /// of the buffered pipeline, possibly a separate task) and the KV scan visitor
@@ -102,7 +102,7 @@ pub(crate) struct TopKThresholdProbe {
 	/// `Less`). With multiple keys, `Equal` must fall through to full decode.
 	single_key: bool,
 	cell: Arc<TopKThresholdCell>,
-	/// Bounds walker descent; sourced from `ctx.config.idiom_recursion_limit`.
+	/// Bounds walker descent; sourced from `ctx.config.exec.idiom_recursion_limit`.
 	depth_limit: u32,
 	/// Present only when EXPLAIN ANALYZE enabled the scan's metrics; the
 	/// visitor flushes per-batch skip counts through it.
@@ -361,7 +361,7 @@ mod tests {
 	use crate::catalog::Record;
 	use crate::val::{Datetime, Number, Object};
 
-	/// Matches the default `ctx.config.idiom_recursion_limit` (256).
+	/// Matches the default `ctx.config.exec.idiom_recursion_limit` (256).
 	const TEST_DEPTH_LIMIT: u32 = 256;
 
 	fn wire_record(obj: Object) -> Vec<u8> {

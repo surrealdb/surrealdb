@@ -6,7 +6,7 @@
 //!
 //! Running against the embedded `mem://` SDK target spins up the same
 //! `Datastore::index_compaction` periodic task as the released server binary
-//! (see `surrealdb/src/engine/tasks.rs::spawn_task_index_compaction`), which
+//! (see `surrealdb/engine-local/src/tasks.rs::spawn_task_index_compaction`), which
 //! is the other compaction path that races with the index builder's
 //! `compact_diskann_pendings`. The race manifests when:
 //!   1. the builder commits its compaction (cache populated with 0..N-1),

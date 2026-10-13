@@ -35,7 +35,19 @@ impl TestReport {
 	fn display_grade(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
 		self.display_grade_header(use_color, f)?;
 
-		f.indent(|f| match self.kind {
+		f.indent(|f| self.display_kind(&self.kind, use_color, f))
+	}
+
+	/// Render one grade. Recursive: a chain failure renders the locating header
+	/// and then delegates to the hop's own kind, so a mismatch inside a walk
+	/// reads exactly like the same mismatch in a plain pairwise run.
+	fn display_kind(
+		&self,
+		kind: &super::TestReportKind,
+		use_color: bool,
+		f: &mut Fmt,
+	) -> fmt::Result {
+		match *kind {
 			super::TestReportKind::Error(ref e) => self.display_run_error(e, f),
 			super::TestReportKind::NoExpectation {
 				ref output,
@@ -91,7 +103,25 @@ impl TestReport {
 			super::TestReportKind::MismatchedValues(ref v) => {
 				Self::display_mismatched_values(v, use_color, f)
 			}
-		})
+			super::TestReportKind::ChainHop {
+				ref version,
+				hop,
+				hops,
+				outputs: _,
+				ref inner,
+			} => {
+				writeln!(f, "> Chain failed at hop {hop}/{hops}, running version {version}")?;
+				writeln!(
+					f,
+					"> Every earlier version in the walk verified; this is the first that did not."
+				)?;
+				f.indent(|f| self.display_kind(inner, use_color, f))
+			}
+			super::TestReportKind::RepairContract(ref explanation) => {
+				writeln!(f, "> Declared `[[test.repair]]` does not describe the code")?;
+				f.indent(|f| writeln!(f, "{explanation}"))
+			}
+		}
 	}
 
 	fn display_grade_header(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {

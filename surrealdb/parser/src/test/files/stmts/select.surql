@@ -19,6 +19,7 @@ SELECT * FROM ONLY foo WITH INDEX a,b WHERE 1==2 GROUP BY a,b ORDER BY a LIMIT 1
 SELECT * FROM ONLY foo WITH INDEX a,b WHERE 1==2 GROUP BY a,b ORDER BY a LIMIT 1 START 1 FETCH type::fields(1,2);
 SELECT * FROM ONLY foo WITH INDEX a,b WHERE 1==2 GROUP BY a,b ORDER BY a LIMIT 1 START 1 FETCH type::field(1);
 SELECT * FROM ONLY foo WITH INDEX a,b WHERE 1==2 GROUP BY a,b ORDER BY a LIMIT 1 START 1 FETCH $p;
+SELECT * FROM a:1 FOR UPDATE;
 /* ===== result =====
 Query
     .exprs: Some
@@ -45,6 +46,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -93,6 +95,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -118,6 +121,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -148,6 +152,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -174,7 +179,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -185,6 +190,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -211,7 +217,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: Some
@@ -232,6 +238,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -258,7 +265,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -280,6 +287,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -306,7 +314,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -338,6 +346,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -364,7 +373,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -398,6 +407,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -424,7 +434,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -458,6 +468,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -484,7 +495,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -520,6 +531,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -546,7 +558,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -582,6 +594,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -608,7 +621,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -646,6 +659,7 @@ Query
                         +1
                     .timeout: None
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -672,7 +686,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -712,6 +726,7 @@ Query
                     Expr::Duration
                         1s
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -738,7 +753,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -778,6 +793,7 @@ Query
                     Expr::Duration
                         1s
                     .fetch: None
+                    .for_update: false
                     .tempfiles: true
                     .explain: None
         -TopLevelExpr::Expr
@@ -804,7 +820,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -844,6 +860,7 @@ Query
                     Expr::Duration
                         1s
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: Some
                     ExplainClause::Base
@@ -871,7 +888,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -911,6 +928,7 @@ Query
                     Expr::Duration
                         1s
                     .fetch: None
+                    .for_update: false
                     .tempfiles: false
                     .explain: Some
                     ExplainClause::Base
@@ -938,7 +956,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -994,6 +1012,7 @@ Query
                                 .op: IdiomOperator::Field
                                     Ident
                                         .text: "d"
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -1020,7 +1039,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1072,6 +1091,7 @@ Query
                                             +1
                                         -Expr::Integer
                                             +2
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -1098,7 +1118,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1148,6 +1168,7 @@ Query
                                     Some
                                         -Expr::Integer
                                             +1
+                    .for_update: false
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -1174,7 +1195,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1213,6 +1234,34 @@ Query
                         -Expr::Param
                             Param
                                 .text: "p"
+                    .for_update: false
+                    .tempfiles: false
+                    .explain: None
+        -TopLevelExpr::Expr
+            Expr::Select
+                Select
+                    .fields: Fields::List
+                            -ListSelector::All
+                    .omit: None
+                    .only: false
+                    .from: 
+                        -Expr::RecordId
+                            RecordId
+                                .name: Ident
+                                    .text: "a"
+                                .key: RecordIdKey::Number
+                                    1
+                    .with_index: None
+                    .condition: None
+                    .split: None
+                    .group: None
+                    .order: None
+                    .start: None
+                    .limit: None
+                    .version: None
+                    .timeout: None
+                    .fetch: None
+                    .for_update: true
                     .tempfiles: false
                     .explain: None
 */

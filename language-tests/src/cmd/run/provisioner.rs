@@ -4,11 +4,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel;
-use surrealdb_core::cnf::ConfigMap;
-use surrealdb_core::dbs::Capabilities;
-use surrealdb_core::dbs::capabilities::Targets;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
@@ -82,6 +81,7 @@ impl CreateInfo {
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
 		let builder = Datastore::builder()
+			.without_maintenance_tasks()
 			.with_capabilities(cap)
 			.with_auth(true)
 			.with_temporary_directory(Some(sort_temp_dir))
@@ -96,11 +96,9 @@ impl CreateInfo {
 
 		let ds = match self.backend {
 			Backend::Memory => {
-				if versioned {
-					builder.build_with_path("mem://?versioned=true&retention=1h").await?
-				} else {
-					builder.build_with_path("mem://").await?
-				}
+				// The memory backend no longer supports versioning; the runner
+				// filters versioned tests out on this backend (see cmd/run).
+				builder.build_with_path("mem://").await?
 			}
 			Backend::RocksDb => {
 				let p = self.produce_path();
@@ -133,7 +131,7 @@ impl CreateInfo {
 				// freshly built handle still sees whatever earlier tests left behind.
 				// Physically drop the entire keyspace out-of-transaction; `bootstrap`
 				// below then re-seeds the node keys. See `reset_storage`.
-				ds.unsafe_destroy_range(vec![0u8], vec![0xffu8]).await?;
+				ds.unsafe_destroy_range((vec![0u8]..vec![0xffu8]).into()).await?;
 				ds
 			}
 		};
@@ -141,7 +139,7 @@ impl CreateInfo {
 		ds.bootstrap().await?;
 
 		Ok(Ds {
-			store: Arc::new(ds),
+			store: ds,
 			path,
 		})
 	}
@@ -171,8 +169,8 @@ impl CreateInfo {
 	/// these are the same prefixes the retained-key check whitelists.
 	async fn reset_storage(&self, ds: &Datastore) -> Result<()> {
 		if let Backend::TikV = self.backend {
-			ds.unsafe_destroy_range(vec![0u8], b"/!ic".to_vec()).await?;
-			ds.unsafe_destroy_range(b"/!ns".to_vec(), vec![0xffu8]).await?;
+			ds.unsafe_destroy_range((vec![0u8]..b"/!ic".to_vec()).into()).await?;
+			ds.unsafe_destroy_range((b"/!ns".as_slice()..[0xffu8].as_slice()).into()).await?;
 		}
 		Ok(())
 	}
@@ -199,8 +197,8 @@ pub struct Ds {
 pub struct Provisioner {
 	send: Sender<Ds>,
 	recv: Receiver<Ds>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_recv: Receiver<Box<Datastore>>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_recv: Receiver<Arc<Datastore>>,
 	create_info: Arc<CreateInfo>,
 }
 
@@ -223,13 +221,13 @@ pub enum CanReuse {
 #[must_use]
 pub struct Permit {
 	info: Arc<CreateInfo>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_ds: Box<Datastore>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_ds: Arc<Datastore>,
 	inner: PermitInner,
 }
 
 impl Permit {
-	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Box<Datastore>) -> (CanReuse, R), R>(
+	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Arc<Datastore>) -> (CanReuse, R), R>(
 		self,
 		f: F,
 	) -> Result<R> {
@@ -311,8 +309,9 @@ impl Permit {
 	}
 }
 
-async fn create_grade_ds() -> Box<Datastore> {
+async fn create_grade_ds() -> Arc<Datastore> {
 	let ds = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(
 			Capabilities::none()
 				.with_functions(Targets::All)
@@ -331,7 +330,7 @@ async fn create_grade_ds() -> Box<Datastore> {
 		.await
 		.unwrap();
 
-	Box::new(ds)
+	ds
 }
 
 impl Provisioner {

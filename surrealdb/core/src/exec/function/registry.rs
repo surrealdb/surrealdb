@@ -63,6 +63,26 @@ impl FunctionRegistry {
 		self.functions.contains_key(name)
 	}
 
+	/// Iterate all registered scalar functions.
+	#[cfg(test)]
+	pub(crate) fn scalar_functions(&self) -> impl Iterator<Item = &Arc<dyn ScalarFunction>> {
+		self.functions.values()
+	}
+
+	/// Iterate all registered projection functions.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn projection_functions(
+		&self,
+	) -> impl Iterator<Item = &Arc<dyn ProjectionFunction>> {
+		self.projections.values()
+	}
+
+	/// Iterate all registered index functions.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn index_functions(&self) -> impl Iterator<Item = &Arc<dyn IndexFunction>> {
+		self.index_functions.values()
+	}
+
 	/// Get the number of registered scalar functions.
 	#[cfg(test)]
 	pub fn len(&self) -> usize {
@@ -164,6 +184,12 @@ impl FunctionRegistry {
 		self.methods.get(name)
 	}
 
+	/// The full method registry.
+	#[cfg(test)]
+	pub fn methods(&self) -> &MethodRegistry {
+		&self.methods
+	}
+
 	// =========================================================================
 	// Combined methods
 	// =========================================================================
@@ -181,6 +207,24 @@ impl FunctionRegistry {
 impl Default for FunctionRegistry {
 	fn default() -> Self {
 		Self::with_builtins()
+	}
+}
+
+/// The experimental target a built-in is gated behind, if any.
+///
+/// Mirrors the `exp(...)` markers on the corresponding arms of `fnc::dispatch`,
+/// which is where the legacy executor enforces the same gate. Registry entries
+/// that reach a bucket acquire it through their `EvalContext` and check for
+/// themselves; the functions listed here are pure, so they carry no context and
+/// the gate has to be applied by whoever invokes them — the built-in physical
+/// expression, and the plan-time folder.
+pub(crate) fn experimental_target(
+	name: &str,
+) -> Option<crate::dbs::capabilities::ExperimentalTarget> {
+	use crate::dbs::capabilities::ExperimentalTarget;
+	match name {
+		"type::file" | "file::bucket" | "file::key" => Some(ExperimentalTarget::Files),
+		_ => None,
 	}
 }
 
@@ -230,6 +274,11 @@ mod tests {
 		assert!(registry.is_aggregate("time::max"));
 		assert!(registry.is_aggregate("array::group"));
 		assert!(registry.is_aggregate("array::distinct"));
+		assert!(registry.is_aggregate("vector::sum"));
+
+		// vector::sum is both an aggregate and a scalar, so a direct call folds
+		// the array it is given while a GROUP BY query folds across rows.
+		assert!(registry.contains("vector::sum"));
 
 		// Scalar functions should not be aggregates
 		assert!(!registry.is_aggregate("math::abs"));
@@ -280,5 +329,43 @@ mod tests {
 
 		let fields = registry.get_projection("type::fields").expect("type::fields should exist");
 		assert_eq!(fields.name(), "type::fields");
+	}
+
+	/// Every clock- or entropy-backed builtin must report itself
+	/// non-deterministic, so the planner's literal folder leaves it to be
+	/// evaluated per row instead of freezing one value into the whole
+	/// statement. These are declared with `define_pure_function!` — correctly,
+	/// since they need no execution context — which makes the determinism flag
+	/// the only thing standing between them and the folder, and it is applied
+	/// by hand at each registration.
+	#[test]
+	fn volatile_builtins_are_non_deterministic() {
+		let registry = FunctionRegistry::with_builtins();
+
+		let volatile: Vec<&str> = registry
+			.scalar_functions()
+			.map(|f| f.name())
+			.filter(|name| *name == "rand" || name.starts_with("rand::") || *name == "time::now")
+			.collect();
+
+		// Guard the guard: a filter that matched nothing would pass silently.
+		assert!(
+			volatile.len() > 10,
+			"expected the whole rand::* family plus time::now, found {volatile:?}"
+		);
+
+		let offenders: Vec<&str> = volatile
+			.iter()
+			.filter(|name| {
+				registry.get(name).expect("just enumerated from the registry").is_deterministic()
+			})
+			.copied()
+			.collect();
+
+		assert!(
+			offenders.is_empty(),
+			"these must be registered behind `NonDeterministic`, or the planner will fold a \
+			 call to one constant reused for every row: {offenders:?}"
+		);
 	}
 }

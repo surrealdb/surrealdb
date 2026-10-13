@@ -1,0 +1,112 @@
+//! The datastore-level abstraction implemented by every storage backend:
+//! creating transactions, shutting down, and reporting metrics.
+
+use std::any::{Any, TypeId};
+use std::sync::Arc;
+
+use common::future::BoxFut;
+
+use crate::TransactionType;
+use crate::api::Transactable;
+use crate::err::Result;
+
+/// Represents a collection of metrics for a specific datastore flavor.
+///
+/// This structure is used to expose datastore-specific metrics to the telemetry system.
+pub struct Metrics {
+	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
+	pub name: &'static str,
+	/// A list of u64-based metrics.
+	pub u64_metrics: Vec<Metric>,
+}
+
+/// Represents a single metric with a name and description.
+pub struct Metric {
+	/// The name of the metric.
+	pub name: &'static str,
+	/// A human-readable description of the metric.
+	pub description: &'static str,
+}
+
+/// Abstraction over storage backends for creating and managing transactions.
+///
+/// This trait allows decoupling the datastore from concrete KV engines (memory,
+/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
+/// generic transaction parameters into a backend-specific transaction and
+/// report whether the transaction is considered "local" (used internally to
+/// enable some optimizations).
+///
+/// This was introduced to make the server more composable/embeddable. External
+/// crates can implement `TransactionBuilder` to plug in custom backends while
+/// reusing the rest of SurrealDB.
+pub trait TransactionBuilder: Send + Sync + 'static {
+	fn name(&self) -> &'static str;
+
+	/// Create a new backend transaction.
+	///
+	/// - `write`: whether the transaction is writable (Write vs Read)
+	///
+	/// Returns the backend transaction object and a flag indicating if the
+	/// transaction is local to the process (true) or requires external resources
+	/// (false).
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>>;
+
+	/// Perform any backend-specific shutdown/cleanup.
+	fn shutdown(&self) -> BoxFut<'_, Result<()>>;
+
+	/// Registers metrics for the current datastore flavor if supported.
+	///
+	/// This will return a list of available metrics and their descriptions.
+	fn register_metrics(&self) -> Option<Metrics>;
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	///
+	/// - `metric`: The name of the metric to collect.
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
+
+	/// Waits until this backend is able to serve transactions.
+	///
+	/// The datastore awaits this before it opens the first transaction of
+	/// startup, so a backend that cannot answer the moment it is built — one
+	/// that has to join a cluster and catch up first — reports that wait here
+	/// instead of spending the caller's retry budget on transactions that
+	/// cannot succeed yet. The wait is unbounded by design: how long becoming
+	/// ready may legitimately take is the backend's judgement, not the
+	/// caller's, and callers gate their own liveness elsewhere.
+	///
+	/// Cancellation is the backend's own concern — it holds the canceller it
+	/// was built with, and returning early on shutdown is a valid `Ok`.
+	///
+	/// `Err` means this backend will never serve and startup must fail.
+	///
+	/// The default returns immediately, for backends that can serve as soon as
+	/// they are built.
+	fn wait_until_serve_ready(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(async { Ok(()) })
+	}
+
+	/// Returns an immutable backend-specific extension handle.
+	///
+	/// Backends expose only stable, shareable handles through this hook. The
+	/// default implementation keeps community datastores free of extension
+	/// state.
+	///
+	/// This is the extension point for backend-specific operations that
+	/// don't fit the generic transaction interface: e.g. the TiKV backend
+	/// returns its `TikvOpsHandle` (matched on `TypeId`) so the engine can
+	/// offer MVCC-GC and lock-cleanup to operators without polluting this
+	/// trait with TiKV-only signatures every other backend would have to
+	/// no-op.
+	///
+	/// A capability several backends can offer is published under a shared
+	/// `TypeId` instead of a backend-specific one, so the engine resolves it
+	/// without naming any backend: [`crate::DestroyRangeHandle`] is that
+	/// shape. A backend publishes such a handle only while it can actually
+	/// perform the operation, so `None` is the caller's signal to fall back.
+	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+		None
+	}
+}

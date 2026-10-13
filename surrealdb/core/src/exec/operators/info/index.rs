@@ -15,8 +15,8 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::index::index_building_info;
@@ -93,14 +93,12 @@ impl ExecOperator for IndexInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_index_info(&ctx, &*index, &*table).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

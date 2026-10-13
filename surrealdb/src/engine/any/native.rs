@@ -38,24 +38,25 @@ impl conn::Sealed for Any {
 				capacity => async_channel::bounded(capacity),
 			};
 
-			let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.url.scheme()) {
+			let endpoint_kind = EndpointKind::from(address.url.scheme());
+			match endpoint_kind {
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -70,13 +71,14 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -91,13 +93,14 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -111,13 +114,14 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
-							conn_tx,
-							route_rx,
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -203,17 +207,37 @@ impl conn::Sealed for Any {
 					None,
 				));
 				}
+				EndpointKind::Grpc | EndpointKind::Grpcs => {
+					#[cfg(feature = "protocol-grpc")]
+					{
+						// The gRPC engine serves `SurrealEngine` itself rather
+						// than consuming routes, so it builds its own router
+						// and returns here instead of falling through.
+						let (engine, grpc_features) = engine::remote::grpc::connect_engine(
+							&address,
+							session_clone.receiver.clone(),
+						)
+						.await?;
+						features.extend(grpc_features);
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
+					}
+
+					#[cfg(not(feature = "protocol-grpc"))]
+					return Err(Error::configuration(
+						"Cannot connect to the `gRPC` remote engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
+				}
+
 				EndpointKind::Unsupported(v) => {
 					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
 				}
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

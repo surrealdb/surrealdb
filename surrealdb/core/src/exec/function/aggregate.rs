@@ -22,7 +22,7 @@ use crate::val::Value;
 /// Each accumulator maintains state for computing an aggregate over
 /// a sequence of input values. Accumulators are created per-group
 /// when executing GROUP BY queries.
-pub trait Accumulator: crate::exec::SendSyncRequirement + Debug {
+pub trait Accumulator: Send + Sync + Debug {
 	/// Update the accumulator with a new value.
 	///
 	/// Called once for each row in the group with the evaluated
@@ -75,7 +75,7 @@ pub trait Accumulator: crate::exec::SendSyncRequirement + Debug {
 /// are detected during query planning when a GROUP BY clause is present.
 ///
 /// Examples: count(), math::sum(), math::mean(), array::group()
-pub trait AggregateFunction: crate::exec::SendSyncRequirement + Debug {
+pub trait AggregateFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "math::mean", "count").
 	fn name(&self) -> &'static str;
 

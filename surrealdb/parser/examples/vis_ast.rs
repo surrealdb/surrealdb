@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![allow(clippy::unwrap_used)]
 use std::fmt;
 use std::io::stdout;

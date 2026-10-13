@@ -1,0 +1,29 @@
+{
+	"name": "@surrealdb/wasm-native",
+	"version": "0.0.0",
+	"type": "module",
+	"license": "Apache-2.0",
+	"description": "WebAssembly bindings to an embedded SurrealDB engine, for the browser",
+	"homepage": "https://github.com/surrealdb/surrealdb",
+	"keywords": ["surrealdb", "wasm", "webassembly", "browser", "embedded"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/surrealdb/surrealdb.git",
+		"directory": "surrealdb/wasm"
+	},
+	"scripts": {
+		"build": "bun run build.ts",
+		"release": "bun run publish.ts"
+	},
+	"devDependencies": {
+		"@surrealdb/cbor": "2.0.0-alpha.4"
+	},
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		},
+		"./module": "./dist/index_bg.wasm"
+	},
+	"files": ["dist"]
+}

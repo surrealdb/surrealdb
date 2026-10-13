@@ -14,8 +14,9 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use crate::doc::CursorDoc;
+use crate::exe::FlowResultExt;
 use crate::expr::function::Function;
-use crate::expr::{Expr, FlowResultExt, FunctionCall, Model};
+use crate::expr::{Expr, FunctionCall, Model};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::syn;
@@ -158,12 +159,17 @@ impl InvocationContext for Host {
 		}
 		let ctx = ctx.freeze();
 
-		let expr: Expr =
-			syn::expr_with_capabilities(&query, &self.ctx.get_capabilities(), &self.ctx.config)?
-				.into();
+		let expr: Expr = syn::expr_with_capabilities(
+			&query,
+			&self.ctx.get_capabilities(),
+			&self.ctx.config.parser,
+		)?
+		.into();
 		let res = self
 			.stk
-			.enter(|stk| expr.compute(stk, &ctx, &self.opt, self.doc.as_ref()))
+			.enter(|stk| {
+				crate::legacy::expr_compute(&expr, stk, &ctx, &self.opt, self.doc.as_ref())
+			})
 			.finish()
 			.await
 			.catch_return()?;
@@ -225,7 +231,7 @@ impl InvocationContext for Host {
 				let f: crate::sql::function::Function = syn::function_with_capabilities(
 					&fnc,
 					&self.ctx.get_capabilities(),
-					&self.ctx.config,
+					&self.ctx.config.parser,
 				)?;
 				f.into()
 			}
@@ -239,7 +245,9 @@ impl InvocationContext for Host {
 		let ctx = self.module_context(config).freeze();
 		let res = self
 			.stk
-			.enter(|stk| expr.compute(stk, &ctx, &self.opt, self.doc.as_ref()))
+			.enter(|stk| {
+				crate::legacy::expr_compute(&expr, stk, &ctx, &self.opt, self.doc.as_ref())
+			})
 			.finish()
 			.await
 			.catch_return()?;
@@ -255,7 +263,7 @@ impl InvocationContext for Host {
 		let ns = self.opt.ns().unwrap_or("?");
 		let db = self.opt.db().unwrap_or("?");
 		let module = &self.module_name;
-		match self.ctx.config.surrealism_log_level.as_str() {
+		match self.ctx.config.surrealism.surrealism_log_level.as_str() {
 			"trace" => tracing::trace!(target: "surrealism::module", module, ns, db, "{output}"),
 			"info" => tracing::info!(target: "surrealism::module", module, ns, db, "{output}"),
 			"warn" => tracing::warn!(target: "surrealism::module", module, ns, db, "{output}"),
@@ -277,7 +285,7 @@ impl InvocationContext for Host {
 		let module = self.module_name.clone();
 		let ns = self.opt.ns().unwrap_or("?").to_string();
 		let db = self.opt.db().unwrap_or("?").to_string();
-		let level = self.ctx.config.surrealism_log_level.clone();
+		let level = self.ctx.config.surrealism.surrealism_log_level.clone();
 		Arc::new(move |output| match level.as_str() {
 			"trace" => {
 				tracing::trace!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")

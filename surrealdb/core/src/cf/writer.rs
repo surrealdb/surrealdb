@@ -1,130 +1,25 @@
-use std::collections::HashMap;
-
-use anyhow::Result;
-use parking_lot::Mutex;
-
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::cf::TableMutations;
-use crate::doc::CursorRecord;
-use crate::kvs::KVValue;
-use crate::val::{RecordId, TableName};
-
-// PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).
-// The timestamp will be provided at commit time via Transaction::current_timestamp().
-type PreparedWrite = (NamespaceId, DatabaseId, TableName, crate::kvs::Val);
-
-#[derive(Hash, Eq, PartialEq, Debug)]
-pub struct ChangeKey {
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
-	pub tb: TableName,
-}
-
-/// Changefeed is a per-transaction buffer of table mutations that are
-/// persisted to the database at commit time.
-pub struct Changefeed {
-	/// The buffer of table mutations to be written to the database.
-	buffer: Mutex<HashMap<ChangeKey, TableMutations>>,
-}
-
-impl Changefeed {
-	/// Create a new changefeed buffer
-	pub(crate) fn new() -> Self {
-		Self {
-			buffer: Mutex::new(HashMap::new()),
-		}
-	}
-
-	/// Record a table definition modification
-	pub(crate) fn buffer_table_change(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		dt: &TableDefinition,
-	) {
-		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
-		// Get or create the entry for the change key and push the table change
-		buffer
-			.entry(ChangeKey {
-				ns,
-				db,
-				tb: tb.clone(),
-			})
-			.or_insert_with(|| TableMutations::new(tb.clone()))
-			.push_table_change(dt.to_owned());
-	}
-
-	/// Record a record modification or deletion
-	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn buffer_record_change(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		id: RecordId,
-		previous: CursorRecord,
-		current: CursorRecord,
-		store_difference: bool,
-	) {
-		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
-		// Get or create the entry for the change key and push the record change
-		buffer
-			.entry(ChangeKey {
-				ns,
-				db,
-				tb: tb.clone(),
-			})
-			.or_insert_with(|| TableMutations::new(tb.clone()))
-			.push_record_change(id, previous, current, store_difference);
-	}
-
-	// get returns all the mutations buffered for this transaction.
-	// The timestamp will be provided at commit time.
-	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
-		// Acquire the buffer lock
-		let buffer = self.buffer.lock();
-		// For zero-length changes, return early
-		if buffer.is_empty() {
-			return Ok(Vec::new());
-		}
-		// Create a new change result set
-		let mut res = Vec::with_capacity(buffer.len());
-		// Iterate over the buffered mutations
-		for (key, mutations) in buffer.iter() {
-			// Encode the value
-			let value = mutations.kv_encode_value()?;
-			// Push the prepared write to the result (timestamp will be added at commit time)
-			res.push((key.ns, key.db, key.tb.clone(), value));
-		}
-		// Return the prepared writes
-		Ok(res)
-	}
-
-	// get returns all the mutations buffered for this transaction.
-	// The timestamp will be provided at commit time.
-	pub(crate) fn clear(&self) {
-		// Clear the internal buffer
-		self.buffer.lock().clear();
-	}
-}
+//! The change feed's write path, end to end.
+//!
+//! Buffering a record change and flushing it at commit both happen inside the
+//! transaction, one crate down. What these cover is the property that spans
+//! both crates: a change buffered here is readable through [`super::read`]
+//! afterwards, in commit order.
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	use surrealdb_strand::Strand;
 
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
+		DatabaseDefinition, DatabaseId, FromStored, NamespaceDefinition, NamespaceId, Record,
+		StoredTableDefinition, TableDefinition, TableId,
 	};
 	use crate::cf::ChangeSet;
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
-	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction};
 	use crate::val::{RecordId, RecordIdKey, TableName, Value};
@@ -143,12 +38,12 @@ mod tests {
 		// Write records to the table.
 		//
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let tb_name = TableName::new(TB.to_owned());
 		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx1 = ds.transaction(Write).await.unwrap();
 		let record_a = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("A")),
@@ -158,15 +53,15 @@ mod tests {
 		tx1.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_a,
-			previous.clone().into(),
-			value_a.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_a).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx1.commit().await.unwrap();
 
-		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx2 = ds.transaction(Write).await.unwrap();
 		let record_c = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("C")),
@@ -175,15 +70,15 @@ mod tests {
 		tx2.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_c,
-			previous.clone().into(),
-			value_c.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_c).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx2.commit().await.unwrap();
 
-		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx3 = ds.transaction(Write).await.unwrap();
 		let record_b = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("B")),
@@ -192,10 +87,10 @@ mod tests {
 		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_b,
-			previous.clone().into(),
-			value_b.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_b).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		let record_c2 = RecordId {
@@ -206,10 +101,10 @@ mod tests {
 		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_c2,
-			previous.clone().into(),
-			value_c2.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_c2).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx3.commit().await.unwrap();
@@ -220,12 +115,12 @@ mod tests {
 
 		let start: u64 = 0;
 
-		let tx4 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx4 = ds.transaction(Write).await.unwrap();
 		let r = crate::cf::read(
 			&tx4,
 			tb.namespace_id,
 			tb.database_id,
-			Some(&tb.name),
+			Some(&tb_name),
 			ShowSince::Versionstamp(start),
 			Some(10),
 		)
@@ -256,14 +151,14 @@ mod tests {
 		// Given we have 2 entries in change feeds
 		let ds = init(false).await;
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let tb_name = TableName::new(TB.to_owned());
 		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Record first change with timestamp ~5
 		let _id1 = record_change_feed_entry(
-			ds.transaction(Write, Optimistic).await.unwrap(),
+			ds.transaction(Write).await.unwrap(),
 			&tb,
 			"First".to_string(),
 		)
@@ -271,23 +166,18 @@ mod tests {
 
 		// Record second change with timestamp ~10 (or later)
 		let _id2 = record_change_feed_entry(
-			ds.transaction(Write, Optimistic).await.unwrap(),
+			ds.transaction(Write).await.unwrap(),
 			&tb,
 			"Second".to_string(),
 		)
 		.await;
 
 		// When we scan from timestamp 0 we should see both changes
-		let r = change_feed_ts(ds.transaction(Write, Optimistic).await.unwrap(), &tb, 0).await;
+		let r = change_feed_ts(ds.transaction(Write).await.unwrap(), &tb, 0).await;
 		assert_eq!(r.len(), 2);
 
 		// When we scan from a timestamp after the first change, we should only see the second
-		let r = change_feed_ts(
-			ds.transaction(Write, Optimistic).await.unwrap(),
-			&tb,
-			r[0].0 as u64 + 1,
-		)
-		.await;
+		let r = change_feed_ts(ds.transaction(Write).await.unwrap(), &tb, r[0].0 as u64 + 1).await;
 		assert_eq!(r.len(), 1);
 	}
 
@@ -296,7 +186,7 @@ mod tests {
 			&tx,
 			tb.namespace_id,
 			tb.database_id,
-			Some(&tb.name),
+			Some(&tb.name.clone()),
 			ShowSince::Versionstamp(ts),
 			Some(10),
 		)
@@ -311,26 +201,27 @@ mod tests {
 		tb: &TableDefinition,
 		id: String,
 	) -> RecordId {
+		let tb_name = tb.name.clone();
 		let record_id = RecordId {
-			table: tb.name.clone(),
+			table: tb_name.clone(),
 			key: RecordIdKey::String(id.into()),
 		};
 		let value_a: Value = "a".into();
-		let previous = Value::None.into();
+		let previous = Value::None;
 		tx.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_id,
-			previous,
-			value_a.into(),
+			Record::new(previous).into_read_only(),
+			Record::new(value_a).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx.commit().await.unwrap();
 		record_id
 	}
 
-	async fn init(store_diff: bool) -> Datastore {
+	async fn init(store_diff: bool) -> Arc<Datastore> {
 		let namespace_id = NamespaceId(1);
 		let database_id = DatabaseId(2);
 		let table_id = TableId(3);
@@ -350,12 +241,13 @@ mod tests {
 			comment: None,
 			strict: false,
 		};
-		let mut tb_def = TableDefinition::new(
+		let mut tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
 			namespace_id,
 			database_id,
 			table_id,
 			TableName::new(TB.to_owned()),
-		);
+		))
+		.unwrap();
 		tb_def.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10 * 60),
 			store_diff,
@@ -368,7 +260,7 @@ mod tests {
 		// conversion work.
 		//
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 
 		tx.put_ns(ns_def).await.unwrap();
 		tx.put_db(NS, db_def).await.unwrap();

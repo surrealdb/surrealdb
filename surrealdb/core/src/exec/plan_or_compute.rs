@@ -16,7 +16,7 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::planner::try_plan_expr;
-use crate::exec::{FlowResult, ValueBatchStream};
+use crate::exec::{Error as ExecError, FlowResult, ValueBatchStream};
 use crate::expr::part::{Part, RecurseInstruction};
 use crate::expr::statements::InfoStatement;
 use crate::expr::{Base, Block, ControlFlow, ControlFlowExt, Expr, Literal};
@@ -33,25 +33,43 @@ use crate::val::Value;
 pub(crate) fn get_legacy_context(
 	exec_ctx: &ExecutionContext,
 ) -> Result<(crate::dbs::Options, FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-	let options = legacy_fallback_options(exec_ctx, options);
+	let options = exec_ctx.options().ok_or_else(|| {
+		ExecError::Thrown("Options not available for legacy compute fallback".into())
+	})?;
+	let options = legacy_fallback_options(
+		options,
+		exec_ctx.root().skip_fetch_perms,
+		exec_ctx.root().computing_field,
+	);
 	Ok((options, Arc::clone(exec_ctx.ctx())))
 }
 
 /// Derive the `Options` to use for a legacy compute fallback.
 ///
-/// When the streaming context is evaluating a `PERMISSIONS` predicate
-/// (signalled by `skip_fetch_perms`), the fallback must block write side
-/// effects so a predicate cannot mutate data through the legacy compute path
-/// (GHSA-66r2-5gwj-gxm2).
-fn legacy_fallback_options(
-	exec_ctx: &ExecutionContext,
+/// The streaming engine plans no writes of its own, so every write in an
+/// expression reaches the legacy path through here. Two frames must not be
+/// allowed to take it:
+///
+/// - a `PERMISSIONS` predicate (signalled by `skip_fetch_perms`), which is evaluated with
+///   permission enforcement disabled (GHSA-66r2-5gwj-gxm2);
+/// - a `COMPUTED` field body (signalled by `computing_field`), which is evaluated on every read of
+///   the field and under the definer's auth.
+///
+/// The permission frame also disables `perms`; the computed frame does not,
+/// because a computed body's own reads stay permission-checked.
+/// The two signals are taken as arguments rather than read from `exec_ctx`
+/// because the permission frame is tracked per `EvalContext` at some call sites
+/// and per root at others. Naming them at each site keeps this the only place
+/// that decides what they mean.
+pub(crate) fn legacy_fallback_options(
 	options: &crate::dbs::Options,
+	permission_predicate: bool,
+	computing_field: bool,
 ) -> crate::dbs::Options {
-	if exec_ctx.root().skip_fetch_perms {
+	if permission_predicate {
 		options.new_for_permission_predicate()
+	} else if computing_field {
+		options.new_for_computed_field()
 	} else {
 		options.clone()
 	}
@@ -66,10 +84,14 @@ pub(crate) fn get_legacy_context_with_param(
 	param_name: &str,
 	param_value: &Value,
 ) -> Result<(crate::dbs::Options, FrozenContext), Error> {
-	let options = exec_ctx
-		.options()
-		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-	let options = legacy_fallback_options(exec_ctx, options);
+	let options = exec_ctx.options().ok_or_else(|| {
+		ExecError::Thrown("Options not available for legacy compute fallback".into())
+	})?;
+	let options = legacy_fallback_options(
+		options,
+		exec_ctx.root().skip_fetch_perms,
+		exec_ctx.root().computing_field,
+	);
 
 	let mut ctx = crate::ctx::Context::new_child(exec_ctx.ctx());
 	ctx.add_value(param_name.to_string(), std::sync::Arc::new(param_value.clone()));
@@ -93,12 +115,25 @@ pub(crate) async fn legacy_compute(
 	doc: Option<&crate::doc::CursorDoc>,
 ) -> crate::expr::FlowResult<Value> {
 	let mut stack = TreeStack::new();
-	stack.enter(|stk| expr.compute(stk, frozen, opt, doc)).finish().await
+	stack.enter(|stk| crate::legacy::expr_compute(expr, stk, frozen, opt, doc)).finish().await
 }
 
 // ============================================================================
 // Plan-or-Compute Evaluation
 // ============================================================================
+
+/// The transaction the deferred-planning operators need to re-plan an
+/// expression at execute time.
+///
+/// Planning resolves table and index definitions through the transaction, so a
+/// context without one cannot plan at all. Reported as an error rather than
+/// read through [`ExecutionContext::txn`], whose missing-transaction case
+/// panics.
+pub(crate) fn planning_txn(ctx: &ExecutionContext) -> Result<Arc<crate::kvs::Transaction>, Error> {
+	ctx.try_txn().ok_or_else(|| {
+		Error::unreachable("Deferred planning requires a transaction, but the context has none")
+	})
+}
 
 /// Plan and evaluate an expression, falling back to legacy compute if the
 /// planner returns `PlannerUnsupported` or `PlannerUnimplemented`.
@@ -124,17 +159,29 @@ pub(crate) async fn evaluate_expr_at_depth(
 	depth: u32,
 ) -> crate::expr::FlowResult<Value> {
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
-	match try_plan_expr!(expr, ctx.ctx(), ctx.txn(), auth, depth) {
+	// The transaction lookup is fallible and, per `try_plan_expr!`, runs only if
+	// the macro takes its planning branch.
+	match try_plan_expr!(
+		expr,
+		ctx.ctx(),
+		ctx.function_registry(),
+		planning_txn(ctx).map_err(|e| ControlFlow::Err(e.into()))?,
+		auth,
+		depth
+	) {
 		Ok(plan) => {
+			let shape = plan.output_shape();
 			let stream = plan.execute(ctx)?;
-			collect_single_value(stream).await
+			collect_shaped_value(stream, shape).await
 		}
-		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+		Err(Error::Exec(
+			e @ (ExecError::PlannerUnsupported(_) | ExecError::PlannerUnimplemented(_)),
+		)) => {
 			match &e {
-				Error::PlannerUnimplemented(msg) => {
+				ExecError::PlannerUnimplemented(msg) => {
 					tracing::warn!("PlannerUnimplemented fallback in evaluate_expr: {msg}");
 				}
-				Error::PlannerUnsupported(msg) => {
+				ExecError::PlannerUnsupported(msg) => {
 					tracing::debug!("PlannerUnsupported fallback in evaluate_expr: {msg}",);
 				}
 				_ => {}
@@ -166,22 +213,35 @@ pub(crate) async fn evaluate_body_expr(
 	let frozen_ctx = Arc::clone(ctx.ctx());
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
 
-	match try_plan_expr!(expr, &frozen_ctx, ctx.txn(), auth, depth) {
+	// Fallible transaction lookup, evaluated only on the planning branch.
+	match try_plan_expr!(
+		expr,
+		&frozen_ctx,
+		ctx.function_registry(),
+		planning_txn(ctx).map_err(|e| ControlFlow::Err(e.into()))?,
+		auth,
+		depth
+	) {
 		Ok(plan) => {
 			if plan.mutates_context() {
-				*ctx = plan.output_context(ctx).await.map_err(|e| ControlFlow::Err(e.into()))?;
+				// A loop signal from the bound expression is the caller's to act
+				// on — `ForeachPlan` breaks or continues its loop on it.
+				*ctx = plan.output_context(ctx).await?;
 				Ok(Value::None)
 			} else {
+				let shape = plan.output_shape();
 				let stream = plan.execute(ctx)?;
-				collect_single_value(stream).await
+				collect_shaped_value(stream, shape).await
 			}
 		}
-		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+		Err(Error::Exec(
+			e @ (ExecError::PlannerUnsupported(_) | ExecError::PlannerUnimplemented(_)),
+		)) => {
 			match &e {
-				Error::PlannerUnimplemented(msg) => {
+				ExecError::PlannerUnimplemented(msg) => {
 					tracing::warn!("PlannerUnimplemented fallback in evaluate_body_expr: {msg}");
 				}
-				Error::PlannerUnsupported(msg) => {
+				ExecError::PlannerUnsupported(msg) => {
 					tracing::debug!("PlannerUnsupported fallback in evaluate_body_expr: {msg}",);
 				}
 				_ => {}
@@ -193,7 +253,7 @@ pub(crate) async fn evaluate_body_expr(
 
 			if let Expr::Let(set_stmt) = expr {
 				if set_stmt.is_protected_set() {
-					return Err(Error::InvalidParam {
+					return Err(ExecError::InvalidParam {
 						name: set_stmt.name.to_string(),
 					}
 					.into());
@@ -202,7 +262,7 @@ pub(crate) async fn evaluate_body_expr(
 				let value = legacy_compute(&set_stmt.what, &frozen, &opt, None).await?;
 
 				let value = if let Some(kind) = &set_stmt.kind {
-					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+					value.coerce_to_kind(kind).map_err(|e| ExecError::SetCoerce {
 						name: set_stmt.name.to_string(),
 						error: Box::new(e),
 					})?
@@ -224,30 +284,34 @@ pub(crate) async fn evaluate_body_expr(
 // Stream Collection Helpers
 // ============================================================================
 
-/// Collect values from a stream into a single value.
+/// Collect values from a stream into the single value an expression evaluates
+/// to, shaped by the plan's declared [`OutputShape`] rather than how many rows
+/// it happened to produce.
 ///
-/// - Empty stream → `Value::None`
-/// - Single value → that value
-/// - Multiple values → wrapped in an array (for query results like SELECT)
+/// - `OutputShape::Scalar` (e.g. `SELECT ONLY`, or any non-query expression) → the one emitted
+///   value, or `Value::None` if the plan emitted none.
+/// - `OutputShape::Rows` (e.g. an ordinary `SELECT`) → always `Value::Array`, regardless of row
+///   count. A caller using the result as a `FOR` range, or any other array-shaped context, must see
+///   `[]` for zero rows and `[x]` for one — never `NONE` or the bare element — the same contract
+///   [`ScalarSubquery`](crate::exec::physical_expr::subquery::ScalarSubquery) already applies to a
+///   subquery expression.
 ///
 /// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).
-pub(crate) async fn collect_single_value(
-	stream: ValueBatchStream,
+pub(crate) async fn collect_shaped_value(
+	mut stream: ValueBatchStream,
+	shape: crate::exec::OutputShape,
 ) -> crate::expr::FlowResult<Value> {
 	let mut values = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
-			Ok(batch) => values.extend(batch.values),
+			Ok(batch) => values.extend(batch.into_values()),
 			Err(ctrl) => return Err(ctrl),
 		}
 	}
 
-	if values.is_empty() {
-		Ok(Value::None)
-	} else if values.len() == 1 {
-		Ok(values.into_iter().next().expect("values verified non-empty"))
+	if shape.is_scalar() {
+		Ok(values.pop().unwrap_or(Value::None))
 	} else {
 		Ok(Value::Array(crate::val::Array(values)))
 	}
@@ -256,13 +320,12 @@ pub(crate) async fn collect_single_value(
 /// Collect all values from a stream into a `Vec`.
 ///
 /// Propagates control flow signals directly.
-pub(crate) async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
+pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
 	let mut results = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
-			Ok(batch) => results.extend(batch.values),
+			Ok(batch) => results.extend(batch.into_values()),
 			Err(ctrl) => return Err(ctrl),
 		}
 	}
@@ -377,7 +440,6 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 		} => expr_required_context(statement),
 
 		// GQL MATCH queries the datastore and needs a database.
-		#[cfg(feature = "gql")]
 		Expr::Match(_) => ContextLevel::Database,
 	}
 }

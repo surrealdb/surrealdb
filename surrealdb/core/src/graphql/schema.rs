@@ -30,6 +30,7 @@ use async_graphql::{Name, Value as GraphqlValue};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
+use surrealdb_kvs::TransactionType;
 use surrealdb_types::ToSql;
 
 use super::auth::add_auth_mutations;
@@ -50,7 +51,7 @@ use crate::graphql::mutations::process_mutations;
 use crate::graphql::relations::collect_relations;
 use crate::graphql::subscriptions::process_subscriptions;
 use crate::graphql::tables::{process_tbs, register_filter_helper_types};
-use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::kvs::{Datastore, Transaction};
 use crate::val::{
 	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
 	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,
@@ -89,7 +90,7 @@ pub async fn generate_schema(
 	graphql_config: GraphQLConfig,
 ) -> Result<Schema, GraphqlError> {
 	let kvs = datastore;
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let tx = kvs.transaction(TransactionType::Read).await?;
 	let ns = session.ns.as_ref().ok_or(GraphqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GraphqlError::UnspecifiedDatabase)?;
 
@@ -103,16 +104,31 @@ pub async fn generate_schema(
 		GraphQLTablesConfig::None => None,
 		_ => {
 			let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
+			// Lightweight relations are skipped: their edges are record-less,
+			// and the GraphQL layer's resolvers assume stored records. They
+			// stay reachable through the tables they connect.
+			let tbs: Arc<[_]> = tbs
+				.iter()
+				.filter(|t| crate::kvs::lightweight::lightweight_relation(&t.table_type).is_none())
+				.cloned()
+				.collect::<Vec<_>>()
+				.into();
 
 			match graphql_config.tables {
 				GraphQLTablesConfig::None => None,
 				GraphQLTablesConfig::Auto => Some(tbs),
-				GraphQLTablesConfig::Include(inc) => {
-					Some(tbs.iter().filter(|t| inc.contains(&t.name)).cloned().collect())
-				}
-				GraphQLTablesConfig::Exclude(exc) => {
-					Some(tbs.iter().filter(|t| !exc.contains(&t.name)).cloned().collect())
-				}
+				GraphQLTablesConfig::Include(inc) => Some(
+					tbs.iter()
+						.filter(|t| inc.iter().any(|x| x.as_str() == t.name.as_str()))
+						.cloned()
+						.collect(),
+				),
+				GraphQLTablesConfig::Exclude(exc) => Some(
+					tbs.iter()
+						.filter(|t| !exc.iter().any(|x| x.as_str() == t.name.as_str()))
+						.cloned()
+						.collect(),
+				),
 			}
 		}
 	};
@@ -956,12 +972,15 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 		Kind::Any => match val {
 			GraphqlValue::String(s) => {
 				use Kind::*;
+				// Detect the temporal/uuid formats the datastore cannot coerce
+				// from a plain string, so nested `datetime`/`duration`/`uuid`
+				// subfields inside `object`-typed fields still work. These
+				// checks are format-guarded and never match a plain string
+				// like "9000" or "10:00". Any other string is kept verbatim —
+				// GraphQL input strings are data, not embedded SurrealQL, so we
+				// must not re-parse them (doing so turned "9000" into the
+				// integer 9000 and broke coercion against `TYPE string`).
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				if let Ok(expr) = syn::expr_legacy_strand(s.as_str())
-					&& let Ok(out) = convert_static_expr(expr.into())
-				{
-					return Ok(out);
-				}
 				Ok(SurValue::String(s.as_str().into()))
 			}
 			GraphqlValue::Null => Ok(SurValue::Null),

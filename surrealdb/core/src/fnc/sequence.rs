@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::Value;
 
 /// Return the next value for a given sequence.

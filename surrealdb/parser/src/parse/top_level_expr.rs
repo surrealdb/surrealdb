@@ -1,14 +1,12 @@
-use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, Transaction, UseKind};
+use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, UseKind};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use super::{Parse, ParseResult, ParseSync, Parser};
-use crate::parse::ParserState;
 
 fn name_previous_statement(prev: NodeId<TopLevelExpr>, parser: &Parser<'_, '_>) -> &'static str {
 	match parser[prev] {
-		TopLevelExpr::Transaction(_) => "a transaction",
 		TopLevelExpr::Expr(n) => match parser[n] {
 			ast::Expr::Path(n) => {
 				if parser[n].parts.is_none() {
@@ -68,18 +66,36 @@ impl Parse for ast::Query {
 
 		let mut exprs = None;
 		let mut cur: Option<NodeListId<ast::TopLevelExpr>> = None;
-		while let Some(next) = parser.peek()? {
-			if let Some(cur) = cur
-				&& parser.eat(T![;])?.is_none()
+
+		loop {
+			// Handle eof before trying to eat so we do not trigger
+			// the peek missing_data error when doing a partial parse.
+
+			// eat all the empty statements.
+			while !parser.eof() && parser.eat(T![;])?.is_some() {}
+
+			if parser.eof() {
+				break;
+			}
+
+			let expr = parser.parse().await?;
+			parser.push_list(expr, &mut exprs, &mut cur);
+
+			if parser.eat(T![;])?.is_none()
+				&& let Some(next) = parser.peek()?
 			{
+				// Missing `;` error.
 				return Err(parser.with_error(|parser| {
-					let last_stmt = parser[cur].cur;
-					let last_stmt_span = last_stmt.ast_span(parser);
+					let Some(cur) = cur else {
+						unreachable!()
+					};
+					let cur = parser[cur].cur;
+					let last_stmt_span = cur.ast_span(parser);
 					let last_stmt_end = Span {
 						start: last_stmt_span.end,
 						end: last_stmt_span.end,
 					};
-					let last_stmt_name = name_previous_statement(last_stmt, parser);
+					let last_stmt_name = name_previous_statement(cur, parser);
 
 					Level::Error
 						.title(format!(
@@ -108,16 +124,6 @@ impl Parse for ast::Query {
 						.to_diagnostic()
 				}));
 			}
-
-			// eat all the empty statements.
-			while parser.eat(T![;])?.is_some() {}
-
-			if parser.eof() {
-				break;
-			}
-
-			let expr = parser.parse().await?;
-			parser.push_list(expr, &mut exprs, &mut cur);
 		}
 
 		let span = parser.span_since(span);
@@ -134,141 +140,32 @@ impl Parse for ast::TopLevelExpr {
 		let next = parser.peek_expect("an expression")?;
 		match next.token {
 			T![BEGIN] => {
-				if parser.state.contains(ParserState::TRANSACTION) {
-					return Err(parser.with_error(|parser| {
-						Level::Error
-							.title(format!("Unexpected token `{}`", parser.slice(next.span)))
-							.snippet(parser.snippet().annotate(
-								AnnotationKind::Primary.span(next.span).label(
-									"You cannot start a second transaction within an existing transaction",
-								),
-							))
-							.to_diagnostic()
-					}));
-				}
-
-				let tx = parser
-					.with_state(
-						|state| state | ParserState::TRANSACTION,
-						async |parser| parser.parse().await,
-					)
-					.await?;
-				Ok(TopLevelExpr::Transaction(tx))
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Begin(span))
 			}
-			T![CANCEL] => Err(parser.with_error(|parser| {
-				Level::Error
-					.title("Unexpected token `CANCEL` expected an expression")
-					.snippet(parser.snippet().annotate(
-						AnnotationKind::Primary.span(next.span).label(
-							"`CANCEL` statements can only be used within a transaction block",
-						),
-					))
-					.to_diagnostic()
-			})),
-			T![COMMIT] => Err(parser.with_error(|parser| {
-				Level::Error
-					.title("Unexpected token `COMMIT` expected an expression")
-					.snippet(parser.snippet().annotate(
-						AnnotationKind::Primary.span(next.span).label(
-							"`COMMIT` statements can only be used within a transaction block",
-						),
-					))
-					.to_diagnostic()
-			})),
-			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync()?)),
+			T![CANCEL] => {
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Cancel(span))
+			}
+			T![COMMIT] => {
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Commit(span))
+			}
+			T![USE] => Ok(TopLevelExpr::Use(parser.parse().await?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),
 			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse().await?)),
 			_ => Ok(TopLevelExpr::Expr(parser.parse().await?)),
 		}
-	}
-}
-
-impl Parse for ast::Transaction {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		debug_assert!(parser.state.contains(ParserState::TRANSACTION));
-
-		let start = parser.expect(T![BEGIN])?.span;
-		let _ = parser.eat(T![TRANSACTION])?;
-
-		let mut head = None;
-		let mut tail = None;
-		let (end, commits) = loop {
-			if parser.eat(T![;])?.is_none() {
-				let span = parser.peek_span();
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title(format!(
-							"Unexpected token `{}`, expected `;` as the transaction block has not yet ended",
-							parser.slice(span)
-						))
-						.snippet(
-							parser.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-								AnnotationKind::Context
-									.span(start)
-									.label("This transaction is still open"),
-							),
-						)
-						.to_diagnostic()
-				}));
-			}
-
-			let Some(next) = parser.peek()? else {
-				let span = parser.peek_span();
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title("Unexpected end of query, expected transaction block to end")
-						.snippet(
-							parser.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-								AnnotationKind::Context
-									.span(start)
-									.label("Expected this transaction to end"),
-							),
-						)
-						.to_diagnostic()
-				}));
-			};
-
-			match next.token {
-				T![CANCEL] => {
-					parser.next()?;
-					break (next.span, false);
-				}
-				T![COMMIT] => {
-					parser.next()?;
-					break (next.span, true);
-				}
-				T![BEGIN] => {
-					return Err(parser.with_error(|parser| {
-						Level::Error
-							.title(
-								"Unexpected token `BEGIN`, cannot start a transaction within another transaction",
-							)
-							.snippet(
-								parser
-									.snippet()
-									.annotate(AnnotationKind::Primary.span(next.span))
-									.annotate(
-										AnnotationKind::Context
-											.span(start)
-											.label("Expected this transaction to end"),
-									),
-							)
-							.to_diagnostic()
-					}));
-				}
-				_ => {
-					let node = parser.parse_enter::<TopLevelExpr>().await?;
-					parser.push_list(node, &mut head, &mut tail);
-				}
-			}
-		};
-
-		Ok(Transaction {
-			span: start.extend(end),
-			statements: head,
-			commits,
-		})
 	}
 }
 
@@ -289,35 +186,43 @@ impl ParseSync for ast::Kill {
 	}
 }
 
-impl ParseSync for ast::Use {
-	fn parse_sync(parser: &mut Parser) -> super::ParseResult<Self> {
+impl Parse for ast::Use {
+	async fn parse(parser: &mut Parser<'_, '_>) -> super::ParseResult<Self> {
 		let start = parser.expect(T![USE])?.span;
 
-		let (kind, span) = if parser.eat(T![NAMESPACE])?.is_some() {
-			let ns = parser.parse_sync()?;
-			if parser.eat(T![DATABASE])?.is_some() {
-				let db = parser.parse_sync()?;
-				(
+		// An argument is an expression, which carries no span of its own, so
+		// the statement's span runs from `USE` to whatever the last argument
+		// consumed. `DEFAULT` takes no argument, so there the span ends on the
+		// keyword itself.
+		let expect = "`NAMESPACE`, `DATABASE`, or `DEFAULT`";
+		let peek = parser.peek_expect(expect)?;
+		let kind = match peek.token {
+			T![NAMESPACE] => {
+				let _ = parser.next();
+				let ns = parser.parse_enter().await?;
+				if parser.eat(T![DATABASE])?.is_some() {
 					UseKind::NamespaceDatabase {
 						namespace: ns,
-						database: db,
-					},
-					start.extend(parser[db].span),
-				)
-			} else {
-				(UseKind::Namespace(ns), start.extend(parser[ns].span))
+						database: parser.parse_enter().await?,
+					}
+				} else {
+					UseKind::Namespace(ns)
+				}
 			}
-		} else if parser.eat(T![DATABASE])?.is_some() {
-			let db = parser.parse_sync()?;
-
-			(UseKind::Database(db), start.extend(parser[db].span))
-		} else {
-			return Err(parser.unexpected("either `NAMESPACE` or `DATABASE`"));
+			T![DATABASE] => {
+				let _ = parser.next();
+				UseKind::Database(parser.parse_enter().await?)
+			}
+			T![DEFAULT] => {
+				let _ = parser.next();
+				UseKind::Default
+			}
+			_ => return Err(parser.unexpected(expect)),
 		};
 
 		Ok(ast::Use {
 			kind,
-			span,
+			span: parser.span_since(start),
 		})
 	}
 }

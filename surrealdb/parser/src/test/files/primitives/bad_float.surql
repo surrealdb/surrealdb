@@ -5,7 +5,7 @@ ERROR:Error: Invalid token
   |> ???:2:8
   |
 2 | SELECT 123fFROM bar;
-  |        ^^^^^ 
+  |        ^^^^^^^^ 
 
 
 */

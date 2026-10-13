@@ -10,24 +10,26 @@
 //! - [`store`] - Object store trait and implementations
 
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
-mod controller;
 use anyhow::{Result, bail};
-pub(crate) use controller::BucketController;
-pub use controller::BucketOperation;
+use common::future::BoxFut;
+use surrealdb_cnf as cnf;
 
+use crate::CommunityComposer;
 use crate::buc::store::ObjectStore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
-use crate::err::Error;
-use crate::iam::file::extract_allowed_paths;
-use crate::{CommunityComposer, cnf};
 
+mod controller;
+mod error;
 pub mod manager;
 pub mod store;
+
+pub(crate) use controller::BucketController;
+pub use controller::BucketOperation;
+pub(crate) use error::Error;
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -39,7 +41,7 @@ pub struct Config {
 impl cnf::Config for Config {
 	fn parse(&mut self, map: &cnf::ConfigMap) {
 		map.parse_key_with("bucket_folder_allowlist", &mut self.bucket_list, |x| {
-			Some(extract_allowed_paths(x, false, "bucket folder"))
+			Some(cnf::extract_allowed_paths(x, false, "bucket folder"))
 		})
 		.parse_key_with("global_bucket", &mut self.global_bucket, |x| Some(Some(x.to_owned())))
 		.parse_key("global_bucket_enforced", &mut self.only_global);
@@ -61,14 +63,13 @@ impl Config {
 /// Marker trait for bucket store provider requirements.
 pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 
-type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
-
 /// Trait for creating connections to bucket storage backends.
 ///
 /// Implementors of this trait can parse storage URLs and create appropriate
-/// [`ObjectStore`] instances. The community edition supports `memory://` and
-/// `file://` backends, while enterprise editions may support additional backends
-/// like S3, GCS, or Azure Blob Storage.
+/// [`ObjectStore`] instances. Supported backends are `memory://`, `file://`,
+/// and cloud object storage via the `object_store` crate: S3 / S3-compatible
+/// (`s3://`, `s3+http://`, `s3+https://`), Google Cloud Storage (`gs://`,
+/// `gcs://`), and Azure Blob Storage (`az://`, `azure://`).
 pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 	/// Connect to a bucket storage backend.
 	///
@@ -86,7 +87,7 @@ pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 		global: bool,
 		readonly: bool,
 		config: Config,
-	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>>;
+	) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>>;
 }
 
 impl BucketStoreProviderRequirements for CommunityComposer {}
@@ -98,7 +99,7 @@ impl BucketStoreProvider for CommunityComposer {
 		_global: bool,
 		_readonly: bool,
 		config: Config,
-	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
+	) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>> {
 		Box::pin(async {
 			#[cfg(target_arch = "wasm32")]
 			let _ = config;
@@ -109,6 +110,15 @@ impl BucketStoreProvider for CommunityComposer {
 			#[cfg(not(target_arch = "wasm32"))]
 			if let Some(opts) = FileStore::parse_url(url, &config).await? {
 				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
+			}
+
+			// Cloud object storage — AWS S3 (and S3-compatible services like
+			// MinIO, Backblaze B2, Wasabi, Cloudflare R2), Google Cloud Storage,
+			// and Azure Blob Storage — all via the `object_store` crate. See
+			// `store::cloud` for the supported URL formats.
+			#[cfg(not(target_arch = "wasm32"))]
+			if let Some(store) = crate::buc::store::cloud::connect(url)? {
+				return Ok(store);
 			}
 
 			bail!(Error::UnsupportedBackend)

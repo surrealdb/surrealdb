@@ -15,47 +15,52 @@
 
 mod pipeline;
 mod projection;
+mod record_fold;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) use pipeline::{
 	FilterAction, PlannedSource, SelectPipelineConfig, TopKPushdownRequest, WhereClauseState,
 	compute_topk_pushdown_request, filter_action_for_predicate,
 };
+use surrealdb_strand::TableName;
 
 use super::Planner;
 use super::util::{
-	SELECT_ITERATION_PARAMS, all_value_sources, derive_field_name, extract_bruteforce_knn,
-	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
-	extract_version, fold_condition_expressions, has_knn_k_operator, has_knn_ktree_operator,
-	has_knn_operator, has_top_level_or, idiom_to_field_name, index_covers_ordering,
-	is_bounded_topk_downstream, is_count_all_eligible, is_indexed_count_eligible,
-	order_is_scan_compatible, resolve_condition_params, resolve_param_value,
-	resolve_projection_field_idioms, strip_fts_condition, strip_index_conditions,
+	BruteForceKnnVector, SELECT_ITERATION_PARAMS, all_value_sources, derive_field_name,
+	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
+	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
+	has_knn_k_operator, has_knn_ktree_operator, has_knn_operator, has_top_level_or,
+	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
+	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
+	resolve_param_value, resolve_projection_field_idioms, source_field_reads_are_inert,
+	strip_fts_condition, strip_index_conditions, strip_knn_and_matches_from_condition,
 	strip_knn_from_condition, strip_union_index_conditions,
 };
-use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
-use crate::err::Error;
-use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef, select_access_path};
+use crate::catalog::{Index, IndexDefinition};
+use crate::err::{EngineError, Error};
+use crate::exec::index::access_path::{
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
+};
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
+use crate::exec::operators::scan::pipeline::table_read_restricted_fields;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
-	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, Filter, KnnTopK, Limit, RecordIdScan,
-	SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
-	VersionScope,
+	AnalyzePlan, BitmapNode, BitmapResolve, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter,
+	KnnTopK, KnnVectorSource, Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout,
+	Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time;
-use crate::exec::{ExecOperator, OperatorMetrics};
+use crate::exec::{Error as ExecError, ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
 use crate::expr::order::Ordering as OrderClause;
 use crate::expr::with::With;
 use crate::expr::{Cond, Expr, Idiom, Literal};
-use crate::idx::planner::ScanDirection;
-use crate::kvs::Transaction;
 use crate::kvs::index::filter_online_indexes;
-use crate::val::TableName;
+use crate::kvs::{Direction, Transaction};
 
 impl<'ctx> Planner<'ctx> {
 	/// Resolve a parameter to its value at plan time.
@@ -185,12 +190,45 @@ impl<'ctx> Planner<'ctx> {
 			let mut idioms = self.resolve_field_idioms(fetch_item.0).await?;
 			fields.append(&mut idioms);
 		}
+		let (fields_sql, physical_fields) = self.convert_fetch_idioms(fields).await?;
 
 		Ok(Arc::new(Fetch {
 			input,
-			fields,
+			fields_sql,
+			physical_fields,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}) as Arc<dyn ExecOperator>)
+	}
+
+	/// Convert resolved FETCH idioms into `FetchStep`s, pre-planning each
+	/// `Part::Value` (a computed index/key, e.g. `refs[0]`, `refs[$i]`) into
+	/// a `PhysicalExpr` once here rather than re-planning it on every row.
+	/// Other part kinds are moved in as-is; the `Fetch` operator walks them
+	/// unchanged.
+	///
+	/// Consumes the idioms so no part is cloned; the returned string is their
+	/// SQL rendering, captured up front for EXPLAIN (`Fetch::attrs`).
+	pub(crate) async fn convert_fetch_idioms(
+		&self,
+		idioms: Vec<Idiom>,
+	) -> Result<(String, Vec<Vec<FetchStep>>), Error> {
+		use surrealdb_types::ToSql;
+		let fields_sql = idioms.iter().map(|f| f.to_sql()).collect::<Vec<_>>().join(", ");
+		let mut physical_fields = Vec::with_capacity(idioms.len());
+		for idiom in idioms {
+			let mut steps = Vec::with_capacity(idiom.0.len());
+			for part in idiom.0 {
+				let step = match part {
+					crate::expr::part::Part::Value(expr) => {
+						FetchStep::Index(self.physical_expr(expr).await?)
+					}
+					other => FetchStep::Static(other),
+				};
+				steps.push(step);
+			}
+			physical_fields.push(steps);
+		}
+		Ok((fields_sql, physical_fields))
 	}
 	// ========================================================================
 	// Field Resolution Helpers
@@ -208,11 +246,12 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(ref param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				let s = value.clone().coerce_to::<String>().map_err(|_| Error::InvalidFetch {
-					value: value.into_literal(),
-				})?;
+				let s =
+					value.clone().coerce_to::<String>().map_err(|_| ExecError::InvalidFetch {
+						value: value.into_literal(),
+					})?;
 				let idiom: Idiom = crate::syn::idiom(&s)
-					.map_err(|_| Error::InvalidFetch {
+					.map_err(|_| ExecError::InvalidFetch {
 						value: expr,
 					})?
 					.into();
@@ -228,7 +267,7 @@ impl<'ctx> Planner<'ctx> {
 						match self.resolve_expr_to_string(arg).await {
 							Ok(s) => {
 								let idiom: Idiom = crate::syn::idiom(&s)
-									.map_err(|e| Error::Query {
+									.map_err(|e| ExecError::Query {
 										message: format!(
 											"Failed to parse field path '{}': {}",
 											s, e
@@ -242,7 +281,7 @@ impl<'ctx> Planner<'ctx> {
 								let strings = self
 									.resolve_expr_to_string_array(arg)
 									.await
-									.map_err(|_| Error::Query {
+									.map_err(|_| ExecError::Query {
 										message: format!(
 											"Projection function '{}' argument could not \
 												 be resolved to a field path",
@@ -251,7 +290,7 @@ impl<'ctx> Planner<'ctx> {
 									})?;
 								for s in strings {
 									let idiom: Idiom = crate::syn::idiom(&s)
-										.map_err(|e| Error::Query {
+										.map_err(|e| ExecError::Query {
 											message: format!(
 												"Failed to parse field path '{}': {}",
 												s, e
@@ -264,22 +303,25 @@ impl<'ctx> Planner<'ctx> {
 						}
 					}
 					if idioms.is_empty() {
-						return Err(Error::Query {
+						return Err(ExecError::Query {
 							message: format!(
 								"Projection function '{}' requires at least one argument",
 								name
 							),
-						});
+						}
+						.into());
 					}
 					Ok(idioms)
 				}
-				_ => Err(Error::InvalidFetch {
+				_ => Err(ExecError::InvalidFetch {
 					value: expr,
-				}),
+				}
+				.into()),
 			},
-			other => Err(Error::InvalidFetch {
+			other => Err(ExecError::InvalidFetch {
 				value: other,
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -289,13 +331,17 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<String>().map_err(|_| Error::Query {
-					message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
+				value.coerce_to::<String>().map_err(|_| {
+					ExecError::Query {
+						message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
+					}
+					.into()
 				})
 			}
-			_ => Err(Error::Query {
+			_ => Err(ExecError::Query {
 				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -311,14 +357,18 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<Vec<String>>().map_err(|_| Error::Query {
-					message: "OMIT/FETCH parameter did not resolve to an array of strings"
-						.to_string(),
+				value.coerce_to::<Vec<String>>().map_err(|_| {
+					ExecError::Query {
+						message: "OMIT/FETCH parameter did not resolve to an array of strings"
+							.to_string(),
+					}
+					.into()
 				})
 			}
-			_ => Err(Error::Query {
+			_ => Err(ExecError::Query {
 				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -658,6 +708,9 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		select: crate::expr::statements::SelectStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Reject clause combinations FOR UPDATE does not support (VERSION,
+		// GROUP BY, SPLIT, and statically-classifiable non-record targets).
+		crate::dbs::validate_for_update(&select)?;
 		let crate::expr::statements::SelectStatement {
 			fields,
 			omit,
@@ -675,13 +728,45 @@ impl<'ctx> Planner<'ctx> {
 			timeout,
 			explain: _,
 			tempfiles,
+			for_update,
 		} = select;
 
 		let version = extract_version(version, self).await?;
 
+		// A FOR UPDATE read locks current record state; a versioned read
+		// (here always inherited from an enclosing version scope, as a
+		// statement-level VERSION clause is already rejected above) would
+		// make the lock meaningless.
+		if for_update && (version.is_some() || self.version.is_some()) {
+			return Err(ExecError::Query {
+				message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+			}
+			.into());
+		}
+
 		// COUNT fast-path
 		if is_count_all_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what) {
 			use crate::exec::operators::CountScan;
+			// A lightweight relation has no record range to count: decline
+			// every statically-named source shape (table, record id, or
+			// record-id range) so the fallback executor's record-less scan
+			// serves it. Runtime-resolved sources (params) are caught by the
+			// fail-closed guard in `CountScan::execute` instead.
+			let static_table = match what.first() {
+				Some(Expr::Table(table)) => Some(table),
+				Some(Expr::Literal(Literal::RecordId(rid))) => Some(&rid.table),
+				Some(Expr::Postfix {
+					expr,
+					..
+				}) => match expr.as_ref() {
+					Expr::Literal(Literal::RecordId(rid)) => Some(&rid.table),
+					_ => None,
+				},
+				_ => None,
+			};
+			if let Some(table) = static_table {
+				self.decline_lightweight_table(table).await?;
+			}
 			let table_expr = self
 				.physical_expr(what.into_iter().next().expect("what verified non-empty"))
 				.await?;
@@ -706,30 +791,45 @@ impl<'ctx> Planner<'ctx> {
 			&& !matches!(with, Some(crate::expr::with::With::NoIndex))
 			&& !self.cond_touches_restricted_select_field(&what, &cond).await
 		{
-			// Try COUNT index first, then B-tree index for key-only counting.
+			// Try COUNT index first, then B-tree index for key-only counting,
+			// then an exact bitmap fusion (multi-index AND) count.
 			let has_count_idx = self.has_matching_count_index(&what, &cond).await;
 			let btree_access = if !has_count_idx {
 				self.resolve_count_btree_access(&what, &cond, with.as_ref()).await
 			} else {
 				None
 			};
+			// Never planned for versioned queries (a statement-level VERSION
+			// or an enclosing version context): doc-ID mappings and index
+			// entries are not time-travel-aware, so the fused bitmap would
+			// reflect current state rather than the requested version. The
+			// remaining fallback (scan + filter + count) is version-aware.
+			let bitmap_plan = if !has_count_idx
+				&& btree_access.is_none()
+				&& version.is_none()
+				&& self.version.is_none()
+			{
+				self.resolve_count_bitmap_plan(&what, &cond, with.as_ref()).await
+			} else {
+				None
+			};
 
-			if has_count_idx || btree_access.is_some() {
+			if has_count_idx || btree_access.is_some() || bitmap_plan.is_some() {
 				use crate::exec::operators::scan::index_count::IndexCountScan;
 				// `is_indexed_count_eligible` proves that `what` is non-empty
 				// and `cond` is `Some`. Either invariant breaking would be a
 				// planner bug rather than user input — surface it as
-				// `Error::Internal` so the failure message points at the
+				// `EngineError::Internal` so the failure message points at the
 				// drift, instead of letting a future eligibility-rule edit
 				// silently turn into a panic on real queries.
 				let table_first = what.first().cloned().ok_or_else(|| {
-					Error::Internal(
+					EngineError::Internal(
 						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `what` is empty".into(),
 					)
 				})?;
 				let table_expr = self.physical_expr(table_first).await?;
 				let condition = cond.clone().ok_or_else(|| {
-					Error::Internal(
+					EngineError::Internal(
 						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `cond` is None".into(),
 					)
 				})?;
@@ -743,7 +843,8 @@ impl<'ctx> Planner<'ctx> {
 						version.clone(),
 						field_names,
 					)
-					.with_btree_access(btree_access),
+					.with_btree_access(btree_access)
+					.with_bitmap_plan(bitmap_plan),
 				);
 				return self.wrap_select_tail(index_count_scan, timeout, version, only, true).await;
 			}
@@ -784,15 +885,16 @@ impl<'ctx> Planner<'ctx> {
 			// already proved this shape, but pattern-matching the owned value
 			// in a single place keeps the invariant local. If the guard
 			// changes and this destructure desynchronizes, the explicit
-			// `Error::Internal` fires with a useful message rather than an
+			// `EngineError::Internal` fires with a useful message rather than an
 			// `unreachable!` panic.
 			let rid_lit = match what.into_iter().next() {
 				Some(Expr::Literal(Literal::RecordId(rid_lit))) => rid_lit,
 				_ => {
-					return Err(Error::Internal(
+					return Err(EngineError::Internal(
 						"literal RecordId fast path entered without a literal RecordId source"
 							.into(),
-					));
+					)
+					.into());
 				}
 			};
 			let table_name_for_resolve = Some(rid_lit.table.clone());
@@ -808,7 +910,8 @@ impl<'ctx> Planner<'ctx> {
 				None,
 				needed_fields.as_ref(),
 			);
-			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None);
+			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None)
+				.with_for_update(for_update);
 			if let Some(tc) = resolved_table_ctx {
 				scan = scan.with_resolved(tc);
 			}
@@ -844,6 +947,14 @@ impl<'ctx> Planner<'ctx> {
 		// before any downstream checks.
 		self.resolve_source_exprs(&mut what).await;
 
+		// Re-classify FOR UPDATE targets now that params and function calls
+		// have been resolved where possible: a target that resolved to a
+		// non-record source is rejected here, while targets that stay
+		// dynamic are re-validated by the scan operators at execution time.
+		if for_update {
+			crate::dbs::check_for_update_targets(&what)?;
+		}
+
 		let is_value_source = all_value_sources(&what);
 		let primary_table = literal_primary_table.or_else(|| {
 			what.iter().find_map(|e| match e {
@@ -853,31 +964,19 @@ impl<'ctx> Planner<'ctx> {
 		});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
-		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
-			if let Some(ref c) = cond {
-				let mc = extract_matches_context(c, Some(self.ctx));
-				let hm = !mc.is_empty();
-				if hm || has_knn_early {
-					let mut child = crate::ctx::Context::new_child(self.ctx);
-					if hm {
-						let mut mc = mc;
-						if let Some(ref t) = primary_table {
-							mc.set_table(t.clone());
-						}
-						child.set_matches_context(mc);
-					}
-					if has_knn_early {
-						child.set_knn_context(std::sync::Arc::new(
-							crate::exec::function::KnnContext::new(),
-						));
-					}
-					std::borrow::Cow::Owned(child.freeze())
-				} else {
-					std::borrow::Cow::Borrowed(self.ctx)
-				}
-			} else {
-				std::borrow::Cow::Borrowed(self.ctx)
-			};
+		// The MATCHES entries and KNN slot this SELECT's own WHERE declares.
+		// Either being present replaces what the enclosing planner had; what
+		// this SELECT does not declare is inherited below.
+		let own_matches_context = cond.as_ref().and_then(|c| {
+			let mut mc = extract_matches_context(c, Some(self.ctx));
+			if mc.is_empty() {
+				return None;
+			}
+			if let Some(ref t) = primary_table {
+				mc.set_table(t.clone());
+			}
+			Some(Arc::new(mc))
+		});
 
 		// Propagate txn, version, auth, and cycle guard to the inner
 		// planner. Inheriting the cycle guard means a self-referential
@@ -886,15 +985,23 @@ impl<'ctx> Planner<'ctx> {
 		// and fall back. Inheriting auth keeps fast-path eligibility
 		// decisions consistent with the outer statement.
 		let mut pp = if let Some(ref txn) = self.txn {
-			Planner::with_txn(&planning_ctx, Arc::clone(txn), self.ns.clone(), self.db.clone())
+			Planner::with_txn(
+				self.ctx,
+				self.function_registry,
+				Arc::clone(txn),
+				self.ns.clone(),
+				self.db.clone(),
+			)
 		} else {
-			Planner::new(&planning_ctx)
+			Planner::new(self.ctx, self.function_registry)
 		}
 		.with_version(version.clone())
+		.with_for_update(for_update)
 		.with_cycle_guard(self.cycle_guard());
 		if let Some(ref auth) = self.auth {
 			pp = pp.with_auth(Arc::clone(auth));
 		}
+		pp.set_planning_scopes(own_matches_context, has_knn_early, self);
 
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
@@ -908,6 +1015,17 @@ impl<'ctx> Planner<'ctx> {
 		// Expr::Table, so we only need to check concrete types here.
 		let source_is_single_scan = what.len() == 1
 			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. });
+
+		// Collect the MATCHES expressions registered by this SELECT's WHERE
+		// condition (legacy-executor parity — see `MatchesScope`). Walked
+		// again after param resolution and constant folding below so that
+		// both the original nodes (as projections reference them) and the
+		// rewritten nodes (as the residual scan predicate contains them) are
+		// in the allowlist.
+		let mut cond_matches = std::collections::HashSet::new();
+		if let Some(ref c) = cond {
+			crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+		}
 
 		// Resolve bind-parameter references so that downstream index analysis
 		// and KNN extraction see Expr::Literal instead of Expr::Param.
@@ -925,13 +1043,143 @@ impl<'ctx> Planner<'ctx> {
 		// - time::now() - 365d → datetime literal
 		// - math::floor(20.5) → 20 (any pure function with literal args)
 		// - type::int('42') → 42
+		// A fold that discards a subtree must not discard a field read that
+		// would have fetched a record or evaluated something on one, so the
+		// folder is told what these sources can put in a row and what reading
+		// a row of them runs. A versioned read resolves its stamp at
+		// evaluation, so the definitions that will apply are not known here.
+		let restricted_fields = if !source_field_reads_are_inert(&what) {
+			None
+		} else if version.is_some() || self.version.is_some() {
+			// A versioned read resolves its stamp at evaluation, so the
+			// definitions that will apply are not known here.
+			(!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new)
+		} else {
+			match (self.txn(), ns_db) {
+				(Some(txn), Some((ns_id, db_id))) => {
+					let check_perms = match (self.ns.as_deref(), self.db.as_deref()) {
+						(Some(ns), Some(db)) => self.should_check_perms_for_view(ns, db),
+						// Without names to check against, assume enforcement.
+						_ => true,
+					};
+					let mut restricted = HashSet::new();
+					let mut resolved = true;
+					for e in what.iter() {
+						let Expr::Table(name) = e else {
+							continue;
+						};
+						match table_read_restricted_fields(
+							txn,
+							ns_id,
+							db_id,
+							name,
+							None,
+							check_perms,
+						)
+						.await
+						{
+							Some(names) => restricted.extend(names),
+							None => {
+								resolved = false;
+								break;
+							}
+						}
+					}
+					resolved.then_some(restricted)
+				}
+				// Without catalog access a table's field definitions are unknown.
+				_ => (!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new),
+			}
+		};
 		let cond = match cond {
 			Some(mut c) => {
-				fold_condition_expressions(&mut c, self.function_registry());
+				let capabilities = self.ctx.get_capabilities();
+				fold_condition_expressions(
+					&mut c,
+					self.function_registry(),
+					&capabilities,
+					restricted_fields.as_ref(),
+				);
 				Some(c)
 			}
 			None => None,
 		};
+
+		// Fold row-independent record-idiom traversals (`(scan:one).field`
+		// after param substitution) to literals so index analysis can match
+		// them. Versioned SELECTs are excluded — a statement-level VERSION or
+		// an enclosing version context both disqualify, because the plan-time
+		// walk reads current state, not the versioned snapshot. Statements
+		// with write side effects anywhere (projections, sources, condition)
+		// are excluded: a write can change a record between the plan-time
+		// read and the per-row evaluation the fold replaces. See
+		// `record_fold` for the runtime-parity contract.
+		let cond = match cond {
+			Some(mut c) => {
+				if version.is_none()
+					&& self.version.is_none()
+					&& fields.read_only()
+					&& what.iter().all(Expr::read_only)
+					&& c.0.read_only()
+				{
+					self.fold_constant_record_idioms(&mut c).await;
+					// Substitution can leave an operand constant that was not
+					// constant during the first pass, so simplify again under
+					// the same rules. A literal operand is inert, which is what
+					// lets the enclosing comparison collapse.
+					let capabilities = self.ctx.get_capabilities();
+					fold_condition_expressions(
+						&mut c,
+						self.function_registry(),
+						&capabilities,
+						restricted_fields.as_ref(),
+					);
+				}
+				Some(c)
+			}
+			None => None,
+		};
+
+		// Finalize the MATCHES registration scope on the inner planner:
+		// allowlist from both condition forms, executor tables from the full
+		// table sources (record-id sources never get a legacy
+		// `QueryExecutor`, so their rows evaluate MATCHES to `false` — see
+		// `Iterator::prepare_record_id`).
+		{
+			if let Some(ref c) = cond {
+				crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+			}
+			let executor_tables: Vec<surrealdb_strand::TableName> = what
+				.iter()
+				.filter_map(|e| match e {
+					Expr::Table(t) => Some(t.clone()),
+					_ => None,
+				})
+				.collect();
+			// A WHERE-clause MATCHES the registration walk does not reach —
+			// a function argument, a literal container, an IF/ELSE branch, a
+			// block — binds to no query executor, which the legacy engine
+			// reports per row as `NoIndexFoundForMatch`. Raise the same
+			// refusal here so the outcome does not depend on which rows the
+			// condition reaches. Only a full table source gets an executor at
+			// all: with none, MATCHES evaluates to `false` per row on both
+			// engines (see `MatchesScope`), and there is nothing to refuse.
+			if !executor_tables.is_empty()
+				&& let Some(ref c) = cond
+				&& let Some(found) =
+					crate::exec::physical_expr::first_unregistered_cond_matches(&c.0, &cond_matches)
+			{
+				use surrealdb_types::ToSql;
+				return Err(crate::idx::Error::NoIndexFoundForMatch {
+					exp: found.to_sql(),
+				}
+				.into());
+			}
+			pp.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
+				allowlist: cond_matches,
+				executor_tables: Arc::from(executor_tables),
+			}));
+		}
 
 		// KNN handling
 		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
@@ -962,18 +1210,21 @@ impl<'ctx> Planner<'ctx> {
 					 supported."
 						.to_string()
 				};
-				return Err(Error::Query {
+				return Err(ExecError::Query {
 					message,
-				});
+				}
+				.into());
 			}
 			if brute_force_knn.is_some() {
 				(stripped.clone(), stripped)
 			} else if cond.as_ref().is_some_and(|c| has_knn_k_operator(&c.0)) {
-				return Err(Error::PlannerUnimplemented(
-					"Brute-force KNN with parameter-based vectors is not supported \
-					 in the streaming executor"
-						.to_string(),
-				));
+				// A `K` form whose right-hand side is not plan-time
+				// computable (idiom, subquery, …). The legacy planner
+				// registers no executor entry for such an expression and it
+				// evaluates to `false` per row; keep the conjunct in the
+				// filter so the physical fallback (`BinaryOp`, which yields
+				// `false` for KNN) reproduces that.
+				(cond.clone(), cond)
 			} else {
 				(cond, stripped)
 			}
@@ -1046,7 +1297,7 @@ impl<'ctx> Planner<'ctx> {
 			&start,
 			&limit,
 			tempfiles,
-			self.ctx.config.max_order_limit_priority_queue_size as usize,
+			self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
 		);
 
 		// TopK threshold pushdown analysis: when the downstream sort will be
@@ -1054,7 +1305,7 @@ impl<'ctx> Planner<'ctx> {
 		// against the heap's worst entry before record decode. SPLIT, GROUP
 		// BY, and brute-force KNN duplicate, regroup, or rank rows between
 		// scan and sort, so they disqualify the request outright.
-		let topk_request = if self.ctx.config.topk_threshold_pushdown_enabled {
+		let topk_request = if self.ctx.config.exec.topk_threshold_pushdown_enabled {
 			compute_topk_pushdown_request(
 				order.as_ref(),
 				&start,
@@ -1062,7 +1313,7 @@ impl<'ctx> Planner<'ctx> {
 				&fields,
 				tempfiles,
 				split.is_some() || group.is_some() || brute_force_knn.is_some(),
-				self.ctx.config.max_order_limit_priority_queue_size as usize,
+				self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
 			)
 		} else {
 			TopKPushdownRequest::NotApplicable
@@ -1072,6 +1323,7 @@ impl<'ctx> Planner<'ctx> {
 		// The result tracks whether the predicate and limit/start were
 		// consumed by the source operator, so we can avoid duplicating
 		// them in the outer pipeline.
+		let source_count = what.len();
 		let mut planned = pp
 			.plan_sources(
 				what,
@@ -1083,6 +1335,10 @@ impl<'ctx> Planner<'ctx> {
 				scan_predicate,
 				scan_limit,
 				scan_start,
+				// A blocking GROUP BY consumes the whole source stream, so its
+				// LIMIT never terminates the source early and must not
+				// disqualify bitmap fusion.
+				limit.is_some() && group.is_none(),
 				downstream_topk,
 				&topk_request,
 			)
@@ -1115,6 +1371,29 @@ impl<'ctx> Planner<'ctx> {
 			}
 		};
 
+		// KNN conjuncts are stripped from `cond_for_filter` on the assumption
+		// a KNN source operator enforces them. When none fired — an
+		// `Approximate` form with no usable HNSW index — restore the full
+		// condition so the conjunct is evaluated per row (as membership in
+		// the empty KNN result set, i.e. `false`), matching the legacy
+		// executor's missing-entry behaviour instead of silently dropping
+		// the conjunct and letting every row through. A multi-source FROM
+		// always restores: a KnnScan in one source's subtree says nothing
+		// about the other sources' rows, which legacy filters out per table
+		// (no executor entry ⇒ false). Membership is stable under
+		// re-evaluation, so restoring over a fired KnnScan is harmless, and
+		// this is also safe for sources that resolve their access path at
+		// run time (`DynamicScan`).
+		let where_clause = if has_knn
+			&& brute_force_knn.is_none()
+			&& (source_count > 1 || !source_contains_knn(&planned.operator))
+			&& let Some(c) = cond_for_index.as_ref()
+		{
+			WhereClauseState::Original(c.clone())
+		} else {
+			where_clause
+		};
+
 		// KNN wrapping. Residual predicates (non-KNN WHERE conditions) must
 		// be applied BEFORE ranking by distance. Otherwise rows that don't
 		// satisfy the WHERE clause can consume top-K slots and push out
@@ -1132,9 +1411,15 @@ impl<'ctx> Planner<'ctx> {
 				}
 				WhereClauseState::None => planned.operator,
 			};
-			let knn_ctx = planning_ctx.get_knn_context().cloned();
+			let knn_ctx = pp.knn_context.clone();
+			let vector = match kp.vector {
+				BruteForceKnnVector::Literal(v) => KnnVectorSource::Literal(v),
+				BruteForceKnnVector::Deferred(expr) => {
+					KnnVectorSource::Deferred(pp.physical_expr(expr).await?)
+				}
+			};
 			let wrapped = Arc::new(
-				KnnTopK::new(input, kp.field, kp.vector, kp.k as usize, kp.distance)
+				KnnTopK::new(input, kp.field, vector, kp.k as usize, kp.distance)
 					.with_knn_context(knn_ctx),
 			) as Arc<dyn ExecOperator>;
 			(wrapped, WhereClauseState::None)
@@ -1172,6 +1457,9 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan FROM sources with plan-time index resolution.
+	///
+	/// `has_query_limit` reports a LIMIT the pipeline can terminate the source
+	/// early on — see [`Self::plan_source`] for the contract.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sources(
 		&self,
@@ -1184,13 +1472,15 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		has_query_limit: bool,
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
 		if what.is_empty() {
-			return Err(Error::Query {
+			return Err(ExecError::Query {
 				message: "SELECT requires at least one source".to_string(),
-			});
+			}
+			.into());
 		}
 		// Multi-source FROM combines via Union: rows from one scan compete in
 		// the sort heap with rows from the others, so a per-scan threshold
@@ -1215,6 +1505,7 @@ impl<'ctx> Planner<'ctx> {
 					scan_predicate.clone(),
 					scan_limit.clone(),
 					scan_start.clone(),
+					has_query_limit,
 					downstream_topk,
 					topk_request,
 				)
@@ -1259,6 +1550,14 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		// Whether the enclosing SELECT carries a LIMIT the pipeline can
+		// terminate the source early on. A LIMIT above a blocking stage
+		// (GROUP BY) consumes the whole stream first and does not count.
+		// Bitmap fusion declines under such a LIMIT so streaming plans keep
+		// pull-based early termination; independent of `scan_limit`, which
+		// only carries a limit the scan itself may consume (never set for a
+		// top-level OR).
+		has_query_limit: bool,
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
@@ -1292,7 +1591,8 @@ impl<'ctx> Planner<'ctx> {
 				needed_fields.as_ref(),
 			);
 			let mut scan =
-				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate.clone());
+				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate.clone())
+					.with_for_update(self.for_update);
 			if let Some(tc) = resolved_table_ctx {
 				scan = scan.with_resolved(tc);
 			}
@@ -1340,16 +1640,38 @@ impl<'ctx> Planner<'ctx> {
 			// where the actor's real field permissions are known (so it cannot
 			// over-apply to privileged users the way a conservative plan-time
 			// `AssumeRestricted` would).
-			let order = match order {
-				Some(o) if restricted_select.order_touches(o) => None,
-				other => other,
+			//
+			// Withholding is tracked separately from absence: a withheld
+			// ORDER BY is still an ordering the statement requires, so the
+			// limit-pushdown decisions below must not read the resulting
+			// `None` as "no ordering to preserve". They take `order_withheld`
+			// and refuse to push, leaving LIMIT/START to the outer operators
+			// above the Sort.
+			let (order, order_withheld) = match order {
+				Some(o) if restricted_select.order_touches(o) => (None, true),
+				other => (other, false),
 			};
 
-			let resolved =
-				self.resolve_access_path(txn, ns, db, table_name, cond, order, with).await;
+			let resolved = self
+				.resolve_access_path(
+					txn,
+					ns,
+					db,
+					table_name,
+					cond,
+					order,
+					with,
+					has_query_limit,
+					// A statement-level VERSION or an enclosing version
+					// context both disqualify bitmap fusion: doc-ID mappings
+					// and index entries are not time-travel-aware.
+					version.is_some() || self.version.is_some(),
+					&restricted_select,
+				)
+				.await;
 			if let Ok(Some((access_path, direction))) = resolved {
 				let table = table_name.clone();
-				let knn_ctx = self.ctx.get_knn_context().cloned();
+				let knn_ctx = self.knn_context.clone();
 				match access_path {
 					AccessPath::BTreeScan {
 						index_ref,
@@ -1364,6 +1686,7 @@ impl<'ctx> Planner<'ctx> {
 								direction,
 								cond,
 								order,
+								order_withheld,
 								scan_predicate,
 								scan_limit,
 								scan_start,
@@ -1396,6 +1719,7 @@ impl<'ctx> Planner<'ctx> {
 						vector,
 						k,
 						ef,
+						prefilter,
 					} => {
 						return self
 							.plan_knn_search_source(
@@ -1404,6 +1728,7 @@ impl<'ctx> Planner<'ctx> {
 								vector,
 								k,
 								ef,
+								prefilter,
 								cond,
 								needed_fields,
 								version,
@@ -1418,6 +1743,7 @@ impl<'ctx> Planner<'ctx> {
 								table,
 								direction,
 								order,
+								order_withheld,
 								scan_predicate,
 								scan_limit,
 								scan_start,
@@ -1449,6 +1775,26 @@ impl<'ctx> Planner<'ctx> {
 							)
 							.await;
 					}
+					AccessPath::BitmapFusion {
+						root,
+						fallback,
+					} => {
+						return self
+							.plan_bitmap_fusion_source(
+								table,
+								root,
+								fallback,
+								order,
+								cond,
+								needed_fields,
+								version,
+								table_ctx,
+								knn_ctx,
+								downstream_topk,
+								&restricted_select,
+							)
+							.await;
+					}
 					AccessPath::EmptyScan => {
 						return Ok(Self::plan_empty_source());
 					}
@@ -1457,7 +1803,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// Fallback: create the appropriate operator (index resolved at runtime)
-		let knn_ctx = self.ctx.get_knn_context().cloned();
+		let knn_ctx = self.knn_context.clone();
 
 		match expr {
 			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
@@ -1465,12 +1811,10 @@ impl<'ctx> Planner<'ctx> {
 					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
 					.await?;
 				Ok(PlannedSource {
-					operator: Arc::new(RecordIdScan::new(
-						record_id_expr,
-						version,
-						needed_fields,
-						None,
-					)) as Arc<dyn ExecOperator>,
+					operator: Arc::new(
+						RecordIdScan::new(record_id_expr, version, needed_fields, None)
+							.with_for_update(self.for_update),
+					) as Arc<dyn ExecOperator>,
 					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 					topk_pushdown: None,
@@ -1478,11 +1822,12 @@ impl<'ctx> Planner<'ctx> {
 			}
 			Expr::Select(inner_select) => {
 				if version.is_some() {
-					return Err(Error::Query {
+					return Err(ExecError::Query {
 						message: "VERSION clause cannot be used with a subquery source. \
 								  Place the VERSION clause inside the subquery instead."
 							.to_string(),
-					});
+					}
+					.into());
 				}
 				Ok(PlannedSource {
 					operator: self.plan_select_statement(*inner_select).await?,
@@ -1495,6 +1840,25 @@ impl<'ctx> Planner<'ctx> {
 			// Expr::Table / Expr::Literal by resolve_source_exprs().
 			// Any remaining Expr::Param is unresolvable at plan time.
 			Expr::Param(_) => {
+				// Under FOR UPDATE the param must resolve to a record id at
+				// execution time; DynamicScan performs the locked lookup and
+				// rejects every other value shape.
+				if self.for_update {
+					return self
+						.plan_dynamic_scan(
+							expr,
+							version,
+							cond,
+							order,
+							with,
+							needed_fields,
+							scan_predicate,
+							scan_limit,
+							scan_start,
+							knn_ctx,
+						)
+						.await;
+				}
 				let phys_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
 					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
@@ -1545,12 +1909,13 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_btree_scan_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		access: BTreeAccess,
-		direction: crate::idx::planner::ScanDirection,
+		direction: crate::kvs::Direction,
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
+		order_withheld: bool,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -1578,8 +1943,17 @@ impl<'ctx> Planner<'ctx> {
 		// index. With a residual filter above the scan, pushing LIMIT
 		// would make the scan return fewer rows than needed because the
 		// post-filter may remove some of them.
-		let order_covered =
-			|| order.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord));
+		//
+		// A withheld ORDER BY (see the security guard in `plan_source`) is
+		// never covered: the ordering the statement requires is still
+		// outstanding, so LIMIT/START must stay above the Sort. `order` is
+		// `None` here precisely because it was withheld, and `is_none_or`
+		// would otherwise read that as "nothing to order by".
+		let order_covered = || {
+			!order_withheld
+				&& order
+					.is_none_or(|ord| index_covers_ordering(&index_ref, &access, direction, ord))
+		};
 		let push = scan_limit.is_some()
 			&& matches!(filter_action, FilterAction::FullyConsumed)
 			&& order_covered();
@@ -1635,7 +2009,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_fulltext_search_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		query: String,
 		operator: crate::expr::operator::MatchesOperator,
@@ -1674,20 +2048,66 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_knn_search_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		vector: Vec<crate::val::Number>,
 		k: u32,
 		ef: u32,
+		prefilter: Option<KnnPrefilterPlan>,
 		cond: Option<&Cond>,
 		needed_fields: Option<std::collections::HashSet<String>>,
 		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
 	) -> Result<PlannedSource, Error> {
-		use crate::exec::operators::KnnScan;
+		use crate::exec::operators::{KnnPrefilter, KnnScan};
 
-		let residual_cond = cond.and_then(strip_knn_from_condition);
+		// The in-traversal residual excludes MATCHES conjuncts: they are not
+		// evaluable inside the ANN search (no query executor — they compute
+		// to `false` and would reject every candidate). The outer Filter
+		// (`FilterAction::UseOriginal`) enforces them through their physical
+		// operator instead.
+		let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
+		// #548: compile the plan-level prefilter into its operator-side form —
+		// the bitmap node tree evaluated at execute time, plus the true
+		// residual both as a `Cond` (for the in-traversal filter) and as a
+		// physical expression (for the graph-free exact tier).
+		// Compiled for a legacy index — which can never use the bitmap
+		// prefilter — and for any index whose KNN-stripped condition contains
+		// a MATCHES the prefilter may fail to cover: one served by a legacy
+		// (not bitmap-capable) full-text index, or an allow-list build that
+		// exceeds its runtime budget.
+		let stripped_cond =
+			cond.as_ref().and_then(|c| crate::exec::planner::util::strip_knn_from_condition(c));
+		let needs_matches_condition = !index_ref.definition().uses_shared_doc_ids()
+			|| stripped_cond.as_ref().is_some_and(|c| {
+				crate::exec::index::analysis::IndexAnalyzer::expr_contains_matches(&c.0)
+			});
+		let matches_condition = if needs_matches_condition {
+			match stripped_cond {
+				Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+				None => None,
+			}
+		} else {
+			None
+		};
+		let prefilter = match prefilter {
+			Some(p) => {
+				let residual_phys = match &p.residual {
+					Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+					None => None,
+				};
+				let node = bitmap_plan_to_node(p.root);
+				Some(KnnPrefilter {
+					node_dyn: Arc::clone(&node) as Arc<dyn ExecOperator>,
+					node,
+					residual: p.residual,
+					residual_phys,
+					uncovered_matches: p.uncovered_matches,
+				})
+			}
+			None => None,
+		};
 		let mut scan = KnnScan::new(
 			index_ref,
 			vector,
@@ -1697,8 +2117,96 @@ impl<'ctx> Planner<'ctx> {
 			version,
 			knn_ctx,
 			residual_cond,
+			prefilter,
 			Some(needed_fields),
-		);
+		)
+		.with_matches_condition(matches_condition);
+		if let Some(tc) = table_ctx {
+			scan = scan.with_resolved(tc);
+		}
+		Ok(PlannedSource {
+			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
+			filter_action: FilterAction::UseOriginal,
+			limit_pushed: false,
+			topk_pushdown: None,
+		})
+	}
+
+	/// Build a `BitmapResolve` for [`AccessPath::BitmapFusion`].
+	///
+	/// The whole WHERE clause stays as the residual filter
+	/// (`FilterAction::UseOriginal`, as for KNN scans): the bitmap
+	/// intersection is a candidate pre-filter, and re-evaluating the full
+	/// predicate per surviving row keeps the plan's results identical to the
+	/// streaming plans by construction — including when a range branch is
+	/// dropped at runtime for exceeding its drained-entry budget.
+	///
+	/// For OR fusion, `fallback` carries the streaming union the fused plan
+	/// replaced. It is planned into a `UnionIndexScan` here and handed to the
+	/// `BitmapResolve`, which streams it instead of the bitmap when a union
+	/// branch overflows its budget at execute time. The union's own filter
+	/// action is discarded — this source stays `FilterAction::UseOriginal`,
+	/// so the full WHERE above re-filters either path.
+	#[allow(clippy::too_many_arguments)]
+	async fn plan_bitmap_fusion_source(
+		&self,
+		table: surrealdb_strand::TableName,
+		root: BitmapPlan,
+		fallback: Option<Box<AccessPath>>,
+		order: Option<&crate::expr::order::Ordering>,
+		cond: Option<&Cond>,
+		needed_fields: Option<std::collections::HashSet<String>>,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		table_ctx: Option<ResolvedTableContext>,
+		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
+		downstream_topk: bool,
+		restricted_select: &RestrictedPrefixes,
+	) -> Result<PlannedSource, Error> {
+		let fallback_op = match fallback.map(|f| *f) {
+			Some(AccessPath::Union {
+				paths,
+				dedupe,
+			}) => Some(
+				self.plan_union_index_source(
+					table.clone(),
+					paths,
+					dedupe,
+					order,
+					// A LIMIT is never pushed into a fused source, so there is
+					// no per-batch ceiling to hand the union's sub-scans.
+					None,
+					cond,
+					needed_fields.clone(),
+					version,
+					table_ctx.clone(),
+					knn_ctx,
+					downstream_topk,
+					restricted_select,
+				)
+				.await?
+				.operator,
+			),
+			Some(other) => {
+				// Server-side log carries the Debug-formatted access path for
+				// diagnosis; the client-facing message stays opaque so internal
+				// access-path details don't leak.
+				tracing::error!(
+					path = ?other,
+					"BitmapFusion carried an unexpected fallback access path"
+				);
+				return Err(EngineError::Internal(
+					"BitmapFusion carried an unexpected fallback access path; \
+					 only Union is valid here"
+						.into(),
+				)
+				.into());
+			}
+			None => None,
+		};
+		let mut scan = BitmapResolve::new(table, bitmap_plan_to_node(root), needed_fields);
+		if let Some(op) = fallback_op {
+			scan = scan.with_overflow_fallback(op);
+		}
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
@@ -1732,9 +2240,10 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_table_scan_source(
 		&self,
-		table: crate::val::TableName,
-		direction: crate::idx::planner::ScanDirection,
+		table: surrealdb_strand::TableName,
+		direction: crate::kvs::Direction,
 		order: Option<&crate::expr::order::Ordering>,
+		order_withheld: bool,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -1748,8 +2257,26 @@ impl<'ctx> Planner<'ctx> {
 			TopKThresholdProbe, field_path_wire_segments, topk_pushdown_status_at_plan_time,
 		};
 
+		// A lightweight relation has no record range to scan.
+		if let Some(tc) = &table_ctx
+			&& crate::kvs::lightweight::lightweight_relation(&tc.table_def.table_type).is_some()
+		{
+			return Err(crate::exec::Error::PlannerUnsupported(
+				"lightweight relations are scanned by the fallback executor".to_owned(),
+			)
+			.into());
+		}
+		if table_ctx.is_none() {
+			self.decline_lightweight_table(&table).await?;
+		}
+
 		let filter_action = filter_action_for_predicate(&scan_predicate);
-		let push = scan_limit.is_some() && order_is_scan_compatible(order);
+		// A withheld ORDER BY (see the security guard in `plan_source`) leaves
+		// `order` as `None`, which `order_is_scan_compatible` reads as "the
+		// scan order already satisfies the statement". It does not: the
+		// ordering is still outstanding and the Sort above this scan needs
+		// every row, so LIMIT/START stay with the outer operators.
+		let push = scan_limit.is_some() && !order_withheld && order_is_scan_compatible(order);
 		let (tbl_limit, tbl_start, limit_pushed) = if push {
 			(scan_limit, scan_start, true)
 		} else {
@@ -1786,7 +2313,7 @@ impl<'ctx> Planner<'ctx> {
 							spec.first_key.direction,
 							spec.key_count == 1,
 							Arc::clone(&cell),
-							self.ctx.config.idiom_recursion_limit,
+							self.ctx.config.exec.idiom_recursion_limit,
 						));
 						let status = topk_pushdown_status_at_plan_time(
 							probe,
@@ -1841,7 +2368,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_union_index_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		paths: Vec<AccessPath>,
 		dedupe: bool,
 		order: Option<&crate::expr::order::Ordering>,
@@ -1887,8 +2414,8 @@ impl<'ctx> Planner<'ctx> {
 		// already sorted by the suffix column in the merge's direction.
 		let paths = if let Some((_, dir)) = &merge_by_index_key {
 			let target = match dir {
-				SortDirection::Asc => crate::idx::planner::ScanDirection::Forward,
-				SortDirection::Desc => crate::idx::planner::ScanDirection::Backward,
+				SortDirection::Asc => crate::kvs::Direction::Forward,
+				SortDirection::Desc => crate::kvs::Direction::Backward,
 			};
 			paths
 				.into_iter()
@@ -1926,12 +2453,16 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		// Strip CONTAINSANY / ANYINSIDE leaves whose literal value set
-		// is fully covered by the branches' prefix values.  If
-		// everything is covered, the residual Filter goes away and
-		// LIMIT can be pushed into the sub-scans (when merge is
-		// active).  CONTAINSALL / ALLINSIDE leaves are NOT stripped
-		// (intersection semantics; see `strip_union_index_conditions`
-		// rustdoc and issue #236).
+		// contains every one of the branches' prefix values — only then
+		// does each branch imply the leaf.  `cond` is the whole WHERE
+		// clause, which may hold conjuncts the union does not cover
+		// (see `try_and_nested_or_union`), so the check is per leaf and
+		// never assumes a leaf produced this union.  If everything is
+		// covered, the residual Filter goes away and LIMIT can be
+		// pushed into the sub-scans (when merge is active).
+		// CONTAINSALL / ALLINSIDE leaves are NOT stripped (intersection
+		// semantics; see `strip_union_index_conditions` rustdoc and
+		// issue #236).
 		//
 		// SECURITY: stripping is also disabled when the WHERE clause
 		// references a field whose SELECT permission is not `Full`.
@@ -2018,13 +2549,13 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// `select_access_path` only emits `BTreeScan` / `FullTextSearch` /
 	/// `KnnSearch` as union sub-paths; anything else is a planner bug
-	/// and surfaces as `Error::Internal` rather than silently returning a
+	/// and surfaces as `EngineError::Internal` rather than silently returning a
 	/// full table scan.
 	#[allow(clippy::too_many_arguments)]
 	fn build_union_sub_operator(
 		&self,
 		path: AccessPath,
-		table: &crate::val::TableName,
+		table: &surrealdb_strand::TableName,
 		cond: Option<&Cond>,
 		version: Option<&Arc<dyn crate::exec::PhysicalExpr>>,
 		table_ctx: Option<&ResolvedTableContext>,
@@ -2081,8 +2612,11 @@ impl<'ctx> Planner<'ctx> {
 				vector,
 				k,
 				ef,
+				// Union branches carry no prefilter in v1: a branch is a
+				// single predicate, so there is nothing to cover.
+				prefilter: _,
 			} => {
-				let residual_cond = cond.and_then(strip_knn_from_condition);
+				let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
 				let mut scan = KnnScan::new(
 					index_ref,
 					vector,
@@ -2092,6 +2626,7 @@ impl<'ctx> Planner<'ctx> {
 					version.cloned(),
 					knn_ctx.cloned(),
 					residual_cond,
+					None,
 					None,
 				);
 				if let Some(tc) = table_ctx {
@@ -2107,11 +2642,12 @@ impl<'ctx> Planner<'ctx> {
 					path = ?other,
 					"UnionIndexScan sub-path produced an unexpected access path"
 				);
-				Err(Error::Internal(
+				Err(EngineError::Internal(
 					"UnionIndexScan sub-path produced an unexpected access path; \
 					 only BTreeScan / FullTextSearch / KnnSearch are valid here"
 						.into(),
-				))
+				)
+				.into())
 			}
 		}
 	}
@@ -2169,7 +2705,8 @@ impl<'ctx> Planner<'ctx> {
 					dyn_start,
 				)
 				.with_knn_context(knn_ctx)
-				.with_pre_decode_filter(pdf),
+				.with_pre_decode_filter(pdf)
+				.with_for_update(self.for_update),
 			) as Arc<dyn ExecOperator>,
 			filter_action,
 			limit_pushed,
@@ -2197,7 +2734,7 @@ impl<'ctx> Planner<'ctx> {
 		pre_decode_filter_status_at_plan_time(
 			predicate,
 			projected.as_ref(),
-			self.ctx.config.idiom_recursion_limit,
+			self.ctx.config.exec.idiom_recursion_limit,
 		)
 	}
 
@@ -2286,12 +2823,10 @@ impl<'ctx> Planner<'ctx> {
 		let Ok(indexes) = filter_online_indexes(txn, ns_id, db_id, indexes).await else {
 			return false;
 		};
+		// The index's pre-parsed guard condition must match the query's WHERE
+		// clause structurally for the fast path to be used.
 		indexes.iter().any(|ix| {
-			if let Index::Count(ref idx_cond) = ix.index {
-				idx_cond.as_ref() == Some(cond)
-			} else {
-				false
-			}
+			matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(cond)
 		})
 	}
 
@@ -2450,10 +2985,47 @@ impl<'ctx> Planner<'ctx> {
 		None
 	}
 
-	/// Resolve the optimal access path for a table at plan time.
+	/// Resolve an exact bitmap fusion plan for an index-only COUNT
+	/// (issue #547): an AND of two or more index-backed predicates whose
+	/// every conjunct is exactly represented by a candidate bitmap. The
+	/// count is then the fused bitmap's cardinality — zero record fetches.
 	///
-	/// Performs index analysis using the WHERE condition and ORDER BY clause.
-	/// Returns `None` if the namespace/database/table cannot be resolved.
+	/// Exactness needs the declared field kinds (array values fan out to one
+	/// index entry per element, which would inflate the count), so the
+	/// table's fields are resolved here; see
+	/// [`IndexAnalyzer::try_bitmap_count_fusion`] for the structural rules.
+	async fn resolve_count_bitmap_plan(
+		&self,
+		what: &[Expr],
+		cond: &Option<Cond>,
+		with: Option<&With>,
+	) -> Option<Arc<BitmapNode>> {
+		let txn = self.txn.as_ref()?;
+		let table_name = match what.first() {
+			Some(Expr::Table(t)) => t,
+			_ => return None,
+		};
+		let cond = cond.as_ref()?;
+
+		let (ns_id, db_id) = self.ns_db_ids().await?;
+		let indexes = txn.all_tb_indexes(ns_id, db_id, table_name, None).await.ok()?;
+		// Bitmap count drains index data directly, so restrict candidates to
+		// durable-online indexes.
+		let indexes = filter_online_indexes(txn, ns_id, db_id, indexes).await.ok()?;
+		if indexes.len() < 2 {
+			return None;
+		}
+
+		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
+		let exact_col = |col: &Idiom| -> bool {
+			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
+		};
+
+		let analyzer = IndexAnalyzer::new(indexes, with);
+		let root = analyzer.try_bitmap_count_fusion(cond, &exact_col)?;
+		Some(bitmap_plan_to_node(root))
+	}
+
 	/// Resolve the optimal access path for a table at plan time.
 	///
 	/// Performs index analysis using the WHERE condition and ORDER BY clause.
@@ -2469,7 +3041,10 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&Cond>,
 		order: Option<&OrderClause>,
 		with: Option<&With>,
-	) -> Result<Option<(AccessPath, ScanDirection)>, Error> {
+		has_limit: bool,
+		has_version: bool,
+		restricted_select: &RestrictedPrefixes,
+	) -> Result<Option<(AccessPath, Direction)>, Error> {
 		let direction = determine_scan_direction(order);
 
 		// If the entire WHERE clause folded to `false` (e.g. `field IN []`
@@ -2483,6 +3058,19 @@ impl<'ctx> Planner<'ctx> {
 
 		if matches!(with, Some(With::NoIndex)) {
 			return Ok(Some((AccessPath::TableScan, direction)));
+		}
+
+		// SECURITY: `AssumeRestricted` records that plan-time permission context
+		// was unavailable, not that a restricted field exists. Resolving here
+		// would withhold every index on the table and pin a table scan, which
+		// also turns a `MATCHES` on a fully readable column into
+		// `NoIndexFoundForMatch` because no full-text index can be named.
+		// Decline the plan-time path instead, exactly as the catalog lookups
+		// below do when they cannot resolve: the `DynamicScan` fallback applies
+		// the same guard at execute time against the actor's resolved field
+		// permissions, so it is fail-closed without over-applying.
+		if matches!(restricted_select, RestrictedPrefixes::AssumeRestricted) {
+			return Ok(None);
 		}
 
 		// Look up namespace and database to get IDs
@@ -2526,11 +3114,111 @@ impl<'ctx> Planner<'ctx> {
 		});
 		let analysis_cond = rewritten_cond.as_ref();
 
+		// SECURITY: an index whose columns carry a non-`Full` SELECT permission
+		// is withheld from access-path selection entirely. Every scan built
+		// from a candidate answers its predicate from index entries and drops
+		// the covered condition, so the document-level reduction never gets to
+		// hide the value the decision was made from — the full-text, compound
+		// B-tree and HNSW paths all become oracles over a field the actor
+		// cannot read. Withholding the index leaves the predicate to be
+		// answered from the reduced document instead.
+		let indexes = drop_restricted_indexes(indexes, restricted_select);
+		if indexes.is_empty() {
+			return Ok(Some((AccessPath::TableScan, direction)));
+		}
+
 		let analyzer = IndexAnalyzer::new(indexes, with);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
+		// Bitmap candidate fusion (issue #547): when the WHERE clause is an
+		// AND of several index-backed predicates, intersect per-branch
+		// candidate bitmaps over the table's shared doc-ID space instead of
+		// driving from one index and filtering the rest per row. Chosen
+		// conservatively — the streaming plans keep every case where they
+		// have a structural advantage:
+		// - an index covers ORDER BY → keep sort elimination / sorted-merge early termination;
+		// - LIMIT without ORDER BY → any streaming plan terminates early, a bitmap plan
+		//   materializes every branch first;
+		// - VERSION queries → doc-ID mappings are not time-travel-aware.
+		let order_covered = candidates.iter().any(|c| c.covers_order);
+		if with.is_none()
+			&& !has_version
+			&& !order_covered
+			&& (order.is_some() || !has_limit)
+			&& let Some(root) = self
+				.try_bitmap_fusion_plan(
+					txn,
+					ns_def.namespace_id,
+					db_def.database_id,
+					table_name,
+					&analyzer,
+					analysis_cond,
+					&candidates,
+				)
+				.await
+		{
+			return Ok(Some((
+				AccessPath::BitmapFusion {
+					root,
+					fallback: None,
+				},
+				direction,
+			)));
+		}
+
+		// Top-level OR fusion (issue #550): union the per-branch candidate
+		// bitmaps over the shared doc-ID space instead of k-way-merging
+		// RecordId streams, whose dedupe set grows with the result size.
+		// Gated like the AND fusion above: LIMIT without ORDER BY keeps
+		// streaming early termination (a bitmap plan materializes every
+		// branch first), an index-covered ORDER BY keeps the union scan's
+		// sorted-merge and sort-elimination plans, and ORDER BY id keeps
+		// the union's merge-by-id. An ordering nothing covers installs a
+		// blocking Sort above either plan, so fusion is allowed there even
+		// under LIMIT.
+		if with.is_none()
+			&& !has_version
+			&& ((order.is_none() && !has_limit)
+				|| (order.is_some() && !order_covered && !order_is_scan_compatible(order)))
+			&& let Some((root, fallback)) =
+				analyzer.try_bitmap_union_fusion(analysis_cond, direction)
+		{
+			// `order_covered` only sees whole-condition candidates, which for
+			// an OR root never include the branches' index accesses — so it
+			// misses the union's composite k-way merge: when every branch
+			// pins the same composite-index prefix and the ordering is that
+			// index's next column, the union satisfies the ORDER BY with no
+			// Sort. Keep the streaming union for that shape.
+			let union_covers_order = matches!(
+				&fallback,
+				AccessPath::Union {
+					paths,
+					..
+				} if detect_order_for_composite_union(order, paths).is_some()
+			);
+			if !union_covers_order {
+				return Ok(Some((
+					AccessPath::BitmapFusion {
+						root,
+						fallback: Some(Box::new(fallback)),
+					},
+					direction,
+				)));
+			}
+		}
+
 		if candidates.is_empty() {
 			if let Some(path) = analyzer.try_or_union(analysis_cond, direction) {
+				return Ok(Some((path, direction)));
+			}
+			// A nested OR conjunct can be the only indexable part of an AND
+			// when every sibling conjunct is unindexed (e.g. an unindexed
+			// `category = $c AND (title @1@ $q OR body @2@ $q)`). `analyze`
+			// ignores OR subtrees, so there is no single-index candidate and
+			// we reach here before the score-gated check further below. With
+			// no single-index driver the union always beats the table-scan
+			// fallback, so take it unconditionally.
+			if let Some((path, _)) = analyzer.try_and_nested_or_union(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
 			}
 			// Try expanding IN operators into union of equality lookups
@@ -2544,6 +3232,11 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 
+		// Score of the best single-index driver, captured before
+		// `select_access_path` consumes `candidates`. Used below to decide
+		// whether a nested-OR multi-index union would be a better driver.
+		let best_single_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
+
 		let path = select_access_path(candidates, with, direction);
 
 		// When the chosen index covers ORDER BY, derive the correct scan
@@ -2551,7 +3244,32 @@ impl<'ctx> Planner<'ctx> {
 		// `determine_scan_direction` (which only handles ORDER BY id).
 		// This enables LIMIT pushdown and sort elimination for queries like
 		// `ORDER BY metadata.payload_metadata.modified DESC LIMIT 25`.
-		let (path, direction) = adjust_direction_for_order(path, order, direction);
+		let (mut path, direction) = adjust_direction_for_order(path, order, direction);
+
+		// Pre-filtered vector search (#548): evaluate the KNN query's exactly
+		// index-coverable conjuncts into an allow-list bitmap before the ANN
+		// search, instead of fetching every visited candidate's record.
+		// Gated like bitmap fusion: no WITH hints (the user pinned the plan)
+		// and no VERSION (doc-ID mappings are not time-travel-aware).
+		if let AccessPath::KnnSearch {
+			prefilter,
+			..
+		} = &mut path
+			&& with.is_none()
+			&& !has_version
+			&& *surrealdb_cnf::KNN_PREFILTER_ENABLED
+		{
+			*prefilter = self
+				.try_knn_prefilter_plan(
+					txn,
+					ns_def.namespace_id,
+					db_def.database_id,
+					table_name,
+					&analyzer,
+					analysis_cond,
+				)
+				.await;
+		}
 
 		// When the best single-index path is a full-range scan (ORDER BY
 		// only, no WHERE selectivity), also try a multi-index union for
@@ -2587,8 +3305,221 @@ impl<'ctx> Planner<'ctx> {
 		// candidates.is_empty() fallback above when no index covers
 		// ORDER BY at all.
 
+		// When the WHERE clause is a conjunction and one conjunct is a pure
+		// OR whose every branch is independently indexable, consider driving
+		// from that OR's multi-index union and applying the remaining
+		// conjuncts as a residual filter. Without this, a nested OR of
+		// full-text matches like `type = $t AND (title @1@ $q OR body @2@ $q)`
+		// drives from the low-selectivity `type` equality and evaluates the
+		// OR as a per-row filter — re-scoring the FT index for every `type`
+		// row. Switch only when the union's weakest branch is more selective
+		// than the chosen single-index driver (higher score); this keeps a
+		// selective unique/compound equality (or an ORDER BY-covering scan,
+		// which carries the +100 order bonus) as the driver.
+		if with.is_none()
+			&& let Some((union_path, union_score)) =
+				analyzer.try_and_nested_or_union(analysis_cond, direction)
+			&& union_score > best_single_score
+		{
+			return Ok(Some((union_path, direction)));
+		}
+
 		Ok(Some((path, direction)))
 	}
+
+	/// Attempt to build the bitmap fusion plan for `resolve_access_path`.
+	///
+	/// Resolves the table's declared field kinds so `NOT` subtraction can be
+	/// restricted to columns that provably never hold arrays (see
+	/// [`IndexAnalyzer::bitmap_exact_plan`]); the structural work is delegated
+	/// to [`IndexAnalyzer::try_bitmap_fusion`]. Any catalog error simply
+	/// disables the fusion — this is an optimization, never a correctness
+	/// gate.
+	#[allow(clippy::too_many_arguments)]
+	async fn try_bitmap_fusion_plan(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		analyzer: &IndexAnalyzer<'_>,
+		cond: Option<&Cond>,
+		candidates: &[crate::exec::index::analysis::IndexCandidate],
+	) -> Option<BitmapPlan> {
+		// Cheap structural pre-check before touching the catalog: fusion
+		// needs a conjunction and at least one NOT for the field-kind lookup
+		// to matter — but `try_bitmap_fusion` re-checks everything, so only
+		// skip the obviously-impossible case here.
+		let cond = cond?;
+		if !matches!(
+			cond.0,
+			Expr::Binary {
+				op: crate::expr::BinaryOperator::And,
+				..
+			}
+		) {
+			return None;
+		}
+		// Field kinds gate NOT subtraction exactness. Fetch lazily: only
+		// when the WHERE clause actually contains a negated conjunct.
+		let has_not = {
+			let mut found = false;
+			let mut stack = vec![&cond.0];
+			while let Some(e) = stack.pop() {
+				match e {
+					Expr::Binary {
+						left,
+						op: crate::expr::BinaryOperator::And,
+						right,
+					} => {
+						stack.push(left);
+						stack.push(right);
+					}
+					e if IndexAnalyzer::as_negated_expr(e).is_some() => {
+						found = true;
+						break;
+					}
+					_ => {}
+				}
+			}
+			found
+		};
+		let fields = if has_not {
+			txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()
+		} else {
+			None
+		};
+		let exact_col = |col: &Idiom| -> bool {
+			let Some(fields) = &fields else {
+				return false;
+			};
+			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
+		};
+		analyzer.try_bitmap_fusion(Some(cond), candidates, &exact_col)
+	}
+
+	/// Attempt to build the pre-filter plan for a KNN access path (#548).
+	///
+	/// The KNN-stripped WHERE is split per conjunct: conjuncts whose truth
+	/// set is exactly a candidate bitmap join the allow-list plan, the rest
+	/// stay as the true residual (see [`IndexAnalyzer::try_knn_prefilter`]).
+	/// The table's declared field kinds are resolved for the array-free
+	/// exactness gate — unlike [`Self::try_bitmap_fusion_plan`]'s lazy fetch,
+	/// every b-tree leaf needs the gate here, not only NOT subtractions. Any
+	/// catalog error simply disables the optimization — this is never a
+	/// correctness gate.
+	async fn try_knn_prefilter_plan(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		analyzer: &IndexAnalyzer<'_>,
+		cond: Option<&Cond>,
+	) -> Option<KnnPrefilterPlan> {
+		let stripped = cond.and_then(strip_knn_from_condition)?;
+		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
+		let exact_col = |col: &Idiom| -> bool {
+			fields
+				.iter()
+				.find(|fd| &fd.name == col)
+				.and_then(|fd| fd.field_kind.as_ref())
+				.is_some_and(field_kind_excludes_arrays)
+		};
+		analyzer.try_knn_prefilter(&stripped, &exact_col)
+	}
+}
+
+/// Convert a plan-level [`BitmapPlan`] tree into the executable
+/// [`BitmapNode`] operator tree.
+fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
+	match plan {
+		BitmapPlan::BTree {
+			index_ref,
+			access,
+		} => BitmapNode::btree(index_ref, access),
+		BitmapPlan::FullText {
+			index_ref,
+			query,
+			operator,
+		} => BitmapNode::fulltext(index_ref, query, operator),
+		BitmapPlan::Graph {
+			source,
+			direction,
+			edge_tables,
+		} => BitmapNode::graph(source, direction, edge_tables),
+		BitmapPlan::And(children) => {
+			BitmapNode::and(children.into_iter().map(bitmap_plan_to_node).collect())
+		}
+		BitmapPlan::Or(children) => {
+			BitmapNode::or(children.into_iter().map(bitmap_plan_to_node).collect())
+		}
+		BitmapPlan::AndNot {
+			base,
+			subtract,
+		} => BitmapNode::and_not(bitmap_plan_to_node(*base), bitmap_plan_to_node(*subtract)),
+	}
+}
+
+/// Like [`field_kind_excludes_arrays`], but starting from a field
+/// definition's declared kind. A definition with no declared `TYPE` is
+/// conservatively not exact.
+fn field_def_excludes_arrays(fd: &crate::catalog::FieldDefinition) -> bool {
+	let Some(kind) = fd.field_kind.as_ref() else {
+		return false;
+	};
+	field_kind_excludes_arrays(kind)
+}
+
+/// Whether a declared field kind guarantees the stored value is never an
+/// array (or set). Array values fan out to one b-tree index entry per
+/// element, so a column admitting arrays cannot back an *exact* bitmap —
+/// required for `NOT` subtraction in bitmap fusion plans. Conservative: any
+/// kind not on the allowlist (including `any`, objects, literals and
+/// geometry) reports `false`.
+fn field_kind_excludes_arrays(kind: &crate::expr::Kind) -> bool {
+	use crate::expr::Kind;
+	match kind {
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Record(_) => true,
+		Kind::Either(kinds) => kinds.iter().all(field_kind_excludes_arrays),
+		_ => false,
+	}
+}
+
+/// Removes every index whose columns are governed by a non-`Full` SELECT
+/// permission for the current actor.
+///
+/// See [`RestrictedPrefixes::index_touches`] for why such an index must not
+/// reach access-path selection. Returns the input untouched when nothing is
+/// restricted, so the common case allocates nothing.
+fn drop_restricted_indexes(
+	indexes: Arc<[IndexDefinition]>,
+	restricted_select: &RestrictedPrefixes,
+) -> Arc<[IndexDefinition]> {
+	if matches!(restricted_select, RestrictedPrefixes::None) {
+		return indexes;
+	}
+	if !indexes.iter().any(|ix| restricted_select.index_touches(&ix.cols)) {
+		return indexes;
+	}
+	indexes
+		.iter()
+		.filter(|ix| !restricted_select.index_touches(&ix.cols))
+		.cloned()
+		.collect::<Vec<_>>()
+		.into()
 }
 
 /// Outcome of resolving which fields on a table carry a non-`Full` SELECT
@@ -2625,6 +3556,31 @@ impl RestrictedPrefixes {
 		use crate::expr::visit::Visitor;
 		let _ = checker.visit_expr(&cond.0);
 		checker.found
+	}
+
+	/// SECURITY: returns `true` when any column of an index is governed by a
+	/// non-`Full` SELECT permission for the current actor (or when restriction
+	/// must be conservatively assumed because plan-time context is missing).
+	///
+	/// An index scan answers a predicate from index entries rather than from
+	/// the document, so the field-level reduction that hides the value never
+	/// runs on the data the decision was made from. Whether a record is
+	/// returned then reports something about a value the actor may not read:
+	/// which records contain a guessed value or search term, or which
+	/// restricted vectors lie nearest a supplied one. Callers drop such an
+	/// index from the candidate set, so the predicate is answered from the
+	/// reduced document instead.
+	///
+	/// An ancestor field definition governs the column too — reducing an
+	/// ancestor implicitly reduces its descendants — which `starts_with`
+	/// covers.
+	fn index_touches(&self, cols: &[Idiom]) -> bool {
+		let prefixes = match self {
+			RestrictedPrefixes::AssumeRestricted => return true,
+			RestrictedPrefixes::None => return false,
+			RestrictedPrefixes::Some(p) => p,
+		};
+		cols.iter().any(|col| prefixes.iter().any(|prefix| col.starts_with(prefix.0.as_slice())))
 	}
 
 	/// SECURITY (value-ordering oracle): returns `true` when any top-level
@@ -2729,12 +3685,12 @@ impl crate::expr::visit::Visitor for RestrictedIdiomChecker<'_> {
 fn adjust_direction_for_order(
 	path: AccessPath,
 	order: Option<&crate::expr::order::Ordering>,
-	default_direction: crate::idx::planner::ScanDirection,
-) -> (AccessPath, crate::idx::planner::ScanDirection) {
+	default_direction: crate::kvs::Direction,
+) -> (AccessPath, crate::kvs::Direction) {
 	use crate::exec::field_path::FieldPath;
 	use crate::exec::index::access_path::BTreeAccess;
 	use crate::expr::order::Ordering;
-	use crate::idx::planner::ScanDirection;
+	use crate::kvs::Direction;
 
 	// Only adjust for BTreeScan paths that cover ORDER BY
 	let AccessPath::BTreeScan {
@@ -2764,18 +3720,20 @@ fn adjust_direction_for_order(
 			.cols
 			.iter()
 			.take(prefix.len())
-			.filter_map(|idiom| FieldPath::try_from(idiom).ok())
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 			.collect(),
-		BTreeAccess::Equality(_) => {
-			ix_def.cols.iter().filter_map(|idiom| FieldPath::try_from(idiom).ok()).collect()
-		}
+		BTreeAccess::Equality(_) => ix_def
+			.cols
+			.iter()
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
+			.collect(),
 		_ => vec![],
 	};
 
 	// Skip leading ORDER BY fields that match equality-pinned columns.
 	let mut order_idx = 0;
 	for field in order_list.0.iter() {
-		if let Ok(fp) = FieldPath::try_from(&field.value)
+		if let Ok(fp) = crate::exec::field_path_convert::field_path_from_idiom(&field.value)
 			&& equality_col_paths.contains(&fp)
 		{
 			order_idx += 1;
@@ -2791,7 +3749,8 @@ fn adjust_direction_for_order(
 		return (path, default_direction);
 	};
 
-	let Ok(order_path) = FieldPath::try_from(&first_order.value) else {
+	let Ok(order_path) = crate::exec::field_path_convert::field_path_from_idiom(&first_order.value)
+	else {
 		return (path, default_direction);
 	};
 
@@ -2814,9 +3773,9 @@ fn adjust_direction_for_order(
 		// All columns are equality-pinned.  Match `ORDER BY id`.
 		if order_path == FieldPath::field("id") {
 			let new_direction = if first_order.direction {
-				ScanDirection::Forward // ASC
+				Direction::Forward // ASC
 			} else {
-				ScanDirection::Backward // DESC
+				Direction::Backward // DESC
 			};
 			let new_path = AccessPath::BTreeScan {
 				index_ref: index_ref.clone(),
@@ -2832,7 +3791,7 @@ fn adjust_direction_for_order(
 		return (path, default_direction);
 	};
 
-	let Ok(col_path) = FieldPath::try_from(target_col) else {
+	let Ok(col_path) = crate::exec::field_path_convert::field_path_from_idiom(target_col) else {
 		return (path, default_direction);
 	};
 
@@ -2840,9 +3799,9 @@ fn adjust_direction_for_order(
 	// set the direction based on the ORDER BY direction
 	if order_path == col_path {
 		let new_direction = if first_order.direction {
-			ScanDirection::Forward // ASC
+			Direction::Forward // ASC
 		} else {
-			ScanDirection::Backward // DESC
+			Direction::Backward // DESC
 		};
 
 		let new_path = AccessPath::BTreeScan {
@@ -2962,7 +3921,6 @@ fn detect_order_for_composite_union(
 	order: Option<&crate::expr::order::Ordering>,
 	paths: &[AccessPath],
 ) -> Option<(crate::exec::field_path::FieldPath, SortDirection)> {
-	use crate::exec::field_path::FieldPath;
 	use crate::exec::index::access_path::BTreeAccess;
 	use crate::expr::order::Ordering;
 
@@ -2977,7 +3935,8 @@ fn detect_order_for_composite_union(
 	if order_field.collate || order_field.numeric {
 		return None;
 	}
-	let order_path = FieldPath::try_from(&order_field.value).ok()?;
+	let order_path =
+		crate::exec::field_path_convert::field_path_from_idiom(&order_field.value).ok()?;
 	let direction = if order_field.direction {
 		SortDirection::Asc
 	} else {
@@ -3008,7 +3967,8 @@ fn detect_order_for_composite_union(
 		return None;
 	}
 	let sort_col_idiom = ix_def.cols.get(first_prefix_len)?;
-	let sort_col_path = FieldPath::try_from(sort_col_idiom).ok()?;
+	let sort_col_path =
+		crate::exec::field_path_convert::field_path_from_idiom(sort_col_idiom).ok()?;
 	if sort_col_path != order_path {
 		return None;
 	}
@@ -3062,6 +4022,15 @@ fn detect_order_for_composite_union(
 	}
 
 	Some((order_path, direction))
+}
+
+/// Whether the planned source tree contains a KNN source operator
+/// (`KnnScan`), i.e. an `Approximate` KNN conjunct from the WHERE condition
+/// was lowered into an index-backed search. Used to decide whether the
+/// pre-stripped filter condition must be restored (see `plan_select_core`).
+fn source_contains_knn(op: &Arc<dyn ExecOperator>) -> bool {
+	op.name() == crate::exec::operators::KnnScan::NAME
+		|| op.children().iter().any(|c| source_contains_knn(c))
 }
 
 #[cfg(test)]

@@ -1,0 +1,53 @@
+[package]
+name = "surrealdb-embedded"
+# The shared body of the embedded JavaScript engines. Each FFI shim
+# (`@surrealdb/node`, `@surrealdb/wasm`) is published as an npm package rather
+# than a crate, and this has no standalone use, so it is not published either.
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "Shared embedded SurrealDB engine for the JavaScript FFI shims"
+
+[features]
+default = []
+kv-mem = ["surrealdb-core/kv-mem"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+kv-indxdb = ["surrealdb-core/kv-indxdb"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+surrealdb-core = { workspace = true, features = ["http"] }
+surrealdb-cnf = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-types = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }
+web-time = { workspace = true }
+
+# A query stream's execution is driven by a task of its own, so that it is
+# finished and its transaction finalised whether or not anyone is still reading.
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen-futures = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

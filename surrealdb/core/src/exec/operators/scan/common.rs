@@ -5,22 +5,13 @@
 
 use std::sync::Arc;
 
-use super::pipeline::{
-	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
-};
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, table_select_permission};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::ControlFlow;
 use crate::kvs::{CachePolicy, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
-
-/// Default value for [`crate::cnf::CommonConfig::scan_batch_size`] — the
-/// number of records each scan operator buffers before yielding a batch
-/// downstream. Read at runtime from config (overridable via
-/// `SURREAL_SCAN_BATCH_SIZE`); this constant exists only as the
-/// documentation anchor for that default.
-pub(crate) const DEFAULT_SCAN_BATCH_SIZE: usize = 1000;
 
 /// Convert a [`Value`] to a [`RecordIdKey`] for use in key range construction.
 ///
@@ -153,7 +144,7 @@ pub(crate) async fn resolve_record_batch(
 	version: Option<u64>,
 	cache_policy: CachePolicy,
 	perm_cache: &mut std::collections::HashMap<
-		crate::val::TableName,
+		surrealdb_strand::TableName,
 		crate::exec::permission::PhysicalPermission,
 	>,
 ) -> Result<Vec<Value>, ControlFlow> {
@@ -178,14 +169,11 @@ pub(crate) async fn resolve_record_batch(
 				.get_table_def(&rid.table, version)
 				.await
 				.context("Failed to get table definition")?;
-			let catalog_perm =
-				crate::exec::permission::resolve_select_permission(table_def.as_deref());
-			let perm = crate::exec::permission::convert_permission_to_physical_runtime(
-				catalog_perm,
-				ctx.ctx(),
-			)
-			.await
-			.context("Failed to convert permission")?;
+			let catalog_perm = table_select_permission(table_def.as_deref());
+			let perm =
+				crate::exec::permission::convert_permission_to_physical_runtime(catalog_perm, ctx)
+					.await
+					.context("Failed to convert permission")?;
 			perm_cache.insert(rid.table.clone(), perm);
 		}
 	}
@@ -243,10 +231,14 @@ pub(crate) async fn resolve_record_batch(
 				field_state_cache.insert(rid.table.clone(), fs);
 			}
 			let field_state = &field_state_cache[&rid.table];
-			compute_fields_for_value(ctx, field_state, &mut value, skip_fetch_perms).await?;
-			if check_perms {
-				filter_fields_by_permission(ctx, field_state, &mut value).await?;
-			}
+			materialise_fields_with_permissions(
+				ctx,
+				field_state,
+				&mut value,
+				skip_fetch_perms,
+				check_perms,
+			)
+			.await?;
 
 			values.push(value);
 		} else {

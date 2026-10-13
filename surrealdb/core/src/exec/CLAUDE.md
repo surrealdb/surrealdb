@@ -44,7 +44,7 @@ Index access paths may strip conjuncts from the logical WHERE at plan time (`str
 ## Key Types
 
 - **`ValueBatch`** — Batch of values (`Vec<Value>`). Designed for future columnar execution.
-- **`ValueBatchStream`** — `Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>` (non-Send on WASM)
+- **`ValueBatchStream`** — `Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>`
 - **`ExecutionContext`** — Hierarchical: `Root` | `Namespace(ns)` | `Database(ns, db)`. Holds transaction, params, auth, capabilities.
 - **`EvalContext`** — Borrowed view for per-row expression evaluation. Carries current value, params, session info, recursion context.
 - **`AccessMode`** — `ReadOnly` | `ReadWrite`. Determines transaction mode and dependency ordering barriers.
@@ -139,7 +139,7 @@ Evaluate idiom parts (field access, array indexing, etc.):
 ## Design Rules
 
 1. **No `compute()` calls** — All evaluation goes through `PhysicalExpr` and `ExecOperator`. The only bridge to legacy `compute()` is in `plan_or_compute.rs` for not-yet-planned statement types.
-2. **WASM compatibility** — Use `SendSyncRequirement` trait, `BoxFut<'a, T>`, and `#[cfg_attr(target_family = "wasm", async_trait(?Send))]` patterns.
+2. **WASM compatibility** — use `target_family = "wasm"` cfgs to cover executor mechanics (`spawn_local` instead of `tokio::spawn`, no rayon offload or `spawn_blocking`), Browser-wasm-only mechanisms (e.g. asserting `Send` on JS-backed futures) must be gated on `all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"), not(target_feature = "atomics")`.
 3. **Access mode propagation** — Every operator and expression must correctly report its `AccessMode`. A SELECT with a mutating subquery must return `ReadWrite`.
 4. **Context level validation** — Operators declare minimum `ContextLevel` (Root/Namespace/Database). The executor validates before execution.
 5. **Batched processing** — Operators work with `ValueBatch`, not individual values. This amortizes per-record overhead and enables future columnar execution.

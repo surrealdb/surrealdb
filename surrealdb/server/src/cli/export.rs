@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use surrealdb::Connection;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Export, ExportConfig};
-use surrealdb_core::kvs::export::TableConfig;
+use surrealdb_rpc::export::TableConfig;
 use tokio::io::{self, AsyncWriteExt};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};

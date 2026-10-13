@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, Model, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
@@ -64,24 +64,10 @@ where
 			}
 
 			if self.is_ml {
-				return router
-					.execute_unit(
-						self.client.session_id,
-						Command::ImportMl {
-							path: self.file,
-						},
-					)
-					.await;
+				return router.engine.import_ml_file(ctx(self.client.session_id), self.file).await;
 			}
 
-			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ImportFile {
-						path: self.file,
-					},
-				)
-				.await
+			router.engine.import_file(ctx(self.client.session_id), self.file).await
 		})
 	}
 }

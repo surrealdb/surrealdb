@@ -6,6 +6,7 @@ pub mod capabilities;
 mod config;
 pub(crate) mod endpoint;
 mod export;
+mod grpc;
 pub(crate) mod query;
 mod resource;
 mod tls;
@@ -14,6 +15,7 @@ mod websocket;
 pub use config::*;
 pub use endpoint::*;
 pub use export::*;
+pub use grpc::*;
 pub use query::*;
 pub use resource::*;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]

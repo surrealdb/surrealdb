@@ -6,7 +6,6 @@ use async_graphql::dynamic::{
 	FieldValue, InputValue, Subscription, SubscriptionField, SubscriptionFieldFuture, TypeRef,
 };
 use async_graphql::{Name, Value as GraphqlValue};
-use async_stream::try_stream;
 use surrealdb_types::{Action as PublicAction, Notification as PublicNotification, ToSql};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -134,24 +133,25 @@ fn make_table_subscription_field(
 			let fetch = parse_fetch_arg(args)?;
 			let live_id =
 				start_table_live_query(ds, &live_sess, &tb_name, fields, cond, fetch).await?;
-			let mut receiver = router.subscribe(live_id);
+			let receiver = router.subscribe(live_id);
 			let cleanup =
 				LiveQueryCleanup::new(Arc::clone(ds), live_sess, live_id, Arc::clone(router));
 
-			Ok(try_stream! {
-				let _cleanup = cleanup;
+			// unfold is used here instead of try_async_stream, because try_async_stream causes a
+			// baffling requirement for `ctx` to have a static lifetime.
+			let stream = futures::stream::unfold((receiver, cleanup), |mut f| async move {
 				loop {
-					let Some(notification) = receiver.recv().await else {
-						break;
-					};
-					if matches!(notification.action, PublicAction::Killed) {
-						break;
+					let notification = f.0.recv().await?;
+					if let PublicAction::Killed = notification.action {
+						return None;
 					}
+
 					if let Some(value) = notification_to_field_value(notification) {
-						yield value;
+						return Some((Ok(value), f));
 					}
 				}
-			})
+			});
+			Ok(stream)
 		})
 	})
 	.description(format!("LIVE query notifications for `{}`", tb.name))

@@ -14,12 +14,18 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Check if the record actually exists
 		self.check_record_exists()?;
-		// SECURITY: evaluate the table-level update permission BEFORE any
+		// SECURITY: evaluate the table-level delete permission BEFORE any
 		// user-supplied expression in the WHERE clause or data clause.
 		// Otherwise a `WHERE THROW ...` could exfiltrate field values
-		// before the permission check rejects the operation.
+		// before the permission check rejects the operation. A predicate naming a
+		// COMPUTED field is evaluated against that field's value, materialised on
+		// a scratch copy.
 		self.check_delete_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
@@ -29,9 +35,27 @@ impl Document {
 		self.cleanup_table_references(stk, ctx, opt).await?;
 		// Empty the record data
 		self.clear_record_data();
-		// Clear the document and index data
-		self.store_index_data(stk, ctx, opt).await?;
+		// Clear the document and index data. If a doc-ID index is mid-build it
+		// enqueues this delete for later replay rather than dropping the record
+		// now, so it still needs the shared `!di`/`!dd` mapping when the builder
+		// replays; `store_index_data` reports that deferral.
+		let doc_id_removal_deferred = self.store_index_data(stk, ctx, opt).await?;
+		// Release the record's entry in the table's shared doc-ID space, once every
+		// index has dropped the record. When a build deferred the removal, the
+		// builder's replay owns it (see kvs::index::replay) — dropping the mapping
+		// here would leave that replay unable to resolve the doc-ID — so a durable
+		// `!dp` marker is written instead, in this same transaction, guaranteeing
+		// the reclaim is completed even if the build never replays the delete.
+		if doc_id_removal_deferred {
+			self.defer_doc_id_removal(ctx).await?;
+		} else {
+			self.remove_doc_id(ctx).await?;
+		}
 		self.purge_record_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Delete).await?;
 		self.process_table_events(stk, ctx, opt, super::Action::Delete).await?;
 		self.process_table_lives(stk, ctx, opt, super::Action::Delete).await?;

@@ -6,25 +6,27 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error as CatalogError, Record};
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
+use crate::dbs::processor::RelateThrough;
 use crate::dbs::result::Results;
 use crate::dbs::store::{MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx};
-use crate::err::Error;
+use crate::err::EngineError;
+use crate::exe::FlowResultExt;
+use crate::exec::Error as ExecError;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::order::Ordering;
-use crate::expr::statements::relate::RelateThrough;
-use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
+use crate::expr::{self, ControlFlow, Expr, Fields, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
-	StatementContext,
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, StatementContext,
 };
+use crate::kvs::Direction;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -43,6 +45,23 @@ pub(crate) enum Iterable {
 	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
 	/// always a write.
 	Defer(DocumentContext, RecordId),
+	/// A [`Mock`] target (`|table:N|` / `|table:a..b|`) for a deferable
+	/// statement (CREATE, UPSERT without condition), carried whole instead
+	/// of pre-expanded into one [`Iterable::Defer`] per id. `Mock`'s own
+	/// iterator is already lazy (see `expr::mock::IntoIter`); expanding it
+	/// eagerly during `prepare` only to store every id in this iterator's
+	/// entry `Vec` up front would hold `O(n)` entries in memory before a
+	/// single record is processed. The collector drains it id-by-id
+	/// instead, the same way [`Iterable::Table`]/[`Iterable::Range`]
+	/// stream rather than pre-list their keys.
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
+	/// always a write.
+	MockDefer(DocumentContext, Mock),
+	/// A [`Mock`] target for a non-deferable statement (SELECT / UPDATE /
+	/// DELETE / RELATE-through over `|table:N|`) — the read/mutate
+	/// counterpart of [`Iterable::MockDefer`]; same lazy-drain rationale.
+	MockRecordId(DocumentContext, Mock),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
@@ -73,12 +92,12 @@ pub(crate) enum Iterable {
 	/// Carries [`DocumentContext::NsDbTbMutCtx`] for write statements
 	/// (UPDATE / DELETE / UPSERT without a specific id) and
 	/// [`DocumentContext::NsDbTbCtx`] for SELECT.
-	Table(DocumentContext, TableName, RecordStrategy, ScanDirection),
+	Table(DocumentContext, TableName, RecordStrategy, Direction),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
 	///
 	/// Carries the same variant as [`Iterable::Table`].
-	Range(DocumentContext, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
+	Range(DocumentContext, TableName, RecordIdKeyRange, RecordStrategy, Direction),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -270,14 +289,18 @@ impl Iterator {
 					&& lookup.start.is_none()
 					&& lookup.expr.is_none()
 				{
-					let from = match from.compute(stk, ctx, opt, doc).await {
+					let from = match crate::legacy::record_id_lit_compute(from, stk, ctx, opt, doc)
+						.await
+					{
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
-						Err(_) => bail!(Error::InvalidControlFlow),
+						Err(_) => bail!(ExecError::InvalidControlFlow),
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc).await?);
+						what.push(
+							crate::legacy::lookup_subject_compute(s, stk, ctx, opt, doc).await?,
+						);
 					}
 					self.prepare_lookup(
 						ctx,
@@ -320,7 +343,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: table.to_owned(),
 					})
 				})?
@@ -375,7 +398,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: rid.table.clone(),
 					})
 				})?
@@ -428,7 +451,7 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		mock: &Mock,
 	) -> Result<()> {
-		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 
 		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
 		let tb = if stm_ctx.stm.is_deferable() {
@@ -446,7 +469,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table(), opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: mock.table().to_owned(),
 					})
 				})?
@@ -461,19 +484,14 @@ impl Iterator {
 		)
 		.await?;
 
-		// Add the records to the iterator
-		for (count, rid) in mock.clone().into_iter().enumerate() {
-			if stm_ctx.stm.is_deferable() {
-				self.ingest(Iterable::Defer(doc_ctx.clone(), rid))
-			} else {
-				self.ingest(Iterable::RecordId(doc_ctx.clone(), rid))
-			}
-			// Check if the context is finished
-			if stm_ctx.ctx.is_done(Some(count)).await? {
-				break;
-			}
+		// Carry the mock whole — the collector drains it id-by-id during
+		// iterate() instead of this loop expanding it into one entry per id
+		// up front (see `Iterable::MockDefer`).
+		if stm_ctx.stm.is_deferable() {
+			self.ingest(Iterable::MockDefer(doc_ctx, mock.clone()))
+		} else {
+			self.ingest(Iterable::MockRecordId(doc_ctx, mock.clone()))
 		}
-		// All ingested ok
 		Ok(())
 	}
 
@@ -489,7 +507,7 @@ impl Iterator {
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,
 	) -> Result<()> {
-		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 		// Check if this is a create statement
 		if stm.is_create() {
 			// recreate the expression for the error.
@@ -503,7 +521,7 @@ impl Iterator {
 			])
 			.to_sql();
 
-			bail!(Error::InvalidStatementTarget {
+			bail!(ExecError::InvalidStatementTarget {
 				value,
 			})
 		}
@@ -513,7 +531,7 @@ impl Iterator {
 			txn.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: from.table.clone(),
 					})
 				})?
@@ -564,7 +582,7 @@ impl Iterator {
 		// Check if this is a create statement
 		ensure!(
 			!stm_ctx.stm.is_create(),
-			Error::InvalidStatementTarget {
+			ExecError::InvalidStatementTarget {
 				value: rid.to_sql(),
 			}
 		);
@@ -591,7 +609,20 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		expr: &Expr,
 	) -> Result<()> {
-		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+		let v = stk
+			.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
+			.await
+			.catch_return()?;
+		// FOR UPDATE targets must resolve to specific (non-range) record ids
+		// so the locked read is never silently skipped for other shapes.
+		if stm_ctx.stm.is_for_update() {
+			ensure!(
+				matches!(&v, Value::RecordId(rid) if !rid.key.is_range()),
+				ExecError::Query {
+					message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+				}
+			);
+		}
 		match v {
 			Value::Table(table_name) => {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table_name).await?
@@ -617,13 +648,13 @@ impl Iterator {
 								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id)
 									.await?;
 							} else {
-								bail!(Error::InvalidStatementTarget {
+								bail!(ExecError::InvalidStatementTarget {
 									value: Value::Object(o).to_sql(),
 								})
 							}
 						}
 						v => {
-							bail!(Error::InvalidStatementTarget {
+							bail!(ExecError::InvalidStatementTarget {
 								value: v.to_sql(),
 							})
 						}
@@ -635,13 +666,13 @@ impl Iterator {
 				if let Some(id) = o.rid() {
 					self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
 				} else {
-					bail!(Error::InvalidStatementTarget {
+					bail!(ExecError::InvalidStatementTarget {
 						value: o.to_sql(),
 					})
 				}
 			}
 			v => {
-				bail!(Error::InvalidStatementTarget {
+				bail!(ExecError::InvalidStatementTarget {
 					value: v.to_sql(),
 				})
 			}
@@ -662,7 +693,7 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		v: &[Expr],
 	) -> Result<()> {
-		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {
@@ -683,14 +714,20 @@ impl Iterator {
 						&& lookup.start.is_none()
 						&& lookup.expr.is_none()
 					{
-						let from = match from.compute(stk, ctx, opt, doc).await {
-							Ok(x) => x,
-							Err(ControlFlow::Err(e)) => return Err(e),
-							Err(_) => bail!(Error::InvalidControlFlow),
-						};
+						let from =
+							match crate::legacy::record_id_lit_compute(from, stk, ctx, opt, doc)
+								.await
+							{
+								Ok(x) => x,
+								Err(ControlFlow::Err(e)) => return Err(e),
+								Err(_) => bail!(ExecError::InvalidControlFlow),
+							};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc).await?);
+							what.push(
+								crate::legacy::lookup_subject_compute(s, stk, ctx, opt, doc)
+									.await?,
+							);
 						}
 						self.prepare_lookup(
 							ctx,
@@ -842,7 +879,7 @@ impl Iterator {
 		if self.limit.is_none()
 			&& let Some(v) = stm.limit()
 		{
-			self.limit = Some(v.process(stk, ctx, opt, None).await?);
+			self.limit = Some(crate::legacy::limit_process(v, stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -861,7 +898,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(stk, ctx, opt, None).await?);
+			self.start = Some(crate::legacy::start_process(v, stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -870,6 +907,8 @@ impl Iterator {
 	/// without changing the semantics of the query.
 	///
 	/// What this actually checks (mirrors the code below):
+	/// - FOR UPDATE: disallowed, because every target record must still be fetched through the
+	///   locked read even when START discards it from the results. → false
 	/// - GROUP BY: disallowed, because grouping changes the result count/order. → false
 	/// - Multiple iterators: disallowed, because START must apply to the merged set. → false
 	/// - WHERE: allowed only if the sole iterator is an index whose executor applies the WHERE
@@ -883,6 +922,12 @@ impl Iterator {
 	/// performed by the index itself and, if ORDER BY is used, the iterator natively yields
 	/// rows in the required order.
 	fn can_start_skip(&self, ctx: &FrozenContext, stm: &Statement<'_>) -> bool {
+		// FOR UPDATE locks every record the FROM targets resolve to,
+		// including records discarded by START, so START cannot be pushed
+		// down to a storage-level skip that would bypass the locked read
+		if stm.is_for_update() {
+			return false;
+		}
 		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
@@ -894,20 +939,12 @@ impl Iterator {
 		// START must apply to the filtered set. Therefore, disallow with WHERE
 		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first() {
-				if let Some(qp) = ctx.get_query_planner() {
-					if let Some(exe) = qp.get_query_executor(t) {
-						if exe.is_iterator_expression(*irf, &cond.0) {
-							// Allowed: index handles the filtering
-						} else {
-							return false;
-						}
-					} else {
-						return false;
-					}
-				} else {
-					return false;
-				}
+			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first()
+				&& let Some(qp) = ctx.get_query_planner()
+				&& let Some(exe) = qp.get_query_executor(t)
+				&& exe.is_iterator_expression(*irf, &cond.0)
+			{
+				// Allowed: index handles the filtering
 			} else {
 				// WHERE exists but iterator is not an index -> cannot start-skip
 				return false;
@@ -1048,7 +1085,8 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, split, val).await?;
+								crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val)
+									.await?;
 								// Add the object to the results
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
@@ -1058,7 +1096,8 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, split, val).await?;
+								crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val)
+									.await?;
 								// Add the object to the results
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
@@ -1067,7 +1106,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(stk, ctx, opt, split, val).await?;
+							crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val).await?;
 							// Add the object to the results
 							self.results.push(stk, ctx, opt, rs, obj).await?;
 						}
@@ -1105,7 +1144,9 @@ impl Iterator {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
 							let effective_limit = self.start.unwrap_or(0) + limit;
-							if effective_limit <= ctx.config.max_order_limit_priority_queue_size {
+							if effective_limit
+								<= ctx.config.exec.max_order_limit_priority_queue_size
+							{
 								let mut res = MemoryOrderedLimit::new(
 									effective_limit as usize,
 									orders.clone(),
@@ -1151,7 +1192,7 @@ impl Iterator {
 		if let Some(fetchs) = stm.fetch() {
 			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
-				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+				crate::legacy::fetch_compute(fetch, stk, ctx, opt, &mut idioms).await?;
 			}
 
 			for i in &idioms {
@@ -1159,7 +1200,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
+					stk.run(|stk| crate::legacy::value_fetch(obj, stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}
@@ -1250,9 +1291,11 @@ impl Iterator {
 						Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 						Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
 						stm => {
-							return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
-								format_args!("Unexpected statement type: {stm:?}"),
-							))));
+							return Err(IgnoreError::from(anyhow::Error::new(
+								EngineError::unreachable(format_args!(
+									"Unexpected statement type: {stm:?}"
+								)),
+							)));
 						}
 					};
 					// Bump the per-statement affected-row counter when a real

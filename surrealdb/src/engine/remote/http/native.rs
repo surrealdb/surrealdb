@@ -9,6 +9,7 @@ use url::Url;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
+use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -121,11 +122,7 @@ impl conn::Sealed for Client {
 			features.insert(ExtraFeatures::Backup);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

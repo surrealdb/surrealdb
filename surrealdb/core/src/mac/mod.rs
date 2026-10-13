@@ -1,117 +1,3 @@
-/// A macro that allows lazily parsing a value from the environment variable,
-/// with a fallback default value if the variable is not set or parsing fails.
-///
-/// # Parameters
-///
-/// - `$key`: An expression representing the name of the environment variable.
-/// - `$t`: The type of the value to be parsed.
-/// - `$default`: The default value to fall back to if the environment variable is not set or
-///   parsing fails.
-///
-/// # Return Value
-///
-/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed
-/// value from the environment variable or the default value.
-#[macro_export]
-macro_rules! lazy_env_parse {
-	// With no default specified
-	($key:expr_2021, Option<String>) => {
-		std::sync::LazyLock::new(|| std::env::var($key).ok())
-	};
-	// With no default specified
-	($key:expr_2021, $t:ty) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_default()
-		})
-	};
-	// With a closure for the default value
-	($key:expr_2021, $t:ty, || $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or_else(|| $default)
-		})
-	};
-	// With a static expression for the default value
-	($key:expr_2021, $t:ty, $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key).ok().and_then(|s| s.parse::<$t>().ok()).unwrap_or($default)
-		})
-	};
-	// With a closure for the default value, allowing for byte suffixes
-	(bytes, $key:expr_2021, $t:ty, || $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseBytes;
-					s.parse_bytes::<$t>().ok()
-				})
-				.unwrap_or_else(|| $default)
-		})
-	};
-	// With a static expression for the default value, allowing for byte suffixes
-	(bytes, $key:expr_2021, $t:ty, $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseBytes;
-					s.parse_bytes::<$t>().ok()
-				})
-				.unwrap_or($default)
-		})
-	};
-	// With a closure for the default value, allowing for byte suffixes
-	(duration, $key:expr_2021, $t:ty, || $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseDuration;
-					s.parse_duration::<$t>().ok()
-				})
-				.unwrap_or_else(|| $default)
-		})
-	};
-	// With a static expression for the default value, allowing for byte suffixes
-	(duration, $key:expr_2021, $t:ty, $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseDuration;
-					s.parse_duration::<$t>().ok()
-				})
-				.unwrap_or($default)
-		})
-	};
-}
-
-/// Creates a new [`VecMap`] of key-value pairs.
-///
-/// Clones items from the optional secondary map first, then applies conditional
-/// entries. Duplicate keys keep the last value (same as repeated [`VecMap::insert`]).
-/// Uses batch construction so key order in the source does not trigger quadratic cost.
-#[macro_export]
-macro_rules! map {
-    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
-        let mut pairs: ::std::vec::Vec<_> = ::std::vec::Vec::new();
-    	$(pairs.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-		$( $(if let $grant = $check)? $(if $guard)? { pairs.push(($k, $v)); };)+
-        pairs.into_iter().collect::<$crate::VecMap<_, _>>()
-    }};
-}
-
-/// Maps an optional value to a new value if the optional value is some, otherwise returns none.
-/// Useful when the computation is async
-macro_rules! map_opt {
-	($x:ident as $opt:expr => $exp:expr) => {
-		match $opt {
-			Some($x) => Some($exp),
-			None => None,
-		}
-	};
-}
-
 /// Merges two sorted maps into one [`VecMap`]. Values from the second map win when keys overlap.
 #[macro_export]
 macro_rules! mrg {
@@ -121,13 +7,6 @@ macro_rules! mrg {
 		pairs.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));
 		pairs.into_iter().collect::<$crate::VecMap<_, _>>()
 	}};
-}
-
-/// Throws an unreachable error with location details
-macro_rules! fail {
-	($($arg:tt)+) => {
-		return Err(::anyhow::Error::new($crate::err::Error::unreachable(format_args!($($arg)*))))
-	};
 }
 
 /// Converts some text into a new line byte string
@@ -189,8 +68,7 @@ macro_rules! run {
 
 #[cfg(test)]
 mod test {
-
-	use crate::err::Error;
+	use crate::err::EngineError;
 
 	#[track_caller]
 	fn fail_func() -> Result<(), anyhow::Error> {
@@ -205,7 +83,7 @@ mod test {
 	#[test]
 	fn fail_literal() {
 		let line = line!();
-		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
+		let Ok(EngineError::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
 		assert_eq!(
@@ -217,7 +95,8 @@ mod test {
 	#[test]
 	fn fail_call() {
 		let line = line!();
-		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
+		let EngineError::Unreachable(msg) = EngineError::unreachable("Reached unreachable code")
+		else {
 			panic!()
 		};
 		assert_eq!(
@@ -229,7 +108,7 @@ mod test {
 	#[test]
 	fn fail_arguments() {
 		let line = line!();
-		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
+		let Ok(EngineError::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
 		assert_eq!(

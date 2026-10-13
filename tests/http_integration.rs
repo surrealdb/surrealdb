@@ -233,6 +233,107 @@ mod http_integration {
 		Ok(())
 	}
 
+	// GHSA-2v9j: the `Surreal-NS`/`Surreal-DB` headers select the session context
+	// independently of the authenticated level. A Database-level principal must
+	// not be able to point them at a foreign namespace/database and query it
+	// without a `USE` (the Basic-auth "header pivot").
+	#[test(tokio::test)]
+	async fn session_ns_db_headers_confined_to_auth_level() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+		let client = reqwest::Client::builder().build()?;
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Define a Database-level user in ns/db (as root, in that context).
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE USER dbuser ON DATABASE PASSWORD 'dbpass' ROLES OWNER")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "define user failed: {}", res.text().await?);
+		}
+
+		// Cross-database pivot: dbuser is Database(ns, db), but the selected
+		// context (`Surreal-NS`/`Surreal-DB`) points at a sibling db.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", "other_db")
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-database header pivot must be rejected");
+		}
+
+		// Cross-namespace pivot.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", "other_ns")
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-namespace header pivot must be rejected");
+		}
+
+		// Regression: a context matching the authenticated level is allowed.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			let status = res.status();
+			assert_eq!(
+				status,
+				200,
+				"legitimate same-tenant access must be allowed: {}",
+				res.text().await?
+			);
+		}
+
+		// Regression: an unscoped ROOT session may select any context.
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_ne!(res.status(), 401, "root must be able to select any namespace/database");
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_guests().await.unwrap();
@@ -1123,6 +1224,94 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn signin_rate_limit() -> Result<(), Box<dyn std::error::Error>> {
+		use std::collections::HashMap;
+		// Opt in with a burst of 3 and a one-token-per-minute refill: no
+		// wall-clock the test can plausibly spend (including debug-build
+		// Argon2 comparisons on each failed attempt) refills a token
+		// mid-test, so the drain is deterministic. Refill behaviour itself
+		// is unit-tested with a controlled clock.
+		let vars: HashMap<String, String> = [
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_ENABLED".to_string(), "true".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_BURST".to_string(), "3".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_PER_MINUTE".to_string(), "1".to_string()),
+		]
+		.into();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let url = &format!("http://{addr}/signin");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		let body = serde_json::to_string(
+			json!({ "user": USER, "pass": "wrong-password" }).as_object().unwrap(),
+		)?;
+
+		// The first three attempts consume the burst: they fail
+		// authentication (401) but are not rate limited.
+		for i in 0..3 {
+			let res = client.post(url).body(body.clone()).send().await?;
+			assert_eq!(res.status(), 401, "attempt {i} body: {}", res.text().await?);
+		}
+
+		// The fourth rapid attempt is rejected with 429 and a Retry-After
+		// hint, and a cross-origin caller is allowed to read that header.
+		let res = client
+			.post(url)
+			.header(header::ORIGIN, "http://example.com")
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "body: {}", res.text().await?);
+		let retry_after: u64 =
+			res.headers().get("Retry-After").expect("Retry-After header").to_str()?.parse()?;
+		assert!(retry_after >= 1, "Retry-After: {retry_after}");
+		let exposed = res
+			.headers()
+			.get("Access-Control-Expose-Headers")
+			.expect("Access-Control-Expose-Headers header")
+			.to_str()?
+			.to_ascii_lowercase();
+		assert!(exposed.contains("retry-after"), "exposed headers: {exposed}");
+
+		// The limiter sits ahead of the authentication layer: a request
+		// carrying credentials that layer would reject is still answered with
+		// 429, so no credential verification runs for a limited request.
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some("wrong-password"))
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "basic-auth body: {}", res.text().await?);
+
+		// Signup draws from the same per-address budget, so it is throttled
+		// before its handler ever runs.
+		let res = client.post(format!("http://{addr}/signup")).body(body.clone()).send().await?;
+		assert_eq!(res.status(), 429, "signup body: {}", res.text().await?);
+
+		// A real CORS preflight is answered even while the bucket is empty.
+		let res = client
+			.request(Method::OPTIONS, url)
+			.header(header::ORIGIN, "http://example.com")
+			.header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "preflight status: {}", res.status());
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signin");
@@ -1493,15 +1682,14 @@ mod http_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+				.header(header::ACCEPT, surrealdb_rpc::format::FLATBUFFERS)
 				.body("CREATE foo")
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let bytes = res.bytes().await?;
-			let value: surrealdb_types::Value =
-				surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-					.expect("flatbuffers SQL response should decode to Value");
+			let value: surrealdb_types::Value = surrealdb_types::decode(&bytes)
+				.expect("flatbuffers SQL response should decode to Value");
 			let array = value.into_array().unwrap();
 			assert_eq!(array.len(), 1);
 			let result = array.into_iter().next().unwrap().into_object().unwrap();
@@ -2574,8 +2762,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
 		headers.insert("surreal-db", db.parse()?);
-		headers.insert(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS.parse()?);
-		headers.insert(header::CONTENT_TYPE, surrealdb_core::api::format::FLATBUFFERS.parse()?);
+		headers.insert(header::ACCEPT, surrealdb_rpc::format::FLATBUFFERS.parse()?);
+		headers.insert(header::CONTENT_TYPE, surrealdb_rpc::format::FLATBUFFERS.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -3817,6 +4005,330 @@ mod http_integration {
 		let body: serde_json::Value = res.json().await?;
 		assert!(body.get("error").is_some(), "anonymous query on random session must fail: {body}");
 
+		Ok(())
+	}
+
+	// ------------------------------
+	// Durable RPC sessions (`--durable-sessions`)
+	// ------------------------------
+
+	/// `--durable-session-ttl` (in seconds) for the two expiry tests below
+	/// (`rpc_durable_session_expires_after_ttl` and
+	/// `rpc_durable_session_expires_while_cached`).
+	///
+	/// Those tests need a TTL short enough to watch a session expire within the
+	/// test, but it must stay comfortably longer than [`durable_rpc_setup_session`]
+	/// takes: `attach` (a durable KV write), a root `signin` (a deliberately
+	/// CPU-slow argon2 verification) and `use`, each a full HTTP round-trip. A
+	/// durable session's expiry is baked at write time (`now + ttl`) and only
+	/// slid *after* a request is authorized, so if setup outruns the TTL the
+	/// attached session expires mid-setup and the next request is rejected with
+	/// `session_not_found` — the helper then panics at its `signin must succeed`
+	/// assertion. The original 1s window was narrow enough that on a loaded CI
+	/// runner (the merge queue, where the server alone took ~2.5s to boot)
+	/// setup's round-trips overran it and both tests failed across every nextest
+	/// retry. Five seconds gives setup ample headroom while staying short enough
+	/// to sleep past. See also [`DURABLE_EXPIRY_WAIT`].
+	#[cfg(feature = "storage-surrealkv")]
+	const DURABLE_EXPIRY_TTL_SECS: u64 = 5;
+
+	/// How long to idle before asserting a session has expired. Must exceed
+	/// [`DURABLE_EXPIRY_TTL_SECS`] with margin so the session is unambiguously
+	/// past its (write-time, slid-on-use) expiry regardless of when the last
+	/// setup request last refreshed it — decoupling the assertion from how long
+	/// setup took.
+	#[cfg(feature = "storage-surrealkv")]
+	const DURABLE_EXPIRY_WAIT: Duration = Duration::from_secs(7);
+
+	/// A JSON `/rpc` client for the durable-session tests.
+	#[cfg(feature = "storage-surrealkv")]
+	fn durable_rpc_client() -> Result<Client, Box<dyn std::error::Error>> {
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		Ok(reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?)
+	}
+
+	/// POST one authenticated RPC request and return the JSON response body.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn durable_rpc_send(
+		client: &Client,
+		addr: &str,
+		body: serde_json::Value,
+	) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+		let res = client
+			.post(format!("http://{addr}/rpc"))
+			.basic_auth(USER, Some(PASS))
+			.body(body.to_string())
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "http status: {}", res.status());
+		Ok(res.json().await?)
+	}
+
+	/// Attach `sid`, sign it in as root, and select `ns`/`db` on it — the
+	/// session state the durable-session tests expect to find (or not find)
+	/// again after a server restart.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn durable_rpc_setup_session(
+		client: &Client,
+		addr: &str,
+		sid: uuid::Uuid,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let body = json!({"id": "attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "attach must succeed: {res}");
+		let body = json!({
+			"id": "signin",
+			"method": "signin",
+			"session": sid,
+			"params": [{"user": USER, "pass": PASS}],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "signin must succeed: {res}");
+		let body = json!({
+			"id": "use",
+			"method": "use",
+			"session": sid,
+			"params": [ns, db],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "use must succeed: {res}");
+		Ok(())
+	}
+
+	/// A client-attached session survives a full server restart when
+	/// `--durable-sessions` is enabled: the same session id resumes with its
+	/// authentication and selected namespace/database intact, and stays
+	/// bound to the principal that authenticated it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_survives_restart() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		durable_rpc_setup_session(&client, &addr, sid, &ns, &db).await?;
+
+		// Restart the server on the same datastore.
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		// The rehydrated session still refuses anonymous callers, exactly
+		// like an in-memory one (and indistinguishably from a missing
+		// session).
+		let body = json!({
+			"id": "anon",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = client.post(format!("http://{addr}/rpc")).body(body.to_string()).send().await?;
+		let res: serde_json::Value = res.json().await?;
+		assert!(res.get("error").is_some(), "anonymous resume must be refused: {res}");
+
+		// The owning principal resumes the session with its `USE` state
+		// intact.
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN $session.ns"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "resume after restart must succeed: {res}");
+		assert!(
+			res.to_string().contains(&ns),
+			"restored session should still be on namespace {ns}: {res}"
+		);
+
+		// Attaching the same id again correctly reports that the session
+		// already exists — the durable copy is the session.
+		let body = json!({"id": "re-attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"attach on a live durable session must report it exists: {res}"
+		);
+		Ok(())
+	}
+
+	/// A persisted session expires: past the configured TTL it can no longer
+	/// be resumed, even by the principal that owned it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_after_ttl() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s");
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// Kill the server, then idle past the TTL so the durable copy is expired
+		// before the restart. The wait exceeds the TTL (which was itself sized to
+		// clear setup), so expiry is driven by the idle window, not by how long
+		// the argon2-bearing setup happened to take.
+		server.kill();
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "expired",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "an expired session must not resume: {res}");
+		Ok(())
+	}
+
+	/// The TTL is enforced for a session still cached in the *running* server,
+	/// not only after a restart: a client idle past `--durable-session-ttl`
+	/// must be rejected on its next request even though the server never
+	/// evicted the in-memory session.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_while_cached() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args: format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s"),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// No restart: the session stays cached in the running server. Once it has
+		// sat idle past the TTL, the next request must be rejected rather than
+		// served the stale cached copy. The idle wait exceeds the TTL (sized to
+		// clear the argon2-bearing setup), so the rejection is driven by the idle
+		// window, not by a setup that happened to overrun a tight TTL.
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
+		let body = json!({
+			"id": "idle",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"an idle-past-TTL cached session must be rejected: {res}"
+		);
+		Ok(())
+	}
+
+	/// `detach` removes the durable copy immediately: the session cannot be
+	/// resumed after a restart even though its TTL has not elapsed.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_detached_durable_session_cannot_be_resumed()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+		let body = json!({"id": "detach", "method": "detach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "detach must succeed: {res}");
+
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "a detached session must not resume: {res}");
+		Ok(())
+	}
+
+	/// Without `--durable-sessions`, attached sessions stay in-memory only:
+	/// a restart on the same datastore loses them (the pre-existing
+	/// behaviour).
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_sessions_are_not_durable_by_default() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"sessions must not survive a restart without --durable-sessions: {res}"
+		);
 		Ok(())
 	}
 

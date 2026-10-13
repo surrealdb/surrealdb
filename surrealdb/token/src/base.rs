@@ -1,11 +1,61 @@
 use std::fmt;
 
-use logos::{Lexer, Logos};
+use logos::{Lexer, Logos, Skip};
 
 use crate::{Joined, LexError};
 
 fn whitespace_callback(lexer: &mut Lexer<BaseTokenKind>) {
 	lexer.extras = Joined::Seperated;
+}
+
+fn multiline_comment_callback(lexer: &mut Lexer<BaseTokenKind>) -> Result<Skip, LexError> {
+	if let Some(found) = lexer.remainder().find("*/") {
+		lexer.bump(found + 2);
+		Ok(Skip)
+	} else {
+		lexer.bump(lexer.remainder().len());
+		Err(LexError::from_lexer(lexer))
+	}
+}
+
+fn eat_string<const TERMINATOR: u8>(lexer: &mut Lexer<BaseTokenKind>) -> Result<(), LexError> {
+	let mut iter = lexer.remainder().as_bytes().iter().copied().enumerate();
+
+	while let Some((idx, b)) = iter.next() {
+		if b == TERMINATOR {
+			lexer.bump(idx + 1);
+			return Ok(());
+		}
+		if b == b'\\' {
+			iter.next();
+		}
+	}
+
+	lexer.bump(lexer.remainder().len());
+	Err(LexError::from_lexer(lexer))
+}
+
+/// Function to reject tokens which are followed by identifier like characters
+/// Can be removed once logos releases their partial parsing option.
+fn no_ident(lexer: &mut Lexer<BaseTokenKind>) -> Result<(), LexError> {
+	let mut follow_lexer = lexer.clone().morph::<Follows>();
+	if let Some(Ok(_)) = follow_lexer.next() {
+		let span = follow_lexer.span();
+		lexer.bump(span.len());
+		return Err(LexError::from_lexer(lexer));
+	}
+
+	Ok(())
+}
+
+/// Token to detect if a number has an identifier directly following it,
+/// resulting in an invalid token.
+/// Can be removed once logos releases their partial parsing option.
+#[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
+#[logos(extras = Joined)]
+pub enum Follows {
+	#[regex(r"[0-9_\p{XID_Continue}]+")]
+	Invalid,
 }
 
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
@@ -15,9 +65,8 @@ fn whitespace_callback(lexer: &mut Lexer<BaseTokenKind>) {
 #[logos(subpattern backtick_ident = r"`([^`\\]|\\.)*`")]
 #[logos(subpattern bracket_ident = r"⟨([^⟩\\]|\\.)*⟩")]
 #[logos(subpattern whitespace = r"[ \t\n\r\u{0085}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}]+")]
-#[logos(subpattern multi_line_comment = r"/\*([^*]|\*[^/])*\*/")]
 #[logos(subpattern line_comment = r"(//|#|--)[^\n\r\u{2028}\u{2029}]*")]
-#[logos(skip(r"((?&whitespace)|(?&line_comment)|(?&multi_line_comment))+", whitespace_callback))]
+#[logos(skip(r"((?&whitespace)|(?&line_comment))+", whitespace_callback))]
 pub enum BaseTokenKind {
 	#[token("{")]
 	/// `{`
@@ -44,6 +93,10 @@ pub enum BaseTokenKind {
 	Comma,
 	#[token("@")]
 	At,
+	// Attaching the multi line comment to slash,
+	// but this token is actually never returned for this rule as it is always skipped.
+	// Logos needs a variant to attach a rule to so thats why this is here.
+	#[token("/*", multiline_comment_callback)]
 	#[token("/")]
 	Slash,
 	#[token("%")]
@@ -106,6 +159,8 @@ pub enum BaseTokenKind {
 	Plus,
 	#[token("+=")]
 	PlusEqual,
+	// Make sure `+?` does not parse as a seperate `+` and `?`
+	#[token("+?", callback = |_| None)]
 	#[token("+?=")]
 	PlusQuestionEqual,
 
@@ -154,25 +209,32 @@ pub enum BaseTokenKind {
 	#[token("⊄")]
 	NoneInside,
 
-	#[regex(r#"(s)?"([^"\\]|\\.)*""#)]
-	#[regex(r#"(s)?'([^'\\]|\\.)*'"#)]
+	// Callbacks here make the token eager, s" is always a string
+	// we should not fallback to having a seperate `s` ident token and a `"` token.
+	// It also seems to simplify the generated lexer definition a lot.
+	#[token("s\"", callback = eat_string::<b'\"'>)]
+	#[token("s'", callback = eat_string::<b'\''>)]
+	#[token("\"", callback = eat_string::<b'\"'>)]
+	#[token("'", callback = eat_string::<b'\''>)]
 	String,
-	#[regex(r#"r"([^"\\]|\\.)*""#)]
-	#[regex(r#"r'([^'\\]|\\.)*'"#)]
+	#[token("r\"", callback = eat_string::<b'\"'>)]
+	#[token("r'", callback = eat_string::<b'\''>)]
 	RecordIdString,
-	#[regex(r#"u"([^"\\]|\\.)*""#)]
-	#[regex(r#"u'([^'\\]|\\.)*'"#)]
+	#[token("u\"", callback = eat_string::<b'\"'>)]
+	#[token("u'", callback = eat_string::<b'\''>)]
 	UuidString,
-	#[regex(r#"d"([^"\\]|\\.)*""#)]
-	#[regex(r#"d'([^'\\]|\\.)*'"#)]
+	#[token("d\"", callback = eat_string::<b'\"'>)]
+	#[token("d'", callback = eat_string::<b'\''>)]
 	DateTimeString,
-	#[regex(r#"f"([^"\\]|\\.)*""#)]
-	#[regex(r#"f'([^'\\]|\\.)*'"#)]
+	#[token("f\"", callback = eat_string::<b'\"'>)]
+	#[token("f'", callback = eat_string::<b'\''>)]
 	FileString,
-	#[regex(r#"b"([^"\\]|\\.)*""#)]
-	#[regex(r#"b'([^'\\]|\\.)*'"#)]
+	#[token("b\"", callback = eat_string::<b'\"'>)]
+	#[token("b'", callback = eat_string::<b'\''>)]
 	ByteString,
 
+	#[regex(r"\$`([^`]|\\.)*", callback = |_| None)]
+	#[regex(r"\$⟨([^⟩]|\\.)*", callback = |_| None)]
 	#[regex(r"\$(?&backtick_ident)")]
 	#[regex(r"\$(?&bracket_ident)")]
 	#[regex(r"\$\p{XID_Continue}+", priority = 3)]
@@ -190,20 +252,16 @@ pub enum BaseTokenKind {
 	PosInfinity,
 	#[token(r"-Infinity")]
 	NegInfinity,
-	#[regex(r"[0-9][0-9_]*f")]
-	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?(f)?")]
-	// Don't allow a float postfix to be immediatly followed by an identifier
-	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?f[_\p{XID_START}]",callback = |_| None)]
+	#[regex(r"[0-9][0-9_]*f", callback = no_ident, priority = 5)]
+	// Reject 1.0e- as a whole to ensure partial parsing succeeds
+	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?[eE][-+]",callback = |_| None)]
+	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?(f)?",callback = no_ident)]
 	Float,
-	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?dec")]
-	// Don't allow a decimal postfix to be immediatly followed by an identifier
-	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?dec[_\p{XID_START}]",callback = |_| None)]
+	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?dec", callback = no_ident)]
 	Decimal,
-	#[regex(r"[0-9][0-9_]*", priority = 3)]
+	#[regex(r"[0-9][0-9_]*", callback = no_ident, priority = 3)]
 	Int,
-	#[regex(r"(?&duration_part)+", priority = 5)]
-	// Don't allow a duration postfix to be immediatly followed by an identifier
-	#[regex(r"(?&duration_part)+[_\p{XID_START}]", callback = |_| None,priority = 4)]
+	#[regex(r"(?&duration_part)+", callback = no_ident, priority = 5)]
 	Duration,
 
 	// Algorithms
@@ -238,6 +296,8 @@ pub enum BaseTokenKind {
 	KwAssert,
 	#[regex(r"(?i)AT")]
 	KwAt,
+	#[regex(r"(?i)AUDIENCE")]
+	KwAudience,
 	#[regex(r"(?i)AUTHENTICATE")]
 	KwAuthenticate,
 	#[regex(r"(?i)AUTO")]
@@ -294,6 +354,8 @@ pub enum BaseTokenKind {
 	KwConfig,
 	#[regex(r"(?i)CONTENT")]
 	KwContent,
+	#[regex(r"(?i)CONTEXT")]
+	KwContext,
 	#[regex(r"(?i)CONTINUE")]
 	KwContinue,
 	#[regex(r"(?i)COUNT")]
@@ -349,6 +411,12 @@ pub enum BaseTokenKind {
 	KwEnd,
 	#[regex(r"(?i)ENFORCED")]
 	KwEnforced,
+	#[regex(r"(?i)LIGHTWEIGHT")]
+	KwLightweight,
+	#[regex(r"(?i)EDGES")]
+	KwEdges,
+	#[regex(r"(?i)INLINE")]
+	KwInline,
 	#[regex(r"(?i)EXCLUDE")]
 	KwExclude,
 	#[regex(r"(?i)EXISTS")]
@@ -505,6 +573,8 @@ pub enum BaseTokenKind {
 	KwParam,
 	#[regex(r"(?i)PASSHASH")]
 	KwPasshash,
+	#[regex(r"(?i)PASSSCRAM")]
+	KwPassscram,
 	#[regex(r"(?i)PASSWORD")]
 	KwPassword,
 	#[regex(r"(?i)PATCH")]
@@ -637,6 +707,8 @@ pub enum BaseTokenKind {
 	KwUnique,
 	#[regex(r"(?i)UNSET")]
 	KwUnset,
+	#[regex(r"(?i)UNSIGNED")]
+	KwUnsigned,
 	#[regex(r"(?i)UPDATE")]
 	KwUpdate,
 	#[regex(r"(?i)UPSERT")]
@@ -920,6 +992,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwAscii => "keyword `ASCII`",
 			BaseTokenKind::KwAssert => "keyword `ASSERT`",
 			BaseTokenKind::KwAt => "keyword `AT`",
+			BaseTokenKind::KwAudience => "keyword `AUDIENCE`",
 			BaseTokenKind::KwAuthenticate => "keyword `AUTHENTICATE`",
 			BaseTokenKind::KwAuto => "keyword `AUTO`",
 			BaseTokenKind::KwAsync => "keyword `ASYNC`",
@@ -948,6 +1021,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwConcurrently => "keyword `CONCURRENTLY`",
 			BaseTokenKind::KwConfig => "keyword `CONFIG`",
 			BaseTokenKind::KwContent => "keyword `CONTENT`",
+			BaseTokenKind::KwContext => "keyword `CONTEXT`",
 			BaseTokenKind::KwContinue => "keyword `CONTINUE`",
 			BaseTokenKind::KwCount => "keyword `COUNT`",
 			BaseTokenKind::KwCreate => "keyword `CREATE`",
@@ -974,6 +1048,9 @@ impl BaseTokenKind {
 			BaseTokenKind::KwElse => "keyword `ELSE`",
 			BaseTokenKind::KwEnd => "keyword `END`",
 			BaseTokenKind::KwEnforced => "keyword `ENFORCED`",
+			BaseTokenKind::KwLightweight => "keyword `LIGHTWEIGHT`",
+			BaseTokenKind::KwEdges => "keyword `EDGES`",
+			BaseTokenKind::KwInline => "keyword `INLINE`",
 			BaseTokenKind::KwExclude => "keyword `EXCLUDE`",
 			BaseTokenKind::KwExists => "keyword `EXISTS`",
 			BaseTokenKind::KwExpired => "keyword `EXPIRED`",
@@ -1050,6 +1127,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwParallel => "keyword `PARALLEL`",
 			BaseTokenKind::KwParam => "keyword `PARAM`",
 			BaseTokenKind::KwPasshash => "keyword `PASSHASH`",
+			BaseTokenKind::KwPassscram => "keyword `PASSSCRAM`",
 			BaseTokenKind::KwPassword => "keyword `PASSWORD`",
 			BaseTokenKind::KwPatch => "keyword `PATCH`",
 			BaseTokenKind::KwPath => "keyword `PATH`",
@@ -1113,6 +1191,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwType => "keyword `TYPE`",
 			BaseTokenKind::KwUnique => "keyword `UNIQUE`",
 			BaseTokenKind::KwUnset => "keyword `UNSET`",
+			BaseTokenKind::KwUnsigned => "keyword `UNSIGNED`",
 			BaseTokenKind::KwUpdate => "keyword `UPDATE`",
 			BaseTokenKind::KwUpsert => "keyword `UPSERT`",
 			BaseTokenKind::KwUppercase => "keyword `UPPERCASE`",
@@ -1247,7 +1326,8 @@ impl BaseTokenKind {
 				| Self::KwAs | Self::KwAscending
 				| Self::KwAscii
 				| Self::KwAssert
-				| Self::KwAt | Self::KwAuthenticate
+				| Self::KwAt | Self::KwAudience
+				| Self::KwAuthenticate
 				| Self::KwAuto
 				| Self::KwAsync
 				| Self::KwBackend
@@ -1274,6 +1354,7 @@ impl BaseTokenKind {
 				| Self::KwConcurrently
 				| Self::KwConfig
 				| Self::KwContent
+				| Self::KwContext
 				| Self::KwContinue
 				| Self::KwCount
 				| Self::KwCreate
@@ -1300,6 +1381,9 @@ impl BaseTokenKind {
 				| Self::KwElse
 				| Self::KwEnd
 				| Self::KwEnforced
+				| Self::KwLightweight
+				| Self::KwEdges
+				| Self::KwInline
 				| Self::KwExclude
 				| Self::KwExists
 				| Self::KwExpired
@@ -1369,6 +1453,7 @@ impl BaseTokenKind {
 				| Self::KwParallel
 				| Self::KwParam
 				| Self::KwPasshash
+				| Self::KwPassscram
 				| Self::KwPassword
 				| Self::KwPatch
 				| Self::KwPath
@@ -1430,6 +1515,7 @@ impl BaseTokenKind {
 				| Self::KwType
 				| Self::KwUnique
 				| Self::KwUnset
+				| Self::KwUnsigned
 				| Self::KwUpdate
 				| Self::KwUpsert
 				| Self::KwUppercase

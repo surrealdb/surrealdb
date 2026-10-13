@@ -92,29 +92,23 @@ impl MethodDescriptor {
 	/// Resolve the method to a concrete function for the given value.
 	///
 	/// Checks type-specific implementations first, then falls back to the
-	/// generic fallback. Returns an error if no implementation is found.
-	pub fn resolve(&self, value: &Value) -> anyhow::Result<&Arc<dyn ScalarFunction>> {
+	/// generic fallback. Returns `None` when no implementation exists for the
+	/// value's type; the caller decides how to degrade (method calls fall back
+	/// to closure-field-call semantics).
+	pub fn resolve(&self, value: &Value) -> Option<&Arc<dyn ScalarFunction>> {
 		let kind = ValueKind::of(value);
 
 		// Check type-specific implementations first
 		if let Some(kind) = kind {
 			for (k, func) in &self.type_impls {
 				if *k == kind {
-					return Ok(func);
+					return Some(func);
 				}
 			}
 		}
 
 		// Fall back to generic implementation
-		if let Some(ref func) = self.fallback {
-			return Ok(func);
-		}
-
-		Err(anyhow::anyhow!(
-			"Method '{}' cannot be called on value of type '{}'",
-			self.name,
-			value.kind_of()
-		))
+		self.fallback.as_ref()
 	}
 }
 
@@ -136,6 +130,18 @@ impl MethodRegistry {
 	/// Look up a method by name.
 	pub fn get(&self, name: &str) -> Option<&Arc<MethodDescriptor>> {
 		self.methods.get(name)
+	}
+
+	/// Iterate over every registered method name.
+	#[cfg(test)]
+	pub fn names(&self) -> impl Iterator<Item = &'static str> + '_ {
+		self.methods.keys().copied()
+	}
+
+	/// Iterate over every registered method descriptor.
+	#[cfg(test)]
+	pub fn descriptors(&self) -> impl Iterator<Item = &Arc<MethodDescriptor>> + '_ {
+		self.methods.values()
 	}
 
 	/// Register a method that works on all types via a single fallback function.
@@ -482,6 +488,7 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("vector_project", ValueKind::Array, get(funcs, "vector::project"));
 	m.register_typed("vector_scale", ValueKind::Array, get(funcs, "vector::scale"));
 	m.register_typed("vector_subtract", ValueKind::Array, get(funcs, "vector::subtract"));
+	m.register_typed("vector_sum", ValueKind::Array, get(funcs, "vector::sum"));
 	m.register_typed(
 		"vector_distance_chebyshev",
 		ValueKind::Array,
@@ -694,4 +701,55 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_alias("index_of", "find_index"); // array.index_of() → array::find_index
 
 	m
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Read-only classification treats a method call as read-only exactly when
+	/// its name dispatches to a builtin; an unregistered name resolves to a
+	/// closure stored on the receiver, whose body is invisible at that point,
+	/// and must be classified writable. Both the surface AST and the
+	/// expression tree read that distinction from
+	/// `surrealdb_sql::method::BUILTIN_METHOD_NAMES`, a static mirror of this
+	/// registry (the layers below cannot depend on this one). The two must
+	/// stay identical: a name missing from the mirror costs every use of that
+	/// method its read transaction, and a stale extra name lets a writing
+	/// closure body reach a read-only transaction.
+	#[test]
+	fn the_name_mirror_matches_the_registry() {
+		let registry = FunctionRegistry::with_builtins();
+		let mut registered: Vec<&str> = registry.methods().names().collect();
+		registered.sort_unstable();
+		assert_eq!(
+			registered,
+			crate::sql::method::BUILTIN_METHOD_NAMES,
+			"keep `surrealdb_sql::method::BUILTIN_METHOD_NAMES` identical to the \
+			 names registered in `build_method_registry`"
+		);
+	}
+
+	/// `MethodPart::access_mode` derives a call's mode from its arguments
+	/// alone. That is sound only while no registered method resolves to one
+	/// of the statement-evaluating builtins that need a write transaction in
+	/// their own right.
+	#[test]
+	fn no_registered_method_resolves_to_a_writing_builtin() {
+		use crate::exec::physical_expr::function::builtin_can_write;
+
+		let registry = FunctionRegistry::with_builtins();
+		for descriptor in registry.methods().descriptors() {
+			let impls = descriptor.type_impls.iter().map(|(_, f)| f);
+			for func in impls.chain(descriptor.fallback.iter()) {
+				assert!(
+					!builtin_can_write(func.name()),
+					"method '{}' resolves to '{}', which needs a write transaction; \
+					 `MethodPart::access_mode` must combine that in",
+					descriptor.name,
+					func.name(),
+				);
+			}
+		}
+	}
 }

@@ -36,8 +36,8 @@
 //! ## `IdOnly` edges and the target-rid decision
 //!
 //! The adjacency keys scanned here are *pointer keys* (vertex-side adjacency):
-//! [`DecodedGraph::edge`](super::super::scan::graph_keys::DecodedGraph) is the
-//! **edge record id**, and [`DecodedGraph::target`] is **`Some` only for
+//! [`DecodedGraph::edge`](crate::key::schema::DecodedGraph) is the
+//! **edge record id**, and `DecodedGraph::target` is **`Some` only for
 //! new-format keys**, carrying the far endpoint vertex directly.
 //!
 //! The target vertex id is therefore resolved in priority order:
@@ -71,28 +71,22 @@
 //! (`check_perms == false`) the gate is skipped and the common path remains
 //! fetch-free.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, EvalContext, ExecOperator,
-	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
-	buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::idx::planner::ScanDirection;
+use crate::idx::adjacency::VertexAdjacency;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// Direction of a single `Expand` hop.
@@ -305,11 +299,11 @@ impl ExecOperator for Expand {
 		// permissions must be enforced (once, internally) and applies table +
 		// field SELECT permissions and computed fields per record. The operator
 		// therefore does not re-derive the permission-check flag itself.
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
@@ -320,11 +314,11 @@ impl ExecOperator for Expand {
 		let target_label = self.target_label.clone();
 		let predicate = self.predicate.clone();
 		let optional = self.optional;
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let max_output_rows = ctx.root().ctx.config.gql_max_output_rows;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
+		let max_output_rows = ctx.root().ctx.config.exec.gql_max_output_rows;
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -338,6 +332,9 @@ impl ExecOperator for Expand {
 			// table's permission + FieldState are resolved at most once.
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut target_cache = FetchFieldStateCache::new();
+			// Per-table adjacency classifications, cached for the whole stream
+			// (source rids can span tables).
+			let mut adjacency_memo: HashMap<TableName, VertexAdjacency> = HashMap::new();
 
 			// Cumulative emitted-row count across all batches and source rows —
 			// bounds high-fan-out expand output (a single dense source vertex, or
@@ -346,14 +343,12 @@ impl ExecOperator for Expand {
 			// the survivor pushes inside `expand_row` are counted.
 			let mut emitted: usize = 0;
 
-			futures::pin_mut!(input_stream);
-
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				let mut out: Vec<Value> = Vec::with_capacity(batch.values.len());
+				let mut out: Vec<Value> = Vec::with_capacity(batch.len());
 
-				for row in batch.values {
+				for row in batch.into_values() {
 					match extract_source_id(&row, &source) {
 						SourceId::Found(rid) => {
 							expand_row(
@@ -376,6 +371,7 @@ impl ExecOperator for Expand {
 								scan_batch_size,
 								&mut edge_cache,
 								&mut target_cache,
+								&mut adjacency_memo,
 								&mut out,
 								&mut emitted,
 								max_output_rows,
@@ -406,10 +402,11 @@ impl ExecOperator for Expand {
 				}
 
 				if !out.is_empty() {
-					yield ValueBatch { values: out };
+					yielder.emit(ValueBatch::new(out)).await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), self.name(), &self.metrics))
 	}
@@ -502,40 +499,35 @@ async fn expand_row(
 	scan_batch_size: usize,
 	edge_cache: &mut FetchFieldStateCache,
 	target_cache: &mut FetchFieldStateCache,
+	adjacency_memo: &mut HashMap<TableName, VertexAdjacency>,
 	out: &mut Vec<Value>,
 	emitted: &mut usize,
 	max_output_rows: usize,
 ) -> Result<(), ControlFlow> {
-	// Enumerate the source vertex's adjacency, collecting (edge rid, optional
-	// decoded target) pairs. `decoded.edge` is the edge record id; `decoded.
-	// target` is the far vertex on new-format pointer keys.
-	let ranges = compute_graph_ranges(ns_id, db_id, source_rid, dir, edge_specs, ctx).await?;
-
+	// Enumerate the source vertex's adjacency — packed blocks merged with
+	// per-edge pointer keys — retaining only (edge rid, optional decoded
+	// target) pairs per item: the key and props are dropped as each edge
+	// streams by, never buffered for the whole fan-out. `edge` is the edge
+	// record id; `target` is the far vertex on new-format entries.
 	let mut edge_rids: Vec<RecordId> = Vec::new();
 	let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-
-	for (beg, end) in ranges {
-		let mut cursor = txn
-			.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
-			.await
-			.context("Failed to open graph cursor")?;
-		loop {
-			crate::exec::operators::check_cancelled(ctx)?;
-			let keys = cursor
-				.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-				.await
-				.context("Failed to scan graph edge")?;
-			if keys.is_empty() {
-				break;
-			}
-			for key in &keys {
-				let decoded = decode_graph_edge(key)?;
-				edge_rids.push(decoded.edge);
-				decoded_targets.push(decoded.target);
-			}
-		}
-		drop(cursor);
-	}
+	collect_adjacency(
+		txn,
+		ns_id,
+		db_id,
+		source_rid,
+		dir,
+		edge_specs,
+		ctx,
+		version,
+		adjacency_memo,
+		|item| {
+			edge_rids.push(item.edge);
+			decoded_targets.push(item.target);
+			Ok(())
+		},
+	)
+	.await?;
 
 	if edge_rids.is_empty() {
 		if optional {

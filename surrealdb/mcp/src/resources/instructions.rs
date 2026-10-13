@@ -23,7 +23,22 @@ This MCP server provides direct access to a SurrealDB database instance.
 - **list**: Enumerate entities of a single kind (namespaces, databases, tables, fields, indexes, events, functions, params, analyzers, apis, buckets, models, modules, sequences, configs, users, accesses, nodes). Set `table` for fields/indexes/events; set `scope` for users/accesses.
 
 ### Context
-- **use**: Switch the active namespace and/or database. Provide `namespace`, `database`, or both in one call.
+- **use**: Switch the active namespace and/or database for the rest of the connection. Provide `namespace`, `database`, or both in one call. Requires a protocol version older than `2026-07-28`; from that revision on nothing persists between requests, so `use` is rejected and scope must be passed per call instead.
+
+## Choosing a namespace and database
+
+Every tool except `use` accepts optional `namespace` and `database` arguments
+naming the scope for that one call. When omitted, the scope is resolved in
+this order:
+
+1. the call's own `namespace` / `database` arguments;
+2. the `surreal-ns` / `surreal-db` request headers;
+3. the connection's current `use` context, if the protocol version has one;
+4. the server's configured defaults.
+
+Passing scope per call is always safe and is the only option under protocol
+`2026-07-28`. A call that names a scope does not change the connection's `use`
+context, so it cannot affect any later call.
 
 ## Available Resources
 - `surrealdb://instructions` -- this document

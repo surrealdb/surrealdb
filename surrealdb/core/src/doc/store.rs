@@ -3,8 +3,8 @@ use anyhow::Result;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Statement;
-use crate::doc::Document;
-use crate::err::Error;
+use crate::doc::{Document, Error as DocError};
+use crate::kvs::storage_error;
 
 impl Document {
 	pub(super) async fn store_record_data(
@@ -20,6 +20,11 @@ impl Document {
 		let tb = self.doc_ctx.tb()?;
 		// Check if the table is DROP
 		if tb.drop {
+			return Ok(());
+		}
+		// A lightweight edge stores no record: its adjacency keys are the
+		// whole edge, and readers synthesize the record from its id.
+		if self.table_is_lightweight()? {
 			return Ok(());
 		}
 		// Get the record id
@@ -46,10 +51,10 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
-							e.downcast_ref(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+							storage_error(&e),
+							Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -71,10 +76,10 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
-							e.downcast_ref(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+							storage_error(&e),
+							Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -96,10 +101,10 @@ impl Document {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
-							e.downcast_ref(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+							storage_error(&e),
+							Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -121,10 +126,10 @@ impl Document {
 				match ctx.tx().put_record(ns, db, &rid.table, &rid.key, doc).await {
 					Err(e) => {
 						if matches!(
-							e.downcast_ref(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+							storage_error(&e),
+							Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {

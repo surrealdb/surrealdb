@@ -7,10 +7,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::helpers::{args_access_mode, args_required_context, evaluate_args, validate_return};
-use crate::err::Error;
 use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut};
-use crate::expr::{ControlFlow, FlowResult};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult};
 use crate::val::Value;
 
 // =============================================================================
@@ -56,9 +55,18 @@ impl PhysicalExpr for ClosureExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Closures themselves are read-only (they're values)
-		// What they do when called is a different matter
-		AccessMode::ReadOnly
+		// A closure literal is inert as a value, but wherever it can flow it can
+		// also be invoked — the call operator, or a closure-taking builtin such
+		// as `array::map` that runs the body per element under this statement's
+		// options. A writing body therefore makes the expression writable, so
+		// anything combining this access mode (e.g. `args_access_mode` on the
+		// builtin holding it) is conservative. Mirrors the expr layer's
+		// `Expr::Closure(c) => c.body.read_only()`.
+		if self.closure.body.read_only() {
+			AccessMode::ReadOnly
+		} else {
+			AccessMode::ReadWrite
+		}
 	}
 }
 
@@ -93,8 +101,13 @@ impl PhysicalExpr for ClosureCallExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// The closure body may require any context level, so be conservative
-		// and take the max of target and arguments
+		// The closure body is a runtime value, invisible at plan time, so
+		// this can only declare what the target and argument expressions
+		// need. The executor materializes the highest context level the
+		// session's ns/db selection supports rather than just this minimum,
+		// which is what lets a database-touching body run. Declaring
+		// `Database` here instead would wrongly reject pure closures in
+		// sessions with no database selected.
 		let target_ctx = self.target.required_context();
 		let args_ctx = args_required_context(&self.arguments);
 		target_ctx.max(args_ctx)
@@ -110,7 +123,7 @@ impl PhysicalExpr for ClosureCallExec {
 			let closure = match target_value {
 				Value::Closure(c) => c,
 				other => {
-					return Err(Error::InvalidFunction {
+					return Err(ExecError::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
 						message: format!("'{}' is not a function", other.kind_of()),
 					}
@@ -140,7 +153,7 @@ impl PhysicalExpr for ClosureCallExec {
 						&& let Some((param, kind)) =
 							arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
 					{
-						return Err(Error::InvalidFunctionArguments {
+						return Err(ExprError::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
@@ -155,7 +168,7 @@ impl PhysicalExpr for ClosureCallExec {
 					let mut local_params: HashMap<Strand, Value> = HashMap::new();
 					for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
 						let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
-							Error::InvalidFunctionArguments {
+							ExprError::InvalidFunctionArguments {
 								name: "ANONYMOUS".to_string(),
 								message: format!(
 									"Expected a value of type '{}' for argument {}",
@@ -175,6 +188,10 @@ impl PhysicalExpr for ClosureCallExec {
 					// Execute the closure body
 					let block_expr = BlockPhysicalExpr {
 						block: crate::expr::Block(vec![body.clone()]),
+						// A closure body is evaluated wherever the closure is
+						// called, which need not be the statement that wrote
+						// it, so it inherits no MATCHES registrations.
+						matches_scope: None,
 					};
 					let eval_ctx = EvalContext {
 						exec_ctx: &isolated_ctx,
@@ -194,7 +211,7 @@ impl PhysicalExpr for ClosureCallExec {
 						Err(ControlFlow::Return(v)) => v,
 						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
 							// BREAK/CONTINUE inside a closure (outside of loop) is an error
-							return Err(Error::InvalidControlFlow.into());
+							return Err(ExecError::InvalidControlFlow.into());
 						}
 						Err(e) => return Err(e),
 					};
@@ -226,5 +243,70 @@ impl ToSql for ClosureCallExec {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.target.fmt_sql(f, fmt);
 		f.push_str("(...)");
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use crate::exec::AccessMode;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::exec::planner::Planner;
+
+	/// Plan `expression` against a txn-backed planner over `db` and return the
+	/// resolved access mode of the resulting physical expression tree.
+	async fn access_mode_of(db: &TestDb, expression: &str) -> AccessMode {
+		let ctx = db.exec_ctx().await;
+		let crate::exec::ExecutionContext::Database(db_ctx) = &ctx else {
+			panic!("exec_ctx builds a Database context");
+		};
+		let txn = ctx.txn();
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			&db_ctx.ns_ctx.root.function_registry,
+			txn,
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		);
+		let expr: crate::expr::Expr = crate::syn::expr(expression).unwrap().into();
+		planner.physical_expr(expr).await.unwrap().access_mode()
+	}
+
+	#[tokio::test]
+	async fn a_pure_closure_literal_is_read_only() {
+		let db = TestDb::new("").await;
+		assert_eq!(access_mode_of(&db, "|$x: any| { RETURN $x; }").await, AccessMode::ReadOnly);
+	}
+
+	#[tokio::test]
+	async fn a_writing_closure_literal_is_read_write() {
+		// A closure does not write when it is created, but it can be invoked
+		// wherever the value flows, so a writing body makes the expression
+		// writable — matching the expr layer's `Expr::Closure(c) => c.body.read_only()`.
+		let db = TestDb::new("DEFINE TABLE log SCHEMALESS;").await;
+		assert_eq!(
+			access_mode_of(&db, "|$x: any| { CREATE log SET v = $x; }").await,
+			AccessMode::ReadWrite
+		);
+	}
+
+	#[tokio::test]
+	async fn a_writing_closure_passed_to_a_builtin_is_read_write() {
+		// `array::map` runs the closure per element under this statement's
+		// options, so a writing closure argument makes the whole call writable.
+		// Feeding the closure body into the builtin's access mode is what closes
+		// the gap: otherwise the call would resolve read-only and could be
+		// overlapped or spawned as if it never wrote.
+		let db = TestDb::new("DEFINE TABLE log SCHEMALESS;").await;
+		assert_eq!(
+			access_mode_of(&db, "array::map([1, 2], |$x: any| { CREATE log SET v = $x; })").await,
+			AccessMode::ReadWrite
+		);
+		// A pure closure argument keeps the call read-only — no regression for
+		// the common case.
+		assert_eq!(
+			access_mode_of(&db, "array::map([1, 2], |$x: any| { RETURN $x; })").await,
+			AccessMode::ReadOnly
+		);
 	}
 }

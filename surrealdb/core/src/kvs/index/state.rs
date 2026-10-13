@@ -1,175 +1,17 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+// Answering from durable build state needs only the keyspace that binds it, so
+// those readers live with it; the protocol that writes the state stays here.
+pub(super) use surrealdb_datastore::index_state::{
+	CatalogIndexState, catalog_index_state, durable_index_error_reason, report_status_from_phase,
+};
+pub(crate) use surrealdb_datastore::index_state::{filter_online_indexes, index_building_info};
 
-use super::{BUILD_OWNER_LEASE_SECS, BuildGeneration, BuildTicket};
-use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
-use crate::err::Error;
+use super::{BUILD_OWNER_LEASE_SECS, IndexBuildPhase, IndexBuildState};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::IndexKeyBase;
-use crate::key::table::bs::Bs;
-use crate::kvs::{Error as KvsError, Transaction, impl_kv_value_revisioned};
-use crate::val::{Object, TableName, Value};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) enum IndexBuildReportStatus {
-	/// Build state was created but no index-data cleanup has started yet.
-	Started,
-	/// Existing index data is being removed before the initial scan.
-	Cleaning,
-	/// The builder is scanning records, replaying queued writes, or closing.
-	Indexing,
-	/// The durable build phase is online and queries may use the index.
-	Ready,
-	/// The local builder was aborted before completion.
-	Aborted,
-	/// The durable build phase failed with an optional stored error reason.
-	Error,
-}
-
-impl IndexBuildReportStatus {
-	fn as_str(self) -> &'static str {
-		match self {
-			Self::Started => "started",
-			Self::Cleaning => "cleaning",
-			Self::Indexing => "indexing",
-			Self::Ready => "ready",
-			Self::Aborted => "aborted",
-			Self::Error => "error",
-		}
-	}
-}
-
-/// Cluster-visible lifecycle for an index build generation.
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) enum IndexBuildPhase {
-	/// The builder is scanning records and writers may reserve tickets.
-	Building,
-	/// Initial indexing has completed and new writer admissions are blocked.
-	Closing,
-	/// The index has caught up with admitted writes and is queryable.
-	Online,
-	/// The build was aborted or failed; queries must not use the index.
-	Error,
-}
-
-/// Durable per-index build state shared by all nodes.
-///
-/// The state is used as an admission counter for writers and as a fencing token
-/// for the builder. Writers can update `updated_at` while allocating tickets;
-/// only builders refresh `owner_heartbeat_at`, which controls lease expiry.
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct IndexBuildState {
-	/// Build epoch. Stale generation-scoped keys are ignored by newer builds.
-	pub(crate) generation: BuildGeneration,
-	/// Current durable lifecycle phase.
-	pub(crate) phase: IndexBuildPhase,
-	/// Concrete builder task that currently owns this generation.
-	pub(crate) owner: Option<Uuid>,
-	/// Next writer ticket to allocate while the build is in `Building`.
-	pub(crate) next_ticket: BuildTicket,
-	/// Whether initial record scanning has completed for this generation.
-	pub(crate) initial_complete: bool,
-	/// Last durable state update time.
-	pub(crate) updated_at: DateTime<Utc>,
-	/// Last builder-owned lease heartbeat.
-	#[revision(start = 3)]
-	pub(crate) owner_heartbeat_at: Option<DateTime<Utc>>,
-	/// Durable error reason visible to every node once the build enters `Error`.
-	#[revision(start = 2)]
-	pub(crate) error: Option<String>,
-	/// User-facing status for `INFO FOR INDEX`.
-	#[revision(start = 3)]
-	pub(crate) report_status: Option<IndexBuildReportStatus>,
-	/// Number of records indexed during the initial scan.
-	#[revision(start = 3)]
-	pub(crate) initial: Option<u64>,
-	/// Number of appended updates replayed after the initial scan.
-	#[revision(start = 3)]
-	pub(crate) updated: Option<u64>,
-	/// Best-effort count of pending build updates visible to the builder.
-	#[revision(start = 3)]
-	pub(crate) pending: Option<u64>,
-}
-
-impl_kv_value_revisioned!(IndexBuildState);
-
-/// Durable admission marker written before the user transaction commits.
-///
-/// The builder cannot move from `Closing` to `Online` until every reservation
-/// for the generation has either been released after transaction close, produced
-/// a durable appending that the builder can replay, or expired after its writer
-/// node is no longer live.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct IndexBuildReservation {
-	/// Node that reserved the ticket.
-	pub(crate) node: Uuid,
-	/// Deadline after which the reservation may be cleaned if the node is dead.
-	pub(crate) expires_at: DateTime<Utc>,
-}
-
-impl_kv_value_revisioned!(IndexBuildReservation);
-
-pub(super) fn report_status_from_phase(phase: IndexBuildPhase) -> IndexBuildReportStatus {
-	match phase {
-		IndexBuildPhase::Building | IndexBuildPhase::Closing => IndexBuildReportStatus::Indexing,
-		IndexBuildPhase::Online => IndexBuildReportStatus::Ready,
-		IndexBuildPhase::Error => IndexBuildReportStatus::Error,
-	}
-}
-
-pub(super) fn durable_index_error_reason(ix: &IndexDefinition, state: &IndexBuildState) -> String {
-	state.error.clone().unwrap_or_else(|| format!("Index {} is in an error state", ix.name))
-}
-
-fn index_building_status_value(ix: &IndexDefinition, state: Option<IndexBuildState>) -> Value {
-	let Some(state) = state else {
-		let mut out = Object::default();
-		out.insert("status", IndexBuildReportStatus::Ready.as_str().into());
-		return out.into();
-	};
-	let status = state.report_status.unwrap_or_else(|| report_status_from_phase(state.phase));
-	let mut out = Object::default();
-	if let Some(initial) = state.initial {
-		out.insert("initial", initial.into());
-	}
-	if let Some(pending) = state.pending {
-		out.insert("pending", pending.into());
-	}
-	if let Some(updated) = state.updated {
-		out.insert("updated", updated.into());
-	}
-	if status == IndexBuildReportStatus::Error {
-		out.insert("error", durable_index_error_reason(ix, &state).into());
-	}
-	out.insert("status", status.as_str().into());
-	out.into()
-}
-
-/// Format `INFO FOR INDEX` output from durable build state.
-///
-/// Missing state is treated as ready so indexes created before this protocol
-/// remain queryable and report the same shape as completed durable builds.
-pub(crate) async fn index_building_info(
-	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	ix: &IndexDefinition,
-) -> Result<Value> {
-	let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-	let status = tx.get(&ikb.new_bs_key(), None).await?;
-	let mut out = Object::default();
-	out.insert("building", index_building_status_value(ix, status));
-	Ok(out.into())
-}
+use crate::kvs::{Error as KvsError, Transaction, storage_error};
+use crate::val::TableName;
 
 /// Delete durable build state for an index that is removed or overwritten.
 ///
@@ -178,16 +20,46 @@ pub(crate) async fn index_building_info(
 /// definition. Once the catalog no longer references this `(name, IndexId)`,
 /// missing `!bs` means retired state; while it still does, missing `!bs` is the
 /// legacy/pre-durable ready state.
+///
+/// Deleting `!bs` here is also the fence that stops the build. Every builder
+/// transaction that writes index data brings `!bs` into its own conflict
+/// domain first — a build batch by compare-and-swap, post-`Online` compaction
+/// by locked read — so once this commits such a transaction can neither find
+/// the state it needs nor commit against a deleted one. Aborting the
+/// process-local task afterwards only saves it a failed batch.
 pub(crate) async fn retire_durable_index(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &TableName,
 	ix: IndexId,
+	expunge: bool,
 ) -> Result<()> {
 	let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
-	tx.del(&ikb.new_bs_key()).await?;
-	delete_durable_build_queues(tx, &ikb).await?;
+	delete_durable_build_artifacts(tx, &ikb, expunge).await?;
+	Ok(())
+}
+
+/// Delete build state and every generation-scoped queue for one index.
+///
+/// EXPUNGE must clear all MVCC versions, so a cascading removal passes its
+/// policy down to the keys it retires here rather than leaving history a later
+/// versioned read could still resolve.
+pub(super) async fn delete_durable_build_artifacts(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	expunge: bool,
+) -> Result<()> {
+	if expunge {
+		tx.clr_key(&ikb.new_bs_key()).await?;
+		tx.clrr(ikb.new_bg_all_generations_range()?).await?;
+		tx.clrr(ikb.new_bp_all_generations_range()?).await?;
+		tx.clrr(ikb.new_br_all_generations_range()?).await?;
+		tx.clrr(ikb.new_bt_all_generations_range()?).await?;
+	} else {
+		tx.del_key(&ikb.new_bs_key()).await?;
+		delete_durable_build_queues(tx, ikb).await?;
+	}
 	Ok(())
 }
 
@@ -203,6 +75,34 @@ pub(super) async fn delete_durable_build_queues(
 	tx.delr(ikb.new_bg_all_generations_range()?).await?;
 	tx.delr(ikb.new_bp_all_generations_range()?).await?;
 	tx.delr(ikb.new_br_all_generations_range()?).await?;
+	tx.delr(ikb.new_bt_all_generations_range()?).await?;
+	Ok(())
+}
+
+/// Delete queued mutations, primary markers, and reservations for every
+/// generation strictly below `below`.
+///
+/// Used by a new-generation takeover after the next generation's state has
+/// been installed and the prior generations' reservations have drained: from
+/// that point no writer can re-create entries under the old generations
+/// (the flip removed the previous generation's `!bt` counter under a
+/// conditional delete, and the admission fence rejects generation mismatches),
+/// so the deletion is stable. Index retirement uses
+/// [`delete_durable_build_queues`] instead, which clears every generation.
+pub(super) async fn delete_stale_build_queues(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	below: super::BuildGeneration,
+) -> Result<()> {
+	tx.delr(ikb.new_bg_range_below(below)?).await?;
+	tx.delr(ikb.new_bp_range_below(below)?).await?;
+	tx.delr(ikb.new_br_range_below(below)?).await?;
+	// The flip that installed `below` already removed its immediate
+	// predecessor's ticket counter under a conditional delete, which is what
+	// fenced the writers still admitting to it. This sweeps up counters left
+	// by generations further back, whose writers were fenced by their own
+	// flips and can no longer allocate.
+	tx.delr(ikb.new_bt_range_below(below)?).await?;
 	Ok(())
 }
 
@@ -214,10 +114,7 @@ pub(super) fn durable_report_count(count: Option<u64>) -> usize {
 }
 
 pub(super) fn is_condition_not_met(err: &anyhow::Error) -> bool {
-	if matches!(err.downcast_ref::<KvsError>(), Some(KvsError::TransactionConditionNotMet)) {
-		return true;
-	}
-	matches!(err.downcast_ref::<Error>(), Some(Error::Kvs(KvsError::TransactionConditionNotMet)))
+	matches!(storage_error(err), Some(KvsError::TransactionConditionNotMet))
 }
 
 pub(super) fn build_owner_expired(state: &IndexBuildState, now: DateTime<Utc>) -> bool {
@@ -226,61 +123,59 @@ pub(super) fn build_owner_expired(state: &IndexBuildState, now: DateTime<Utc>) -
 		<= now
 }
 
-/// Check whether a possibly cached index definition is still catalog-reachable.
+/// Whether a builder anywhere in the cluster still owns this index.
 ///
-/// Missing durable state is ambiguous: it is expected for legacy indexes that
-/// predate the durable build protocol, but it is also how retired indexes look
-/// after their `!bs` key is deleted. The current catalog entry resolves that
-/// ambiguity without adding work to the common durable-`Online` path.
-pub(super) async fn catalog_still_references_index(
-	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	ix: &IndexDefinition,
-) -> Result<bool> {
-	let Some(current) = tx.get_tb_index(ns, db, &ix.table_name, &ix.name, None).await? else {
-		return Ok(false);
-	};
-	Ok(!current.prepare_remove && current.index_id == ix.index_id)
+/// True while the state is `Building` or `Closing`, and while it is `Online`
+/// with an owner that has not released it. That last window covers both the
+/// drain a build runs after publishing the index and the wait for the
+/// statement that started it to close the transaction carrying the new
+/// definition — until that commit lands, every other node reads the previous
+/// definition, so this is the only signal that the build happened at all.
+/// [`Building::defer_ownership_release`](super::builder::Building) is what
+/// holds the window open that far.
+///
+/// Deliberately not bounded on the owner's heartbeat lease. Lease expiry is
+/// what lets another builder *attempt* a takeover; it is not itself a fence,
+/// because `maintain_build_ownership` accepts the same `(generation, owner)`
+/// whatever the heartbeat age. A builder inside one long uninterruptible
+/// stretch — a vector compaction plan carries no internal checkpoint — can let
+/// its heartbeat lapse and then carry on writing, so treating expiry as
+/// "nobody owns this" would let maintenance run against a live writer. Only a
+/// committed CAS takeover changes the owner, and this reads that.
+///
+/// The cost of that choice is that a builder which dies mid-drain leaves the
+/// index fenced until something rewrites `!bs`: the resume scan for a
+/// `Building`/`Closing` generation, or the next `REBUILD INDEX` for a stranded
+/// `Online` owner. That failure mode is bounded and benign — pendings simply
+/// accumulate for a reader that already materialises them — where the
+/// alternative is two writers folding the same pendings through different
+/// on-disk layouts.
+pub(crate) async fn build_owner_is_live(tx: &Transaction, ikb: &IndexKeyBase) -> Result<bool> {
+	Ok(build_owner_holds(tx.get_key(&ikb.new_bs_key(), None).await?))
 }
 
-/// Remove indexes that have a durable build state but are not online.
+/// [`build_owner_is_live`] under a commit-time conflict registration.
 ///
-/// Missing state is treated as online only when the catalog still references
-/// the same index name and internal id. That preserves legacy/pre-durable
-/// indexes while filtering stale execution-cache entries for retired indexes.
-/// Build-state reads are batched so planner hot paths do not perform one
-/// remote point read per index on distributed engines.
-/// Document write paths intentionally read the full catalog so they can enqueue
-/// updates for building indexes.
-pub(crate) async fn filter_online_indexes(
+/// For a caller that goes on to write in the same transaction. A build
+/// acquiring or releasing ownership writes `!bs`, so registering the key here
+/// means a build that starts after this read cannot commit alongside the
+/// caller: one of the two is rejected, and the caller re-reads on retry.
+/// Without it the read is only a snapshot, and a build acquired just after it
+/// would be invisible to the write that follows.
+pub(crate) async fn build_owner_is_live_locked(
 	tx: &Transaction,
-	ns: NamespaceId,
-	db: DatabaseId,
-	indexes: Arc<[IndexDefinition]>,
-) -> Result<Arc<[IndexDefinition]>> {
-	if indexes.is_empty() {
-		return Ok(indexes);
-	}
-	let state_keys: Vec<_> =
-		indexes.iter().map(|ix| Bs::new(ns, db, &ix.table_name, ix.index_id)).collect();
-	let states = tx.getm(state_keys, None).await?;
-	let mut filtered = Vec::new();
-	let mut filtered_any = false;
-	for (ix, state) in indexes.iter().zip(states) {
-		let online = match state {
-			Some(state) => state.phase == IndexBuildPhase::Online,
-			None => catalog_still_references_index(tx, ns, db, ix).await?,
-		};
-		if online {
-			filtered.push(ix.clone());
-		} else {
-			filtered_any = true;
-		}
-	}
-	if filtered_any {
-		Ok(Arc::from(filtered))
-	} else {
-		Ok(indexes)
+	ikb: &IndexKeyBase,
+) -> Result<bool> {
+	Ok(build_owner_holds(tx.getu_key(&ikb.new_bs_key()).await?))
+}
+
+fn build_owner_holds(state: Option<IndexBuildState>) -> bool {
+	let Some(state) = state else {
+		return false;
+	};
+	match state.phase {
+		IndexBuildPhase::Building | IndexBuildPhase::Closing => true,
+		IndexBuildPhase::Online => state.owner.is_some(),
+		IndexBuildPhase::Error => false,
 	}
 }

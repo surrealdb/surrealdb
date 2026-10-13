@@ -20,6 +20,12 @@ no-default-features = true
 highlight = "all"
 # The lint level for when a crate version requirement is set to `*`.
 wildcards = "deny"
+# Path dependencies on private (publish = false) workspace crates are declared
+# without a version on purpose - a version would keep them in published
+# manifests and break `cargo publish` (see surrealdb-kvs-test). Cargo reads a
+# version-less path dep as `*`, so allow that specifically for path deps while
+# still denying genuine registry wildcards.
+allow-wildcard-paths = true
 # Lint level for when multiple versions of the same crate are detected.
 multiple-versions = "allow"
 # The default lint level for `default` features for workspace crates.
@@ -55,7 +61,7 @@ yanked = "warn"
 # A list of security advisory identifiers to ignore.
 # TODOs:
 # - for RUSTSEC-2025-0141, bincode is unmaintained but considered complete and stable at v1.3.3.
-#   Plan migration to wincode, postcard, bitcode, or rkyv in future. Also need surrealmx to update.
+#   Plan migration to wincode, postcard, bitcode, or rkyv in future.
 # - for RUSTSEC-2023-0071, rsa gas a constant-time implementation allowing attackers to recover keys
 #   see https://github.com/RustCrypto/RSA/issues/19#issuecomment-1822995643 for more information
 # - for RUSTSEC-2024-0436, paste is now unmaintained and archived, but we only use paste in tests
@@ -73,10 +79,28 @@ yanked = "warn"
 #
 # Cleared by the wasmtime 44 bump on main (RUSTSEC-2026-0149, wasmtime-wasi 43.0.2
 # `path_open(TRUNCATE)` host-perm bypass).
+#
+# - for RUSTSEC-2026-0194 / -0195, quick-xml <0.41 has XML-parsing DoS bugs (quadratic
+#   duplicate-attribute check + unbounded namespace-declaration allocation). It is pulled
+#   only by `object_store`, which uses it to parse the S3/GCS/Azure XML API responses from
+#   the operator-configured cloud endpoint — not arbitrary attacker input. `object_store`
+#   0.13.2 pins `quick-xml = "0.39"` (<0.40), so reaching the patched >=0.41 requires an
+#   `object_store` 0.14 major bump (tracked separately, as it also touches the `obs` module).
+#
+# - for RUSTSEC-2026-0249, smartstring is unmaintained (archived 2026-05-03) and every version
+#   is affected, so there is no upgrade that clears it. It reaches us only through
+#   `opentelemetry-prometheus-text-exporter`, which uses it for metric and label names the
+#   server itself supplies — no attacker-controlled input, and nothing `unsafe` of ours. The
+#   exporter's own 0.3.0 still requires `smartstring = "^1.0.1"`, so clearing this means the
+#   exporter migrating to `compact_str` or `smol_str`; bumping to 0.3.0 would only add an
+#   `opentelemetry` 0.31 -> 0.32 major bump across the `obs` module for no advisory gain.
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0249",
 ]
 
 # --------------------------------------------------
@@ -116,11 +140,123 @@ name = "surrealdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-cnf"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-collections"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-common"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-keyspace-macro"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-tikv"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-indxdb"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-mem"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-rocksdb"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-surrealkv"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-any"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-kvs-test"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-core"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-datastore"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-runtime"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-engine-api"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-engine-local"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-iam"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-idx"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-observe"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-rpc"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-catalog"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-expr"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-gql"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-sql"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-syn"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-ast"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-parse-common"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-parser"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-token"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -170,12 +306,152 @@ expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
+name = "surrealdb-cnf"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
 name = "surrealdb-collections"
 expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-core"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-datastore"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-runtime"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-engine-api"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-engine-local"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-iam"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-idx"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-keyspace-macro"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-observe"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-rpc"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-catalog"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-expr"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-gql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-sql"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-syn"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-ast"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-parse-common"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-parser"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-token"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-mem"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-indxdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-rocksdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-surrealkv"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-tikv"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-any"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-test"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-common"
 expression = "BUSL-1.1"
 license-files = []
 

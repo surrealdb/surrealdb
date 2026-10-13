@@ -52,22 +52,10 @@ defaults:
 permissions:
   contents: read
 
-# sccache → S3 backend, shared with the rest of CI. Set at workflow level so the
-# values are in the environment when the sccache-action daemon starts.
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
-  SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
-
 jobs:
   compat:
     name: Build + test
-    # Never run on the public mirror. Guarding on the public repo name (rather
-    # than this one) keeps this repository unnamed in this mirrored file.
-    if: github.repository != 'surrealdb/surrealdb'
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
     # On-demand (not spot): spot preemption shows up as "runner lost
     # communication" failures, and this is a soft signal we don't want flaking.
     runs-on: runner-arm-16-cores
@@ -81,36 +69,56 @@ jobs:
       - name: Check whether the downstream check is configured
         id: preflight
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld (fork
+          # PRs, or the setup window before the key secret was added), so gating
+          # on the variable lets the token mint run without a key and hard-fail
+          # instead of no-opping. `!= ''` yields a boolean without exposing it.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          # Gated separately from HAS_APP: this key authenticates the
+          # downstream's OWN private git sources, which the checkout credential
+          # cannot reach. Absent, the cargo steps fail in resolution rather than
+          # at checkout, so the two are not interchangeable.
+          HAS_DEP_APP: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ -n "${CLIENT_ID}" ]; then
+          echo "dep-configured=${HAS_DEP_APP}" >> "$GITHUB_OUTPUT"
+          if [ "${HAS_DEP_APP}" != "true" ]; then
+            echo "::notice title=Downstream compatibility::DEP_FETCH_APP_* absent, so the downstream's own private git dependencies are unauthenticated; the cargo steps will fail in resolution if it has any."
+          fi
+          if [ "${HAS_APP}" = "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Downstream compatibility::Not configured (DOWNSTREAM_APP_* secrets absent) — skipping."
+            echo "::notice title=Downstream compatibility::Not configured (RELEASE_AUTOMATION_APP_* absent) — skipping."
           fi
 
       # The engine (this PR) is checked out at the workspace root so the local
       # composite actions below (./.github/actions/...) resolve.
       - name: Checkout engine (this PR)
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Don't leave this repo's GITHUB_TOKEN in the workspace git config: it
           # is scoped to this repo, and a later git call to the downstream repo
           # made from this directory would otherwise pick it up and be denied.
           persist-credentials: false
 
-      # Mint a short-lived token scoped to the downstream repo only. The owner
-      # defaults to this repository's owner; the repo name comes from a secret so
-      # it is never written into this publicly-mirrored file.
+      # Mint a short-lived token scoped to the downstream repo, for the
+      # checkout below. The owner defaults to this repository's owner; the repo
+      # name comes from a secret.
+      #
+      # Deliberately does NOT cover the downstream's own private git
+      # dependencies. This token comes from the release-automation App, which
+      # carries write permissions for the release and cut workflows, so it is
+      # confined to the checkout step and never published to the build. The
+      # dependency credential below is a separate, read-only token.
       - name: Generate a token for the downstream repo
         id: app-token
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # Pick the downstream branch to validate against, in priority order: the
@@ -148,15 +156,36 @@ jobs:
           export GIT_CONFIG_VALUE_0
           ref=""
           last_err=""
+          # Number of ls-remote attempts per candidate before giving up on it.
+          max_attempts=5
           for cand in "${WANT}" main; do
             # --exit-code: 0 = ref found, 2 = connected but no such ref, other =
             # access/auth error. So a non-empty last_err means we couldn't reach
             # the repo (likely the App lacks Contents:read), vs the ref just being
             # absent (empty last_err).
-            if last_err="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>&1 >/dev/null)"; then
-              ref="${cand}"
-              break
-            fi
+            #
+            # Retry only the "couldn't reach the repo" case: a freshly-minted
+            # installation token is occasionally not usable for a moment, and a
+            # private repo surfaces that as a transient 404 ("repository not
+            # found") that is indistinguishable from a real permission gap on a
+            # single attempt. A ref that is merely absent (empty last_err) is a
+            # real "no such branch", so we stop retrying and fall through to the
+            # next candidate. Fixed 5s backoff mirrors the retry style already
+            # used in .github/actions/setup-databases.
+            attempt=1
+            while :; do
+              if last_err="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>&1 >/dev/null)"; then
+                ref="${cand}"
+                break
+              fi
+              if [ -z "${last_err}" ] || [ "${attempt}" -ge "${max_attempts}" ]; then
+                break
+              fi
+              echo "Downstream ls-remote for '${cand}' failed (attempt ${attempt}/${max_attempts}); retrying in 5s..." >&2
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            [ -n "${ref}" ] && break
           done
           if [ -z "${ref}" ]; then
             echo "::error title=Downstream compatibility::could not read '${WANT}' or 'main' on ${OWNER}/${REPO}. If git reports an auth/permission error below, the App is missing Contents:read on the repo (ref reads require it; approve the permission on the installation, not just add it to the App). git said: ${last_err:-<no error output: branches simply do not exist>}"
@@ -170,7 +199,7 @@ jobs:
 
       - name: Checkout downstream
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ steps.branch.outputs.ref }}
@@ -182,9 +211,70 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: ./.github/actions/setup-environment
         with:
+          # The kache S3 backend shared with the rest of CI.
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           workspaces: downstream
           cache-key: downstream-compat
           save-cache: ${{ github.event_name == 'push' }}
+
+      # Mint the credential cargo presents for the downstream's private git
+      # dependencies. Read-only, and from the dependency-fetch App rather than
+      # the release-automation App above, because of where it ends up: the step
+      # after this publishes it through GIT_CONFIG_GLOBAL, so every later step
+      # inherits it, including `cargo check` and `cargo nextest run` over the
+      # downstream workspace. Build scripts, proc macros and test binaries there
+      # run as this user and can read the file. What reaches them must therefore
+      # be read-only and confined to the repos this job already builds, which is
+      # what this App grants and a release token does not.
+      #
+      # No `repositories:` restriction: the App is single-purpose, so its
+      # installation is itself the allowlist and a list here would only
+      # duplicate it. `permission-contents: read` pins the token regardless of
+      # what the App is granted later.
+      - name: Generate a token for the downstream's private git dependencies
+        id: dep-token
+        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEP_FETCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEP_FETCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+
+      # The downstream declares its private git dependencies with ssh:// URLs,
+      # and this runner has no ssh key for them. Rewrite that spelling (and the
+      # scp-style one) to token-authenticated HTTPS so the token minted above is
+      # what cargo presents, and make cargo fetch through the git CLI, since its
+      # builtin fetcher ignores git config. Engine URLs match the rewrite too,
+      # harmlessly: the [patch] step below means they are never fetched. This
+      # mirrors the downstream's own setup-environment action, so both repos
+      # authenticate the same dependencies the same way.
+      #
+      # The rewrite lives in a job-scoped file under $RUNNER_TEMP, published via
+      # GIT_CONFIG_GLOBAL, so the token stays out of ~/.gitconfig, which would
+      # outlive the job on a reused runner. GIT_CONFIG_GLOBAL REPLACES
+      # ~/.gitconfig rather than layering on it, hence the include (git skips it
+      # silently when the file does not exist). The file is recreated rather
+      # than edited so a stale one left by a failed cleanup cannot win the
+      # insteadOf tie with an expired token.
+      - name: Authenticate the downstream's private git dependencies
+        if: steps.preflight.outputs.configured == 'true' && steps.preflight.outputs.dep-configured == 'true'
+        env:
+          TOKEN: ${{ steps.dep-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/dep.gitconfig"
+          rm -f "$cfg"
+          git config --file "$cfg" include.path "$HOME/.gitconfig"
+          chmod 600 "$cfg"
+          git config --file "$cfg" url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --file "$cfg" --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          {
+            echo "GIT_CONFIG_GLOBAL=$cfg"
+            echo "CARGO_NET_GIT_FETCH_WITH_CLI=true"
+          } >> "$GITHUB_ENV"
 
       - name: Install tools
         if: steps.preflight.outputs.configured == 'true'
@@ -192,69 +282,312 @@ jobs:
         with:
           preset: test
 
-      # Redirect the downstream's `surrealdb-server` git dependency to this
-      # checkout. Its in-repo deps (surrealdb-core/-types/surrealdb) are workspace
-      # path deps, so they follow transitively from the same checkout — only
-      # surrealdb-server needs patching. The git source URL is read from the
-      # downstream manifest so this repo's git URL is not hardcoded here. This
-      # rewrites Cargo.lock, so the cargo steps below intentionally omit --locked.
+      # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
+      # with its `cloud`+`aws` cargo features — from the downstream's own
+      # dependency graph, not this engine (this engine's rocksdb is the crates.io
+      # `surrealdb-rocksdb` with only lz4+snappy). Those features compile RocksDB's
+      # cloud glue against the AWS C++ SDK (`#include <aws/core/Aws.h>`), and the
+      # fork's build.rs expects a prebuilt SDK at $AWS_SDK_INSTALL_DIR. The runner
+      # image ships none, so without this the downstream `cargo check` aborts at
+      # the C++ stage (issue #614). Build the same components the fork's
+      # scripts/init_deps.sh does (s3;transfer;core, static) and cache them; the
+      # pinned version makes the artifact immutable, so a cache hit is ~free.
+      - name: Restore cached AWS C++ SDK
+        id: aws-sdk-cache
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
+        with:
+          path: ${{ runner.temp }}/aws-sdk-install
+          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
+
+      - name: Provision AWS C++ SDK for the downstream build
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          # rust-rocksdb's init_deps.sh clones aws-sdk-cpp at HEAD; pin a recent
+          # tag here so the cache key is stable and the build reproducible. Bump
+          # this (and the -vN cache suffix above) if the fork needs a newer SDK.
+          AWS_SDK_VERSION: "1.11.845"
+          AWS_SDK_INSTALL: ${{ runner.temp }}/aws-sdk-install
+        run: |
+          set -euo pipefail
+
+          # Use sudo only when present and not already root (self-hosted runners
+          # vary). Best-effort: if apt/sudo are absent or the install fails
+          # (runner images with stale apt lists 404 on package fetches),
+          # proceed — the link probe below decides whether anything the build
+          # needs is actually missing.
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+
+          # Build deps (cmake + a C++ toolchain) and the SDK core's own link deps
+          # (libcurl for HTTP, openssl for crypto, zlib). curl/ssl/crypto are also
+          # what the fork's build.rs links at the `cargo nextest` step, and they
+          # live outside the cached SDK dir — so install them on cache hits too.
+          if command -v apt-get >/dev/null 2>&1; then
+            $SUDO apt-get -qq -y update || true
+            $SUDO apt-get -qq -y install --no-install-recommends \
+              cmake g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
+          fi
+
+          # The cargo steps below link these system libraries directly (the
+          # fork's build.rs emits -lcurl -lssl -lcrypto -lz), and the install
+          # above is allowed to fail on images that already ship them — so
+          # prove the linker can resolve each one now. A gap must fail this
+          # provisioning step with the missing libraries named, not surface
+          # half an hour later as a bare "cannot find -lcurl" from an ld
+          # invocation deep inside the cargo build.
+          if ! command -v cc >/dev/null 2>&1; then
+            echo "::error title=Downstream compatibility::no C compiler/linker driver (cc) on this runner, and the best-effort apt-get install above could not provide one (check its output) — the cargo steps below cannot link"
+            exit 1
+          fi
+          probe="${RUNNER_TEMP}/link-probe.c"
+          echo 'int main(void) { return 0; }' > "${probe}"
+          missing=""
+          for lib in curl ssl crypto z; do
+            cc "${probe}" "-l${lib}" -o /dev/null 2>/dev/null || missing="${missing} lib${lib}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error title=Downstream compatibility::runner is missing system link libraries required by the downstream build:${missing} (from libcurl4-openssl-dev / libssl-dev / zlib1g-dev). The best-effort apt-get install above could not provide them (check its output for the cause) — failing here instead of at link time in the cargo steps below"
+            exit 1
+          fi
+
+          # Reuse the cached build when present (mirrors init_deps.sh's guard;
+          # lib64/ on some distros, lib/ on others).
+          if [ -f "${AWS_SDK_INSTALL}/lib/libaws-cpp-sdk-s3.a" ] || \
+             [ -f "${AWS_SDK_INSTALL}/lib64/libaws-cpp-sdk-s3.a" ]; then
+            echo "AWS C++ SDK ${AWS_SDK_VERSION} restored from cache at ${AWS_SDK_INSTALL}"
+          else
+            echo "Building AWS C++ SDK ${AWS_SDK_VERSION} from source (cache miss)..."
+            src="${RUNNER_TEMP}/aws-sdk-cpp"
+            build="${RUNNER_TEMP}/aws-sdk-build"
+            rm -rf "$src" "$build"
+            git clone --branch "${AWS_SDK_VERSION}" --depth 1 \
+              --recurse-submodules \
+              https://github.com/aws/aws-sdk-cpp.git "$src"
+            # Match the fork's scripts/init_deps.sh: only s3;transfer;core, static.
+            cmake -S "$src" -B "$build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${AWS_SDK_INSTALL}" \
+              -DBUILD_ONLY="s3;transfer;core" \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DENABLE_TESTING=OFF \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DMINIMIZE_SIZE=ON
+            cmake --build "$build" --parallel "$(nproc)"
+            cmake --install "$build"
+            rm -rf "$src" "$build" # free disk; only the install prefix is cached
+            echo "AWS C++ SDK installed at ${AWS_SDK_INSTALL}"
+          fi
+
+          # Hand the prebuilt SDK to the fork's build.rs for the cargo steps below.
+          echo "AWS_SDK_INSTALL_DIR=${AWS_SDK_INSTALL}" >> "$GITHUB_ENV"
+
+      # Save right after a successful build (inline, not a post-step) so a genuine
+      # downstream compat failure in the cargo steps below never discards the
+      # freshly-built SDK. Skipped on a cache hit.
+      - name: Save AWS C++ SDK to cache
+        if: steps.preflight.outputs.configured == 'true' && steps.aws-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
+        with:
+          path: ${{ runner.temp }}/aws-sdk-install
+          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
+
+      # Redirect every engine crate the downstream depends on DIRECTLY from
+      # this repo's git source to this checkout with a Cargo `[patch]`. The
+      # crate set is read from the downstream's own manifests (any Cargo.toml
+      # in its workspace): a direct git dependency left unpatched forces
+      # cargo to fetch the pinned private rev, which the runner cannot
+      # authenticate. Transitive engine crates are never patched — they
+      # follow as path dependencies of the patched crates. When the
+      # downstream-locked engine version differs from this checkout, the
+      # engine workspace version (and its internal version requirements) is
+      # stamped uniformly to the locked version, keeping the patch preferred
+      # for every crate without breaking the workspace's own internal edges.
+      # This rewrites Cargo.lock, so the cargo steps below intentionally
+      # omit --locked.
       - name: Point downstream at this engine checkout
         if: steps.preflight.outputs.configured == 'true'
         env:
           ENGINE: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          src_url="$(grep -E '^[[:space:]]*surrealdb-server[[:space:]]*=' downstream/Cargo.toml \
-            | grep -oE 'git = "[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)".*/\1/')"
-          if [ -z "$src_url" ]; then
-            echo "::error title=Downstream compatibility::could not find the surrealdb-server git source in downstream/Cargo.toml"
-            exit 1
-          fi
-
-          # Cargo records the git source's resolved version as an available
-          # version and selects the newest semver-compatible one. When this
-          # engine is OLDER than the version downstream already locked from git
-          # (e.g. a release branch: 3.2.x here vs 3.3.0-nightly on main), cargo
-          # prefers the original git source over the path [patch] below and tries
-          # to fetch the pinned private rev — which the runner cannot
-          # authenticate, so the build fails before it starts. Stamp this
-          # engine's surrealdb-server crate to the exact version downstream
-          # locked, so the patch is the preferred (equal-version) source and the
-          # original git source is never fetched. Only the server crate's own
-          # version is rewritten; its path deps on -core/-types are unaffected,
-          # and on main (where the versions already match) this is a no-op.
-          want_ver="$(awk '
-            /^\[\[package\]\]/ { name = ""; ver = "" }
-            /^name = / { name = $3; gsub(/"/, "", name) }
-            /^version = / { ver = $3; gsub(/"/, "", ver) }
-            name == "surrealdb-server" && ver != "" { print ver; exit }
-          ' downstream/Cargo.lock)"
-          server_toml="${ENGINE}/surrealdb/server/Cargo.toml"
-          if [ -n "${want_ver}" ] && grep -qE '^version\.workspace = true$' "${server_toml}"; then
-            sed -i -E "s/^version\.workspace = true$/version = \"${want_ver}\"/" "${server_toml}"
-            echo "Stamped engine surrealdb-server version -> ${want_ver} (matches downstream lock)"
+          # Existence is a sufficient capability check: the script was introduced
+          # complete with the ENGINE_DEST / positional-engine-path contract in a
+          # single downstream commit and backported intact, so no downstream
+          # commit carries it without that contract. Older commits take the
+          # [patch] fallback below.
+          if [ -f downstream/docker/patch-ce-local.py ]; then
+            # The downstream repo owns the engine-redirection logic: a real TOML
+            # parser that handles any declaration form, rewrites every engine dep to
+            # a path into this checkout and reconciles the lock (see that script's
+            # header). ENGINE_DEST == the engine location means no relocation - this
+            # engine checkout already sits outside the downstream workspace.
+            WORKSPACE_DIR=downstream ENGINE_DEST="${ENGINE}" \
+              python3 downstream/docker/patch-ce-local.py "${ENGINE}"
           else
-            echo "::warning title=Downstream compatibility::could not stamp engine surrealdb-server version (want_ver='${want_ver}'); cargo may skip the [patch] if the engine version differs from the downstream lock"
+            # Fallback for downstream branches that predate the script (e.g.
+            # release lines): redirect via a [patch] over every directly-declared
+            # engine dep, with a uniform workspace version stamp so cargo prefers
+            # the patch even under release-line version skew.
+            src_url="$(grep -E '^[[:space:]]*surrealdb-server[[:space:]]*=' downstream/Cargo.toml \
+              | grep -oE 'git = "[^"]*"' | head -n1 | sed -E 's/.*"([^"]*)".*/\1/')"
+            if [ -z "$src_url" ]; then
+              echo "::error title=Downstream compatibility::could not find the surrealdb-server git source in downstream/Cargo.toml"
+              exit 1
+            fi
+
+            # Every crate the downstream declares as a direct dependency on
+            # this git source, across all manifests in its workspace. The URL
+            # is matched as a fixed string, so a different git source whose
+            # URL merely contains this repo's name can never sweep foreign
+            # crates into the set. A no-match grep must not kill the step
+            # under `set -o pipefail` — the empty-set branch below owns that
+            # diagnosis. The scan expects inline-table dependencies
+            # (`name = { git = ... }`): a table-form dependency would match on
+            # its bare `git = ...` line, so that token is filtered out and
+            # surfaces through the empty-set error rather than as a confusing
+            # missing-crate failure. Crate names contain no whitespace, so
+            # word-splitting the list is safe.
+            git_crates="$(grep -rh --include=Cargo.toml -F "git = \"${src_url}\"" downstream/ \
+              | sed -nE 's/^[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*=.*/\1/p' \
+              | grep -vx git | sort -u || true)"
+            if [ -z "$git_crates" ]; then
+              echo "::error title=Downstream compatibility::no direct inline-table dependencies on ${src_url} found in the downstream manifests"
+              exit 1
+            fi
+
+            # Authoritative name -> directory map of the engine workspace
+            # members (exact, no filesystem-order ambiguity from stray
+            # fixtures that happen to share a crate name).
+            engine_meta="$(cargo metadata --manifest-path "${ENGINE}/Cargo.toml" --no-deps --format-version 1)"
+            find_crate_dir() {
+              jq -r --arg name "$1" \
+                '.packages[] | select(.name == $name) | .manifest_path' <<<"$engine_meta" \
+                | head -n1 | xargs -r dirname
+            }
+            # Prints the downstream-locked version of crate $1 (empty if absent).
+            locked_version() {
+              awk -v crate="$1" '
+                /^\[\[package\]\]/ { name = ""; ver = "" }
+                /^name = / { name = $3; gsub(/"/, "", name) }
+                /^version = / { ver = $3; gsub(/"/, "", ver) }
+                name == crate && ver != "" { print ver; exit }
+              ' downstream/Cargo.lock
+            }
+            workspace_ver="$(jq -r '.packages[0].version' <<<"$engine_meta")"
+
+            # Cargo records the git source's resolved version as an available
+            # version and selects the newest semver-compatible one. When this
+            # engine's version differs from what the downstream locked (e.g. a
+            # release branch vs main drift), cargo prefers the original git
+            # source over the path [patch] below and tries to fetch the pinned
+            # private rev — which the runner cannot authenticate. Stamping only
+            # some crates would break the workspace's own internal version
+            # requirements, so the stamp is uniform: rewrite the engine
+            # workspace version and its internal `[workspace.dependencies]`
+            # version requirements to the downstream-locked version, so every
+            # patched crate presents the locked version while internal edges
+            # stay mutually consistent. On main (where the versions already
+            # match) this is a no-op; mixed locked versions across the direct
+            # dependencies make a consistent stamp impossible and are surfaced
+            # as a warning instead.
+            stamp_ver=""
+            for crate in $git_crates; do
+              want_ver="$(locked_version "$crate")"
+              if [ -z "${want_ver}" ]; then
+                echo "::warning title=Downstream compatibility::could not read the downstream-locked version of ${crate}; cargo may skip the [patch] if the engine version differs from the downstream lock"
+              elif [ -z "${stamp_ver}" ]; then
+                stamp_ver="${want_ver}"
+              elif [ "${stamp_ver}" != "${want_ver}" ]; then
+                echo "::warning title=Downstream compatibility::downstream locks mixed engine versions (${stamp_ver} vs ${want_ver} for ${crate}); skipping the version stamp — cargo may prefer the original git source and fail to fetch it"
+                stamp_ver="mixed"
+              fi
+            done
+            if [ -n "${stamp_ver}" ] && [ "${stamp_ver}" != "mixed" ] && [ "${stamp_ver}" != "${workspace_ver}" ]; then
+              sed -i -E "s/^version = \"${workspace_ver}\"$/version = \"${stamp_ver}\"/" "${ENGINE}/Cargo.toml"
+              sed -i -E "/path = \"surrealdb/s/version = \"${workspace_ver}\"/version = \"${stamp_ver}\"/" "${ENGINE}/Cargo.toml"
+              echo "Stamped engine workspace version ${workspace_ver} -> ${stamp_ver} (matches downstream lock)"
+            fi
+
+            {
+              echo ""
+              echo "# CI-only (downstream-compat): build against this PR's engine checkout."
+              echo "[patch.\"${src_url}\"]"
+            } >> downstream/Cargo.toml
+            for crate in $git_crates; do
+              dir="$(find_crate_dir "$crate")"
+              if [ -z "$dir" ]; then
+                echo "::error title=Downstream compatibility::downstream depends on '${crate}' from ${src_url}, but this checkout has no workspace member with that name"
+                exit 1
+              fi
+              # A crate with an explicit (non workspace-inherited) version does
+              # not follow the uniform stamp; surface the mismatch so a
+              # patch-skip fetch failure explains itself.
+              want_ver="$(locked_version "$crate")"
+              if [ -n "${want_ver}" ] && [ "${want_ver}" != "${workspace_ver}" ] \
+                && ! grep -qE '^version\.workspace = true$' "${dir}/Cargo.toml"; then
+                echo "::warning title=Downstream compatibility::${crate} declares an explicit version (engine ${workspace_ver}, downstream lock ${want_ver}) that the workspace stamp does not cover; cargo may skip the [patch]"
+              fi
+              echo "${crate} = { path = \"${dir}\" }" >> downstream/Cargo.toml
+              echo "Patching ${crate} (${src_url}) -> ${dir}"
+            done
           fi
 
-          {
-            echo ""
-            echo "# CI-only (downstream-compat): build against this PR's engine checkout."
-            echo "[patch.\"${src_url}\"]"
-            echo "surrealdb-server = { path = \"${ENGINE}/surrealdb/server\" }"
-          } >> downstream/Cargo.toml
-          echo "Patched surrealdb-server (${src_url}) -> ${ENGINE}/surrealdb/server"
+      # Name the repo when a private git source is unreachable. cargo's failure
+      # for a missing credential is a bare "revision <sha> not found / failed to
+      # authenticate" that names neither the repo nor the remedy, and an App
+      # installation is not guessable from it.
+      # Warns rather than fails: the scan is a grep over manifests, so it must
+      # never be the thing that reddens this job — an unreachable source fails
+      # the cargo step below on its own, with this annotation alongside it.
+      - name: Check the downstream's private git sources are reachable
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          # The engine's own repo as owner/name, dropped from the scan: the
+          # patch step above redirects those crates to this checkout, so they
+          # are never fetched. github.repository rather than the event payload,
+          # so the value does not depend on the triggering event's shape.
+          ENGINE_REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          # A downstream whose only private source is the engine matches
+          # nothing here, and grep reports that as exit 1, which the runner's
+          # `bash -e -o pipefail` would turn into a failed step. Empty is the
+          # answer the branch below handles, so the status is not one.
+          repos="$(grep -rhoE '(ssh://git@github\.com/|git@github\.com:)[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' \
+                     --include=Cargo.toml --exclude-dir=target --exclude-dir=vendor downstream/ \
+                   | sed -E 's#.*github\.com[:/]##; s#\.git$##' \
+                   | sort -u | grep -vx "${ENGINE_REPO}")" || true
+          if [ -z "${repos}" ]; then
+            echo "No private git sources beyond the engine."
+            exit 0
+          fi
+          for repo in ${repos}; do
+            if git ls-remote "ssh://git@github.com/${repo}.git" HEAD >/dev/null 2>&1; then
+              echo "reachable: ${repo}"
+            else
+              echo "::warning title=Downstream compatibility::the downstream resolves a git dependency from '${repo}', which this job cannot read, so the cargo steps below will fail in resolution. Install the dependency-fetch App (DEP_FETCH_APP_*) on '${repo}' with Contents:read and approve it there. Its installation is the allowlist, so nothing in this repo needs changing once that is done."
+            fi
+          done
 
+      # The downstream workspace includes the Kubernetes operator crates
+      # (s7b-operator, s7b-operator-e2e). Their build graph is disjoint from the
+      # engine: they do not depend on the patched engine crates, so they add no
+      # compatibility signal here. Building them also needs the Go toolchain (the
+      # envtest dev-dependency's build script), and their tests need a live
+      # cluster, neither of which this runner provides. Exclude them, matching
+      # the downstream repo's own engine `cargo make ci-*` tasks; its operator-*
+      # workflows cover those crates.
       - name: Build downstream (cargo check)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo check --workspace
+        run: cargo check --workspace --exclude s7b-operator --exclude s7b-operator-e2e
 
       - name: Test downstream (unit suite)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo nextest run --workspace --exclude surrealdb-integration
+        run: cargo nextest run --workspace --exclude surrealdb-integration --exclude s7b-operator --exclude s7b-operator-e2e
 
-      - name: sccache stats
+      - name: kache stats
         if: ${{ always() && steps.preflight.outputs.configured == 'true' }}
-        run: sccache --show-stats || true
+        run: kache stats || true

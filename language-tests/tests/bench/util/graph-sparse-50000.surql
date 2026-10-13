@@ -16,7 +16,7 @@ value = "'OK'"
 {
 	DEFINE TABLE person SCHEMALESS;
 
-	CREATE |person:1..50000| SET
+	CREATE |person:1..=50000| SET
 		name = rand::string(12),
 		age = rand::int(18, 80)
 	RETURN NONE;

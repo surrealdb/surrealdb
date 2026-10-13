@@ -16,7 +16,7 @@ Query
                                     .start: Ident
                                         .text: "na"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -36,7 +36,7 @@ Query
                                     .start: Ident
                                         .text: "na"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -58,7 +58,7 @@ Query
                                     .start: Ident
                                         .text: "na"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -82,7 +82,7 @@ Query
                                     .start: Ident
                                         .text: "na"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Path
                                 Path
                                     .start: Ident

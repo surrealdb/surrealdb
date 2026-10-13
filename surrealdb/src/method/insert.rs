@@ -7,7 +7,7 @@ use uuid::Uuid;
 use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
 use super::validate_data;
-use crate::conn::Command;
+use crate::conn::{QueryRequest, ctx_txn};
 use crate::method::{BoxFuture, Content, OnceLockExt};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
@@ -88,16 +88,7 @@ macro_rules! into_future {
 					}
 				};
 
-				router
-					.$method(
-						client.session_id,
-						Command::Query {
-							txn,
-							query,
-							variables,
-						},
-					)
-					.await
+				router.$method(ctx_txn(client.session_id, txn), query, variables).await
 			})
 		}
 	};
@@ -110,7 +101,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {query_value}
 }
 
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Option<R>>
@@ -121,7 +112,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {query_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Insert<'r, Client, Vec<R>>
@@ -132,7 +123,7 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {query_vec}
 }
 
 impl<'r, C, R> Insert<'r, C, R>
@@ -199,7 +190,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::Query {
+			Ok(QueryRequest {
 				txn: self.txn,
 				query,
 				variables,
@@ -265,7 +256,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::Query {
+			Ok(QueryRequest {
 				txn: self.txn,
 				query,
 				variables,

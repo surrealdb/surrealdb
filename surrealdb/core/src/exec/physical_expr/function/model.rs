@@ -7,9 +7,12 @@ use surrealdb_types::{SqlFormat, ToSql};
 use super::helpers::{args_access_mode, args_required_context};
 #[cfg(feature = "ml")]
 use super::helpers::{check_permission, evaluate_args};
-use crate::err::Error;
+#[cfg(not(feature = "ml"))]
+use crate::exec::Error as ExecError;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
+#[cfg(feature = "ml")]
+use crate::expr::Error as ExprError;
 use crate::expr::{FlowResult, Model};
 use crate::val::Value;
 
@@ -42,6 +45,7 @@ impl PhysicalExpr for ModelFunctionExec {
 			use surrealml_core::ndarray as mlNdarray;
 			use surrealml_core::storage::surml_file::SurMlFile;
 
+			use crate::catalog::Error as CatalogError;
 			use crate::catalog::providers::DatabaseProvider;
 			use crate::expr::model::get_model_path;
 			use crate::iam::Action;
@@ -75,7 +79,7 @@ impl PhysicalExpr for ModelFunctionExec {
 					ctx.exec_ctx.version_stamp(),
 				)
 				.await?
-				.ok_or_else(|| Error::MlNotFound {
+				.ok_or_else(|| CatalogError::MlNotFound {
 					name: format!("{}<{}>", self.model.name, self.model.version),
 				})?;
 
@@ -95,7 +99,7 @@ impl PhysicalExpr for ModelFunctionExec {
 
 			// Validate argument count
 			if args.len() != 1 {
-				return Err(Error::InvalidFunctionArguments {
+				return Err(ExprError::InvalidFunctionArguments {
 					name: format!("ml::{}<{}>", self.model.name, self.model.version),
 					message: ARGUMENTS.into(),
 				}
@@ -112,7 +116,7 @@ impl PhysicalExpr for ModelFunctionExec {
 						.into_iter()
 						.map(|(k, v)| {
 							v.coerce_to::<f64>().map(|f| (k.into_string(), f as f32)).map_err(
-								|_| Error::InvalidFunctionArguments {
+								|_| ExprError::InvalidFunctionArguments {
 									name: format!(
 										"ml::{}<{}>",
 										self.model.name, self.model.version
@@ -151,7 +155,7 @@ impl PhysicalExpr for ModelFunctionExec {
 				// Perform raw compute (number input)
 				Value::Number(v) => {
 					let args: f32 = Value::Number(v).coerce_to::<f64>().map_err(|_| {
-						Error::InvalidFunctionArguments {
+						ExprError::InvalidFunctionArguments {
 							name: format!("ml::{}<{}>", self.model.name, self.model.version),
 							message: ARGUMENTS.into(),
 						}
@@ -191,7 +195,7 @@ impl PhysicalExpr for ModelFunctionExec {
 						.into_iter()
 						.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
 						.collect::<Result<Vec<f32>, _>>()
-						.map_err(|_| Error::InvalidFunctionArguments {
+						.map_err(|_| ExprError::InvalidFunctionArguments {
 							name: format!("ml::{}<{}>", self.model.name, self.model.version),
 							message: ARGUMENTS.into(),
 						})?;
@@ -225,7 +229,7 @@ impl PhysicalExpr for ModelFunctionExec {
 						.collect())
 				}
 				// Invalid argument type
-				_ => Err(Error::InvalidFunctionArguments {
+				_ => Err(ExprError::InvalidFunctionArguments {
 					name: format!("ml::{}<{}>", self.model.name, self.model.version),
 					message: ARGUMENTS.into(),
 				}
@@ -237,7 +241,7 @@ impl PhysicalExpr for ModelFunctionExec {
 	#[cfg(not(feature = "ml"))]
 	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			Err(Error::InvalidModel {
+			Err(ExecError::InvalidModel {
 				message: String::from("Machine learning computation is not enabled."),
 			}
 			.into())

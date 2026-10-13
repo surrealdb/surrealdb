@@ -50,14 +50,9 @@
 //! a `SELECT` on that table would return for the caller. A permission denial is
 //! indistinguishable from a missing record — both drop the row.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
@@ -182,11 +177,11 @@ impl ExecOperator for EndpointBind {
 		// helper ([`resolve_with_field_state`]), which resolves whether SELECT
 		// permissions must be enforced (once, internally) and applies table +
 		// field SELECT permissions and computed fields per record.
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let edge = self.edge.clone();
@@ -195,12 +190,10 @@ impl ExecOperator for EndpointBind {
 		let target_label = self.target_label.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// One FieldState cache for the endpoint table, reused across batches
 			// so each table's permission + FieldState are resolved at most once.
 			let mut target_cache = FetchFieldStateCache::new();
-
-			futures::pin_mut!(input_stream);
 
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
@@ -211,10 +204,10 @@ impl ExecOperator for EndpointBind {
 				// back to. Rows whose edge binding is missing / not a record /
 				// label-mismatched never enter `targets_to_fetch` and so are
 				// dropped here.
-				let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.values.len());
-				let mut row_positions: Vec<usize> = Vec::with_capacity(batch.values.len());
+				let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.len());
+				let mut row_positions: Vec<usize> = Vec::with_capacity(batch.len());
 
-				for (i, row) in batch.values.iter().enumerate() {
+				for (i, row) in batch.values().iter().enumerate() {
 					match extract_endpoint_id(row, &edge, field) {
 						Some(rid) => {
 							// Apply the target_label filter before fetching.
@@ -250,15 +243,16 @@ impl ExecOperator for EndpointBind {
 					let Some(target_value) = target_value else {
 						continue;
 					};
-					let input_row = &batch.values[row_positions[slot]];
+					let input_row = &batch.values()[row_positions[slot]];
 					out.push(bound_row(input_row, &target_binding, target_value));
 				}
 
 				if !out.is_empty() {
-					yield ValueBatch { values: out };
+					yielder.emit(ValueBatch::new(out)).await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "EndpointBind", &self.metrics))
 	}

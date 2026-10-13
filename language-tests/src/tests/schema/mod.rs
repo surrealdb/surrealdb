@@ -5,13 +5,12 @@ use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::dbs::NewPlannerStrategy;
-use surrealdb_core::dbs::capabilities::{
-	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget,
-};
-use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
+use surrealdb_rpc::capabilities::{
+	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+	NewPlannerStrategy, RouteTarget,
+};
+use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::Backend;
@@ -201,7 +200,7 @@ impl TestEnv {
 
 /// Strategy for the new streaming planner/executor in language tests.
 ///
-/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
+/// Maps to `surrealdb_rpc::capabilities::NewPlannerStrategy` but uses shorter
 /// kebab-case names for TOML configuration.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -464,10 +463,44 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub upgrade: bool,
 
+	/// Marks a script written in the SurrealQL of the released binary that runs
+	/// it, in a spelling the current parser no longer accepts.
+	///
+	/// Only an upgrade helper can be one: it is replayed against a spawned
+	/// released binary and never against the current checkout, so the syntax it
+	/// needs is that binary's, not this build's. The current parser's
+	/// language-test corpus check reads this flag and leaves such a file alone,
+	/// which is why it is a declared key rather than a comment.
+	///
+	/// A test body may not set it — the body executes on the upgrade target, so
+	/// its syntax must be the one that build parses.
+	#[serde(default)]
+	pub legacy_syntax: bool,
+
 	#[serde(default)]
 	pub version: Option<VersionReq>,
 	#[serde(default)]
 	pub importing_version: Option<VersionReq>,
+
+	/// The release that introduced the feature under test — the earliest binary
+	/// able to *create* the state the test asserts on.
+	///
+	/// Distinct from `importing-version`, which excludes a hop because a released
+	/// binary is defective. Both bound the source side, so nothing but intent
+	/// separates them, and that intent is what the filename prefix mirrors and
+	/// the walk reads: a pairwise run skips hops whose source predates this, and
+	/// a chain run uses it as the default `[test.chain] since`.
+	#[serde(default)]
+	pub introduced: Option<VersionReq>,
+
+	/// Opts the test into the cumulative chain runner (`upgrade --chain`).
+	#[serde(default)]
+	pub chain: Option<TestChain>,
+
+	/// Manual steps this upgrade is documented to require, in the sense of a
+	/// release note's "after upgrading, run X". See [`TestRepair`].
+	#[serde(default)]
+	pub repair: Vec<TestRepair>,
 
 	#[serde(default)]
 	pub results: Option<TestDetailsResults>,
@@ -485,17 +518,118 @@ impl Default for TestDetails {
 			issue: Default::default(),
 			wip: false,
 			upgrade: Default::default(),
+			legacy_syntax: Default::default(),
 			version: Default::default(),
 			importing_version: Default::default(),
+			introduced: Default::default(),
+			chain: Default::default(),
+			repair: Default::default(),
 			results: Default::default(),
 			_unused_keys: Default::default(),
 		}
 	}
 }
 
+/// Cumulative-chain configuration for an upgrade test.
+///
+/// The chain runner walks one datastore through every version passed to
+/// `--chain`, which CI populates from `LANG_UPGRADE_CHAIN` — a list that omits
+/// any release demanding a manual repair, and so is deliberately not the same
+/// as the adjacent-pair `LANG_UPGRADE_VERSIONS`. `setup` runs exactly once, on the first
+/// version satisfying `since`; from that version onwards the test body is run
+/// as the per-hop verification, so a feature introduced at 3.1.0 is created by
+/// 3.1.0 and re-verified by 3.1.1, 3.1.2, ... and the current checkout, against
+/// the data the earlier binaries left behind.
+///
+/// The body must be idempotent: it is executed once per remaining version and
+/// graded against the same `[[test.results]]` every time. `mutate` is the place
+/// for per-hop writes — it runs before the body on every version at or after
+/// `setup`, which is what makes each release write *through* a structure an
+/// older release created.
+///
+/// Matcher expressions in `[[test.results]]` may reference the chain position
+/// through the `$hop`, `$hops`, `$version` and `$chain` parameters, so a body
+/// whose result set grows with each `mutate` can still assert exactly.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestChain {
+	/// Version requirement the walked version must satisfy before this feature
+	/// exists. `setup` runs on the first chain version that matches, and the
+	/// test is skipped entirely when no version in the chain does.
+	///
+	/// Defaults to the test's `[test] introduced`, which is the same fact stated
+	/// once; set it only to override the walk independently of that.
+	#[serde(default)]
+	pub since: Option<VersionReq>,
+	/// Test-root-relative path of the script that creates the feature. Resolved
+	/// exactly like an `[env] imports` entry, transitive imports included.
+	pub setup: String,
+	/// Test-root-relative path of a script run on every version at or after
+	/// `setup`, before the body. Its statements' results are not graded; a
+	/// statement that errors fails the hop.
+	#[serde(default)]
+	pub mutate: Option<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+/// A manual step an upgrade is documented to require — the SurrealQL equivalent
+/// of a release note's "after upgrading, run `REBUILD INDEX ...`".
+///
+/// The runner brackets the declaration rather than trusting it. The body is run
+/// once before the repair, and its outcome must equal `unrepaired`; the repair
+/// script then runs, and the body is run again and graded normally. Both
+/// directions are therefore falsifiable: a requirement nobody declared fails
+/// because the first run was supposed to succeed, and a declaration that has
+/// stopped reproducing fails because the pre-repair run no longer reports the
+/// damage it claims.
+///
+/// Without this, a repair statement written straight into a test body is
+/// indistinguishable from a silent breakage that someone patched until the
+/// suite went green.
+///
+/// Because the body runs twice against the same store, it must be idempotent:
+/// a `CREATE` that succeeds on the first pass fails as "already exists" on the
+/// second. Writes in a bracketed body belong in an `UPSERT`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct TestRepair {
+	/// First upgrade *target* requiring the step. Matched as `>= since`, so a
+	/// declaration for `3.3.0` also covers `3.3.0-beta.3`.
+	pub since: VersionReq,
+	/// Test-root-relative path of the script performing the repair.
+	pub script: String,
+	/// What the body does before the repair has run.
+	pub unrepaired: Unrepaired,
+	/// Why an operator has to do this. A step with no stated reason cannot be
+	/// told apart from a bug someone worked around.
+	pub reason: String,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+/// Observed behaviour of a test body before its declared repair has run.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Unrepaired {
+	/// A statement errors in a way the expectations do not allow.
+	Broken,
+	/// Every statement completes but at least one result differs.
+	Degraded,
+}
+
 impl TestDetails {
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
+
+		if let Some(chain) = self.chain.as_ref() {
+			res.extend(chain._unused_keys.keys().map(|x| format!("test.chain.{x}")));
+		}
+		for (i, repair) in self.repair.iter().enumerate() {
+			res.extend(repair._unused_keys.keys().map(|x| format!("test.repair[{i}].{x}")));
+		}
 
 		if let Some(results) = self.results.as_ref() {
 			match results {
@@ -895,6 +1029,21 @@ pub struct BenchDetails {
 	/// slate per iteration.
 	#[serde(default)]
 	pub rebuild: bool,
+	/// Folds the imported graph adjacency into packed blocks before the warmup,
+	/// so the timed statement reads the folded layout. The datastore is built
+	/// with `graph_fold_threshold = 1`, the bench statement is executed once as
+	/// a priming pass — the fold queue is observation-driven, so exactly the
+	/// scopes the statement traverses are folded — and the fold queue is then
+	/// drained by the same routine the background task runs. Requires
+	/// `rebuild = false` (the priming pass would execute a mutating statement
+	/// an extra, unmeasured time) and a SurrealQL bench statement.
+	#[serde(default)]
+	pub graph_fold: bool,
+	/// Encodes folded block entries as numeric doc-ids instead of record keys
+	/// (`graph_numeric_ids = true`). Implies the same fold pass as
+	/// `graph-fold`, under the same constraints.
+	#[serde(default)]
+	pub graph_numeric_ids: bool,
 	/// Run this bench once per named dataset, each resolved (transitively) as the
 	/// bench's import for that run. Lets a single read-only scan be measured
 	/// against multiple datasets — e.g. one without indexes and one with — from a

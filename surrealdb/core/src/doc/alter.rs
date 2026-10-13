@@ -4,16 +4,16 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::{DefineDefault, LATEST_EDGE_VARIANT, RecordType};
+use crate::catalog::{LATEST_EDGE_VARIANT, RecordType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document, Extras};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
+use crate::exe::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{AssignOperator, FlowResultExt, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{AssignOperator, Error, Idiom, Kind, KindLiteral, Operation, Part};
 use crate::iam::AuthLimit;
-use crate::val::{RecordId, RecordIdKey, TableName, Value};
+use crate::val::{Array, RecordId, RecordIdKey, TableName, Value};
 
 impl Document {
 	/// Generate (or finalise) a record ID for CREATE, UPSERT, RELATE, and
@@ -36,6 +36,36 @@ impl Document {
 		ctx: &FrozenContext,
 		opt: &Options,
 	) -> Result<()> {
+		// A lightweight relation's edge id is canonical — `[in, out]`, derived
+		// from the endpoints, never generated. A record-id target must match
+		// it: the id is the edge's entire identity and storage, so an
+		// arbitrary id would name a different edge than the one related.
+		if let Extras::Relate(l, r, _) = &self.extras
+			&& self.table_is_lightweight()?
+		{
+			let table = self.doc_ctx.tb()?.name.clone();
+			let canonical = RecordIdKey::Array(Array(vec![
+				Value::RecordId(l.clone()),
+				Value::RecordId(r.clone()),
+			]));
+			if let Some(existing) = self.id.take() {
+				ensure!(
+					existing.key == canonical,
+					crate::exec::Error::Thrown(format!(
+						"a LIGHTWEIGHT relation's edge id is canonical: expected {}:{}, found {}",
+						table,
+						canonical.to_sql(),
+						existing.to_sql(),
+					))
+				);
+			}
+			self.id = Some(Arc::new(RecordId {
+				table,
+				key: canonical,
+			}));
+			return Ok(());
+		}
+
 		// This is a CREATE, UPSERT, RELATE, or INSERT statement.
 		//
 		// Locate the precomputed `id` field definition (if any). Its declared
@@ -51,7 +81,7 @@ impl Document {
 		// broader privileges.
 		let id_opt;
 		let opt = if let Some(fd) = id_field {
-			id_opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			id_opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			&id_opt
 		} else {
 			opt
@@ -77,7 +107,9 @@ impl Document {
 			let id = if supplied.is_some() {
 				// A concrete id was supplied; use it.
 				supplied.generate(tb, false)?
-			} else if let Some(DefineDefault::Set(expr)) = id_field.map(|fd| &fd.default) {
+			} else if let Some(crate::catalog::DefineDefault::Set(expr)) =
+				id_field.map(|fd| &fd.default)
+			{
 				// No id supplied, but the `id` field declares a `DEFAULT`:
 				// evaluate it and use the result as the record id. Session
 				// params (`$auth`), functions (`time::now()`), and references to
@@ -93,7 +125,10 @@ impl Document {
 				} else {
 					Some(&self.current)
 				};
-				let value = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+				let value = stk
+					.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
+					.await
+					.catch_return()?;
 				value.generate(tb, false)?
 			} else {
 				// No id and no `DEFAULT`: synthesise one for the declared kind.
@@ -144,7 +179,7 @@ impl Document {
 			// Anything else (int, number, array, object, a union, or a literal
 			// that is not a single concrete scalar) cannot be synthesised
 			// without an explicit value or sequence.
-			Some(other) => bail!(Error::IdFieldGenerateUnsupported {
+			Some(other) => bail!(DocError::IdFieldGenerateUnsupported {
 				table: tb.to_string(),
 				kind: other.to_sql(),
 			}),
@@ -175,7 +210,7 @@ impl Document {
 			// Rebuild the record id from the coerced value using the robust
 			// conversion that handles ints, uuids, arrays, and objects.
 			Ok(coerced) => coerced.generate(id.table, false),
-			Err(error) => Err(Error::FieldCoerce {
+			Err(error) => Err(DocError::FieldCoerce {
 				record: id.to_sql(),
 				field_name: "id".to_string(),
 				error: Box::new(error),
@@ -241,7 +276,7 @@ impl Document {
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
-					bail!(Error::InOverride {
+					bail!(DocError::InOverride {
 						value: v.to_sql(),
 					})
 				}
@@ -258,7 +293,7 @@ impl Document {
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
-					bail!(Error::OutOverride {
+					bail!(DocError::OutOverride {
 						value: v.to_sql(),
 					})
 				}
@@ -302,6 +337,118 @@ impl Document {
 		Ok(())
 	}
 
+	/// Reject a `PATCH` whose `copy`/`move` `from` or `test` `path` pointer
+	/// reads a field the caller may not select.
+	///
+	/// `Value::patch` applies its operations to the full record loaded from
+	/// storage and resolves those pointers against it, so without this gate a
+	/// caller holding table-level write permission reads a field denied by
+	/// `DEFINE FIELD ... PERMISSIONS FOR select`: `copy`/`move` land the value
+	/// in a destination of the caller's choosing, and `test` reports it in the
+	/// mismatch error. The `SET`/`CONTENT`/`MERGE`/`REPLACE` clauses are not
+	/// affected because their right-hand sides are computed against the reduced
+	/// view and already observe `NONE`.
+	///
+	/// A pointer is judged by comparing what it resolves to on the record with
+	/// what it resolves to on the permission-reduced view of that record. Any
+	/// difference means the pointer reaches data the reduction removed, whether
+	/// the pointer names the restricted field directly or an ancestor object or
+	/// array that contains it. Delegating to the reduction rather than
+	/// re-deriving which paths are restricted keeps this in step with the
+	/// field-permission kernel, including its wildcard and array-element
+	/// handling.
+	///
+	/// The operations are walked in order against a copy of the record that
+	/// each one is applied to in turn, and every pointer is judged against that
+	/// copy as it stands when its own operation runs. A patch is a sequence,
+	/// not a set: an earlier operation that inserts into or removes from an
+	/// array moves every later element by one, so a pointer judged against the
+	/// record as it was before the patch names a different value by the time it
+	/// is read — which is enough to walk a restricted field into range of a
+	/// pointer that resolved to nothing when the patch arrived. The reduced
+	/// view is recomputed alongside for the same reason: a `PERMISSIONS FOR
+	/// select` predicate reads the record, so what it permits moves with it.
+	///
+	/// `add` and `change` also read a pointer, but each writes its result back
+	/// to the same path it read, so neither carries a value out of the field it
+	/// came from.
+	async fn check_patch_read_pointers(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		ops: &Value,
+	) -> Result<()> {
+		/// The pointer an operation reads and then writes somewhere other than
+		/// where it read it, mapped by `Operation::path_to_parts` — the mapping
+		/// `Value::patch` itself uses, so that the location judged here is the
+		/// location the patch reaches. Re-deriving it would let the two drift,
+		/// and a pointer judged at a location the patch does not read enforces
+		/// nothing.
+		///
+		/// Matched exhaustively on purpose: an operation added without being
+		/// classified here would otherwise default to carrying nothing out.
+		fn exposed_read_pointer(op: &Operation) -> Option<Vec<Part>> {
+			let path = match op {
+				Operation::Copy {
+					from,
+					..
+				}
+				| Operation::Move {
+					from,
+					..
+				} => from,
+				Operation::Test {
+					path,
+					..
+				} => path,
+				Operation::Add {
+					..
+				}
+				| Operation::Remove {
+					..
+				}
+				| Operation::Replace {
+					..
+				}
+				| Operation::Change {
+					..
+				} => return None,
+			};
+			Some(Operation::path_to_parts(path))
+		}
+		// Nothing to enforce when field permissions do not apply to this actor.
+		if !self.reduction_required(ctx, opt)? {
+			return Ok(());
+		}
+		let operations = Operation::value_to_operations(ops.clone())
+			.map_err(Error::InvalidPatch)
+			.map_err(anyhow::Error::new)?;
+		// Nothing to enforce when no operation carries a value out of the
+		// location it read, which spares the reduction on the common patch.
+		if !operations.iter().any(|op| exposed_read_pointer(op).is_some()) {
+			return Ok(());
+		}
+		// A copy of the record, advanced one operation at a time so that each
+		// pointer is judged against what its own operation will read.
+		let mut working = self.current.clone();
+		for op in operations {
+			if let Some(pointer) = exposed_read_pointer(&op) {
+				let reduced = self.reduce_to_owned(stk, ctx, opt, &working).await?;
+				if working.doc.as_ref().pick(&pointer) != reduced.doc.as_ref().pick(&pointer) {
+					let field = Idiom(pointer);
+					bail!(DocError::PatchPointerNotAllowed(field.to_sql()));
+				}
+			}
+			// An operation that fails here fails the statement when the patch
+			// is applied for real, so the walk stops and leaves it to report.
+			if working.doc.to_mut().patch(Operation::operations_to_value(vec![op])).is_err() {
+				return Ok(());
+			}
+		}
+		Ok(())
+	}
+
 	/// Updates the current document using the data
 	/// clause present on the statement. This can be
 	/// one of CONTENT, REPLACE, MERGE, PATCH, SET,
@@ -319,6 +466,7 @@ impl Document {
 		if let Some(v) = self.input_data.clone() {
 			match v {
 				ComputedData::Patch(data) => {
+					self.check_patch_read_pointers(stk, ctx, opt, data.as_ref()).await?;
 					self.current.doc.to_mut().patch(data.as_ref().clone())?
 				}
 				ComputedData::Merge(data) => {
@@ -347,13 +495,17 @@ impl Document {
 					apply_assignments(stk, ctx, opt, self.current.doc.to_mut(), &x).await?;
 				}
 			};
-			// Every arm mutates `self.current.doc`, so the reduced view
-			// cached earlier in the pipeline (e.g. by `compute_input_data`
-			// or `check_where_condition`) is now stale. Invalidate
-			// it so any downstream caller that re-reduces sees the new
+			// Every arm mutates `self.current.doc`, so the pre-mutation
+			// snapshot is now stale in both halves. Invalidate the reduced
+			// view so any downstream caller that re-reduces sees the new
 			// field values rather than relying on `output_*` to do this
-			// implicitly.
+			// implicitly, and clear `fields_computed` so the computed fields
+			// are re-derived from those new values instead of the snapshot
+			// ones — otherwise a computed field that depends on an assigned
+			// field keeps its pre-mutation value, or disappears from the
+			// returned record once `process_table_fields` strips it.
 			self.current_reduced = None;
+			self.current.fields_computed = false;
 		};
 		// Carry on
 		Ok(())
@@ -363,14 +515,21 @@ impl Document {
 	///
 	/// The expressions inside `SET`/`CONTENT`/`MERGE`/`PATCH`/`REPLACE`/`UNSET`
 	/// can reference `$input` (for `INSERT … ON DUPLICATE KEY UPDATE` and
-	/// `RELATE`) and the current document fields, so the data clause must be
-	/// computed against a reduced view of `current` that has had field-level
-	/// permissions applied. The first call materialises that reduced view via
-	/// [`Self::reduce_current`], computes each expression against it, and
-	/// stores the resulting [`ComputedData`] on `self`. Subsequent calls in
-	/// the same pipeline (e.g. the UPSERT retry path, or `process_record_data`
-	/// reusing the value computed by an earlier permission check) are no-ops
-	/// and return the cached value without re-evaluating any user expression.
+	/// `RELATE`) and the current document fields, so the data clause is
+	/// evaluated against the pre-mutation snapshot built by
+	/// [`Self::materialise_current_snapshot`]: field-level permissions
+	/// applied, `COMPUTED` fields populated, and none of this statement's own
+	/// assignments visible. Every expression is evaluated against that one
+	/// image before any of them is applied, which is what makes
+	/// `SET a = a + 1, b = a + 1` assign `b` from the old `a`, and what makes
+	/// a computed field read the same in the data clause as in the `WHERE`
+	/// condition.
+	///
+	/// The first call computes each expression and stores the resulting
+	/// [`ComputedData`] on `self`. Subsequent calls in the same pipeline
+	/// (e.g. the UPSERT retry path, or `process_record_data` reusing the
+	/// value computed by an earlier permission check) are no-ops and return
+	/// the cached value without re-evaluating any user expression.
 	///
 	/// Returns `Ok(None)` when the statement has no data clause.
 	pub(super) async fn compute_input_data(
@@ -392,27 +551,36 @@ impl Document {
 				Extras::Relate(_, _, Some(value)) => Some(Arc::clone(value)),
 				_ => None,
 			};
-			// Reduce the document with permissions
-			let doc = self.reduce_current(stk, ctx, opt).await?;
+			// Evaluate against the pre-mutation snapshot, so the data clause
+			// reads exactly what the `WHERE` condition read
+			let doc = self.materialise_current_snapshot(stk, ctx, opt).await?;
 			// Compote the input data from the statement
 			self.input_data = Some(match data {
 				// This is a UNSET expression
 				Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
 				// This is a PATCH expression
 				Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a MERGE expression
 				Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a REPLACE expression
 				Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a CONTENT expression
 				Data::ContentExpression(data) => ComputedData::Content(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a SET or ON DUPLICATE KEY UPDATE expression
 				x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
@@ -434,9 +602,7 @@ impl Document {
 						assignments.push(ComputedAssignment {
 							place: x.place.clone(),
 							operator: x.operator.clone(),
-							value: x
-								.value
-								.compute(stk, &ctx, opt, Some(doc))
+							value: crate::legacy::expr_compute(&x.value, stk, &ctx, opt, Some(doc))
 								.await
 								.catch_return()?,
 						});
@@ -628,14 +794,22 @@ async fn apply_assignments(
 	for x in assignments {
 		match &x.operator {
 			AssignOperator::Assign => match &x.value {
-				Value::None => doc.del(stk, ctx, opt, &x.place).await?,
-				_ => doc.set(stk, ctx, opt, &x.place, x.value.clone()).await?,
+				Value::None => crate::legacy::value_del(doc, stk, ctx, opt, &x.place).await?,
+				_ => {
+					crate::legacy::value_set(doc, stk, ctx, opt, &x.place, x.value.clone()).await?
+				}
 			},
-			AssignOperator::Add => doc.increment(stk, ctx, opt, &x.place, x.value.clone()).await?,
-			AssignOperator::Subtract => {
-				doc.decrement(stk, ctx, opt, &x.place, x.value.clone()).await?
+			AssignOperator::Add => {
+				crate::legacy::value_increment(doc, stk, ctx, opt, &x.place, x.value.clone())
+					.await?
 			}
-			AssignOperator::Extend => doc.extend(stk, ctx, opt, &x.place, x.value.clone()).await?,
+			AssignOperator::Subtract => {
+				crate::legacy::value_decrement(doc, stk, ctx, opt, &x.place, x.value.clone())
+					.await?
+			}
+			AssignOperator::Extend => {
+				crate::legacy::value_extend(doc, stk, ctx, opt, &x.place, x.value.clone()).await?
+			}
 		}
 	}
 	Ok(())

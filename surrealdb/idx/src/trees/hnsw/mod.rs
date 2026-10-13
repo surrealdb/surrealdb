@@ -1,0 +1,3503 @@
+pub(crate) mod cache;
+pub(crate) mod docs;
+mod elements;
+mod filter;
+mod flavor;
+mod heuristic;
+pub mod index;
+mod layer;
+
+use anyhow::Result;
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
+use reblessive::tree::Stk;
+use roaring::RoaringTreemap;
+use surrealdb_datastore::Transaction;
+// The graph's state record, the queued updates in both their layouts, the vector
+// identity they carry and the element id they address are keyspace values, so
+// they are declared below this layer; the graph built from them stays here.
+pub use surrealdb_datastore::values::hnsw::{
+	HnswRecordPendingUpdate, HnswState, VectorId, VectorPendingUpdate,
+};
+pub(crate) use surrealdb_datastore::values::vector::ElementId;
+
+use crate::IndexKeyBase;
+use crate::catalog::{HnswParams, TableId};
+use crate::env::IndexEnv;
+use crate::error::Error;
+use crate::trees::dynamicset::DynamicSet;
+use crate::trees::hnsw::cache::VectorCache;
+use crate::trees::hnsw::elements::HnswElements;
+use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
+use crate::trees::hnsw::heuristic::Heuristic;
+use crate::trees::hnsw::index::HnswContext;
+use crate::trees::hnsw::layer::{HnswLayer, LayerState};
+use crate::trees::knn::DoublePriorityQueue;
+use crate::trees::vector::{SerializedVector, SharedVector, Vector};
+
+/// Parameters for a k-nearest neighbor search on the HNSW graph.
+struct HnswSearch {
+	/// The query vector to search for.
+	pt: SharedVector,
+	/// The number of nearest neighbors to return.
+	k: usize,
+	/// The size of the dynamic candidate list during search (exploration factor).
+	ef: usize,
+}
+
+impl HnswSearch {
+	pub(super) fn new(pt: SharedVector, k: usize, ef: usize) -> Self {
+		Self {
+			pt,
+			k,
+			ef,
+		}
+	}
+}
+
+/// Core HNSW (Hierarchical Navigable Small World) graph implementation.
+///
+/// The graph is organized into multiple layers: a base layer (layer 0) that contains
+/// all elements, and upper layers with progressively fewer elements for fast
+/// long-range traversal. The type parameters `L0` and `L` control the neighbor
+/// set implementation for layer 0 and upper layers respectively, allowing
+/// compile-time optimization based on the `m` (max connections) parameter.
+struct Hnsw<L0, L>
+where
+	L0: DynamicSet,
+	L: DynamicSet,
+{
+	/// Key base for generating index-related storage keys.
+	ikb: IndexKeyBase,
+	/// Persisted graph state (entry point, element counter, layer states).
+	state: HnswState,
+	/// Maximum number of connections per element in upper layers.
+	m: usize,
+	/// Size of the dynamic candidate list during construction.
+	efc: usize,
+	/// Level multiplier used in the random level generation formula.
+	ml: f64,
+	/// The base layer (layer 0) containing all elements.
+	layer0: HnswLayer<L0>,
+	/// Upper layers (1..N), each containing a subset of elements.
+	layers: Vec<HnswLayer<L>>,
+	/// Storage and cache for element vectors.
+	elements: HnswElements,
+	/// Random number generator for level assignment.
+	rng: SmallRng,
+	/// Heuristic strategy for neighbor selection.
+	heuristic: Heuristic,
+}
+
+impl<L0, L> Hnsw<L0, L>
+where
+	L0: DynamicSet,
+	L: DynamicSet,
+{
+	/// Creates a new HNSW graph with the given parameters.
+	fn new(
+		table_id: TableId,
+		ikb: IndexKeyBase,
+		p: &HnswParams,
+		vector_cache: VectorCache,
+		format_version: u16,
+	) -> Result<Self> {
+		let m0 = p.m0 as usize;
+		Ok(Self {
+			state: Default::default(),
+			m: p.m as usize,
+			efc: p.ef_construction as usize,
+			ml: p.ml.to_float(),
+			layer0: HnswLayer::new(ikb.clone(), 0, m0),
+			layers: Vec::default(),
+			elements: HnswElements::new(
+				table_id,
+				ikb.clone(),
+				p.distance.clone(),
+				vector_cache,
+				format_version,
+			),
+			// A fixed seed makes graph construction deterministic so build and
+			// search benchmarks are reproducible across runs; with none resolved,
+			// the RNG is seeded from entropy. See `surrealdb_cnf::hnsw_build_seed`
+			// for where the seed comes from.
+			rng: match surrealdb_cnf::hnsw_build_seed() {
+				Some(seed) => SmallRng::seed_from_u64(seed),
+				None => SmallRng::from_rng(&mut rand::rng()),
+			},
+			heuristic: p.into(),
+			ikb,
+		})
+	}
+
+	/// Returns `true` if the persisted state has drifted from the in-memory state
+	/// in a way that would cause [`check_state`](Self::check_state) to mutate.
+	///
+	/// Safe to call under a shared (read) lock — performs only a KV read of the
+	/// `hs` key plus a few field comparisons. Used as the steady-state fast path
+	/// so concurrent kNN searches do not serialise on the graph write lock.
+	async fn needs_state_reload(&self, env: &dyn IndexEnv) -> Result<bool> {
+		let tx = env.tx();
+		let st: HnswState = tx.get_key(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
+		// Writable transactions may need to migrate legacy `Hl` layout even when
+		// versions match. Mirrors `force_migration` in `check_state`.
+		if tx.writeable() && st.layer0.chunks > 0 {
+			return Ok(true);
+		}
+		if st.layer0.version != self.state.layer0.version {
+			return Ok(true);
+		}
+		if st.layers.len() != self.state.layers.len() {
+			return Ok(true);
+		}
+		if st.layers.len() != self.layers.len() {
+			return Ok(true);
+		}
+		for (new_stl, stl) in st.layers.iter().zip(self.state.layers.iter()) {
+			if new_stl.version != stl.version {
+				return Ok(true);
+			}
+		}
+		if st.next_element_id != self.elements.next_element_id() {
+			return Ok(true);
+		}
+		Ok(false)
+	}
+
+	/// Loads and synchronizes the in-memory graph state from the key-value store.
+	///
+	/// Compares the stored layer versions with the current in-memory versions,
+	/// reloading any layers that have changed. Also handles layer migration
+	/// from the legacy `Hl` format to the current `Hn` format.
+	async fn check_state(&mut self, env: &dyn IndexEnv) -> Result<()> {
+		let tx = env.tx();
+		// Read the state
+		let mut st: HnswState = tx.get_key(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
+		// Possible migration
+		let mut migrated = false;
+		let force_migration = tx.writeable() && st.layer0.chunks > 0;
+		// Compare versions
+		if st.layer0.version != self.state.layer0.version || force_migration {
+			migrated |= self.layer0.load(env, &tx, &mut st.layer0).await?;
+		}
+		for ((new_stl, stl), layer) in
+			st.layers.iter_mut().zip(self.state.layers.iter_mut()).zip(self.layers.iter_mut())
+		{
+			if new_stl.version != stl.version || force_migration {
+				migrated |= layer.load(env, &tx, new_stl).await?;
+			}
+		}
+		// Retrieve missing layers
+		for i in self.layers.len()..st.layers.len() {
+			let mut l = HnswLayer::new(self.ikb.clone(), i + 1, self.m);
+			migrated |= l.load(env, &tx, &mut st.layers[i]).await?;
+			self.layers.push(l);
+		}
+		// Remove non-existing layers
+		while self.layers.len() > st.layers.len() {
+			self.layers.pop();
+		}
+		// Set the enter_point
+		self.elements.set_next_element_id(st.next_element_id);
+		self.state = st;
+		// If any layer was migrated from Hl to Hn, persist the updated state
+		// so that subsequent loads don't attempt to fetch the now-deleted Hl keys.
+		if migrated {
+			self.save_state(&tx).await?;
+		}
+		Ok(())
+	}
+
+	/// Inserts a vector into the graph at the specified level.
+	///
+	/// Assigns a new element ID, creates any missing upper layers, stores
+	/// the vector, and connects it to its nearest neighbors at each layer.
+	async fn insert_level(
+		&mut self,
+		ctx: &HnswContext<'_>,
+		q_pt: Vector,
+		q_level: usize,
+	) -> Result<ElementId> {
+		// Attributes an ID to the vector
+		let q_id = self.elements.next_element_id();
+		let top_up_layers = self.layers.len();
+
+		// Be sure we have existing (up) layers if required
+		for i in top_up_layers..q_level {
+			self.layers.push(HnswLayer::new(self.ikb.clone(), i + 1, self.m));
+			self.state.layers.push(LayerState::default());
+		}
+
+		// Store the vector
+		let pt_ser = SerializedVector::from(&q_pt);
+		let q_pt = self.elements.insert(&ctx.tx, q_id, q_pt, &pt_ser).await?;
+
+		if let Some(ep_id) = self.state.enter_point {
+			// We already have an enter_point, let's insert the element in the layers
+			self.insert_element(ctx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
+		} else {
+			// Otherwise is the first element
+			self.insert_first_element(&ctx.tx, q_id, q_level).await?;
+		}
+
+		self.state.next_element_id = self.elements.inc_next_element_id();
+		Ok(q_id)
+	}
+
+	/// Generates a random level for a new element using the level multiplier `ml`.
+	fn get_random_level(&mut self) -> usize {
+		let unif: f64 = self.rng.random(); // generate a uniform random number between 0 and 1
+		(-unif.ln() * self.ml).floor() as usize // calculate the layer
+	}
+
+	/// Inserts the very first element into an empty graph, setting it as the entry point.
+	async fn insert_first_element(
+		&mut self,
+		tx: &Transaction,
+		id: ElementId,
+		level: usize,
+	) -> Result<()> {
+		if level > 0 {
+			// Insert in up levels
+			for (layer, state) in
+				self.layers.iter_mut().zip(self.state.layers.iter_mut()).take(level)
+			{
+				layer.add_empty_node(tx, id, state).await?;
+			}
+		}
+		// Insert in layer 0
+		self.layer0.add_empty_node(tx, id, &mut self.state.layer0).await?;
+		// Update the enter point
+		self.state.enter_point = Some(id);
+		//
+		Ok(())
+	}
+
+	/// Inserts an element into the graph when an entry point already exists.
+	///
+	/// Traverses the upper layers to find the closest entry point, then inserts
+	/// the element into each layer from `q_level` down to layer 0, connecting
+	/// it to its nearest neighbors. Updates the entry point if the new element
+	/// is assigned to a higher layer than the current entry point.
+	async fn insert_element(
+		&mut self,
+		ctx: &HnswContext<'_>,
+		q_id: ElementId,
+		q_pt: &SharedVector,
+		q_level: usize,
+		mut ep_id: ElementId,
+		top_up_layers: usize,
+	) -> Result<()> {
+		if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, q_pt, &ep_id).await? {
+			if q_level < top_up_layers {
+				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
+					if let Some(ep_dist_id) = layer
+						.search_single(ctx, &self.elements, q_pt, ep_dist, ep_id, 1, None)
+						.await?
+						.peek_first()
+					{
+						(ep_dist, ep_id) = ep_dist_id;
+					} else {
+						#[cfg(debug_assertions)]
+						unreachable!()
+					}
+				}
+			}
+
+			let mut eps = DoublePriorityQueue::from(ep_dist, ep_id);
+
+			let insert_to_up_layers = q_level.min(top_up_layers);
+			if insert_to_up_layers > 0 {
+				for (layer, st) in self
+					.layers
+					.iter_mut()
+					.zip(self.state.layers.iter_mut())
+					.take(insert_to_up_layers)
+					.rev()
+				{
+					eps = layer
+						.insert(
+							ctx,
+							st,
+							&self.elements,
+							&self.heuristic,
+							self.efc,
+							(q_id, q_pt),
+							eps,
+						)
+						.await?;
+				}
+			}
+
+			self.layer0
+				.insert(
+					ctx,
+					&mut self.state.layer0,
+					&self.elements,
+					&self.heuristic,
+					self.efc,
+					(q_id, q_pt),
+					eps,
+				)
+				.await?;
+
+			if top_up_layers < q_level {
+				for (layer, st) in self.layers[top_up_layers..q_level]
+					.iter_mut()
+					.zip(self.state.layers[top_up_layers..q_level].iter_mut())
+				{
+					if !layer.add_empty_node(&ctx.tx, q_id, st).await? {
+						#[cfg(debug_assertions)]
+						unreachable!("Already there {}", q_id);
+					}
+				}
+			}
+
+			if q_level > top_up_layers {
+				self.state.enter_point = Some(q_id);
+			}
+			Ok(())
+		} else {
+			// The element's vector is already stored and its id already spent,
+			// but without a readable entry point there is nothing to connect it
+			// to: returning here would commit an element that is in no layer and
+			// so unreachable by every later search. The caller rolls the write
+			// back and reloads the state instead.
+			Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+				table: self.ikb.table().to_string(),
+				index_id: self.ikb.index().0,
+				element: ep_id,
+			}))
+		}
+	}
+
+	/// Persists the current graph state to the key-value store.
+	async fn save_state(&self, tx: &Transaction) -> Result<()> {
+		let state_key = self.ikb.new_hs_key();
+		tx.set_key(&state_key, &self.state).await?;
+		Ok(())
+	}
+
+	/// Inserts a vector into the graph at a randomly chosen level and persists the state.
+	async fn insert(&mut self, ctx: &HnswContext<'_>, q_pt: Vector) -> Result<ElementId> {
+		let q_level = self.get_random_level();
+		let res = self.insert_level(ctx, q_pt, q_level).await?;
+		self.save_state(&ctx.tx).await?;
+		Ok(res)
+	}
+
+	/// Removes an element from the graph, reconnecting its neighbors and updating
+	/// the entry point if necessary. Returns `true` if the element was found and removed.
+	async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
+		let mut removed = false;
+
+		// Do we have the vector?
+		if let Some(e_pt) = self.elements.get_vector(&ctx.tx, &e_id).await? {
+			// Check if we are deleted the current enter_point
+			let mut new_enter_point = if Some(e_id) == self.state.enter_point {
+				None
+			} else {
+				self.state.enter_point
+			};
+
+			// Remove from the up layers
+			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()).rev() {
+				if new_enter_point.is_none() {
+					new_enter_point = layer
+						.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
+						.await?;
+				}
+				if layer.remove(ctx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
+					removed = true;
+				}
+			}
+
+			// Check possible new enter_point at layer0
+			if new_enter_point.is_none() {
+				new_enter_point = self
+					.layer0
+					.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
+					.await?;
+			}
+
+			// Remove from layer 0
+			if self
+				.layer0
+				.remove(
+					ctx,
+					&mut self.state.layer0,
+					&self.elements,
+					&self.heuristic,
+					e_id,
+					self.efc,
+				)
+				.await?
+			{
+				removed = true;
+			}
+
+			self.elements.remove(&ctx.tx, e_id).await?;
+
+			self.state.enter_point = new_enter_point;
+		}
+
+		self.save_state(&ctx.tx).await?;
+		Ok(removed)
+	}
+
+	/// Performs a k-nearest neighbor search on the graph without filtering.
+	///
+	/// Optionally excludes documents present in `pending_docs` (those with
+	/// pending updates that have already been searched separately).
+	async fn knn_search(
+		&self,
+		ctx: &HnswContext<'_>,
+		search: &HnswSearch,
+		pending_docs: Option<&RoaringTreemap>,
+	) -> Result<Vec<(f64, ElementId)>> {
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await? {
+			let w = self
+				.layer0
+				.search_single(
+					ctx,
+					&self.elements,
+					&search.pt,
+					ep_dist,
+					ep_id,
+					search.ef,
+					pending_docs,
+				)
+				.await?;
+			Ok(w.to_vec_limit(search.k))
+		} else {
+			Ok(vec![])
+		}
+	}
+
+	/// Performs a k-nearest neighbor search with a conditional document filter
+	/// and/or an allow-list bitmap gating candidate admission (#548).
+	///
+	/// Similar to [`knn_search`](Self::knn_search), but additionally applies a
+	/// user-defined filter and/or the allow-list to exclude non-matching
+	/// documents from the results.
+	async fn knn_search_with_filter(
+		&self,
+		ctx: &HnswContext<'_>,
+		search: &HnswSearch,
+		stk: &mut Stk,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
+	) -> Result<Vec<(f64, ElementId)>> {
+		// The upper-layer descent keeps `pending_docs` only: it is pure
+		// navigation towards the layer-0 entry point, not result admission.
+		// Restricting it with the allow-list would strand the entry point
+		// under sparse filters and disconnect the traversal.
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await? {
+			// The descent only carries forward elements whose vectors it read,
+			// so re-reading this one in the same transaction resolves. Treated
+			// like an unreadable entry point rather than as no neighbours: the
+			// graph is unsearchable either way, and an empty result would be
+			// indistinguishable from a graph that genuinely holds none.
+			let Some(ep_pt) = self.elements.get_vector(&ctx.tx, &ep_id).await? else {
+				return Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+					table: self.ikb.table().to_string(),
+					index_id: self.ikb.index().0,
+					element: ep_id,
+				}));
+			};
+			let w = self
+				.layer0
+				.search_single_with_filter(
+					ctx,
+					stk,
+					&self.elements,
+					search,
+					ep_dist,
+					ep_id,
+					&ep_pt,
+					filter,
+					pending_docs,
+					allow_list,
+				)
+				.await?;
+			return Ok(w.to_vec_limit(search.k));
+		}
+		Ok(vec![])
+	}
+
+	/// Finds the best entry point for a search by traversing the upper layers.
+	///
+	/// Starting from the graph's entry point, greedily descends through the upper
+	/// layers to find the closest element to the query vector `pt`.
+	///
+	/// `Ok(None)` means the graph is empty. A graph whose entry point exists but
+	/// whose vector this transaction cannot read is reported as
+	/// [`Error::AnnEntryPointUnreadable`] rather than as an empty result: the
+	/// search cannot reach the graph, and returning no neighbours would present
+	/// a pending-only result set as if it were complete.
+	async fn search_ep(
+		&self,
+		ctx: &HnswContext<'_>,
+		pt: &SharedVector,
+		pending_doc: Option<&RoaringTreemap>,
+	) -> Result<Option<(f64, ElementId)>> {
+		let Some(mut ep_id) = self.state.enter_point else {
+			return Ok(None);
+		};
+		let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? else {
+			return Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+				table: self.ikb.table().to_string(),
+				index_id: self.ikb.index().0,
+				element: ep_id,
+			}));
+		};
+		for layer in self.layers.iter().rev() {
+			// A layer that admits no candidate leaves the entry point as it
+			// stands and descent continues one layer down: every element the
+			// descent has accepted so far had its vector read, so the entry
+			// point carried forward is always usable. Upper layers hold a
+			// subset of the elements and `pending_doc` suppresses more, so an
+			// empty layer result is ordinary.
+			if let Some(ep_dist_id) = layer
+				.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
+				.await?
+				.peek_first()
+			{
+				(ep_dist, ep_id) = ep_dist_id;
+			}
+		}
+		Ok(Some((ep_dist, ep_id)))
+	}
+
+	/// Retrieves the vector associated with the given element ID.
+	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
+		self.elements.get_vector(tx, e_id).await
+	}
+	#[cfg(test)]
+	async fn check_hnsw_properties(&self, expected_count: usize) {
+		check_hnsw_props(self, expected_count).await;
+	}
+}
+
+#[cfg(test)]
+async fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+where
+	L0: DynamicSet,
+	L: DynamicSet,
+{
+	assert_eq!(h.elements.len().await, expected_count);
+	for layer in h.layers.iter() {
+		layer.check_props(&h.elements).await;
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::borrow::Cow;
+	use std::collections::hash_map::Entry;
+	use std::ops::Deref;
+	use std::sync::Arc;
+
+	use ahash::{HashMap, HashSet, HashSetExt};
+	use anyhow::Result;
+	use common::EngineError;
+	use ndarray::Array1;
+	use rand::rngs::SmallRng;
+	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
+	use surrealdb_kvs::TransactionType;
+	use test_log::test;
+	use tracing::info;
+
+	use crate::IndexKeyBase;
+	use crate::catalog::providers::CatalogProvider;
+	use crate::catalog::{
+		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
+		StoredTableDefinition, TableId, VectorType,
+	};
+	use crate::docids::{DocId, TableDocIds};
+	use crate::error::Error;
+	use crate::key::schema::HnswPendingLegacyKey;
+	use crate::test_env::{CancelAtCheckpoint, TestIndexEnv, TestIndexStore};
+	use crate::trees::hnsw::docs::VecDocs;
+	use crate::trees::hnsw::flavor::HnswFlavor;
+	use crate::trees::hnsw::index::{HnswContext, HnswIndex};
+	use crate::trees::hnsw::{
+		ElementId, HnswRecordPendingUpdate, HnswSearch, VectorCache, VectorId, VectorPendingUpdate,
+	};
+	use crate::trees::knn::tests::{
+		RandomItemGenerator, TestCollection, get_seed_rnd, new_random_vec, new_vectors_from_file,
+	};
+	use crate::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
+	use crate::trees::pending::{
+		PENDING_MAX_BATCH_KEYS, PENDING_MAX_BYTES, PENDING_MAX_PAGE_BYTES, PENDING_MAX_ROWS,
+		PENDING_PROBE_ROWS,
+	};
+	use crate::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
+	use crate::val::{Number, RecordIdKey, TableName, Value};
+
+	async fn insert_collection_hnsw(
+		ctx: &HnswContext<'_>,
+		h: &mut HnswFlavor,
+		collection: &TestCollection,
+	) -> HashMap<ElementId, SharedVector> {
+		let mut map = HashMap::default();
+		for (_, obj) in collection.to_vec_ref() {
+			let obj: SharedVector = obj.clone();
+			let e_id = h.insert(ctx, obj.clone_vector()).await.unwrap();
+			map.insert(e_id, obj);
+			h.check_hnsw_properties(map.len()).await;
+		}
+		map
+	}
+
+	async fn find_collection_hnsw(
+		ctx: &HnswContext<'_>,
+		h: &HnswFlavor,
+		collection: &TestCollection,
+	) {
+		let max_knn = 20.min(collection.len());
+		for (_, obj) in collection.to_vec_ref() {
+			for knn in 1..max_knn {
+				let search = HnswSearch::new(obj.clone(), knn, 80);
+				let res = h.knn_search(ctx, &search, None).await.unwrap();
+				if collection.is_unique() {
+					let mut found = false;
+					for (_, e_id) in &res {
+						if let Some(v) = h.get_vector(&ctx.tx, e_id).await.unwrap()
+							&& v.eq(obj)
+						{
+							found = true;
+							break;
+						}
+					}
+					assert!(
+						found,
+						"Search: {:?} - Knn: {} - Vector not found - Got: {:?} - Coll: {}",
+						obj,
+						knn,
+						res,
+						collection.len(),
+					);
+				}
+				let expected_len = collection.len().min(knn);
+				if expected_len != res.len() {
+					info!("expected_len != res.len()")
+				}
+				assert_eq!(
+					expected_len,
+					res.len(),
+					"Wrong knn count - Expected: {} - Got: {} - Collection: {} - - Res: {:?}",
+					expected_len,
+					res.len(),
+					collection.len(),
+					res,
+				)
+			}
+		}
+	}
+
+	async fn delete_collection_hnsw(
+		ctx: &HnswContext<'_>,
+		h: &mut HnswFlavor,
+		mut map: HashMap<ElementId, SharedVector>,
+	) {
+		let element_ids: Vec<ElementId> = map.keys().copied().collect();
+		for e_id in element_ids {
+			assert!(h.remove(ctx, e_id).await.unwrap());
+			map.remove(&e_id);
+			h.check_hnsw_properties(map.len()).await;
+		}
+	}
+
+	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
+		let ds = TestIndexStore::new().await;
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb = TableId(3);
+		let tb = StoredTableDefinition::new(ns, db, tb, "tb".into());
+		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(4));
+		let vec_docs = VecDocs::new(
+			ikb.clone(),
+			tb.table_id,
+			ds.index_stores().vector_cache().clone(),
+			false,
+			0,
+		);
+		let mut h = HnswFlavor::new(
+			tb.table_id,
+			IndexKeyBase::new(
+				NamespaceId(1),
+				DatabaseId(2),
+				TableName::from(tb.name.clone()),
+				IndexId(4),
+			),
+			p,
+			ds.index_stores().vector_cache().clone(),
+			0,
+		)
+		.unwrap();
+		let map = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			let map = insert_collection_hnsw(&ctx, &mut h, collection).await;
+			ctx.tx.commit().await.unwrap();
+			map
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			find_collection_hnsw(&ctx, &h, collection).await;
+			ctx.tx.cancel().await.unwrap();
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			delete_collection_hnsw(&ctx, &mut h, map).await;
+			ctx.tx.commit().await.unwrap();
+		}
+	}
+
+	#[allow(clippy::too_many_arguments)]
+	fn new_params(
+		dimension: usize,
+		vector_type: VectorType,
+		distance: Distance,
+		m: usize,
+		efc: usize,
+		extend_candidates: bool,
+		keep_pruned_connections: bool,
+		use_hashed_vector: bool,
+	) -> HnswParams {
+		let m = m as u8;
+		let m0 = m * 2;
+		HnswParams {
+			dimension: dimension as u16,
+			distance,
+			vector_type,
+			m,
+			m0,
+			ml: (1.0 / (m as f64).ln()).into(),
+			ef_construction: efc as u16,
+			extend_candidates,
+			keep_pruned_connections,
+			use_hashed_vector,
+		}
+	}
+
+	async fn test_hnsw(collection_size: usize, p: HnswParams) {
+		info!("Collection size: {collection_size} - Params: {p:?}");
+		let collection = TestCollection::new(
+			true,
+			collection_size,
+			p.vector_type,
+			p.dimension as usize,
+			&p.distance,
+		);
+		test_hnsw_collection(&p, &collection).await;
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw() -> Result<()> {
+		let mut futures = Vec::new();
+		for (dist, dim) in [
+			(Distance::Chebyshev, 5),
+			(Distance::Cosine, 5),
+			(Distance::Euclidean, 5),
+			(Distance::Hamming, 20),
+			// (Distance::Jaccard, 100),
+			(Distance::Manhattan, 5),
+			(Distance::Minkowski(2.into()), 5),
+			// (Distance::Pearson, 5),
+		] {
+			for vt in [
+				VectorType::F64,
+				VectorType::F32,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
+			] {
+				for (extend, keep, use_hashed_vector) in [
+					(false, false, false),
+					(true, false, true),
+					(false, true, false),
+					(true, true, true),
+				] {
+					let p =
+						new_params(dim, vt, dist.clone(), 24, 500, extend, keep, use_hashed_vector);
+					let f = tokio::spawn(async move {
+						test_hnsw(30, p).await;
+					});
+					futures.push(f);
+				}
+			}
+		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_hnsw_u8_euclidean() -> Result<()> {
+		let p = new_params(5, VectorType::U8, Distance::Euclidean, 24, 500, false, false, false);
+		test_hnsw(30, p).await;
+		Ok(())
+	}
+
+	async fn insert_collection_hnsw_index(
+		ctx: &TestIndexEnv,
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+	) -> Result<HashMap<SharedVector, HashSet<DocId>>> {
+		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+			match map.entry(obj.clone()) {
+				Entry::Occupied(mut e) => {
+					e.get_mut().insert(*doc_id);
+				}
+				Entry::Vacant(e) => {
+					e.insert(HashSet::from_iter([*doc_id]));
+				}
+			}
+			h.index_pendings(ctx).await?;
+			h.check_hnsw_properties(map.len()).await;
+		}
+		Ok(map)
+	}
+
+	async fn find_collection_hnsw_index(
+		ctx: &TestIndexEnv,
+		stk: &mut Stk,
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+	) {
+		let ctx = h.new_hnsw_context(ctx);
+		let max_knn = 20.min(collection.len());
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let doc_id = VectorId::DocId(*doc_id);
+			for knn in 1..max_knn {
+				let search = HnswSearch::new(obj.clone(), knn, 500);
+				let mut builder = KnnResultBuilder::new(search.k);
+				h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
+					.await
+					.unwrap();
+				let res = builder.collect();
+				let first_dist: f64 = res.first().unwrap().0.into();
+				if knn == 1 && res.len() == 1 && first_dist > 0.0 {
+					let docs: Vec<VectorId> = res.iter().map(|(_, id)| id.clone()).collect();
+					if collection.is_unique() {
+						assert!(
+							docs.contains(&doc_id),
+							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {:?} - Got: {:?}",
+							obj,
+							knn,
+							doc_id,
+							res
+						);
+					}
+				}
+				let expected_len = collection.len().min(knn);
+				assert_eq!(
+					expected_len,
+					res.len(),
+					"Wrong knn count - Expected: {} - Got: {} - - Docs: {:?} - Collection: {}",
+					expected_len,
+					res.len(),
+					res,
+					collection.len(),
+				)
+			}
+		}
+	}
+
+	async fn delete_hnsw_index_collection(
+		ctx: &TestIndexEnv,
+		h: &mut HnswIndex,
+		collection: &TestCollection,
+		mut map: HashMap<SharedVector, HashSet<DocId>>,
+	) -> Result<()> {
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			let id = RecordIdKey::Number(*doc_id as i64);
+			h.index(ctx, &id, Some(content), None).await?;
+			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
+				let set = e.get_mut();
+				set.remove(doc_id);
+				if set.is_empty() {
+					e.remove();
+				}
+			}
+			h.index_pendings(ctx).await?;
+			// Check properties
+			h.check_hnsw_properties(map.len()).await;
+		}
+		Ok(())
+	}
+
+	async fn new_ctx(ds: &TestIndexStore, tt: TransactionType) -> TestIndexEnv {
+		// The environment carries the shared table-level doc-ID sequence, which
+		// compaction's `resolve` needs.
+		ds.env(tt).await
+	}
+
+	fn vector_content(vector: &SharedVector) -> Vec<Value> {
+		vec![Value::from(vector.deref())]
+	}
+
+	fn serialized(vector: &SharedVector) -> SerializedVector {
+		SerializedVector::from(vector.deref())
+	}
+
+	async fn test_hnsw_index(collection_size: usize, unique: bool, p: HnswParams) {
+		info!("test_hnsw_index - coll size: {collection_size} - params: {p:?}");
+
+		let ds = TestIndexStore::new().await;
+
+		let collection = TestCollection::new(
+			unique,
+			collection_size,
+			p.vector_type,
+			p.dimension as usize,
+			&p.distance,
+		);
+
+		// Create index
+		let (mut h, map) = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ns = NamespaceId(1);
+			let db = DatabaseId(2);
+			let tb = TableId(3);
+			let ix = IndexId(4);
+			let tx = ctx.tx();
+			let mut h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				IndexKeyBase::new(ns, db, "tb".into(), ix),
+				tb,
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await
+			.unwrap();
+			// Fill index
+			let map = insert_collection_hnsw_index(&ctx, &mut h, &collection).await.unwrap();
+			tx.commit().await.unwrap();
+			(h, map)
+		};
+
+		// Search index
+		{
+			let mut stack = reblessive::tree::TreeStack::new();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+
+			stack
+				.enter(|stk| async {
+					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
+				})
+				.finish()
+				.await;
+			tx.cancel().await.unwrap();
+		}
+
+		// Delete collection
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			delete_hnsw_index_collection(&ctx, &mut h, &collection, map).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn tests_hnsw_index() -> Result<()> {
+		let mut futures = Vec::new();
+		for (dist, dim) in [
+			(Distance::Chebyshev, 5),
+			(Distance::Cosine, 5),
+			(Distance::Euclidean, 5),
+			(Distance::Hamming, 20),
+			// (Distance::Jaccard, 100),
+			(Distance::Manhattan, 5),
+			(Distance::Minkowski(2.into()), 5),
+			(Distance::Pearson, 5),
+		] {
+			for vt in [
+				VectorType::F64,
+				VectorType::F32,
+				VectorType::I64,
+				VectorType::I32,
+				VectorType::I16,
+			] {
+				for (extend, keep, use_hashed_vector) in [
+					(false, false, true),
+					(true, false, false),
+					(false, true, true),
+					(true, true, false),
+				] {
+					for unique in [true, false] {
+						let p = new_params(
+							dim,
+							vt,
+							dist.clone(),
+							8,
+							150,
+							extend,
+							keep,
+							use_hashed_vector,
+						);
+						let f = tokio::spawn(async move {
+							test_hnsw_index(30, unique, p).await;
+						});
+						futures.push(f);
+					}
+				}
+			}
+		}
+		for f in futures {
+			f.await.expect("Task error");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_simple_hnsw() {
+		let collection = TestCollection::Unique(vec![
+			(0, new_i16_vec(-2, -3)),
+			(1, new_i16_vec(-2, 1)),
+			(2, new_i16_vec(-4, 3)),
+			(3, new_i16_vec(-3, 1)),
+			(4, new_i16_vec(-1, 1)),
+			(5, new_i16_vec(-2, 3)),
+			(6, new_i16_vec(3, 0)),
+			(7, new_i16_vec(-1, -2)),
+			(8, new_i16_vec(-2, 2)),
+			(9, new_i16_vec(-4, -2)),
+			(10, new_i16_vec(0, 3)),
+		]);
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let ds = Arc::new(TestIndexStore::new().await);
+		let vec_docs = VecDocs::new(
+			ikb.clone(),
+			TableId(3),
+			ds.index_stores().vector_cache().clone(),
+			false,
+			0,
+		);
+		let mut h = HnswFlavor::new(
+			TableId(3),
+			ikb.clone(),
+			&p,
+			ds.index_stores().vector_cache().clone(),
+			0,
+		)
+		.unwrap();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			insert_collection_hnsw(&ctx, &mut h, &collection).await;
+			ctx.tx.commit().await.unwrap();
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
+			let res = h.knn_search(&ctx, &search, None).await.unwrap();
+			ctx.tx.cancel().await.unwrap();
+			assert_eq!(res.len(), 10);
+		}
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_coalesces_new_record_updates() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+
+		h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+		h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
+
+		let pending: HnswRecordPendingUpdate =
+			tx.get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
+		assert_eq!(pending.doc_id, None);
+		assert!(pending.old_vectors.is_empty());
+		assert_eq!(pending.new_vectors, vec![serialized(&second)]);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_preserves_existing_doc_baseline() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+
+		h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+		assert_eq!(h.index_pendings(&ctx).await?, 1);
+		h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
+		h.index(&ctx, &id, Some(vector_content(&second)), None).await?;
+
+		let pending: HnswRecordPendingUpdate =
+			tx.get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
+		assert_eq!(pending.doc_id, Some(0));
+		assert_eq!(pending.old_vectors, vec![serialized(&first)]);
+		assert!(pending.new_vectors.is_empty());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	/// Regression: deleting a record removes the shared table-level doc-ID
+	/// mapping; re-creating the same key before the vector pending is compacted
+	/// folds the new vectors into the delete's pending (which still carries the
+	/// deleted doc-ID). Compaction must insert them under the *current* doc-ID,
+	/// re-resolved from the record key, otherwise the re-created record's KNN
+	/// hits reference a doc-ID with no `!dd` mapping and disappear until rebuild.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_delete_recreate_before_compaction_stays_resolvable() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		// Create the record and compact it into the graph under its first doc-ID.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+		let original_doc_id = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let d = docids.get_doc_id(&ctx.tx(), &id).await?.expect("mapped after compaction");
+			ctx.tx().cancel().await?;
+			d
+		};
+
+		// Delete the record: enqueue the delete pending and remove the shared
+		// doc-ID mapping, mirroring `store_index_data` + the central purge removal.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, Some(vector_content(&first)), None).await?;
+			docids.remove(&ctx.tx(), &id).await?;
+			ctx.tx().commit().await?;
+		}
+		// Re-create the same key before compaction: folds into the delete pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&second))).await?;
+			ctx.tx().commit().await?;
+		}
+		// Compact the folded pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+		}
+
+		// The record is remapped to a fresh, resolvable doc-ID (the deleted one is
+		// gone and not reused).
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let tx = ctx.tx();
+			let new_doc_id = docids.get_doc_id(&tx, &id).await?.expect("remapped after recreate");
+			assert_ne!(new_doc_id, original_doc_id, "re-create must not reuse the deleted doc-ID");
+			assert_eq!(docids.get_record_id(&tx, new_doc_id).await?, Some(id.clone()));
+			assert_eq!(docids.get_record_id(&tx, original_doc_id).await?, None);
+			tx.cancel().await?;
+		}
+		// KNN for the re-created vector resolves back to the record.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let mut stack = reblessive::tree::TreeStack::new();
+			let pt = vec![Number::Int(2), Number::Int(2)];
+			let res = stack
+				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+				.finish()
+				.await?;
+			ctx.tx().cancel().await?;
+			assert!(
+				res.iter().any(|(rid, _, _)| rid.key == id),
+				"re-created record must be resolvable in KNN results: {res:?}"
+			);
+		}
+		Ok(())
+	}
+
+	/// An `!hr` entry written before the value carried the record id must still
+	/// resolve to the record its key names.
+	///
+	/// This is the fallback arm, and it is reachable only from a store an
+	/// earlier release wrote: the production write path stamps the id on every
+	/// entry, so nothing else in the suite constructs one without it. The id
+	/// here is a plain string, which the key's codec spells exactly — a
+	/// compound id holding a number is what the codec cannot express, and that
+	/// is the hazard the stamped id removes rather than something this arm can
+	/// recover.
+	#[tokio::test]
+	async fn hnsw_pending_written_before_the_id_field_resolves_through_its_key() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::String("written-by-an-older-release".into());
+		let vec = new_i16_vec(1, 1);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			// Exactly what an earlier release left queued: no `id` on the value.
+			let doc_id = docids.resolve_or_assign(&ctx, &id).await?;
+			tx.set_key(
+				&ikb.new_hr_key(&id),
+				&HnswRecordPendingUpdate {
+					doc_id: Some(doc_id),
+					old_vectors: vec![],
+					new_vectors: vec![serialized(&vec)],
+					id: None,
+				},
+			)
+			.await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let tx = ctx.tx();
+		let doc_id = docids.get_doc_id(&tx, &id).await?.expect("mapped after compaction");
+		let mapped = docids.get_record_id(&tx, doc_id).await?.expect("reverse mapping");
+		tx.cancel().await?;
+		assert_eq!(
+			storekey::encode_vec(&mapped).unwrap(),
+			storekey::encode_vec(&id).unwrap(),
+			"compacted under {mapped:?}, which is not the key the record is stored under"
+		);
+		Ok(())
+	}
+
+	/// A record id holding a nested number must survive indexing.
+	///
+	/// The pending key `!hr` encodes its id component with `IndexFormat`, which
+	/// deliberately omits a number's `NumberKind`. Decoding it back therefore
+	/// yields `Decimal` whatever the record was keyed with, so `person:[1]` is
+	/// read out of the queue as `person:[1dec]` — an id no record is stored
+	/// under. The KNN hit still consumes a top-k slot and is then dropped when
+	/// the record fetch misses, so the query silently returns fewer rows than
+	/// the k it was asked for.
+	///
+	/// Comparisons here are on encoded record keys, not `==`: `Number`'s
+	/// equality is cross-variant, so `[1dec] == [1]` and an `assert_eq!` on the
+	/// ids alone passes while the records are addressed by different keys.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compound_record_id_holding_a_number_survives_indexing() -> Result<()> {
+		fn record_key(id: &RecordIdKey) -> Vec<u8> {
+			storekey::encode_vec(id).unwrap()
+		}
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Array(vec![Value::Number(Number::Int(1))].into());
+		let vec = new_i16_vec(1, 1);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&vec))).await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+
+		// Compaction must map the doc-ID back to the id the record is stored
+		// under, not to a decimalised spelling of it.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let tx = ctx.tx();
+			let doc_id = docids.get_doc_id(&tx, &id).await?.expect("mapped after compaction");
+			let mapped = docids.get_record_id(&tx, doc_id).await?.expect("reverse mapping");
+			assert_eq!(
+				record_key(&mapped),
+				record_key(&id),
+				"doc-ID maps back to {mapped:?}, which is not the key the record is stored under"
+			);
+			tx.cancel().await?;
+		}
+
+		// And the KNN hit must name that same id.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let mut stack = reblessive::tree::TreeStack::new();
+			let pt = vec![Number::Int(1), Number::Int(1)];
+			let res = stack
+				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+				.finish()
+				.await?;
+			ctx.tx().cancel().await?;
+			assert!(
+				res.iter().any(|(rid, _, _)| record_key(&rid.key) == record_key(&id)),
+				"KNN must resolve back to {id:?}, got {res:?}"
+			);
+		}
+		Ok(())
+	}
+
+	/// #548 test scaffold: an HNSW index over `n` distinct 2-D vectors
+	/// (record key `i` → vector `(i, i)` for `i` in `1..=n`), optionally
+	/// compacted into the graph. Each record's shared doc-ID is resolved at
+	/// write time — as the document pipeline does through any doc-ID-carrying
+	/// sibling index — so allow-list membership is testable both for pending
+	/// and compacted vectors. Returns the index and the doc-IDs in key order.
+	async fn new_allow_list_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		n: i64,
+		compact: bool,
+	) -> Result<(HnswIndex, Vec<DocId>)> {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::with_capacity(n as usize);
+		let h = {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			for i in 1..=n {
+				let id = RecordIdKey::Number(i);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(
+					&ctx,
+					&id,
+					None,
+					Some(vector_content(&new_i16_vec(i as isize, i as isize))),
+				)
+				.await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		if compact {
+			loop {
+				let ctx = new_ctx(ds, TransactionType::Write).await;
+				let compacted = h.index_pendings(&ctx).await?;
+				ctx.tx().commit().await?;
+				if compacted == 0 {
+					break;
+				}
+			}
+		}
+		Ok((h, docs))
+	}
+
+	/// #548 test helper: runs a KNN search with an optional allow-list and
+	/// returns the sorted numeric record keys of the results.
+	async fn knn_with_allow(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		pt: &[Number],
+		k: usize,
+		allow_list: Option<&RoaringTreemap>,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 500, None, allow_list).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// #548: allow-list admission restricts graph results to bitmap members —
+	/// no allow-list is unrestricted, and an empty allow-list admits nothing.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_restricts_graph_admission() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 8, true).await?;
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// No allow-list: unrestricted admission returns every record.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 8, None).await?, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+		// The allow-list restricts admission to exactly its members, even
+		// with k larger than the member count.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2], docs[4]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 8, Some(&allow)).await?, vec![1, 3, 5]);
+		// An empty allow-list admits nothing.
+		let empty = RoaringTreemap::new();
+		assert!(knn_with_allow(&ds, &h, &pt, 8, Some(&empty)).await?.is_empty());
+		Ok(())
+	}
+
+	/// Regression (#548 review): a doc with a pending update must not admit
+	/// its (stale) graph element through the allow-list — result
+	/// materialization suppresses pending docs, so such an element burns an
+	/// `ef` slot that can never yield a row, and the pending scan already
+	/// scores the doc's CURRENT vector exactly. With a tight `ef`, the stale
+	/// near entry would otherwise crowd out a legitimate committed
+	/// neighbour and return the wrong top-k.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_ignores_pending_docs_for_admission() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			// Records 1 and 2 share one vector near the query (one graph
+			// element, two doc-IDs); record 3 is a little farther.
+			let vectors = [new_i16_vec(1, 1), new_i16_vec(1, 1), new_i16_vec(2, 2)];
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(i as i64 + 1);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(&ctx, &id, None, Some(vector_content(v))).await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		// Move record 1 far away, leaving the update pending: its stale graph
+		// entry still sits near the query, but the pending scan is now the
+		// source of truth for its (far) position.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(
+				&ctx,
+				&RecordIdKey::Number(1),
+				Some(vector_content(&new_i16_vec(1, 1))),
+				Some(vector_content(&new_i16_vec(100, 100))),
+			)
+			.await?;
+			ctx.tx().commit().await?;
+		}
+		// Allow records 1 and 3 (record 2, sharing the stale near element, is
+		// NOT allowed). With ef=1, admitting the stale element through
+		// pending record 1 would fill the result queue and lock out record 3
+		// — returning record 1 at its far position instead of the true
+		// nearest allowed record.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2]]);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 1, None, Some(&allow)).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		assert_eq!(keys, vec![3], "the committed allowed neighbour must win: {res:?}");
+		Ok(())
+	}
+
+	/// Regression (#548 review): the initial entry-point admission passed the
+	/// QUERY vector where the element's own vector belongs. On a cold
+	/// vector-doc cache the doc-set lookup keys off that vector, so the
+	/// entry point resolved another vector's (usually no) doc set, was
+	/// rejected, and the wrong verdict was cached under its element id. A
+	/// fresh index instance (fresh caches) over the same persisted graph
+	/// must still admit the entry point through the allow-list.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_admits_entry_point_on_cold_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// A single record: it is necessarily the graph's entry point.
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		// Query vector deliberately different from the stored vector (1, 1).
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let allow = RoaringTreemap::from_iter([docs[0]]);
+		// Warm-cache sanity check on the original instance.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, Some(&allow)).await?, vec![1]);
+		// A fresh index instance over the same persisted graph, with its own
+		// (empty) vector cache: the entry-point admission must resolve the
+		// element's doc set from the KV store, keyed by the element's actual
+		// vector — not the query vector.
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let h2 = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h2 = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h2.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h2
+		};
+		assert_eq!(knn_with_allow(&ds, &h2, &pt, 1, Some(&allow)).await?, vec![1]);
+		Ok(())
+	}
+
+	/// Inserting into a graph whose in-memory state names an entry point the
+	/// writing transaction cannot resolve is an error, not a silent no-op.
+	///
+	/// The new element's vector is stored and its id spent before the graph is
+	/// touched, so a write that skipped the connection step would commit an
+	/// element that sits in no layer and that no later search can reach.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_insert_over_unreadable_entry_point_is_reported() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// Element ids start at 0, so the single seeded record is element 0 and
+		// the graph's entry point.
+		let (_seed, _docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			tx.del_key(&ikb.new_he_key(0)).await?;
+			tx.commit().await?;
+		}
+		// Indexing stages a pending update; compaction is what reaches the
+		// graph, and so what has to refuse.
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let id = RecordIdKey::Number(2);
+		h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(5, 5)))).await?;
+		let err = h
+			.index_pendings(&ctx)
+			.await
+			.expect_err("an unreadable entry point must not leave the element unconnected");
+		ctx.tx().cancel().await?;
+		assert!(
+			matches!(
+				err.downcast_ref::<Error>(),
+				Some(Error::AnnEntryPointUnreadable {
+					element: 0,
+					..
+				})
+			),
+			"unexpected error: {err}"
+		);
+		Ok(())
+	}
+
+	/// A graph whose in-memory state names an entry point the reading
+	/// transaction cannot resolve is an error, not an empty result set.
+	///
+	/// Returning no neighbours here would be indistinguishable from a graph
+	/// that holds none, so a search over a state that has outrun its snapshot
+	/// would silently present a pending-only result as complete. The same
+	/// verdict is required of debug and release builds.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_unreadable_entry_point_is_reported() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// A single record: it is necessarily the graph's entry point, and
+		// element ids start at 0, so the entry point is element 0.
+		let (_h, _docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		// A fresh instance with an empty vector cache, so element vectors
+		// resolve from the store, holding state loaded before the removal
+		// below.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h
+		};
+		// Drop the entry point's stored vector behind that state's back,
+		// reproducing what a rolled-back write leaves visible: state naming an
+		// element the store no longer has.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let key = ikb.new_he_key(0);
+			assert!(
+				tx.get_key(&key, None).await?.is_some(),
+				"element 0 should hold the entry point's vector"
+			);
+			tx.del_key(&key).await?;
+			tx.commit().await?;
+		}
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+			.finish()
+			.await
+			.expect_err("an unreadable entry point must not be reported as an empty result");
+		ctx.tx().cancel().await?;
+		assert!(
+			matches!(
+				err.downcast_ref::<Error>(),
+				Some(Error::AnnEntryPointUnreadable {
+					element: 0,
+					..
+				})
+			),
+			"unexpected error: {err}"
+		);
+		Ok(())
+	}
+
+	/// #548: `allow_list` and `pending_docs` share a type but have opposite
+	/// polarity — the same doc-ID set admits exactly its members as an
+	/// allow-list and suppresses exactly its members as pending docs. This
+	/// test fails if the two parameters are ever transposed along the
+	/// filtered-search call chain.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_and_pending_docs_polarity() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 6, true).await?;
+		let subset = RoaringTreemap::from_iter([docs[1], docs[3]]);
+		let search = HnswSearch::new(new_i16_vec(0, 0), 6, 500);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let hctx = h.new_hnsw_context(&ctx);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let (admitted, kept) = stack
+			.enter(|stk| async {
+				// As the allow-list: exactly the subset is admitted.
+				let mut b1 = KnnResultBuilder::new(6);
+				h.search_graph(&hctx, stk, &search, None, &mut None, Some(&subset), &mut b1)
+					.await?;
+				// As pending docs: exactly the subset is suppressed.
+				let mut b2 = KnnResultBuilder::new(6);
+				h.search_graph(&hctx, stk, &search, Some(subset.clone()), &mut None, None, &mut b2)
+					.await?;
+				anyhow::Ok((b1.collect(), b2.collect()))
+			})
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let to_doc_ids = |res: KnnResult| -> Vec<DocId> {
+			let mut ids: Vec<DocId> = res
+				.iter()
+				.map(|(_, id)| match id {
+					VectorId::DocId(d) => *d,
+					other => panic!("unexpected vector id: {other:?}"),
+				})
+				.collect();
+			ids.sort();
+			ids
+		};
+		assert_eq!(to_doc_ids(admitted), vec![docs[1], docs[3]]);
+		let mut complement: Vec<DocId> = vec![docs[0], docs[2], docs[4], docs[5]];
+		complement.sort();
+		assert_eq!(to_doc_ids(kept), complement);
+		Ok(())
+	}
+
+	/// #548: one graph element can carry several doc-IDs (identical vectors).
+	/// Element admission only needs one allowed doc, but result
+	/// materialization must gate per doc: a sibling doc outside the
+	/// allow-list must neither surface nor consume a top-K slot.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_gates_shared_vector_docs() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			// Records 1 and 2 share one vector (one graph element, two
+			// doc-IDs); records 3 and 4 are distinct.
+			let vectors =
+				[new_i16_vec(7, 7), new_i16_vec(7, 7), new_i16_vec(1, 1), new_i16_vec(2, 2)];
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(i as i64 + 1);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(&ctx, &id, None, Some(vector_content(v))).await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		let pt = vec![Number::Int(7), Number::Int(7)];
+		// Record 2 shares its element with allowed record 1 but is not in
+		// the allow-list itself: it must not appear.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2], docs[3]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 3, 4]);
+		Ok(())
+	}
+
+	/// #548: the allow-list also gates the pending (uncompacted) scan, for
+	/// both doc-ID-mapped pendings and record-keyed pendings whose membership
+	/// is resolved through the current `Di` mapping (delete → re-create).
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_gates_pending_updates() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 4, false).await?;
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// All vectors are still pending: only allow-members are admitted.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[1]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 2]);
+		// Delete → re-create record 2 before compaction: its pending becomes
+		// record-keyed and its doc-ID is re-assigned, so membership must be
+		// resolved through the current mapping.
+		let id2 = RecordIdKey::Number(2);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id2, Some(vector_content(&new_i16_vec(2, 2))), None).await?;
+			docids.remove(&ctx.tx(), &id2).await?;
+			ctx.tx().commit().await?;
+		}
+		let new_doc2 = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let d = docids.resolve_or_assign(&ctx, &id2).await?;
+			h.index(&ctx, &id2, None, Some(vector_content(&new_i16_vec(2, 2)))).await?;
+			ctx.tx().commit().await?;
+			d
+		};
+		assert_ne!(new_doc2, docs[1], "re-create must not reuse the deleted doc-ID");
+		// Allowed under its re-resolved doc-ID → admitted.
+		let allow = RoaringTreemap::from_iter([docs[0], new_doc2]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 2]);
+		// The stale (deleted) doc-ID no longer admits the record.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[1]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1]);
+		Ok(())
+	}
+
+	/// An HNSW index holding `n` uncompacted record-keyed pendings: record key
+	/// `i` carries vector `(i, i)` for `i` in `1..=n`. Nothing reaches the
+	/// graph, so a search over it reads the whole queue.
+	async fn new_pending_backlog_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		n: i64,
+	) -> Result<HnswIndex> {
+		new_wide_pending_backlog_fixture(ds, ikb, 2, n).await
+	}
+
+	/// A pending queue whose retained identity bytes live primarily in the
+	/// record keys rather than the vector values.
+	async fn new_large_key_pending_backlog_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		n: i64,
+		key_payload_bytes: usize,
+	) -> Result<HnswIndex> {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		h.index(&ctx, &RecordIdKey::Number(0), None, Some(vector_content(&new_i16_vec(0, 0))))
+			.await?;
+		let suffix = "x".repeat(key_payload_bytes);
+		for i in 1..=n {
+			let id = RecordIdKey::String(format!("{i:04}-{suffix}").into());
+			h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(i as isize, i as isize))))
+				.await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// The same backlog with `dimension`-wide vectors, so one pending entry is
+	/// as large as `dimension` makes it. Record `i` still carries `(i, i)` in
+	/// the leading components, so the queries below pick the same winners
+	/// whatever the width.
+	async fn new_wide_pending_backlog_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		dimension: usize,
+		n: i64,
+	) -> Result<HnswIndex> {
+		let p =
+			new_params(dimension, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		for i in 1..=n {
+			let v = new_padded_i16_vec(dimension, i as isize, i as isize);
+			h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// A pending queue whose entries widen partway through: `narrow` records
+	/// carrying one `dimension`-wide vector each, then `wide` records carrying
+	/// `vectors_per_wide_record` of them.
+	///
+	/// The record-keyed range is scanned in record order, so the narrow prefix is
+	/// what the scan measures its first pages from and the wide tail is what
+	/// those pages then have to hold. Record `i` carries `(i, i)` in the leading
+	/// components of every one of its vectors, so the nearest neighbours to the
+	/// origin are the head of the queue whichever half they fall in.
+	async fn new_widening_pending_backlog_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		dimension: usize,
+		narrow: i64,
+		wide: i64,
+		vectors_per_wide_record: usize,
+	) -> Result<HnswIndex> {
+		let p =
+			new_params(dimension, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		for i in 1..=(narrow + wide) {
+			let v = new_padded_i16_vec(dimension, i as isize, i as isize);
+			let copies = if i <= narrow {
+				1
+			} else {
+				vectors_per_wide_record
+			};
+			let content = vec![Value::from(v.deref()); copies];
+			h.index(&ctx, &RecordIdKey::Number(i), None, Some(content)).await?;
+		}
+		tx.commit().await?;
+		Ok(h)
+	}
+
+	/// Writes one entry into the append-keyed pending layout.
+	///
+	/// Nothing in the engine writes that layout: an index still carrying
+	/// entries under it was upgraded from before the record-keyed layout, and
+	/// the read paths must keep scoring and draining them. The tests below are
+	/// therefore the only writers, and they place entries at explicit
+	/// positions because position is what decides which entry for an identity
+	/// is the live one.
+	async fn write_legacy_pending(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		appending_id: u64,
+		id: VectorId,
+		vector: &SharedVector,
+	) -> Result<()> {
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let key = HnswPendingLegacyKey::new(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			appending_id,
+		);
+		let pending = VectorPendingUpdate {
+			id,
+			old_vectors: vec![],
+			new_vectors: vec![serialized(vector)],
+		};
+		tx.set_key(&key, &pending).await?;
+		tx.commit().await?;
+		Ok(())
+	}
+
+	/// A kNN search holds at most one cursor page and one materialisation
+	/// batch of pending vectors at a time, however deep the queue is. Pinned
+	/// as exact accounting: a queue of a known length is read in a known
+	/// number of pages and scores in a known number of batches, and page and
+	/// batch together stay inside the residency budget.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_materialises_bounded_batches() -> Result<()> {
+		// Two full batches plus a remainder, so the counts below pin the
+		// budget and the split of a queue across batches, not just that some
+		// batching happened.
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		const EXPECTED_BATCHES: usize = 3;
+		// The fixture's 2-D i16 vectors are orders of magnitude smaller than
+		// the byte budget, so the entry budget alone decides where a batch
+		// ends and the row cap alone decides where a page ends — which is what
+		// makes both counts below exact.
+		const _: () = assert!(PENDING_MAX_BYTES > PENDING_MAX_BATCH_KEYS * 1024);
+		// The empty append-keyed range costs one page. The record-keyed range
+		// costs a probe page, full pages for everything the probe left, and
+		// the empty page that ends it.
+		const AFTER_PROBE: usize = PENDING as usize - PENDING_PROBE_ROWS as usize;
+		const FULL_PAGES: usize = AFTER_PROBE.div_ceil(PENDING_MAX_ROWS as usize);
+		const EXPECTED_PAGES: usize = 1 + 1 + FULL_PAGES + 1;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, None).await?, vec![1, 2, 3, 4]);
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.batches(),
+			EXPECTED_BATCHES,
+			"a {PENDING}-entry queue scores in {EXPECTED_BATCHES} batches"
+		);
+		assert_eq!(
+			stats.peak_batch_entries(),
+			PENDING_MAX_BATCH_KEYS,
+			"no batch holds more than the entry budget"
+		);
+		assert!(
+			stats.peak_batch_bytes() < PENDING_MAX_BYTES,
+			"the byte budget must not bind for this fixture: {} bytes",
+			stats.peak_batch_bytes()
+		);
+		assert_eq!(
+			stats.pages(),
+			EXPECTED_PAGES,
+			"a {PENDING}-entry queue is read in {EXPECTED_PAGES} pages"
+		);
+		assert_eq!(
+			stats.peak_page_entries(),
+			PENDING_MAX_ROWS as usize,
+			"narrow entries keep full-size pages"
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		Ok(())
+	}
+
+	/// Large user record IDs remain buffered as `VectorId::RecordKey` values
+	/// after the cursor page that supplied them is released. Their encoded key
+	/// bytes must therefore roll the scoring batch even when the vector values
+	/// themselves and the entry count fit in one batch.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_accounts_for_record_key_bytes() -> Result<()> {
+		const PENDING: i64 = 600;
+		const KEY_PAYLOAD_BYTES: usize = 8 * 1024;
+		const _: () = assert!(PENDING as usize + 1 < PENDING_MAX_BATCH_KEYS);
+		const _: () = assert!(PENDING as usize * KEY_PAYLOAD_BYTES > PENDING_MAX_BYTES);
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h =
+			new_large_key_pending_backlog_fixture(&ds, &ikb, PENDING, KEY_PAYLOAD_BYTES).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, None).await?, vec![0]);
+
+		let stats = h.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"record key bytes alone must split the queue into several scoring batches"
+		);
+		assert!(
+			stats.peak_batch_bytes() <= PENDING_MAX_BYTES,
+			"retained record-key bytes stay inside the scoring-batch budget: {} bytes",
+			stats.peak_batch_bytes()
+		);
+		Ok(())
+	}
+
+	/// Wide vectors shrink the cursor pages instead of the residency bound.
+	///
+	/// A page is requested by entry count, so a fixed count would let entries
+	/// this wide materialise several times the budget in the cursor's arena,
+	/// where they stay resident for as long as the scan holds the page. Pinned
+	/// as exact accounting: the row cap does not bind, the byte share does,
+	/// and page and batch together stay inside the residency budget — while
+	/// the search still returns the query's true nearest neighbours.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_pages_shrink_for_wide_vectors() -> Result<()> {
+		// Wide enough that a full-size page of these entries would not fit the
+		// page budget, and deep enough that the byte budget — not the entry
+		// budget — is what ends a scoring batch.
+		const DIMENSION: usize = 32_768;
+		const PENDING: i64 = 64;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, None).await?, vec![1, 2, 3, 4]);
+
+		let stats = h.pending_scan_stats();
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			entry_bytes * PENDING_MAX_ROWS as usize > PENDING_MAX_PAGE_BYTES,
+			"the fixture must be wide enough for a full-size page to overrun the budget: \
+			 {entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_entries() < PENDING_MAX_ROWS as usize,
+			"the byte share, not the row cap, sized the pages: {} entries",
+			stats.peak_page_entries()
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"no page holds more than its byte share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_batch_entries() < PENDING_MAX_BATCH_KEYS,
+			"the byte budget, not the entry budget, ended a batch: {} entries",
+			stats.peak_batch_entries()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch together stay inside the residency budget: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		Ok(())
+	}
+
+	/// The backlog report arms on a scoring rollover, from inside the scan, for
+	/// a queue whose raw bytes are well inside the residency budget.
+	///
+	/// A batch shares that budget with the cursor page it is filled from, so a
+	/// queue of wide vectors costs several materialisation batches long before
+	/// its raw values add up to [`PENDING_MAX_BYTES`]. A report gated on a raw
+	/// byte total would say nothing about it. Deriving the crossing from the
+	/// rollover itself is what makes the two agree. Draining the queue re-arms
+	/// the report for the next crossing, so a sustained backlog stays one record
+	/// rather than one per query.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_backlog_report_arms_on_a_scoring_rollover() -> Result<()> {
+		// Wide enough that page residency rolls a batch over...
+		const DIMENSION: usize = 24_000;
+		const PENDING: i64 = 80;
+		// ...while the entry count stays inside the entry budget, so the entry
+		// count alone cannot be what arms the report.
+		const _: () = assert!(PENDING as usize <= PENDING_MAX_BATCH_KEYS);
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_wide_pending_backlog_fixture(&ds, &ikb, DIMENSION, PENDING).await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, None).await?, vec![1]);
+		let stats = h.pending_scan_stats();
+		assert!(
+			stats.batches() > 1,
+			"the fixture must cost more than one batch to score: {} batches",
+			stats.batches()
+		);
+		// Keys included, the whole queue is inside the residency budget: a
+		// threshold over raw bytes could not have armed this report.
+		let entry_bytes = stats.peak_page_bytes().div_ceil(stats.peak_page_entries());
+		assert!(
+			stats.entries_read() * entry_bytes < PENDING_MAX_BYTES,
+			"the queue's raw bytes must stay inside the budget: {} entries of {entry_bytes} bytes",
+			stats.entries_read()
+		);
+		assert!(
+			h.pending_backlog_reported(),
+			"a queue that costs several materialisation batches arms the report"
+		);
+
+		// Drain the queue behind the index's back: nothing was ever compacted,
+		// so removing the record-keyed range leaves an empty index.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().delr(ikb.new_hr_range()?).await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(knn_with_allow(&ds, &h, &pt, 1, None).await?.is_empty());
+		assert!(
+			!h.pending_backlog_reported(),
+			"a scan that completes inside both budgets re-arms the report"
+		);
+		Ok(())
+	}
+
+	/// An abrupt increase in entry width cannot restore the ordinary 500-row
+	/// cursor amplification.
+	///
+	/// The narrow probe sizes the next page at the pending scan's conservative
+	/// row cap. The entries then widen enough that an ordinary 500-row cursor page
+	/// would exceed the whole residency target, but the pending page stays inside
+	/// its byte share because it can hold only sixteen. Results are unaffected.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_caps_pages_when_entries_widen() -> Result<()> {
+		// A narrow entry small enough that the row cap, not the byte target,
+		// sizes the page after the probe...
+		const DIMENSION: usize = 512;
+		const NARROW: i64 = PENDING_PROBE_ROWS as i64;
+		// ...and a wide entry large enough that the engine-wide 500-row default
+		// would overrun the whole residency target.
+		const VECTORS_PER_WIDE_RECORD: usize = 10;
+		// Several conservatively capped pages pin that the narrow prefix cannot
+		// increase the request beyond the pending-specific cap.
+		const WIDE: i64 = PENDING_MAX_ROWS as i64 * 3 + 5;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			NARROW,
+			WIDE,
+			VECTORS_PER_WIDE_RECORD,
+		)
+		.await?;
+
+		let pt = vec![Number::Int(0); DIMENSION];
+		assert_eq!(
+			knn_with_allow(&ds, &h, &pt, 4, None).await?,
+			vec![1, 2, 3, 4],
+			"the conservative page cap changes residency, not results"
+		);
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.peak_page_entries(),
+			PENDING_MAX_ROWS as usize,
+			"the narrow prefix sized the next page at the row cap"
+		);
+		let wide_entry_bytes = stats.peak_page_bytes().div_ceil(PENDING_MAX_ROWS as usize);
+		assert!(
+			wide_entry_bytes * surrealdb_kvs::consts::NORMAL_BATCH_SIZE as usize
+				> PENDING_MAX_BYTES,
+			"the ordinary row cap must recreate the allocation this regression guards: \
+			 {wide_entry_bytes} bytes per entry"
+		);
+		assert!(
+			stats.peak_page_bytes() <= PENDING_MAX_PAGE_BYTES,
+			"the pending-specific row cap keeps the widening page inside its share: {} bytes",
+			stats.peak_page_bytes()
+		);
+		assert!(
+			stats.peak_resident_bytes() <= PENDING_MAX_BYTES,
+			"page and batch stay inside the residency target: {} bytes",
+			stats.peak_resident_bytes()
+		);
+		// The empty append-keyed range costs one page. The record-keyed range
+		// costs the probe, capped pages for the wide tail, and its empty page.
+		assert_eq!(
+			stats.pages(),
+			1 + 1 + (WIDE as usize).div_ceil(PENDING_MAX_ROWS as usize) + 1,
+			"the widening tail stays split by the conservative row cap"
+		);
+		Ok(())
+	}
+
+	/// A scan cancelled at a checkpoint has already accounted for the entry that
+	/// checkpoint belongs to.
+	///
+	/// The cancellation schedule deep-checks on entry counts that bracket the
+	/// entry-count crossing, so a loop that checked before charging would return
+	/// `QueryCancelled` out of the very scan the backlog report exists to
+	/// explain, having read the crossing entry but never accounted for it.
+	/// Pinned as exact accounting: cancelling at the checkpoint of the entry
+	/// that crosses leaves that entry charged and the report armed.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_reports_the_entry_it_is_cancelled_on() -> Result<()> {
+		// One entry past the entry budget is the crossing; the queue is deeper
+		// so the scan is stopped by the checkpoint rather than by the range end.
+		const CROSSING: usize = PENDING_MAX_BATCH_KEYS + 1;
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		// The empty append-keyed range costs no checkpoints, so the scan's
+		// `CROSSING`-th checkpoint is the crossing entry's own.
+		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CROSSING);
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 4, 500, None, None).await })
+			.finish()
+			.await
+			.expect_err("the scan is cancelled before it finishes reading the queue");
+		assert!(
+			matches!(err.downcast_ref::<EngineError>(), Some(EngineError::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+		ctx.tx().cancel().await?;
+
+		let stats = h.pending_scan_stats();
+		assert_eq!(
+			stats.entries_read(),
+			CROSSING,
+			"the entry the scan is cancelled on is charged before the checkpoint"
+		);
+		assert!(
+			h.pending_backlog_reported(),
+			"the crossing is reported before the deadline bails out of the scan"
+		);
+		Ok(())
+	}
+
+	/// A byte-based rollover is reported before cancellation on the entry that
+	/// would force it, even while the queue remains below the entry threshold.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_reports_byte_rollover_before_cancellation() -> Result<()> {
+		const DIMENSION: usize = 512;
+		const PENDING: i64 = 2;
+		const VECTORS_PER_RECORD: usize = 1536;
+		const CANCEL_AT: usize = 2;
+		const _: () = assert!((PENDING as usize) < PENDING_MAX_BATCH_KEYS);
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_widening_pending_backlog_fixture(
+			&ds,
+			&ikb,
+			DIMENSION,
+			0,
+			PENDING,
+			VECTORS_PER_RECORD,
+		)
+		.await?;
+		assert!(!h.pending_backlog_reported(), "no scan has read the queue yet");
+
+		let ctx = CancelAtCheckpoint::new(ds.env(TransactionType::Read).await, CANCEL_AT);
+		let pt = vec![Number::Int(0); DIMENSION];
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+			.finish()
+			.await
+			.expect_err("the second entry cancels before the batch can be scored");
+		assert!(
+			matches!(err.downcast_ref::<EngineError>(), Some(EngineError::QueryCancelled)),
+			"unexpected error: {err}"
+		);
+		ctx.tx().cancel().await?;
+
+		assert_eq!(h.pending_scan_stats().entries_read(), CANCEL_AT);
+		assert!(
+			h.pending_backlog_reported(),
+			"the byte rollover must be reported before its cancellation checkpoint"
+		);
+		Ok(())
+	}
+
+	/// Splitting the pending queue into batches must not change which
+	/// candidates win. The second query's neighbours straddle a batch
+	/// boundary, so a top-K kept per batch rather than across the whole scan
+	/// would return a different set.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_batching_preserves_top_k() -> Result<()> {
+		const PENDING: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2 + 7;
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, PENDING).await?;
+
+		// Nearest to the origin: the head of the queue, wholly inside the
+		// first batch.
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 9, None).await?, (1..=9).collect::<Vec<i64>>());
+
+		// Nearest to the last entry of the first batch: the winners span the
+		// boundary between the first and second batch.
+		let boundary = PENDING_MAX_BATCH_KEYS as i64;
+		let pt = vec![Number::Int(boundary), Number::Int(boundary)];
+		assert_eq!(
+			knn_with_allow(&ds, &h, &pt, 9, None).await?,
+			(boundary - 4..=boundary + 4).collect::<Vec<i64>>()
+		);
+		Ok(())
+	}
+
+	/// The suppression bitmap covers every document seen anywhere in the
+	/// pending queue, whatever batch its vectors were scored in. The moved
+	/// record's pending sorts last, so its doc-ID enters the bitmap only after
+	/// two batches have already been scored; without it the graph search would
+	/// return that record at the position it no longer occupies.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_masks_stale_graph_entries_across_batches() -> Result<()> {
+		const FILLERS: i64 = PENDING_MAX_BATCH_KEYS as i64 * 2;
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let near = RecordIdKey::Number(9000);
+		let winner = RecordIdKey::Number(9001);
+
+		// Two committed records: the nearest to the origin, and the runner-up.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &near, None, Some(vector_content(&new_i16_vec(1, 1)))).await?;
+			h.index(&ctx, &winner, None, Some(vector_content(&new_i16_vec(5, 5)))).await?;
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+
+		// A queue deep enough to span several batches, every entry farther
+		// from the origin than the runner-up.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=FILLERS {
+				let v = new_i16_vec(10000 + i as isize, 10000 + i as isize);
+				h.index(&ctx, &RecordIdKey::Number(i), None, Some(vector_content(&v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// Move the committed nearest record away, leaving its graph entry
+		// stale. Its record key sorts after every filler, so its pending is
+		// read last.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(
+				&ctx,
+				&near,
+				Some(vector_content(&new_i16_vec(1, 1))),
+				Some(vector_content(&new_i16_vec(30000, 30000))),
+			)
+			.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(
+			knn_with_allow(&ds, &h, &pt, 1, None).await?,
+			vec![9001],
+			"the moved record's stale graph entry must stay masked"
+		);
+		Ok(())
+	}
+
+	/// The append-keyed layout may hold several entries for one identity. Only
+	/// the last of them is live: the earlier ones carry superseded vectors and
+	/// must not be scored.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_scores_last_legacy_entry_for_an_identity() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 2, true).await?;
+
+		// Record 1: first parked far from the origin, then superseded by an
+		// entry that puts it nearer than record 2.
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(9, 9)).await?;
+		write_legacy_pending(&ds, &ikb, 1, VectorId::DocId(docs[1]), &new_i16_vec(5, 5)).await?;
+		write_legacy_pending(&ds, &ikb, 2, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// Scoring the superseded entry instead would put record 1 at (9, 9)
+		// and hand the single slot to record 2.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, None).await?, vec![1]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 2, None).await?, vec![1, 2]);
+		Ok(())
+	}
+
+	/// Legacy coalescing remains exact when the superseding entry falls in a
+	/// later bounded chunk. Large distinct record identities between the two
+	/// target writes reproduce the allocation that an all-identities liveness
+	/// map would retain for the whole query.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_scan_coalesces_legacy_entries_across_bounded_chunks() -> Result<()> {
+		const FILLERS: u64 = 600;
+		const KEY_PAYLOAD_BYTES: usize = 8 * 1024;
+		const _: () = assert!(FILLERS as usize * KEY_PAYLOAD_BYTES > PENDING_MAX_BYTES);
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let h = new_pending_backlog_fixture(&ds, &ikb, 0).await?;
+		let target = Arc::new(RecordIdKey::String("target".into()));
+		let winner = Arc::new(RecordIdKey::Number(1));
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let write = |appending_id: u64, id: VectorId, vector: SharedVector| {
+			let tx = &tx;
+			let ikb = &ikb;
+			async move {
+				let key = HnswPendingLegacyKey::new(
+					ikb.ns(),
+					ikb.db(),
+					Cow::Borrowed(ikb.table()),
+					ikb.index(),
+					appending_id,
+				);
+				let pending = VectorPendingUpdate {
+					id,
+					old_vectors: vec![],
+					new_vectors: vec![serialized(&vector)],
+				};
+				tx.set_key(&key, &pending).await
+			}
+		};
+		write(0, VectorId::RecordKey(Arc::clone(&target)), new_i16_vec(0, 0)).await?;
+		write(1, VectorId::RecordKey(winner), new_i16_vec(1, 1)).await?;
+		let suffix = "x".repeat(KEY_PAYLOAD_BYTES);
+		for i in 0..FILLERS {
+			let id = RecordIdKey::String(format!("{i:04}-{suffix}").into());
+			write(
+				i + 2,
+				VectorId::RecordKey(Arc::new(id)),
+				new_i16_vec(10000 + i as isize, 10000 + i as isize),
+			)
+			.await?;
+		}
+		write(FILLERS + 2, VectorId::RecordKey(target), new_i16_vec(20000, 20000)).await?;
+		tx.commit().await?;
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(
+			knn_with_allow(&ds, &h, &pt, 1, None).await?,
+			vec![1],
+			"the target's stale first vector must not survive its later-chunk replacement"
+		);
+		assert!(
+			h.pending_scan_stats().batches() > 1,
+			"the fixture must span multiple bounded legacy chunks"
+		);
+		Ok(())
+	}
+
+	/// A record-keyed pending supersedes every append-keyed entry for the same
+	/// record — under the doc-ID it captured and under its record key alike.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_record_pending_supersedes_legacy_entries() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 2, true).await?;
+		let first = RecordIdKey::Number(1);
+
+		// Record 1 queued under both identities the append-keyed layout can
+		// use, both of them nearer to the origin than record 2.
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+		write_legacy_pending(
+			&ds,
+			&ikb,
+			1,
+			VectorId::RecordKey(Arc::new(first.clone())),
+			&new_i16_vec(2, 2),
+		)
+		.await?;
+		// The record-keyed pending moves record 1 away, and record 2 to a
+		// position between the legacy entries and the new one.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &first, None, Some(vector_content(&new_i16_vec(30000, 30000)))).await?;
+			h.index(&ctx, &RecordIdKey::Number(2), None, Some(vector_content(&new_i16_vec(5, 5))))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// Either legacy entry leaking would hand the slot back to record 1.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, None).await?, vec![2]);
+		Ok(())
+	}
+
+	/// A record-keyed delete cancels the append-keyed entries queued under the
+	/// doc-ID it captured: the record is gone, and its legacy vectors must not
+	/// resurface.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_record_pending_delete_cancels_legacy_entry() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 2, true).await?;
+		let first = RecordIdKey::Number(1);
+
+		write_legacy_pending(&ds, &ikb, 0, VectorId::DocId(docs[0]), &new_i16_vec(1, 1)).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &first, Some(vector_content(&new_i16_vec(1, 1))), None).await?;
+			h.index(&ctx, &RecordIdKey::Number(2), None, Some(vector_content(&new_i16_vec(5, 5))))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 2, None).await?, vec![2]);
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_deletes_pending_key_after_final_batch() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+
+		let plan = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		assert!(plan.has_work());
+		assert!(!plan.has_more());
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(h.apply_compaction(&ctx, plan).await?);
+			ctx.tx().commit().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&id), None).await?.is_none());
+			ctx.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_empty_compaction_plan_preserves_concurrent_pending_write() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			tx.commit().await?;
+			h
+		};
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+
+		let plan = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		assert!(!plan.has_work());
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			ctx.tx().commit().await?;
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(!h.apply_compaction(&ctx, plan).await?);
+			ctx.tx().cancel().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&id), None).await?.is_some());
+			ctx.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_preserves_changed_pending_value() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+
+		let plan = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		assert!(plan.has_work());
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
+			ctx.tx().commit().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(!h.apply_compaction(&ctx, plan).await?);
+			ctx.tx().cancel().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let pending: HnswRecordPendingUpdate =
+				ctx.tx().get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
+			assert_eq!(pending.new_vectors, vec![serialized(&second)]);
+			ctx.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_preserves_post_snapshot_pending_key() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let first_id = RecordIdKey::Number(1);
+		let second_id = RecordIdKey::Number(2);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &first_id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+
+		let plan = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		assert!(plan.has_work());
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &second_id, None, Some(vector_content(&second))).await?;
+			ctx.tx().commit().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(h.apply_compaction(&ctx, plan).await?);
+			ctx.tx().commit().await?;
+		}
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&first_id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&second_id), None).await?.is_some());
+			ctx.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_compaction_generation_allows_one_winner() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+				DOC_IDS_FORMAT_VERSION,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+
+		let plan_1 = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+		let plan_2 = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let plan = HnswIndex::prepare_compaction(&ctx, &ikb).await?;
+			ctx.tx().cancel().await?;
+			plan
+		};
+
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(h.apply_compaction(&ctx, plan_1).await?);
+			ctx.tx().commit().await?;
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert!(!h.apply_compaction(&ctx, plan_2).await?);
+			ctx.tx().cancel().await?;
+		}
+		Ok(())
+	}
+
+	async fn test_recall(
+		embeddings_file: &str,
+		ingest_limit: usize,
+		queries_file: &str,
+		query_limit: usize,
+		p: HnswParams,
+		tests_ef_recall: &[(usize, f64)],
+	) -> Result<()> {
+		info!("Build data collection");
+
+		let ds = Arc::new(TestIndexStore::new().await);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
+		tx.commit().await?;
+
+		let collection: Arc<TestCollection> =
+			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+				p.vector_type,
+				&format!("../../tests/data/{embeddings_file}"),
+				Some(ingest_limit),
+			)?));
+
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let tb = TableId(3);
+		let ix = IndexId(4);
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), ix),
+			tb,
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		info!("Insert collection");
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+		}
+
+		info!("Index pendings");
+		assert_eq!(h.index_pendings(&ctx).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx).await?, 0);
+
+		tx.commit().await?;
+
+		let h = Arc::new(h);
+
+		info!("Build query collection");
+		let queries = Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+			p.vector_type,
+			&format!("../../tests/data/{queries_file}"),
+			Some(query_limit),
+		)?));
+
+		info!("Check recall");
+		let mut futures = Vec::with_capacity(tests_ef_recall.len());
+		for &(efs, expected_recall) in tests_ef_recall {
+			let queries = Arc::clone(&queries);
+			let collection = Arc::clone(&collection);
+			let h = Arc::clone(&h);
+			let ds = Arc::clone(&ds);
+			let f = tokio::spawn(async move {
+				let mut stack = reblessive::tree::TreeStack::new();
+				stack
+					.enter(|stk| async {
+						let mut total_recall = 0.0;
+						for (_, pt) in queries.to_vec_ref() {
+							let knn = 10;
+							let search = HnswSearch::new(pt.clone(), knn, efs);
+
+							let ctx = new_ctx(&ds, TransactionType::Read).await;
+							let ctx = h.new_hnsw_context(&ctx);
+							let mut builder = KnnResultBuilder::new(knn);
+							h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
+								.await
+								.unwrap();
+							ctx.tx.cancel().await.unwrap();
+							let res = builder.collect();
+							assert_eq!(res.len(), knn, "Different size - knn: {knn}",);
+							let brute_force_res = collection.knn(pt, &Distance::Euclidean, knn);
+							let rec = compute_recall(&brute_force_res, &res);
+							if rec == 1.0 {
+								assert_eq!(brute_force_res, res);
+							}
+							total_recall += rec;
+						}
+						let recall = total_recall / queries.to_vec_ref().len() as f64;
+						info!("EFS: {efs} - Recall: {recall}");
+						assert!(
+							recall >= expected_recall,
+							"EFS: {efs} - Recall: {recall} - Expected: {expected_recall}"
+						);
+					})
+					.finish()
+					.await;
+			});
+			futures.push(f);
+		}
+		for f in futures {
+			f.await.expect("Task failure");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			1000,
+			"hnsw-random-5000-20-euclidean.gz",
+			300,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean_keep_pruned_connections() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, true, false);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			750,
+			"hnsw-random-5000-20-euclidean.gz",
+			200,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_euclidean_full() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, true, true, true);
+		test_recall(
+			"hnsw-random-9000-20-euclidean.gz",
+			500,
+			"hnsw-random-5000-20-euclidean.gz",
+			100,
+			p,
+			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	/// #548: recall of allow-list-gated HNSW traversal against the filtered
+	/// brute-force ground truth, across allow-list selectivities.
+	///
+	/// The allow-list admits doc-IDs by modulus (optionally inverted for the
+	/// near-universe case); the oracle is a linear scan restricted to the
+	/// same subset; the gated traversal runs with the 4× boosted ef the
+	/// graph tier applies by default. Each case asserts an average
+	/// Recall@10 floor over the query set — the sparsest cases document why
+	/// the triage routes tiny allow-lists to the graph-free exact tier
+	/// instead (guaranteed recall 1.0 there).
+	async fn test_recall_filtered(
+		embeddings_file: &str,
+		ingest_limit: usize,
+		queries_file: &str,
+		query_limit: usize,
+		p: HnswParams,
+		ef: usize,
+		cases: &[(u64, bool, f64)],
+	) -> Result<()> {
+		let ds = Arc::new(TestIndexStore::new().await);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
+		tx.commit().await?;
+
+		let collection: Arc<TestCollection> =
+			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+				p.vector_type,
+				&format!("../../tests/data/{embeddings_file}"),
+				Some(ingest_limit),
+			)?));
+
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), IndexId(4)),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+		}
+		assert_eq!(h.index_pendings(&ctx).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx).await?, 0);
+		tx.commit().await?;
+
+		let queries = TestCollection::NonUnique(new_vectors_from_file(
+			p.vector_type,
+			&format!("../../tests/data/{queries_file}"),
+			Some(query_limit),
+		)?);
+
+		let mut stack = reblessive::tree::TreeStack::new();
+		stack
+			.enter(|stk| async {
+				for &(modulus, invert, min_recall) in cases {
+					// Membership by doc-ID modulus, inverted for the
+					// near-universe selectivity.
+					let allow: RoaringTreemap = collection
+						.to_vec_ref()
+						.iter()
+						.map(|(doc_id, _)| *doc_id)
+						.filter(|doc_id| (doc_id % modulus == 0) != invert)
+						.collect();
+					let members = allow.len() as usize;
+					assert!(members > 0, "empty allow-list for modulus {modulus}");
+					let knn = 10;
+					// The graph tier's default 4× ef boost.
+					let ef_gated = ef * 4;
+					let mut total_recall = 0.0;
+					for (_, pt) in queries.to_vec_ref() {
+						let search = HnswSearch::new(pt.clone(), knn, ef_gated);
+						let ctx = new_ctx(&ds, TransactionType::Read).await;
+						let hctx = h.new_hnsw_context(&ctx);
+						let mut builder = KnnResultBuilder::new(knn);
+						h.search_graph(
+							&hctx,
+							stk,
+							&search,
+							None,
+							&mut None,
+							Some(&allow),
+							&mut builder,
+						)
+						.await
+						.unwrap();
+						hctx.tx.cancel().await.unwrap();
+						let res = builder.collect();
+						// Every returned doc must be an allow-list member.
+						for (_, id) in res.iter() {
+							match id {
+								VectorId::DocId(d) => {
+									assert!(allow.contains(*d), "non-member {d} in results")
+								}
+								other => panic!("unexpected vector id: {other:?}"),
+							}
+						}
+						let truth =
+							collection.knn_filtered(pt, &Distance::Euclidean, knn, &allow);
+						let rec = compute_recall(&truth, &res);
+						if rec == 1.0 {
+							assert_eq!(truth, res);
+						}
+						total_recall += rec;
+					}
+					let recall = total_recall / queries.to_vec_ref().len() as f64;
+					info!(
+						"modulus: {modulus} invert: {invert} members: {members} - Recall: {recall}"
+					);
+					assert!(
+						recall >= min_recall,
+						"modulus: {modulus} invert: {invert} members: {members} - Recall: {recall} - Expected: {min_recall}"
+					);
+				}
+			})
+			.finish()
+			.await;
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_filtered_euclidean() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
+		test_recall_filtered(
+			"hnsw-random-9000-20-euclidean.gz",
+			1000,
+			"hnsw-random-5000-20-euclidean.gz",
+			100,
+			p,
+			40,
+			&[
+				// Floors are set with margin below observed recall (the graph
+				// build is unseeded, so exact figures vary run to run). The
+				// sparse cases sit well below 1.0 even with the ef boost —
+				// which is precisely why the triage routes allow-lists up to
+				// T_exact through the graph-free exact tier (recall 1.0 by
+				// construction) instead of this traversal.
+				// 0.1% (a single member; observed ~1.0).
+				(1000, false, 0.5),
+				// 1% (10 members = k; observed ~0.85).
+				(100, false, 0.6),
+				// 10% (100 members).
+				(10, false, 0.85),
+				// 90% (near-universe).
+				(10, true, 0.9),
+			],
+		)
+		.await
+	}
+
+	/// Diagnostic: measure HNSW Recall@10 against an exact (brute-force) ground
+	/// truth, on a collection generated in-process at an arbitrary dimension and
+	/// distance. Unlike `test_recall`, (a) the data is synthesized rather than
+	/// loaded from a fixture, so we can probe high dimensions / cosine, and (b)
+	/// the brute-force ground truth uses the SAME distance as the index (the
+	/// fixture-based `test_recall` hardcodes Euclidean). Recall is averaged over
+	/// the query set and asserted against a per-`ef` threshold (the graph RNG is
+	/// entropy-seeded, so recall is not bit-reproducible — thresholds, like the
+	/// other recall tests, not equality). Set `TEST_SEED` for reproducible data.
+	async fn diag_recall_generated(
+		collection_size: usize,
+		query_count: usize,
+		dimension: usize,
+		p: HnswParams,
+		tests_ef_recall: &[(usize, f64)],
+	) -> Result<()> {
+		let dist = p.distance.clone();
+		let vt = p.vector_type;
+		info!(
+			"=== diag recall: dim={dimension} dist={dist:?} M={} M0={} EFC={} keep_pruned={} n={collection_size} q={query_count} ===",
+			p.m, p.m0, p.ef_construction, p.keep_pruned_connections
+		);
+
+		let ds = Arc::new(TestIndexStore::new().await);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
+		tx.commit().await?;
+
+		// Draw the indexed set and the query set from ONE continuous seeded RNG
+		// stream so the queries are disjoint from the indexed vectors. Calling
+		// `TestCollection::new` twice re-seeds from TEST_SEED each time, which
+		// makes the first `query_count` queries exact copies of the first indexed
+		// vectors — every query then has itself (distance 0) as its true nearest
+		// neighbour, turning Recall@10 into a self-query over-estimate. Sharing
+		// one RNG keeps the run reproducible while the query draws continue past
+		// the indexed draws, so the two sets do not overlap.
+		let mut rng = get_seed_rnd();
+		let item_gen = RandomItemGenerator::new(&dist, dimension);
+		let gen_set = |rng: &mut SmallRng, n: usize| {
+			let v: Vec<(DocId, SharedVector)> = (0..n)
+				.map(|i| (i as DocId, new_random_vec(rng, vt, dimension, &item_gen)))
+				.collect();
+			TestCollection::NonUnique(v)
+		};
+		let collection = gen_set(&mut rng, collection_size);
+
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), IndexId(4)),
+			TableId(3),
+			&p,
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+		}
+		// `index_pendings` applies queued inserts to the graph in batches
+		// (capped per call), so drain it until no pendings remain.
+		let mut indexed = 0;
+		loop {
+			let n = h.index_pendings(&ctx).await?;
+			indexed += n;
+			if n == 0 {
+				break;
+			}
+		}
+		assert_eq!(indexed, collection.len());
+		tx.commit().await?;
+
+		let queries = gen_set(&mut rng, query_count);
+		let knn = 10;
+
+		for &(efs, expected_recall) in tests_ef_recall {
+			let mut stack = reblessive::tree::TreeStack::new();
+			stack
+				.enter(|stk| async {
+					let mut total_recall = 0.0;
+					for (_, pt) in queries.to_vec_ref() {
+						let search = HnswSearch::new(pt.clone(), knn, efs);
+						let qctx = new_ctx(&ds, TransactionType::Read).await;
+						let qctx = h.new_hnsw_context(&qctx);
+						let mut builder = KnnResultBuilder::new(knn);
+						h.search_graph(&qctx, stk, &search, None, &mut None, None, &mut builder)
+							.await
+							.unwrap();
+						qctx.tx.cancel().await.unwrap();
+						let res = builder.collect();
+						let brute_force_res = collection.knn(pt, &dist, knn);
+						total_recall += compute_recall(&brute_force_res, &res);
+					}
+					let recall = total_recall / queries.to_vec_ref().len() as f64;
+					info!(
+						"dim={dimension} keep_pruned={} EF={efs} -> Recall@{knn} = {recall:.4}",
+						p.keep_pruned_connections
+					);
+					assert!(
+						recall >= expected_recall,
+						"dim={dimension} EF={efs} Recall={recall:.4} < expected {expected_recall}"
+					);
+				})
+				.finish()
+				.await;
+		}
+		Ok(())
+	}
+
+	/// Diagnostic for the "low 768d recall" report: at the `DEFINE INDEX HNSW`
+	/// defaults (M=12 => M0=24, EFC=150), show that Recall@10 on cosine data is
+	/// lower at 768 dimensions than at 128 for the same parameters, and that it
+	/// climbs back toward 1.0 purely by raising the search `ef`. This confirms
+	/// the behaviour is a tuning/curse-of-dimensionality curve, not a recall cap.
+	/// NOTE: synthetic uniform vectors are a stand-in; absolute numbers will
+	/// differ from real embeddings, but the directional levers (ef, dimension)
+	/// are what this asserts. Ignored by default (slow at 768d): run with
+	/// `cargo test -p surrealdb-core --release diag_recall -- --ignored --nocapture`.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore = "diagnostic (slow, high-dim): cosine Recall@10 vs dimension"]
+	async fn diag_recall_cosine_dim_curve() -> Result<()> {
+		// Held-out queries (TEST_SEED=42), Recall@10:
+		//   128-d: EF 10/40/100/200 -> ~0.50 / 0.88 / 0.99 / 1.00
+		//   768-d: EF 40/100/200/400 -> ~0.68 / 0.91 / 0.99 / 1.00
+		// 768-d needs a markedly higher EF than 128-d for equal recall, and both
+		// converge to 1.0 — recall is EF-bound, not capped. (768-d @ EF=100 ~0.91
+		// lands in the reported "0.915" regime.) Thresholds are loose floors at
+		// low EF (low + noisier) and firm at high EF (the convergence guard),
+		// shared across both dims so each must hold for the worse 768-d curve.
+		let efs = &[(10, 0.20), (40, 0.55), (100, 0.82), (200, 0.95), (400, 0.98)];
+		for dim in [128usize, 768] {
+			let p =
+				new_params(dim, VectorType::F32, Distance::Cosine, 12, 150, false, false, false);
+			diag_recall_generated(1500, 100, dim, p, efs).await?;
+		}
+		Ok(())
+	}
+
+	/// Diagnostic: at 768d cosine with default build params, compare the default
+	/// neighbour-selection heuristic against `KEEP_PRUNED_CONNECTIONS` across an
+	/// `ef` sweep. Hypothesis was that keeping pruned connections (refilling
+	/// neighbour lists up to M) would lift recall in high dimensions where the
+	/// diversity heuristic prunes more. On this small uniform-random collection
+	/// the effect is negligible (recall is identical to the default within
+	/// noise) — the lever is expected to matter more at scale and on clustered
+	/// data, so this stands as a comparison/regression guard, not proof of a
+	/// win. Run with `--ignored --nocapture`.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[ignore = "diagnostic (slow, high-dim): KEEP_PRUNED_CONNECTIONS effect at 768d cosine"]
+	async fn diag_recall_cosine_768_keep_pruned() -> Result<()> {
+		// Held-out queries (TEST_SEED=42): default vs KEEP_PRUNED at 768-d track
+		// each other within noise (e.g. EF=100 ~0.91 either way), so the effect is
+		// negligible on this data. Thresholds match the dim-curve 768-d floors.
+		let efs = &[(40, 0.55), (100, 0.82), (200, 0.95), (400, 0.98)];
+		info!("--- default heuristic (keep_pruned=false) ---");
+		diag_recall_generated(
+			1500,
+			100,
+			768,
+			new_params(768, VectorType::F32, Distance::Cosine, 12, 150, false, false, false),
+			efs,
+		)
+		.await?;
+		info!("--- KEEP_PRUNED_CONNECTIONS (keep_pruned=true) ---");
+		diag_recall_generated(
+			1500,
+			100,
+			768,
+			new_params(768, VectorType::F32, Distance::Cosine, 12, 150, false, true, false),
+			efs,
+		)
+		.await?;
+		Ok(())
+	}
+
+	impl TestCollection {
+		fn knn(&self, pt: &SharedVector, dist: &Distance, n: usize) -> KnnResult {
+			let mut b = KnnResultBuilder::new(n);
+			for (doc_id, doc_pt) in self.to_vec_ref() {
+				let d = dist.calculate(doc_pt, pt);
+				if b.check_add(d) {
+					b.add_graph_result(d, &Ids64::One(*doc_id));
+				}
+			}
+			b.collect()
+		}
+
+		/// #548: brute-force ground truth restricted to an allow-list subset.
+		fn knn_filtered(
+			&self,
+			pt: &SharedVector,
+			dist: &Distance,
+			n: usize,
+			allow: &RoaringTreemap,
+		) -> KnnResult {
+			let mut b = KnnResultBuilder::new(n);
+			for (doc_id, doc_pt) in self.to_vec_ref() {
+				if !allow.contains(*doc_id) {
+					continue;
+				}
+				let d = dist.calculate(doc_pt, pt);
+				if b.check_add(d) {
+					b.add_graph_result(d, &Ids64::One(*doc_id));
+				}
+			}
+			b.collect()
+		}
+	}
+
+	fn compute_recall(res1: &KnnResult, res2: &KnnResult) -> f64 {
+		let mut docs = HashSet::with_capacity(res1.len());
+		for (_, doc_id) in res1.iter() {
+			docs.insert(doc_id.clone());
+		}
+		let mut found = 0;
+		for (_, doc_id) in res2.iter() {
+			if docs.contains(doc_id) {
+				found += 1;
+			}
+		}
+		found as f64 / docs.len() as f64
+	}
+
+	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
+		new_padded_i16_vec(2, x, y)
+	}
+
+	/// `(x, y)` padded with zeros out to `dimension` components.
+	///
+	/// Distance ordering stays with `x` and `y`, so a fixture can be made
+	/// arbitrarily wide without changing which record wins a query. Width is
+	/// what decides whether the byte budget or the row cap sizes a pending
+	/// cursor page.
+	fn new_padded_i16_vec(dimension: usize, x: isize, y: isize) -> SharedVector {
+		let mut values = vec![0i16; dimension];
+		values[0] = x as i16;
+		if dimension > 1 {
+			values[1] = y as i16;
+		}
+		Vector::I16(Array1::from_vec(values)).into()
+	}
+}

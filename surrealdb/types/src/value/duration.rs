@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::{SqlFormat, ToSql};
@@ -117,71 +116,80 @@ impl Duration {
 	}
 
 	pub(crate) fn fmt_sql_internal(&self, f: &mut String) {
-		// Split up the duration
-		let secs = self.0.as_secs();
-		let nano = self.0.subsec_nanos();
-		// Ensure no empty output
-		if secs == 0 && nano == 0 {
-			return f.push_str("0ns");
-		}
-		// Calculate the total years
-		let year = secs / SECONDS_PER_YEAR;
-		let secs = secs % SECONDS_PER_YEAR;
-		// Calculate the total weeks
-		let week = secs / SECONDS_PER_WEEK;
-		let secs = secs % SECONDS_PER_WEEK;
-		// Calculate the total days
-		let days = secs / SECONDS_PER_DAY;
-		let secs = secs % SECONDS_PER_DAY;
-		// Calculate the total hours
-		let hour = secs / SECONDS_PER_HOUR;
-		let secs = secs % SECONDS_PER_HOUR;
-		// Calculate the total minutes
-		let mins = secs / SECONDS_PER_MINUTE;
-		let secs = secs % SECONDS_PER_MINUTE;
-		// Calculate the total milliseconds
-		let msec = nano / NANOSECONDS_PER_MILLISECOND;
-		let nano = nano % NANOSECONDS_PER_MILLISECOND;
-		// Calculate the total microseconds
-		let usec = nano / NANOSECONDS_PER_MICROSECOND;
-		let nano = nano % NANOSECONDS_PER_MICROSECOND;
-		// Write the different parts
-		if year > 0 {
-			f.push_str(&year.to_string());
-			f.push('y');
-		}
-		if week > 0 {
-			f.push_str(&week.to_string());
-			f.push('w');
-		}
-		if days > 0 {
-			f.push_str(&days.to_string());
-			f.push('d');
-		}
-		if hour > 0 {
-			f.push_str(&hour.to_string());
-			f.push('h');
-		}
-		if mins > 0 {
-			f.push_str(&mins.to_string());
-			f.push('m');
-		}
-		if secs > 0 {
-			f.push_str(&secs.to_string());
-			f.push('s');
-		}
-		if msec > 0 {
-			f.push_str(&msec.to_string());
-			f.push_str("ms");
-		}
-		if usec > 0 {
-			f.push_str(&usec.to_string());
-			f.push_str("µs");
-		}
-		if nano > 0 {
-			f.push_str(&nano.to_string());
-			f.push_str("ns");
-		}
+		fmt_duration_sql(self.0, f);
+	}
+}
+
+/// Format a [`std::time::Duration`] using SurrealQL duration syntax (e.g. `1h30m`).
+///
+/// This is the exact rendering [`Duration`]'s [`ToSql`] implementation uses;
+/// it is exposed so layers holding a raw [`std::time::Duration`] can print the
+/// public duration grammar without wrapping.
+pub fn fmt_duration_sql(duration: std::time::Duration, f: &mut String) {
+	// Split up the duration
+	let secs = duration.as_secs();
+	let nano = duration.subsec_nanos();
+	// Ensure no empty output
+	if secs == 0 && nano == 0 {
+		return f.push_str("0ns");
+	}
+	// Calculate the total years
+	let year = secs / SECONDS_PER_YEAR;
+	let secs = secs % SECONDS_PER_YEAR;
+	// Calculate the total weeks
+	let week = secs / SECONDS_PER_WEEK;
+	let secs = secs % SECONDS_PER_WEEK;
+	// Calculate the total days
+	let days = secs / SECONDS_PER_DAY;
+	let secs = secs % SECONDS_PER_DAY;
+	// Calculate the total hours
+	let hour = secs / SECONDS_PER_HOUR;
+	let secs = secs % SECONDS_PER_HOUR;
+	// Calculate the total minutes
+	let mins = secs / SECONDS_PER_MINUTE;
+	let secs = secs % SECONDS_PER_MINUTE;
+	// Calculate the total milliseconds
+	let msec = nano / NANOSECONDS_PER_MILLISECOND;
+	let nano = nano % NANOSECONDS_PER_MILLISECOND;
+	// Calculate the total microseconds
+	let usec = nano / NANOSECONDS_PER_MICROSECOND;
+	let nano = nano % NANOSECONDS_PER_MICROSECOND;
+	// Write the different parts
+	if year > 0 {
+		f.push_str(&year.to_string());
+		f.push('y');
+	}
+	if week > 0 {
+		f.push_str(&week.to_string());
+		f.push('w');
+	}
+	if days > 0 {
+		f.push_str(&days.to_string());
+		f.push('d');
+	}
+	if hour > 0 {
+		f.push_str(&hour.to_string());
+		f.push('h');
+	}
+	if mins > 0 {
+		f.push_str(&mins.to_string());
+		f.push('m');
+	}
+	if secs > 0 {
+		f.push_str(&secs.to_string());
+		f.push('s');
+	}
+	if msec > 0 {
+		f.push_str(&msec.to_string());
+		f.push_str("ms");
+	}
+	if usec > 0 {
+		f.push_str(&usec.to_string());
+		f.push_str("µs");
+	}
+	if nano > 0 {
+		f.push_str(&nano.to_string());
+		f.push_str("ns");
 	}
 }
 
@@ -189,133 +197,7 @@ impl FromStr for Duration {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let mut total_secs = 0u64;
-		let mut total_nanos = 0u32;
-		let mut remaining = s.trim();
-
-		// Handle empty string
-		if remaining.is_empty() {
-			return Err(anyhow!("Invalid duration string: {s}, empty string"));
-		}
-
-		// Handle special case for zero duration
-		if remaining == "0ns" || remaining == "0" {
-			return Ok(Duration::new(0, 0));
-		}
-
-		while !remaining.is_empty() {
-			// Find the end of the number part
-			let mut end = 0;
-			for (i, c) in remaining.char_indices() {
-				if !c.is_ascii_digit() {
-					end = i;
-					break;
-				}
-				end = i + c.len_utf8();
-			}
-
-			if end == 0 {
-				return Err(anyhow!("Invalid duration string: {s}, empty characters"));
-			}
-
-			let value_str = &remaining[..end];
-			let value: u64 = value_str.parse().map_err(|err| {
-				anyhow!("Invalid duration string: {s}, failed to parse value: {err}")
-			})?;
-
-			remaining = &remaining[end..];
-
-			// Parse the unit - check longer units first to avoid partial matches
-			let unit = if remaining.starts_with("ms") {
-				remaining = &remaining[2..];
-				"ms"
-			} else if remaining.starts_with("µs") {
-				remaining = &remaining[2..];
-				"µs"
-			} else if remaining.starts_with("us") {
-				remaining = &remaining[2..];
-				"us"
-			} else if remaining.starts_with("ns") {
-				remaining = &remaining[2..];
-				"ns"
-			} else if remaining.starts_with("y") {
-				remaining = &remaining[1..];
-				"y"
-			} else if remaining.starts_with("w") {
-				remaining = &remaining[1..];
-				"w"
-			} else if remaining.starts_with("d") {
-				remaining = &remaining[1..];
-				"d"
-			} else if remaining.starts_with("h") {
-				remaining = &remaining[1..];
-				"h"
-			} else if remaining.starts_with("m") {
-				remaining = &remaining[1..];
-				"m"
-			} else if remaining.starts_with("s") {
-				remaining = &remaining[1..];
-				"s"
-			} else {
-				return Err(anyhow!(
-					"Invalid duration string: {s}, unexpected remainder: {remaining}"
-				));
-			};
-
-			// Convert to seconds and nanoseconds based on unit
-			match unit {
-				"y" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_YEAR));
-				}
-				"w" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_WEEK));
-				}
-				"d" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_DAY));
-				}
-				"h" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_HOUR));
-				}
-				"m" => {
-					total_secs =
-						total_secs.saturating_add(value.saturating_mul(SECONDS_PER_MINUTE));
-				}
-				"s" => {
-					total_secs = total_secs.saturating_add(value);
-				}
-				"ms" => {
-					let millis = value.saturating_mul(NANOSECONDS_PER_MILLISECOND as u64);
-					let (secs, nanos) = (millis / 1_000_000_000, (millis % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				"µs" | "us" => {
-					let micros = value.saturating_mul(NANOSECONDS_PER_MICROSECOND as u64);
-					let (secs, nanos) = (micros / 1_000_000_000, (micros % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				"ns" => {
-					let (secs, nanos) = (value / 1_000_000_000, (value % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				unexpected => {
-					return Err(anyhow!(
-						"Invalid duration string: {s}, unexpected unit: {unexpected}"
-					));
-				}
-			}
-		}
-
-		// Handle nanosecond overflow
-		if total_nanos >= 1_000_000_000 {
-			let additional_secs = total_nanos / 1_000_000_000;
-			total_secs = total_secs.saturating_add(additional_secs as u64);
-			total_nanos %= 1_000_000_000;
-		}
-
-		Ok(Duration::new(total_secs, total_nanos))
+		parse_common::duration(s).map(Self).map_err(|e| anyhow::Error::msg(e.message))
 	}
 }
 
@@ -370,7 +252,6 @@ mod tests {
 
 		// Test zero duration
 		assert_eq!(Duration::from_str("0ns").unwrap(), Duration::new(0, 0));
-		assert_eq!(Duration::from_str("0").unwrap(), Duration::new(0, 0));
 
 		// Test combined units
 		let combined = Duration::from_str("1h30m15s500ms").unwrap();

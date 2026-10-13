@@ -2,7 +2,7 @@ use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use surrealdb_core::lazy_env_parse;
+use common::lazy_env_parse;
 
 /// The logo of the SurrealDB server
 pub const LOGO: &str = "
@@ -50,7 +50,7 @@ pub static HTTP_MAX_SQL_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_GQL_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_GQL_BODY_SIZE", usize, 1 << 20);
 
-/// The maximum HTTP body size of the HTTP /api endpoint (default: 1 MiB)
+/// The maximum HTTP body size of the HTTP /api endpoint (default: 4 MiB)
 pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_API_BODY_SIZE", usize, 4 << 20);
 
@@ -78,6 +78,158 @@ pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 pub static WEBSOCKET_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS", usize, 256);
 
+/// The maximum size of a single gRPC message, in either direction
+/// (default: the HTTP `/rpc` body limit).
+///
+/// Bounds two things at once, and deliberately so: the decode limit the gRPC
+/// service enforces on a request, and the `max_message_bytes` the capability
+/// handshake advertises. A client sizes its own limits from what is
+/// advertised, so the two must be the same number -- advertising more than is
+/// enforced invites a client to send a message the service then rejects mid
+/// body, which reaches it as an opaque HTTP/2 stream error rather than as a
+/// status naming the limit.
+///
+/// The default tracks `SURREAL_HTTP_MAX_RPC_BODY_SIZE` so that the two RPC
+/// transports sharing this listener start out bounded alike, rather than gRPC
+/// carrying a message size the HTTP route would refuse. Raise it for a
+/// workload whose individual records or transactions exceed it -- bulk
+/// ingest of embeddings is the usual case -- keeping in mind that this is the
+/// memory a single caller can make the server buffer for one message.
+///
+/// A value below [`GRPC_MIN_MESSAGE_SIZE`] is raised to it, and one that is not
+/// a size at all falls back to the default.
+pub static GRPC_MAX_MESSAGE_SIZE: LazyLock<usize> =
+	LazyLock::new(|| grpc_message_size(env::var("SURREAL_GRPC_MAX_MESSAGE_SIZE").ok().as_deref()));
+
+/// The smallest gRPC message size that leaves the service able to do its job.
+///
+/// The service frames an export and an import at a fixed
+/// `DEFAULT_FILE_CHUNK_SIZE`, and reports that same figure as the handshake's
+/// `max_chunk_bytes`, so a message size below it would advertise a chunk the
+/// same handshake says cannot be carried, and every export would fail while
+/// still appearing to be offered. The allowance above the chunk covers the
+/// fields wrapping it in its response message, which are tens of bytes.
+///
+/// A message size anywhere near this floor is a very unusual thing to want.
+/// The floor is here so that a mistaken one degrades to a working service
+/// rather than to one that starts, advertises its methods, and fails every
+/// call.
+pub(crate) const GRPC_MIN_MESSAGE_SIZE: usize =
+	surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE + (4 << 10);
+
+/// The largest gRPC message the wire can describe.
+///
+/// Every message is length-prefixed with four bytes, so a longer one cannot be
+/// framed at all: tonic refuses to emit it whatever the configured limit says.
+/// A configured size above this would be advertised by the handshake and sized
+/// into every client's buffers, promising a message the route can never carry
+/// and turning a misconfiguration into a failure that only shows up on the
+/// largest payloads.
+pub(crate) const GRPC_MAX_MESSAGE_CEILING: usize = u32::MAX as usize;
+
+/// Resolves the configured gRPC message size.
+///
+/// Anything unparseable, or absent, takes the default. Whatever the source, the
+/// result is held between [`GRPC_MIN_MESSAGE_SIZE`] and
+/// [`GRPC_MAX_MESSAGE_CEILING`]: this limit governs every message the service
+/// encodes, and both ends of that range are sizes at which the service would
+/// otherwise start, advertise its methods, and then fail calls. Below the floor
+/// nothing can be carried at all -- zero is only the most obvious of those, an
+/// inherited `SURREAL_HTTP_MAX_RPC_BODY_SIZE` that has itself been set very low
+/// is the least. Above the ceiling the failure is narrower and later: only the
+/// messages past four gibibytes are refused, by which point a client has been
+/// told it may send them.
+fn grpc_message_size(configured: Option<&str>) -> usize {
+	use common::str::ParseBytes;
+
+	// Read as a `u128`, bounded there, and only then narrowed.
+	//
+	// `u128` is the width the parser itself accumulates in, which is what makes
+	// this the last place the distinction can be lost: reading into anything
+	// narrower turns a size past that narrower type into a parse failure, and a
+	// parse failure takes the default. A size deliberately set far too high
+	// would come back as four mebibytes -- the opposite of what it asked for,
+	// and silently.
+	//
+	// A number so large that the parser overflows computing it is not a size it
+	// can express at all, and falls under the same rule as any other unreadable
+	// value.
+	let configured = configured
+		.and_then(|var| var.parse_bytes::<u128>().ok())
+		.unwrap_or(*HTTP_MAX_RPC_BODY_SIZE as u128);
+	let bounded = configured.clamp(GRPC_MIN_MESSAGE_SIZE as u128, GRPC_MAX_MESSAGE_CEILING as u128);
+	// The ceiling is `u32::MAX`, which every pointer width this builds for can
+	// represent, so the narrowing cannot truncate.
+	bounded as usize
+}
+
+/// The maximum number of explicitly attached sessions the gRPC transport will
+/// retain at once (default: 16384).
+///
+/// As with HTTP, the gRPC session map is process-global: a channel reconnects
+/// transparently and requests for one session may arrive on different
+/// connections, so sessions cannot be scoped to a connection. An uncapped map
+/// is therefore a denial-of-service target, and this bounds the memory
+/// attributable to attached gRPC sessions. Ephemeral per-request sessions do
+/// not count against this cap.
+pub static GRPC_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GRPC_MAX_ATTACHED_SESSIONS", usize, 16384);
+
+/// How many live query notifications may be buffered for a gRPC subscription
+/// that is not keeping up (default: 1024).
+///
+/// This is a hard bound on what one subscription can hold: filling the buffer
+/// ends that subscription with a `RESOURCE_EXHAUSTED` frame rather than making
+/// the dispatcher wait. Waiting would not bound anything, because the
+/// notification dispatcher keeps receiving while a send is pending, so a busy
+/// live query would accumulate pending sends instead of queued frames.
+pub static GRPC_NOTIFICATION_BUFFER: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GRPC_NOTIFICATION_BUFFER", usize, 1024);
+
+/// How long a streaming query may wait to hand one frame to a WebSocket
+/// connection's outbound channel before the stream is stopped (default: 30s).
+///
+/// A frame send is what a stalled client blocks, and blocking it stops the
+/// execution being polled while it holds a read snapshot or a transaction. The
+/// wall-clock query timeout would bound that, but it is off by default, so this
+/// is the bound that always applies. It is not a limit on how long a stream may
+/// run: it is reset for every frame, so a client that keeps reading is never
+/// affected.
+///
+/// Clamped to `1..=86_400`. Zero would defeat the grace the terminal frame is
+/// given, and a huge value would overflow the deadline arithmetic it feeds.
+/// There is deliberately no value meaning "no bound", because the bound is what
+/// stops a stalled client pinning an execution.
+pub static WEBSOCKET_STREAM_SEND_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
+	static CONFIGURED: LazyLock<u64> =
+		lazy_env_parse!("SURREAL_WEBSOCKET_STREAM_SEND_TIMEOUT", u64, 30);
+	(*CONFIGURED).clamp(1, 86_400)
+});
+
+/// The maximum number of concurrently executing streaming queries on a single
+/// WebSocket connection (default: 32).
+///
+/// Every in-flight stream holds an executing query — with whatever read
+/// snapshot or transaction that entails — for as long as its client keeps
+/// reading, so this bounds what one connection can pin at once. A request over
+/// the cap is refused with an error; nothing is queued.
+pub static WEBSOCKET_MAX_CONCURRENT_STREAMS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_STREAMS", usize, 32);
+
+/// The maximum number of concurrently open client-managed transactions on a
+/// WebSocket connection's implicit default session (default: 64). Bounds
+/// resource use by a client that opens transactions without committing or
+/// cancelling them.
+pub static MAX_TRANSACTIONS_PER_CONNECTION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_CONNECTION", usize, 64);
+
+/// The maximum number of concurrently open client-managed transactions within a
+/// single attached session on a WebSocket connection (default: 64). Session
+/// transactions are counted per session and do not count towards the
+/// connection limit.
+pub static MAX_TRANSACTIONS_PER_SESSION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_SESSION", usize, 64);
+
 /// The maximum HTTP body size of the HTTP /key endpoints (default: 16 KiB)
 pub static HTTP_MAX_KEY_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
@@ -89,6 +241,54 @@ pub static HTTP_MAX_SIGNUP_BODY_SIZE: LazyLock<usize> =
 /// The maximum HTTP body size of the HTTP /signin endpoint (default: 1 KiB)
 pub static HTTP_MAX_SIGNIN_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", usize, 1 << 10);
+
+/// Whether to rate limit authentication attempts on the HTTP /signin and
+/// /signup endpoints per client address (default: false). Accepted values
+/// are exactly `true` and `false`; any other value is ignored and the
+/// default applies.
+///
+/// The limiter keys on the client address resolved by the `--client-ip`
+/// strategy, so enabling it requires a strategy that yields one address per
+/// client: `socket` when clients connect directly, or a header strategy
+/// behind a trusted proxy (the last, proxy-appended element of a
+/// comma-separated chain is used, and IPv6 addresses are grouped by /64
+/// prefix). Behind a proxy with `--client-ip socket`, every client resolves
+/// to the proxy's address and shares one budget, so enabling the limiter
+/// there throttles all authentication collectively. With `--client-ip none`
+/// no address is available and the limiter is inert.
+///
+/// A header strategy is only as trustworthy as the proxy that sets the
+/// header: a request that reaches the instance without it yields no address
+/// and is admitted unchecked, so the limiter only protects deployments where
+/// every request to these endpoints passes through that proxy.
+pub static HTTP_AUTH_RATE_LIMIT_ENABLED: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_ENABLED", bool, false);
+
+/// The burst of authentication attempts a single client address may make
+/// against the HTTP /signin and /signup endpoints before being rate
+/// limited (default: 60). Both endpoints draw from one shared budget.
+/// Setting this to 0 disables the limiter.
+pub static HTTP_AUTH_RATE_LIMIT_BURST: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_BURST", u32, 60);
+
+/// The sustained rate, in attempts per minute, at which a client address's
+/// authentication budget refills (default: 60, i.e. one attempt per
+/// second). Setting this to 0 disables the limiter.
+pub static HTTP_AUTH_RATE_LIMIT_PER_MINUTE: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_PER_MINUTE", u32, 60);
+
+/// The maximum number of client addresses tracked by the authentication
+/// rate limiter at once (default: 16384). Setting this to 0 disables the
+/// limiter.
+///
+/// The tracking store is written by unauthenticated callers, so it is a
+/// bounded cache: at capacity, tracking a new address evicts an existing
+/// entry rather than growing the store or turning the limiter off. An
+/// evicted address starts again from a full burst, so the sustained rate
+/// binds an address only while it stays tracked: size this above the number
+/// of distinct addresses the instance authenticates.
+pub static HTTP_AUTH_RATE_LIMIT_MAX_TRACKED_CLIENTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_MAX_TRACKED_CLIENTS", usize, 16384);
 
 /// The maximum HTTP body size of the HTTP /import endpoint (default: 4 GiB)
 pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
@@ -154,10 +354,28 @@ pub static WEBSOCKET_MAX_WRITE_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
 	buffer_size().unwrap_or(usize::MAX)
 });
 
-/// How many messages can be queued for sending down the WebSocket (default:
-/// 100)
-pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
+/// The smallest outbound queue a WebSocket connection can run with.
+///
+/// A queue of zero is not a queue at all and panics the channel it is handed
+/// to. Two rather than one because a queue of one holds nothing behind the
+/// message being written: a second notification arriving before the writer
+/// drains the first finds it full, and a client reading promptly is closed
+/// for a burst of its own notifications -- see
+/// [`Websocket::deliver_notification`].
+///
+/// [`Websocket::deliver_notification`]: crate::rpc::websocket::Websocket::deliver_notification
+pub const WEBSOCKET_RESPONSE_CHANNEL_FLOOR: usize = 2;
+
+/// How many messages can be queued for sending down each of a WebSocket
+/// connection's outbound queues (default: 100), never fewer than
+/// [`WEBSOCKET_RESPONSE_CHANNEL_FLOOR`]. Replies and notifications queue
+/// separately and are sized alike; the close frame that ends a lagging
+/// connection has a slot of its own that this does not size.
+pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> = LazyLock::new(|| {
+	static CONFIGURED: LazyLock<usize> =
+		lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
+	(*CONFIGURED).max(WEBSOCKET_RESPONSE_CHANNEL_FLOOR)
+});
 
 /// How many responses can be buffered when delivering to the client (default:
 /// 0)
@@ -244,18 +462,21 @@ pub static METRICS_ENABLED: LazyLock<bool> = lazy_env_parse!("SURREAL_METRICS_EN
 pub static SLOW_QUERY_METRIC_THRESHOLD_MS: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS", u64, 1000);
 
-/// Cadence (in seconds) at which the cached process snapshot used by the
-/// `surrealdb.process.{memory,cpu_percent}` observable gauges is refreshed.
+/// Cadence (in seconds) at which the cached process snapshot read by the
+/// `surrealdb.process.{memory,cpu_percent}` observable gauges and by
+/// `INFO FOR ROOT` is refreshed.
 ///
-/// A background task runs while metrics are enabled (Prometheus and / or
-/// OTLP) and calls
-/// [`surrealdb_core::observe::refresh_process_snapshot`] on this cadence
-/// so OTLP-only deployments do not see flat-lined process metrics
-/// between exports. The default of `5` seconds gives stable CPU%
-/// readings (sysinfo computes CPU% as a delta since the last refresh,
-/// so very short intervals amplify scheduler jitter) while keeping the
-/// per-refresh overhead well under 0.05% of one core. Operators
-/// running tighter or looser metric pipelines can override.
+/// Supplies `EngineOptions::system_metrics_refresh_interval`, so the engine's
+/// maintenance scheduler calls
+/// [`surrealdb_core::observe::refresh_process_snapshot`] on this cadence. The
+/// refresh runs whether or not metrics are exported, because `INFO FOR ROOT`
+/// reads the same cache; OTLP-only deployments therefore do not see
+/// flat-lined process metrics between exports. Values below one second are
+/// floored to one. The default of `5` seconds gives stable CPU% readings
+/// (sysinfo computes CPU% as a delta since the last refresh, so very short
+/// intervals amplify scheduler jitter) while keeping the per-refresh overhead
+/// well under 0.05% of one core. Operators running tighter or looser metric
+/// pipelines can override.
 pub static PROCESS_METRICS_REFRESH_INTERVAL: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_PROCESS_METRICS_REFRESH_INTERVAL", u64, 5);
 
@@ -279,3 +500,76 @@ pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
 /// `tokio-console` feature.
 pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_ENABLED", bool, false);
+
+#[cfg(test)]
+mod tests {
+	use super::{
+		GRPC_MAX_MESSAGE_CEILING, GRPC_MIN_MESSAGE_SIZE, HTTP_MAX_RPC_BODY_SIZE, grpc_message_size,
+	};
+
+	/// A size this small configures the service to refuse messages it has to be
+	/// able to send -- `GetCapabilities` at the bottom end, an export chunk at
+	/// the top -- leaving a service that starts, advertises its methods and
+	/// then fails every call.
+	#[test]
+	fn an_unusable_grpc_message_size_is_raised_to_the_floor() {
+		for configured in ["0", "1", "1k", "255k"] {
+			assert_eq!(
+				grpc_message_size(Some(configured)),
+				GRPC_MIN_MESSAGE_SIZE,
+				"{configured} cannot carry a message this service must send"
+			);
+		}
+	}
+
+	/// A value that is not a size says nothing about intent, so it takes the
+	/// default rather than the floor.
+	#[test]
+	fn an_unreadable_grpc_message_size_takes_the_default() {
+		let default = *HTTP_MAX_RPC_BODY_SIZE;
+		assert_eq!(grpc_message_size(Some("banana")), default, "a word is not a size");
+		assert_eq!(grpc_message_size(Some("")), default, "nor is nothing");
+		assert_eq!(grpc_message_size(None), default, "and unset is the default");
+		// The boundary of "readable": a number the parser overflows computing
+		// is not a size it can express, so it is unreadable rather than large.
+		// Anything it can express is capped instead -- see the ceiling test.
+		assert_eq!(
+			grpc_message_size(Some("340282366920938463463374607431768211456")),
+			default,
+			"a number past what the parser accumulates in is not a size"
+		);
+	}
+
+	/// A size an operator actually meant is honoured, with the byte suffixes
+	/// the other size settings accept.
+	#[test]
+	fn a_configured_grpc_message_size_is_honoured() {
+		assert_eq!(grpc_message_size(Some("128mib")), 128 << 20);
+	}
+
+	/// A message longer than four gibibytes cannot be length-prefixed, so the
+	/// transport refuses it whatever this says. Advertising such a size would
+	/// have every client size its buffers to a message the route can never
+	/// carry.
+	#[test]
+	fn a_grpc_message_size_past_the_frame_width_is_capped() {
+		for configured in [
+			"8g",
+			"4gib",
+			"16gib",
+			// Past `usize` on a 32-bit target, and past `u64` everywhere: each
+			// is a size the parser can still express, so each is capped rather
+			// than mistaken for a value it could not read.
+			"18446744073709551616",
+			"17179869184gib",
+		] {
+			assert_eq!(
+				grpc_message_size(Some(configured)),
+				GRPC_MAX_MESSAGE_CEILING,
+				"{configured} is longer than a four byte length prefix can describe"
+			);
+		}
+		// And a size just inside it is left alone.
+		assert_eq!(grpc_message_size(Some("2gib")), 2 << 30);
+	}
+}

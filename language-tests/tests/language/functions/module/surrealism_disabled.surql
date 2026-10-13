@@ -3,15 +3,15 @@
 allow-experimental = []
 
 [test]
-reason = "Test that mod:: module syntax requires experimental capability when not enabled"
+reason = "A `mod::` function call is rejected at parse time when Surrealism modules are not enabled, with the caret on the `mod` keyword."
 
 [test.results]
 parsing-error = """
-Experimental capability `surrealism` is not enabled
+Surrealism modules are not enabled
   --> [19:8]
    |
 19 | RETURN mod::nonexistent();
-   |        ^^^ Use of `mod::` is still experimental
+   |        ^^^ Use of `mod::` requires Surrealism modules
 """
 */
 

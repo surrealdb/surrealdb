@@ -30,6 +30,8 @@ pub mod ntw;
 /// Observability wiring: community Prometheus registry, `/metrics` handler,
 /// and the allowlists controlling what may leave the server unauthenticated.
 pub mod observe;
+#[cfg(feature = "postgres")]
+mod pg;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
 pub mod rpc;
@@ -43,7 +45,7 @@ pub mod tls;
 use std::future::Future;
 use std::process::ExitCode;
 
-pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
+pub use cli::{Config, ConfigCheck};
 /// Re-export `RouterFactory` for convenience so embedders can `use
 /// surrealdb_server::RouterFactory`.
 #[doc(inline)]
@@ -64,7 +66,6 @@ pub use surrealdb as sdk;
 /// Re-export `core` for convenience so embedders can `use surrealdb_server::core::...`.
 #[doc(inline)]
 pub use surrealdb_core as core;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
@@ -83,11 +84,7 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 ///   - `RouterFactory` (constructs the HTTP router)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {

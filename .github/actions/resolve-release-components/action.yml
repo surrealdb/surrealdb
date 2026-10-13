@@ -1,0 +1,63 @@
+name: 'Resolve components to release'
+description: >-
+  Resolve components to release.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  release-downstream:
+    description: 'release-downstream (see step body)'
+    value: ${{ steps.resolve.outputs.release-downstream }}
+  release-engine:
+    description: 'release-engine (see step body)'
+    value: ${{ steps.resolve.outputs.release-engine }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve components to release
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        release_engine="${REQ_ENGINE}"
+        release_downstream="${REQ_DOWNSTREAM}"
+        test="${REQ_TEST:-false}"
+
+        # A downstream image must exist to mirror it, whether for a downstream
+        # release (release-downstream) or a test release (test).
+        if [[ ( "${release_downstream}" == "true" || "${test}" == "true" ) && "${DS_BUILT}" != "true" ]]; then
+          if [[ "${EVENT}" == "schedule" ]]; then
+            echo "::warning::Nightly: no downstream image was built for ${SHA}; releasing the engine only."
+            release_downstream=false
+          elif [[ "${DS_BRANCH_MISSING:-false}" == "true" ]]; then
+            # No matching downstream release branch for this line (Locate probed the
+            # downstream repo), so no downstream image exists or will ever be built.
+            # The policy depends on what was asked for:
+            #   * public (the engine is being released too) -> ship the engine only.
+            #   * internal / test (the downstream image is the whole deliverable) ->
+            #     fail; there is nothing to release.
+            if [[ "${release_engine}" == "true" ]]; then
+              echo "::warning::No matching downstream release branch exists for this line, so no downstream image is built; releasing the engine only."
+              release_downstream=false
+            else
+              echo "::error::No matching downstream release branch exists for this line, so no downstream image is (or will be) built - but this ${COMPONENTS} release ships only the downstream image. Create the matching downstream release branch and re-run its rolling build, or cut a public release instead."
+              exit 1
+            fi
+          else
+            echo "::error::A downstream image was requested (components=${COMPONENTS}) but none was built for ${SHA} (no downstream.json for this commit). Re-run the rolling build for this commit."
+            exit 1
+          fi
+        fi
+
+        if [[ "${release_engine}" != "true" && "${release_downstream}" != "true" && "${test}" != "true" ]]; then
+          echo "::error::Nothing to release: neither the engine, a downstream image, nor a test image is being promoted."
+          exit 1
+        fi
+
+        echo "Effective release: engine=${release_engine}, downstream=${release_downstream}"
+        {
+          echo "release-engine=${release_engine}"
+          echo "release-downstream=${release_downstream}"
+        } >> "$GITHUB_OUTPUT"
