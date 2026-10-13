@@ -162,6 +162,57 @@ pub struct DiskAnnPendingState {
 
 impl_kv_value_revisioned!(DiskAnnPendingState);
 
+/// A node's writer lease on one DiskANN pending-state guard shard (`!dz`).
+///
+/// Held by a node whose writers commit pending updates into the shard without
+/// arming its guard. No node steps the guard while a lease on its shard
+/// holds; one holds until its node releases it or it expires.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DiskAnnWriterLease {
+	/// The datastore instance that took the lease, so a node id reused by a
+	/// later process does not pass for this one.
+	pub process: uuid::Uuid,
+	/// The instant the lease stops holding unless its node renews it first.
+	pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl_kv_value_revisioned!(DiskAnnWriterLease);
+
+impl DiskAnnWriterLease {
+	/// A lease another process took, expired or not, as the tests of the
+	/// writer-lease protocol plant one.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn foreign(expired: bool) -> Self {
+		let ttl = chrono::Duration::seconds(if expired {
+			-1
+		} else {
+			60
+		});
+		Self {
+			process: uuid::Uuid::new_v4(),
+			expires_at: chrono::Utc::now() + ttl,
+		}
+	}
+
+	/// This lease expiring `secs` seconds from now, or having expired that long
+	/// ago for a negative `secs`, as the tests of its renewal and retirement
+	/// plant it.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn expiring_in(&self, secs: i64) -> Self {
+		Self {
+			process: self.process,
+			expires_at: chrono::Utc::now() + chrono::Duration::seconds(secs),
+		}
+	}
+
+	/// Whether the lease holds for at least `secs` more seconds.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn holds_for(&self, secs: i64) -> bool {
+		self.expires_at > chrono::Utc::now() + chrono::Duration::seconds(secs)
+	}
+}
+
 /// Coalesced pending vector state for a single DiskANN indexed record.
 ///
 /// `id` is the record the entry belongs to, kept here because the revisioned

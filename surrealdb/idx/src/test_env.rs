@@ -99,6 +99,73 @@ impl TestIndexStore {
 		}
 	}
 
+	/// Another datastore over this store's backend, as a second node of a
+	/// cluster sees it: its own node id, index stores and commit triggers, and
+	/// the DiskANN writer-lease protocol a store shared between datastores needs.
+	pub(crate) fn shared_node(&self) -> Self {
+		let triggers = Arc::new(CommitTriggers::new());
+		triggers.assume_shared_store();
+		self.node_with(triggers)
+	}
+
+	/// Another datastore over this store's backend that covers DiskANN guards
+	/// as on a store validating every read
+	/// (`surrealdb_kvs::api::Transactable::validates_reads`).
+	pub(crate) fn validating_node(&self) -> Self {
+		let triggers = Arc::new(CommitTriggers::new());
+		triggers.assume_validated_reads();
+		self.node_with(triggers)
+	}
+
+	/// Another datastore over this store's backend, with `triggers` and its own
+	/// node id and index stores.
+	fn node_with(&self, triggers: Arc<CommitTriggers>) -> Self {
+		let tf = self.tf.with_triggers(triggers);
+		let node_id = Uuid::new_v4();
+		let config = &self.config;
+		let stores = IndexStores::new(
+			config.hnsw_cache_size,
+			config.diskann_cache_size,
+			config.graph_resolve_cache_size,
+			config.segment_dictionary_path.clone(),
+		);
+		Self {
+			sequences: Sequences::new(tf.clone(), node_id),
+			tf,
+			stores,
+			node_id,
+			config: Arc::clone(config),
+		}
+	}
+
+	/// Have this datastore's next commit run `hook` between covering its DiskANN
+	/// guards and its storage commit.
+	pub(crate) fn before_next_commit(&self, hook: surrealdb_datastore::triggers::BeforeCommitHook) {
+		self.tf.triggers().set_before_commit_hook(hook);
+	}
+
+	/// How many DiskANN guards this datastore's compaction has repaired.
+	pub(crate) fn guard_repairs(&self) -> usize {
+		self.tf.triggers().diskann_guard_repairs()
+	}
+
+	/// This datastore's node id.
+	pub(crate) fn node_id(&self) -> Uuid {
+		self.node_id
+	}
+
+	/// Release every DiskANN writer lease this datastore holds, as its idle
+	/// release would once nothing has committed under them for long enough.
+	pub(crate) async fn release_writer_leases(&self) -> Result<usize> {
+		self.release_idle_writer_leases(Duration::ZERO).await
+	}
+
+	/// Release the DiskANN writer leases nothing has relied on for `idle`, as the
+	/// idle release does.
+	pub(crate) async fn release_idle_writer_leases(&self, idle: Duration) -> Result<usize> {
+		self.tf.release_idle_diskann_writer_leases(&self.sequences, idle).await
+	}
+
 	/// The process-local index registry, shared by every environment this
 	/// store hands out — the caches must survive across transactions for the
 	/// tests that assert on cache behaviour.

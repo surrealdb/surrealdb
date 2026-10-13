@@ -489,6 +489,16 @@ pub trait Transactable: Send + Sync {
 		false
 	}
 
+	/// Whether a write transaction commits only if no key it read, by any read
+	/// and not only [`Self::getu`], was written by a transaction that committed
+	/// after it opened. A caller may then rely on a plain read staying true up
+	/// to its commit, and must not have another transaction write a key this
+	/// one read without failing this one's commit. `false` unless the backend
+	/// guarantees it.
+	fn validates_reads(&self) -> bool {
+		false
+	}
+
 	/// Whether [`Self::count`] reads its range off the calling thread, and
 	/// in parallel where the transaction allows: a caller may then count a
 	/// range in a few calls, each awaited without holding its thread for the
@@ -552,6 +562,19 @@ pub trait Transactable: Send + Sync {
 	/// specific to networked backends, since a durability step that fails after
 	/// the write is already visible leaves the same ambiguity.
 	fn commit<'a>(&'a self) -> BoxFut<'a, Result<()>>;
+
+	/// Commit a transaction as [`Self::commit`] does, without waiting for the
+	/// store to make this commit durable on its own.
+	///
+	/// For a commit whose durability a later synced commit through the same
+	/// store provides. The commit is applied and visible on return, with the
+	/// same error contract as [`Self::commit`]; only the store's own sync wait
+	/// is skipped. A backend overrides this only where its commits become
+	/// durable in the order they are applied, so that no later commit survives
+	/// a crash this one does not. The default commits as usual.
+	fn commit_unsynced<'a>(&'a self) -> BoxFut<'a, Result<()>> {
+		self.commit()
+	}
 
 	/// Check if a key exists in the datastore.
 	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>>;

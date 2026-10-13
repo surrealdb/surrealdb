@@ -125,6 +125,9 @@ serial_test.workspace = true
 # The engines' own tests open a transaction against an in-memory backend.
 # Nothing in the library selects a backend.
 surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
+# The writer-lease tests run two datastores over one in-memory store, which
+# reports itself the sole writer; the hook has them run the lease protocol.
+surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
 # The analyzer helper parses a `DEFINE ANALYZER` statement rather than building
 # the definition by hand, so the tests keep the parser.
 temp-dir.workspace = true

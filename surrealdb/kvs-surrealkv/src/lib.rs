@@ -80,6 +80,39 @@ impl Transaction {
 		}
 		Ok(())
 	}
+
+	/// Commits the transaction, waiting for the grouped fsync when `sync`.
+	async fn commit_with(&self, sync: bool) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Refuse the commit before applying anything once the datastore
+		// has begun shutting down: the grouped fsync can no longer
+		// confirm durability, so no new commit should run past this
+		// point. Shutdown is treated as a controlled crash — the store
+		// is required to be consistent after any crash — so failing here
+		// leaves the transaction un-applied and safely retryable.
+		if let Some(coordinator) = &self.commit_coordinator
+			&& coordinator.is_shutting_down()
+		{
+			return Err(Error::Shutdown);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Commit the transaction (writes to WAL)
+		inner.commit().await.map_err(kvs_error)?;
+		// If we have a coordinator, wait for the grouped fsync
+		if sync && let Some(coordinator) = &self.commit_coordinator {
+			coordinator.wait_for_sync().await?;
+		}
+		// Continue
+		Ok(())
+	}
 }
 
 impl Datastore {
@@ -267,37 +300,15 @@ impl Transactable for Transaction {
 	/// Commits the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn commit(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			// Atomically mark transaction as done and check if it was already closed
-			if self.done.swap(true, Ordering::AcqRel) {
-				return Err(Error::TransactionFinished);
-			}
-			// Check to see if transaction is writable
-			if !self.writeable() {
-				return Err(Error::TransactionReadonly);
-			}
-			// Refuse the commit before applying anything once the datastore
-			// has begun shutting down: the grouped fsync can no longer
-			// confirm durability, so no new commit should run past this
-			// point. Shutdown is treated as a controlled crash — the store
-			// is required to be consistent after any crash — so failing here
-			// leaves the transaction un-applied and safely retryable.
-			if let Some(coordinator) = &self.commit_coordinator
-				&& coordinator.is_shutting_down()
-			{
-				return Err(Error::Shutdown);
-			}
-			// Load the inner transaction
-			let mut inner = self.inner.write().await;
-			// Commit the transaction (writes to WAL)
-			inner.commit().await.map_err(kvs_error)?;
-			// If we have a coordinator, wait for the grouped fsync
-			if let Some(coordinator) = &self.commit_coordinator {
-				coordinator.wait_for_sync().await?;
-			}
-			// Continue
-			Ok(())
-		})
+		Box::pin(self.commit_with(true))
+	}
+
+	/// Commits the transaction without waiting for the grouped fsync. The
+	/// write-ahead log applies commits in order, so a later synced commit
+	/// makes this one durable with it.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	fn commit_unsynced(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(self.commit_with(false))
 	}
 
 	/// Checks if a key exists in the database.

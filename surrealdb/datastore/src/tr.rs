@@ -218,6 +218,23 @@ impl Transactor {
 		self.inner.writeable()
 	}
 
+	/// Whether every transaction committed to the store is committed through
+	/// the datastore this transaction belongs to, and this transaction reads
+	/// the snapshot the store held when it opened.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::sole_writer`].
+	pub fn sole_writer(&self) -> bool {
+		self.inner.sole_writer()
+	}
+
+	/// Whether a write transaction's commit fails if any key it read was
+	/// written since it opened.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::validates_reads`].
+	pub fn validates_reads(&self) -> bool {
+		self.inner.validates_reads()
+	}
+
 	/// Whether a locked read ([`Self::getu`]) conflicts only with writes,
 	/// never with another transaction's locked read of the same key.
 	///
@@ -251,6 +268,19 @@ impl Transactor {
 	)]
 	pub(crate) async fn commit(&self) -> Result<()> {
 		self.inner.commit().await
+	}
+
+	/// Commit the transaction without waiting for the store's own sync.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::commit_unsynced`]. Crate-private:
+	/// only for a commit a later synced commit through the same store makes
+	/// durable.
+	#[cfg_attr(
+		not(diskann),
+		allow(dead_code, reason = "only DiskANN guard coverings and steps commit unsynced")
+	)]
+	pub(crate) async fn commit_unsynced(&self) -> Result<()> {
+		self.inner.commit_unsynced().await
 	}
 
 	/// Check if a key exists in the datastore.

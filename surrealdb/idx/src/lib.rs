@@ -233,6 +233,12 @@ pub async fn wipe_index_data(
 	}
 
 	tx.del_prefix_key(&ikb.new_idx_root()).await?;
+	// The wipe removes the DiskANN pending-state guards and writer leases too, so
+	// what this datastore knows of them is forgotten as the wipe commits.
+	#[cfg(diskann)]
+	if matches!(index, catalog::Index::DiskAnn(_)) {
+		tx.buffer_diskann_guard_wipe(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
+	}
 
 	if let Some(generation) = hnsw {
 		tx.set_key(&ikb.new_hg_key(), &generation).await?;

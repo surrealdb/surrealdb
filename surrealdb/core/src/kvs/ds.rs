@@ -130,6 +130,12 @@ pub use config::LiveQueryEngine;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
+/// How long a node commits nothing under its DiskANN writer leases on an index
+/// before it releases them ([`Datastore::release_idle_diskann_writer_leases`]).
+/// Until then no node returns those shards' guards to `Empty`, so lookups keep
+/// scanning them; past it, a write takes the lease again.
+const DISKANN_WRITER_LEASE_IDLE: Duration = Duration::from_secs(10);
+
 /// Whether a feature-level raise consults the other nodes' recorded releases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NodeCheck {
@@ -3893,9 +3899,14 @@ impl Datastore {
 	/// the scan to itself (a start-anchored or key-successor scan only stays
 	/// fair while the drain outpaces the enqueue).
 	///
-	/// Under sustained enqueue the drain keeps running — every iteration
-	/// stays bounded — and stops when the queue empties, the lease is lost,
-	/// or the task is cancelled.
+	/// Where this datastore is the store's sole writer, a pass ends once it has
+	/// compacted a batch that held everything queued when it was read: entries
+	/// queued during the pass are left for the next one, which the write that
+	/// queued them wakes after a debounce, so each pass compacts the writes of
+	/// that interval together. On a store other nodes write to, whose commits
+	/// do not wake this node, and under a backlog of full batches, the drain
+	/// keeps running — every iteration stays bounded — and stops when the queue
+	/// empties, the lease is lost, or the task is cancelled.
 	///
 	/// Coordinated across the cluster by a [`TaskLeaseType::IndexCompaction`]
 	/// lease. Returns the number of processed batches and the number of
@@ -3954,14 +3965,29 @@ impl Datastore {
 			// key it deletes is a per-replica write reservation on
 			// distributed backends. Queue values carry no payload, so a
 			// keys-only scan suffices.
-			let keys = {
+			let (keys, sole_writer) = {
 				let txn = dbs.transaction(Read).await?;
 				let res =
 					txn.keys(window.clone(), INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
+				let sole_writer = txn.sole_writer();
 				let _ = txn.cancel().await;
-				res?
+				(res?, sole_writer)
 			};
 			Self::ensure_not_cancelled(&canceller)?;
+			// A batch read from the start of the queue that came back short of a
+			// full batch is everything queued when it was read. Where this
+			// datastore is the store's sole writer, the pass ends once it is
+			// compacted, rather than going straight back for the entries queued
+			// meanwhile: each was queued by a commit of this datastore, which wakes
+			// the next pass after a debounce, so a pass compacts the writes of that
+			// interval together instead of a handful at a time. On a store other
+			// nodes write to, their commits do not wake this node, so the pass keeps
+			// going until the queue is empty. A full batch, or one read part-way
+			// through the queue, is a backlog, and the pass keeps going until it is
+			// drained.
+			let whole_queue = sole_writer
+				&& window.start() == queue.start()
+				&& keys.len() < INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
 			if keys.is_empty() {
 				if window.start() == queue.start() {
 					// Nothing left anywhere in the queue.
@@ -4066,6 +4092,13 @@ impl Datastore {
 					warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
 					break 'compaction;
 				}
+				break;
+			}
+			#[cfg(test)]
+			if let Some(hook) = test::take_after_compaction_batch(dbs.id) {
+				hook().await;
+			}
+			if whole_queue {
 				break;
 			}
 		}
@@ -6006,6 +6039,17 @@ impl Datastore {
 		&self.transaction_factory
 	}
 
+	/// Release the DiskANN writer leases this node holds on indexes it has
+	/// committed nothing under for [`DISKANN_WRITER_LEASE_IDLE`], so other nodes'
+	/// compaction can return those indexes' drained guards to `Empty`. A lease is
+	/// only ever held on a store this datastore is not the sole writer of.
+	pub(crate) async fn release_idle_diskann_writer_leases(&self) -> Result<()> {
+		self.transaction_factory
+			.release_idle_diskann_writer_leases(&self.sequences, DISKANN_WRITER_LEASE_IDLE)
+			.await
+			.map(|_| ())
+	}
+
 	#[cfg(test)]
 	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
 	pub(crate) fn index_builder(&self) -> &IndexBuilder {
@@ -7380,6 +7424,21 @@ mod test {
 	};
 	use crate::types::{PublicValue, PublicVariables};
 
+	/// Work a test runs once a compaction pass of the node has compacted a batch
+	/// and deleted its queue entries.
+	type CompactionBatchHook =
+		Box<dyn FnOnce() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
+	static AFTER_COMPACTION_BATCH: std::sync::LazyLock<
+		std::sync::Mutex<HashMap<Uuid, CompactionBatchHook>>,
+	> = std::sync::LazyLock::new(Default::default);
+
+	/// The hook a test set for the node's next compacted batch, taken so it runs
+	/// once.
+	pub(super) fn take_after_compaction_batch(node: Uuid) -> Option<CompactionBatchHook> {
+		AFTER_COMPACTION_BATCH.lock().unwrap().remove(&node)
+	}
+
 	async fn new_index_compaction_test_ds() -> Result<(Arc<Datastore>, Session)> {
 		new_index_compaction_test_ds_with_config(ConfigMap::empty()).await
 	}
@@ -8636,6 +8695,79 @@ mod test {
 
 		assert_eq!(errors, 0);
 		assert_eq!(retryable_conflict_count(site, node_id), 0);
+		Ok(())
+	}
+
+	/// Runs one compaction pass over a short queue, with two more entries queued
+	/// once its first batch is compacted, as a write landing during the pass
+	/// would, and returns the pass's batches and the entries left after it.
+	async fn compaction_pass_with_entries_queued_during_it(
+		shared_store: bool,
+	) -> Result<(usize, usize)> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		if shared_store {
+			ds.triggers.assume_shared_store();
+		}
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		let enqueue = move |ds: Arc<Datastore>, ikb: IndexKeyBase, n: usize| async move {
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..n {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await
+		};
+		enqueue(Arc::clone(&ds), ikb.clone(), 3).await?;
+		let (hook_ds, hook_ikb) = (Arc::clone(&ds), ikb.clone());
+		AFTER_COMPACTION_BATCH.lock().unwrap().insert(
+			node_id,
+			Box::new(move || {
+				Box::pin(async move {
+					enqueue(hook_ds, hook_ikb, 2).await.expect("queueing during the pass");
+				})
+			}),
+		);
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert!(take_after_compaction_batch(node_id).is_none(), "the pass ran the hook");
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		Ok((batches, remaining.len()))
+	}
+
+	/// Where the datastore is the store's sole writer, a pass ends once it has
+	/// compacted a short batch holding the whole queue: entries queued during
+	/// it are left for the next pass, which the commit that queued them wakes.
+	#[tokio::test]
+	async fn index_compaction_pass_on_a_sole_writer_leaves_entries_queued_during_it() -> Result<()>
+	{
+		assert_eq!(compaction_pass_with_entries_queued_during_it(false).await?, (1, 2));
+		Ok(())
+	}
+
+	/// On a store other nodes write to, their commits do not wake this node's
+	/// compactor, so a pass drains what was queued during it before it ends.
+	#[tokio::test]
+	async fn index_compaction_pass_on_a_shared_store_drains_entries_queued_during_it() -> Result<()>
+	{
+		assert_eq!(compaction_pass_with_entries_queued_during_it(true).await?, (2, 0));
 		Ok(())
 	}
 

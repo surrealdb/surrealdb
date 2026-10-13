@@ -278,6 +278,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!dp                                                                   DiskannPendingLegacyPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dy{shard}                                                                     DiskannPendingKey ->  crate::values::diskann::DiskAnnPendingState
 /*{ns}*{db}*{tb}+{ix}!dy                                                                         DiskannPendingPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!dz{shard}{nid}                                                            DiskannWriterLeaseKey ->  crate::values::diskann::DiskAnnWriterLease
+/*{ns}*{db}*{tb}+{ix}!dz{shard}                                                         DiskannWriterLeaseShardPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dr{id}                                                                  DiskannRecordPendingKey ->  crate::values::diskann::DiskAnnRecordPendingUpdate
 /*{ns}*{db}*{tb}+{ix}!dr                                                                   DiskannRecordPendingPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dw{shard}{id}                                                      DiskannRecordPendingShardKey ->  crate::values::diskann::DiskAnnRecordPendingUpdate

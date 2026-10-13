@@ -828,6 +828,14 @@ keyspace! {
 						#[cfg(diskann)]
 						diskann_pending = ["!dy", @, shard: u16]
 							=> crate::values::diskann::DiskAnnPendingState;
+						/// A node's writer lease on one `!dy` guard shard: while it
+						/// holds, the node's writers commit pending updates into the
+						/// shard without arming its guard, so no node steps the guard.
+						/// Written only where the datastore is not the store's sole
+						/// writer.
+						#[cfg(diskann)]
+						diskann_writer_lease = ["!dz", shard: u16, @, nid: Uuid]
+							=> crate::values::diskann::DiskAnnWriterLease;
 
 						/// Legacy unsharded record-keyed DiskANN pending updates, read
 						/// and drained but never written.
@@ -2515,7 +2523,7 @@ mod tests {
 		#[cfg(diskann)]
 		stored_tags.extend_from_slice(&[
 			"/***+!de", "/***+!dg", "/***+!dh", "/***+!dk", "/***+!dn", "/***+!dp", "/***+!dq",
-			"/***+!dr", "/***+!ds", "/***+!dw", "/***+!dy",
+			"/***+!dr", "/***+!ds", "/***+!dw", "/***+!dy", "/***+!dz",
 		]);
 
 		// Reduce every declared route the same way: drop field placeholders.

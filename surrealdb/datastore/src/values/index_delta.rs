@@ -33,6 +33,14 @@
 //! [`IndexDeltaBuffer::pending_term_change`] and
 //! [`IndexDeltaBuffer::pending_doc_stats`].
 //!
+//! The buffer also names the DiskANN pending-state guard shards
+//! (`!dy{shard}`) this transaction wrote pending updates into. Unlike the
+//! other families, these are not written into the committing transaction:
+//! the commit arms them in a transaction of its own, so the user's
+//! transaction never reads or writes a key the compactor writes
+//! (`Transaction::commit`). Lookups in this transaction treat a named shard as
+//! holding entries ([`IndexDeltaBuffer::pending_guard_shards`]).
+//!
 //! ## Save-point scoping
 //!
 //! Every family is a stack of frames rather than one map, because what the buffer
@@ -49,7 +57,7 @@
 //! the transaction's own and is never popped — the storage layer has no save point
 //! matching it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use parking_lot::Mutex;
 use roaring::RoaringTreemap;
@@ -173,6 +181,18 @@ pub struct IndexDeltaBuffer {
 	/// Adjacency scopes that asked for a fold, and the node id to tag the
 	/// queue entry with.
 	graph_folds: Mutex<Vec<HashMap<GraphFoldScope, Uuid>>>,
+	/// DiskANN pending-state guard shards this transaction wrote a pending
+	/// update into, to be armed when it commits.
+	pending_guards: Mutex<Vec<HashMap<(BufferedIndex, u16), ()>>>,
+	/// DiskANN indexes whose data this transaction wiped, guards included.
+	/// Not save-point scoped: what is known of a wiped index's guards is
+	/// forgotten at commit, and forgetting it needlessly costs only a read.
+	guard_wipes: Mutex<HashSet<BufferedIndex>>,
+	/// DiskANN indexes whose pending-state guards this transaction read, noted
+	/// only on a store that validates every read. Not save-point scoped: a
+	/// rolled-back read may still be validated, and treating an index as read
+	/// needlessly costs only a guard write at commit.
+	guards_read: Mutex<HashSet<BufferedIndex>>,
 }
 
 impl Default for IndexDeltaBuffer {
@@ -183,6 +203,9 @@ impl Default for IndexDeltaBuffer {
 			term_changes: Mutex::new(vec![HashMap::new()]),
 			doc_stats: Mutex::new(vec![HashMap::new()]),
 			graph_folds: Mutex::new(vec![HashMap::new()]),
+			pending_guards: Mutex::new(vec![HashMap::new()]),
+			guard_wipes: Mutex::new(HashSet::new()),
+			guards_read: Mutex::new(HashSet::new()),
 		}
 	}
 }
@@ -387,6 +410,75 @@ impl IndexDeltaBuffer {
 		merged.into_iter().collect()
 	}
 
+	/// Record that this transaction wrote a DiskANN pending update into
+	/// `shard` of `index`, so the shard's guard is armed when it commits.
+	pub fn buffer_pending_guard(&self, index: BufferedIndex, shard: u16) {
+		let mut frames = self.pending_guards.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
+		frame.insert((index, shard), ());
+	}
+
+	/// The shards of an index this transaction has written a DiskANN pending
+	/// update into that a rollback has not undone, as a bit per shard, so a
+	/// lookup in it scans those shards whatever their stored guards say.
+	pub fn pending_guard_shards(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> u64 {
+		self.pending_guards
+			.lock()
+			.iter()
+			.flat_map(|frame| frame.keys())
+			.filter(|(index, _)| {
+				index.ix == ix && index.ns == ns && index.db == db && index.tb == *tb
+			})
+			.fold(0, |shards, (_, shard)| shards | 1 << shard)
+	}
+
+	/// Record that this transaction wiped the data of a DiskANN index, guards
+	/// included.
+	pub fn buffer_guard_wipe(&self, index: BufferedIndex) {
+		self.guard_wipes.lock().insert(index);
+	}
+
+	/// Record that this transaction read the DiskANN index's pending-state
+	/// guards.
+	pub fn note_guards_read(&self, index: BufferedIndex) {
+		self.guards_read.lock().insert(index);
+	}
+
+	/// Drain the DiskANN indexes whose pending-state guards this transaction
+	/// read.
+	pub fn take_guards_read(&self) -> HashSet<BufferedIndex> {
+		std::mem::take(&mut *self.guards_read.lock())
+	}
+
+	/// Whether any DiskANN pending-state guard shard is waiting to be armed, or
+	/// any DiskANN index's guards were wiped.
+	pub fn has_pending_guards(&self) -> bool {
+		self.pending_guards.lock().iter().any(|frame| !frame.is_empty())
+			|| !self.guard_wipes.lock().is_empty()
+	}
+
+	/// Drain the DiskANN indexes whose guards were wiped.
+	pub fn take_guard_wipes(&self) -> Vec<BufferedIndex> {
+		self.guard_wipes.lock().drain().collect()
+	}
+
+	/// Drain the DiskANN pending-state guard shards to arm.
+	pub fn take_pending_guards(&self) -> Vec<(BufferedIndex, u16)> {
+		let mut frames = self.pending_guards.lock();
+		let mut merged: HashMap<(BufferedIndex, u16), ()> = HashMap::new();
+		for frame in frames.drain(..) {
+			merged.extend(frame);
+		}
+		frames.push(HashMap::new());
+		merged.into_keys().collect()
+	}
+
 	/// Drain the accumulated fold triggers.
 	#[allow(clippy::mutable_key_type)]
 	pub fn take_graph_folds(&self) -> Vec<(GraphFoldScope, Uuid)> {
@@ -406,6 +498,8 @@ impl IndexDeltaBuffer {
 			&& self.term_changes.lock().iter().all(HashMap::is_empty)
 			&& self.doc_stats.lock().iter().all(HashMap::is_empty)
 			&& self.graph_folds.lock().iter().all(HashMap::is_empty)
+			&& self.pending_guards.lock().iter().all(HashMap::is_empty)
+			&& self.guard_wipes.lock().is_empty()
 	}
 
 	/// Discard everything buffered. Used when the transaction is cancelled.
@@ -415,6 +509,9 @@ impl IndexDeltaBuffer {
 		reset_frames(&mut self.term_changes.lock());
 		reset_frames(&mut self.doc_stats.lock());
 		reset_frames(&mut self.graph_folds.lock());
+		reset_frames(&mut self.pending_guards.lock());
+		self.guard_wipes.lock().clear();
+		self.guards_read.lock().clear();
 	}
 
 	/// Open a frame for a save point, so its mutations can be discarded whole.
@@ -427,6 +524,7 @@ impl IndexDeltaBuffer {
 		self.term_changes.lock().push(HashMap::new());
 		self.doc_stats.lock().push(HashMap::new());
 		self.graph_folds.lock().push(HashMap::new());
+		self.pending_guards.lock().push(HashMap::new());
 	}
 
 	/// Fold the save point's frame into the one beneath it: its writes survived,
@@ -469,7 +567,14 @@ impl IndexDeltaBuffer {
 				}
 			}
 		}
-		let mut frames = self.graph_folds.lock();
+		{
+			let mut frames = self.graph_folds.lock();
+			if let Some(top) = pop_save_point(&mut frames) {
+				let parent = frames.last_mut().expect("popping left at least one frame");
+				parent.extend(top);
+			}
+		}
+		let mut frames = self.pending_guards.lock();
 		if let Some(top) = pop_save_point(&mut frames) {
 			let parent = frames.last_mut().expect("popping left at least one frame");
 			parent.extend(top);
@@ -484,6 +589,7 @@ impl IndexDeltaBuffer {
 		pop_save_point(&mut self.term_changes.lock());
 		pop_save_point(&mut self.doc_stats.lock());
 		pop_save_point(&mut self.graph_folds.lock());
+		pop_save_point(&mut self.pending_guards.lock());
 	}
 }
 
@@ -513,6 +619,27 @@ mod tests {
 	/// A rolled-back save point's KV writes are undone, so its buffered
 	/// description of them must not survive: flushing it would claim a document
 	/// carries a term whose posting no longer exists.
+	#[test]
+	fn a_rolled_back_save_point_arms_none_of_its_pending_guards() {
+		let buffer = IndexDeltaBuffer::new();
+		let index = term().index;
+		buffer.buffer_pending_guard(index.clone(), 1);
+		buffer.push_save_point();
+		buffer.buffer_pending_guard(index.clone(), 2);
+		let shards = || buffer.pending_guard_shards(index.ns, index.db, &index.tb, index.ix);
+		assert_eq!(shards(), 0b110, "an open save point's write is visible");
+		buffer.rollback_save_point();
+		assert_eq!(shards(), 0b010, "nothing of the rolled-back write remains");
+		buffer.push_save_point();
+		buffer.buffer_pending_guard(index, 3);
+		buffer.release_save_point();
+		let mut armed: Vec<u16> =
+			buffer.take_pending_guards().into_iter().map(|(_, shard)| shard).collect();
+		armed.sort_unstable();
+		assert_eq!(armed, vec![1, 3]);
+		assert!(buffer.is_empty());
+	}
+
 	#[test]
 	fn a_rolled_back_save_point_keeps_none_of_its_deltas() {
 		let buffer = IndexDeltaBuffer::new();

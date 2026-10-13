@@ -342,6 +342,43 @@ time. Run it before lowering the level or starting the earlier release.
   range open at its upper end (`WHERE time > $since`) reads the table rather
   than the index. Rows are unchanged. `REBUILD INDEX`, once every node runs this
   release, restores the index plans for a field that never held an array.
+- On a store several nodes share (TiKV, and the enterprise engines), a write to
+  a DiskANN index no longer fails with a retryable `TransactionConflict` when
+  background compaction of the index runs at the same time. The upgrade is not
+  rolling-safe for those indexes: while a node of an earlier release is still
+  running, writes made by upgraded nodes can be missing from KNN results.
+
+### DiskANN writes on a shared store, and upgrading every node together
+
+A write to a DiskANN index marks its shard's pending-state guard (`!dy`) as
+holding entries, and compaction returns a drained shard's guard to empty so KNN
+lookups can skip it. A write could lose its commit to that compaction with a
+retryable `TransactionConflict`, which `surreal import` and single-statement
+writes do not retry: an import of a table whose `DEFINE INDEX … DISKANN`
+precedes its data, which is the order `surreal export` writes, could finish
+with rows missing.
+
+Writes no longer touch the guard. On a store that one node opens alone
+(RocksDB, SurrealKV, memory) nothing else changes. On a store several nodes
+share, each node now holds a writer lease (`!dz`) on the guard shards it writes
+into, and no node returns a leased shard's guard to empty. A node releases its
+leases once it has written nothing to the index for ten seconds, so a drained
+shard's guard returns to empty, and KNN lookups skip it again, shortly after
+writes stop. A node that keeps writing renews its leases, and a lease left
+behind by a node that crashed or restarted is retired by the first compaction
+that finds it 30 seconds past its last renewal. Retirement compares lease expiry times across nodes, so nodes'
+clocks must agree to within 15 seconds.
+
+A node of an earlier release does not know about the leases. If it runs the
+index's compaction while upgraded nodes write to the index, it can return a
+guard to empty under an upgraded node's write, and that write is missing from
+KNN results until another write to the same shard. Downgrading a cluster that
+upgraded nodes have written to has the same effect.
+
+**What to do**: on a store several nodes share, upgrade every node before
+writing to a DiskANN index again: stop writes to DiskANN indexes, or stop the
+whole cluster, while the nodes are replaced. On RocksDB, SurrealKV or an
+in-memory store there is nothing to do.
 
 ### `--versions` is refused rather than ignored
 

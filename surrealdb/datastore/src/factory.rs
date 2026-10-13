@@ -154,6 +154,39 @@ impl TransactionFactory {
 		))
 	}
 
+	/// Release the DiskANN writer leases this datastore holds on indexes it has
+	/// committed nothing under for `idle`, and return how many it released.
+	/// See [`crate::tx::release_idle_diskann_writer_leases`].
+	pub async fn release_idle_diskann_writer_leases(
+		&self,
+		sequences: &Sequences,
+		idle: std::time::Duration,
+	) -> Result<usize> {
+		crate::tx::release_idle_diskann_writer_leases(self, &self.triggers, sequences, idle).await
+	}
+
+	/// The commit triggers of the datastore this factory belongs to, for the
+	/// tests that drive them.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn triggers(&self) -> &Arc<CommitTriggers> {
+		&self.triggers
+	}
+
+	/// A factory over the same store with its own commit triggers, as a second
+	/// datastore over the store would open its transactions. For the tests that
+	/// run two datastores over one in-memory store.
+	#[cfg(any(test, feature = "test-hooks"))]
+	pub fn with_triggers(&self, triggers: Arc<CommitTriggers>) -> Self {
+		Self {
+			builder: Arc::clone(&self.builder),
+			triggers,
+			observer: Arc::clone(&self.observer),
+			config: Arc::clone(&self.config),
+			feature: Arc::clone(&self.feature),
+			read_only: Arc::clone(&self.read_only),
+		}
+	}
+
 	/// Names the storage backend transactions are opened against.
 	pub fn backend_name(&self) -> &'static str {
 		self.builder.name()

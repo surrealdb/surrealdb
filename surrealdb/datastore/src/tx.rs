@@ -87,6 +87,11 @@ use crate::key::schema::{
 	RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix,
 	TableConformanceKey, TableKey, TableMigrationsKey, TablePrefix, TermChangeBatchKey, VersionKey,
 };
+#[cfg(diskann)]
+use crate::key::schema::{
+	DiskannPendingKey, DiskannPendingPrefix, DiskannRecordPendingShardShardPrefix,
+	DiskannWriterLeaseKey, DiskannWriterLeaseShardPrefix,
+};
 use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::sequences::{Sequence, Sequences};
@@ -98,6 +103,10 @@ use crate::testing::{
 use crate::triggers::CommitTriggers;
 use crate::values::catalog_version::{CatalogObject, CatalogObjectKind, CatalogVersion};
 use crate::values::changefeed::Changefeed;
+#[cfg(diskann)]
+use crate::values::diskann::{
+	DISKANN_PENDING_STATE_SHARDS, DiskAnnPendingState, DiskAnnPendingStateKind, DiskAnnWriterLease,
+};
 use crate::values::fulltext::DocLengthAndCount;
 use crate::values::graph::{AdjacencyBlock, BlockEntries, GraphFoldScope};
 use crate::values::ids::DocId;
@@ -114,6 +123,168 @@ use crate::{
 	TransactionFactory, TransactionType, Transactor, Val, cache, catalog,
 	is_retryable_transaction_conflict, storage_error, util,
 };
+
+/// How many times a commit covers its DiskANN pending-state guards before it
+/// reports the conflict. Covering conflicts only with another writer covering
+/// the same guard, or on a shared store with a guard step, and a retry then
+/// finds the guard covered, so a second attempt usually settles the race; the
+/// bound only keeps a misbehaving store from looping. Each retry backs off
+/// first ([`diskann_guard_arm_backoff`]).
+#[cfg(diskann)]
+const DISKANN_GUARD_ARM_ATTEMPTS: u32 = 8;
+
+/// The wait before retrying a DiskANN guard covering that lost a conflict on
+/// attempt number `attempt`: 1 ms doubling per attempt up to 16 ms, each drawn
+/// from half to one and a half times that.
+#[cfg(diskann)]
+fn diskann_guard_arm_backoff(attempt: u32) -> Duration {
+	let base = Duration::from_millis(1) * 2u32.pow(attempt.saturating_sub(1).min(4));
+	base.mul_f64(rand::random_range(0.5..=1.5))
+}
+
+/// How long a DiskANN writer lease holds once taken or renewed
+/// (`DiskAnnWriterLease::expires_at`). Past it, any node's guard step retires
+/// it. A commit relying on a lease with less than
+/// [`DISKANN_WRITER_LEASE_RENEWAL`] left renews it, and a lease nothing has
+/// relied on is released well within it, so a lease expires only once its
+/// datastore has stopped, restarted or stalled. Nodes' clocks must agree to
+/// within the renewal margin.
+#[cfg(diskann)]
+const DISKANN_WRITER_LEASE_TTL: chrono::Duration = chrono::Duration::seconds(30);
+
+/// The time left on a DiskANN writer lease below which a commit relying on it
+/// renews it.
+#[cfg(diskann)]
+const DISKANN_WRITER_LEASE_RENEWAL: chrono::Duration = chrono::Duration::seconds(15);
+
+/// The writer lease (`!dz`) node `nid` takes on the shard whose guard is `key`.
+#[cfg(diskann)]
+fn diskann_writer_lease_key<'a>(
+	key: &'a DiskannPendingKey<'_>,
+	nid: Uuid,
+) -> DiskannWriterLeaseKey<'a> {
+	DiskannWriterLeaseKey {
+		ns: key.ns,
+		db: key.db,
+		tb: Cow::Borrowed(key.tb.as_ref()),
+		ix: key.ix,
+		shard: key.shard,
+		nid,
+	}
+}
+
+/// Release the DiskANN writer leases (`!dz`) this datastore holds on indexes
+/// it has committed nothing under for `idle`, and return how many it released.
+///
+/// Each index's leases are released holding its guard fence exclusively, so no
+/// commit of this datastore relies on them while they go, and in one
+/// transaction that also queues a compaction pass for the index: no node steps
+/// a guard under a lease, so a guard left `NonEmpty` over a drained shard is
+/// stepped by that pass. A lease another process of this node took is left for
+/// the step that recognises it ([`Transaction::step_diskann_pending_guards`]).
+#[cfg(diskann)]
+pub(crate) async fn release_idle_diskann_writer_leases(
+	tf: &TransactionFactory,
+	triggers: &CommitTriggers,
+	sequences: &Sequences,
+	idle: Duration,
+) -> Result<usize> {
+	let fenced = &triggers.pending_guard_fences;
+	let (node, process) = (sequences.node_id(), fenced.process());
+	let mut released = 0;
+	for (prefix, index) in fenced.idle_lease_fences(idle) {
+		let fence = fenced.exclusive(&prefix, || index.clone()).await;
+		// A commit may have relied on the leases while the fence was awaited.
+		let shards = fence.idle_leases(idle);
+		if shards == 0 {
+			continue;
+		}
+		let tx = tf.transaction(TransactionType::Write, sequences.clone()).await?;
+		let result: Result<()> = async {
+			// Read in one batch: the exclusive fence holds the index's writers
+			// back meanwhile.
+			let keys: Vec<_> = (0..u64::BITS as u16)
+				.filter(|shard| shards & (1 << shard) != 0)
+				.map(|shard| DiskannWriterLeaseKey {
+					ns: index.ns,
+					db: index.db,
+					tb: Cow::Borrowed(&index.tb),
+					ix: index.ix,
+					shard,
+					nid: node,
+				})
+				.collect();
+			let leases = tx.get_many_key(keys.clone(), None).await?;
+			for (key, lease) in keys.iter().zip(leases) {
+				if lease.is_some_and(|lease| lease.process == process) {
+					tx.del_key(key).await?;
+				}
+			}
+			tx.buffer_compaction_trigger(index.ns, index.db, &index.tb, index.ix, node);
+			tx.commit().await
+		}
+		.await;
+		match result {
+			Ok(()) => {
+				fence.release_leases(shards);
+				released += shards.count_ones() as usize;
+			}
+			Err(e) => {
+				if !tx.closed() {
+					let _ = tx.cancel().await;
+				}
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					"releasing idle DiskANN writer leases failed, to be retried: {e}"
+				);
+			}
+		}
+	}
+	Ok(released)
+}
+
+/// Without DiskANN no writer lease is ever taken, so none is released.
+#[cfg(not(diskann))]
+pub(crate) async fn release_idle_diskann_writer_leases(
+	_tf: &TransactionFactory,
+	_triggers: &CommitTriggers,
+	_sequences: &Sequences,
+	_idle: Duration,
+) -> Result<usize> {
+	Ok(0)
+}
+
+/// The DiskANN guard fences a commit holds across its storage commit
+/// ([`Transaction::arm_diskann_pending_guards`]).
+#[derive(Default)]
+struct DiskAnnGuardFences {
+	/// Held shared, for indexes the transaction wrote into.
+	#[cfg(diskann)]
+	shared: Vec<crate::triggers::SharedGuardFence>,
+	/// Held exclusively, for indexes whose data the transaction wiped.
+	#[cfg(diskann)]
+	wiped: Vec<crate::triggers::ExclusiveGuardFence>,
+	/// On a store other datastores write to, the earliest expiry among the
+	/// writer leases the commit relies on, and the guards it covered, to cover
+	/// again if the commit lands too close to that expiry
+	/// ([`Transaction::recover_diskann_leases`]).
+	#[cfg(diskann)]
+	#[allow(clippy::type_complexity)]
+	leases_relied:
+		Option<(chrono::DateTime<Utc>, Vec<(Vec<DiskannPendingKey<'static>>, usize, u64)>)>,
+}
+
+impl DiskAnnGuardFences {
+	/// Release the fences once the commit has returned, first forgetting what
+	/// was known of a wiped index's guards and leases, whatever the commit's
+	/// outcome.
+	fn finish(self) {
+		#[cfg(diskann)]
+		for fence in &self.wiped {
+			fence.forget_all();
+		}
+	}
+}
 
 /// Counts a write or a save-point rollback in
 /// [`Transaction::state_changes`] when dropped: held across the change, so
@@ -2038,8 +2209,44 @@ impl Transaction {
 			// operation that first made commit impossible.
 			return Err(e);
 		}
+		// Arm the DiskANN pending-state guards this transaction wrote under,
+		// holding their fences until the commit below has returned. See
+		// [`Self::arm_diskann_pending_guards`]. Boxed, and only for a transaction
+		// that buffered a guard: the arming holds a transaction of its own, which
+		// would otherwise grow every commit's future by its size.
+		let arming = if self.index_deltas.get().is_some_and(|buffer| buffer.has_pending_guards()) {
+			Box::pin(self.arm_diskann_pending_guards()).await
+		} else {
+			Ok(DiskAnnGuardFences::default())
+		};
+		let guard_fences = match arming {
+			Ok(fences) => fences,
+			Err(e) => {
+				if let Err(err) = self.cancel().await {
+					tracing::warn!(
+						target: "surrealdb::core::kvs::tx",
+						"transaction cleanup failed after arming DiskANN pending guards failed; preserving original error {e}: {err}"
+					);
+				}
+				return Err(e);
+			}
+		};
+		#[cfg(any(test, feature = "test-hooks"))]
+		if let Some(hook) = self.triggers.take_before_commit_hook() {
+			hook().await;
+		}
 		// Commit the transaction
-		if let Err(e) = self.commit_store().await {
+		let committed = self.commit_store().await;
+		#[cfg(diskann)]
+		if committed.is_ok() && guard_fences.leases_relied.is_some() {
+			Box::pin(self.recover_diskann_leases(&guard_fences)).await;
+		}
+		#[cfg(diskann)]
+		if committed.is_ok() && !guard_fences.wiped.is_empty() {
+			Box::pin(self.arm_diskann_guards_after_wipe(&guard_fences)).await;
+		}
+		guard_fences.finish();
+		if let Err(e) = committed {
 			// Record the write-set size, which is what separates an over-large
 			// transaction from an unhealthy cluster and which storage-layer
 			// errors do not carry.
@@ -6111,8 +6318,11 @@ impl Transaction {
 	/// Answered by the engine when the transaction opened. A store on such an engine has no other
 	/// process whose release must be consulted, and none that can write between this
 	/// transaction's read and its commit without this process's knowledge.
+	///
+	/// `false` for a datastore that runs the DiskANN writer-lease protocol
+	/// regardless, as the tests of that protocol have it do.
 	pub fn sole_writer(&self) -> bool {
-		self.sole_writer
+		self.sole_writer && !self.triggers.pending_guard_fences.assumes_shared_store()
 	}
 
 	/// The count of events that change which generation of a table is current, what the
@@ -7605,6 +7815,877 @@ impl Transaction {
 				},
 				nid,
 			)
+	}
+
+	/// Whether this transaction's commit fails if any key it read was written
+	/// since it opened ([`Transactor::validates_reads`]), or the datastore
+	/// covers DiskANN guards as if it did, as the tests of that path have it
+	/// do.
+	pub fn validates_reads(&self) -> bool {
+		self.tr.validates_reads() || self.triggers.pending_guard_fences.assumes_validated_reads()
+	}
+
+	/// Record that this transaction read the DiskANN pending-state guards of the
+	/// index, so a guard it then writes under is covered in this transaction
+	/// rather than by the arming transaction, whose write would fail this
+	/// transaction's commit ([`Self::arm_diskann_pending_guards`]). Records
+	/// nothing on a store that does not validate every read.
+	pub fn note_diskann_guards_read(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) {
+		if !self.validates_reads() {
+			return;
+		}
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).note_guards_read(
+			BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			},
+		)
+	}
+
+	/// Register that this transaction wrote a DiskANN pending update into
+	/// `shard` of the index, so the shard's pending-state guard (`!dy`) is
+	/// covered when it commits ([`Self::arm_diskann_pending_guards`]): armed
+	/// where this datastore is the store's sole writer, and otherwise held by
+	/// this datastore's writer lease (`!dz`). Reads nothing, so the guard and
+	/// the lease stay out of this transaction's reads.
+	pub fn buffer_diskann_pending_guard(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		shard: u16,
+	) {
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_pending_guard(
+			BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			},
+			shard,
+		)
+	}
+
+	/// The shards of the index this transaction has written a DiskANN pending
+	/// update into that a rollback has not undone, as a bit per shard. Their
+	/// guards are not armed until the commit, so a lookup in this transaction
+	/// scans those shards whatever the stored guards say.
+	pub fn diskann_buffered_pending_guard_shards(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> u64 {
+		self.index_deltas.get().map_or(0, |buffer| buffer.pending_guard_shards(ns, db, tb, ix))
+	}
+
+	/// Whether `e` is a conditional write or delete that found a value other
+	/// than the one it was conditioned on.
+	#[cfg(diskann)]
+	fn condition_not_met(e: &anyhow::Error) -> bool {
+		matches!(storage_error(e), Some(KvsError::TransactionConditionNotMet))
+	}
+
+	/// Names the index's guard fence: the start of its `!dy` guard range, which
+	/// is distinct per index and orders indexes the same way for every caller.
+	#[cfg(diskann)]
+	fn diskann_pending_guard_fence_id(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<Vec<u8>> {
+		Ok(DiskannPendingPrefix::new(ns, db, Cow::Borrowed(tb), ix).range()?.start().to_vec())
+	}
+
+	/// Record that this transaction wiped the data of a DiskANN index, its
+	/// pending-state guards and writer leases included, so its commit holds the
+	/// index's guard fence exclusively and forgets what this datastore knew of
+	/// those guards and leases (`PendingGuardFences`).
+	pub fn buffer_diskann_guard_wipe(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) {
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_guard_wipe(
+			BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			},
+		)
+	}
+
+	/// Cover the DiskANN pending-state guards this transaction buffered
+	/// ([`Self::buffer_diskann_pending_guard`]), returning their indexes'
+	/// fences. The caller holds them until its commit has returned, then
+	/// finishes them ([`DiskAnnGuardFences::finish`]).
+	///
+	/// The fences are taken in the order of the indexes' encoded prefixes, so
+	/// every committer takes them in one order: shared for an index this
+	/// transaction wrote into, exclusively for one whose data it wiped
+	/// ([`Self::buffer_diskann_guard_wipe`]).
+	///
+	/// Where this datastore is the store's sole writer, a guard the fence knows
+	/// to read `NonEmpty` needs nothing, and a commit needing nothing opens no
+	/// transaction. The rest are armed in a transaction of their own, opened
+	/// once the fences are held: a guard read `Empty`, `MaybeEmpty` or absent is
+	/// set `NonEmpty`.
+	///
+	/// Elsewhere every commit that buffered a guard opens that transaction,
+	/// and reads in it this datastore's lease on each shard the fence records
+	/// it holding. A shard whose lease is there, with more than
+	/// [`DISKANN_WRITER_LEASE_RENEWAL`] left, needs nothing: no node steps a
+	/// guard under a lease, and a release forgets the lease under the exclusive
+	/// fence before it goes. Any other shard (its lease near expiry, removed by a
+	/// wipe or a retirement on another node, or not recorded held) has its
+	/// guard read locked and written `NonEmpty` with a new generation, even if it
+	/// already reads `NonEmpty`, and the lease written alongside with a fresh
+	/// expiry. The guard write is what orders a lease against another node's step
+	/// of the guard on every store, the locked read alone not conflicting with a
+	/// step where the store validates reads rather than locking them: a step that
+	/// read the guard before this commit fails its conditional write, so a step
+	/// either sees the lease or is refused.
+	///
+	/// A transaction that wrote nothing is cancelled. Two writers covering one
+	/// guard conflict only with each other, and the retry finds it covered.
+	///
+	/// To be covered, a guard is neither read nor written by this transaction,
+	/// so neither a guard step nor another covering can fail its commit. The
+	/// exception is a store that validates every read
+	/// ([`Self::validates_reads`]), where a guard this transaction already read
+	/// (a lookup in it, [`Self::note_diskann_guards_read`]) is covered in this
+	/// transaction instead: the arming transaction's write would fail this
+	/// commit, while the read already makes a step of the guard fail it.
+	///
+	/// A guard armed for a commit that then fails is left `NonEmpty` over a
+	/// range holding nothing of it. Where this datastore is
+	/// the sole writer, the arming queues a compaction pass for the index, whose
+	/// guard step returns it to `Empty`; elsewhere the pass the lease's release
+	/// queues does.
+	#[cfg(diskann)]
+	async fn arm_diskann_pending_guards(&self) -> Result<DiskAnnGuardFences> {
+		let mut fences = DiskAnnGuardFences::default();
+		let Some(buffer) = self.index_deltas.get() else {
+			return Ok(fences);
+		};
+		let guards = buffer.take_pending_guards();
+		let wipes = buffer.take_guard_wipes();
+		// Two kinds of guard are covered here, in this transaction, rather than
+		// by another one:
+		// - a guard of an index whose data this transaction wiped: the wipe's delete commits with
+		//   this transaction, after any other transaction's arming, and would remove it;
+		// - on a store that validates every read, a guard this transaction read: another
+		//   transaction's arming would fail this one's commit.
+		// Either way this transaction already conflicts with a step of the
+		// guard, by writing it or by having read it, so writing it adds no
+		// conflict, and a commit that lands leaves the guard `NonEmpty` over its
+		// entry. Nothing else is needed for it: no lease, and nothing left behind
+		// if the commit fails.
+		let read = buffer.take_guards_read();
+		let guards = if read.is_empty() && wipes.is_empty() {
+			guards
+		} else {
+			let (in_place, guards): (Vec<_>, Vec<_>) = guards
+				.into_iter()
+				.partition(|(index, _)| read.contains(index) || wipes.contains(index));
+			let keys: Vec<_> = in_place
+				.iter()
+				.map(|(index, shard)| DiskannPendingKey {
+					ns: index.ns,
+					db: index.db,
+					tb: Cow::Borrowed(&index.tb),
+					ix: index.ix,
+					shard: *shard,
+				})
+				.collect();
+			// Written even where it already reads `NonEmpty`: a step that opened
+			// before this commit and lands after it would otherwise step the guard
+			// with nothing to conflict with, where the new generation makes its
+			// conditional write fail.
+			let currents = self.get_many_key(keys.clone(), None).await?;
+			for (key, current) in keys.iter().zip(currents) {
+				let next = DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: current.map_or(0, |s| s.generation).wrapping_add(1),
+				};
+				self.set_key(key, &next).await?;
+			}
+			guards
+		};
+		if guards.is_empty() && wipes.is_empty() {
+			return Ok(fences);
+		}
+		let shared_store = !self.sole_writer();
+		let fenced = &self.triggers.pending_guard_fences;
+		// What each index needs, keyed by its encoded prefix.
+		struct Needs {
+			index: BufferedIndex,
+			keys: Vec<DiskannPendingKey<'static>>,
+			wiped: bool,
+		}
+		let mut by_index: std::collections::BTreeMap<Vec<u8>, Needs> = Default::default();
+		for index in wipes {
+			let prefix =
+				Self::diskann_pending_guard_fence_id(index.ns, index.db, &index.tb, index.ix)?;
+			by_index
+				.entry(prefix)
+				.or_insert_with(|| Needs {
+					index,
+					keys: Vec::new(),
+					wiped: true,
+				})
+				.wiped = true;
+		}
+		for (index, shard) in guards {
+			let prefix =
+				Self::diskann_pending_guard_fence_id(index.ns, index.db, &index.tb, index.ix)?;
+			// The index is cloned once, for its first shard; each key takes the
+			// table name its buffered entry owns.
+			let needs = by_index.entry(prefix).or_insert_with(|| Needs {
+				index: index.clone(),
+				keys: Vec::new(),
+				wiped: false,
+			});
+			needs.keys.push(DiskannPendingKey {
+				ns: index.ns,
+				db: index.db,
+				tb: Cow::Owned(index.tb),
+				ix: index.ix,
+				shard,
+			});
+		}
+		// Take the fences, and keep the guards still to cover, with the index's
+		// place among the shared fences and, elsewhere than on a sole writer, the
+		// shards whose leases the fence records held, which are read before
+		// relying on them. A wiped index has no guard left to cover here.
+		let mut uncovered: Vec<(Vec<DiskannPendingKey<'static>>, usize, u64)> = Vec::new();
+		for (prefix, needs) in by_index {
+			let Needs {
+				index,
+				keys,
+				wiped,
+			} = needs;
+			if wiped {
+				fences.wiped.push(fenced.exclusive(&prefix, || index).await);
+				continue;
+			}
+			let fence = fenced.shared(&prefix, || index).await;
+			let (keys, held): (Vec<_>, u64) = if shared_store {
+				let shards = keys.iter().fold(0u64, |shards, key| shards | 1 << key.shard);
+				(keys, fence.holds_leases(shards))
+			} else {
+				(keys.into_iter().filter(|key| !fence.armed(key.shard)).collect(), 0)
+			};
+			fences.shared.push(fence);
+			if !keys.is_empty() {
+				uncovered.push((keys, fences.shared.len() - 1, held));
+			}
+		}
+		if uncovered.is_empty() {
+			return Ok(fences);
+		}
+		let deadline = self.cover_diskann_guards(&uncovered, shared_store).await?;
+		// Every guard covered now reads `NonEmpty`, and no step can change that
+		// while the fence is held, nor, elsewhere, while the lease written with it
+		// holds.
+		for (keys, i, _) in &uncovered {
+			if shared_store {
+				fences.shared[*i]
+					.use_leases(keys.iter().fold(0, |shards, key| shards | 1 << key.shard));
+			} else {
+				for key in keys {
+					fences.shared[*i].mark_armed(key.shard);
+				}
+			}
+		}
+		if let Some(deadline) = deadline {
+			fences.leases_relied =
+				Some((deadline, uncovered.into_iter().map(|(keys, i, _)| (keys, i, 0)).collect()));
+		}
+		Ok(fences)
+	}
+
+	/// Arm the guard of every shard of an index this commit wiped that still
+	/// holds a pending entry, once the wipe has landed.
+	///
+	/// A wipe deletes the index's keys as its transaction read them, so an entry
+	/// another transaction committed meanwhile, under a guard it knew armed,
+	/// survives while its guard does not. The wipe's exclusive fence is held from
+	/// its covering until here, so every writer of this datastore has either
+	/// committed (its entry is seen) or waits to re-arm (the wipe forgets what was
+	/// armed). Each such guard is set `NonEmpty`, with a compaction pass queued
+	/// for the index. A failure is logged: the pass the hidden entry's own write
+	/// queued repairs its guard (`Transaction::repair_diskann_pending_guards`).
+	#[cfg(diskann)]
+	async fn arm_diskann_guards_after_wipe(&self, fences: &DiskAnnGuardFences) {
+		let result: Result<()> = async {
+			let probe = self
+				.sequences
+				.transaction_factory()
+				.transaction(TransactionType::Read, self.sequences.clone())
+				.await?;
+			let mut holding: Vec<(Vec<DiskannPendingKey<'static>>, usize, u64)> = Vec::new();
+			let probed: Result<()> = async {
+				for fence in &fences.wiped {
+					let index = fence.index();
+					let shards = probe
+						.diskann_shards_holding_entries(index.ns, index.db, &index.tb, index.ix)
+						.await?;
+					let keys: Vec<_> = (0..DISKANN_PENDING_STATE_SHARDS)
+						.filter(|shard| shards & (1 << shard) != 0)
+						.map(|shard| DiskannPendingKey {
+							ns: index.ns,
+							db: index.db,
+							tb: Cow::Owned(index.tb.clone()),
+							ix: index.ix,
+							shard,
+						})
+						.collect();
+					if !keys.is_empty() {
+						holding.push((keys, 0, 0));
+					}
+				}
+				Ok(())
+			}
+			.await;
+			let _ = probe.tr.cancel().await;
+			probed?;
+			if !holding.is_empty() {
+				// Armed as a sole writer arms, with no lease: the entries have
+				// landed, so no step on any node can find their shard empty.
+				self.cover_diskann_guards(&holding, false).await?;
+			}
+			Ok(())
+		}
+		.await;
+		if let Err(e) = result {
+			tracing::warn!(
+				target: "surrealdb::core::kvs::tx",
+				"arming the DiskANN guards left over entries after a wipe failed: {e}"
+			);
+		}
+	}
+
+	/// The shards of the DiskANN index holding at least one pending entry
+	/// (`!dw`), as a bit per shard.
+	///
+	/// Read by skipping: each probe reads the first entry from the shard after the
+	/// last one found to the end of the index's pending entries, so the read costs
+	/// one probe more than the shards holding entries, and one for an index whose
+	/// pending entries are all compacted.
+	#[cfg(diskann)]
+	pub async fn diskann_shards_holding_entries(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Result<u64> {
+		let shards = (0..DISKANN_PENDING_STATE_SHARDS)
+			.map(|shard| {
+				DiskannRecordPendingShardShardPrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+					shard,
+				}
+				.range()
+			})
+			.collect::<Result<Vec<_>>>()?;
+		let Some(last) = shards.last() else {
+			return Ok(0);
+		};
+		let root = IdxRoot {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix,
+		}
+		.raw_range()?;
+		let end = last.end().as_slice().to_vec();
+		let mut holding = 0u64;
+		let mut from = 0;
+		while from < shards.len() {
+			let rest = root.part(shards[from].start().as_slice(), &end);
+			let Some(key) = self.keys_raw(rest, 1, 0, None).await?.into_iter().next() else {
+				break;
+			};
+			let Some(found) = shards[from..].iter().position(|shard| {
+				key.as_slice() >= shard.start().as_slice()
+					&& key.as_slice() < shard.end().as_slice()
+			}) else {
+				break;
+			};
+			holding |= 1 << (from + found);
+			from += found + 1;
+		}
+		Ok(holding)
+	}
+
+	/// Arm the guards of `shards` of the index, which a compaction pass found
+	/// `Empty` or absent over pending entries, and queue a compaction pass for
+	/// the index.
+	///
+	/// The covering protocol leaves no entry under such a guard except where a
+	/// repair after the fact failed or never ran: a wipe's arming of the guards it
+	/// left over entries, and, on a store other datastores write to, a writer on
+	/// another node committing across a wipe, or a commit that outlasted its lease
+	/// and could not cover its guard again. Lookup and compaction skip such a shard,
+	/// so its entries stay hidden until repaired, and each of those writes left
+	/// a queue entry whose pass finds it here. Arming a guard over entries is
+	/// always safe: no step finds their shard empty. The pass that found it does
+	/// not compact those shards; the one queued here does.
+	#[cfg(diskann)]
+	pub async fn repair_diskann_pending_guards(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		shards: &[u16],
+	) -> Result<()> {
+		if shards.is_empty() {
+			return Ok(());
+		}
+		tracing::warn!(
+			target: "surrealdb::core::kvs::tx",
+			"repairing {} DiskANN pending-state guards left empty over pending entries",
+			shards.len()
+		);
+		let fenced = &self.triggers.pending_guard_fences;
+		fenced.count_repairs(shards.len());
+		let prefix = Self::diskann_pending_guard_fence_id(ns, db, tb, ix)?;
+		let _fence = fenced
+			.shared(&prefix, || BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			})
+			.await;
+		let keys = shards
+			.iter()
+			.map(|&shard| DiskannPendingKey {
+				ns,
+				db,
+				tb: Cow::Owned(tb.clone()),
+				ix,
+				shard,
+			})
+			.collect();
+		// Armed as a sole writer arms, with no lease, which also queues the pass.
+		self.cover_diskann_guards(&[(keys, 0, 0)], false).await?;
+		Ok(())
+	}
+
+	/// Cover again the guards a commit that has landed covered with writer
+	/// leases, if it landed too close to the earliest of those leases' expiry.
+	///
+	/// A lease relied on at the covering can expire before the commit lands, if
+	/// the commit stalls. Another node may then retire it and, finding the
+	/// shard's pending range still empty, step its guard to `Empty`, leaving the
+	/// landed entry under it. Its fences still held, the commit covers its guards
+	/// again, without relying on any lease, once it lands within
+	/// [`DISKANN_WRITER_LEASE_RENEWAL`] (the clock skew nodes may have) of that
+	/// expiry. A lease that holds, by this node's clock, for longer than that once
+	/// the commit has landed was not retired before it, and a step after it sees
+	/// the entry. A failure is logged: the commit has landed, and its next
+	/// covering of the shard sees the lease gone and arms the guard.
+	#[cfg(diskann)]
+	async fn recover_diskann_leases(&self, fences: &DiskAnnGuardFences) {
+		let Some((deadline, guards)) = &fences.leases_relied else {
+			return;
+		};
+		if Utc::now() + DISKANN_WRITER_LEASE_RENEWAL < *deadline {
+			return;
+		}
+		match self.cover_diskann_guards(guards, true).await {
+			// The leases written are relied on from now, so an idle release does
+			// not take them as idle since before the stall.
+			Ok(_) => {
+				for (keys, i, _) in guards {
+					fences.shared[*i]
+						.use_leases(keys.iter().fold(0, |shards, key| shards | 1 << key.shard));
+				}
+			}
+			Err(e) => tracing::warn!(
+				target: "surrealdb::core::kvs::tx",
+				"covering DiskANN guards again after a commit that outlasted its writer lease failed: {e}"
+			),
+		}
+	}
+
+	/// Cover `uncovered`'s guards, each listed with its index's place among the
+	/// shared fences and the shards whose leases the fence records held, in a
+	/// transaction of its own, retried against other coverings
+	/// ([`Self::arm_diskann_pending_guards`]). Returns, on a store other
+	/// datastores write to, the earliest expiry among the leases the covering
+	/// relies on.
+	#[cfg(diskann)]
+	async fn cover_diskann_guards(
+		&self,
+		uncovered: &[(Vec<DiskannPendingKey<'static>>, usize, u64)],
+		shared_store: bool,
+	) -> Result<Option<chrono::DateTime<Utc>>> {
+		let node = self.sequences.node_id();
+		let process = self.triggers.pending_guard_fences.process();
+		let mut attempt = 1;
+		loop {
+			let arm = self
+				.sequences
+				.transaction_factory()
+				.transaction(TransactionType::Write, self.sequences.clone())
+				.await?;
+			// The earliest expiry among the leases this attempt relies on.
+			let mut deadline: Option<chrono::DateTime<Utc>> = None;
+			let wrote: Result<bool> = async {
+				let mut wrote = false;
+				let now = Utc::now();
+				let expires_at = now + DISKANN_WRITER_LEASE_TTL;
+				for (keys, _, held) in uncovered {
+					// The leases the fence records held that this transaction still
+					// reads with time to spare, read in one batch.
+					let mut found = 0u64;
+					if *held != 0 {
+						let leased: Vec<_> =
+							keys.iter().filter(|key| held & (1 << key.shard) != 0).collect();
+						let leases = arm
+							.get_many_key(
+								leased
+									.iter()
+									.map(|key| diskann_writer_lease_key(key, node))
+									.collect(),
+								None,
+							)
+							.await?;
+						for (key, lease) in leased.into_iter().zip(leases) {
+							if let Some(lease) = lease.filter(|lease| {
+								lease.process == process
+									&& lease.expires_at > now + DISKANN_WRITER_LEASE_RENEWAL
+							}) {
+								found |= 1 << key.shard;
+								deadline = Some(
+									deadline.map_or(lease.expires_at, |d| d.min(lease.expires_at)),
+								);
+							}
+						}
+					}
+					let mut index_armed = false;
+					let covering: Vec<_> =
+						keys.iter().filter(|key| found & (1 << key.shard) == 0).collect();
+					// Read in one batch where a plain read suffices; a locked read is
+					// taken key by key.
+					let currents = if shared_store {
+						let mut currents = Vec::with_capacity(covering.len());
+						for key in &covering {
+							currents.push(arm.getu_key(*key).await?);
+						}
+						currents
+					} else {
+						arm.get_many_key(
+							covering
+								.iter()
+								.map(|key| DiskannPendingKey {
+									ns: key.ns,
+									db: key.db,
+									tb: Cow::Borrowed(key.tb.as_ref()),
+									ix: key.ix,
+									shard: key.shard,
+								})
+								.collect(),
+							None,
+						)
+						.await?
+					};
+					for (key, current) in covering.into_iter().zip(currents) {
+						// Where a lease is taken the guard is written even if it reads
+						// `NonEmpty`, so a step that read it before fails.
+						if shared_store
+							|| !current
+								.as_ref()
+								.is_some_and(|s| s.kind == DiskAnnPendingStateKind::NonEmpty)
+						{
+							let next = DiskAnnPendingState {
+								kind: DiskAnnPendingStateKind::NonEmpty,
+								generation: current
+									.as_ref()
+									.map_or(0, |s| s.generation)
+									.wrapping_add(1),
+							};
+							arm.put_compare_key(key, &next, current.as_ref()).await?;
+							index_armed = true;
+						}
+						if shared_store {
+							arm.set_key(
+								&diskann_writer_lease_key(key, node),
+								&DiskAnnWriterLease {
+									process,
+									expires_at,
+								},
+							)
+							.await?;
+							deadline = Some(deadline.map_or(expires_at, |d| d.min(expires_at)));
+							wrote = true;
+						}
+					}
+					// Queue a pass for the index with the arming, so a guard this
+					// commit armed is stepped back even if the commit then fails and
+					// takes its own queue entry with it. A lease's release queues one
+					// instead.
+					if let (true, false, Some(key)) = (index_armed, shared_store, keys.first()) {
+						let queued = IndexCompactionKey {
+							ns: key.ns,
+							db: key.db,
+							tb: Cow::Borrowed(key.tb.as_ref()),
+							ix: key.ix,
+							nid: node,
+							uid: Uuid::now_v7(),
+						};
+						arm.put_key(&queued, &()).await?;
+					}
+					wrote |= index_armed;
+				}
+				Ok(wrote)
+			}
+			.await;
+			let committed = match wrote {
+				Ok(true) => {
+					// Committed without its own sync: this transaction's commit
+					// follows it through the same store and makes it durable, and a
+					// covering that does not outlive a crash took no committed write
+					// with it.
+					match arm.tr.commit_unsynced().await {
+						Ok(()) => {
+							if !shared_store {
+								self.triggers.index_compaction.notify_one();
+							}
+							Ok(())
+						}
+						Err(e) => {
+							let _ = arm.tr.cancel().await;
+							Err(anyhow::Error::from(e))
+						}
+					}
+				}
+				Ok(false) => arm.tr.cancel().await.map_err(anyhow::Error::from),
+				Err(e) => {
+					let _ = arm.tr.cancel().await;
+					Err(e)
+				}
+			};
+			match committed {
+				Ok(()) => return Ok(deadline),
+				Err(e)
+					if attempt < DISKANN_GUARD_ARM_ATTEMPTS
+						&& (is_retryable_transaction_conflict(&e)
+							|| Self::condition_not_met(&e)) =>
+				{
+					// Lost to another writer covering the same guard, reported as a
+					// conflict or, by a backend that reports a lost conditional write
+					// that way, as an unmet condition, from the write or the commit.
+					// Back off before the retry, so the writers that lost to one winner
+					// do not all retry in step and collide again.
+					sleep(diskann_guard_arm_backoff(attempt)).await;
+					attempt += 1;
+				}
+				Err(e) => return Err(e),
+			}
+		}
+	}
+
+	/// Without DiskANN no write buffers a guard, so there is nothing to cover.
+	#[cfg(not(diskann))]
+	async fn arm_diskann_pending_guards(&self) -> Result<DiskAnnGuardFences> {
+		Ok(DiskAnnGuardFences::default())
+	}
+
+	/// Step to `Empty` each of `shards` of the index whose pending range
+	/// (`!dw{shard}`) holds no entry, and report whether any guard was stepped.
+	///
+	/// The step holds the index's fence exclusively from before its transaction
+	/// opens until it commits, so its snapshot holds every writer of this
+	/// datastore that covered the guard before it, and no such writer commits
+	/// between that snapshot and the step: one that covers the guard later reads
+	/// the step and sets the guard back. Where this datastore is the store's sole
+	/// writer, that is every writer.
+	///
+	/// Elsewhere a shard is stepped only if no writer lease (`!dz`) on it holds,
+	/// this datastore's own included. A lease holds until its datastore releases
+	/// it or it expires ([`DISKANN_WRITER_LEASE_TTL`]), whichever datastore took
+	/// it; a lease this node took in an earlier process never holds, since this
+	/// process knows it has none. Leases that no longer hold are deleted with
+	/// the step, each on condition that it is still the one read, and an
+	/// expired one of this datastore's is forgotten by its fence, so its next
+	/// commit into the shard takes the lease again. A writer
+	/// covering the shard concurrently reads the guard locked, so it and the step
+	/// conflict and one of them is refused.
+	///
+	/// An emptiness seen here is therefore one no writer can still contradict,
+	/// which is why a single step suffices. Every shard it steps, or tries to,
+	/// is forgotten by the fence as armed. A step lost to a concurrent write of
+	/// the guard is left for the next pass.
+	#[cfg(diskann)]
+	pub async fn step_diskann_pending_guards(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		shards: &[u16],
+	) -> Result<bool> {
+		if shards.is_empty() {
+			return Ok(false);
+		}
+		let shared_store = !self.sole_writer();
+		let fenced = &self.triggers.pending_guard_fences;
+		let prefix = Self::diskann_pending_guard_fence_id(ns, db, tb, ix)?;
+		let fence = fenced
+			.exclusive(&prefix, || BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			})
+			.await;
+		let step = self
+			.sequences
+			.transaction_factory()
+			.transaction(TransactionType::Write, self.sequences.clone())
+			.await?;
+		let (node, process, now) = (self.sequences.node_id(), fenced.process(), Utc::now());
+		let mut stepping = Vec::new();
+		let mut retired_own = 0u64;
+		let mut wrote = false;
+		let stepped: Result<bool> = async {
+			for &shard in shards {
+				let key = DiskannPendingKey {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+					shard,
+				};
+				let Some(current) = step.get_key(&key, None).await? else {
+					continue;
+				};
+				if current.kind == DiskAnnPendingStateKind::Empty {
+					continue;
+				}
+				if shared_store {
+					let range = DiskannWriterLeaseShardPrefix {
+						ns,
+						db,
+						tb: Cow::Borrowed(tb),
+						ix,
+						shard,
+					}
+					.range()?;
+					let mut held = false;
+					for (raw, lease) in step.scan(range, u32::MAX, 0, None).await? {
+						let lease_key = DiskannWriterLeaseKey::decode_key(&raw)?;
+						let own = lease_key.nid == node && lease.process == process;
+						let stale = lease.expires_at <= now || (lease_key.nid == node && !own);
+						if !stale {
+							held = true;
+							continue;
+						}
+						match step.del_compare_key(&lease_key, Some(&lease)).await {
+							Ok(()) => {
+								wrote = true;
+								if own {
+									retired_own |= 1 << shard;
+								}
+							}
+							// Renewed since it was read: it holds.
+							Err(e) if Self::condition_not_met(&e) => held = true,
+							Err(e) => return Err(e),
+						}
+					}
+					if held {
+						continue;
+					}
+				}
+				let range = DiskannRecordPendingShardShardPrefix {
+					ns,
+					db,
+					tb: Cow::Borrowed(tb),
+					ix,
+					shard,
+				}
+				.range()?;
+				if !step.keys(range, 1, 0, None).await?.is_empty() {
+					continue;
+				}
+				let next = DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::Empty,
+					generation: current.generation.wrapping_add(1),
+				};
+				match step.put_compare_key(&key, &next, Some(&current)).await {
+					Ok(()) => {
+						stepping.push(shard);
+						wrote = true;
+					}
+					// A writer covered the guard since it was read: the shard is not
+					// stepped, and the others still are.
+					Err(e) if Self::condition_not_met(&e) => {}
+					Err(e) => return Err(e),
+				}
+			}
+			Ok(!stepping.is_empty())
+		}
+		.await;
+		// Committed without its own sync, since writers wait on the fence while it
+		// is held: a step that does not outlive a crash leaves the guard
+		// `NonEmpty`, which only makes lookups scan a drained shard until the next
+		// pass steps it again.
+		let result = match stepped {
+			Ok(stepped) if wrote => match step.tr.commit_unsynced().await {
+				Ok(()) => Ok(stepped),
+				Err(e) => {
+					let _ = step.tr.cancel().await;
+					let e = anyhow::Error::from(e);
+					// Lost to a concurrent write of a guard, which a backend checking
+					// conditional writes at commit reports as an unmet condition: the
+					// step is left for the next pass.
+					if is_retryable_transaction_conflict(&e) || Self::condition_not_met(&e) {
+						Ok(false)
+					} else {
+						Err(e)
+					}
+				}
+			},
+			Ok(_) => step.tr.cancel().await.map(|()| false).map_err(anyhow::Error::from),
+			Err(e) => {
+				let _ = step.tr.cancel().await;
+				Err(e)
+			}
+		};
+		// Forgotten whatever the outcome: a step that may have landed must not
+		// leave its shard recorded as armed, nor a lease it may have retired as
+		// held. Forgetting a lease that is still there costs only its next
+		// commit a re-take.
+		for shard in stepping {
+			fence.forget(shard);
+		}
+		if retired_own != 0 {
+			fence.release_leases(retired_own);
+		}
+		result
 	}
 
 	/// Register that a graph adjacency scope wants folding once this

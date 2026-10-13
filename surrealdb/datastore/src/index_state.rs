@@ -88,17 +88,24 @@ async fn index_has_unmaterialised_updates(
 			// shard whether to merge them by reading that shard's `!dy` guard.
 			// So the guards are the question, not `!dw` itself.
 			//
-			// Only `NonEmpty` counts. The guards step `NonEmpty` ->
-			// `MaybeEmpty` -> `Empty` across compaction passes, and a
-			// `MaybeEmpty` shard has already had its updates folded in — the
-			// guard has just not been proved empty yet, so lookup still scans
-			// a range it will find nothing in. Treating that as unsettled
-			// would leave the field true on an index that answers at full
-			// speed, until some later pass happened to close the guard.
-			// There are at most `DISKANN_PENDING_STATE_SHARDS` of these.
+			// Only `NonEmpty` counts. A `MaybeEmpty` shard has already had its
+			// updates folded in — the guard has just not been proved empty yet,
+			// so lookup still scans a range it will find nothing in. Treating
+			// that as unsettled would leave the field true on an index that
+			// answers at full speed, until some later pass happened to close
+			// the guard. There are at most `DISKANN_PENDING_STATE_SHARDS` of
+			// these.
+			//
+			// A shard this transaction wrote into counts as `NonEmpty` before
+			// its commit arms the stored guard
+			// ([`Transaction::buffer_diskann_pending_guard`]).
+			if tx.diskann_buffered_pending_guard_shards(ns, db, &ix.table_name, ix.index_id) != 0 {
+				return Ok(true);
+			}
 			let guards = DiskannPendingPrefix::new(ns, db, tb.clone(), ix.index_id).range()?;
 			let guards: Vec<(Vec<u8>, DiskAnnPendingState)> =
 				tx.scan(guards, DISKANN_PENDING_STATE_SHARDS.into(), 0, None).await?;
+			tx.note_diskann_guards_read(ns, db, &ix.table_name, ix.index_id);
 			if guards.iter().any(|(_, state)| state.kind == DiskAnnPendingStateKind::NonEmpty) {
 				true
 			} else {

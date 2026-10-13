@@ -729,6 +729,11 @@ impl Transactable for IndxdbTx {
 		"indxdb"
 	}
 
+	// The commit revalidates every read against its recorded value.
+	fn validates_reads(&self) -> bool {
+		true
+	}
+
 	fn closed(&self) -> bool {
 		self.done.load(Ordering::Acquire)
 	}

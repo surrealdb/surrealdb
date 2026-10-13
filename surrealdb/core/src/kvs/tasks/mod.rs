@@ -104,8 +104,9 @@ impl Tasks {
 /// - The **cluster heartbeat** runs alone. A stalled heartbeat gets this node archived by another
 ///   member's expiry scan and fails its readiness probe, so nothing may ever share its task.
 /// - **Async event processing** and **index compaction** each keep their own task because both are
-///   driven by the write path and drain their queue to empty, so under sustained load they do not
-///   return between ticks.
+///   driven by the write path: event processing drains its queue to empty, and index compaction
+///   runs a pass on every write-triggered wakeup and drains any backlog, so under sustained load
+///   neither waits for a tick.
 /// - The remaining jobs run on two [`spawn_task_scheduler`] instances, split by whether one pass
 ///   has a bound. [`maintenance_slots`] carries the jobs whose cost is bounded by catalog size, so
 ///   none can delay a peer by more than one short pass. [`sweep_slots`] carries the two whose queue
@@ -275,8 +276,10 @@ fn spawn_task_node_membership_refresh(
 ///
 /// The task runs at the interval specified by `opts.index_compaction_interval`.
 /// It keeps its own task rather than joining the maintenance scheduler because
-/// the queue is fed by the write path and each pass drains it to empty, so under
-/// sustained indexed writes a pass does not return between ticks.
+/// the queue is fed by the write path: a pass runs on every write-triggered
+/// wakeup, and keeps going while a backlog remains
+/// ([`Datastore::index_compaction`]), so under sustained indexed writes it does
+/// not wait for a tick.
 ///
 /// # Arguments
 ///
@@ -484,6 +487,8 @@ enum MaintenanceJob {
 	TikvLockCleanup,
 	/// Refresh the cached process/system utilisation metrics.
 	SystemMetricsRefresh,
+	/// Release the DiskANN writer leases this node no longer writes under.
+	DiskannWriterLeases,
 }
 
 impl MaintenanceJob {
@@ -491,7 +496,7 @@ impl MaintenanceJob {
 	/// Must list all of them; a new variant belongs here and in exactly one of
 	/// [`maintenance_slots`] / [`sweep_slots`].
 	#[cfg(test)]
-	const ALL: [Self; 9] = [
+	const ALL: [Self; 10] = [
 		Self::NodeExpire,
 		Self::NodeCleanup,
 		Self::ChangefeedGc,
@@ -501,6 +506,7 @@ impl MaintenanceJob {
 		Self::TikvGc,
 		Self::TikvLockCleanup,
 		Self::SystemMetricsRefresh,
+		Self::DiskannWriterLeases,
 	];
 
 	/// Description used in the scheduler's log lines.
@@ -515,6 +521,7 @@ impl MaintenanceJob {
 			Self::TikvGc => "TiKV MVCC GC",
 			Self::TikvLockCleanup => "TiKV lock cleanup",
 			Self::SystemMetricsRefresh => "system metrics refresh",
+			Self::DiskannWriterLeases => "idle DiskANN writer lease release",
 		}
 	}
 }
@@ -534,6 +541,12 @@ struct Slot {
 /// run ahead of it. So they can share one task without delaying a peer by more
 /// than one short pass, and a job with more work than one pass allows continues
 /// on the next tick rather than holding the task.
+/// How often this node releases the DiskANN writer leases it no longer writes
+/// under ([`Datastore::release_idle_diskann_writer_leases`]). A lease is only
+/// ever held on a store this datastore is not the sole writer of, so elsewhere
+/// the job finds nothing to do.
+const DISKANN_WRITER_LEASE_RELEASE_INTERVAL: Duration = Duration::from_secs(5);
+
 fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 	slots(&[
 		(MaintenanceJob::SystemMetricsRefresh, opts.system_metrics_refresh_interval),
@@ -543,6 +556,7 @@ fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 		(MaintenanceJob::ResumeIndexBuilds, opts.index_build_resume_interval),
 		(MaintenanceJob::TikvGc, opts.tikv_gc_interval),
 		(MaintenanceJob::TikvLockCleanup, opts.tikv_lock_cleanup_interval),
+		(MaintenanceJob::DiskannWriterLeases, DISKANN_WRITER_LEASE_RELEASE_INTERVAL),
 	])
 }
 
@@ -636,6 +650,7 @@ async fn run_maintenance_job(
 		}
 		MaintenanceJob::TikvGc => dbs.run_mvcc_gc(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::TikvLockCleanup => dbs.run_lock_cleanup(opts.tikv_gc_lifetime).await,
+		MaintenanceJob::DiskannWriterLeases => dbs.release_idle_diskann_writer_leases().await,
 		MaintenanceJob::SystemMetricsRefresh => {
 			// The snapshot is one cache per process, and its CPU percentage is a
 			// delta since the previous refresh of it, so only the datastore

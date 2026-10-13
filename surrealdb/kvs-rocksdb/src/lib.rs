@@ -903,6 +903,69 @@ impl TransactionBuilder for Datastore {
 }
 
 impl Transaction {
+	/// Commit the transaction, waiting for the grouped fsync when `sync`.
+	async fn commit_with(&self, sync: bool) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already
+		// closed.
+		if self.done.swap(true, Ordering::SeqCst) {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(true) && self.contains_writes() {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Take ownership of the transaction state. The tokio mutex guard
+		// is dropped at the end of this statement, so no lock is held
+		// across subsequent awaits (e.g. the commit coordinator wait below).
+		let tx = self.inner.lock().await.take().ok_or(Error::TransactionFinished)?;
+
+		// Refuse the commit before applying anything once the datastore
+		// has begun shutting down: the grouped fsync can no longer
+		// confirm durability, so no new commit should run past this
+		// point. Shutdown is treated as a controlled crash — the store
+		// is required to be consistent after any crash — so failing here
+		// leaves the transaction un-applied (the taken `inner` rolls
+		// back on drop) and safely retryable.
+		if let Some(coordinator) = &self.commit_coordinator
+			&& coordinator.is_shutting_down()
+		{
+			return Err(Error::Shutdown);
+		}
+
+		let db = tx.db().clone();
+
+		let tx = tx.into_inner().await;
+
+		// When versioned, stamp all writes with the current HLC timestamp
+		if self.versioned {
+			let ts = HlcTimeStamp::next();
+			tx.set_commit_timestamp(ts.0);
+		}
+
+		// RocksDB commit may invoke `fsync` when sync writes are
+		// enabled, so it is the highest-latency synchronous call in
+		// the transaction lifecycle and must respect the
+		// runtime-headroom guard. The helper probes the inline-blocking
+		// permit: granted → run on the calling tokio worker; refused →
+		// dispatched to the affinity pool.
+		self.inline_guard.try_inline_or_offload(move || tx.commit()).await.map_err(kvs_error)?;
+
+		// If we have a coordinator, wait for the grouped fsync
+		if sync && let Some(coordinator) = &self.commit_coordinator {
+			coordinator.wait_for_sync().await?;
+		}
+		// Perform compaction if necessary
+		if self.is_restricted(true) && self.contains_deletes() {
+			compact(db, None).await?;
+		}
+		// Continue
+		Ok(())
+	}
+
 	/// Get the current transaction state
 	fn current_state(&self) -> TransactionState {
 		match self.transaction_state.load(Ordering::Acquire) {
@@ -2061,70 +2124,15 @@ impl Transactable for Transaction {
 	/// Commit a transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn commit(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			// Atomically mark transaction as done and check if it was already
-			// closed.
-			if self.done.swap(true, Ordering::SeqCst) {
-				return Err(Error::TransactionFinished);
-			}
-			// Check to see if transaction is writable
-			if !self.writeable() {
-				return Err(Error::TransactionReadonly);
-			}
-			// Check if we are in read-and-deletion-only mode
-			if self.is_restricted(true) && self.contains_writes() {
-				return Err(Error::ReadAndDeleteOnly);
-			}
-			// Take ownership of the transaction state. The tokio mutex guard
-			// is dropped at the end of this statement, so no lock is held
-			// across subsequent awaits (e.g. the commit coordinator wait below).
-			let tx = self.inner.lock().await.take().ok_or(Error::TransactionFinished)?;
+		Box::pin(self.commit_with(true))
+	}
 
-			// Refuse the commit before applying anything once the datastore
-			// has begun shutting down: the grouped fsync can no longer
-			// confirm durability, so no new commit should run past this
-			// point. Shutdown is treated as a controlled crash — the store
-			// is required to be consistent after any crash — so failing here
-			// leaves the transaction un-applied (the taken `inner` rolls
-			// back on drop) and safely retryable.
-			if let Some(coordinator) = &self.commit_coordinator
-				&& coordinator.is_shutting_down()
-			{
-				return Err(Error::Shutdown);
-			}
-
-			let db = tx.db().clone();
-
-			let tx = tx.into_inner().await;
-
-			// When versioned, stamp all writes with the current HLC timestamp
-			if self.versioned {
-				let ts = HlcTimeStamp::next();
-				tx.set_commit_timestamp(ts.0);
-			}
-
-			// RocksDB commit may invoke `fsync` when sync writes are
-			// enabled, so it is the highest-latency synchronous call in
-			// the transaction lifecycle and must respect the
-			// runtime-headroom guard. The helper probes the inline-blocking
-			// permit: granted → run on the calling tokio worker; refused →
-			// dispatched to the affinity pool.
-			self.inline_guard
-				.try_inline_or_offload(move || tx.commit())
-				.await
-				.map_err(kvs_error)?;
-
-			// If we have a coordinator, wait for the grouped fsync
-			if let Some(coordinator) = &self.commit_coordinator {
-				coordinator.wait_for_sync().await?;
-			}
-			// Perform compaction if necessary
-			if self.is_restricted(true) && self.contains_deletes() {
-				compact(db, None).await?;
-			}
-			// Continue
-			Ok(())
-		})
+	/// Commit a transaction without waiting for the grouped fsync. The
+	/// write-ahead log applies commits in order, so a later synced commit
+	/// makes this one durable with it.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	fn commit_unsynced(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(self.commit_with(false))
 	}
 
 	/// Check if a key exists.

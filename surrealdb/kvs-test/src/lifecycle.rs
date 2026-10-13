@@ -75,6 +75,22 @@ async fn double_commit_errors(b: &TestBackend) {
 
 kvs_test!(double_commit_errors);
 
+/// An unsynced commit applies like a commit: its writes are visible to a later
+/// transaction, it closes the transaction, and committing again is an error.
+async fn commit_unsynced_applies_like_commit(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set(b"test".into(), b"value".to_vec()).await.unwrap();
+	tx.commit_unsynced().await.unwrap();
+	assert!(tx.closed());
+	assert!(tx.commit_unsynced().await.is_err());
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_eq!(tx.get(b"test".into(), None).await.unwrap().as_deref(), Some(&b"value"[..]));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(commit_unsynced_applies_like_commit);
+
 /// Committing a cancelled transaction is an error, and its writes stay
 /// discarded.
 async fn commit_after_cancel_errors(b: &TestBackend) {

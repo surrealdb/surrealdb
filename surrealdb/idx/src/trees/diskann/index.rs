@@ -1129,150 +1129,68 @@ impl DiskAnnIndex {
 		(hasher.finish() % u64::from(DISKANN_PENDING_STATE_SHARDS)) as u16
 	}
 
-	/// Reads every DiskANN pending-state shard in one ordered batch.
-	/// Reads the sharded `!dy` pending-state guard for every shard.
+	/// Reads the sharded `!dy` pending-state guard for every shard, in one ordered batch.
 	///
 	/// This guard tracks the sharded `!dw` layout only. It is deliberately separate from the legacy
 	/// `!dp` guard so a pre-change node's compactor (which clears `!dp` on `!dr`-emptiness, unaware
 	/// of `!dw`) can never mark a shard empty while a `!dw` entry still exists. Legacy `!dr`
 	/// records are not reflected here; lookup scans the legacy range unconditionally instead.
+	///
+	/// The read is noted on the transaction ([`Transaction::note_diskann_guards_read`]): on a store
+	/// that validates every read, a guard this transaction read is covered by its own commit.
+	///
+	/// A shard this transaction wrote a pending update into reads `NonEmpty` whatever is stored:
+	/// on a sole-writer store its guard is armed only when the transaction commits
+	/// ([`Self::mark_pending_non_empty`]), and a lookup in the transaction must still see the
+	/// write.
 	async fn read_pending_state(
 		tx: &Transaction,
 		ikb: &IndexKeyBase,
 	) -> Result<PendingStateSnapshot> {
 		let keys: Vec<_> =
 			(0..DISKANN_PENDING_STATE_SHARDS).map(|shard| ikb.new_dy_key(shard)).collect();
-		tx.get_many_key(keys, None).await
-	}
-
-	/// Marks the sharded `!dy` pending-state guard non-empty after writing a sharded `!dw` update.
-	///
-	/// Lookup and compaction skip a shard whose guard is `Empty`, so a transaction that writes a
-	/// `!dw` entry must not commit while its shard's guard is `Empty`. A guard that is not
-	/// `NonEmpty` is set `NonEmpty` with a compare-and-swap, which conflicts with a concurrent
-	/// compaction step of that guard. A guard that already reads `NonEmpty` is left unwritten, so
-	/// writers into one shard never conflict with one another over it. Compaction can still step
-	/// that guard `NonEmpty → MaybeEmpty → Empty` over two passes while the writer is open:
-	///
-	/// * Where locked reads are shared ([`Transaction::shared_locked_reads`]), the guard is read
-	///   locked. A step committed after this transaction's snapshot then fails its commit with a
-	///   retryable conflict, and the retry finds the stepped guard and sets it `NonEmpty`. The
-	///   refusal has to cover the first step, to `MaybeEmpty`, and not only the step to `Empty`:
-	///   the pass that empties the shard checks its `!dw` range in a snapshot, and nothing
-	///   validates that check at commit, so the pass cannot see a writer that commits while it is
-	///   open. The first step always commits after the snapshot of a writer that read the guard
-	///   `NonEmpty`, so refusing the writer over it covers that interleaving as well.
-	/// * Elsewhere a locked read would make the writers into a shard conflict with one another, so
-	///   the guard is read plain. A writer is then covered by the engine's own read validation
-	///   where it has one, and otherwise only while at most one compaction pass steps its shard's
-	///   guard: that pass leaves it `MaybeEmpty`, which lookup and compaction still scan.
-	///
-	/// Single-shot: within one transaction the read and the `putc` condition check see the same
-	/// value, so retrying on `TransactionConditionNotMet` inside the transaction would reach the
-	/// same outcome ([`Self::clear_pending_state_if_current`] has the same shape for the inverse
-	/// direction).
-	async fn mark_pending_non_empty(
-		tx: &Transaction,
-		ikb: &IndexKeyBase,
-		id: &RecordIdKey,
-	) -> Result<()> {
-		let key = ikb.new_dy_key(Self::pending_state_shard(id));
-		let current: Option<DiskAnnPendingState> = if tx.shared_locked_reads() {
-			tx.getu_key(&key).await?
-		} else {
-			tx.get_key(&key, None).await?
-		};
-		if current.as_ref().is_some_and(|state| state.kind == DiskAnnPendingStateKind::NonEmpty) {
-			return Ok(());
+		let mut states: PendingStateSnapshot = tx.get_many_key(keys, None).await?;
+		tx.note_diskann_guards_read(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
+		let buffered =
+			tx.diskann_buffered_pending_guard_shards(ikb.ns(), ikb.db(), ikb.table(), ikb.index());
+		if buffered == 0 {
+			return Ok(states);
 		}
-		let next = DiskAnnPendingState {
-			kind: DiskAnnPendingStateKind::NonEmpty,
-			generation: current.as_ref().map_or(0, |state| state.generation).saturating_add(1),
-		};
-		tx.put_compare_key(&key, &next, current.as_ref()).await
-	}
-
-	/// Conditionally advances the given sharded `!dy` guard shards toward empty after compaction
-	/// consumed their planned `!dw` ranges.
-	///
-	/// Only the shards in `shards` are stepped (NonEmpty → MaybeEmpty → Empty). Each `putc` is
-	/// conditioned on the snapshot value observed during prepare, so a concurrent writer that
-	/// bumped a shard between prepare and apply aborts that shard's clear without losing its
-	/// update. A writer that found the guard `NonEmpty` and left it unwritten is covered from its
-	/// own side instead; see [`Self::mark_pending_non_empty`].
-	async fn clear_pending_state_if_current(
-		tx: &Transaction,
-		ikb: &IndexKeyBase,
-		current: &[Option<DiskAnnPendingState>],
-		shards: &[u16],
-	) -> Result<bool> {
-		let mut changed = false;
-		for &shard in shards {
-			let current = current.get(shard as usize).and_then(|state| state.as_ref());
-			if current.is_some_and(|state| state.kind == DiskAnnPendingStateKind::Empty) {
+		for (shard, state) in states.iter_mut().enumerate() {
+			if state.as_ref().is_some_and(|s| s.kind != DiskAnnPendingStateKind::Empty) {
 				continue;
 			}
-			let key = ikb.new_dy_key(shard);
-			let kind = match current.map(|state| state.kind) {
-				Some(DiskAnnPendingStateKind::NonEmpty) => DiskAnnPendingStateKind::MaybeEmpty,
-				Some(DiskAnnPendingStateKind::MaybeEmpty) | None => DiskAnnPendingStateKind::Empty,
-				// Already filtered by the `continue` guard above; degrade to a no-op skip rather
-				// than panic on the compaction path if that guard ever drifts from this match.
-				Some(DiskAnnPendingStateKind::Empty) => continue,
-			};
-			let next = DiskAnnPendingState {
-				kind,
-				generation: current.map_or(0, |state| state.generation.saturating_add(1)),
-			};
-			match tx.put_compare_key(&key, &next, current).await {
-				Ok(()) => changed = true,
-				Err(e) if is_transaction_condition_not_met(&e) => return Ok(false),
-				Err(e) => return Err(e),
+			if buffered & (1 << shard) != 0 {
+				*state = Some(DiskAnnPendingState {
+					kind: DiskAnnPendingStateKind::NonEmpty,
+					generation: state.as_ref().map_or(0, |s| s.generation),
+				});
 			}
 		}
-		Ok(changed)
+		Ok(states)
 	}
 
-	/// Returns whether a pending-update range holds no entries. Used to re-check emptiness inside
-	/// the apply transaction before advancing pending state.
-	async fn range_empty(
-		env: &dyn IndexEnv,
-		tx: &Transaction,
-		rng: TypedRange<DiskAnnRecordPendingUpdate>,
-	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
-		// The first non-empty batch is conclusive; we just need to know
-		// whether *any* entry exists in the range.
-		let batch = cursor.next_batch(1).await?;
-		if !batch.is_empty() {
-			return Ok(false);
-		}
-		drop(cursor);
-		if env.is_done(None).await? {
-			bail!(EngineError::QueryCancelled)
-		}
-		Ok(true)
-	}
-
-	/// Re-checks that each cleared shard's `!dw` range is empty before advancing the shard's `!dy`
-	/// guard toward `Empty`.
+	/// Covers the sharded `!dy` pending-state guard of a `!dw` update this transaction wrote.
 	///
-	/// Only the per-shard `!dw` range matters: the `!dy` guard tracks the sharded layout, and
-	/// lookup scans the legacy `!dr` range unconditionally, so a shard's guard can clear as soon
-	/// as its `!dw` range drains — independent of how far the one-time legacy `!dr` backlog has
-	/// drained.
-	async fn pending_shard_ranges_empty(
-		env: &dyn IndexEnv,
-		tx: &Transaction,
-		ikb: &IndexKeyBase,
-		shards: &[u16],
-	) -> Result<bool> {
-		for &shard in shards {
-			if !Self::range_empty(env, tx, ikb.new_dw_shard_range(shard)?).await? {
-				return Ok(false);
-			}
-		}
-		Ok(true)
+	/// Lookup and compaction skip a shard whose guard is `Empty`, so a `!dw` entry must not
+	/// commit under an `Empty` guard. The writing transaction neither reads nor writes the guard,
+	/// so no guard step can fail its commit: it names the shard, and its commit covers the guard
+	/// under the index's guard fence (`Transaction::buffer_diskann_pending_guard`).
+	///
+	/// Where this datastore is the store's sole writer ([`Transaction::sole_writer`]), the commit
+	/// arms the guard, and the fence orders the arming against every guard step. Elsewhere other
+	/// nodes step guards too, and the commit covers the guard with this datastore's writer lease
+	/// on the shard instead (`!dz`), under which no node steps it. The commit reads that lease
+	/// in a transaction of its own, so a lease another node's wipe of the index's data removed is
+	/// taken again, and the guard armed with it.
+	fn mark_pending_non_empty(tx: &Transaction, ikb: &IndexKeyBase, id: &RecordIdKey) {
+		tx.buffer_diskann_pending_guard(
+			ikb.ns(),
+			ikb.db(),
+			ikb.table(),
+			ikb.index(),
+			Self::pending_state_shard(id),
+		);
 	}
 
 	/// Records a transaction's old/new vectors as a coalesced pending update.
@@ -1357,7 +1275,7 @@ impl DiskAnnIndex {
 		// added later.
 		pending.id = Some(id.clone());
 		tx.set_key(&key, &pending).await?;
-		Self::mark_pending_non_empty(&tx, &self.ikb, id).await?;
+		Self::mark_pending_non_empty(&tx, &self.ikb, id);
 		Ok(())
 	}
 
@@ -1460,16 +1378,49 @@ impl DiskAnnIndex {
 			return Ok(builder.into_plan(Vec::new()));
 		}
 		// Phase 2: sharded `!dw` per shard that may hold data. A write commits its `!dw` key only
-		// in a transaction that read or set its `!dy` shard `NonEmpty`, and
-		// `mark_pending_non_empty` keeps that transaction from committing once the guard is
-		// stepped to `Empty`, within the engine limits it documents. Absent/Empty shards
-		// therefore hold no committed entry.
+		// once its shard's `!dy` guard reads `NonEmpty`, and no guard is stepped to `Empty` over
+		// a committed entry (`mark_pending_non_empty`, within the engine limits it documents).
+		// Absent/Empty shards therefore hold no committed entry, except where a repair after the
+		// fact failed or never ran. So an `Empty` or absent shard is probed, and one holding
+		// entries has its guard repaired, with a pass queued to compact it
+		// (`Transaction::repair_diskann_pending_guards`). With no such shard there is nothing to
+		// probe. Read in this snapshot, the probe also tells phase 2 which armed shards hold
+		// nothing, which it then clears without scanning.
+		let unarmed = |state: &Option<DiskAnnPendingState>| {
+			state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty)
+		};
+		let holding = if pending_state.iter().any(unarmed) {
+			let holding = tx
+				.diskann_shards_holding_entries(ikb.ns(), ikb.db(), ikb.table(), ikb.index())
+				.await?;
+			let orphaned: Vec<u16> = pending_state
+				.iter()
+				.enumerate()
+				.filter(|(shard, state)| holding & (1 << shard) != 0 && unarmed(state))
+				.map(|(shard, _)| shard as u16)
+				.collect();
+			tx.repair_diskann_pending_guards(
+				ikb.ns(),
+				ikb.db(),
+				ikb.table(),
+				ikb.index(),
+				&orphaned,
+			)
+			.await?;
+			Some(holding)
+		} else {
+			None
+		};
 		let mut cleared_shards = Vec::new();
 		for (shard, state) in pending_state.iter().enumerate() {
-			if state.as_ref().is_none_or(|s| s.kind == DiskAnnPendingStateKind::Empty) {
+			if unarmed(state) {
 				continue;
 			}
 			let shard = shard as u16;
+			if holding.is_some_and(|holding| holding & (1 << shard) == 0) {
+				cleared_shards.push(shard);
+				continue;
+			}
 			let drained = Self::capture_shard_range(
 				env,
 				&tx,
@@ -1667,30 +1618,18 @@ impl DiskAnnIndex {
 	) -> Result<bool> {
 		let DiskAnnCompactionPlan {
 			generation,
-			pending_state,
+			pending_state: _,
 			captured_keys,
 			pending,
 			cleared_shards,
 			has_more: _,
 		} = plan;
 		let tx = env.tx();
+		// The guards are stepped after this transaction, under the index's guard fence, so this
+		// transaction never writes a guard a writer covers.
 		if captured_keys.is_empty() {
-			// No graph mutations possible; the only KV writes here are to the !dy
-			// guard shards. Commit (or cancel) without touching the graph lock or cache.
-			if !cleared_shards.is_empty()
-				&& Self::pending_shard_ranges_empty(env, &tx, &self.ikb, &cleared_shards).await?
-				&& Self::clear_pending_state_if_current(
-					&tx,
-					&self.ikb,
-					&pending_state,
-					&cleared_shards,
-				)
-				.await?
-			{
-				return tx.commit().await.map(|()| true);
-			}
 			cancel_silently(&tx).await;
-			return Ok(false);
+			return self.step_pending_guards(&tx, &cleared_shards).await;
 		}
 		if !bump_compaction_generation(&tx, &self.ikb.new_dg_key(), generation).await? {
 			cancel_silently(&tx).await;
@@ -1726,17 +1665,6 @@ impl DiskAnnIndex {
 			for pending in pending {
 				self.apply_pending_operation(&diskann_ctx, &docs, &mut graph, pending).await?;
 			}
-			if !cleared_shards.is_empty()
-				&& Self::pending_shard_ranges_empty(env, &tx, &self.ikb, &cleared_shards).await?
-			{
-				Self::clear_pending_state_if_current(
-					&tx,
-					&self.ikb,
-					&pending_state,
-					&cleared_shards,
-				)
-				.await?;
-			}
 			Ok(())
 		}
 		.await;
@@ -1752,12 +1680,41 @@ impl DiskAnnIndex {
 			return Err(e);
 		}
 		graph.commit_frame(committed);
-		// Lock is released as `graph` goes out of scope. By the time any
-		// concurrent reader can acquire `graph.read()` the cache and KV are
-		// consistent and the span covers the committed generation (commit
-		// succeeded) — or, on the error paths above, the cache has been cleared
-		// and the span closed (commit failed) before the lock was released.
+		// By the time any concurrent reader can acquire `graph.read()` the cache
+		// and KV are consistent and the span covers the committed generation
+		// (commit succeeded) — or, on the error paths above, the cache has been
+		// cleared and the span closed (commit failed) before the lock was released.
+		drop(graph);
+		// The apply has committed, so a failed step does not undo it: the guard is left as it was,
+		// which may only make lookups scan a drained shard, and the next pass steps it.
+		if let Err(e) = self.step_pending_guards(&tx, &cleared_shards).await {
+			tracing::warn!(
+				target: "surrealdb::idx::diskann",
+				"failed to step the DiskANN pending-state guards after a compaction: {e}"
+			);
+		}
 		Ok(true)
+	}
+
+	/// Steps the drained shards' guards to `Empty`, in a transaction of their own under the index's
+	/// guard fence. On a store other datastores write to, a shard under a writer lease that still
+	/// holds is skipped, and leases that no longer hold are retired with the step. See
+	/// `Transaction::step_diskann_pending_guards`.
+	///
+	/// Boxed because the step holds a transaction of its own, which would otherwise grow the
+	/// compaction's future by its size.
+	async fn step_pending_guards(&self, tx: &Transaction, shards: &[u16]) -> Result<bool> {
+		if shards.is_empty() {
+			return Ok(false);
+		}
+		Box::pin(tx.step_diskann_pending_guards(
+			self.ikb.ns(),
+			self.ikb.db(),
+			self.ikb.table(),
+			self.ikb.index(),
+			shards,
+		))
+		.await
 	}
 
 	/// Drops every entry in the process-local [`DiskAnnCache`] that is scoped to
@@ -2371,11 +2328,12 @@ impl DiskAnnIndex {
 		let rng = self.ikb.new_dr_range()?;
 		self.scan_pending_range(ctx, &mut scan, rng, PendingLayout::Legacy, false).await?;
 		// Phase 2: the sharded ranges of every shard that may hold data. A write
-		// commits its `!dw` key only in a transaction that read or set its `!dy`
-		// shard `NonEmpty`, and `mark_pending_non_empty` keeps that transaction from
-		// committing once the guard is stepped to `Empty`, within the engine limits
-		// it documents. A shard that is absent or confirmed `Empty` therefore holds
-		// no committed `!dw` entry. Skipping those shards keeps the scan proportional
+		// commits its `!dw` key only once its shard's `!dy` guard reads `NonEmpty`,
+		// and no guard is stepped to `Empty` over a committed entry
+		// (`mark_pending_non_empty`, within the engine limits it documents); a shard
+		// this transaction wrote into reads `NonEmpty` here before its commit arms it.
+		// A shard that is absent or confirmed `Empty` therefore holds no `!dw` entry
+		// this lookup can see. Skipping those shards keeps the scan proportional
 		// to the un-compacted backlog of the few active shards rather than the whole
 		// index.
 		for shard in 0..DISKANN_PENDING_STATE_SHARDS {
@@ -2648,6 +2606,7 @@ mod tests {
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
 	use tracing::info;
+	use uuid::Uuid;
 
 	use super::*;
 	use crate::catalog::{
@@ -2733,16 +2692,6 @@ mod tests {
 
 	fn diskann_any_pending_state_non_empty(states: &[Option<DiskAnnPendingState>]) -> bool {
 		states.iter().flatten().any(|state| state.kind == DiskAnnPendingStateKind::NonEmpty)
-	}
-
-	fn diskann_any_pending_state_maybe_empty(states: &[Option<DiskAnnPendingState>]) -> bool {
-		states.iter().flatten().any(|state| state.kind == DiskAnnPendingStateKind::MaybeEmpty)
-	}
-
-	fn diskann_pending_states_require_scan(states: &[Option<DiskAnnPendingState>]) -> bool {
-		states.iter().any(|state| {
-			state.as_ref().is_none_or(|state| state.kind != DiskAnnPendingStateKind::Empty)
-		})
 	}
 
 	/// True when no pending-state shard is non-empty. Untouched (`None`) shards are ignored: with
@@ -3058,8 +3007,7 @@ mod tests {
 	///
 	/// One prepare pass is capped at [`DISKANN_COMPACTION_MAX_PENDING_KEYS`] keys
 	/// and [`DISKANN_COMPACTION_MAX_PENDING_BYTES`] bytes, so a corpus wider than
-	/// one batch needs several passes, and each drained `!dy` shard takes one
-	/// further pass to step from `MaybeEmpty` to `Empty`. Returns the number of
+	/// one batch needs several passes. Returns the number of
 	/// passes that captured pending keys, which is what a caller asserts on when
 	/// it cares that the drain was batched. The pass cap turns a drain that fails
 	/// to converge into a failure rather than a hang.
@@ -3281,16 +3229,17 @@ mod tests {
 
 		let pending: DiskAnnRecordPendingUpdate =
 			tx.get_key(&dw_key(&ikb, &id), None).await?.unwrap();
-		let states = diskann_pending_states(&tx, &ikb).await?;
-		let state = states
-			.iter()
-			.flatten()
-			.find(|state| state.kind == DiskAnnPendingStateKind::NonEmpty)
-			.unwrap();
+		// The writing transaction reads its shard as holding entries, while the
+		// stored guard waits for the commit to arm it.
+		let shard = DiskAnnIndex::pending_state_shard(&id) as usize;
+		let states = DiskAnnIndex::read_pending_state(&tx, &ikb).await?;
+		assert_eq!(
+			states[shard].as_ref().map(|state| state.kind),
+			Some(DiskAnnPendingStateKind::NonEmpty)
+		);
+		assert!(diskann_pending_states(&tx, &ikb).await?[shard].is_none());
 		assert!(pending.old_vectors.is_empty());
 		assert_eq!(pending.new_vectors, vec![SerializedVector::F32(vec![1.0, 2.0, 3.0, 4.0])]);
-		assert_eq!(state.kind, DiskAnnPendingStateKind::NonEmpty);
-		assert_eq!(state.generation, 1);
 
 		index
 			.index(
@@ -3302,16 +3251,14 @@ mod tests {
 			.await?;
 		let pending: DiskAnnRecordPendingUpdate =
 			tx.get_key(&dw_key(&ikb, &id), None).await?.unwrap();
-		let updated_states = diskann_pending_states(&tx, &ikb).await?;
-		let updated_state = updated_states
-			.iter()
-			.flatten()
-			.find(|state| state.kind == DiskAnnPendingStateKind::NonEmpty)
-			.unwrap();
 		assert_eq!(pending.new_vectors, vec![SerializedVector::F32(vec![4.0, 3.0, 2.0, 1.0])]);
-		assert_eq!(updated_state.kind, DiskAnnPendingStateKind::NonEmpty);
-		assert!(updated_state.generation >= state.generation);
-		tx.cancel().await?;
+		tx.commit().await?;
+		// The commit arms the guard once, however many writes named the shard.
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard].clone().unwrap();
+		ctx.tx().cancel().await?;
+		assert_eq!(state.kind, DiskAnnPendingStateKind::NonEmpty);
+		assert_eq!(state.generation, 1);
 		Ok(())
 	}
 
@@ -4414,17 +4361,8 @@ mod tests {
 			assert!(index.apply_compaction(&ctx, plan).await?);
 		}
 
-		{
-			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
-			assert!(diskann_pending_states_require_scan(&states));
-			assert!(diskann_any_pending_state_maybe_empty(&states));
-			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &id), None).await?.is_none());
-			ctx.tx().cancel().await?;
-		}
-
-		assert!(compact_once(&index, &ds, &ikb).await?);
-
+		// On a sole-writer store the pass that drains the shard confirms it empty
+		// under the guard fence, so one step takes the guard to `Empty`.
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
@@ -4432,6 +4370,8 @@ mod tests {
 			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
+
+		assert!(!compact_once(&index, &ds, &ikb).await?, "nothing is left to step");
 		Ok(())
 	}
 
@@ -4486,9 +4426,10 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
 			let shard = DiskAnnIndex::pending_state_shard(&second_id) as usize;
+			// The step after the apply reads the writer's entry, so it leaves the guard alone.
 			assert_eq!(
 				states[shard].as_ref().map(|state| state.kind),
-				Some(DiskAnnPendingStateKind::MaybeEmpty)
+				Some(DiskAnnPendingStateKind::NonEmpty)
 			);
 			assert!(ctx.tx().get_key(&dw_key(&ikb, &second_id), None).await?.is_some());
 			ctx.tx().cancel().await?;
@@ -4589,15 +4530,24 @@ mod tests {
 		Ok(())
 	}
 
-	/// A writer that finds its shard's `!dy` guard `NonEmpty` leaves the guard
-	/// alone. Compaction passes that step the shard to `Empty` while the writer
+	/// Compaction passes that step a writer's shard to `Empty` while the writer
 	/// is still open must not hide the writer's pending once it commits: search
-	/// and compaction both skip a shard whose guard is `Empty`. The writer's
-	/// commit may instead be refused as retryable, in which case the retried
-	/// write must be the one that stays visible.
+	/// and compaction both skip a shard whose guard is `Empty`. The writer's commit
+	/// covers the guard after those steps, and is never refused for them. Where
+	/// other datastores write to the store, the shard empties once the earlier
+	/// write's lease is released, and the writer's commit takes the lease again.
 	#[tokio::test]
 	async fn diskann_pending_written_while_its_shard_empties_stays_visible() -> Result<()> {
-		let ds = TestIndexStore::new().await;
+		diskann_pending_written_while_its_shard_empties_stays_visible_on(
+			TestIndexStore::new().await,
+		)
+		.await
+	}
+
+	/// The body of [`diskann_pending_written_while_its_shard_empties_stays_visible`], on any store.
+	async fn diskann_pending_written_while_its_shard_empties_stays_visible_on(
+		ds: TestIndexStore,
+	) -> Result<()> {
 		let ikb = ikb();
 		let index = new_index(
 			ikb.clone(),
@@ -4630,6 +4580,7 @@ mod tests {
 				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
 			)
 			.await?;
+		ds.release_writer_leases().await?;
 		for _ in 0..3 {
 			compact_once(&index, &ds, &ikb).await?;
 		}
@@ -4643,46 +4594,104 @@ mod tests {
 				"the shard must reach Empty while the writer is open for this to test anything"
 			);
 		}
-		match writer.tx().commit().await {
-			Ok(()) => {}
-			// Retried as a client does, in a fresh transaction.
-			Err(e) if is_retryable_transaction_conflict(&e) => {
-				let ctx = new_ctx(&ds, TransactionType::Write).await;
-				index
-					.index(
-						&ctx,
-						&RecordIdKey::Number(33),
-						None,
-						Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
-					)
-					.await?;
-				ctx.tx().commit().await?;
-			}
-			Err(e) => return Err(e),
-		}
+		writer.tx().commit().await?;
 		let query = [33.0, 0.0, 0.0, 0.0];
 		assert_eq!(
 			knn_keys_with_allow(&index, &ds, &query, 2, None).await?,
 			vec![1, 33],
 			"search must see the committed pending"
 		);
+		ds.release_writer_leases().await?;
 		while compact_once(&index, &ds, &ikb).await? {}
 		assert_eq!(
 			knn_keys_with_allow(&index, &ds, &query, 2, None).await?,
 			vec![1, 33],
 			"compaction must fold the committed pending into the graph"
 		);
+		assert_eq!(ds.guard_repairs(), 0, "the covering protocol left no guard to repair");
 		Ok(())
 	}
 
-	/// A writer that found its shard's guard `NonEmpty` and commits while the
-	/// pass that empties the shard is open, after that pass has checked the
-	/// shard's `!dw` range but before it commits, must not end up under an
-	/// `Empty` guard. The pass's range check never sees the writer's pending,
-	/// so one of the two transactions has to be refused.
+	/// A lookup in the transaction that wrote a pending update sees it although
+	/// the shard's stored guard reads `Empty`: on a sole-writer store the guard
+	/// is armed only when that transaction commits.
+	#[tokio::test]
+	async fn diskann_lookup_in_the_writing_transaction_sees_its_pending_under_an_empty_guard()
+	-> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Records 1 and 33 share a shard; record 1 is folded so its guard ends `Empty`.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(1),
+					None,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		assert_eq!(
+			diskann_pending_states(&writer.tx(), &ikb).await?[shard as usize]
+				.as_ref()
+				.map(|state| state.kind),
+			Some(DiskAnnPendingStateKind::Empty),
+			"the stored guard must read Empty for this to test anything"
+		);
+		index
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		let query = f32_query(&[33.0, 0.0, 0.0, 0.0]);
+		let found = index.knn_search(&writer, &query, 2, 8, None, None).await?;
+		writer.tx().cancel().await?;
+		let mut keys: Vec<i64> = found
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort_unstable();
+		assert_eq!(keys, vec![1, 33], "the writing transaction must see its own pending update");
+		Ok(())
+	}
+
+	/// A writer that commits while the pass that empties its shard is open must
+	/// not end up under an `Empty` guard. On a sole-writer store the pass's
+	/// apply never writes the guard, and its step reads the guard and the range
+	/// under the guard fence after the writer has armed it, so the writer's
+	/// commit is never refused.
 	#[tokio::test]
 	async fn diskann_writer_committing_inside_the_emptying_pass_stays_visible() -> Result<()> {
-		let ds = TestIndexStore::new().await;
+		diskann_writer_committing_inside_the_emptying_pass_stays_visible_on(
+			TestIndexStore::new().await,
+		)
+		.await
+	}
+
+	/// The body of [`diskann_writer_committing_inside_the_emptying_pass_stays_visible`], on any
+	/// store.
+	async fn diskann_writer_committing_inside_the_emptying_pass_stays_visible_on(
+		ds: TestIndexStore,
+	) -> Result<()> {
 		let ikb = ikb();
 		let index = new_index(
 			ikb.clone(),
@@ -4715,7 +4724,7 @@ mod tests {
 				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
 			)
 			.await?;
-		// The first pass drains record 1 and steps the guard to `MaybeEmpty`.
+		// The first pass drains record 1 and steps the guard to `Empty`.
 		assert!(compact_once(&index, &ds, &ikb).await?);
 		// The emptying pass plans and opens its apply before the writer commits.
 		let plan = {
@@ -4725,23 +4734,7 @@ mod tests {
 			plan
 		};
 		let emptying = new_ctx(&ds, TransactionType::Write).await;
-		match writer.tx().commit().await {
-			Ok(()) => {}
-			// Retried as a client does, in a fresh transaction.
-			Err(e) if is_retryable_transaction_conflict(&e) => {
-				let ctx = new_ctx(&ds, TransactionType::Write).await;
-				index
-					.index(
-						&ctx,
-						&RecordIdKey::Number(33),
-						None,
-						Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
-					)
-					.await?;
-				ctx.tx().commit().await?;
-			}
-			Err(e) => return Err(e),
-		}
+		writer.tx().commit().await?;
 		// The pass then applies over what it planned; a refusal is equally correct.
 		match index.apply_compaction(&emptying, plan).await {
 			Ok(_) => {}
@@ -4760,12 +4753,12 @@ mod tests {
 			vec![1, 33],
 			"compaction must fold the committed pending into the graph"
 		);
+		assert_eq!(ds.guard_repairs(), 0, "the covering protocol left no guard to repair");
 		Ok(())
 	}
 
 	/// Overlapping writers into a shard whose `!dy` guard already reads
-	/// `NonEmpty` all commit: each takes a locked read of the guard and leaves
-	/// it unwritten, and locked reads do not conflict with one another.
+	/// `NonEmpty` all commit: none of them writes the guard.
 	#[tokio::test]
 	async fn diskann_overlapping_writers_into_a_non_empty_shard_all_commit() -> Result<()> {
 		let ds = TestIndexStore::new().await;
@@ -4804,8 +4797,8 @@ mod tests {
 		let first = new_ctx(&ds, TransactionType::Write).await;
 		let second = new_ctx(&ds, TransactionType::Write).await;
 		assert!(
-			first.tx().shared_locked_reads(),
-			"the store must share locked reads for the writers to take the locked path"
+			first.tx().sole_writer(),
+			"the store must be one this datastore is the sole writer of for the fenced path"
 		);
 		index
 			.index(
@@ -4835,6 +4828,1041 @@ mod tests {
 			knn_keys_with_allow(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 3, None).await?,
 			vec![1, 33, 65],
 			"search must see both writers' pendings"
+		);
+		Ok(())
+	}
+
+	/// Writers into a shard whose guard reads `Empty` both arm it as they
+	/// commit. Their arming transactions conflict only with each other, and the
+	/// one that loses retries and finds the guard armed, so both commits land.
+	#[tokio::test]
+	async fn diskann_concurrent_writers_arming_an_empty_shard_both_commit() -> Result<()> {
+		diskann_concurrent_writers_arming_an_empty_shard_both_commit_on(TestIndexStore::new().await)
+			.await
+	}
+
+	/// The body of [`diskann_concurrent_writers_arming_an_empty_shard_both_commit`], on any store.
+	async fn diskann_concurrent_writers_arming_an_empty_shard_both_commit_on(
+		ds: TestIndexStore,
+	) -> Result<()> {
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Records 1, 33 and 65 share a shard; record 1 is folded so its guard ends `Empty`.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		for id in [33, 65] {
+			assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(id)));
+		}
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(1),
+					None,
+					Some(f32_content(&[1.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		ds.release_writer_leases().await?;
+		compact_all(&index, &ds, &ikb).await?;
+		let first = new_ctx(&ds, TransactionType::Write).await;
+		let second = new_ctx(&ds, TransactionType::Write).await;
+		for (ctx, id) in [(&first, 33), (&second, 65)] {
+			index
+				.index(
+					ctx,
+					&RecordIdKey::Number(id),
+					None,
+					Some(f32_content(&[id as f32, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+		}
+		let (first_tx, second_tx) = (first.tx(), second.tx());
+		let (a, b) = tokio::join!(first_tx.commit(), second_tx.commit());
+		a?;
+		b?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard as usize].clone();
+			ctx.tx().cancel().await?;
+			assert_eq!(state.map(|s| s.kind), Some(DiskAnnPendingStateKind::NonEmpty));
+		}
+		assert_eq!(
+			knn_keys_with_allow(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 3, None).await?,
+			vec![1, 33, 65],
+			"search must see both writers' pendings"
+		);
+		assert_eq!(ds.guard_repairs(), 0, "the covering protocol left no guard to repair");
+		Ok(())
+	}
+
+	/// A guard armed for a commit that then fails is left `NonEmpty` over a range
+	/// holding nothing of it. The arming queued a compaction pass for the index,
+	/// so the failed commit taking its own queue entry with it does not leave the
+	/// guard stuck: the pass returns it to `Empty`.
+	#[tokio::test]
+	async fn diskann_guard_armed_for_a_failed_commit_is_stepped_back() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		// Record 1 is folded, so its shard's guard ends `Empty`.
+		let id = RecordIdKey::Number(1);
+		let shard = DiskAnnIndex::pending_state_shard(&id) as usize;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index.index(&ctx, &id, None, Some(f32_content(&[1.0, 0.0, 0.0, 0.0]))).await?;
+			ctx.tx().commit().await?;
+		}
+		compact_all(&index, &ds, &ikb).await?;
+		let queued = |tx: Arc<Transaction>| {
+			let ikb = ikb.clone();
+			async move {
+				let range = crate::key::schema::IndexCompactionIxPrefix {
+					ns: ikb.ns(),
+					db: ikb.db(),
+					tb: Cow::Borrowed(ikb.table()),
+					ix: ikb.index(),
+				}
+				.range()?;
+				let n = tx.keys(range, u32::MAX, 0, None).await?.len();
+				tx.cancel().await?;
+				Ok::<_, anyhow::Error>(n)
+			}
+		};
+		let before = queued(new_ctx(&ds, TransactionType::Read).await.tx()).await?;
+		// The writer also writes a key a second transaction commits first, so its
+		// own commit is refused after its arming has committed.
+		let contested = crate::key::Key::from(b"/7575-contested".as_slice());
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		index
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		writer.tx().set(contested.clone(), b"writer".to_vec()).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().set(contested, b"winner".to_vec()).await?;
+			ctx.tx().commit().await?;
+		}
+		let refused = writer.tx().commit().await;
+		assert!(
+			refused.as_ref().is_err_and(is_retryable_transaction_conflict),
+			"the writer's commit must lose the contested key: {refused:?}"
+		);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard].clone();
+			ctx.tx().cancel().await?;
+			assert_eq!(
+				state.map(|s| s.kind),
+				Some(DiskAnnPendingStateKind::NonEmpty),
+				"the arming committed although the writer's commit did not"
+			);
+		}
+		assert_eq!(
+			queued(new_ctx(&ds, TransactionType::Read).await.tx()).await?,
+			before + 1,
+			"the arming queues a compaction pass for the index"
+		);
+		assert!(compact_once(&index, &ds, &ikb).await?);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard].clone();
+		ctx.tx().cancel().await?;
+		assert_eq!(state.map(|s| s.kind), Some(DiskAnnPendingStateKind::Empty));
+		Ok(())
+	}
+
+	/// On a store that validates every read, a transaction that read a shard's
+	/// guard covers that guard in its own commit, whichever came first, the
+	/// lookup or the write: another transaction's arming would invalidate the
+	/// read and fail it. A guard covered that way goes with a commit that fails,
+	/// where one the arming transaction covered outlives it. A write with no
+	/// lookup is still covered by the arming transaction.
+	#[tokio::test]
+	async fn diskann_guard_read_on_a_validating_store_is_covered_by_its_own_commit() -> Result<()> {
+		let ds = TestIndexStore::new().await.validating_node();
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33));
+		// Writes record 33 in a transaction whose commit is refused, after or
+		// before a lookup if `lookup` says so, and returns the shard's guard as
+		// it stands afterwards.
+		let refused_write = |lookup: Option<bool>| {
+			let (ds, index, ikb) = (&ds, &index, ikb.clone());
+			async move {
+				let contested = crate::key::Key::from(b"/7575-validated".as_slice());
+				let writer = new_ctx(ds, TransactionType::Write).await;
+				if lookup == Some(true) {
+					DiskAnnIndex::read_pending_state(&writer.tx(), &ikb).await?;
+				}
+				index
+					.index(
+						&writer,
+						&RecordIdKey::Number(33),
+						None,
+						Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+				if lookup == Some(false) {
+					DiskAnnIndex::read_pending_state(&writer.tx(), &ikb).await?;
+				}
+				writer.tx().set(contested.clone(), b"writer".to_vec()).await?;
+				{
+					let ctx = new_ctx(ds, TransactionType::Write).await;
+					ctx.tx().set(contested, b"winner".to_vec()).await?;
+					ctx.tx().commit().await?;
+				}
+				let refused = writer.tx().commit().await;
+				assert!(
+					refused.as_ref().is_err_and(is_retryable_transaction_conflict),
+					"the writer's commit must lose the contested key: {refused:?}"
+				);
+				stored_guard(ds, shard).await
+			}
+		};
+		assert_eq!(refused_write(Some(true)).await?, None, "lookup, then write");
+		assert_eq!(refused_write(Some(false)).await?, None, "write, then lookup");
+		assert_eq!(
+			refused_write(None).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a write with no lookup is armed by a transaction of its own"
+		);
+		// A lookup, then a write, that commits leaves its guard `NonEmpty`.
+		let other = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(2));
+		assert_ne!(other, shard);
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		DiskAnnIndex::read_pending_state(&writer.tx(), &ikb).await?;
+		index
+			.index(&writer, &RecordIdKey::Number(2), None, Some(f32_content(&[2.0, 0.0, 0.0, 0.0])))
+			.await?;
+		writer.tx().commit().await?;
+		assert_eq!(stored_guard(&ds, other).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		Ok(())
+	}
+
+	/// A wipe of the index's data removes its guards, so what the datastore knew
+	/// of them as armed is forgotten as the wipe commits: the next write into a
+	/// shard it had recorded arms the guard again, rather than leaving its
+	/// pending update under an absent guard that lookup skips.
+	#[tokio::test]
+	async fn diskann_write_after_a_wipe_arms_the_guard_again() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
+		// Records 1 and 33 share a shard; record 1's commit arms its guard.
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		let guard = |ds: &TestIndexStore| {
+			let ikb = ikb.clone();
+			let ds = ds.clone();
+			async move {
+				let ctx = new_ctx(&ds, TransactionType::Read).await;
+				let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard as usize].clone();
+				ctx.tx().cancel().await?;
+				Ok::<_, anyhow::Error>(state.map(|s| s.kind))
+			}
+		};
+		for id in [1, 33] {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(id),
+					None,
+					Some(f32_content(&[id as f32, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(guard(&ds).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb, &crate::catalog::Index::DiskAnn(p.clone()))
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(guard(&ds).await?, None, "the wipe removes the guard");
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(65),
+					None,
+					Some(f32_content(&[65.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(
+			guard(&ds).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a write after the wipe must arm the guard again"
+		);
+		// A wipe and a write in one transaction: the guard is covered after the
+		// wipe's delete, which would otherwise remove it as the commit lands.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb, &crate::catalog::Index::DiskAnn(p.clone()))
+				.await?;
+			index
+				.index(
+					&ctx,
+					&RecordIdKey::Number(97),
+					None,
+					Some(f32_content(&[97.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(
+			guard(&ds).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a write in the wiping transaction must leave its guard armed"
+		);
+		Ok(())
+	}
+
+	/// A wipe deletes the index's keys as its transaction saw them, so a writer committing into a
+	/// shard whose guard it knows armed, while the wipe is open, leaves an entry the wipe does not
+	/// delete under a guard it does. The wipe's commit arms the guard of every shard still holding
+	/// entries once it has landed.
+	#[tokio::test]
+	async fn diskann_write_committed_during_a_wipe_keeps_its_guard() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index = new_index(ikb.clone(), TableId(4), &p, cache()).await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		write_one(&index, &ds, 1).await?;
+		let wipe = new_ctx(&ds, TransactionType::Write).await;
+		crate::wipe_index_data(&wipe.tx(), &ikb, &crate::catalog::Index::DiskAnn(p.clone()))
+			.await?;
+		write_one(&index, &ds, 33).await?;
+		wipe.tx().commit().await?;
+		let pending = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let range = crate::key::schema::DiskannRecordPendingShardShardPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+				shard,
+			}
+			.range()?;
+			let n = ctx.tx().keys(range, u32::MAX, 0, None).await?.len();
+			ctx.tx().cancel().await?;
+			n
+		};
+		assert_eq!(pending, 1, "the wipe leaves the entry it did not see");
+		assert_eq!(
+			stored_guard(&ds, shard).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"the entry left behind must be under an armed guard"
+		);
+		Ok(())
+	}
+
+	/// Two datastores over one in-memory store, each a node of a cluster running
+	/// the writer-lease protocol, with their own handles on one index.
+	async fn lease_nodes() -> Result<(TestIndexStore, DiskAnnIndex, TestIndexStore, DiskAnnIndex)> {
+		let base = TestIndexStore::new().await;
+		let (a, b) = (base.shared_node(), base.shared_node());
+		let p = params(VectorType::F32, Distance::Euclidean);
+		let index_a = new_index(ikb(), TableId(4), &p, cache()).await?;
+		let index_b = new_index(ikb(), TableId(4), &p, cache()).await?;
+		Ok((a, index_a, b, index_b))
+	}
+
+	/// Commits one record's vector through `index` on `ds`.
+	async fn write_one(index: &DiskAnnIndex, ds: &TestIndexStore, id: i64) -> Result<()> {
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		index
+			.index(
+				&ctx,
+				&RecordIdKey::Number(id),
+				None,
+				Some(f32_content(&[id as f32, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		ctx.tx().commit().await
+	}
+
+	/// The kind of `shard`'s stored guard, as `ds` reads it.
+	async fn stored_guard(
+		ds: &TestIndexStore,
+		shard: u16,
+	) -> Result<Option<DiskAnnPendingStateKind>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let state = diskann_pending_states(&ctx.tx(), &ikb()).await?[shard as usize].clone();
+		ctx.tx().cancel().await?;
+		Ok(state.map(|state| state.kind))
+	}
+
+	/// The writer lease node `nid` holds on `shard`, as `ds` reads it.
+	fn lease_key(shard: u16, nid: Uuid) -> crate::key::schema::DiskannWriterLeaseKey<'static> {
+		let ikb = ikb();
+		crate::key::schema::DiskannWriterLeaseKey {
+			ns: ikb.ns(),
+			db: ikb.db(),
+			tb: Cow::Owned(ikb.table().clone()),
+			ix: ikb.index(),
+			shard,
+			nid,
+		}
+	}
+
+	async fn stored_lease(
+		ds: &TestIndexStore,
+		shard: u16,
+		nid: Uuid,
+	) -> Result<Option<surrealdb_datastore::values::diskann::DiskAnnWriterLease>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let lease = ctx.tx().get_key(&lease_key(shard, nid), None).await?;
+		ctx.tx().cancel().await?;
+		Ok(lease)
+	}
+
+	/// Writes a lease for `nid` directly, as another process would have left it.
+	async fn plant_lease(ds: &TestIndexStore, shard: u16, nid: Uuid, expired: bool) -> Result<()> {
+		let ctx = new_ctx(ds, TransactionType::Write).await;
+		ctx.tx()
+			.set_key(
+				&lease_key(shard, nid),
+				&surrealdb_datastore::values::diskann::DiskAnnWriterLease::foreign(expired),
+			)
+			.await?;
+		ctx.tx().commit().await
+	}
+
+	/// A node's writer lease keeps another node's compaction from returning the
+	/// shard's guard to `Empty`, whatever that compaction drains, until the node
+	/// releases the lease. The release queues the pass that then steps it.
+	#[tokio::test]
+	async fn diskann_lease_blocks_a_foreign_step_until_released() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_some(), "the write takes a lease");
+		for _ in 0..3 {
+			compact_once(&index_b, &b, &ikb()).await?;
+		}
+		assert_eq!(
+			stored_guard(&b, shard).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"no node steps a guard under another node's lease"
+		);
+		assert_eq!(a.release_writer_leases().await?, 1);
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_none());
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[1.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![1]
+		);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// The shared-store form of a guard covered for a commit that then fails: the
+	/// lease taken with it keeps the guard `NonEmpty` over a range holding nothing
+	/// of the commit until the node releases the lease, after which a pass
+	/// returns the guard to `Empty`.
+	#[tokio::test]
+	async fn diskann_lease_taken_for_a_failed_commit_is_released_and_stepped() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33));
+		// The writer also writes a key a second transaction commits first, so its
+		// own commit is refused after its covering has committed.
+		let contested = crate::key::Key::from(b"/7575-contested".as_slice());
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		writer.tx().set(contested.clone(), b"writer".to_vec()).await?;
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			ctx.tx().set(contested, b"winner".to_vec()).await?;
+			ctx.tx().commit().await?;
+		}
+		let refused = writer.tx().commit().await;
+		assert!(
+			refused.as_ref().is_err_and(is_retryable_transaction_conflict),
+			"the writer's commit must lose the contested key: {refused:?}"
+		);
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_some());
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert_eq!(
+			stored_guard(&b, shard).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"the lease holds although its commit failed"
+		);
+		assert_eq!(a.release_writer_leases().await?, 1);
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_none());
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// The cross-node form of #7575: a writer on one node commits while another
+	/// node compacts its shard, and both its commit and its record survive.
+	#[tokio::test]
+	async fn diskann_writer_commits_while_another_node_compacts_its_shard() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		assert_eq!(shard, DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33)));
+		write_one(&index_a, &a, 1).await?;
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		for _ in 0..3 {
+			compact_once(&index_b, &b, &ikb()).await?;
+		}
+		writer.tx().commit().await?;
+		let query = [33.0, 0.0, 0.0, 0.0];
+		assert_eq!(knn_keys_with_allow(&index_b, &b, &query, 2, None).await?, vec![1, 33]);
+		for _ in 0..3 {
+			compact_once(&index_b, &b, &ikb()).await?;
+		}
+		assert_eq!(knn_keys_with_allow(&index_b, &b, &query, 2, None).await?, vec![1, 33]);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// A writer that found its node's lease held relies on it only if the node
+	/// still holds it when the writer commits. A release in between, and a step
+	/// another node takes after it, leave the writer to take the lease again, so
+	/// its record is not committed under an `Empty` guard.
+	#[tokio::test]
+	async fn diskann_release_while_a_writer_is_open_does_not_hide_its_write() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		assert_eq!(a.release_writer_leases().await?, 1);
+		for _ in 0..3 {
+			compact_once(&index_b, &b, &ikb()).await?;
+		}
+		assert_eq!(
+			stored_guard(&b, shard).await?,
+			Some(DiskAnnPendingStateKind::Empty),
+			"the shard must reach Empty while the writer is open for this to test anything"
+		);
+		writer.tx().commit().await?;
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_some());
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[33.0, 0.0, 0.0, 0.0], 2, None).await?,
+			vec![1, 33]
+		);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// Another node's wipe of the index's data removes this node's lease with the
+	/// guards, so this node's next write takes the lease again and arms the
+	/// guard, rather than relying on what it held before the wipe.
+	#[tokio::test]
+	async fn diskann_write_after_another_nodes_wipe_takes_the_lease_again() -> Result<()> {
+		let (a, index_a, b, _index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			let index =
+				crate::catalog::Index::DiskAnn(params(VectorType::F32, Distance::Euclidean));
+			crate::wipe_index_data(&ctx.tx(), &ikb(), &index).await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(stored_guard(&a, shard).await?, None);
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_none());
+		write_one(&index_a, &a, 33).await?;
+		assert_eq!(stored_guard(&a, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_some());
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// A writer whose transaction is open across another node's wipe of the index's data commits
+	/// under a lease and guard it takes again: its fence still records the lease the wipe
+	/// removed, and the commit reads the lease before relying on it. A wipe and a write in one
+	/// transaction cover the guard in that transaction, after the wipe's delete, with no lease.
+	#[tokio::test]
+	async fn diskann_writer_open_across_another_nodes_wipe_takes_the_lease_again() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		let diskann = crate::catalog::Index::DiskAnn(params(VectorType::F32, Distance::Euclidean));
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb(), &diskann).await?;
+			ctx.tx().commit().await?;
+		}
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_none());
+		writer.tx().commit().await?;
+		assert_eq!(stored_guard(&a, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_some());
+		// Node B wipes and writes in one transaction.
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			crate::wipe_index_data(&ctx.tx(), &ikb(), &diskann).await?;
+			index_b
+				.index(
+					&ctx,
+					&RecordIdKey::Number(65),
+					None,
+					Some(f32_content(&[65.0, 0.0, 0.0, 0.0])),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&b, shard, b.node_id()).await?.is_none());
+		assert!(stored_lease(&b, shard, a.node_id()).await?.is_none());
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[65.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![65]
+		);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// Taking a writer lease writes the guard with a new generation even when it already reads
+	/// `NonEmpty`, so a step on another node that read the guard before the lease landed fails its
+	/// conditional write, whether or not the store's locked read conflicts with it.
+	#[tokio::test]
+	async fn diskann_taking_a_lease_rewrites_an_armed_guard() -> Result<()> {
+		let (a, index_a, b, _index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1)) as usize;
+		write_one(&index_a, &a, 1).await?;
+		assert_eq!(a.release_writer_leases().await?, 1);
+		let generation = || {
+			let a = a.clone();
+			async move {
+				let ctx = new_ctx(&a, TransactionType::Read).await;
+				let state = diskann_pending_states(&ctx.tx(), &ikb()).await?[shard].clone();
+				ctx.tx().cancel().await?;
+				let state = state.expect("the guard is armed");
+				assert_eq!(state.kind, DiskAnnPendingStateKind::NonEmpty);
+				Ok::<_, anyhow::Error>(state.generation)
+			}
+		};
+		let before = generation().await?;
+		write_one(&index_a, &a, 33).await?;
+		assert!(generation().await? > before, "taking the lease rewrote the armed guard");
+		assert_eq!(a.guard_repairs() + b.guard_repairs(), 0);
+		Ok(())
+	}
+
+	/// An idle release lets go of every lease the node holds on the index, across shards, and the
+	/// pass it queues steps each of their guards.
+	#[tokio::test]
+	async fn diskann_idle_release_lets_go_of_every_shards_lease() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let ids = [1, 2, 3];
+		for id in ids {
+			write_one(&index_a, &a, id).await?;
+		}
+		let shards: Vec<u16> = ids
+			.iter()
+			.map(|id| DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(*id)))
+			.collect();
+		for &shard in &shards {
+			assert!(stored_lease(&a, shard, a.node_id()).await?.is_some());
+		}
+		assert_eq!(a.release_writer_leases().await?, ids.len());
+		compact_all(&index_b, &b, &ikb()).await?;
+		for &shard in &shards {
+			assert!(stored_lease(&a, shard, a.node_id()).await?.is_none());
+			assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		}
+		assert_eq!(a.guard_repairs() + b.guard_repairs(), 0);
+		Ok(())
+	}
+
+	/// A commit relying on a lease close to expiry renews it, so a node that keeps
+	/// writing into a shard never lets its lease lapse.
+	#[tokio::test]
+	async fn diskann_commit_renews_a_lease_close_to_expiry() -> Result<()> {
+		let (a, index_a, _b, _index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		let lease = stored_lease(&a, shard, a.node_id()).await?.expect("the write took a lease");
+		assert!(lease.holds_for(20));
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			ctx.tx().set_key(&lease_key(shard, a.node_id()), &lease.expiring_in(1)).await?;
+			ctx.tx().commit().await?;
+		}
+		write_one(&index_a, &a, 33).await?;
+		let renewed = stored_lease(&a, shard, a.node_id()).await?.expect("the lease is still held");
+		assert_eq!(renewed.process, lease.process);
+		assert!(renewed.holds_for(20), "the commit renewed the lease");
+		assert_eq!(a.guard_repairs(), 0, "the covering protocol left no guard to repair");
+		Ok(())
+	}
+
+	/// A commit that stalls between covering its guard and landing can outlast the lease it relied
+	/// on: another node retires the lease and, finding the shard's range still empty, steps the
+	/// guard to `Empty`. A commit that lands that close to the lease's expiry covers its guard
+	/// again, so its entry is not left under an `Empty` guard.
+	#[tokio::test]
+	async fn diskann_commit_outlasting_its_lease_covers_its_guard_again() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		compact_once(&index_b, &b, &ikb()).await?;
+		// Node A relies on its lease with just over the renewal margin left.
+		let lease = stored_lease(&a, shard, a.node_id()).await?.expect("the write took a lease");
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			ctx.tx().set_key(&lease_key(shard, a.node_id()), &lease.expiring_in(16)).await?;
+			ctx.tx().commit().await?;
+		}
+		let writer = new_ctx(&a, TransactionType::Write).await;
+		index_a
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		// The commit stalls once its guard is covered: the lease expires, and node B retires it
+		// and steps the guard.
+		let (b_hook, a_node) = (b.clone(), a.node_id());
+		a.before_next_commit(Box::new(move || {
+			Box::pin(async move {
+				tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+				let ctx = new_ctx(&b_hook, TransactionType::Write).await;
+				ctx.tx()
+					.set_key(&lease_key(shard, a_node), &lease.expiring_in(-1))
+					.await
+					.expect("expiring the lease");
+				ctx.tx().commit().await.expect("expiring the lease");
+				compact_once(&index_b, &b_hook, &ikb()).await.expect("node B's pass");
+				assert_eq!(
+					stored_guard(&b_hook, shard).await.expect("reading the guard"),
+					Some(DiskAnnPendingStateKind::Empty),
+					"node B stepped the guard under the stalled commit"
+				);
+			})
+		}));
+		writer.tx().commit().await?;
+		assert_eq!(stored_guard(&a, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(
+			stored_lease(&a, shard, a.node_id()).await?.is_some_and(|lease| lease.holds_for(20))
+		);
+		assert_eq!(
+			knn_keys_with_allow(&index_a, &a, &[33.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![33]
+		);
+		// The lease the re-cover took is relied on from the commit, not from before the stall: an
+		// idle release shorter than the stall leaves it.
+		assert_eq!(
+			a.release_idle_writer_leases(std::time::Duration::from_secs(1)).await?,
+			0,
+			"the re-cover's lease counts as just relied on"
+		);
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
+		);
+		Ok(())
+	}
+
+	/// The shards holding pending entries are found by skipping from one to the next, including
+	/// the first and the last shard, and none for an index with no pending entry.
+	#[tokio::test]
+	async fn diskann_shards_holding_entries_are_found_by_skipping() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let index =
+			new_index(ikb(), TableId(4), &params(VectorType::F32, Distance::Euclidean), cache())
+				.await?;
+		let holding = |ds: &TestIndexStore| {
+			let ds = ds.clone();
+			async move {
+				let ctx = new_ctx(&ds, TransactionType::Read).await;
+				let ikb = ikb();
+				let shards = ctx
+					.tx()
+					.diskann_shards_holding_entries(ikb.ns(), ikb.db(), ikb.table(), ikb.index())
+					.await?;
+				ctx.tx().cancel().await?;
+				Ok::<_, anyhow::Error>(shards)
+			}
+		};
+		assert_eq!(holding(&ds).await?, 0);
+		let ids = [32, 5, 37, 31, 63];
+		for id in ids {
+			write_one(&index, &ds, id).await?;
+		}
+		let expected = ids.iter().fold(0u64, |shards, id| {
+			shards | 1 << DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(*id))
+		});
+		assert_eq!(expected.count_ones(), 3, "the ids cover shards 0, 5 and 31");
+		assert_eq!(holding(&ds).await?, expected);
+		Ok(())
+	}
+
+	/// Where the datastore is the store's sole writer too, compaction repairs a guard left `Empty`
+	/// over entries, as a wipe whose arming of such guards failed leaves one.
+	#[tokio::test]
+	async fn diskann_compaction_repairs_an_empty_guard_on_a_sole_writer() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let index =
+			new_index(ikb(), TableId(4), &params(VectorType::F32, Distance::Euclidean), cache())
+				.await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33));
+		write_one(&index, &ds, 33).await?;
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			ctx.tx().del_key(&ikb().new_dy_key(shard)).await?;
+			ctx.tx().commit().await?;
+		}
+		compact_once(&index, &ds, &ikb()).await?;
+		assert_eq!(ds.guard_repairs(), 1);
+		assert_eq!(stored_guard(&ds, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		compact_all(&index, &ds, &ikb()).await?;
+		assert_eq!(
+			knn_keys_with_allow(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![33]
+		);
+		Ok(())
+	}
+
+	/// On a store that validates every read, a guard a transaction read and wrote under is written
+	/// by its commit even when it already reads `NonEmpty`, with a new generation, so a step that
+	/// opened before the commit and lands after it fails its conditional write.
+	#[tokio::test]
+	async fn diskann_guard_read_on_a_validating_store_is_rewritten_when_armed() -> Result<()> {
+		let ds = TestIndexStore::new().await.validating_node();
+		let ikb = ikb();
+		let index = new_index(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1)) as usize;
+		write_one(&index, &ds, 1).await?;
+		let generation = |ds: &TestIndexStore| {
+			let (ds, ikb) = (ds.clone(), ikb.clone());
+			async move {
+				let ctx = new_ctx(&ds, TransactionType::Read).await;
+				let state = diskann_pending_states(&ctx.tx(), &ikb).await?[shard].clone();
+				ctx.tx().cancel().await?;
+				let state = state.expect("the write armed the guard");
+				assert_eq!(state.kind, DiskAnnPendingStateKind::NonEmpty);
+				Ok::<_, anyhow::Error>(state.generation)
+			}
+		};
+		let before = generation(&ds).await?;
+		let writer = new_ctx(&ds, TransactionType::Write).await;
+		DiskAnnIndex::read_pending_state(&writer.tx(), &ikb).await?;
+		index
+			.index(
+				&writer,
+				&RecordIdKey::Number(33),
+				None,
+				Some(f32_content(&[33.0, 0.0, 0.0, 0.0])),
+			)
+			.await?;
+		writer.tx().commit().await?;
+		assert!(generation(&ds).await? > before, "the commit rewrote the armed guard");
+		Ok(())
+	}
+
+	/// On a store other datastores write to, compaction probes the shards whose guard reads
+	/// `Empty`, and a shard holding entries has its guard repaired and its entries compacted by
+	/// the pass the repair queues, rather than left hidden from lookup.
+	#[tokio::test]
+	async fn diskann_compaction_repairs_a_guard_left_empty_over_entries() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(33));
+		write_one(&index_a, &a, 33).await?;
+		// A gap in the covering leaves the guard `Empty` over the entry.
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			ctx.tx()
+				.set_key(
+					&ikb().new_dy_key(shard),
+					&DiskAnnPendingState {
+						kind: DiskAnnPendingStateKind::Empty,
+						generation: 1_000,
+					},
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		assert_eq!(a.release_writer_leases().await?, 1);
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert_eq!(b.guard_repairs(), 1);
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		compact_all(&index_b, &b, &ikb()).await?;
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(
+			knn_keys_with_allow(&index_b, &b, &[33.0, 0.0, 0.0, 0.0], 1, None).await?,
+			vec![33]
+		);
+		Ok(())
+	}
+
+	/// A node's own lease, taken in this process, still lapses once it expires: the node's own step
+	/// retires it and steps the guard, and the node's next write into the shard takes it again.
+	#[tokio::test]
+	async fn diskann_step_retires_its_own_expired_lease() -> Result<()> {
+		let (a, index_a, _b, _index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		compact_once(&index_a, &a, &ikb()).await?;
+		assert_eq!(
+			stored_guard(&a, shard).await?,
+			Some(DiskAnnPendingStateKind::NonEmpty),
+			"a lease that holds keeps the guard"
+		);
+		let lease = stored_lease(&a, shard, a.node_id()).await?.expect("the write took a lease");
+		{
+			let ctx = new_ctx(&a, TransactionType::Write).await;
+			ctx.tx().set_key(&lease_key(shard, a.node_id()), &lease.expiring_in(-1)).await?;
+			ctx.tx().commit().await?;
+		}
+		compact_once(&index_a, &a, &ikb()).await?;
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_none());
+		assert_eq!(stored_guard(&a, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		write_one(&index_a, &a, 33).await?;
+		assert_eq!(stored_guard(&a, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&a, shard, a.node_id()).await?.is_some());
+		assert_eq!(a.guard_repairs(), 0, "the covering protocol left no guard to repair");
+		Ok(())
+	}
+
+	/// A lease holds until its node releases it or it expires. A step deletes one
+	/// that no longer holds, and leaves one that does.
+	#[tokio::test]
+	async fn diskann_step_retires_only_leases_that_no_longer_hold() -> Result<()> {
+		let (a, index_a, b, index_b) = lease_nodes().await?;
+		let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+		write_one(&index_a, &a, 1).await?;
+		assert_eq!(a.release_writer_leases().await?, 1);
+		// An unexpired lease of another node holds.
+		let other = Uuid::new_v4();
+		plant_lease(&b, shard, other, false).await?;
+		for _ in 0..3 {
+			compact_once(&index_b, &b, &ikb()).await?;
+		}
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+		assert!(stored_lease(&b, shard, other).await?.is_some());
+		// Expired, it no longer holds, even though its node is a live member: a
+		// node that kept its id across a restart leaves its earlier process's
+		// leases behind.
+		{
+			let ctx = new_ctx(&b, TransactionType::Write).await;
+			ctx.tx()
+				.set_key(
+					&crate::key::schema::NodeKey::new(other),
+					&crate::catalog::node::Node::new(other, 0.into(), false),
+				)
+				.await?;
+			ctx.tx().commit().await?;
+		}
+		plant_lease(&b, shard, other, true).await?;
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert!(stored_lease(&b, shard, other).await?.is_none());
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		// A lease this node took in an earlier process never holds for it.
+		write_one(&index_a, &a, 33).await?;
+		assert_eq!(a.release_writer_leases().await?, 1);
+		plant_lease(&b, shard, b.node_id(), false).await?;
+		compact_once(&index_b, &b, &ikb()).await?;
+		assert!(stored_lease(&b, shard, b.node_id()).await?.is_none());
+		assert_eq!(stored_guard(&b, shard).await?, Some(DiskAnnPendingStateKind::Empty));
+		assert_eq!(
+			a.guard_repairs() + b.guard_repairs(),
+			0,
+			"the covering protocol left no guard to repair"
 		);
 		Ok(())
 	}
@@ -7443,5 +8471,89 @@ mod tests {
 			}
 		}
 		Ok(())
+	}
+
+	/// The DiskANN guard races of #1329 and #1332 on TiKV, which runs the
+	/// writer-lease protocol natively (it is not a sole writer). Gated to the
+	/// `kv-tikv` backend and requiring a running cluster at 127.0.0.1:2379 (the
+	/// `tikv` CI lane). Each test wipes the cluster's keyspace on entry, so the
+	/// `tikv::` tests run in one serial group (`.config/nextest.toml`).
+	#[cfg(feature = "kv-tikv")]
+	mod tikv {
+		use super::*;
+		use crate::key::schema::{RootRoot, VersionKey};
+
+		async fn fresh_tikv_ds() -> TestIndexStore {
+			let ds = TestIndexStore::with_path("tikv:127.0.0.1:2379").await;
+			let tx = ds.transaction(TransactionType::Write).await.unwrap();
+			tx.delr(RootRoot {}.range_subtree().unwrap()).await.unwrap();
+			tx.del_key(&VersionKey {}).await.unwrap();
+			tx.commit().await.unwrap();
+			ds
+		}
+
+		/// #1329's reproduction: a writer open across the passes that empty its
+		/// shard stays visible once it commits.
+		#[tokio::test]
+		async fn pending_written_while_its_shard_empties_stays_visible() -> Result<()> {
+			diskann_pending_written_while_its_shard_empties_stays_visible_on(fresh_tikv_ds().await)
+				.await
+		}
+
+		/// #1332's interleaving: a writer committing while the pass that empties its
+		/// shard is open does not end up under an `Empty` guard.
+		#[tokio::test]
+		async fn writer_committing_inside_the_emptying_pass_stays_visible() -> Result<()> {
+			diskann_writer_committing_inside_the_emptying_pass_stays_visible_on(
+				fresh_tikv_ds().await,
+			)
+			.await
+		}
+
+		/// Writers into a shard whose guard reads `Empty` both commit.
+		#[tokio::test]
+		async fn concurrent_writers_arming_an_empty_shard_both_commit() -> Result<()> {
+			diskann_concurrent_writers_arming_an_empty_shard_both_commit_on(fresh_tikv_ds().await)
+				.await
+		}
+
+		/// Overlapping writers into a shard whose guard reads `NonEmpty` both
+		/// commit: neither reads the guard, and the lease the first write took
+		/// covers both.
+		#[tokio::test]
+		async fn overlapping_writers_into_an_armed_shard_both_commit() -> Result<()> {
+			let ds = fresh_tikv_ds().await;
+			assert!(!ds.transaction(TransactionType::Read).await?.sole_writer());
+			let index = new_index(
+				ikb(),
+				TableId(4),
+				&params(VectorType::F32, Distance::Euclidean),
+				cache(),
+			)
+			.await?;
+			let shard = DiskAnnIndex::pending_state_shard(&RecordIdKey::Number(1));
+			write_one(&index, &ds, 1).await?;
+			assert_eq!(stored_guard(&ds, shard).await?, Some(DiskAnnPendingStateKind::NonEmpty));
+			let first = new_ctx(&ds, TransactionType::Write).await;
+			let second = new_ctx(&ds, TransactionType::Write).await;
+			for (ctx, id) in [(&first, 33), (&second, 65)] {
+				index
+					.index(
+						ctx,
+						&RecordIdKey::Number(id),
+						None,
+						Some(f32_content(&[id as f32, 0.0, 0.0, 0.0])),
+					)
+					.await?;
+			}
+			first.tx().commit().await?;
+			second.tx().commit().await?;
+			assert_eq!(
+				knn_keys_with_allow(&index, &ds, &[33.0, 0.0, 0.0, 0.0], 3, None).await?,
+				vec![1, 33, 65]
+			);
+			assert_eq!(ds.guard_repairs(), 0);
+			Ok(())
+		}
 	}
 }
