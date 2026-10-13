@@ -339,28 +339,20 @@ thread_local! {
 }
 
 /// Declares the work polled on this thread sealed or unsealed, catalog and
-/// planner alike, until dropped.
+/// planner alike, until dropped. Every user is itself debug-only.
+#[cfg(debug_assertions)]
 struct Declared {
-	#[cfg(debug_assertions)]
 	_catalog: crate::kvs::catalog_reads::Declaration,
-	#[cfg(debug_assertions)]
 	planner: bool,
 }
 
+#[cfg(debug_assertions)]
 impl Declared {
 	#[inline]
 	fn new(sealed: bool) -> Self {
-		#[cfg(debug_assertions)]
-		{
-			Self {
-				_catalog: crate::kvs::catalog_reads::declare(sealed),
-				planner: RUN_SEALED.with(|cell| cell.replace(sealed)),
-			}
-		}
-		#[cfg(not(debug_assertions))]
-		{
-			let _ = sealed;
-			Self {}
+		Self {
+			_catalog: crate::kvs::catalog_reads::declare(sealed),
+			planner: RUN_SEALED.with(|cell| cell.replace(sealed)),
 		}
 	}
 }

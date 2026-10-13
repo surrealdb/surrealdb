@@ -88,7 +88,7 @@ use std::borrow::Cow;
 use std::io::Read;
 use std::sync::Arc;
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, ensure};
 use revision::{DeserializeRevisioned, Error as RevisionError, SkipCheckRevisioned, revisioned};
 use surrealdb_collections::bounded;
 use surrealdb_kvs::value::KVValue;
@@ -794,7 +794,9 @@ fn check_reads_back(
 	let read = match StoredRecord::parse(bytes)? {
 		Some(stored) if stored.is_packed() => {
 			let Some(layouts) = layouts else {
-				bail!("an encoded packed record has no packed descriptor to read back with");
+				anyhow::bail!(
+					"an encoded packed record has no packed descriptor to read back with"
+				);
 			};
 			let packed =
 				layouts.admit_packed(packed_generation(&stored, layouts)?).map_err(layout_error)?;

@@ -17,10 +17,13 @@ on:
   merge_group:
 
 concurrency:
-  # Superseded automatic main/branch/PR runs should release runner capacity.
+  # Superseded branch/PR runs are cancelled to release runner capacity.
+  # Runs on main are never cancelled: one runs to completion while at most one
+  # newer run waits, and a still-newer push replaces the waiting run, so the
+  # next run covers the latest main commit rather than every commit between.
   # Explicit workflow_dispatch validations remain independent.
   group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:
   run:
