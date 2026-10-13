@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "A CANCEL after an error in a block pushes no result of its own"
+reason = "A CANCEL after an error in a block answers NONE like a CANCEL of a healthy block (register #20): every statement of the request has a slot"
 
 [[test.results]]
 value = "NONE"
@@ -10,6 +10,9 @@ error = "An error occurred: x"
 
 [[test.results]]
 error = "The query was not executed due to a cancelled transaction"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "2"

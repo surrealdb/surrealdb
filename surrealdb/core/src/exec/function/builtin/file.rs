@@ -54,7 +54,7 @@ impl<'a> StreamingBucketOps<'a> {
 			.into());
 		}
 
-		// Get FrozenContext and Options (same approach as fnc::file)
+		// Get the FrozenContext and the Options for this call.
 		let frozen_ctx = ctx.exec_ctx.ctx();
 		let opt = ctx.exec_ctx.options().ok_or_else(|| {
 			EngineError::Internal("No options available for file operation".to_string())
@@ -94,7 +94,7 @@ impl<'a> StreamingBucketOps<'a> {
 		key: Option<&ObjectKey>,
 		target: Option<&ObjectKey>,
 	) -> Result<()> {
-		// Check if we should check permissions (uses Options::check_perms like fnc::file)
+		// Permissions are checked only when the options require it.
 		if self.frozen_ctx.check_perms(self.opt, op.into())? {
 			// Guest and Record users are not allowed to list files in buckets
 			ensure!(
@@ -105,8 +105,8 @@ impl<'a> StreamingBucketOps<'a> {
 				}
 			);
 
-			// The bucket permission compiles from its stored text through
-			// the same funnel as every other permission clause.
+			// The bucket permission is compiled from its stored text,
+			// the same way as every other permission clause.
 			let permission = LogicalPermissionBody::of(&self.bucket.permissions)
 				.logical()
 				.map_err(|e| anyhow::anyhow!("bucket permission has no logical form: {e:#}"))?;
@@ -119,13 +119,13 @@ impl<'a> StreamingBucketOps<'a> {
 				}
 				LogicalPermission::Full => (),
 				LogicalPermission::Specific(e) => {
-					// Served from the compile cache by the clause as written, the
-					// names the check binds around it read when it runs, so one
-					// compilation serves every operation and file
-					// ([`crate::exec::vm::serve`]). It is compiled without a
-					// principal: the clause is judged with permissions off, and
-					// a principal would bind guards over what it reads that the
-					// frame is meant to waive.
+					// The clause is served from the compile cache, keyed by the clause as written.
+					// The names bound around it (`action`, `file`, `target`) are read when the
+					// check runs, so one compilation serves every operation and file
+					// ([`crate::exec::vm::serve`]).
+					// It is compiled without a principal, since the clause is judged with
+					// permissions off. A principal would bind guards over reads that the frame
+					// is meant to waive.
 					let expr = crate::exec::vm::serve::expr_binding(
 						self.exec_ctx,
 						e,
@@ -155,12 +155,11 @@ impl<'a> StreamingBucketOps<'a> {
 						);
 					}
 
-					// SECURITY: the bucket predicate runs with the caller's auth and only
-					// disables nested permission checks to avoid recursive permission
-					// evaluation, as `Options::new_with_perms(false)` does.
-					// A write reached from it is refused for the same reason a table's
-					// `select` guard refuses one: the predicate is judged with
-					// enforcement off (GHSA-66r2-5gwj-gxm2).
+					// SECURITY: the bucket predicate runs with the caller's auth. Nested permission
+					// checks are disabled, as `Options::new_with_perms(false)` does, so the
+					// predicate does not recurse into permission evaluation. The predicate is
+					// judged with enforcement off, so a write issued from it is refused, as it
+					// is for a table's `select` guard.
 					let exec_ctx = exec_ctx
 						.with_skip_fetch_perms(true)
 						.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate);
@@ -546,33 +545,32 @@ fn file_key_impl((file,): (File,)) -> Result<Value> {
 
 // Note: We use `Any` for file arguments in the macro signature because Kind::File takes
 // parameters (bucket types). The actual type checking happens via FromArgs::from_args.
-define_async_function!(FilePut, "file::put", effects: EffectSet::WRITES_EXTERNAL, (file: Any, value: Any) -> Any, file_put_impl);
-define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", effects: EffectSet::WRITES_EXTERNAL, (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
-define_async_function!(FileGet, "file::get", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_get_impl);
-define_async_function!(FileHead, "file::head", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_head_impl);
-define_async_function!(FileDelete, "file::delete", effects: EffectSet::WRITES_EXTERNAL, (file: Any) -> Any, file_delete_impl);
-define_async_function!(FileCopy, "file::copy", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (src: Any, dst: Any) -> Any, file_copy_impl);
-define_async_function!(FileCopyIfNotExists, "file::copy_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (src: Any, dst: Any) -> Any, file_copy_if_not_exists_impl);
-define_async_function!(FileRename, "file::rename", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (file: Any, target: String) -> Any, file_rename_impl);
-define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
-define_async_function!(FileExists, "file::exists", effects: EffectSet::READS_EXTERNAL, (file: Any) -> Any, file_exists_impl);
-define_async_function!(FileList, "file::list", effects: EffectSet::READS_EXTERNAL, (bucket: String, ?opts: Object) -> Any, file_list_impl);
+define_async_function!(FilePut, "file::put", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any) -> Any, file_put_impl);
+define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
+define_async_function!(FileGet, "file::get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_get_impl);
+define_async_function!(FileHead, "file::head", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_head_impl);
+define_async_function!(FileDelete, "file::delete", effects: EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_delete_impl);
+define_async_function!(FileCopy, "file::copy", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (src: Any, dst: Any) -> Any, file_copy_impl);
+define_async_function!(FileCopyIfNotExists, "file::copy_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (src: Any, dst: Any) -> Any, file_copy_if_not_exists_impl);
+define_async_function!(FileRename, "file::rename", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, target: String) -> Any, file_rename_impl);
+define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
+define_async_function!(FileExists, "file::exists", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (file: Any) -> Any, file_exists_impl);
+define_async_function!(FileList, "file::list", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (bucket: String, ?opts: Object) -> Any, file_list_impl);
 
-define_pure_function!(FileBucket, "file::bucket", effects: EffectSet::PURE, (file: Any) -> Any, file_bucket_impl);
-define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, (file: Any) -> Any, file_key_impl);
+define_pure_function!(FileBucket, "file::bucket", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (file: Any) -> Any, file_bucket_impl);
+define_pure_function!(FileKey, "file::key", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (file: Any) -> Any, file_key_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-// A bucket lives outside the transaction's snapshot, so every function that
-// reaches into one declares `READS_EXTERNAL`, `WRITES_EXTERNAL` or both: the
-// writes have an effect a rule may not repeat or drop and a grouped projection
-// may not run once per group — the bucket keeps what they leave behind, so the
-// count of effects must not follow from how a query grouped its rows — and the
-// reads answer differently on either side of such a write. `file::bucket` and
-// `file::key` only read the two fields of the file value they are given, and
-// are pure.
+// A bucket lives outside the transaction's snapshot, so every function that reaches into
+// one declares `READS_EXTERNAL`, `WRITES_EXTERNAL` or both. A write has an effect that a
+// rule may not repeat or drop, and a grouped projection may not run it once per group.
+// The bucket keeps what a write leaves behind, so the number of effects must not depend
+// on how a query grouped its rows. A read can answer differently on either side of a
+// write. `file::bucket` and `file::key` only read two fields of the file value they are
+// given, so they are pure.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,

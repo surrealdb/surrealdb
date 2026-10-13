@@ -74,7 +74,7 @@ type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<CachedSequence>>
 /// sequence on this node writes the same cursor row, and can leave it holding
 /// exactly the value the removed one last wrote; the conditional write that
 /// catches a reset then succeeds, and the removed allocator resumes inside a
-/// window the sequence no longer has while other nodes claim the same values
+/// window the sequence does not have while other nodes claim the same values
 /// from the new run. The mark lives on the slot rather than the allocator so
 /// that it also covers a build still in flight when the slot is removed.
 struct CachedSequence {
@@ -113,7 +113,7 @@ impl CachedSequence {
 			.await
 	}
 
-	/// Marks this slot as no longer the one serving its sequence. Called with
+	/// Marks this slot as stale: another slot now serves its sequence. Called with
 	/// the map's write lock held, so the mark precedes any slot inserted to
 	/// replace it, and so any allocator built there.
 	fn evict(&self) {
@@ -1359,7 +1359,7 @@ impl Sequence {
 					// The caller read a definition, this transaction did not
 					// write it, and nothing is committed under the name: it was
 					// removed after the caller read it. Allocating anyway would
-					// hand out values for a sequence that no longer exists and
+					// hand out values for a sequence that has been removed and
 					// leave claim rows for whoever defines the name next. The
 					// uncommitted case does not reach here: it is served by
 					// [`Sequence::load_provisional`], which the caller's own
@@ -1560,7 +1560,7 @@ impl Sequence {
 		// two transactions write nothing in common. Both commit. The cursor
 		// then lands in a row the reset never saw, every later write compares
 		// against it and succeeds, and this node serves out a window the
-		// sequence no longer has — while a peer rebuilding from the new
+		// sequence does not have — while a peer rebuilding from the new
 		// `START` claims the same range. Writing the claim row back unchanged
 		// puts it in both write sets, so one of the two loses on any backend.
 		//
@@ -1697,8 +1697,8 @@ impl Sequence {
 			match Self::check_batch_allocation(sqs, seq, next, batch, guard).await {
 				Ok(r) => return Ok(r),
 				// Not transient: the sequence this allocator belongs to is gone,
-				// and retrying would claim a window under a definition that no
-				// longer exists. The caller rebuilds instead.
+				// and retrying would claim a window under a definition that has
+				// been removed. The caller rebuilds instead.
 				Err(SequenceError::Reset) => return Err(SequenceError::Reset),
 				// Also not transient. What the backoff waits for is the state
 				// another transaction holds to change, and a provisional claim
@@ -1760,7 +1760,7 @@ impl Sequence {
 			// against do not use it: `kvs-mem` opens transactions at plain
 			// snapshot isolation. So a claim whose snapshot predates a
 			// `DEFINE SEQUENCE` commits after it with nothing to stop it,
-			// leaving a window the sequence no longer owns. The first-write
+			// leaving a window the sequence does not own. The first-write
 			// check cannot object to it either: the row is present, owned by
 			// this node and correctly bounded. A peer that claimed after the
 			// reset computed its window from the new `START`, and the two
@@ -2442,7 +2442,7 @@ mod tests {
 
 	/// A sequence removed after the caller read it is not allocated from.
 	///
-	/// The caller holds a definition the store no longer has. That is the same
+	/// The caller holds a definition the store does not have. That is the same
 	/// shape as a caller carrying an uncommitted `DEFINE`, and only the
 	/// transaction can tell them apart — so where it says the definition is not
 	/// its own, an absent one means removed, and building an allocator over it
@@ -2535,7 +2535,8 @@ mod tests {
 		use surrealdb_kvs::api::{BoxFut, KeysResult, ScanResult, Transactable};
 		use surrealdb_kvs::err::Result as KvsResult;
 		use surrealdb_kvs::{
-			Key, KeyRange, Metrics, TransactionBuilder, TransactionType as KvsTransactionType, Val,
+			Estimate, Key, KeyRange, Metrics, Snapshot, SplitTarget, TransactionBuilder,
+			TransactionType as KvsTransactionType, Val,
 		};
 
 		use crate::factory::TransactionFactory;
@@ -2678,6 +2679,24 @@ mod tests {
 				version: Option<u64>,
 			) -> BoxFut<'a, KvsResult<ScanResult>> {
 				self.inner.scanr(rng, limit, skip, version)
+			}
+			fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+				self.inner.snapshot()
+			}
+			fn estimate<'a>(
+				&'a self,
+				rng: KeyRange<'a>,
+				version: Option<u64>,
+			) -> BoxFut<'a, KvsResult<Estimate>> {
+				self.inner.estimate(rng, version)
+			}
+			fn split<'a>(
+				&'a self,
+				rng: KeyRange<'a>,
+				target: SplitTarget,
+				version: Option<u64>,
+			) -> BoxFut<'a, KvsResult<Vec<Key<'static>>>> {
+				self.inner.split(rng, target, version)
 			}
 			fn new_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
 				self.inner.new_save_point()
@@ -3082,7 +3101,7 @@ mod tests {
 	///
 	/// A `DEFINE SEQUENCE` evicts only on the node that runs it, so a peer's
 	/// allocator is not dropped by either an inline or a commit-time eviction —
-	/// a close-time hook would not reach it any more than the inline one does.
+	/// a close-time hook would not reach it either.
 	/// What keeps a peer's allocator from outliving the reposition is the same
 	/// definition write-back: the peer's claim and the statement both write that
 	/// key, so they cannot both commit.
@@ -3279,8 +3298,8 @@ mod tests {
 		// rows before the reposition and commits after it.
 		let domain = SequenceDomain::new_user(ns, db, name);
 		let a2 = match Sequence::load(None, &n2, &domain, 1, BATCH, None).await {
-			// The claim noticed the reset: this is the outcome the hole's fix
-			// produces. Rebuild, as `next_val` would.
+			// The straddling claim is rejected as a reset.
+			// Rebuild, as `next_val` would.
 			Err(SequenceError::Reset) => {
 				Sequence::load(None, &n2, &domain, 1, BATCH, None).await.unwrap()
 			}
@@ -3331,8 +3350,8 @@ mod tests {
 	/// survives.
 	///
 	/// Driven through `next_user_sequence_id` rather than the allocator, because
-	/// the failure this pins is one the public path had and the sibling tests
-	/// did not see: they rebuild by calling `Sequence::load` themselves.
+	/// the failure this pins sits on that public path, which the sibling
+	/// tests do not reach: they rebuild by calling `Sequence::load` themselves.
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_reset_while_building_is_rebuilt_not_reported() {
 		let (tf, hook) = hooked::hooked_factory().await;
@@ -3429,7 +3448,7 @@ mod tests {
 		let mut twice = Vec::new();
 		// Either the write notices — as a reset, or as the conflict it loses —
 		// and N1 rebuilds as `next_val` would, or it commits and N1 serves on
-		// from a window the sequence no longer has.
+		// from a window the sequence does not have.
 		match a1.next(&n1, None, &domain, BATCH, None, None).await {
 			Ok(v) => {
 				issued.insert(v);
@@ -3471,7 +3490,7 @@ mod tests {
 	/// Allocation never issues the same id twice, however `DEFINE SEQUENCE
 	/// OVERWRITE` interleaves with it.
 	///
-	/// The targeted tests each pin one interleaving that was reasoned about.
+	/// Each targeted test pins one interleaving.
 	/// This one does not choose the interleaving: several nodes allocate
 	/// concurrently while the sequence is repositioned underneath them, and the
 	/// only thing asserted is the property that has to hold regardless — an id

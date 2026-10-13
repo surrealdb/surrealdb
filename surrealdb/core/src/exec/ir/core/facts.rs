@@ -1,0 +1,250 @@
+//! The fact cache: per-op facts, per-value type knowledge and invariance classes, and per-value
+//! fold outcomes, owned apart from the container.
+//!
+//! The driver passes the cache `&mut` beside the container, so no interior mutability is needed
+//! and the pair is `Send`. An entry records the generation of its op when it was computed; an
+//! entry whose generation differs from the container's is stale and is recomputed on its next
+//! read. An entry of an erased op or value is dropped, so a recycled slot never answers with the
+//! entry of its previous occupant; only [`FactCache::last`] still answers for an erased op.
+
+use std::collections::{BTreeMap, HashMap};
+
+use slotmap::SecondaryMap;
+use smallvec::SmallVec;
+
+use crate::exec::ir::iface::catalog::CxKey;
+use crate::exec::ir::iface::effects::OpEffects;
+use crate::exec::ir::iface::fold::{FoldOutcome, FoldRequest};
+use crate::exec::ir::iface::ids::{OpId, ValueId};
+use crate::exec::ir::iface::policy::LoopFacts;
+use crate::exec::ir::iface::types::TypeKnowledge;
+use crate::exec::logical::pipelines::{Legality, StatementLegality};
+
+/// What analyses know about one op.
+#[derive(Clone, Debug)]
+pub(crate) struct OpFacts {
+	pub(crate) effects: OpEffects,
+}
+
+impl OpFacts {
+	/// The facts of an op nothing is known about: the top of every lattice.
+	pub(crate) fn top() -> Self {
+		Self {
+			effects: OpEffects::top(),
+		}
+	}
+}
+
+/// The state of one fold request.
+#[derive(Clone, Debug)]
+enum FoldSlot {
+	/// Requested; awaited by the driver between passes.
+	Pending(FoldRequest),
+	Done(Box<FoldOutcome>),
+}
+
+/// The loop facts taken at the logical phase boundary, keyed by the logical loop op.
+pub(crate) type LegalitySnapshotSlot = BTreeMap<OpId, LoopFacts>;
+
+/// What the logical plan states of the pipelines and statements of a container, keyed by the
+/// logical op each stands for: a pipeline by its loop, a statement by its `logical.stmt`.
+///
+/// The planner of a request fills it from the plan it bound the container from, so a pipeline
+/// converted from a logical loop reads the legality the plan stated for it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LogicalLegalities {
+	/// The legality of the segment of the logical plan each pipeline came from.
+	pub(crate) pipelines: BTreeMap<OpId, Legality>,
+	/// What each statement refuses its pipelines.
+	pub(crate) statements: BTreeMap<OpId, StatementLegality>,
+}
+
+/// The invariance classes of one value: per op it was computed against, the generation of that
+/// op and the class.
+type Invariance = SmallVec<[(OpId, u32, u8); 2]>;
+
+/// The facts of one op, one entry per context: the generation they were computed at, the
+/// context's key and the facts.
+type ContextFacts = SmallVec<[(u32, CxKey, OpFacts); 1]>;
+
+/// The memo of one container's analyses.
+#[derive(Clone, Debug)]
+pub(crate) struct FactCache {
+	/// The answer for every op while no analysis has computed one.
+	top: OpFacts,
+	/// Per op: the facts computed under each context, with the generation they were computed at
+	/// and the context's key. The last entry is the one recorded last.
+	entries: SecondaryMap<OpId, ContextFacts>,
+	/// The facts of erased ops, as they stood when the op was erased.
+	retired: HashMap<OpId, OpFacts>,
+	/// Per value: the generation of its defining op when the knowledge was computed, and it.
+	types: SecondaryMap<ValueId, (u32, TypeKnowledge)>,
+	/// Per value: the invariance class computed against an op, with the generation of that op.
+	invariance: SecondaryMap<ValueId, Invariance>,
+	/// One fold slot per value.
+	folds: SecondaryMap<ValueId, FoldSlot>,
+	/// The snapshot taken at the logical boundary, once an analysis has filled it.
+	legality_snapshot: Option<LegalitySnapshotSlot>,
+	/// What the logical plan states of the container's pipelines and statements, once the planner
+	/// has stated it.
+	logical_legalities: Option<LogicalLegalities>,
+}
+
+impl FactCache {
+	/// An empty cache.
+	pub(crate) fn new() -> Self {
+		Self {
+			top: OpFacts::top(),
+			entries: SecondaryMap::new(),
+			retired: HashMap::new(),
+			types: SecondaryMap::new(),
+			invariance: SecondaryMap::new(),
+			folds: SecondaryMap::new(),
+			legality_snapshot: None,
+			logical_legalities: None,
+		}
+	}
+
+	/// The facts of `op` computed at `generation` under the context `key` names, or `None` when
+	/// absent or stale. Facts computed under another context never answer.
+	pub(crate) fn get(&self, op: OpId, generation: u32, key: &CxKey) -> Option<&OpFacts> {
+		self.entries
+			.get(op)?
+			.iter()
+			.find(|(computed_at, held, _)| *computed_at == generation && held == key)
+			.map(|(_, _, facts)| facts)
+	}
+
+	/// The answer that holds for every op no analysis has computed a fact for.
+	pub(crate) fn top(&self) -> &OpFacts {
+		&self.top
+	}
+
+	/// Records `facts` of `op` computed at `generation` under the context `key` names. Entries of
+	/// an older generation are dropped.
+	pub(crate) fn insert(&mut self, op: OpId, generation: u32, key: CxKey, facts: OpFacts) {
+		if self.entries.get(op).is_none() {
+			self.entries.insert(op, SmallVec::new());
+		}
+		if let Some(held) = self.entries.get_mut(op) {
+			held.retain(|(computed_at, other, _)| *computed_at == generation && *other != key);
+			held.push((generation, key, facts));
+		}
+	}
+
+	/// The facts last recorded for `op`, whatever their generation. An erased op answers the
+	/// facts it had when it was erased; an op never computed answers `None`.
+	pub(crate) fn last(&self, op: OpId) -> Option<&OpFacts> {
+		self.entries
+			.get(op)
+			.and_then(|held| held.last())
+			.map(|(_, _, facts)| facts)
+			.or_else(|| self.retired.get(&op))
+	}
+
+	/// Drops the entry of `op`, which keeps answering [`FactCache::last`].
+	pub(crate) fn invalidate(&mut self, op: OpId) {
+		if let Some((_, _, facts)) = self.entries.remove(op).and_then(|mut held| held.pop()) {
+			self.retired.insert(op, facts);
+		}
+	}
+
+	/// Drops every entry held for the erased value `v`.
+	pub(crate) fn invalidate_value(&mut self, v: ValueId) {
+		self.types.remove(v);
+		self.invariance.remove(v);
+		self.folds.remove(v);
+	}
+
+	/// The type knowledge of `v` computed when its defining op stood at `generation`, or `None`
+	/// when absent or stale.
+	pub(crate) fn type_of(&self, v: ValueId, generation: u32) -> Option<&TypeKnowledge> {
+		self.types
+			.get(v)
+			.filter(|(computed_at, _)| *computed_at == generation)
+			.map(|(_, knowledge)| knowledge)
+	}
+
+	/// Records the type knowledge of `v` computed at `generation` of its defining op.
+	pub(crate) fn set_type(&mut self, v: ValueId, generation: u32, knowledge: TypeKnowledge) {
+		self.types.insert(v, (generation, knowledge));
+	}
+
+	/// The invariance class of `v` against `op` computed when `op` stood at `generation`, or
+	/// `None` when absent or stale. The class is the analysis's own encoding.
+	pub(crate) fn invariance(&self, v: ValueId, op: OpId, generation: u32) -> Option<u8> {
+		self.invariance
+			.get(v)?
+			.iter()
+			.find(|(against, computed_at, _)| *against == op && *computed_at == generation)
+			.map(|(_, _, class)| *class)
+	}
+
+	/// Records the invariance class of `v` against `op` computed at `generation` of `op`.
+	pub(crate) fn set_invariance(&mut self, v: ValueId, op: OpId, generation: u32, class: u8) {
+		if self.invariance.get(v).is_none() {
+			self.invariance.insert(v, SmallVec::new());
+		}
+		if let Some(entries) = self.invariance.get_mut(v) {
+			match entries.iter_mut().find(|(against, _, _)| *against == op) {
+				Some(entry) => *entry = (op, generation, class),
+				None => entries.push((op, generation, class)),
+			}
+		}
+	}
+
+	/// The loop facts taken at the logical boundary, or `None` until an analysis has taken them.
+	pub(crate) fn legality_snapshot(&self) -> Option<&LegalitySnapshotSlot> {
+		self.legality_snapshot.as_ref()
+	}
+
+	/// Stores the loop facts taken at the logical boundary.
+	pub(crate) fn set_legality_snapshot(&mut self, snapshot: LegalitySnapshotSlot) {
+		self.legality_snapshot = Some(snapshot);
+	}
+
+	/// What the logical plan states of the container's pipelines and statements, or `None` until
+	/// the planner has stated it.
+	pub(crate) fn logical_legalities(&self) -> Option<&LogicalLegalities> {
+		self.logical_legalities.as_ref()
+	}
+
+	/// Stores what the logical plan states of the container's pipelines and statements.
+	pub(crate) fn set_logical_legalities(&mut self, legalities: LogicalLegalities) {
+		self.logical_legalities = Some(legalities);
+	}
+
+	/// Records that `req.value` is to be folded. An outcome already stored is kept.
+	pub(crate) fn request_fold(&mut self, req: FoldRequest) {
+		if !self.folds.contains_key(req.value) {
+			self.folds.insert(req.value, FoldSlot::Pending(req));
+		}
+	}
+
+	/// The outcome stored for `v`, or `None` while it is pending or was never requested.
+	pub(crate) fn fold_outcome(&self, v: ValueId) -> Option<&FoldOutcome> {
+		match self.folds.get(v) {
+			Some(FoldSlot::Done(outcome)) => Some(&**outcome),
+			Some(FoldSlot::Pending(_)) | None => None,
+		}
+	}
+
+	/// The requests awaiting an outcome.
+	pub(crate) fn pending_folds(&self) -> impl Iterator<Item = FoldRequest> {
+		self.folds.values().filter_map(|slot| match slot {
+			FoldSlot::Pending(req) => Some(*req),
+			FoldSlot::Done(_) => None,
+		})
+	}
+
+	/// Stores the outcome of the fold requested for `v`.
+	pub(crate) fn store_fold(&mut self, v: ValueId, outcome: FoldOutcome) {
+		self.folds.insert(v, FoldSlot::Done(Box::new(outcome)));
+	}
+}
+
+impl Default for FactCache {
+	fn default() -> Self {
+		Self::new()
+	}
+}

@@ -17,10 +17,11 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
-use crate::cli::{Backend, ColorMode, ResultsMode};
+use crate::cli::{Backend, ColorMode, ResultsMode, RunMode};
 use crate::cmd::run::provisioner::CanReuse;
 use crate::format::{IndentFormatter, Progress, ansi};
 use crate::runner::Schedular;
+use crate::tests::case::Dialect;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::run::{CaseImports, RunConfig};
 use crate::tests::schema::ENV_DEFAULT_TIMEOUT;
@@ -32,13 +33,25 @@ mod provisioner;
 #[derive(Debug)]
 pub struct TestRunConfig {
 	pub backend: Backend,
+	pub mode: RunMode,
 }
 
 impl RunConfig for TestRunConfig {
 	fn name(&self, case: &CaseImports) -> String {
-		format!("{} on {}", case.test.origin.path, self.backend)
+		match self.mode {
+			RunMode::Request => format!("{} on {}", case.test.origin.path, self.backend),
+			RunMode::Fragments => {
+				format!("{} on {} ({})", case.test.origin.path, self.backend, self.mode)
+			}
+		}
 	}
 }
+
+/// The error a `--mode fragments` run reports when the runner was built without
+/// the driver. The driver is the only caller of `Datastore::execute_fragments`,
+/// which core compiles only under its `internal-fragments` feature.
+#[cfg(not(feature = "internal-fragments"))]
+const FRAGMENTS_UNAVAILABLE: &str = "fragments mode needs the internal-fragments build";
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let mut load_errors = Vec::new();
@@ -47,6 +60,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let set = CaseSet::load_surrealql_files(path, &mut load_errors).await?;
 
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
+	let mode = *matches.get_one::<RunMode>("mode").unwrap();
+
+	#[cfg(not(feature = "internal-fragments"))]
+	if mode == RunMode::Fragments {
+		bail!(FRAGMENTS_UNAVAILABLE);
+	}
+
 
 	// A `--endpoint` selects the remote (SDK) execution path; without it the
 	// runner uses an embedded datastore (the default).
@@ -56,6 +76,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		bail!("--endpoint requires building language-tests with `--features remote`");
 	}
 	let remote = endpoint.is_some();
+	// Fragments mode drives the embedded datastore's fragment driver directly;
+	// a remote endpoint only accepts whole requests.
+	if remote && mode == RunMode::Fragments {
+		bail!("--mode fragments is not supported with --endpoint");
+	}
 
 	// Datastore configuration keys for every datastore this run opens. Only the
 	// embedded path opens one: a remote run's datastores belong to the server and
@@ -140,10 +165,18 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.with_filter(move |x| {
 			!x.test.config.parsed.env.versioned || backend.supports_versioning() || remote
 		})
+		// Only run tests valid in this mode: the file's `[test] modes` must allow
+		// it, and fragments mode splits parsed SurrealQL statements, so every other
+		// dialect runs in request mode only.
+		.with_filter(move |x| {
+			x.test.config.parsed.test.runs_in_mode(mode)
+				&& (mode == RunMode::Request || x.test.dialect == Dialect::SurrealQl)
+		})
 		// One run per test.
-		.with_expander(|_| {
+		.with_expander(move |_| {
 			vec![TestRunConfig {
 				backend,
+				mode,
 			}]
 		});
 
@@ -210,6 +243,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
 
+	// Created before any test runs, so that a run which declines nothing leaves
+	// an empty file and an unwritable path fails the run immediately.
+	let decline_report = matches
+		.get_one::<String>("report-declines")
+		.map(|file| {
+			std::fs::File::create(file)
+				.map(std::io::BufWriter::new)
+				.with_context(|| format!("could not create decline report `{file}`"))
+		})
+		.transpose()?;
+
 	// Expectations are the corpus's statement of what SurrealDB must answer, so
 	// they are only ever written from a run of this checkout. A remote endpoint is
 	// an arbitrary server — a different version, or a different implementation
@@ -248,7 +292,18 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		None => (run_embedded_jobs(runs, num_jobs, backend, config, color).await?, None::<String>),
 	};
 
-	let graded = finish(reports, scheduled, &load_errors, &set, path, color, failure_mode).await;
+	let graded = finish(
+		reports,
+		scheduled,
+		&load_errors,
+		&set,
+		path,
+		color,
+		failure_mode,
+		decline_report,
+		backend,
+	)
+	.await;
 
 	// Residue on the endpoint fails the run even when every test passed: the
 	// suite's own isolation rests on each run starting from a clean root, so a
@@ -330,6 +385,8 @@ async fn finish(
 	path: &str,
 	color: ColorMode,
 	failure_mode: &ResultsMode,
+	decline_report: Option<std::io::BufWriter<std::fs::File>>,
+	backend: Backend,
 ) -> Result<()> {
 	// A run that produced no report ran but was never graded, so nothing below
 	// can see it. Fail rather than summarise a suite that quietly shrank.
@@ -438,6 +495,12 @@ async fn finish(
 	}
 	println!();
 
+	if let Some(file) = decline_report {
+		let declined = write_decline_report(file, &reports, backend)?;
+		println!("declines: {declined}");
+		println!();
+	}
+
 	// possibly update test configs with acquired results.
 	match failure_mode {
 		ResultsMode::Default => {}
@@ -466,6 +529,35 @@ async fn finish(
 	Ok(())
 }
 
+/// Writes one JSON line per statement the engine declined to run, ordered by
+/// test path then statement, and returns how many there were.
+fn write_decline_report(
+	mut file: impl std::io::Write,
+	reports: &[TestReport],
+	backend: Backend,
+) -> Result<usize> {
+	let mut declines = reports
+		.iter()
+		.flat_map(|report| {
+			let path = report.case.test.origin.path.as_str();
+			report.declines().into_iter().map(move |decline| (path, decline))
+		})
+		.collect::<Vec<_>>();
+	declines.sort_by(|(a, x), (b, y)| a.cmp(b).then(x.statement.cmp(&y.statement)));
+
+	for (path, decline) in declines.iter() {
+		let line = serde_json::json!({
+			"path": path,
+			"backend": backend.to_string(),
+			"statement": decline.statement,
+			"message": decline.message,
+		});
+		writeln!(file, "{line}").context("could not write decline report")?;
+	}
+	file.flush().context("could not write decline report")?;
+	Ok(declines.len())
+}
+
 pub async fn schedule_run(
 	run: TestRun<TestRunConfig>,
 	schedular: &mut Schedular,
@@ -478,7 +570,7 @@ pub async fn schedule_run(
 	let future = async move {
 		let res = permit
 			.with(async |ds, grade_ds| {
-				let mut executor = EmbeddedExecutor::new(Arc::clone(ds));
+				let mut executor = EmbeddedExecutor::new(Arc::clone(ds), run.config.mode);
 				let fut = run_test(&run, &mut executor);
 				let res = AssertUnwindSafe(fut).catch_unwind().await;
 
@@ -1230,6 +1322,31 @@ async fn run_test_body<E: Executor>(
 	}
 }
 
+/// Runs a parsed SurrealQL query as the fragments of one stream, one statement
+/// per fragment, and returns each statement's result in order.
+#[cfg(feature = "internal-fragments")]
+pub(crate) async fn run_fragments(
+	dbs: &Datastore,
+	query: surrealdb_expr::parser::Query,
+	session: &Session,
+) -> Result<Vec<Result<SurValue, String>>> {
+	dbs.execute_fragments(QueryRequest::new(query, session))
+		.await
+		.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
+		.map_err(|e| anyhow::anyhow!(e))
+}
+
+/// Without the driver there is no way to run fragments; `run` refuses the mode
+/// before any test starts, so this is the same error for any path that gets here.
+#[cfg(not(feature = "internal-fragments"))]
+pub(crate) async fn run_fragments(
+	_dbs: &Datastore,
+	_query: surrealdb_expr::parser::Query,
+	_session: &Session,
+) -> Result<Vec<Result<SurValue, String>>> {
+	Err(anyhow::anyhow!(FRAGMENTS_UNAVAILABLE))
+}
+
 /// Removes the namespace, database, and root configs a test (or its imports) may
 /// have created, returning the reused base datastore to a clean state for the
 /// next test.
@@ -1504,6 +1621,7 @@ mod tests {
 			}),
 			config: TestRunConfig {
 				backend: Backend::Memory,
+				mode: RunMode::Request,
 			},
 		}
 	}
@@ -1532,7 +1650,7 @@ mod tests {
 			"/**\n[env]\nnamespace = true\ndatabase = true\nauth = { level = \"owner\" }\n*/\nCREATE person:2 SET name = ;",
 		);
 		let run_a = make_run(case_a, vec![import.clone()]);
-		let mut exec_a = EmbeddedExecutor::new(Arc::clone(&dbs));
+		let mut exec_a = EmbeddedExecutor::new(Arc::clone(&dbs), RunMode::Request);
 		let result_a = run_test(&run_a, &mut exec_a).await.unwrap();
 		assert!(
 			matches!(result_a, TestTaskResult::ParserError(_)),
@@ -1555,7 +1673,7 @@ mod tests {
 			"/**\n[env]\nnamespace = true\ndatabase = true\nauth = { level = \"owner\" }\n*/\nSELECT name FROM person;",
 		);
 		let run_b = make_run(case_b, vec![import]);
-		let mut exec_b = EmbeddedExecutor::new(Arc::clone(&dbs));
+		let mut exec_b = EmbeddedExecutor::new(Arc::clone(&dbs), RunMode::Request);
 		let result_b = run_test(&run_b, &mut exec_b).await.unwrap();
 		assert!(
 			!matches!(result_b, TestTaskResult::Import(..)),

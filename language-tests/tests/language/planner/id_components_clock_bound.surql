@@ -7,17 +7,19 @@ imports = ["language/planner/id_components_key_range_import.surql"]
 
 [test]
 reason = """
-	A bound over a datetime component that reads the clock is pushed where the
-	statement folds the clock to one instant before it plans, which a SELECT
-	does: the range and the predicate above it then hold the same instant. A
-	user-defined function's argument bounds the range its body reads, and a
-	call of a function as a bound gives the rows the predicate admits whether
-	or not the range takes it. The readings are of 2024, so a bound an hour
-	before now admits none of them and one at now admits every one.
+	A bound over a datetime component that reads the clock is not pushed into
+	the key range: the range is built from literals and from expressions that
+	read no clock, so the leading `city` is pinned and the clock comparison
+	stays in the predicate above the scan, which reads the statement's one
+	instant. A user-defined function's argument bounds the range its body
+	reads, and a call of a function as a bound gives the rows the predicate
+	admits whether or not the range takes it. The readings are of 2024, so a
+	bound an hour before now admits none of them and one at now admits every
+	one.
 """
 
 [[test.results]]
-match = '''string::contains($result, "KeyRangeScan") AND string::contains($result, "key: city = 'London'") AND string::contains($result, "range: time > ") AND !string::contains($result, "TableScan")'''
+match = '''string::contains($result, "KeyRangeScan") AND string::contains($result, "key: city = 'London'") AND !string::contains($result, "range: time > ") AND !string::contains($result, "TableScan")'''
 error = false
 
 [[test.results]]

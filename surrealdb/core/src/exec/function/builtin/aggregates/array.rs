@@ -9,6 +9,7 @@ use anyhow::Result;
 
 use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::Value;
 
@@ -18,16 +19,19 @@ use crate::val::Value;
 
 /// array::group - flattens the group's values and returns the unique ones.
 ///
-/// Shares its result with the scalar `array::group`, which is the contract
-/// callers rely on: the aggregate must not report values the scalar form would
-/// have collapsed, or `array::len` over it reports a count no row set
-/// justifies.
+/// Returns the same values as the scalar `array::group`. The aggregate must not
+/// keep values that the scalar form would collapse, otherwise `array::len` over
+/// it counts values that the group's rows do not support.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArrayGroup;
 
 impl AggregateFunction for ArrayGroup {
 	fn name(&self) -> &'static str {
 		"array::group"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::group", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -51,9 +55,9 @@ impl AggregateFunction for ArrayGroup {
 ///   element per row;
 /// - the GQL lowering targets it for `collect`/`collect_list`, which owe one entry per matched row.
 ///
-/// The name is absent from the parser's builtin path table, so SurrealQL text
-/// cannot call it: it names the fold in plan output and gives the GQL lowering
-/// something to point at. The SurrealQL spelling of this fold is the projected
+/// The name is not in the parser's builtin path table, so SurrealQL text
+/// cannot call it. It names the fold in plan output and is the target of the
+/// GQL `collect` lowering. The SurrealQL form of this fold is the projected
 /// expression itself.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ArrayCollect;
@@ -61,6 +65,10 @@ pub struct ArrayCollect;
 impl AggregateFunction for ArrayCollect {
 	fn name(&self) -> &'static str {
 		"array::collect"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::collect", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -128,9 +136,8 @@ impl Accumulator for ArrayGroupAccumulator {
 	fn finalize(&self) -> Result<Value> {
 		let array = self.values.clone().into();
 		if self.dedupe {
-			// Delegate rather than reimplement: the aggregate and the scalar
-			// form have to agree, and sharing the call is what keeps them
-			// from drifting apart again.
+			// Calls the scalar function directly, so the aggregate and the
+			// scalar form always return the same value.
 			crate::fnc::array::group((array,))
 		} else {
 			Ok(Value::Array(array))
@@ -161,6 +168,10 @@ pub struct ArrayJoin;
 impl AggregateFunction for ArrayJoin {
 	fn name(&self) -> &'static str {
 		"array::join"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::join", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -255,6 +266,10 @@ pub struct ArrayDistinct;
 impl AggregateFunction for ArrayDistinct {
 	fn name(&self) -> &'static str {
 		"array::distinct"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::distinct", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -366,6 +381,10 @@ impl AggregateFunction for ArrayMin {
 		"array::min"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::min", Fallibility::INFALLIBLE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(ExtremumAccumulator::new(Extremum::Min))
 	}
@@ -384,6 +403,10 @@ pub struct ArrayMax;
 impl AggregateFunction for ArrayMax {
 	fn name(&self) -> &'static str {
 		"array::max"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "array::max", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {

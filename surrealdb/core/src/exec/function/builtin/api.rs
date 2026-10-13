@@ -7,6 +7,7 @@ use crate::api::request::ApiRequest;
 use crate::err::EngineError;
 use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::{FromArgs, FromPublic, Optional};
@@ -22,6 +23,14 @@ pub struct ApiInvoke;
 impl ScalarFunction for ApiInvoke {
 	fn name(&self) -> &'static str {
 		"api::invoke"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Scalar,
+			"api::invoke",
+			Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
+		)
 	}
 
 	fn effects(&self) -> EffectSet {
@@ -60,10 +69,10 @@ impl ScalarFunction for ApiInvoke {
 			// Convert args using FromArgs (the same conversion the `fnc` dispatch uses)
 			let (path, Optional(req)): (String, Optional<FromPublic<ApiRequest>>) =
 				FromArgs::from_args("api::invoke", args)?;
-			// A seam of the run-time seal ([`crate::exec::compiles`]): the API
-			// is found by the path the call names, a load of its definition,
-			// and its middleware and handler are served from the compile cache
-			// ([`crate::exec::vm::serve`]).
+			// The API is looked up by the path the call names, its definition is
+			// loaded, and its middleware and handler are served from the compile
+			// cache ([`crate::exec::vm::serve`]). All of this runs inside
+			// [`crate::exec::compiles::seam`].
 			let response = crate::exec::compiles::seam(async {
 				anyhow::Ok(
 					match crate::fnc::api::route(frozen, opt, &path, req.map(|x| x.0)).await? {
@@ -87,9 +96,10 @@ impl ScalarFunction for ApiInvoke {
 /// Helper macro for API middleware functions: each converts its arguments as
 /// the `fnc` dispatch does, does its work on the request or the response,
 /// and runs the `next` continuation it is handed through the
-/// engine's closure evaluator.
+/// engine's closure evaluator. A trailing `, fallibility: <class>` declares
+/// [`ScalarFunction::fallibility`].
 macro_rules! define_api_middleware_function {
-	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $sig:expr) => {
+	($struct_name:ident, $func_name:literal, effects: $effects:expr, $impl_path:path, $sig:expr $(, fallibility: $fallibility:expr)?) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
 
@@ -101,6 +111,10 @@ macro_rules! define_api_middleware_function {
 			fn effects(&self) -> EffectSet {
 				$effects
 			}
+
+			$(fn fallibility(&self) -> crate::exec::ir::iface::Fallibility {
+				crate::declare_fallibility!(Scalar, $func_name, $fallibility)
+			})?
 
 			fn signature(&self) -> Signature {
 				$sig
@@ -220,7 +234,8 @@ define_api_middleware_function!(
 		.arg("request", Kind::Object)
 		.arg("next", Kind::Function(None, None))
 		.optional("strategy", Kind::String)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -232,7 +247,8 @@ define_api_middleware_function!(
 		.arg("request", Kind::Object)
 		.arg("next", Kind::Function(None, None))
 		.arg("limit", Kind::Any)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -244,7 +260,8 @@ define_api_middleware_function!(
 		.arg("request", Kind::Object)
 		.arg("next", Kind::Function(None, None))
 		.optional("strategy", Kind::String)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -256,7 +273,8 @@ define_api_middleware_function!(
 		.arg("request", Kind::Any)
 		.arg("next", Kind::Function(None, None))
 		.arg("status", Kind::Int)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -269,7 +287,8 @@ define_api_middleware_function!(
 		.arg("next", Kind::Function(None, None))
 		.arg("name", Kind::String)
 		.optional("value", Kind::String)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -281,7 +300,8 @@ define_api_middleware_function!(
 		.arg("request", Kind::Any)
 		.arg("next", Kind::Function(None, None))
 		.arg("headers", Kind::Object)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
 define_api_middleware_function!(
@@ -293,14 +313,15 @@ define_api_middleware_function!(
 		.arg("request", Kind::Any)
 		.arg("next", Kind::Function(None, None))
 		.arg("timeout", Kind::Duration)
-		.returns(Kind::Any)
+		.returns(Kind::Any),
+	fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
 );
 
-// Each middleware function runs the `next` continuation it is handed, whose
-// body is invisible from the call, which `EffectSet::OPAQUE_BODY` declares.
-// `api::invoke` runs a whole endpoint that may write, so it declares
-// `WRITES_DATA` as well; `is_writer_builtin` names the same functions, and the
-// registry's guard test holds the two in agreement.
+// Each middleware function runs the `next` continuation it is handed. The body
+// of `next` is not visible from the call, so these functions declare
+// `EffectSet::OPAQUE_BODY`. `api::invoke` runs a whole endpoint that may write,
+// so it also declares `WRITES_DATA`. `is_writer_builtin` lists the same
+// functions, and the registry's guard test checks that the two agree.
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(ApiInvoke);
 	registry.register(ApiReqBody);

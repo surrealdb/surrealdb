@@ -16,11 +16,21 @@ use crate::catalog::{
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::exec::Error as ExecError;
-use crate::exec::vm::lower_live;
+use crate::exec::vm::live as vm_live;
 use crate::expr::statements::live::{LiveFields, LiveStatement, is_document_dependent};
 use crate::expr::visit::Visit;
 use crate::key::schema::{NodeLiveQueryKey, SubscriptionKey};
 use crate::val::Value;
+
+/// The checks a `KILL` or a `LIVE` makes before it evaluates its operands: realtime is enabled,
+/// and the session selects a namespace and a database.
+pub(crate) fn realtime_checks(ctx: &FrozenContext, opt: &Options) -> Result<()> {
+	// Is realtime enabled?
+	ctx.realtime()?;
+	// Valid options?
+	opt.valid_for_db()?;
+	Ok(())
+}
 
 /// The subscription a `LIVE SELECT` registers, as the session that issued it
 /// defines it: its captured parameters, fields, query, authentication,
@@ -31,24 +41,6 @@ fn subscription_of(
 	ctx: &FrozenContext,
 	opt: &Options,
 ) -> SubscriptionDefinition {
-	let mut vars = Variables::new();
-	let mut pass = ParameterCapturePass {
-		context: ctx,
-		captures: &mut vars,
-	};
-	if let LiveFields::Select(x) = &this.fields {
-		let _ = x.visit(&mut pass);
-	};
-	let _ = this.what.visit(&mut pass);
-	if let Some(cond) = &this.cond {
-		let _ = cond.0.visit(&mut pass);
-	}
-	if let Some(fetch) = &this.fetch {
-		for i in fetch.iter() {
-			let _ = i.0.visit(&mut pass);
-		}
-	}
-
 	let fields = match &this.fields {
 		LiveFields::Diff => SubscriptionFields::Diff,
 		LiveFields::Select(x) => SubscriptionFields::Select(x.clone()),
@@ -63,23 +55,60 @@ fn subscription_of(
 		fetch: this.fetch.as_ref().map(|fs| fs.iter().map(|f| f.0.clone()).collect()),
 	});
 
-	SubscriptionDefinition {
-		id: this.id,
-		node: ctx.node_id(),
-		query,
+	completed(
+		SubscriptionDefinition {
+			id: this.id,
+			node: ctx.node_id(),
+			query,
+			auth: None,
+			session: None,
+			vars: Default::default(),
+		},
+		ctx,
+		opt,
+	)
+}
 
-		// Use the current session authentication
-		// for when we store the LIVE Statement
-		auth: Some(opt.auth.as_ref().clone()),
-		// Use the current session authentication
-		// for when we store the LIVE Statement
-		session: ctx.value("session").cloned(),
-		// Add the variables to the subscription definition. Keys are
-		// copied out of `Strand` into owned `String` here because the
-		// subscription is persisted in the catalog and stores
-		// `BTreeMap<String, Value>`.
-		vars: vars.0.into_iter().map(|(k, v)| (k.into_string(), v)).collect(),
+/// The subscription `definition` with what the session that runs the statement contributes: the
+/// parameters its clauses capture, its authentication and session, and this node.
+///
+/// A `LIVE` states its identity and query; the session that issues it supplies the rest, so the
+/// statement and a program that carries the statement's definition as a template register the
+/// same subscription.
+pub(crate) fn completed(
+	mut definition: SubscriptionDefinition,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> SubscriptionDefinition {
+	let mut vars = Variables::new();
+	let mut pass = ParameterCapturePass {
+		context: ctx,
+		captures: &mut vars,
+	};
+	if let SubscriptionQuery::Compiled(query) = &definition.query {
+		if let SubscriptionFields::Select(x) = &query.fields {
+			let _ = x.visit(&mut pass);
+		};
+		let _ = query.what.visit(&mut pass);
+		if let Some(cond) = &query.cond {
+			let _ = cond.visit(&mut pass);
+		}
+		if let Some(fetch) = &query.fetch {
+			for i in fetch.iter() {
+				let _ = i.visit(&mut pass);
+			}
+		}
 	}
+	definition.node = ctx.node_id();
+	// Store the authentication of the current session with the subscription.
+	definition.auth = Some(opt.auth.as_ref().clone());
+	// Store the session value with the subscription.
+	definition.session = ctx.value("session").cloned();
+	// Add the captured variables to the subscription definition. Names are
+	// converted to owned `String`s because the catalog stores
+	// `BTreeMap<String, Value>`.
+	definition.vars = vars.0.into_iter().map(|(k, v)| (k.into_string(), v)).collect();
+	definition
 }
 
 /// Compile the unit of a `LIVE SELECT` as the statement arrives, before the
@@ -94,7 +123,7 @@ pub(crate) async fn live_statement_arrive(
 	this: &LiveStatement,
 	ctx: &FrozenContext,
 	opt: &Options,
-) -> Option<lower_live::Arrived> {
+) -> Option<vm_live::Arrived> {
 	ctx.realtime().ok()?;
 	opt.valid_for_db().ok()?;
 	let exec = crate::exec::entry::frame(ctx, opt, None).await;
@@ -106,7 +135,7 @@ pub(crate) async fn live_statement_arrive(
 	let txn = ctx.tx();
 	txn.expect_tb_by_name(names.0, names.1, &tb).await.ok()?;
 	let subscription = subscription_of(this, ctx, opt);
-	lower_live::arrive(ctx, &txn, (ns, db), names, &tb, &subscription).await
+	vm_live::arrive(ctx, &txn, (ns, db), names, &tb, &subscription).await
 }
 
 /// Register the subscription a `LIVE SELECT` names and return its id.
@@ -125,21 +154,34 @@ pub(crate) async fn live_statement_compute(
 	this: &LiveStatement,
 	ctx: &FrozenContext,
 	opt: &Options,
-	arrived: Option<lower_live::Arrived>,
+	arrived: Option<vm_live::Arrived>,
 ) -> Result<Value> {
 	let exec = crate::exec::entry::frame(ctx, opt, None).await;
-	// Is realtime enabled?
-	ctx.realtime()?;
-	// Valid options?
-	opt.valid_for_db()?;
+	realtime_checks(ctx, opt)?;
+	let subscription_definition = subscription_of(this, ctx, opt);
+	// Process the live query table
+	let target = crate::exec::entry::scalar(&exec, &this.what).await?;
+	live_register(target, subscription_definition, ctx, opt, arrived).await
+}
+
+/// Register `subscription_definition` over `target`, the value the statement's target evaluated
+/// to, and return its id, after [`realtime_checks`] and the evaluation of the target.
+///
+/// The rules of [`live_statement_compute`] hold: the target must be a table that exists and is not
+/// a lightweight relation, and the subscription and its node key are written in the statement's
+/// transaction.
+pub(crate) async fn live_register(
+	target: Value,
+	mut subscription_definition: SubscriptionDefinition,
+	ctx: &FrozenContext,
+	opt: &Options,
+	arrived: Option<vm_live::Arrived>,
+) -> Result<Value> {
 	// Get the Node ID
 	let nid = ctx.node_id();
-
-	let mut subscription_definition = subscription_of(this, ctx, opt);
 	// Get the id
 	let live_query_id = subscription_definition.id;
-	// Process the live query table
-	match crate::exec::entry::scalar(&exec, &this.what).await? {
+	match target {
 		Value::Table(tb) => {
 			// Store the current Node ID
 			subscription_definition.node = nid;
@@ -151,10 +193,8 @@ pub(crate) async fn live_statement_compute(
 			{
 				let (ns, db) = opt.ns_db()?;
 				let tbdef = txn.expect_tb_by_name(ns, db, &tb).await?;
-				// Live queries over record-less edges are out of scope:
-				// parts of the notification machinery assume stored
-				// records, so a subscription could observe partial
-				// behaviour rather than failing loudly.
+				// Lightweight relations have no stored records, which the
+				// notification path assumes, so a LIVE query on one is rejected.
 				anyhow::ensure!(
 					crate::kvs::lightweight::lightweight_relation(&tbdef.table_type).is_none(),
 					crate::exec::Error::Thrown(
@@ -167,11 +207,14 @@ pub(crate) async fn live_statement_compute(
 			// execution context. This catches obviously broken expressions such as
 			// `WHERE string::len(NONE)` at registration time instead of silently
 			// suppressing every future notification.
-			if let Some(cond) = &this.cond
-				&& !is_document_dependent(&cond.0)
-				&& let Err(e) = crate::exec::entry::scalar(&exec, &cond.0).await
+			if let Some(cond) =
+				subscription_definition.query.compiled().and_then(|query| query.cond.as_ref())
+				&& !is_document_dependent(cond)
 			{
-				bail!("LIVE query WHERE clause is invalid and will never match: {e}");
+				let exec = crate::exec::entry::frame(ctx, opt, None).await;
+				if let Err(e) = crate::exec::entry::scalar(&exec, cond).await {
+					bail!("LIVE query WHERE clause is invalid and will never match: {e}");
+				}
 			}
 			// Insert the node live query
 			let key = NodeLiveQueryKey {
@@ -204,7 +247,7 @@ pub(crate) async fn live_statement_compute(
 			txn.clear_cache();
 			// Hold the unit compiled as the statement arrived; nothing is
 			// compiled in this transaction.
-			lower_live::registered(ctx, (ns, db), &tb, &subscription_definition, arrived).await?;
+			vm_live::registered(ctx, (ns, db), &tb, &subscription_definition, arrived).await?;
 		}
 		v => {
 			bail!(ExecError::LiveStatement {

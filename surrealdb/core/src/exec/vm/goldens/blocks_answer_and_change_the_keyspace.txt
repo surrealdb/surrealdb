@@ -120,7 +120,7 @@ keyspace:
 person:1
 keyspace:
 ### { LET $x = ({ RETURN 3 }) + 1; RETURN $x }
-3
+4
 keyspace:
 ### RETURN (CREATE thing:9 SET v = 1).v
 [1]

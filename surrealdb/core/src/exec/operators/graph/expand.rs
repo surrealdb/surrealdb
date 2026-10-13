@@ -1,10 +1,9 @@
 //! Single-hop graph traversal for GQL v2 `MATCH`.
 //!
-//! [`expand_input_row`] is the workhorse of binding-table execution. Given a
-//! binding row (a `Value::Object` keyed by binding name, per
-//! `doc/gql/V2_DESIGN.md` §3), it expands one edge step from a bound source
-//! node, binding the traversed edge and the reached target node into each
-//! surviving row.
+//! [`expand_input_row`] is the core of binding-table execution. Given a
+//! binding row (a `Value::Object` keyed by binding name), it expands one edge
+//! step from a bound source node, binding the traversed edge and the reached
+//! target node into each surviving row.
 //!
 //! For every input row it:
 //!
@@ -30,7 +29,7 @@
 //! - `row[source]` is `Value::Null` ⇒ the source is an optional miss: when `optional` the row
 //!   passes through with `edge`/`target` bound to `Null`, otherwise it is skipped;
 //! - the binding is missing, or holds any other (non-record, non-null) value ⇒ the row is dropped
-//!   with a `debug!` log (never a panic). This only happens on a malformed plan; the lowering
+//!   with a `debug!` log (never a panic). This only happens on a malformed plan; the planner
 //!   guarantees the source binding is a bound node.
 //!
 //! ## `IdOnly` edges and the target-rid decision
@@ -50,26 +49,23 @@
 //!    through the FieldState helper to read its `out`/`in`.
 //!
 //! `IdOnly` binds the edge as a bare `Value::RecordId` (no record content
-//! surfaces) per §3, but still needs the target id; the decode supplies it on
-//! new-format data, and we fall back to a minimal fetch only on un-migrated
-//! legacy edges. This keeps the common path fetch-free while staying correct on
-//! legacy storage.
+//! surfaces), but still needs the target id. New-format keys supply it during
+//! decode. Only legacy-format keys fall back to a minimal fetch, so the common
+//! path stays fetch-free and legacy storage stays correct.
 //!
 //! ## Edge SELECT-permission gating (security)
 //!
 //! Binding the edge id-only must not let a user *traverse* an edge table they
-//! cannot SELECT — otherwise `->edge` would enumerate otherwise-hidden
-//! relationships even though the edge content is never returned.
-//! The VM's graph scan gates its id-only output on the edge perm for exactly
-//! this reason. So when permissions
-//! are enforced (`check_perms`), `IdOnly` edges are still resolved through the
-//! FieldState-aware [`fetch`](crate::exec::operators::scan::fetch) helper purely to *gate*
-//! traversal: an edge denied (or missing) yields `None` and the candidate target is
-//! dropped, while the bound value stays the bare `Value::RecordId`. The gating
-//! fetch doubles as the legacy-key `out`/`in` source, so it costs at most one
-//! extra batched read on the secured path. For root/owner sessions
-//! (`check_perms == false`) the gate is skipped and the common path remains
-//! fetch-free.
+//! cannot SELECT. Otherwise `->edge` would enumerate relationships that stay
+//! hidden, even though no edge content is returned. When permissions are
+//! enforced (`check_perms`), `IdOnly` edges are still resolved through the
+//! FieldState-aware [`fetch`](crate::exec::operators::scan::fetch) helper, but
+//! only to gate traversal. A denied or missing edge yields `None`, and its
+//! candidate target is dropped. The bound value stays the bare
+//! `Value::RecordId`. The gating fetch also supplies `out`/`in` for legacy keys,
+//! so it adds at most one batched read on the secured path. For root and owner
+//! sessions (`check_perms == false`) the gate is skipped and the fetch-free path
+//! is used.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -85,13 +81,12 @@ use crate::val::{Object, RecordId, TableName, Value};
 
 /// Direction of a single `Expand` hop.
 ///
-/// GQL `MATCH` patterns only ever traverse a directed edge `->` (`Out`) or `<-`
-/// (`In`); there is no undirected hop at the operator level. This is the
-/// operator-local mirror of the `match_plan::ExpandDirection` IR enum (the
-/// planner, which is feature-gated, translates one into the other), kept local
-/// so this operator compiles without the `gql` feature — matching the
-/// `match/fetch.rs` precedent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// GQL `MATCH` patterns only traverse a directed edge: `->` (`Out`) or `<-`
+/// (`In`). There is no undirected hop at the operator level. This is a local
+/// mirror of the `match_plan::ExpandDirection` enum. The planner, which sits
+/// behind the `gql` feature, translates between the two. Keeping this copy
+/// local lets the operator build without that feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExpandDir {
 	/// Outgoing edge `->`: target is the edge's `out` endpoint.
 	Out,
@@ -118,7 +113,7 @@ impl ExpandDir {
 }
 
 /// How the traversed edge is bound into each surviving row.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EdgeBinding {
 	/// Bind the full edge record (FieldState-aware fetch) under this name.
 	Full(String),
@@ -249,7 +244,7 @@ pub(crate) async fn expand_input_row<J: CandidateJudge>(
 		}
 		SourceId::Drop => {
 			// Malformed plan: the source binding is missing or
-			// not a record. The lowering guarantees a bound node
+			// not a record. The planner guarantees a bound node
 			// here, so this is unreachable on valid plans; drop
 			// without panicking.
 			debug!(
@@ -394,18 +389,16 @@ async fn expand_row<J: CandidateJudge>(
 		return Ok(());
 	}
 
-	// SECURITY: an id-only (hidden / anonymous) edge binds just the edge's
-	// record id and never fetches the edge record on the common new-format path
-	// (the target is decoded straight from the adjacency key). The edge table's
-	// SELECT permission would therefore never be evaluated, letting a user
-	// denied SELECT on the edge table still traverse `->edge` to surface the
-	// far node — leaking otherwise-hidden relationships. `GraphEdgeScan`
-	// (scan/graph.rs) gates its id-only output on the edge perm for exactly this
-	// reason. So when permissions are enforced we still resolve every id-only
-	// edge through the FieldState helper purely to *gate* traversal: a denied /
-	// missing edge (`None`) drops the candidate. For root/owner sessions
-	// (`check_perms == false`) the gate is a no-op and the fetch-free fast path
-	// is preserved.
+	// SECURITY: an id-only (hidden or anonymous) edge binds only its record id.
+	// Without a gate, a user denied SELECT on the edge table could still traverse
+	// `->edge` to reach the far node. The common new-format path decodes the target
+	// straight from the adjacency key and never reads the edge record, so nothing
+	// would check that permission. `GraphEdgeScan` (scan/graph.rs) applies the same
+	// edge-permission gate to its id-only output. When permissions are enforced,
+	// every id-only edge is therefore resolved through the FieldState helper, only
+	// to gate traversal. A denied or missing edge (`None`) drops the candidate. For
+	// root and owner sessions (`check_perms == false`) the gate is a no-op and the
+	// fetch-free fast path is kept.
 	let gate_id_only_edges = !fetch_full_edge && edge_cache.check_perms(ctx)?;
 
 	// Survivor count for this input row, so OptionalExpand can emit its
@@ -422,14 +415,13 @@ async fn expand_row<J: CandidateJudge>(
 		let edge_slice = &edge_rids[start..end];
 		let decoded_slice = &decoded_targets[start..end];
 
-		// Resolve the edge bindings. In `Full` mode every edge is fetched
-		// through the FieldState helper (its perm gating is the `Some`/`None`
-		// of `edge_values[i]`). In `IdOnly` mode the *bound value* is always the
-		// bare record id (per V2_DESIGN §3, no record content surfaces);
-		// `edge_perm` separately records whether the edge passed the table /
-		// field SELECT permission, computed by a gating fetch when permissions
-		// are enforced (see `gate_id_only_edges`). Both vectors are positional
-		// with `edge_slice`.
+		// Resolve the edge bindings. In `Full` mode every edge is fetched through the
+		// FieldState helper, and its perm gating is the `Some`/`None` of
+		// `edge_values[i]`. In `IdOnly` mode the bound value is always the bare record
+		// id, with no record content. `edge_perm` records whether the edge passed the
+		// table and field SELECT permission, computed by a gating fetch when
+		// permissions are enforced (see `gate_id_only_edges`). Both vectors are
+		// positional with `edge_slice`.
 		let (edge_values, edge_perm): (Vec<Option<Value>>, Vec<Option<Value>>) = if fetch_full_edge
 		{
 			let fetched = resolve_with_field_state(ctx, edge_cache, edge_slice).await?;
@@ -530,7 +522,7 @@ async fn expand_row<J: CandidateJudge>(
 			// The edge binding value. Permission-denied edges (Full or gated
 			// IdOnly) were already excluded above (their `target_rids` slot was
 			// `None`, so they are absent from `candidate_positions`); this `None`
-			// skip is the belt-and-braces guard for Full mode, where the dropped
+			// skip is an extra guard for Full mode, where the dropped
 			// object would otherwise leak the denied edge's existence.
 			let edge_value = match edge_values[i].clone() {
 				Some(v) => v,

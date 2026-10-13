@@ -3,8 +3,8 @@
 use crate::exec::function::FunctionRegistry;
 use crate::{define_pure_function, register_functions};
 
-define_pure_function!(MetaId, "meta::id", effects: EffectSet::PURE, (record: Any) -> Any, crate::fnc::record::id);
-define_pure_function!(MetaTb, "meta::tb", effects: EffectSet::PURE, (record: Any) -> String, crate::fnc::record::tb);
+define_pure_function!(MetaId, "meta::id", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (record: Any) -> Any, crate::fnc::record::id);
+define_pure_function!(MetaTb, "meta::tb", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (record: Any) -> String, crate::fnc::record::tb);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(registry, MetaId, MetaTb);

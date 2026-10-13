@@ -8,56 +8,9 @@
 
 use std::collections::HashSet;
 
+use super::summaries::CatalogSummaries;
 use crate::exec::function::FunctionRegistry;
-use crate::exec::{AccessMode, ContextLevel};
-use crate::expr::logical::{
-	EffectOracle, EffectSet, LogicalCall, LogicalExpr, LogicalInfo, LogicalOp, effects_of,
-};
-use crate::expr::{Base, Function};
-
-/// The registry's declarations, with each user-defined function call
-/// answering for the call alone: the oracle of a summary that names the
-/// functions it calls rather than folding their bodies in
-/// ([`crate::exec::vm::footprint`]).
-struct LateBound<'a>(Oracle<'a>);
-
-impl EffectOracle for LateBound<'_> {
-	fn builtin(&self, name: &str) -> Option<EffectSet> {
-		self.0.builtin(name)
-	}
-
-	fn closure_args(&self, name: &str) -> Option<&'static [usize]> {
-		self.0.closure_args(name)
-	}
-
-	fn method_always_dispatches(&self, name: &str) -> bool {
-		self.0.method_always_dispatches(name)
-	}
-
-	fn evaluates_against_row(&self, name: &str) -> bool {
-		self.0.evaluates_against_row(name)
-	}
-
-	fn permission_checked_param(&self, name: &str) -> bool {
-		self.0.permission_checked_param(name)
-	}
-
-	fn custom_function(&self, _name: &str) -> Option<EffectSet> {
-		Some(EffectSet::READS_ROW)
-	}
-}
-
-/// [`effects_of_plan`], with each user-defined function call answering for
-/// the call alone ([`LateBound`]).
-pub(crate) fn effects_of_plan_late_bound(
-	op: &LogicalOp,
-	registry: &FunctionRegistry,
-) -> PlanEffects {
-	let oracle = LateBound(Oracle::new(registry));
-	let mut out = PlanEffects::default();
-	fold_plan(op, &oracle, &mut out);
-	out
-}
+use crate::expr::logical::{EffectOracle, EffectSet, LogicalExpr, LogicalOp, effects_of};
 
 /// The registry's declarations. Every parameter read is taken to be in hand,
 /// so `Effects::may_raise` is not the question to ask through this one; see
@@ -93,6 +46,79 @@ impl EffectOracle for Oracle<'_> {
 
 	fn permission_checked_param(&self, _name: &str) -> bool {
 		false
+	}
+}
+
+/// The registry's declarations, with each stored function a [`CatalogSummaries`] holds answering
+/// by its summary.
+///
+/// A call a summary answers for is [`EffectSet::READS_ROW`] and the summary's effects, and with
+/// `opaque` also [`EffectSet::OPAQUE_BODY`]: a stored function called from a statement stays an
+/// unseen body to the pipelines of that statement, whatever its summary says, and the summary
+/// adds what the body does besides. A body folded into a summary, whose callees are the
+/// definitions the summary is made of, takes `opaque` off. A call the summaries do not name
+/// answers as the registry alone does.
+pub(crate) struct SummaryOracle<'a> {
+	inner: Oracle<'a>,
+	summaries: &'a CatalogSummaries,
+	opaque: bool,
+}
+
+impl<'a> SummaryOracle<'a> {
+	pub(crate) fn registry(&self) -> &'a FunctionRegistry {
+		self.inner.registry
+	}
+
+	pub(crate) fn summaries(&self) -> &'a CatalogSummaries {
+		self.summaries
+	}
+
+	/// The oracle of the pipelines of a statement.
+	pub(crate) fn new(registry: &'a FunctionRegistry, summaries: &'a CatalogSummaries) -> Self {
+		Self {
+			inner: Oracle::new(registry),
+			summaries,
+			opaque: true,
+		}
+	}
+
+	/// The oracle of a body that a summary is made of: its callees' summaries are theirs alone.
+	pub(super) fn of_body(registry: &'a FunctionRegistry, summaries: &'a CatalogSummaries) -> Self {
+		Self {
+			opaque: false,
+			..Self::new(registry, summaries)
+		}
+	}
+}
+
+impl EffectOracle for SummaryOracle<'_> {
+	fn builtin(&self, name: &str) -> Option<EffectSet> {
+		self.inner.builtin(name)
+	}
+
+	fn closure_args(&self, name: &str) -> Option<&'static [usize]> {
+		self.inner.closure_args(name)
+	}
+
+	fn method_always_dispatches(&self, name: &str) -> bool {
+		self.inner.method_always_dispatches(name)
+	}
+
+	fn evaluates_against_row(&self, name: &str) -> bool {
+		self.inner.evaluates_against_row(name)
+	}
+
+	fn permission_checked_param(&self, name: &str) -> bool {
+		self.inner.permission_checked_param(name)
+	}
+
+	fn custom_function(&self, name: &str) -> Option<EffectSet> {
+		let summary = self.summaries.function(name)?;
+		let own = summary.effects().union(EffectSet::READS_ROW);
+		Some(match self.opaque {
+			true => own.union(EffectSet::OPAQUE_BODY),
+			false => own,
+		})
 	}
 }
 
@@ -138,8 +164,8 @@ pub(crate) fn effects_of_expr(
 /// schema statement is [`EffectSet::WRITES_DATA`], since it writes the
 /// catalog through the transaction. A statement reading rows, a graph or
 /// reference lookup, and a step that fetches the record its base may name
-/// are [`EffectSet::READS_DATA`]. What a unit of the body declares on its
-/// head.
+/// are [`EffectSet::READS_DATA`]. The builtins the body calls add the effects
+/// their declarations state, as [`effects_of`] reads them.
 pub(crate) fn effects_of_body(body: &LogicalExpr, registry: &FunctionRegistry) -> EffectSet {
 	use std::ops::ControlFlow;
 	let mut out = PlanEffects::default();
@@ -188,25 +214,125 @@ fn fetched_base(expr: &LogicalExpr) -> Option<&LogicalExpr> {
 	None
 }
 
-/// The effects of every scalar a plan evaluates, unioned.
-///
-/// [`effects_of`](crate::expr::logical::effects_of) answers for one expression;
-/// this answers for a whole plan, by walking every scalar the plan holds —
-/// including those inside nested plans — and combining what each declares.
-///
-/// The union is the conservative answer, and the right one for asking whether a
-/// rewrite changed what a statement does: a rule may reshape the plan freely, but
-/// the set of effects its scalars carry is not its to alter. A rule that drops a
-/// call to something with `ENTROPY`, or evaluates one twice where the statement
-/// asked for once, changes this answer.
-///
-/// `impure` is carried alongside the set, since a plan holding one expression
-/// that may not be evaluated twice is itself one that may not be.
-pub(crate) fn effects_of_plan(op: &LogicalOp, registry: &FunctionRegistry) -> PlanEffects {
-	let oracle = Oracle::new(registry);
+/// [`effects_of_plan`] as `oracle` answers.
+pub(crate) fn effects_of_plan_with(op: &LogicalOp, oracle: &dyn EffectOracle) -> PlanEffects {
 	let mut out = PlanEffects::default();
-	fold_plan(op, &oracle, &mut out);
+	fold_plan(op, oracle, &mut out);
 	out
+}
+
+/// What evaluating `expr` does, as `oracle` answers: the effects [`effects_of`] derives, and
+/// those of everything the expression reaches that the declarations of the builtins do not state.
+///
+/// - Every statement written in the expression ([`plan_effects`]).
+/// - The implementations of every method it calls ([`FunctionRegistry::method_effects`]).
+/// - The body of every `COMPUTED` field it reads by name: a read of the name is a read of the field
+///   of every table the summaries hold a field of that name for, since the expression does not say
+///   which table's row it is evaluated against.
+pub(crate) fn scalar_effects(expr: &LogicalExpr, oracle: &SummaryOracle<'_>) -> EffectSet {
+	use std::ops::ControlFlow;
+	let mut set = effects_of(expr, oracle).set;
+	let _: ControlFlow<()> = expr.visit_deep(&mut |inner| {
+		if let LogicalExpr::Subquery(plan) = inner {
+			set = set
+				.union(effects_of_plan_with(plan, oracle).set)
+				.union(blocking_effects(plan))
+				.union(permission_effects(plan, oracle));
+		} else {
+			set = set.union(reached_effects(inner, oracle));
+		}
+		ControlFlow::Continue(())
+	});
+	set
+}
+
+/// What running the statement `op` does, as `oracle` answers: the effects of every scalar of
+/// every operator and of the statements nested in them ([`effects_of_plan_with`]), the effects
+/// [`scalar_effects`] adds for the methods and `COMPUTED` fields they reach, and the `COMPUTED`
+/// fields a table permission of the statement derives for itself ([`permission_computed`]).
+pub(crate) fn plan_effects(op: &LogicalOp, oracle: &SummaryOracle<'_>) -> EffectSet {
+	use std::ops::ControlFlow;
+	let mut set = effects_of_plan_with(op, oracle)
+		.set
+		.union(blocking_effects(op))
+		.union(permission_effects(op, oracle));
+	let walked: Result<(), std::convert::Infallible> = op.visit_scalars_deep(&mut |scalar| {
+		let _: ControlFlow<()> = scalar.visit_deep(&mut |inner| {
+			set = set.union(reached_effects(inner, oracle));
+			ControlFlow::Continue(())
+		});
+		Ok(())
+	});
+	let Ok(()) = walked;
+	set
+}
+
+/// `BLOCKING` where the statement `op`, or a statement nested in it, is a `SLEEP`: the statement
+/// blocks as the builtin of that name does, and no scalar says so.
+fn blocking_effects(op: &LogicalOp) -> EffectSet {
+	use std::ops::ControlFlow;
+	let mut set = EffectSet::PURE;
+	let _: ControlFlow<()> = op.visit_ops_deep(&mut |node| {
+		if matches!(node, LogicalOp::Sleep(_)) {
+			set = set.union(EffectSet::BLOCKING);
+		}
+		ControlFlow::Continue(())
+	});
+	set
+}
+
+/// What the node `expr` reaches beyond its own effects: the implementations of a method it
+/// calls, and the body of a `COMPUTED` field it reads.
+fn reached_effects(expr: &LogicalExpr, oracle: &SummaryOracle<'_>) -> EffectSet {
+	if let LogicalExpr::Method {
+		name,
+		..
+	} = expr
+	{
+		oracle.registry().method_effects(name.as_str())
+	} else if let LogicalExpr::Field(name) = expr {
+		oracle.summaries().computed_reads(name.as_str())
+	} else {
+		EffectSet::PURE
+	}
+}
+
+/// The effects of the `COMPUTED` fields every table permission of the statement `op` derives for
+/// itself.
+fn permission_effects(op: &LogicalOp, oracle: &SummaryOracle<'_>) -> EffectSet {
+	use std::ops::ControlFlow;
+	let mut set = EffectSet::PURE;
+	let _: ControlFlow<()> = op.visit_ops_deep(&mut |node| {
+		let derived = permission_computed(node, oracle.registry(), oracle.summaries());
+		set = set.union(derived.unwrap_or(EffectSet::PURE));
+		ControlFlow::Continue(())
+	});
+	set
+}
+
+/// The effects of the `COMPUTED` fields the permission `node` derives for itself, or `None` when
+/// `node` is no permission, or its predicate reads none of them, or its rows do not belong to a
+/// table whose resolved schema names them.
+///
+/// A permission judges its predicate over a copy of the row on which it has derived the computed
+/// fields the predicate reads; that is the one place a `COMPUTED` body runs that no projection of
+/// the plan holds. A predicate that reads the row other than by name may read any of the table's.
+pub(crate) fn permission_computed(
+	node: &LogicalOp,
+	registry: &FunctionRegistry,
+	summaries: &CatalogSummaries,
+) -> Option<EffectSet> {
+	let LogicalOp::PermissionFilter(filter) = node else {
+		return None;
+	};
+	let (table, schema) = crate::exec::planner::fold::permission_subject(&filter.input)?;
+	let reads = crate::exec::planner::fold::computed_reads(&filter.predicate, &schema, registry)?;
+	Some(match reads {
+		Some(names) => names
+			.iter()
+			.fold(EffectSet::PURE, |set, name| set.union(summaries.computed_of(&table, name))),
+		None => summaries.computed_of_table(&table),
+	})
 }
 
 /// [`effects_of_plan`]'s walk, which descends through nested plans.
@@ -226,8 +352,10 @@ fn fold_plan(op: &LogicalOp, oracle: &dyn EffectOracle, out: &mut PlanEffects) {
 	let Ok(()) = walked;
 
 	// A mutation's write is the operator's, not any scalar's, so the fold above
-	// cannot see it.
-	if matches!(op, LogicalOp::Write(_)) {
+	// cannot see it: a write statement's, and a `MATCH`'s write stages'.
+	let writes = matches!(op, LogicalOp::Write(_))
+		|| matches!(op, LogicalOp::Match(matched) if matched.plan.has_mutations());
+	if writes {
 		out.set |= EffectSet::WRITES_DATA;
 	}
 
@@ -259,300 +387,4 @@ pub(crate) struct PlanEffects {
 	/// Whether some scalar holds a `MATCHES` or `KNN`, which an access path
 	/// answers rather than evaluation.
 	pub index_operator: bool,
-}
-
-// ---------------------------------------------------------------------------
-// The transaction and session level an expression needs
-// ---------------------------------------------------------------------------
-
-/// What evaluating an expression asks of the transaction and the session: the
-/// access mode it needs and the namespace and database it must have selected.
-///
-/// The executor validates both before it runs a program, so each is the
-/// maximum over every node the expression holds that raises it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Needs {
-	pub access_mode: AccessMode,
-	pub context: ContextLevel,
-}
-
-impl Needs {
-	/// What an expression that reads no row and calls nothing needs.
-	pub(crate) const NOTHING: Self = Self {
-		access_mode: AccessMode::ReadOnly,
-		context: ContextLevel::Root,
-	};
-
-	/// What an expression needs that holds both `self` and `other`.
-	pub(crate) fn join(self, other: Self) -> Self {
-		Self {
-			access_mode: self.access_mode.combine(other.access_mode),
-			context: self.context.max(other.context),
-		}
-	}
-
-	fn at(context: ContextLevel) -> Self {
-		Self {
-			access_mode: AccessMode::ReadOnly,
-			context,
-		}
-	}
-
-	fn writing(self) -> Self {
-		Self {
-			access_mode: AccessMode::ReadWrite,
-			..self
-		}
-	}
-}
-
-/// Collects into `out` the stored functions `expr` calls — `fn::`, module and
-/// silo functions — including those a statement written inside it calls.
-pub(crate) fn stored_functions_of(expr: &LogicalExpr, out: &mut Vec<Function>) {
-	if let LogicalExpr::Call(call) = expr
-		&& matches!(
-			call.receiver,
-			Function::Custom(_) | Function::Module(..) | Function::Silo { .. }
-		) && !out.contains(&call.receiver)
-	{
-		out.push(call.receiver.clone());
-	}
-	if let LogicalExpr::Subquery(op) = expr {
-		let walked: Result<(), std::convert::Infallible> = op.visit_scalars_deep(&mut |scalar| {
-			stored_functions_of(scalar, out);
-			Ok(())
-		});
-		let Ok(()) = walked;
-	}
-	expr.for_each_child(&mut |child| stored_functions_of(child, out));
-}
-
-/// What `expr` needs of the transaction and the session.
-///
-/// `stored` answers for a stored function the access mode its body needs,
-/// which the catalog decides and the expression cannot.
-pub(crate) fn needs_of_expr(
-	expr: &LogicalExpr,
-	registry: &FunctionRegistry,
-	stored: &dyn Fn(&Function) -> AccessMode,
-) -> Needs {
-	NeedsFold {
-		registry,
-		stored,
-	}
-	.expr(expr)
-}
-
-struct NeedsFold<'a> {
-	registry: &'a FunctionRegistry,
-	stored: &'a dyn Fn(&Function) -> AccessMode,
-}
-
-impl NeedsFold<'_> {
-	/// What `expr`'s own children need, joined.
-	fn children(&self, expr: &LogicalExpr) -> Needs {
-		let mut needs = Needs::NOTHING;
-		expr.for_each_child(&mut |child| needs = needs.join(self.expr(child)));
-		needs
-	}
-
-	fn expr(&self, expr: &LogicalExpr) -> Needs {
-		use ContextLevel::{Database, Root};
-		match expr {
-			LogicalExpr::Literal(_)
-			| LogicalExpr::Param(_)
-			| LogicalExpr::Table(_)
-			| LogicalExpr::Mock(_)
-			| LogicalExpr::Constant(_)
-			| LogicalExpr::Doc
-			| LogicalExpr::Current
-			| LogicalExpr::Break
-			| LogicalExpr::Continue
-			| LogicalExpr::RepeatRecurse(_) => Needs::NOTHING,
-			// A field read of a record id fetches the record.
-			LogicalExpr::Field(_) => Needs::at(Database),
-			LogicalExpr::Access {
-				..
-			}
-			| LogicalExpr::Each(_)
-			| LogicalExpr::Lookup {
-				..
-			}
-			| LogicalExpr::Recurse(_) => self.children(expr).join(Needs::at(Database)),
-			// A closure's body runs where the closure is called: the literal
-			// needs nothing of the session, and of the transaction what its
-			// body needs.
-			LogicalExpr::Closure(closure) => Needs {
-				access_mode: self.expr(&closure.body).access_mode,
-				context: Root,
-			},
-			LogicalExpr::Invoke {
-				target,
-				..
-			} => {
-				let needs = self.children(expr);
-				if matches!(**target, LogicalExpr::Closure(_)) {
-					needs
-				} else {
-					needs.writing()
-				}
-			}
-			LogicalExpr::Method {
-				name,
-				..
-			} => {
-				let needs = self.children(expr);
-				if self.registry.get_method(name.as_str()).is_some() {
-					needs
-				} else {
-					needs.writing()
-				}
-			}
-			LogicalExpr::Call(call) => self.call(call),
-			LogicalExpr::Subquery(op) => self.plan(op),
-			LogicalExpr::Array(_)
-			| LogicalExpr::Set(_)
-			| LogicalExpr::Object(_)
-			| LogicalExpr::RecordId(_)
-			| LogicalExpr::Index {
-				..
-			}
-			| LogicalExpr::First(_)
-			| LogicalExpr::Last(_)
-			| LogicalExpr::Flatten {
-				..
-			}
-			| LogicalExpr::Filter {
-				..
-			}
-			| LogicalExpr::Destructure {
-				..
-			}
-			| LogicalExpr::Optional {
-				..
-			}
-			| LogicalExpr::Broadcast {
-				..
-			}
-			| LogicalExpr::SetField {
-				..
-			}
-			| LogicalExpr::Prefix {
-				..
-			}
-			| LogicalExpr::Postfix {
-				..
-			}
-			| LogicalExpr::Binary {
-				..
-			}
-			| LogicalExpr::If(_)
-			| LogicalExpr::Throw(_) => self.children(expr),
-		}
-	}
-
-	fn call(&self, call: &LogicalCall) -> Needs {
-		let args = call.args.iter().fold(Needs::NOTHING, |needs, arg| needs.join(self.expr(arg)));
-		match &call.receiver {
-			Function::Normal(name) => {
-				let mut needs = args;
-				if crate::expr::method::is_writer_builtin(name) {
-					needs = needs.writing();
-				}
-				let declared = if self.registry.is_projection(name) {
-					self.registry
-						.get_projection(name)
-						.map_or(ContextLevel::Database, |f| f.required_context())
-				} else if self.registry.is_index_function(name) {
-					self.registry
-						.get_index_function(name)
-						.map_or(ContextLevel::Database, |f| f.required_context())
-				} else {
-					self.registry.get(name).map_or(ContextLevel::Root, |f| f.required_context())
-				};
-				needs.join(Needs::at(declared))
-			}
-			Function::Custom(_) => Needs {
-				access_mode: (self.stored)(&call.receiver),
-				context: ContextLevel::Database,
-			}
-			.join(args),
-			// A script runs in the session it is called in, so it asks for no
-			// level of its own, and its arguments' levels are not its own.
-			Function::Script(_) => Needs {
-				access_mode: AccessMode::ReadWrite,
-				context: ContextLevel::Root,
-			},
-			Function::Model(_) => args.join(Needs::at(ContextLevel::Database)),
-			Function::Module(..)
-			| Function::Silo {
-				..
-			} => Needs {
-				access_mode: (self.stored)(&call.receiver),
-				context: ContextLevel::Database,
-			}
-			.join(args),
-		}
-	}
-
-	/// What a statement written in expression position needs: a write wherever
-	/// the plan holds a write, a schema statement, a `SLEEP` or an expression
-	/// that writes, and a selected database wherever it reads or writes a
-	/// table.
-	fn plan(&self, op: &LogicalOp) -> Needs {
-		let mut needs = Needs::NOTHING;
-		// `EXPLAIN` of a plan it does not run needs nothing of what the plan
-		// holds.
-		if let LogicalOp::Explain(explain) = op
-			&& !explain.analyze
-		{
-			return needs;
-		}
-		if matches!(op, LogicalOp::Write(_) | LogicalOp::Ddl(_) | LogicalOp::Sleep(_)) {
-			needs = needs.writing();
-		}
-		// A schema statement and a `SLEEP` resolve the session themselves and
-		// ask for no level of it.
-		if matches!(op, LogicalOp::Source(_) | LogicalOp::Write(_)) {
-			needs = needs.join(Needs::at(ContextLevel::Database));
-		}
-		// `*` dereferences record ids.
-		if let LogicalOp::Project(project) = op
-			&& project.fields.has_all_selection()
-		{
-			needs = needs.join(Needs::at(ContextLevel::Database));
-		}
-		if let LogicalOp::Info(info) = op {
-			needs = needs.join(Needs::at(match &**info {
-				LogicalInfo::Root {
-					..
-				} => ContextLevel::Root,
-				LogicalInfo::Ns {
-					..
-				} => ContextLevel::Namespace,
-				LogicalInfo::User {
-					base,
-					..
-				} => match base {
-					Some(Base::Root) | None => ContextLevel::Root,
-					Some(Base::Ns) => ContextLevel::Namespace,
-					Some(Base::Db) => ContextLevel::Database,
-				},
-				LogicalInfo::Db {
-					..
-				}
-				| LogicalInfo::Table {
-					..
-				}
-				| LogicalInfo::Index {
-					..
-				} => ContextLevel::Database,
-			}));
-		}
-		op.for_each_scalar(&mut |scalar| needs = needs.join(self.expr(scalar)));
-		for child in op.children() {
-			needs = needs.join(self.plan(child));
-		}
-		needs
-	}
 }

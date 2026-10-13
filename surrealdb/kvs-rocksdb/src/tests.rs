@@ -209,13 +209,13 @@ async fn shutdown_compacts_to_bottommost_when_opted_in() {
 /// Verifies that many concurrent scan cursors can be opened on the same
 /// transaction without interfering with each other.
 ///
-/// This is the regression test for the LRU-thrash failure mode in PR #179:
-/// a bounded iterator cache at
-/// capacity 4 evicts the outer iterator when 5+ inner prefixes are walked
-/// concurrently, e.g. `SELECT ->knows FROM person` with > 4 outer rows. In
-/// the cursor design the caller owns the iterator for the duration of
-/// each logical scan, so N concurrent prefixes ⇒ N live cursors with no
-/// eviction.
+/// This guards against LRU thrash in a bounded iterator cache. A cache of
+/// capacity 4 evicts the outer iterator when 5 or more inner prefixes are
+/// walked concurrently, e.g. `SELECT ->knows FROM person` with more than
+/// four outer rows. The caller owns each iterator for the duration of its
+/// logical scan, so N concurrent prefixes give N live cursors and none is
+/// evicted.
+/// Every cursor must still return its full prefix.
 ///
 /// The test opens 8 cursors over disjoint key prefixes, advances each
 /// in a strided interleave (round-robin one batch per cursor) so that no
@@ -638,8 +638,8 @@ async fn cancel_blocks_until_live_cursor_drops() {
 		.expect("cancel failed after cursor drop");
 }
 
-/// Verifies the open-side of the SeqCst protocol (invariant I3 in
-/// `build_scan_iter`'s SAFETY comment): a cursor that tries to open
+/// Verifies the open side of the SeqCst protocol described in the SAFETY
+/// comment on `build_scan_iter`: a cursor that tries to open
 /// after `commit`/`cancel` has set `done = true` must fail immediately
 /// with `TransactionFinished`, not race past the check and build an
 /// iterator against a transaction that's about to drop its snapshot.
@@ -710,16 +710,16 @@ async fn open_cursor_after_commit_starts_fails() {
 	commit_fut.await.unwrap();
 }
 
-/// Regression test for the cursor-open cancellation leak.
+/// Dropping an open-cursor future must not leak its `cursors_alive` slot.
 ///
-/// `open_*_cursor` does `cursors_alive.fetch_add(SeqCst)` and *then*
+/// `open_*_cursor` increments `cursors_alive` with `fetch_add(SeqCst)` and then
 /// awaits `self.inner.lock()`. If the calling future is dropped at that
-/// await — query cancellation, timeout, `tokio::select!` losing arm,
-/// etc. — the increment must not leak: a leaked slot stalls
-/// `drain_cursors` forever in the next `commit`/`cancel`.
+/// await (query cancellation, timeout, a `tokio::select!` losing arm, and
+/// so on), a leaked slot would stall `drain_cursors` forever in the next
+/// `commit`/`cancel`.
 ///
-/// The fix wraps the increment in an `AliveGuard` bound before the
-/// `lock().await`, so the future-drop runs the guard's `Drop`.
+/// The increment is owned by an `AliveGuard` bound before the
+/// `lock().await`, so dropping the future runs the guard's `Drop`.
 ///
 /// Test shape (behavioural, no atomic introspection):
 ///
@@ -728,12 +728,11 @@ async fn open_cursor_after_commit_starts_fails() {
 /// 2. Drive `count()` to its parked-at-affinitypool state. Its closure now holds the `inner` lock
 ///    guard.
 /// 3. Drive `open_keys_cursor` to its parked-at-`inner.lock()` state. The
-///    `fetch_add(cursors_alive)` has executed; the future would leak it pre-fix.
-/// 4. Drop the parked future. Pre-fix, the slot stays incremented.
+///    `fetch_add(cursors_alive)` has executed, so the slot is claimed.
+/// 4. Drop the parked future. The guard releases the claimed slot.
 /// 5. Let `count()` finish to release `inner`.
-/// 6. Call `commit()`. Pre-fix, `drain_cursors` loops forever on the leaked slot — the timeout
-///    below would fail the test. With the fix, `AliveGuard::drop` ran at step 4 and commit
-///    completes.
+/// 6. Call `commit()`. A leaked slot would make `drain_cursors` loop forever, and the timeout below
+///    would fail the test. `AliveGuard::drop` ran at step 4, so commit completes.
 #[tokio::test(flavor = "multi_thread")]
 async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 	use std::time::Duration;
@@ -799,16 +798,16 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 		the test set-up didn't produce contention and the regression isn't being exercised"
 	);
 
-	// Cancel: drop the parked future. The fix's `AliveGuard` runs Drop
-	// here and decrements the slot claimed by the `fetch_add`. Pre-fix
-	// the slot leaked and `drain_cursors` below would hang.
+	// Cancel: drop the parked future. The `AliveGuard` runs its `Drop` here
+	// and decrements the slot claimed by the `fetch_add`, so `drain_cursors`
+	// below does not wait on it.
 	drop(open_fut);
 
 	// Let count complete so it releases `inner`.
 	count_fut.await.unwrap();
 
-	// commit must complete promptly. Pre-fix the leaked slot makes
-	// `drain_cursors` loop forever on `cursors_alive > 0`, tripping
+	// commit must complete promptly. A leaked slot would keep
+	// `drain_cursors` looping on `cursors_alive > 0`, tripping
 	// this timeout.
 	tokio::time::timeout(Duration::from_secs(5), tx_ref.commit())
 		.await
@@ -824,7 +823,7 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 ///
 /// Group commit applies the transaction on the caller thread and then waits
 /// for the coordinator's batched fsync. Once shutdown has begun the fsync can
-/// no longer confirm durability, so the pre-apply gate fails the commit with
+/// cannot confirm durability, so the pre-apply gate fails the commit with
 /// `Shutdown` — nothing is applied and the caller can safely retry after
 /// reconnecting. Shutdown is treated as a controlled crash: no commit runs
 /// past this point, which the datastore must already stay consistent against.
@@ -1356,6 +1355,500 @@ async fn cursor_survives_savepoint_rollback() {
 		drop(keys_cursor);
 		drop(vals_cursor);
 		tx.cancel().await.unwrap();
+	}
+}
+
+/// A view that opens through another and overrides nothing else, so every other method of
+/// [`surrealdb_kvs::Snapshot`] answers by its default.
+struct OpenOnly(std::sync::Arc<dyn surrealdb_kvs::Snapshot>);
+
+impl surrealdb_kvs::Snapshot for OpenOnly {
+	fn open<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: surrealdb_kvs::Direction,
+		version: Option<u64>,
+	) -> surrealdb_kvs::api::BoxFut<
+		'a,
+		surrealdb_kvs::Result<Box<dyn surrealdb_kvs::RangeCursor + 'a>>,
+	> {
+		self.0.open(rng, dir, version)
+	}
+}
+
+/// `get_many` of a read view, native and default alike, answers what the transaction's `getm`
+/// answers: hits, misses, a key repeated, and the input order, with the counts of `getm`.
+///
+/// The probes include a key whose successor-by-`0x00` is stored and a key that is the strict
+/// prefix of a stored one, which a point read over `[k, k + 0x00)` must not see.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_many_equals_getm_at_the_views_moment() {
+	use surrealdb_kvs::{Key, Snapshot};
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+	let stored: Vec<(Vec<u8>, Vec<u8>)> = vec![
+		(b"gm/k0".to_vec(), b"zero".to_vec()),
+		(b"gm/k0\x00".to_vec(), b"zero-successor".to_vec()),
+		(b"gm/k1".to_vec(), b"one".to_vec()),
+		(b"gm/k1/child".to_vec(), b"one-child".to_vec()),
+		(b"gm/k3".to_vec(), Vec::new()),
+	];
+	{
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for (k, v) in &stored {
+			tx.set(Key::from(k.clone()), v.clone()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let view = tx.snapshot().expect("a read-only transaction gives a view");
+	// Committed after the view was taken, so invisible to it and to `getm` alike.
+	{
+		let writer = ds.transaction(TransactionType::Write).await.unwrap();
+		writer.set(Key::from(b"gm/k2".to_vec()), b"late".to_vec()).await.unwrap();
+		writer.set(Key::from(b"gm/k1".to_vec()), b"changed".to_vec()).await.unwrap();
+		writer.commit().await.unwrap();
+	}
+	let keys: Vec<Key<'static>> = [
+		&b"gm/k3"[..],
+		b"gm/k1",
+		b"gm/missing",
+		b"gm/k0",
+		b"gm/k1",
+		b"gm/k2",
+		b"gm/k1/child",
+		b"gm/k0\x00",
+		b"gm/k",
+	]
+	.into_iter()
+	.map(|k| Key::from(k.to_vec()))
+	.collect();
+	let expected = tx.getm(&keys, None).await.unwrap();
+	assert_eq!(expected.records, 6);
+	let native = view.get_many(&keys, None).await.unwrap();
+	let default = OpenOnly(view).get_many(&keys, None).await.unwrap();
+	for (name, got) in [("native", native), ("default", default)] {
+		assert_eq!(got.values, expected.values, "{name} values");
+		assert_eq!(got.records, expected.records, "{name} records");
+		assert_eq!(got.value_bytes, expected.value_bytes, "{name} value bytes");
+	}
+	let none = tx.snapshot().expect("a view").get_many(&[], None).await.unwrap();
+	assert!(none.values.is_empty() && none.records == 0 && none.value_bytes == 0);
+	tx.cancel().await.unwrap();
+}
+
+/// Conformance of the read view a writable transaction gives while it has buffered no put or
+/// delete. The oracle is the transaction's own `get`, `getm`, `scan` and `scanr` over the test
+/// range, taken immediately before `snapshot()`.
+mod write_view {
+	use std::ops::ControlFlow;
+	use std::sync::Arc;
+	use std::time::Duration;
+
+	use rand::rngs::StdRng;
+	use rand::{RngCore, SeedableRng};
+	use surrealdb_kvs::api::Transactable;
+	use surrealdb_kvs::err::{Error, Result};
+	use surrealdb_kvs::snapshot::ViewCapabilities;
+	use surrealdb_kvs::{Direction, Key, KeyRange, Page, Snapshot, TransactionType};
+	use temp_dir::TempDir;
+
+	use crate::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	type Entries = Vec<(Vec<u8>, Vec<u8>)>;
+
+	fn key(i: usize) -> Vec<u8> {
+		format!("wv/{i:05}").into_bytes()
+	}
+
+	fn val(i: usize, tag: &str) -> Vec<u8> {
+		format!("{tag}-{i:05}").into_bytes()
+	}
+
+	fn range(lo: &[u8], hi: &[u8]) -> KeyRange<'static> {
+		KeyRange {
+			start: lo.to_vec().into(),
+			end: hi.to_vec().into(),
+		}
+	}
+
+	/// Every key under `wv/`.
+	fn whole() -> KeyRange<'static> {
+		super::prefix_byte_range("wv/")
+	}
+
+	async fn open_ds(config: RocksDbConfig) -> RocksDbDatastore {
+		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+		RocksDbDatastore::new(&path, config).await.unwrap()
+	}
+
+	/// Commit `n` keys `wv/00000..` with the value `seed-<i>`.
+	async fn seed(ds: &RocksDbDatastore, n: usize) {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		for i in 0..n {
+			tx.set(key(i).into(), val(i, "seed")).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+	}
+
+	/// What the transaction itself reads over `rng` and `keys`.
+	struct Record {
+		fwd: Entries,
+		bwd: Entries,
+		many: Vec<Option<Vec<u8>>>,
+	}
+
+	async fn record(
+		tx: &dyn Transactable,
+		rng: &KeyRange<'static>,
+		keys: &[Key<'static>],
+	) -> Record {
+		let fwd = tx.scan(rng.clone(), u32::MAX, 0, None).await.unwrap().values;
+		let bwd = tx.scanr(rng.clone(), u32::MAX, 0, None).await.unwrap().values;
+		let many = tx.getm(keys, None).await.unwrap().values;
+		for (k, v) in keys.iter().zip(&many) {
+			assert_eq!(&tx.get(k.clone(), None).await.unwrap(), v, "get equals getm");
+		}
+		Record {
+			fwd,
+			bwd,
+			many,
+		}
+	}
+
+	/// Probe keys over `0..n` plus misses, shuffled by `seed`.
+	fn probes(n: usize, seed: u64) -> Vec<Key<'static>> {
+		let mut keys: Vec<Vec<u8>> = (0..n).map(key).collect();
+		keys.push(b"wv/missing".to_vec());
+		keys.push(b"wv/".to_vec());
+		keys.push(key(0).into_iter().chain([0u8]).collect());
+		keys.push(key(n / 2));
+		let mut rng = StdRng::seed_from_u64(seed);
+		for i in (1..keys.len()).rev() {
+			let j = (rng.next_u32() as usize) % (i + 1);
+			keys.swap(i, j);
+		}
+		keys.into_iter().map(Key::from).collect()
+	}
+
+	async fn drain_visit(
+		view: &dyn Snapshot,
+		rng: KeyRange<'static>,
+		dir: Direction,
+		limit: u32,
+	) -> Entries {
+		let mut out = Entries::new();
+		let mut cursor = view.open(rng, dir, None).await.unwrap();
+		let mut f = |k: &[u8], v: &[u8]| -> Result<ControlFlow<()>> {
+			out.push((k.to_vec(), v.to_vec()));
+			Ok(ControlFlow::Continue(()))
+		};
+		loop {
+			let stats = cursor.for_each(limit, &mut f).await.unwrap();
+			if stats.rows == 0 {
+				break;
+			}
+		}
+		drop(cursor);
+		out
+	}
+
+	async fn drain_fill(view: &dyn Snapshot, rng: KeyRange<'static>, dir: Direction) -> Entries {
+		let mut out = Entries::new();
+		let mut cursor = view.open(rng, dir, None).await.unwrap();
+		let mut page = Page::with_capacity(64);
+		loop {
+			cursor.fill(&mut page, u32::MAX).await.unwrap();
+			if page.is_empty() {
+				break;
+			}
+			let batch = page.batch();
+			for i in 0..page.len() {
+				let (k, v) = batch.get(i).unwrap();
+				out.push((k.to_vec(), v.to_vec()));
+			}
+		}
+		out
+	}
+
+	/// The view answers exactly what `rec` recorded: `get_many`, and cursors in both directions
+	/// with limits 1, 7 and `u32::MAX`, and `fill` with a 64-byte page.
+	async fn assert_view(
+		view: &dyn Snapshot,
+		rng: &KeyRange<'static>,
+		keys: &[Key<'static>],
+		rec: &Record,
+		what: &str,
+	) {
+		let got = view.get_many(keys, None).await.unwrap();
+		assert_eq!(got.values, rec.many, "{what}: get_many values");
+		let hits = rec.many.iter().flatten().collect::<Vec<_>>();
+		assert_eq!(got.records, hits.len() as u64, "{what}: get_many records");
+		assert_eq!(
+			got.value_bytes,
+			hits.iter().map(|v| v.len() as u64).sum::<u64>(),
+			"{what}: get_many value bytes"
+		);
+		for (dir, expected) in [(Direction::Forward, &rec.fwd), (Direction::Backward, &rec.bwd)] {
+			for limit in [1, 7, u32::MAX] {
+				let got = drain_visit(view, rng.clone(), dir, limit).await;
+				assert_eq!(&got, expected, "{what}: {dir:?} cursor, limit {limit}");
+			}
+			let got = drain_fill(view, rng.clone(), dir).await;
+			assert_eq!(&got, expected, "{what}: {dir:?} fill");
+		}
+	}
+
+	/// Overwrite, delete and insert keys inside and outside the range of `whole()`.
+	async fn scribble(tx: &dyn Transactable, round: usize) {
+		for i in (0..200).step_by(3) {
+			tx.set(key(i).into(), val(i, &format!("over{round}"))).await.unwrap();
+		}
+		for i in (1..200).step_by(5) {
+			tx.del(key(i).into()).await.unwrap();
+		}
+		for i in 0..20 {
+			tx.set(format!("wv/{:05}x", i * 10).into_bytes().into(), b"new".to_vec())
+				.await
+				.unwrap();
+		}
+		tx.set(b"aa/outside".to_vec().into(), b"o".to_vec()).await.unwrap();
+		tx.set(b"zz/outside".to_vec().into(), b"o".to_vec()).await.unwrap();
+		tx.del(b"zz/gone".to_vec().into()).await.unwrap();
+	}
+
+	fn assert_finished<T>(res: &Result<T>, what: &str) {
+		assert!(
+			matches!(res, Err(Error::TransactionFinished)),
+			"{what}: expected TransactionFinished"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv9_a_writable_transaction_with_no_write_gives_a_view() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 10).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let view = tx.snapshot().expect("a writable transaction with no write gives a view");
+		assert_eq!(view.held_bytes(), 0);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv2_later_writes_are_invisible_to_a_tier1_view() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 200).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let keys = probes(200, 2);
+		let rec = record(&*tx, &whole(), &keys).await;
+		let view = tx.snapshot().expect("a view before the first write");
+		scribble(&*tx, 0).await;
+		assert!(tx.snapshot().is_none(), "a transaction with buffered writes gives no view");
+		assert_view(&*view, &whole(), &keys, &rec, "after the owner wrote").await;
+		scribble(&*tx, 1).await;
+		assert_view(&*view, &whole(), &keys, &rec, "after the owner wrote again").await;
+		drop(view);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv3_savepoint_rollback_is_invisible() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 200).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let keys = probes(200, 3);
+		let rec = record(&*tx, &whole(), &keys).await;
+		let view = tx.snapshot().expect("a view before the first write");
+		tx.new_save_point().await.unwrap();
+		scribble(&*tx, 0).await;
+		assert_view(&*view, &whole(), &keys, &rec, "inside the savepoint").await;
+		tx.rollback_to_save_point().await.unwrap();
+		assert_view(&*view, &whole(), &keys, &rec, "after the rollback").await;
+		scribble(&*tx, 1).await;
+		assert_view(&*view, &whole(), &keys, &rec, "after writing again").await;
+		drop(view);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv4_other_commits_are_invisible() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 200).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let keys = probes(200, 4);
+		let rec = record(&*tx, &whole(), &keys).await;
+		let view = tx.snapshot().expect("a view before the first write");
+		let other = ds.transaction(TransactionType::Write).await.unwrap();
+		scribble(&*other, 0).await;
+		other.commit().await.unwrap();
+		assert_view(&*view, &whole(), &keys, &rec, "after another transaction committed").await;
+		drop(view);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv5_concurrent_with_the_owner() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 400).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let mut tasks = Vec::new();
+		let mut views: Vec<Arc<dyn Snapshot>> = Vec::new();
+		for q in 0..4 {
+			let rng = range(&key(q * 100), &key((q + 1) * 100));
+			let keys: Vec<Key<'static>> = probes(400, 50 + q as u64)
+				.into_iter()
+				.filter(|k| {
+					rng.start.as_slice() <= k.as_slice() && k.as_slice() < rng.end.as_slice()
+				})
+				.collect();
+			let rec = record(&*tx, &rng, &keys).await;
+			views.push(tx.snapshot().expect("a view before the first write"));
+			let view = Arc::clone(&views[q]);
+			tasks.push(tokio::spawn(async move {
+				for round in 0..5 {
+					assert_view(&*view, &rng, &keys, &rec, &format!("quarter {q}, round {round}"))
+						.await;
+					tokio::task::yield_now().await;
+				}
+			}));
+		}
+		for chunk in 0..10usize {
+			tx.new_save_point().await.unwrap();
+			for i in 0..1000usize {
+				let n = chunk * 1000 + i;
+				tx.set(format!("wv/{:05}w{n}", n % 400).into_bytes().into(), b"w".to_vec())
+					.await
+					.unwrap();
+				if i % 100 == 0 {
+					tokio::task::yield_now().await;
+				}
+			}
+			if chunk % 2 == 1 {
+				tx.rollback_to_save_point().await.unwrap();
+			}
+		}
+		for task in tasks {
+			task.await.unwrap();
+		}
+		drop(views);
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv6_keep_alive() {
+		for commit in [true, false] {
+			let ds = open_ds(RocksDbConfig::default()).await;
+			seed(&ds, 20).await;
+			let tx: Arc<dyn Transactable> =
+				Arc::from(ds.transaction(TransactionType::Write).await.unwrap());
+			let view = tx.snapshot().expect("a view before the first write");
+			let mut cursor = view.open(whole(), Direction::Forward, None).await.unwrap();
+			let mut page = Page::with_capacity(64);
+			cursor.fill(&mut page, 3).await.unwrap();
+			assert_eq!(page.len(), 3);
+			let finishing = {
+				let tx = Arc::clone(&tx);
+				tokio::spawn(async move {
+					if commit {
+						tx.commit().await
+					} else {
+						tx.cancel().await
+					}
+				})
+			};
+			for _ in 0..20 {
+				tokio::time::sleep(Duration::from_millis(5)).await;
+				assert!(!finishing.is_finished(), "finish completed while a cursor was alive");
+			}
+			// The cursor stays readable while the finish waits.
+			// Each fill clears the page and stops before the first entry it cannot hold, so the
+			// remaining entries arrive over several fills.
+			let mut drained = 0;
+			loop {
+				cursor.fill(&mut page, u32::MAX).await.unwrap();
+				if page.is_empty() {
+					break;
+				}
+				drained += page.len();
+			}
+			assert_eq!(drained, 17);
+			drop(cursor);
+			tokio::time::timeout(Duration::from_secs(5), finishing)
+				.await
+				.expect("finish did not complete after the cursor was dropped")
+				.unwrap()
+				.unwrap();
+			assert_finished(&view.open(whole(), Direction::Forward, None).await, "open");
+			assert_finished(&view.get_many(&[Key::from(key(0))], None).await, "get_many");
+			assert_finished(&view.get_many(&[], None).await, "get_many of no keys");
+		}
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv8_versioned() {
+		let ds = open_ds(RocksDbConfig {
+			versioned: true,
+			..RocksDbConfig::default()
+		})
+		.await;
+		seed(&ds, 10).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(tx.snapshot().is_some(), "a versioned transaction with no write gives a view");
+		tx.set(key(3).into(), b"changed".to_vec()).await.unwrap();
+		assert!(tx.snapshot().is_none(), "a versioned transaction with a write gives no view");
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv15_delete_only_is_not_tier1() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 10).await;
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(tx.snapshot().is_some());
+		for i in 0..10 {
+			tx.del(key(i).into()).await.unwrap();
+		}
+		assert!(tx.snapshot().is_none(), "a delete-only transaction would expose what it deleted");
+		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn wv13_view_reads_are_untracked() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 10).await;
+		let reader = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(!reader.plain_reads_tracked());
+		let view = reader.snapshot().expect("a view before the first write");
+		let a = Key::from(key(1));
+		let got = view.get_many(std::slice::from_ref(&a), None).await.unwrap();
+		assert_eq!(got.values, vec![Some(val(1, "seed"))]);
+		reader.set(key(5).into(), b"b".to_vec()).await.unwrap();
+		let writer = ds.transaction(TransactionType::Write).await.unwrap();
+		writer.set(key(1).into(), b"a".to_vec()).await.unwrap();
+		writer.commit().await.unwrap();
+		drop(view);
+		reader.commit().await.expect("a read through the view joins no conflict set");
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn rocksdb_view_capabilities() {
+		let ds = open_ds(RocksDbConfig::default()).await;
+		seed(&ds, 10).await;
+		let both = ViewCapabilities {
+			read_only: true,
+			writable: true,
+		};
+		let read = ds.transaction(TransactionType::Read).await.unwrap();
+		assert_eq!(read.view_capabilities(), both);
+		assert!(read.snapshot().is_some());
+		read.cancel().await.unwrap();
+		let write = ds.transaction(TransactionType::Write).await.unwrap();
+		assert_eq!(write.view_capabilities(), both);
+		assert!(write.snapshot().is_some(), "a writable transaction with no write gives a view");
+		write.cancel().await.unwrap();
 	}
 }
 

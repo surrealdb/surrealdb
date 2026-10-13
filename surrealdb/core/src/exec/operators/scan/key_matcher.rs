@@ -10,6 +10,9 @@
 //! the matcher answers precisely as the evaluator would; any predicate
 //! shape it cannot express stays on the evaluator path.
 
+// Dead-code lints are allowed for the whole module.
+#![allow(dead_code)]
+
 use crate::exec::parts::LookupDirection;
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{LogicalExpr, LogicalRecordIdKey};

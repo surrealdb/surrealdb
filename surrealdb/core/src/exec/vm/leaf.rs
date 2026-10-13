@@ -16,6 +16,9 @@
 //! tests. `doc/executor/VM_LEAF.md` states the classification and its
 //! rationale.
 
+// Runtime the IR lowering emits.
+#![allow(dead_code)]
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -39,8 +42,8 @@ pub(crate) enum Seam {
 	Clock,
 	/// The session's and the frame's parameters.
 	Params,
-	/// Linking a unit for a closure or a read by a table only the data names,
-	/// which faults to the compiler where no table holds the unit.
+	/// Links a unit for a closure, or reads one by a table name the data gives.
+	/// If no table holds the unit, the request falls back to the compiler.
 	Link,
 }
 
@@ -53,6 +56,8 @@ pub(crate) enum Bar {
 	Schema,
 	/// Notifies or kills a live subscription.
 	Live,
+	/// Writes the request's session: its options, its namespace and database, its parameters.
+	Session,
 	/// Runs an embedded script or a module.
 	Script,
 	/// Runs a machine-learning model.
@@ -65,7 +70,7 @@ pub(crate) enum Bar {
 	/// Runs a body the program does not hold: a statement given as text, a
 	/// stored endpoint.
 	Opaque,
-	/// Takes a draw a speculative planning reserved: an id, a uuid.
+	/// Takes a value that speculative planning reserved in advance: an id, a uuid.
 	Speculation,
 }
 
@@ -181,6 +186,9 @@ pub(super) fn step(step: &Step) -> Class {
 		| Step::Store {
 			..
 		}
+		| Step::Ir {
+			..
+		}
 		| Step::External {
 			..
 		} => Class::ByOperand,
@@ -256,7 +264,29 @@ fn store(instr: &StoreInstr) -> Class {
 		} => Class::NonLeaf(Bar::Speculation),
 		StoreInstr::KillOnCommit {
 			..
+		}
+		| StoreInstr::RealtimeChecks
+		| StoreInstr::Live {
+			..
+		}
+		| StoreInstr::Kill {
+			..
 		} => Class::NonLeaf(Bar::Live),
+		StoreInstr::SessionOption {
+			..
+		}
+		| StoreInstr::SessionUseName {
+			..
+		}
+		| StoreInstr::SessionUse {
+			..
+		}
+		| StoreInstr::SessionLetChecks {
+			..
+		}
+		| StoreInstr::SessionLet {
+			..
+		} => Class::NonLeaf(Bar::Session),
 		StoreInstr::DeleteModelArtifact {
 			..
 		} => Class::NonLeaf(Bar::Model),
@@ -269,6 +299,20 @@ fn store(instr: &StoreInstr) -> Class {
 		StoreInstr::ConnectBucket {
 			..
 		} => Class::NonLeaf(Bar::Network),
+		// An access statement reads or writes the grants of an access method
+		// in the catalog, and a filter of its grants runs host code.
+		StoreInstr::ShowGrants {
+			..
+		}
+		| StoreInstr::IssueGrant {
+			..
+		}
+		| StoreInstr::RevokeGrants {
+			..
+		}
+		| StoreInstr::PurgeGrants {
+			..
+		} => Class::NonLeaf(Bar::Schema),
 		StoreInstr::EvaluateOver {
 			..
 		}
@@ -477,6 +521,9 @@ fn store(instr: &StoreInstr) -> Class {
 		| StoreInstr::AlterFieldDefinition {
 			..
 		}
+		| StoreInstr::AlterFieldClauses {
+			..
+		}
 		| StoreInstr::CheckIndexColumns {
 			..
 		}
@@ -548,10 +595,10 @@ fn write(instr: &WriteInstr) -> Class {
 	}
 }
 
-/// The class of the builtin `name`, from its declared effects: a call that
-/// runs an unseen body, writes, reaches outside the snapshot or waits is
-/// barred, for the first of those it does; a pure synchronous one runs on its arguments alone; any
-/// other is invoked with the evaluation context, for the reads its effects name.
+/// The class of the builtin `name`, from its declared effects. A call that runs an
+/// unseen body, writes, reaches outside the snapshot or waits is barred. A pure
+/// synchronous call runs on its arguments alone. Any other gets the evaluation
+/// context, for the reads its effects name.
 pub(crate) fn builtin(name: &str, registry: &FunctionRegistry) -> Class {
 	if registry.get_projection(name).is_some() {
 		return Class::Kernel(&[]);
@@ -661,6 +708,9 @@ pub(super) fn instr(
 			..
 		}
 		| Instr::LoadSlot {
+			..
+		}
+		| Instr::LoadElement {
 			..
 		}
 		| Instr::SortKey {
@@ -978,6 +1028,7 @@ pub(super) fn instr(
 		} => named(step(&Step::JudgeCopy {
 			at: 0,
 		})),
+		Instr::Ir(i) => named(i.leaf_class()),
 		Instr::Omit {
 			..
 		} => named(step(&Step::Omit {
@@ -1030,9 +1081,6 @@ pub(super) fn instr(
 				ExternalCallee::Function {
 					..
 				} => (Bar::Script, "function"),
-				ExternalCallee::Specialised {
-					..
-				} => (Bar::Script, "specialised body"),
 			};
 			(Class::NonLeaf(bar), format!("external {kind}"))
 		}
@@ -1091,11 +1139,17 @@ pub(super) fn source(source: &Source) -> (Class, String) {
 		}
 		| Source::LightweightEdges {
 			..
+		}
+		| Source::Vacant {
+			..
 		} => Class::Kernel(&[Storage]),
 		Source::Count {
 			..
 		}
 		| Source::Values {
+			..
+		}
+		| Source::Changes {
 			..
 		} => Class::Kernel(&[Storage, Permissions]),
 		Source::WriteTargets {
@@ -1236,6 +1290,9 @@ fn visit_source(of: &Source, profile: &mut Profile) {
 /// holds it to the trait.
 #[cfg(test)]
 pub(crate) const SERVICES: &[(&str, Class)] = &[
+	// The IR host runs instructions the interpreter hands it: it needs the native host runtime,
+	// and the interfaces each instruction reaches are classified at that instruction's step.
+	("ir_host", Class::Kernel(&[])),
 	("read_range", Class::Kernel(&[Storage])),
 	("read_range_keys", Class::Kernel(&[Storage])),
 	("evaluate_bitmap", Class::Kernel(&[Storage])),

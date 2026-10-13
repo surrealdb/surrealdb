@@ -21,8 +21,8 @@
 //! missing record id is per record and is answered once, before any
 //! subscription is considered. A context whose units do not match its
 //! subscriptions is an invariant the write broke. The broker's `should_emit`
-//! is asked after the payload is built rather than before, which fails the
-//! write for strictly fewer subscriptions than asking first would.
+//! is asked only after the payload is built, so a write fails only for
+//! subscriptions that have something to deliver.
 //!
 //! # The two-phase bind
 //!
@@ -42,6 +42,9 @@
 //! delivery order deterministic and contends on nothing — the futures would
 //! share one transaction handle either way.
 
+// Entry points the IR lowering emits; no Rust call site reaches them directly.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -58,10 +61,9 @@ use crate::val::{RecordId, Value, convert_value_to_public_value};
 
 /// Send `notification` to `subscription`'s node, when this node emits for it.
 ///
-/// The broker is asked after the payload is built rather than before it: this
-/// is the one failure of a subscription's delivery that still aborts the
-/// write, and asking it here means it can only do so for a subscription that
-/// had something to deliver.
+/// The broker is asked only once the payload is built. Its error is the one
+/// delivery failure that aborts the write, so it can only abort the write for
+/// a subscription that has something to deliver.
 pub(crate) async fn deliver(
 	broker: &Arc<dyn crate::dbs::MessageBroker>,
 	ctx: &WriteCtx,

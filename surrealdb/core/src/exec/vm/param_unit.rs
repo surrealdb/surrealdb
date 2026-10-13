@@ -1,120 +1,62 @@
-//! A parameter's unit: the `PERMISSIONS` predicate of its definition,
-//! compiled from the definition and served from the compile cache
-//! ([`super::compile_cache`]).
+//! A parameter's `PERMISSIONS` predicate, judged as a stored clause.
 //!
-//! A read of a parameter reads its value from the catalog when it runs, and
-//! judges the definition's predicate with the pipeline the program lowered
-//! for the clause the catalog held when it was planned. Where the definition
-//! read then holds another clause — it was defined, redefined or given a
-//! predicate after the program was planned — the read judges it with the
-//! parameter's unit instead: the clause it reads compiled as a program of its
-//! own, against the catalog entries the clause consults, keyed by the
-//! parameter's name and the hash of the clause, with one compilation per
-//! frame, and kept while those entries hold as its lowering read them. The
-//! load is a seam of the run-time seal
-//! ([`crate::exec::compiles::seam`]); a unit the cache does not hold is
-//! compiled in a fault ([`crate::exec::compiles::serving_fault`]) and kept.
+//! A read of a parameter takes its value from the catalog when it runs, and
+//! judges the predicate of the definition it reads, over the row the read is
+//! made on. The predicate is evaluated as a closure body that takes no
+//! argument ([`crate::exec::scalar_unit::ScalarUnit::predicate`]). Its unit is
+//! cached by the clause as written and the frame it is judged in, and is reused
+//! only while the catalog facts its compile read still hold. A clause defined,
+//! redefined or given a predicate after the program was planned is judged as
+//! it reads now.
 
 use std::sync::Arc;
 
-use super::program::{DefHash, Program};
-use super::units::ContextDeps;
 use crate::catalog::providers::DatabaseProvider;
-use crate::exec::catalog_deps::CatalogDeps;
-use crate::exec::planner::Planner;
-use crate::exec::{ExecutionContext, FlowResult};
+use crate::exec::scalar_unit::ScalarUnit;
+use crate::exec::{EvalContext, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::expr::logical::LogicalPermissionRef;
+use crate::val::Value;
 
 fn internal(why: String) -> ControlFlow {
 	ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(why)))
 }
 
-/// The unit of parameter `name` for a read in `exec`, the definition as the
-/// transaction reads it now, at the read's `VERSION` stamp where it has one:
-/// the program whose pipeline `0` evaluates its predicate. `None` where the
-/// definition is gone or its clause is no predicate.
-pub(super) async fn guard(name: &str, exec: &ExecutionContext) -> FlowResult<Option<Arc<Program>>> {
-	use super::compile_cache::{BuildId, ObjectVersion, UnitKey, UnitObject};
-	crate::exec::compiles::seam(async {
-		let txn = exec
-			.ctx()
-			.try_tx()
-			.map(Arc::clone)
-			.ok_or_else(|| internal(format!("${name} read with no transaction")))?;
-		let db_ctx = exec.database().map_err(|e| ControlFlow::Err(e.into()))?;
-		let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
-		// The definition the read judges is the one it read: at the
-		// statement's `VERSION` stamp where it has one.
-		let Ok(definition) = txn.get_db_param(ns, db, name, exec.version_stamp()).await else {
-			return Ok(None);
-		};
-		let LogicalPermissionRef::Specific(predicate) =
-			definition.permissions_body.logical_ref().map_err(ControlFlow::Err)?
-		else {
-			return Ok(None);
-		};
-		let predicate = predicate.clone();
-		let (ns_name, db_name) = super::closure::names_of(exec);
-		// The predicate is judged one re-entry deeper than the read.
-		let planner = Planner::with_txn(
-			exec.ctx(),
-			exec.function_registry(),
-			Arc::clone(&txn),
-			ns_name,
-			db_name,
-		)
-		.with_auth(Arc::clone(&exec.root().auth))
-		.with_perms_suppressed(exec.root().perms_suppressed)
-		.with_depth(super::closure::depth_of(exec) + 1);
-		// The unit, and what its lowering read of the catalog where the unit
-		// can be kept: the definitions the clause consults, which the
-		// lowering reads before it lowers the clause.
-		let compile = || async {
-			crate::exec::compiles::serving_fault(async {
-				let recording = txn.record_catalog_reads();
-				let lowered = super::lower::param_guard_unit(&planner, &predicate).await;
-				let reads = recording.finish();
-				let program = lowered
-					.map(Arc::new)
-					.map_err(|refused| ControlFlow::Err(super::declined(refused).into()))?;
-				let deps = match txn.speculating() {
-					false => CatalogDeps::resolve(&txn, &reads).await,
-					true => None,
-				};
-				Ok::<_, ControlFlow>((program, deps))
-			})
-			.await
-		};
-		let Some(units) =
-			exec.ctx().compiled_units().filter(|_| !txn.speculating()).map(Arc::clone)
-		else {
-			return compile().await.map(|(program, _)| Some(program));
-		};
-		let key = UnitKey {
-			ns: db_ctx.ns_name().to_owned(),
-			db: db_ctx.db_name().to_owned(),
-			ids: (ns, db),
-			object: UnitObject::ParamGuard(name.to_owned()),
-			version: ObjectVersion::Content(DefHash::of_param(&definition).0),
-			build: BuildId::current(exec.ctx().get_capabilities()),
-		};
-		let frame = super::lower::statement_frame(&planner);
-		if let Some(kept) = units.param_guards().lookup(&key, &frame, &txn, exec.ctx()).await {
-			return Ok(Some(kept));
-		}
-		let kept = units
-			.param_guards()
-			.get_or_compile(&key, &frame, &txn, exec.ctx(), || async {
-				// The key names the clause; the unit stands while what the
-				// clause consults holds as it was read.
-				let (program, deps) = compile().await?;
-				Ok::<_, ControlFlow>((program, deps.map(|deps| (deps, ContextDeps::default()))))
-			})
-			.await?;
-		Ok(Some(kept))
-	})
-	.await
+/// Reads the definition of parameter `name` through the transaction of
+/// `frame`, the permission frame the read is judged in, and evaluates its
+/// predicate over `row`. The read uses the statement's `VERSION` stamp when it
+/// has one. Returns `None` if the definition does not exist or its clause is
+/// not a predicate. Errors if `frame` has no transaction or no database.
+pub(super) async fn verdict(
+	name: &str,
+	frame: &ExecutionContext,
+	row: Option<&Value>,
+) -> FlowResult<Option<Value>> {
+	let txn = frame
+		.ctx()
+		.try_tx()
+		.map(Arc::clone)
+		.ok_or_else(|| internal(format!("${name} read with no transaction")))?;
+	let db_ctx = frame.database().map_err(|e| ControlFlow::Err(e.into()))?;
+	let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
+	// Read the definition at the statement's `VERSION` stamp when it has one.
+	let definition =
+		crate::exec::compiles::seam(txn.get_db_param(ns, db, name, frame.version_stamp())).await;
+	let Ok(definition) = definition else {
+		return Ok(None);
+	};
+	let LogicalPermissionRef::Specific(predicate) =
+		definition.permissions_body.logical_ref().map_err(ControlFlow::Err)?
+	else {
+		return Ok(None);
+	};
+	let unit = ScalarUnit::predicate(predicate.clone());
+	let eval = EvalContext::from_exec_ctx(frame);
+	let eval = match row {
+		Some(row) => eval.with_value_and_doc(row),
+		None => eval,
+	};
+	unit.evaluate(&eval).await.map(Some)
 }
 
 #[cfg(test)]
@@ -161,8 +103,8 @@ mod tests {
 				"{read:?}"
 			);
 		}
-		// What the clause reads changes, and the read judges it as it now
-		// reads.
+		// A change to a catalog fact the clause reads changes the verdict of
+		// the next read.
 		db.run(
 			"DEFINE FUNCTION OVERWRITE fn::can_read($a: any) { RETURN false };
 			DEFINE FIELD OVERWRITE open ON gate COMPUTED false;",

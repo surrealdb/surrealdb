@@ -3,20 +3,33 @@
 //! An [`AccessPath`] represents a specific way to retrieve records from a table,
 //! whether through a full table scan, point lookup, or index scan.
 
+use std::borrow::Cow;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use anyhow::Result;
 use surrealdb_datastore::index_shapes::{TableIndexShapes, ValueShape};
 
 use super::IndexCandidate;
-use super::key_range::KeyRangeAccess;
-use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition};
-use crate::expr::logical::LogicalExpr;
+use super::key_range::{DeliveredKeyOrder, KeyRangeAccess, plan_key_range};
+use crate::catalog::{DefineDefault, FieldDefinition, Index, IndexDefinition, KeyStructure};
+use crate::err::Error;
+use crate::exec::function::FunctionRegistry;
+use crate::exec::operators::scan::pipeline::determine_scan_direction;
+use crate::exec::planner::util::{
+	expr_contains_matches, has_knn_operator, order_is_scan_compatible,
+	resolve_projection_field_idioms, strip_knn_from_condition,
+};
+use crate::exec::planner::{
+	RestrictedPrefixes, adjust_direction_for_order, detect_order_for_composite_union,
+	drop_restricted_indexes, field_def_excludes_arrays,
+};
+use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOrdering};
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Idiom, Kind, KindLiteral, Part};
 use crate::kvs::Direction;
-use crate::val::{Number, Range, Value};
+use crate::val::{Datetime, Duration, Number, Range, TryAdd, TrySub, Value};
 
 /// An index definition with the position it holds among its table's indexes.
 ///
@@ -75,6 +88,11 @@ impl IndexRef {
 	pub(crate) fn with_coarse_id(mut self) -> Self {
 		self.coarse_id = true;
 		self
+	}
+
+	/// Per column, whether it is known to hold no array; empty when no column is.
+	pub(crate) fn scalar_columns(&self) -> &[bool] {
+		&self.scalar
 	}
 
 	/// Whether the entries that agree on every column list their records in
@@ -173,23 +191,23 @@ pub enum AccessPath {
 	KnnSearch {
 		index_ref: IndexRef,
 		/// The query vector to search for nearest neighbors of
-		vector: KnnQueryVector,
+		vector: Arc<[Number]>,
 		/// Number of nearest neighbors to return
 		k: u32,
 		/// ANN search expansion factor
 		ef: u32,
-		/// Pre-filtered vector search (#548): an exact bitmap plan over the
+		/// Pre-filtered vector search: an exact bitmap plan over the
 		/// index-covered WHERE conjuncts, plus the true residual. `None` when
 		/// no conjunct is exactly index-coverable.
 		prefilter: Option<KnnPrefilterPlan>,
 	},
 
 	/// Roaring-bitmap candidate fusion over the table's shared doc-ID space
-	/// (issue #547).
+	/// Candidate bitmaps from several indexes are combined with set algebra.
 	///
 	/// Chosen for an AND-composed WHERE clause with at least two index-backed
 	/// members (or one plus a subtractable `NOT`), or a top-level OR whose
-	/// every branch is bitmap-capable (issue #550), when every participating
+	/// every branch is bitmap-capable when every participating
 	/// index carries doc-IDs, no index covers the ORDER BY, and no
 	/// early-termination (LIMIT without ORDER BY) or VERSION constraints
 	/// apply. Surfaces as a `BitmapResolve` operator over a `BitmapNode`
@@ -249,7 +267,7 @@ impl AccessPath {
 			self,
 			AccessPath::BTreeScan {
 				access: BTreeAccess::Range {
-					range: Range {
+					range: OperandRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
 					},
@@ -260,7 +278,7 @@ impl AccessPath {
 	}
 }
 
-/// Plan-level pre-filter for a KNN search (issue #548).
+/// Plan-level pre-filter for a KNN search.
 ///
 /// Built by [`crate::exec::index::analysis::IndexAnalyzer::try_knn_prefilter`]
 /// from the KNN-stripped WHERE clause: each conjunct whose truth set is
@@ -275,6 +293,9 @@ pub struct KnnPrefilterPlan {
 	/// in-traversal filter, and an over-approximate bitmap would let
 	/// non-matching candidates consume top-K slots).
 	pub root: BitmapPlan,
+	/// The indexes, in the `AND` chain of the condition the plan was made from, of the conjuncts
+	/// `root` covers.
+	pub covered: Vec<usize>,
 	/// KNN-stripped conjuncts NOT covered by `root`, re-ANDed. `None` when
 	/// the whole stripped WHERE is covered. MATCHES conjuncts never appear
 	/// here: they are not evaluable through the plain in-traversal residual
@@ -289,7 +310,7 @@ pub struct KnnPrefilterPlan {
 	pub uncovered_matches: bool,
 }
 
-/// Plan-level bitmap candidate expression tree (issue #547).
+/// Plan-level bitmap candidate expression tree.
 ///
 /// Built by [`crate::exec::index::analysis::IndexAnalyzer::try_bitmap_fusion`]
 /// and converted into `BitmapNode` operators by the SELECT planner. Leaves
@@ -311,15 +332,15 @@ pub enum BitmapPlan {
 		query: String,
 		operator: MatchesOperator,
 	},
-	/// A single-hop graph reachability semi-join (issue #549): the doc-IDs of
+	/// A single-hop graph reachability semi-join: the doc-IDs of
 	/// scanned-table rows adjacent to `source` through `edge_tables`,
 	/// traversed in `direction` — the *inverse* of the direction the
 	/// predicate was written in, so a `->edge->` containment anchors at its
 	/// target literal and walks back to the candidate rows. Read entirely
 	/// from adjacency pointer keys, which embed the far vertex; a
-	/// key of the older adjacency layout (no embedded target) overflows the branch, so an
-	/// unmigrated scope degrades to the residual filter instead of
-	/// under-approximating. Never exact: participates only as a droppable,
+	/// key that does not embed a target overflows the branch, so the
+	/// residual filter answers the predicate instead of an
+	/// under-approximating set. Never exact: participates only as a droppable,
 	/// budgeted AND conjunct beneath the original-WHERE residual.
 	Graph {
 		/// Plan-time literal record id to traverse from.
@@ -340,13 +361,208 @@ pub enum BitmapPlan {
 	},
 }
 
-/// The query vector of a KNN, as planned: the search of an ANN index or a
-/// brute-force ranking.
+/// One bound, or one key component, of a b-tree access.
+///
+/// A literal is the value the condition names. The statement clock is read
+/// when the scan opens, never when the statement is planned, so a plan holds
+/// no instant: `at > time::now() - 1d` stays an index range and a program
+/// that outlives its statement keeps reading the clock of the statement that
+/// runs it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BoundOperand {
+	/// The value the condition names.
+	Literal(Value),
+	/// The instant of the running top-level statement, moved by an offset.
+	StatementClock(ClockBound),
+}
+
+/// The statement clock as a bound: the instant of the running statement, moved
+/// by `offset` where there is one. It is what `time::now()` and
+/// `time::now() ± <duration literal>` evaluate to in the statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockBound {
+	pub offset: Option<(ClockSign, Duration)>,
+}
+
+/// The direction an offset moves the statement clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockSign {
+	Plus,
+	Minus,
+}
+
+impl From<Value> for BoundOperand {
+	fn from(value: Value) -> Self {
+		BoundOperand::Literal(value)
+	}
+}
+
+impl BoundOperand {
+	/// The literal value, `None` for the clock.
+	pub(crate) fn as_literal(&self) -> Option<&Value> {
+		match self {
+			BoundOperand::Literal(value) => Some(value),
+			BoundOperand::StatementClock(_) => None,
+		}
+	}
+
+	/// Whether this operand reads the statement clock.
+	pub(crate) fn is_clock(&self) -> bool {
+		matches!(self, BoundOperand::StatementClock(_))
+	}
+
+	/// A value that sorts where this operand does, which is all a plan-time
+	/// check of a bound's place in the value order needs: the literal itself,
+	/// or any datetime for the clock, since every datetime sorts in the
+	/// datetime band whatever its instant.
+	pub(crate) fn witness(&self) -> Cow<'_, Value> {
+		match self {
+			BoundOperand::Literal(value) => Cow::Borrowed(value),
+			BoundOperand::StatementClock(_) => Cow::Owned(Value::Datetime(Datetime::MIN_UTC)),
+		}
+	}
+
+	/// The value this operand denotes for a statement whose clock reads
+	/// `clock`: a literal as it is, the clock moved by its offset with the
+	/// arithmetic the expression `time::now() ± <duration>` evaluates with.
+	pub(crate) fn resolve(&self, clock: &Datetime) -> Result<Value> {
+		match self {
+			BoundOperand::Literal(value) => Ok(value.clone()),
+			BoundOperand::StatementClock(ClockBound {
+				offset,
+			}) => {
+				let now = Value::Datetime(*clock);
+				match offset {
+					None => Ok(now),
+					Some((ClockSign::Plus, by)) => now.try_add(Value::Duration(*by)),
+					Some((ClockSign::Minus, by)) => now.try_sub(Value::Duration(*by)),
+				}
+			}
+		}
+	}
+
+	/// How EXPLAIN renders the operand: a literal as its value, the clock as
+	/// the call that reads it.
+	pub(crate) fn describe(&self) -> String {
+		use surrealdb_types::ToSql;
+		match self {
+			BoundOperand::Literal(value) => value.to_sql(),
+			BoundOperand::StatementClock(ClockBound {
+				offset: None,
+			}) => "time::now()".to_owned(),
+			BoundOperand::StatementClock(ClockBound {
+				offset: Some((sign, by)),
+			}) => {
+				let sign = match sign {
+					ClockSign::Plus => '+',
+					ClockSign::Minus => '-',
+				};
+				format!("time::now() {sign} {by}")
+			}
+		}
+	}
+}
+
+/// The bounds of a b-tree range scan, each a [`BoundOperand`].
+///
+/// Two ranges whose bounds are all literals combine as the values do; a range
+/// with a clock bound combines only where no clock bound is compared with
+/// another bound, because the instants a clock bound and a literal denote are
+/// not known until the scan opens.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperandRange {
+	pub start: Bound<BoundOperand>,
+	pub end: Bound<BoundOperand>,
+}
+
+impl From<Range> for OperandRange {
+	fn from(range: Range) -> Self {
+		let bound = |bound: Bound<Value>| match bound {
+			Bound::Included(value) => Bound::Included(BoundOperand::Literal(value)),
+			Bound::Excluded(value) => Bound::Excluded(BoundOperand::Literal(value)),
+			Bound::Unbounded => Bound::Unbounded,
+		};
+		OperandRange {
+			start: bound(range.start),
+			end: bound(range.end),
+		}
+	}
+}
+
+impl OperandRange {
+	/// The range holding every value: no bound on either side.
+	pub(crate) fn unbounded() -> Self {
+		OperandRange {
+			start: Bound::Unbounded,
+			end: Bound::Unbounded,
+		}
+	}
+
+	/// The range of literal bounds, `None` where a bound reads the clock.
+	pub(crate) fn as_literal(&self) -> Option<Range> {
+		let bound = |bound: &Bound<BoundOperand>| match bound {
+			Bound::Included(operand) => operand.as_literal().cloned().map(Bound::Included),
+			Bound::Excluded(operand) => operand.as_literal().cloned().map(Bound::Excluded),
+			Bound::Unbounded => Some(Bound::Unbounded),
+		};
+		Some(Range {
+			start: bound(&self.start)?,
+			end: bound(&self.end)?,
+		})
+	}
+
+	/// The bounds' operands, start then end.
+	pub(crate) fn operands(&self) -> impl Iterator<Item = &BoundOperand> {
+		[&self.start, &self.end].into_iter().filter_map(|bound| match bound {
+			Bound::Included(operand) | Bound::Excluded(operand) => Some(operand),
+			Bound::Unbounded => None,
+		})
+	}
+
+	/// The values the range bounds, for a check of where its bounds sort: each
+	/// operand's [`BoundOperand::witness`].
+	pub(crate) fn witnesses(&self) -> (Bound<Cow<'_, Value>>, Bound<Cow<'_, Value>>) {
+		fn bound(bound: &Bound<BoundOperand>) -> Bound<Cow<'_, Value>> {
+			match bound {
+				Bound::Included(operand) => Bound::Included(operand.witness()),
+				Bound::Excluded(operand) => Bound::Excluded(operand.witness()),
+				Bound::Unbounded => Bound::Unbounded,
+			}
+		}
+		(bound(&self.start), bound(&self.end))
+	}
+
+	/// The intersection of two ranges, `None` where it cannot be formed
+	/// before the scan opens: two bounds of the same side would have to be
+	/// compared and one of them reads the clock. A side only one range bounds
+	/// is taken as it is.
+	pub(crate) fn intersect(&self, other: &Self) -> Option<Self> {
+		if let (Some(a), Some(b)) = (self.as_literal(), other.as_literal()) {
+			return Some(a.intersect(b).into());
+		}
+		let side = |a: &Bound<BoundOperand>, b: &Bound<BoundOperand>| match (a, b) {
+			(Bound::Unbounded, other) | (other, Bound::Unbounded) => Some(other.clone()),
+			_ => None,
+		};
+		Some(OperandRange {
+			start: side(&self.start, &other.start)?,
+			end: side(&self.end, &other.end)?,
+		})
+	}
+
+	/// Whether no value lies in the range, known only for literal bounds: a
+	/// range with a clock bound is never proved empty.
+	pub(crate) fn is_empty(&self) -> bool {
+		self.as_literal().is_some_and(|range| range.is_empty())
+	}
+}
+
+/// The query vector of a KNN operator's right-hand side, as the planner reads
+/// it for an ANN index search or a brute-force ranking
+/// ([`classify_knn_vector`](crate::exec::planner::util::classify_knn_vector)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnnQueryVector {
-	/// A numeric array known when the access path is chosen: written in the
-	/// statement, or the plan-time value of a parameter
-	/// ([`Planner::resolve_query_vector`](crate::exec::planner::Planner::resolve_query_vector)).
+	/// A numeric array written in the statement.
 	Literal(Arc<[Number]>),
 	/// The right-hand side of the KNN operator, evaluated once with no row in
 	/// scope before the search reads any input: any expression that does not
@@ -361,14 +577,18 @@ pub enum KnnQueryVector {
 }
 
 /// How to access an index.
+///
+/// Every value a variant pins or bounds is a [`BoundOperand`]: a literal, or
+/// the statement clock, which resolves when the scan opens
+/// ([`Self::resolve`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum BTreeAccess {
 	/// Single value equality: `field = value`
-	Equality(Value),
+	Equality(BoundOperand),
 
 	/// Range scan with optional bounds: `field > a AND field < b`
 	Range {
-		range: Range,
+		range: OperandRange,
 	},
 
 	/// Compound index access with fixed prefix and optional range on next column.
@@ -377,9 +597,9 @@ pub enum BTreeAccess {
 	/// the prefix is [1, 2] and range is Some((MoreThan, 3)).
 	Compound {
 		/// Fixed values for leading columns
-		prefix: Vec<Value>,
+		prefix: Vec<BoundOperand>,
 		/// Optional range condition on the next column after the prefix
-		range: Option<(BinaryOperator, Value)>,
+		range: Option<(BinaryOperator, BoundOperand)>,
 	},
 
 	/// Full-text search access
@@ -393,7 +613,7 @@ pub enum BTreeAccess {
 	/// KNN vector search access via ANN index.
 	Knn {
 		/// The query vector
-		vector: KnnQueryVector,
+		vector: Arc<[Number]>,
 		/// Number of nearest neighbors
 		k: u32,
 		/// ANN search expansion factor
@@ -401,27 +621,129 @@ pub enum BTreeAccess {
 	},
 }
 
+/// Whether no record can sit under both `a` and `b`, two equality prefixes of
+/// one index: they differ at a position where both are literals. A prefix
+/// that reads the clock is not known to differ from another before the scan
+/// opens, so it never proves two prefixes disjoint.
+pub(crate) fn prefixes_are_disjoint(a: &[BoundOperand], b: &[BoundOperand]) -> bool {
+	a.iter().zip(b).any(|(x, y)| match (x.as_literal(), y.as_literal()) {
+		(Some(x), Some(y)) => x != y,
+		_ => false,
+	})
+}
+
+/// A b-tree access with every operand resolved to a value: what the key
+/// kernels encode into a key range.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum KeyAccess {
+	Equality(Value),
+	Range(Range),
+	Compound {
+		prefix: Vec<Value>,
+		range: Option<(BinaryOperator, Value)>,
+	},
+}
+
 impl BTreeAccess {
+	/// An equality on the literal `value`.
+	pub(crate) fn literal_equality(value: Value) -> Self {
+		BTreeAccess::Equality(BoundOperand::Literal(value))
+	}
+
+	/// A range over the literal bounds of `range`.
+	pub(crate) fn literal_range(range: Range) -> Self {
+		BTreeAccess::Range {
+			range: range.into(),
+		}
+	}
+
+	/// A compound access over literal values.
+	pub(crate) fn literal_compound(
+		prefix: Vec<Value>,
+		range: Option<(BinaryOperator, Value)>,
+	) -> Self {
+		BTreeAccess::Compound {
+			prefix: prefix.into_iter().map(BoundOperand::Literal).collect(),
+			range: range.map(|(op, value)| (op, BoundOperand::Literal(value))),
+		}
+	}
+
+	/// The access with every operand resolved against `clock`, the instant of
+	/// the statement the scan runs for, or against the wall clock at the call
+	/// where no statement installed one. `None` for an access that is not a
+	/// b-tree scan (full-text, KNN).
+	///
+	/// A literal resolves to itself, so the key range a program reads is the
+	/// one the literal values encode whether or not the plan reads the clock.
+	pub(crate) fn resolve(&self, clock: Option<&Datetime>) -> Result<Option<KeyAccess>> {
+		let now;
+		let clock = match clock {
+			Some(clock) => clock,
+			None => {
+				now = Datetime::now();
+				&now
+			}
+		};
+		Ok(Some(match self {
+			BTreeAccess::Equality(operand) => KeyAccess::Equality(operand.resolve(clock)?),
+			BTreeAccess::Range {
+				range,
+			} => {
+				let bound = |bound: &Bound<BoundOperand>| -> Result<Bound<Value>> {
+					Ok(match bound {
+						Bound::Included(operand) => Bound::Included(operand.resolve(clock)?),
+						Bound::Excluded(operand) => Bound::Excluded(operand.resolve(clock)?),
+						Bound::Unbounded => Bound::Unbounded,
+					})
+				};
+				KeyAccess::Range(Range {
+					start: bound(&range.start)?,
+					end: bound(&range.end)?,
+				})
+			}
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => KeyAccess::Compound {
+				prefix: prefix
+					.iter()
+					.map(|operand| operand.resolve(clock))
+					.collect::<Result<Vec<_>>>()?,
+				range: match range {
+					Some((op, operand)) => Some((op.clone(), operand.resolve(clock)?)),
+					None => None,
+				},
+			},
+			BTreeAccess::FullText {
+				..
+			}
+			| BTreeAccess::Knn {
+				..
+			} => return Ok(None),
+		}))
+	}
+
 	/// Human-readable description of the access shape for EXPLAIN output.
 	///
 	/// Shared by [`crate::exec::operators::IndexScan`] and the bitmap
 	/// candidate operators so the `access:` attribute renders identically.
-	/// `FullText`/`Knn` shapes are described by their dedicated operators.
+	/// `FullText`/`Knn` shapes are described by their dedicated operators. A
+	/// bound that reads the clock is rendered as the call, never as an
+	/// instant.
 	pub(crate) fn describe(&self) -> String {
-		use surrealdb_types::ToSql;
 		match self {
-			BTreeAccess::Equality(v) => format!("= {}", v.to_sql()),
+			BTreeAccess::Equality(v) => format!("= {}", v.describe()),
 			BTreeAccess::Range {
 				range,
 			} => {
-				let from_str = match range.start.as_ref() {
-					Bound::Included(x) => format!(">={}", x.to_sql()),
-					Bound::Excluded(x) => format!(">{}", x.to_sql()),
+				let from_str = match &range.start {
+					Bound::Included(x) => format!(">={}", x.describe()),
+					Bound::Excluded(x) => format!(">{}", x.describe()),
 					Bound::Unbounded => String::new(),
 				};
-				let to_str = match range.end.as_ref() {
-					Bound::Included(x) => format!("<={}", x.to_sql()),
-					Bound::Excluded(x) => format!("<{}", x.to_sql()),
+				let to_str = match &range.end {
+					Bound::Included(x) => format!("<={}", x.describe()),
+					Bound::Excluded(x) => format!("<{}", x.describe()),
 					Bound::Unbounded => String::new(),
 				};
 				format!("{from_str} {to_str}").trim().to_string()
@@ -430,9 +752,10 @@ impl BTreeAccess {
 				prefix,
 				range,
 			} => {
-				let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
+				let prefix_str =
+					prefix.iter().map(BoundOperand::describe).collect::<Vec<_>>().join(", ");
 				if let Some((op, val)) = range {
-					let val_sql = val.to_sql();
+					let val_sql = val.describe();
 					format!("[{prefix_str}] {op:?} {val_sql}")
 				} else {
 					format!("[{prefix_str}]")
@@ -509,14 +832,18 @@ pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> 
 /// nothing. A range bounded on neither side states no predicate and reaches
 /// every record.
 pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bool {
-	let (col, start, end) = match access {
+	let (col, start, end): (usize, Bound<Cow<'_, Value>>, Bound<Cow<'_, Value>>) = match access {
 		BTreeAccess::Range {
 			range,
-		} => (0, range.start.as_ref(), range.end.as_ref()),
+		} => {
+			let (start, end) = range.witnesses();
+			(0, start, end)
+		}
 		BTreeAccess::Compound {
 			prefix,
 			range: Some((op, value)),
 		} => {
+			let value = value.witness();
 			let (start, end) = match op {
 				BinaryOperator::MoreThan => (Bound::Excluded(value), Bound::Unbounded),
 				BinaryOperator::MoreThanEqual => (Bound::Included(value), Bound::Unbounded),
@@ -528,10 +855,11 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 		}
 		_ => return false,
 	};
-	if matches!((start, end), (Bound::Unbounded, Bound::Unbounded)) || !index.may_hold_array(col) {
+	if matches!((&start, &end), (Bound::Unbounded, Bound::Unbounded)) || !index.may_hold_array(col)
+	{
 		return false;
 	}
-	range_reaches_arrays(start, end)
+	range_reaches_arrays(start.as_ref().map(|v| &**v), end.as_ref().map(|v| &**v))
 }
 
 /// Whether the key range of `access` admits exactly the values its predicate
@@ -544,13 +872,12 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 /// rejects, and the comparison has to judge each one. An equality reads the
 /// entries keyed by its value alone.
 pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
-	let inexact = |v: &Value| matches!(v, Value::Number(n) if !exact_across_kinds(n));
+	// A bound that reads the clock is a datetime, which is no number.
+	let inexact = |v: &BoundOperand| matches!(v.as_literal(), Some(Value::Number(n)) if !exact_across_kinds(n));
 	match access {
 		BTreeAccess::Range {
 			range,
-		} => ![range.start.as_ref(), range.end.as_ref()]
-			.into_iter()
-			.any(|b| matches!(b, Bound::Included(v) | Bound::Excluded(v) if inexact(v))),
+		} => !range.operands().any(inexact),
 		BTreeAccess::Compound {
 			range: Some((_, v)),
 			..
@@ -920,6 +1247,7 @@ fn kind_admits_set(kind: &Kind) -> bool {
 pub(crate) type ColumnFlags = Box<[bool]>;
 
 /// What [`with_array_columns_as_elements`] made of a table's indexes.
+#[derive(Clone, Debug)]
 pub(crate) struct ElementColumns {
 	/// The indexes, with every rewritten column spelled with `*`.
 	pub(crate) indexes: Arc<[IndexDefinition]>,
@@ -1030,18 +1358,6 @@ pub(crate) fn may_have_array_columns(indexes: &[IndexDefinition]) -> bool {
 					|| !c.0.iter().any(|p| matches!(p, Part::Flatten))
 			})
 	})
-}
-
-#[cfg(test)]
-/// `indexes` without its b-tree indexes, for a caller that cannot tell which
-/// of their columns store array elements: a b-tree access path planned
-/// without that knowledge can count, order or seek element entries as whole
-/// values.
-pub(crate) fn without_btree_indexes(indexes: Arc<[IndexDefinition]>) -> Arc<[IndexDefinition]> {
-	if !indexes.iter().any(|ix| matches!(ix.index, Index::Idx | Index::Uniq)) {
-		return indexes;
-	}
-	indexes.iter().filter(|ix| !matches!(ix.index, Index::Idx | Index::Uniq)).cloned().collect()
 }
 
 /// How many record links, and views over a source table, the search for a set
@@ -1589,11 +1905,11 @@ pub fn select_access_path_paged(
 	// drives unconditionally — overriding score selection (a unique equality
 	// outscores KNN, 1000 > 800) and WITH INDEX hints, both of which would
 	// otherwise pick a silently-wrong plan. The sibling predicates feed the
-	// KNN prefilter (#548) or the pushed-down residual instead.
+	// KNN prefilter or the pushed-down residual instead.
 	if let Some(pos) = candidates.iter().position(|c| matches!(c.access, BTreeAccess::Knn { .. })) {
-		// Overriding an explicit hint deserves a signal — mirroring the
-		// unmatched-hint warning below — so "why isn't my index being used"
-		// investigations have something to find.
+		// Overriding an explicit hint logs a warning, as an unmatched hint does
+		// below, so a plan that ignores WITH INDEX can be traced in the logs.
+		// The override is never silent.
 		if let Some(With::Index(names)) = with_hints {
 			tracing::warn!(
 				target: "surreal::index",
@@ -1611,9 +1927,9 @@ pub fn select_access_path_paged(
 		}
 		// Hint did not match any candidate. The most common cause is that
 		// the user named an index but no WHERE conjunct refers to its
-		// leading column. We log a warning so debugging "why isn't my
-		// index being used" tickets has a signal, then fall through to
-		// best-effort selection / table scan.
+		// leading column. A warning is logged and selection then falls back to
+		// best-effort selection or a table scan.
+		// The warning names the unmatched hint.
 		tracing::warn!(
 			target: "surreal::index",
 			hinted = ?names,
@@ -1651,6 +1967,403 @@ fn find_hinted_index<'a>(
 	None
 }
 
+// ---------------------------------------------------------------------------------------------
+// The access-path decision
+// ---------------------------------------------------------------------------------------------
+
+/// What [`decide_access`] reads about a table, already read from the catalog.
+///
+/// The planner's reads and the IR's table answers both fill one of these, so the decision that
+/// follows the reads is one function. Every field that can fail to be read is an `Option`, so an
+/// unreadable answer stays distinct from an empty one.
+pub(crate) struct AccessInputs<'a> {
+	/// The table's online indexes, at the stamp a `VERSION` read names. The decision narrows them
+	/// to the indexes a read may be served from ([`admissible_indexes`]).
+	pub(crate) indexes: Arc<[IndexDefinition]>,
+	/// Which declared fields a non-`Full` `SELECT` permission governs for the caller.
+	pub(crate) restricted: &'a RestrictedPrefixes,
+	/// The structure of the table's record ids where they name their components, read only when
+	/// the statement has a condition or an ordering.
+	pub(crate) key: Option<Arc<KeyStructure>>,
+	/// The element columns over `admissible_indexes(indexes, restricted, reads_versioned)`, or
+	/// `None` when the field list or the indexes' recorded shapes could not be read. Read only
+	/// when that list is not empty.
+	pub(crate) columns: Option<ElementColumns>,
+	/// The table's declared fields, which decide which columns provably hold no array. `None`
+	/// when they could not be read: no column is then taken to hold none.
+	pub(crate) fields: Option<&'a [FieldDefinition]>,
+	/// The query vectors of the `KNN` operators whose right operand is a parameter holding an
+	/// array of numbers, read only when an approximate index survives the narrowing.
+	pub(crate) knn_vectors: &'a super::analysis::KnnQueryVectors,
+	/// Whether the caller may call `time::now()`, so a comparison against it is an index bound.
+	pub(crate) allows_clock: bool,
+	/// Whether the read observes a `VERSION`: the statement names one, or an enclosing statement
+	/// does.
+	pub(crate) reads_versioned: bool,
+	/// Whether a table permission predicate is part of the condition, so that a key range over the
+	/// components of the record id takes only literal bounds.
+	pub(crate) permissioned: bool,
+}
+
+/// The indexes a read may be served from: `indexes` with, for a versioned read, only the
+/// full-text ones, since an index entry carries no version and a `MATCHES` has no evaluation but
+/// its index), and without any index whose columns a restricted field governs.
+///
+/// The one narrowing both the decision and the reads that feed it use, so they never disagree on
+/// which indexes are candidates.
+pub(crate) fn admissible_indexes(
+	indexes: Arc<[IndexDefinition]>,
+	restricted: &RestrictedPrefixes,
+	reads_versioned: bool,
+) -> Arc<[IndexDefinition]> {
+	let indexes: Arc<[IndexDefinition]> =
+		if reads_versioned && indexes.iter().any(|ix| !matches!(ix.index, Index::FullText(_))) {
+			indexes.iter().filter(|ix| matches!(ix.index, Index::FullText(_))).cloned().collect()
+		} else {
+			indexes
+		};
+	if indexes.is_empty() {
+		return indexes;
+	}
+	drop_restricted_indexes(indexes, restricted)
+}
+
+/// `cond` as the index analyzer reads it: projection function calls (`type::field("name")`)
+/// rewritten to the paths they name.
+pub(crate) fn analysis_condition(
+	cond: Option<&LogicalExpr>,
+	registry: &FunctionRegistry,
+) -> Option<LogicalExpr> {
+	cond.map(|c| {
+		let mut c = c.clone();
+		resolve_projection_field_idioms(&mut c, registry);
+		c
+	})
+}
+
+/// The answers that need no catalog read, decided before any read is made: a condition folded to
+/// `false` admits no row, `WITH NOINDEX` scans the table, and an unresolved permission context
+/// declines the plan-time path.
+///
+/// `None` when the decision needs the reads. `Some(None)` is a decline, as [`decide_access`]
+/// answers it.
+pub(crate) fn decide_without_reads(
+	cond: Option<&LogicalExpr>,
+	order: Option<&LogicalOrdering>,
+	with: Option<&With>,
+	restricted: &RestrictedPrefixes,
+) -> Option<Option<(AccessPath, Direction)>> {
+	let direction = determine_scan_direction(order);
+	if matches!(cond, Some(LogicalExpr::Literal(LogicalLiteral::Bool(false)))) {
+		return Some(Some((AccessPath::EmptyScan, direction)));
+	}
+	if matches!(with, Some(With::NoIndex)) {
+		return Some(Some((AccessPath::TableScan, direction)));
+	}
+	// SECURITY: `AssumeRestricted` records that plan-time permission context was unavailable, not
+	// that a restricted field exists. Resolving here would withhold every index on the table and
+	// pin a table scan, which also turns a `MATCHES` on a fully readable column into
+	// `NoIndexFoundForMatch` because no full-text index can be named. The plan-time path is
+	// declined instead: the run-time fallback applies the same guard against the actor's resolved
+	// field permissions, so it is fail-closed without over-applying.
+	if matches!(restricted, RestrictedPrefixes::AssumeRestricted) {
+		return Some(None);
+	}
+	None
+}
+
+/// The access path for a table source at plan time, with the predicate `cond` and ordering
+/// `order` offered to it: the decision that follows the catalog reads, which builds nothing.
+///
+/// A read that observes a `VERSION` ([`AccessInputs::reads_versioned`]) plans no bitmap and no KNN
+/// prefilter. `None` when the plan-time path is declined: the permission context is unresolved, or
+/// the element columns could not be read.
+///
+/// Over a table whose record ids name their components, or an aggregated view, whose rows are
+/// keyed by their group values, a key range over the record keys ([`plan_key_range`]) competes
+/// with the index candidates (`IndexCandidate::outranks_key_range`); it is not planned under a
+/// `VERSION`, a `WITH` hint, a `MATCHES` or a KNN operator.
+pub(crate) fn decide_access(
+	inputs: &AccessInputs<'_>,
+	cond: Option<&LogicalExpr>,
+	order: Option<&LogicalOrdering>,
+	with: Option<&With>,
+	has_limit: bool,
+	registry: &FunctionRegistry,
+) -> Result<Option<(AccessPath, Direction)>, Error> {
+	if let Some(done) = decide_without_reads(cond, order, with, inputs.restricted) {
+		return Ok(done);
+	}
+	let direction = determine_scan_direction(order);
+	let restricted_select = inputs.restricted;
+	let key = &inputs.key;
+	// A read at a stamp plans no key range: the structure was checked against the keys present
+	// when it was defined, not against the keys a past stamp holds. A `WITH` hint chooses the
+	// read, and a `MATCHES` or a KNN operator has no answer but its index.
+	let key_range = match (key, cond) {
+		(Some(key), Some(cond))
+			if with.is_none()
+				&& !inputs.reads_versioned
+				&& !expr_contains_matches(cond)
+				&& !has_knn_operator(cond) =>
+		{
+			// A conjunct that reads a field the caller may not read is left to the reduced row, as
+			// it is for an index.
+			let conjuncts: Vec<&LogicalExpr> = crate::exec::logical::conjuncts(cond)
+				.into_iter()
+				.filter(|c| !restricted_select.cond_touches(c))
+				.collect();
+			plan_key_range(key, &conjuncts, order, inputs.permissioned, registry)
+		}
+		_ => None,
+	};
+	let key_range_path = |access: KeyRangeAccess| {
+		let direction = access.direction;
+		(AccessPath::KeyRange(access), direction)
+	};
+
+	let indexes =
+		admissible_indexes(Arc::clone(&inputs.indexes), restricted_select, inputs.reads_versioned);
+	if indexes.is_empty() {
+		return Ok(Some(key_range.map_or((AccessPath::TableScan, direction), key_range_path)));
+	}
+
+	let rewritten_cond = analysis_condition(cond, registry);
+	let analysis_cond = rewritten_cond.as_ref();
+
+	let Some(columns) = inputs.columns.as_ref() else {
+		return Ok(None);
+	};
+	let analyzer = columns
+		.analyzer(with, registry)
+		.with_key(key.clone())
+		.with_clock(inputs.allows_clock)
+		.with_knn_query_vectors(inputs.knn_vectors);
+	let candidates = analyzer.analyze(analysis_cond, order);
+
+	// A key range is chosen unless an index candidate outranks it, and only a candidate that
+	// outranks it is chosen in its place.
+	let candidates = match key_range {
+		Some(access) => {
+			let pinned = access.eq.len();
+			let delivers = access.delivers == DeliveredKeyOrder::Exact;
+			let outranking: Vec<_> = candidates
+				.into_iter()
+				.filter(|c| c.outranks_key_range(pinned, delivers, has_limit))
+				.collect();
+			if outranking.is_empty() {
+				return Ok(Some(key_range_path(access)));
+			}
+			outranking
+		}
+		None => candidates,
+	};
+
+	// The declared kinds that gate exactness: `NOT` subtraction of a bitmap, and the allow-list of
+	// a KNN search, are exact only over columns declared a kind that holds no array.
+	let exact_col = |col: &Idiom| -> bool {
+		inputs.fields.is_some_and(|fields| {
+			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
+		})
+	};
+
+	// Bitmap candidate fusion: when the WHERE clause is an AND of several index-backed predicates,
+	// intersect per-branch candidate bitmaps over the table's shared doc-ID space instead of
+	// driving from one index and filtering the rest per row. Chosen conservatively — the streaming
+	// plans keep every case where they have a structural advantage:
+	// - an index covers ORDER BY → keep sort elimination / sorted-merge early termination;
+	// - LIMIT without ORDER BY → any streaming plan terminates early, a bitmap plan materializes
+	//   every branch first;
+	// - VERSION queries → doc-ID mappings are not time-travel-aware.
+	let order_covered = candidates.iter().any(|c| c.covers_order);
+	if with.is_none()
+		&& !inputs.reads_versioned
+		&& !order_covered
+		&& (order.is_some() || !has_limit)
+		&& let Some(cond) = analysis_cond
+		&& matches!(
+			cond,
+			LogicalExpr::Binary {
+				op: BinaryOperator::And,
+				..
+			}
+		) && let Some(root) = analyzer.try_bitmap_fusion(Some(cond), &candidates, &exact_col)
+	{
+		return Ok(Some((
+			AccessPath::BitmapFusion {
+				root,
+				fallback: None,
+			},
+			direction,
+		)));
+	}
+
+	// Top-level OR fusion: union the per-branch candidate bitmaps over the shared doc-ID space
+	// instead of k-way-merging RecordId streams, whose dedupe set grows with the result size.
+	// Gated like the AND fusion above: LIMIT without ORDER BY keeps streaming early termination (a
+	// bitmap plan materializes every branch first), an index-covered ORDER BY keeps the union
+	// scan's sorted-merge and sort-elimination plans, and ORDER BY id keeps the union's
+	// merge-by-id. An ordering nothing covers installs a blocking Sort above either plan, so
+	// fusion is allowed there even under LIMIT.
+	if with.is_none()
+		&& !inputs.reads_versioned
+		&& ((order.is_none() && !has_limit)
+			|| (order.is_some() && !order_covered && !order_is_scan_compatible(order)))
+		&& let Some((root, fallback)) = analyzer.try_bitmap_union_fusion(analysis_cond, direction)
+	{
+		// `order_covered` only sees whole-condition candidates, which for an OR root never include
+		// the branches' index accesses — so it misses the union's composite k-way merge: when every
+		// branch pins the same composite-index prefix and the ordering is that index's next
+		// column, the union satisfies the ORDER BY with no Sort. Keep the streaming union for that
+		// shape.
+		let union_covers_order = matches!(
+			&fallback,
+			AccessPath::Union {
+				paths,
+				..
+			} if detect_order_for_composite_union(order, paths).is_some()
+		);
+		if !union_covers_order {
+			return Ok(Some((
+				AccessPath::BitmapFusion {
+					root,
+					fallback: Some(Box::new(fallback)),
+				},
+				direction,
+			)));
+		}
+	}
+
+	if candidates.is_empty() {
+		if let Some(path) = analyzer.try_or_union(analysis_cond, direction) {
+			return Ok(Some((path, direction)));
+		}
+		// A nested OR conjunct can be the only indexable part of an AND when every sibling conjunct
+		// is unindexed (e.g. an unindexed `category = $c AND (title @1@ $q OR body @2@ $q)`).
+		// `analyze` ignores OR subtrees, so there is no single-index candidate and we reach here
+		// before the score-gated check further below. With no single-index driver the union always
+		// beats the table-scan fallback, so take it unconditionally.
+		if let Some((path, _)) = analyzer.try_and_nested_or_union(analysis_cond, direction) {
+			return Ok(Some((path, direction)));
+		}
+		// Try expanding IN operators into union of equality lookups
+		if let Some(path) = analyzer.try_in_expansion(analysis_cond, direction) {
+			return Ok(Some((path, direction)));
+		}
+		// Try expanding CONTAINSALL/CONTAINSANY into union of equality lookups
+		if let Some(path) = analyzer.try_containment_expansion(analysis_cond, direction) {
+			return Ok(Some((path, direction)));
+		}
+		return Ok(Some((AccessPath::TableScan, direction)));
+	}
+
+	// Rank of the best single-index driver, captured before `select_access_path_paged` consumes
+	// `candidates`. Used below to decide whether a nested-OR multi-index union would be a better
+	// driver.
+	let best_single_score = candidates.iter().map(|c| c.rank(has_limit)).max().unwrap_or(0);
+
+	let path = select_access_path_paged(candidates, with, direction, has_limit);
+
+	// When the chosen index covers ORDER BY, derive the correct scan direction from the ORDER BY
+	// clause rather than the default `determine_scan_direction` (which only handles ORDER BY id).
+	// This enables LIMIT pushdown and sort elimination for queries like
+	// `ORDER BY metadata.payload_metadata.modified DESC LIMIT 25`.
+	let (mut path, direction) = adjust_direction_for_order(path, order, direction);
+
+	// Pre-filtered vector search: evaluate the KNN query's exactly index-coverable conjuncts into
+	// an allow-list bitmap before the ANN search, instead of fetching every visited candidate's
+	// record. Gated like bitmap fusion: no WITH hints (the user pinned the plan) and no VERSION
+	// (doc-ID mappings are not time-travel-aware).
+	if let AccessPath::KnnSearch {
+		prefilter,
+		..
+	} = &mut path
+		&& with.is_none()
+		&& !inputs.reads_versioned
+		&& *surrealdb_cnf::KNN_PREFILTER_ENABLED
+	{
+		*prefilter = knn_prefilter_plan(&analyzer, analysis_cond, inputs.fields);
+	}
+
+	// When the best single-index path is a full-range scan (ORDER BY only, no WHERE selectivity),
+	// also try a multi-index union for OR conditions. The union reads only matching rows from each
+	// branch, which is typically far better than scanning every row in the index. The outer
+	// pipeline adds a Sort when the union does not satisfy ORDER BY.
+	if path.is_full_range_scan()
+		&& let Some(union_path) = analyzer.try_or_union(analysis_cond, direction)
+	{
+		return Ok(Some((union_path, direction)));
+	}
+	// Same logic for containment expansion (CONTAINSANY / ANYINSIDE against an array-element
+	// index): the full-range scan would walk every indexed entry — typically one per array element
+	// per row — and filter post-hoc. A Union of per-value Compound prefix scans reads only the
+	// matching prefix ranges. The k-way merge with `MergeMode::ByIndexKeyDedup` preserves the
+	// trailing ORDER BY column's sort order and dedupes rows that match multiple branches.
+	if path.is_full_range_scan()
+		&& let Some(union_path) = analyzer.try_containment_expansion(analysis_cond, direction)
+	{
+		return Ok(Some((union_path, direction)));
+	}
+	// `try_in_expansion` is deliberately not tried here. The full-range scan covers ORDER BY,
+	// enabling sort elimination and early termination with the batch ceiling. Replacing it with a
+	// Union of prefix scans would require an expensive Sort of ALL matching records, which is far
+	// worse for ORDER BY + LIMIT queries. IN expansion is only helpful in the
+	// `candidates.is_empty()` fallback above when no index covers ORDER BY at all.
+
+	// When the WHERE clause is a conjunction and one conjunct is a pure OR whose every branch is
+	// independently indexable, consider driving from that OR's multi-index union and applying the
+	// remaining conjuncts as a residual filter. A nested OR of full-text matches like
+	// `type = $t AND (title @1@ $q OR body @2@ $q)` should not drive from the low-selectivity
+	// `type` equality, which would evaluate the OR as a per-row filter — re-scoring the FT index
+	// for every `type` row. Switch only when the union's weakest branch is more selective than the
+	// chosen single-index driver (higher score); this keeps a selective unique/compound equality
+	// (or an ORDER BY-covering scan, which carries the +100 order bonus) as the driver.
+	if with.is_none()
+		&& let Some((union_path, union_score)) =
+			analyzer.try_and_nested_or_union(analysis_cond, direction)
+		&& union_score > best_single_score
+	{
+		return Ok(Some((union_path, direction)));
+	}
+
+	Ok(Some((path, direction)))
+}
+
+/// The pre-filter plan of a KNN access path: the KNN-stripped condition split per conjunct, those
+/// whose truth set is exactly a candidate bitmap joining the allow-list and the rest staying the
+/// true residual. `None` when the declared fields could not be read, which only costs the
+/// optimisation.
+fn knn_prefilter_plan(
+	analyzer: &super::analysis::IndexAnalyzer<'_>,
+	cond: Option<&LogicalExpr>,
+	fields: Option<&[FieldDefinition]>,
+) -> Option<KnnPrefilterPlan> {
+	let cond = cond?;
+	let stripped = strip_knn_from_condition(cond)?;
+	let fields = fields?;
+	let exact_col = |col: &Idiom| -> bool {
+		fields
+			.iter()
+			.find(|fd| &fd.name == col)
+			.and_then(|fd| fd.field_kind.as_ref())
+			.is_some_and(field_kind_excludes_arrays)
+	};
+	let mut plan = analyzer.try_knn_prefilter(&stripped, &exact_col)?;
+	// The plan indexes the chain of `stripped`, which has no KNN conjunct; its indexes are
+	// restated in the chain of `cond`.
+	let kept: Vec<usize> = crate::exec::logical::conjuncts(cond)
+		.into_iter()
+		.enumerate()
+		.filter(|(_, conjunct)| strip_knn_from_condition(conjunct).is_some())
+		.map(|(at, _)| at)
+		.collect();
+	if kept.len() != crate::exec::logical::conjuncts(&stripped).len() {
+		return None;
+	}
+	plan.covered = plan.covered.iter().map(|at| kept[*at]).collect();
+	Some(plan)
+}
+
 #[cfg(test)]
 mod range_comparison_tests {
 	use std::ops::Bound;
@@ -1659,12 +2372,10 @@ mod range_comparison_tests {
 	use crate::val::{Number, Range, Value};
 
 	fn below(v: Value) -> BTreeAccess {
-		BTreeAccess::Range {
-			range: Range {
-				start: Bound::Unbounded,
-				end: Bound::Excluded(v),
-			},
-		}
+		BTreeAccess::literal_range(Range {
+			start: Bound::Unbounded,
+			end: Bound::Excluded(v),
+		})
 	}
 
 	#[test]
@@ -1682,1087 +2393,8 @@ mod range_comparison_tests {
 		] {
 			assert_eq!(range_matches_comparison(&below(bound.clone())), exact, "{bound:?}");
 		}
-		assert!(range_matches_comparison(&BTreeAccess::Equality(Value::Number(Number::Float(
-			0.1
-		)))));
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	//! Unit tests for the plan-time access-path types.
-	//!
-	//! Four concerns, one nested module each:
-	//!
-	//! - [`index_ref`] — how an [`IndexRef`] resolves and compares, which the analyser's candidate
-	//!   dedupe and the union planner both rely on.
-	//! - [`full_range`] — the `is_full_range_scan` flag the SELECT planner reads before swapping a
-	//!   selectivity-free index scan for a multi-index union.
-	//! - [`describe`] — the `access:` attribute rendered into EXPLAIN output.
-	//! - [`selection`] — `select_access_path` hint precedence and scoring.
-	//! - [`residual`] — which WHERE conjuncts the chosen shape lets the planner drop from the
-	//!   residual filter. Both directions matter: keeping a covered leaf only costs time, dropping
-	//!   an uncovered one returns wrong rows.
-	//! - [`array_columns`] — which b-tree columns `with_array_columns_as_elements` plans as element
-	//!   columns, from the field kinds declared for them.
-
-	use std::str::FromStr;
-
-	use surrealdb_strand::Strand;
-	use surrealdb_types::ToSql;
-
-	use super::*;
-	use crate::catalog::{FullTextParams, Index, IndexId, Scoring};
-	use crate::exec::index::IndexCandidate;
-	use crate::exec::planner::util::strip_index_conditions;
-	use crate::expr::Idiom;
-	use crate::expr::logical::lower_expr;
-	use crate::expr::operator::{BooleanOperator, MatchesOperator};
-
-	// ------------------------------------------------------------------
-	// Fixtures
-	// ------------------------------------------------------------------
-
-	/// A minimal `IndexDefinition`. `index_id` is synthetic — nothing here
-	/// touches the catalog.
-	fn idx_def(id: u32, name: &str, cols: &[&str], kind: Index) -> IndexDefinition {
-		IndexDefinition {
-			index_id: IndexId(id),
-			name: Strand::from(name),
-			table_name: "t".into(),
-			cols: cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect(),
-			index: kind,
-			count_cond: None,
-			comment: None,
-			prepare_remove: false,
-			format_version: 1,
-		}
-	}
-
-	fn idx_basic(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
-		idx_def(id, name, cols, Index::Idx)
-	}
-
-	fn idx_uniq(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
-		idx_def(id, name, cols, Index::Uniq)
-	}
-
-	fn idx_ft(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
-		idx_def(
-			id,
-			name,
-			cols,
-			Index::FullText(FullTextParams {
-				analyzer: "simple".into(),
-				highlight: false,
-				scoring: Scoring::Bm {
-					k1: 1.2,
-					b: 0.75,
-				},
-			}),
-		)
-	}
-
-	/// Wrap definitions in the shared list an [`IndexRef`] indexes into.
-	fn refs(defs: Vec<IndexDefinition>) -> Arc<[IndexDefinition]> {
-		Arc::<[_]>::from(defs.into_boxed_slice())
-	}
-
-	fn index_ref(defs: Vec<IndexDefinition>, idx: usize) -> IndexRef {
-		IndexRef::new(&refs(defs), idx)
-	}
-
-	fn candidate(defs: Vec<IndexDefinition>, idx: usize, access: BTreeAccess) -> IndexCandidate {
-		IndexCandidate::new(index_ref(defs, idx), access)
-	}
-
-	fn matches_op() -> MatchesOperator {
-		MatchesOperator {
-			rf: None,
-			operator: BooleanOperator::And,
-		}
-	}
-
-	fn num(n: i64) -> Value {
-		Value::from(n)
-	}
-
-	fn range(start: Bound<Value>, end: Bound<Value>) -> BTreeAccess {
-		BTreeAccess::Range {
-			range: Range {
-				start,
-				end,
-			},
-		}
-	}
-
-	/// Parse `snippet` as the WHERE clause of a SELECT so the tests state
-	/// predicates as source text rather than hand-built AST nodes.
-	fn parse_cond(snippet: &str) -> LogicalExpr {
-		let src = format!("SELECT * FROM t WHERE {snippet}");
-		let ast = crate::syn::parse(&src).expect("parse");
-		let mut exprs = ast.expressions;
-		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
-		match exprs.remove(0) {
-			surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Select(s)) => {
-				lower_expr(s.cond.expect("WHERE").0).expect("lowers")
-			}
-			other => panic!("expected SELECT, got {other:?}"),
-		}
-	}
-
-	/// The residual WHERE left after the given access shape consumed what it
-	/// covers, rendered as SurrealQL. `None` means the index consumed all of it
-	/// and the planner installs no Filter.
-	fn residual(cond: &str, access: &BTreeAccess, cols: &[&str]) -> Option<String> {
-		let cols: Vec<Idiom> =
-			cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect();
-		strip_index_conditions(&parse_cond(cond), access, &cols).map(|c| c.to_sql())
-	}
-
-	// ------------------------------------------------------------------
-	// 1. IndexRef
-	// ------------------------------------------------------------------
-	mod index_ref {
-		use super::*;
-
-		#[test]
-		fn resolves_the_definition_at_its_own_position() {
-			let r =
-				index_ref(vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b", "c"])], 1);
-			assert_eq!(r.definition().name.as_str(), "ix_b");
-			// Deref reaches the same definition's fields directly.
-			assert_eq!(r.cols.len(), 2);
-		}
-
-		#[test]
-		fn is_unique_holds_only_for_the_uniq_kind() {
-			assert!(!index_ref(vec![idx_basic(1, "ix", &["a"])], 0).is_unique());
-			assert!(index_ref(vec![idx_uniq(1, "ix", &["a"])], 0).is_unique());
-			assert!(
-				!index_ref(vec![idx_ft(1, "ix", &["a"])], 0).is_unique(),
-				"a full-text index is not a unique b-tree"
-			);
-		}
-
-		#[test]
-		fn identity_is_the_definition_and_its_position() {
-			use std::collections::hash_map::DefaultHasher;
-			use std::hash::{Hash, Hasher};
-
-			fn hash(r: &IndexRef) -> u64 {
-				let mut h = DefaultHasher::new();
-				r.hash(&mut h);
-				h.finish()
-			}
-
-			let list = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
-			let first = index_ref(list.clone(), 0);
-			let second = index_ref(list.clone(), 1);
-			assert_ne!(first, second);
-			assert_ne!(hash(&first), hash(&second));
-
-			// References compare by value, not by the list they were drawn
-			// from: equal definitions at one position are the same reference
-			// whichever list holds them, and a clone shares its definition.
-			let again = index_ref(list, 0);
-			assert_eq!(first, again);
-			assert_eq!(hash(&first), hash(&again));
-			assert_eq!(first, first.clone());
-
-			// A different definition at the same position is a different
-			// index.
-			let other_list = index_ref(vec![idx_uniq(9, "unrelated", &["z"])], 0);
-			assert_ne!(first, other_list);
-		}
-
-		#[test]
-		fn holds_the_one_definition_it_names() {
-			let list = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
-			let r = index_ref(list.clone(), 1);
-			assert_eq!(r.definition(), &list[1]);
-			assert_eq!(r.idx, 1);
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// 2. is_full_range_scan — read by the planner before union substitution
-	// ------------------------------------------------------------------
-	mod full_range {
-		use super::*;
-
-		fn btree(access: BTreeAccess) -> AccessPath {
-			AccessPath::BTreeScan {
-				index_ref: index_ref(vec![idx_basic(1, "ix_a", &["a"])], 0),
-				access,
-				direction: Direction::Forward,
-			}
-		}
-
-		#[test]
-		fn doubly_unbounded_btree_range_is_a_full_range_scan() {
-			assert!(btree(range(Bound::Unbounded, Bound::Unbounded)).is_full_range_scan());
-		}
-
-		#[test]
-		fn any_bound_makes_the_scan_selective() {
-			for access in [
-				range(Bound::Included(num(1)), Bound::Unbounded),
-				range(Bound::Excluded(num(1)), Bound::Unbounded),
-				range(Bound::Unbounded, Bound::Included(num(9))),
-				range(Bound::Unbounded, Bound::Excluded(num(9))),
-				range(Bound::Included(num(1)), Bound::Included(num(9))),
-			] {
-				assert!(
-					!btree(access.clone()).is_full_range_scan(),
-					"{} carries WHERE selectivity",
-					access.describe()
-				);
-			}
-		}
-
-		#[test]
-		fn other_shapes_are_never_full_range_scans() {
-			let ft = index_ref(vec![idx_ft(1, "ix_ft", &["body"])], 0);
-			let paths = vec![
-				AccessPath::TableScan,
-				AccessPath::EmptyScan,
-				btree(BTreeAccess::Equality(num(1))),
-				// A prefix-less compound covers the whole index but is not
-				// recognised as a full-range scan.
-				btree(BTreeAccess::Compound {
-					prefix: vec![],
-					range: None,
-				}),
-				AccessPath::FullTextSearch {
-					index_ref: ft.clone(),
-					query: "hello".to_owned(),
-					operator: matches_op(),
-				},
-				AccessPath::KnnSearch {
-					index_ref: ft,
-					vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
-					k: 3,
-					ef: 10,
-					prefilter: None,
-				},
-				AccessPath::Union {
-					paths: vec![btree(range(Bound::Unbounded, Bound::Unbounded))],
-					dedupe: true,
-				},
-			];
-			for path in paths {
-				assert!(!path.is_full_range_scan(), "{path:?} is not a full-range b-tree scan");
-			}
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// 3. describe — the EXPLAIN `access:` attribute
-	// ------------------------------------------------------------------
-	mod describe {
-		use super::*;
-
-		#[test]
-		fn equality_renders_the_sql_literal() {
-			assert_eq!(BTreeAccess::Equality(num(5)).describe(), "= 5");
-			assert_eq!(BTreeAccess::Equality(Value::from("x")).describe(), "= 'x'");
-			assert_eq!(BTreeAccess::Equality(Value::None).describe(), "= NONE");
-		}
-
-		#[test]
-		fn every_range_bound_combination_renders() {
-			let cases = [
-				(Bound::Included(num(1)), Bound::Included(num(9)), ">=1 <=9"),
-				(Bound::Included(num(1)), Bound::Excluded(num(9)), ">=1 <9"),
-				(Bound::Excluded(num(1)), Bound::Included(num(9)), ">1 <=9"),
-				(Bound::Excluded(num(1)), Bound::Excluded(num(9)), ">1 <9"),
-				(Bound::Included(num(1)), Bound::Unbounded, ">=1"),
-				(Bound::Excluded(num(1)), Bound::Unbounded, ">1"),
-				(Bound::Unbounded, Bound::Included(num(9)), "<=9"),
-				(Bound::Unbounded, Bound::Excluded(num(9)), "<9"),
-				// A doubly-unbounded range describes as nothing at all.
-				(Bound::Unbounded, Bound::Unbounded, ""),
-			];
-			for (start, end, expected) in cases {
-				assert_eq!(range(start, end).describe(), expected);
-			}
-		}
-
-		#[test]
-		fn compound_renders_the_prefix_and_any_range() {
-			let prefix = vec![num(1), Value::from("b")];
-			assert_eq!(
-				BTreeAccess::Compound {
-					prefix: prefix.clone(),
-					range: None,
-				}
-				.describe(),
-				"[1, 'b']"
-			);
-			assert_eq!(
-				BTreeAccess::Compound {
-					prefix,
-					range: Some((BinaryOperator::MoreThan, num(3))),
-				}
-				.describe(),
-				"[1, 'b'] MoreThan 3"
-			);
-		}
-
-		#[test]
-		fn fulltext_and_knn_render_their_own_shorthand() {
-			assert_eq!(
-				BTreeAccess::FullText {
-					query: "hello world".to_owned(),
-					operator: matches_op(),
-				}
-				.describe(),
-				"@@ hello world"
-			);
-			assert_eq!(
-				BTreeAccess::Knn {
-					vector: KnnQueryVector::Literal(vec![Number::Int(1), Number::Int(2)].into()),
-					k: 4,
-					ef: 40,
-				}
-				.describe(),
-				"knn 4"
-			);
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// 4. select_access_path
-	// ------------------------------------------------------------------
-	mod selection {
-		use super::*;
-
-		fn defs() -> Vec<IndexDefinition> {
-			vec![idx_basic(1, "ix_a", &["a"]), idx_uniq(2, "ix_b", &["b"])]
-		}
-
-		fn scan_index(path: &AccessPath) -> &str {
-			match path {
-				AccessPath::BTreeScan {
-					index_ref,
-					..
-				} => index_ref.name.as_str(),
-				other => panic!("expected BTreeScan, got {other:?}"),
-			}
-		}
-
-		#[test]
-		fn noindex_hint_forces_a_table_scan() {
-			// Outranks everything, including a candidate the analyser proved
-			// empty (which would otherwise short-circuit the whole pipeline).
-			let mut empty = candidate(defs(), 1, BTreeAccess::Equality(num(1)));
-			empty.empty = true;
-			let path = select_access_path(vec![empty], Some(&With::NoIndex), Direction::Forward);
-			assert!(matches!(path, AccessPath::TableScan));
-		}
-
-		#[test]
-		fn named_hint_wins_over_a_better_scoring_candidate() {
-			// `ix_b` is a unique equality (score 1000) and `ix_a` a
-			// half-bounded range (200), yet the hint decides.
-			let candidates = vec![
-				candidate(defs(), 0, range(Bound::Included(num(1)), Bound::Unbounded)),
-				candidate(defs(), 1, BTreeAccess::Equality(num(1))),
-			];
-			let with = With::Index(vec!["ix_a".to_owned()]);
-			let path = select_access_path(candidates, Some(&with), Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_a");
-		}
-
-		#[test]
-		fn hint_name_order_decides_between_two_hinted_candidates() {
-			let candidates = vec![
-				candidate(defs(), 0, BTreeAccess::Equality(num(1))),
-				candidate(defs(), 1, BTreeAccess::Equality(num(1))),
-			];
-			// The names are searched in the order the user wrote them, not in
-			// candidate order.
-			let with = With::Index(vec!["ix_b".to_owned(), "ix_a".to_owned()]);
-			let path = select_access_path(candidates, Some(&with), Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_b");
-		}
-
-		#[test]
-		fn unmatched_hint_falls_back_to_best_effort_selection() {
-			let candidates = vec![candidate(defs(), 1, BTreeAccess::Equality(num(1)))];
-			let with = With::Index(vec!["nonexistent".to_owned()]);
-			let path = select_access_path(candidates, Some(&with), Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_b", "an unmatched hint does not veto the plan");
-		}
-
-		#[test]
-		fn no_candidates_is_a_table_scan() {
-			assert!(matches!(
-				select_access_path(vec![], None, Direction::Forward),
-				AccessPath::TableScan
-			));
-		}
-
-		#[test]
-		fn an_empty_candidate_short_circuits_to_empty_scan() {
-			// `empty` scores u32::MAX, so it wins over any real access shape
-			// and `to_access_path` discards the shape entirely.
-			let mut empty = candidate(defs(), 0, range(Bound::Included(num(1)), Bound::Unbounded));
-			empty.empty = true;
-			let candidates = vec![candidate(defs(), 1, BTreeAccess::Equality(num(1))), empty];
-			let path = select_access_path(candidates, None, Direction::Forward);
-			assert!(matches!(path, AccessPath::EmptyScan));
-		}
-
-		#[test]
-		fn a_score_tie_resolves_to_the_first_index_in_catalog_order() {
-			// Both candidates are non-unique equalities, so they tie at 500
-			// and catalog position decides. The fixture lists them in catalog
-			// order, which for a real table is name order.
-			let defs = vec![idx_basic(1, "ix_a1", &["a"]), idx_basic(2, "ix_a2", &["a"])];
-			let candidates = vec![
-				candidate(defs.clone(), 0, BTreeAccess::Equality(num(1))),
-				candidate(defs, 1, BTreeAccess::Equality(num(1))),
-			];
-			let path = select_access_path(candidates, None, Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_a1");
-		}
-
-		#[test]
-		fn a_score_tie_resolves_the_same_way_whatever_order_candidates_arrive_in() {
-			let defs = vec![idx_basic(1, "ix_a1", &["a"]), idx_basic(2, "ix_a2", &["a"])];
-			let reversed = vec![
-				candidate(defs.clone(), 1, BTreeAccess::Equality(num(1))),
-				candidate(defs, 0, BTreeAccess::Equality(num(1))),
-			];
-			let path = select_access_path(reversed, None, Direction::Forward);
-			assert_eq!(scan_index(&path), "ix_a1");
-		}
-
-		#[test]
-		fn the_requested_direction_reaches_the_btree_scan() {
-			let candidates = vec![candidate(defs(), 1, BTreeAccess::Equality(num(1)))];
-			let path = select_access_path(candidates, None, Direction::Backward);
-			match path {
-				AccessPath::BTreeScan {
-					direction,
-					..
-				} => assert_eq!(direction, Direction::Backward),
-				other => panic!("expected BTreeScan, got {other:?}"),
-			}
-		}
-
-		#[test]
-		fn specialised_access_shapes_get_their_own_path_kind() {
-			// A full-text or KNN candidate must not become a b-tree scan —
-			// those shapes are executed by dedicated operators.
-			let ft_defs = vec![idx_ft(1, "ix_ft", &["body"])];
-			let ft = candidate(
-				ft_defs.clone(),
-				0,
-				BTreeAccess::FullText {
-					query: "hello".to_owned(),
-					operator: matches_op(),
-				},
-			);
-			assert!(matches!(
-				select_access_path(vec![ft], None, Direction::Forward),
-				AccessPath::FullTextSearch { .. }
-			));
-
-			let knn = candidate(
-				ft_defs,
-				0,
-				BTreeAccess::Knn {
-					vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
-					k: 3,
-					ef: 10,
-				},
-			);
-			assert!(matches!(
-				select_access_path(vec![knn], None, Direction::Forward),
-				AccessPath::KnnSearch {
-					k: 3,
-					ef: 10,
-					..
-				}
-			));
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// 5. Residual WHERE after the access path consumed what it covers
-	// ------------------------------------------------------------------
-	mod residual {
-		use super::*;
-
-		#[test]
-		fn equality_consumes_its_own_leaf_and_leaves_the_rest() {
-			let access = BTreeAccess::Equality(num(5));
-			assert_eq!(residual("a = 5", &access, &["a"]), None);
-			assert_eq!(residual("a = 5 AND b = 1", &access, &["a"]), Some("b = 1".to_owned()));
-		}
-
-		#[test]
-		fn equality_on_another_value_or_column_is_retained() {
-			let access = BTreeAccess::Equality(num(5));
-			// The seek is on 5; a leaf comparing against 6 still has to run.
-			assert_eq!(residual("a = 6", &access, &["a"]), Some("a = 6".to_owned()));
-			assert_eq!(residual("b = 5", &access, &["a"]), Some("b = 5".to_owned()));
-		}
-
-		#[test]
-		fn range_consumes_only_the_leaf_its_bound_came_from() {
-			let access = range(Bound::Excluded(num(5)), Bound::Unbounded);
-			assert_eq!(residual("a > 5", &access, &["a"]), None);
-			// An inclusive leaf admits `a = 5`, which the exclusive bound skips.
-			assert_eq!(residual("a >= 5", &access, &["a"]), Some("a >= 5".to_owned()));
-			assert_eq!(residual("a > 6", &access, &["a"]), Some("a > 6".to_owned()));
-		}
-
-		#[test]
-		fn a_bounded_range_consumes_both_of_its_leaves() {
-			let access = range(Bound::Included(num(1)), Bound::Excluded(num(9)));
-			assert_eq!(residual("a >= 1 AND a < 9", &access, &["a"]), None);
-		}
-
-		#[test]
-		fn flipped_operand_order_is_still_consumed() {
-			// `5 < a` is the same constraint as `a > 5`.
-			let access = range(Bound::Excluded(num(5)), Bound::Unbounded);
-			assert_eq!(residual("5 < a", &access, &["a"]), None);
-		}
-
-		#[test]
-		fn compound_prefix_consumes_positional_equalities() {
-			let access = BTreeAccess::Compound {
-				prefix: vec![num(1), num(2)],
-				range: None,
-			};
-			assert_eq!(residual("a = 1 AND b = 2", &access, &["a", "b", "c"]), None);
-			assert_eq!(
-				residual("a = 1 AND b = 2 AND c = 3", &access, &["a", "b", "c"]),
-				Some("c = 3".to_owned()),
-				"no prefix value pins c"
-			);
-		}
-
-		#[test]
-		fn a_prefix_value_at_the_wrong_column_is_retained() {
-			// prefix [1, 2] pins a = 1 and b = 2. `a = 2` matches a prefix
-			// *value* but not at a's position, so dropping it would return
-			// rows where a = 1.
-			let access = BTreeAccess::Compound {
-				prefix: vec![num(1), num(2)],
-				range: None,
-			};
-			assert_eq!(residual("a = 2", &access, &["a", "b"]), Some("a = 2".to_owned()));
-			assert_eq!(residual("b = 1", &access, &["a", "b"]), Some("b = 1".to_owned()));
-		}
-
-		#[test]
-		fn compound_range_is_consumed_only_on_the_column_after_the_prefix() {
-			let access = BTreeAccess::Compound {
-				prefix: vec![num(1)],
-				range: Some((BinaryOperator::MoreThan, num(2))),
-			};
-			assert_eq!(residual("a = 1 AND b > 2", &access, &["a", "b", "c"]), None);
-			// Same operator and value, wrong column.
-			assert_eq!(
-				residual("a = 1 AND c > 2", &access, &["a", "b", "c"]),
-				Some("c > 2".to_owned())
-			);
-			// Right column, different operator.
-			assert_eq!(
-				residual("a = 1 AND b >= 2", &access, &["a", "b", "c"]),
-				Some("b >= 2".to_owned())
-			);
-		}
-
-		#[test]
-		fn not_none_is_consumed_through_its_exclusive_none_encoding() {
-			// `a != NONE` is analysed into a range excluding NONE, and into a
-			// compound `(MoreThan, NONE)` after an equality prefix.
-			let as_range = range(Bound::Excluded(Value::None), Bound::Unbounded);
-			assert_eq!(residual("a != NONE", &as_range, &["a"]), None);
-
-			let as_compound = BTreeAccess::Compound {
-				prefix: vec![num(1)],
-				range: Some((BinaryOperator::MoreThan, Value::None)),
-			};
-			assert_eq!(residual("a = 1 AND b != NONE", &as_compound, &["a", "b"]), None);
-		}
-
-		#[test]
-		fn a_leaf_under_or_is_never_consumed() {
-			// Stripping stops at AND boundaries: an OR branch is only a
-			// candidate for the whole predicate, never for a partial strip.
-			let access = BTreeAccess::Equality(num(5));
-			assert_eq!(
-				residual("a = 5 OR b = 1", &access, &["a"]),
-				Some("a = 5 OR b = 1".to_owned())
-			);
-		}
-
-		#[test]
-		fn single_element_in_is_consumed_only_with_the_idiom_on_the_left() {
-			let access = BTreeAccess::Equality(num(5));
-			// `a IN [5]` is the analyser's canonical form for `a = 5`.
-			assert_eq!(residual("a IN [5]", &access, &["a"]), None);
-			// `[5] INSIDE a` means `[5].contains(a)` — different semantics, and
-			// the analyser produces no candidate for it, so it must stay.
-			assert_eq!(residual("[5] INSIDE a", &access, &["a"]), Some("[5] INSIDE a".to_owned()));
-		}
-
-		#[test]
-		fn containment_is_consumed_only_on_an_array_element_column() {
-			// The analyser turns `tags CONTAINS 'x'` on a `tags.*` index into
-			// an equality seek, so the leaf is already enforced by the range.
-			let access = BTreeAccess::Equality(Value::from("x"));
-			assert_eq!(residual("tags CONTAINS 'x'", &access, &["tags.*"]), None);
-			// The same leaf against a scalar column is not covered.
-			assert_eq!(
-				residual("tags CONTAINS 'x'", &access, &["tags"]),
-				Some("tags CONTAINS 'x'".to_owned())
-			);
-		}
-
-		#[test]
-		fn a_non_literal_operand_is_retained() {
-			// Only plan-time literals can be compared against the seek value.
-			let access = BTreeAccess::Equality(num(5));
-			assert_eq!(residual("a = $p", &access, &["a"]), Some("a = $p".to_owned()));
-		}
-
-		#[test]
-		fn fulltext_and_knn_shapes_consume_nothing() {
-			// Those paths have their own strippers; this one must not touch
-			// their predicates.
-			let ft = BTreeAccess::FullText {
-				query: "hello".to_owned(),
-				operator: matches_op(),
-			};
-			assert_eq!(residual("a = 5", &ft, &["a"]), Some("a = 5".to_owned()));
-
-			let knn = BTreeAccess::Knn {
-				vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
-				k: 3,
-				ef: 10,
-			};
-			assert_eq!(residual("a = 5", &knn, &["a"]), Some("a = 5".to_owned()));
-		}
-	}
-
-	mod array_columns {
-		use super::*;
-
-		fn field(name: &str, kind: Option<Kind>) -> FieldDefinition {
-			FieldDefinition {
-				name: Idiom::from_str(name).expect("valid idiom"),
-				field_kind: kind,
-				..Default::default()
-			}
-		}
-
-		/// The columns of the first index after the rewrite, as SurrealQL.
-		fn planned(cols: &[&str], kind: Index, fields: &[FieldDefinition]) -> Vec<String> {
-			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", cols, kind)].into();
-			with_array_columns_as_elements(indexes, fields, &TableIndexShapes::default()).indexes[0]
-				.cols
-				.iter()
-				.map(|c| c.to_sql())
-				.collect()
-		}
-
-		fn array_of_strings() -> Kind {
-			Kind::Array(Box::new(Kind::String), None)
-		}
-
-		#[test]
-		fn a_column_whose_kind_holds_only_arrays_is_planned_as_its_elements() {
-			let kinds = [
-				array_of_strings(),
-				Kind::Either(vec![Kind::None, array_of_strings()]),
-				Kind::Either(vec![Kind::None, Kind::Null, array_of_strings()]),
-				Kind::Literal(KindLiteral::Array(vec![Kind::String])),
-			];
-			for kind in kinds {
-				let fields = [field("acl", Some(kind.clone()))];
-				assert_eq!(planned(&["acl"], Index::Idx, &fields), ["acl.*"], "{kind:?}");
-				assert_eq!(planned(&["acl"], Index::Uniq, &fields), ["acl.*"], "{kind:?}");
-			}
-		}
-
-		#[test]
-		fn only_the_columns_that_admit_an_array_change() {
-			let fields =
-				[field("acl", Some(array_of_strings())), field("name", Some(Kind::String))];
-			assert_eq!(planned(&["name", "acl"], Index::Idx, &fields), ["name", "acl.*"]);
-		}
-
-		#[test]
-		fn a_column_that_can_store_a_whole_value_is_taken_as_written() {
-			let kinds = [
-				Kind::String,
-				Kind::Either(vec![Kind::None, Kind::Int]),
-				// A set is stored whole, not one entry per element.
-				Kind::Set(Box::new(Kind::String), None),
-				Kind::Object,
-				// A kind that also admits a scalar: a string is stored whole, so an
-				// element seek misses the substring `CONTAINS` finds in it.
-				Kind::Any,
-				Kind::Either(vec![Kind::String, array_of_strings()]),
-				Kind::Either(vec![Kind::None, Kind::Null]),
-			];
-			for kind in kinds {
-				let fields = [field("acl", Some(kind.clone()))];
-				assert_eq!(planned(&["acl"], Index::Idx, &fields), ["acl"], "{kind:?}");
-			}
-		}
-
-		#[test]
-		fn an_undeclared_kind_is_taken_as_written() {
-			assert_eq!(planned(&["acl"], Index::Idx, &[field("acl", None)]), ["acl"]);
-			assert_eq!(planned(&["acl"], Index::Idx, &[]), ["acl"]);
-		}
-
-		#[test]
-		fn a_column_already_over_elements_or_flattened_is_taken_as_written() {
-			let fields = [field("acl", Some(array_of_strings()))];
-			let fields_flat = [field("acl…", Some(array_of_strings()))];
-			assert_eq!(planned(&["acl.*"], Index::Idx, &fields), ["acl.*"]);
-			assert_eq!(planned(&["acl…"], Index::Idx, &fields_flat), ["acl…"]);
-		}
-
-		#[test]
-		fn only_btree_indexes_are_rewritten() {
-			let fields = [field("acl", Some(array_of_strings()))];
-			assert_eq!(planned(&["acl"], Index::Count(None), &fields), ["acl"]);
-		}
-
-		#[test]
-		fn a_union_is_read_through_at_any_depth() {
-			let nested = Kind::Either(vec![
-				Kind::None,
-				Kind::Either(vec![array_of_strings(), Kind::Array(Box::new(Kind::Int), None)]),
-			]);
-			assert_eq!(planned(&["acl"], Index::Idx, &[field("acl", Some(nested))]), ["acl.*"]);
-			let nested_scalar = Kind::Either(vec![
-				array_of_strings(),
-				Kind::Either(vec![Kind::None, Kind::String]),
-			]);
-			assert_eq!(
-				planned(&["acl"], Index::Idx, &[field("acl", Some(nested_scalar))]),
-				["acl"]
-			);
-		}
-
-		#[test]
-		fn an_ancestor_object_literal_declares_the_column_kind() {
-			let object = |kind: Kind| {
-				Kind::Literal(KindLiteral::Object(
-					[(Strand::from("tags"), kind)].into_iter().collect(),
-				))
-			};
-			let declared = [field("metadata", Some(object(array_of_strings())))];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &declared), ["metadata.tags.*"]);
-			// An optional parent reads its fields as NONE, which an element
-			// column stores as the column does.
-			let optional = [field(
-				"metadata",
-				Some(Kind::Either(vec![Kind::None, object(array_of_strings())])),
-			)];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &optional), ["metadata.tags.*"]);
-			let scalar = [field("metadata", Some(object(Kind::String)))];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &scalar), ["metadata.tags"]);
-			// A plain `object` declares nothing about its fields.
-			let opaque = [field("metadata", Some(Kind::Object))];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &opaque), ["metadata.tags"]);
-			// The column's own definition wins over its ancestor's literal.
-			let both = [
-				field("metadata", Some(object(array_of_strings()))),
-				field("metadata.tags", Some(Kind::String)),
-			];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &both), ["metadata.tags"]);
-			// A definition of the column that declares no kind leaves the
-			// ancestor's literal in force.
-			let untyped_child =
-				[field("metadata", Some(object(array_of_strings()))), field("metadata.tags", None)];
-			assert_eq!(
-				planned(&["metadata.tags"], Index::Idx, &untyped_child),
-				["metadata.tags.*"]
-			);
-			// An untyped definition that produces its own value replaces what
-			// the ancestor's type coerced, unchecked: the kind is unknown.
-			let value = |fd: FieldDefinition| FieldDefinition {
-				value: Some(crate::syn::expr("'scalar'").expect("expr")),
-				..fd
-			};
-			let default = |fd: FieldDefinition| FieldDefinition {
-				default: DefineDefault::Set(crate::syn::expr("'scalar'").expect("expr")),
-				..fd
-			};
-			for produce in [value, default] {
-				let child = [
-					field("metadata", Some(object(array_of_strings()))),
-					produce(field("metadata.tags", None)),
-				];
-				assert_eq!(planned(&["metadata.tags"], Index::Idx, &child), ["metadata.tags"]);
-			}
-			// The same holds for one on the way between the ancestor and the
-			// column.
-			let nested = Kind::Literal(KindLiteral::Object(
-				[(Strand::from("inner"), object(array_of_strings()))].into_iter().collect(),
-			));
-			let between = [field("metadata", Some(nested)), value(field("metadata.inner", None))];
-			assert_eq!(
-				planned(&["metadata.inner.tags"], Index::Idx, &between),
-				["metadata.inner.tags"]
-			);
-			// The nearest typed definition settles it, even when its type is
-			// not a literal that reaches the column.
-			let nearer = [
-				field("metadata", Some(object(array_of_strings()))),
-				field("metadata.tags", Some(Kind::Any)),
-			];
-			assert_eq!(planned(&["metadata.tags"], Index::Idx, &nearer), ["metadata.tags"]);
-		}
-
-		#[test]
-		fn a_column_through_an_element_path_is_taken_as_written() {
-			// `items[*].tags` stores each item's array whole, one entry per
-			// item, so its entries are arrays rather than their elements.
-			let fields = [field("items[*].tags", Some(array_of_strings()))];
-			assert_eq!(planned(&["items[*].tags"], Index::Idx, &fields), ["items.*.tags"]);
-		}
-
-		#[test]
-		fn a_partly_rewritten_list_keeps_every_index_in_place() {
-			let indexes: Arc<[IndexDefinition]> = vec![
-				idx_def(1, "a", &["name"], Index::Idx),
-				idx_def(2, "b", &["acl"], Index::Idx),
-				idx_def(3, "c", &["name"], Index::Uniq),
-			]
-			.into();
-			let fields =
-				[field("acl", Some(array_of_strings())), field("name", Some(Kind::String))];
-			let out =
-				with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
-			let flags: Vec<Vec<bool>> =
-				out.rewritten.as_deref().expect("rewritten").iter().map(|f| f.to_vec()).collect();
-			assert_eq!(flags, [vec![], vec![true], vec![]]);
-			let cols: Vec<_> =
-				out.indexes.iter().map(|ix| (ix.name.as_str(), ix.cols[0].to_sql())).collect();
-			assert_eq!(
-				cols,
-				[("a", "name".to_owned()), ("b", "acl.*".to_owned()), ("c", "name".to_owned())]
-			);
-		}
-
-		#[test]
-		fn the_field_list_is_needed_only_for_a_btree_column_without_a_flatten_or_with_elements() {
-			let with = |cols: &[&str], kind: Index| {
-				may_have_array_columns(&[idx_def(1, "ix", cols, kind)])
-			};
-			assert!(with(&["acl"], Index::Idx));
-			assert!(with(&["acl.*", "name"], Index::Uniq));
-			// A column over elements may flatten a set.
-			assert!(with(&["acl.*"], Index::Idx));
-			assert!(!with(&["acl…"], Index::Idx));
-			assert!(!with(&["acl"], Index::Count(None)));
-		}
-
-		fn set_of_strings() -> Kind {
-			Kind::Set(Box::new(Kind::String), None)
-		}
-
-		/// Per index, whether each column flattens a set.
-		fn set_flags(columns: &ElementColumns) -> Vec<Vec<bool>> {
-			columns
-				.sets
-				.as_deref()
-				.map(|sets| sets.iter().map(|f| f.to_vec()).collect())
-				.unwrap_or_default()
-		}
-
-		#[test]
-		fn a_column_that_flattens_a_set_is_reported_and_kept() {
-			let indexes: Arc<[IndexDefinition]> = vec![
-				idx_def(1, "a", &["account", "tags.*"], Index::Idx),
-				idx_def(2, "b", &["acl.*"], Index::Uniq),
-				idx_def(3, "c", &["tags.*"], Index::Count(None)),
-			]
-			.into();
-			let fields = [
-				field("tags", Some(Kind::Either(vec![Kind::None, set_of_strings()]))),
-				field("acl", Some(array_of_strings())),
-			];
-			let out = with_array_columns_as_elements(
-				Arc::clone(&indexes),
-				&fields,
-				&TableIndexShapes::default(),
-			);
-			// The index stays in the list, in place: only its set column is
-			// reported.
-			assert!(Arc::ptr_eq(&indexes, &out.indexes));
-			assert_eq!(set_flags(&out), [vec![false, true], vec![false], vec![]]);
-		}
-
-		#[test]
-		fn a_set_declared_by_an_ancestor_literal_or_tuple_is_found() {
-			let object = Kind::Literal(KindLiteral::Object(
-				[(Strand::from("tags"), set_of_strings())].into_iter().collect(),
-			));
-			let tuple = Kind::Literal(KindLiteral::Array(vec![set_of_strings(), Kind::Int]));
-			let fields = [field("meta", Some(object)), field("pair", Some(tuple))];
-			for (col, sets) in [
-				("meta.tags.*", true),
-				("pair[0].*", true),
-				("pair[$].*", false),
-				("pair[1].*", false),
-				("meta.other.*", false),
-			] {
-				let indexes: Arc<[IndexDefinition]> =
-					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out =
-					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
-				assert_eq!(
-					set_flags(&out),
-					if sets {
-						vec![vec![true]]
-					} else {
-						vec![]
-					},
-					"{col}"
-				);
-			}
-		}
-
-		#[test]
-		fn any_alternative_of_a_union_of_literals_may_declare_the_set() {
-			let object = |kind: Kind| {
-				Kind::Literal(KindLiteral::Object(
-					[(Strand::from("tags"), kind)].into_iter().collect(),
-				))
-			};
-			let union = Kind::Either(vec![
-				Kind::None,
-				object(set_of_strings()),
-				object(array_of_strings()),
-			]);
-			let tuples = Kind::Either(vec![
-				Kind::Literal(KindLiteral::Array(vec![array_of_strings()])),
-				Kind::Literal(KindLiteral::Array(vec![set_of_strings()])),
-			]);
-			let fields = [field("meta", Some(union)), field("pair", Some(tuples))];
-			for (col, sets) in [("meta.tags.*", true), ("pair[0].*", true), ("meta.other.*", false)]
-			{
-				let indexes: Arc<[IndexDefinition]> =
-					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out =
-					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
-				assert_eq!(
-					set_flags(&out),
-					if sets {
-						vec![vec![true]]
-					} else {
-						vec![]
-					},
-					"{col}"
-				);
-			}
-		}
-
-		#[test]
-		fn a_set_reached_through_the_elements_of_a_collection_is_found() {
-			let object = Kind::Literal(KindLiteral::Object(
-				[(Strand::from("tags"), set_of_strings())].into_iter().collect(),
-			));
-			let fields = [
-				field("items", Some(Kind::Array(Box::new(object.clone()), None))),
-				field("groups", Some(Kind::Set(Box::new(object), None))),
-			];
-			for (col, sets) in
-				[("items.*.tags.*", true), ("groups.*.tags.*", true), ("items.*.other.*", false)]
-			{
-				let indexes: Arc<[IndexDefinition]> =
-					vec![idx_def(1, "ix", &[col], Index::Idx)].into();
-				let out =
-					with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
-				assert_eq!(
-					set_flags(&out),
-					if sets {
-						vec![vec![true]]
-					} else {
-						vec![]
-					},
-					"{col}"
-				);
-			}
-		}
-
-		#[test]
-		fn a_set_found_on_another_table_is_reported_at_its_prefix() {
-			let indexes: Arc<[IndexDefinition]> = vec![
-				idx_def(1, "a", &["r.tags.*"], Index::Idx),
-				idx_def(2, "b", &["name", "r.tags.*.x"], Index::Uniq),
-				idx_def(3, "c", &["r.other.*"], Index::Idx),
-			]
-			.into();
-			let out = with_array_columns_as_elements(indexes, &[], &TableIndexShapes::default())
-				.withholding_sets_at(&[Idiom::from_str("r.tags").expect("valid idiom").0]);
-			assert_eq!(set_flags(&out), [vec![true], vec![false, true], vec![false]]);
-			let none = with_array_columns_as_elements(
-				vec![idx_def(1, "a", &["r.tags.*"], Index::Idx)].into(),
-				&[],
-				&TableIndexShapes::default(),
-			)
-			.withholding_sets_at(&[]);
-			assert!(none.sets.is_none());
-		}
-
-		#[test]
-		fn withholding_btree_indexes_keeps_the_others() {
-			let indexes: Arc<[IndexDefinition]> = vec![
-				idx_def(1, "a", &["acl"], Index::Idx),
-				idx_ft(2, "b", &["body"]),
-				idx_def(3, "c", &["name"], Index::Uniq),
-			]
-			.into();
-			let names: Vec<_> = without_btree_indexes(indexes)
-				.iter()
-				.map(|ix| ix.name.as_str().to_owned())
-				.collect();
-			assert_eq!(names, ["b"]);
-		}
-
-		#[test]
-		fn an_unchanged_list_is_returned_as_is() {
-			let indexes: Arc<[IndexDefinition]> =
-				vec![idx_def(1, "ix", &["name"], Index::Idx)].into();
-			let fields = [field("name", Some(Kind::String))];
-			let out = with_array_columns_as_elements(
-				Arc::clone(&indexes),
-				&fields,
-				&TableIndexShapes::default(),
-			);
-			assert!(Arc::ptr_eq(&indexes, &out.indexes));
-			assert!(out.rewritten.is_none());
-		}
-
-		#[test]
-		fn every_column_of_a_wide_index_is_rewritten() {
-			let names: Vec<String> = (0..70).map(|c| format!("c{c}")).collect();
-			let cols: Vec<&str> = names.iter().map(String::as_str).collect();
-			let fields: Vec<_> = names.iter().map(|n| field(n, Some(array_of_strings()))).collect();
-			let indexes: Arc<[IndexDefinition]> = vec![idx_def(1, "ix", &cols, Index::Idx)].into();
-			let out =
-				with_array_columns_as_elements(indexes, &fields, &TableIndexShapes::default());
-			assert_eq!(out.indexes[0].cols[69].to_sql(), "c69.*");
-			let flags = &out.rewritten.as_ref().expect("rewritten")[0];
-			assert_eq!(flags.len(), 70);
-			assert!(flags.iter().all(|f| *f));
-		}
+		assert!(range_matches_comparison(&BTreeAccess::literal_equality(Value::Number(
+			Number::Float(0.1)
+		))));
 	}
 }

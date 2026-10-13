@@ -49,25 +49,12 @@ pub(crate) fn inline_fields(fields: &[FieldDefinition]) -> Vec<&FieldDefinition>
 	let mut inline: Vec<&FieldDefinition> = fields.iter().filter(|f| f.inline).collect();
 	inline.sort_by(|a, b| match (root(a), root(b)) {
 		(Some(a), Some(b)) => a.as_bytes().cmp(b.as_bytes()),
-		// A non-simple idiom cannot be inline; keep the order total for
-		// that unreachable shape anyway. A single-part field's raw string
-		// is its root name, so mixing the two arms stays consistent.
+		// A non-simple idiom cannot be inline. This arm only keeps the
+		// order total for that shape. A single-part field's raw string is
+		// its root name, so both arms compare consistently.
 		_ => a.name.to_raw_string().cmp(&b.name.to_raw_string()),
 	});
 	inline
-}
-
-/// The payload name of an inline field: the raw root field name, exactly
-/// as the field keys a record's object map. Readers match predicate
-/// dependencies against it and synthesize candidate objects with it, so
-/// payload evaluation sees the same keys record evaluation does.
-pub(crate) fn inline_field_name(f: &FieldDefinition) -> String {
-	match f.name.0.as_slice() {
-		[Part::Field(name)] => name.as_str().to_owned(),
-		// A non-simple idiom cannot be inline; render the unreachable
-		// shape deterministically anyway.
-		_ => f.name.to_raw_string(),
-	}
 }
 
 /// Encodes the inline payload section for one edge document: the inline
@@ -86,8 +73,8 @@ pub(crate) fn encode_inline_section(
 	);
 	let none = Value::None;
 	// An inline field is a top-level single-part idiom, so its value is
-	// borrowed straight off the document's object map; any other shape —
-	// unreachable through DEFINE/ALTER — falls back to an owned pick.
+	// borrowed from the document's object map. Any other shape, which
+	// DEFINE and ALTER reject, falls back to an owned pick.
 	let values: Vec<std::borrow::Cow<'_, Value>> = fields
 		.iter()
 		.map(|f| match (f.name.0.as_slice(), doc) {

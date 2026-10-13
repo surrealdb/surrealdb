@@ -3,8 +3,8 @@
 //!
 //! Like [`expand_paths`](super::path_expand::expand_paths) it expands a single
 //! quantified segment from a bound *source* node, per input binding row, and
-//! emits one row per selected path with the terminal node, the edge group (R4)
-//! and the alternating path array (R5). It differs in *which* paths it keeps:
+//! emits one row per selected path with the terminal node, the edge group
+//! and the alternating path array. It differs in *which* paths it keeps:
 //! a pattern carrying a `SHORTEST` (or `ANY`) selector is routed here.
 //! Grouping is per-source-row by terminal node id, which equals the GQL endpoint
 //! partition `(start, end)`. A pattern bound on its far node expands backwards
@@ -19,7 +19,7 @@
 //! path expansion uses). Because successors are enqueued at the back, paths are
 //! processed in non-decreasing depth (hop count), so a terminal is *reached* in
 //! non-decreasing length order — the property every selector relies on.
-//! Edge-uniqueness within a path (DIFFERENT EDGES, R2) is enforced by the
+//! Edge-uniqueness within a path (DIFFERENT EDGES) is enforced by the
 //! adjacency scan exactly as in path expansion, which also bounds the queue on
 //! cyclic graphs; the optional path mode adds node-uniqueness
 //! ([`step_kind`]). Shortest is by **hop count** (unweighted).
@@ -74,7 +74,7 @@ use crate::val::{RecordId, Value};
 /// selector ([`ShortestSelector::Any`]) — a shortest representative is a valid
 /// arbitrary path, so `ANY` reuses the same cheap visit-once / `k`-bounded
 /// traversal rather than the full path-expansion DFS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortestSelector {
 	/// `k` arbitrary paths per endpoint (`ANY [k]`); implemented as the `k`
 	/// shortest (a valid arbitrary choice) for O(k·E) cost.
@@ -312,7 +312,7 @@ pub(crate) async fn expand_shortest(
 	let mut state = TerminalSelector::new(selector, params.min);
 	state.mark_source(&source_rid);
 
-	// --- Zero-length path (R6): the source is its own terminal at depth 0.
+	// --- Zero-length path: the source is its own terminal at depth 0.
 	// Emitted iff min == 0, the source passes the label, and the selector
 	// admits it.
 	if params.min == 0
@@ -356,7 +356,7 @@ pub(crate) async fn expand_shortest(
 		let depth = path.depth();
 
 		// Enumerate the tip's adjacency, retaining only edges not already on
-		// the path (DIFFERENT EDGES), filtered per streamed item. Identical to
+		// the path (DIFFERENT EDGES), filtered per streamed item. Same scan as
 		// path expansion.
 		let mut edge_ids: Vec<RecordId> = Vec::new();
 		let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();

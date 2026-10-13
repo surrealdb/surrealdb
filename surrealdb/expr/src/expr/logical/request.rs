@@ -7,10 +7,11 @@
 //! block leaves that block unterminated. The grouping is fixed by the text
 //! alone, so it is known before any statement runs.
 //!
-//! Every statement keeps its position in the request. That is not its response
-//! slot: a `RETURN` that skips the rest of a block, a `CANCEL` after an error
-//! and an import that drops successful results all leave positions without a
-//! slot, so a driver keeps counting its own slots.
+//! Every statement keeps its position in the request, and every statement
+//! gets one response slot, except the successful results an import suppresses
+//! (`skip_success_results`). A position counts the statements the grouper has
+//! been given; it is not a slot index, so a driver keeps counting its own
+//! slots.
 //!
 //! A transaction statement that cannot do what it says is marked, not
 //! rejected. A `COMMIT` or `CANCEL` outside a block is a transaction of its
@@ -32,6 +33,15 @@
 //! The emission of an explicit transaction is fixed when its `BEGIN` is placed,
 //! because a streaming driver cannot read ahead to learn how the block ends.
 //! Auto-commit and session transactions always stream.
+//!
+//! A driver that reads its input as fragments of one stream groups each
+//! fragment with [`RequestGrouper::finish_fragment`], which returns a block
+//! still open as an [`OpenBlock`] instead of ending it, and continues it in the
+//! next fragment with [`RequestGrouper::resume`]. A fragment never knows it is
+//! the last: the driver ends an open block as unterminated when the stream
+//! ends. A resumed grouper numbers its statements on from the fragment that
+//! left the block open; a grouper that continues no block numbers from 0, and
+//! the driver keeps the count across fragments of one stream.
 
 /// How a transaction of a request is opened and ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -133,7 +143,8 @@ pub struct StatementPlace {
 	/// The statement's position in the request, counting every statement the
 	/// grouper has been given. It is not the statement's response slot.
 	pub index: usize,
-	/// The position, in the output of [`lower_request`], of the transaction
+	/// The position, in the output of [`lower_request`] or in the
+	/// `transactions` of the fragment's [`FragmentGrouping`], of the transaction
 	/// that holds the statement.
 	pub transaction: usize,
 	/// What the grouping makes of the statement.
@@ -150,17 +161,22 @@ pub struct LogicalTransaction {
 	/// When the transaction's results reach a streaming consumer.
 	pub emission: Emission,
 	/// The position in the request of its first statement: its `BEGIN`, for
-	/// an explicit transaction.
+	/// an explicit transaction that starts with [`BlockStart::Begin`].
 	pub first_index: usize,
 	/// The positions of its statements, in order, its `BEGIN` and the
 	/// `COMMIT` or `CANCEL` that ends it included.
 	pub statements: Vec<usize>,
 	/// For an explicit transaction, the position of the first `BEGIN` inside
-	/// it, which aborts it there.
+	/// it, which aborts it there. A continued block records only the `BEGIN`s
+	/// of its own fragment.
 	pub aborted_at: Option<usize>,
 	/// The positions of its misplaced transaction-control statements, in
 	/// order, with why each is misplaced.
 	pub misplaced: Vec<(usize, MisplacedControl)>,
+	/// How the transaction opens in its fragment. Read through
+	/// [`LogicalTransaction::start`]; the private field keeps the struct
+	/// constructible only by the grouper.
+	start: BlockStart,
 }
 
 impl LogicalTransaction {
@@ -172,8 +188,65 @@ impl LogicalTransaction {
 			statements: vec![first_index],
 			aborted_at: None,
 			misplaced: Vec::new(),
+			start: BlockStart::Begin,
 		}
 	}
+
+	/// How the transaction opens: [`BlockStart::Begin`] when its first
+	/// statement is the `BEGIN` of an explicit block, an auto-commit statement
+	/// or the first statement of a session transaction;
+	/// [`BlockStart::Continued`] when it continues a block that an earlier
+	/// fragment left open, in which case [`LogicalTransaction::first_index`] and
+	/// [`LogicalTransaction::statements`] cover only this fragment's part of
+	/// the block.
+	pub fn start(&self) -> BlockStart {
+		self.start
+	}
+}
+
+/// How an explicit block of a fragment opens. Maps one to one to the IR's
+/// `TxnStart`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlockStart {
+	/// The block's own `BEGIN` is in this fragment.
+	Begin,
+	/// The block was opened by an earlier fragment of the same stream.
+	Continued,
+}
+
+/// An explicit block a fragment left open: it continues in the next fragment of
+/// the same stream.
+///
+/// Only [`RequestGrouper::finish_fragment`] makes one, and only
+/// [`RequestGrouper::resume`] consumes it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct OpenBlock {
+	/// The block's part in the fragment that left it open. Its mode is
+	/// `Explicit { end: Unterminated }`; that the block is open, not
+	/// unterminated, is carried by this type.
+	block: LogicalTransaction,
+	/// The position of the next statement of the stream.
+	next: usize,
+}
+
+impl OpenBlock {
+	/// The block's part in the fragment that left it open.
+	pub fn transaction(&self) -> &LogicalTransaction {
+		&self.block
+	}
+}
+
+/// The grouping of one fragment: its closed transactions, and the block it
+/// leaves open.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FragmentGrouping {
+	/// The fragment's transactions in order, none of them open. A block that
+	/// continued from an earlier fragment and ended here is among them with
+	/// [`BlockStart::Continued`].
+	pub transactions: Vec<LogicalTransaction>,
+	/// The explicit block the fragment ends inside, if any. It is never in
+	/// `transactions`.
+	pub open: Option<OpenBlock>,
 }
 
 /// The role of a statement that is not transaction control: `OPTION` or a
@@ -220,6 +293,35 @@ impl RequestGrouper {
 			block: None,
 			held: None,
 		}
+	}
+
+	/// A grouper for the next fragment of a stream whose previous fragment left
+	/// `open`. Its first `COMMIT` or `CANCEL` ends that block, the statements it
+	/// is given are numbered from where the previous fragment stopped, and the
+	/// block's transaction has [`BlockStart::Continued`]. Explicit blocks opened
+	/// later in this fragment take the emission of `open`.
+	///
+	/// `session` and `open` come from the same stream. A session request holds
+	/// no explicit block, so a session grouper keeps only the numbering of
+	/// `open` and never continues it.
+	pub fn resume(session: bool, open: OpenBlock) -> Self {
+		let OpenBlock {
+			block,
+			next,
+		} = open;
+		let mut grouper = RequestGrouper::new(session).with_explicit_emission(block.emission);
+		grouper.next = next;
+		if !session {
+			grouper.block = Some(LogicalTransaction {
+				statements: Vec::new(),
+				first_index: next,
+				aborted_at: None,
+				misplaced: Vec::new(),
+				start: BlockStart::Continued,
+				..block
+			});
+		}
+		grouper
 	}
 
 	/// The emission given to every explicit transaction this grouper opens.
@@ -362,6 +464,24 @@ impl RequestGrouper {
 		self.out.extend(self.block.take());
 		self.out.extend(self.held.take());
 		self.out
+	}
+
+	/// End a fragment of fragmented input. The transactions of the statements
+	/// placed so far are `transactions`; a block still open is `open`, never an
+	/// unterminated transaction, so the next fragment can continue it with
+	/// [`RequestGrouper::resume`]. A fragment never knows it is the last: the
+	/// driver ends an open block as unterminated when the stream ends. A session
+	/// grouper never returns an open block.
+	pub fn finish_fragment(mut self) -> FragmentGrouping {
+		let open = self.block.take().map(|block| OpenBlock {
+			block,
+			next: self.next,
+		});
+		self.out.extend(self.held.take());
+		FragmentGrouping {
+			transactions: self.out,
+			open,
+		}
 	}
 }
 
@@ -647,5 +767,248 @@ mod tests {
 				assert_eq!(lower_request(kinds, session), grouper.finish());
 			}
 		}
+	}
+
+	/// One fragment cut of `kinds` after each position in `cuts`, grouped in
+	/// order. Returns every statement's `(position, role, emission)`, the
+	/// transactions with the parts of a spanning block merged, and whether any
+	/// block spanned a cut. A grouper that continues no block numbers from 0, so
+	/// its positions are shifted by the statements the earlier fragments held. A
+	/// resumed grouper numbers on from the grouper it continues, so it keeps that
+	/// grouper's shift.
+	fn fold_fragments(
+		kinds: &[RequestStatementKind],
+		cuts: &[usize],
+	) -> (Vec<(usize, StatementRole, Emission)>, Vec<LogicalTransaction>, bool) {
+		let mut bounds = vec![0];
+		bounds.extend_from_slice(cuts);
+		bounds.push(kinds.len());
+		let mut places = Vec::new();
+		let mut merged: Vec<LogicalTransaction> = Vec::new();
+		let mut spanned = false;
+		let mut open: Option<OpenBlock> = None;
+		let mut base = 0;
+		for window in bounds.windows(2) {
+			if open.is_none() {
+				base = window[0];
+			}
+			let mut grouper = match open.take() {
+				Some(block) => RequestGrouper::resume(false, block),
+				None => RequestGrouper::new(false),
+			};
+			for kind in &kinds[window[0]..window[1]] {
+				let place = grouper.place(*kind);
+				places.push((place.index + base, place.role, place.emission));
+			}
+			let FragmentGrouping {
+				transactions,
+				open: left,
+			} = grouper.finish_fragment();
+			let pieces =
+				transactions.into_iter().chain(left.as_ref().map(|o| o.transaction().clone()));
+			for mut piece in pieces {
+				piece.first_index += base;
+				piece.statements.iter_mut().for_each(|i| *i += base);
+				piece.aborted_at = piece.aborted_at.map(|i| i + base);
+				piece.misplaced.iter_mut().for_each(|(i, _)| *i += base);
+				match (piece.start(), merged.last_mut()) {
+					(BlockStart::Continued, Some(head)) => {
+						spanned = true;
+						head.mode = piece.mode;
+						head.statements.extend(piece.statements);
+						head.misplaced.extend(piece.misplaced);
+						head.aborted_at = head.aborted_at.or(piece.aborted_at);
+					}
+					(BlockStart::Continued, None) => {
+						panic!("a continued block with no block to continue")
+					}
+					(BlockStart::Begin, _) => merged.push(piece),
+				}
+			}
+			open = left;
+		}
+		(places, merged, spanned)
+	}
+
+	fn whole_places(kinds: &[RequestStatementKind]) -> Vec<(usize, StatementRole, Emission)> {
+		let mut grouper = RequestGrouper::new(false);
+		kinds
+			.iter()
+			.map(|kind| {
+				let place = grouper.place(*kind);
+				(place.index, place.role, place.emission)
+			})
+			.collect()
+	}
+
+	#[test]
+	fn a_fragment_ending_inside_a_block_returns_it_open() {
+		let mut grouper = RequestGrouper::new(false);
+		for kind in [Run, Begin, Run] {
+			grouper.place(kind);
+		}
+		let fragment = grouper.finish_fragment();
+		assert_eq!(fragment.transactions.len(), 1);
+		assert_eq!(fragment.transactions[0].mode, AUTO);
+		let open = fragment.open.expect("the block is still open");
+		assert_eq!(open.transaction().statements, vec![1, 2]);
+		assert_eq!(open.transaction().start(), BlockStart::Begin);
+		assert_eq!(open.transaction().mode, explicit(TxnEnd::Unterminated));
+		// A fragment that ends between transactions leaves nothing open.
+		let mut grouper = RequestGrouper::new(false);
+		for kind in [Begin, Commit, Run] {
+			grouper.place(kind);
+		}
+		let fragment = grouper.finish_fragment();
+		assert_eq!(fragment.transactions.len(), 2);
+		assert!(fragment.open.is_none());
+	}
+
+	#[test]
+	fn a_resumed_block_ends_at_the_next_terminator_and_is_continued() {
+		let mut first = RequestGrouper::new(false);
+		for kind in [Begin, Run] {
+			first.place(kind);
+		}
+		let open = first.finish_fragment().open.expect("open");
+		let mut second = RequestGrouper::resume(false, open);
+		let places: Vec<_> = [Run, Commit, Run].iter().map(|kind| second.place(*kind)).collect();
+		assert_eq!(places.iter().map(|p| p.index).collect::<Vec<_>>(), vec![2, 3, 4]);
+		assert_eq!(
+			places.iter().map(|p| p.role).collect::<Vec<_>>(),
+			vec![StatementRole::Run, StatementRole::Commit, StatementRole::Run]
+		);
+		assert_eq!(places.iter().map(|p| p.transaction).collect::<Vec<_>>(), vec![0, 0, 1]);
+		let txns = second.finish();
+		assert_eq!(txns.len(), 2);
+		assert_eq!(txns[0].start(), BlockStart::Continued);
+		assert_eq!(txns[0].mode, explicit(TxnEnd::Commit));
+		assert_eq!(txns[0].statements, vec![2, 3]);
+		assert_eq!(txns[1].start(), BlockStart::Begin);
+		assert_eq!(txns[1].mode, AUTO);
+	}
+
+	#[test]
+	fn a_resumed_block_without_a_terminator_is_unterminated_by_finish_and_open_by_finish_fragment()
+	{
+		let mut first = RequestGrouper::new(false);
+		first.place(Begin);
+		let open = first.finish_fragment().open.expect("open");
+		let mut second = RequestGrouper::resume(false, open.clone());
+		second.place(Run);
+		let txns = second.finish();
+		assert_eq!(txns.len(), 1);
+		assert_eq!(txns[0].start(), BlockStart::Continued);
+		assert_eq!(txns[0].mode, explicit(TxnEnd::Unterminated));
+		let mut second = RequestGrouper::resume(false, open);
+		second.place(Run);
+		let again = second.finish_fragment();
+		assert!(again.transactions.is_empty());
+		let open = again.open.expect("still open");
+		assert_eq!(open.transaction().start(), BlockStart::Continued);
+		assert_eq!(open.transaction().statements, vec![1]);
+		// A fragment with no statement keeps the block and the numbering.
+		let mut third = RequestGrouper::resume(false, open);
+		assert_eq!(third.place(Commit).index, 2);
+	}
+
+	#[test]
+	fn a_resumed_grouper_keeps_the_emission_of_the_block() {
+		let mut first = RequestGrouper::new(false).with_explicit_emission(Emission::Hold);
+		first.place(Begin);
+		let open = first.finish_fragment().open.expect("open");
+		assert_eq!(open.transaction().emission, Emission::Hold);
+		let mut second = RequestGrouper::resume(false, open);
+		let emissions: Vec<_> =
+			[Run, Commit, Begin, Run].iter().map(|kind| second.place(*kind).emission).collect();
+		assert_eq!(emissions, vec![Emission::Hold; 4]);
+	}
+
+	#[test]
+	fn a_nested_begin_in_a_resumed_block_is_marked() {
+		let mut first = RequestGrouper::new(false);
+		first.place(Begin);
+		let open = first.finish_fragment().open.expect("open");
+		let mut second = RequestGrouper::resume(false, open);
+		assert_eq!(second.place(Begin).role, NESTED);
+		let txns = second.finish();
+		assert_eq!(txns[0].aborted_at, Some(1));
+		assert_eq!(txns[0].misplaced, vec![(1, MisplacedControl::NestedBegin)]);
+	}
+
+	#[test]
+	fn a_split_request_folds_to_the_grouping_of_the_whole_request() {
+		let sequences: [&[RequestStatementKind]; 6] = [
+			&[Run, Begin, Run, Commit, Run],
+			&[Begin, Run, Cancel, Begin, Run, Commit],
+			&[Begin, Begin, Run, Begin, Commit, Cancel],
+			&[Commit, Begin, RequestStatementKind::Option, Run, Cancel, Run],
+			&[Begin, Run, Run],
+			&[Run, Begin, Run, Begin, Commit, Commit, Begin, Run],
+		];
+		for kinds in sequences {
+			let whole = lower_request(kinds, false);
+			let places = whole_places(kinds);
+			for mask in 0u32..(1 << (kinds.len() - 1)) {
+				let cuts: Vec<usize> = (0..kinds.len() - 1)
+					.filter(|bit| mask >> bit & 1 == 1)
+					.map(|bit| bit + 1)
+					.collect();
+				let (folded_places, folded, spanned) = fold_fragments(kinds, &cuts);
+				assert_eq!(folded_places, places, "{kinds:?} cut at {cuts:?}");
+				assert_eq!(folded, whole, "{kinds:?} cut at {cuts:?} (spanned: {spanned})");
+			}
+		}
+	}
+
+	#[test]
+	fn a_cut_inside_a_block_continues_it_and_a_cut_between_blocks_does_not() {
+		let kinds = [Run, Begin, Run, Commit, Run];
+		let (_, inside, spanned) = fold_fragments(&kinds, &[3]);
+		assert!(spanned);
+		assert_eq!(inside, lower_request(&kinds, false));
+		let (_, between, spanned) = fold_fragments(&kinds, &[1, 4]);
+		assert!(!spanned);
+		assert_eq!(between, lower_request(&kinds, false));
+	}
+
+	#[test]
+	fn a_session_grouper_never_returns_an_open_block() {
+		for kinds in [&[Begin, Run][..], &[Run, Begin, Commit, Cancel], &[Begin]] {
+			let mut grouper = RequestGrouper::new(true);
+			for kind in kinds {
+				grouper.place(*kind);
+			}
+			let fragment = grouper.finish_fragment();
+			assert!(fragment.open.is_none());
+			assert_eq!(fragment.transactions.len(), 1);
+			assert_eq!(fragment.transactions[0].mode, TxnMode::Session);
+			assert_eq!(fragment.transactions[0].start(), BlockStart::Begin);
+		}
+		// Resumed as a session, an open block's numbering carries and nothing stays open.
+		let mut first = RequestGrouper::new(false);
+		first.place(Begin);
+		let open = first.finish_fragment().open.expect("open");
+		let mut session = RequestGrouper::resume(true, open);
+		assert_eq!(
+			session.place(Begin).role,
+			StatementRole::Misplaced(MisplacedControl::BeginInSession)
+		);
+		let fragment = session.finish_fragment();
+		assert!(fragment.open.is_none());
+		assert_eq!(fragment.transactions[0].statements, vec![1]);
+	}
+
+	#[test]
+	fn finish_still_leaves_an_open_block_unterminated() {
+		let kinds = [Begin, Run];
+		let mut grouper = RequestGrouper::new(false);
+		for kind in kinds {
+			grouper.place(kind);
+		}
+		let txns = grouper.finish();
+		assert_eq!(txns, lower_request(&kinds, false));
+		assert_eq!(txns[0].mode, explicit(TxnEnd::Unterminated));
+		assert_eq!(txns[0].start(), BlockStart::Begin);
 	}
 }

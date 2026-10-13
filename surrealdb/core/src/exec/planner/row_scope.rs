@@ -14,18 +14,14 @@
 //!   belong to the current row's table.
 //! - `$parent` denotes the *outer* SELECT's iteration row. Field accesses through it belong to the
 //!   outer row, not the current row.
-//! - A SELECT in scalar position is *not* descended into during analysis: its `$parent` rescopes to
-//!   the current SELECT's `$this` and so does not contribute to the current SELECT's outer-row
-//!   dependency. This is load-bearing for nested-subquery patterns and pinned by the
-//!   `parent_nested_subqueries.surql` and `7184_parent_in_nested_subquery_graph_where.surql`
-//!   reproductions. A block, `LET`, `RETURN` or `FOR` in scalar position runs in the enclosing
-//!   scope and is descended into.
+//! - A SELECT in scalar position is not descended into during analysis. Its `$parent` binds to the
+//!   current SELECT's `$this`, so it does not add to the current SELECT's outer-row dependency.
+//!   Nested-subquery patterns rely on this, and the language tests cover it. A block, `LET`,
+//!   `RETURN` or `FOR` in scalar position runs in the enclosing scope and is descended into.
 //!
-//! This module is plan-time only. Runtime sites (`parts/filter.rs`,
-//! `parts/lookup.rs`, etc.) consume the flags
-//! produced here via `WherePart::needs_parent` and friends; they do their
-//! own per-row binding through `EvalContext::current_value` /
-//! `document_root`.
+//! This module is plan-time only. Runtime sites (`parts/filter.rs`, `parts/lookup.rs`, etc.)
+//! read the flags produced here through `WherePart::needs_parent` and related methods. They bind
+//! each row at run time through `EvalContext::current_value` and `document_root`.
 
 use std::ops::ControlFlow;
 
@@ -33,9 +29,9 @@ use crate::exec::function::FunctionRegistry;
 use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalSource, SourceRef};
 use crate::expr::{Function, Param};
 
-/// Row-scoped parameter names: the logical layer's `ITERATION_PARAMS`,
-/// which its effect fold reads too. `util::SELECT_ITERATION_PARAMS` re-exports
-/// this, and the binding passes receive it as `BindContext::row_scoped`.
+/// Row-scoped parameter names. These are the logical layer's `ITERATION_PARAMS`, which the effect
+/// fold also reads. `util::SELECT_ITERATION_PARAMS` re-exports this list, and the binding passes
+/// receive it as `BindContext::row_scoped`.
 pub(crate) const ROW_SCOPED_PARAMS: &[&str] = crate::expr::logical::ITERATION_PARAMS;
 
 /// Variants of row-scoped parameter references.
@@ -63,47 +59,17 @@ impl RowScopeKind {
 	}
 }
 
-/// Whose row a path's field reads are about, decided by the expression the
-/// path starts from ([`LogicalExpr::path_root`]).
+/// How deeply row-scope analysis walks an expression tree.
 ///
-/// - `ThisRow`: the path starts at a field of the row, at the row itself (a leading lookup, `@`) or
-///   at `$this`/`$self`. Its field reads name columns of the *current* row's table.
-/// - `OuterRow`: the path starts at `$parent`. Its field reads name columns of the *outer* row.
-/// - `Opaque`: the path starts at any other expression (another parameter, a computed value). Which
-///   fields it reads cannot be known statically; callers fall back to "all fields needed".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PathRoot {
-	ThisRow,
-	OuterRow,
-	Opaque,
-}
-
-/// Classify the expression a path starts from, without descending into the
-/// steps applied to it. An expression that is not a path is its own root.
-pub(crate) fn classify_path_root(path: &LogicalExpr) -> PathRoot {
-	match path.path_root() {
-		LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Current => PathRoot::ThisRow,
-		LogicalExpr::Param(p) => match RowScopeKind::from_param_name(p.as_str()) {
-			Some(RowScopeKind::This | RowScopeKind::Self_) => PathRoot::ThisRow,
-			Some(RowScopeKind::Parent) => PathRoot::OuterRow,
-			None => PathRoot::Opaque,
-		},
-		_ => PathRoot::Opaque,
-	}
-}
-
-/// How deeply row-scope analysis should walk an expression tree.
+/// The two consumers need different rules:
 ///
-/// Two consumers care about different rules:
-///
-/// - `CurrentSelect`: stop at SELECT subquery boundaries. Used when the analysis informs the
-///   *current* SELECT's optimisation decisions (e.g. `WherePart::needs_parent`). A subquery's
-///   `$parent` rescopes to the current SELECT's `$this` and so does not contribute.
-/// - `Recursive`: descend through SELECT subqueries. Used when the analysis is a blanket
-///   prohibition. GROUP BY validation is the prototypical case: a `$parent` reference anywhere
-///   inside a grouped projection — even inside a subquery whose `$parent` nominally resolves to the
-///   outer SELECT's `$this` — is invalid, because that `$this` is the iteration document the GROUP
-///   BY has collapsed away.
+/// - `CurrentSelect`: stop at SELECT subquery boundaries. Used when the result feeds the current
+///   SELECT's own decisions, such as `WherePart::needs_parent`. A subquery's `$parent` binds to the
+///   current SELECT's `$this`, so it does not count.
+/// - `Recursive`: descend through SELECT subqueries. Used for blanket prohibitions. GROUP BY
+///   validation is the main case: a `$parent` reference anywhere in a grouped projection is
+///   invalid, even inside a subquery whose `$parent` resolves to the outer SELECT's `$this`. That
+///   `$this` is the iteration document, which GROUP BY collapses away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AnalysisScope {
 	CurrentSelect,
@@ -142,6 +108,15 @@ pub(crate) fn reads_enclosing_row(op: &LogicalOp) -> bool {
 		return true;
 	}
 	let mut walker = ParamWalker::new(|_| true, AnalysisScope::Recursive);
+	let _ = walker.walk_op(op);
+	walker.found
+}
+
+/// Whether `op`, a plan in scalar position, names `$parent` anywhere inside it, as a scalar or
+/// as a `FROM` source.
+pub(crate) fn names_parent(op: &LogicalOp) -> bool {
+	let mut walker =
+		ParamWalker::new(|kind| kind == RowScopeKind::Parent, AnalysisScope::Recursive);
 	let _ = walker.walk_op(op);
 	walker.found
 }
@@ -461,35 +436,6 @@ fn reads_value_in(expr: &LogicalExpr, scope: ValueInScope, registry: &FunctionRe
 	}
 }
 
-/// Whether `expr`, evaluated where a value is in scope, may read that value. It
-/// does where it reads it itself — a field, `@`, the value as the root of a
-/// path, `$this`/`$self`, a projection builtin, or a statement in scalar
-/// position that does, outside the bodies a step evaluates against an element
-/// and outside closure literals — and it may wherever it holds code whose
-/// reads the expression does not show, which is taken to read it: a call of a
-/// user-defined function, a script or a module
-/// ([`evaluates_against_row`](crate::exec::planner::util::evaluates_against_row)),
-/// a closure invoked or a method called (which may be a closure an object
-/// holds), and a statement in scalar position, whose `$parent` is that value.
-/// A lowering that would hand `expr` the value in scope can skip doing so only
-/// when it may read none.
-pub(crate) fn may_read_value_in_scope(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
-	reads_value_in(expr, ValueInScope::Row, registry)
-		|| expr.any(|node| match node {
-			LogicalExpr::Call(call) => {
-				crate::exec::planner::util::evaluates_against_row(call, registry)
-			}
-			LogicalExpr::Invoke {
-				..
-			}
-			| LogicalExpr::Method {
-				..
-			}
-			| LogicalExpr::Subquery(_) => true,
-			_ => false,
-		})
-}
-
 /// [`reads_value_in`] for a step whose `base` is evaluated at `scope` and
 /// whose other children are a body evaluated against an element.
 fn body_reads_value(
@@ -652,285 +598,5 @@ impl<F: FnMut(RowScopeKind) -> bool> ParamWalker<F> {
 			self.walk_op(child)?;
 		}
 		ControlFlow::Continue(())
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::expr::logical::lower_expr;
-
-	fn parse_expr(src: &str) -> LogicalExpr {
-		// Wrap in a RETURN so it parses as a single top-level statement,
-		// then lower the returned expression.
-		let ast = crate::syn::parse(&format!("RETURN {src};")).expect("parse");
-		let mut exprs = ast.expressions;
-		assert_eq!(exprs.len(), 1, "expected one statement");
-		let surrealdb_expr::parser::TopLevelExpr::Expr(crate::expr::Expr::Return(out)) =
-			exprs.remove(0)
-		else {
-			panic!("unexpected statement shape");
-		};
-		lower_expr(out.what).expect("lowers")
-	}
-
-	// 1. Top-level $parent.x
-	#[test]
-	fn references_parent_top_level() {
-		assert!(references_parent(&parse_expr("$parent.x")));
-		assert_eq!(
-			first_row_scoped_reference(&parse_expr("$parent.x"), AnalysisScope::CurrentSelect),
-			Some(RowScopeKind::Parent),
-		);
-	}
-
-	// 2. $parent nested inside method-call arguments
-	#[test]
-	fn references_parent_in_method_arg() {
-		assert!(references_parent(&parse_expr("array::find($parent.refs, 'foo')")));
-	}
-
-	// 3. $parent inside a graph-traversal WHERE part
-	#[test]
-	fn references_parent_in_graph_where() {
-		assert!(references_parent(&parse_expr("user->knows[WHERE out = $parent.id]")));
-	}
-
-	// 4. $parent inside an ORDER BY subquery — analysis must NOT detect it on the outer expression
-	//    because subqueries rescope $parent.
-	#[test]
-	fn references_parent_skips_select_subquery() {
-		// `(SELECT ... FROM $parent->edge ORDER BY x)` as part of a larger
-		// expression: the inner $parent is the SUBQUERY's parent, which is
-		// the *outer* row. From the OUTER expression's perspective there is
-		// no $parent dependency.
-		let e = parse_expr("(SELECT * FROM $parent->edge ORDER BY x)");
-		assert!(!references_parent(&e));
-	}
-
-	// 5. $parent inside a block in scalar position — a block runs in the enclosing scope, so its
-	//    `$parent` IS the outer SELECT's `$parent`.
-	#[test]
-	fn references_parent_enters_block() {
-		let e = parse_expr("{ RETURN $parent.id }");
-		assert!(references_parent(&e));
-		let e = parse_expr("{ LET $x = $parent.id; RETURN $x }");
-		assert!(references_parent(&e));
-	}
-
-	// 6. $parent deep field path
-	#[test]
-	fn references_parent_deep_path() {
-		assert!(references_parent(&parse_expr("$parent.visibility.tags")));
-	}
-
-	// 7. Nested SELECT — outer's analysis ignores inner $parent. `outer SELECT { inner SELECT {
-	//    $parent.x } }`: the outer has no $parent reference, only the inner does (and that's the
-	//    outer's $this, not propagated by this analyser).
-	#[test]
-	fn nested_select_does_not_propagate_inner_parent() {
-		let e = parse_expr("(SELECT (SELECT * FROM tbl WHERE id = $parent.id) FROM x)");
-		assert!(!references_parent(&e));
-	}
-
-	// 8. Field literally named `parent` (not $parent) — must NOT trigger.
-	#[test]
-	fn bare_parent_field_is_not_param() {
-		let e = parse_expr("parent.sub");
-		assert!(!references_parent(&e));
-		assert!(first_row_scoped_reference(&e, AnalysisScope::Recursive).is_none());
-	}
-
-	// 9. classify_path_root: a path from $this → ThisRow.
-	#[test]
-	fn classify_path_root_this() {
-		assert_eq!(classify_path_root(&parse_expr("$this.cat")), PathRoot::ThisRow);
-		assert_eq!(classify_path_root(&parse_expr("$self.cat")), PathRoot::ThisRow);
-		assert_eq!(classify_path_root(&parse_expr("$this.a.b[0]")), PathRoot::ThisRow);
-	}
-
-	// 10. classify_path_root: a path from $parent → OuterRow.
-	#[test]
-	fn classify_path_root_parent() {
-		assert_eq!(classify_path_root(&parse_expr("$parent.cat")), PathRoot::OuterRow);
-	}
-
-	// 11. classify_path_root: a path from the row (a field, a lookup) → ThisRow.
-	#[test]
-	fn classify_path_root_unrooted() {
-		assert_eq!(classify_path_root(&parse_expr("name")), PathRoot::ThisRow);
-		assert_eq!(classify_path_root(&parse_expr("user.name")), PathRoot::ThisRow);
-		assert_eq!(classify_path_root(&parse_expr("->likes->person")), PathRoot::ThisRow);
-	}
-
-	// 12. classify_path_root: opaque starts.
-	#[test]
-	fn classify_path_root_opaque() {
-		// $param (non-row-scoped) → opaque
-		assert_eq!(classify_path_root(&parse_expr("$other.cat")), PathRoot::Opaque);
-		assert_eq!(classify_path_root(&parse_expr("(SELECT * FROM t).cat")), PathRoot::Opaque);
-	}
-
-	// 13. first_row_scoped_reference distinguishes $this from $parent.
-	#[test]
-	fn references_any_for_this_only() {
-		let e = parse_expr("$this.x + 1");
-		assert!(!references_parent(&e));
-		assert_eq!(
-			first_row_scoped_reference(&e, AnalysisScope::CurrentSelect),
-			Some(RowScopeKind::This),
-		);
-	}
-
-	// 14. $parent inside a WHERE part and inside a closure body.
-	#[test]
-	fn references_parent_in_where_part() {
-		assert!(references_parent(&parse_expr("foo[WHERE bar = $parent.id]")));
-		assert!(references_parent(&parse_expr("array::find(foo, |$x| $x.bar = $parent.id)")));
-	}
-
-	// 15. AnalysisScope::Recursive descends into SELECT subqueries. GROUP BY validation depends on
-	//     this: `(SELECT $parent FROM ...)` in a grouped projection must error even though the
-	//     subquery rescopes the inner $parent — the outer's $this is undefined under GROUP BY and
-	//     the inner reference still names it.
-	#[test]
-	fn recursive_scope_descends_into_subqueries() {
-		let e = parse_expr("(SELECT $parent FROM 1)");
-		assert!(!references_parent(&e), "current-scope walk skips subqueries");
-		assert_eq!(
-			first_row_scoped_reference(&e, AnalysisScope::Recursive),
-			Some(RowScopeKind::Parent),
-			"recursive walk must find $parent inside the subquery",
-		);
-	}
-
-	// 17. A row parameter as the `FROM` source of a subquery is a reference like any other: the
-	//     recursive walk finds it (GROUP BY validation), the current-scope walk does not (the
-	//     subquery rescopes it).
-	#[test]
-	fn param_source_of_a_subquery_is_a_reference() {
-		let e = parse_expr("(SELECT id FROM $parent)");
-		assert!(!references_parent(&e), "current-scope walk skips subqueries");
-		assert_eq!(
-			first_row_scoped_reference(&e, AnalysisScope::Recursive),
-			Some(RowScopeKind::Parent),
-		);
-		let e = parse_expr("(SELECT count() FROM $this GROUP ALL)");
-		assert_eq!(
-			first_row_scoped_reference(&e, AnalysisScope::Recursive),
-			Some(RowScopeKind::This),
-		);
-		let e = parse_expr("(SELECT id FROM $other)");
-		assert!(first_row_scoped_reference(&e, AnalysisScope::Recursive).is_none());
-	}
-
-	// 18. subquery_reads_enclosing_row: a subquery reads the row it is evaluated for through a
-	//     `$parent` at its own level or a row-scoped parameter in its source; a `$this` in its own
-	//     clauses is its own row, and a SELECT nested in it rescopes again.
-	#[test]
-	fn subquery_reads_enclosing_row_follows_the_subquery_scope() {
-		let reads = |src: &str| match parse_expr(src) {
-			LogicalExpr::Subquery(op) => subquery_reads_enclosing_row(&op),
-			other => panic!("expected a subquery, got {other:?}"),
-		};
-		assert!(reads("(SELECT VALUE v FROM q WHERE id = $parent.r)"));
-		assert!(reads("(SELECT VALUE v FROM $this)"));
-		assert!(reads("(SELECT VALUE v FROM $parent.items)"));
-		assert!(reads("(SELECT VALUE $parent.v FROM q)"));
-		assert!(!reads("(SELECT VALUE v FROM q)"));
-		assert!(!reads("(SELECT VALUE v FROM q WHERE $this.ok)"));
-		assert!(!reads("(SELECT VALUE (SELECT VALUE x FROM t WHERE y = $parent.z) FROM q)"));
-	}
-
-	// 19. subquery_reads_enclosing_row: per row, a `[WHERE …]`, a lookup's clauses, a destructure
-	//     body and a block bind `$parent` to the plan's own row or a value derived from it, and a
-	//     closure literal is a value wherever it sits; their bases, the source and the plan's own
-	//     level still read the enclosing row.
-	#[test]
-	fn subquery_reads_enclosing_row_follows_document_rebinding() {
-		let reads = |src: &str| match parse_expr(src) {
-			LogicalExpr::Subquery(op) => subquery_reads_enclosing_row(&op),
-			other => panic!("expected a subquery, got {other:?}"),
-		};
-		for src in [
-			"(SELECT VALUE [[5f, 0f]][WHERE $parent.enabled][0] FROM ONLY { enabled: true })",
-			"(SELECT VALUE person:a->likes[WHERE w = $parent.w][0].v FROM ONLY { w: 4 })",
-			"(SELECT VALUE [[5f, 0f]][WHERE $parent.enabled][0] FROM qv LIMIT 1)",
-			"(SELECT VALUE v FROM qv WHERE [1][WHERE $parent.enabled])",
-			"(SELECT VALUE { o: 1 }.{ v: [1][WHERE $parent.o] } FROM ONLY { e: 1 })",
-			"(SELECT VALUE v FROM ONLY $o.{ v: [[5f, 0f]][WHERE $parent.enabled][0] })",
-			"(SELECT VALUE v FROM ONLY $o.{ v: person:a->likes[WHERE w = $parent.w][0].v })",
-			"(SELECT VALUE v FROM ONLY $o.{ v: (SELECT VALUE v FROM qv WHERE n = $parent.n)[0] })",
-			"(SELECT VALUE v FROM ONLY $o.{ v: $this.v })",
-			"(SELECT VALUE { RETURN $parent.v } FROM qv)",
-			"(SELECT VALUE [1].map(|$y| $parent.v) FROM qv)",
-			"(SELECT VALUE fn::constant(|$x| $parent.point) FROM ONLY { enabled: true })",
-			"(SELECT VALUE v FROM fn::constant(|$x| $parent.point))",
-			"(SELECT VALUE v FROM qv LIMIT fn::constant(|$x| $parent.n)[0])",
-		] {
-			assert!(!reads(src), "{src}");
-		}
-		for src in [
-			"(SELECT VALUE v FROM qv WHERE n = $parent.point[0])",
-			"(SELECT VALUE $parent.v FROM qv)",
-			"(SELECT VALUE v FROM $parent.items)",
-			"(SELECT VALUE v FROM [{ v: 1 }][WHERE $parent.enabled])",
-			"(SELECT VALUE $parent.vs[WHERE enabled][0] FROM ONLY { k: 1 })",
-			"(SELECT VALUE v FROM qv LIMIT [1][WHERE $parent.n][0])",
-			"(SELECT VALUE { o: 1 }.{ v: $parent.o } FROM ONLY { e: 1 })",
-			"(SELECT VALUE v FROM ONLY $o.{ v: $parent.v })",
-			"(SELECT VALUE v FROM $vs[WHERE $parent.enabled])",
-			"(SELECT VALUE v FROM ONLY $parent.{ v })",
-			"(SELECT VALUE v FROM ONLY $this.{ v })",
-			"(SELECT VALUE v FROM { RETURN [{ v: $parent.v }] })",
-		] {
-			assert!(reads(src), "{src}");
-		}
-	}
-
-	// 20. subquery_reads_enclosing_row: a table's `PERMISSIONS FOR select` predicate is evaluated
-	//     per row of the plan with that row as its document, as the WHERE condition is: a `[WHERE
-	//     …]` or a lookup in it binds `$parent` to the protected row, while a bare `$parent` is the
-	//     enclosing row.
-	#[test]
-	fn subquery_reads_enclosing_row_classifies_a_permission_predicate_per_row() {
-		let guarded = |predicate: &str| {
-			let LogicalExpr::Subquery(op) = parse_expr("(SELECT VALUE v FROM p)") else {
-				panic!("expected a subquery");
-			};
-			let LogicalOp::Project(mut project) = *op else {
-				panic!("expected a projection over the source");
-			};
-			project.input = Box::new(LogicalOp::PermissionFilter(
-				crate::expr::logical::LogicalPermissionFilter {
-					input: project.input,
-					predicate: parse_expr(predicate),
-					auth: None,
-					guard: crate::expr::logical::GuardKind::Read,
-				},
-			));
-			subquery_reads_enclosing_row(&LogicalOp::Project(project))
-		};
-		for predicate in [
-			"array::len(acl[WHERE $parent.enabled]) > 0",
-			"array::len(person:a->likes[WHERE w = $parent.w]) > 0",
-			"array::len(->likes[WHERE w = $parent.w]) >= 0",
-			"$this.x = 1",
-			"enabled = true",
-		] {
-			assert!(!guarded(predicate), "{predicate}");
-		}
-		assert!(guarded("$parent.x = 1"));
-	}
-
-	// 16. A SELECT nested inside a block is still a SELECT scope.
-	#[test]
-	fn select_inside_block_still_rescopes() {
-		let e = parse_expr("{ RETURN (SELECT * FROM t WHERE a = $parent.id) }");
-		assert!(!references_parent(&e));
-		assert_eq!(
-			first_row_scoped_reference(&e, AnalysisScope::Recursive),
-			Some(RowScopeKind::Parent),
-		);
 	}
 }

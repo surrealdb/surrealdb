@@ -5,8 +5,7 @@
 //! [`monitor_stream`] function wraps a [`ValueBatchStream`] so that every
 //! yielded batch automatically updates the metrics and emits a tracing span.
 //!
-//! This replaces the former `InstrumentedStream` / `instrument_stream` pair
-//! with a single wrapper that handles both tracing and metrics collection.
+//! The same wrapper handles both tracing and metrics collection.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -95,9 +94,9 @@ pub(crate) struct OperatorMetrics {
 	/// evaluations, not KV reads: the underlying record read may be served
 	/// from the transaction cache (the pendings scan and the neighbourhood
 	/// prefetch batch-warm it), and a candidate is counted even if its fetch
-	/// subsequently errors. The KNN prefilter (#548) exists to drive this to
-	/// zero for index-covered predicates — EXPLAIN ANALYZE renders it so that
-	/// claim is observable. Deliberately excludes the exact tier's bounded
+	/// subsequently errors. For index-covered predicates the KNN prefilter keeps this at
+	/// zero, and EXPLAIN ANALYZE renders it so that this is visible.
+	/// Deliberately excludes the exact tier's bounded
 	/// resolve-stage fetches, which happen outside any traversal.
 	records_fetched: AtomicU64,
 	/// Whether a bitmap branch declined to produce its bitmap (budget
@@ -107,6 +106,9 @@ pub(crate) struct OperatorMetrics {
 	/// ANALYZE, where both otherwise render `rows: 0`. Discloses only that
 	/// the branch declined, never any cardinality.
 	branch_dropped: AtomicBool,
+	/// What the morsels of the statement's scans did, recorded only where the statement's
+	/// configuration asks for it to be rendered (`morsel_explain_analyze`).
+	morsels: std::sync::Mutex<Option<crate::exec::vm::MorselMetrics>>,
 }
 
 impl OperatorMetrics {
@@ -131,6 +133,7 @@ impl OperatorMetrics {
 			props_fallbacks: AtomicU64::new(0),
 			records_fetched: AtomicU64::new(0),
 			branch_dropped: AtomicBool::new(false),
+			morsels: std::sync::Mutex::new(None),
 		}
 	}
 
@@ -267,6 +270,20 @@ impl OperatorMetrics {
 		self.branch_dropped.store(true, Ordering::Relaxed);
 	}
 
+	/// Add what the morsels of one scan did.
+	pub(crate) fn add_morsels(&self, scan: &crate::exec::vm::MorselMetrics) {
+		self.morsels
+			.lock()
+			.unwrap_or_else(|e| e.into_inner())
+			.get_or_insert_with(Default::default)
+			.absorb(scan);
+	}
+
+	/// What the morsels of the statement's scans did, when it was recorded.
+	pub(crate) fn morsels(&self) -> Option<crate::exec::vm::MorselMetrics> {
+		self.morsels.lock().unwrap_or_else(|e| e.into_inner()).clone()
+	}
+
 	/// Record one batch of `rows` values, adding `delta_ns` to elapsed time.
 	pub(crate) fn record_batch(&self, rows: u64, delta_ns: u64) {
 		self.output_rows.fetch_add(rows, Ordering::Relaxed);
@@ -301,8 +318,7 @@ impl crate::idx::trees::gate::CandidateFetchCounter for OperatorMetrics {
 ///   2. Wall-clock time is measured around the inner `poll_next`.
 ///   3. If a batch is yielded, the metrics are updated with the row count and elapsed time.
 ///
-/// This replaces the former `InstrumentedStream` with a single wrapper that
-/// handles both tracing and metrics collection.
+/// Tracing and metrics collection are both handled by this one wrapper.
 struct MetricsStream {
 	inner: ValueBatchStream,
 	metrics: Arc<OperatorMetrics>,

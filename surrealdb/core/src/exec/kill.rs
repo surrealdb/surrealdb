@@ -36,16 +36,29 @@ pub(crate) async fn kill_statement_compute(
 	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value> {
-	// Is realtime enabled?
-	ctx.realtime()?;
-	// Valid options?
-	opt.valid_for_db()?;
+	super::live::realtime_checks(ctx, opt)?;
 	// Resolve live query id
 	let exec = crate::exec::entry::frame(ctx, opt, None).await;
-	let lid = match crate::exec::entry::scalar(&exec, &this.id).await?.cast_to::<Uuid>() {
+	let id = crate::exec::entry::scalar(&exec, &this.id).await?;
+	kill_subscription(id, || this.id.to_sql(), ctx, opt).await
+}
+
+/// Remove the subscription `id` names, after [`super::live::realtime_checks`] and the evaluation of
+/// the id.
+///
+/// `written` is the id as the statement wrote it, which the errors that name the statement print.
+/// Removal is gated on ownership as [`kill_statement_compute`] documents, and its transaction and
+/// notification rules are the same.
+pub(crate) async fn kill_subscription(
+	id: Value,
+	written: impl Fn() -> String,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let lid = match id.cast_to::<Uuid>() {
 		Err(_) => {
 			bail!(ExecError::KillStatement {
-				value: this.id.to_sql(),
+				value: written(),
 			})
 		}
 		Ok(id) => id,
@@ -77,15 +90,13 @@ pub(crate) async fn kill_statement_compute(
 				let subscription: Option<StoredSubscriptionDefinition> =
 					txn.get_key(&table_key, None).await?;
 				if let Some(sub) = subscription {
-					// For live queries created before auth tracking was introduced
-					// (sub.auth is None), we have no ownership information and
-					// cannot verify the caller is the original owner. Fail closed:
-					// only root may kill legacy live queries without auth metadata.
+					// A subscription with `sub.auth` of None records no owner, so the
+					// caller cannot be verified as the creator. Fail closed: only root
+					// may kill it.
 					//
 					// Compare only user identity (id + level), not the full Auth
-					// snapshot. Roles are excluded so that a legitimate owner whose
-					// roles were changed by an admin after the LIVE query was created
-					// can still kill their own live query.
+					// snapshot. Roles are excluded so that an owner whose roles changed
+					// after the LIVE query was created can still kill it.
 					let is_owner = sub.auth.as_ref().is_some_and(|live_auth| {
 						live_auth.id() == opt.auth.id() && live_auth.level() == opt.auth.level()
 					});
@@ -129,7 +140,7 @@ pub(crate) async fn kill_statement_compute(
 		}
 		None => {
 			bail!(ExecError::KillStatement {
-				value: this.id.to_sql(),
+				value: written(),
 			});
 		}
 	}
@@ -349,14 +360,11 @@ mod tests {
 			.expect("a root user should be able to kill any live query");
 	}
 
-	/// When authentication is disabled, any user can kill any live query (backwards compat).
+	/// When authentication is disabled, any user can kill any live query.
 	///
-	/// Use `db_session` with distinct IDs (alice/bob) so the two sessions are genuinely
-	/// different identities.  With the identity-based ownership check in place, if a
-	/// regression caused auth-disabled sessions to enter the ownership block, `is_owner`
-	/// would return `false` (alice ≠ bob) and the test would correctly fail.  Using
-	/// `Session::for_level` for both would give them the same `id="system_auth"`, making
-	/// `is_owner` true and masking the regression.
+	/// `db_session` gives alice and bob distinct IDs. If auth-disabled sessions entered the
+	/// ownership check, `is_owner` would be false and the test would fail. `Session::for_level`
+	/// would give both the same `id="system_auth"`, so the check would pass and hide the error.
 	#[tokio::test]
 	async fn test_kill_any_live_query_when_auth_disabled() {
 		let (_, ds) = new_ds_no_auth().await.unwrap();
@@ -372,9 +380,9 @@ mod tests {
 			.expect("with auth disabled, any user should be able to kill any live query");
 	}
 
-	/// A non-root user cannot kill a live query whose subscription record has auth: None
-	/// (legacy queries created before auth tracking was introduced, e.g. v3.0.0 and betas).
-	/// Without ownership metadata we cannot verify the caller is the creator, so we fail closed.
+	/// A non-root user cannot kill a live query whose subscription record has auth: None.
+	/// Without ownership metadata the caller cannot be verified as the creator, so KILL fails
+	/// closed.
 	#[tokio::test]
 	async fn test_kill_legacy_live_query_auth_none_fails_for_non_root() {
 		let (_, ds) = new_ds_with_auth().await.unwrap();
@@ -457,13 +465,10 @@ mod tests {
 	}
 
 	/// When the table-level subscription record is missing, KILL must fail closed for
-	/// non-root users rather than silently skipping the ownership check.
+	/// non-root users rather than skipping the ownership check.
 	///
-	/// Use `db_session` with distinct IDs (alice/bob) for consistency with the rest of
-	/// the ownership-related tests in this module.  The `else` branch is an unconditional
-	/// `bail!` that ignores caller identity, so production behaviour is not affected, but
-	/// using genuinely distinct principals future-proofs the test against any weakening
-	/// of that branch.
+	/// `db_session` gives alice and bob distinct IDs, as in the other ownership tests. The
+	/// missing-record branch bails regardless of caller identity.
 	#[tokio::test]
 	async fn test_kill_without_subscription_record_fails_closed() {
 		let (_, ds) = new_ds_with_auth().await.unwrap();

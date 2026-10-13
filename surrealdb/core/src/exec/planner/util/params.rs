@@ -2,14 +2,13 @@
 //!
 //! Resolves bind parameters and `DEFINE PARAM` values to literals so that
 //! constant folding and index analysis can see through them. Row-scoped
-//! parameters (`$this`, `$self`, `$parent`) are intentionally NOT resolved
-//! here — they're bound per-row at execution time. The
-//! `super::row_scope::ROW_SCOPED_PARAMS` constant is the source of truth
-//! and is re-exported as `SELECT_ITERATION_PARAMS`.
+//! parameters (`$this`, `$self`, `$parent`) are never resolved here. They are
+//! bound per row at execution time. `super::row_scope::ROW_SCOPED_PARAMS` is the
+//! source of truth and is re-exported as `SELECT_ITERATION_PARAMS`.
 //!
-//! Also includes `resolve_projection_field_idioms`, which rewrites
-//! projection function calls (`type::field("name")`) into the path expression
-//! the argument names so the index analyzer can match them.
+//! Also includes `resolve_projection_field_idioms`, which rewrites projection
+//! function calls (`type::field("name")`) into the path expression the argument
+//! names, so the index analyzer can match them.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -19,17 +18,17 @@ use crate::expr::Function;
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, lower_expr};
 
 /// Parameters injected per-row during SELECT document iteration.
-/// These change value for every row and cannot be resolved at plan time.
+/// These change value for every row, so they cannot be resolved at plan time.
 ///
 /// - `this`/`self`: the current document being iterated
 /// - `parent`: the outer document in correlated subqueries
 ///
-/// Event/live/field params (`$before`, `$after`, `$value`, `$input`, `$event`)
-/// are intentionally excluded because the exec planner only handles
-/// top-level statements.  Those params are bound by the frame an event
-/// handler, live query notification or field evaluator runs in and are
-/// resolved at runtime via `ctx.value()`. A plan compiled in such a frame
-/// would need this guard set expanded accordingly.
+/// Event, live and field params (`$before`, `$after`, `$value`, `$input`,
+/// `$event`) are excluded because the exec planner only handles top-level
+/// statements. Those params are bound by the frame an event handler, live
+/// query notification or field evaluator runs in, and are read at runtime
+/// via `ctx.value()`. A plan compiled in such a frame must expand this
+/// guard set.
 pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = super::super::row_scope::ROW_SCOPED_PARAMS;
 
 /// What a parameter is at plan time; see [`bind_param`].
@@ -50,16 +49,25 @@ pub(crate) enum ParamBinding {
 
 /// Bind a parameter at plan time.
 ///
-/// The order is the runtime's: the row-scoped names
-/// — `$this`, `$self`, `$parent` — are bound per row and never here, even
-/// when the context holds a value under the name; then the context's value
-/// chain, which holds `LET` bindings, client bind parameters and the session
-/// values; then the database's `DEFINE PARAM`s. A `DEFINE PARAM` is a value
-/// only when readable with `Permission::Full`; one with a `NONE` or `WHERE`
-/// permission is judged per read at runtime. A name found nowhere is
-/// [`ParamBinding::Unbound`] only when the catalog was consulted: without a
-/// transaction and a database the name stays a runtime lookup. `txn` is the
-/// planner's transaction; the context's own is consulted when there is none.
+/// Lookup order matches the runtime. Row-scoped names (`$this`, `$self`,
+/// `$parent`) are always bound per row and never here, even when the context
+/// holds a value under the name. Next comes the context's value chain, which
+/// holds `LET` bindings, client bind parameters and session values. Last comes
+/// the database's `DEFINE PARAM`s. A `DEFINE PARAM` is a value only when it is
+/// readable with `Permission::Full`. One with a `NONE` or `WHERE` permission is
+/// checked per read at runtime. A name found nowhere is
+/// [`ParamBinding::Unbound`] only when the catalog was consulted. Without a
+/// transaction and a database, the name stays a runtime lookup. `txn` is the
+/// planner's transaction. When there is none, the context's own is used.
+///
+/// A function body is planned in the scope a body reads
+/// ([`crate::ctx::Context::new_call_scope`]). A plan made while a body runs
+/// reads its context the same way ([`crate::ctx::Context::lexical_value`]).
+/// So the context holds, for a name, only a request parameter, a session
+/// value, a row name, an argument or a binding the body made. A `LET` or `FOR`
+/// binding of the body's caller is never visible. A name only the caller binds
+/// resolves to a `DEFINE PARAM` of the database or to unbound, as it does when
+/// the body runs (`vm::function`).
 pub(crate) async fn bind_param(
 	name: &str,
 	ctx: &crate::ctx::FrozenContext,
@@ -72,8 +80,8 @@ pub(crate) async fn bind_param(
 	if row_scoped.contains(&name) {
 		return ParamBinding::Runtime;
 	}
-	if let Some(value) = ctx.value(name) {
-		return ParamBinding::Value(value.clone());
+	if let Some(value) = ctx.lexical_value(name) {
+		return ParamBinding::Value(value.as_ref().clone());
 	}
 	let (Some((ns, db)), Some(txn)) = (ns_db, txn.or_else(|| ctx.try_tx())) else {
 		return ParamBinding::Runtime;
@@ -105,19 +113,18 @@ pub(crate) async fn resolve_param_value(
 	}
 }
 
-/// Rewrite projection function calls with a single string literal argument
-/// (e.g. `type::field("name")`) to the path expression the argument names so
-/// the index analyzer can match them against indexed columns.
+/// Rewrite projection function calls with one string literal argument, such
+/// as `type::field("name")`, to the path expression the argument names. The
+/// index analyzer can then match them against indexed columns.
 ///
-/// Projection functions like `type::field(s)` and a bare path `s` both
-/// reference the same document field, but the index analyzer only recognises
-/// a path. This pass bridges the gap after param resolution and constant
-/// folding have reduced the argument to a string literal.
+/// `type::field(s)` and a bare path `s` reference the same document field,
+/// but the index analyzer only recognises a path. This pass runs after
+/// parameter resolution and constant folding have reduced the argument to a
+/// string literal.
 ///
-/// Uses `FunctionRegistry::is_projection` so any current or future
-/// projection function is handled without hardcoding names. The argument is
-/// parsed as a surface idiom and lowered, so it takes the same path every
-/// written idiom takes.
+/// Projection functions are found through `FunctionRegistry::is_projection`,
+/// so new ones are handled without a name list. The argument is parsed as a
+/// surface idiom and lowered, so it takes the same path as any written idiom.
 pub(crate) fn resolve_projection_field_idioms(expr: &mut LogicalExpr, registry: &FunctionRegistry) {
 	let Ok(()) = expr.visit_mut(&mut |e| {
 		if let LogicalExpr::Call(call) = e

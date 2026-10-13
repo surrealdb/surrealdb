@@ -1,10 +1,9 @@
 //! The grants an access method issues.
 //!
 //! `ACCESS ... GRANT`, `SHOW`, `REVOKE` and `PURGE` read and write the grants
-//! held under an access method. Like the schema statements beside them they
-//! have no operator of their own and are executed rather than planned; what
-//! they are written with — a grant's subject, a `WHERE` clause over the grants
-//! — is an expression, resolved through [`crate::ddl::scalar`] in the frame
+//! held under an access method. These statements are executed directly, not
+//! planned. Their expressions (a grant's subject and a `WHERE` clause over the
+//! grants) are resolved through [`crate::ddl::scalar`] in the frame that
 //! [`crate::ddl::frame`] builds.
 //!
 //! Every grant a clause is shown has been redacted first. A `WHERE` that could
@@ -39,13 +38,11 @@ use crate::{catalog, val};
 
 /// The `WHERE` clause of an access statement, resolved once for the statement.
 ///
-/// The clause is asked of every grant the statement reached, so it is compiled
-/// here rather than per grant, and served from the compile cache like every
-/// other expression an executed statement is written with
-/// ([`crate::exec::vm::serve::expr`]): the statement compiles it only on the
-/// cache's miss. A clause the engine has no compiled form for is kept as it
-/// was written and evaluated the way [`crate::ddl::scalar`] evaluates such an
-/// expression.
+/// The clause is checked against every grant the statement reached, so it is
+/// compiled once here, not per grant. The compiled form comes from the compile
+/// cache ([`crate::exec::vm::serve::expr`]) and is only compiled on a cache
+/// miss. A clause that cannot be lowered is kept as written and evaluated by
+/// [`crate::ddl::scalar`].
 enum GrantFilter {
 	/// No clause: every grant the statement reached.
 	Every,
@@ -101,15 +98,21 @@ pub(crate) async fn subject_compute(
 		Subject::Record(record_id_lit) => {
 			let expr = Expr::Literal(Literal::RecordId(record_id_lit.clone()));
 			let value = crate::ddl::scalar::scalar(exec, &expr).await?;
-			let rid: RecordId = value.coerce_to().map_err(|_| {
-				anyhow::Error::new(ExecError::InvalidStatement(
-					"A grant subject must name a record".to_string(),
-				))
-			})?;
-			Ok(catalog::Subject::Record(rid))
+			record_subject(value)
 		}
 		Subject::User(ident) => Ok(catalog::Subject::User(ident.to_string())),
 	}
+}
+
+/// The subject of a grant issued to the record `value` names; a value that names no record is
+/// refused.
+pub(crate) fn record_subject(value: Value) -> Result<catalog::Subject> {
+	let rid: RecordId = value.coerce_to().map_err(|_| {
+		anyhow::Error::new(ExecError::InvalidStatement(
+			"A grant subject must name a record".to_string(),
+		))
+	})?;
+	Ok(catalog::Subject::Record(rid))
 }
 
 /// Resolve the access method named by an access statement under the given base.
@@ -291,7 +294,7 @@ pub(crate) async fn create_grant(
 							txn.get_ns_user(ns_id, user, None).await?.ok_or_else(|| {
 								CatalogError::UserNsNotFound {
 									name: user.clone(),
-									// We just retrieved the ns_id above
+									// The namespace id was resolved by get_ns_id above
 									ns: opt
 										.ns()
 										.expect("namespace validated by get_ns_id")
@@ -304,7 +307,7 @@ pub(crate) async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user, None).await?.ok_or_else(|| {
 								CatalogError::UserDbNotFound {
 									name: user.clone(),
-									// We just retrieved the ns_id and db_id above
+									// The namespace and database ids were resolved above
 									ns: opt
 										.ns()
 										.expect("namespace validated by expect_ns_db_ids")
@@ -437,91 +440,118 @@ pub(crate) async fn compute_show(
 	opt: &Options,
 	exec: &ExecutionContext,
 ) -> Result<Value> {
-	let base = match &stmt.base {
-		Some(base) => *base,
-		None => opt.selected_base()?,
-	};
-	// Allowed to run?
-	ctx.is_allowed(opt, Action::View, ResourceKind::Access, base)?;
-	// Get the transaction.
-	let txn = ctx.tx();
-	// Clear the cache.
-	txn.clear_cache();
-	// Check if the access method exists.
-	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
-
-	// Get the grants to show.
+	let base = access_method_base(stmt.base, stmt.ac.as_str(), Action::View, ctx, opt).await?;
 	match &stmt.gr {
-		Some(gr) => {
-			let grant = match base {
-				Base::Root => {
-					match txn.get_root_access_grant(stmt.ac.as_str(), gr.as_str(), None).await? {
-						Some(val) => val,
-						None => bail!(CatalogError::AccessGrantRootNotFound {
-							ac: stmt.ac.to_string(),
-							gr: gr.to_string(),
-						}),
-					}
-				}
-				Base::Ns => {
-					let ns = ctx.expect_ns_id(opt).await?;
-					match txn.get_ns_access_grant(ns, stmt.ac.as_str(), gr.as_str(), None).await? {
-						Some(val) => val,
-						None => bail!(CatalogError::AccessGrantNsNotFound {
-							ac: stmt.ac.to_string(),
-							gr: gr.to_string(),
-							ns: ns.to_string(),
-						}),
-					}
-				}
-				Base::Db => {
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					match txn
-						.get_db_access_grant(ns, db, stmt.ac.as_str(), gr.as_str(), None)
-						.await?
-					{
-						Some(val) => val,
-						None => bail!(CatalogError::AccessGrantDbNotFound {
-							ac: stmt.ac.to_string(),
-							gr: gr.to_string(),
-							ns: ns.to_string(),
-							db: db.to_string(),
-						}),
-					}
-				}
-			};
-
-			Ok(Value::Object(access_object_from_grant(&(*grant).clone().redacted())))
-		}
+		Some(gr) => shown_grant(base, stmt.ac.as_str(), gr.as_str(), ctx, opt).await,
 		None => {
-			// Get all grants.
-			let grs = match base {
-				Base::Root => txn.all_root_access_grants(stmt.ac.as_str(), None).await?,
-				Base::Ns => {
-					let ns = ctx.expect_ns_id(opt).await?;
-					txn.all_ns_access_grants(ns, stmt.ac.as_str(), None).await?
-				}
-				Base::Db => {
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					txn.all_db_access_grants(ns, db, stmt.ac.as_str(), None).await?
-				}
-			};
-
+			let grs = grants_at(base, stmt.ac.as_str(), ctx, opt).await?;
 			let filter = GrantFilter::resolve(stmt.cond.as_ref(), exec).await?;
 			let mut show = Vec::new();
 			for gr in grs.iter() {
-				let redacted_gr = Value::Object(access_object_from_grant(&gr.clone().redacted()));
+				let redacted_gr = shown(gr);
 				if !filter.admits(&redacted_gr, exec).await? {
 					continue;
 				}
-
-				// Store revoked version of the redacted grant.
 				show.push(redacted_gr);
 			}
-
 			Ok(Value::Array(show.into()))
 		}
 	}
+}
+
+/// Resolves the base an `ACCESS ... SHOW`, `REVOKE` or `PURGE` statement addresses. The checks run
+/// in this order: the base `base` names (or the session's selected base), the session's permission
+/// to take `action` at that base, and that access method `ac` exists under it. The catalog cache is
+/// cleared before the last check.
+pub(crate) async fn access_method_base(
+	base: Option<Base>,
+	ac: &str,
+	action: Action,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Base> {
+	let base = match base {
+		Some(base) => base,
+		None => opt.selected_base()?,
+	};
+	// Allowed to run?
+	ctx.is_allowed(opt, action, ResourceKind::Access, base)?;
+	// Clear the cache.
+	ctx.tx().clear_cache();
+	// Check if the access method exists.
+	expect_access(base, ac, ctx, opt).await?;
+	Ok(base)
+}
+
+/// Every grant access method `ac` holds at `base`, in key order.
+pub(crate) async fn grants_at(
+	base: Base,
+	ac: &str,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Arc<[catalog::AccessGrant]>> {
+	let txn = ctx.tx();
+	match base {
+		Base::Root => txn.all_root_access_grants(ac, None).await,
+		Base::Ns => {
+			let ns = ctx.expect_ns_id(opt).await?;
+			txn.all_ns_access_grants(ns, ac, None).await
+		}
+		Base::Db => {
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+			txn.all_db_access_grants(ns, db, ac, None).await
+		}
+	}
+}
+
+/// Grant `grant` as a statement shows it: redacted, so its plaintext key is never shown.
+pub(crate) fn shown(grant: &catalog::AccessGrant) -> Value {
+	Value::Object(access_object_from_grant(&grant.clone().redacted()))
+}
+
+/// Grant `gr` of access method `ac` at `base`, shown; a grant that does not exist is the error
+/// naming it at that base.
+pub(crate) async fn shown_grant(
+	base: Base,
+	ac: &str,
+	gr: &str,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let txn = ctx.tx();
+	let grant = match base {
+		Base::Root => match txn.get_root_access_grant(ac, gr, None).await? {
+			Some(val) => val,
+			None => bail!(CatalogError::AccessGrantRootNotFound {
+				ac: ac.to_owned(),
+				gr: gr.to_owned(),
+			}),
+		},
+		Base::Ns => {
+			let ns = ctx.expect_ns_id(opt).await?;
+			match txn.get_ns_access_grant(ns, ac, gr, None).await? {
+				Some(val) => val,
+				None => bail!(CatalogError::AccessGrantNsNotFound {
+					ac: ac.to_owned(),
+					gr: gr.to_owned(),
+					ns: ns.to_string(),
+				}),
+			}
+		}
+		Base::Db => {
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+			match txn.get_db_access_grant(ns, db, ac, gr, None).await? {
+				Some(val) => val,
+				None => bail!(CatalogError::AccessGrantDbNotFound {
+					ac: ac.to_owned(),
+					gr: gr.to_owned(),
+					ns: ns.to_string(),
+					db: db.to_string(),
+				}),
+			}
+		}
+	};
+	Ok(shown(&grant))
 }
 
 pub(crate) async fn revoke_grant(
@@ -530,192 +560,152 @@ pub(crate) async fn revoke_grant(
 	opt: &Options,
 	exec: &ExecutionContext,
 ) -> Result<Value> {
-	let base = match &stmt.base {
-		Some(base) => *base,
-		None => opt.selected_base()?,
-	};
-	// Allowed to run?
-	ctx.is_allowed(opt, Action::Edit, ResourceKind::Access, base)?;
-	// Get the transaction
-	let txn = ctx.tx();
-	// Clear the cache
-	txn.clear_cache();
-	// Check if the access method exists.
-	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
-
+	let base = access_method_base(stmt.base, stmt.ac.as_str(), Action::Edit, ctx, opt).await?;
 	// Get the grants to revoke.
 	let mut revoked = Vec::new();
 	match &stmt.gr {
 		Some(gr) => {
-			let mut revoke = match base {
-				Base::Root => {
-					match txn.get_root_access_grant(stmt.ac.as_str(), gr.as_str(), None).await? {
-						Some(val) => (*val).clone(),
-						None => bail!(CatalogError::AccessGrantRootNotFound {
-							ac: stmt.ac.to_string(),
-							gr: gr.to_string(),
-						}),
-					}
-				}
-				Base::Ns => {
-					let ns = ctx.expect_ns_id(opt).await?;
-					match txn.get_ns_access_grant(ns, stmt.ac.as_str(), gr.as_str(), None).await? {
-						Some(val) => (*val).clone(),
-						None => {
-							let ns = opt.ns()?;
-							bail!(CatalogError::AccessGrantNsNotFound {
-								ac: stmt.ac.to_string(),
-								gr: gr.to_string(),
-								ns: ns.to_string(),
-							})
-						}
-					}
-				}
-				Base::Db => {
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					match txn
-						.get_db_access_grant(ns, db, stmt.ac.as_str(), gr.as_str(), None)
-						.await?
-					{
-						Some(val) => (*val).clone(),
-						None => {
-							let (ns, db) = opt.ns_db()?;
-							bail!(CatalogError::AccessGrantDbNotFound {
-								ac: stmt.ac.to_string(),
-								gr: gr.to_string(),
-								ns: ns.to_string(),
-								db: db.to_string(),
-							})
-						}
-					}
-				}
-			};
-			ensure!(revoke.revocation.is_none(), ExecError::AccessGrantRevoked);
-			revoke.revocation = Some(Datetime::now());
-
-			// Revoke the grant.
-			match base {
-				Base::Root => {
-					let key = RootGrantKey {
-						ac: Cow::Borrowed(&stmt.ac),
-						gr: Cow::Borrowed(gr),
-					};
-					txn.set_key(&key, &revoke).await?;
-				}
-				Base::Ns => {
-					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-					let key = NsGrantKey {
-						ns: ns.namespace_id,
-						ac: Cow::Borrowed(&stmt.ac),
-						gr: Cow::Borrowed(gr),
-					};
-					txn.set_key(&key, &revoke).await?;
-				}
-				Base::Db => {
-					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
-
-					let key = DbGrantKey {
-						ns: db.namespace_id,
-						db: db.database_id,
-						ac: Cow::Borrowed(&stmt.ac),
-						gr: Cow::Borrowed(gr),
-					};
-					txn.set_key(&key, &revoke).await?;
-				}
-			};
-
-			info!(
-				"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
-				revoke.ac,
-				revoke.id,
-				revoke.grant.variant(),
-				revoke.subject.id(),
-				opt.auth.id()
-			);
-
-			revoked.push(Value::Object(access_object_from_grant(&revoke.redacted())));
+			revoked.push(revoke_named(base, stmt.ac.as_str(), gr.as_str(), ctx, opt).await?)
 		}
 		None => {
-			// Get all grants.
-			let grs = match base {
-				Base::Root => txn.all_root_access_grants(stmt.ac.as_str(), None).await?,
-				Base::Ns => {
-					let ns = ctx.expect_ns_id(opt).await?;
-					txn.all_ns_access_grants(ns, stmt.ac.as_str(), None).await?
-				}
-				Base::Db => {
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					txn.all_db_access_grants(ns, db, stmt.ac.as_str(), None).await?
-				}
-			};
-
+			let grs = grants_at(base, stmt.ac.as_str(), ctx, opt).await?;
 			let filter = GrantFilter::resolve(stmt.cond.as_ref(), exec).await?;
 			for gr in grs.iter() {
 				// If the grant is already revoked, it cannot be revoked again.
 				if gr.revocation.is_some() {
 					continue;
 				}
-
-				let redacted_gr = Value::Object(access_object_from_grant(&gr.clone().redacted()));
-				if !filter.admits(&redacted_gr, exec).await? {
+				if !filter.admits(&shown(gr), exec).await? {
 					continue;
 				}
-
-				let mut gr = gr.clone();
-				gr.revocation = Some(Datetime::now());
-				// recreate now that the revocation is set.
-				let redacted_gr = Value::Object(access_object_from_grant(&gr.clone().redacted()));
-
-				// Revoke the grant.
-				match base {
-					Base::Root => {
-						let key = RootGrantKey {
-							ac: Cow::Borrowed(&stmt.ac),
-							gr: Cow::Borrowed(&gr.id),
-						};
-						txn.set_key(&key, &gr).await?;
-					}
-					Base::Ns => {
-						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-						let key = NsGrantKey {
-							ns: ns.namespace_id,
-							ac: Cow::Borrowed(&stmt.ac),
-							gr: Cow::Borrowed(&gr.id),
-						};
-						txn.set_key(&key, &gr).await?;
-					}
-					Base::Db => {
-						let (ns, db) = opt.ns_db()?;
-						let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
-
-						let key = DbGrantKey {
-							ns: db.namespace_id,
-							db: db.database_id,
-							ac: Cow::Borrowed(&stmt.ac),
-							gr: Cow::Borrowed(&gr.id),
-						};
-						txn.set_key(&key, &gr).await?;
-					}
-				};
-
-				info!(
-					"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
-					gr.ac,
-					gr.id,
-					gr.grant.variant(),
-					gr.subject.id(),
-					opt.auth.id()
-				);
-
-				// Store revoked version of the redacted grant.
-				revoked.push(redacted_gr);
+				revoked.push(revoke_held(base, stmt.ac.as_str(), gr, ctx, opt).await?);
 			}
 		}
 	}
 
 	// Return revoked grants.
 	Ok(Value::Array(revoked.into()))
+}
+
+/// Revokes grant `gr` of access method `ac` at `base`, answering it shown as revoked. A grant
+/// that does not exist is the error naming it at that base, and one already revoked is
+/// [`ExecError::AccessGrantRevoked`].
+pub(crate) async fn revoke_named(
+	base: Base,
+	ac: &str,
+	gr: &str,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let txn = ctx.tx();
+	let mut revoke = match base {
+		Base::Root => match txn.get_root_access_grant(ac, gr, None).await? {
+			Some(val) => (*val).clone(),
+			None => bail!(CatalogError::AccessGrantRootNotFound {
+				ac: ac.to_owned(),
+				gr: gr.to_owned(),
+			}),
+		},
+		Base::Ns => {
+			let ns = ctx.expect_ns_id(opt).await?;
+			match txn.get_ns_access_grant(ns, ac, gr, None).await? {
+				Some(val) => (*val).clone(),
+				None => {
+					let ns = opt.ns()?;
+					bail!(CatalogError::AccessGrantNsNotFound {
+						ac: ac.to_owned(),
+						gr: gr.to_owned(),
+						ns: ns.to_string(),
+					})
+				}
+			}
+		}
+		Base::Db => {
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+			match txn.get_db_access_grant(ns, db, ac, gr, None).await? {
+				Some(val) => (*val).clone(),
+				None => {
+					let (ns, db) = opt.ns_db()?;
+					bail!(CatalogError::AccessGrantDbNotFound {
+						ac: ac.to_owned(),
+						gr: gr.to_owned(),
+						ns: ns.to_string(),
+						db: db.to_string(),
+					})
+				}
+			}
+		}
+	};
+	ensure!(revoke.revocation.is_none(), ExecError::AccessGrantRevoked);
+	revoke.revocation = Some(Datetime::now());
+	store_revoked(base, ac, &revoke, ctx, opt).await?;
+	Ok(shown(&revoke))
+}
+
+/// Revokes `grant`, one of the grants access method `ac` holds at `base` and not yet revoked,
+/// answering it shown as revoked.
+pub(crate) async fn revoke_held(
+	base: Base,
+	ac: &str,
+	grant: &catalog::AccessGrant,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let mut gr = grant.clone();
+	gr.revocation = Some(Datetime::now());
+	store_revoked(base, ac, &gr, ctx, opt).await?;
+	Ok(shown(&gr))
+}
+
+/// Stores `gr`, which carries its revocation, under access method `ac` at `base`, and logs the
+/// revocation.
+async fn store_revoked(
+	base: Base,
+	ac: &str,
+	gr: &catalog::AccessGrant,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<()> {
+	let txn = ctx.tx();
+	match base {
+		Base::Root => {
+			let key = RootGrantKey {
+				ac: Cow::Borrowed(ac),
+				gr: Cow::Borrowed(&gr.id),
+			};
+			txn.set_key(&key, gr).await?;
+		}
+		Base::Ns => {
+			let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
+			let key = NsGrantKey {
+				ns: ns.namespace_id,
+				ac: Cow::Borrowed(ac),
+				gr: Cow::Borrowed(&gr.id),
+			};
+			txn.set_key(&key, gr).await?;
+		}
+		Base::Db => {
+			let (ns, db) = opt.ns_db()?;
+			let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
+			let key = DbGrantKey {
+				ns: db.namespace_id,
+				db: db.database_id,
+				ac: Cow::Borrowed(ac),
+				gr: Cow::Borrowed(&gr.id),
+			};
+			txn.set_key(&key, gr).await?;
+		}
+	};
+
+	info!(
+		"Access method '{}' was used to revoke grant '{}' of type '{}' for '{}' by '{}'",
+		gr.ac,
+		gr.id,
+		gr.grant.variant(),
+		gr.subject.id(),
+		opt.auth.id()
+	);
+	Ok(())
 }
 
 pub(crate) async fn compute_revoke(
@@ -733,54 +723,48 @@ pub(crate) async fn compute_purge(
 	ctx: &FrozenContext,
 	opt: &Options,
 ) -> Result<Value> {
-	let base = match &stmt.base {
-		Some(base) => *base,
-		None => opt.selected_base()?,
-	};
-	// Allowed to run?
-	ctx.is_allowed(opt, Action::Edit, ResourceKind::Access, base)?;
-	// Get the transaction.
+	purge_grants(stmt.base, stmt.ac.as_str(), &stmt.kind, stmt.grace.0, ctx, opt).await
+}
+
+/// Deletes the grants of access method `ac` at `base` (or the session's selected base) that
+/// expired, were revoked, or both as `kind` says, more than `grace` before now, answering each
+/// deleted grant shown. A grant expired or revoked at a later time, or within the grace, is kept.
+pub(crate) async fn purge_grants(
+	base: Option<Base>,
+	ac: &str,
+	kind: &PurgeKind,
+	grace: std::time::Duration,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let base = access_method_base(base, ac, Action::Edit, ctx, opt).await?;
 	let txn = ctx.tx();
-	// Clear the cache.
-	txn.clear_cache();
-	// Check if the access method exists.
-	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
 	// Get all grants to purge.
 	let mut purged = Array::new();
-	let grs = match base {
-		Base::Root => txn.all_root_access_grants(stmt.ac.as_str(), None).await?,
-		Base::Ns => {
-			let ns = ctx.expect_ns_id(opt).await?;
-			txn.all_ns_access_grants(ns, stmt.ac.as_str(), None).await?
-		}
-		Base::Db => {
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.all_db_access_grants(ns, db, stmt.ac.as_str(), None).await?
-		}
-	};
+	let grs = grants_at(base, ac, ctx, opt).await?;
 	for gr in grs.iter() {
-		// Determine if the grant should purged based on expiration or revocation.
+		// Decide whether the grant should be purged, based on expiration or revocation.
 		let now = Datetime::now();
-		// We can convert to unsigned integer as substraction is saturating.
+		// Saturating subtraction keeps the cast to unsigned non-negative.
 		// Revocation times should never exceed the current time.
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
-		let purge_expired = matches!(stmt.kind, PurgeKind::Expired | PurgeKind::Both)
+		let purge_expired = matches!(kind, PurgeKind::Expired | PurgeKind::Both)
 			&& gr.expiration.as_ref().is_some_and(|exp| {
 				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
-				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
+				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > grace.as_secs()
 				             });
-		let purge_revoked = matches!(stmt.kind, PurgeKind::Revoked | PurgeKind::Both)
+		let purge_revoked = matches!(kind, PurgeKind::Revoked | PurgeKind::Both)
 			&& gr.revocation.as_ref().is_some_and(|rev| {
 				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
-				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
+				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > grace.as_secs()
 				             });
-		// If it should, delete the grant and append the redacted version to the result.
+		// Delete the grant and append its redacted form to the result.
 		if purge_expired || purge_revoked {
 			match base {
 				Base::Root => {
 					let key = RootGrantKey {
-						ac: Cow::Borrowed(&stmt.ac),
+						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(&gr.id),
 					};
 					txn.del_key(&key).await?
@@ -789,7 +773,7 @@ pub(crate) async fn compute_purge(
 					let ns = ctx.expect_ns_id(opt).await?;
 					let key = NsGrantKey {
 						ns,
-						ac: Cow::Borrowed(&stmt.ac),
+						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(&gr.id),
 					};
 
@@ -800,7 +784,7 @@ pub(crate) async fn compute_purge(
 					let key = DbGrantKey {
 						ns,
 						db,
-						ac: Cow::Borrowed(&stmt.ac),
+						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(&gr.id),
 					};
 
@@ -817,7 +801,7 @@ pub(crate) async fn compute_purge(
 				opt.auth.id()
 			);
 
-			purged.push(Value::Object(access_object_from_grant(&gr.clone().redacted())));
+			purged.push(shown(gr));
 		}
 	}
 
@@ -875,7 +859,7 @@ pub(crate) fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantB
 	}
 }
 
-/// Returns the surrealql object representation of the access grant
+/// Returns the SurrealQL object form of the access grant.
 pub(crate) fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	let mut res = Object::default();
 	res.insert("id".to_owned(), Value::from(grant.id.clone()));

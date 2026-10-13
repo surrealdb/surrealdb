@@ -1,35 +1,35 @@
-//! Sources that are not a read of a table the program names, and statements
-//! nested in an expression, run over the program's own state.
+//! Sources that do not read a table the program names, and statements
+//! nested in an expression. Both run over the program's own state.
 //!
 //! A value in `FROM` ([`Source::Values`]) is evaluated when its pipeline opens
-//! and read as [`ValuesRead`](super::plan::ValuesRead) describes. A record id among the values is
-//! read under the caller's permissions; a table a dynamic read finds is read as
-//! the pipeline takes its rows, no more records asked of storage first than
-//! the pipeline's paging admits, and no further once a limit of the pipeline
-//! is spent. Under a program lowered with the units that read each table its
-//! values can name ([`super::dispatch`]) both are read by the unit of the
-//! table. A record the units do not read is read by the fetch helpers. A table they do not read is
-//! one the catalog did not hold when the program was lowered, which the run defined by
-//! writing to it: it holds no definition a unit would have lowered, and is read
-//! by key range, as a scan of such a table reads it ([`undispatched_table`]).
+//! and read as [`ValuesRead`](super::payload::ValuesRead) describes. A record id among the values
+//! is read under the caller's permissions. A table found by a dynamic read is read as
+//! the pipeline takes its rows: storage is asked for no more records than the
+//! pipeline's paging admits, and no more once a limit of the pipeline is
+//! spent. When the program was lowered with the units that read each table its
+//! values can name ([`super::dispatch`]), the record ids and tables are read by
+//! the unit of their table. A record no unit reads is read by the fetch helpers.
+//! A table no unit reads was not in the catalog when the program was lowered. The run
+//! created it by writing to it, so no unit was lowered for it. It is read
+//! by key range, the way a scan reads any table ([`undispatched_table`]).
 //! Nothing is planned or lowered while the program runs.
 //!
 //! A statement in `FROM` ([`Source::Nested`]) and a statement in scalar
 //! position ([`BlockInstr::Nested`]) are groups of the program
-//! ([`Program::groups`]), run by [`super::host::run_group`] over the running
-//! state. A statement in scalar position runs in the frame it is evaluated
-//! in, with the row as its `$parent` and `$this`, and over none of the
-//! row-level state of the pipeline that evaluates it: its frame, the
-//! permission bypass, the write in flight, the record a computed frame
-//! computes and the zero limit a statement in `FROM` runs under are set aside
-//! and restored around it. Its run is a frame of the statement's driver, so
-//! nesting spends no thread stack.
+//! ([`Program::groups`]). [`super::host::run_group`] runs them over the
+//! running state. A statement in scalar position runs in the frame where
+//! it is evaluated, with the row as its `$parent` and `$this`. It does not
+//! see the row-level state of the pipeline that evaluates it: the frame,
+//! the permission bypass, the write in flight, the record a computed frame
+//! computes, and the zero limit of a statement in `FROM`. That state is set
+//! aside before the statement runs and restored after it. The run is a frame
+//! of the statement's driver, so nesting uses no thread stack.
 //!
 //! A statement joined to the row it is evaluated for reads through a probe
-//! ([`Source::Probe`]): the rows beneath its join predicate are read once,
-//! at the first opening, and kept with a map from the value of the join
-//! field to the rows holding it ([`Probe`]); each opening then yields, in
-//! the order they were read, the kept rows whose field may equal the key.
+//! ([`Source::Probe`]). The rows under its join predicate are read once,
+//! at the first opening, and kept in a map from the value of the join
+//! field to the rows holding it ([`Probe`]). Each opening yields the kept
+//! rows whose field may equal the key, in the order they were read.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,9 +43,8 @@ use super::host::{
 use super::interp::{Kept, State};
 use super::ledger::Site;
 use super::membership::Members;
-use super::plan::ValuesRead;
+use super::payload::ValuesRead;
 use super::program::{BlockInstr, HostScalar, Pipeline, Program, Source};
-use crate::exe::FlowResultExt as _;
 use crate::exec::operators::fetch::fetch_raw_record;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::operators::scan::pipeline::kv_scan_stream;
@@ -173,9 +172,9 @@ async fn stream_rows(
 	Ok(false)
 }
 
-/// The value at `path` of `parent`, read through objects alone: `None` where
-/// the path meets any other value, whose reading — a record fetched, an
-/// array mapped — is the predicate's own.
+/// The value at `path` of `parent`, read through objects only. Returns `None`
+/// where the path meets any other value. Reading such a value, such as
+/// fetching a record or mapping an array, is left to the predicate.
 pub(super) fn key_at<'a>(
 	parent: Option<&'a Value>,
 	path: &[surrealdb_strand::Strand],
@@ -190,20 +189,20 @@ pub(super) fn key_at<'a>(
 	Some(value)
 }
 
-/// The rows a probe keeps, in the order they were read, each indexed by the
-/// value of the join field, `NONE` where a row has none.
+/// The rows a probe keeps, in the order they were read. Each is indexed by
+/// the value of the join field, or `NONE` when a row has none.
 ///
-/// [`Probe::candidates`] answers a superset of the rows whose field `=`
-/// ([`Value::equal`]) the key, which the join predicate still judges. A map
-/// is decisive only where hashing agrees with `=`
-/// ([`Value::hash_agrees_with_eq`]): a number's hash does not agree across
-/// its representations, so numbers are indexed by representation and a key
-/// is looked up in each representation it can equal exactly — an integer
-/// equals a float or decimal only of the same integral value — while a float
-/// and a decimal, whose equality is approximate, match any row of the other
-/// representation. A field whose value is neither a number nor agreeing, a
-/// regex matching a string key among them, is a candidate for every key; a
-/// key that is neither matches every row.
+/// [`Probe::candidates`] returns a superset of the rows whose field `=`
+/// ([`Value::equal`]) the key. The join predicate still judges each one.
+/// A map is exact only where hashing agrees with `=`
+/// ([`Value::hash_agrees_with_eq`]). A number's hash differs between its
+/// representations, so numbers are indexed by representation. A key is
+/// looked up in each representation it can equal exactly: an integer equals
+/// a float or decimal only when both have the same integral value. A float
+/// and a decimal compare approximately, so they match any row of the other
+/// representation. A field value that is neither a number nor hash-agreeing
+/// is a candidate for every key, and so is a regex that can match a string
+/// key. A key that is neither matches every row.
 pub(crate) struct Probe {
 	rows: Vec<Value>,
 	ints: HashMap<i64, Vec<usize>>,
@@ -349,8 +348,18 @@ fn paged_reads(pipeline: &Pipeline, state: &State) -> Option<u32> {
 		.map(|reads| u32::try_from(reads.max(1)).unwrap_or(u32::MAX))
 }
 
+/// The value of a `FROM` source from the host's run of it: a `RETURN` inside it
+/// is its value, and a `BREAK` or `CONTINUE` passes outwards to the loop the
+/// statement is written in.
+fn source_value(ran: FlowResult<Value>) -> FlowResult<Value> {
+	match ran {
+		Err(ControlFlow::Return(value)) => Ok(value),
+		ran => ran,
+	}
+}
+
 /// The rows `value` yields, read as `read` says; see
-/// [`ValuesRead`](super::plan::ValuesRead). Under `zeroed`, a record id or
+/// [`ValuesRead`](super::payload::ValuesRead). Under `zeroed`, a record id or
 /// table a dynamic read finds reads no record; a table a dynamic read finds
 /// is read `reads` records at a time first, where the pipeline takes no more
 /// ([`paged_reads`]).
@@ -366,11 +375,11 @@ async fn values(
 		ValuesRead::Expression {
 			written,
 		} => {
-			// Nested, the statement's `$this` is the enclosing row: the
-			// expression reads it as its current value and its document.
+			// In a nested statement, `$this` is the enclosing row. The expression
+			// reads it as its current value and as its document.
 			let (this, forbidding) = ctx.enclosing_row();
 			let ctx = forbidding.as_ref().unwrap_or(ctx);
-			let value = host_scalar(program, value, ctx, this).await.catch_return()?;
+			let value = source_value(host_scalar(program, value, ctx, this).await)?;
 			let rows = match value {
 				Value::Array(array) => {
 					let mut rows = Vec::with_capacity(array.len());
@@ -394,7 +403,7 @@ async fn values(
 			Ok(Values::Rows(rows))
 		}
 		ValuesRead::Locked => {
-			let value = host_scalar(program, value, ctx, None).await.catch_return()?;
+			let value = source_value(host_scalar(program, value, ctx, None).await)?;
 			// A locked read is of the record id the value is, which the units
 			// serving the table do not lock.
 			let Value::RecordId(rid) = value else {
@@ -423,7 +432,7 @@ async fn values(
 			Ok(Values::Rows(rows))
 		}
 		ValuesRead::Dynamic => {
-			let value = host_scalar(program, value, ctx, None).await.catch_return()?;
+			let value = source_value(host_scalar(program, value, ctx, None).await)?;
 			if let Some(deref) = ctx.vm_deref().cloned()
 				&& reads_through(&deref, &value, ctx).await?
 			{
@@ -467,6 +476,9 @@ async fn values(
 				Value::Table(table) => {
 					let db_ctx = ctx.database()?;
 					let version = resolve_version_stamp(ctx, None).await?;
+					if absent_and_hidden(ctx, &table, version).await? {
+						return Ok(Values::Rows(Vec::new()));
+					}
 					if db_ctx.get_table_def(&table, version).await?.is_none() {
 						return Err(ControlFlow::Err(anyhow::Error::new(
 							crate::catalog::Error::TbNotFound {
@@ -504,10 +516,10 @@ async fn reads_through(
 }
 
 /// The record `rid` as a statement reads it from inside one of the record's
-/// own computed fields, read at `version`: its view with no computed field
-/// derived, since deriving them is what the read is part of — the view the
-/// computation holds, or else the record as stored. `None` for any other
-/// read, which reads the record as it reads every other.
+/// own computed fields, at `version`. The view has no computed field derived,
+/// because deriving them is the work this read is part of. It is the view the
+/// computation holds, or else the record as stored. Returns `None` for any
+/// other read, which reads the record as it reads every other.
 async fn own_record(
 	ctx: &ExecutionContext,
 	rid: &crate::val::RecordId,
@@ -524,14 +536,14 @@ async fn own_record(
 	}))
 }
 
-/// The rows a dynamic read of `value` yields, read by the units of `deref`:
-/// a record id or range is read by the unit of its table, as a table is, and
-/// an array's elements are read by [`records_of`]. Under `zeroed`, a record
-/// id or table reads no record once its table is known to exist. A table is
-/// read by its unit as a table named in the text is read under its
-/// statement's paging: the unit's read of storage takes no more than `reads`
+/// The rows a dynamic read of `value` yields, read by the units of `deref`.
+/// A record id or range is read by the unit of its table, as a table is.
+/// An array's elements are read by [`records_of`].
+/// Under `zeroed`, a record id or table reads no record once its table is
+/// known to exist. A table is read by its unit with the same paging as a
+/// table named in the text: the unit asks storage for no more than `reads`
 /// records before it hands its rows on, and no more once the pipeline stops
-/// taking them.
+/// taking rows.
 async fn dispatched(
 	deref: &Arc<super::Deref>,
 	value: Value,
@@ -606,6 +618,9 @@ async fn dispatched(
 		}
 		Value::Array(array) => Ok(Values::Rows(records_of(ctx, array.0).await?)),
 		Value::Table(table) => {
+			if absent_and_hidden(ctx, &table, version).await? {
+				return Ok(Values::Rows(Vec::new()));
+			}
 			require_defined(ctx, &table, version).await?;
 			if zeroed {
 				return Ok(Values::Rows(Vec::new()));
@@ -623,6 +638,22 @@ async fn dispatched(
 		Value::None | Value::Null => Ok(Values::Rows(Vec::new())),
 		other => Ok(Values::Rows(vec![other])),
 	}
+}
+
+/// Whether `table` is not defined as of `version` and the caller's reads are permission-checked,
+/// so that a read of it by a value answers no row, as a scan of it by name does, rather than
+/// disclosing the absence.
+async fn absent_and_hidden(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	version: Option<u64>,
+) -> FlowResult<bool> {
+	let db_ctx = ctx.database()?;
+	if db_ctx.get_table_def(table, version).await?.is_some() {
+		return Ok(false);
+	}
+	crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)
+		.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))
 }
 
 /// Fails with the error of a table that is not defined, as of `version`.
@@ -651,17 +682,17 @@ async fn records_of(ctx: &ExecutionContext, mut values: Vec<Value>) -> FlowResul
 	Ok(values)
 }
 
-/// The rows of `table`, which no unit of the program or of the run reads in
-/// the frame `ctx` runs in — a table whose read the host lowers no unit of,
-/// or one read in a frame other than the one its linked unit was lowered for
-/// ([`super::Deref::serving`]): every record in key order, read as the
-/// pipeline takes them, as a record is read by id
-/// ([`crate::exec::operators::fetch::process_fetched_record`]) — the table's
-/// permission, its computed fields and the permissions of its fields — where
-/// the table defines any, and as storage holds it otherwise. A table the
-/// program's own units read in another frame, and a lightweight relation,
-/// which keeps no records to scan, are an internal error. Storage is asked
-/// for no more than `reads` records first, where the pipeline takes no more.
+/// The rows of `table` when no unit of the program or of the run reads it in
+/// the frame `ctx` runs in ([`super::Deref::serving`]). This covers a table
+/// no unit was lowered for, and a table read in a frame other than the one
+/// its unit was lowered for. Records come in key order, as the pipeline
+/// takes them. Each is read the way a fetch by id reads it
+/// ([`crate::exec::operators::fetch::process_fetched_record`]): the table
+/// permission, the computed fields and the field permissions apply where the
+/// table defines them. Otherwise the record is read as storage holds it. A
+/// table that the program's own units read in another frame is an internal
+/// error, and so is a lightweight relation, which keeps no records to scan.
+/// Storage is asked for no more than `reads` records first, and the pipeline takes no more.
 async fn undispatched_table(
 	ctx: &ExecutionContext,
 	table: &TableName,
@@ -854,7 +885,7 @@ async fn run_statement(
 	};
 	let group = match &spec.hashed {
 		Some((hashed, path))
-			if state.lookups[nested as usize] >= super::plan::LOOKUP_EVALUATIONS
+			if state.lookups[nested as usize] >= super::payload::LOOKUP_EVALUATIONS
 				|| !row
 					.and_then(|row| key_at(Some(row), path))
 					.is_some_and(super::host::lookup_key) =>

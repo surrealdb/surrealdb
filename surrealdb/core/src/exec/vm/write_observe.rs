@@ -11,12 +11,15 @@
 //!
 //! The table's live subscriptions are not the program's to know: another
 //! session registers and kills them at any time. A record reads the ones its
-//! write context holds, as `ProcessTableLives` does, and a write to a table
-//! with none does nothing more. Each subscription's work is a unit of its own
+//! write context holds, and a write to a table with none does nothing more.
+//! Each subscription's work is a unit of its own
 //! ([`LoweredSubscription`] over the program of its [`LiveUnit`]), compiled
 //! for its principal before any write reaches it and carried by the write
-//! context (`vm::live`); its notification is sent as the Rust body sends it,
-//! only once the transaction commits.
+//! context (`vm::live`); its notification is sent only once the transaction
+//! commits.
+
+// Runtime that lowered programs call into.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -44,8 +47,8 @@ use crate::val::{RecordId, Value};
 /// An instruction of the observer stages.
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::exec::vm) enum ObserveInstr {
-	/// Run the table's events for the record, as `ProcessTableEvents` runs
-	/// them: the events and clauses of unit `unit` ([`Program::events`]).
+	/// Run the table's events for the record: the events and clauses of unit
+	/// `unit` ([`Program::events`]).
 	Events {
 		unit: UnitId,
 		/// The planner's re-entry depth at the write, which a write reached
@@ -54,16 +57,14 @@ pub(in crate::exec::vm) enum ObserveInstr {
 		depth: u32,
 	},
 	/// Buffer the record's change for the change feed and the live-query
-	/// capture, as `ProcessChangefeeds` buffers it.
+	/// capture.
 	RecordChange,
-	/// Maintain the views the table feeds for the record, as
-	/// `ProcessTableViews` maintains them for `action`.
+	/// Maintain the views the table feeds for the record, for `action`.
 	Views {
 		action: Action,
 		lowered: Arc<super::view::LoweredViews>,
 	},
-	/// Notify the table's live subscriptions of the record, as
-	/// `ProcessTableLives` notifies them for `action`.
+	/// Notify the table's live subscriptions of the record, for `action`.
 	Lives(Action),
 }
 
@@ -266,7 +267,7 @@ async fn lives(action: Action, state: &mut State) -> FlowResult<()> {
 ///
 /// A subscription with no unit gets none: it is served nothing, or its clauses
 /// did not lower and that is traced where the unit was decided
-/// ([`crate::exec::vm::lower_live::ensure`]). The context holds one entry per
+/// ([`crate::exec::vm::live::ensure`]). The context holds one entry per
 /// subscription, so a missing entry is an invariant the write broke.
 pub(crate) async fn notify_at(
 	ctx: &WriteCtx,
@@ -297,7 +298,7 @@ pub(crate) async fn notify_at(
 #[cfg(test)]
 thread_local! {
 	/// Records whose live subscriptions the instructions notified, for tests
-	/// that must know the Rust body did not run.
+	/// that check which path delivered them.
 	pub(in crate::exec::vm) static LIVES_RUN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 	/// Subscriptions notified by their lowered programs.
 	pub(in crate::exec::vm) static LIVES_LOWERED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -594,9 +595,49 @@ async fn clause(
 	};
 	match ran {
 		Ok(value) | Err(ControlFlow::Return(value)) => Ok(value),
-		Err(e) => Err(ControlFlow::Err(anyhow::anyhow!(
-			"Error while processing event {}: {e}",
-			event.name
-		))),
+		Err(signal) => Err(ControlFlow::Err(event_failure(&event.name, signal))),
+	}
+}
+
+/// The failure of a clause of event `event` that ended in `signal`, named by
+/// the event.
+///
+/// An event is a barrier: a `BREAK` or `CONTINUE` leaving a clause has no loop
+/// to target and is the misplaced-control-flow error, the one text every such
+/// site answers. An error keeps its own text. A `RETURN` is a clause's value
+/// and never a failure, so one reaching here is an internal error.
+fn event_failure(event: &str, signal: ControlFlow) -> anyhow::Error {
+	let inner = match signal {
+		ControlFlow::Break | ControlFlow::Continue => {
+			anyhow::Error::new(crate::exec::Error::InvalidControlFlow)
+		}
+		ControlFlow::Err(e) => e,
+		ControlFlow::Return(_) => anyhow::Error::new(crate::err::EngineError::Internal(
+			"a RETURN was treated as the failure of an event clause".to_owned(),
+		)),
+	};
+	anyhow::anyhow!("Error while processing event {event}: {inner}")
+}
+
+#[cfg(test)]
+mod tests {
+	use super::event_failure;
+	use crate::expr::ControlFlow;
+
+	const BARRIER: &str =
+		"Invalid control flow statement, break or continue statement found outside of loop.";
+
+	#[test]
+	fn a_loop_signal_in_an_event_is_the_misplaced_control_flow_error() {
+		for signal in [ControlFlow::Break, ControlFlow::Continue] {
+			assert_eq!(
+				event_failure("e", signal).to_string(),
+				format!("Error while processing event e: {BARRIER}"),
+			);
+		}
+		assert_eq!(
+			event_failure("e", ControlFlow::Err(anyhow::anyhow!("boom"))).to_string(),
+			"Error while processing event e: boom",
+		);
 	}
 }

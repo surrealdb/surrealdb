@@ -287,6 +287,17 @@ mod vm {
 				Outcome::Declined(Error::Exec(crate::exec::Error::PlannerUnsupported { .. }))
 			)
 		}
+
+		/// Whether this is the plan refusing a statement in a clause whose region does not admit
+		/// it, such as a write in a `WHERE` clause: the request is refused before any statement
+		/// of it runs, so no program holds the statement.
+		fn is_region_refusal(&self) -> bool {
+			matches!(
+				self,
+				Outcome::Declined(Error::Exec(crate::exec::Error::InvalidStatement(message)))
+					if message.contains("is not allowed in a")
+			)
+		}
 	}
 
 	/// A statement as the executor plans it.
@@ -617,7 +628,8 @@ mod vm {
 	enum Reach {
 		/// The program is `ReadWrite`: the derivation reached the position.
 		Reached,
-		/// The VM declined the statement, so no program holds it.
+		/// The VM declined the statement, or the plan refused it in its region, so no program
+		/// holds it.
 		Declined,
 	}
 
@@ -654,10 +666,12 @@ mod vm {
 				"{label}: `{sql}` holds `{nested}` but planned to a ReadOnly program, so the \
 				 derivation did not reach the position"
 			)),
-			outcome if outcome.is_vm_decline() => Ok(Reach::Declined),
+			outcome if outcome.is_vm_decline() || outcome.is_region_refusal() => {
+				Ok(Reach::Declined)
+			}
 			outcome => Err(format!(
-				"{label}: `{sql}` failed to plan for a reason other than the VM declining it: \
-				 {outcome:?}"
+				"{label}: `{sql}` failed to plan for a reason other than the VM declining it or \
+				 its region refusing it: {outcome:?}"
 			)),
 		}
 	}
@@ -679,7 +693,8 @@ mod vm {
 				match judge_nested(label, &sql, nested, writes, &planned) {
 					Ok(Reach::Reached) => reached += 1,
 					Ok(Reach::Declined) => println!(
-						"declined by the VM (no program, so nothing runs): {label} with `{nested}`"
+						"declined by the VM or refused by its region (no program, so nothing \
+						 runs): {label} with `{nested}`"
 					),
 					Err(failure) => panic!("{failure}"),
 				}

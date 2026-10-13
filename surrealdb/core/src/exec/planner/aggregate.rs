@@ -2,7 +2,6 @@
 //!
 //! Handles GROUP BY, aggregate function extraction, and the `AggregateExtractor` rewrite.
 
-use std::collections::HashMap;
 use std::ops::Bound;
 
 use surrealdb_types::ToSql;
@@ -10,34 +9,13 @@ use surrealdb_types::ToSql;
 use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
-use crate::exec::operators::{AggregateId, aggregate_field_name, group_key_field_name};
+use crate::exec::operators::{AggregateId, aggregate_field_name};
 use crate::exec::planner::util::SELECT_ITERATION_PARAMS;
 use crate::expr::Function;
 use crate::expr::logical::{
-	LogicalCall, LogicalExpr, LogicalField, LogicalFields, LogicalLiteral, LogicalRecordIdKey,
-	OutputPath, OutputPathPart,
+	LogicalCall, LogicalExpr, LogicalField, LogicalFields, LogicalRecordIdKey, OutputPath,
 };
 use crate::expr::operator::BinaryOperator;
-
-/// The keys of an [`OutputPath`], for use as an [`AggregateField::output_path`].
-///
-/// The projection pipeline places values by the same path, so the two agree
-/// on output field names:
-///
-/// - Graph-traversal aliases (`` ->friends->person AS buddy ``) are a single flat key (the alias
-///   identifier).
-/// - Multi-part paths (`AS foo.bar`) nest as `["foo", "bar"]`.
-/// - A single key whose identifier contains a dot (`` AS `foo.bar` ``) stays a single flat
-///   `["foo.bar"]` key.
-/// - A lookup key is spelled as the lookup renders.
-fn output_path_keys(path: &OutputPath) -> Vec<String> {
-	path.parts()
-		.iter()
-		.map(|part| match part {
-			OutputPathPart::Field(key) | OutputPathPart::Lookup(key) => key.clone(),
-		})
-		.collect()
-}
 
 // ============================================================================
 // Logical analysis
@@ -49,12 +27,6 @@ fn output_path_keys(path: &OutputPath) -> Vec<String> {
 pub(crate) struct AggregateCallAnalysis {
 	/// The function the call names.
 	pub(crate) id: AggregateId,
-	/// The expression evaluated per row to get the value to accumulate.
-	pub(crate) argument: LogicalExpr,
-	/// The arguments after the first, evaluated once for the group against a
-	/// document of its keys, with a key read already rewritten to its
-	/// placeholder.
-	pub(crate) extra_args: Vec<LogicalExpr>,
 }
 
 /// The aggregates a projected expression holds, as the planner extracts them.
@@ -62,38 +34,20 @@ pub(crate) struct AggregateCallAnalysis {
 pub(crate) struct AggregateInfoAnalysis {
 	/// The calls, in the order of their `_aN` placeholders.
 	pub(crate) calls: Vec<AggregateCallAnalysis>,
-	/// The expression over the placeholders, evaluated once for the group
-	/// against a document of the group's answers; `None` for a projection that
-	/// is exactly one aggregate.
-	pub(crate) post: Option<LogicalExpr>,
 }
 
 /// A projected field of an aggregation, before any of its expressions is
 /// compiled.
 #[derive(Debug, Clone)]
 pub(crate) struct AggregateFieldAnalysis {
-	/// Where the field's value lands in the group's answer.
-	pub(crate) output_path: Vec<String>,
-	/// Whether the field is a grouping key.
-	pub(crate) is_group_key: bool,
-	/// For a grouping key, its position among the keys.
-	pub(crate) group_key_index: Option<usize>,
 	/// The aggregates of the field, when it holds any or reads the row.
 	pub(crate) info: Option<AggregateInfoAnalysis>,
-	/// The expression of a field that is neither a key nor an aggregate.
-	pub(crate) fallback: Option<LogicalExpr>,
-	/// Whether [`Self::fallback`] has one value for the whole group: it is
-	/// the row-independent branch of the analysis.
-	pub(crate) fallback_is_constant: bool,
 }
 
 /// An aggregation's grouping keys and projected fields, before any of their
 /// expressions is compiled.
 #[derive(Debug, Clone)]
 pub(crate) struct AggregationAnalysis {
-	/// The grouping keys with a key written as a field's alias replaced by
-	/// that field's expression.
-	pub(crate) keys: Vec<LogicalExpr>,
 	pub(crate) fields: Vec<AggregateFieldAnalysis>,
 }
 
@@ -109,66 +63,22 @@ pub(crate) fn analyse_aggregation(
 	fields: &LogicalFields,
 	group_by: &[LogicalExpr],
 ) -> Result<AggregationAnalysis, Error> {
-	let mut alias_to_expr: HashMap<String, &LogicalExpr> = HashMap::new();
-	match fields {
-		LogicalFields::Value {
-			expr,
-			alias,
-		} => {
-			if let Some(alias) = alias {
-				alias_to_expr.insert(alias.to_sql(), expr);
-			}
-		}
-		LogicalFields::Select(field_list) => {
-			for field in field_list {
-				if let LogicalField::Single {
-					expr,
-					alias: Some(alias),
-					..
-				} = field
-				{
-					alias_to_expr.insert(alias.to_sql(), expr);
-				}
-			}
-		}
-	}
-
-	let keys = group_by
-		.iter()
-		.map(|key| match alias_to_expr.get(&key.to_sql()) {
-			Some(select_expr) => (*select_expr).clone(),
-			None => key.clone(),
-		})
-		.collect();
-
-	let analyse = |output_path: Vec<String>,
-	               expr: &LogicalExpr,
-	               alias: Option<&OutputPath>|
-	 -> Result<AggregateFieldAnalysis, Error> {
-		let group_key_index = find_group_key_index(expr, alias, group_by);
-		let is_group_key = group_key_index.is_some();
-		let (info, fallback) = if is_group_key {
-			(None, None)
-		} else {
-			analyse_aggregate_info(registry, expr.clone(), group_by)?
+	let analyse =
+		|expr: &LogicalExpr, alias: Option<&OutputPath>| -> Result<AggregateFieldAnalysis, Error> {
+			let info = match find_group_key_index(expr, alias, group_by) {
+				Some(_) => None,
+				None => analyse_aggregate_info(registry, expr.clone())?.0,
+			};
+			Ok(AggregateFieldAnalysis {
+				info,
+			})
 		};
-		Ok(AggregateFieldAnalysis {
-			output_path,
-			is_group_key,
-			group_key_index,
-			// A fallback comes from the row-independent branch of the
-			// analysis, which is the only place one is produced.
-			fallback_is_constant: fallback.is_some(),
-			info,
-			fallback,
-		})
-	};
 
 	let fields = match fields {
 		LogicalFields::Value {
 			expr,
 			alias,
-		} => vec![analyse(vec![String::new()], expr, alias.as_ref())?],
+		} => vec![analyse(expr, alias.as_ref())?],
 		LogicalFields::Select(field_list) => {
 			let mut analysed = Vec::with_capacity(field_list.len());
 			for field in field_list {
@@ -185,11 +95,7 @@ pub(crate) fn analyse_aggregation(
 						alias,
 						..
 					} => {
-						let output_path = match alias {
-							Some(alias) => output_path_keys(alias),
-							None => output_path_keys(&expr.output_path()),
-						};
-						analysed.push(analyse(output_path, expr, alias.as_ref())?);
+						analysed.push(analyse(expr, alias.as_ref())?);
 					}
 				}
 			}
@@ -197,7 +103,6 @@ pub(crate) fn analyse_aggregation(
 		}
 	};
 	Ok(AggregationAnalysis {
-		keys,
 		fields,
 	})
 }
@@ -212,13 +117,12 @@ pub(crate) fn analyse_aggregation(
 pub(crate) fn analyse_aggregate_info(
 	registry: &FunctionRegistry,
 	mut expr: LogicalExpr,
-	group_by: &[LogicalExpr],
 ) -> Result<AggregateInfoOrFallback, Error> {
 	let mut extractor = AggregateExtractor::new(registry);
 	extractor.extract(&mut expr)?;
 
 	if extractor.aggregates.is_empty() {
-		// No aggregates found — the extractor left expr unchanged.
+		// No aggregate was found, so the extractor left `expr` unchanged.
 		//
 		// An expression the row cannot influence has one value for the
 		// whole group, so it is evaluated once as a non-aggregate field
@@ -230,18 +134,14 @@ pub(crate) fn analyse_aggregate_info(
 		}
 
 		// The expression reads the row, so the group is reduced by
-		// collecting each row's value, duplicates included. That is the
-		// established answer for this shape, which is why it folds with
-		// `array::collect` and not `array::group` — the latter owes its
-		// caller a deduplicated result.
+		// collecting each row's value, duplicates included.
+		// The fold is `array::collect`, not `array::group`, because
+		// `array::group` returns deduplicated values.
 		return Ok((
 			Some(AggregateInfoAnalysis {
 				calls: vec![AggregateCallAnalysis {
 					id: AggregateId::ImplicitCollect,
-					argument: expr,
-					extra_args: vec![],
 				}],
-				post: None,
 			}),
 			None,
 		));
@@ -250,42 +150,14 @@ pub(crate) fn analyse_aggregate_info(
 	let mut calls = Vec::with_capacity(extractor.aggregates.len());
 	for (name, call) in extractor.aggregates {
 		let id = AggregateId::of_call(name.as_str(), !call.args.is_empty());
-		let mut args = call.args.into_iter();
-		let argument = args.next().unwrap_or(LogicalExpr::Literal(LogicalLiteral::None));
-		let extra_args = args
-			.map(|mut arg| {
-				// An argument after the first is evaluated once for the group,
-				// against the group's keys rather than against a row, so a key
-				// named in one is reached through its placeholder exactly as a
-				// post-expression reaches it.
-				rewrite_group_key_reads(&mut arg, group_by);
-				arg
-			})
-			.collect();
 		calls.push(AggregateCallAnalysis {
 			id,
-			argument,
-			extra_args,
 		});
 	}
-
-	// The extractor replaced each aggregate call with a read of its
-	// placeholder field (`_a0`, `_a1`, …). A projection that is exactly
-	// one such read needs no post-expression.
-	let is_direct_single_aggregate =
-		calls.len() == 1 && expr == LogicalExpr::Field(aggregate_field_name(0).into());
-
-	let post = if is_direct_single_aggregate {
-		None
-	} else {
-		rewrite_group_key_reads(&mut expr, group_by);
-		Some(expr)
-	};
 
 	Ok((
 		Some(AggregateInfoAnalysis {
 			calls,
-			post,
 		}),
 		None,
 	))
@@ -304,13 +176,13 @@ pub(crate) fn analyse_aggregate_info(
 /// one that does has its per-row values collected.
 ///
 /// The analysis walks to the leaves rather than matching whole shapes, so
-/// `math::abs(-7)` reduces the same way `-7` and `4 + 3` do. Getting that
-/// uniformity right is the point: a rule that reduces some constant expressions
-/// and collects others cannot be predicted from the query text.
+/// `math::abs(-7)` reduces the same way `-7` and `4 + 3` do. Every
+/// expression with no row reference gets this treatment, so the outcome can
+/// be predicted from the query text.
 ///
 /// A row is read through a field of its own, through `$this`/`$self`/`$parent`,
-/// or by a body plan time cannot see. So these are *not* row-independent, and
-/// each for a reason rather than for want of a case arm:
+/// or by a body that plan time cannot see. These expressions are therefore
+/// row-dependent. The cases are:
 ///
 /// - A read of the row's own field (`name`, and `address.city` as an [`LogicalExpr::Access`] over
 ///   one), and the record id the document is addressed by (`@`).
@@ -481,8 +353,8 @@ fn call_is_row_independent(
 	}
 
 	// An aggregate reduces the group rather than describing one row. The
-	// extractor lifts those out before this runs, so this is a guard against a
-	// future caller rather than a case reached today.
+	// extractor removes aggregate calls before this runs, so this guards
+	// against future callers.
 	if registry.get_aggregate(name).is_some() {
 		return false;
 	}
@@ -558,32 +430,6 @@ pub(super) fn find_group_key_index(
 	}
 
 	None
-}
-
-/// Rewrite every read of a grouping key in `expr` into a read of that key's
-/// placeholder field (`_g0`, `_g1`, …).
-///
-/// A post-expression is evaluated once for the group, against a document of
-/// the group's answers rather than against a row, so a key named inside it —
-/// the `g` of `math::sum(v) + g` — has nothing to read unless the key is
-/// placed there under a name it can reach. Which reads name a key is
-/// [`find_group_key_index`]'s rule, the same one that decides whether a whole
-/// projection is a key; a key the rule does not recognise is left as written
-/// and reads `NONE`, as it did before.
-///
-/// A post-expression and an aggregate's arguments after the first are
-/// rewritten; the extractor has already lifted the latter out of `expr` by the
-/// time this runs, so they are rewritten where they are compiled. An
-/// aggregate's *first* argument is not: it is evaluated against each row of
-/// the group, where a key is readable as written.
-fn rewrite_group_key_reads(expr: &mut LogicalExpr, group_by: &[LogicalExpr]) {
-	if let Some(idx) = find_group_key_index(expr, None, group_by) {
-		*expr = LogicalExpr::Field(group_key_field_name(idx).into());
-		return;
-	}
-	for child in expr.children_mut() {
-		rewrite_group_key_reads(child, group_by);
-	}
 }
 
 // ============================================================================

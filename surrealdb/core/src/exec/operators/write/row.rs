@@ -12,16 +12,17 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Metadata, Record};
+use crate::doc::alter::ComputedData;
 use crate::exec::Error as ExecError;
+use crate::exec::memory::size::value_bytes;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::expr::ControlFlow;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// The evaluated data clause a record's stages apply.
 ///
-/// It is the `doc` module's own shape, under the name the write operator uses
-/// for it, rather than a second enum kept in step with it: two declarations of
-/// one shape drift.
+/// This is the `doc` module's type, under the name the write operator uses for it.
+/// It is an alias, not a copy, so the two declarations cannot drift apart.
 ///
 /// The helpers on it are not crate-visible and must not become so: they
 /// evaluate through the surface `Value` mutators rather than the compiled
@@ -31,9 +32,15 @@ pub(crate) type ComputedInput = crate::doc::alter::ComputedData;
 /// The statement-specific payload a record carries: `INSERT`'s own row value,
 /// or `RELATE`'s endpoints and value.
 ///
-/// As with [`ComputedInput`], this is the `doc` module's own shape under the
-/// write operator's name for it, not a copy.
+/// Like [`ComputedInput`], this is an alias of the `doc` module's type.
 pub(crate) type WriteExtras = crate::doc::Extras;
+
+/// A row moves from a worker task to the coordinator, so it must be `Send`.
+/// It is not `Sync` (`modified` is a `OnceCell`), and no row is shared.
+const _: fn() = || {
+	fn send<T: Send>() {}
+	send::<WriteRow>();
+};
 
 /// Per-record state threaded through a stage list.
 #[derive(Debug)]
@@ -94,13 +101,13 @@ pub(crate) struct WriteRow {
 
 	/// Whether `current` currently carries its `COMPUTED` field values.
 	///
-	/// Load-bearing, not a cache hint. The derivation short-circuits on it, and
+	/// A correctness condition, not a cache hint. The derivation short-circuits on it, and
 	/// every stage that changes the record's field values must clear it:
 	/// applying the data clause, and stripping the computed values before
 	/// storage. A stale `true` makes the scratch copy a write-permission
 	/// predicate is judged against inherit values that are no longer there, so
-	/// a predicate naming a `COMPUTED` field reads `NONE` and the guard opens
-	/// (GHSA-f6h4-5xf2-86q9).
+	/// a predicate naming a `COMPUTED` field reads `NONE`, so the guard opens
+	/// instead of holding.
 	///
 	/// Cleared by [`WriteRow::reset_for_update_retry`] along with the images.
 	pub(crate) fields_computed: bool,
@@ -219,9 +226,9 @@ impl WriteRow {
 	/// of ids, an object carrying one, a `|table:n|` generator — is refused
 	/// rather than accepted as one. Each of those is expanded before a row
 	/// exists; this shape is one expression to one subject, so taking a range
-	/// here would
-	/// write a single record whose id *is* the range instead of the records it
-	/// spans. Failing is the only safe reading.
+	/// here would make one record whose id *is* the range, not the records
+	/// it spans. Failing is the only safe reading.
+	/// Callers expand the target before this constructor is reached.
 	pub(crate) fn for_target(target: Value) -> Result<Self, ControlFlow> {
 		let unsupported = |value: Value| {
 			Err(ControlFlow::Err(anyhow::anyhow!(ExecError::InvalidStatementTarget {
@@ -470,5 +477,57 @@ impl WriteRow {
 		self.initial_fields_computed = false;
 		self.input = None;
 		self.modified = OnceCell::new();
+	}
+
+	/// The bytes this record in flight holds.
+	///
+	/// The row's own size plus the values behind `initial`, `current`, the two reduced images,
+	/// `output` and the evaluated data clause in `input`, counted by
+	/// [`value_bytes`]. A `Set` clause counts its assignment values; an `Unset` clause counts its
+	/// idiom slots by `size_of` only, as the parts of an idiom are not walked. `extras` and the
+	/// metadata slots are counted by the struct's size alone.
+	///
+	/// An estimate for a memory account: close enough to bound the candidates held at once, and
+	/// cheap enough to take once per record. It walks borrowed values and never clones.
+	#[allow(dead_code, reason = "the morsel runtime is the first caller")]
+	pub(crate) fn held_bytes(&self) -> usize {
+		let images = [
+			Some(&self.initial),
+			Some(&self.current),
+			self.initial_reduced.as_ref(),
+			self.current_reduced.as_ref(),
+			self.output.as_ref(),
+		];
+		let input = match &self.input {
+			None => 0,
+			Some(
+				ComputedData::Patch(value)
+				| ComputedData::Merge(value)
+				| ComputedData::Replace(value)
+				| ComputedData::Content(value),
+			) => value_bytes(value),
+			Some(ComputedData::Unset(idioms)) => std::mem::size_of_val(idioms.as_slice()),
+			Some(ComputedData::Set(assignments)) => {
+				assignments.iter().map(|assignment| value_bytes(&assignment.value)).sum()
+			}
+		};
+		images
+			.into_iter()
+			.flatten()
+			.map(value_bytes)
+			.fold(std::mem::size_of::<Self>().saturating_add(input), usize::saturating_add)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn held_bytes_grows_with_the_images() {
+		let light = WriteRow::for_insert(TableName::from("t"), None);
+		let mut heavy = WriteRow::for_insert(TableName::from("t"), None);
+		heavy.current = Value::String("x".repeat(1024).into());
+		assert!(heavy.held_bytes() >= light.held_bytes() + 1024);
 	}
 }

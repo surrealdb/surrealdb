@@ -6,7 +6,7 @@ use surrealdb_kvs::api::{
 	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
-use surrealdb_kvs::{Direction, Key, KeyRange};
+use surrealdb_kvs::{Direction, Estimate, Key, KeyRange, Snapshot, SplitTarget};
 
 use crate::speculation::{Held, HeldCursor, Overlay};
 use crate::{IntoBytes, Result, Val};
@@ -206,7 +206,7 @@ impl Transactor {
 	///
 	/// If the transaction has been marked as a writeable
 	/// transaction, then this function will return [`true`].
-	/// This fuction can be used to check whether a transaction
+	/// This function can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
 	/// will return a [`surrealdb_kvs::Error::TransactionReadonly`] error when
 	/// attempting to modify any data within the transaction.
@@ -532,7 +532,7 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
+	/// request to the underlying datastore. The returned [`KeysResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
 	#[cfg_attr(
@@ -559,7 +559,7 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
+	/// request to the underlying datastore. The returned [`KeysResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
 	#[cfg_attr(
@@ -679,6 +679,56 @@ impl Transactor {
 		self.inner.count_bounded(rng, version, budget).await
 	}
 
+	/// This transaction's owned read view, or `None` when it cannot give one.
+	///
+	/// A speculation's view answers `None`: its reads pass through an overlay of writes that
+	/// the storage's view does not hold.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::snapshot`].
+	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		if self.speculating() {
+			return None;
+		}
+		self.inner.snapshot()
+	}
+
+	/// What a range holds, exactly when it holds fewer keys than the estimate budget and
+	/// extrapolated otherwise.
+	///
+	/// A speculating transaction estimates what the storage holds: the writes the speculation
+	/// has taken are not counted.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::estimate`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn estimate(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<Estimate> {
+		self.inner.estimate(rng, version).await
+	}
+
+	/// Boundary keys that divide a range into parts, strictly inside it and ascending.
+	///
+	/// A range the speculation touches is not divided: the storage cannot see the keys the
+	/// speculation holds, so the answer is no boundaries.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::split`].
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
+	)]
+	pub async fn split(
+		&self,
+		rng: KeyRange<'_>,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> Result<Vec<Key<'static>>> {
+		if self.speculated(&rng, version) {
+			return Ok(Vec::new());
+		}
+		self.inner.split(rng, target, version).await
+	}
+
 	/// How the work of a count grows with the keys a range holds.
 	///
 	/// See [`surrealdb_kvs::api::Transactable::count_cost`].
@@ -697,7 +747,7 @@ impl Transactor {
 	/// `next_batch` call advances the same underlying iterator instead of
 	/// re-seeking from scratch, which is the primary cost on RocksDB
 	/// paged scans. `skip` is applied once on the first batch. See
-	/// [`ScanCursorKey<'_>s`].
+	/// [`ScanCursorKeys`].
 	#[cfg_attr(
 		feature = "observability",
 		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)
@@ -785,16 +835,15 @@ impl Transactor {
 	// Savepoint functions
 	// --------------------------------------------------
 	//
-	// A save point scopes more than the storage layer's write set: the buffered
-	// index deltas describe writes this transaction has made, so they are framed
-	// alongside it. Only [`crate::Transaction`] holds those buffers, so it owns
-	// the save-point API and reaches the engine through `inner` directly.
+	// A save point covers the storage write set and the buffered index deltas
+	// together, so both are framed at once. Only [`crate::Transaction`] holds
+	// those buffers, so it owns the save-point API and calls the engine through
+	// `inner` directly.
 	//
-	// Deliberately no wrapper here. `Transaction` derefs to `Transactor`, so one
-	// would resolve on a `Transaction` for any caller who reached for it, and move
-	// the storage stack without the frames that mirror it. Reaching `inner` still
-	// does that — the field is what `Transaction` itself needs — so this is one
-	// fewer way in rather than none.
+	// There is no save-point wrapper here. `Transaction` derefs to `Transactor`,
+	// so a wrapper would be reachable from any `Transaction` and could roll back
+	// storage without the index frames. `inner` stays reachable because
+	// `Transaction` needs it, so callers must not use it to skip those frames.
 
 	// --------------------------------------------------
 	// Timestamp functions
@@ -854,4 +903,147 @@ fn ordered(mut pairs: Vec<(Vec<u8>, Val)>, dir: Direction, skip: u32) -> Vec<(Ve
 	}
 	pairs.drain(..(skip as usize).min(pairs.len()));
 	pairs
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_kvs::api::BoxFut;
+	use surrealdb_kvs::{RangeCursor, Result as KvsResult, TransactionType};
+
+	use super::*;
+
+	/// A view that opens nothing: only its presence is observed.
+	struct StubView;
+
+	impl Snapshot for StubView {
+		fn open<'a>(
+			&'a self,
+			_: KeyRange<'a>,
+			_: Direction,
+			_: Option<u64>,
+		) -> BoxFut<'a, KvsResult<Box<dyn RangeCursor + 'a>>> {
+			unreachable!("the view is only asked for, never read")
+		}
+	}
+
+	/// A transaction on the in-memory backend that, unlike the backend, can give a view.
+	struct Viewing(Box<dyn Transactable>);
+
+	impl Transactable for Viewing {
+		fn kind(&self) -> &'static str {
+			self.0.kind()
+		}
+		fn closed(&self) -> bool {
+			self.0.closed()
+		}
+		fn writeable(&self) -> bool {
+			self.0.writeable()
+		}
+		fn cancel(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.cancel()
+		}
+		fn commit(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.commit()
+		}
+		fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, KvsResult<bool>> {
+			self.0.exists(key, version)
+		}
+		fn get<'a>(
+			&'a self,
+			key: Key<'a>,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<Option<Val>>> {
+			self.0.get(key, version)
+		}
+		fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
+			self.0.set(key, val)
+		}
+		fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
+			self.0.put(key, val)
+		}
+		fn putc<'a>(
+			&'a self,
+			key: Key<'a>,
+			val: Val,
+			chk: Option<Val>,
+		) -> BoxFut<'a, KvsResult<()>> {
+			self.0.putc(key, val, chk)
+		}
+		fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, KvsResult<()>> {
+			self.0.del(key)
+		}
+		fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, KvsResult<()>> {
+			self.0.delc(key, chk)
+		}
+		fn keys<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<KeysResult>> {
+			self.0.keys(rng, limit, skip, version)
+		}
+		fn keysr<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<KeysResult>> {
+			self.0.keysr(rng, limit, skip, version)
+		}
+		fn scan<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<ScanResult>> {
+			self.0.scan(rng, limit, skip, version)
+		}
+		fn scanr<'a>(
+			&'a self,
+			rng: KeyRange<'a>,
+			limit: u32,
+			skip: u32,
+			version: Option<u64>,
+		) -> BoxFut<'a, KvsResult<ScanResult>> {
+			self.0.scanr(rng, limit, skip, version)
+		}
+		fn new_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.new_save_point()
+		}
+		fn release_last_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.release_last_save_point()
+		}
+		fn rollback_to_save_point(&self) -> BoxFut<'_, KvsResult<()>> {
+			self.0.rollback_to_save_point()
+		}
+		fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+			Some(Arc::new(StubView))
+		}
+	}
+
+	async fn viewing_storage() -> Box<dyn Transactable> {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let (tx, _) = builder.new_transaction(TransactionType::Read).await.unwrap();
+		Box::new(Viewing(tx))
+	}
+
+	/// A speculation's reads pass through an overlay the storage's view does not hold, so its
+	/// transactor offers no view even over a backend that gives one.
+	#[tokio::test]
+	async fn a_speculating_transaction_gives_no_view() {
+		let plain = Transactor::new(viewing_storage().await);
+		assert!(plain.snapshot().is_some(), "the storage's own view is offered");
+		let speculating =
+			Transactor::speculative(viewing_storage().await, Arc::new(Mutex::new(None)));
+		assert!(speculating.speculating());
+		assert!(speculating.snapshot().is_none());
+	}
 }

@@ -1,6 +1,6 @@
-// Belt-and-suspenders against regressing the per-Transaction `inner` mutex
-// back to a synchronous type (parking_lot or std). Tokio mutex guards are not
-// flagged by this lint, so the current `inner.lock().await` sites are fine.
+// Keeps the per-Transaction `inner` mutex on an async type. A synchronous lock
+// (parking_lot or std) held across `.await` would block the runtime thread.
+// This lint does not flag tokio mutex guards, so `inner.lock().await` is allowed.
 #![deny(clippy::await_holding_lock)]
 // TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
 #![allow(clippy::absolute_paths)]
@@ -17,6 +17,7 @@ mod owned_tx;
 mod prefix_extractor;
 mod range_shard;
 mod scan_cursor;
+mod snapshot;
 #[cfg(test)]
 mod tests;
 
@@ -42,6 +43,7 @@ use rocksdb::{
 use scan_cursor::{
 	RocksDbKeysCursor, RocksDbValsCursor, ScanIter, ScanStateKeys, ScanStateVals, TxResume,
 };
+use snapshot::RocksSnapshot;
 use surrealdb_kvs::api::{
 	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
 	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
@@ -49,10 +51,11 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::consts::{ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
 use surrealdb_kvs::err::{Error, Result};
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::HlcTimeStamp;
 use surrealdb_kvs::{
-	Direction, Key, KeyRange, Metric, Metrics, SavepointStack, TransactionBuilder, TransactionType,
-	Val,
+	Direction, Key, KeyRange, Metric, Metrics, SavepointStack, Snapshot, TransactionBuilder,
+	TransactionType, Val,
 };
 use tokio::sync::{Mutex, MutexGuard};
 use tracing::{error, info, instrument};
@@ -182,7 +185,10 @@ pub struct Transaction {
 	/// `MutexGuard<'_, Option<TransactionInner>>` is `Send` (because
 	/// `TransactionInner: Send`), and `spawn_local`'s `'pool` lifetime
 	/// admits non-`'static` borrows from `&self`.
-	inner: Mutex<Option<OwnedTx>>,
+	///
+	/// Shared (`Arc`) so a [`snapshot::RocksSnapshot`] can open cursors after the transaction's
+	/// own borrow has ended; only `commit` and `cancel` empty the slot.
+	inner: Arc<Mutex<Option<OwnedTx>>>,
 	/// Engine savepoints backing each open savepoint.
 	///
 	/// Always acquired before `inner` and held across it, so the scope counts
@@ -701,8 +707,8 @@ impl Datastore {
 	///    the `Arc<OptimisticTransactionDB>` is dropped.
 	/// 6. Shut down the memory manager.
 	///
-	/// Steps 1, 2, and 6 already existed; 3-5 are new. All errors are
-	/// logged-and-continued rather than propagated: a partial shutdown is
+	/// Errors in each step are logged and the shutdown continues rather
+	/// than propagating: a partial shutdown is
 	/// always better than panicking on the way out.
 	pub async fn shutdown(&self) -> Result<()> {
 		// (1) Stop the application-level pumps so nothing schedules new
@@ -758,7 +764,7 @@ impl Datastore {
 				self.db.compact_range_opt::<&[u8], &[u8]>(None, None, &copts);
 			}
 			// (4) Drain in-flight compactions. After the memtable flush
-			//     above, the new L0 file may have crossed
+			//     above, the flushed L0 file may have crossed
 			//     `level_zero_file_num_compaction_trigger`; waiting for
 			//     that to settle means the next startup does not have
 			//     to recover or re-perform the work.
@@ -862,7 +868,7 @@ impl Datastore {
 			write: matches!(write, TransactionType::Write),
 			versioned: self.versioned,
 			read_options: ro,
-			inner: Mutex::new(Some(tx)),
+			inner: Arc::new(Mutex::new(Some(tx))),
 			savepoints: Mutex::new(SavepointStack::default()),
 			rollback_epoch: AtomicU64::new(0),
 			write_epoch: AtomicU64::new(0),
@@ -2091,6 +2097,45 @@ impl Transactable for Transaction {
 	/// Check if closed
 	fn closed(&self) -> bool {
 		self.done.load(Ordering::Relaxed)
+	}
+
+	/// The read view of this transaction while it holds no buffered put or delete.
+	///
+	/// A cursor or point read through the view reads the database under the snapshot this
+	/// transaction began with. A read-only transaction, and a writable one before its first put or
+	/// delete, read exactly that base, so the view equals their own reads and stays fixed as the
+	/// transaction writes later. Once a put or delete is buffered the transaction's reads merge its
+	/// write batch, which the view cannot, so it answers `None`. A finished transaction answers
+	/// `None`.
+	///
+	/// The test is `ReadsOnly`, not `!contains_writes()`: a delete-only transaction is `HasDeletes`
+	/// and its reads already hide the keys it deleted.
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		if self.done.load(Ordering::Acquire) {
+			return None;
+		}
+		if self.write && self.current_state() != TransactionState::ReadsOnly {
+			return None;
+		}
+		Some(Arc::new(RocksSnapshot {
+			inner: Arc::clone(&self.inner),
+			versioned: self.versioned,
+			verify_checksums: self.scan_verify_checksums,
+		}))
+	}
+
+	/// Read-only transactions always give a view; writable ones give one until their first put or
+	/// delete.
+	fn view_capabilities(&self) -> ViewCapabilities {
+		ViewCapabilities {
+			read_only: true,
+			writable: true,
+		}
+	}
+
+	/// A plain read never joins the optimistic conflict set; only a locking read does.
+	fn plain_reads_tracked(&self) -> bool {
+		false
 	}
 
 	/// Check if writeable

@@ -16,8 +16,8 @@
 //!   with the physical planner.
 //! - **Unbound names:** a name with no value in the context and no `DEFINE PARAM` in the database
 //!   evaluates to `NONE`, and is substituted as `NONE`: a `FROM $p` no binding reaches is the
-//!   no-row source a literal `NONE` is, and a predicate on the name folds. The catalog has to have
-//!   been asked: without a transaction and a database the name stays a runtime lookup.
+//!   no-row source a literal `NONE` is, and a predicate on the name folds. The catalog is consulted
+//!   only with a transaction and a database; without them the name stays a runtime lookup.
 //! - **Row-scoped names** (`BindContext::row_scoped`): bound per row at execution, so their
 //!   plan-time value, if any, is the wrong one.
 //! - **Names the plan binds itself:** a `LET` in a block or a `FOR` loop variable. Each is a
@@ -46,7 +46,7 @@
 //! enclosing one; a block body is an expression rather than a predicate or a
 //! source and is not touched. A `Source` whose expression becomes a value
 //! literal is reclassified as `Values`, so the leaf kinds a bound plan exposes
-//! match what lowering would have produced had the literal been written in
+//! match the kinds the planner gives a literal written in
 //! the statement.
 
 use std::collections::{HashMap, HashSet};
@@ -183,19 +183,6 @@ fn permission_names(op: &LogicalOp, bound: &HashSet<String>) -> HashSet<String> 
 	});
 	names.retain(|name| !bound.contains(name));
 	names
-}
-
-/// Whether some name of `names` is read where [`resolve_params`] would
-/// substitute a statement-scoped value for it — a predicate, a join key or
-/// residual, a source expression — in `op` or in a plan nested in it, and is
-/// not a name the plan binds itself.
-pub(super) fn reads_in_resolvable_position(op: &LogicalOp, names: &[&str]) -> bool {
-	let ReferencedNames {
-		names: referenced,
-		bound,
-		..
-	} = referenced_and_bound(op);
-	names.iter().any(|name| referenced.contains(*name) && !bound.contains(*name))
 }
 
 /// The names a plan references in a position [`resolve_params`] substitutes.
@@ -655,7 +642,6 @@ mod tests {
 			row_scoped: SELECT_ITERATION_PARAMS,
 			registry: &registry,
 			versioned: false,
-			folds_clock: true,
 			inlines_definitions: true,
 			binds_nested: true,
 		};
@@ -894,7 +880,7 @@ mod tests {
 	#[tokio::test]
 	async fn a_set_is_substituted_as_a_set_literal() {
 		// A set has a literal form of its own, so it is substituted like any
-		// other value and the predicate no longer reads the parameter.
+		// other value, so the predicate does not read the parameter afterwards.
 		let plan = bound(
 			lower("SELECT * FROM t WHERE a IN $s"),
 			vec![("s", Value::Set(Set::from(vec![int(1)])))],

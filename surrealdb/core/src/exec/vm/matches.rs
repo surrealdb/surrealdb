@@ -28,18 +28,15 @@
 //! restricted field matches a search query. Such expressions fall through to
 //! rule 3 and error on table sources.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::catalog::{FieldDefinition, Index, Permission};
 use crate::exec::EvalContext;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::expr::idiom::Idiom;
-use crate::expr::logical::{
-	FieldPath, LogicalEval, LogicalExplain, LogicalExpr, LogicalForeach, LogicalLet, LogicalOp,
-	LogicalReturn, LogicalSequence, LogicalSleep, LogicalThrow,
-};
-use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
+use crate::expr::logical::FieldPath;
+use crate::expr::operator::MatchesOperator;
 use crate::expr::{FlowResult, Kind};
 use crate::iam::Action;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
@@ -89,169 +86,15 @@ impl ExecutorTables {
 		Self::new(Vec::new(), Vec::new(), false)
 	}
 
+	/// The first table read whole, the table index functions report against.
+	pub(crate) fn first_known(&self) -> Option<&TableName> {
+		self.known.first()
+	}
+
 	/// Whether a row of `table` is evaluated by an executor.
 	pub(crate) fn has_executor(&self, table: &TableName) -> bool {
 		self.known.contains(table) || (self.open && !self.excluded.contains(table))
 	}
-
-	/// Whether any source is known at plan time to get an executor, which is
-	/// when an unregistered WHERE MATCHES can be refused before any row is
-	/// read.
-	pub(crate) fn any_known(&self) -> bool {
-		!self.known.is_empty()
-	}
-}
-
-/// Collect MATCHES expressions reachable from `expr` through binary nodes and
-/// logical-NOT prefix nodes.
-///
-/// The traversal walks binary nodes only and treats every other node
-/// (function calls, arrays, idioms, prefixes) as an opaque leaf. The
-/// bitmap-fusion planner additionally turns a negated
-/// full-text branch (`... AND !(body @@ 'x')`) into a `BitmapAndNot` over the
-/// term's posting bitmap and keeps the negated MATCHES in the residual `Filter`
-/// for per-row re-evaluation — so the inner MATCHES must be registered too, or
-/// it would raise [`Error::NoIndexFoundForMatch`]. Descending through the `Not`
-/// prefix registers it.
-pub(crate) fn collect_cond_matches(expr: &LogicalExpr, out: &mut HashSet<LogicalExpr>) {
-	match expr {
-		LogicalExpr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			if matches!(op, BinaryOperator::Matches(_)) {
-				out.insert(expr.clone());
-			}
-			collect_cond_matches(left, out);
-			collect_cond_matches(right, out);
-		}
-		LogicalExpr::Prefix {
-			op: PrefixOperator::Not,
-			expr: inner,
-		} => {
-			collect_cond_matches(inner, out);
-		}
-		_ => {}
-	}
-}
-
-/// The first MATCHES expression in `cond` that `allowlist` does not hold, or
-/// `None` when every MATCHES the condition evaluates is registered.
-///
-/// [`collect_cond_matches`] describes which MATCHES a SELECT registers; this is
-/// the complement, used to refuse such a condition at plan time with the same
-/// [`Error::NoIndexFoundForMatch`] raised per row. The two
-/// walks answer different questions, so the boundary this one draws is its own
-/// contract:
-///
-/// - A `BinaryOperator::Matches` node absent from `allowlist` is reported and the walk stops. A
-///   node the allowlist holds is registered, so the walk continues past it.
-/// - A [`LogicalExpr::Subquery`] holding a statement — a block, `RETURN`, `LET`, `FOR` — is
-///   descended into: it evaluates against this row, so a MATCHES inside it is this SELECT's to
-///   register. One holding a relational plan is not: a nested `SELECT` is planned in its own scope
-///   and registers its own WHERE. A [`LogicalExpr::Closure`] is not descended into either: a
-///   closure body is evaluated wherever the closure is finally called, which is not necessarily
-///   this row.
-/// - The predicate of a [`LogicalExpr::Filter`] and the clauses of a [`LogicalExpr::Lookup`] are
-///   not descended into (their bases are). A path filter and a graph hop evaluate their condition
-///   against values other than the SELECT's iteration row, where the outcome is decided by the
-///   per-row rules in the module docs (rules 1–2) rather than by registration.
-/// - Every other shape is walked, so a MATCHES in a function argument, a literal container, an
-///   index expression, a method argument, a destructure alias, a recursion body, or an IF/ELSE
-///   branch is reported.
-pub(crate) fn first_unregistered_cond_matches(
-	cond: &LogicalExpr,
-	allowlist: &HashSet<LogicalExpr>,
-) -> Option<LogicalExpr> {
-	fn walk_expr(e: &LogicalExpr, allowlist: &HashSet<LogicalExpr>) -> Option<LogicalExpr> {
-		match e {
-			LogicalExpr::Binary {
-				op: BinaryOperator::Matches(_),
-				..
-			} if !allowlist.contains(e) => return Some(e.clone()),
-			LogicalExpr::Subquery(op) => return walk_statement(op, allowlist),
-			LogicalExpr::Closure(_) => return None,
-			LogicalExpr::Filter {
-				base,
-				..
-			}
-			| LogicalExpr::Lookup {
-				base,
-				..
-			} => return walk_expr(base, allowlist),
-			_ => {}
-		}
-		e.children().into_iter().find_map(|child| walk_expr(child, allowlist))
-	}
-
-	/// The scalars of a statement evaluated against this row. A relational
-	/// plan or a GQL `MATCH` is its own scope and is not entered.
-	fn walk_statement(op: &LogicalOp, allowlist: &HashSet<LogicalExpr>) -> Option<LogicalExpr> {
-		match op {
-			LogicalOp::Eval(LogicalEval {
-				expr,
-			}) => walk_expr(expr, allowlist),
-			LogicalOp::Sequence(LogicalSequence {
-				stmts,
-			}) => stmts.iter().find_map(|stmt| walk_statement(stmt, allowlist)),
-			LogicalOp::Let(LogicalLet {
-				value,
-				..
-			}) => walk_statement(value, allowlist),
-			LogicalOp::Return(LogicalReturn {
-				what,
-				fetch,
-			}) => walk_statement(what, allowlist)
-				.or_else(|| fetch.iter().find_map(|e| walk_expr(e, allowlist))),
-			LogicalOp::Foreach(LogicalForeach {
-				range,
-				body,
-				..
-			}) => walk_expr(range, allowlist).or_else(|| walk_statement(body, allowlist)),
-			LogicalOp::Explain(LogicalExplain {
-				input,
-				..
-			}) => walk_statement(input, allowlist),
-			LogicalOp::Sleep(LogicalSleep {
-				duration,
-			}) => walk_expr(duration, allowlist),
-			// In evaluation order: each condition, then its arm.
-			LogicalOp::If(ifs) => ifs
-				.branches()
-				.find_map(|(condition, arm)| {
-					walk_expr(condition, allowlist).or_else(|| walk_statement(arm, allowlist))
-				})
-				.or_else(|| ifs.otherwise().and_then(|arm| walk_statement(arm, allowlist))),
-			LogicalOp::Throw(LogicalThrow {
-				value,
-			}) => walk_expr(value, allowlist),
-			LogicalOp::Break(_) | LogicalOp::Continue(_) => None,
-			LogicalOp::Info(_)
-			| LogicalOp::Ddl(_)
-			| LogicalOp::Match(_)
-			| LogicalOp::Write(_)
-			| LogicalOp::Source(_)
-			| LogicalOp::Values(_)
-			| LogicalOp::Subquery(_)
-			| LogicalOp::UnionAll(_)
-			| LogicalOp::Join(_)
-			| LogicalOp::Filter(_)
-			| LogicalOp::PermissionFilter(_)
-			| LogicalOp::Split(_)
-			| LogicalOp::Aggregate(_)
-			| LogicalOp::Distinct(_)
-			| LogicalOp::Sort(_)
-			| LogicalOp::Limit(_)
-			| LogicalOp::Project(_)
-			| LogicalOp::Fetch(_)
-			| LogicalOp::Timeout(_)
-			| LogicalOp::VersionScope(_)
-			| LogicalOp::Only(_) => None,
-		}
-	}
-
-	walk_expr(cond, allowlist)
 }
 
 /// A resolved evaluation strategy for one row table.
@@ -339,8 +182,8 @@ impl MatchesEval {
 		}
 	}
 
-	/// The outcome for a row evaluated against an index when this expression has
-	/// no entry in it.
+	/// The error for a row that needs an index when this expression resolves
+	/// to none.
 	fn no_index_error(&self) -> FlowResult<Value> {
 		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
 			exp: self.sql.clone(),
@@ -436,8 +279,8 @@ impl MatchesEval {
 				.await?;
 		let indexes = if version.is_none() {
 			// MATCHES must not read a full-text index until durable state
-			// has published it as queryable. Which ones are is a catalog
-			// fact, loaded as one.
+			// has published it as queryable. Which indexes are online is a
+			// catalog fact, read in one load.
 			crate::exec::vm::descriptor::object(filter_online_indexes(
 				tx.as_ref(),
 				ns_id,
@@ -477,10 +320,10 @@ impl MatchesEval {
 					break;
 				}
 				let remote_field = FieldPath::new(remote_field.to_vec());
-				// Walk the link targets in declaration order; keep the last
-				// resolvable target seen before the first unresolvable one
-				// (one entry is inserted per resolved target and resolution
-				// stops at the first failure — the last insert wins).
+				// Walk the link targets in declaration order. Each resolved
+				// target replaces the previous one, and the walk stops at the
+				// first target without a matching index, so the result is the
+				// last target resolved before that point.
 				let mut resolved = None;
 				for target in targets {
 					match self
@@ -567,9 +410,8 @@ impl MatchesEval {
 		frozen: &crate::ctx::FrozenContext,
 		tx: &Arc<crate::kvs::Transaction>,
 	) -> Result<(FullTextIndex, QueryTerms), anyhow::Error> {
-		// Indexes without shared doc ids resolve postings through their
-		// historical private doc-ID layout until explicitly rebuilt; the
-		// format version selects the resolver used below.
+		// The index's format version selects how its postings are resolved.
+		// Indexes without shared doc ids use the private doc-ID layout.
 		let ft_params = match &index_def.index {
 			Index::FullText(params) => params,
 			_ => unreachable!("Caller checked for FullText"),

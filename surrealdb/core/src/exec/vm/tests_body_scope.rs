@@ -1,13 +1,14 @@
-//! A caller's own bindings — a query parameter, a session variable set over
-//! RPC, a `LET`, a `FOR` variable or a block-local name — are visible to an
-//! ordinary function call, as they are to the caller's own code. A privileged
-//! frame, where code a definer wrote runs (a table or field permission, a
-//! `VALUE` or `ASSERT`, a computed field, an event, a gate), holds none of
-//! them: the session's own values and the database's parameters reach it, and
-//! no caller binding does, however the code is reached and whoever compiled
-//! it. Each test runs the same statements as more than one principal on one
-//! datastore, so a unit compiled for one caller and served to the next is held
-//! to the same scope.
+//! A function body is lexically scoped. It reads its arguments, the names it
+//! binds itself, the row names, the session's own values, the request's
+//! parameters (a query parameter, or a session variable set over RPC), and the
+//! database's parameters. It never reads a binding its caller made with `LET`
+//! or `FOR`, at any depth of calls. A privileged frame, where code a definer
+//! wrote runs (a table or field permission, a `VALUE` or `ASSERT`, a computed
+//! field, an event, a gate), holds no caller binding and no request parameter.
+//! It sees the session's own values and the database's parameters, however the
+//! code is reached and whoever compiled it. Each test runs the same statements
+//! as more than one principal on one datastore, so a unit compiled for one
+//! caller and reused for the next must follow the same scope rules.
 
 use crate::exec::operators::test_util::TestDb;
 use crate::types::PublicVariables;
@@ -118,11 +119,12 @@ async fn a_callers_bindings_do_not_reach_a_direct_permission() {
 	assert_eq!(by_param[0], parse("[]"), "a query parameter reached a direct table permission");
 }
 
-/// An ordinary call reads what its caller binds: a query parameter, a
-/// session variable, a `LET`, a `FOR` variable and a block-local name, for
-/// every principal in turn.
+/// An ordinary call reads the request's parameters — a query parameter, a
+/// session variable — and never what its caller binds with `LET` or `FOR`,
+/// for every principal in turn: a name no binding of the body or of the
+/// request holds is the database's parameter.
 #[tokio::test]
-async fn an_ordinary_call_reads_the_callers_bindings() {
+async fn an_ordinary_call_reads_no_binding_of_its_caller() {
 	let db = TestDb::new_with_auth(SETUP).await;
 	let sql = "LET $limit = 1000;
 		RETURN fn::lim();
@@ -134,11 +136,11 @@ async fn an_ordinary_call_reads_the_callers_bindings() {
 	for session in [record_user("alice"), TestDb::owner(), record_user("bob")] {
 		let got = values(&db, &session, sql).await;
 		let who = format!("{:?}", session.au);
-		assert_eq!(got[1], parse("1000"), "{who}: a top-level call under a LET");
-		assert_eq!(got[2], parse("1000"), "{who}: a block-local call under a LET");
-		assert_eq!(got[3], parse("1000"), "{who}: a call in a projection under a LET");
-		assert_eq!(got[4], parse("3"), "{who}: a call under a block's LET");
-		assert_eq!(got[6], parse("[5]"), "{who}: a call in a write under a FOR variable");
+		assert_eq!(got[1], parse("10"), "{who}: a top-level call under a LET");
+		assert_eq!(got[2], parse("10"), "{who}: a block-local call under a LET");
+		assert_eq!(got[3], parse("10"), "{who}: a call in a projection under a LET");
+		assert_eq!(got[4], parse("10"), "{who}: a call under a block's LET");
+		assert_eq!(got[6], parse("[10]"), "{who}: a call in a write under a FOR variable");
 	}
 	let by_param = values_with(
 		&db,
@@ -148,26 +150,132 @@ async fn an_ordinary_call_reads_the_callers_bindings() {
 			vars.insert("limit", 77);
 			vars
 		}),
-		"RETURN fn::lim();",
+		"RETURN fn::lim();
+		 LET $limit = 1000;
+		 RETURN fn::lim();
+		 RETURN [1].map(|$x| fn::lim());
+		 RETURN [1].map(|$x| [$limit, fn::lim()]);",
 	)
 	.await;
 	assert_eq!(by_param[0], parse("77"), "a query parameter did not reach a call");
+	assert_eq!(by_param[2], parse("77"), "a LET shadowed a query parameter inside a call");
+	assert_eq!(by_param[3], parse("[77]"), "a query parameter did not reach a call in a closure");
+	assert_eq!(
+		by_param[4],
+		parse("[[1000, 77]]"),
+		"a LET a closure captured reached the function it calls"
+	);
 	let mut session = TestDb::owner();
 	session.variables.insert("limit", 88);
-	let by_rpc = values(&db, &session, "RETURN fn::lim();").await;
+	let by_rpc =
+		values(&db, &session, "RETURN fn::lim(); LET $limit = 1000; RETURN fn::lim();").await;
 	assert_eq!(by_rpc[0], parse("88"), "a session variable set over RPC did not reach a call");
+	assert_eq!(by_rpc[2], parse("88"), "a LET shadowed a session variable inside a call");
 }
 
 /// A function body reads the database parameter of a name its caller binds
-/// only where the caller binds nothing of it; the caller's binding wins
-/// everywhere else.
+/// with `LET`, whether the caller binds it before or after the plan is made:
+/// the request's `LET` of a constant is not folded into the body.
 #[tokio::test]
-async fn a_function_body_reads_a_database_parameter_only_unbound_by_its_caller() {
+async fn a_function_body_reads_a_database_parameter_whatever_its_caller_binds() {
 	let db = TestDb::new_with_auth(SETUP).await;
-	let got =
-		values(&db, &TestDb::owner(), "RETURN fn::lim(); LET $limit = 1; RETURN fn::lim();").await;
+	let got = values(
+		&db,
+		&TestDb::owner(),
+		"RETURN fn::lim(); LET $limit = 1; RETURN fn::lim(); LET $limit = 2; RETURN fn::lim();",
+	)
+	.await;
 	assert_eq!(got[0], parse("10"));
-	assert_eq!(got[2], parse("1"));
+	assert_eq!(got[2], parse("10"));
+	assert_eq!(got[4], parse("10"));
+}
+
+/// A request's `LET` of a name a `DEFINE PARAM` holds is read by the caller
+/// and not by a function body, which reads the stored parameter.
+#[tokio::test]
+async fn a_let_of_a_stored_parameters_name_is_not_read_by_a_body() {
+	let db = TestDb::new_with_auth(
+		"DEFINE PARAM $q VALUE 3 PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::g() { RETURN $q } PERMISSIONS FULL;
+		 DEFINE TABLE t SCHEMALESS PERMISSIONS FULL;",
+	)
+	.await;
+	let got = values(
+		&db,
+		&TestDb::owner(),
+		"LET $q = 5;
+		 RETURN [$q, fn::g()];
+		 FOR $q IN [6] { UPSERT t:1 SET v = fn::g() };
+		 SELECT VALUE v FROM t:1;",
+	)
+	.await;
+	assert_eq!(got[1], parse("[5, 3]"));
+	assert_eq!(got[3], parse("[3]"));
+}
+
+/// A body whose predicate or source names a free name plans it as the
+/// database's parameter, whatever constant the request's `LET` gave the name:
+/// no caller binding is folded into the plan.
+#[tokio::test]
+async fn a_callers_let_is_not_folded_into_a_bodys_predicate() {
+	let db = TestDb::new_with_auth(
+		"DEFINE PARAM $k VALUE 3 PERMISSIONS FULL;
+		 DEFINE TABLE rows SCHEMALESS PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::seen() { RETURN (SELECT VALUE id FROM rows WHERE k = $k) }
+			PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::from() { RETURN (SELECT VALUE $this FROM [$k]) }
+			PERMISSIONS FULL;
+		 CREATE rows:three SET k = 3;
+		 CREATE rows:five SET k = 5;",
+	)
+	.await;
+	for session in [TestDb::owner(), TestDb::owner()] {
+		let got = values(
+			&db,
+			&session,
+			"LET $k = 5;
+			 RETURN fn::seen();
+			 RETURN (SELECT VALUE id FROM rows WHERE k = $k);
+			 RETURN fn::from();",
+		)
+		.await;
+		assert_eq!(got[1], parse("[rows:three]"), "a LET was folded into a body's predicate");
+		assert_eq!(got[2], parse("[rows:five]"), "the caller's own predicate read its LET");
+		assert_eq!(got[3], parse("[3]"), "a LET was folded into a body's source");
+	}
+}
+
+/// A body reads the arguments of its own call and not the argument of the
+/// call that entered its caller, however deep the calls nest.
+#[tokio::test]
+async fn a_nested_body_reads_no_binding_of_the_bodies_around_it() {
+	let db = TestDb::new_with_auth(
+		"DEFINE PARAM $p VALUE 'stored' PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::inner() { RETURN $p } PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::mid($p: any) { RETURN [$p, fn::inner()] } PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::outer() { LET $p = 'local'; RETURN [$p, fn::mid('arg'), fn::inner()] }
+			PERMISSIONS FULL;",
+	)
+	.await;
+	let got = values(&db, &TestDb::owner(), "LET $p = 'caller'; RETURN fn::outer();").await;
+	assert_eq!(got[1], parse("['local', ['arg', 'stored'], 'stored']"));
+}
+
+/// A closure called inside a body reads what the body reads, and a closure
+/// created in a body captures no binding of the body's caller.
+#[tokio::test]
+async fn a_closure_in_a_body_captures_no_binding_of_the_bodys_caller() {
+	let db = TestDb::new_with_auth(
+		"DEFINE PARAM $q VALUE 3 PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::via_closure() { RETURN [1].map(|$x| $x + $q) } PERMISSIONS FULL;
+		 DEFINE FUNCTION fn::made() { LET $f = |$x| $x + $q; RETURN $f(1) } PERMISSIONS FULL;",
+	)
+	.await;
+	let got =
+		values(&db, &TestDb::owner(), "LET $q = 5; RETURN fn::via_closure(); RETURN fn::made();")
+			.await;
+	assert_eq!(got[1], parse("[4]"));
+	assert_eq!(got[2], parse("4"));
 }
 
 /// A privileged frame reads the session's own values and the database's
@@ -278,7 +386,7 @@ fn read_wrappers(read: &str) -> Vec<(&'static str, String, usize)> {
 	]
 }
 
-/// `read_wrappers` for a write statement, which answers nothing compared.
+/// The write counterpart of `read_wrappers`. Each statement is run and its answer is not compared.
 fn write_wrappers(write: &str) -> Vec<(&'static str, String)> {
 	vec![
 		("let", format!("LET $allowed = true; {write};")),
@@ -304,10 +412,10 @@ async fn as_binding(db: &TestDb, how: &str, sql: &str) -> Vec<Value> {
 }
 
 /// Every way a caller binds a name, against every way a read or a write
-/// reaches a permission that reads the name — directly, through a function
-/// planned light, and through one with a body of statements: the permission
-/// answers as the database's parameter of the name has it, and the parameter
-/// is what opens it.
+/// reaches a permission that reads the name: directly, through a function with
+/// a single expression body, and through one with a block of statements. The
+/// permission answers as the database's parameter of the name has it, and that
+/// parameter is what opens it.
 #[tokio::test]
 async fn no_caller_binding_reaches_a_permission_however_it_is_reached() {
 	let guards = ["$allowed", "fn::allowed()", "fn::allowed_block()"];
@@ -459,10 +567,9 @@ async fn no_caller_binding_reaches_a_computed_field_however_it_is_read() {
 }
 
 /// Every way a caller binds a name, against a function's and a parameter's
-/// `PERMISSIONS` clause holding a statement that reads the name: the clause
-/// is definer code, lowered and judged in a privileged frame whoever calls
-/// it, so it answers as the database's parameter of the name has it, and the
-/// parameter is what opens it.
+/// `PERMISSIONS` clause that reads the name. The clause is definer code and
+/// runs in a privileged frame whoever calls it, so it answers as the database's
+/// parameter of the name has it, and that parameter is what opens it.
 #[tokio::test]
 async fn no_caller_binding_reaches_a_definition_guard() {
 	let db = TestDb::new_with_auth(

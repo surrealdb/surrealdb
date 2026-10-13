@@ -14,7 +14,7 @@ mod error; // The failures raised while validating and writing a document
 pub(crate) mod alter; // The shape of an evaluated data clause
 mod event; // Drains the queue of ASYNC table events
 mod inline; // Keeps inline edge-property payloads in step with the record
-pub(crate) use inline::{encode_inline_section, inline_field_name, inline_fields};
+pub(crate) use inline::{encode_inline_section, inline_fields};
 
 #[cfg(test)]
 mod tests; // Datastore-backed tests for the document processing pipeline

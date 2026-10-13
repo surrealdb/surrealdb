@@ -20,7 +20,7 @@ web-time = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libtest-mimic = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

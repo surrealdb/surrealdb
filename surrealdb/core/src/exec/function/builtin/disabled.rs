@@ -6,6 +6,7 @@
 use anyhow::Result;
 
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::val::Value;
@@ -31,6 +32,10 @@ impl ScalarFunction for Disabled {
 
 	fn effects(&self) -> EffectSet {
 		EffectSet::OPAQUE_BODY
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		Fallibility::VALUE | Fallibility::CONTEXT | Fallibility::DATA
 	}
 
 	fn invoke(&self, _args: Vec<Value>) -> Result<Value> {

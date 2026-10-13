@@ -13,11 +13,11 @@
 //! Writes are named by table, from the statement and what the catalog says it
 //! triggers; reads are conservative. A resource a footprint cannot name is
 //! widened — to every table, to every definition of a kind, or to
-//! [`Resource::Unknown`], which overlaps everything. What a statement triggers is part of it: a
-//! write reads its table's catalog, and a table's events, views and reference
-//! repairs, custom function bodies and closures invoked by value, run what the
-//! footprint cannot see and widen it to `Unknown` unless the catalog shows
-//! there is nothing to run ([`expand`]).
+//! [`Resource::Unknown`], which overlaps everything. What a statement
+//! triggers is part of its footprint: a write reads its table's catalog. A
+//! table's events, views and reference repairs, and custom function bodies and
+//! closures invoked by value, run code the footprint cannot see, so it widens
+//! to `Unknown` unless the catalog shows there is nothing to run ([`expand`]).
 
 // A statement, expression or definition kind this layer does not name is
 // read conservatively: as every resource of a kind, or as unknown.
@@ -393,13 +393,14 @@ fn expr_footprint(expr: &LogicalExpr, registry: &FunctionRegistry, out: &mut Foo
 						table: None,
 						name: Some(name.clone()),
 					});
-					// Its body is the catalog's; what it touches is not written here.
+					// The body is stored in the catalog and is not visible here, so the
+					// footprint widens to unknown.
 					out.absorb(Footprint::unknown());
 				}
 				_ => out.absorb(Footprint::unknown()),
 			},
-			// A value invoked, or a lookup over edges the expression may not
-			// name: what they run or read is not written here.
+			// A value that is invoked, or a lookup over edges, runs or reads
+			// things this footprint cannot name, so it widens to unknown.
 			LogicalExpr::Invoke {
 				..
 			} => out.absorb(Footprint::unknown()),
@@ -431,9 +432,8 @@ fn expr_footprint(expr: &LogicalExpr, registry: &FunctionRegistry, out: &mut Foo
 			| LogicalExpr::Throw(_)
 			| LogicalExpr::Break
 			| LogicalExpr::Continue => {}
-			// A path into a value, a lookup, a method: any of them may follow
-			// a record link, not typed to a table here, to a record of any
-			// table.
+			// A path into a value, a lookup or a method may follow a record link
+			// whose table is not known here, so it reads records of any table.
 			_ => out.read(Resource::any_data()),
 		}
 		std::ops::ControlFlow::<()>::Continue(())
@@ -446,37 +446,6 @@ pub(crate) fn written(expr: &Expr) -> Option<String> {
 		Expr::Literal(crate::expr::Literal::String(s)) => Some(s.as_str().to_owned()),
 		expr => crate::ddl::scalar::written_name(expr),
 	}
-}
-
-/// The table schema statement `statement` defines where there is none, as a
-/// write defines the table it writes to (`get_or_add_tb`): a `DEFINE FIELD`,
-/// `DEFINE INDEX` or `DEFINE EVENT` over a table it names as written. Such a
-/// statement does the same whether the table it finds was defined by that
-/// write or by its own run.
-pub(crate) fn defines_on_demand(statement: &LogicalDdlStatement) -> Option<TableName> {
-	let LogicalDdlStatement::Define(define) = statement else {
-		return None;
-	};
-	let table = match define.as_ref() {
-		DefineStatement::Field(stmt) => &stmt.what,
-		DefineStatement::Index(stmt) => &stmt.what,
-		DefineStatement::Event(stmt) => &stmt.target_table,
-		DefineStatement::Namespace(_)
-		| DefineStatement::Database(_)
-		| DefineStatement::Function(_)
-		| DefineStatement::Analyzer(_)
-		| DefineStatement::Param(_)
-		| DefineStatement::Table(_)
-		| DefineStatement::User(_)
-		| DefineStatement::Model(_)
-		| DefineStatement::Access(_)
-		| DefineStatement::Config(_)
-		| DefineStatement::Api(_)
-		| DefineStatement::Bucket(_)
-		| DefineStatement::Sequence(_)
-		| DefineStatement::Module(_) => return None,
-	};
-	written(table).map(|table| TableName::new(&table))
 }
 
 fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
@@ -500,7 +469,7 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 					table: table.clone(),
 					name: None,
 				});
-				// A view is filled from its sources, into its table.
+				// A view is filled from its sources into its table.
 				if let Some(view) = &stmt.view {
 					for source in &view.what {
 						out.read(Resource::table(source.clone()));
@@ -691,86 +660,6 @@ fn ddl_footprint(statement: &LogicalDdlStatement, out: &mut Footprint) {
 		}
 	}
 }
-
-/// What the catalog says a statement with footprint `fp` triggers, added to
-/// it: a table read whose reads evaluate a permission predicate or a computed
-/// field reads what those may, a table written that the catalog does not
-/// define is defined by the write, a table written that runs events or holds views over it runs
-/// what the footprint cannot see, and a delete from a table other tables reference
-/// runs their repairs, which may run statements. `catalog` answers for the
-/// tables as the program being planned leaves them.
-pub(crate) async fn expand(fp: &mut Footprint, catalog: &dyn CatalogView) {
-	// A table whose reads evaluate what the catalog holds — a permission
-	// predicate, a computed field — reads whatever that reads.
-	let read: Vec<TableName> = fp
-		.reads
-		.iter()
-		.filter_map(|r| match r {
-			Resource::Data {
-				table: Some(table),
-				..
-			} => Some(table.clone()),
-			_ => None,
-		})
-		.collect();
-	for table in read {
-		if catalog.reads_through(&table).await {
-			fp.read(Resource::Unknown);
-			break;
-		}
-	}
-	let mut triggers = false;
-	let written: Vec<Option<TableName>> = fp
-		.writes
-		.iter()
-		.filter_map(|w| match w {
-			Resource::Data {
-				table,
-				..
-			} => Some(table.clone()),
-			_ => None,
-		})
-		.collect();
-	for table in written {
-		match table {
-			Some(table) => {
-				// A write defines the table it writes to when there is none.
-				if !catalog.defines(&table).await {
-					fp.write(Resource::table_catalog(table.clone()));
-				}
-				let (events, views) = catalog.triggers(&table).await;
-				triggers |= events;
-				if views {
-					// A view's table is written by the view's maintenance.
-					fp.write(Resource::any_data());
-				}
-			}
-			None => triggers |= catalog.any_triggers().await,
-		}
-	}
-	if triggers {
-		fp.absorb(Footprint::unknown());
-	}
-}
-
-/// The catalog a footprint's expansion reads.
-pub(crate) trait CatalogView: Send + Sync {
-	/// Whether `table` runs events when written, and whether views are
-	/// defined over it. Answers `(true, true)` when it cannot tell.
-	fn triggers<'a>(&'a self, table: &'a TableName) -> BoxFuture<'a, (bool, bool)>;
-	/// Whether reading `table` evaluates a body the catalog holds: a select
-	/// permission predicate, a computed field, a field's select permission.
-	/// Answers `true` when it cannot tell.
-	fn reads_through<'a>(&'a self, table: &'a TableName) -> BoxFuture<'a, bool>;
-	/// Whether the catalog defines `table`. Answers `false` when it cannot
-	/// tell.
-	fn defines<'a>(&'a self, table: &'a TableName) -> BoxFuture<'a, bool>;
-	/// Whether any table runs events, or any reference repair runs a
-	/// statement, when written. Answers `true` when it cannot tell.
-	fn any_triggers(&self) -> BoxFuture<'_, bool>;
-}
-
-type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 #[cfg(test)]
 mod tests {

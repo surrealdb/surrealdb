@@ -9,9 +9,9 @@
 //! node's inputs expose — their shape, their schema, whether an input is a
 //! layer, the frame a join carries — and nothing above the node, so no rule
 //! reasons about where in the statement it stands. It is reached only at a
-//! node whose [`LogicalOp::kind`] its [`RuleDef::kinds`] names, which is both
-//! what spares it an arm for every operator it ignores and where most of the
-//! set's work goes unspent. Declining is leaving the node as it is, so a
+//! node whose [`LogicalOp::kind`] its [`RuleDef::kinds`] names. A rule
+//! therefore needs no arm for an operator it ignores, and the driver skips
+//! most of the set at each node. Declining is leaving the node as it is, so a
 //! variant no rule names is simply not rewritten.
 //!
 //! A node rule that rewrites the scalars of any node rather than the node
@@ -22,9 +22,8 @@
 //! An **expression rule** ([`ExprRule`]) rewrites one scalar in place. The
 //! driver applies it to every scalar of every node, so it states no node
 //! kinds and walks nothing; what it rewrites holds wherever the expression
-//! sits, whatever the plan around it has become. Constant folding is such a
-//! rule, which is why it reaches every expression of every operator rather
-//! than the predicates one pass thought to fold.
+//! sits, whatever the plan around it is. Constant folding is such a rule, so
+//! it reaches every expression of every operator, not only the predicates.
 //!
 //! Every rule is a strict improvement of the plan it rewrites — a predicate
 //! judged once rather than twice, a node that does nothing removed, a call
@@ -120,9 +119,6 @@ pub(super) struct RuleContext<'a> {
 	pub(super) next_alias: usize,
 	/// What the caller may execute, which bounds what a call folds to.
 	pub(super) capabilities: &'a Capabilities,
-	/// Whether a `time::now()` in a condition folds to the time of binding
-	/// ([`super::BindContext::folds_clock`]).
-	pub(super) folds_clock: bool,
 }
 
 /// One node rewrite rule; see the module documentation for what a rule may
@@ -169,8 +165,7 @@ pub(super) struct RuleDef {
 	/// bound assertions.
 	pub(super) name: &'static str,
 	/// The kinds this rule can rewrite. The driver skips it at every other
-	/// node, which is both what lets a rule match only what it handles and
-	/// where most of the rule set's work is avoided.
+	/// node, so the rule only ever sees the nodes it handles.
 	pub(super) kinds: &'static [OpKind],
 	pub(super) apply: Rule,
 }
@@ -207,9 +202,6 @@ pub(super) struct ExprContext<'a> {
 	/// Whether the aggregate extractor reads these scalars after binding and
 	/// matches their calls by name, so a call it knows must survive whole.
 	pub(super) aggregates_survive: bool,
-	/// Whether these scalars are a condition, where `time::now()` is one value
-	/// for the statement; see [`super::fold::is_condition`].
-	pub(super) condition: bool,
 }
 
 /// One expression rewrite rule.
@@ -648,46 +640,6 @@ pub(super) fn is_pure(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
 	effects_of(expr, &Oracle::new(registry)).pure()
 }
 
-/// Whether evaluating `expr` a second time, or before rather than after
-/// another expression of the same row, leaves the world as evaluating it once
-/// in written order would: it stages no write, advances no counter, reaches
-/// nothing outside the transaction, waits for nothing and runs no body the
-/// plan cannot see. This is what lets an operator evaluate a batch one column
-/// at a time, and evaluate a column again after it failed part-way.
-///
-/// Reading the transaction's own snapshot is all of this, because the snapshot
-/// answers the same however often it is asked. **A record dereference is not a
-/// read of that kind**: fetching the record derives its `COMPUTED` fields and
-/// judges its `PERMISSIONS`, which are bodies the plan cannot see, so what the
-/// fetch leaves behind is whatever those bodies do. A body drawing from a
-/// sequence advances it once per fetch, and `SELECT link.n AS a, link.n AS b`
-/// then reports which column was evaluated first rather than what the row
-/// holds. A `[WHERE …]` filter fetches the same way, because its predicate is
-/// evaluated with each element of the base as the current value.
-///
-/// [`Effects::impure`](crate::expr::logical::Effects) is where that hazard is
-/// stated, alongside the shapes whose two evaluations can answer differently at
-/// all — a method, a closure, an applied value, control flow, a nested
-/// statement, a generated record-id key. A nested statement is rejected whole:
-/// [`effects_of`] counts it as one opaque node and does not enter it, so what
-/// its own scalars do is not in the answer, and only the arm naming
-/// `Subquery` keeps that from being read as inertness.
-///
-/// [`is_pure`] is what a rule needs before it may keep one of two evaluations
-/// in place of both. It rests on the same read-only classification and the same
-/// `impure`, and differs in turning down a `MATCHES` or `KNN` — answered by an
-/// access path rather than by evaluation, so a rule may not move it, while an
-/// operator choosing the shape of its own batch is free to. That relation is
-/// [`Effects::pure`](crate::expr::logical::Effects), which is defined in terms
-/// of [`Effects::effect_free`](crate::expr::logical::Effects) so it holds by
-/// construction.
-pub(crate) fn is_effect_free(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
-	if !expr.read_only() {
-		return false;
-	}
-	effects_of(expr, &Oracle::new(registry)).effect_free()
-}
-
 /// Whether every row a value source built from `expr` materialises into
 /// itself.
 ///
@@ -769,9 +721,10 @@ pub(super) fn is_row_free(expr: &LogicalExpr, registry: &FunctionRegistry) -> bo
 /// against, at any depth (a read inside a body over another value is
 /// included: it over-approximates, which is the safe direction for a demand).
 /// `None` when the row is read other than by name — see
-/// [`reads::reads_row_opaquely`] — through a closure, whose body runs against
-/// whatever row it is later invoked with, or through a step applied to the
-/// row's own `id`, which dereferences the record and so reads it whole.
+/// [`reads::reads_row_opaquely`] — through a closure, which captures the row
+/// where it is written and reads it by names this analysis does not follow,
+/// or through a step applied to the row's own `id`, which dereferences the
+/// record and so reads it whole.
 pub(crate) fn named_reads(
 	expr: &LogicalExpr,
 	registry: &FunctionRegistry,
@@ -869,7 +822,6 @@ pub(super) mod test_support {
 			permission_checked_params: permission_checked,
 			next_alias: 0,
 			capabilities,
-			folds_clock: true,
 		};
 		optimise(op, &mut cx)
 	}
@@ -910,273 +862,5 @@ pub(super) mod test_support {
 			current = child;
 		}
 		out
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::super::lower_test as lower;
-	use super::*;
-	use crate::expr::Kind;
-	use crate::expr::logical::{
-		EvalFrame, LogicalField, LogicalFields, LogicalFilter, LogicalPostfixOperator,
-		LogicalProject, LogicalRecordIdKey, OutputPath,
-	};
-
-	/// A projection over `SELECT * FROM t`, a layer when `frame` is not the
-	/// caller's.
-	fn project(expr: LogicalExpr, frame: EvalFrame) -> LogicalOp {
-		let field = if frame.is_caller() {
-			LogicalField::Single {
-				expr,
-				alias: Some(OutputPath::field("c")),
-				kind: None,
-				frame,
-			}
-		} else {
-			LogicalField::column("c", expr, Some(Kind::Int), frame)
-		};
-		LogicalOp::Project(LogicalProject {
-			input: Box::new(lower("SELECT * FROM t")),
-			fields: LogicalFields::Select(vec![LogicalField::All, field]),
-			omit: vec![],
-		})
-	}
-
-	fn param(name: &str) -> LogicalExpr {
-		LogicalExpr::Param(name.to_owned().into())
-	}
-
-	#[test]
-	fn plan_may_raise_reads_a_parameter_as_a_fetch_unless_the_row_binds_it() {
-		// A plain read of the row raises nothing.
-		assert!(!plan_may_raise(&project(LogicalExpr::Field("a".into()), EvalFrame::caller())));
-		// A cast does, wherever it sits.
-		let cast = LogicalExpr::Prefix {
-			op: crate::expr::PrefixOperator::Cast(Kind::Int),
-			expr: Box::new(LogicalExpr::Field("a".into())),
-		};
-		assert!(plan_may_raise(&project(cast, EvalFrame::caller())));
-
-		// A layer binds `$value` for its own columns, so reading it there is
-		// no catalog fetch; every other name is taken to be one, since the
-		// bind pass's classification is not available here.
-		assert!(!plan_may_raise(&project(param("value"), EvalFrame::computed(None))));
-		assert!(plan_may_raise(&project(param("value"), EvalFrame::caller())));
-		assert!(plan_may_raise(&project(param("secret"), EvalFrame::computed(None))));
-		for name in ["this", "self", "parent"] {
-			assert!(!plan_may_raise(&project(param(name), EvalFrame::caller())), "${name}");
-		}
-	}
-
-	/// A method call dispatches on its receiver and an application runs a
-	/// body the expression does not hold, so neither is pure. A registered
-	/// builtin method is read-only, which is what lets it reach the match at
-	/// all.
-	#[test]
-	fn a_method_call_and_an_application_are_not_pure() {
-		let registry = FunctionRegistry::with_builtins();
-		let receiver =
-			|| Box::new(LogicalExpr::Array(vec![LogicalExpr::Literal(LogicalLiteral::Integer(1))]));
-
-		for name in ["shuffle", "len"] {
-			let method = LogicalExpr::Method {
-				base: receiver(),
-				name: name.to_owned().into(),
-				args: vec![],
-			};
-			assert!(method.read_only(), ".{name}() reads only");
-			assert!(!is_pure(&method, &registry), "method .{name}()");
-		}
-
-		// Applying a value runs its body.
-		let call = LogicalExpr::Invoke {
-			target: receiver(),
-			args: vec![],
-		};
-		assert!(!is_pure(&call, &registry));
-
-		// A range postfix only wraps its operand, and stays inert.
-		let range = LogicalExpr::Postfix {
-			expr: Box::new(LogicalExpr::Literal(LogicalLiteral::Integer(1))),
-			op: LogicalPostfixOperator::Range,
-		};
-		assert!(is_pure(&range, &registry));
-	}
-
-	#[test]
-	fn a_generated_record_id_key_is_not_pure() {
-		use std::ops::Bound;
-
-		use crate::expr::RecordIdKeyGen;
-		use crate::expr::logical::{LogicalRecordIdKeyRange, LogicalRecordIdLit};
-
-		let registry = FunctionRegistry::with_builtins();
-		let id = |key: LogicalRecordIdKey| {
-			LogicalExpr::RecordId(Box::new(LogicalRecordIdLit {
-				table: "t".into(),
-				key,
-			}))
-		};
-
-		// A written-down key is the same record every time.
-		assert!(is_pure(&id(LogicalRecordIdKey::Number(1)), &registry));
-		assert!(is_pure(&id(LogicalRecordIdKey::String("a".into())), &registry));
-
-		// A generated one is not, wherever it sits — including a range
-		// bound, which no expression walk reaches.
-		for generated in [RecordIdKeyGen::Rand, RecordIdKeyGen::Ulid, RecordIdKeyGen::Uuid] {
-			let label = format!("{generated:?}");
-			let key = LogicalRecordIdKey::Generate(generated);
-			assert!(!is_pure(&id(key), &registry), "{label}");
-		}
-		let range = LogicalRecordIdKey::Range(Box::new(LogicalRecordIdKeyRange {
-			start: Bound::Included(LogicalRecordIdKey::Number(1)),
-			end: Bound::Excluded(LogicalRecordIdKey::Generate(RecordIdKeyGen::Ulid)),
-		}));
-		assert!(!is_pure(&id(range), &registry));
-		let range = LogicalRecordIdKey::Range(Box::new(LogicalRecordIdKeyRange {
-			start: Bound::Included(LogicalRecordIdKey::Number(1)),
-			end: Bound::Excluded(LogicalRecordIdKey::Number(5)),
-		}));
-		assert!(is_pure(&id(range), &registry));
-	}
-
-	#[test]
-	fn a_field_read_off_a_record_id_is_not_pure() {
-		use crate::expr::logical::LogicalRecordIdLit;
-
-		let registry = FunctionRegistry::with_builtins();
-		let access = |base: LogicalExpr| LogicalExpr::Access {
-			base: Box::new(base),
-			field: "coin".into(),
-		};
-
-		// The fetch derives the record's `COMPUTED` fields, whose bodies this
-		// expression does not hold and need not answer the same twice.
-		let rid = LogicalExpr::RecordId(Box::new(LogicalRecordIdLit {
-			table: "cfg".into(),
-			key: LogicalRecordIdKey::String("one".into()),
-		}));
-		assert!(!is_pure(&access(rid), &registry));
-
-		// A field may hold a record link, so a read off one may fetch too.
-		assert!(!is_pure(&access(LogicalExpr::Field("link".into())), &registry));
-
-		// A row-scoped name denotes the row in hand, which is not always a
-		// record: a source can yield bare record ids, and a second read off
-		// one fetches again. The exemption that reads such a base as a row
-		// already materialised belongs to `may_raise`, which asks whether an
-		// evaluation can be dropped, not to purity, which licenses keeping one
-		// evaluation in place of two.
-		assert!(!is_pure(
-			&access(LogicalExpr::Param(crate::expr::Param::from("parent".to_string()))),
-			&registry
-		));
-
-		// `_join<n>` is not the tell it looks like: the name is reserved so a
-		// join mints a *different* index when a plan already carries it, which
-		// leaves the field free to be a user's, holding a link.
-		assert!(!is_pure(&access(LogicalExpr::Field("_join0".into())), &registry));
-	}
-
-	#[test]
-	fn a_field_read_off_a_record_id_is_not_effect_free() {
-		use crate::expr::logical::LogicalRecordIdLit;
-
-		let registry = FunctionRegistry::with_builtins();
-		let access = |base: LogicalExpr| LogicalExpr::Access {
-			base: Box::new(base),
-			field: "coin".into(),
-		};
-
-		// The same four bases `a_field_read_off_a_record_id_is_not_pure`
-		// builds. A batch shape is judged by this predicate rather than by
-		// `is_pure`, so the hazard has to be turned down here too: the fetch
-		// derives `COMPUTED` fields whose bodies the plan cannot see, and
-		// evaluating one column of fetches before another reorders them.
-		let rid = LogicalExpr::RecordId(Box::new(LogicalRecordIdLit {
-			table: "cfg".into(),
-			key: LogicalRecordIdKey::String("one".into()),
-		}));
-		assert!(!is_effect_free(&access(rid), &registry));
-		assert!(!is_effect_free(&access(LogicalExpr::Field("link".into())), &registry));
-		assert!(!is_effect_free(
-			&access(LogicalExpr::Param(crate::expr::Param::from("parent".to_string()))),
-			&registry
-		));
-		assert!(!is_effect_free(&access(LogicalExpr::Field("_join0".into())), &registry));
-
-		// A literal base cannot name a record, so nothing is fetched.
-		assert!(is_effect_free(
-			&access(LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Integer(1))),
-			&registry
-		));
-	}
-
-	#[test]
-	fn a_terminal_filter_over_a_link_is_not_effect_free() {
-		let registry = FunctionRegistry::with_builtins();
-		let filter = |base: LogicalExpr| LogicalExpr::Filter {
-			base: Box::new(base),
-			predicate: Box::new(LogicalExpr::Field("n".into())),
-		};
-
-		// `links[WHERE n]` evaluates the predicate with each element of
-		// `links` as the current value, so `n` reads off that element and an
-		// element holding a record id is fetched. The predicate names the
-		// field directly rather than through a step whose base is the element,
-		// so nothing inside it shows the fetch — only the filter node does.
-		assert!(!is_effect_free(&filter(LogicalExpr::Field("links".into())), &registry));
-		assert!(!is_pure(&filter(LogicalExpr::Field("links".into())), &registry));
-
-		// A literal base holds no record id to fetch.
-		assert!(is_effect_free(
-			&filter(LogicalExpr::Array(vec![LogicalExpr::Literal(
-				crate::expr::logical::LogicalLiteral::Integer(1)
-			)])),
-			&registry
-		));
-	}
-
-	#[test]
-	fn purity_is_effect_freedom_plus_the_index_operators() {
-		use crate::expr::logical::{EffectOracle, Effects, effects_of};
-
-		// `is_pure` and `is_effect_free` share a basis, and the only term that
-		// separates them is `index_operator`. Stating it here keeps a future
-		// `node_set` arm from making `is_pure` admit what `is_effect_free`
-		// refuses.
-		let registry = FunctionRegistry::with_builtins();
-		let oracle = Oracle::new(&registry);
-		let matches = LogicalExpr::Binary {
-			left: Box::new(LogicalExpr::Field("body".into())),
-			op: crate::expr::BinaryOperator::Matches(crate::expr::operator::MatchesOperator {
-				rf: None,
-				operator: crate::expr::operator::BooleanOperator::And,
-			}),
-			right: Box::new(LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::String(
-				"x".into(),
-			))),
-		};
-		let effects: Effects = effects_of(&matches, &oracle as &dyn EffectOracle);
-		assert!(effects.effect_free());
-		assert!(!effects.pure());
-		assert!(is_effect_free(&matches, &registry));
-		assert!(!is_pure(&matches, &registry));
-	}
-
-	#[test]
-	fn plan_may_raise_looks_through_the_whole_plan() {
-		let cast = LogicalExpr::Prefix {
-			op: crate::expr::PrefixOperator::Cast(Kind::Int),
-			expr: Box::new(LogicalExpr::Field("a".into())),
-		};
-		let inner = project(cast, EvalFrame::caller());
-		let outer = LogicalOp::Filter(LogicalFilter {
-			input: Box::new(inner),
-			predicate: LogicalExpr::Field("b".into()),
-		});
-		assert!(plan_may_raise(&outer));
 	}
 }

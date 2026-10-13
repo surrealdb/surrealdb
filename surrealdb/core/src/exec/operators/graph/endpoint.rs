@@ -5,7 +5,7 @@
 //! (`(a)-[:x]->(b)` with no labeled node), the plan scans the edge table and binds
 //! each edge record under a binding name, then runs two endpoint steps to recover
 //! the two endpoint nodes — the `in` endpoint and the `out` endpoint — as full
-//! node bindings. See the worked plan tree (ii) in `doc/gql/V2_DESIGN.md` §6.
+//! node bindings, read from the full edge object that the earlier scan step bound.
 //!
 //! For every input row it:
 //!
@@ -51,10 +51,10 @@ use crate::val::{Object, RecordId, TableName, Value};
 
 /// Which endpoint of the bound edge to bind as the target node.
 ///
-/// Operator-local mirror of the edge `in`/`out` field selection; kept here so
-/// this operator compiles without the `gql` feature — matching the
-/// `graph/expand.rs` precedent for [`ExpandDir`](super::expand::ExpandDir).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Mirror of the edge `in`/`out` field selection, kept local so this operator
+/// compiles without the `gql` feature. It has the same shape as
+/// [`ExpandDir`](super::expand::ExpandDir).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EndpointField {
 	/// Bind the edge's `in` endpoint.
 	In,
@@ -109,9 +109,9 @@ pub(crate) async fn bind_endpoints(
 			}
 			None => {
 				// Malformed plan, optional miss, or an edge with no readable
-				// endpoint: drop the row without panicking. The lowering
-				// guarantees a full edge object here, so this is unreachable
-				// on valid plans.
+				// endpoint: drop the row without panicking. Valid plans bind
+				// a full edge object here, so the malformed-plan case should
+				// not occur.
 				debug!(
 					binding = %edge,
 					"EndpointBind: edge binding missing, not a full edge record, or has no endpoint; dropping row"

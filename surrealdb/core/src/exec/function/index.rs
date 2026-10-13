@@ -19,6 +19,9 @@
 //!
 //! Examples: search::highlight, search::score, search::offsets, vector::distance::knn
 
+// Some items have no caller in every build, so dead-code lints are allowed.
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -28,6 +31,7 @@ use anyhow::Result;
 use super::Signature;
 use crate::catalog::Index;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::{BoxFut, ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
@@ -135,6 +139,16 @@ pub trait IndexFunction: Send + Sync + Debug {
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Root
 	}
+
+	/// What a call's failure can depend on: the failure classes of the body
+	/// for arguments of the signature's kinds, the index context included.
+	/// Argument coercion (arity and kind) is the call's `VALUE`, not the
+	/// function's.
+	///
+	/// A class is a superset when unsure. Every implementor declares a
+	/// class; there is no default, so an undeclared one does not compile.
+	#[allow(unused)]
+	fn fallibility(&self) -> Fallibility;
 
 	/// Async invocation with index context.
 	///
@@ -245,9 +259,9 @@ impl MatchContext {
 				))
 				.await?;
 				let indexes = if ctx.exec_ctx.version_stamp().is_none() {
-					// MATCHES/scoring must only open indexes that durable build
-					// state has published as queryable. Which ones are is a
-					// catalog fact, loaded as one.
+					// MATCHES and scoring only open indexes that durable build
+					// state marks as queryable. That state is catalog data,
+					// loaded together with the index list.
 					crate::exec::vm::descriptor::object(filter_online_indexes(
 						tx.as_ref(),
 						ns_id,

@@ -17,7 +17,7 @@
 //! being told.
 //!
 //! A table's descriptor ([`TableDescriptor`]) is read afresh per load, from
-//! the transaction cache, so a host step that loads it where it needs it —
+//! the transaction cache, so a step that loads it where it needs it —
 //! when its pipeline opens a source, when a write resolves its table — sees
 //! the catalog as the statements before it left it, a schema statement's
 //! writes and those of a call whose effects are unknown included. What is
@@ -167,12 +167,6 @@ impl TableMemo {
 		Ok(loaded)
 	}
 
-	/// How many descriptors are held.
-	#[cfg(test)]
-	pub(crate) fn len(&self) -> usize {
-		self.entries.len()
-	}
-
 	/// Let go of every descriptor held.
 	pub(crate) fn clear(&mut self) {
 		self.txn = 0;
@@ -193,8 +187,8 @@ async fn load_table(
 		Some(_) => txn.all_tb_fields(ns, db, table, stamp).await?,
 		None => Arc::from([]),
 	};
-	// The load fails only on a storage error: a descriptor this build cannot
-	// read is a refused generation in the answer.
+	// Only a storage error fails the load. A generation this build cannot read
+	// is reported as a refused generation in `layouts`.
 	let layouts_epoch = txn.layout_epoch();
 	let layouts = txn.table_layouts(ns, db, table, stamp).await?;
 	Ok(Arc::new(TableDescriptor {
@@ -210,8 +204,8 @@ async fn load_table(
 }
 
 /// The definition of `table` in the database of `db_ctx`, as of `stamp`;
-/// `None` where it is not defined. What
-/// [`DatabaseContext::get_table_def`] reads on a miss of its own cache.
+/// `None` where it is not defined. This is the load
+/// [`DatabaseContext::get_table_def`] makes on a miss in its own cache.
 pub(crate) fn definition<'a>(
 	db_ctx: &'a DatabaseContext,
 	table: &'a TableName,
@@ -292,14 +286,13 @@ async fn key_of(
 /// `compile`, what is compiled from `table`'s definitions for `ctx` and the
 /// frame `checked` names, served by the compile cache under `object`: the
 /// unit kept for the table's catalog version and the frame where what else
-/// it depends on holds, and otherwise compiled now, with a planner over the
+/// it depends on holds, and otherwise compiled on the miss, with a planner over the
 /// transaction ([`unit_planner`]), and kept. A read at a `VERSION` stamp and a
 /// table whose catalog was never stamped are compiled with no transaction, and
 /// kept for the statement by `statement`.
 ///
-/// What the cache keeps is a compilation the run requests: the one kind of
-/// compile after a query arrives, a seam of the run-time seal
-/// ([`crate::exec::compiles`]).
+/// The cache keeps only compilations the run requests. These are the only
+/// compiles made after a query arrives ([`crate::exec::compiles`]).
 async fn from_cache<'a, V: Clone + Send + Sync + 'static>(
 	ctx: &'a ExecutionContext,
 	table: &'a TableName,
@@ -331,7 +324,7 @@ async fn from_cache<'a, V: Clone + Send + Sync + 'static>(
 		&frame,
 		&txn,
 		ctx.ctx(),
-		// A miss is a fault the host serves, as every compile-cache fill is.
+		// A miss compiles under the serving-fault guard, as every compile-cache fill does.
 		|| {
 			crate::exec::compiles::serving_fault(async {
 				let planner = unit_planner(ctx, db_ctx);
@@ -504,9 +497,9 @@ pub(crate) async fn database(
 
 /// `read`, a load of a catalog object other than a table — a parameter, a
 /// function, an analyzer, a sequence, a bucket, a model, a module, an API, a
-/// config, the ids of a namespace and database — that the run, a builtin it calls or a write it
-/// makes names. Each is to be served as a table's descriptor is, by (object,
-/// version).
+/// config, the ids of a namespace and database — that the run, a builtin it
+/// calls, or a write it makes names. Each is served as a table's descriptor is,
+/// by (object, version).
 pub(crate) fn object<'a, F: std::future::Future + Send + 'a>(
 	read: F,
 ) -> impl std::future::Future<Output = F::Output> + Send + 'a {

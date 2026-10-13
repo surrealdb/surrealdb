@@ -14,6 +14,7 @@ use std::fmt::Debug;
 use anyhow::Result;
 
 use super::Signature;
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::Value;
 
@@ -57,9 +58,9 @@ pub trait Accumulator: Send + Sync + Debug {
 		None
 	}
 
-	/// Whether the accumulator keeps its inputs, so what it holds grows with
-	/// each value it folds: a breaker counts those values against its
-	/// query's memory.
+	/// Whether the accumulator keeps its inputs, so its size grows with
+	/// each value it folds. The operator that runs it counts those values
+	/// against the query's memory.
 	fn holds_inputs(&self) -> bool {
 		false
 	}
@@ -95,9 +96,9 @@ pub trait Accumulator: Send + Sync + Debug {
 	///
 	/// `array::join(txt, sep)`'s separator describes the group rather than any
 	/// one row, so it is evaluated once for the group and bound here rather
-	/// than at construction: a group is not known to exist until a row opens
-	/// it, and the groups are bound in group-key order, which is where a
-	/// separator that writes, draws or reads the clock has its effect.
+	/// than at construction. A group exists only once a row opens it. Groups
+	/// are bound in group-key order, which decides the effect of a separator
+	/// that writes, draws random values or reads the clock.
 	///
 	/// Called once per group, immediately before [`Self::finalize`]. The
 	/// default implementation ignores the arguments, which is what every
@@ -138,6 +139,16 @@ pub trait AggregateFunction: Send + Sync + Debug {
 	fn return_type(&self, _arg_types: &[Kind]) -> Result<Kind> {
 		Ok(self.signature().returns)
 	}
+
+	/// What a group's failure can depend on: the failure classes of the
+	/// accumulator's `update`, `merge` and `finalize` for arguments of the
+	/// signature's kinds. Argument coercion is the call's `VALUE`, not the
+	/// aggregate's.
+	///
+	/// A class is a superset when unsure. Every implementor declares a
+	/// class; there is no default, so an undeclared one does not compile.
+	#[allow(unused)]
+	fn fallibility(&self) -> Fallibility;
 }
 
 /// Helper macro to define simple aggregate functions with their accumulators.
@@ -152,6 +163,11 @@ pub trait AggregateFunction: Send + Sync + Debug {
 ///     SumAccumulator                  // Accumulator type
 /// );
 /// ```
+///
+/// Every aggregate names what its failure depends on last, as
+/// `, fallibility: Fallibility::VALUE`
+/// ([`AggregateFunction::fallibility`]). The argument is required: an
+/// aggregate without it does not compile.
 #[macro_export]
 macro_rules! define_aggregate {
 	// Single required argument: (name: Type) -> ReturnType
@@ -160,6 +176,7 @@ macro_rules! define_aggregate {
 		$func_name:literal,
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$accumulator:ty
+		, fallibility: $fallibility:expr
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -171,6 +188,10 @@ macro_rules! define_aggregate {
 
 			fn create_accumulator(&self) -> Box<dyn $crate::exec::function::Accumulator> {
 				Box::new(<$accumulator>::default())
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				$crate::declare_fallibility!(Aggregate, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -187,6 +208,7 @@ macro_rules! define_aggregate {
 		$func_name:literal,
 		() -> $ret:ident,
 		$accumulator:ty
+		, fallibility: $fallibility:expr
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -198,6 +220,10 @@ macro_rules! define_aggregate {
 
 			fn create_accumulator(&self) -> Box<dyn $crate::exec::function::Accumulator> {
 				Box::new(<$accumulator>::default())
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				$crate::declare_fallibility!(Aggregate, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {

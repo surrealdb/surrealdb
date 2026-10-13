@@ -39,7 +39,7 @@ use std::sync::Arc;
 
 use futures::Stream;
 
-// Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
+// Re-export FlowResult and ControlFlowExt for operator implementations
 pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
 
 /// A boxed `Send` future, used at trait boundaries to keep async state
@@ -67,12 +67,15 @@ pub(crate) mod frame;
 pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod scalar_unit;
+pub(crate) mod session;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod field_rules;
 pub(crate) mod function;
 pub(crate) mod guard_verdicts;
 pub(crate) mod index;
+#[allow(dead_code)]
+pub(crate) mod ir;
 pub(crate) mod logical;
 pub mod memory;
 pub(crate) mod metrics;
@@ -108,7 +111,6 @@ pub(crate) use error::Error;
 pub(crate) use eval_context::EvalContext;
 // Re-export metrics types
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
-// Re-export ordering types
 // Re-export the output-partitioning property
 pub(crate) use partitioning::Partitioning;
 

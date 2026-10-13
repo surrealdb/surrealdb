@@ -5,13 +5,13 @@
 //! expression they evaluate is a host pipeline over one of the record's
 //! images (see `doc/executor/VM_WRITE_STAGES.md`).
 //!
-//! The field schema is applied as the field kernel of
-//! [`crate::exec::operators::write::stages::schema`] applies it: one field at a
-//! time in the table's field order and, within a field, one place at a time.
-//! [`SchemaInstr::Field`] opens a field, [`SchemaInstr::NextPlace`] steps to its
-//! next place, the clause instructions produce the place's value and
-//! [`SchemaInstr::Land`] writes it back. The field definitions are those the
-//! catalog held when the statement was planned.
+//! The field schema is applied in the order the field kernel of
+//! [`crate::exec::operators::write::stages::schema`] uses: one field at a
+//! time in the table's field order and, within a field, one place at a
+//! time. [`SchemaInstr::Field`] opens a field, [`SchemaInstr::NextPlace`]
+//! steps to its next place, the clause instructions produce the place's
+//! value and [`SchemaInstr::Land`] writes it back. The field definitions
+//! are read from the write's context and must be the fields the plan names.
 
 use std::sync::Arc;
 
@@ -133,9 +133,9 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	},
 	/// Step to the open field's next place, or jump to `done` when none is
 	/// left. The `id` field of an existing record, and a `READONLY` field of
-	/// one, are checked here and never produced. A place within one an absent
-	/// optional field left empty is not produced either, but its enforced
-	/// permission predicate is still judged and its answer discarded.
+	/// one, are checked here and never produced. A place inside an absent
+	/// optional field's empty value is not produced either, but its enforced
+	/// permission predicate is still judged and the answer is discarded.
 	NextPlace {
 		done: Label,
 	},
@@ -159,8 +159,8 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	},
 	/// Judge the place's `ASSERT` once every field is produced.
 	DeferAssert,
-	/// Keep the value the record held when the open field's `PERMISSIONS` are
-	/// enforced and refuse the change.
+	/// Revert the place to the value the record held before the statement
+	/// when the open field's `PERMISSIONS` deny the change.
 	Permit,
 	/// Write the place's value back into the post-image, and note a place an
 	/// absent optional field left empty, whose places within are skipped.
@@ -184,7 +184,7 @@ pub(in crate::exec::vm) enum SchemaInstr {
 	/// Derive the table's `COMPUTED` fields onto both images when anything
 	/// observes the record after it is written: each image is handed through
 	/// host pipelines [`Program::host_code`]`[pipelines[..]]` in order, each
-	/// deriving the fields after those the ones before it derived.
+	/// deriving the fields after those the earlier pipelines derived.
 	Observe {
 		pipelines: Arc<[u16]>,
 	},
@@ -346,6 +346,11 @@ fn record(write: &mut WriteState) -> Result<&mut SchemaRecord, ControlFlow> {
 /// Run clause pipeline `pipeline` for the open field's place: over the
 /// post-image as it stands, in the field's frame with the place's parameters
 /// bound to `value`, or to the place's own value.
+///
+/// A field clause is a barrier to loops. A `BREAK` or `CONTINUE` in it names
+/// a loop outside the clause, so it fails with
+/// [`InvalidControlFlow`](crate::exec::Error::InvalidControlFlow) and never
+/// leaves the write. A `RETURN` gives the clause's value.
 async fn place_clause(
 	program: &Program,
 	pipeline: u16,
@@ -360,7 +365,13 @@ async fn place_clause(
 	let place = cursor.place.as_ref().ok_or_else(|| internal("a clause with no place"))?;
 	let value = value.unwrap_or_else(|| place.val.clone());
 	let bound = clause_frame(&cursor.frame, place, &value);
-	run_image(program, pipeline, doc, Some(bound), state, &exec).await
+	match run_image(program, pipeline, doc, Some(bound), state, &exec).await {
+		Err(ControlFlow::Return(value)) => Ok(value),
+		Err(ControlFlow::Break | ControlFlow::Continue) => {
+			Err(fail(crate::exec::Error::InvalidControlFlow))
+		}
+		ran => ran,
+	}
 }
 
 /// Judge write permission predicate `pipeline` for the open field's place and
@@ -688,8 +699,8 @@ pub(super) async fn step(
 				row.current.cut(name);
 			}
 			// SECURITY: the write permission gate derives onto its scratch copy
-			// only the computed values this flag says the post-image lacks, and
-			// every one was just stripped (GHSA-f6h4-5xf2-86q9).
+			// only the computed values this flag says the post-image lacks. Every
+			// computed value was stripped above, so the flag is cleared.
 			row.fields_computed = false;
 			// The field values changed, so the reduced image no longer
 			// describes the record.

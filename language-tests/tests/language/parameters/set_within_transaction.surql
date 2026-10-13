@@ -1,5 +1,10 @@
 /**
 [test]
+reason = """
+A LET inside a transaction that is cancelled is undone with it: `$a`, bound
+inside a committed transaction, keeps its new value, and `$b`, bound inside a
+cancelled one, reads the value it held before BEGIN.
+"""
 
 [[test.results]]
 value = "NONE"
@@ -29,7 +34,7 @@ value = "NONE"
 value = "1"
 
 [[test.results]]
-value = "2"
+value = "0"
 
 */
 

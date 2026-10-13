@@ -7,6 +7,7 @@ use anyhow::Result;
 use super::Rejected;
 use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::{Datetime, Value};
 
@@ -21,6 +22,10 @@ pub struct TimeMin;
 impl AggregateFunction for TimeMin {
 	fn name(&self) -> &'static str {
 		"time::min"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "time::min", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -88,9 +93,9 @@ impl Accumulator for TimeMinAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// The engine's aggregate only. The materialised-view path
-		// (`catalog/aggregation.rs`) still emits `Datetime::MAX_UTC` for empty
-		// groups; aligning it requires bumping `AggregationStat`'s revision.
+		// An empty group returns NONE. The materialised-view path in
+		// `catalog/aggregation.rs` returns `Datetime::MAX_UTC` for empty groups
+		// instead. Changing that path needs a new revision of `AggregationStat`.
 		self.rejected.check()?;
 		match &self.min {
 			Some(d) => Ok(Value::Datetime(*d)),
@@ -123,6 +128,10 @@ pub struct TimeMax;
 impl AggregateFunction for TimeMax {
 	fn name(&self) -> &'static str {
 		"time::max"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "time::max", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -190,9 +199,9 @@ impl Accumulator for TimeMaxAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
-		// The engine's aggregate only. The materialised-view path
-		// (`catalog/aggregation.rs`) still emits `Datetime::MIN_UTC` for empty
-		// groups; aligning it requires bumping `AggregationStat`'s revision.
+		// An empty group returns NONE. The materialised-view path in
+		// `catalog/aggregation.rs` returns `Datetime::MIN_UTC` for empty groups
+		// instead. Changing that path needs a new revision of `AggregationStat`.
 		self.rejected.check()?;
 		match &self.max {
 			Some(d) => Ok(Value::Datetime(*d)),
@@ -304,7 +313,7 @@ mod tests {
 
 	#[test]
 	fn time_min_merge_into_empty() {
-		// Exercise the `self.min == None, other.min == Some` branch of merge.
+		// Covers merge when self has no minimum and other has one.
 		let func = TimeMin;
 		let mut acc1 = func.create_accumulator();
 
@@ -433,7 +442,7 @@ mod tests {
 
 	#[test]
 	fn time_max_merge_into_empty() {
-		// Exercise the `self.max == None, other.max == Some` branch of merge.
+		// Covers merge when self has no maximum and other has one.
 		let func = TimeMax;
 		let mut acc1 = func.create_accumulator();
 

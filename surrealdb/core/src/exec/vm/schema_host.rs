@@ -95,6 +95,30 @@ pub(super) async fn alter_field(
 	Ok(())
 }
 
+/// `ALTER FIELD` once the field and its table are named, for a statement that holds its clauses
+/// as the definition they form.
+pub(super) async fn alter_field_clauses(
+	altered: &crate::catalog::FieldDefinition,
+	fields: &[String],
+	(kind_changed, if_exists): (bool, bool),
+	name: Idiom,
+	table: TableName,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(crate::ddl::alter::field::alter_field_definition_apply(
+		altered,
+		fields,
+		(kind_changed, if_exists),
+		name,
+		table,
+		ctx,
+		opt,
+	))
+	.await?;
+	Ok(())
+}
+
 /// The check `DEFINE INDEX` makes of one column against the table it
 /// indexes.
 pub(super) async fn check_index_column(
@@ -146,11 +170,11 @@ pub(super) async fn check_table_altered(
 	.await
 }
 
-/// The checks a field statement makes of the definition `definition` it
-/// forms, in the database `ns`, `db`: the record id components it names, or
-/// the clash of the field it defines with one, judged as a `DEFINE FIELD` of
-/// `kind` judges them, against the catalog and the rows of the table's views
-/// as `txn` holds them.
+/// The checks a field statement makes of `definition`, the field it forms in
+/// the database `ns`, `db`: the record id components it names, and whether it
+/// clashes with one.
+/// They are judged as a `DEFINE FIELD` of `kind` judges them, against the
+/// catalog and the table's view rows as `txn` holds them.
 pub(super) async fn check_key_components(
 	txn: &Transaction,
 	ns: NamespaceId,
@@ -215,9 +239,9 @@ pub(super) async fn validate_record_keys(
 	.await
 }
 
-/// What refuses the removal of table `name` of the database `ns`, `db`: a
-/// non-empty LIGHTWEIGHT relation using it as an endpoint, before the table
-/// itself being a non-empty LIGHTWEIGHT relation, as `txn` holds their edges.
+/// What refuses removing table `name` from the database `ns`, `db`. A non-empty
+/// LIGHTWEIGHT relation that uses `name` as an endpoint is reported first, then
+/// a non-empty LIGHTWEIGHT `name` itself. Edges are read through `txn`.
 pub(super) async fn refuse_removing_lightweight(
 	txn: &crate::kvs::Transaction,
 	ns: crate::catalog::NamespaceId,

@@ -14,6 +14,7 @@ use std::cmp::Ordering;
 use anyhow::bail;
 
 pub(super) use super::groups::Groups;
+use super::ir_exec::IrFlow;
 use super::program::{Instr, KeyOrder, Operand, Pipeline, Program, ROW, Reg};
 use super::row::RowReader;
 use super::scalar::Scalar;
@@ -64,6 +65,11 @@ pub(super) enum Step {
 	/// Take access instruction `at` over a record id, array or geometry,
 	/// then resume after it.
 	Access {
+		at: usize,
+	},
+	/// Run the IR instruction at `at` on the host, which answers where the row
+	/// resumes.
+	Ir {
 		at: usize,
 	},
 	/// Take each instruction `at` over a record id or an array holding one,
@@ -259,6 +265,12 @@ pub(super) struct FunctionMemo {
 	/// The principal an entry ran the body under for the caller's auth it
 	/// was derived from, for the definition held above.
 	pub(super) principal: Option<super::function::Narrowed>,
+	/// The definition an entry found to hash otherwise than the program
+	/// expects, which the call runs through the function's call unit.
+	pub(super) redefined: Option<std::sync::Arc<crate::catalog::FunctionDefinition>>,
+	/// The call unit the site's last call of a redefined function linked
+	/// ([`super::call_unit::Linked`]).
+	pub(super) linked: Option<super::call_unit::Linked>,
 }
 
 /// A region the row's body is in ([`State::tries`]).
@@ -312,9 +324,10 @@ pub(super) struct State {
 	/// For each sort of a brute-force KNN whose query vector is computed when
 	/// the statement runs, the cell its vector is evaluated into.
 	pub(super) knn_queries: Vec<KnnQueryCell>,
-	/// For each of [`Program::knn_searches`](super::program::Program), the
-	/// cell its vector is evaluated into.
-	pub(super) knn_searches: Vec<KnnQueryCell>,
+	/// For each query vector a KNN search of the run computes
+	/// ([`Source::Knn`](super::program::Source)), the cell it is evaluated
+	/// into, found by the identity of the query the sources share.
+	pub(super) knn_searches: Vec<(std::sync::Arc<super::program::KnnQuery>, KnnQueryCell)>,
 	/// For each sort that may spill, the rows it holds before it writes them
 	/// out as a run whatever its query's memory (a sort under `TEMPFILES`),
 	/// and its order.
@@ -431,6 +444,11 @@ pub(super) struct State {
 	pub(super) group_writes: Vec<Option<Box<super::write::WriteState>>>,
 	/// The values a block has bound its `LET` and `FOR` names to, by slot.
 	pub(super) slots: Vec<Value>,
+	/// The current value a closure value captured at its literal, which a body
+	/// run over the document root it captured loads as its element
+	/// ([`Instr::LoadElement`]). It is shared with the value, so an invocation
+	/// copies no document to hold it.
+	pub(super) element: Option<std::sync::Arc<Value>>,
 	/// What each nested statement run once has taken, by
 	/// [`Program::nested`](super::program::Program::nested) index, until the
 	/// group it is evaluated in starts again.
@@ -480,8 +498,8 @@ pub(super) struct State {
 	/// read of a table named in the text stops at its statement's `LIMIT`.
 	/// Taken by that read.
 	pub(super) scan_hint: Option<u32>,
-	/// The paging clause a region's batch counts its rows against, which the
-	/// batch leaves to its merge: `None` for a state that runs no such batch.
+	/// The paging clause a morsel counts its rows against, which the morsel
+	/// leaves to its merge: `None` for a state that runs no such morsel.
 	pub(super) batch_paging: Option<u16>,
 	/// Whether a row has executed the paging instruction of
 	/// [`batch_paging`](Self::batch_paging) since the flag was last cleared.
@@ -489,6 +507,13 @@ pub(super) struct State {
 	/// by clauses of its own, which say nothing of whether the row is taken,
 	/// so no instruction of another clause sets it.
 	pub(super) reached_paging: bool,
+	/// Whether the row that passes a distinct set leaves its value in
+	/// [`Self::distinct_taken`], for a morsel whose merge keeps the first
+	/// occurrence of each row among its morsels'.
+	pub(super) capture_distinct: bool,
+	/// The row a distinct set took since the field was last cleared, while
+	/// [`Self::capture_distinct`] holds.
+	pub(super) distinct_taken: Option<Value>,
 	/// Which of [`Program::reservations`] a draw has taken: each is taken
 	/// once, by the first run of the draw that reserved it.
 	pub(super) reserved_taken: Vec<bool>,
@@ -514,9 +539,8 @@ pub(super) struct State {
 	/// table's rows through, opened by the backfill's first row so that the
 	/// view table's write context is resolved once for the run.
 	pub(super) backfill: Option<std::sync::Arc<crate::exec::operators::write::scope::WriteScope>>,
-	/// The order of the view table a backfill fills, lowered when the
-	/// backfill met it, for a view whose table the plan could not name: the
-	/// table, and its order.
+	/// The order of the view table a backfill fills, taken when the backfill
+	/// met it: the table, and its order.
 	pub(super) backfill_order: Option<(surrealdb_strand::TableName, std::sync::Arc<Program>)>,
 	/// The format a backfill writes the rows of the view table it fills in: the table, and
 	/// the slot that answers for it while the transaction's layout epoch
@@ -551,14 +575,21 @@ pub(super) struct State {
 	/// is transcoded from its bytes, and [`Self::output`] is drained into the
 	/// frame ahead of it ([`Self::framed_output`]).
 	pub(super) row_frame: Option<super::row_frame::RowFrame>,
+	/// The statement's registration with the node's places, made by the first
+	/// morsel set that wants a place and shared by every set of the run, so
+	/// that the statement holds no more places than the policy's cap whatever
+	/// the number of its scans. The state of a morsel, which runs a body over
+	/// the rows it is handed and reads no source, starts with none and makes
+	/// none.
+	pub(super) places: Option<super::morsel::Statement>,
 }
 
 /// The query vector of a brute-force KNN sort, or of a KNN search, that is
 /// computed when the statement runs: empty until the first row of the run is
 /// ranked against it ([`Step::KnnQuery`]), or the first source searching with
-/// it opens, which evaluates it once. A region's batches share the statement's
-/// cell ([`RunShare`]), so the batch that ranks the first row evaluates it for
-/// all of them, and a batch whose rows all fail a condition beneath the
+/// it opens, which evaluates it once. A statement's morsels share its cell
+/// ([`RunShare`]), so the morsel that ranks the first row evaluates it for
+/// all of them, and a morsel whose rows all fail a condition beneath the
 /// ranking evaluates nothing.
 ///
 /// The cell holds the evaluation's outcome, a failure included, so a vector
@@ -618,10 +649,11 @@ impl KnnQueryOutcome {
 	}
 }
 
-/// What the batches of a statement's region share with the statement: its
+/// What the morsels of a statement share with the statement: its
 /// aggregate functions, the distances its scan published, the query vectors
 /// of its brute-force searches, and the resolutions of the index functions and `MATCHES` operators
-/// it holds, so that a batch resolves nothing against the registry.
+/// it holds, so that a morsel resolves nothing against the registry.
+#[derive(Clone)]
 pub(super) struct RunShare {
 	registry: u64,
 	aggregates: std::sync::Arc<ResolvedAggregates>,
@@ -629,6 +661,10 @@ pub(super) struct RunShare {
 	knn_queries: Vec<KnnQueryCell>,
 	index_runs: Vec<Option<IndexRun>>,
 	matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
+	/// The threshold cell of each sort the run's scan pushes a top-k down for: the sorts of the
+	/// morsels publish into the statement's cell, so that every morsel's scan rejects by the
+	/// tightest threshold any of them holds.
+	topk_cells: Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
 }
 
 /// The aggregate functions a program's aggregates name, with the names they
@@ -886,6 +922,7 @@ impl State {
 		state.knn_queries = shared.knn_queries;
 		state.index_runs = shared.index_runs;
 		state.matches_evals = shared.matches_evals;
+		state.topk_cells = shared.topk_cells;
 		state.start(program, paging);
 		state
 	}
@@ -915,7 +952,6 @@ impl State {
 		self.sort_arrivals.resize(sorts, Arrivals::default());
 		self.topk_cells.resize(sorts, None);
 		self.knn_queries.resize_with(sorts, KnnQueryCell::default);
-		self.knn_searches.resize_with(program.knn_searches.len(), KnnQueryCell::default);
 		self.sort_spill.resize(sorts, None);
 		self.sort_runs.resize_with(sorts, || None);
 		self.sort_accounts.resize_with(sorts, crate::exec::memory::Reservation::unbounded);
@@ -999,6 +1035,7 @@ impl State {
 			program,
 			group_writes,
 			slots,
+			element,
 			once,
 			lookups,
 			join_lookups,
@@ -1014,6 +1051,8 @@ impl State {
 			scan_hint,
 			batch_paging,
 			reached_paging,
+			capture_distinct,
+			distinct_taken,
 			reserved_taken,
 			units,
 			methods: _,
@@ -1030,6 +1069,7 @@ impl State {
 			degrees,
 			linked,
 			row_frame,
+			places,
 		} = self;
 		emptied(paging);
 		emptied(sorts);
@@ -1077,6 +1117,7 @@ impl State {
 		*program = None;
 		emptied(group_writes);
 		emptied(slots);
+		*element = None;
 		emptied(once);
 		emptied(lookups);
 		emptied(join_lookups);
@@ -1092,6 +1133,8 @@ impl State {
 		*scan_hint = None;
 		*batch_paging = None;
 		*reached_paging = false;
+		*capture_distinct = false;
+		*distinct_taken = None;
 		emptied(reserved_taken);
 		*units = None;
 		emptied(index_runs);
@@ -1107,6 +1150,7 @@ impl State {
 		emptied(degrees);
 		emptied(linked);
 		*row_frame = None;
+		*places = None;
 	}
 
 	/// The descriptor of method `index`, `spec`'s, resolved from `registry` the
@@ -1130,9 +1174,9 @@ impl State {
 		slot.clone()
 	}
 
-	/// What a batch of this run's region shares with it: the index functions
+	/// What a morsel of this run shares with it: the index functions
 	/// and `MATCHES` operators of `program`, this run's, are resolved first,
-	/// so that every batch reports against the same clauses and the same
+	/// so that every morsel reports against the same clauses and the same
 	/// distances.
 	pub(super) fn shared(
 		&mut self,
@@ -1154,6 +1198,7 @@ impl State {
 			knn_queries: self.knn_queries.clone(),
 			index_runs: self.index_runs.clone(),
 			matches_evals: self.matches_evals.clone(),
+			topk_cells: self.topk_cells.clone(),
 		})
 	}
 
@@ -1271,9 +1316,14 @@ impl State {
 					table.clone(),
 				),
 			)),
-			Some(IndexBinding::Knn {
-				slot,
-			}) => crate::exec::function::IndexContext::Knn(self.knn_context(*slot)),
+			Some(
+				IndexBinding::Knn {
+					slot,
+				}
+				| IndexBinding::KnnHolds {
+					slot,
+				},
+			) => crate::exec::function::IndexContext::Knn(self.knn_context(*slot)),
 			None => anyhow::bail!("`{}` is not bound to an index clause", spec.name),
 		};
 		let run = IndexRun {
@@ -1337,6 +1387,7 @@ impl State {
 			program: None,
 			group_writes: Vec::new(),
 			slots: Vec::new(),
+			element: None,
 			once: Vec::new(),
 			lookups: Vec::new(),
 			join_lookups: Vec::new(),
@@ -1352,6 +1403,8 @@ impl State {
 			scan_hint: None,
 			batch_paging: None,
 			reached_paging: false,
+			capture_distinct: false,
+			distinct_taken: None,
 			reserved_taken: Vec::new(),
 			units: None,
 			methods: Vec::new(),
@@ -1368,6 +1421,7 @@ impl State {
 			degrees: Vec::new(),
 			linked: Vec::new(),
 			row_frame: None,
+			places: None,
 		}
 	}
 
@@ -1413,7 +1467,7 @@ impl State {
 	}
 
 	/// Forget that the state linked a unit for the closure `digest` names,
-	/// invoked in frame `frame`: the run's table no longer holds one standing.
+	/// invoked in frame `frame`: the run's table holds no entry for it.
 	pub(super) fn forget_linked(
 		&mut self,
 		frame: Option<u16>,
@@ -1479,9 +1533,9 @@ impl State {
 		self.merge_arrived(program, sort, keep);
 	}
 
-	/// [`Self::keep_sorted`] for rows a region's batch kept for sort `sort`,
+	/// [`Self::keep_sorted`] for rows a morsel kept for sort `sort`,
 	/// in the order its own sort held them: they arrived after every row the
-	/// sort holds, `arrived` of them reaching the batch's sort. A merging
+	/// sort holds, `arrived` of them reaching the morsel's sort. A merging
 	/// sort's rows carry their arrival in the batch, which is rebased on the
 	/// sort's own.
 	pub(super) fn keep_absorbed(
@@ -1571,7 +1625,7 @@ impl State {
 			if let Some(Some(cell)) = self.topk_cells.get(at)
 				&& let Some(first_key) = rows[keep - 1].0.first()
 			{
-				cell.publish(first_key.clone());
+				publish_threshold(cell, first_key, &program.sorts[at].keys);
 			}
 		}
 	}
@@ -1701,7 +1755,7 @@ impl State {
 			if let Some(Some(cell)) = self.topk_cells.get(at)
 				&& let Some(first_key) = rows[keep - 1].0.first()
 			{
-				cell.publish(first_key.clone());
+				publish_threshold(cell, first_key, &program.sorts[at].keys);
 			}
 		}
 		if done {
@@ -1879,6 +1933,15 @@ impl State {
 		}
 	}
 
+	/// Hand `row`, keyed by `keys`, to sort `sort`, which keeps only the rows
+	/// its order can still reach.
+	fn sort_value(&mut self, program: &Program, sort: u16, keys: Vec<Value>, row: Value) {
+		let row = (keys, SortRow::Value(row));
+		self.charge_sort(sort, &row);
+		self.sorts[sort as usize].push(row);
+		self.keep_sorted(program, sort);
+	}
+
 	/// Hand a row the body left pending to where it goes: the output, or a
 	/// sort, which keeps only the rows its order can still reach.
 	pub(super) fn settle(&mut self, program: &Program, row: Value) {
@@ -1887,12 +1950,7 @@ impl State {
 			Some(Pending::Sort {
 				sort,
 				keys,
-			}) => {
-				let row = (keys, SortRow::Value(row));
-				self.charge_sort(sort, &row);
-				self.sorts[sort as usize].push(row);
-				self.keep_sorted(program, sort);
-			}
+			}) => self.sort_value(program, sort, keys, row),
 			// A split's rows are run by the host, which takes the pending
 			// split before a row is settled.
 			Some(Pending::Split {
@@ -1978,6 +2036,11 @@ pub(super) fn run_row<'r>(
 	state: &mut State,
 	mut pc: usize,
 ) -> anyhow::Result<Step> {
+	// The [`ROW`] slot is never handed out as a body register. When the row is borrowed whole,
+	// the slot holds it, so code over row values reads the row from there.
+	if let (Some(slot), Some(whole)) = (regs.get_mut(ROW as usize), row.borrowed()) {
+		*slot = Scalar::Value(std::borrow::Cow::Borrowed(whole));
+	}
 	let read = |regs: &[Scalar<'r>], operand: Operand| -> anyhow::Result<Scalar<'r>> {
 		Ok(match operand {
 			Operand::Reg(reg) => regs[reg as usize].clone(),
@@ -2024,9 +2087,8 @@ pub(super) fn run_row<'r>(
 		};
 	}
 	loop {
-		// A body that reaches past its last instruction — on entry, on the
-		// resume after a host step, or after a jump — was lowered wrong, and
-		// raises that as an error.
+		// A body that reaches past its last instruction, on entry, on resume after a
+		// host step, or after a jump, means the program was lowered wrong. It raises an error.
 		let Some(instr) = pipeline.code.get(pc) else {
 			bail!("a pipeline body ran past its end");
 		};
@@ -2296,6 +2358,13 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				let value = state.slots.get(*slot as usize).cloned().unwrap_or(Value::None);
+				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
+				pc += 1;
+			}
+			Instr::LoadElement {
+				dst,
+			} => {
+				let value = state.element.as_deref().cloned().unwrap_or(Value::None);
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
 				pc += 1;
 			}
@@ -3350,9 +3419,14 @@ pub(super) fn run_row<'r>(
 			}
 			Instr::Distinct {
 				distinct,
+				src,
 				target,
 			} => {
-				let value = row.record()?;
+				let value = if *src == ROW {
+					row.record()?
+				} else {
+					regs[*src as usize].to_value()
+				};
 				let fresh = match state.seen[*distinct as usize].insert(&value, state.build_budget)
 				{
 					Ok(fresh) => fresh,
@@ -3360,6 +3434,9 @@ pub(super) fn run_row<'r>(
 					Err(other) => bail!("a distinct set ended its row with {other:?}"),
 				};
 				if fresh {
+					if state.capture_distinct {
+						state.distinct_taken = Some(value);
+					}
 					pc += 1;
 				} else {
 					jump!(*target as usize);
@@ -3411,6 +3488,7 @@ pub(super) fn run_row<'r>(
 				sort,
 				keys,
 				count,
+				src,
 			} => {
 				// A row that orders no earlier than the last row the sort keeps
 				// is dropped before its keys are gathered or the row is taken.
@@ -3438,10 +3516,19 @@ pub(super) fn run_row<'r>(
 						std::mem::replace(&mut regs[r as usize], Scalar::None).to_value()
 					}));
 					let keys = gathered;
-					state.pending = Some(Pending::Sort {
-						sort: *sort,
-						keys,
-					});
+					if *src == ROW {
+						state.pending = Some(Pending::Sort {
+							sort: *sort,
+							keys,
+						});
+					} else {
+						let value = match std::mem::replace(&mut regs[*src as usize], Scalar::None)
+						{
+							Scalar::Value(std::borrow::Cow::Owned(value)) => value,
+							other => other.to_value(),
+						};
+						state.sort_value(program, *sort, keys, value);
+					}
 				}
 				pc += 1;
 			}
@@ -3590,6 +3677,19 @@ pub(super) fn run_row<'r>(
 					at: pc,
 				});
 			}
+			Instr::Ir(instr) => {
+				match super::ir_exec::run(instr, program, pipeline, row, regs, state, pc)? {
+					IrFlow::Fall => pc += 1,
+					IrFlow::Goto(target) => jump!(target),
+					IrFlow::EndRow => return Ok(Step::Next),
+					IrFlow::StopPipeline => return Ok(Step::Stop),
+					IrFlow::Host => {
+						return Ok(Step::Ir {
+							at: pc,
+						});
+					}
+				}
+			}
 			Instr::EndRow => return Ok(Step::Next),
 			Instr::StopPipeline => return Ok(Step::Stop),
 		}
@@ -3659,6 +3759,23 @@ fn remove_path(value: &mut Value, path: &[FieldPathPart]) {
 		},
 		_ => {}
 	}
+}
+
+/// Publish `first_key`, the first sort key of the last row a sort that keeps a bounded number of
+/// rows holds once it holds that many, to the threshold cell of its execution. Sorts that share a
+/// cell (the morsels of one scan, and the statement) each publish what they hold, so the cell keeps
+/// the threshold that orders first: a threshold only tightens.
+fn publish_threshold(
+	cell: &crate::exec::topk_pushdown::TopKThresholdCell,
+	first_key: &Value,
+	keys: &[KeyOrder],
+) {
+	let Some(order) = keys.get(..1) else {
+		return;
+	};
+	cell.tighten(first_key.clone(), |new, held| {
+		compare_keys(std::slice::from_ref(new), std::slice::from_ref(held), order) == Ordering::Less
+	});
 }
 
 /// An aggregate's groups before any row has been folded into them.

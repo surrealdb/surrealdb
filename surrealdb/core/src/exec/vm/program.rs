@@ -15,16 +15,21 @@
 //! which evaluates it and resumes the body. A pipeline whose body holds none
 //! runs inside the storage cursor.
 
+// Runtime the IR lowering emits.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use surrealdb_strand::{Strand, TableName};
 
 use super::codec::TypeId;
 use super::codec::key::RouteId;
+use super::ir_instr::IrInstr;
 use super::row::FieldName;
 use super::scalar::Scalar;
 use crate::ddl::define::table::TableConversion;
 use crate::exec::field_path::FieldPath;
+use crate::exec::planner::placement::Parallel;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::operator::BinaryOperator;
 use crate::fnc::operate;
@@ -40,13 +45,15 @@ pub(super) type Label = u32;
 /// The register denoting the row.
 pub(super) const ROW: Reg = 0;
 
-/// Where a signal a nested statement raises is taken, by the expression at
-/// whose root the statement sits.
+/// Where a signal a nested statement raises is taken, by the instruction that
+/// runs the statement: a `RETURN` is the statement's own value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Catch {
-	/// The register a `RETURN`'s value is stored in.
+	/// The register a `RETURN`'s value is stored in: the instruction's own
+	/// destination.
 	pub(super) root: Reg,
-	/// Where the body resumes once the value is stored.
+	/// Where the body resumes once the value is stored: the instruction after
+	/// the statement's.
 	pub(super) label: Label,
 	/// Whether a `BREAK` or `CONTINUE` is an error there, as it is in a
 	/// record-id key element, which no loop encloses.
@@ -203,6 +210,13 @@ pub(super) enum Instr {
 		slot: u16,
 		dst: Reg,
 	},
+	/// `dst` = the current value a closure value captured at its literal,
+	/// which the invocation holds beside the slots
+	/// ([`State::element`](super::interp::State)): the body's element where
+	/// the value also captured the document root.
+	LoadElement {
+		dst: Reg,
+	},
 	/// `dst` = key `key` of the sorted row the pipeline is running: a value a
 	/// projection shares with the sort beneath it.
 	SortKey {
@@ -285,29 +299,22 @@ pub(super) enum Instr {
 	},
 	/// `dst` = builtin [`Program::calls`]`[call]` applied to `args`, invoked
 	/// by name through the function registry in permission frame `frame`
-	/// when set, and otherwise in the frame the body runs in. The call is
-	/// evaluated against `elem` as its value in scope where it is set — the
-	/// element a body is evaluated against — and against the row otherwise;
-	/// its document is the row either way.
+	/// when set, and otherwise in the frame the body runs in.
 	Call {
 		call: u32,
 		args: Vec<Operand>,
 		dst: Reg,
 		frame: Option<u16>,
-		elem: Option<Reg>,
 	},
 	/// Enter user-defined function [`Program::functions`]`[function]`, called
 	/// from permission or call frame `outer` when set: read its definition,
 	/// check it is the one the program was lowered for, check it may be
 	/// called and open call frame `frame`, under the definer's auth, for its
-	/// arguments to be evaluated in. Its `PERMISSIONS` clause is judged over
-	/// `elem` where it is set — the element a body is evaluated against, which
-	/// the body then runs over — and over the row otherwise.
+	/// arguments to be evaluated in.
 	FunctionEnter {
 		function: u32,
 		frame: u16,
 		outer: Option<u16>,
-		elem: Option<Reg>,
 	},
 	/// Bind `args`, the arguments of the function entered into call frame
 	/// `frame`, as its definition declares them, into the registers from
@@ -328,16 +335,13 @@ pub(super) enum Instr {
 		dst: Reg,
 	},
 	/// `dst` = the function entered into call frame `frame`, applied to
-	/// `args` and run as its body's subroutine, over `elem` where it is set —
-	/// the element a body is evaluated against — and over the row otherwise;
-	/// the frame closes.
+	/// `args` and run as its body's subroutine; the frame closes.
 	FunctionCall {
 		function: u32,
 		frame: u16,
 		args: Vec<Operand>,
 		dst: Reg,
 		outer: Option<u16>,
-		elem: Option<Reg>,
 	},
 	/// `dst` = `src` converted to an array as builtin
 	/// [`Program::calls`]`[call]` converts its argument at 1-based
@@ -381,11 +385,11 @@ pub(super) enum Instr {
 	/// `dst` = the value of subquery [`Program::subqueries`]`[subquery]`,
 	/// evaluated over the value in `doc` when set and the row otherwise, in
 	/// permission frame `frame` when set. A `RETURN` the subquery signals is
-	/// the value of the expression it sits at the root of, stored in
-	/// `caught`'s register before jumping to its label, when the root takes
-	/// one, and a `BREAK` or `CONTINUE` is an error where `caught` says so;
-	/// otherwise the signal propagates, and out of a projection layer's
-	/// column frame ([`PermissionSpec::column`]) any signal is an error.
+	/// its own value, stored in `caught`'s register before jumping to its
+	/// label, when the expression takes one, and a `BREAK` or `CONTINUE` is an
+	/// error where `caught` says so; otherwise the signal propagates, and out
+	/// of a projection layer's column frame ([`PermissionSpec::column`]) any
+	/// signal is an error.
 	Subquery {
 		subquery: u32,
 		dst: Reg,
@@ -394,12 +398,18 @@ pub(super) enum Instr {
 		doc: Option<Reg>,
 	},
 	/// `dst` = the value closure literal [`Program::closure_values`]`[closure]`
-	/// makes: its parameters bound where it is written captured, those the
-	/// program holds itself from `slots`, in the spec's order, and the rest
-	/// from the frame.
+	/// makes: the parameters its body reads captured where it is written,
+	/// those the program holds itself from `slots`, in the order its closure value spec lists them,
+	/// and the rest from the frame, and the row it reads there: the current value
+	/// from `row` and the document root from `root`, each where the
+	/// [`ClosureValueSpec::row_captures`] names one of a kind that holds
+	/// its value in a register. A capture of the row the pipeline runs over has
+	/// no operand: the host holds that row.
 	MakeClosure {
 		closure: u32,
 		slots: Vec<Operand>,
+		row: Option<Operand>,
+		root: Option<Operand>,
 		dst: Reg,
 	},
 	/// `dst` = the closure the object in `recv` holds in field `name`, raising
@@ -608,7 +618,7 @@ pub(super) enum Instr {
 	/// to the host.
 	Omit {
 		object: Reg,
-		walk: Arc<crate::exec::vm::plan::Walk<u16>>,
+		walk: Arc<crate::exec::vm::payload::Walk<u16>>,
 	},
 	/// Set `value` at [`Program::paths`]`[path]` on the object in `object`.
 	SetField {
@@ -673,18 +683,20 @@ pub(super) enum Instr {
 		split: u16,
 		src: Reg,
 	},
-	/// Hand the row to sort `sort`, keyed by the `count` registers from
-	/// `keys`.
+	/// Hand the value in `src` ([`ROW`]: the row itself) to sort `sort`,
+	/// keyed by the `count` registers from `keys`.
 	SortPush {
 		sort: u16,
 		keys: Reg,
 		count: u16,
+		src: Reg,
 	},
 	/// Continue at `target` when an earlier row of this run of distinct set
-	/// `distinct` equals the row as a value; otherwise remember the row and
-	/// continue after.
+	/// `distinct` equals the value in `src` ([`ROW`]: the row as a value);
+	/// otherwise remember that value and continue after.
 	Distinct {
 		distinct: u16,
+		src: Reg,
 		target: Label,
 	},
 	/// Hand the row to join `join`, which looks up the rows its build table
@@ -905,6 +917,9 @@ pub(super) enum Instr {
 		src: Reg,
 		dst: Reg,
 	},
+	/// An instruction form the IR's lowering emits; [`IrInstr`] names each.
+	#[allow(dead_code)]
+	Ir(IrInstr),
 }
 
 /// A step of a block's control flow: the statements it runs, the frame they
@@ -1002,10 +1017,10 @@ pub(super) enum BlockInstr {
 	/// is evaluated in — permission frame `frame` when set — with the row as
 	/// its `$parent` and `$this`, and its rows gathered as a subquery gathers
 	/// them: a scalar statement's last value or `NONE`, otherwise its rows as
-	/// an array. A `RETURN` it signals is the value of the expression it sits
-	/// at the root of, stored in `caught`'s register before jumping to its
-	/// label, when the root takes one, and a `BREAK` or `CONTINUE` is an
-	/// error where `caught` says so; otherwise the signal propagates.
+	/// an array. A `RETURN` it signals is its own value, stored in `caught`'s
+	/// register before jumping to its label, when the expression takes one,
+	/// and a `BREAK` or `CONTINUE` is an error where `caught` says so;
+	/// otherwise the signal propagates.
 	Nested {
 		nested: u32,
 		dst: Reg,
@@ -1279,6 +1294,60 @@ pub(super) enum StoreInstr {
 	/// evaluates it, and the statements after it are not planned knowing
 	/// what it defines.
 	RealRunOnly,
+	/// `dst` = what `ACCESS ... SHOW` shows of the grants of access method
+	/// `ac` at `base`, or at the session's selected base where it is `None`,
+	/// once the statement's checks pass
+	/// ([`crate::ddl::grant::access_method_base`], viewing): grant `gr`
+	/// shown where it is named, raising where it does not exist; otherwise an
+	/// array of every grant shown, in key order, keeping only those host
+	/// pipeline [`Program::host_code`]`[filter]` answers truthy for, over
+	/// the shown grant as its row, where there is a filter. A grant is shown
+	/// redacted, and the filter sees only that.
+	ShowGrants {
+		ac: String,
+		base: Option<crate::expr::Base>,
+		gr: Option<String>,
+		filter: Option<u16>,
+		dst: Reg,
+	},
+	/// `dst` = the grant `ACCESS ... GRANT` issues under access method `ac`
+	/// at `base`, or at the session's selected base where it is `None`, to
+	/// `subject`, shown with its key in plain text, the one time the key is
+	/// ever shown ([`crate::ddl::grant::create_grant`]). A record subject's
+	/// register holds the value it was written as, which must name a record.
+	IssueGrant {
+		ac: String,
+		base: Option<crate::expr::Base>,
+		subject: GrantSubject,
+		dst: Reg,
+	},
+	/// `dst` = an array holding the array of the grants `ACCESS ... REVOKE`
+	/// revokes under access method `ac` at `base`, or at the session's
+	/// selected base where it is `None`, each shown as revoked, once the
+	/// statement's checks pass (editing): grant `gr` where it is named,
+	/// raising where it does not exist or is revoked already; otherwise
+	/// every grant not yet revoked, in key order, that host pipeline
+	/// [`Program::host_code`]`[filter]` answers truthy for over the grant
+	/// shown as its row (every one where there is no filter), each revoked
+	/// as soon as it is admitted.
+	RevokeGrants {
+		ac: String,
+		base: Option<crate::expr::Base>,
+		gr: Option<String>,
+		filter: Option<u16>,
+		dst: Reg,
+	},
+	/// `dst` = an array of the grants `ACCESS ... PURGE` deletes under access
+	/// method `ac` at `base`, or at the session's selected base where it is
+	/// `None`, each shown: those expired, revoked, or both as `kind` says,
+	/// more than `grace` before now ([`crate::ddl::grant::purge_grants`]).
+	PurgeGrants {
+		ac: String,
+		base: Option<crate::expr::Base>,
+		kind: crate::expr::statements::access::PurgeKind,
+		grace: std::time::Duration,
+		dst: Reg,
+	},
 	/// `dst` = a new version-7 uuid, from the clock.
 	NewUuid {
 		dst: Reg,
@@ -1392,7 +1461,7 @@ pub(super) enum StoreInstr {
 	/// Raise the error the planner refuses a statement with: a late-bound
 	/// statement the planner refuses when the block reaches it.
 	Refuse {
-		refusal: Box<super::plan::Refusal>,
+		refusal: Box<super::payload::Refusal>,
 	},
 	/// Evict every definition the transaction has cached.
 	ClearCache,
@@ -1632,6 +1701,74 @@ pub(super) enum StoreInstr {
 	KillOnCommit {
 		subscription: Reg,
 	},
+	/// The checks a `KILL` or a `LIVE` makes before it evaluates its operands:
+	/// realtime is enabled, and the session selects a namespace and a
+	/// database.
+	RealtimeChecks,
+	/// `LIVE`: register the subscription whose stored definition is the
+	/// constant in `template`, over the target in `target`, which the
+	/// statement evaluated, and leave its id in `dst`. The registration
+	/// takes what the running session contributes (the node, the session's
+	/// authentication and value, the parameters the clauses capture), requires
+	/// the target to be a table that exists and is not a lightweight relation,
+	/// evaluates a `WHERE` that reads no document so that one that can never
+	/// match fails here, and writes the subscription and its node key in the
+	/// statement's transaction. It registers no compiled unit: a subscription
+	/// whose unit is wanted is compiled where it first notifies.
+	Live {
+		target: Reg,
+		template: Reg,
+		dst: Reg,
+	},
+	/// `KILL`: remove the live query whose id is in `id`, which the statement
+	/// evaluated, and queue the `KILLED` notification to be sent when the
+	/// transaction commits. `written` holds the id as the statement wrote it,
+	/// as a string, which the refusals that name the statement print. The
+	/// removal is gated on ownership as `KILL`'s always is.
+	Kill {
+		id: Reg,
+		written: Reg,
+	},
+	/// `OPTION name = what`: check that the principal may edit options on the database, then
+	/// record the option for the executor to apply to the session when the program ends. Raises
+	/// where the running context holds no session sink, which only the context of a top-level
+	/// statement does.
+	SessionOption {
+		name: Strand,
+		what: bool,
+	},
+	/// Read the evaluated operand of a `USE` in `value` as the name it gives, in place: the
+	/// namespace's, or the database's when `database`. Raises what a value that is no string
+	/// raises, naming the level, before the statement evaluates its next operand.
+	SessionUseName {
+		value: Reg,
+		database: bool,
+	},
+	/// `USE`: the transactional half of the statement in the statement's transaction, then the
+	/// levels it selected recorded for the executor to apply to the session. `ns` and `db` hold
+	/// the evaluated operands, which are read as names; `default` is `USE DEFAULT`, whose names
+	/// are the database's default configuration. `dst` = the `{ namespace, database }` the
+	/// statement answers: the session's selection overlaid by what this instruction recorded.
+	/// Raises where the running context holds no session sink.
+	SessionUse {
+		default: bool,
+		ns: Option<Reg>,
+		db: Option<Reg>,
+		dst: Reg,
+	},
+	/// The refusal a session `LET` makes before it evaluates its value: a protected name.
+	SessionLetChecks {
+		name: Strand,
+	},
+	/// A session `LET`: the value in `value` coerced to `kind` ([`Program::kinds`]) where the
+	/// statement declares one, checked for depth, and recorded for the executor to bind as the
+	/// request's parameter `name` for the statements after it. Raises where the running context
+	/// holds no session sink.
+	SessionLet {
+		name: Strand,
+		kind: Option<u32>,
+		value: Reg,
+	},
 	/// `dst` = whether the index defined in `index` reads and writes its
 	/// table's shared doc-id space.
 	SharesDocIds {
@@ -1707,14 +1844,12 @@ pub(super) enum StoreInstr {
 	/// Store the row of the materialized view named in `table` that `row`, a
 	/// row of the view's backfill select (its source record's `id` and the
 	/// view's fields), stands for under the source record's key, then run the
-	/// view table's own order for a created row: unit `order`, lowered from the
-	/// view table's definitions, or, for a view whose table is named only when
-	/// the statement runs, the order lowered for that table when the backfill
-	/// meets it.
+	/// view table's own order for a created row: the order of the view table's
+	/// catalog version when the backfill meets the table
+	/// ([`super::fault::view_rows`]).
 	BackfillRow {
 		table: Reg,
 		row: Reg,
-		order: Option<UnitId>,
 	},
 	/// `dst` = the document the fields of an aggregated view are evaluated
 	/// over for the group that `row`, a row of the view's backfill select,
@@ -1735,7 +1870,6 @@ pub(super) enum StoreInstr {
 		table: Reg,
 		row: Reg,
 		fields: Vec<(crate::expr::Idiom, Reg)>,
-		order: Option<UnitId>,
 	},
 	/// Jump to `target` when the base the session selects is `base`: the
 	/// root with no namespace, the namespace with a namespace and no
@@ -1785,6 +1919,19 @@ pub(super) enum StoreInstr {
 		table: Reg,
 		statement: Box<crate::expr::statements::alter::field::AlterFieldStatement>,
 	},
+	/// Alter the field the text in `name` names of the table named in `table`, as `ALTER FIELD`
+	/// alters it once both are named, by the clauses the definition in `altered` holds for each of
+	/// `fields`: the stored definition the statement's clauses form, with the stored type's
+	/// default where a clause is not set. `kind_changed` is whether the statement sets or drops
+	/// the type, which decides whether the record id components it names are judged again.
+	AlterFieldClauses {
+		name: Reg,
+		table: Reg,
+		altered: Reg,
+		fields: Vec<String>,
+		kind_changed: bool,
+		if_exists: bool,
+	},
 	/// Raise what `DEFINE INDEX` raises of the index `index` of the table
 	/// `table`, in the database `ns`/`db`, over the columns in the array
 	/// `columns` of path texts: a column that names a computed field, or, when
@@ -1806,6 +1953,15 @@ pub(super) enum StoreInstr {
 		previous: Reg,
 		updated: Reg,
 	},
+}
+
+/// Who a [`StoreInstr::IssueGrant`] issues its grant to.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum GrantSubject {
+	/// The system user of this name, at the grant's base.
+	User(String),
+	/// The record the value in this register names.
+	Record(Reg),
 }
 
 /// A field path a schema statement names, before it is resolved.
@@ -2026,7 +2182,7 @@ pub(crate) enum FieldRefusal {
 impl FieldRefusal {
 	/// The refusal `error` raises, or `None` when it is no refusal of a
 	/// field's definition.
-	pub(super) fn of(error: &anyhow::Error) -> Option<Self> {
+	pub(crate) fn of(error: &anyhow::Error) -> Option<Self> {
 		use crate::exec::Error as E;
 		match error.downcast_ref::<crate::catalog::Error>() {
 			Some(crate::catalog::Error::TbNotFound {
@@ -2920,6 +3076,7 @@ impl Instr {
 				WriteInstr::Storage(instr) => instr.target_mut().into_iter().collect(),
 				_ => Vec::new(),
 			},
+			Instr::Ir(instr) => instr.labels_mut(),
 			_ => Vec::new(),
 		}
 	}
@@ -3005,7 +3162,9 @@ pub(crate) struct WriteSpec {
 	/// What the statement's clauses are, as the body's instructions read
 	/// them.
 	pub(super) shape: WriteShape,
-	pub(super) output: Option<crate::expr::output::Output>,
+	/// What the statement returns for each record, which the output stage shows. The projection
+	/// of a `RETURN` of fields is a host pipeline of the program, not part of the write body.
+	pub(super) output: crate::exec::ir::iface::statements::OutputShape,
 	pub(super) only: bool,
 	/// For a statement that names no single table, the units that hold the
 	/// stages its body's [`WriteInstr::DispatchTable`]s apply, by the table a
@@ -3367,17 +3526,6 @@ pub(super) enum KnnVector {
 	Query(u16),
 }
 
-/// Where the vector a KNN search looks for the nearest neighbours of comes
-/// from.
-#[derive(Debug, Clone, PartialEq)]
-pub(super) enum KnnSearchVector {
-	Literal(std::sync::Arc<[crate::val::Number]>),
-	/// The vector [`Program::knn_searches`]`[0]` computes, which the host
-	/// evaluates when the first source searching with it opens, before the
-	/// search, and every other source of the run searches with too.
-	Query(u16),
-}
-
 /// A query vector computed when the statement runs: evaluated once, with the
 /// row being scanned forbidden to it
 /// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)), and coerced to
@@ -3443,7 +3591,7 @@ pub(super) enum SplitKind {
 /// that owns the join starts again.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct JoinSpec {
-	pub(super) kind: super::plan::JoinMatch,
+	pub(super) kind: super::payload::JoinMatch,
 	/// The field a build row is set under in a pairing, which the build keys
 	/// and the residual read it through.
 	pub(super) alias: String,
@@ -3462,13 +3610,13 @@ pub(super) struct JoinSpec {
 	/// this join.
 	pub(super) pipeline: usize,
 	/// For a join reading its right input through an index
-	/// ([`super::plan::JoinLookup`]): the group that reads it for one left
+	/// ([`super::payload::JoinLookup`]): the group that reads it for one left
 	/// row's key, and the position of that key among the probe keys. The
-	/// first [`super::plan::LOOKUP_EVALUATIONS`] left rows since the group
+	/// first [`super::payload::LOOKUP_EVALUATIONS`] left rows since the group
 	/// that owns the join started run it in place of the build table.
 	pub(super) lookup: Option<(u16, usize)>,
 	/// For a join that holds its left input's one row
-	/// ([`super::plan::JoinBuild::Left`]): the index in [`Program::pipelines`]
+	/// ([`super::payload::JoinBuild::Left`]): the index in [`Program::pipelines`]
 	/// of the pipeline that reads the right input and hands each row to the
 	/// join ([`Instr::JoinPair`]). It runs after the left input's pipeline,
 	/// and only where that pipeline handed the join a row.
@@ -3485,7 +3633,7 @@ pub(super) struct SortSpec {
 	/// sort that keeps all of them, which the run charges to the query's
 	/// lease and spills once the lease no longer covers them
 	/// ([`Spill::Bounded`] for one bounded by `keep`).
-	pub(super) held: super::plan::Spill,
+	pub(super) held: super::payload::Spill,
 	/// Whether the sort holds on disk what outgrows the rows it may keep in
 	/// memory (`TEMPFILES`); never with `keep`, which bounds it already.
 	pub(super) spill: bool,
@@ -3515,13 +3663,13 @@ pub(super) struct SortSpec {
 /// `GROUP ALL`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AggregateSink {
-	pub(super) fields: Vec<AggSpec>,
+	pub(crate) fields: Vec<AggSpec>,
 	pub(super) keys: usize,
 	/// How the plan has the aggregate hold its groups: [`Spill::Spillable`]
 	/// for `GROUP BY`'s, which the run charges to the query's lease and
 	/// spills once the lease no longer covers them, [`Spill::Bounded`] for
 	/// `GROUP ALL`'s one.
-	pub(super) held: super::plan::Spill,
+	pub(super) held: super::payload::Spill,
 }
 
 /// A projected field of an aggregate: what its group answers for it, in the
@@ -3539,7 +3687,7 @@ pub(crate) struct AggSpec {
 	pub(super) group_key_index: Option<usize>,
 	/// The aggregates of the field; `None` for a field answered by the first
 	/// value its group takes from its rows.
-	pub(super) aggregate: Option<AggExpr>,
+	pub(crate) aggregate: Option<AggExpr>,
 	/// Whether the field of a group answered by its first value has one value
 	/// for every row of the group, which decides how many times it is
 	/// evaluated and what a `NONE` from it means.
@@ -3552,7 +3700,7 @@ pub(crate) struct AggSpec {
 /// The aggregate calls of one field and the expression over their answers.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AggExpr {
-	pub(super) calls: Vec<AggCall>,
+	pub(crate) calls: Vec<AggCall>,
 	/// The pipeline of [`Program::host_code`] that evaluates the expression
 	/// over the group's answers, run over an object holding each call's
 	/// answer as `_aN` and each key as `_gN`; `None` for a field that is
@@ -3564,7 +3712,7 @@ pub(crate) struct AggExpr {
 /// the first.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AggCall {
-	pub(super) name: crate::exec::operators::AggregateId,
+	pub(crate) name: crate::exec::operators::AggregateId,
 	/// The pipelines, each run once for the group over an object holding its
 	/// keys as `_gN`, before the group finishes.
 	pub(super) extra_args: Vec<u16>,
@@ -3580,9 +3728,9 @@ pub(super) struct PermissionSpec {
 	pub(super) mode: FrameMode,
 	pub(super) auth: Option<surrealdb_iam::AuthLimit>,
 	/// Whether the frame evaluates a column of a projection layer, as the
-	/// projection layer evaluates it: a `BREAK` or `CONTINUE` out of it is an
-	/// error naming the layer column, where one out of any other permission
-	/// frame names the permission predicate.
+	/// projection layer evaluates it: a `RETURN` out of it is an error naming
+	/// the layer column, where one out of any other permission frame names the
+	/// permission predicate.
 	pub(super) column: bool,
 }
 
@@ -3760,6 +3908,32 @@ pub(super) struct RecurseSpec {
 	pub(super) max: Option<u32>,
 	pub(super) collect: RecurseCollect,
 	pub(super) repeat: bool,
+	/// The values of the running program the body reads, bound once in the
+	/// context every depth runs in ([`UnitInput`]).
+	pub(super) inputs: Vec<UnitInput>,
+}
+
+/// A value of the program that runs a unit, which the unit reads from its
+/// context as the parameter `name`.
+///
+/// The run evaluates `value` where the instruction that runs the unit sits,
+/// in the program's frame, and binds it under `name` in the context the unit
+/// runs in, beside `$parent` and `$this`. The `at`th input of a unit is named
+/// [`unit_input_name`]`(at)`, which the lowering of the unit reads it by. An
+/// input carries no authority: it is a value the running program computed
+/// under its own principal.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct UnitInput {
+	pub(super) name: Strand,
+	pub(super) value: Operand,
+}
+
+/// The parameter a unit reads its `at`th input under ([`UnitInput`]).
+///
+/// The name starts with a NUL, which no unquoted parameter holds, so a
+/// written `$name` reads it only when quoted to spell it exactly.
+pub(crate) fn unit_input_name(at: usize) -> Strand {
+	Strand::new(format!("\u{0}input{at}"))
 }
 
 /// A nested program of the root program: an index into [`Program::units`] of
@@ -3794,14 +3968,57 @@ pub(crate) struct UnitFrame {
 	/// enforcement while still performing writes, which no frame that
 	/// enforces them runs it in.
 	pub(super) perms_suppressed: bool,
-	/// Whether the unit was lowered for a frame whose reads are permission
-	/// checked. A unit lowered for an unchecked frame runs in no checked one;
-	/// one lowered for a checked frame also runs in an unchecked one, which
-	/// waives checks it would otherwise apply.
+	/// The permission contract the unit is admitted by. A checked unit runs
+	/// in any frame its principal, names and suppression match; an unchecked
+	/// one runs only in a frame whose reads skip permissions. Whether the
+	/// principal's reads are checked is no part of it: the principal class,
+	/// names and suppression fix that
+	/// ([`super::ir_lower::LowerCx::reads_checked`]).
 	pub(super) checked: bool,
 }
 
 impl UnitFrame {
+	/// The frame of code lowered for no principal and no database: permissions apply, none are
+	/// suppressed, and the class digest is `0`, so any principal's run is admitted.
+	pub(crate) fn unprincipled() -> Self {
+		Self {
+			class_digest: 0,
+			ns: None,
+			db: None,
+			perms_suppressed: false,
+			checked: true,
+		}
+	}
+
+	/// The frame its parts describe, as [`UnitFrame::parts`] answers them.
+	pub(crate) fn from_parts(
+		class_digest: u64,
+		ns: Option<String>,
+		db: Option<String>,
+		perms_suppressed: bool,
+		checked: bool,
+	) -> Self {
+		Self {
+			class_digest,
+			ns,
+			db,
+			perms_suppressed,
+			checked,
+		}
+	}
+
+	/// The class digest, namespace, database, permission suppression and permission contract of
+	/// the frame, which a text form writes field by field.
+	pub(crate) fn parts(&self) -> (u64, Option<&str>, Option<&str>, bool, bool) {
+		(
+			self.class_digest,
+			self.ns.as_deref(),
+			self.db.as_deref(),
+			self.perms_suppressed,
+			self.checked,
+		)
+	}
+
 	/// A digest of the class of `auth` in the database `ns` and `db` name, on
 	/// a datastore that enforces authentication where `auth_enabled`
 	/// ([`PrincipalClass::of`]); `0` for no principal, and never `0` for one.
@@ -3973,9 +4190,56 @@ pub(super) struct ClosureValueSpec {
 	pub(super) frame: Option<u16>,
 	/// What invoking the literal's body does to the transaction.
 	pub(super) access_mode: AccessMode,
+	/// The row the literal captures where it is written.
+	pub(super) row_captures: RowCaptures,
 }
 
 assert_plain!(ClosureValueSpec);
+
+/// What a closure literal captures of the row where it is written, apart from
+/// the parameters it names: the current value, which its fields, `$this` and
+/// `@` read, and the document root, which its index and method arguments and
+/// its statements read. Each is held by the value the literal makes and is
+/// not a parameter: no name carries it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct RowCaptures {
+	/// The current value at the literal.
+	pub(super) row: Option<RowKind>,
+	/// The document root at the literal.
+	pub(super) root: Option<RowKind>,
+}
+
+assert_plain!(RowCaptures);
+
+/// Where a row capture is read from where the literal is written, which the
+/// host answers by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RowKind {
+	/// The element of an element, broadcast, optional or destructure body:
+	/// the register the capture operand names.
+	Element,
+	/// The root an index or a method argument is evaluated against, where the
+	/// literal is itself one: the register the capture operand names.
+	StepRoot,
+	/// The row the pipeline runs over. The capture has no operand, and the
+	/// host captures the pipeline's row, or none where the pipeline has no row.
+	PipelineRow,
+}
+
+assert_plain!(RowKind);
+
+/// Which row captures a closure value holds, and a body unit expects: the unit
+/// reads its element from the current value held and is run over the document
+/// root held, or over none.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(crate) struct RowBits {
+	/// The value holds the current value of the literal.
+	pub(super) row: bool,
+	/// The value holds the document root of the literal.
+	pub(super) root: bool,
+}
+
+assert_plain!(RowBits);
 
 /// The version of the instruction set and of the layout of a [`Program`] a
 /// unit is lowered to. A kept unit is keyed by it, so a unit lowered for
@@ -4087,6 +4351,10 @@ pub(crate) struct ClosureHead {
 	/// The names the closure value captured, sorted, which the unit reads
 	/// from its slots after the arguments.
 	pub(super) captured: Vec<String>,
+	/// The row captures the closure value holds, which the unit is lowered
+	/// to read: the current value, as the body's element, and the document
+	/// root, as its row.
+	pub(super) rows: RowBits,
 	/// The names bound in the unit's slots, in slot order: the arguments,
 	/// then the captures that are not also arguments.
 	pub(super) slots: Vec<String>,
@@ -4134,6 +4402,9 @@ pub(super) struct SubquerySpec {
 	/// Whether the statement keeps row order ([`Program::keeps_row_order`]),
 	/// which the program holding the subquery keeps too.
 	pub(super) keeps_row_order: bool,
+	/// The values of the running program the statement reads ([`UnitInput`]),
+	/// bound in the context [`super::host::run_subprogram`] derives.
+	pub(super) inputs: Vec<UnitInput>,
 }
 
 assert_plain!(SubquerySpec);
@@ -4171,8 +4442,10 @@ impl DefHash {
 /// `PERMISSIONS` clause.
 ///
 /// The body and the guard were lowered when the program was planned, from the
-/// definition that hashes to [`Self::def_hash`]; a call that finds another
-/// definition is an internal error, never a compilation.
+/// definition that hashes to [`Self::def_hash`]. A call that finds another
+/// definition, or that is [`Self::per_call`], runs the function's call unit
+/// for the definition the transaction reads when the call is made
+/// ([`super::call_unit`]).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct FunctionSpec {
 	/// The function's name, without its `fn::` prefix.
@@ -4186,9 +4459,14 @@ pub(super) struct FunctionSpec {
 	pub(super) body_access_mode: AccessMode,
 	/// Whether the function was defined and allowed when the program was
 	/// lowered. A call of one that was not fails entering it, as the catalog
-	/// or the capabilities say; the definition it then finds is an internal
-	/// error.
+	/// or the capabilities say, or runs the call unit of the definition it
+	/// then finds.
 	pub(super) defined: bool,
+	/// Whether the call runs the function's call unit whatever definition it
+	/// finds: the statement may change the catalog as it runs, so the bodies
+	/// of the functions it calls are planned when each call is made. The
+	/// program then holds no body and no guard for the call.
+	pub(super) per_call: bool,
 	/// The definition the body and the guard were lowered from.
 	pub(super) def_hash: DefHash,
 	/// The frame the call was lowered for.
@@ -4205,11 +4483,10 @@ pub(super) struct FunctionSpec {
 	/// where [`Self::body`] is [`Self::checked`].
 	pub(super) unchecked_body: Option<UnitId>,
 	/// The `PERMISSIONS` predicate, judged while the call enters: the hash
-	/// of the definition it was lowered from, the pipeline of
-	/// [`Program::host_code`] that evaluates it, and how often its verdict
-	/// stands within a statement. `None` for a clause that is not a
-	/// predicate, and where the call's frame judges none.
-	pub(super) guard: Option<(DefHash, u16, crate::exec::guard_verdicts::GuardScope)>,
+	/// of the definition it was lowered from, the code that evaluates it,
+	/// and how often its verdict stands within a statement. `None` for a
+	/// clause that is not a predicate, and where the call's frame judges none.
+	pub(super) guard: Option<(DefHash, GuardCode, crate::exec::guard_verdicts::GuardScope)>,
 	/// What the call spends of the computation-depth budget beyond its own
 	/// re-entry ([`super::depth`]).
 	pub(super) depth: CallDepth,
@@ -4247,6 +4524,21 @@ pub(super) struct CallDepth {
 
 assert_plain!(FunctionSpec);
 
+/// The code that evaluates a user-defined function's `PERMISSIONS` predicate
+/// over the caller's row, in a frame that checks no permissions, under the
+/// principal the definition's `AUTH LIMIT` leaves the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GuardCode {
+	/// Pipeline `n` of the calling program's [`Program::host_code`].
+	Host(u16),
+	/// Pipeline `0` of a unit of the root program's table, lowered for that
+	/// principal; the run admits it as it admits any unit, and a unit it does
+	/// not admit fails the call closed.
+	Unit(UnitId),
+}
+
+assert_plain!(GuardCode);
+
 /// What a call of code the host runs calls: code the statement or the
 /// catalog holds as data, run by the engine's runtime for its kind.
 #[derive(Debug, Clone, PartialEq)]
@@ -4274,12 +4566,6 @@ pub(super) enum ExternalCallee {
 	/// transaction reads when the call runs ([`super::call_unit`]), which
 	/// makes the checks, binds the arguments and runs the body.
 	Function {
-		name: String,
-	},
-	/// The body of user-defined function `name`, run by a call that entered
-	/// it: a body that reads an argument where only a value answers, compiled
-	/// for the values the call's arguments hold ([`super::call_unit`]).
-	Specialised {
 		name: String,
 	},
 }
@@ -4337,15 +4623,15 @@ assert_plain!(ParamSpec);
 /// A statement in scalar position compiled into the program as group
 /// [`Program::groups`]`[group]`, run as `strategy` says.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct NestedSpec {
+pub(crate) struct NestedSpec {
 	pub(super) group: u16,
 	/// Whether the statement reads the row it is evaluated for as its
 	/// document.
 	pub(super) inherits_row: bool,
 	/// Whether its value is kept, from the first evaluation that reaches it,
 	/// until the group it is evaluated in — the program's own pipelines for
-	/// `None` — starts again ([`super::plan::Strategy::Once`]).
-	pub(super) once: bool,
+	/// `None` — starts again ([`super::payload::Strategy::Once`]).
+	pub(crate) once: bool,
 	/// The group whose pipelines evaluate it.
 	pub(super) owner: Option<u16>,
 	/// For a statement kept across a loop's iterations, the loop, by its
@@ -4354,20 +4640,20 @@ pub(super) struct NestedSpec {
 	/// iteration can change what it reads: it reads no name the loop binds,
 	/// and nothing in the loop's body writes.
 	pub(super) hoist: Option<u16>,
-	/// Whether the statement only reads, so a region's batch may run it over
-	/// the batch's own state.
-	pub(super) read_only: bool,
+	/// Whether the statement only reads, so a morsel may run it over the
+	/// morsel's own state.
+	pub(crate) read_only: bool,
 	/// Whether it reads through a probe ([`Source::Probe`]), whose kept rows
 	/// are the running state's.
-	pub(super) probed: bool,
+	pub(crate) probed: bool,
 	/// Whether its rows are kept as a membership index rather than as the
 	/// array they gather ([`BlockInstr::Member`]), which only a statement kept
 	/// across evaluations ([`Self::once`]) is.
-	pub(super) members: bool,
+	pub(crate) members: bool,
 	/// For a statement read through an index nested loop: the group that reads
 	/// it through its probe, and the path into `$parent` of the key the
 	/// lookup reads. The evaluations past the first
-	/// [`super::plan::LOOKUP_EVALUATIONS`] since the group that owns it
+	/// [`super::payload::LOOKUP_EVALUATIONS`] since the group that owns it
 	/// started run that group instead of `group`, as does an evaluation whose
 	/// key the index may not list every equal record under, which a lookup
 	/// would read the table whole for.
@@ -4766,6 +5052,11 @@ pub(super) struct CallSpec {
 	/// ([`ScalarFunction::closure_args`](crate::exec::function::ScalarFunction::closure_args)):
 	/// the operands [`Instr::Call`] links a unit for before the call.
 	pub(super) closure_args: Vec<u16>,
+	/// Whether the call is lowered in a closure body unit that holds its
+	/// current value beside the document root, at the level of the unit
+	/// itself, so that it reads the captured current value
+	/// ([`State::element`]) and not the row of a pipeline it stands in.
+	pub(super) reads_element: bool,
 }
 
 /// A `MATCHES` operator a body evaluates against the row: what it probes
@@ -4806,6 +5097,13 @@ pub(super) enum IndexBinding {
 	/// The `KNN` operator of the statement whose scan publishes its distances
 	/// in `slot` ([`Source::Knn::slot`]).
 	Knn {
+		slot: u16,
+	},
+	/// A `KNN` operator judged per row: whether the record the row is has a
+	/// distance in `slot`, which a search of the statement published before
+	/// the row was read. A row that is no record, or one no search yielded,
+	/// is not admitted.
+	KnnHolds {
 		slot: u16,
 	},
 }
@@ -4930,7 +5228,7 @@ pub(super) enum CountSource {
 	All {
 		table: TableName,
 		source: CountedValue,
-		select: super::plan::CountSelect,
+		select: super::payload::CountSelect,
 		/// The unconditional `COUNT` index that answers a count of the whole
 		/// table not read at a version.
 		deltas: Option<crate::catalog::IndexId>,
@@ -4941,7 +5239,7 @@ pub(super) enum CountSource {
 	/// The records of `table` that the condition admits.
 	Indexed {
 		table: TableName,
-		select: super::plan::CountSelect,
+		select: super::payload::CountSelect,
 		via: CountVia,
 		/// The unit that answers the statement as the ordinary pipeline
 		/// does, for a conditional permission.
@@ -4953,7 +5251,7 @@ pub(super) enum CountSource {
 // plain exactly when `Value` is (see `Source`); the rest of the source is
 // plain data.
 assert_plain!(CountedValue);
-assert_plain!(super::plan::CountSelect);
+assert_plain!(super::payload::CountSelect);
 assert_plain!(crate::catalog::IndexId);
 
 /// Where a pipeline's rows come from.
@@ -4968,7 +5266,7 @@ pub(super) enum Source {
 	///
 	/// With `range`, only the records whose keys lie in the key ranges it
 	/// builds when the scan opens, range by range in key order along
-	/// `direction` ([`super::plan::Plan::KeyRangeScan`]).
+	/// `direction` ([`super::payload::Plan::KeyRangeScan`]).
 	Scan {
 		table: TableName,
 		direction: Direction,
@@ -5003,7 +5301,7 @@ pub(super) enum Source {
 	/// the key the join running the pipeline hands it
 	/// ([`State::lookup_key`](super::interp::State)). Every record of
 	/// `table`, in key order, where the key is one the index may not list
-	/// every equal record under ([`super::plan::Plan::IndexLookup`]).
+	/// every equal record under ([`super::payload::Plan::IndexLookup`]).
 	Lookup {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
@@ -5012,7 +5310,7 @@ pub(super) enum Source {
 	/// The records the B-tree scans `branches` list, each once: branch by
 	/// branch, or merged by `merge`'s key.
 	IndexUnion {
-		branches: Vec<super::plan::IndexBranch>,
+		branches: Vec<super::payload::IndexBranch>,
 		merge: Option<crate::exec::operators::scan::MergeMode>,
 		/// As for [`Source::Index`], for every branch.
 		decode: Option<crate::exec::operators::scan::common::DecodeFields>,
@@ -5040,7 +5338,13 @@ pub(super) enum Source {
 	Knn {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		vector: KnnSearchVector,
+		/// The query vector, shared with the plan it was lowered from. Empty for a vector known
+		/// only when the statement runs, which `vector_query` computes.
+		vector: std::sync::Arc<[crate::val::Number]>,
+		/// The query vector the source evaluates when it opens, where the plan does not hold it:
+		/// shared by every source of the program searching with the same vector, which a run of
+		/// its group evaluates once ([`State::knn_searches`](super::interp::State)).
+		vector_query: Option<std::sync::Arc<KnnQuery>>,
 		k: u32,
 		ef: u32,
 		/// Where the distance of each record found is published for
@@ -5061,13 +5365,13 @@ pub(super) enum Source {
 	/// The rows of each source in turn, in written order.
 	Union(Vec<Source>),
 	/// The rows a value in `FROM` yields: `value`, evaluated once when the
-	/// pipeline opens, read as `read` says ([`super::plan::ValuesRead`]).
+	/// pipeline opens, read as `read` says ([`super::payload::ValuesRead`]).
 	/// A zero limit of the pipeline reads no record of a record id or table
 	/// a dynamic read finds, and every other row is yielded and judged
 	/// whatever the limit.
 	Values {
 		value: HostScalar,
-		read: super::plan::ValuesRead,
+		read: super::payload::ValuesRead,
 	},
 	/// The rows block statement [`Program::groups`]`[group]` yields — a
 	/// statement in `FROM` — run once when the pipeline opens. A zero limit
@@ -5079,7 +5383,7 @@ pub(super) enum Source {
 	},
 	/// The rows of block statement [`Program::groups`]`[build]` whose field
 	/// `field` may equal the value at path `outer` of `$parent`
-	/// ([`super::plan::Plan::Probe`]): the group run at the first opening of
+	/// ([`super::payload::Plan::Probe`]): the group run at the first opening of
 	/// probe [`Program::probes`]`[probe]` and its rows kept, keyed by
 	/// `field`, until the probe's owner starts again. At each opening where
 	/// a row is kept, the key is read through objects alone; where the path
@@ -5118,6 +5422,17 @@ pub(super) enum Source {
 	/// row at all for a top-level one, whose body then evaluates against no
 	/// document.
 	Once,
+	/// The change sets of the selected database's change feed, or of
+	/// `table`'s, from `since`, at most `limit` of them, each as the value
+	/// `SHOW CHANGES` shows. Opening the source checks the session's
+	/// permission to view the database's tables, then resolves the selected
+	/// namespace and database, raising where either is missing, before it
+	/// reads the feed: an empty feed is checked as a full one is.
+	Changes {
+		table: Option<TableName>,
+		since: crate::expr::statements::show::ShowSince,
+		limit: Option<u32>,
+	},
 	/// The subjects each of a write's `targets` names, evaluated one target
 	/// at a time and each run as the record in flight. `deferable` says
 	/// whether a table or record id names a record to create rather than
@@ -5156,6 +5471,12 @@ pub(super) enum Source {
 		table: TableName,
 		record: Option<HostScalar>,
 		direction: Direction,
+	},
+	/// No row. Opening it raises the error of an undefined `table` as a scan
+	/// of it would, unless the caller's reads are permission-checked, which
+	/// hides the absence ([`super::payload::Plan::Vacant`]).
+	Vacant {
+		table: TableName,
 	},
 }
 
@@ -5210,7 +5531,7 @@ assert_plain!(ScanRange);
 /// With `coarse`, the scan is a key-range scan that delivers the first key by
 /// the whole second of a datetime component of the record id: it reads no
 /// stored bytes for the key, and stops once it reads a record whose component
-/// is in a second past the threshold's ([`super::plan::CoarseCutoff`]).
+/// is in a second past the threshold's ([`super::payload::CoarseCutoff`]).
 ///
 /// Sort `sort` of the program holding the scan publishes the threshold, in
 /// its cell of the running state, and the scan arms a probe with that cell
@@ -5228,12 +5549,12 @@ pub(super) struct TopKScan {
 	/// The bound on how deep the walk over the stored bytes descends.
 	pub(super) depth_limit: u32,
 	/// The cut a key-range scan makes by the second of a datetime component.
-	pub(super) coarse: Option<super::plan::CoarseCutoff>,
+	pub(super) coarse: Option<super::payload::CoarseCutoff>,
 }
 
 impl TopKScan {
 	/// The scan of `key`, fed by sort `sort`.
-	pub(super) fn new(key: &super::plan::TopKKey, sort: u16) -> Self {
+	pub(super) fn new(key: &super::payload::TopKKey, sort: u16) -> Self {
 		Self {
 			path: Arc::clone(&key.path),
 			direction: key.direction,
@@ -5265,7 +5586,7 @@ impl TopKScan {
 // access of an index and the bitmap plan over it name key values, so they are
 // plain exactly when `Value` is.
 assert_plain!(TopKScan);
-assert_plain!(super::plan::TopKKey);
+assert_plain!(super::payload::TopKKey);
 assert_plain!(crate::exec::index::access_path::IndexRef);
 assert_plain!(crate::exec::operators::scan::MergeMode);
 assert_plain!(crate::exec::operators::scan::common::DecodeFields);
@@ -5361,6 +5682,9 @@ impl Source {
 			}
 			| Source::LightweightEdges {
 				..
+			}
+			| Source::Vacant {
+				..
 			} => true,
 			Source::Union(sources) => sources.iter().all(Source::reads_storage),
 			Source::Sorted {
@@ -5396,6 +5720,9 @@ impl Source {
 			| Source::WriteEdges {
 				..
 			}
+			| Source::Changes {
+				..
+			}
 			| Source::Once => false,
 		}
 	}
@@ -5407,7 +5734,14 @@ impl Source {
 pub(crate) enum Enforce {
 	/// The table's `PERMISSIONS FOR select`, its `COMPUTED` fields and its
 	/// field permissions: a row the table's permission refuses is no row.
-	Rows(TableName),
+	/// The `COMPUTED` fields derived are those `needed` names, with the ones
+	/// they read and the ones a field permission reads, as the table's scan
+	/// derives those its projection needs; every one where `needed` is `None`,
+	/// for a pipeline that reads the row whole.
+	Rows {
+		table: TableName,
+		needed: Option<Arc<std::collections::HashSet<String>>>,
+	},
 	/// The table's `COMPUTED` fields and field permissions alone, over an
 	/// image of a record the statement wrote: the image is shown whatever the
 	/// table's own permission says, as the output of a write is.
@@ -5433,19 +5767,19 @@ pub(crate) struct Pipeline {
 	pub(super) stored_rows: bool,
 	/// What each row the source yields is put through before the body runs,
 	/// where the body holds none of it. Such a pipeline runs on values, never
-	/// on stored bytes or as a region.
+	/// on stored bytes, and never as morsels.
 	pub(super) enforce: Option<Enforce>,
 	/// The paging clauses in the body. A pipeline one of whose limits admits no
 	/// row reads no record: it does not open a source that reads storage, and
 	/// reads no record of a value source's record ids or tables, nor of a
 	/// statement in `FROM`.
 	pub(super) limits: Vec<u16>,
-	/// Whether the body may run its rows as a region: batch by batch, each
-	/// batch inline or on a worker of its own, their outputs merged in batch
-	/// order (see [`super::region`]). A region's body only reads, and pages
-	/// only in the shape its merge replays, so every order of running its
-	/// batches answers the rows the serial run answers.
-	pub(super) region: bool,
+	/// How the pipeline's rows run: one after another on the statement's task, or as morsels
+	/// merged in the order of the serial run (see [`super::morsel`]). The physical plan's policy
+	/// chooses ([`crate::exec::planner::placement::Policy::plan`]); a pipeline planned as morsels
+	/// only reads, and pages only in the shape its merge replays, so every width answers the rows
+	/// the serial run answers.
+	pub(super) parallel: Parallel,
 	/// The statement of a block the pipeline belongs to, [`Program::groups`]
 	/// `[group]`, run when the block reaches it; `None` for a pipeline of the
 	/// program's own, run when the program runs.
@@ -5453,6 +5787,13 @@ pub(crate) struct Pipeline {
 }
 
 impl Pipeline {
+	/// Whether the pipeline runs as morsels of batches the coordinator reads and hands on.
+	#[cfg(test)]
+	pub(super) fn runs_as_batches(&self) -> bool {
+		use crate::exec::planner::placement::MorselInput;
+		super::morsel::effective_input(self) == Some(MorselInput::Batches)
+	}
+
 	/// Whether the body hands each row on as it is and does nothing else, so
 	/// that its run over a row held in memory answers that row: no
 	/// enforcement of the table's permissions, computed fields and field
@@ -5579,10 +5920,6 @@ pub(crate) struct Program {
 	pub(super) paths: Vec<FieldPath>,
 	pub(super) limits: Vec<LimitSpec>,
 	pub(super) sorts: Vec<SortSpec>,
-	/// The query vectors KNN searches compute when the statement runs, each
-	/// shared by the searches of one KNN operator ([`KnnSearchVector::Query`])
-	/// and evaluated once per run of the group that owns it.
-	pub(super) knn_searches: Vec<KnnQuery>,
 	pub(super) splits: Vec<SplitSpec>,
 	pub(super) joins: Vec<JoinSpec>,
 	/// For each distinct set, the group whose start empties it.
@@ -5708,7 +6045,7 @@ pub(crate) struct Program {
 	pub(super) required_context: ContextLevel,
 	/// Whether something the program calls answers differently for a call
 	/// made after another, or leaves something behind, so its rows run one
-	/// after another in the order read and no pipeline runs as a region.
+	/// after another in the order read and no pipeline runs as morsels.
 	pub(super) keeps_row_order: bool,
 	/// For the program of a whole request, the request: its steps in order
 	/// and the programs of its statements, whose units are this program's.

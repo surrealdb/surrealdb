@@ -33,14 +33,15 @@
 //! # The pre-mutation snapshot
 //!
 //! The `WHERE` condition and the data clause read one image of the record:
-//! the field-level-`select`-reduced pre-mutation record with its `COMPUTED`
-//! fields derived. Sharing it is what makes a predicate and a data-clause
-//! expression in the same statement agree about what a computed field holds,
+//! the field-level-`select`-reduced pre-mutation record, carrying the
+//! `COMPUTED` fields the caller may see: a field whose `select` guard denies
+//! the caller is absent from it and its body never ran. Sharing it is what makes a predicate and a
+//! data-clause expression in the same statement agree about what a computed field holds,
 //! and what keeps a caller's data clause from observing a field the caller may
 //! not select. Neither reader ever observes the statement's own writes: every
 //! expression of the data clause is evaluated against this image before any of
 //! them is applied, which is what makes `SET a = a + 1, b = a + 1` assign `b`
-//! from the old `a`.
+//! from the value `a` held before the statement.
 
 use surrealdb_types::ToSql;
 
@@ -406,8 +407,8 @@ fn check_special_field(found: &Value, expected: &RecordId) -> Result<(), Control
 	}))
 }
 
-/// The record this row writes at. Absent only for a creating order whose id
-/// has still to be derived, which every caller here runs after.
+/// The record this row writes at. It is absent only before the id is derived,
+/// so callers read it after the id is settled.
 fn record_id(row: &WriteRow) -> Result<&RecordId, ControlFlow> {
 	row.id
 		.as_ref()
@@ -525,8 +526,8 @@ fn coerce_id_key(
 
 /// Coerce the whole key of `id` to the declared `kind`.
 fn coerce_whole_key(id: RecordId, kind: &Kind) -> Result<RecordId, ControlFlow> {
-	// The key is cloned so the original id stays whole for the failure, which
-	// is rendered only when there is one rather than on every typed-id write.
+	// The key is cloned so the original id stays whole for the error, which is
+	// rendered only on failure.
 	match id.key.clone().into_value().coerce_to_kind(kind) {
 		Ok(coerced) => coerced.generate(id.table, false).map_err(ControlFlow::Err),
 		Err(error) => Err(fail(DocError::FieldCoerce {
@@ -692,12 +693,12 @@ enum Addressed {
 
 /// How the evaluated data clause `input` writes the field `name`.
 ///
-/// A key field the record holds after the clause is judged by its value. What
-/// the clause leaves out cannot be judged that way: an `UNSET`, or a `NONE`
-/// assigned or merged, removes the field the record held, and a write beneath a
-/// field that is a string leaves it as it was. The clause itself says that it
-/// wrote there. A `CONTENT` or `REPLACE` names the whole body, and a component
-/// it leaves out is derived from the key as before.
+/// A key field the record holds after the clause is judged by its value.
+/// A field the clause removes, by `UNSET` or by a `NONE` assigned or merged,
+/// has no value left to judge, so the clause itself decides it. A write
+/// beneath a field is a mismatch whatever the field holds. A `CONTENT` or
+/// `REPLACE` names the whole body, and a component it leaves out is derived
+/// from the key.
 fn addressed(input: Option<&ComputedInput>, name: &str) -> Addressed {
 	/// The number of parts of `path` when it starts at the field `name`.
 	fn depth(path: &Idiom, name: &str) -> Option<usize> {
@@ -1203,8 +1204,8 @@ mod tests {
 	fn a_write_beneath_a_component_is_a_mismatch_whatever_the_field_holds() {
 		let key = reading();
 		let rid = record(vec![text("London"), at(2024)]);
-		// The field still holds the key's own element, which is no answer: the
-		// clause wrote beneath it.
+		// The field still holds the key's element, but the clause wrote beneath
+		// it, which is a mismatch.
 		let current = object(vec![("city", text("London"))]);
 		let input = ComputedInput::Set(vec![assignment(&["city", "x"], int(1))]);
 		let refused = settle_components(&key, &rid, &current, Some(&input), &Value::None)

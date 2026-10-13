@@ -76,9 +76,6 @@ pub(super) async fn enter(
 		}
 		ExternalCallee::Function {
 			..
-		}
-		| ExternalCallee::Specialised {
-			..
 		} => Ok(Entered::Function),
 	}
 }
@@ -123,12 +120,6 @@ pub(super) async fn call(
 			},
 			Entered::Function,
 		) => super::call_unit::call(name, spec.plan_depth, args, ctx, held).await,
-		(
-			ExternalCallee::Specialised {
-				name,
-			},
-			Entered::Function,
-		) => super::call_unit::specialised(name, ctx).await,
 		_ => Err(internal("an external call made with another call's entry".to_owned())),
 	}
 }

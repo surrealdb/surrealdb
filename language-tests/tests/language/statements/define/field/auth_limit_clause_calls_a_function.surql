@@ -8,10 +8,11 @@ auth = { namespace = "test", database = "test", level = "editor" }
 reason = """
 A field defined by a database editor carries the editor's AUTH LIMIT, and its
 clauses run for the writer narrowed by it. A call of a user-defined function
-or a statement in a VALUE, ASSERT, DEFAULT, write PERMISSIONS or COMPUTED
+or a read statement in a VALUE, ASSERT, DEFAULT, write PERMISSIONS or COMPUTED
 clause is made for that principal, and the field answers as any other: the
-COMPUTED value derived for a later VALUE, the ASSERT refusing, a statement the
-editor may not run refused with the editor's permissions.
+COMPUTED value derived for a later VALUE and the ASSERT refusing. A schema
+statement in such a clause is refused where the field is defined (register
+#28, region_constraints/value_ddl.surql).
 """
 
 [[test.results]]
@@ -52,12 +53,6 @@ value = "[{ a: 8, b: 5, c: 3, d: 42, e: true, f: 16, g: 17, id: t:1 }]"
 
 [[test.results]]
 error = "Found 1 for field `c`, with record `t:2`, but field must conform to: fn::double($value) > 2"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-error = "IAM error: Not enough permissions to perform this action"
 */
 
 DEFINE FUNCTION fn::double($n: int) { RETURN $n * 2; };
@@ -73,5 +68,3 @@ CREATE t:1 SET a = 2, c = 3, e = true;
 UPDATE t:1 SET a = 4;
 SELECT * FROM t;
 CREATE t:2 SET a = 1, c = 1;
-DEFINE FIELD h ON u VALUE (DEFINE USER escalated ON DATABASE ROLES OWNER PASSWORD 'secret');
-CREATE u:1;

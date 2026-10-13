@@ -2,18 +2,18 @@
 //! for tests that must know a running program compiled nothing.
 //!
 //! Every entry point that binds, maps, lowers or compiles a plan or a scalar
-//! notes itself here: [`Planner::bind_scoped`], [`Planner::scalar_metadata`], the VM's
-//! mapping and lowering, and the lowering of a closure body. A note made while a program's stream
-//! is being polled ([`while_running`]) is a compilation the running program made; one made
-//! while the statement is planned is not. A test runs a query and reads
-//! [`count`] before and after.
+//! notes itself here: [`Planner::bind_scoped`], [`Planner::scalar_metadata`],
+//! the VM's mapping and lowering, and the lowering of a closure body. A note
+//! made while a program's stream is being polled ([`while_running`]) is a
+//! compilation the running program made. A note made while the statement is
+//! planned is not. A test runs a query and reads [`count`] before and after.
 //!
 //! The one compilation a running program may cause is a fault: an
 //! instruction handing a callee a closure its run holds no unit for yields
 //! to the host with the request, and so does a read of a table only the data
 //! names that its run has not linked ([`crate::exec::vm::fault`]); the host
-//! links or compiles what it asks for. An invocation inside the call such an
-//! instruction made whose linked unit stopped standing takes the same fault.
+//! links or compiles what it asks for. A call made by such an instruction,
+//! whose linked unit fails its check, takes the same fault.
 //! The host serves the fault inside [`serving_fault`], which counts it,
 //! exactly once, by [`faults`]; the compilations beneath it are the fault's
 //! and are not noted as ones the program made, so a running program that
@@ -118,13 +118,6 @@ pub(crate) fn note() {
 #[cfg(test)]
 pub(crate) fn count() -> usize {
 	COMPILES.with(std::cell::Cell::get)
-}
-
-/// How many program streams this thread has started: one per statement the
-/// executor runs as a program, whatever it nests.
-#[cfg(test)]
-pub(crate) fn programs() -> usize {
-	PROGRAMS.with(std::cell::Cell::get)
 }
 
 /// How many compilations this thread has noted while a request ran, outside
@@ -309,20 +302,24 @@ pub(crate) fn while_running_task<'a, F: std::future::Future + Send + 'a>(
 //
 // A seam is work entered with [`seam`] that may do both. The seams are:
 // - the descriptor API, the one way a running program learns a catalog fact;
-// - a load from the compile cache (`crate::exec::vm::compile_cache`), by name or by text: a table's
-//   read unit, its field state and `SELECT` permission, the stages a write that may reach any
-//   table, or a late-bound write, applies to a table, a closure body's unit, the code reached
-//   through an expression — a function body a compiled expression calls, an analyzer's function, an
-//   API's middleware and handler, an expression reached through `crate::exec::entry`, a GQL
-//   mutation step's write (`crate::exec::vm::serve`) — and for a late-bound statement a function's
-//   call unit, the body of a function that reads an argument where only a value answers compiled
-//   for the call's values, and a parameter's permission predicate. A load reads the object's
-//   version and checks what else the unit depends on, and compiles nothing;
+// - a load from the compile cache (`crate::exec::vm::compile_cache`), by name or by text. Loads
+//   cover:
+//   - a table's read unit, its field state and `SELECT` permission;
+//   - the stages of a write that may reach any table, or of a late-bound write;
+//   - a closure body's unit;
+//   - the code reached through an expression: a function body a compiled expression calls, an
+//     analyzer's function, an API's middleware and handler, an expression reached through
+//     `crate::exec::entry`, and a GQL mutation step's write (`crate::exec::vm::serve`);
+//   - for a late-bound statement, a function's call unit, the body of a function that reads an
+//     argument where only a value answers, compiled for the call's values, and a parameter's
+//     permission predicate.
+//   A load reads the object's version and checks what else the unit depends
+//   on. It compiles nothing.
 // - a compile-cache miss ([`serving_fault`]): the unit a load found none of, compiled once per key
-//   and frame, the one kind of compile a running program causes;
-// - the closure links a run makes and their checks that a held unit still stands;
-// - a nested query ([`nested_query`]): `eval::surql` and `eval::gql` text and embedded JavaScript's
-//   `surrealdb.query()`, compiled as a query and program of its own.
+//   and frame. This is the one kind of compile a running program causes;
+// - the closure links a run makes, and their checks that a held unit still stands;
+// - a nested query ([`nested_query`]): `eval::surql` and `eval::gql` text, and embedded
+//   JavaScript's `surrealdb.query()`, compiled as a query and program of its own.
 //
 // An entry boundary is not a seam: a request that arrives from outside a
 // running program — an HTTP request to an API route, a query — compiles its
@@ -445,14 +442,13 @@ pub(crate) fn seam<'a, F: std::future::Future + Send + 'a>(
 /// executor as a query of its own, in the caller's transaction, and run to its
 /// value.
 ///
-/// The one sanctioned way a running program has query text compiled for it;
-/// the only other compile a run causes is a compile-cache miss
-/// ([`serving_fault`]). The program itself is never recompiled, and what the
+/// The one sanctioned way a running program has query text compiled for it.
+/// The only other compile a run causes is a compile-cache miss
+/// ([`serving_fault`]). The program itself is never recompiled. What the
 /// nested query compiles runs as a program of its own, sealed again by its own
-/// stream. A [`seam`] by
-/// another name, so every entry is found by it. A script's work is polled on
-/// the thread running the script, so the future need not be `Send`; the
-/// returned future is `Send` exactly when `future` is.
+/// stream. This is a [`seam`], listed in the seal above. A script's work is
+/// polled on the thread running the script, so the future need not be `Send`;
+/// the returned future is `Send` exactly when `future` is.
 pub(crate) fn nested_query<'a, F: std::future::Future + 'a>(
 	future: F,
 ) -> impl std::future::Future<Output = F::Output> + 'a {

@@ -8,6 +8,7 @@ use surrealdb_runtime::util::math::vector::add_assign;
 
 use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::{Error as ExprError, Kind};
 use crate::val::{Number, Value};
 
@@ -22,6 +23,10 @@ pub struct VectorSum;
 impl AggregateFunction for VectorSum {
 	fn name(&self) -> &'static str {
 		"vector::sum"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "vector::sum", Fallibility::INFALLIBLE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -318,9 +323,9 @@ mod tests {
 		assert_eq!(acc.finalize().unwrap(), Value::Null);
 	}
 
-	/// The reason an inconsistent group has no total is only ever read from a
-	/// log, since `finalize` reports `NULL` rather than raising — but it must
-	/// still name the function, matching the scalar form, in case that changes.
+	/// The reason an inconsistent group has no total is only read from a log,
+	/// since `finalize` reports `NULL` rather than raising. It must still name
+	/// the function, as the scalar form does.
 	#[test]
 	fn a_non_vector_reason_carries_the_function_prefix() {
 		let mut acc = VectorSumAccumulator::default();

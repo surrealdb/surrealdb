@@ -11,8 +11,8 @@ writes are undone with it, and the statements after it still run. Inside
 BEGIN … COMMIT an escaping BREAK or CONTINUE is the statement's error, which
 cancels the transaction as any other error there does: the statements before
 it report the failed transaction, those after it the cancelled one, and the
-COMMIT fails. A RETURN there ends the transaction's statements and commits
-what ran before it.
+COMMIT fails. A RETURN there is a value statement like any other: the
+statements after it run and commit with the block.
 """
 
 [[test.results]]
@@ -61,10 +61,13 @@ value = "[{ id: t:6 }]"
 value = "'early'"
 
 [[test.results]]
+value = "[{ id: t:7 }]"
+
+[[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[t:1, t:6]"
+value = "[t:1, t:6, t:7]"
 */
 
 CREATE t:1;

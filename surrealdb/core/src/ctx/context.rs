@@ -59,10 +59,19 @@ use crate::mem::ALLOC;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 use crate::types::PublicVariables;
-use crate::val::Value;
 use crate::val::convert_public::convert_public_value_to_internal;
+use crate::val::{Datetime, Value};
 
 pub type FrozenContext = Arc<Context>;
+
+/// The names of the values a frame binds around the code it runs rather than
+/// the query binding them: the row a statement reads (`$this`, `$self`,
+/// `$parent`) and the names an event, a live notification or a field clause
+/// binds. A function body called from such a frame reads them through the
+/// whole context chain, as it reads the protected names; they are not a
+/// caller's `LET` or `FOR` bindings.
+const ROW_PARAM_NAMES: &[&str] =
+	&["this", "self", "parent", "before", "after", "event", "value", "input"];
 
 /// What a parameter name is bound to in a context's chain
 /// ([`Context::binding`]).
@@ -136,6 +145,25 @@ pub struct Context {
 	// the corresponding `StatementEvent`. Replaced by the executor before
 	// each top-level statement; `None` outside an active statement.
 	statement_counters: Option<Arc<StatementCounters>>,
+	// The instant every CLOCK read of the running top-level statement answers.
+	// Installed by the executor before each top-level statement and copied by
+	// every context derived from this one, so a subquery, a function or closure
+	// body, triggered code and a nested query (`eval::*`, a script's
+	// `surrealdb.query()`) read their statement's instant. `None` where no
+	// statement installed one: a read then takes the wall clock at the call.
+	statement_clock: Option<Datetime>,
+	// The parameters the request was made with: the client's bind parameters
+	// and the session's variables, as attached by [`Self::attach_session`],
+	// [`Self::attach_variables`] and [`Self::attach_public_variables`], which
+	// a function body reads past its call boundary ([`Self::lexical_value`]).
+	// A `LET` or `FOR` binding is never among them. A child context carries
+	// its parent's; an isolated context holds none of its parent's, as it
+	// holds none of its other values.
+	request_params: Option<Arc<HashMap<Strand, Arc<Value>>>>,
+	// Whether this node is the scope of a function body entered by a call
+	// ([`Self::mark_call_boundary`]): the node [`Self::lexical_value`] stops
+	// at before it answers from the request parameters.
+	call_boundary: bool,
 	// Pre-resolved tenant identity (namespace, database, user, session id,
 	// client ip) derived from the active session at `attach_session` time.
 	// Read by the executor and the transaction layer to populate the
@@ -222,7 +250,10 @@ impl Debug for Context {
 }
 
 impl Context {
-	/// Creates a new empty background context.
+	/// Creates a new empty background context. It carries the parent's
+	/// statement clock: the work it runs, a live subscription's clauses for one
+	/// write, belongs to the statement that built it. It holds none of the
+	/// parent's values, so it carries none of its request parameters either.
 	pub(crate) fn background(parent: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -254,6 +285,9 @@ impl Context {
 			surrealism_cache: None,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			statement_clock: parent.statement_clock,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -317,6 +351,9 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
+			statement_clock: parent.statement_clock,
+			request_params: parent.request_params.clone(),
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
@@ -342,7 +379,10 @@ impl Context {
 
 	/// Create a new context from a frozen parent context.
 	/// This context is isolated, and values specified on
-	/// any parent contexts will not be accessible.
+	/// any parent contexts will not be accessible: the protected names
+	/// (`$auth`, `$access`, `$token`, `$session`) aside, which are read through
+	/// the parent chain. The parent's request parameters are values too, so
+	/// the context holds none until it attaches its own.
 	pub(crate) fn new_isolated(parent: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -366,6 +406,9 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
+			statement_clock: parent.statement_clock,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -408,10 +451,19 @@ impl Context {
 	/// observe the snapshot's local (never-tripped) flag instead of the
 	/// connection-level cancel handle installed on the source root, and
 	/// would not abort on WebSocket disconnect.
+	///
+	/// A snapshot of a context inside a function body keeps the body's view:
+	/// it holds the bindings [`Self::lexical_value`] answers there and is
+	/// itself a call boundary, so what the body could not read the snapshot
+	/// does not hold.
 	pub(crate) fn snapshot(from: &FrozenContext) -> Self {
+		let in_call_body = from.in_call_body();
 		Self {
 			// Flatten all values from the parent chain into this context
-			values: from.collect_values(HashMap::default()),
+			values: match in_call_body {
+				true => from.lexical_values(),
+				false => from.collect_values(HashMap::default()),
+			},
 			forbidden: from.collect_forbidden(),
 			deadline: from.deadline,
 			slow_log: from.slow_log.clone(),
@@ -432,6 +484,9 @@ impl Context {
 			surrealism_cache: from.surrealism_cache.clone(),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
+			statement_clock: from.statement_clock,
+			request_params: from.request_params.clone(),
+			call_boundary: in_call_body,
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -459,13 +514,15 @@ impl Context {
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
 	///
+	/// No statement clock is carried: the context runs a background task of its
+	/// own, outside any top-level statement.
+	///
 	/// `index_builder` is intentionally cleared: the only caller is the
 	/// background index `Building` task, which lives inside the
 	/// `IndexBuilder`'s HashMap. Cloning the back-reference would form an
 	/// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pins the
 	/// `Datastore` (and its storage handles, ~7 file descriptors per RocksDB
-	/// instance, ~3 per SurrealKV) until process exit — see issue
-	/// surrealdb/surrealdb#7304.
+	/// instance, ~3 per SurrealKV) until process exit.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -489,6 +546,9 @@ impl Context {
 			surrealism_cache: from.surrealism_cache.clone(),
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -556,6 +616,9 @@ impl Context {
 			surrealism_cache: Some(surrealism_cache),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config,
 			#[cfg(feature = "http")]
 			http_client,
@@ -613,6 +676,9 @@ impl Context {
 			surrealism_cache: None,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			statement_clock: None,
+			request_params: None,
+			call_boundary: false,
 			config: Default::default(),
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
@@ -815,7 +881,7 @@ impl Context {
 		Ok(opt.auth.is_allowed(action, &res).map_err(crate::err::Error::from)?)
 	}
 
-	/// Table-level permission check frequency (mirrors former [`Options::check_perms`]).
+	/// Table-level permission check, which the options' `perms` flag gates.
 	pub fn check_perms(&self, opt: &Options, action: Action) -> Result<bool> {
 		if !opt.perms {
 			return Ok(false);
@@ -1017,6 +1083,20 @@ impl Context {
 		self.statement_counters.as_ref()
 	}
 
+	/// Install the instant every CLOCK read answers while the top-level
+	/// statement about to run executes. Called by the executor once per
+	/// top-level statement, so a `sleep` inside the statement does not advance
+	/// it. Contexts derived afterwards carry it.
+	pub(crate) fn set_statement_clock(&mut self, clock: Datetime) {
+		self.statement_clock = Some(clock);
+	}
+
+	/// The instant of the top-level statement running around this context, or
+	/// `None` where no statement installed one.
+	pub(crate) fn statement_clock(&self) -> Option<&Datetime> {
+		self.statement_clock.as_ref()
+	}
+
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
 		self.transaction
 			.clone()
@@ -1191,6 +1271,28 @@ impl Context {
 		self.shared_value(key).map(Arc::as_ref)
 	}
 
+	/// This context's own binding of `key`, with no walk to the parent
+	/// contexts. [`Self::value`] cannot tell an own binding from an inherited
+	/// one, which an exact restore of a binding needs.
+	pub(crate) fn own_value(&self, key: &str) -> Option<&Arc<Value>> {
+		self.values.get(key)
+	}
+
+	/// Puts the own binding of `key` back to `prev`: inserts the value, or
+	/// removes the binding when `prev` is `None`. A removed binding leaves the
+	/// name unbound here, so a parent's binding or a `DEFINE PARAM` of the same
+	/// name is answered again instead of a shadowing `NONE`.
+	pub(crate) fn restore_value(&mut self, key: &str, prev: Option<Arc<Value>>) {
+		match prev {
+			Some(value) => {
+				self.values.insert(Strand::from(key), value);
+			}
+			None => {
+				self.values.remove(key);
+			}
+		}
+	}
+
 	/// The allocation [`Self::value`] answers for `key`.
 	fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
 		match self.binding(key) {
@@ -1276,6 +1378,129 @@ impl Context {
 		map
 	}
 
+	/// Marks this node as the scope of a function body entered by a call. The
+	/// node holds the arguments, and [`Self::lexical_value`] answers from it
+	/// and from what is bound below it, then from the request parameters,
+	/// never from what the caller bound above it.
+	pub(crate) fn mark_call_boundary(&mut self) {
+		self.call_boundary = true;
+	}
+
+	/// Whether this context is, or is derived from, the scope of a function
+	/// body ([`Self::mark_call_boundary`]).
+	pub(crate) fn in_call_body(&self) -> bool {
+		std::iter::successors(Some(self), |ctx| ctx.parent.as_deref()).any(|ctx| ctx.call_boundary)
+	}
+
+	/// The value `key` holds in a frame running in this context, as the code
+	/// of a function body reads it.
+	///
+	/// With no call boundary on the chain it is [`Self::value`]. Otherwise
+	/// the chain is walked as `value` walks it up to and including the
+	/// nearest boundary ([`Self::mark_call_boundary`]), so the arguments of
+	/// the call and every binding made inside the body are read, and past it
+	/// the answer is:
+	///
+	/// - for the protected names (`$auth`, `$access`, `$token`, `$session`) and the row names
+	///   (`$this`, `$self`, `$parent`, `$before`, `$after`, `$event`, `$value`, `$input`), the
+	///   nearest value of the whole chain;
+	/// - for every other name, the request parameter of that name, if any.
+	///
+	/// A caller's `LET` or `FOR` binding is therefore never read by the body,
+	/// at any depth of calls, and a name no binding of the body or of the
+	/// request holds is left to a `DEFINE PARAM` of the database.
+	///
+	/// A name bound to a KNN query vector's row being scanned holds no value
+	/// and answers `None` here; [`Self::lexical_binding`] tells it apart.
+	pub(crate) fn lexical_value(&self, key: &str) -> Option<&Arc<Value>> {
+		match self.lexical_binding(key) {
+			Some(Binding::Value(value)) => Some(value),
+			Some(Binding::Forbidden(_)) | None => None,
+		}
+	}
+
+	/// What `key` is bound to as the code of a function body reads it
+	/// ([`Self::lexical_value`]): a value, a KNN query vector's row being
+	/// scanned ([`Binding::Forbidden`]), or nothing.
+	pub(crate) fn lexical_binding(&self, key: &str) -> Option<Binding<'_>> {
+		let mut node = self;
+		loop {
+			if let Some(value) = node.values.get(key) {
+				return Some(Binding::Value(value));
+			}
+			if let Some((_, row)) = node.forbidden.iter().find(|(name, _)| name.as_str() == key) {
+				return Some(Binding::Forbidden(row));
+			}
+			if node.call_boundary {
+				return node.beyond_boundary(key);
+			}
+			match &node.parent {
+				Some(parent) if PROTECTED_PARAM_NAMES.contains(&key) || !node.isolated => {
+					node = parent;
+				}
+				_ => return None,
+			}
+		}
+	}
+
+	/// What a read of `key` answers past this call boundary, once the node's own
+	/// bindings do not hold it; see [`Self::lexical_value`].
+	fn beyond_boundary(&self, key: &str) -> Option<Binding<'_>> {
+		if PROTECTED_PARAM_NAMES.contains(&key) || ROW_PARAM_NAMES.contains(&key) {
+			self.parent.as_ref()?.binding(key)
+		} else {
+			self.request_params.as_ref()?.get(key).map(Binding::Value)
+		}
+	}
+
+	/// The names a read in this context may find a value under: those
+	/// [`Self::value`] answers and the request parameters.
+	fn visible_names(&self) -> Vec<Strand> {
+		let mut names: Vec<Strand> = self.collect_values(HashMap::default()).into_keys().collect();
+		if let Some(params) = &self.request_params {
+			names.extend(params.keys().cloned());
+		}
+		names
+	}
+
+	/// Every binding [`Self::lexical_value`] answers in this context.
+	fn lexical_values(&self) -> HashMap<Strand, Arc<Value>> {
+		self.visible_names()
+			.into_iter()
+			.filter_map(|name| {
+				let value = Arc::clone(self.lexical_value(&name)?);
+				Some((name, value))
+			})
+			.collect()
+	}
+
+	/// The context a function body entered from `parent` is planned in: an
+	/// isolated, call-boundary child of it that holds the request parameters
+	/// and the row names of `parent` and reads the protected names through it.
+	/// A binding the caller made with `LET` or `FOR` is not among them, so a
+	/// plan made in it folds none, and a name no binding holds is looked up
+	/// among the database's parameters.
+	pub(crate) fn new_call_scope(parent: &FrozenContext) -> Self {
+		let mut scope = Self::new_isolated(parent);
+		scope.request_params.clone_from(&parent.request_params);
+		scope.call_boundary = true;
+		let mut held = Vec::new();
+		let mut forbidden = Vec::new();
+		for name in parent.visible_names() {
+			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+				continue;
+			}
+			match scope.beyond_boundary(&name) {
+				Some(Binding::Value(value)) => held.push((name, Arc::clone(value))),
+				Some(Binding::Forbidden(row)) => forbidden.push((name, Arc::clone(row))),
+				None => {}
+			}
+		}
+		scope.values.extend(held);
+		scope.forbidden = forbidden;
+		scope
+	}
+
 	/// Get a 'static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
@@ -1288,7 +1513,7 @@ impl Context {
 	}
 
 	/// Attach a session to the context and add any session variables to the
-	/// context.
+	/// context, as request parameters ([`Self::attach_variables`]).
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.live = session.live();
 		self.add_values(session.values());
@@ -1310,8 +1535,22 @@ impl Context {
 		self.tenant_identity.as_ref()
 	}
 
-	/// Attach variables to the context.
+	/// Attach variables to the context. They are the request's parameters: a
+	/// function body reads them past its call boundary
+	/// ([`Self::lexical_value`]), where it reads no `LET` or `FOR` binding.
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		self.bind_variables(vars, true)
+	}
+
+	/// Binds the captures of a closure as values of this context, refusing a
+	/// protected name as [`Self::attach_variables`] does. A capture is the
+	/// closure's own binding, not a request parameter, so a function the
+	/// closure's body calls does not read it.
+	pub(crate) fn attach_captures(&mut self, vars: Variables) -> Result<(), Error> {
+		self.bind_variables(vars, false)
+	}
+
+	fn bind_variables(&mut self, vars: Variables, request: bool) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(ExecError::InvalidParam {
@@ -1319,11 +1558,31 @@ impl Context {
 				}
 				.into());
 			}
-			self.add_value(name, Arc::new(val));
+			match request {
+				true => self.add_request_param(name, Arc::new(val)),
+				false => self.add_value(name, Arc::new(val)),
+			}
 		}
 		Ok(())
 	}
 
+	/// Carries the request parameters of `from` onto this context, which a
+	/// frame built isolated from `from` does to keep the request's
+	/// parameters readable to the function bodies it runs.
+	pub(crate) fn inherit_request_params(&mut self, from: &Context) {
+		self.request_params.clone_from(&from.request_params);
+	}
+
+	/// Adds a request parameter: a value of the context that a function body
+	/// reads past its call boundary ([`Self::lexical_value`]).
+	fn add_request_param(&mut self, name: Strand, value: Arc<Value>) {
+		Arc::make_mut(self.request_params.get_or_insert_with(Default::default))
+			.insert(name.clone(), Arc::clone(&value));
+		self.values.insert(name, value);
+	}
+
+	/// Attach variables of the public type to the context, as
+	/// [`Self::attach_variables`] attaches them.
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
@@ -1332,7 +1591,7 @@ impl Context {
 				}
 				.into());
 			}
-			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
+			self.add_request_param(name.into(), Arc::new(convert_public_value_to_internal(val)));
 		}
 		Ok(())
 	}
@@ -1903,7 +2162,7 @@ mod tests {
 	/// `dbs::Executor::execute_operator_plan` and produces a ctx with
 	/// `parent: None`. Operators that poll `Context::done` / `is_done`
 	/// (HNSW/DiskANN KNN search inner loops, etc.) read the snapshot's own
-	/// `cancelled` flag — without parent walk to fall back to. If `snapshot`
+	/// `cancelled` flag — with no parent to fall back on. If `snapshot`
 	/// allocated a fresh `Arc<AtomicBool>` instead of sharing the source's,
 	/// those checks would never observe a connection-level cancel installed
 	/// via `set_cancellation`, and a WS disconnect during e.g. a KNN
@@ -2028,5 +2287,151 @@ mod tests {
 			),
 			"expected QueryBeyondMemoryThreshold, got: {err:?}"
 		);
+	}
+
+	/// A context derived from one that carries a statement clock reads the same
+	/// instant, whichever way it is derived, and installs none of its own.
+	#[test]
+	fn a_derived_context_inherits_the_statement_clock() {
+		use crate::val::Datetime;
+
+		let mut root = Context::new_test();
+		assert!(root.statement_clock().is_none());
+		let now = Datetime::now();
+		root.set_statement_clock(now);
+		let root = root.freeze();
+		assert_eq!(Context::new_child(&root).statement_clock(), Some(&now));
+		assert_eq!(Context::new_isolated(&root).statement_clock(), Some(&now));
+		assert_eq!(Context::snapshot(&root).statement_clock(), Some(&now));
+	}
+
+	/// A binding put back as absent leaves the name unbound in this context, so
+	/// the binding of a parent shows through again instead of a shadowing `NONE`.
+	#[test]
+	fn restoring_an_absent_binding_removes_it() {
+		use std::sync::Arc;
+
+		use crate::val::Value;
+
+		let mut parent = Context::new_test();
+		parent.add_value("x", Arc::new(Value::from(1)));
+		let parent = parent.freeze();
+		let mut child = Context::new_child(&parent);
+		assert!(child.own_value("x").is_none(), "an inherited binding is not the child's own");
+		let before = child.own_value("x").cloned();
+		child.add_value("x", Arc::new(Value::from(2)));
+		assert_eq!(child.value("x"), Some(&Value::from(2)));
+		child.restore_value("x", before);
+		assert!(child.own_value("x").is_none());
+		assert_eq!(child.value("x"), Some(&Value::from(1)), "the parent's binding answers again");
+		let held = Arc::new(Value::from(3));
+		child.restore_value("x", Some(Arc::clone(&held)));
+		assert_eq!(child.own_value("x"), Some(&held));
+	}
+	fn int(n: i64) -> std::sync::Arc<crate::val::Value> {
+		std::sync::Arc::new(crate::val::Value::from(n))
+	}
+
+	/// A request with the bind parameter `$q = 1`, a caller's `LET $q = 5` and
+	/// `LET $l = 7`, and the body of a call with the argument `$a` over a row.
+	fn a_call_body() -> std::sync::Arc<Context> {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		vars.insert("q", Value::from(1));
+		request.attach_variables(vars).expect("variables attach");
+		request.add_value("q", int(5));
+		request.add_value("l", int(7));
+		request.add_value("session", int(9));
+		let request = request.freeze();
+		let mut caller = Context::new_child(&request);
+		caller.add_value("f", int(8));
+		let caller = caller.freeze();
+		let mut body = Context::new_child(&caller);
+		body.add_value("a", int(2));
+		body.add_value("this", int(3));
+		body.mark_call_boundary();
+		let mut inside = Context::new_child(&body.freeze());
+		inside.add_value("b", int(4));
+		inside.freeze()
+	}
+
+	/// A body reads its arguments, what it binds, the request parameters, the
+	/// protected names and the row names, and never a binding of its caller.
+	#[test]
+	fn a_body_reads_its_arguments_row_names_and_request_parameters_only() {
+		let body = a_call_body();
+		assert_eq!(body.lexical_value("a"), Some(&int(2)));
+		assert_eq!(body.lexical_value("b"), Some(&int(4)));
+		assert_eq!(body.lexical_value("this"), Some(&int(3)));
+		assert_eq!(body.lexical_value("session"), Some(&int(9)));
+		assert_eq!(body.lexical_value("q"), Some(&int(1)), "the request's q, not the caller's LET");
+		assert_eq!(body.lexical_value("l"), None);
+		assert_eq!(body.lexical_value("f"), None);
+		// `value` is the plain chain walk.
+		assert_eq!(body.value("l"), Some(&crate::val::Value::from(7)));
+	}
+
+	/// With no boundary on the chain a read is the chain walk.
+	#[test]
+	fn without_a_boundary_a_lexical_read_is_a_chain_read() {
+		let mut root = Context::new_test();
+		root.add_value("l", int(7));
+		let root = root.freeze();
+		let child = Context::new_child(&root).freeze();
+		assert!(!child.in_call_body());
+		assert_eq!(child.lexical_value("l"), Some(&int(7)));
+		assert_eq!(child.lexical_value("none"), None);
+	}
+
+	/// An isolated context holds none of its parent's request parameters, so a
+	/// body entered from a privileged frame reads none, and the ones it attaches
+	/// are its own.
+	#[test]
+	fn an_isolated_context_holds_no_request_parameters_of_its_parent() {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		let mut request = Context::new_test();
+		let mut vars = Variables::new();
+		vars.insert("q", Value::from(1));
+		request.attach_variables(vars).expect("variables attach");
+		let request = request.freeze();
+		let mut frame = Context::new_isolated(&request);
+		frame.mark_call_boundary();
+		assert_eq!(frame.lexical_value("q"), None);
+		let mut own = Variables::new();
+		own.insert("p", Value::from(2));
+		frame.attach_variables(own).expect("variables attach");
+		assert_eq!(frame.lexical_value("p"), Some(&int(2)));
+		assert_eq!(frame.lexical_value("q"), None);
+	}
+
+	/// The scope a body is planned in holds the request parameters and the
+	/// row names of the context it is entered from, and no binding of it.
+	#[test]
+	fn a_call_scope_holds_request_parameters_and_row_names_only() {
+		let body = a_call_body();
+		let scope = Context::new_call_scope(&body).freeze();
+		assert_eq!(scope.value("q"), Some(&crate::val::Value::from(1)));
+		assert_eq!(scope.value("this"), Some(&crate::val::Value::from(3)));
+		assert_eq!(scope.value("session"), Some(&crate::val::Value::from(9)));
+		for name in ["a", "b", "l", "f"] {
+			assert_eq!(scope.value(name), None, "{name} reached a body's plan");
+			assert_eq!(scope.lexical_value(name), None);
+		}
+	}
+
+	/// A snapshot of a context inside a body is the body's view of it.
+	#[test]
+	fn a_snapshot_inside_a_body_keeps_the_lexical_view() {
+		let body = a_call_body();
+		let snapshot = Context::snapshot(&body);
+		assert_eq!(snapshot.lexical_value("a"), Some(&int(2)));
+		assert_eq!(snapshot.lexical_value("q"), Some(&int(1)));
+		assert_eq!(snapshot.lexical_value("l"), None);
+		assert_eq!(snapshot.value("l"), None);
 	}
 }

@@ -41,7 +41,6 @@ pub(crate) use project::projection_writes;
 pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
 pub use scan::CountOutput;
-pub use scan::EdgeTableSpec;
 pub(crate) use sort::{SortDirection, compare_values};
 pub(crate) use split::{SplitTarget, split_row, split_target};
 
@@ -58,7 +57,7 @@ use crate::val::Value;
 /// - `OutputShape::Rows` (e.g. an ordinary `SELECT`) → always `Value::Array`, regardless of row
 ///   count. A caller using the result as a `FOR` range, or any other array-shaped context, must see
 ///   `[]` for zero rows and `[x]` for one — never `NONE` or the bare element — the same contract
-///   [`ScalarSubquery`](crate::exec::vm::subquery::ScalarSubquery) already applies to a subquery
+///   [`ScalarSubquery`](crate::exec::vm::subquery::ScalarSubquery) applies to a subquery
 ///   expression.
 ///
 /// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).

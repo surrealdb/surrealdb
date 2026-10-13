@@ -44,6 +44,8 @@ mod set;
 mod sleep;
 mod string;
 mod time;
+#[cfg(feature = "scripting")]
+pub(crate) use time::timezone_at;
 mod r#type;
 mod value;
 mod vector;

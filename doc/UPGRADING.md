@@ -277,6 +277,15 @@ for a read-only compatible entry, open otherwise. The other findings list what
 the target refuses after it has opened the store, one statement or row at a
 time. Run it before lowering the level or starting the earlier release.
 
+### A `LET` inside a cancelled transaction is undone
+
+Parameters set with `LET` inside a transaction are discarded when the
+transaction is cancelled or fails, as its writes are. After
+`LET $b = 0; BEGIN; LET $b = 2; CANCEL;`, `$b` reads `0`, and a name the
+transaction bound for the first time holds nothing again. A `LET` inside a
+transaction that commits keeps its value. A client that read a parameter bound
+inside a cancelled transaction must bind it again outside the transaction.
+
 ## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, and pre-filtered KNN choosing its strategy by cost
 
 **Impact**:
@@ -945,13 +954,16 @@ LET $cut = time::now() - 30d;
 DELETE reading WHERE time < $cut;
 ```
 
-A mutation evaluates a clock read in its `WHERE` once per row, never once per
-statement. `DELETE reading WHERE time < time::now() - 30d` therefore removes the
-same records in effect, but has no bound to read a range or an index with: it
-reads every record of the table and calls the clock for each. `LET` evaluates
-the clock once, before the statement, and `$cut` is a value the statement holds,
-which can bound a key range. A `SELECT` folds the clock in its conditions to one
-instant, so `time > time::now() - 1d` needs no `LET` there.
+A mutation evaluates a clock read in its `WHERE` on every row, and every read
+answers the one instant of the statement. `DELETE reading WHERE time <
+time::now() - 30d` therefore removes the same records in effect, but a
+comparison with the clock bounds neither a key range nor an index over a
+component of the id: it reads every record of the table and calls the clock for
+each. `LET` evaluates the clock once, before the statement, and `$cut` is a
+value the statement holds, which can bound a key range. Over a field that is no
+component of the id, a `SELECT` offers a comparison with the clock to an index
+as a bound that reads the statement's instant when the scan opens, so `seen >
+time::now() - 1d` needs no `LET` there.
 
 A bound as a value reads a range only where the key order allows it. In an id
 `[city: string, time: datetime]` the keys are ordered by city and then by time,

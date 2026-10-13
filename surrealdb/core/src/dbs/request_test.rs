@@ -135,8 +135,8 @@ fn a_schema_statement_made_by_a_script_is_seen() {
 }
 
 /// An `ACCESS` statement's `WHERE` clause is served from the compile cache
-/// when the statement runs, as its subject is: the request compiles nothing
-/// after it arrived outside a cache fill.
+/// when the statement runs. The request compiles nothing after it arrived,
+/// except to fill the cache.
 #[test]
 fn an_access_statements_where_clause_is_served() {
 	check(
@@ -287,10 +287,10 @@ fn an_escaping_break_inside_a_block_cancels_it() {
 }
 
 /// A statement served when it is reached folds the values of the session it
-/// runs in, as one compiled with the request does, and is kept for those
-/// values: two principals running the same request text each get the rows
-/// their own `$auth` selects, through the index on the field it is compared
-/// with, however the cache was filled before them.
+/// runs in, as one compiled with the request does, and the cached plan is
+/// keyed on those values. Two principals running the same request text each
+/// get the rows their own `$auth` selects, through the index on the compared
+/// field, whatever order the cache was filled in.
 #[test]
 fn a_served_statement_never_serves_one_sessions_folded_values_to_another() {
 	let runtime =
@@ -363,8 +363,9 @@ fn a_served_statement_never_serves_one_sessions_folded_values_to_another() {
 	});
 }
 
-/// A statement served when it is reached reads the clock of its own run: the
-/// compile cache never answers a later request with the time an earlier one
+/// A statement reads the clock of its own run, whether it is compiled when the
+/// request arrives or served when it is reached: a plan holds no instant, so
+/// the compile cache never answers a later request with the time an earlier one
 /// was planned at.
 #[test]
 fn a_served_statement_reads_the_clock_of_its_run() {
@@ -384,4 +385,422 @@ fn a_served_statement_reads_the_clock_of_its_run() {
 		assert_ne!(first[1], second[1], "{first:?} {second:?}");
 		assert_ne!(first[2], second[2], "{first:?} {second:?}");
 	});
+}
+
+/// Two top-level statements of one request read two clocks: each installs the
+/// instant it starts at, so a statement after a sleep reads a later one.
+#[test]
+fn two_statements_read_two_clocks() {
+	let results = answers("", "LET $a = time::now(); SLEEP 20ms; RETURN $a < time::now();");
+	assert_eq!(results.len(), 3, "{results:?}");
+	assert!(results[2].as_ref().is_ok_and(|v| v.contains("true")), "{results:?}");
+}
+
+/// One statement reads one clock whatever it runs in between: a `SLEEP` inside
+/// the statement does not advance the instant its clock reads answer.
+#[test]
+fn one_statement_holding_a_sleep_reads_one_clock() {
+	let results = answers(
+		"",
+		"{ LET $a = time::now(); SLEEP 20ms; LET $b = time::now(); RETURN $a = $b AND $a = time::now() };",
+	);
+	assert_eq!(results.len(), 1, "{results:?}");
+	assert!(results[0].as_ref().is_ok_and(|v| v.contains("true")), "{results:?}");
+}
+
+/// An embedded script reads the clock of the statement running it, through
+/// `surrealdb.functions.time` and through a nested `surrealdb.query()` alike. A
+/// script returns a datetime to the millisecond, so the reads are compared by
+/// their milliseconds, after a sleep that would separate two wall-clock reads.
+#[cfg(feature = "scripting")]
+#[test]
+fn a_script_reads_the_statement_clock() {
+	let results = answers(
+		"",
+		"{ LET $a = time::now(); SLEEP 30ms; \
+		   LET $b = function() { return surrealdb.functions.time.now(); }; \
+		   LET $c = function() { return surrealdb.query('RETURN time::now()'); }; \
+		   RETURN [time::millis($a) = time::millis($b), time::millis($a) = time::millis($c)] };",
+	);
+	assert_eq!(results.len(), 1, "{results:?}");
+	let answer = results[0].as_ref().expect("the block answers");
+	assert!(answer.contains("true") && !answer.contains("false"), "{results:?}");
+}
+
+/// What `sql` answers after `setup`, once compiled whole and once planned a
+/// statement at a time, which must agree.
+fn answers(setup: &str, sql: &str) -> Rendered {
+	let runtime =
+		tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
+	runtime.block_on(async {
+		let (expected, _, _) = measured(setup, sql, true).await;
+		let (whole, _, _) = measured(setup, sql, false).await;
+		assert_eq!(whole, expected, "`{sql}` answered differently when compiled whole");
+		whole
+	})
+}
+
+/// The error text of slot `at`, empty where the slot succeeded.
+fn failure(results: &Rendered, at: usize) -> String {
+	results[at].as_ref().err().cloned().unwrap_or_default()
+}
+
+/// A top-level `RETURN` inside `BEGIN … COMMIT` is a value statement: every
+/// statement after it runs, and the block commits what they wrote.
+#[test]
+fn a_return_in_a_block_is_a_value_statement() {
+	let results = answers(
+		"DEFINE TABLE t;",
+		"BEGIN; CREATE t:1 SET a = 'one'; RETURN 'ret'; CREATE t:2 SET a = 'two'; COMMIT; \
+		 SELECT VALUE a FROM t ORDER BY a;",
+	);
+	assert_eq!(results.len(), 6, "{results:?}");
+	assert!(results.iter().all(Result::is_ok), "{results:?}");
+	assert!(results[1].as_ref().is_ok_and(|v| v.contains("one")), "{results:?}");
+	assert!(results[2].as_ref().is_ok_and(|v| v.contains("ret")), "{results:?}");
+	assert!(results[3].as_ref().is_ok_and(|v| v.contains("two")), "{results:?}");
+	let rows = results[5].as_ref().expect("the select answers");
+	assert!(rows.contains("one") && rows.contains("two"), "both rows committed: {results:?}");
+}
+
+/// The block's end rewrites a `RETURN`'s slot like any other recorded slot: a
+/// `CANCEL` after it cancels every slot, the `RETURN`'s included.
+#[test]
+fn a_return_then_cancel_cancels_every_slot() {
+	let results = answers(
+		"DEFINE TABLE t;",
+		"BEGIN; CREATE t:1; RETURN 'ret'; CREATE t:2; CANCEL; SELECT VALUE id FROM t;",
+	);
+	assert_eq!(results.len(), 6, "{results:?}");
+	for at in 1..=3 {
+		assert!(failure(&results, at).contains("cancelled transaction"), "{at}: {results:?}");
+	}
+	assert!(results[4].is_ok(), "CANCEL answers NONE: {results:?}");
+	assert_eq!(results[5], Ok("Array(Array([]))".to_owned()), "nothing committed");
+}
+
+/// A failure after a `RETURN` fails the `RETURN`'s slot with the rest of the
+/// block's earlier slots, and the statements after the failure are cancelled.
+#[test]
+fn a_return_then_failure_fails_the_return_slot() {
+	let results = answers(
+		"DEFINE TABLE t;",
+		"BEGIN; CREATE t:1; RETURN 'ret'; THROW 'x'; CREATE t:2; COMMIT;",
+	);
+	assert_eq!(results.len(), 6, "{results:?}");
+	assert!(failure(&results, 1).contains("failed transaction"), "{results:?}");
+	assert!(failure(&results, 2).contains("failed transaction"), "{results:?}");
+	assert!(failure(&results, 3).contains('x'), "{results:?}");
+	assert!(failure(&results, 4).contains("cancelled transaction"), "{results:?}");
+	assert!(failure(&results, 5).contains("Cannot COMMIT"), "{results:?}");
+}
+
+/// A `CANCEL` after a failure is answered NONE, as a `CANCEL` of a healthy
+/// block is; every statement of the request has a slot.
+#[test]
+fn a_cancel_after_a_failure_answers_none() {
+	let results = answers("DEFINE TABLE t;", "BEGIN; THROW 'x'; CREATE t:1; CANCEL; RETURN 2;");
+	assert_eq!(results.len(), 5, "{results:?}");
+	assert!(failure(&results, 1).contains('x'), "{results:?}");
+	assert!(failure(&results, 2).contains("cancelled transaction"), "{results:?}");
+	assert!(results[3].is_ok(), "CANCEL answers NONE: {results:?}");
+	assert!(results[4].as_ref().is_ok_and(|v| v.contains('2')), "{results:?}");
+}
+
+/// Whether slot `at` answered the integer `n`.
+fn is_int(results: &Rendered, at: usize, n: i64) -> bool {
+	results[at].as_ref().is_ok_and(|v| v.contains(&format!("Int({n})")))
+}
+
+/// A `LET` in a block that commits stays bound for the statements after the
+/// block; one in a block that is cancelled is unbound again.
+#[test]
+fn a_let_survives_a_commit_and_is_undone_by_a_cancel() {
+	let results =
+		answers("", "BEGIN; LET $t = 1; COMMIT; RETURN $t; BEGIN; LET $u = 2; CANCEL; RETURN $u;");
+	assert_eq!(results.len(), 8, "{results:?}");
+	assert!(is_int(&results, 3, 1), "the committed binding stands: {results:?}");
+	assert_eq!(results[7], Ok("None".to_owned()), "the cancelled binding is gone: {results:?}");
+}
+
+/// A block that fails puts back the value a `LET` inside it overwrote.
+#[test]
+fn a_let_is_undone_by_a_failed_block() {
+	let results = answers("", "LET $x = 0; BEGIN; LET $x = 1; THROW 'e'; COMMIT; RETURN $x;");
+	assert_eq!(results.len(), 6, "{results:?}");
+	assert!(failure(&results, 3).contains('e'), "{results:?}");
+	assert!(is_int(&results, 5, 0), "the binding is the one held at BEGIN: {results:?}");
+}
+
+/// A statement planned in the same compile as the block, after its `CANCEL`,
+/// reads the reverted binding, not the value the block bound.
+#[test]
+fn a_statement_planned_after_a_cancel_reads_the_reverted_binding() {
+	let results = answers(
+		"DEFINE TABLE t;",
+		"LET $x = 0; BEGIN; LET $x = 1; CANCEL; RETURN $x; CREATE t:1 SET v = $x; \
+		 SELECT VALUE v FROM t;",
+	);
+	assert_eq!(results.len(), 7, "{results:?}");
+	assert!(is_int(&results, 4, 0), "{results:?}");
+	assert!(results[6].as_ref().is_ok_and(|v| v.contains("Int(0)")), "{results:?}");
+}
+
+/// A cancelled block restores a `LET` that shadowed a defined parameter, so
+/// the parameter answers its `DEFINE PARAM` value again rather than `NONE`.
+#[test]
+fn a_cancelled_let_restores_a_defined_param() {
+	let results = answers("", "DEFINE PARAM $p VALUE 3; BEGIN; LET $p = 5; CANCEL; RETURN $p;");
+	assert_eq!(results.len(), 5, "{results:?}");
+	assert!(is_int(&results, 4, 3), "{results:?}");
+}
+
+/// `USE` inside a block that is cancelled keeps its effect: the statements
+/// after the block run in the database it selected.
+#[tokio::test]
+async fn a_use_survives_a_cancelled_block() {
+	let ds = datastore().await;
+	for result in run(&ds, "DEFINE DATABASE other;").await {
+		result.expect("the setup runs");
+	}
+	let results = run(&ds, "BEGIN; USE DB other; CANCEL; CREATE marker:1;").await;
+	assert_eq!(results.len(), 4, "{results:?}");
+	assert!(results[3].is_ok(), "the statement after the block runs: {results:?}");
+	let there = run(&ds, "USE DB other; SELECT VALUE id FROM marker;").await;
+	assert!(
+		there[1].as_ref().is_ok_and(|v| v.contains("marker")),
+		"the record landed in the database `USE` selected: {there:?}"
+	);
+}
+
+/// How a request is interrupted at the statement it pulls.
+#[derive(Clone, Copy)]
+enum Interrupt {
+	Cancel,
+	Timeout,
+}
+
+/// Each statement's answer, as text, when `sql` is interrupted as its
+/// `pull`-th statement is taken from the input (counting from one).
+async fn interrupted(sql: &str, pull: usize, interrupt: Interrupt) -> Vec<String> {
+	use futures::StreamExt;
+
+	let ds = datastore().await;
+	let ses = session();
+	let opt = ds.setup_options(&ses);
+	let mut ctx = ds.setup_ctx().expect("a context");
+	let canceller = ctx.add_cancel();
+	if let Interrupt::Timeout = interrupt {
+		ctx.add_timeout(std::time::Duration::from_millis(500)).expect("a timeout");
+	}
+	ctx.attach_session(&ses).expect("the session attaches");
+
+	let ast = crate::syn::parse(sql).expect("the request parses");
+	let mut pulled = 0;
+	let stream = futures::stream::iter(ast.expressions).map(move |expr| {
+		pulled += 1;
+		if pulled == pull {
+			match interrupt {
+				Interrupt::Cancel => canceller.cancel(),
+				Interrupt::Timeout => std::thread::sleep(std::time::Duration::from_millis(700)),
+			}
+		}
+		Ok(expr)
+	});
+	let results = super::executor::Executor::execute_stream(&ds, ctx.freeze(), opt, false, stream)
+		.await
+		.expect("the request runs");
+	results
+		.iter()
+		.map(|res| match &res.result {
+			Ok(value) => format!("{value:?}"),
+			Err(e) => e.to_string(),
+		})
+		.collect()
+}
+
+/// The statement observed at a cancellation inside `BEGIN` has a slot of its
+/// own, answered as the statements after it are, and so has the `COMMIT` that
+/// ends the block.
+#[tokio::test]
+async fn the_statement_observed_at_a_cancellation_has_a_slot() {
+	let messages =
+		interrupted("BEGIN; CREATE a:1; CREATE a:2; CREATE a:3; COMMIT;", 3, Interrupt::Cancel)
+			.await;
+	assert_eq!(messages.len(), 5, "one result per statement: {messages:?}");
+	for at in 1..=3 {
+		assert!(messages[at].contains("cancelled transaction"), "{at}: {messages:?}");
+	}
+	assert!(messages[4].contains("Cannot COMMIT: the transaction was cancelled"), "{messages:?}");
+}
+
+/// The statement observed at a timeout inside `BEGIN` answers the timeout.
+#[tokio::test]
+async fn the_statement_observed_at_a_timeout_has_a_slot() {
+	let messages =
+		interrupted("BEGIN; CREATE a:1; CREATE a:2; CREATE a:3; COMMIT;", 3, Interrupt::Timeout)
+			.await;
+	assert_eq!(messages.len(), 5, "one result per statement: {messages:?}");
+	assert!(messages[1].contains("cancelled transaction"), "{messages:?}");
+	assert!(messages[2].contains("Timed out"), "the observed statement: {messages:?}");
+	assert!(messages[3].contains("Timed out"), "{messages:?}");
+	assert!(messages[4].contains("Cannot COMMIT: timed out"), "{messages:?}");
+}
+
+/// A `COMMIT` or `CANCEL` observed at the interrupt takes the terminator's
+/// slot, and the block ends there.
+#[tokio::test]
+async fn a_terminator_observed_at_an_interrupt_takes_its_terminator_slot() {
+	let messages = interrupted("BEGIN; CREATE a:1; COMMIT;", 3, Interrupt::Cancel).await;
+	assert_eq!(messages.len(), 3, "{messages:?}");
+	assert!(messages[1].contains("cancelled transaction"), "{messages:?}");
+	assert!(messages[2].contains("Cannot COMMIT: the transaction was cancelled"), "{messages:?}");
+
+	let messages = interrupted("BEGIN; CREATE a:1; CANCEL;", 3, Interrupt::Timeout).await;
+	assert_eq!(messages.len(), 3, "{messages:?}");
+	assert!(messages[2].contains("Timed out"), "{messages:?}");
+}
+
+/// A `BREAK` or `CONTINUE` outside every loop of a statement run in a
+/// caller-owned transaction answers as it does at the top of a request, and
+/// the statements after it run.
+#[tokio::test]
+async fn a_break_in_a_session_transaction_answers_invalid_control_flow() {
+	use crate::kvs::QueryRequest;
+
+	let ds = datastore().await;
+	let ses = session();
+	let autocommit = ds
+		.execute("BREAK;", &ses, None)
+		.await
+		.expect("the request runs")
+		.remove(0)
+		.result
+		.expect_err("a top-level BREAK fails");
+	assert!(autocommit.to_string().contains("outside of loop"), "{autocommit}");
+
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await.expect("a transaction"));
+	let results = ds
+		.run(
+			QueryRequest::new("BREAK; CONTINUE; RETURN 1;", &ses)
+				.with_transaction(Arc::clone(&txn)),
+		)
+		.await
+		.expect("the request runs");
+	txn.cancel().await.expect("the transaction is cancelled");
+	assert_eq!(results.len(), 3);
+	for (at, slot) in results.iter().enumerate().take(2) {
+		let error = slot.result.as_ref().expect_err("the slot is an error");
+		assert_eq!(format!("{error:?}"), format!("{autocommit:?}"), "slot {at}");
+	}
+	assert!(results[2].result.is_ok(), "the statement after it runs");
+}
+
+/// A backend that behaves exactly like the one it wraps until `refusing` is
+/// set, and then refuses to open a write transaction.
+struct RefusingBuilder {
+	inner: Arc<dyn surrealdb_kvs::TransactionBuilder>,
+	refusing: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl surrealdb_kvs::TransactionBuilder for RefusingBuilder {
+	fn name(&self) -> &'static str {
+		self.inner.name()
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> common::future::BoxFut<
+		'_,
+		surrealdb_kvs::Result<(Box<dyn surrealdb_kvs::Transactable>, bool)>,
+	> {
+		if matches!(write, TransactionType::Write)
+			&& self.refusing.load(std::sync::atomic::Ordering::SeqCst)
+		{
+			return Box::pin(async {
+				Err(surrealdb_kvs::Error::Datastore("no write transaction".to_string()))
+			});
+		}
+		self.inner.new_transaction(write)
+	}
+
+	fn shutdown(&self) -> common::future::BoxFut<'_, surrealdb_kvs::Result<()>> {
+		self.inner.shutdown()
+	}
+
+	fn register_metrics(&self) -> Option<surrealdb_kvs::Metrics> {
+		self.inner.register_metrics()
+	}
+
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		self.inner.collect_u64_metric(metric)
+	}
+}
+
+/// Builds the datastore of the wrapped path with a switch that makes it refuse
+/// write transactions.
+struct RefusingComposer(Arc<std::sync::atomic::AtomicBool>);
+
+impl crate::kvs::TransactionBuilderFactory for RefusingComposer {
+	type RouterState = ();
+
+	async fn new_transaction_builder(
+		&self,
+		path: &str,
+		canceller: tokio_util::sync::CancellationToken,
+		config: surrealdb_cnf::ConfigMap,
+	) -> anyhow::Result<crate::kvs::TransactionBuilderParts<Self::RouterState>> {
+		let parts =
+			crate::CommunityComposer().new_transaction_builder(path, canceller, config).await?;
+		Ok(crate::kvs::TransactionBuilderParts::without_router_state(Box::new(RefusingBuilder {
+			inner: Arc::from(parts.builder),
+			refusing: Arc::clone(&self.0),
+		})))
+	}
+
+	fn path_valid(&self, v: &str) -> anyhow::Result<String> {
+		crate::CommunityComposer().path_valid(v)
+	}
+}
+
+/// A block whose transaction cannot be opened answers every statement it holds,
+/// its terminating `COMMIT` or `CANCEL` included, and the statements after the
+/// block run as they would have.
+#[tokio::test]
+async fn a_block_that_cannot_begin_gives_its_terminator_a_slot() {
+	let refusing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_factory_path("memory", RefusingComposer(Arc::clone(&refusing)))
+		.await
+		.expect("a memory datastore");
+	let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
+	tx.ensure_ns_db(None, "test", "test").await.expect("the test namespace and database");
+	tx.commit().await.expect("committing the namespace");
+	refusing.store(true, std::sync::atomic::Ordering::SeqCst);
+
+	let render = |results: Vec<crate::dbs::QueryResult>| -> Rendered {
+		results
+			.into_iter()
+			.map(|res| res.result.map(|value| format!("{value:?}")).map_err(|e| e.to_string()))
+			.collect()
+	};
+
+	let results =
+		ds.execute("BEGIN; CREATE a:1; COMMIT;", &session(), None).await.expect("the request runs");
+	let answered = render(results);
+	assert_eq!(answered.len(), 3, "one result per statement: {answered:?}");
+	assert!(failure(&answered, 1).contains("Tried to start a transaction"), "{answered:?}");
+	assert!(
+		failure(&answered, 2).contains("Cannot COMMIT: the transaction could not be started"),
+		"{answered:?}"
+	);
+
+	let results =
+		ds.execute("BEGIN; CREATE a:1; CANCEL;", &session(), None).await.expect("the request runs");
+	let answered = render(results);
+	assert_eq!(answered.len(), 3, "one result per statement: {answered:?}");
+	assert!(failure(&answered, 1).contains("Tried to start a transaction"), "{answered:?}");
+	assert_eq!(answered[2], Ok("None".to_string()), "CANCEL answers NONE: {answered:?}");
 }

@@ -212,6 +212,10 @@ pub(crate) fn wrap(rid: &RecordId, err: ControlFlow) -> ControlFlow {
 // The statements, built rather than parsed
 // ===========================================================================
 
+// ===========================================================================
+// The statements, built rather than parsed
+// ===========================================================================
+
 /// `DELETE <what>`, as a plan.
 pub(crate) fn delete_of(what: Expr) -> Result<LogicalOp, ControlFlow> {
 	let statement = DeleteStatement {

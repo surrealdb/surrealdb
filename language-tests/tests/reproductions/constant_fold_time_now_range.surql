@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "Constant folding of time::now() in WHERE range bounds enables proper index range access and LIMIT pushdown"
+reason = "A comparison with time::now(), or with time::now() plus or minus a duration literal, bounds an index range that reads the statement clock when the scan opens. The plan holds the call and no instant, and the range still enables index range access, filter consumption and LIMIT pushdown."
 
 # DEFINE INDEX
 [[test.results]]
@@ -16,8 +16,8 @@ value = "None"
 value = "None"
 
 # ASC with time::now() as upper bound: all records are before 2026+, so all match
-# With constant folding, time::now() becomes a literal datetime, enabling
-# index range access and filter consumption for LIMIT pushdown.
+# The bound reads the statement clock when the scan opens, enabling index
+# range access and filter consumption for LIMIT pushdown.
 [[test.results]]
 value = "[{ id: test:1, ts: d'2020-01-02T00:00:00Z' }, { id: test:2, ts: d'2020-01-03T00:00:00Z' }, { id: test:3, ts: d'2020-01-04T00:00:00Z' }, { id: test:4, ts: d'2020-01-05T00:00:00Z' }, { id: test:5, ts: d'2020-01-06T00:00:00Z' }]"
 
@@ -34,6 +34,11 @@ value = "[{ id: test:1, ts: d'2020-01-02T00:00:00Z' }, { id: test:2, ts: d'2020-
 # which is before all records (2020-01-02 to 2020-01-11), so all match.
 [[test.results]]
 value = "[{ id: test:1, ts: d'2020-01-02T00:00:00Z' }, { id: test:2, ts: d'2020-01-03T00:00:00Z' }, { id: test:3, ts: d'2020-01-04T00:00:00Z' }, { id: test:4, ts: d'2020-01-05T00:00:00Z' }, { id: test:5, ts: d'2020-01-06T00:00:00Z' }]"
+
+# The plan names the call, not an instant, so it is the same plan whenever it runs
+[[test.results]]
+match = '''string::contains($result, "IndexScan") AND string::contains($result, "access: >time::now() - 10y <time::now()") AND !string::contains($result, "TableScan")'''
+error = false
 */
 
 -- Index on timestamp field
@@ -72,4 +77,9 @@ SELECT id, ts FROM test
 -- Both bounds are expressions: time::now() - 10y < ts < time::now() - 1d
 SELECT id, ts FROM test
   WHERE ts > time::now() - 10y AND ts < time::now() - 1d
+  ORDER BY ts ASC LIMIT 5;
+
+-- The range is bounded by the clock itself: EXPLAIN shows the call
+EXPLAIN SELECT id, ts FROM test
+  WHERE ts > time::now() - 10y AND ts < time::now()
   ORDER BY ts ASC LIMIT 5;

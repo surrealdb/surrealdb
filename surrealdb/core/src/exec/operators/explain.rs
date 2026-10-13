@@ -156,8 +156,8 @@ fn format_execution_plan(
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
 
 	// Show the output partitioning only when the operator produces more than one
-	// stream, so a plan built entirely from single-partition operators renders
-	// exactly as it did before partitioning existed.
+	// stream, so a plan built only from single-partition operators shows no
+	// partitioning line.
 	let partitioning = plan.output_partitioning();
 	if !partitioning.is_single() {
 		let _ = write!(output, " [partitions: {}]", partitioning.count());
@@ -202,7 +202,7 @@ fn format_execution_plan_json(plan: &dyn ExecOperator, redaction: Redaction) -> 
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
 
 	// Emitted only when the operator produces more than one stream, so a plan of
-	// single-partition operators renders the same keys it always did.
+	// single-partition operators renders no partitioning keys.
 	let partitioning = plan.output_partitioning();
 	if !partitioning.is_single() {
 		obj.insert("partitions", Value::from(partitioning.count() as i64));
@@ -319,7 +319,7 @@ fn metrics_json(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) 
 		// Deliberately rendered even at zero — unlike the counters above,
 		// `records_fetched: 0` is itself the claim worth asserting: an ANN
 		// search whose predicate was fully served by the allow-list bitmap
-		// performed no in-traversal record fetches (#548).
+		// performed no in-traversal record fetches.
 		metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
 	}
 	metrics_obj
@@ -409,8 +409,8 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	// like batches/elapsed), rendered only when non-zero. `scanned` is the
 	// denominator for graph-traversal filter selectivity (matched = rows);
 	// `skipped` is the TopK threshold-pushdown reject count; `fetched` is the
-	// count of candidate records evaluated inside an ANN search (#548 drives
-	// it to zero for index-covered predicates).
+	// count of candidate records evaluated inside an ANN search (zero for
+	// predicates the index fully covers).
 	let mut extra = String::new();
 	let scanned = metrics.edges_scanned();
 	if scanned > 0 {
@@ -485,8 +485,8 @@ fn format_analyze_plan_by(
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
 
 	// Show the output partitioning only when the operator produces more than one
-	// stream, so a plan built entirely from single-partition operators renders
-	// exactly as it did before partitioning existed.
+	// stream, so a plan built only from single-partition operators shows no
+	// partitioning line.
 	let partitioning = plan.output_partitioning();
 	if !partitioning.is_single() {
 		let _ = write!(output, " [partitions: {}]", partitioning.count());
@@ -538,7 +538,7 @@ fn format_analyze_plan_json(
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
 
 	// Emitted only when the operator produces more than one stream, so a plan of
-	// single-partition operators renders the same keys it always did.
+	// single-partition operators renders no partitioning keys.
 	let partitioning = plan.output_partitioning();
 	if !partitioning.is_single() {
 		obj.insert("partitions", Value::from(partitioning.count() as i64));
@@ -599,6 +599,13 @@ impl ExplainPlan {
 				);
 				let _ = writeln!(plan_text);
 				let _ = write!(plan_text, "Total rows: {}", total_rows);
+				// Every operator of a VM program reports one set of metrics, so what its
+				// morsels did is written once, beneath the plan.
+				if !redact_volatile_explain_attrs
+					&& let Some(morsels) = plan.metrics().and_then(|m| m.morsels())
+				{
+					let _ = write!(plan_text, "\n{}", morsels.render_text());
+				}
 				Value::String(plan_text.into())
 			}
 			ExplainFormat::Json => {
@@ -608,6 +615,11 @@ impl ExplainPlan {
 					Redaction::default(),
 				);
 				plan_json.insert("total_rows", Value::from(total_rows as i64));
+				if !redact_volatile_explain_attrs
+					&& let Some(morsels) = plan.metrics().and_then(|m| m.morsels())
+				{
+					plan_json.insert("morsels", Value::Object(morsels.render_object()));
+				}
 				Value::Object(plan_json)
 			}
 		}

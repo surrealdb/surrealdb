@@ -15,6 +15,9 @@
 //! record neither reaches — data that is not an object, an older revision — is
 //! decoded whole, once, and read from that.
 
+// Runtime support that lowered programs call into.
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 use std::cell::OnceCell;
 
@@ -793,7 +796,7 @@ mod tests {
 			crate::catalog::encode_record(DOCUMENT, None, &val("{ a: 1, b: 'xy' }"), None)
 				.expect("encodes");
 		let at = value.windows(2).position(|w| w == b"xy").expect("the string is stored");
-		// 0xFF is never valid UTF-8, so the string no longer decodes.
+		// 0xFF is never valid UTF-8, so the string does not decode.
 		value[at] = 0xFF;
 		assert!(decode_record_value(&key, &value, None).is_err(), "a whole decode refuses it");
 		let row = StoredRow::new(&key, &value);

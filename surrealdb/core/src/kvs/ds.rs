@@ -22,7 +22,7 @@ use bytes::{Bytes, BytesMut};
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
 use common::rt::spawn;
 use common::time::{Instant, sleep, timeout, timeout_at};
-use futures::{Future, Stream};
+use futures::{Future, Stream, StreamExt};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
 use surrealdb_cnf::ConfigMap;
@@ -57,6 +57,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
+use crate::dbs::executor::CarryBound;
 use crate::dbs::node::{Node, NodeRelease, Timestamp};
 use crate::dbs::{
 	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
@@ -200,6 +201,20 @@ const _: () = assert!(
 /// The cadence is on the log, not on the retries: attempts run as fast as the
 /// back-off allows, and one in every interval is reported.
 const BOOTSTRAP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
+
+/// What the top-level `LET`s of an import may retain between statements.
+///
+/// An import is read as a stream and never held in memory as a whole, but every
+/// top-level `LET` binds into the request context for the rest of the stream,
+/// so the carried parameters would otherwise grow with the input. A stream that
+/// binds more than 10 000 distinct names, or values estimated at more than
+/// 64 MiB, fails the `LET` that crosses the bound and ends there; the statements
+/// before it have run. Exports define no parameters, so a restore stays far
+/// below the bound.
+pub(crate) const IMPORT_CARRY_BOUND: CarryBound = CarryBound {
+	names: Some(10_000),
+	bytes: Some(64 * 1024 * 1024),
+};
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -1002,6 +1017,23 @@ impl Datastore {
 	/// with the memory threshold error.
 	pub fn query_memory_max(&self) -> usize {
 		self.memory_host().settings.max
+	}
+
+	/// The morsel settings the datastore holds, as `(key, value)` pairs in the form
+	/// the configuration reads them, for a harness to check that a setting it
+	/// passed reached the store.
+	pub fn morsel_knobs(&self) -> Vec<(&'static str, String)> {
+		let exec = &self.config.exec;
+		vec![
+			("morsel_split_rows", exec.morsel_split_rows.to_string()),
+			("morsel_target_bytes", exec.morsel_target_bytes.to_string()),
+			("morsel_places", exec.morsel_places.to_string()),
+			("morsel_oltp_reserve", exec.morsel_oltp_reserve.to_string()),
+			("morsel_window_bytes", exec.morsel_window_bytes.to_string()),
+			("morsel_steal_always", exec.morsel_steal_always.to_string()),
+			("morsel_place_quantum", exec.morsel_place_quantum.to_string()),
+			("morsel_explain_analyze", exec.morsel_explain_analyze.to_string()),
+		]
 	}
 
 	/// The longest a query waits in all for other queries to give memory back
@@ -2852,7 +2884,7 @@ impl Datastore {
 				// with a fresh heartbeat — and archiving it here would retire a
 				// live member. The write is therefore conditional on the heartbeat
 				// the scan saw: a row whose heartbeat has moved has re-registered
-				// or refreshed itself, and is no longer the row that expired.
+				// or refreshed itself, and is not the row that expired.
 				//
 				// That closes the window in both directions. A commit that landed
 				// before this transaction's snapshot is visible to this re-read,
@@ -2885,7 +2917,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Removes and cleans up nodes which are no longer in this cluster.
+	/// Removes and cleans up nodes which are not in this cluster any more.
 	///
 	/// This function should be run periodically at an interval.
 	///
@@ -3000,7 +3032,7 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Deletes the release records whose node row no longer exists.
+	/// Deletes the release records whose node row does not exist.
 	///
 	/// A release that does not know the records removes a node's row without removing its
 	/// record, so the record outlives the node. The records are read in batches without a write
@@ -3179,8 +3211,8 @@ impl Datastore {
 	/// Refreshes the durable copy of an *existing* RPC session with the given
 	/// value, expiring `ttl` from now, **without recreating it** if it is gone.
 	///
-	/// Returns `true` if the entry was present and updated, `false` if it no
-	/// longer exists (or was changed on another node). Uses a conditional
+	/// Returns `true` if the entry was present and updated, `false` if it does
+	/// not exist (or was changed on another node). Uses a conditional
 	/// write (`put_compare_key` guarded by the value just read), so it is
 	/// atomic on last-writer-wins backends (TiKV): a session deleted elsewhere
 	/// between the read and the write is neither resurrected nor clobbered — a
@@ -3748,7 +3780,7 @@ impl Datastore {
 			return Ok(0);
 		}
 		// Serialize recovery: while any local builder task is still running
-		// (a previously adopted build or a user-started one), defer further
+		// (an already adopted build or a user-started one), defer further
 		// adoptions to a later pass. Without this, a restart with several
 		// stranded builds starts them all at once, and the concurrent initial
 		// scans can overwhelm a small instance's memory and CPU.
@@ -5461,8 +5493,8 @@ impl Datastore {
 			let mut applied_format = format_version;
 			let res: Result<HnswCompactionOutcome> = async {
 				// Re-tested inside the write transaction, and under a conflict
-				// registration. The dispatch-time test was a snapshot in a
-				// transaction that has since been cancelled, so a build acquired
+				// registration. The dispatch-time test is a snapshot taken in a
+				// transaction that has been cancelled, so a build acquired
 				// after it would otherwise be invisible to this apply; the
 				// registration makes such an acquisition conflict this commit
 				// instead, and the retry re-reads it.
@@ -5664,7 +5696,7 @@ impl Datastore {
 			.await;
 			// `apply_diskann_compaction` normally owns the transaction's
 			// lifecycle (commits on success, cancels on apply failure while
-			// holding the graph write lock — closing the #7318 race). A few
+			// holding the graph write lock — so no other writer interleaves). A few
 			// pre-apply paths inside `IndexOperation::apply_diskann_compaction`
 			// (missing table or catalog lookup errors) can return without
 			// finalizing the tx, so we add an idempotent safety net here:
@@ -6187,9 +6219,51 @@ impl Datastore {
 		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
 		// holds a handful of residual variants, so a bare layer error
 		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
-		// reaches the client as `internal` where it used to be a validation
+		// reaches the client as `internal` rather than as a validation
 		// failure. The helper walks the whole registry.
 		.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// Run a query as the fragments of one stream: each statement is compiled
+	/// when it arrives rather than with the whole request.
+	///
+	/// Sets up the query exactly as [`Self::run`] does, so session checks,
+	/// variables, cancellation and parser settings are the same, and the
+	/// statements have the same semantics. Intended for the equivalence checks of
+	/// the language tests, which compares this against [`Self::run`]; it is
+	/// compiled only under the `internal-fragments` feature. A request carrying
+	/// a client transaction is refused: fragments run outside session
+	/// transactions.
+	#[cfg(feature = "internal-fragments")]
+	#[doc(hidden)]
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)
+	)]
+	pub async fn execute_fragments(
+		&self,
+		req: QueryRequest<'_>,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		let QueryRequest {
+			source,
+			session,
+			variables,
+			transaction,
+			cancel,
+			row_format: _,
+			held_transactions: _,
+		} = req;
+		if transaction.is_some() {
+			return Err(TypesError::internal(
+				"Fragments run outside session transactions, but the request carries one"
+					.to_string(),
+			));
+		}
+		let statements = self.statements_for(source)?;
+		let (opt, ctx) = self.setup_query(session, variables, None, cancel)?;
+		Executor::execute_fragments(self, ctx, opt, statements)
+			.await
+			.map_err(crate::err::anyhow_to_types_error)
 	}
 
 	/// Prepare a query to stream its results.
@@ -6420,7 +6494,7 @@ impl Datastore {
 		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
 		// holds a handful of residual variants, so a bare layer error
 		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
-		// reaches the client as `internal` where it used to be a validation
+		// reaches the client as `internal` rather than as a validation
 		// failure. The helper walks the whole registry.
 		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
 
@@ -6512,7 +6586,7 @@ impl Datastore {
 	///
 	/// The grammar gates are derived from the caller's live capabilities:
 	/// import text is a fresh statement at the query boundary, not text this
-	/// engine previously rendered, so the experimental-syntax gates apply to
+	/// engine rendered, so the experimental-syntax gates apply to
 	/// it as they do to any other operator-supplied query.
 	fn import_parser_settings(capabilities: &Capabilities) -> ParserSettings {
 		ParserSettings {
@@ -6531,6 +6605,21 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		query: S,
+	) -> Result<Vec<QueryResult>>
+	where
+		S: Stream<Item = Result<Bytes>>,
+	{
+		self.execute_import_bounded(sess, vars, query, IMPORT_CARRY_BOUND).await
+	}
+
+	/// [`Datastore::execute_import`] with `carry` as the bound on what the
+	/// import's top-level `LET`s retain between statements.
+	pub(crate) async fn execute_import_bounded<S>(
+		&self,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		query: S,
+		carry: CarryBound,
 	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
@@ -6623,7 +6712,15 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
+		Executor::execute_statement_stream_bounded(
+			self,
+			Arc::new(ctx),
+			opt,
+			true,
+			carry,
+			stream.map(|x| x.map(TopLevelStatement::Ast)),
+		)
+		.await
 	}
 
 	/// Evaluates a SQL [`Value`] without checking authenticating config
@@ -6682,11 +6779,11 @@ impl Datastore {
 
 		// Freeze the context
 		let ctx = ctx.freeze();
-		// Evaluate the clause. It has no statement behind it, so it enters the
-		// engine through the route every other caller outside a plan takes,
-		// under the options built for this session above.
+		// Evaluate the clause. It has no statement behind it, so it is planned
+		// as a statement of its own, in the frame every caller outside a plan
+		// enters through, under the options built for this session above.
 		let exec = crate::exec::entry::frame(&ctx, &opt, None).await;
-		let res = crate::exec::entry::scalar(&exec, val).await;
+		let res = crate::exec::entry::statement(&exec, val).await;
 		// Store any data
 		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
@@ -7779,7 +7876,7 @@ mod test {
 		// A mutation-only query returns an empty array.
 		let val = run_gql(&ds, &ses, "MATCH (n:person) REMOVE n.age").await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![]));
-		// The field is gone: a filter on the old value no longer matches.
+		// The field is gone: a filter on the old value does not match.
 		let val =
 			run_gql(&ds, &ses, "MATCH (n:person) WHERE n.age = 30 RETURN n.name AS name").await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![]));
@@ -7887,7 +7984,7 @@ mod test {
 			val,
 			PublicValue::Array(surrealdb_types::array![object! { name: "A2", city: "X" }])
 		);
-		// The dropped `age` no longer matches.
+		// The dropped `age` does not match.
 		let val =
 			run_gql(&ds, &ses, "MATCH (n:person) WHERE n.age = 30 RETURN n.name AS name").await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![]));
@@ -7959,7 +8056,7 @@ mod test {
 		)
 		.await?;
 		// `a` fans out to two rows; SET a.age = 7 must show a consistent AFTER image
-		// on both rows (the §1 fix — no stale pre-mutation binding on a duplicate).
+		// on both rows (no stale pre-mutation binding is read on a duplicate).
 		let val = run_gql(
 			&ds,
 			&ses,
@@ -7988,7 +8085,7 @@ mod test {
 			RELATE person:1->knows->person:2 SET since = 2020;",
 		)
 		.await?;
-		// DETACH DELETE on `a` cascades the `k` edge; the §3 fix nulls `k` in the
+		// DETACH DELETE on `a` cascades the `k` edge; `k` is nulled in the
 		// RETURN rather than surfacing the stale (deleted) edge.
 		let val = run_gql(
 			&ds,
@@ -8215,7 +8312,7 @@ mod test {
 		let (ds, ses) = gql_test_ds().await?;
 		execute_all(&ds, &ses, "CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B';")
 			.await?;
-		// The trailing MATCH no longer observes the row the DELETE removed.
+		// The trailing MATCH does not observe the row the DELETE removed.
 		let val = run_gql(
 			&ds,
 			&ses,
@@ -8650,7 +8747,7 @@ mod test {
 		assert_eq!(hnsw_pending_len(&ds, &ikb).await?, 1);
 
 		// Force that neighbour lookup to the store, then corrupt its encoded
-		// vector. The apply now errors after `remove_node_and_bidirectional_edges`
+		// vector. The apply errors after `remove_node_and_bidirectional_edges`
 		// but before `save_nodes` can version the mutated layer.
 		ds.index_store().invalidate_hnsw_index_caches(table_id, &ikb, format_version).await;
 		let entry_vector_key = surrealdb_datastore::key::schema::HnswVectorKey::new(
@@ -10082,7 +10179,7 @@ mod test {
 	///
 	/// The restart lands mid-window — the doc-ID batch is 1000 and far fewer
 	/// records are written — which is the case a persisted per-allocation
-	/// cursor used to cover and the window's committed end covers now. A
+	/// cursor must cover, as must the window's committed end. A
 	/// restart keeps the node id, which is what makes the persisted allocator
 	/// state reachable at all: it is keyed per node.
 	#[tokio::test]
@@ -10222,6 +10319,48 @@ mod test {
 			result.result?;
 		}
 		assert_eq!(export_sql(&stream_target, &session).await?, sql, "restored from a stream");
+
+		Ok(())
+	}
+
+	/// An import of `lets` distinct top-level `LET`s, then a record that shows
+	/// whether the stream got past them.
+	fn import_binding(lets: usize) -> String {
+		let mut sql = String::from("OPTION IMPORT;\n");
+		for i in 0..lets {
+			sql.push_str(&format!("LET $p{i} = {i};\n"));
+		}
+		sql.push_str("CREATE marker:1;\n");
+		sql
+	}
+
+	/// An import that binds [`IMPORT_CARRY_BOUND`] names runs to its end, and
+	/// one that binds a name more fails the `LET` that crosses the bound and
+	/// runs nothing after it, through both import entry points.
+	#[tokio::test]
+	async fn import_stops_at_the_let_that_crosses_the_carry_bound() -> Result<()> {
+		let session = Session::owner().with_ns("test").with_db("test");
+		let limit = IMPORT_CARRY_BOUND.names.expect("an import bounds the names it carries");
+
+		let at_limit = empty_datastore(&session).await?;
+		let sql = Bytes::from(import_binding(limit).into_bytes());
+		let results = at_limit
+			.execute_import(&session, None, futures::stream::once(async move { Ok(sql) }))
+			.await?;
+		assert!(results.is_empty(), "an import at the bound reports only failures: {results:?}");
+		let rows = at_limit.execute("SELECT VALUE id FROM marker", &session, None).await?;
+		assert_eq!(rows[0].result.as_ref().unwrap().as_array().unwrap().len(), 1);
+
+		let past_limit = empty_datastore(&session).await?;
+		let sql = Bytes::from(import_binding(limit + 1).into_bytes());
+		let results = past_limit
+			.import_stream(&session, futures::stream::once(async move { Ok(sql) }))
+			.await?;
+		assert_eq!(results.len(), 1, "only the crossing LET reports");
+		let err = results[0].result.as_ref().unwrap_err();
+		assert!(err.message().contains(&format!("limit of {limit}")), "got: {err:?}");
+		let rows = past_limit.execute("SELECT VALUE id FROM marker", &session, None).await?;
+		assert!(rows[0].result.as_ref().unwrap().as_array().unwrap().is_empty());
 
 		Ok(())
 	}

@@ -3,9 +3,10 @@
 //! [`MatchFold`](super::match_plan::MatchFold) decides the shape of a
 //! binding-table plan: which anchor each pattern takes, where each conjunct is
 //! placed, how clauses join. It builds that shape through a
-//! [`BindingBackend`], which owns what a node of the shape is: the VM's
-//! physical plan (`vm::match_plan`) is the backend. A builder that cannot express a node declines
-//! with [`Planning::Decline`], which the fold passes up untouched.
+//! [`BindingBackend`], which owns what a node of the shape is. The IR binder's
+//! logical backend in `ir/build/match_fold.rs` implements it. A builder that
+//! cannot express a node declines with [`Planning::Decline`], which the fold
+//! passes up untouched.
 //!
 //! Every scalar a builder receives is a [`LogicalExpr`] scoped to the binding
 //! row, and every binding is named: the builders never see a [`MatchPlan`]
@@ -18,7 +19,6 @@ use crate::exec::operators::{
 	EdgeBinding, EndpointField, ExpandDir, JoinType, PathMode, ShortestSelector,
 };
 use crate::exec::vm::NotCovered;
-use crate::expr::Function;
 use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::{MatchOutput, MatchPlan, MutationStage};
 
@@ -122,7 +122,8 @@ pub(crate) trait BindingBackend {
 
 	async fn path_expand(&self, input: Self::Node, spec: PathSpec) -> Result<Self::Node, Planning>;
 
-	/// The DIFFERENT EDGES check across the edge bindings `edges`.
+	/// Enforces GQL DIFFERENT EDGES over the edge bindings named in `edges`: no
+	/// two of them may bind the same edge.
 	fn distinct_edges(&self, input: Self::Node, edges: Vec<String>)
 	-> Result<Self::Node, Planning>;
 
@@ -174,21 +175,4 @@ pub(crate) trait BindingBackend {
 	async fn sort(&self, input: Self::Node, output: &MatchOutput) -> Result<Self::Node, Planning>;
 
 	async fn limit(&self, input: Self::Node, output: &MatchOutput) -> Result<Self::Node, Planning>;
-}
-
-/// Whether an expression contains a call to a registered aggregate function.
-/// Used to classify an aggregating query's columns: a non-key column with an
-/// aggregate folds via `extract_aggregate_info`, one without is a value
-/// determined by the grouping keys (first-value).
-pub(crate) fn expr_has_aggregate(
-	registry: &crate::exec::function::FunctionRegistry,
-	expr: &LogicalExpr,
-) -> bool {
-	expr.any(|e| {
-		matches!(
-			e,
-			LogicalExpr::Call(call)
-				if matches!(&call.receiver, Function::Normal(name) if registry.get_aggregate(name.as_str()).is_some())
-		)
-	})
 }

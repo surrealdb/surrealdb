@@ -1,7 +1,7 @@
 //! Planning a block against what its own schema statements write.
 //!
 //! A statement after a schema statement reads a catalog the schema statement
-//! has changed. Rather than compile it once the schema statement has run, the
+//! has changed. So the
 //! block runs the schema statement speculatively while it is planned: its
 //! program, lowered as the block lowers it, run over the transaction while the
 //! transaction speculates (`kvs::Transaction::speculate`), so its writes land
@@ -34,19 +34,16 @@
 //! handed the view, through a planner over it ([`view`]) and a frame holding
 //! it, and nothing else reads through the overlay. Every other holder of the
 //! transaction — a task of an earlier statement, a concurrent caller of a
-//! client's transaction — reads and writes the storage as before, and a task
+//! client's transaction — reads and writes the storage directly, and a task
 //! of the speculative run still holding the view once the speculation ends
 //! takes no write. Only the executor's planner for a statement it is about to
 //! run speculates ([`Planner::speculation`]).
 
 use std::sync::Arc;
 
-use crate::ctx::Context;
-use crate::exec::context::{RootContext, SessionInfo};
+use crate::exec::ExecutionContext;
 use crate::exec::planner::Planner;
-use crate::exec::vm::plan::PhysicalPlan;
-use crate::exec::{ExecutionContext, FlowResult};
-use crate::kvs::speculation::Overlay;
+use crate::expr::logical::LogicalOp;
 use crate::val::Value;
 
 #[cfg(test)]
@@ -241,273 +238,6 @@ pub(super) fn held(
 	}
 }
 
-/// What a schema statement's speculative run did.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Speculated {
-	/// The catalog's writes after the run: those it started from and its own.
-	pub(crate) overlay: Overlay,
-	/// What its draws drew — ids leased, uuids minted — which its real
-	/// run takes.
-	pub(crate) draws: Vec<(u16, u128)>,
-	/// Whether the run wrote anything.
-	pub(crate) changed: bool,
-	/// Whether the run left an effect beyond the overlay for the real run.
-	pub(crate) skipped: bool,
-	/// The statement's value.
-	pub(crate) value: Value,
-	/// The table the run defined, as the statement defines one where there is
-	/// none, that a write of the block before the statement may define first:
-	/// its definition's reservations are shared with that write
-	/// ([`super::program::ImplicitTable`]).
-	pub(crate) shared: Option<surrealdb_strand::TableName>,
-}
-
-/// How a speculative run ended.
-#[derive(Debug, Clone)]
-pub(crate) enum Outcome {
-	/// It ran to its end.
-	Ran(Box<Speculated>),
-	/// It raised. `refused` is whether it raised a refusal the statement
-	/// declares — a definition that exists or is missing, a capability the
-	/// caller lacks — after leaving no effect for the real run: then the real
-	/// run, the same program over the same catalog, raises it too. What it
-	/// raises is left to that run.
-	Raised {
-		refused: bool,
-	},
-}
-
-/// Run schema statement `physical`, mapped by `planner`, speculatively over
-/// the catalog `from` leaves: `None` when the planner may not speculate or the
-/// statement does not lower.
-pub(super) async fn run(
-	planner: &Planner<'_>,
-	physical: &PhysicalPlan,
-	from: &Overlay,
-) -> Option<Outcome> {
-	let speculating = planner.speculation.clone()?;
-	let speculation = planner.txn.as_ref()?.speculate(from.clone())?;
-	let planner = planner.over(Arc::clone(speculation.txn()));
-	let txn = Arc::clone(speculation.txn());
-	let ran = execute(&planner, physical, &speculating.options, &txn).await;
-	drop(planner);
-	let mut overlay = speculation.end();
-	let draws = overlay.take_notes();
-	let skipped = overlay.take_skipped();
-	let refused = overlay.take_refused();
-	// The ids the run held are the statement's to release. No reservation
-	// models a run that did not lower or that raised, so its ids are released
-	// now.
-	let mark = speculating.held.mark();
-	speculating.held.ids().extend(overlay.take_held());
-	if !matches!(ran, Some(Ok(_))) {
-		speculating.held.release_since(mark);
-	}
-	#[cfg(test)]
-	{
-		SPECULATED.with(|count| count.set(count.get() + 1));
-		DRAWN.with(|drawn| drawn.borrow_mut().extend(draws.iter().map(|(_, value)| *value)));
-	}
-	match ran? {
-		Ok(value) => Some(Outcome::Ran(Box::new(Speculated {
-			changed: !overlay.writes_as(from),
-			skipped,
-			overlay,
-			draws,
-			value,
-			shared: None,
-		}))),
-		Err(_) => Some(Outcome::Raised {
-			refused: refused && !skipped,
-		}),
-	}
-}
-
-/// Lower `physical` and run it to its end in the session's frame.
-async fn execute(
-	planner: &Planner<'_>,
-	physical: &PhysicalPlan,
-	options: &Arc<crate::dbs::Options>,
-	txn: &Arc<crate::kvs::Transaction>,
-) -> Option<FlowResult<Value>> {
-	let (program, served) = Box::pin(super::lower_to_program(planner, physical)).await.ok()?;
-	let program = Arc::new(program);
-	let exec = frame(planner, options, txn).await;
-	let exec = match served.is_empty() {
-		true => exec,
-		false => exec.with_vm_served(served.into()),
-	};
-	Some(
-		async {
-			let stream = super::host::execute_program(&program, &exec)?;
-			let mut values = crate::exec::operators::collect_stream(stream).await?;
-			Ok(match values.len() {
-				0 => Value::None,
-				_ => values.swap_remove(0),
-			})
-		}
-		.await,
-	)
-}
-
-/// The frame the executor runs a statement in, for `planner`'s session.
-async fn frame(
-	planner: &Planner<'_>,
-	options: &Arc<crate::dbs::Options>,
-	txn: &Arc<crate::kvs::Transaction>,
-) -> ExecutionContext {
-	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-	let mut ctx = Context::new_child(planner.frozen_ctx());
-	ctx.set_transaction(Arc::clone(txn));
-	let ctx = ctx.freeze();
-	let root = ExecutionContext::Root(RootContext {
-		cancellation: Arc::new(ctx.cancel_token().map(|t| t.child_token()).unwrap_or_default()),
-		session: SessionInfo::from_context(&ctx).map(Arc::new),
-		ctx,
-		options: Some((**options).clone()),
-		datastore: None,
-		auth: Arc::clone(&options.auth),
-		current_value: None,
-		current_row: None,
-		forbidden_row: None,
-		skip_fetch_perms: false,
-		perms_suppressed: false,
-		caller_perms_suppressed: false,
-		computing_record: None,
-		no_write: None,
-		version_stamp: None,
-		guard_verdicts: Default::default(),
-		writing: false,
-	});
-	let (Ok(ns), Ok(db)) = (options.ns(), options.db()) else {
-		return root;
-	};
-	let (Ok(ns_def), Ok(db_def)) =
-		(txn.expect_ns_by_name(ns).await, txn.expect_db_by_name(ns, db).await)
-	else {
-		return root;
-	};
-	root.with_database(ns_def, db_def)
-}
-
-/// A speculation from `overlay` and a planner like `planner` over its view,
-/// which binds, maps and lowers against the catalog as `overlay` leaves it:
-/// `None` when `planner` has no transaction, or its transaction is itself a
-/// view. The speculation ends when the guard is dropped; what is planned over
-/// the view holds no transaction, so it runs over the real one.
-pub(super) fn view<'p>(
-	planner: &Planner<'p>,
-	overlay: &Overlay,
-) -> Option<(crate::kvs::tx::Speculation, Planner<'p>)> {
-	let speculation = planner.txn.as_ref()?.speculate(overlay.clone())?;
-	let over = planner.over(Arc::clone(speculation.txn()));
-	Some((speculation, over))
-}
-
-/// Whether the catalog as `overlay` leaves it defines table `table`, as
-/// `planner`'s transaction reads it; `false` when it cannot tell.
-pub(super) async fn defines_table(
-	planner: &Planner<'_>,
-	overlay: &Overlay,
-	table: &surrealdb_strand::TableName,
-) -> bool {
-	use crate::catalog::providers::TableProvider;
-	let Some((_speculation, over)) = view(planner, overlay) else {
-		return false;
-	};
-	let (Some(txn), Some((ns, db))) = (over.txn.clone(), over.ns_db_ids().await) else {
-		return false;
-	};
-	matches!(txn.get_tb(ns, db, table, None).await, Ok(Some(_)))
-}
-
-/// The catalog as a planner's transaction reads it — through a speculation's
-/// overlay when the planner is over its view — for a footprint's expansion.
-pub(super) struct TxnCatalog {
-	pub(super) txn: Arc<crate::kvs::Transaction>,
-	pub(super) ids: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
-	/// Whether the footprint is a schema statement's, which reads a table's
-	/// rows as stored — an index's build, a view's backfill, run by a caller
-	/// no permission predicate binds — so that only a computed field reads
-	/// beyond them.
-	pub(super) schema: bool,
-}
-
-impl crate::exec::logical::footprint::CatalogView for TxnCatalog {
-	fn triggers<'a>(
-		&'a self,
-		table: &'a surrealdb_strand::TableName,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = (bool, bool)> + Send + 'a>> {
-		use crate::catalog::providers::TableProvider;
-		Box::pin(async move {
-			let Some((ns, db)) = self.ids else {
-				return (true, true);
-			};
-			let events = match self.txn.all_tb_events(ns, db, table, None).await {
-				Ok(events) => !events.is_empty(),
-				Err(_) => true,
-			};
-			let views = match self.txn.all_tb_views(ns, db, table, None).await {
-				Ok(views) => !views.is_empty(),
-				Err(_) => true,
-			};
-			(events, views)
-		})
-	}
-
-	fn any_triggers(
-		&self,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
-		Box::pin(async { true })
-	}
-
-	/// A field derived from a named record id component
-	/// ([`crate::catalog::FieldDefinition::is_key_part`]) reads nothing but
-	/// the id of the row it is read from, so it does not count as a computed
-	/// field here.
-	fn reads_through<'a>(
-		&'a self,
-		table: &'a surrealdb_strand::TableName,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-		use crate::catalog::Permission;
-		use crate::catalog::providers::TableProvider;
-		Box::pin(async move {
-			let Some((ns, db)) = self.ids else {
-				return true;
-			};
-			let table_def = match self.txn.get_tb(ns, db, table, None).await {
-				Ok(Some(def)) => def,
-				Ok(None) => return false,
-				Err(_) => return true,
-			};
-			if !self.schema && matches!(table_def.permissions.select, Permission::Specific(_)) {
-				return true;
-			}
-			match self.txn.all_tb_fields(ns, db, table, None).await {
-				Ok(fields) => fields.iter().any(|field| {
-					(field.computed.is_some() && !field.is_key_part())
-						|| (!self.schema
-							&& matches!(field.select_permission, Permission::Specific(_)))
-				}),
-				Err(_) => true,
-			}
-		})
-	}
-
-	fn defines<'a>(
-		&'a self,
-		table: &'a surrealdb_strand::TableName,
-	) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + 'a>> {
-		use crate::catalog::providers::TableProvider;
-		Box::pin(async move {
-			let Some((ns, db)) = self.ids else {
-				return false;
-			};
-			matches!(self.txn.get_tb(ns, db, table, None).await, Ok(Some(_)))
-		})
-	}
-}
-
 /// Whether running block statement `op` may change the catalog through code
 /// that is not written in it: the stored bodies it calls, and what the
 /// catalog runs for its writes — a written table's events that run in the
@@ -536,45 +266,9 @@ pub(super) async fn runs_unseen_schema(
 	reached(planner, op, closures_from_outside).await.is_none()
 }
 
-/// What block statement `op`, of footprint `footprint`, writes, when nothing
-/// it reaches changes the catalog unseen ([`runs_unseen_schema`]): its own
-/// writes, and in place of what the footprint could not name, the records of
-/// every table the code it reaches writes; with whether any of that code
-/// writes to a table it evaluates, which may be any table, defined or not. A
-/// closure it invokes that is written in an earlier statement of the block is
-/// in that statement's footprint, which holds what the closure's body writes.
-/// `None` when something it reaches may change the catalog.
-pub(super) async fn seen_writes(
-	planner: &Planner<'_>,
-	op: &crate::expr::logical::LogicalOp,
-	footprint: &crate::exec::logical::footprint::Footprint,
-	closures_from_outside: bool,
-) -> Option<(crate::exec::logical::footprint::Footprint, bool)> {
-	use crate::exec::logical::footprint::Resource;
-	let reached = reached(planner, op, closures_from_outside).await?;
-	let mut seen = footprint.clone();
-	seen.writes.retain(|written| !matches!(written, Resource::Unknown));
-	let tables = reached.tables.into_iter().map(Resource::table);
-	let data = match reached.every_table {
-		true => vec![Resource::any_data()],
-		false => tables.collect(),
-	};
-	for written in data {
-		if !seen.writes.contains(&written) {
-			seen.writes.push(written);
-		}
-	}
-	Some((seen, reached.every_table))
-}
-
 /// What [`reached`] found running a statement reaches, when none of it may
 /// change the catalog.
-struct Reached {
-	/// The tables written by the statement and by what it reaches.
-	tables: std::collections::BTreeSet<surrealdb_strand::TableName>,
-	/// Whether a write's table is evaluated, so it may be any table.
-	every_table: bool,
-}
+struct Reached {}
 
 /// What running `op` reaches, as [`runs_unseen_schema`] follows it; `None`
 /// when any of it may change the catalog.
@@ -594,10 +288,7 @@ async fn reached(
 	}
 	let mut tables = std::collections::BTreeSet::new();
 	if reach.calls.is_empty() && reach.written.is_empty() && !reach.every_table {
-		return Some(Reached {
-			tables,
-			every_table: false,
-		});
+		return Some(Reached {});
 	}
 	let txn = planner.txn.clone()?;
 	let (ns, db) = planner.ns_db_ids().await?;
@@ -645,10 +336,7 @@ async fn reached(
 			continue;
 		}
 		let Some(table) = reach.written.pop_first() else {
-			return Some(Reached {
-				tables,
-				every_table,
-			});
+			return Some(Reached {});
 		};
 		if !tables.insert(table.clone()) {
 			continue;
@@ -700,7 +388,9 @@ pub(super) fn closures_from_outside<'o>(
 				let _ = scalar.visit(&mut |expr| {
 					if let LogicalExpr::Param(param) = expr
 						&& !bound.iter().any(|name| name == param.as_str())
-						&& ctx.value(param.as_str()).is_some_and(holds_closure)
+						&& ctx
+							.lexical_value(param.as_str())
+							.is_some_and(|value| holds_closure(value))
 					{
 						found = true;
 					}
@@ -907,31 +597,51 @@ impl crate::expr::visit::Visitor for StoredReach<'_> {
 	}
 }
 
-/// The footprint of block statement `op` as `planner` plans it, with what the
-/// catalog the transaction reads now says it triggers.
+/// How statement `op`, which `bound` names are bound around, reaches what code
+/// it runs may redefine while it runs ([`crate::exec::planner::CatalogWithin`]).
 ///
-/// Its reads are expanded through the catalog only when `reads` is asked
-/// for; otherwise they are `Unknown`, which conflicts with any write, so a
-/// caller that asks only after what a statement writes pays nothing for
-/// what it reads and a reader of them is never told less than it may read.
-pub(super) async fn footprint(
+/// The code is what the plan cannot see into: an embedded script, a closure
+/// invoked through a value that may come from outside the block, a function
+/// body that reaches either or holds a schema statement, an event or field
+/// clause of a table it writes that does, and a schema statement held in one
+/// of its expressions. A statement that reaches none of it plans as it is.
+/// A schema statement is not judged here. A block is judged whole, for what
+/// it binds; each statement it runs is judged again for itself as the block
+/// plans it.
+pub(crate) async fn catalog_within(
 	planner: &Planner<'_>,
-	op: &crate::expr::logical::LogicalOp,
-	reads: bool,
-) -> crate::exec::logical::footprint::Footprint {
-	use crate::exec::logical::footprint;
-	let mut fp = footprint::of(op, planner.function_registry());
-	let Some(txn) = planner.txn.clone() else {
-		return footprint::Footprint::unknown();
-	};
-	if !reads {
-		fp.reads = vec![footprint::Resource::Unknown];
+	op: &LogicalOp,
+	bound: &[String],
+) -> crate::exec::planner::CatalogWithin {
+	if planner.is_late_bound()
+		|| planner.txn().is_none()
+		|| matches!(op, LogicalOp::Ddl(_) | LogicalOp::Explain(_))
+	{
+		return crate::exec::planner::CatalogWithin::default();
 	}
-	let catalog = TxnCatalog {
-		txn,
-		ids: planner.ns_db_ids().await,
-		schema: crate::exec::planner::fold::changes_the_catalog(op),
+	// A block's own schema statements are the block's to plan around.
+	let block = matches!(op, LogicalOp::Sequence(_) | LogicalOp::Foreach(_));
+	let holds_schema = !block && crate::exec::planner::fold::changes_the_catalog(op);
+	let may_redefine = holds_schema || {
+		let outside = closures_from_outside(planner, [op], bound);
+		runs_unseen_schema(planner, op, outside).await
 	};
-	footprint::expand(&mut fp, &catalog).await;
-	fp
+	if !may_redefine {
+		return crate::exec::planner::CatalogWithin::default();
+	}
+	// A write, and a statement holding a write or a schema statement, plan
+	// the statements in their expressions as the catalog stands when each
+	// runs.
+	let writes = matches!(op, LogicalOp::Write(_))
+		|| holds_schema
+		|| op
+			.visit_ops_deep(&mut |node| match node {
+				LogicalOp::Write(_) => std::ops::ControlFlow::Break(()),
+				_ => std::ops::ControlFlow::Continue(()),
+			})
+			.is_break();
+	crate::exec::planner::CatalogWithin {
+		calls_current: true,
+		nested_late: writes,
+	}
 }

@@ -8,7 +8,6 @@
 
 use surrealdb_types::ToSql;
 
-use super::tests::keyspace;
 use crate::exec::operators::test_util::TestDb;
 
 /// The header byte's layout bits: 0 is a document, 1 to 3 are packed rows.
@@ -150,4 +149,19 @@ async fn rows_of_every_generation_read_as_their_schema_says() {
 	let (first, third, fourth) = (generation(&held[0]), generation(&held[2]), generation(&held[3]));
 	assert!(first < third, "p:3 was written after a field was added: {first} against {third}");
 	assert!(third < fourth, "p:4 was written after a field was removed: {third} against {fourth}");
+}
+
+/// Every key and value the datastore holds, read in one transaction.
+async fn keyspace(db: &TestDb) -> Vec<(Vec<u8>, Vec<u8>)> {
+	let read = db
+		.datastore()
+		.transaction(crate::kvs::TransactionType::Read)
+		.await
+		.expect("a read transaction opens");
+	let all = read
+		.getr_raw(surrealdb_kvs::key::RawRange::every_key(), None)
+		.await
+		.expect("the keyspace reads");
+	read.cancel().await.expect("the read transaction ends");
+	all
 }

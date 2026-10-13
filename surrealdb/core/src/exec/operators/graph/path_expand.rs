@@ -4,19 +4,18 @@
 //! [`MatchPlan`](crate::expr::match_plan::MatchPlan): patterns such as
 //! `(a)-[:knows]->{1,3}(b)`, `(a)-[:knows]->+(b)`, or `(a)-[:knows]->*(b)`. For
 //! every input binding row it walks the graph from a bound *source* node,
-//! enumerating one output row **per path** (rule R6 of
-//! `doc/gql/V2_DESIGN.md` §0) at every depth in `[min, max]` whose terminal
-//! node passes the `target_label` filter.
+//! enumerating one output row **per path** at every depth in `[min, max]` whose
+//! terminal node passes the `target_label` filter.
 //!
 //! ## Binding rows produced
 //!
-//! Each emitted row is the input row (a `Value::Object` keyed by binding name,
-//! per V2_DESIGN §3) extended with:
+//! Each emitted row is the input row (a `Value::Object` keyed by binding name)
+//! extended with:
 //! - `target_binding` → the full terminal node object (FieldState-fetched);
 //! - `group_binding` (when set) → a [`Value::Array`] of the traversed edge objects in path order —
-//!   `[]` for a zero-length path (R4);
+//!   `[]` for a zero-length path.
 //! - `path_binding` (when set) → the alternating `[n0, e1, n1, … , ed, nd]` array of full records
-//!   (R5; a single-node path is `[n0]`).
+//!   (a single-node path is `[n0]`).
 //!
 //! ## Traversal: depth-first, edge-unique within a path
 //!
@@ -24,9 +23,9 @@
 //! `{ tip, edges, nodes }`. Extension enumerates the adjacency of `tip` via the
 //! shared [`graph_keys`](super::super::scan::graph_keys) machinery (identical
 //! ranges/decode to the graph scan and [`expand`](super::expand)), and:
-//! - **skips any edge already present in the current path** — DIFFERENT-EDGES within a path. This
-//!   is what makes the unbounded forms (`*`, `+`, `{n,}`) terminate on cyclic graphs: a finite edge
-//!   set bounds the number of distinct simple-edge paths, so the DFS stack cannot grow without
+//! - **skips any edge already present in the current path**, so no edge repeats within one path.
+//!   This is what makes the unbounded forms (`*`, `+`, `{n,}`) terminate on cyclic graphs: a finite
+//!   edge set bounds the number of distinct simple-edge paths, so the DFS stack cannot grow without
 //!   bound;
 //! - FieldState-fetches the edge record (always — the edge is part of the group / path value and
 //!   the uniqueness set) and the next node through [`resolve_with_field_state`]; a `None` (missing,
@@ -44,7 +43,7 @@
 //! that e.g. `{2,4}` still reaches depth 4 through a depth-2 node that failed the
 //! label filter.
 //!
-//! ### Zero-length path & label filtering (R6)
+//! ### Zero-length path and label filtering
 //!
 //! When `min == 0` a zero-length path is emitted with `target = source`,
 //! `group = []`, and `path = [source]` — but only if the *source node itself*
@@ -107,13 +106,12 @@ pub(crate) fn target_field(direction: ExpandDir) -> &'static str {
 
 /// The ISO path mode of a quantified traversal, as the operators execute it.
 ///
-/// SurrealDB's MATCH mode is fixed to DIFFERENT EDGES (V2_DESIGN R2: no edge
-/// record binds twice within a path), so edge-uniqueness is always enforced by
-/// the adjacency scan regardless of mode — `Walk` and `Trail` are therefore
-/// identical here. `Acyclic` additionally forbids any repeated node; `Simple`
-/// forbids repeated nodes except a single close back onto the path's start.
+/// The MATCH mode is fixed to DIFFERENT EDGES: no edge record binds twice within a
+/// path, so the adjacency scan always enforces edge-uniqueness. `Walk` and `Trail`
+/// are therefore identical here. `Acyclic` additionally forbids any repeated node;
+/// `Simple` forbids repeated nodes except a single close back onto the path's start.
 /// Shared by [`expand_paths`] (DFS) and the shortest-path search (BFS).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PathMode {
 	Walk,
 	Trail,
@@ -122,8 +120,8 @@ pub enum PathMode {
 }
 
 impl PathMode {
-	/// The EXPLAIN label, or `None` for the default (`Walk`) which renders
-	/// nothing — keeping plans without an explicit mode byte-identical.
+	/// The EXPLAIN label, or `None` for the default (`Walk`), which renders nothing so
+	/// that plans without an explicit mode print unchanged.
 	pub(crate) fn attr(self) -> Option<&'static str> {
 		match self {
 			PathMode::Walk => None,
@@ -210,9 +208,8 @@ impl PartialPath {
 /// Extract the source `RecordId` from a binding row's source slot.
 ///
 /// Thin wrapper over the shared [`crate::exec::operators::binding_record_id`]
-/// (the slot holds a full node object whose `id` field is the record id —
-/// V2_DESIGN §3 — or, defensively, a bare `RecordId`; anything else yields
-/// `None` and the operator drops the row).
+/// (the slot holds a full node object whose `id` field is the record id, or a bare
+/// `RecordId`; anything else yields `None` and the operator drops the row).
 pub(crate) fn source_record_id(row: &Value, source: &str) -> Option<RecordId> {
 	crate::exec::operators::binding_record_id(row, source)
 }
@@ -369,7 +366,7 @@ pub(crate) async fn expand_paths(
 	// every emitted path for this source row.
 	let mut path_count: usize = 0;
 
-	// --- Zero-length path (R6): target == source, [] group, [source] path.
+	// --- Zero-length path: target == source, [] group, [source] path.
 	// Emitted iff min == 0 and the source node itself passes the target-label
 	// filter.
 	if params.min == 0 && node_passes_label(&source_obj, params.target_label.as_ref()) {
@@ -565,7 +562,7 @@ pub(crate) fn path_rows_exceeded(limit: usize) -> ControlFlow {
 	))
 }
 
-/// Build the R5 alternating path array `[n0, e1, n1, … , ed, nd]`.
+/// Build the alternating path array `[n0, e1, n1, … , ed, nd]`.
 ///
 /// `nodes.len() == edges.len() + 1`. A single-node path is `[n0]`.
 pub(crate) fn build_path_array(nodes: &[Value], edges: &[(RecordId, Value)]) -> Vec<Value> {
@@ -579,7 +576,7 @@ pub(crate) fn build_path_array(nodes: &[Value], edges: &[(RecordId, Value)]) -> 
 	arr
 }
 
-/// Build the edge-group list (R4) and the R5 path array for an emitted path,
+/// Build the edge-group list and the alternating path array for an emitted path,
 /// both in traversal order (`source → terminal`).
 ///
 /// When `reversed` the pattern was anchored on its far node and the traversal
@@ -678,7 +675,7 @@ mod tests {
 	fn source_id_missing_or_null_drops() {
 		// Missing binding.
 		assert!(source_record_id(&Value::Object(Object::default()), "a").is_none());
-		// Null slot (optional miss; PR-C interplay).
+		// Null slot (optional miss).
 		let mut row = Object::default();
 		row.insert("a", Value::Null);
 		assert!(source_record_id(&Value::Object(row), "a").is_none());

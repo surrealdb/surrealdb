@@ -294,24 +294,23 @@ async fn http_request(
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(HttpHead, "http::head", effects: EffectSet::READS_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_head_impl);
-define_async_function!(HttpGet, "http::get", effects: EffectSet::READS_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_get_impl);
-define_async_function!(HttpPut, "http::put", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_put_impl);
-define_async_function!(HttpPost, "http::post", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_post_impl);
-define_async_function!(HttpPatch, "http::patch", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?body: Any, ?opts: Object) -> Any, http_patch_impl);
-define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, (uri: String, ?opts: Object) -> Any, http_delete_impl);
+define_async_function!(HttpHead, "http::head", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_head_impl);
+define_async_function!(HttpGet, "http::get", effects: EffectSet::READS_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_get_impl);
+define_async_function!(HttpPut, "http::put", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_put_impl);
+define_async_function!(HttpPost, "http::post", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_post_impl);
+define_async_function!(HttpPatch, "http::patch", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?body: Any, ?opts: Object) -> Any, http_patch_impl);
+define_async_function!(HttpDelete, "http::delete", effects: EffectSet::READS_EXTERNAL | EffectSet::WRITES_EXTERNAL, fallibility: Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA), (uri: String, ?opts: Object) -> Any, http_delete_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
-// A remote endpoint is outside the transaction's snapshot: it may answer a
-// second call differently, and the write verbs act on it. Every verb declares
-// `READS_EXTERNAL`, and the non-safe verbs `WRITES_EXTERNAL` as well, which
-// keeps a rule from duplicating a request or dropping one it has substituted
-// away, and keeps a grouped projection holding one evaluated per row: a request
-// the remote acts on cannot be sent a different number of times because a
-// query grouped its rows differently. `head` and `get` only read.
+// A remote endpoint is outside the transaction's snapshot, so a second call may
+// return a different answer, and the write verbs change remote state. Every verb
+// declares `READS_EXTERNAL`. The non-safe verbs (put, post, patch, delete) also
+// declare `WRITES_EXTERNAL`. Rewrite rules must not duplicate or drop a request,
+// and a grouped query must not change how many times a request is sent.
+// `head` and `get` only read.
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(registry, HttpHead, HttpGet, HttpPut, HttpPost, HttpPatch, HttpDelete,);
 }

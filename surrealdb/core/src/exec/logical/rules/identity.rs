@@ -12,14 +12,14 @@
 //! - A [`LogicalOp::Sort`] over an input that yields at most one row orders nothing and goes: a
 //!   single record id, a `GROUP ALL`, an `ONLY`, and any row-preserving or row-reducing operators
 //!   over one of those. Dropping the sort drops the evaluation of its keys, so it goes only where
-//!   every key is inert — read-only and unable to raise. Ordering by a key that is neither is not a
-//!   shape the pipeline planner admits today; the guard is what keeps the rewrite sound if it ever
-//!   is.
+//!   every key is inert — read-only and unable to raise. The pipeline planner only produces plain
+//!   path keys, which are inert; the guard keeps the rewrite sound for any other key.
 //! - `ONLY` over `ONLY` is one `ONLY`.
-//! - A block directly inside a block is spliced into it when it is not empty and declares no `LET`
-//!   of its own: a `LET` is scoped to its block, and an empty block yields `NONE` where the spliced
-//!   sequence would yield the statement before it. Control flow — `RETURN`, `BREAK`, `CONTINUE` —
-//!   propagates out of a nested block exactly as it does out of the spliced statements.
+//! - A block directly inside a block is spliced into it when it is not empty, declares no `LET` of
+//!   its own and holds no `RETURN`: a `LET` is scoped to its block, an empty block yields `NONE`
+//!   where the spliced sequence would yield the statement before it, and a `RETURN` ends the block
+//!   that holds it with its value, where spliced it would end the parent. `BREAK` and `CONTINUE`
+//!   propagate out of a nested block exactly as they do out of the spliced statements.
 //!
 //! Two rewrites that look like they belong here do not:
 //!
@@ -175,7 +175,9 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 		}) => {
 			let splice = |stmt: &LogicalOp| {
 				matches!(stmt, LogicalOp::Sequence(LogicalSequence { stmts: inner })
-						if !inner.is_empty() && !inner.iter().any(|s| matches!(s, LogicalOp::Let(_))))
+						if !inner.is_empty()
+							&& !inner.iter().any(|s| matches!(s, LogicalOp::Let(_)))
+							&& !inner.iter().any(holds_return))
 			};
 			if !stmts.iter().any(splice) {
 				return Outcome::Unchanged(LogicalOp::Sequence(LogicalSequence {
@@ -203,6 +205,21 @@ fn apply(node: &mut LogicalOp, cx: &mut RuleContext<'_>) -> bool {
 		// The rule fires on no other kind; see `RULE`.
 		other => Outcome::Unchanged(other),
 	})
+}
+
+/// Whether `op` is, or holds, a `RETURN` statement. A block ends at the
+/// `RETURN` it holds, with its value, so it is a scope the `RETURN` does not
+/// leave; spliced into its parent, the same `RETURN` would end the parent.
+fn holds_return(op: &LogicalOp) -> bool {
+	use std::ops::ControlFlow;
+	op.visit_ops_deep(&mut |node| {
+		if matches!(node, LogicalOp::Return(_)) {
+			ControlFlow::Break(())
+		} else {
+			ControlFlow::Continue(())
+		}
+	})
+	.is_break()
 }
 
 /// The fields the layers beneath `op` set with an expression that is not
@@ -338,6 +355,17 @@ mod tests {
 	}
 
 	#[test]
+	fn a_false_filter_never_drops_a_source_that_names_a_table() {
+		// The access chooser reads the table to decide the scan is empty, and a
+		// read of a table that is not defined raises whatever the predicate says.
+		for sql in ["SELECT * FROM nosuch WHERE false", "SELECT * FROM ONLY nosuch WHERE false"] {
+			let plan = rewritten_sql(sql);
+			assert!(plan.contains("Filter[false]"), "`{sql}`:\n{plan}");
+			assert!(plan.contains("nosuch"), "`{sql}`:\n{plan}");
+		}
+	}
+
+	#[test]
 	fn a_false_filter_keeps_a_source_whose_rows_are_not_inert() {
 		// Reading `$secret` fetches a `DEFINE PARAM` whose `PERMISSIONS`
 		// clause is judged there, so the read reports what the clause
@@ -450,9 +478,9 @@ mod tests {
 	fn a_sort_whose_key_is_not_inert_stays_over_one_row() {
 		use crate::expr::logical::{LogicalEval, LogicalOrder, LogicalOrdering};
 
-		// `ORDER BY` takes an idiom, and every key the pipeline planner
-		// admits today is a plain path, so the keys are built here rather
-		// than lowered from a SELECT.
+		// `ORDER BY` takes an idiom, and the pipeline planner only produces
+		// plain path keys, so these keys are built here rather than lowered
+		// from a SELECT.
 		fn key(sql: &str) -> crate::expr::logical::LogicalExpr {
 			let lowered = lower(sql);
 			let LogicalOp::Eval(LogicalEval {
@@ -521,5 +549,21 @@ mod tests {
 			],
 		}));
 		assert_eq!(plan.to_string(), "Sequence\n  Eval[1]\n  Sequence");
+	}
+
+	/// A block that holds a `RETURN` is a scope that `RETURN` ends, so it stays a block of its
+	/// parent: spliced, `{ { RETURN 1 }; RETURN 2 }` would answer 1.
+	#[test]
+	fn a_block_holding_a_return_is_not_spliced() {
+		let plan = rewritten_sql("{ { RETURN 1 }; RETURN 2 }");
+		assert!(
+			plan.lines().filter(|l| l.trim_start().starts_with("Sequence")).count() == 2,
+			"{plan}"
+		);
+		let plan = rewritten_sql("{ { IF rand::bool() { RETURN 1 }; 2 }; 3 }");
+		assert!(
+			plan.lines().filter(|l| l.trim_start().starts_with("Sequence")).count() >= 2,
+			"{plan}"
+		);
 	}
 }

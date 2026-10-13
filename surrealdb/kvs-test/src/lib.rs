@@ -48,7 +48,8 @@
 //! ```
 // Test-support crate: unwrap/expect are the assertion style in behaviour tests.
 #![allow(clippy::unwrap_used)]
-// TODO: Remove once this crate no longer needs it; see `absolute_paths` in the workspace lints.
+// TODO: Remove this allow once the crate stops using absolute paths; see `absolute_paths` in the
+// workspace lints.
 #![allow(clippy::absolute_paths)]
 
 use std::any::Any;
@@ -70,6 +71,7 @@ pub mod edges;
 pub mod lifecycle;
 pub mod multi;
 pub mod raw;
+pub mod read_view;
 pub mod savepoint;
 pub mod snapshot;
 pub mod timestamp;
@@ -316,9 +318,9 @@ unsafe extern "C" {
 /// registry was populated (`inventory` collection relies on
 /// life-before-main constructors, which a runner could silently skip).
 pub async fn run_all(backends: &[TestBackend], log: impl Fn(&str)) -> usize {
-	// Populate the `inventory` registry. Constructors are idempotent, but
-	// only run them once in case other, non-idempotent constructors are
-	// linked in.
+	// Run the linked module constructors to populate the `inventory`
+	// registry. The `Once` guard below keeps this to one call, since other
+	// constructors linked into the binary may not be idempotent.
 	#[cfg(target_family = "wasm")]
 	{
 		static CTORS: std::sync::Once = std::sync::Once::new();

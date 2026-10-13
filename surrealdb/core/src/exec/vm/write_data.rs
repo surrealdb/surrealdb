@@ -61,7 +61,7 @@ pub(in crate::exec::vm) enum DataInstr {
 		pipeline: u16,
 		skip: Label,
 	},
-	/// Jump to `target` when the record's data clause is evaluated already.
+	/// Jump to `target` when the record already holds an evaluated data clause.
 	JumpIfInput {
 		target: Label,
 	},
@@ -253,9 +253,20 @@ pub(super) async fn statement_input(
 	materialised
 }
 
-/// A clause's value from a host pipeline's run: a `RETURN` inside it is its
-/// value, and a `BREAK` or `CONTINUE` has nothing here to leave.
+/// A clause's value from a host pipeline's run, for a clause written in the
+/// statement: a `RETURN` inside it is its value, and a `BREAK` or `CONTINUE`
+/// passes outwards to the loop the statement is written in.
 fn clause(ran: FlowResult<Value>) -> Result<Value, ControlFlow> {
+	match ran {
+		Err(ControlFlow::Return(value)) => Ok(value),
+		ran => ran,
+	}
+}
+
+/// A clause's value from a host pipeline's run, for a clause the schema
+/// stores: a `RETURN` inside it is its value, and a `BREAK` or `CONTINUE` is
+/// an error, since the loop it names is not written in it.
+fn field_clause(ran: FlowResult<Value>) -> Result<Value, ControlFlow> {
 	ran.catch_return().map_err(ControlFlow::Err)
 }
 
@@ -567,7 +578,7 @@ pub(super) async fn step(
 			let frame = field_default_frame(&exec, field).map_err(ControlFlow::Err)?;
 			let doc = data::id_default_doc(row).clone();
 			let value =
-				clause(run_image(program, *pipeline, doc, Some(frame), state, &exec).await)?;
+				field_clause(run_image(program, *pipeline, doc, Some(frame), state, &exec).await)?;
 			let row = write_state(state)?.row()?;
 			data::check_default_id(row, &ctx, &table, &value)?;
 			let id = value.generate(table, false).map_err(ControlFlow::Err)?;

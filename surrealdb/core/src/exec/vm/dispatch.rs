@@ -14,27 +14,25 @@
 //! record a read by id fetched, is the dereference of that record
 //! ([`Deref::fetch`]).
 //!
-//! The units are served by the compile cache ([`super::compile_cache`]),
-//! keyed by the table, the catalog version of its definitions and the build,
-//! with one compilation per frame: the class of the principal and the
-//! permission contract ([`table_unit`]). A program holds none of them. When
-//! the query arrives, the plan asks the cache for the units of the tables its
-//! sites name by analysis ([`build`]): the tables of the record ids and tables
-//! written in the text, and the tables the kinds of the fields a `FETCH`
-//! walks name for the records of a table it fetches into ([`fetch_reach`]),
-//! with the tables their units read in turn. What they number follows from
-//! the statement and the definitions it reaches, never from how many tables
-//! the database holds: planning never lists the database's tables for a
-//! read. A run loads the unit of each table it reads by the table's name, the
-//! first time it meets the table in a frame ([`Deref::serving`]), and finds
-//! it kept; a table no plan asked for — a site that may name any table, a
-//! record of a table its analysis did not name, which data written before a
-//! field's kind changed may hold — is compiled in a fault where the cache
-//! holds no unit of it ([`super::fault::link_read`]). Every later read of the
-//! table, by that program or by any other program of the run, finds it
-//! loaded. A read in a frame the unit of its table was not compiled for, or of
-//! a table no unit of whose read is compiled, is made by the record-fetch
-//! helpers of `operators::fetch`.
+//! The units are kept by the compile cache ([`super::compile_cache`]), keyed
+//! by the table, the catalog version of its definitions and the build, with
+//! one compilation per frame: the class of the principal and the permission
+//! contract ([`table_unit`]). A program holds none of them. When a query
+//! arrives, planning asks the cache for the units of the tables its sites name
+//! by analysis ([`build`]): the tables of record ids and table names written
+//! in the text, and the tables that the kinds of the fields a `FETCH` walks
+//! name for the records it fetches ([`fetch_reach`]), with the tables those
+//! units read in turn. The count follows from the statement and the
+//! definitions it reaches, never from how many tables the database holds, so
+//! planning never lists the database's tables for a read. A run loads a
+//! table's unit by the table's name the first time it meets the table in a
+//! frame ([`Deref::serving`]), and later reads of that table find it loaded,
+//! by that program or any other program of the run. A table no plan asked
+//! for, such as a table a site may name at run time or a record of a table
+//! the analysis did not name, is compiled in a fault when the cache holds no
+//! unit of it ([`super::fault::link_read`]). A read in a frame the unit was
+//! not compiled for, or of a table with no compiled read unit, is made by the
+//! record-fetch helpers of `operators::fetch`.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -42,16 +40,15 @@ use std::sync::Arc;
 
 use surrealdb_strand::TableName;
 
-use super::NotCovered;
 use super::host::{host_frames, out_of_line, run_cow_row_from, run_unit_inline, unit_state};
-use super::lower::Lowered;
 use super::program::{Program, UnitHead, UnitSig};
+use super::{Lowered, NotCovered};
 use crate::exec::operators::fetch::{fetch_raw_deref, require_table};
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::planner::Planner;
 use crate::exec::{ExecutionContext, FlowResult};
-use crate::expr::logical::{LogicalExpr, LogicalFields, LogicalOp, LogicalProject, LogicalSource};
-use crate::expr::{ControlFlow, Kind};
+use crate::expr::ControlFlow;
+use crate::expr::logical::{LogicalFields, LogicalOp, LogicalProject, LogicalSource};
 use crate::val::{RecordId, Value};
 
 #[cfg(test)]
@@ -89,37 +86,6 @@ impl Reach {
 				Reach::Tables(a)
 			}
 			_ => Reach::Any,
-		}
-	}
-
-	/// The reach of a value written in the text of a statement: the tables of
-	/// the record ids and table names it holds, or any table where its value
-	/// is not known until the statement runs.
-	pub(super) fn of_expr(expr: &LogicalExpr) -> Reach {
-		match expr {
-			LogicalExpr::Literal(_) | LogicalExpr::Constant(_) => Reach::none(),
-			LogicalExpr::Table(table) => Reach::Tables(BTreeSet::from([table.clone()])),
-			LogicalExpr::RecordId(rid) => Reach::Tables(BTreeSet::from([rid.table.clone()])),
-			LogicalExpr::Mock(mock) => Reach::Tables(BTreeSet::from([mock.table().clone()])),
-			LogicalExpr::Array(items) | LogicalExpr::Set(items) => {
-				items.iter().fold(Reach::none(), |reach, item| reach.union(Reach::of_expr(item)))
-			}
-			LogicalExpr::Object(entries) => entries
-				.iter()
-				.fold(Reach::none(), |reach, (_, value)| reach.union(Reach::of_expr(value))),
-			_ => Reach::Any,
-		}
-	}
-
-	fn is_empty(&self) -> bool {
-		matches!(self, Reach::Tables(tables) if tables.is_empty())
-	}
-
-	/// Whether a table both `self` and `other` reach can exist.
-	pub(super) fn meets(&self, other: &Reach) -> bool {
-		match (self, other) {
-			(Reach::Any, reach) | (reach, Reach::Any) => !reach.is_empty(),
-			(Reach::Tables(a), Reach::Tables(b)) => !a.is_disjoint(b),
 		}
 	}
 
@@ -600,233 +566,6 @@ fn read_pipeline(program: &Program) -> FlowResult<&super::program::Pipeline> {
 		.ok_or_else(|| internal("a table's read unit holds no pipeline of its own".to_owned()))
 }
 
-/// The tables of the database `planner` is lowering against that `named`
-/// names, in table order: the definition of each of them alone is read, so
-/// what it costs does not grow with the tables of the database. A table the
-/// catalog does not hold is not a candidate: reading it fails before its unit
-/// is looked for.
-pub(super) async fn candidates(
-	planner: &Planner<'_>,
-	named: &BTreeSet<TableName>,
-) -> Lowered<Vec<TableName>> {
-	use crate::catalog::providers::TableProvider;
-	let Some(txn) = planner.txn() else {
-		return Err(NotCovered::internal("no transaction at plan time"));
-	};
-	let Some((ns, db)) = planner.ns_db_ids().await else {
-		return Err(NotCovered::unresolved_database(planner));
-	};
-	let unread = |e: anyhow::Error| {
-		super::plan_catalog::unread_catalog(&e, || "the table catalog could not be read".to_owned())
-	};
-	let mut names = Vec::with_capacity(named.len());
-	for name in named {
-		if txn.get_tb(ns, db, name, None).await.map_err(unread)?.is_some() {
-			names.push(name.clone());
-		}
-	}
-	names.sort();
-	Ok(names)
-}
-
-/// Where a `FETCH` walk stands: on a record of a table, or on a value of a
-/// kind that is not a record id.
-enum At {
-	Record(TableName),
-	Value(Kind),
-}
-
-/// The tables a `FETCH` of `parts`, over records of `tables` as the catalog
-/// defines them, reads records of: the tables the kinds of the fields it
-/// walks through name for the record ids it meets, as
-/// [`crate::exec::operators::fetch::fetch_fields_with`] walks them — a record
-/// id met mid-path or at its end is read, and so is each record id of an
-/// array at its end. Any table where a field it walks through is not
-/// defined, or is of a kind that may hold a record id of any table.
-///
-/// The reach is what the definitions promise of the data. A record of a
-/// table outside it, which data written before a field's kind changed may
-/// hold, is read through the unit the run links for its table
-/// ([`Deref::serving`]).
-pub(super) async fn fetch_reach(
-	planner: &Planner<'_>,
-	tables: &BTreeSet<TableName>,
-	parts: &[crate::exec::operators::fetch::FetchPart<'_>],
-) -> Reach {
-	let Some(txn) = planner.txn() else {
-		return Reach::Any;
-	};
-	let Some((ns, db)) = planner.ns_db_ids().await else {
-		return Reach::Any;
-	};
-	let mut reach = BTreeSet::new();
-	let mut at: Vec<At> = tables.iter().cloned().map(At::Record).collect();
-	for part in parts {
-		let mut next = Vec::new();
-		for pos in at {
-			let walked = crate::exec::vm::host::out_of_line(|| {
-				walk(txn, (ns, db), pos, part, &mut next, &mut reach)
-			})
-			.await;
-			if walked.is_none() {
-				return Reach::Any;
-			}
-		}
-		at = next;
-	}
-	// At its end the walk reads a record id, or each record id of an array.
-	for pos in at {
-		let At::Value(kind) = pos else {
-			continue;
-		};
-		let mut ends = vec![kind.clone()];
-		ends.extend(elements(&kind));
-		for end in ends {
-			if records(&end, &mut reach).is_none() {
-				return Reach::Any;
-			}
-		}
-	}
-	Reach::Tables(reach)
-}
-
-/// Take step `part` from `pos` into `next`, adding to `reach` the tables of
-/// the record ids the walk reads on the way: a record id it stands on is
-/// read before the step is taken, and an array a field step meets applies
-/// the step to each element. `None` where the step may reach a record id of
-/// any table.
-async fn walk(
-	txn: &crate::kvs::Transaction,
-	(ns, db): (crate::catalog::NamespaceId, crate::catalog::DatabaseId),
-	pos: At,
-	part: &crate::exec::operators::fetch::FetchPart<'_>,
-	next: &mut Vec<At>,
-	reach: &mut BTreeSet<TableName>,
-) -> Option<()> {
-	use crate::catalog::providers::TableProvider;
-	use crate::exec::operators::fetch::FetchPart;
-	use crate::expr::KindLiteral;
-	match pos {
-		At::Record(table) => match part {
-			FetchPart::Field(name) => {
-				let fields = txn.all_tb_fields(ns, db, &table, None).await.ok()?;
-				let field = fields.iter().find(|field| {
-					matches!(field.name.0.as_slice(), [crate::expr::Part::Field(f)] if f.as_str() == name.as_str())
-				})?;
-				let kind = field.field_kind.clone()?;
-				land(kind, next, reach)
-			}
-			// The values of every field, or a field a computed key names.
-			FetchPart::All | FetchPart::Index(_) => None,
-			FetchPart::First | FetchPart::Last | FetchPart::Unsupported => Some(()),
-		},
-		At::Value(kind) => match kind {
-			Kind::Any | Kind::Object => match part {
-				FetchPart::Unsupported => Some(()),
-				_ => None,
-			},
-			Kind::Either(kinds) => {
-				for kind in kinds {
-					crate::exec::vm::host::out_of_line(|| {
-						walk(txn, (ns, db), At::Value(kind), part, next, reach)
-					})
-					.await?;
-				}
-				Some(())
-			}
-			Kind::Array(..) | Kind::Set(..) | Kind::Literal(KindLiteral::Array(_)) => {
-				let inner = elements(&kind);
-				match part {
-					// A field step is taken from each element, each record
-					// id among them read first.
-					FetchPart::Field(_) => {
-						for element in inner {
-							let mut landed = Vec::new();
-							land(element, &mut landed, reach)?;
-							for pos in landed {
-								crate::exec::vm::host::out_of_line(|| {
-									walk(txn, (ns, db), pos, part, next, reach)
-								})
-								.await?;
-							}
-						}
-						Some(())
-					}
-					FetchPart::All | FetchPart::First | FetchPart::Last | FetchPart::Index(_) => {
-						for element in inner {
-							land(element, next, reach)?;
-						}
-						Some(())
-					}
-					FetchPart::Unsupported => Some(()),
-				}
-			}
-			Kind::Literal(KindLiteral::Object(fields)) => match part {
-				FetchPart::Field(name) => match fields.get(*name) {
-					Some(kind) => land(kind.clone(), next, reach),
-					None => Some(()),
-				},
-				FetchPart::All | FetchPart::Index(_) => {
-					for kind in fields.into_values() {
-						land(kind, next, reach)?;
-					}
-					Some(())
-				}
-				FetchPart::First | FetchPart::Last | FetchPart::Unsupported => Some(()),
-			},
-			// A value that holds no record id and no value that does.
-			_ => Some(()),
-		},
-	}
-}
-
-/// Stand on a value of `kind`: on a record of each table its record ids
-/// may name, which the walk reads, adding them to `reach`, and on the
-/// value where it may be something else. `None` where it may be a record
-/// id of any table.
-fn land(kind: Kind, next: &mut Vec<At>, reach: &mut BTreeSet<TableName>) -> Option<()> {
-	let mut tables = BTreeSet::new();
-	records(&kind, &mut tables)?;
-	for table in tables {
-		reach.insert(table.clone());
-		next.push(At::Record(table));
-	}
-	next.push(At::Value(kind));
-	Some(())
-}
-
-/// Add to `out` the tables a value of `kind` may be a record id of; `None`
-/// where it may be one of any table.
-fn records(kind: &Kind, out: &mut BTreeSet<TableName>) -> Option<()> {
-	match kind {
-		Kind::Any => None,
-		Kind::Record(tables) if tables.is_empty() => None,
-		Kind::Record(tables) => {
-			out.extend(tables.iter().cloned());
-			Some(())
-		}
-		Kind::Either(kinds) => {
-			for kind in kinds {
-				records(kind, out)?;
-			}
-			Some(())
-		}
-		_ => Some(()),
-	}
-}
-
-/// The kinds of the elements of an array or set of `kind`.
-fn elements(kind: &Kind) -> Vec<Kind> {
-	use crate::expr::KindLiteral;
-	match kind {
-		Kind::Array(inner, _) | Kind::Set(inner, _) => vec![(**inner).clone()],
-		Kind::Literal(KindLiteral::Array(kinds)) => kinds.clone(),
-		Kind::Either(kinds) => kinds.iter().flat_map(elements).collect(),
-		Kind::Any => vec![Kind::Any],
-		_ => Vec::new(),
-	}
-}
-
 /// The statement that reads every record of `table` the caller may select.
 pub(super) fn read_all(table: &TableName) -> LogicalOp {
 	LogicalOp::Project(LogicalProject {
@@ -859,22 +598,13 @@ pub(super) async fn table_unit(planner: &Planner<'_>, table: &TableName) -> Lowe
 	Ok(table_read_unit(planner, table).await?.program)
 }
 
-/// A table's read unit as the compile cache keeps it: the program, and what
-/// running it may do ([`super::footprint`]).
+/// A table's read unit as the compile cache keeps it.
 #[derive(Debug, Clone)]
 pub(crate) struct TableReadUnit {
 	pub(crate) program: Arc<Program>,
-	#[cfg_attr(
-		not(test),
-		expect(
-			dead_code,
-			reason = "kept with the unit for the placement and reload decisions that read effect summaries; read by tests"
-		)
-	)]
-	pub(crate) footprint: Arc<super::footprint::Footprint>,
 }
 
-/// [`table_unit`], with the unit's footprint.
+/// [`table_unit`], as the compile cache keeps it.
 pub(super) async fn table_read_unit(
 	planner: &Planner<'_>,
 	table: &TableName,
@@ -887,10 +617,9 @@ pub(super) async fn table_read_unit(
 			sealed(false, crate::exec::vm::host::out_of_line(|| lower_table_unit(&root, table)))
 				.await;
 		let recorded = recording.map(|recording| recording.finish());
-		let (program, footprint) = lowered?;
+		let program = lowered?;
 		let unit = TableReadUnit {
 			program: Arc::new(program),
-			footprint: Arc::new(footprint),
 		};
 		Ok::<_, NotCovered>((unit, recorded))
 	};
@@ -902,7 +631,7 @@ pub(super) async fn table_read_unit(
 	let (Some((units, txn)), Some(key)) = (cached, key) else {
 		return Ok(compile(None).await?.0);
 	};
-	let frame = super::lower::statement_frame(planner);
+	let frame = super::statement_frame(planner);
 	let compiled = std::sync::atomic::AtomicBool::new(false);
 	let served = sealed(
 		false,
@@ -944,98 +673,39 @@ pub(super) async fn table_read_unit(
 }
 
 /// The unit that reads `table`, lowered for the frame `planner` lowers for.
-async fn lower_table_unit(
-	planner: &Planner<'_>,
-	table: &TableName,
-) -> Lowered<(Program, super::footprint::Footprint)> {
+async fn lower_table_unit(planner: &Planner<'_>, table: &TableName) -> Lowered<Program> {
 	let statement = read_all(table);
 	// A read whose binding fails fails with the error the binding raises.
 	let bound = crate::exec::planner::bind_statement(planner, statement).await.map_err(|e| {
-		match super::plan::Refusal::of(&e) {
+		match super::payload::Refusal::of(&e) {
 			Some(refusal) => NotCovered::refused(refusal),
-			None => NotCovered::new(format!("the table {table} did not bind: {e}")),
+			None => NotCovered::unsupported(format!("the table {table} did not bind: {e}")),
 		}
 	})?;
-	let mapped = super::map::map(planner, &bound).await?;
-	let physical = super::optimize::optimize(mapped);
+	// A table unit is cached under its own key and served to any frame that asks for it, so its
+	// pipelines are placed in the scope of its own statement alone.
 	let mut program =
-		crate::exec::vm::host::out_of_line(|| super::lower::lower_unit(planner, &physical, None))
+		crate::exec::vm::host::out_of_line(|| super::compile::compile_unit(planner, &bound))
 			.await?;
 	// The read is the one pipeline no block statement owns
 	// ([`Program::own_pipeline`]). The others are the bodies of statements
 	// nested in the table's permissions, which the read runs as groups of the
 	// program.
 	if program.write.is_some() || program.own_pipeline().is_none() {
-		return Err(NotCovered::new(format!("the table {table} is not read by one pipeline")));
+		return Err(NotCovered::unsupported(format!(
+			"the table {table} is not read by one pipeline"
+		)));
 	}
 	program.unit = Some(UnitHead {
 		sig: UnitSig {
 			params: Vec::new(),
 			takes_row: true,
 		},
-		frame: super::lower::statement_frame(planner),
+		frame: super::statement_frame(planner),
 		entry: None,
 		closure: None,
 	});
-	let footprint =
-		super::footprint::Footprint::of(&bound, planner.function_registry(), reach_of(&program));
-	Ok((program, footprint))
-}
-
-/// Ask the compile cache for the read units of the tables `reach` names, and
-/// of `known`, and of the tables those units read records of in turn, so a
-/// run finds each kept when it loads it by name; the dispatch naming them, or
-/// `None` where `reach` reaches no table.
-///
-/// Each table has a unit for a caller whose reads are checked and, where
-/// `planner` lowers for such a caller, one for a frame that waives the checks
-/// (a permission predicate, an event). What a reach that may name any table
-/// names beyond them, the run loads the same way, and a unit the cache does
-/// not hold is compiled in a fault ([`super::fault::link_read`]).
-pub(super) async fn build(
-	planner: &Planner<'_>,
-	reach: Reach,
-	known: BTreeSet<TableName>,
-) -> Lowered<Option<Arc<TableDispatch>>> {
-	if reach.is_empty() {
-		return Ok(None);
-	}
-	let waived =
-		planner.body_is_checked(planner.auth.as_ref()).then(|| planner.waiving_permissions());
-	let mut tables: Vec<TableName> = Vec::new();
-	let mut named = tables_named(reach);
-	named.extend(known);
-	loop {
-		let mut grew = false;
-		for table in candidates(planner, &named).await? {
-			if tables.contains(&table) {
-				continue;
-			}
-			// A table whose unit reads records of other tables names them.
-			let program = table_unit(planner, &table).await?;
-			named.extend(tables_named(program.reach.clone().unwrap_or_else(Reach::none)));
-			if let Some(waived) = &waived {
-				let program = table_unit(waived, &table).await?;
-				named.extend(tables_named(program.reach.clone().unwrap_or_else(Reach::none)));
-			}
-			tables.push(table);
-			grew = true;
-		}
-		if !grew {
-			tables.sort();
-			return Ok(Some(Arc::new(TableDispatch {
-				tables,
-			})));
-		}
-	}
-}
-
-/// The tables `reach` names: none beyond those a reach of any table names.
-fn tables_named(reach: Reach) -> BTreeSet<TableName> {
-	match reach {
-		Reach::Tables(tables) => tables,
-		Reach::Any => BTreeSet::new(),
-	}
+	Ok(program)
 }
 
 /// What `program` and the units it holds, which hold no dispatch of their
@@ -1046,32 +716,6 @@ pub(super) fn reach_of(program: &Program) -> Reach {
 		reach = reach.union(reach_of(unit));
 	}
 	reach
-}
-
-/// Give `program`, a statement lowered against `planner`, the dispatch over
-/// the tables it and its units read records of by id.
-pub(super) async fn seal(planner: &Planner<'_>, program: &mut Program) -> Lowered<()> {
-	seal_knowing(planner, program, BTreeSet::new()).await
-}
-
-/// [`seal`] for a statement whose records by id its caller knows to be of
-/// `known`, as a cascade knows the table of the record a key named: the
-/// units of `known` are asked for with the program wherever its sites may
-/// name any table, so a read of those records compiles nothing, and a record
-/// of another table is loaded by the run as for any program.
-pub(super) async fn seal_knowing(
-	planner: &Planner<'_>,
-	program: &mut Program,
-	known: BTreeSet<TableName>,
-) -> Lowered<()> {
-	let reach = match reach_of(program) {
-		reach if reach.is_empty() => reach,
-		reach => reach.union(Reach::Tables(known.clone())),
-	};
-	if let Some(dispatch) = build(planner, reach, known).await? {
-		program.dispatch = Some(dispatch);
-	}
-	Ok(())
 }
 
 /// The context `ctx` runs `program` in: the one that reads records by id

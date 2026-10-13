@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::method::{self, MethodDescriptor, MethodRegistry};
 use super::{AggregateFunction, IndexFunction, ProjectionFunction, ScalarFunction, builtin};
+use crate::exec::ir::iface::Fallibility;
+use crate::expr::logical::EffectSet;
 
 /// Registry of functions available during query execution.
 ///
@@ -91,7 +93,7 @@ impl FunctionRegistry {
 	}
 
 	/// Iterate all registered projection functions.
-	#[cfg(all(test, feature = "kv-mem"))]
+	#[cfg(test)]
 	pub(crate) fn projection_functions(
 		&self,
 	) -> impl Iterator<Item = &Arc<dyn ProjectionFunction>> {
@@ -99,7 +101,7 @@ impl FunctionRegistry {
 	}
 
 	/// Iterate all registered index functions.
-	#[cfg(all(test, feature = "kv-mem"))]
+	#[cfg(test)]
 	pub(crate) fn index_functions(&self) -> impl Iterator<Item = &Arc<dyn IndexFunction>> {
 		self.index_functions.values()
 	}
@@ -129,6 +131,12 @@ impl FunctionRegistry {
 	/// Check if a function is registered as an aggregate.
 	pub fn is_aggregate(&self, name: &str) -> bool {
 		self.aggregates.contains_key(name)
+	}
+
+	/// Iterate all registered aggregate functions.
+	#[cfg(test)]
+	pub(crate) fn aggregate_functions(&self) -> impl Iterator<Item = &Arc<dyn AggregateFunction>> {
+		self.aggregates.values()
 	}
 
 	/// Get the number of registered aggregate functions.
@@ -261,6 +269,22 @@ impl FunctionRegistry {
 		}
 	}
 
+	/// The effects the method `name` may have: the union of the declared effects of every builtin
+	/// it may resolve to, for any receiver. A name the registry does not hold resolves to a
+	/// closure the receiver carries, whose body cannot be seen, and is
+	/// [`EffectSet::OPAQUE_BODY`].
+	pub(crate) fn method_effects(&self, name: &str) -> EffectSet {
+		match self.get_method(name) {
+			Some(descriptor) => descriptor
+				.type_impls
+				.iter()
+				.map(|(_, function)| function)
+				.chain(descriptor.fallback.iter())
+				.fold(EffectSet::PURE, |set, function| set.union(function.effects())),
+			None => EffectSet::OPAQUE_BODY,
+		}
+	}
+
 	/// [`Self::keeps_row_order`] for the method `name`: whether a builtin it
 	/// may resolve to, for any receiver, keeps row order. A name the registry
 	/// does not hold resolves to a closure the receiver carries, whose body
@@ -312,7 +336,7 @@ impl Default for FunctionRegistry {
 /// The experimental target a built-in is gated behind, if any.
 ///
 /// Mirrors the `exp(...)` markers on the corresponding arms of `fnc::dispatch`,
-/// which the script bridge reaches by name. Registry entries
+/// which the scripting layer reaches by name. Registry entries
 /// that reach a bucket acquire it through their `EvalContext` and check for
 /// themselves; the functions listed here are pure, so they carry no context and
 /// the gate has to be applied by whoever invokes them — the built-in physical
@@ -327,8 +351,643 @@ pub(crate) fn experimental_target(
 	}
 }
 
+/// The registry a builtin is registered in, which a name alone does not settle: `count` is both
+/// a scalar function and an aggregate, and `vector::sum` likewise.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum FnKind {
+	Scalar,
+	Aggregate,
+	Projection,
+	Index,
+}
+
+/// Whether two names are equal, in a `const` context.
+const fn same_name(a: &str, b: &str) -> bool {
+	let (a, b) = (a.as_bytes(), b.as_bytes());
+	if a.len() != b.len() {
+		return false;
+	}
+	let mut i = 0;
+	while i < a.len() {
+		if a[i] != b[i] {
+			return false;
+		}
+		i += 1;
+	}
+	true
+}
+
+/// Fails constant evaluation unless [`FALLIBILITY`] holds a row for `(kind, name)` whose class is
+/// exactly `declared`. Evaluated by every [`declare_fallibility!`](crate::declare_fallibility)
+/// expansion, so a builtin with no row, or a row that disagrees with its declaration, does not
+/// compile.
+pub(crate) const fn check_fallibility_row(kind: FnKind, name: &str, declared: Fallibility) {
+	let mut i = 0;
+	while i < FALLIBILITY.len() {
+		let (row_kind, row_name, class) = FALLIBILITY[i];
+		if row_kind as u8 == kind as u8 && same_name(row_name, name) {
+			assert!(
+				class.is_exactly(declared),
+				"a builtin's declared fallibility differs from its FALLIBILITY row"
+			);
+			return;
+		}
+		i += 1;
+	}
+	panic!("a builtin declares fallibility but has no FALLIBILITY row");
+}
+
+/// What each builtin's failure can depend on, by kind and name: one row for every registered
+/// scalar function, aggregate, projection function and index function, each stating its class
+/// whether or not it is [`Fallibility::INFALLIBLE`], so that no omission means anything.
+///
+/// A method is a scalar function reached by dot syntax and shares its row. Sorted by
+/// `(kind, name)`. Every declaration site names its row through
+/// [`declare_fallibility!`](crate::declare_fallibility), which fails the build when the row is
+/// absent or names a different class; `every_builtin_declares_fallibility` pins the converse,
+/// that every row names a registered builtin.
+#[allow(dead_code)]
+pub(crate) const FALLIBILITY: &[(FnKind, &str, Fallibility)] = &[
+	(
+		FnKind::Scalar,
+		"api::invoke",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::req::body",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::req::max_body",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::res::body",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::res::header",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::res::headers",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::res::status",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"api::timeout",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "array::add", Fallibility::VALUE),
+	(FnKind::Scalar, "array::all", Fallibility::VALUE),
+	(FnKind::Scalar, "array::any", Fallibility::VALUE),
+	(FnKind::Scalar, "array::append", Fallibility::VALUE),
+	(FnKind::Scalar, "array::at", Fallibility::VALUE),
+	(FnKind::Scalar, "array::boolean_and", Fallibility::VALUE),
+	(FnKind::Scalar, "array::boolean_not", Fallibility::VALUE),
+	(FnKind::Scalar, "array::boolean_or", Fallibility::VALUE),
+	(FnKind::Scalar, "array::boolean_xor", Fallibility::VALUE),
+	(FnKind::Scalar, "array::clump", Fallibility::VALUE),
+	(FnKind::Scalar, "array::combine", Fallibility::VALUE),
+	(FnKind::Scalar, "array::complement", Fallibility::VALUE),
+	(FnKind::Scalar, "array::concat", Fallibility::VALUE),
+	(FnKind::Scalar, "array::difference", Fallibility::VALUE),
+	(FnKind::Scalar, "array::distinct", Fallibility::VALUE),
+	(FnKind::Scalar, "array::every", Fallibility::VALUE),
+	(FnKind::Scalar, "array::fill", Fallibility::VALUE),
+	(FnKind::Scalar, "array::filter", Fallibility::VALUE),
+	(FnKind::Scalar, "array::filter_index", Fallibility::VALUE),
+	(FnKind::Scalar, "array::find", Fallibility::VALUE),
+	(FnKind::Scalar, "array::find_index", Fallibility::VALUE),
+	(FnKind::Scalar, "array::first", Fallibility::VALUE),
+	(FnKind::Scalar, "array::flatten", Fallibility::VALUE),
+	(FnKind::Scalar, "array::fold", Fallibility::VALUE),
+	(FnKind::Scalar, "array::group", Fallibility::VALUE),
+	(FnKind::Scalar, "array::includes", Fallibility::VALUE),
+	(FnKind::Scalar, "array::index_of", Fallibility::VALUE),
+	(FnKind::Scalar, "array::insert", Fallibility::VALUE),
+	(FnKind::Scalar, "array::intersect", Fallibility::VALUE),
+	(FnKind::Scalar, "array::is_empty", Fallibility::VALUE),
+	(FnKind::Scalar, "array::join", Fallibility::VALUE),
+	(FnKind::Scalar, "array::last", Fallibility::VALUE),
+	(FnKind::Scalar, "array::len", Fallibility::VALUE),
+	(FnKind::Scalar, "array::logical_and", Fallibility::VALUE),
+	(FnKind::Scalar, "array::logical_or", Fallibility::VALUE),
+	(FnKind::Scalar, "array::logical_xor", Fallibility::VALUE),
+	(FnKind::Scalar, "array::map", Fallibility::VALUE),
+	(FnKind::Scalar, "array::matches", Fallibility::VALUE),
+	(FnKind::Scalar, "array::max", Fallibility::VALUE),
+	(FnKind::Scalar, "array::min", Fallibility::VALUE),
+	(FnKind::Scalar, "array::pop", Fallibility::VALUE),
+	(FnKind::Scalar, "array::prepend", Fallibility::VALUE),
+	(FnKind::Scalar, "array::push", Fallibility::VALUE),
+	(FnKind::Scalar, "array::range", Fallibility::VALUE),
+	(FnKind::Scalar, "array::reduce", Fallibility::VALUE),
+	(FnKind::Scalar, "array::remove", Fallibility::VALUE),
+	(FnKind::Scalar, "array::repeat", Fallibility::VALUE),
+	(FnKind::Scalar, "array::reverse", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sequence", Fallibility::VALUE),
+	(FnKind::Scalar, "array::shuffle", Fallibility::VALUE),
+	(FnKind::Scalar, "array::slice", Fallibility::VALUE),
+	(FnKind::Scalar, "array::some", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort::asc", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort::desc", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort_lexical", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort_natural", Fallibility::VALUE),
+	(FnKind::Scalar, "array::sort_natural_lexical", Fallibility::VALUE),
+	(FnKind::Scalar, "array::swap", Fallibility::VALUE),
+	(FnKind::Scalar, "array::transpose", Fallibility::VALUE),
+	(FnKind::Scalar, "array::union", Fallibility::VALUE),
+	(FnKind::Scalar, "array::windows", Fallibility::VALUE),
+	(FnKind::Scalar, "bytes::len", Fallibility::VALUE),
+	(FnKind::Scalar, "count", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "crypto::argon2::compare", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::argon2::generate", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::bcrypt::compare", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::bcrypt::generate", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::blake3", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::joaat", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::md5", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::pbkdf2::compare", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::pbkdf2::generate", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::scrypt::compare", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::scrypt::generate", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::sha1", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::sha256", Fallibility::VALUE),
+	(FnKind::Scalar, "crypto::sha512", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::days", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "duration::from_days", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_hours", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_micros", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_millis", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_mins", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_nanos", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_secs", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::from_weeks", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::hours", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "duration::micros", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::millis", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::mins", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "duration::nanos", Fallibility::VALUE),
+	(FnKind::Scalar, "duration::secs", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "duration::weeks", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "duration::years", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "encoding::base64::decode", Fallibility::VALUE),
+	(FnKind::Scalar, "encoding::base64::encode", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "encoding::cbor::decode", Fallibility::VALUE),
+	(FnKind::Scalar, "encoding::cbor::encode", Fallibility::VALUE),
+	(FnKind::Scalar, "encoding::json::decode", Fallibility::VALUE),
+	(FnKind::Scalar, "encoding::json::encode", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"eval::gql",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"eval::surql",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "file::bucket", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"file::copy",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::copy_if_not_exists",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::delete",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::exists",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::get",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::head",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "file::key", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"file::list",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::put",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::put_if_not_exists",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::rename",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"file::rename_if_not_exists",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "geo::area", Fallibility::VALUE),
+	(FnKind::Scalar, "geo::bearing", Fallibility::VALUE),
+	(FnKind::Scalar, "geo::centroid", Fallibility::VALUE),
+	(FnKind::Scalar, "geo::distance", Fallibility::VALUE),
+	(FnKind::Scalar, "geo::hash::decode", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "geo::hash::encode", Fallibility::VALUE),
+	(FnKind::Scalar, "geo::is_valid", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"http::delete",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"http::get",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"http::head",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"http::patch",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"http::post",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Scalar,
+		"http::put",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "math::abs", Fallibility::VALUE),
+	(FnKind::Scalar, "math::acos", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::acot", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::asin", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::atan", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::bottom", Fallibility::VALUE),
+	(FnKind::Scalar, "math::ceil", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::clamp", Fallibility::VALUE),
+	(FnKind::Scalar, "math::cos", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::cot", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::deg2rad", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::fixed", Fallibility::VALUE),
+	(FnKind::Scalar, "math::floor", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::interquartile", Fallibility::VALUE),
+	(FnKind::Scalar, "math::lerp", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::lerpangle", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::ln", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::log", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::log10", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::log2", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::max", Fallibility::VALUE),
+	(FnKind::Scalar, "math::mean", Fallibility::VALUE),
+	(FnKind::Scalar, "math::median", Fallibility::VALUE),
+	(FnKind::Scalar, "math::midhinge", Fallibility::VALUE),
+	(FnKind::Scalar, "math::min", Fallibility::VALUE),
+	(FnKind::Scalar, "math::mode", Fallibility::VALUE),
+	(FnKind::Scalar, "math::nearestrank", Fallibility::VALUE),
+	(FnKind::Scalar, "math::percentile", Fallibility::VALUE),
+	(FnKind::Scalar, "math::pow", Fallibility::VALUE),
+	(FnKind::Scalar, "math::product", Fallibility::VALUE),
+	(FnKind::Scalar, "math::rad2deg", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::round", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::sign", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::sin", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::spread", Fallibility::VALUE),
+	(FnKind::Scalar, "math::sqrt", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::stddev", Fallibility::VALUE),
+	(FnKind::Scalar, "math::sum", Fallibility::VALUE),
+	(FnKind::Scalar, "math::tan", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "math::top", Fallibility::VALUE),
+	(FnKind::Scalar, "math::trimean", Fallibility::VALUE),
+	(FnKind::Scalar, "math::variance", Fallibility::VALUE),
+	(FnKind::Scalar, "meta::id", Fallibility::VALUE),
+	(FnKind::Scalar, "meta::tb", Fallibility::VALUE),
+	(FnKind::Scalar, "not", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "object::entries", Fallibility::VALUE),
+	(FnKind::Scalar, "object::extend", Fallibility::VALUE),
+	(FnKind::Scalar, "object::from_entries", Fallibility::VALUE),
+	(FnKind::Scalar, "object::is_empty", Fallibility::VALUE),
+	(FnKind::Scalar, "object::keys", Fallibility::VALUE),
+	(FnKind::Scalar, "object::len", Fallibility::VALUE),
+	(FnKind::Scalar, "object::remove", Fallibility::VALUE),
+	(FnKind::Scalar, "object::values", Fallibility::VALUE),
+	(FnKind::Scalar, "parse::email::host", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::email::user", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::domain", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::fragment", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::host", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::path", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::port", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::query", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "parse::url::scheme", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "rand", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "rand::bool", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "rand::duration", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::enum", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::float", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::id", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::int", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::string", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::time", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::ulid", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::uuid", Fallibility::VALUE),
+	(FnKind::Scalar, "rand::uuid::v4", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "rand::uuid::v7", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"record::exists",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "record::id", Fallibility::VALUE),
+	(
+		FnKind::Scalar,
+		"record::is_edge",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "record::table", Fallibility::VALUE),
+	(FnKind::Scalar, "record::tb", Fallibility::VALUE),
+	(FnKind::Scalar, "schema::table::exists", Fallibility::DATA),
+	(
+		FnKind::Scalar,
+		"search::analyze",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Scalar, "search::linear", Fallibility::VALUE),
+	(FnKind::Scalar, "search::rrf", Fallibility::VALUE),
+	(FnKind::Scalar, "sequence::nextval", Fallibility::DATA),
+	(FnKind::Scalar, "session::ac", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::db", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::id", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::ip", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::ns", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::origin", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::rd", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "session::token", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "set::add", Fallibility::VALUE),
+	(FnKind::Scalar, "set::all", Fallibility::VALUE),
+	(FnKind::Scalar, "set::any", Fallibility::VALUE),
+	(FnKind::Scalar, "set::at", Fallibility::VALUE),
+	(FnKind::Scalar, "set::complement", Fallibility::VALUE),
+	(FnKind::Scalar, "set::contains", Fallibility::VALUE),
+	(FnKind::Scalar, "set::difference", Fallibility::VALUE),
+	(FnKind::Scalar, "set::filter", Fallibility::VALUE),
+	(FnKind::Scalar, "set::find", Fallibility::VALUE),
+	(FnKind::Scalar, "set::first", Fallibility::VALUE),
+	(FnKind::Scalar, "set::flatten", Fallibility::VALUE),
+	(FnKind::Scalar, "set::fold", Fallibility::VALUE),
+	(FnKind::Scalar, "set::intersect", Fallibility::VALUE),
+	(FnKind::Scalar, "set::is_empty", Fallibility::VALUE),
+	(FnKind::Scalar, "set::join", Fallibility::VALUE),
+	(FnKind::Scalar, "set::last", Fallibility::VALUE),
+	(FnKind::Scalar, "set::len", Fallibility::VALUE),
+	(FnKind::Scalar, "set::map", Fallibility::VALUE),
+	(FnKind::Scalar, "set::max", Fallibility::VALUE),
+	(FnKind::Scalar, "set::min", Fallibility::VALUE),
+	(FnKind::Scalar, "set::reduce", Fallibility::VALUE),
+	(FnKind::Scalar, "set::remove", Fallibility::VALUE),
+	(FnKind::Scalar, "set::slice", Fallibility::VALUE),
+	(FnKind::Scalar, "set::union", Fallibility::VALUE),
+	(FnKind::Scalar, "sleep", Fallibility::VALUE.union(Fallibility::CONTEXT)),
+	(FnKind::Scalar, "string::capitalize", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::concat", Fallibility::VALUE),
+	(FnKind::Scalar, "string::contains", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::distance::damerau_levenshtein", Fallibility::VALUE),
+	(FnKind::Scalar, "string::distance::hamming", Fallibility::VALUE),
+	(FnKind::Scalar, "string::distance::levenshtein", Fallibility::VALUE),
+	(FnKind::Scalar, "string::distance::normalized_damerau_levenshtein", Fallibility::VALUE),
+	(FnKind::Scalar, "string::distance::normalized_levenshtein", Fallibility::VALUE),
+	(FnKind::Scalar, "string::distance::osa", Fallibility::VALUE),
+	(FnKind::Scalar, "string::ends_with", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::html::encode", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::html::sanitize", Fallibility::VALUE),
+	(FnKind::Scalar, "string::is_alpha", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_alphanum", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_ascii", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_datetime", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_domain", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_email", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_hexadecimal", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_ip", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_ipv4", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_ipv6", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_latitude", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_longitude", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_numeric", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_record", Fallibility::VALUE),
+	(FnKind::Scalar, "string::is_semver", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_ulid", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_url", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::is_uuid", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::join", Fallibility::VALUE),
+	(FnKind::Scalar, "string::len", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::lowercase", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::matches", Fallibility::VALUE),
+	(FnKind::Scalar, "string::repeat", Fallibility::VALUE),
+	(FnKind::Scalar, "string::replace", Fallibility::VALUE),
+	(FnKind::Scalar, "string::reverse", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::semver::compare", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::inc::major", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::inc::minor", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::inc::patch", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::major", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::minor", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::patch", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::set::major", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::set::minor", Fallibility::VALUE),
+	(FnKind::Scalar, "string::semver::set::patch", Fallibility::VALUE),
+	(FnKind::Scalar, "string::similarity::fuzzy", Fallibility::VALUE),
+	(FnKind::Scalar, "string::similarity::jaro", Fallibility::VALUE),
+	(FnKind::Scalar, "string::similarity::jaro_winkler", Fallibility::VALUE),
+	(FnKind::Scalar, "string::similarity::smithwaterman", Fallibility::VALUE),
+	(FnKind::Scalar, "string::similarity::sorensen_dice", Fallibility::VALUE),
+	(FnKind::Scalar, "string::slice", Fallibility::VALUE),
+	(FnKind::Scalar, "string::slug", Fallibility::VALUE),
+	(FnKind::Scalar, "string::split", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::starts_with", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::trim", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::uppercase", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "string::words", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::ceil", Fallibility::VALUE),
+	(FnKind::Scalar, "time::day", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::floor", Fallibility::VALUE),
+	(FnKind::Scalar, "time::format", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_micros", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_millis", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_nanos", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_secs", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_ulid", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_unix", Fallibility::VALUE),
+	(FnKind::Scalar, "time::from_uuid", Fallibility::VALUE),
+	(FnKind::Scalar, "time::group", Fallibility::VALUE),
+	(FnKind::Scalar, "time::hour", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::is_leap_year", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::max", Fallibility::VALUE),
+	(FnKind::Scalar, "time::micros", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::millis", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::min", Fallibility::VALUE),
+	(FnKind::Scalar, "time::minute", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::month", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::nano", Fallibility::VALUE),
+	(FnKind::Scalar, "time::now", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::round", Fallibility::VALUE),
+	(FnKind::Scalar, "time::second", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::set_day", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_hour", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_minute", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_month", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_nanosecond", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_second", Fallibility::VALUE),
+	(FnKind::Scalar, "time::set_year", Fallibility::VALUE),
+	(FnKind::Scalar, "time::timezone", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::unix", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::wday", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::week", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::yday", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "time::year", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::array", Fallibility::VALUE),
+	(FnKind::Scalar, "type::bool", Fallibility::VALUE),
+	(FnKind::Scalar, "type::bytes", Fallibility::VALUE),
+	(FnKind::Scalar, "type::datetime", Fallibility::VALUE),
+	(FnKind::Scalar, "type::decimal", Fallibility::VALUE),
+	(FnKind::Scalar, "type::duration", Fallibility::VALUE),
+	(FnKind::Scalar, "type::file", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::float", Fallibility::VALUE),
+	(FnKind::Scalar, "type::geometry", Fallibility::VALUE),
+	(FnKind::Scalar, "type::int", Fallibility::VALUE),
+	(FnKind::Scalar, "type::is_array", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_bool", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_bytes", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_collection", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_datetime", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_decimal", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_duration", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_float", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_geometry", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_int", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_line", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_multiline", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_multipoint", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_multipolygon", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_none", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_null", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_number", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_object", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_point", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_polygon", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_range", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_record", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_set", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_string", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::is_uuid", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::number", Fallibility::VALUE),
+	(FnKind::Scalar, "type::of", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "type::point", Fallibility::VALUE),
+	(FnKind::Scalar, "type::range", Fallibility::VALUE),
+	(FnKind::Scalar, "type::record", Fallibility::VALUE),
+	(FnKind::Scalar, "type::set", Fallibility::VALUE),
+	(FnKind::Scalar, "type::string", Fallibility::VALUE),
+	(FnKind::Scalar, "type::string_lossy", Fallibility::VALUE),
+	(FnKind::Scalar, "type::table", Fallibility::VALUE),
+	(FnKind::Scalar, "type::uuid", Fallibility::VALUE),
+	(FnKind::Scalar, "value::chain", Fallibility::VALUE),
+	(FnKind::Scalar, "value::diff", Fallibility::INFALLIBLE),
+	(FnKind::Scalar, "value::expect", Fallibility::VALUE),
+	(FnKind::Scalar, "value::patch", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::add", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::angle", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::cross", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::chebyshev", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::euclidean", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::hamming", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::mahalanobis", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::manhattan", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::distance::minkowski", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::divide", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::dot", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::magnitude", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::multiply", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::normalize", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::project", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::scale", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::similarity::cosine", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::similarity::jaccard", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::similarity::pearson", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::similarity::spearman", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::subtract", Fallibility::VALUE),
+	(FnKind::Scalar, "vector::sum", Fallibility::VALUE),
+	(FnKind::Aggregate, "array::collect", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "array::distinct", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "array::group", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "array::join", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "array::max", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "array::min", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "count", Fallibility::INFALLIBLE),
+	(FnKind::Aggregate, "math::max", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::mean", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::median", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::min", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::stddev", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::sum", Fallibility::VALUE),
+	(FnKind::Aggregate, "math::variance", Fallibility::VALUE),
+	(FnKind::Aggregate, "time::max", Fallibility::VALUE),
+	(FnKind::Aggregate, "time::min", Fallibility::VALUE),
+	(FnKind::Aggregate, "vector::sum", Fallibility::INFALLIBLE),
+	(
+		FnKind::Projection,
+		"type::field",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(
+		FnKind::Projection,
+		"type::fields",
+		Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA),
+	),
+	(FnKind::Index, "search::highlight", Fallibility::VALUE.union(Fallibility::DATA)),
+	(FnKind::Index, "search::offsets", Fallibility::DATA),
+	(FnKind::Index, "search::score", Fallibility::DATA),
+	(FnKind::Index, "vector::distance::knn", Fallibility::DATA),
+];
+
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+
 	use super::*;
 	use crate::expr::logical::EffectSet as E;
 
@@ -586,7 +1245,7 @@ mod tests {
 			 `NON_DETERMINISTIC` and declares the effect at its definition"
 		);
 
-		// Guard the guard: a registry that answered nothing would pass both.
+		// The check only means something when the set is non-empty, so an empty result fails here.
 		assert!(actual.len() > 40, "expected the whole volatile class, found {actual:?}");
 	}
 
@@ -701,14 +1360,14 @@ mod tests {
 		("schema::table::exists", E::READS_CATALOG),
 		("search::analyze", E::READS_CATALOG),
 		("sequence::nextval", E::ADVANCES_STATE),
-		("session::ac", E::READS_SESSION),
-		("session::db", E::READS_SESSION),
-		("session::id", E::READS_SESSION),
-		("session::ip", E::READS_SESSION),
-		("session::ns", E::READS_SESSION),
-		("session::origin", E::READS_SESSION),
-		("session::rd", E::READS_SESSION),
-		("session::token", E::READS_SESSION),
+		("session::ac", E::READS_PRINCIPAL),
+		("session::db", E::READS_SESSION_DB),
+		("session::id", E::READS_PRINCIPAL),
+		("session::ip", E::READS_PRINCIPAL),
+		("session::ns", E::READS_SESSION_DB),
+		("session::origin", E::READS_PRINCIPAL),
+		("session::rd", E::READS_PRINCIPAL),
+		("session::token", E::READS_PRINCIPAL),
 		("sleep", E::BLOCKING),
 		("time::day", E::CLOCK),
 		("time::hour", E::CLOCK),
@@ -775,6 +1434,117 @@ mod tests {
 				"{}: `mutates_state_builtin` and `EffectSet::mutates_state` disagree",
 				f.name()
 			);
+		}
+	}
+
+	/// Every registered builtin has a [`FALLIBILITY`] row equal to what its declaration answers,
+	/// and every row names a registered builtin.
+	///
+	/// A method resolves to a scalar function the registry holds, so it is covered by that
+	/// function's row; the check below reads each method's implementations by `name()` to pin
+	/// that. A build that leaves a feature-gated family out registers stand-ins for it, so the
+	/// name-set and row equality are only asserted when every family is present; the implications
+	/// on a declaration hold in every build.
+	#[test]
+	fn every_builtin_declares_fallibility() {
+		let registry = FunctionRegistry::with_builtins();
+
+		assert!(
+			FALLIBILITY.windows(2).all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1)),
+			"keep `FALLIBILITY` sorted by (kind, name), one row per builtin"
+		);
+
+		let mut actual: BTreeMap<(FnKind, &str), Fallibility> = BTreeMap::new();
+		for f in registry.scalar_functions() {
+			actual.insert((FnKind::Scalar, f.name()), f.fallibility());
+		}
+		for f in registry.aggregate_functions() {
+			actual.insert((FnKind::Aggregate, f.name()), f.fallibility());
+		}
+		for f in registry.projection_functions() {
+			actual.insert((FnKind::Projection, f.name()), f.fallibility());
+		}
+		for f in registry.index_functions() {
+			actual.insert((FnKind::Index, f.name()), f.fallibility());
+		}
+		let table: BTreeMap<(FnKind, &str), Fallibility> =
+			FALLIBILITY.iter().map(|&(kind, name, class)| ((kind, name), class)).collect();
+
+		if cfg!(all(
+			feature = "api",
+			feature = "encoding",
+			feature = "files",
+			feature = "search",
+			feature = "url"
+		)) {
+			let missing: Vec<_> = actual.keys().filter(|key| !table.contains_key(*key)).collect();
+			let extra: Vec<_> = table.keys().filter(|key| !actual.contains_key(*key)).collect();
+			assert!(
+				missing.is_empty() && extra.is_empty(),
+				"`FALLIBILITY` and the registry name different builtins; \
+				 missing a row: {missing:?}, a row naming no builtin: {extra:?}"
+			);
+			for (key, class) in &actual {
+				assert_eq!(
+					table[key], *class,
+					"{key:?}: the `FALLIBILITY` row differs from the declaration"
+				);
+			}
+		}
+
+		// A method's implementations are scalar functions the registry holds, and the table
+		// answers for them under the same name.
+		for descriptor in registry.methods().descriptors() {
+			let implementations = descriptor
+				.type_impls
+				.iter()
+				.map(|(_, function)| function)
+				.chain(descriptor.fallback.iter());
+			for function in implementations {
+				let held = registry.get(function.name()).unwrap_or_else(|| {
+					panic!("method `{}`: `{}` is not registered", descriptor.name, function.name())
+				});
+				assert_eq!(
+					held.fallibility(),
+					function.fallibility(),
+					"method `{}`: `{}` answers differently from the registered function",
+					descriptor.name,
+					function.name()
+				);
+				assert!(
+					table.contains_key(&(FnKind::Scalar, function.name())),
+					"method `{}`: `{}` has no `FALLIBILITY` row",
+					descriptor.name,
+					function.name()
+				);
+			}
+		}
+
+		// The floor a body's effects put under its class: a declaration may name more, never less.
+		let data_and_context = Fallibility::CONTEXT | Fallibility::DATA;
+		for f in registry.scalar_functions() {
+			let (effects, class) = (f.effects(), f.fallibility());
+			if effects.contains(E::READS_DATA) || effects.writes_data() {
+				assert!(
+					class.contains(Fallibility::DATA),
+					"{}: reads or writes data, so `DATA`",
+					f.name()
+				);
+			}
+			if effects.contains(E::OPAQUE_BODY) {
+				assert!(
+					class.contains(data_and_context),
+					"{}: runs a body it cannot see, so `CONTEXT | DATA`",
+					f.name()
+				);
+			}
+			if effects.intersects(E::READS_EXTERNAL.union(E::WRITES_EXTERNAL)) {
+				assert!(
+					class.contains(data_and_context),
+					"{}: reaches outside the transaction, so `CONTEXT | DATA`",
+					f.name()
+				);
+			}
 		}
 	}
 

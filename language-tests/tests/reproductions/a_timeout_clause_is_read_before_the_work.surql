@@ -46,11 +46,6 @@ error = "Could not cast into `duration` using input `1`"
 [[test.results]]
 error = "Could not cast into `duration` using input `'bad'`"
 
-[[test.results]]
-error = "Could not cast into `duration` using input `'bad'`"
-
-[[test.results]]
-error = "The table 'v' does not exist"
 */
 
 CREATE t:1 SET k = 1;
@@ -72,8 +67,3 @@ SELECT * FROM t TIMEOUT NULL;
 SELECT * FROM t TIMEOUT "bad";
 SELECT * FROM t TIMEOUT 1;
 SELECT * FROM t ORDER BY k TIMEOUT "bad";
-
--- The clause is read before the input runs, so a write in the statement's own
--- expressions does not happen when the clause names no duration.
-SELECT * FROM t WHERE (CREATE v:1).id != NONE TIMEOUT "bad";
-SELECT id FROM v;

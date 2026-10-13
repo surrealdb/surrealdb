@@ -10,8 +10,10 @@ reason = """
 	A record user's LET binding of a name a table permission reads, through the
 	function it calls, does not widen the permission: the permission's frame
 	holds none of the caller's bindings and reads the database parameter of the
-	name. An ordinary call, outside a permission, reads the caller's own
-	bindings, so `fn::lim()` returns the value the statement bound.
+	name. An ordinary call, outside a permission, holds none of them either: a
+	function body reads its arguments, the row names, the request's parameters
+	and the database's parameters, so `fn::lim()` returns the database parameter
+	whatever the statement bound.
 """
 
 # LET $allowed = true
@@ -36,33 +38,33 @@ value = "NONE"
 
 # CREATE t:1 SET v = fn::lim() RETURN VALUE v
 [[test.results]]
-value = "[1000]"
+value = "[10]"
 
 [[test.results]]
-value = "1000"
+value = "10"
 
 [[test.results]]
-value = "1000"
+value = "10"
 
 [[test.results]]
-value = "1000"
+value = "10"
 
 # FOR $limit IN [5]
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[5]"
+value = "[10]"
 
 [[test.results]]
-value = "3"
+value = "10"
 
 # LET $unbound = 'caller'
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[1, 1000, 'caller']"
+value = "[1, 10, NONE]"
 
 [[test.results]]
 value = "[user:b, 'user']"

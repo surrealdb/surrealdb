@@ -14,13 +14,16 @@ use super::codec;
 use super::codec::TypeId;
 use super::codec::key::RouteId;
 use super::program::{
-	AccessCheck, ClauseConversion, ColumnSource, FieldCheck, IdSequence, PathSource, Program,
-	Service, StatementError, StoreInstr,
+	AccessCheck, ClauseConversion, ColumnSource, FieldCheck, GrantSubject, IdSequence, PathSource,
+	Program, Service, StatementError, StoreInstr,
 };
 use super::scalar::Scalar;
 use crate::catalog::stored::StoredField;
+use crate::ddl::grant;
+use crate::exe::FlowResultExt as _;
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
+use crate::iam::Action;
 use crate::kvs::sequences::CatalogSequence;
 use crate::val::Value;
 
@@ -30,6 +33,25 @@ pub(super) fn read(regs: &[Scalar<'_>], reg: u16) -> Value {
 
 pub(super) fn write(regs: &mut [Scalar<'_>], reg: u16, value: Value) {
 	regs[reg as usize] = Scalar::Value(Cow::Owned(value));
+}
+
+/// The sink the running statement records its session effects in, and the session's options.
+///
+/// Only the context of a top-level statement of the request holds a sink. A program run anywhere
+/// else (a function body, a closure, an event, a subscription, `eval::*`) holds none, so an
+/// instruction that writes the session raises there: such code can never switch the caller's
+/// namespace or database, set its options or bind a request parameter.
+fn session_sink_of<'a>(
+	ctx: &'a ExecutionContext,
+	statement: &str,
+) -> FlowResult<(&'a crate::exec::context::SessionSink, &'a crate::dbs::Options)> {
+	let options = ctx.options().ok_or_else(|| {
+		ControlFlow::Err(anyhow!("a {statement} run without the session's options"))
+	})?;
+	let sink = ctx.session_sink().ok_or_else(|| {
+		ControlFlow::Err(anyhow!("a {statement} run where the session cannot be changed"))
+	})?;
+	Ok((sink, options))
 }
 
 /// Take store instruction `instr`, answering the instruction the body jumps
@@ -87,6 +109,57 @@ async fn step_inner(
 			if ctx.try_txn().is_some_and(|txn| txn.speculating()) {
 				return Err(super::speculate::real_run_only());
 			}
+		}
+		StoreInstr::ShowGrants {
+			ac,
+			base,
+			gr,
+			filter,
+			dst,
+		} => {
+			let shown = show_grants(program, ctx, ac, *base, gr.as_deref(), *filter).await?;
+			write(regs, *dst, shown);
+		}
+		StoreInstr::IssueGrant {
+			ac,
+			base,
+			subject,
+			dst,
+		} => {
+			let subject = match subject {
+				GrantSubject::User(name) => crate::catalog::Subject::User(name.clone()),
+				GrantSubject::Record(reg) => {
+					grant::record_subject(read(regs, *reg)).map_err(ControlFlow::Err)?
+				}
+			};
+			let issued =
+				grant::create_grant(ac.clone(), *base, subject, ctx.ctx(), session_options(ctx)?)
+					.await
+					.map_err(ControlFlow::Err)?;
+			write(regs, *dst, Value::Object(grant::access_object_from_grant(&issued)));
+		}
+		StoreInstr::RevokeGrants {
+			ac,
+			base,
+			gr,
+			filter,
+			dst,
+		} => {
+			let revoked = revoke_grants(program, ctx, ac, *base, gr.as_deref(), *filter).await?;
+			write(regs, *dst, revoked);
+		}
+		StoreInstr::PurgeGrants {
+			ac,
+			base,
+			kind,
+			grace,
+			dst,
+		} => {
+			let purged =
+				grant::purge_grants(*base, ac, kind, *grace, ctx.ctx(), session_options(ctx)?)
+					.await
+					.map_err(ControlFlow::Err)?;
+			write(regs, *dst, purged);
 		}
 		StoreInstr::RefuseNoWrite => {
 			if let Some(frame) = ctx.root().no_write {
@@ -1053,6 +1126,173 @@ async fn step_inner(
 					.await;
 			}
 		}
+		StoreInstr::RealtimeChecks => {
+			let options = ctx.options().ok_or_else(|| {
+				ControlFlow::Err(anyhow!("a realtime statement run without the session's options"))
+			})?;
+			crate::exec::live::realtime_checks(ctx.ctx(), options).map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::Live {
+			target,
+			template,
+			dst,
+		} => {
+			let options = ctx.options().ok_or_else(|| {
+				ControlFlow::Err(anyhow!("a LIVE run without the session's options"))
+			})?;
+			let stored: crate::catalog::StoredSubscriptionDefinition =
+				rust(&read(regs, *template))?;
+			let definition = crate::catalog::SubscriptionDefinition::compile(&stored);
+			if definition.query.compiled().is_none() {
+				return Err(ControlFlow::Err(anyhow!(
+					"the template of a LIVE statement holds text that does not compile"
+				)));
+			}
+			let definition = crate::exec::live::completed(definition, ctx.ctx(), options);
+			let id = crate::exec::live::live_register(
+				read(regs, *target),
+				definition,
+				ctx.ctx(),
+				options,
+				None,
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
+			write(regs, *dst, id);
+		}
+		StoreInstr::Kill {
+			id,
+			written,
+		} => {
+			let options = ctx.options().ok_or_else(|| {
+				ControlFlow::Err(anyhow!("a KILL run without the session's options"))
+			})?;
+			let id = read(regs, *id);
+			let written = match read(regs, *written) {
+				Value::String(text) => text.as_str().to_owned(),
+				other => {
+					return Err(ControlFlow::Err(anyhow!(
+						"the written id of a KILL is {other:?}, which is no string"
+					)));
+				}
+			};
+			crate::exec::kill::kill_subscription(id, || written.clone(), ctx.ctx(), options)
+				.await
+				.map_err(ControlFlow::Err)?;
+		}
+		StoreInstr::SessionOption {
+			name,
+			what,
+		} => {
+			let (sink, options) = session_sink_of(ctx, "OPTION")?;
+			crate::exec::session::option_allowed(ctx.ctx(), options).map_err(ControlFlow::Err)?;
+			sink.record(crate::exec::context::SessionEffect::Option {
+				name: name.clone(),
+				what: *what,
+			});
+		}
+		StoreInstr::SessionUseName {
+			value,
+			database,
+		} => {
+			let level = if *database {
+				"database"
+			} else {
+				"namespace"
+			};
+			let name = crate::exec::session::use_name(read(regs, *value), level)
+				.map_err(ControlFlow::Err)?;
+			write(regs, *value, Value::String(name.into()));
+		}
+		StoreInstr::SessionUse {
+			default,
+			ns,
+			db,
+			dst,
+		} => {
+			use crate::catalog::providers::RootProvider as _;
+			let (sink, options) = session_sink_of(ctx, "USE")?;
+			let txn = ctx.txn();
+			let (use_ns, use_db) = match default {
+				true => match txn.get_default_config().await? {
+					Some(config) => (config.namespace.clone(), config.database.clone()),
+					None => (None, None),
+				},
+				false => {
+					let ns = ns
+						.map(|reg| crate::exec::session::use_name(read(regs, reg), "namespace"))
+						.transpose()
+						.map_err(ControlFlow::Err)?;
+					let db = db
+						.map(|reg| crate::exec::session::use_name(read(regs, reg), "database"))
+						.transpose()
+						.map_err(ControlFlow::Err)?;
+					(ns, db)
+				}
+			};
+			// The session as the statement leaves it: what the frame selects, overlaid by the
+			// levels the transactional half selected.
+			let mut ns = options.ns.as_deref().map(str::to_owned);
+			let mut db = options.db.as_deref().map(str::to_owned);
+			let selected = crate::exec::session::use_targets(
+				ctx.ctx(),
+				options,
+				&txn,
+				use_ns,
+				use_db,
+				|level| {
+					if let crate::exec::context::SessionEffect::Use {
+						ns: level_ns,
+						db: level_db,
+					} = &level
+					{
+						ns = level_ns.as_ref().map(|name| name.as_str().to_owned()).or(ns.take());
+						db = level_db.as_ref().map(|name| name.as_str().to_owned()).or(db.take());
+					}
+					sink.record(level);
+				},
+			)
+			.await;
+			selected.map_err(ControlFlow::Err)?;
+			write(regs, *dst, crate::exec::session::use_answer(ns.as_deref(), db.as_deref()));
+		}
+		StoreInstr::SessionLetChecks {
+			name,
+		} => {
+			// SECURITY: a protected name is refused before the value is evaluated, so a refused
+			// `LET` has no side effects.
+			if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+				return Err(ControlFlow::Err(anyhow::Error::new(
+					crate::exec::Error::InvalidParam {
+						name: name.as_str().to_owned(),
+					},
+				)));
+			}
+		}
+		StoreInstr::SessionLet {
+			name,
+			kind,
+			value,
+		} => {
+			let (sink, _) = session_sink_of(ctx, "LET")?;
+			let mut bound = read(regs, *value);
+			if let Some(kind) = kind {
+				bound = bound.coerce_to_kind(&program.kinds[*kind as usize]).map_err(|error| {
+					ControlFlow::Err(anyhow::Error::new(crate::exec::Error::SetCoerce {
+						name: name.as_str().to_owned(),
+						error: Box::new(error),
+					}))
+				})?;
+			}
+			// A top-level `LET` binds into the request-scoped context, which is not reset
+			// between statements, so a chain of them would grow the value's nesting without
+			// bound: the bound is checked here, as a storage guard checks a written value.
+			crate::val::check_value_depth(&bound).map_err(ControlFlow::Err)?;
+			sink.record(crate::exec::context::SessionEffect::Let {
+				name: name.clone(),
+				value: std::sync::Arc::new(bound),
+			});
+		}
 		StoreInstr::KillOnCommit {
 			subscription,
 		} => {
@@ -1244,8 +1484,8 @@ async fn step_inner(
 					let index = crate::catalog::IndexDefinition::from_stored(&stored)
 						.map_err(ControlFlow::Err)?;
 					// Restamping at the current format moves an index with a
-					// private layout onto the shared space; one already on it
-					// was a consumer throughout.
+					// private layout onto the shared space. An index already on
+					// the shared space keeps reading from it and is not moved.
 					let mut restamped = index.clone();
 					restamped.format_version = crate::catalog::INDEX_FORMAT_VERSION;
 					let moves = index.format_version != crate::catalog::INDEX_FORMAT_VERSION
@@ -1653,6 +1893,35 @@ async fn step_inner(
 				.await
 				.map_err(ControlFlow::Err)?;
 		}
+		StoreInstr::AlterFieldClauses {
+			name,
+			table,
+			altered,
+			fields,
+			kind_changed,
+			if_exists,
+		} => {
+			let name = idiom_of(&read(regs, *name))?;
+			let table = table_name_of(&read(regs, *table))?;
+			use crate::catalog::FromStored as _;
+			let stored: crate::catalog::StoredFieldDefinition = rust(&read(regs, *altered))?;
+			let altered =
+				crate::catalog::FieldDefinition::from_stored(&stored).map_err(ControlFlow::Err)?;
+			let options = ctx.options().ok_or_else(|| {
+				ControlFlow::Err(anyhow!("a field altered without the session's options"))
+			})?;
+			super::schema_host::alter_field_clauses(
+				&altered,
+				fields,
+				(*kind_changed, *if_exists),
+				name,
+				table,
+				ctx.ctx(),
+				options,
+			)
+			.await
+			.map_err(ControlFlow::Err)?;
+		}
 		StoreInstr::CheckIndexColumns {
 			ns,
 			db,
@@ -1860,8 +2129,8 @@ fn string_field(value: &Value, name: &str) -> String {
 	}
 }
 
-/// A catalog id held in a register.
 /// The table a register names, as a string.
+/// Fails when the value is neither a string nor a table.
 pub(super) fn table_name_of(value: &Value) -> FlowResult<crate::val::TableName> {
 	match value {
 		Value::String(s) => Ok(crate::val::TableName::new(s.as_str())),
@@ -1907,6 +2176,101 @@ fn speculative_skip(instr: &StoreInstr) -> bool {
 			| StoreInstr::EvictSequence { .. }
 			| StoreInstr::ValidateRecordKeys { .. }
 	)
+}
+
+/// The options of the session an access statement runs in, which name its
+/// selected base and its principal.
+fn session_options(ctx: &ExecutionContext) -> FlowResult<&crate::dbs::Options> {
+	ctx.options().ok_or_else(|| {
+		ControlFlow::Err(anyhow!("an access statement run without the session's options"))
+	})
+}
+
+/// Whether host pipeline `filter` of `program` answers truthy over `row`, a
+/// grant as a statement shows it; every grant is admitted where there is no
+/// filter. A `RETURN` in the filter answers its value.
+async fn admits(
+	program: &Program,
+	filter: Option<u16>,
+	row: &Value,
+	state: &mut Option<super::interp::PooledState>,
+	ctx: &ExecutionContext,
+) -> FlowResult<bool> {
+	let Some(filter) = filter else {
+		return Ok(true);
+	};
+	let verdict = super::host::eval_on_row(program, filter, Cow::Borrowed(row), state, ctx)
+		.await
+		.catch_return()
+		.map_err(ControlFlow::Err)?;
+	Ok(verdict.is_truthy())
+}
+
+/// What [`StoreInstr::ShowGrants`] answers.
+async fn show_grants(
+	program: &Program,
+	ctx: &ExecutionContext,
+	ac: &str,
+	base: Option<crate::expr::Base>,
+	gr: Option<&str>,
+	filter: Option<u16>,
+) -> FlowResult<Value> {
+	let opt = session_options(ctx)?;
+	let frozen = ctx.ctx();
+	let base = grant::access_method_base(base, ac, Action::View, frozen, opt)
+		.await
+		.map_err(ControlFlow::Err)?;
+	if let Some(gr) = gr {
+		return grant::shown_grant(base, ac, gr, frozen, opt).await.map_err(ControlFlow::Err);
+	}
+	let grants = grant::grants_at(base, ac, frozen, opt).await.map_err(ControlFlow::Err)?;
+	let mut state = None;
+	let mut shown = Vec::new();
+	for held in grants.iter() {
+		let row = grant::shown(held);
+		if admits(program, filter, &row, &mut state, ctx).await? {
+			shown.push(row);
+		}
+	}
+	Ok(Value::Array(shown.into()))
+}
+
+/// What [`StoreInstr::RevokeGrants`] answers.
+async fn revoke_grants(
+	program: &Program,
+	ctx: &ExecutionContext,
+	ac: &str,
+	base: Option<crate::expr::Base>,
+	gr: Option<&str>,
+	filter: Option<u16>,
+) -> FlowResult<Value> {
+	let opt = session_options(ctx)?;
+	let frozen = ctx.ctx();
+	let base = grant::access_method_base(base, ac, Action::Edit, frozen, opt)
+		.await
+		.map_err(ControlFlow::Err)?;
+	let mut revoked = Vec::new();
+	match gr {
+		Some(gr) => revoked
+			.push(grant::revoke_named(base, ac, gr, frozen, opt).await.map_err(ControlFlow::Err)?),
+		None => {
+			let grants = grant::grants_at(base, ac, frozen, opt).await.map_err(ControlFlow::Err)?;
+			let mut state = None;
+			for held in grants.iter() {
+				if held.revocation.is_some()
+					|| !admits(program, filter, &grant::shown(held), &mut state, ctx).await?
+				{
+					continue;
+				}
+				revoked.push(
+					grant::revoke_held(base, ac, held, frozen, opt)
+						.await
+						.map_err(ControlFlow::Err)?,
+				);
+			}
+		}
+	}
+	Ok(Value::Array(vec![Value::Array(revoked.into())].into()))
 }
 
 /// The id of catalog sequence `sequence` that draw `draw` takes: the one

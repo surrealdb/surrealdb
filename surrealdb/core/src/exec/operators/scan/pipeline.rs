@@ -12,15 +12,21 @@
 //! - [`eval_limit_expr`] — LIMIT/START expression evaluation
 //! - [`determine_scan_direction`] — ORDER BY → scan direction
 
+// The IR lowering emits the runtime these items serve, so the dead-code lint is allowed for the
+// module.
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
+use smallvec::SmallVec;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permission, TableLayouts};
 use crate::exec::permission::{
-	GuardKind, PhysicalPermission, check_permission_for_value, read_permission_to_physical,
+	Derivation, GuardKind, PhysicalPermission, check_permission_for_value, judge_before_derivation,
+	plan_table_derivations, read_permission_to_physical,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
@@ -32,9 +38,9 @@ use crate::kvs::{Admission, Direction, RowGate, Transaction};
 use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
-/// `(field_name, clause, optional_kind, dependency_field_names)`.
+/// `(field_name, clause, optional_kind, dependency_field_names, auth_limit, reenters)`.
 type RawComputedField =
-	(String, Clause, Option<crate::expr::Kind>, Vec<String>, Option<crate::iam::AuthLimit>);
+	(String, Clause, Option<crate::expr::Kind>, Vec<String>, Option<crate::iam::AuthLimit>, bool);
 
 // =============================================================================
 // ScanPipeline
@@ -339,9 +345,9 @@ pub(crate) fn kv_scan_stream(
 				})
 				.await
 				.context("Failed to scan record")?;
-			// Re-raise a stashed failure as the stream's terminal error, now
-			// that the cursor borrow has ended. `?` on an `Err` already ends
-			// the stream, so no explicit `return` is needed.
+			// Re-raise a stashed failure as the stream's terminal error, once the cursor borrow has
+			// ended. A `?` on an `Err` already ends the stream, so no explicit `return` is
+			// needed.
 			if let Some(cf) = decode_err {
 				Err(cf)?;
 			}
@@ -653,6 +659,24 @@ pub(crate) struct FieldState {
 	/// permission expression contains opaque constructs (subqueries, params,
 	/// etc.) that could reference fields outside of `permission_field_deps`.
 	permission_deps_complete: bool,
+	/// When each entry of `computed_fields` is derived relative to its select
+	/// guard, aligned with `computed_fields`. `None` when every field is
+	/// derived before its guard masks it ([`Derivation::AsMain`]), which is
+	/// every field of a state built for a caller whose reads are not checked.
+	/// [`Self::deferred_derivations`] is the only reader, and it answers `None`
+	/// for a list that does not line up with `computed_fields`.
+	derivations: Option<Arc<[PlannedDerivation]>>,
+}
+
+/// When one `COMPUTED` field is derived for a checked caller.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PlannedDerivation {
+	/// The rule [`plan_table_derivations`] chose for the field.
+	plan: Derivation,
+	/// The index in [`FieldState::field_permissions`] of the guard a
+	/// [`Derivation::JudgeFirst`] field is judged by. `None` for every other
+	/// plan.
+	guard: Option<usize>,
 }
 
 impl FieldState {
@@ -664,7 +688,17 @@ impl FieldState {
 			dep_map: Arc::new(HashMap::new()),
 			permission_field_deps: Arc::new(HashSet::new()),
 			permission_deps_complete: true,
+			derivations: None,
 		}
+	}
+
+	/// The derivation plan of `computed_fields`, when some field is not
+	/// derived before its guard. Aligned with `computed_fields`; `None` when
+	/// every field is, or when the two do not correspond.
+	fn deferred_derivations(&self) -> Option<&[PlannedDerivation]> {
+		self.derivations.as_deref().filter(|plan| {
+			!self.computed_fields.is_empty() && plan.len() == self.computed_fields.len()
+		})
 	}
 }
 
@@ -680,9 +714,13 @@ pub(crate) struct ComputedFieldDef {
 	/// The definer's auth, recorded on the field by `DEFINE FIELD`. The body is
 	/// evaluated under this so it cannot exercise more privilege than the
 	/// identity that wrote it. `None` when the stamp cannot narrow anything
-	/// (root Owner, which is also what pre-`auth_limit` field records default
-	/// to), letting the common case skip the context clone.
+	/// (root Owner) cannot narrow anything, and a field with no stored stamp defaults to it,
+	/// so the common case skips the context clone.
 	auth_limit: Option<crate::iam::AuthLimit>,
+	/// Whether the body holds a statement, a closure or a call of a
+	/// user-defined function, through which deriving the field can derive it
+	/// again: its derivation spends a unit of the computation-depth budget.
+	reenters: bool,
 }
 
 impl ComputedFieldDef {
@@ -695,6 +733,7 @@ impl ComputedFieldDef {
 			expr: Clause::literal(Value::None),
 			kind: None,
 			auth_limit: None,
+			reenters: false,
 		}
 	}
 }
@@ -704,8 +743,8 @@ impl ComputedFieldDef {
 ///
 /// A root-`Owner` stamp is inert: `Level::Root` is a sublevel of nothing but
 /// `Level::Root`, so the caller keeps its own level, and retaining roles `<=
-/// Owner` keeps every role. Records written before `auth_limit` existed
-/// default to exactly that stamp, so this is also the overwhelmingly common case.
+/// Owner` keeps every role. A field with no stored stamp defaults to this stamp,
+/// so this is also the most common case.
 pub(crate) fn narrowing_auth_limit(
 	auth_limit: &crate::catalog::auth::AuthLimit,
 ) -> Result<Option<crate::iam::AuthLimit>, anyhow::Error> {
@@ -715,12 +754,6 @@ pub(crate) fn narrowing_auth_limit(
 	Ok(Some(crate::iam::AuthLimit::try_from(auth_limit)?))
 }
 
-/// Build field state from raw transaction and context parameters.
-///
-/// This is the core implementation that does the actual work: KV lookup of
-/// field definitions, [`Clause`] compilation, dependency analysis, and
-/// topological sorting. It takes explicit parameters instead of
-/// `ExecutionContext`, making it usable at both plan time and execution time.
 /// The fields of this table whose read is not inert, or `None` when no field
 /// read of it is.
 ///
@@ -820,9 +853,7 @@ pub(crate) async fn compile_field_state(
 	// planner's `CycleGuard` prevents recursive table-resolution for
 	// self-referential permissions like
 	// `WHERE (SELECT FROM same_table) != NONE`. When the planner is txn-less
-	// (runtime resolution), inner subqueries compile to runtime-resolving
-	// scans. See
-	// `language-tests/tests/reproductions/skip_fetch_perms_subquery_dereference.surql`.
+	// (runtime resolution), inner subqueries compile to runtime-resolving scans.
 
 	// Collect ALL computed fields and their dependency metadata.
 	let mut raw_computed: Vec<RawComputedField> = Vec::new();
@@ -858,34 +889,43 @@ pub(crate) async fn compile_field_state(
 				_ => None,
 			};
 			let body_planner = limited.as_ref().unwrap_or(planner);
-			let clause = match body {
+			let (clause, reenters) = match body {
 				Ok(body) => {
 					let compiled =
 						body_planner.scalar_metadata(body.clone()).await.with_context(|| {
 							format!("Computed field '{field_name}' has unsupported expression")
 						})?;
-					Clause::of(body.clone(), compiled)
+					let reenters = crate::exec::ir::logical::stages::needs_caller(body);
+					(Clause::of(body.clone(), compiled), reenters)
 				}
-				Err(reason) => Clause::uncompilable(reason.to_string()),
+				Err(reason) => (Clause::uncompilable(reason.to_string()), false),
 			};
 
-			raw_computed.push((field_name, clause, fd.field_kind.clone(), deps.fields, limit));
+			raw_computed.push((
+				field_name,
+				clause,
+				fd.field_kind.clone(),
+				deps.fields,
+				limit,
+				reenters,
+			));
 		}
 	}
 
 	// Topologically sort ALL computed fields for correct evaluation order
 	let topo_input: Vec<(String, Vec<String>)> =
-		raw_computed.iter().map(|(name, _, _, deps, _)| (name.clone(), deps.clone())).collect();
+		raw_computed.iter().map(|(name, _, _, deps, _, _)| (name.clone(), deps.clone())).collect();
 	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
 
 	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
 	for idx in sorted_indices {
-		let (field_name, expr, kind, _, auth_limit) = &raw_computed[idx];
+		let (field_name, expr, kind, _, auth_limit, reenters) = &raw_computed[idx];
 		computed_fields.push(ComputedFieldDef {
 			field_name: field_name.clone(),
 			expr: expr.clone(),
 			kind: kind.clone(),
 			auth_limit: auth_limit.clone(),
+			reenters: *reenters,
 		});
 	}
 
@@ -941,13 +981,67 @@ pub(crate) async fn compile_field_state(
 		}
 	}
 
+	let derivations = if check_perms {
+		plan_field_derivations(field_defs, &computed_fields, &field_permissions)
+	} else {
+		None
+	};
+
 	Ok(FieldState {
 		computed_fields,
 		field_permissions: Arc::new(field_permissions),
 		dep_map: Arc::new(dep_map),
 		permission_field_deps: Arc::new(permission_field_deps),
 		permission_deps_complete,
+		derivations,
 	})
+}
+
+/// The derivation plan of `computed_fields` for a caller whose reads are
+/// checked, or `None` when every field is derived before its guard.
+///
+/// The decision is [`plan_table_derivations`] over the whole table's
+/// definitions, matched to `computed_fields` by the name the record holds the
+/// field under. A [`Derivation::JudgeFirst`] field whose own guard is not in
+/// `field_permissions` has no guard to judge by, so it is derived before its
+/// guard like any other. A judged or hidden field's own guard entry is kept in
+/// the plan, so that the computed permission pass skips it.
+fn plan_field_derivations(
+	field_defs: &[crate::catalog::FieldDefinition],
+	computed_fields: &[ComputedFieldDef],
+	field_permissions: &[(crate::expr::Idiom, PhysicalPermission)],
+) -> Option<Arc<[PlannedDerivation]>> {
+	let decided = plan_table_derivations(field_defs, true);
+	let planned: Vec<PlannedDerivation> = computed_fields
+		.iter()
+		.map(|cf| {
+			let as_main = PlannedDerivation {
+				plan: Derivation::AsMain,
+				guard: None,
+			};
+			let Some(definition) = field_defs
+				.iter()
+				.find(|fd| fd.computed.is_some() && fd.name.field_name() == Some(&cf.field_name))
+			else {
+				return as_main;
+			};
+			let key = definition.name.to_raw_string();
+			let guard = field_permissions.iter().position(|(idiom, _)| *idiom == definition.name);
+			match decided.iter().find(|(name, _)| *name == key).map(|(_, plan)| *plan) {
+				// A guard inherited from an ancestor field has no entry of its own.
+				Some(Derivation::Hidden) => PlannedDerivation {
+					plan: Derivation::Hidden,
+					guard,
+				},
+				Some(Derivation::JudgeFirst) if guard.is_some() => PlannedDerivation {
+					plan: Derivation::JudgeFirst,
+					guard,
+				},
+				Some(Derivation::JudgeFirst | Derivation::AsMain) | None => as_main,
+			}
+		})
+		.collect();
+	planned.iter().any(|p| p.plan != Derivation::AsMain).then(|| Arc::from(planned))
 }
 
 /// The field state of reads of `table_name` in `ctx`, with field permissions
@@ -1004,19 +1098,30 @@ pub(crate) fn filter_field_state_for_projection(
 		&full_state.dep_map,
 	);
 
-	let computed_fields = if let Some(ref required_set) = required {
-		full_state
-			.computed_fields
-			.iter()
-			.filter(|cf| required_set.contains(&cf.field_name))
-			.cloned()
+	// The derivation plan is decided over the whole table, so narrowing the
+	// projection keeps each surviving field's entry and never makes a field
+	// eligible that the table's plan did not.
+	let kept: Option<Vec<usize>> = required.as_ref().map(|required_set| {
+		(0..full_state.computed_fields.len())
+			.filter(|&i| required_set.contains(&full_state.computed_fields[i].field_name))
 			.collect()
-	} else {
-		full_state.computed_fields.clone()
+	});
+	let (computed_fields, derivations) = match kept {
+		Some(kept) => {
+			let derivations = full_state
+				.deferred_derivations()
+				.map(|plan| kept.iter().map(|&i| plan[i]).collect::<Arc<[PlannedDerivation]>>());
+			let computed_fields =
+				kept.iter().map(|&i| full_state.computed_fields[i].clone()).collect();
+			(computed_fields, derivations)
+		}
+		None => (full_state.computed_fields.clone(), full_state.derivations.clone()),
 	};
+	let derivations = derivations.filter(|plan| plan.iter().any(|p| p.plan != Derivation::AsMain));
 
 	FieldState {
 		computed_fields,
+		derivations,
 		// SECURITY: `field_permissions` is retained in full here — it is
 		// deliberately NOT filtered down to the projection. Field-level SELECT
 		// permissions must be enforced for every restricted field on the table
@@ -1056,8 +1161,8 @@ pub(crate) async fn compute_fields_for_value(
 /// shadowed by a COMPUTED field of the same name, or `None` when it carries
 /// none.
 ///
-/// A key written while a field was ordinary stays in the record's bytes once
-/// that field is redefined as COMPUTED. The field no longer reaches it, but a
+/// A key written while a field was an ordinary field stays in the record's bytes
+/// after that field is redefined as COMPUTED. The computed field does not reach it, but
 /// self-dereference reads storage directly and would return it. Dropping the
 /// computed names makes `id.<name>` yield `NONE` there — the answer a read of
 /// storage gives for a name that is not stored.
@@ -1094,6 +1199,21 @@ pub(crate) async fn compute_fields_for_value_against(
 	skip_fetch_perms: bool,
 	stored_view: Option<Value>,
 ) -> Result<(), ControlFlow> {
+	derive_fields(ctx, state, value, skip_fetch_perms, stored_view, None).await
+}
+
+/// [`compute_fields_for_value_against`] deriving only the fields `verdicts`
+/// admits: `verdicts[i]` is whether `state.computed_fields[i]` is derived, and
+/// `None` derives them all. A field that is not derived leaves the row as it
+/// is.
+async fn derive_fields(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+	skip_fetch_perms: bool,
+	stored_view: Option<Value>,
+	verdicts: Option<&[bool]>,
+) -> Result<(), ControlFlow> {
 	if state.computed_fields.is_empty() {
 		return Ok(());
 	}
@@ -1125,8 +1245,24 @@ pub(crate) async fn compute_fields_for_value_against(
 	// so without the refusal a read of the field would mutate the database as
 	// the definer. Loop-invariant, so derived once per row rather than per field.
 	let field_ctx = ctx.clone().privileged_frame().computing_field();
+	// A body that can derive the fields of a record again — through a statement reading the
+	// table, a closure or a function — spends a unit of the computation-depth budget for the row,
+	// so a cycle of derivations ends in the computation-depth error, as recursion through a
+	// function does.
+	let reenters = state
+		.computed_fields
+		.iter()
+		.enumerate()
+		.any(|(index, cf)| cf.reenters && verdicts.is_none_or(|verdicts| verdicts[index]));
+	let field_ctx = match reenters {
+		true => field_ctx.dive().map_err(ControlFlow::Err)?,
+		false => field_ctx,
+	};
 
-	for cf in &state.computed_fields {
+	for (index, cf) in state.computed_fields.iter().enumerate() {
+		if verdicts.is_some_and(|verdicts| !verdicts[index]) {
+			continue;
+		}
 		// SECURITY: apply the field's AUTH LIMIT so the body runs under the
 		// definer's auth, not the reader's. Without it a low-privileged definer
 		// can plant a body that a high-privileged reader then executes with
@@ -1144,7 +1280,7 @@ pub(crate) async fn compute_fields_for_value_against(
 			narrowed
 		};
 		// Evaluate with the row as both current value and document root so
-		// nested subqueries see the same `$parent` as top-level projections (#7154).
+		// nested subqueries see the same `$parent` as top-level projections.
 		let row_ctx = narrowed_eval_ctx.with_value_and_doc(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
@@ -1224,7 +1360,7 @@ impl PermissionPass {
 	fn applies_to(self, state: &FieldState, idiom: &crate::expr::Idiom) -> bool {
 		let computed = match idiom.0.as_slice() {
 			[crate::expr::Part::Field(name)] => state.dep_map.contains_key(name.as_str()),
-			// A computed field is a top-level one, so no longer path is its own
+			// A computed field is top-level, so only a single-segment path can name one.
 			_ => false,
 		};
 		match self {
@@ -1266,6 +1402,12 @@ pub(crate) async fn materialise_fields_with_permissions(
 	skip_fetch_perms: bool,
 	check_perms: bool,
 ) -> Result<(), ControlFlow> {
+	if check_perms
+		&& !state.field_permissions.is_empty()
+		&& let Some(plan) = state.deferred_derivations()
+	{
+		return materialise_judged(ctx, state, plan, value, skip_fetch_perms).await;
+	}
 	compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
 	// Nothing on the table restricts reads, so nothing can be cut and nothing
 	// needs re-deriving. Checked before the snapshot below so a table whose
@@ -1284,7 +1426,7 @@ pub(crate) async fn materialise_fields_with_permissions(
 	// fields cut from it, so a clause naming one would read it as `NONE` there
 	// and pass a field the clause was written to deny.
 	let record = value.clone();
-	// The computed values and their snapshot are both live now, and the passes
+	// The computed values and their snapshot are both in place, and the passes
 	// below may cut them before the batch's own threshold check would see them.
 	super::common::ensure_below_memory_threshold()?;
 	// Stored fields first. `value` still equals `record`, so it doubles as the
@@ -1296,10 +1438,11 @@ pub(crate) async fn materialise_fields_with_permissions(
 		PermissionPass::Stored,
 		Some(&record),
 		Some(&record),
+		&[],
 	)
 	.await?;
 	if cut {
-		// Re-derive the computed fields, now against the reduced record, so one
+		// Re-derive the computed fields against the reduced record, so one
 		// whose body reads a denied field yields `NONE` instead of the value it
 		// held before that field was cut. The same reduced row backs the
 		// self-dereference, so `id.<field>` reads neither the cut value nor a
@@ -1307,7 +1450,7 @@ pub(crate) async fn materialise_fields_with_permissions(
 		let stored_view = stored_fields_view(state, value);
 		compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, Some(stored_view))
 			.await?;
-		// The re-derived values are live now, and the computed fields' own
+		// The re-derived values are in place, and the computed fields' own
 		// clauses below may cut them.
 		super::common::ensure_below_memory_threshold()?;
 	}
@@ -1324,6 +1467,93 @@ pub(crate) async fn materialise_fields_with_permissions(
 		PermissionPass::Computed,
 		snapshot,
 		Some(&record),
+		&[],
+	)
+	.await?;
+	Ok(())
+}
+
+/// [`materialise_fields_with_permissions`] for a table where some `COMPUTED`
+/// field is not derived before its select guard: `plan` is
+/// [`FieldState::deferred_derivations`].
+///
+/// A per-row verdict decides which fields are derived at all, taken against the
+/// row as stored before anything is derived onto it: a [`Derivation::Hidden`]
+/// field is never derived, a [`Derivation::JudgeFirst`] field is derived only
+/// when its guard admits the stored row, and every other field is derived. A
+/// field that is not derived is absent from the result, including a stored key
+/// of the same name that it shadows. The later passes then run as they do for
+/// any table, except that the computed pass skips every guard already judged,
+/// so each guard answers once per row and a volatile one cannot roll twice.
+/// The re-derivation after the stored pass derives the same fields and no
+/// others.
+async fn materialise_judged(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	plan: &[PlannedDerivation],
+	value: &mut Value,
+	skip_fetch_perms: bool,
+) -> Result<(), ControlFlow> {
+	// A guard that errors fails the row with its error, unchanged, so a retryable
+	// conflict stays downcastable; nothing is derived on a guess.
+	let mut verdicts: SmallVec<[bool; 8]> = SmallVec::with_capacity(plan.len());
+	let mut judged: SmallVec<[usize; 8]> = SmallVec::new();
+	for planned in plan {
+		let derive = match (planned.plan, planned.guard) {
+			(Derivation::AsMain, _) => true,
+			(Derivation::Hidden, guard) => {
+				judged.extend(guard);
+				false
+			}
+			(Derivation::JudgeFirst, Some(guard)) => {
+				judged.push(guard);
+				let (_, permission) = &state.field_permissions[guard];
+				judge_before_derivation(permission, value, ctx).await.map_err(ControlFlow::Err)?
+			}
+			// A judged field with no guard to judge it by is derived unconditionally.
+			(Derivation::JudgeFirst, None) => true,
+		};
+		verdicts.push(derive);
+	}
+	// Sampled before any key is removed, for the reason given on
+	// `shadowed_stored_view`.
+	let view = shadowed_stored_view(state, value);
+	if let Value::Object(obj) = &mut *value {
+		for (cf, _) in state.computed_fields.iter().zip(&verdicts).filter(|(_, derive)| !**derive) {
+			obj.remove(cf.field_name.as_str());
+		}
+	}
+	derive_fields(ctx, state, value, skip_fetch_perms, view, Some(&verdicts)).await?;
+
+	// The record as derived from storage, for the passes' predicates; see
+	// `materialise_fields_with_permissions`.
+	let record = value.clone();
+	super::common::ensure_below_memory_threshold()?;
+	let cut = filter_fields_by_permission_inner(
+		ctx,
+		state,
+		value,
+		PermissionPass::Stored,
+		Some(&record),
+		Some(&record),
+		&judged,
+	)
+	.await?;
+	if cut {
+		let stored_view = stored_fields_view(state, value);
+		derive_fields(ctx, state, value, skip_fetch_perms, Some(stored_view), Some(&verdicts))
+			.await?;
+		super::common::ensure_below_memory_threshold()?;
+	}
+	let snapshot = (!cut).then_some(&record);
+	filter_fields_by_permission_inner(
+		ctx,
+		state,
+		value,
+		PermissionPass::Computed,
+		snapshot,
+		Some(&record),
+		&judged,
 	)
 	.await?;
 	Ok(())
@@ -1340,7 +1570,8 @@ pub(crate) async fn filter_fields_by_permission(
 	state: &FieldState,
 	value: &mut Value,
 ) -> Result<(), ControlFlow> {
-	filter_fields_by_permission_inner(ctx, state, value, PermissionPass::All, None, None).await?;
+	filter_fields_by_permission_inner(ctx, state, value, PermissionPass::All, None, None, &[])
+		.await?;
 	Ok(())
 }
 
@@ -1369,6 +1600,7 @@ async fn filter_fields_by_permission_inner(
 	pass: PermissionPass,
 	snapshot: Option<&Value>,
 	predicate_doc: Option<&Value>,
+	judged: &[usize],
 ) -> Result<bool, ControlFlow> {
 	if state.field_permissions.is_empty() {
 		return Ok(false);
@@ -1383,8 +1615,8 @@ async fn filter_fields_by_permission_inner(
 	// the snapshot so earlier cuts don't affect later field expansion.
 	let mut lazy_snapshot: Option<Value> = None;
 	let mut cut_any = false;
-	for (idiom, perm) in state.field_permissions.iter() {
-		if !pass.applies_to(state, idiom) {
+	for (entry, (idiom, perm)) in state.field_permissions.iter().enumerate() {
+		if !pass.applies_to(state, idiom) || judged.contains(&entry) {
 			continue;
 		}
 		match perm {
@@ -1394,12 +1626,9 @@ async fn filter_fields_by_permission_inner(
 					Some(snapshot) => snapshot,
 					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
 				};
-				// SECURITY: iterate in reverse. `each` yields ascending
-				// array indices and `Value::cut` removes via `Vec::remove`
-				// (shifting later indices down), so a forward pass would
-				// let each removal invalidate the pending indices and leak
-				// the odd-indexed elements (issue #7356). Removing higher
-				// indices first keeps the pending lower indices valid.
+				// SECURITY: iterate in reverse. `each` yields ascending array indices and
+				// `Value::cut` removes via `Vec::remove`, which shifts later indices down.
+				// Removing higher indices first keeps the pending lower indices valid.
 				for path in original.each(&idiom.0).into_iter().rev() {
 					value.cut(&path.0);
 					cut_any = true;
@@ -1411,9 +1640,8 @@ async fn filter_fields_by_permission_inner(
 					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
 				};
 				let doc = predicate_doc.unwrap_or(original);
-				// SECURITY: iterate in reverse (see the Deny arm above and
-				// issue #7356). Predicates read from `original` and `doc`,
-				// both immutable, so evaluation order is irrelevant.
+				// SECURITY: iterate in reverse, as in the Deny arm above. Predicates read from
+				// `original` and `doc`, both immutable, so evaluation order is irrelevant.
 				for path in original.each(&idiom.0).into_iter().rev() {
 					let field_value = original.pick(&path.0);
 					let allowed = check_permission_for_value(perm, doc, Some(&field_value), ctx)
@@ -1459,6 +1687,7 @@ mod tests {
 			dep_map: Arc::new(HashMap::new()),
 			permission_field_deps: Arc::new(HashSet::new()),
 			permission_deps_complete: true,
+			derivations: None,
 		}
 	}
 
@@ -1605,6 +1834,112 @@ mod tests {
 		let unchecked = field_state(&ctx, &table, false).await.unwrap();
 		assert!(!Arc::ptr_eq(&first, &unchecked));
 		assert!(Arc::ptr_eq(&unchecked, &field_state(&ctx, &table, false).await.unwrap()));
+	}
+
+	// =========================================================================
+	// derivation relative to the select guard
+	// =========================================================================
+
+	/// A row of table `t` as storage holds it.
+	fn stored(text: &str) -> Value {
+		Value::from(crate::syn::value(text).expect("the row parses"))
+	}
+
+	#[tokio::test]
+	async fn a_hidden_computed_field_is_never_derived_for_a_checked_caller() {
+		// The body of `hidden` raises on this row, so deriving it would fail
+		// the read.
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD shown ON t COMPUTED a + 1;
+			 DEFINE FIELD hidden ON t COMPUTED <int> label PERMISSIONS FOR select NONE;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let table = TableName::from("t");
+		let checked = build_field_state(&ctx, &table, true, None).await.unwrap();
+		assert!(checked.deferred_derivations().is_some(), "the denied field is planned hidden");
+
+		let mut row = stored("{ id: t:1, a: 1, label: 'x' }");
+		materialise_fields_with_permissions(&ctx, &checked, &mut row, false, true)
+			.await
+			.expect("the hidden body is never evaluated");
+		assert_eq!(row, stored("{ id: t:1, a: 1, label: 'x', shown: 2 }"));
+
+		// A shadowing stored key of the hidden field goes with it.
+		let mut row = stored("{ id: t:1, a: 1, label: 'x', hidden: 5 }");
+		materialise_fields_with_permissions(&ctx, &checked, &mut row, false, true).await.unwrap();
+		assert_eq!(row, stored("{ id: t:1, a: 1, label: 'x', shown: 2 }"));
+
+		// A state that derives every field reaches the body and raises.
+		let unchecked = build_field_state(&ctx, &table, false, None).await.unwrap();
+		let mut row = stored("{ id: t:1, a: 1, label: 'x' }");
+		assert!(compute_fields_for_value(&ctx, &unchecked, &mut row, false).await.is_err());
+	}
+
+	#[tokio::test]
+	async fn a_judge_first_computed_field_is_derived_only_for_the_rows_its_guard_admits() {
+		// The guard reads the stored `visible`; the body raises on a label that
+		// is not a number, so a denied row proves the body did not run.
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD judged ON t COMPUTED <int> label PERMISSIONS FOR select WHERE visible = true;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let checked = build_field_state(&ctx, &TableName::from("t"), true, None).await.unwrap();
+		assert!(checked.deferred_derivations().is_some(), "the guard is judged first");
+
+		let mut admitted = stored("{ id: t:1, visible: true, label: '7' }");
+		materialise_fields_with_permissions(&ctx, &checked, &mut admitted, false, true)
+			.await
+			.unwrap();
+		assert_eq!(admitted, stored("{ id: t:1, visible: true, label: '7', judged: 7 }"));
+
+		let mut denied = stored("{ id: t:2, visible: false, label: 'x' }");
+		materialise_fields_with_permissions(&ctx, &checked, &mut denied, false, true)
+			.await
+			.expect("a denied row's body is never evaluated");
+		assert_eq!(denied, stored("{ id: t:2, visible: false, label: 'x' }"));
+	}
+
+	#[tokio::test]
+	async fn a_table_whose_derivations_are_all_as_main_carries_no_plan() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD doubled ON t COMPUTED a * 2;
+			 DEFINE FIELD secret ON t PERMISSIONS FOR select NONE;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let checked = build_field_state(&ctx, &TableName::from("t"), true, None).await.unwrap();
+		assert!(checked.deferred_derivations().is_none(), "`doubled` has no guard to defer to");
+
+		let mut row = stored("{ id: t:1, a: 2, secret: 's' }");
+		materialise_fields_with_permissions(&ctx, &checked, &mut row, false, true).await.unwrap();
+		assert_eq!(row, stored("{ id: t:1, a: 2, doubled: 4 }"));
+	}
+
+	#[tokio::test]
+	async fn narrowing_a_projection_keeps_the_plan_aligned_with_the_fields() {
+		let db = TestDb::new(
+			"DEFINE TABLE t SCHEMALESS;
+			 DEFINE FIELD shown ON t COMPUTED a + 1;
+			 DEFINE FIELD hidden ON t COMPUTED a + 2 PERMISSIONS FOR select NONE;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let table = TableName::from("t");
+		let wanted: HashSet<String> = ["hidden".to_owned()].into_iter().collect();
+		let narrowed = build_field_state(&ctx, &table, true, Some(&wanted)).await.unwrap();
+		assert_eq!(narrowed.computed_fields.len(), 1);
+		let plan = narrowed.deferred_derivations().expect("the hidden field stays planned");
+		assert_eq!(plan.len(), narrowed.computed_fields.len());
+		assert_eq!(plan[0].plan, Derivation::Hidden);
+
+		let mut row = stored("{ id: t:1, a: 1 }");
+		materialise_fields_with_permissions(&ctx, &narrowed, &mut row, false, true).await.unwrap();
+		assert_eq!(row, stored("{ id: t:1, a: 1 }"));
 	}
 
 	// =========================================================================

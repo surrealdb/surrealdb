@@ -76,11 +76,11 @@ pub(super) async fn count(
 			check_table(&services, &name, version, true).await?;
 			if check_perms {
 				match select {
-					crate::exec::vm::plan::CountSelect::Deny => return Ok(Counted::Count(0)),
-					crate::exec::vm::plan::CountSelect::Conditional => {
+					crate::exec::vm::payload::CountSelect::Deny => return Ok(Counted::Count(0)),
+					crate::exec::vm::payload::CountSelect::Conditional => {
 						return ordinary_rows(program, units, *ordinary, ctx).await;
 					}
-					crate::exec::vm::plan::CountSelect::Allow => {}
+					crate::exec::vm::payload::CountSelect::Allow => {}
 				}
 			}
 			let count = match &rid {
@@ -110,11 +110,11 @@ pub(super) async fn count(
 			check_table(&services, table, version, false).await?;
 			if check_perms {
 				match select {
-					crate::exec::vm::plan::CountSelect::Deny => return Ok(Counted::Count(0)),
-					crate::exec::vm::plan::CountSelect::Conditional => {
+					crate::exec::vm::payload::CountSelect::Deny => return Ok(Counted::Count(0)),
+					crate::exec::vm::payload::CountSelect::Conditional => {
 						return ordinary_rows(program, units, *ordinary, ctx).await;
 					}
-					crate::exec::vm::plan::CountSelect::Allow => {}
+					crate::exec::vm::payload::CountSelect::Allow => {}
 				}
 			}
 			let count = match via {
@@ -155,8 +155,8 @@ async fn check_table(
 	Ok(())
 }
 
-/// The rows of ordinary unit `unit`, the statement as a pipeline of scan,
-/// permission, predicate and aggregate answers it, run in `ctx`.
+/// Runs ordinary unit `unit` in `ctx` and returns its rows. The unit is the
+/// statement as a pipeline of scan, permission, predicate and aggregate.
 async fn ordinary_rows(
 	program: &Program,
 	units: Option<UnitTable>,
@@ -194,28 +194,25 @@ async fn ordinary_rows(
 	Ok(Counted::Rows(rows))
 }
 
-/// The parts the rest of a key range is divided into once its first call
-/// shows it holds more than one call's keys, where the backend counts in
-/// parallel.
+/// The number of parts the keys left after a first count call are split
+/// into when the backend counts in parallel.
 const COUNT_PARTS: usize = 64;
 
 /// The most calls of a key count in flight at once, each counting part of
 /// the range on the backend's own threads.
 const COUNTS_IN_FLIGHT: usize = 16;
 
-/// The number of keys in `range` as of `version`, counted by key alone, a
-/// unit a key examined, with a yield point between calls.
+/// The number of keys in `range` as of `version`, counted by key alone. Each
+/// call charges one unit per key it examines and yields between calls.
 ///
 /// A backend whose count is [`CountCost::Logarithmic`] answers the range in
-/// one call, charged a unit. Any other counts through
-/// [`count_bounded`](crate::kvs::Transaction::count_bounded), each call
-/// examining no more keys than the fuel left and resumed at the key it
-/// stopped on: one call counting a whole range would be a walk no quantum
-/// bounds. Where the backend counts off the calling thread
-/// ([`Transactor::parallel_count`]), what the first call leaves is divided
-/// into parts over the band its keys occupy, and the parts are counted a
-/// quantum of keys a call, several calls in flight at once, each charged as
-/// it returns.
+/// one call, charged one unit. Any other backend counts through
+/// [`count_bounded`](crate::kvs::Transaction::count_bounded). Each call
+/// examines at most the batch it is given and resumes at the key it stopped
+/// on, so no single call walks an unbounded range. Where the backend counts
+/// off the calling thread ([`Transactor::parallel_count`]), the keys left
+/// after the first call are split into parts over the band they occupy. The
+/// parts are counted several at a time, each charged as its call returns.
 ///
 /// [`CountCost::Logarithmic`]: surrealdb_kvs::CountCost::Logarithmic
 /// [`Transactor::parallel_count`]: surrealdb_datastore::Transactor::parallel_count
@@ -298,9 +295,7 @@ pub(super) async fn count_rest(
 		let part = range.part(&lo, &hi);
 		async move { (txn.count_bounded(part, version, budget).await, hi) }
 	};
-	let mut parts =
-		crate::exec::operators::scan::extents::split_range(&from, &band_end, COUNT_PARTS)
-			.into_iter();
+	let mut parts = surrealdb_kvs::split::split_range(&from, &band_end, COUNT_PARTS).into_iter();
 	let mut running = FuturesUnordered::new();
 	for (lo, hi) in parts.by_ref().take(in_flight) {
 		running.push(call(lo, hi));
@@ -321,4 +316,115 @@ pub(super) async fn count_rest(
 		super::fuel::tick(ctx, super::fuel::units(part)).await?;
 	}
 	Ok(counted)
+}
+
+#[cfg(test)]
+mod range_shape {
+	use surrealdb_kvs::split::split_range;
+
+	use crate::key::KVKey;
+	use crate::key::schema::RecordPrefix;
+
+	/// A table's own record range divides into the extents a parallel count asks for.
+	///
+	/// The splitter divides on the bytes that distinguish the bounds, so what it can do depends on
+	/// the shape of the range the scan is given. A range whose bounds differ only in a final marker
+	/// byte offers one value to divide, and the count that asked for many extents would get one.
+	/// The extents of a table's range hold comparable numbers of its records.
+	///
+	/// Dividing the range evenly divides the rows evenly only if the keys are spread evenly
+	/// through it. A generated record id is base32 text, so its bytes occupy a narrow band of the
+	/// range the splitter divides; extents outside that band hold nothing and the count is as slow
+	/// as whichever extent holds the rows.
+	#[test]
+	fn extents_hold_comparable_numbers_of_real_record_keys() {
+		let range = RecordPrefix {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(1),
+			tb: std::borrow::Cow::Owned(crate::val::TableName::from("person")),
+		}
+		.range()
+		.expect("record range");
+		let (lo, hi) = range.bounds();
+
+		// Keys as the default generator makes them: 20 characters of base32 text.
+		const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+		let mut seed = 0x2545_F491_4F6C_DD1Du64;
+		let keys: Vec<Vec<u8>> = (0..5000)
+			.map(|_| {
+				let id: String = (0..20)
+					.map(|_| {
+						seed ^= seed << 13;
+						seed ^= seed >> 7;
+						seed ^= seed << 17;
+						ALPHABET[(seed % ALPHABET.len() as u64) as usize] as char
+					})
+					.collect();
+				crate::key::schema::RecordKey {
+					ns: crate::catalog::NamespaceId(1),
+					db: crate::catalog::DatabaseId(1),
+					tb: std::borrow::Cow::Owned(crate::val::TableName::from("person")),
+					id: std::borrow::Cow::Owned(crate::val::RecordIdKey::String(id.into())),
+				}
+				.encode_key()
+				.expect("encode")
+				.as_slice()
+				.to_vec()
+			})
+			.collect();
+
+		// The scan divides the band the keys occupy, found as `count_rest` finds it,
+		// not the range's own bounds.
+		let mut sorted = keys.clone();
+		sorted.sort();
+		let first = sorted.first().expect("keys").clone();
+		let mut band_end = sorted.last().expect("keys").clone();
+		band_end.push(0);
+		assert!(
+			first.as_slice() >= lo && band_end.as_slice() <= hi,
+			"the band sits inside the range"
+		);
+		let extents = split_range(&first, &band_end, 12);
+		let counts: Vec<usize> = extents
+			.iter()
+			.map(|(s, e)| {
+				keys.iter()
+					.filter(|k| k.as_slice() >= s.as_slice() && k.as_slice() < e.as_slice())
+					.count()
+			})
+			.collect();
+		let occupied = counts.iter().filter(|&&c| c > 0).count();
+		let biggest = counts.iter().max().copied().unwrap_or(0);
+		assert_eq!(counts.iter().sum::<usize>(), keys.len(), "every key lands in one extent");
+		assert!(
+			occupied >= extents.len() / 2,
+			"only {occupied} of {} extents hold any rows: {counts:?}",
+			extents.len()
+		);
+		assert!(
+			biggest <= keys.len() / extents.len() * 3,
+			"one extent holds {biggest} of {} rows; a parallel count is as slow as that extent: \
+			 {counts:?}",
+			keys.len()
+		);
+	}
+
+	#[test]
+	fn a_tables_record_range_divides_into_extents() {
+		let range = RecordPrefix {
+			ns: crate::catalog::NamespaceId(1),
+			db: crate::catalog::DatabaseId(1),
+			tb: std::borrow::Cow::Owned(crate::val::TableName::from("person")),
+		}
+		.range()
+		.expect("record range");
+		let (lo, hi) = range.bounds();
+		let extents = split_range(lo, hi, 16);
+		assert!(
+			extents.len() > 1,
+			"a table's record range must divide, or a parallel count silently runs one extent; \
+			 lo={lo:?} hi={hi:?} gave {} extent(s)",
+			extents.len()
+		);
+	}
 }

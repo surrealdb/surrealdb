@@ -78,14 +78,19 @@ pub(crate) struct TopKThresholdCell {
 }
 
 impl TopKThresholdCell {
-	/// Publish a new (tighter) threshold. Both sides of the lock are
-	/// poison-tolerant: a panicked peer can only have left a stale-but-valid
-	/// threshold, which is sound (under-rejects).
-	pub(crate) fn publish(&self, v: Value) {
-		let v = Some(Arc::new(v));
-		match self.value.write() {
-			Ok(mut guard) => *guard = v,
-			Err(poisoned) => *poisoned.into_inner() = v,
+	/// Publish `v` unless the threshold held is at least as tight. `tighter(new, held)` says
+	/// whether `new` orders strictly before `held` in the sort's order. Several sorts of one
+	/// execution publish into one cell (the sorts of a scan's morsels), so what each publishes
+	/// must only ever tighten what is held. Both sides of the lock are poison-tolerant: a
+	/// panicked peer can only have left a stale-but-valid threshold, which is sound
+	/// (under-rejects).
+	pub(crate) fn tighten(&self, v: Value, tighter: impl Fn(&Value, &Value) -> bool) {
+		let mut guard = match self.value.write() {
+			Ok(guard) => guard,
+			Err(poisoned) => poisoned.into_inner(),
+		};
+		if guard.as_deref().is_none_or(|held| tighter(&v, held)) {
+			*guard = Some(Arc::new(v));
 		}
 	}
 
@@ -153,6 +158,16 @@ impl TopKThresholdProbe {
 			cell: Some(cell),
 			depth_limit,
 			metrics: None,
+		})
+	}
+
+	/// Copy of this probe that never rejects a tie, whatever the number of keys. A threshold
+	/// published by a sort that did not see every row before the row being judged (each morsel of
+	/// a scan publishes what it holds) may belong to rows that come after it, and those lose a tie.
+	pub(crate) fn ties_kept(&self) -> Arc<Self> {
+		Arc::new(Self {
+			single_key: false,
+			..self.clone()
 		})
 	}
 
@@ -323,14 +338,66 @@ mod tests {
 		assert!(!reads_key_component(&[], &key));
 	}
 
+	/// A cell shared by several sorts keeps only the tightest threshold published to it, as ranked
+	/// by the comparison each publisher passes to `tighten`.
 	#[test]
-	fn cell_starts_empty_publishes_and_overwrites() {
+	fn a_cell_shared_by_sorts_only_tightens() {
+		let t = |n: i64| Value::Number(Number::Int(n));
 		let cell = TopKThresholdCell::default();
 		assert!(cell.snapshot().is_none());
-		cell.publish(Value::Number(Number::Int(5)));
-		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(5))));
-		cell.publish(Value::Number(Number::Int(7)));
-		assert_eq!(cell.snapshot().as_deref(), Some(&Value::Number(Number::Int(7))));
+		let ascending = |new: &Value, held: &Value| new < held;
+		cell.tighten(t(50), ascending);
+		assert_eq!(cell.snapshot().as_deref(), Some(&t(50)));
+		cell.tighten(t(70), ascending);
+		assert_eq!(cell.snapshot().as_deref(), Some(&t(50)), "a looser threshold is not kept");
+		cell.tighten(t(50), ascending);
+		assert_eq!(cell.snapshot().as_deref(), Some(&t(50)));
+		cell.tighten(t(20), ascending);
+		assert_eq!(cell.snapshot().as_deref(), Some(&t(20)));
+		let descending = |new: &Value, held: &Value| new > held;
+		let cell = TopKThresholdCell::default();
+		cell.tighten(t(20), descending);
+		cell.tighten(t(10), descending);
+		cell.tighten(t(30), descending);
+		assert_eq!(cell.snapshot().as_deref(), Some(&t(30)));
+	}
+
+	/// A probe that keeps ties rejects only what is strictly worse than the threshold, however many
+	/// keys the order has.
+	#[test]
+	fn a_probe_that_keeps_ties_rejects_only_the_strictly_worse() {
+		use revision::SerializeRevisioned;
+		let mut rec = Vec::new();
+		crate::catalog::Record {
+			metadata: None,
+			data: Value::Object(crate::val::Object::from(std::collections::BTreeMap::from([(
+				surrealdb_strand::Strand::from("a"),
+				Value::Number(Number::Int(5)),
+			)]))),
+		}
+		.serialize_revisioned(&mut rec)
+		.unwrap();
+		let t = |n: i64| Value::Number(Number::Int(n));
+		for direction in [SortDirection::Asc, SortDirection::Desc] {
+			let single = TopKThresholdProbe::armed(
+				[PathSegment::new("a")].into_iter().collect(),
+				direction,
+				true,
+				256,
+				Arc::new(TopKThresholdCell::default()),
+			);
+			let kept = single.ties_kept();
+			// The row's key equals the threshold.
+			assert!(single.rejects(&t(5), &rec), "{direction:?}: a single key rejects a tie");
+			assert!(!kept.rejects(&t(5), &rec), "{direction:?}: a tie is kept");
+			// Strictly worse than the threshold is rejected, strictly better is not.
+			let (worse, better) = match direction {
+				SortDirection::Asc => (4, 6),
+				SortDirection::Desc => (6, 4),
+			};
+			assert!(kept.rejects(&t(worse), &rec), "{direction:?}");
+			assert!(!kept.rejects(&t(better), &rec), "{direction:?}");
+		}
 	}
 
 	/// Full reject matrix: {Asc, Desc} × {candidate better, tie, worse} ×

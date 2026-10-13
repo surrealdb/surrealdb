@@ -26,8 +26,11 @@ pub mod cursor;
 pub mod destroy;
 pub mod err;
 pub mod key;
+pub mod page;
 pub mod release;
 pub mod savepoint;
+pub mod snapshot;
+pub mod split;
 pub mod threadpool;
 pub mod timestamp;
 mod types;
@@ -40,8 +43,11 @@ pub use api::{
 pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use destroy::{DestroyRange, DestroyRangeHandle};
 pub use err::{Error, Result};
+pub use page::Page;
 pub use release::{FeatureLevel, Release};
 pub use savepoint::SavepointStack;
+pub use snapshot::{RangeCursor, Resume, Snapshot};
+pub use split::{Estimate, SplitTarget};
 pub use types::{Key, KeyRange};
 pub use value::{EncodeContext, Encoded};
 
@@ -60,10 +66,9 @@ pub enum TransactionType {
 
 /// The direction of a scan over a key range.
 ///
-/// Lives in its own module rather than inside the cursor or scanner code
-/// because every layer (backends, exec operators, indices, doc machinery)
-/// needs to name it and they shouldn't all depend on the storage backend
-/// or stream-scanner modules to do so.
+/// Defined here so every layer (backends, exec operators, indices, doc
+/// machinery) can name it without depending on a storage backend or a
+/// stream-scanner module.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Direction {
 	/// Iterate from `range.start` toward `range.end` (lex-ascending).
@@ -72,9 +77,9 @@ pub enum Direction {
 	Backward,
 }
 
-/// Names the direction as a query plan reports it. These two strings reach
-/// clients in `EXPLAIN` output, so they are part of the engine's surface and
-/// cannot be spelled to taste.
+/// Names the direction as a query plan reports it. These two strings appear
+/// in `EXPLAIN` output that clients read, so they are part of the public
+/// surface and must not change.
 impl std::fmt::Display for Direction {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {

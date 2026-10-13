@@ -280,6 +280,12 @@ impl Transactable for Transaction {
 		self.write
 	}
 
+	/// The commit oracle validates written keys and keys read with `get_for_update`; a plain read
+	/// registers nothing.
+	fn plain_reads_tracked(&self) -> bool {
+		false
+	}
+
 	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {

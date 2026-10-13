@@ -17,10 +17,9 @@ use std::sync::Arc;
 
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::exec::logical::Needs;
 use crate::exec::permission::ComputedFieldGuard;
 use crate::exec::scalar_unit::ScalarUnit;
-use crate::exec::{AccessMode, Error as ExecError, EvalContext};
+use crate::exec::{Error as ExecError, EvalContext};
 use crate::expr::FlowResult;
 use crate::expr::logical::LogicalExpr;
 use crate::val::Value;
@@ -32,25 +31,17 @@ use crate::val::Value;
 #[derive(Debug)]
 pub(crate) struct ScalarMetadata {
 	expr: LogicalExpr,
-	needs: Needs,
 	literal: Option<Value>,
 }
 
 impl ScalarMetadata {
-	/// The description of `expr`, whose requirements are `needs` and which
-	/// folds to `literal` where it is a constant.
-	pub(crate) fn new(expr: LogicalExpr, needs: Needs, literal: Option<Value>) -> Self {
+	/// The description of `expr`, which folds to `literal` where it is a
+	/// constant.
+	pub(crate) fn new(expr: LogicalExpr, literal: Option<Value>) -> Self {
 		Self {
 			expr,
-			needs,
 			literal,
 		}
-	}
-
-	/// What the expression does to the transaction: a mutation subquery or a
-	/// writing function makes it `ReadWrite`.
-	pub(crate) fn access_mode(&self) -> AccessMode {
-		self.needs.access_mode
 	}
 
 	/// The value the expression folds to, if it is a constant.
@@ -119,14 +110,13 @@ impl Clause {
 	/// The clause that cannot be compiled, for `reason`. Evaluating it fails
 	/// with `PlannerUnsupported` naming the reason.
 	///
-	/// The engine compiles a catalog clause — a table or field
-	/// `PERMISSIONS FOR select` guard, a `COMPUTED` or `DEFAULT` body, an
-	/// event's `WHEN` or `THEN`, a materialized view's condition, a stored
-	/// field list — from its stored text. A clause whose text has no logical
-	/// form, and one whose logical form holds a write no operator compiles,
-	/// cannot be compiled that way, and is carried as this variant instead.
-	/// Compiling is the decision to run a clause, so a statement that never
-	/// evaluates it is not refused; one that does fails closed, and a
+	/// The engine compiles catalog clauses (table and field `PERMISSIONS`
+	/// guards, `COMPUTED` and `DEFAULT` bodies, event `WHEN` and `THEN`,
+	/// materialized view conditions, stored field lists) from their stored
+	/// text. A clause with no logical form, or whose logical form holds a
+	/// write that no operator compiles, is carried as this variant instead.
+	/// Compiling is the decision to run a clause: a statement that never
+	/// evaluates it is not refused, and one that does fails closed, so a
 	/// permission guard that fails denies.
 	pub(crate) fn uncompilable(reason: String) -> Self {
 		Self::Uncompilable(Arc::from(reason))

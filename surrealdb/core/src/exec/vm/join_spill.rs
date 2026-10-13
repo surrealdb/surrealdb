@@ -1,11 +1,10 @@
-//! A GQL hash join whose build side spills: the build rows held in the
-//! query's temporary store once its lease no longer covers them, with the
-//! join's output in the order the in-memory join gives it.
+//! A GQL hash join whose build side spills to the query's temporary store when the memory
+//! lease does not cover the build rows. Its output keeps the order the in-memory join gives.
 //!
-//! The build side is read a batch at a time ([`BuildSink`]). While its lease
-//! covers it, the join builds its table in memory as before. Once it does
-//! not, the build rows are written out as runs sorted by key, then arrival,
-//! and the join is a sort-merge join with a deferred probe pass:
+//! The build side is read a batch at a time ([`BuildSink`]). While the lease covers
+//! the build rows, the join builds its table in memory. Once it does not, the build rows
+//! are written out as runs sorted by key, then arrival, and the join is a sort-merge join
+//! with a deferred probe pass:
 //!
 //! - every probe row is deferred with its arrival: a probe row with a key is spilled sorted by key,
 //!   then arrival; one whose key holds a regex is kept aside, since `=` matches it against every
@@ -19,7 +18,10 @@
 //!
 //! Equality is `Value: Ord`, as the in-memory table's, so no match is lost to
 //! a hash. A cross join pairs every build row with every probe row and is
-//! not spilled; its build side keeps main's build-row cap.
+//! not spilled; its build side keeps the in-memory build-row cap.
+
+// The IR lowering is the only caller of the items here, so dead-code lints are off.
+#![allow(dead_code)]
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -42,7 +44,8 @@ fn by_keys() -> RecordOrder {
 	Arc::new(|(a, _), (b, _)| a.cmp(b))
 }
 
-/// Sort `held` by key and write it as the next of `runs`, written for `spec`.
+/// Sort `held` by key, write it as a run of `spec` appended to `runs`, and release its charge from
+/// `account`.
 async fn spill_sorted(
 	memory: &Arc<QueryMemory>,
 	spec: RunSpec,
@@ -268,8 +271,8 @@ impl RowSink for BuildSink {
 	}
 }
 
-/// A SQL join's build side as a run holds it: a table shared with the
-/// pipelines that read it, or the runs it spilled.
+/// A SQL join's build side as the pipelines that read it see it: a table
+/// shared between them, or the runs it spilled.
 pub(super) enum JoinBuilt {
 	Memory(Arc<BuildTable>),
 	Spilled(Box<SpilledJoin>),
@@ -534,7 +537,7 @@ impl SpilledJoin {
 		self.defer_at(arrival, key, row, with).await
 	}
 
-	/// Defer probe `row`, keyed `key`, as the probe that arrived `arrival`th
+	/// Defer probe `row`, keyed `key`, as the probe with arrival number `arrival`
 	/// among every probe of the join; arrivals are unique per join.
 	pub(super) async fn defer_at(
 		&mut self,

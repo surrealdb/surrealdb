@@ -27,6 +27,9 @@
 //!
 //! [`WriteForm::View`]: crate::exec::operators::write::plan::WriteForm::View
 
+// Runtime the IR lowering emits.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use super::data::PlaceRun;
@@ -135,7 +138,7 @@ pub(in crate::exec::vm) struct Recalc {
 
 assert_plain!(Recalc);
 
-/// The pipeline of [`ViewRows::program`] that takes a row written with
+/// The pipeline of [`ViewRows`] that takes a row written with
 /// `action`.
 pub(in crate::exec::vm) fn action_pipeline(action: Action) -> usize {
 	match action {
@@ -456,7 +459,7 @@ async fn group_delete(
 }
 
 /// A record changed within `group`: the change between what it contributed
-/// and what it contributes now applied to the group's stats.
+/// and what it contributes under the current image applied to the group's stats.
 async fn group_update(
 	m: &Maintain<'_>,
 	state: &mut State,
@@ -519,7 +522,7 @@ async fn store_group(
 }
 
 /// Recompute the extremes of `recalculations`, which the stats of `group` of
-/// the aggregated view `view` can no longer maintain from the change alone, over
+/// the aggregated view `view` cannot maintain from the change alone, over
 /// the group's remaining rows by the view's recalculation unit, and write them
 /// back into `stats`.
 ///

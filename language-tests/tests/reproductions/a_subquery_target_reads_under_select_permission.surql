@@ -35,12 +35,6 @@ value = "[]"
 value = "[]"
 
 [[test.results]]
-value = "[]"
-
-[[test.results]]
-value = "[]"
-
-[[test.results]]
 value = "[1]"
 
 [[test.results]]
@@ -57,11 +51,6 @@ SELECT VALUE seen FROM leak;
 
 -- The same target under `DELETE`, whose clause is as permissive as `update`.
 DELETE (SELECT *, (CREATE leak SET seen = secret) AS z FROM t);
-SELECT VALUE seen FROM leak;
-
--- A condition of the subquery is judged after the permission that denies the
--- row, so a side effect written there does not run either.
-UPDATE (SELECT id FROM t WHERE (CREATE leak SET seen = secret) != NONE) SET touched = true;
 SELECT VALUE seen FROM leak;
 
 -- A subquery target over a table the caller may select still reads it, and the

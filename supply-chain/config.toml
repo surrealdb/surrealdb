@@ -626,6 +626,10 @@ criteria = "safe-to-deploy"
 version = "2.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.egg]]
+version = "0.11.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.elliptic-curve]]
 version = "0.13.8"
 criteria = "safe-to-deploy"
@@ -636,6 +640,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.encoding_rs_io]]
 version = "0.1.8"
+criteria = "safe-to-deploy"
+
+[[exemptions.env_logger]]
+version = "0.9.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.error-code]]
@@ -1410,6 +1418,10 @@ criteria = "safe-to-deploy"
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.quanta]]
+version = "0.12.6"
+criteria = "safe-to-deploy"
+
 [[exemptions.quick-xml]]
 version = "0.41.0"
 criteria = "safe-to-deploy"
@@ -1440,6 +1452,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rand_core]]
 version = "0.10.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.raw-cpuid]]
+version = "11.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rayon]]
@@ -1686,6 +1702,10 @@ criteria = "safe-to-deploy"
 version = "1.0.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.slotmap]]
+version = "1.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.smartstring]]
 version = "1.0.1"
 criteria = "safe-to-deploy"
@@ -1736,6 +1756,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.strum_macros]]
 version = "0.28.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.symbol_table]]
+version = "0.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.symbolic_expressions]]
+version = "5.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.symlink]]

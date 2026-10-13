@@ -442,7 +442,7 @@ the choice and everything that depends on it above the source to be made at run 
 - `Blocks::control` stops lifting `Control::If` and `Control::Throw` out of `LogicalExpr`
   (`map.rs:4710-4723`) and the `Eval` special cases for `Break` and `Continue` in
   `Blocks::statement` go too. It maps operators to `Control` one for one.
-- **Morsel fan-out per branch.** Fan-out eligibility is decided from footprints and effects. With
+- **Morsel fan-out per branch.** Fan-out eligibility is decided from footprints and effects (§5.6). With
   the union, one branch that writes outside its row disqualifies a loop body whose other branches
   are row-local. Per-branch footprints let the physical plan fan out the eligible branch and run
   the rest in place, or at least tell the two apart in `EXPLAIN`.
@@ -505,6 +505,203 @@ supports neither.
   version, the `Transaction` structure, and each block's manifest), and the read frontier per
   `Transaction` node. The program's in-memory form is plain data today but has no stable encoding;
   adding one is part of this work.
+
+### 5.6 Pipelines and parallel legality
+
+The logical plan states what may be run apart, overlapped or fused; the physical plan chooses;
+the VM runs what it is given. The statement is `exec/logical/pipelines.rs`; the policy that
+chooses is `exec/planner/placement.rs`, and the pass that applies it to a plan, the last step of
+physical planning, is `exec/vm/place.rs`. [`PLAN_LAYERS.md`](PLAN_LAYERS.md) states what each
+layer owns and what it may only narrow.
+
+**The pipeline view.** A statement's operator tree is cut into pipelines: a *source* (a table or
+record range, an index, values, a statement in `FROM`, a union), a *chain* of streaming operators
+that handle one row at a time (filter, permission filter, layer, projection, fetch, limit), and
+a *sink*. The cuts are the breakers: `ORDER BY`, a grouping, `DISTINCT`, `SPLIT`, a join's
+inputs, a write's rows, and the edge of a statement. There is one pipeline per relational
+source, ended by the breaker its rows reach; what runs above a breaker reads its output and is
+not a pipeline of the logical plan. A statement written inside an expression has pipelines of its
+own, listed after its host's, naming the host's pipeline in `feeds`.
+
+**Legality of a pipeline** is six facts, none of which reads a statistic, an access path or
+bytecode. The effects they fold may come from the catalog's definitions, which the logical plan
+reads at the version it is bound at (below):
+
+- `SourceSplit`. `Range`: a key range the storage layer cuts (a table, a record-id range, an
+  index range whose access reaches each record through one entry). `Ordinal`: a sequence the
+  coordinator produces in a defined order and hands on in batches (a union of storage sources,
+  and at the physical level a nearest-neighbour search, a full-text match, a bitmap, an index
+  union or lookup, lightweight edges, and an index range whose access may reach a record through
+  several entries and so lists each record once, in the order of its first entry). `Whole`: not
+  partitionable (values, a statement in `FROM`, a sorted or grouped input, a split, a join, a
+  count, a write's targets).
+- `ChainLegality`. `RowLocal`: every operator of the chain, and of the sink's expressions, reads
+  only its own row and inputs that do not change during the statement, and writes nothing. It is
+  the fold of `effects_of` over the chain's expressions: a write (`WRITES_DATA`,
+  `WRITES_EXTERNAL`), a state advance (`ADVANCES_STATE`, a sequence), entropy (`ENTROPY`),
+  blocking (`BLOCKING`, `SLEEP`, which is never elided), an opaque body (`OPAQUE_BODY`) and a read
+  outside the transaction's snapshot (`READS_EXTERNAL`: a remote endpoint, a bucket) refuse, in
+  that order. A clock read is row-local, and so is a read of storage through the statement's
+  transaction, which is stable within a statement; a nested statement that only reads is
+  row-local. The effects of a method call are those of every implementation it may dispatch to.
+- `SinkCombine`. How partial results combine into the serial result: `Concat` (the output, in
+  input order), `StableMerge` (`ORDER BY`, ties by input position), `TopK` (`ORDER BY` under a
+  `LIMIT` directly above it: a bounded heap per part and a shared threshold),
+  `Aggregate(per function)`, `Distinct` (the first occurrence in input order is kept), and
+  `NotSplittable` (a split, a join's probe or pairing, a write).
+- `Paging`: none, one, or many `START` / `LIMIT` clauses in the pipeline. More than one is not
+  split.
+- `ErrorOrder`: see below.
+- `may_raise`: whether evaluating the pipeline's expressions may fail for some row. It is false
+  only for field reads, literals, `AND`, `OR`, `NOT` and the total comparisons, in filters, plain
+  projections, ordering keys and paging; every call, arithmetic, cast, dereference and
+  catalog-sourced expression may raise. A part that drops a row by a shared bound (a top-k
+  threshold) must not skip a row whose failure the serial run raises first, so such a part judges
+  rows by the bound only when the pipeline cannot raise.
+
+The legality is derived once for a statement, keyed by the operator that is each pipeline's
+source (`LegalityIndex`), and attached to the physical plan when it is mapped. It is also
+recorded for the operators above each breaker (a *segment*). `Legality::fuse` joins a pipeline
+and the segment above a breaker that a physical rule removes or holds as a chain operator: the
+source and the error order are the lower part's, the chain is the first refusal of both, the
+paging counts both, the pipeline may raise as either part may, and the sink is the upper part's,
+except for a distinct set: it turns a `Concat` sink into `Distinct` only when neither part pages,
+and any other sink, or paging in either part, makes the pipeline not splittable. The physical
+plan never edits legality itself; a rule that removes a breaker restates it through `fuse`.
+
+**Statement legality.** `StatementLegality` is the refusal of a statement as a whole: the first
+refusal named by the effects of everything the statement evaluates, nested statements and the
+bodies of the stored functions it calls included. It is a refusal of the same kind as the chain's,
+over the whole statement, so a refusal of any chain is a refusal of its statement. A statement
+that holds any effect that depends on the order or number of evaluations (a write, a sequence,
+entropy, a wait, a body the plan cannot see, a read outside the transaction) runs every pipeline
+serially, including the pipelines of the plans nested in it. The unit is the statement the
+physical plan maps: a whole non-block statement, or one statement of a block, each its own scope.
+A unit a running program loads from the compile cache (a called function's body) is placed in a
+scope of its own.
+
+**Definitions the plan does not hold.** A stored function is called by name and a `COMPUTED`
+field is derived from a body the catalog holds, so neither is in the plan. The logical plan
+reads these definitions at the catalog version it is bound at and states what each does
+(`exec/logical/summaries.rs`): the effects of the body, the implementations of the methods it
+calls, its callees' summaries transitively, and what its writes run on the tables they name (the
+table's synchronous events, its fields' `VALUE`, `ASSERT` and `DEFAULT` clauses, the views over
+it). A summary is unknown, the top of the effect lattice, for a body it cannot read or that is
+recursive, a script, module, silo or model call, a closure value, a write whose table is not
+named, a delete, a schema statement, a `MATCH` plan, an asynchronous event, and any definition
+after a catalog change in the same statement. A read of a field that some table computes folds
+that field's summary, and so does a computed field a table permission derives for itself. A
+call to a stored function is still an unseen body, whatever its summary: the summary adds what
+the function does, so one that writes refuses as a write, and one that does nothing still
+refuses.
+
+**Decomposability of aggregates.** Each aggregate function of a sink declares how partial states
+combine:
+
+| class | functions | meaning |
+|---|---|---|
+| `Exact` | `count`, `math::min`, `math::max`, `math::median`, `time::min`, `time::max`, `array::join`, `array::distinct`, `array::min`, `array::max` | partial states combine to exactly the serial fold |
+| `Appending` | `array::group`, `array::collect` | exact when partial states fold in input order |
+| `InexactFloat` | `math::sum`, `math::mean`, `math::stddev`, `math::variance`, `vector::sum` | decomposable, but a float fold depends on how its terms are grouped, so the low bits may differ |
+| `NotDecomposable` | every other name | no combine over partial states |
+
+The logical plan refuses a sink that folds a `NotDecomposable` function (`Legality::may_split` is
+false). A sink that folds only `Exact`, `Appending` and `InexactFloat` functions is legal;
+`InexactFloat` is admitted by the physical plan's policy alone, which today admits only `Exact`
+and `Appending` and answers `Serial` for the rest, a choice and not a refusal of legality, so
+that admitting it is a policy change, not a logical one. A field that carries
+no aggregate folds with `array::collect`.
+
+**Paging.** A pipeline with one paging clause whose sink is the statement's output may be split
+when the merge can replay the clause over rows counted in input order. A part runs each row as
+though it were taken, and the merge applies `START` and `LIMIT` in order: a row `START` skips is
+dropped with any failure its projection raised, a row taken counts against `LIMIT`, and once the
+limit is spent the remaining parts are cancelled and the source is read no further.
+
+**Error order.** The first error by input position wins. A failure's position is the position of
+its part in the serial order and the index of its row within the part; the statement raises the
+failure with the smallest position, where the serial run raises it: after every earlier part has
+merged without failing and without spending a `LIMIT`. A row `START` skips drops its failure, and
+a failure after a spent `LIMIT` is never raised. The error is the serial run's, never a wrapper.
+
+**Siblings and loops.** Two sibling statements with no ordering edge (`edges::between` is
+`NONE`), neither of which is a barrier, are `independent` and could run at the same time. A
+statement that may fail is ordered against every other such statement and every writer, so two
+reads of different tables share no data edge and still keep their order. A barrier is independent
+of nothing: a statement that leaves its block (`RETURN`, `THROW`, `BREAK`, `CONTINUE`), waits
+(`SLEEP`), changes the schema, writes, or has an effect that is not deterministic but for the
+clock. `BEGIN`, `COMMIT`, `CANCEL` and `USE` are never siblings, since the request is split at
+them before the logical plan is built. Nothing executes on `independent` today; an overlap of
+statements built on it keeps four rules: no write overlaps anything, every statement reads the
+same transaction's view, responses are held and returned in statement order, and the first error
+in statement order is the one raised. The iterations of a `FOR` body are independent when its
+effects are row-local, its footprint writes nothing, and its exit summary (§3.3) shows neither a `BREAK` nor a `RETURN` that
+may leave the body: neither is an effect, and either makes an iteration's outcome depend on the
+iterations before it. A `BREAK` that a nested loop absorbs does not count, and `CONTINUE` ends
+only its own iteration. The legality of each arm of an `IF` among the body's statements is
+stated on its own, with the conditions evaluated to reach it, so that a loop with one writing arm
+is told apart from one whose arms are all row-local.
+
+**The layers.** The logical plan states legality, from the query and the catalog's definitions.
+The physical plan owns the physical catalog (indexes, layout), statistics, cost, placement, degree
+of parallelism and the decision to fuse, elide or split, and splits only where the logical plan
+says splitting is legal; it adds refusals of its own and never legality. The bytecode and the VM
+have no optimiser: lowering emits what the physical plan chose, and a running program never
+recompiles its own code.
+
+**The placement policy.** `placement::Policy` is the one decision point, and the physical plan
+applies it in one pass (`place`, the last step of `optimize`) that cuts every pipeline of a plan,
+derives its facts from the plan, asks the policy and stores the answer on the pipeline's source
+node. Lowering copies the answer. Every choice of the
+form "run this apart or not", "how many rows to hand over at once" and "how many rows may be in
+flight" is one of its methods, and the code that acts on a choice holds no threshold of its own.
+Its inputs are:
+
+- the pipeline's `Legality`, which bounds every choice, and the `StatementLegality` of its
+  statement and of the statements around it;
+- the `PhysicalFacts` the placement pass derives from the plan: the access path, whether rows are
+  put through enforcement, whether the pipeline or a statement around it writes, the kind of sink
+  the rows end in, the paging clauses and whether the merge can replay them, whether the body
+  binds the row, reads the record a row names, passes rows through a distinct set, holds a block
+  construct, and what statements its expressions nest;
+- the `Signals` a run observes: rows merged and rows that reached the paging, the measured cost
+  of a row, the entries a coordinator has read, what a reader takes before it may stop, the places
+  the statement holds, and later the statistics of `RFC_STATISTICS_AND_COST.md`;
+- the configuration.
+
+`plan` answers when the plan is placed whether the pipeline runs as morsels (`Decision`, which
+lowering copies into `Parallel`), and whether their rows come from key ranges the workers read
+themselves or from batches the coordinator reads and hands on; `split`, `batch_rows`,
+`hands_to_worker` and `window` answer at run time when to cut a range, how large a batch is,
+whether it goes to a worker or runs on the statement's task, and how many rows a paged pipeline
+may have in flight; `place_cap` and `oltp_reserve` bound the places a
+statement takes. `doc/executor/RFC_MORSEL_PARALLELISM.md` states the runtime. The cases the policy
+exists to decide:
+
+- A selective scan, whose predicate passes few rows, is bound by the scan and fans out.
+- A scan whose predicate passes nearly every row is bound by the bandwidth to the client; it does
+  not fan out, and its operators stay fused without tracking batches.
+- A small input runs as one pipeline.
+- Pipelines are split, reordered or elided only where their legality allows it.
+
+Statistics enter through `Signals` and change no signature of the logical layer. `plan` refuses a
+pipeline whose chain `Legality` records as not row-local, and every pipeline of a statement whose
+`StatementLegality` is a refusal. A statement that writes, or that calls something whose answers
+depend on the calls made before it (a stored function, a closure, an external call), runs every
+pipeline serially, and so does every plan nested in it: a read nested in a write runs beside the
+write. The statements of a block are siblings that do not see one another's writes, each placed in the
+scope of the plan that holds the block, and a unit loaded from the
+compile cache is placed in a scope of its own. A call that only
+reads the clock does not refuse. The combine is the one the physical sink needs and is never
+stronger than the sink the logical plan states, along `TopK ≥ StableMerge ≥ Concat ≥ Serial`
+(`Aggregate` and `Distinct` weaken only to `Serial`).
+
+**Reads and order of responses.** Concurrent reads of the parts of one pipeline go through the
+transaction's owned read view, which the KV layer gives: every cursor opened from it sees what
+the transaction saw when the view was taken, and the transaction's commit and cancel wait for the
+cursors. A backend that cannot give a view reads the parts one after another on the statement's
+task. The response is in serial order: a later pipeline holds its rows until the earlier ones are
+merged.
 
 ## 6. Response emission
 

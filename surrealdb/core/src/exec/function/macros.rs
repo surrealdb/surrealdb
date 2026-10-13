@@ -1,5 +1,24 @@
 //! Macros for defining scalar functions with minimal boilerplate.
 
+/// Names a builtin's fallibility class and checks it at compile time against the `FALLIBILITY`
+/// table entry for `(kind, name)`.
+///
+/// Expands to the class, so it stands in the body of `fn fallibility`. `kind` is a `FnKind`
+/// variant, `name` the builtin's registered name, and `class` a constant expression. A builtin
+/// with no table entry, or one whose entry holds a different class, is a build error.
+#[macro_export]
+macro_rules! declare_fallibility {
+	($kind:ident, $name:literal, $class:expr) => {{
+		const CLASS: $crate::exec::ir::iface::Fallibility = $class;
+		const _: () = $crate::exec::function::check_fallibility_row(
+			$crate::exec::function::FnKind::$kind,
+			$name,
+			CLASS,
+		);
+		CLASS
+	}};
+}
+
 /// Define a pure scalar function that wraps an existing `fnc::*` implementation.
 ///
 /// # Usage
@@ -46,6 +65,11 @@
 /// );
 /// ```
 ///
+/// Every function names what its failure depends on after `effects:`, as
+/// `fallibility: Fallibility::VALUE,`
+/// ([`ScalarFunction::fallibility`](crate::exec::function::ScalarFunction::fallibility)).
+/// The argument is required: a function without it does not compile.
+///
 /// A function whose work grows with its input also names, after any `rule:`,
 /// the walk the executor runs it as (`metered: crate::fnc::array::sort_walk,`):
 /// an `async fn` over the same arguments that charges the fuel meter a
@@ -58,6 +82,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		() -> $ret:ident,
@@ -75,6 +100,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -107,6 +138,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
@@ -124,6 +156,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -158,6 +196,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
@@ -175,6 +214,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -210,6 +255,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
@@ -227,6 +273,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -263,6 +315,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		(... $arg_name:ident : $arg_type:ident) -> $ret:ident,
@@ -280,6 +333,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -314,6 +373,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ... $rest_name:ident : $rest_type:ident) -> $ret:ident,
@@ -331,6 +391,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -366,6 +432,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
@@ -383,6 +450,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -417,6 +490,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
@@ -434,6 +508,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -469,6 +549,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
@@ -486,6 +567,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -522,6 +609,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
@@ -539,6 +627,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -575,6 +669,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
@@ -592,6 +687,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -629,6 +730,7 @@ macro_rules! define_pure_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		$(metered: $metered:path,)?
 		(? $arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
@@ -646,6 +748,12 @@ macro_rules! define_pure_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -722,6 +830,7 @@ macro_rules! define_context_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		() -> $ret:ident,
 		$impl_fn:expr
@@ -738,6 +847,12 @@ macro_rules! define_context_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -804,6 +919,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		() -> $ret:ident,
 		$impl_fn:expr
@@ -820,6 +936,12 @@ macro_rules! define_async_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -861,6 +983,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_fn:expr
@@ -877,6 +1000,12 @@ macro_rules! define_async_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -920,6 +1049,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
@@ -936,6 +1066,12 @@ macro_rules! define_async_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -980,6 +1116,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
@@ -996,6 +1133,12 @@ macro_rules! define_async_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {
@@ -1040,6 +1183,7 @@ macro_rules! define_async_function {
 		$struct_name:ident,
 		$func_name:literal,
 		effects: $effects:expr,
+		fallibility: $fallibility:expr,
 		$(rule: $rule:expr,)?
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_fn:expr
@@ -1056,6 +1200,12 @@ macro_rules! define_async_function {
 				#[allow(unused_imports)]
 				use $crate::expr::logical::EffectSet;
 				$effects
+			}
+
+			fn fallibility(&self) -> $crate::exec::ir::iface::Fallibility {
+				#[allow(unused_imports)]
+				use $crate::exec::ir::iface::Fallibility;
+				$crate::declare_fallibility!(Scalar, $func_name, $fallibility)
 			}
 
 			fn signature(&self) -> $crate::exec::function::Signature {

@@ -40,6 +40,9 @@
 //! ([`QueryMemory::writer`]) from the moment it opens until it finishes or is
 //! dropped.
 
+// The runtime the IR lowering emits calls into.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
 use anyhow::Context as _;

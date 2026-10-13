@@ -1,8 +1,8 @@
 //! Query planner for the engine.
 //!
 //! The planner binds a lowered plan ([`LogicalOp`]) for one transaction and one principal, hands
-//! the bound plan to the VM's mapping ([`crate::exec::vm::plan_checked`]), and supplies what the
-//! mapping consumes: a table source's access path and the pushdowns it admits, the clauses a
+//! the bound plan to the IR planning and the VM ([`crate::exec::vm::plan_checked`]), and supplies
+//! what planning reads: a table source's access path and the pushdowns it admits, the clauses a
 //! pipeline collects, the analysis of an aggregation, the targets of a write. A logical scalar
 //! ([`LogicalExpr`]) is described by [`Planner::scalar_metadata`] and evaluated as the VM unit of
 //! the [`Clause`] built from that description. The planner's input is the logical plan and nothing
@@ -34,26 +34,28 @@ mod aggregate;
 mod cycle_guard;
 pub(crate) mod fold;
 mod path;
+pub(crate) mod placement;
 mod scalar_metadata;
 pub(crate) use path::contains_repeat_recurse;
 // GQL `MATCH` planning (`plan_match`).
 pub(crate) mod match_backend;
 pub(crate) mod match_plan;
+pub(crate) mod name_scope;
 pub(crate) mod row_scope;
 mod select;
 mod source;
-pub(crate) use source::{TableDefs, TargetVertexPlan};
 pub(crate) mod util;
 pub(crate) mod write;
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub(crate) use aggregate::{AggregationAnalysis, analyse_aggregation};
-pub(crate) use cycle_guard::{CycleGuard, EventsEntry};
-pub(crate) use fold::AccessOffer;
+pub(crate) use aggregate::analyse_aggregation;
+pub(crate) use cycle_guard::{CycleGuard, UnitKey};
 pub(crate) use select::{
-	CountDecision, bitmap_plan_to_node, check_locked_read, decide_union_merge, output_field_path,
+	RestrictedPrefixes, adjust_direction_for_order, bitmap_plan_to_node, decide_union_merge,
+	detect_order_for_composite_union, drop_restricted_indexes, field_def_excludes_arrays,
+	output_field_path,
 };
 
 use crate::ctx::FrozenContext;
@@ -61,7 +63,6 @@ use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::{Clause, Error as ExecError, ExecOperator};
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOp, LogicalRecordIdKey};
-use crate::expr::operator::BinaryOperator;
 use crate::val::Value;
 
 /// Query planner that converts logical plans to physical execution plans.
@@ -104,8 +105,6 @@ pub(crate) enum PlanTimeVersion {
 	Current,
 	/// A `VERSION` denoting this stamp.
 	At(u64),
-	/// A `VERSION` only the runtime can evaluate.
-	Unknown,
 }
 
 /// What a call of a user-defined function does, resolved through its call
@@ -130,11 +129,12 @@ pub struct Planner<'ctx> {
 	/// The frozen context containing query parameters, capabilities, and session info.
 	///
 	/// Its value chain is what a parameter read binds against at plan time.
-	/// A user-defined function body is planned against this context
-	/// ([`Self::body_scope`]), which is isolated in a privileged frame
-	/// ([`Self::privileged`]); a body binds only the session's own values
-	/// ([`UNIT_RUNTIME_PARAMS`]) at plan time, and reads every other name when
-	/// it runs.
+	/// A user-defined function body is planned against a context of its own
+	/// ([`Self::body_scope`]) that holds the request's parameters and the row
+	/// names and none of the caller's `LET` or `FOR` bindings; a body binds
+	/// only the session's own values ([`UNIT_RUNTIME_PARAMS`]) at plan time,
+	/// and reads every other name when it runs. A privileged frame
+	/// ([`Self::privileged`]) plans against an isolated context.
 	ctx: FrozenContext,
 	/// Cached reference to the function registry for aggregate/projection detection.
 	function_registry: &'ctx FunctionRegistry,
@@ -278,12 +278,6 @@ pub struct Planner<'ctx> {
 	/// reaches it, after the block's first schema statement, rather than when
 	/// the block is planned ([`Self::compiled_when_reached`]).
 	when_reached: bool,
-	/// Whether what this planner compiles is kept by the compile cache and
-	/// served to later statements: a unit ([`Self::unit_root`],
-	/// [`Self::reading_session_values`]). Such code outlives the statement, so
-	/// a `time::now()` in a condition is evaluated when it runs rather than
-	/// folded to the time of planning ([`Self::folds_clock`]).
-	kept: bool,
 	/// How the statement being planned reaches what code it runs may redefine
 	/// while it runs ([`CatalogWithin`]).
 	within: CatalogWithin,
@@ -330,90 +324,13 @@ pub(crate) const UNIT_RUNTIME_PARAMS: &[&str] = surrealdb_cnf::PROTECTED_PARAM_N
 /// Where a statement stands below the statement the session runs
 /// ([`Planner::statement_nesting`]).
 #[derive(Debug, Clone, Copy, Default)]
-struct StatementNesting {
-	/// The `IF` branches it is in.
-	ifs: u32,
-	/// Whether it is in a block, a loop, an expression or `FROM`.
-	nested: bool,
-}
-
-/// What a planner plans with, as [`Planner::frame_key`] answers it.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PlannerFrameKey {
-	ns: Option<String>,
-	db: Option<String>,
-	auth: Option<crate::iam::Auth>,
-	perms_suppressed: bool,
-	plan_time_version: PlanTimeVersion,
-	depth: u32,
-	/// The shadowed names, sorted and each once.
-	shadowed: Vec<String>,
-	/// The function bodies under compilation, outermost first.
-	functions: Vec<(String, u64, bool)>,
-	/// The identities of the transaction, the `VERSION` expression, the
-	/// `MATCHES` context, the KNN context and the speculation.
-	shared: [usize; 5],
-	late_bound: bool,
-	when_reached: bool,
-	within: CatalogWithin,
-	stored_clause: bool,
-}
-
-impl PlannerFrameKey {
-	/// Whether code planned with `other` reads and checks as code planned
-	/// with this does: the same database, principal, permission contract,
-	/// stamp, names bound when it runs and shared scopes, at whatever re-entry
-	/// depth and under whatever function bodies.
-	pub(crate) fn plans_alike(&self, other: &Self) -> bool {
-		self.ns == other.ns
-			&& self.db == other.db
-			&& self.auth == other.auth
-			&& self.perms_suppressed == other.perms_suppressed
-			&& self.plan_time_version == other.plan_time_version
-			&& self.shadowed == other.shadowed
-			&& self.shared == other.shared
-			&& self.late_bound == other.late_bound
-			&& self.stored_clause == other.stored_clause
-	}
-}
+struct StatementNesting {}
 
 /// One function body under compilation on a planner's [`Planner::function_path`].
 #[derive(Clone, Debug)]
-pub(crate) struct FunctionFrame {
-	/// The function's name, without its `fn::` prefix.
-	name: String,
-	/// The content hash of the definition being compiled
-	/// ([`FunctionSnapshot`](crate::kvs::cache::ds::FunctionSnapshot)).
-	pub(crate) definition: u64,
-	/// The definition being compiled.
-	pub(crate) compiled_from: Arc<crate::catalog::FunctionDefinition>,
-	/// Whether the body is bound for a principal whose reads are permission-checked.
-	pub(crate) checked: bool,
-}
+pub(crate) struct FunctionFrame {}
 
 impl<'ctx> Planner<'ctx> {
-	/// Whether the named table is a lightweight relation.
-	///
-	/// A lightweight relation keeps no records: its edges live as the two
-	/// vertex-side adjacency keys of their endpoints, so it has no record
-	/// range, and a caller that would open one asks here first.
-	pub(crate) async fn table_is_lightweight(
-		&self,
-		table: &surrealdb_strand::TableName,
-	) -> Result<bool, crate::err::Error> {
-		use crate::catalog::providers::TableProvider;
-		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
-			return Ok(false);
-		};
-		let def = txn
-			.get_tb_by_name(ns, db, table, None)
-			.await
-			.map_err(|e| crate::err::EngineError::Internal(e.to_string()))?;
-		Ok(def.is_some_and(|def| {
-			crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
-		}))
-	}
-
 	/// Create a new planner with the given context (no transaction).
 	///
 	/// Table sources will use the generic `Scan` operator that resolves
@@ -448,7 +365,6 @@ impl<'ctx> Planner<'ctx> {
 			late_after_schema: false,
 			late_bound: false,
 			when_reached: false,
-			kept: false,
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
@@ -493,67 +409,9 @@ impl<'ctx> Planner<'ctx> {
 			late_after_schema: false,
 			late_bound: false,
 			when_reached: false,
-			kept: false,
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
-		}
-	}
-
-	/// This planner for a statement whose `VERSION` clause is `version`: every
-	/// catalog read it makes, and every plan derived from it, is made as of the
-	/// stamp the clause denotes ([`Self::plan_time_version_of`]).
-	pub(crate) async fn under_version(&self, version: &LogicalExpr) -> Planner<'ctx> {
-		let mut scoped = self.shadowing([]);
-		scoped.plan_time_version = self.plan_time_version_of(Some(version)).await;
-		scoped
-	}
-
-	/// Whether what this planner plans reads at a `VERSION`: the statement
-	/// names one itself (`own`), or it is planned beneath a statement that
-	/// does.
-	pub(crate) fn reads_versioned(&self, own: bool) -> bool {
-		own || !matches!(self.plan_time_version, PlanTimeVersion::Current)
-	}
-
-	/// The version a pipeline's sources are read at, for the catalog reads
-	/// planning makes, from the pipeline's `VERSION` expression: the
-	/// transaction's current state for none (`VERSION NONE` is none), the
-	/// stamp of a datetime literal or of a parameter the context binds to a
-	/// datetime — the two forms the analyzer resolves a source under — and
-	/// [`PlanTimeVersion::Unknown`] for any other expression, which only the
-	/// runtime evaluates. The inherited version stands where the pipeline
-	/// names none.
-	pub(crate) async fn plan_time_version_of(
-		&self,
-		version: Option<&LogicalExpr>,
-	) -> PlanTimeVersion {
-		let stamps = || self.txn.as_ref().map(|txn| txn.version_impl());
-		let stamp_of = |datetime: crate::val::Datetime| match stamps() {
-			Some(stamps) => match datetime.to_version_stamp(stamps.as_ref()) {
-				Ok(stamp) => PlanTimeVersion::At(stamp),
-				Err(_) => PlanTimeVersion::Unknown,
-			},
-			None => PlanTimeVersion::Unknown,
-		};
-		match version {
-			None | Some(LogicalExpr::Literal(LogicalLiteral::None)) => self.plan_time_version,
-			Some(LogicalExpr::Literal(LogicalLiteral::Datetime(datetime))) => stamp_of(*datetime),
-			Some(LogicalExpr::Param(param)) => {
-				let value = util::resolve_param_value(
-					param.as_str(),
-					&self.ctx,
-					self.txn.as_ref(),
-					self.definition_ids().await,
-					&self.row_scoped(),
-				)
-				.await;
-				match value {
-					Some(crate::val::Value::Datetime(datetime)) => stamp_of(datetime),
-					Some(_) | None => PlanTimeVersion::Unknown,
-				}
-			}
-			Some(_) => PlanTimeVersion::Unknown,
 		}
 	}
 
@@ -650,61 +508,6 @@ impl<'ctx> Planner<'ctx> {
 		self
 	}
 
-	/// Whether a `KNN` operator is in scope for the expressions planned here:
-	/// without one, a `KNN` operator evaluated as an expression is `false`
-	/// for every row (see the [`knn_context`](Self::knn_context) field docs).
-	pub(crate) fn has_knn_scope(&self) -> bool {
-		self.knn_context.is_some()
-	}
-
-	/// Seed the re-entry nesting depth (see the `depth` field).
-	///
-	/// Used when a runtime re-entry (`eval` re-planning its query string, a
-	/// user-defined-function body) starts a fresh planner but must continue
-	/// counting from the depth of the boundary that triggered it (`parent + 1`),
-	/// so the limit reflects the total nesting across the boundary rather than
-	/// resetting to 0.
-	#[must_use]
-	/// This planner, planning stored code of which `sites` is the measure
-	/// ([`Self::depth_sites`]).
-	pub(crate) fn with_depth_sites(
-		mut self,
-		sites: Arc<crate::exec::vm::depth::ExprDepth>,
-	) -> Self {
-		self.depth_sites = Some(sites);
-		self
-	}
-
-	/// What the stored code being planned spends of the computation-depth
-	/// budget where it is evaluated one expression at a time: the event clause
-	/// this planner plans, or else the body on top of its function path.
-	/// `None` for a statement the session runs.
-	pub(crate) fn depth_sites(&self) -> Option<Arc<crate::exec::vm::depth::ExprDepth>> {
-		if let Some(sites) = &self.depth_sites {
-			return Some(Arc::clone(sites));
-		}
-		self.function_path.last().map(|frame| {
-			Arc::new(crate::exec::vm::depth::ExprDepth::of_body(&frame.compiled_from.block))
-		})
-	}
-
-	/// A planner for a statement nested in the one this plans, inside `ifs`
-	/// more `IF` branches and, where `nested`, inside a block or loop.
-	pub(crate) fn nested_statement(&self, ifs: u32, nested: bool) -> Planner<'ctx> {
-		let mut planner = self.shadowing(std::iter::empty());
-		planner.statement_nesting = StatementNesting {
-			ifs: self.statement_nesting.ifs + ifs,
-			nested: self.statement_nesting.nested || nested,
-		};
-		planner
-	}
-
-	/// The depth a write planned here resumes the computation-depth count
-	/// from ([`Self::statement_nesting`]).
-	pub(crate) fn statement_nesting(&self) -> u32 {
-		2 * self.statement_nesting.ifs + u32::from(self.statement_nesting.nested)
-	}
-
 	pub(crate) fn with_depth(mut self, depth: u32) -> Self {
 		self.depth = depth;
 		self
@@ -759,12 +562,6 @@ impl<'ctx> Planner<'ctx> {
 	#[inline]
 	pub fn function_registry(&self) -> &'ctx FunctionRegistry {
 		self.function_registry
-	}
-
-	/// The context the planner compiles against.
-	#[inline]
-	pub(crate) fn frozen_ctx(&self) -> &FrozenContext {
-		&self.ctx
 	}
 
 	/// Look up (NamespaceId, DatabaseId) from the planner's transaction.
@@ -891,7 +688,6 @@ impl<'ctx> Planner<'ctx> {
 			registry: self.function_registry,
 			versioned: self.version.is_some()
 				|| !matches!(self.plan_time_version, PlanTimeVersion::Current),
-			folds_clock: self.folds_clock(),
 			inlines_definitions: !self.within.calls_current,
 			binds_nested: !self.within.nested_late,
 		};
@@ -1024,8 +820,7 @@ impl<'ctx> Planner<'ctx> {
 	/// are read when the unit runs, never folded into its code
 	/// ([`UNIT_RUNTIME_PARAMS`]), so a permission that reads `$auth` serves
 	/// every principal of the unit's class with the caller's own. So is the
-	/// clock: a `time::now()` in a unit's condition is not folded
-	/// ([`Self::folds_clock`]).
+	/// clock: a `time::now()` is never folded, so a unit holds no instant.
 	///
 	/// A unit compiled where reads are made at a `VERSION` stamp is compiled
 	/// at that stamp, from the definitions the stamp holds: the planner keeps
@@ -1037,10 +832,15 @@ impl<'ctx> Planner<'ctx> {
 		planner.shadowed_params =
 			UNIT_RUNTIME_PARAMS.iter().map(|name| (*name).to_owned()).collect();
 		planner.depth = 0;
-		planner.kept = true;
 		planner.version.clone_from(&self.version);
 		planner.plan_time_version = self.plan_time_version;
 		planner
+	}
+
+	/// Whether the statement this planner plans inlines no catalog definition
+	/// ([`CatalogWithin::calls_current`]).
+	pub(crate) fn calls_current(&self) -> bool {
+		self.within.calls_current
 	}
 
 	/// This planner with the session's own values ([`UNIT_RUNTIME_PARAMS`])
@@ -1048,122 +848,23 @@ impl<'ctx> Planner<'ctx> {
 	/// the planning context's. Every planner whose compilation the compile
 	/// cache keeps and serves to other principals of the frame's class plans
 	/// with them shadowed: the class is not the principal, and a folded
-	/// `$auth` would answer one principal's rows to another. The code it
-	/// compiles outlives the statement, so it reads the clock when it runs
-	/// too ([`Self::folds_clock`]).
+	/// `$auth` would answer one principal's rows to another.
 	pub(crate) fn reading_session_values(&self) -> Planner<'ctx> {
 		let missing: Vec<String> = UNIT_RUNTIME_PARAMS
 			.iter()
 			.filter(|name| !self.param_is_shadowed(name))
 			.map(|name| (*name).to_owned())
 			.collect();
-		let mut planner = self.shadowing(missing);
-		planner.kept = true;
-		planner
+		self.shadowing(missing)
 	}
 
-	/// Whether a `time::now()` in a condition this planner compiles folds to
-	/// the time of planning, one value for the statement. Code that runs after
-	/// a change it was not planned against ([`Self::late_binding`]) or that
-	/// the compile cache keeps for later statements ([`Self::kept`]) reads
-	/// the clock when it runs.
-	pub(crate) fn folds_clock(&self) -> bool {
-		!self.late_bound && !self.kept
-	}
-
-	/// What the node's units key catalog unit `unit` lowered by this planner
-	/// for `frame` on; `None` where the planner plans with something the key
-	/// does not hold, whose unit is then lowered for this plan alone: a
-	/// `VERSION`, a planning scope of a `MATCHES` or KNN predicate, or a table
-	/// or event compilation open on its cycle guard. The caller takes the key
-	/// only where [`Self::unit_cache`] answers.
-	pub(crate) async fn catalog_unit_key(
-		&self,
-		unit: crate::exec::vm::units::CatalogUnit,
-		frame: crate::exec::vm::program::UnitFrame,
-	) -> Option<crate::exec::vm::units::CatalogUnitKey> {
-		if !self.keeps_catalog_units() {
-			return None;
-		}
-		let ids = self.ns_db_ids().await?;
-		let mut shadowed: Vec<String> = self.shadowed_params.to_vec();
-		shadowed.sort();
-		shadowed.dedup();
-		Some(crate::exec::vm::units::CatalogUnitKey {
-			ns: self.ns.clone()?,
-			db: self.db.clone()?,
-			ids,
-			unit,
-			isa: crate::exec::vm::program::ISA_VERSION,
-			frame,
-			depth: self.depth,
-			shadowed,
-			capabilities: crate::exec::vm::units::CapabilitiesId::new(self.ctx.get_capabilities()),
-		})
-	}
-
-	/// Whether the body of `fn::name` is on the path of bodies being compiled.
-	pub(crate) fn on_function_path(&self, name: &str) -> bool {
-		self.function_path.iter().any(|f| f.name == name)
-	}
-
-	/// Whether compiling `fn::name` binds a value from the planning context
-	/// into its code: whether its body, or the body of any function it calls,
-	/// reads from outside a session value this planner neither shadows nor
-	/// lacks, which binding substitutes where it is read as a predicate or a
-	/// source. A body binds only the session's own values
-	/// ([`UNIT_RUNTIME_PARAMS`]) at plan time and reads every other name when
-	/// it runs, so no other name of the planning context is folded into it.
-	/// `true` when a body cannot be read.
-	pub(crate) async fn folds_context(
-		&self,
-		name: &str,
-		txn: &crate::kvs::Transaction,
-		(ns, db): (crate::catalog::NamespaceId, crate::catalog::DatabaseId),
-	) -> bool {
-		use crate::kvs::cache::ds::FunctionSnapshot;
-		let cache = self.ctx.get_cache();
-		let Ok(Some(snapshot)) =
-			FunctionSnapshot::for_function(cache.as_deref(), txn, ns, db, name).await
-		else {
-			return true;
-		};
-		let mut names = vec![name.to_owned()];
-		names.extend(snapshot.facts().calls.iter().cloned());
-		for called in names {
-			let Ok(Some(snapshot)) =
-				FunctionSnapshot::for_function(cache.as_deref(), txn, ns, db, &called).await
-			else {
-				return true;
-			};
-			let Ok(body) = snapshot.body() else {
-				return true;
-			};
-			let args: Vec<&str> =
-				snapshot.definition().args.iter().map(|(arg, _)| arg.as_str()).collect();
-			let mut folds = false;
-			let _ = body.visit_scalars_deep(&mut |scalar| {
-				let _ = scalar.visit_deep(&mut |e| {
-					if let LogicalExpr::Param(param) = e {
-						let param = param.as_str();
-						if !args.contains(&param)
-							&& !util::SELECT_ITERATION_PARAMS.contains(&param)
-							&& UNIT_RUNTIME_PARAMS.contains(&param)
-							&& !self.param_is_shadowed(param)
-							&& self.ctx.value(param).is_some()
-						{
-							folds = true;
-						}
-					}
-					std::ops::ControlFlow::<()>::Continue(())
-				});
-				Ok::<_, std::convert::Infallible>(())
-			});
-			if folds {
-				return true;
-			}
-		}
-		false
+	/// Whether the caller may call `time::now()`, so that the index analyzer may
+	/// offer a comparison against it as a bound that reads the statement clock.
+	/// The scan reads the clock without a function-name check of its own, so
+	/// the check is made here, where the plan is chosen: a caller denied the
+	/// function keeps the comparison as a filter, which raises the denial.
+	pub(crate) fn allows_clock_bound(&self) -> bool {
+		self.ctx.get_capabilities().allows_function_name("time::now")
 	}
 
 	/// The compiled definition of `fn::name` as this planner's transaction
@@ -1184,7 +885,6 @@ impl<'ctx> Planner<'ctx> {
 		let version = match self.plan_time_version {
 			PlanTimeVersion::Current => None,
 			PlanTimeVersion::At(stamp) => Some(stamp),
-			PlanTimeVersion::Unknown => return FunctionLookup::Unavailable,
 		};
 		let (Some(txn), Some((ns, db))) = (&self.txn, self.ns_db_ids().await) else {
 			return FunctionLookup::Unavailable;
@@ -1247,19 +947,23 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// [`Self::prepare_function_body`] for the function `snapshot` reads,
-	/// including one on the path being compiled, whose recursive edge the
-	/// caller finds.
+	/// The body of the function `snapshot` reads, bound once for every call
+	/// from code this planner plans, including one on the path being
+	/// compiled, whose recursive edge the caller finds. The arguments, the
+	/// row names and every name the body reads that the planner does not bind
+	/// are read when the body runs, by the lexical rule, so the body is one
+	/// generic unit whatever values a call passes. Fails with what the
+	/// binding raised, or where the planner has no transaction or database.
 	pub(crate) async fn prepare_snapshot(
 		&self,
 		name: &str,
 		snapshot: &Arc<crate::kvs::cache::ds::FunctionSnapshot>,
-	) -> Option<PreparedBody<'ctx>> {
+	) -> Result<PreparedBody<'ctx>, PrepareError> {
 		let (Some(txn), Some((ns, db))) = (&self.txn, self.ns_db_ids().await) else {
-			return None;
+			return Err(PrepareError::NoDatabase);
 		};
 		let definition = snapshot.definition();
-		let body = snapshot.body().ok()?.clone();
+		let body = snapshot.body().map_err(PrepareError::Bind)?.clone();
 
 		// The names the body binds itself, and the names it reads that are
 		// bound nowhere the planner can see.
@@ -1273,7 +977,7 @@ impl<'ctx> Planner<'ctx> {
 			});
 			Ok::<_, std::convert::Infallible>(())
 		});
-		let (planner, frame) = self.body_scope(name, snapshot)?;
+		let (planner, _) = self.body_scope(snapshot).ok_or(PrepareError::AuthLimit)?;
 		let mut row_scoped: Vec<&str> = util::SELECT_ITERATION_PARAMS.to_vec();
 		row_scoped.extend(definition.args.iter().map(|(arg, _)| arg.as_str()));
 		let mut unbound = Vec::new();
@@ -1282,10 +986,12 @@ impl<'ctx> Planner<'ctx> {
 				continue;
 			}
 			// Only the session's own values are read here. Any other name is
-			// left to the runtime, which binds it in the frame the call runs in:
-			// a caller's binding of it is then visible to an ordinary call and
-			// absent from a privileged frame, and no unit folds one caller's
-			// binding for another. A `DEFINE PARAM` is read at run time too.
+			// left to the runtime, which binds it in the frame the call runs in
+			// by the lexical rule ([`crate::ctx::Context::lexical_value`]): the
+			// body's arguments and bindings, the row names, the request's
+			// parameters, and otherwise the database's `DEFINE PARAM`, never a
+			// binding the caller made with `LET` or `FOR`. So no unit folds one
+			// caller's binding for another.
 			if !UNIT_RUNTIME_PARAMS.contains(&param.as_str()) {
 				unbound.push(param.as_str());
 				continue;
@@ -1298,47 +1004,13 @@ impl<'ctx> Planner<'ctx> {
 		}
 		row_scoped.extend(unbound);
 
-		let bound = match planner.bind_scoped(body, &row_scoped).await {
-			Ok(bound) => bound,
-			Err(e) => {
-				tracing::debug!("fn::{name} body is left for the runtime to bind: {e:#}");
-				return None;
-			}
-		};
-		let args: Vec<&str> = definition.args.iter().map(|(arg, _)| arg.as_str()).collect();
-		if crate::exec::logical::reads_in_resolvable_position(&bound, &args) {
-			return None;
-		}
-		Some(PreparedBody {
+		let bound = planner.bind_scoped(body, &row_scoped).await.map_err(|e| {
+			tracing::debug!("fn::{name} body did not bind: {e:#}");
+			PrepareError::Bind(e.into())
+		})?;
+		Ok(PreparedBody {
 			planner,
 			bound,
-			frame,
-			specialised: false,
-		})
-	}
-
-	/// The body of `fn::name` left as written, for each call to run compiled
-	/// for the values its arguments hold, as the compile service compiles it
-	/// on a miss: the planner the body is planned with and the body, which no
-	/// pass has bound.
-	///
-	/// This is the body of a function [`Self::prepare_snapshot`] does not
-	/// bind, because it reads an argument where only a value can be
-	/// answered, or because it does not bind against the catalog as it
-	/// stands. `None` for a function whose body has no logical form, or whose
-	/// `AUTH LIMIT` does not parse.
-	pub(crate) fn specialised_snapshot(
-		&self,
-		name: &str,
-		snapshot: &Arc<crate::kvs::cache::ds::FunctionSnapshot>,
-	) -> Option<PreparedBody<'ctx>> {
-		let bound = snapshot.body().ok()?.clone();
-		let (planner, frame) = self.body_scope(name, snapshot)?;
-		Some(PreparedBody {
-			planner,
-			bound,
-			frame,
-			specialised: true,
 		})
 	}
 
@@ -1351,31 +1023,27 @@ impl<'ctx> Planner<'ctx> {
 	/// in the versioned frame of the call that enters it, so its reads are
 	/// planned as of the same stamp.
 	///
-	/// The body's context is this planner's: a privileged frame's planner
-	/// already holds an isolated one, so the body reads nothing of the caller
-	/// there ([`ExecutionContext::privileged_frame`]).
+	/// The body is planned in the context a body reads
+	/// ([`crate::ctx::Context::new_call_scope`]): this planner's request
+	/// parameters, row names and protected names, and none of the bindings its
+	/// statement's caller made with `LET` or `FOR`, which a body never reads.
+	/// A privileged frame's planner holds an isolated context, which has no
+	/// request parameter to pass on ([`ExecutionContext::privileged_frame`]).
 	fn body_scope(
 		&self,
-		name: &str,
 		snapshot: &Arc<crate::kvs::cache::ds::FunctionSnapshot>,
 	) -> Option<(Planner<'ctx>, FunctionFrame)> {
 		let definition = snapshot.definition();
 		let mut planner =
 			self.shadowing(definition.args.iter().map(|(arg, _)| arg.as_str().to_owned()));
+		planner.ctx = crate::ctx::Context::new_call_scope(&self.ctx).freeze();
 		planner.version = None;
 		planner.matches_context = None;
 		planner.knn_context = None;
 		planner.within = CatalogWithin::default();
 		planner.depth = self.depth + 1;
 		planner.auth = self.function_principal(definition)?;
-		let frame = FunctionFrame {
-			name: name.to_owned(),
-			definition: snapshot.content_hash(),
-			compiled_from: Arc::clone(snapshot.definition()),
-			checked: planner.auth.is_some()
-				&& !planner.perms_suppressed
-				&& planner.compiles_for_checked_caller(),
-		};
+		let frame = FunctionFrame {};
 		planner.function_path.push(frame.clone());
 		planner.depth_sites = None;
 		Some((planner, frame))
@@ -1413,7 +1081,6 @@ impl<'ctx> Planner<'ctx> {
 			late_after_schema: self.late_after_schema,
 			late_bound: false,
 			when_reached: false,
-			kept: self.kept,
 			within: CatalogWithin::default(),
 			stored_clause: false,
 			trusts_index_shapes: false,
@@ -1464,49 +1131,9 @@ impl<'ctx> Planner<'ctx> {
 			late_after_schema: self.late_after_schema,
 			late_bound: self.late_bound,
 			when_reached: self.when_reached,
-			kept: self.kept,
 			within: self.within,
 			stored_clause: self.stored_clause,
 			trusts_index_shapes: self.trusts_index_shapes,
-		}
-	}
-
-	/// What this planner plans with, beyond its caches: two planners with
-	/// equal keys plan the same statement to the same plan. The shared parts
-	/// — the transaction, the `VERSION` expression, the planning scopes and
-	/// the speculation — are compared by identity, so a key is meaningful only
-	/// among planners derived from one another while one statement is planned.
-	pub(crate) fn frame_key(&self) -> PlannerFrameKey {
-		fn identity<T: ?Sized>(shared: Option<&Arc<T>>) -> usize {
-			shared.map_or(0, |shared| Arc::as_ptr(shared).cast::<()>() as usize)
-		}
-		let mut shadowed = self.shadowed_params.to_vec();
-		shadowed.sort_unstable();
-		shadowed.dedup();
-		PlannerFrameKey {
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			auth: self.auth.as_deref().cloned(),
-			perms_suppressed: self.perms_suppressed,
-			plan_time_version: self.plan_time_version,
-			depth: self.depth,
-			shadowed,
-			functions: self
-				.function_path
-				.iter()
-				.map(|frame| (frame.name.clone(), frame.definition, frame.checked))
-				.collect(),
-			shared: [
-				identity(self.txn.as_ref()),
-				identity(self.version.as_ref()),
-				identity(self.matches_context.as_ref()),
-				identity(self.knn_context.as_ref()),
-				identity(self.speculation.as_ref()),
-			],
-			late_bound: self.late_bound,
-			when_reached: self.when_reached,
-			within: self.within,
-			stored_clause: self.stored_clause,
 		}
 	}
 
@@ -1549,38 +1176,10 @@ impl<'ctx> Planner<'ctx> {
 		self
 	}
 
-	/// The namespace and database whose `DEFINE PARAM`s a parameter may be
-	/// bound to at plan time: none where the statement inlines no catalog
-	/// definition ([`CatalogWithin::calls_current`]), whose parameters are
-	/// read when it runs.
-	pub(crate) async fn definition_ids(
-		&self,
-	) -> Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)> {
-		match self.within.calls_current {
-			true => None,
-			false => self.ns_db_ids().await,
-		}
-	}
-
-	/// How the statement this planner plans reaches what code it runs may
-	/// redefine ([`CatalogWithin`]).
-	pub(crate) fn catalog_within(&self) -> CatalogWithin {
-		self.within
-	}
-
 	/// Whether this planner plans a statement whose catalog is loaded when it
 	/// runs ([`Self::late_binding`]).
 	pub(crate) fn is_late_bound(&self) -> bool {
 		self.late_bound
-	}
-
-	/// This planner planning a statement a block compiles when it reaches it,
-	/// after the block's first schema statement: an `IF` in it evaluates only
-	/// the branch taken.
-	pub(crate) fn compiled_when_reached(&self) -> Planner<'ctx> {
-		let mut reached = self.shadowing(std::iter::empty());
-		reached.when_reached = true;
-		reached
 	}
 
 	/// This planner, trusting the value shapes the indexes have recorded when
@@ -1603,35 +1202,11 @@ impl<'ctx> Planner<'ctx> {
 		self.trusts_index_shapes
 	}
 
-	/// This planner planning a stored clause, or a statement nested in one
-	/// ([`Self::is_stored_clause`]).
-	pub(crate) fn in_stored_clause(mut self) -> Self {
-		self.stored_clause = true;
-		self
-	}
-
-	/// Whether this planner plans a stored clause, or a statement nested in
-	/// one: an event's `WHEN` or `THEN`, a field's `VALUE`, `ASSERT`,
-	/// `DEFAULT` or `COMPUTED`. In such code a `LET` written where its value
-	/// is read raises when it is evaluated.
-	pub(crate) fn is_stored_clause(&self) -> bool {
-		self.stored_clause
-	}
-
 	/// Whether this planner plans what follows a statement of a block that
 	/// may change what the rest of it resolves against late-bound
 	/// ([`Self::binding_late_after_schema`]).
 	pub(crate) fn binds_late_after_schema(&self) -> bool {
 		self.late_after_schema
-	}
-
-	/// This planner over `txn` in place of its own transaction: a
-	/// speculation's view, which plans against the catalog the speculation's
-	/// writes leave ([`crate::exec::vm`]).
-	pub(crate) fn over(&self, txn: Arc<crate::kvs::Transaction>) -> Planner<'ctx> {
-		let mut over = self.shadowing(std::iter::empty());
-		over.txn = Some(txn);
-		over
 	}
 
 	/// This planner compiling for a frame that waives permission checks, for
@@ -1643,85 +1218,11 @@ impl<'ctx> Planner<'ctx> {
 		self.shadowing(std::iter::empty()).with_perms_suppressed(true)
 	}
 
-	/// Whether nothing around the statement this plans binds `$parent`: it is
-	/// a statement the session runs at its top level — not one nested in
-	/// another statement, a block, a loop or an `IF`, a function body, a nested
-	/// query (`eval`) or a stored clause — and the session holds no parameter
-	/// of that name. A `$parent` such a statement reads falls back to the
-	/// document it is evaluated against: per row, the row.
-	pub(crate) fn binds_no_parent(&self) -> bool {
-		self.depth == 0
-			&& self.function_path.is_empty()
-			&& self.depth_sites.is_none()
-			&& !self.stored_clause
-			&& self.statement_nesting.ifs == 0
-			&& !self.statement_nesting.nested
-			&& self.ctx.value("parent").is_none()
-	}
-
 	/// Whether an enclosing `FOR`, closure, user-defined function or block
 	/// `LET` binds `name`, so that a read of it is not the ambient context's
 	/// value.
 	pub(crate) fn param_is_shadowed(&self, name: &str) -> bool {
 		self.shadowed_params.iter().any(|shadowed| shadowed == name)
-	}
-
-	/// The access mode a stored function — `fn::`, module or silo — needs of
-	/// the transaction; a module or silo function is a write when its
-	/// signature says so or when that cannot be resolved.
-	pub(crate) async fn resolve_function_access_mode(
-		&self,
-		function: &crate::expr::Function,
-	) -> crate::exec::AccessMode {
-		use crate::exec::AccessMode;
-		use crate::expr::Function;
-
-		let writeable = |resolved: Result<bool, Error>| {
-			if resolved.unwrap_or(true) {
-				AccessMode::ReadWrite
-			} else {
-				AccessMode::ReadOnly
-			}
-		};
-		match function {
-			Function::Custom(name) => self.resolve_custom_access_mode(name).await,
-			Function::Module(module, sub) => {
-				writeable(self.resolve_module_writeable(module, sub.as_deref()).await)
-			}
-			Function::Silo {
-				org,
-				pkg,
-				major,
-				minor,
-				patch,
-				sub,
-			} => writeable(
-				self.resolve_silo_writeable(org, pkg, *major, *minor, *patch, sub.as_deref()).await,
-			),
-			Function::Normal(_) | Function::Script(_) | Function::Model(_) => AccessMode::ReadOnly,
-		}
-	}
-
-	/// Resolve the access mode of a user-defined function's body at plan time,
-	/// by walking the call graph in the plan-time snapshot
-	/// ([`crate::fnc::mutability`], conservative polarity).
-	///
-	/// Returns `AccessMode::ReadWrite` — the safe over-approximation — when the
-	/// planner lacks the transaction or namespace/database context to resolve,
-	/// or when the resolution errors. [`Self::resolve_module_writeable`] takes
-	/// the same write-side default for missing context, though it propagates a
-	/// resolution error rather than absorbing it. A `ReadOnly` answer is
-	/// returned only when the whole reachable call graph is provably write-free
-	/// in this snapshot, so a `ReadWrite` fallback can never mis-license a
-	/// write onto a read-only fast path.
-	///
-	/// The snapshot is the one the call will run against: the runtime reads a
-	/// body at the statement's `VERSION`, so the walk reads it at the same
-	/// stamp. A definition redefined since that stamp says nothing about the
-	/// body that will run, and a `VERSION` only the runtime can evaluate
-	/// leaves the stamp unknown, which is the `ReadWrite` case.
-	pub(crate) async fn resolve_custom_access_mode(&self, name: &str) -> crate::exec::AccessMode {
-		self.resolve_custom_function(name).await.access_mode
 	}
 
 	/// [`Self::resolve_custom_access_mode`], with whether the body keeps row
@@ -1744,7 +1245,6 @@ impl<'ctx> Planner<'ctx> {
 		let version = match self.plan_time_version {
 			PlanTimeVersion::Current => None,
 			PlanTimeVersion::At(stamp) => Some(stamp),
-			PlanTimeVersion::Unknown => return UNRESOLVED,
 		};
 		// A UDF call reaches its callee's body through the call graph; the call
 		// itself contributes exactly that one edge.
@@ -1832,7 +1332,7 @@ impl<'ctx> Planner<'ctx> {
 						..
 					}) = e.downcast_ref::<CatalogError>()
 					{
-						// Not an unresolved flag but a resolved absence: the
+						// A missing module is a resolved absence, not an unknown: the
 						// invocation repeats this lookup and fails on it, so the
 						// call cannot reach a module body and cannot write.
 						return Ok(false);
@@ -1953,70 +1453,6 @@ impl<'ctx> Planner<'ctx> {
 	// Scalar compilation
 	// ========================================================================
 
-	/// The `count(->edge)` projection shape the graph-degree fast path serves.
-	///
-	/// One argument, a bare graph lookup over the row — no clauses, no
-	/// `ONLY`, plain table subjects — counted for a session whose permission
-	/// checks are provably skipped (the id-only resolve such a session takes
-	/// never fetches records either, so the raw adjacency cardinality is
-	/// exactly its answer) and reading current data. The lowering gives a
-	/// single trailing lookup as `Lookup` over `Current` with no broadcast,
-	/// which is the only shape that qualifies.
-	pub(crate) fn graph_degree_shape(
-		&self,
-		name: &str,
-		arguments: &[LogicalExpr],
-	) -> Option<(crate::exec::parts::LookupDirection, Vec<surrealdb_strand::TableName>)> {
-		use crate::expr::logical::LogicalLookupSubject;
-		use crate::expr::lookup::LookupKind;
-		if name != "count" || arguments.len() != 1 || self.version.is_some() {
-			return None;
-		}
-		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
-			return None;
-		};
-		if self.should_check_perms_for_view(ns, db) {
-			return None;
-		}
-		let LogicalExpr::Lookup {
-			base,
-			lookup,
-		} = &arguments[0]
-		else {
-			return None;
-		};
-		if !matches!(base.as_ref(), LogicalExpr::Current) {
-			return None;
-		}
-		let LookupKind::Graph(dir) = &lookup.kind else {
-			return None;
-		};
-		if lookup.only
-			|| lookup.expr.is_some()
-			|| lookup.cond.is_some()
-			|| lookup.split.is_some()
-			|| lookup.group.is_some()
-			|| lookup.order.is_some()
-			|| lookup.limit.is_some()
-			|| lookup.start.is_some()
-			|| lookup.alias.is_some()
-		{
-			return None;
-		}
-		let mut tables = Vec::with_capacity(lookup.what.len());
-		for subject in &lookup.what {
-			let LogicalLookupSubject::Table {
-				table,
-				referencing_field: None,
-			} = subject
-			else {
-				return None;
-			};
-			tables.push(table.clone());
-		}
-		Some(((*dir).into(), tables))
-	}
-
 	// ========================================================================
 	// Record ID keys
 	// ========================================================================
@@ -2074,9 +1510,8 @@ pub(crate) async fn plan_logical_scoped(
 	if !shadowed.is_empty() {
 		planner = planner.shadowing(shadowed.iter().cloned());
 	}
-	// Boxed so the planner's state machine — over ten kilobytes, most of it the
-	// SELECT pipeline compiler's locals — is allocated once rather than embedded
-	// in, and copied through, every frame between the statement loop and here.
+	// Boxed so the large planner state machine is allocated once and is not
+	// copied through every frame between the statement loop and here.
 	crate::exec::vm::out_of_line(|| crate::exec::vm::plan_front_end(&planner, op)).await
 }
 
@@ -2141,16 +1576,6 @@ pub(crate) async fn plan_statement_scoped(
 	plan_statement_with(op, ctx, registry, txn, auth, depth, None, perms_suppressed, shadowed).await
 }
 
-/// A top-level statement of a request, planned when the request arrives
-/// ([`plan_request_statement`]).
-pub(crate) struct RequestStatementPlan {
-	/// Where the statement was compiled to, or the error planning raised.
-	pub(crate) entry: Result<crate::exec::vm::RequestEntry, Error>,
-	/// Whether binding folded a call that reads the clock, so the plan holds
-	/// the time it was planned at.
-	pub(crate) binds_the_clock: bool,
-}
-
 /// Plan a top-level statement of a request when the request arrives, in the
 /// transaction of the request's first planned statement, lowering it into the
 /// request's program as `request` builds it.
@@ -2167,14 +1592,11 @@ pub(crate) async fn plan_request_statement(
 	auth: Option<Arc<crate::iam::Auth>>,
 	speculation: Option<Arc<crate::dbs::Options>>,
 	request: &mut crate::exec::vm::RequestBuilder,
-) -> RequestStatementPlan {
+) -> Result<crate::exec::vm::RequestEntry, Error> {
 	if let Some(why) = crate::exec::logical::unplannable_write(&op) {
-		return RequestStatementPlan {
-			entry: Err(Error::Exec(ExecError::PlannerUnsupported {
-				reason: why,
-			})),
-			binds_the_clock: false,
-		};
+		return Err(Error::Exec(ExecError::PlannerUnsupported {
+			reason: why,
+		}));
 	}
 	let (ns, db) = session_ns_db(ctx);
 	let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
@@ -2183,34 +1605,44 @@ pub(crate) async fn plan_request_statement(
 		planner = planner.with_auth(auth);
 	}
 	planner.speculate_with(speculation);
-	let binds_the_clock = Box::pin(crate::exec::vm::binds_the_clock(&op, &planner)).await;
 	let unbound = matches!(
 		op,
 		LogicalOp::Sequence(_) | LogicalOp::Foreach(_) | LogicalOp::Let(_) | LogicalOp::Eval(_)
 	)
 	.then(|| op.clone());
-	let entry = match Box::pin(planner.bind(op)).await {
+	match Box::pin(planner.bind(op)).await {
 		Ok(bound) => Box::pin(request.plan(&planner, &bound, unbound.as_ref())).await,
 		Err(e) => Err(e),
-	};
-	RequestStatementPlan {
-		entry,
-		binds_the_clock,
 	}
 }
 
-/// The program of a request whose statements `request` lowered, taking
-/// `steps`, planned in `txn` as its statements were.
-pub(crate) fn finish_request(
+/// The message of the region-constraint rejection of `op`, the statement at `position` of its
+/// request, bound in `txn` as [`plan_request_statement`] binds it; `None` when every region
+/// admits what it holds, and when the statement does not bind against the catalog `txn` holds.
+pub(crate) async fn request_statement_rejection(
+	op: LogicalOp,
 	ctx: &FrozenContext,
 	registry: &FunctionRegistry,
 	txn: Arc<crate::kvs::Transaction>,
+	auth: Option<Arc<crate::iam::Auth>>,
+	position: usize,
+) -> Option<String> {
+	let (ns, db) = session_ns_db(ctx);
+	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db);
+	if let Some(auth) = auth {
+		planner = planner.with_auth(auth);
+	}
+	let bound = Box::pin(planner.bind(op)).await.ok()?;
+	Box::pin(crate::exec::vm::rejection(&planner, &bound, position)).await
+}
+
+/// The program of a request whose statements `request` compiled, taking
+/// `steps`.
+pub(crate) fn finish_request(
 	request: crate::exec::vm::RequestBuilder,
 	steps: Vec<crate::exec::vm::program::RequestStep>,
 ) -> Result<crate::exec::vm::request::CompiledRequest, Error> {
-	let (ns, db) = session_ns_db(ctx);
-	let planner = Planner::with_txn(ctx, registry, txn, ns, db);
-	request.finish(&planner, steps)
+	request.finish(steps)
 }
 
 #[expect(
@@ -2296,8 +1728,18 @@ pub(crate) enum FunctionLookup {
 	Unavailable,
 }
 
+/// Why [`Planner::prepare_snapshot`] bound no body.
+pub(crate) enum PrepareError {
+	/// The planner has no transaction or database.
+	NoDatabase,
+	/// The definition's `AUTH LIMIT` does not parse.
+	AuthLimit,
+	/// The body has no logical form, or binding it raised this error.
+	Bind(anyhow::Error),
+}
+
 /// A function body bound for a call and the planner that compiles it
-/// ([`Planner::prepare_function_body`]).
+/// ([`Planner::prepare_snapshot`]).
 pub(crate) struct PreparedBody<'ctx> {
 	/// The planner the body is compiled with: the call's principal capped by
 	/// the definition's `AUTH LIMIT`, one re-entry deeper, with the arguments
@@ -2306,11 +1748,6 @@ pub(crate) struct PreparedBody<'ctx> {
 	/// The body, bound by [`Self::planner`]; as written, when
 	/// [`Self::specialised`].
 	pub(crate) bound: LogicalOp,
-	/// The definition the body was bound from.
-	pub(crate) frame: FunctionFrame,
-	/// Whether the body is left unbound, to be compiled for the values each
-	/// call's arguments hold ([`Planner::specialised_snapshot`]).
-	pub(crate) specialised: bool,
 }
 
 /// Bind `op`, a statement nested in another, with `planner`, refusing the
@@ -2385,39 +1822,6 @@ fn expr_planner<'ctx>(
 		planner = planner.with_auth(auth);
 	}
 	planner
-}
-
-/// Returns `true` if the binary operator is eligible for `SimpleBinaryOp` optimisation.
-///
-/// Only comparison and containment operators are eligible — these take `(&Value, &Value)`
-/// and produce a boolean result. Operators that produce non-boolean results (arithmetic,
-/// ranges), require short-circuit logic (And, Or, NullCoalescing), or need special index
-/// context (Matches, NearestNeighbor) are excluded.
-pub(crate) fn is_simple_binary_eligible(op: &BinaryOperator) -> bool {
-	matches!(
-		op,
-		BinaryOperator::Equal
-			| BinaryOperator::ExactEqual
-			| BinaryOperator::NotEqual
-			| BinaryOperator::AllEqual
-			| BinaryOperator::AnyEqual
-			| BinaryOperator::LessThan
-			| BinaryOperator::LessThanEqual
-			| BinaryOperator::MoreThan
-			| BinaryOperator::MoreThanEqual
-			| BinaryOperator::Contain
-			| BinaryOperator::NotContain
-			| BinaryOperator::ContainAll
-			| BinaryOperator::ContainAny
-			| BinaryOperator::ContainNone
-			| BinaryOperator::Inside
-			| BinaryOperator::NotInside
-			| BinaryOperator::AllInside
-			| BinaryOperator::AnyInside
-			| BinaryOperator::NoneInside
-			| BinaryOperator::Outside
-			| BinaryOperator::Intersects
-	)
 }
 
 /// The namespace and database the session is using, when it named them.

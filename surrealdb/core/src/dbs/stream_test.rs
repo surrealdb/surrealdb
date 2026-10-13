@@ -38,11 +38,11 @@ impl Statement {
 /// A datastore with the test namespace and database in place, seeded with
 /// three records.
 ///
-/// `USE` no longer creates a namespace implicitly, so the namespace has to
-/// exist before any statement runs. Every seed statement's own result is
-/// checked as well: `execute` reports a per-statement failure inside its `Ok`,
-/// so a seed that silently did nothing would leave every test below comparing
-/// two identically empty answers and passing for the wrong reason.
+/// `USE` does not create a namespace, so the namespace must exist before any statement runs.
+/// Each seed statement's own result is checked as well.
+/// `execute` reports a per-statement failure inside its `Ok`, so a seed that
+/// silently did nothing would leave the tests comparing two empty answers and
+/// pass for the wrong reason.
 async fn datastore() -> Arc<Datastore> {
 	let ds = Datastore::new("memory").await.expect("a memory datastore");
 	let tx = ds.transaction(TransactionType::Write).await.expect("a write transaction");
@@ -129,8 +129,8 @@ fn reassemble(items: Vec<QueryStreamItem>) -> Vec<QueryResult> {
 			}
 		}
 	}
-	// An index that produced no item at all is a statement control flow
-	// skipped, and contributes no result -- the same as on the buffered path.
+	// An index that produced no item at all belongs to a statement that control flow
+	// skipped. It contributes no result, the same as in a non-streaming run.
 	statements.into_iter().flatten().map(Statement::finish).collect()
 }
 
@@ -230,10 +230,10 @@ async fn held_streaming_matches_buffered() {
 	}
 }
 
-/// A statement that streams rows and then fails must terminate with an error,
-/// and a consumer that trusted the rows before that would be wrong to keep
-/// them. This is the case the buffered path cannot exhibit, so it is asserted
-/// on the items themselves rather than through a parity comparison.
+/// A statement that streams rows and then fails must end with an error, and a
+/// consumer must not keep rows it received before that error.
+/// A buffered run cannot produce this case, so the test checks the items
+/// directly instead of comparing the two paths.
 #[tokio::test]
 async fn a_rolled_back_block_retracts_its_rows() {
 	let ds = datastore().await;
@@ -662,4 +662,101 @@ async fn a_session_request_ignores_hold() {
 		shapes.push(items.iter().map(shape).collect::<Vec<_>>());
 	}
 	assert_eq!(shapes[0], shapes[1], "holding changes nothing inside a caller's transaction");
+}
+
+/// Every index below `count` is terminated by exactly one `Finished` item, that
+/// item is the index's last, none is past `count`, and the terminal items
+/// arrive in statement order.
+fn assert_each_terminated_once(items: &[QueryStreamItem], count: usize, sql: &str) {
+	assert!(items.iter().all(|i| i.index() < count), "{sql}: an item past statement {count}");
+	for index in 0..count {
+		let terminals = items
+			.iter()
+			.filter(|i| matches!(i, QueryStreamItem::Finished { index: i, .. } if *i == index))
+			.count();
+		assert_eq!(terminals, 1, "{sql}: statement {index} must be terminated exactly once");
+		let last = items.iter().rposition(|i| i.index() == index).expect("an item per statement");
+		assert!(
+			matches!(items[last], QueryStreamItem::Finished { .. }),
+			"{sql}: statement {index}'s last item must be its terminal one"
+		);
+	}
+	let order: Vec<usize> = items
+		.iter()
+		.filter_map(|i| match i {
+			QueryStreamItem::Finished {
+				index,
+				..
+			} => Some(*index),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(order, (0..count).collect::<Vec<_>>(), "{sql}: terminal items out of order");
+}
+
+/// The `CANCEL` of a failed block answers NONE, and its slot reaches the
+/// consumer as one terminal item in its place.
+#[tokio::test]
+async fn a_cancel_after_a_failure_is_terminated_once() {
+	let sql = "BEGIN; THROW 'x'; CREATE thing:9; CANCEL; RETURN 2;";
+	for held in [false, true] {
+		let ds = datastore().await;
+		let items = streamed_items(&ds, sql, held).await.expect("the request runs");
+		assert_each_terminated_once(&items, 5, sql);
+		let results = reassemble(items);
+		assert_eq!(results.len(), 5, "{sql}: held {held}");
+		assert!(results[3].result.is_ok(), "{sql}: CANCEL answers NONE, held {held}");
+		assert!(results[4].result.is_ok(), "{sql}: held {held}");
+	}
+}
+
+/// A `RETURN` inside a block leaves the items of later statements in place: each is
+/// terminated once, and the block's rows are all sent.
+#[tokio::test]
+async fn a_return_in_a_block_keeps_later_items() {
+	let sql = "BEGIN; CREATE thing:9; RETURN 1; SELECT * FROM thing; COMMIT;";
+	for held in [false, true] {
+		let ds = datastore().await;
+		let items = streamed_items(&ds, sql, held).await.expect("the request runs");
+		assert_each_terminated_once(&items, 5, sql);
+		assert!(
+			items.iter().any(|i| i.index() == 3 && !matches!(i, QueryStreamItem::Finished { .. })),
+			"{sql}: the SELECT after the RETURN sends its rows, held {held}"
+		);
+		let results = reassemble(items);
+		assert!(results.iter().all(|r| r.result.is_ok()), "{sql}: held {held}");
+	}
+}
+
+/// A cancellation inside a block gives the statement observed at it a slot, so
+/// every statement of the request is terminated once and in order.
+#[tokio::test]
+async fn a_cancellation_inside_a_block_terminates_every_statement_once() {
+	let sql = "BEGIN; SELECT * FROM thing; SLEEP 300ms; SELECT * FROM thing; COMMIT;";
+	for held in [false, true] {
+		let ds = datastore().await;
+		let handle = crate::ctx::CancelHandle::new();
+		let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
+		let session = session();
+		let mut request = QueryRequest::new(sql, &session).with_cancel(handle.clone());
+		if held {
+			request = request.with_held_transactions();
+		}
+		let job = ds.run_streaming(request, tx).expect("the query parses");
+		let drain = async {
+			let mut items = Vec::new();
+			while let Ok(item) = rx.recv().await {
+				if item.index() == 1 {
+					handle.trip();
+				}
+				items.push(item);
+			}
+			items
+		};
+		let (outcome, items) = futures::future::join(job.run, drain).await;
+		outcome.expect("the request runs");
+		// A held block sends nothing until it resolves, so there the cancellation
+		// can only land once the block is over; the alignment holds either way.
+		assert_each_terminated_once(&items, 5, sql);
+	}
 }

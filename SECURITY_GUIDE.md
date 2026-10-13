@@ -262,10 +262,10 @@ Flag for detailed review when changes touch:
 
 **Files**: `iam/`, `dbs/options.rs` (`Options` struct, `perms` flag, `with_import`),
 `ctx/context.rs` (`check_perms`, `is_allowed`), the write path the VM lowers
-from the write stages (`exec/vm/lower_write_gate.rs` for the table gates,
-`process_table_fields` in `exec/vm/lower_write_schema.rs` for field writes,
+from the write stages (`gate_pipeline` in `exec/vm/ir_lower/stage.rs` for the table gates,
+`process_fields` in `exec/vm/ir_lower/stage.rs` for field writes,
 `DataInstr::Snapshot` in `exec/vm/write_data.rs` for the pre-mutation snapshot,
-`output_stage` and `shown_view` in `exec/vm/lower.rs` for what a write
+the `OutputWrite` stage and `shown_view` in `exec/vm/ir_lower/stage.rs` for what a write
 returns), and the streaming engine's two read paths: the bound plan
 (`exec/logical/resolve.rs` writes the table permission as a `PermissionFilter`
 and the computed fields and field guards as projection layers above a resolved
@@ -297,18 +297,25 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   derived by `materialise` in `exec/vm/write_data.rs`), so a field the caller
   cannot select must be absent from it — otherwise a data clause reads the
   value and copies it into a field the caller can select. For a checked
-  caller the snapshot is the record run through the table's field view
-  (`image_view` in `exec/vm/lower.rs`), or through its guards on stored fields
-  alone when there is no pre-image to derive `COMPUTED` fields from. A
-  COMPUTED field is the case to check: its value must be derived before its
-  own `PERMISSIONS FOR select` is judged, and re-derived once stored fields
-  are cut. `materialise_fields_with_permissions` in
+  caller the snapshot is the record run through the table's field view, or
+  through its guards on stored fields alone when there is no pre-image to
+  derive `COMPUTED` fields from (`Stages::snapshot` in
+  `exec/vm/ir_lower/stage.rs`: the stored-field columns of the view's layers,
+  or `Enforce::Guards` for a view with no layer form). A
+  COMPUTED field is the case to check: its value is derived before its own
+  `PERMISSIONS FOR select` is judged and re-derived once stored fields are
+  cut, except where `plan_table_derivations` (`exec/permission.rs`) decides the
+  guard first. A `NONE` guard never derives the field for a checked caller, and
+  a `WHERE` guard that reads stored fields alone is judged once against the
+  record as stored and derives the body only when it admits. Both leave no
+  trace of the body in the result, and the read-time and bind-time paths
+  decide through the same function. `materialise_fields_with_permissions` in
   `exec/operators/scan/pipeline.rs` is what orders those passes for a view
   with no layer form (`Enforce::Image`), and every site that materialises
   computed fields on a reduced view has to go through it or through the
   bound layers. What a write returns — AFTER, BEFORE, DIFF and FIELDS — is
   each image put through the same view (`WriteInstr::ShowImage`, emitted by
-  `output_stage` in `exec/vm/lower.rs`). There
+  the `OutputWrite` stage in `exec/vm/ir_lower/stage.rs`). There
   are two read paths and a new one must join one of them, never neither:
   the streaming engine's bound plan, where a resolved source carries its table
   permission as a `PermissionFilter` and its computed fields and field guards
@@ -332,11 +339,25 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   instructions, any other evaluated in the frame `permission_frame` builds —
   the same function the permission operator evaluates in — and neither where
   `skip_fetch_perms` holds. Its scan still checks namespace and database
-  confinement (`validate_record_user_access`), as every scan does. Verified by
-  `a_record_user_reads_through_the_permissions`,
-  `a_table_permission_admits_the_rows_it_names`,
-  `a_projection_layer_derives_and_hides_fields` and
-  `a_principal_outside_the_database_is_refused` (`exec/vm/tests.rs`).
+  confinement (`validate_record_user_access`), as every scan does: a reading
+  program that is not a scalar expression checks it before it streams a row
+  (`execute_untailed` in `exec/vm/host.rs`), each group of a block that reads
+  rows checks it when the group starts (`start_group` in the same file), and a
+  write checks it per row at `GateInstr::Tenant` (`exec/vm/write_gate.rs`).
+  Verified for a record user by
+  `access/record/array_field_select_permission.surql` (a field guard cuts a
+  denied field, top-level and in each array element),
+  `access/record/computed_field_select_permission.surql` (a computed field is
+  derived, and its own guard holds wherever the statement reads it) and
+  `access/record/enforced_reads_writes_and_searches.surql` (a table permission
+  admits only the rows it names, through a record range, a subquery and a KNN
+  search) (`language-tests/tests/`), and by
+  `a_table_permission_reads_the_callers_auth` (`exec/vm/tests_principal.rs`).
+  The confinement check is pinned by
+  `a_record_user_is_confined_to_its_own_namespace_and_database`
+  (`exec/permission.rs`), and a write by a principal outside its tenant by
+  `a_principal_outside_its_tenant_is_refused_whatever_the_clause` (below); no
+  test pins the refusal of such a principal's read end to end.
   Privileged frames hold none of the caller's bindings. A table permission
   predicate, a read or write guard, a gate, a layer, a `COMPUTED` field, a
   field's `VALUE`, `ASSERT`, `DEFAULT` or `PERMISSIONS` clause, a function's or
@@ -347,17 +368,27 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   or closure argument of the caller is visible there, nor in any function the
   frame calls; the session's own values and the database's parameters are. No
   plan-time step carries a caller's value into such code either: lowering
-  reads the session's values only (`Lowering::caller_value`), the logical
+  refuses a privileged frame's read of a name a block binds (`Lowerer::value` in `exec/vm/ir_lower/expr.rs`), the logical
   parameter resolution substitutes the privileged view throughout a permission
   predicate and the plans it holds (`exec/logical/params.rs`), the resolver
   takes no caller value of `FROM $p` or `VERSION $p` inside a definition body
   (`exec/logical/resolve.rs`), a block's constants are not propagated into a
-  permission predicate or a layer's columns (`exec/vm/map.rs`), and a statement
+  permission predicate or a layer's columns (no value reaches into a region
+  isolated from above: common-subexpression and dead-code elimination merge a
+  value only where `Ir::dominates` in `exec/ir/core/ir.rs` holds, which stops
+  at such a region, `exec/ir/passes/rehome.rs` never moves a value into one,
+  and `exec/ir/core/verify.rs` checks it after every pass in a debug build),
+  and a statement
   such code holds is bound and planned against `Planner::privileged` and, run as
   a group of the program, inherits none of the block's slots
-  (`exec/vm/lower.rs`). Ordinary
-  calls of user-defined functions see the caller's bindings; a function body
-  reads every non-argument parameter at run time, so a compiled body is never
+  (`Lowerer::value` in `exec/vm/ir_lower/expr.rs`). A function body is
+  lexically scoped (`Context::lexical_value`): it reads its arguments, what it
+  binds, the row names, the session's own values, the request's parameters and
+  the database's parameters, and never a `LET` or `FOR` binding of its caller,
+  at any depth of calls. A body called from a privileged frame reads no request
+  parameter either, since an isolated context carries none. A body reads every
+  non-argument parameter at run time and is planned in a context that holds no
+  caller binding (`Context::new_call_scope`), so a compiled body is never
   served with one caller's value for another. Verified by
   `privilege/privileged_frame_record_user.surql`,
   `privilege/privileged_frame_import.surql`,
@@ -366,7 +397,9 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   (`language-tests/tests/language/statements/define/`), and by
   `no_caller_binding_reaches_a_permission_however_it_is_reached`,
   `a_statement_in_definer_code_reads_no_caller_binding` and
-  `a_permission_reads_its_own_let_and_no_callers` (`exec/vm/tests_body_scope.rs`),
+  `a_permission_reads_its_own_let_and_no_callers`,
+  `an_ordinary_call_reads_no_binding_of_its_caller` and
+  `a_callers_let_is_not_folded_into_a_bodys_predicate` (`exec/vm/tests_body_scope.rs`),
   which bind the name every way a caller can against every way a read or a
   write reaches a permission, and check that a permission's own `LET` still
   reaches the statement it holds.
@@ -466,16 +499,22 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   The copy reaches the predicate alone, and the caller receives each field as
   the caller reads it. In the VM each body runs in a `FrameMode::Derived` frame
   (`exec/vm/program.rs`), one under an `AUTH LIMIT` holding a statement or a
-  user-defined function call lowered for the narrowed principal
-  (`narrowed_derivation`). The points are `Lowering::permission` for a plan's
-  `PermissionFilter` and a KNN search's candidates (`Plan::PermissionFilter`'s
-  `computed`, set in `vm/map.rs` from `planner::fold::computed_reads`, judged
-  through `Instr::JudgeCopy`), a graph hop's table permission
-  (`permission_pipeline` in `vm/lower_graph.rs`), the write gates'
+  user-defined function call is refused when it is lowered, with `NotYet`
+  (`refuse_narrowed` and `derive_fields` in `exec/vm/ir_lower/stage.rs`). The points
+  are `Body::permission_filter` for a plan's
+  `PermissionFilter` and a KNN search's candidates (`PermissionFilter`'s
+  `computed`, set in `exec/ir/build/logical.rs` by `computed_reads_of` from `planner::fold::computed_reads`, judged
+  through `Instr::JudgeCopy`), a graph hop's table permission (judged when
+  the hop runs: the lowering in `exec/vm/ir_lower/graph.rs` leaves
+  `LookupHop`'s `tables` empty, so `resolve` in `exec/vm/graph.rs` hands every
+  record reached to `resolve_record_batch` in
+  `exec/operators/scan/common.rs`, which judges it with
+  `check_permission_for_value` against the table's compiled `SELECT` guard,
+  a `ComputedFieldGuard`), the write gates'
   `GateInstr::Judge` for the create, update, delete and select clauses on
-  either image (`vm/lower_write_gate.rs`), a live subscriber's `select` clause
-  (`lower_subscription` in `vm/lower_write_observe.rs`), and a field's write
-  clauses (`field_permission` in `vm/lower_write_schema.rs`). Every compiled
+  either image (`exec/vm/ir_lower/stage.rs`), a live subscriber's `select` clause
+  (`lower_subscription` in `exec/vm/ir_lower/units.rs`, admission in `exec/vm/ir_lower/subscription.rs`), and a field's write
+  clauses (`field_predicate_pipeline` in `exec/vm/ir_lower/stage.rs`, judged by `SchemaInstr::Permit` in `exec/vm/write_schema.rs`). Every compiled
   table `SELECT` guard the host's streaming helpers evaluate — a record link
   the program follows — is a `ComputedFieldGuard`
   (`table_select_permission_physical`). The decorrelation rule does not lift a
@@ -551,16 +590,21 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   `EvalContext` alone and the function call carries it onto the body's context).
 - A permission predicate a read applies reaches the caller only as its verdict.
   It runs with reads unchecked, so a value it computes must never become the
-  value of the statement it guards: a `RETURN`, `BREAK` or `CONTINUE` leaving
-  the predicate is the error "unexpected control flow in a permission
-  predicate". A predicate lowered into a program raises it where the signal
-  leaves a statement evaluated in its frame (`escaped_signal` in
-  `exec/vm/host.rs`); a guard applied to a record read by id or dereferenced is
-  compiled by `read_permission_to_physical` as a predicate unit
-  (`ScalarUnit::predicate` in `exec/scalar_unit.rs`). A write's gate takes a
-  `RETURN` as its verdict, and a `COMPUTED` field derived for a predicate takes
-  it as the field's value; neither hands it to the caller.
-  Verified by: `reproductions/a_return_in_a_permission_block_is_an_error.surql`.
+  value of the statement it guards: a `RETURN` ends the block that holds it with
+  its value, which the predicate then judges, and a `BREAK` or `CONTINUE` leaving
+  the predicate is the loop-barrier error (`InvalidControlFlow`), since no loop
+  is written in it. A predicate lowered into a program takes the `RETURN` of
+  each statement it holds at that statement's instruction; a `RETURN` that
+  leaves a statement evaluated in its frame uncaught, and a loop signal that
+  does, are raised as errors where the signal leaves (`escaped_signal` in
+  `exec/vm/host.rs`), never as the guarded statement's value. A guard applied to
+  a record read by id or dereferenced is compiled by
+  `read_permission_to_physical` as a predicate unit (`ScalarUnit::predicate` in
+  `exec/scalar_unit.rs`), and `check_permission_for_value` applies the same
+  table. A write's gate takes a `RETURN` as its verdict, and a `COMPUTED` field
+  derived for a predicate takes it as the field's value; neither hands it to
+  the caller.
+  Verified by: `reproductions/a_return_in_a_permission_block_is_its_value.surql`.
 
   **Scope: statements, not side-effecting calls.** This frame blocks statement
   forms. It does *not* block a call to a builtin that changes something without
@@ -627,33 +671,46 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
     under `RestrictedPrefixes::AssumeRestricted`, `VERSION`, a `WITH` hint,
     `MATCHES` or a KNN operator, and a conjunct that reads a field the caller may
     not read is withheld from it (`cond_touches`), as it is from an index.
-  - Under a permissioned offer (`AccessOffer::permissioned`, where a table
-    permission predicate contributes to what the access path is offered) only
-    literal bounds are pushed. A deferred bound is evaluated in the caller's
-    frame when the scan opens, and a permission predicate is definer code. A
-    deferred bound anywhere reads no row of the table, holds no nested
-    statement, closure or index operator and has no effect, and an error in
-    evaluating it widens the side it bounds rather than raising.
+  - Under a permissioned offer (`AccessInputs::permissioned`, set from
+    `TableAnswers` in `exec/vm/ir_catalog.rs` wherever the caller's reads are
+    checked and the table's select permission is not `FULL`) only literal
+    bounds are pushed (`Classifier::bound` in `exec/index/key_range.rs`). A
+    deferred bound is evaluated in the caller's frame when the scan opens, and
+    a permission predicate is definer code. A deferred bound anywhere reads no
+    row of the table, holds no nested statement, closure or index operator and
+    has no effect (`Classifier::deferrable`), and an error in evaluating it
+    widens the side it bounds rather than raising.
   - Every range `record_key_ranges` builds is intersected with the table's
     record range, and an empty or inverted range is dropped, so a bound the
     caller supplies cannot take the scan out of the table (section 14).
   - For a checked caller beneath a permission, `key`, `range` and `ranges` print
     `<permission>` (`ACCESS_PATH_ATTRS` in `exec/operators/explain.rs`), as the
     index, access and record id of any access path do, and the column of a
-    component prints `<computed>` where its expression stands.
-  Verified by: `a_permissioned_offer_pushes_literals_only`,
-  `a_deferred_bound_is_pushed_only_when_it_reads_no_row_and_has_no_effect`
-  (`exec/index/key_range.rs`), `every_range_lies_within_the_table`,
+    component prints `<computed>` where its expression stands (`layer_attrs`
+    in `exec/vm/ir_lower/explain.rs`, which renders a column evaluated in a
+    computed frame, a component's included, as `<computed>` for a checked
+    caller).
+  Verified by: `a_key_range_reads_the_range_and_keeps_the_whole_predicate`
+  (`exec/ir/phys/access.rs`), `every_range_lies_within_the_table`,
   `a_bound_its_component_cannot_hold_widens_rather_than_raising`
   (`exec/operators/scan/key_range.rs`),
-  `a_checked_caller_is_shown_no_text_of_a_key_column` (`exec/vm/explain.rs`),
   `a_component_is_not_rederived_beneath_a_restricted_field`
-  (`exec/logical/resolve.rs`) and `a_key_range_scan_returns_what_the_table_scan_returns`
-  (`exec/vm/tests_scan_parity.rs`); end to end by
+  (`exec/logical/resolve.rs`); end to end by
+  `language/planner/id_components_differential_reads.surql` (the plan that may
+  read a key range returns what `WITH NOINDEX` and an unkeyed twin return),
+  `language/planner/id_components_differential_permissions.surql` (the same,
+  for a record user whose permission reads the components),
+  `language/planner/id_components_bounds_from_params_functions_and_closures.surql`,
+  `language/planner/id_components_clock_bound.surql`,
   `language/statements/select/id_components_permissions.surql`,
   `language/statements/define/field/id_components_select_permission_refused.surql`,
-  `language/planner/id_components_permission_bounds.surql` and
+  `language/planner/id_components_permission_bounds.surql` (a checked caller's
+  `EXPLAIN` shows `key` and `range` as `<permission>`) and
   `language/planner/id_components_permission_bounds_for_another_user.surql`.
+  These pin the rows a key range yields, not which bounds it takes: no test
+  pins that a permissioned offer pushes literals alone, which deferred bounds
+  are pushed, or the `<computed>` text of a component's column for a checked
+  caller.
 
 ### Review Triggers
 
@@ -665,8 +722,8 @@ Flag for detailed review when changes touch:
 - `DEFINE EVENT`, `DEFINE TABLE ... AS`, or `DEFINE FIELD ... REFERENCE` processing
 - `Auth`, `AuthLimit`, `Actor`, or role-checking methods
 - `USE` statement handling in the executor
-- `process_table_fields`, `DataInstr::Snapshot`, `WriteInstr::ShowImage`,
-  `image_view`, `shown_view`, `Enforce`, or `materialise_fields_with_permissions`
+- `process_fields`, `DataInstr::Snapshot`, `WriteInstr::ShowImage`,
+  `shown_view`, `Enforce`, or `materialise_fields_with_permissions`
   (the VM's write path and the views it shows a written record through), and
   `ComputedFieldGuard` or the VM's permission derivations (the computed fields a
   permission predicate reads)
@@ -683,7 +740,7 @@ Flag for detailed review when changes touch:
 - `purge_references` or cascade processing logic
 - How `auth_enabled` is evaluated or propagated
 - The `reduced` document mechanism or computed field handling
-- `plan_key_range`, `AccessOffer::permissioned`, `record_key_ranges`, the
+- `plan_key_range`, `AccessInputs::permissioned`, `record_key_ranges`, the
   `KeyRangeScan` EXPLAIN attributes in `ACCESS_PATH_ATTRS`, or the derivation of
   a record-id component (`KeyStructure::derived_fields`, a `key_part` definition,
   `id_field_restrictions`)
@@ -794,8 +851,9 @@ relate), Key API, field evaluation, events, views, cascades
   (a component has no field permission). A new error on this path must keep both
   properties: raised after the table's gates, and carrying nothing beyond what the
   caller's own data clause reads.
-  Verified by: `keyed_writes_settle_their_components_as_instructions`
-  (`exec/vm/tests_write_data.rs`), `merge_rpc_cannot_change_a_component_of_the_record_id`
+  Verified by: `the_special_fields_are_stamped_and_a_keyed_table_judges_the_key`
+  (`exec/vm/ir_lower/stage.rs`, which pins that a keyed table's write lowers to
+  `DataInstr::SettleKeyFields`), `merge_rpc_cannot_change_a_component_of_the_record_id`
   (`rpc/protocol.rs`), and end to end by
   `language/statements/update/id_components_immutable.surql`,
   `language/write/id_components_error_precedence.surql` and
@@ -1122,9 +1180,10 @@ Flag when changes touch:
   component and the remedy and never a stored field value.
   Verified by: `the_records_are_checked_only_against_a_changed_structure`,
   `a_view_that_selects_every_field_reads_every_name_once_it_holds_a_row` and the
-  `record_reads` tests (`ddl/key_scan.rs`),
-  `the_record_id_components_of_the_id_are_judged_when_the_statement_runs`
-  (`exec/vm/lower_ddl.rs`), and end to end by
+  `record_reads` tests (`ddl/key_scan.rs`), and, for the checks
+  `define_field`, `alter_field` and `remove_field`
+  (`exec/vm/ir_lower/ddl/field.rs`) emit to run when the statement runs, end
+  to end by
   `language/statements/define/field/id_components_wildcard_view_judged_when_the_statement_runs.surql`,
   `language/statements/define/field/id_components_rename_used_by_reference_repair.surql`,
   `language/statements/define/field/id_components_rename_used_through_function.surql`,

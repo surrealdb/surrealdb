@@ -12,10 +12,10 @@
 //!   and feeds the standard fetch pipeline (table permissions per record, computed fields,
 //!   field-level permissions). Rows are emitted in doc-ID order, which is unspecified relative to
 //!   any field — the planner only chooses this plan when no index-covered ORDER BY is available, so
-//!   any ORDER BY is enforced by a downstream Sort. An OR fusion plan additionally carries the
-//!   streaming union it replaced as an overflow fallback: when any union branch exceeds its
-//!   drained-entry budget, the bitmap is abandoned and the fallback's stream is emitted instead
-//!   (`union_tier: fallback` under EXPLAIN ANALYZE).
+//!   any ORDER BY is enforced by a downstream Sort. An OR fusion plan also carries a streaming
+//!   union as an overflow fallback: when any union branch exceeds its drained-entry budget, the
+//!   bitmap is abandoned and the fallback's stream is emitted instead (`union_tier: fallback` under
+//!   EXPLAIN ANALYZE).
 //!
 //! [`BitmapNode`]s implement [`ExecOperator`] so EXPLAIN renders the bitmap
 //! expression as a plan subtree (`BitmapAnd` / `BitmapOr` / `BitmapAndNot` /
@@ -569,9 +569,9 @@ fn build_bitmap_plan<'a>(
 						// set (the residual `NOT ...` filter still
 						// applies), so the subtract side is never anchored.
 						// In strict mode a subtraction overflow invalidates
-						// the evaluation like any other branch (unreachable
-						// for v1 KNN prefilter trees, which carry no NOTs —
-						// kept airtight regardless).
+						// the evaluation like any other branch.
+						// A KNN prefilter tree never contains a NOT, so
+						// this arm is unreachable for those trees.
 						if !acc.is_empty() {
 							match build_bitmap_plan(
 								subtract,
@@ -615,8 +615,9 @@ async fn build_btree_bitmap(
 	anchored: bool,
 ) -> std::result::Result<BranchBitmap, ControlFlow> {
 	let ix = index_ref.definition();
-	let mut range = bitmap_scan_range(bctx.ns, bctx.db, ix, access)
-		.context("Failed to compute bitmap scan range")?;
+	let mut range =
+		bitmap_scan_range(bctx.ns, bctx.db, ix, access, bctx.ctx.ctx().statement_clock())
+			.context("Failed to compute bitmap scan range")?;
 	let mut docs = RoaringTreemap::new();
 	let mut missing: Vec<RecordId> = Vec::new();
 	let mut drained = 0usize;
@@ -1010,7 +1011,7 @@ mod tests {
 	fn eq(index_ref: &IndexRef, value: i64) -> BitmapPlan {
 		BitmapPlan::BTree {
 			index_ref: index_ref.clone(),
-			access: BTreeAccess::Equality(Value::from(value)),
+			access: BTreeAccess::literal_equality(Value::from(value)),
 		}
 	}
 

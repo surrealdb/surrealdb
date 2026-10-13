@@ -12,13 +12,13 @@
 //! Two rows belong to the same group iff their keys compare equal under
 //! `Value: Ord`, so the key index is ordered (`GroupMap`, in
 //! `operators/aggregate.rs`, says why a hash does not serve), and the groups
-//! are finished in key order. A single key is
-//! indexed by its value, a compound key by the vector of its values; both order as the
-//! vector of the key's values does.
+//! are finished in key order. A single key is indexed by its value, and a
+//! compound key by the vector of its values. Both order the way that vector does.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use super::partition::Splitters;
 use crate::exec::function::{AccumulatorState, AggregateFunction};
 use crate::exec::memory::runs::Record;
 use crate::val::Value;
@@ -224,6 +224,90 @@ impl Groups {
 	/// Whether no group is open.
 	pub(super) fn is_empty(&self) -> bool {
 		self.len == 0
+	}
+
+	/// How many groups are open.
+	pub(super) fn len(&self) -> usize {
+		self.len
+	}
+
+	/// The key of every `stride`th open group, first one included, in key order; none under
+	/// `GROUP ALL`.
+	pub(super) fn sample(&self, stride: usize) -> Vec<Vec<Value>> {
+		let stride = stride.max(1);
+		match &self.index {
+			KeyIndex::All => Vec::new(),
+			KeyIndex::One(index) => index.keys().step_by(stride).map(|k| vec![k.clone()]).collect(),
+			KeyIndex::Many(index) => index.keys().step_by(stride).cloned().collect(),
+		}
+	}
+
+	/// These groups divided by `splitters` into one set of groups per partition, in partition
+	/// order, every group moved whole into the partition its key routes to. A key that compares
+	/// equal to another routes with it, so equal keys always meet in one partition, and the
+	/// partitions' keys follow one another in key order. `GROUP ALL`'s one group is not divided:
+	/// it is the only part.
+	pub(super) fn split(self, splitters: &Splitters) -> Vec<Groups> {
+		if !self.spillable() {
+			return vec![self];
+		}
+		let (width, fields, total, count) = (self.width(), self.fields(), self.bytes, self.len);
+		let mut parts: Vec<Groups> =
+			(0..splitters.partitions()).map(|_| self.empty_like()).collect();
+		let mut finished = self.finish();
+		for (key, from) in std::mem::take(&mut finished.keys) {
+			let part = &mut parts[splitters.route(key.as_slice())];
+			let at = part.len;
+			part.len += 1;
+			part.accumulators.extend(
+				finished.accumulators[from * width..(from + 1) * width]
+					.iter_mut()
+					.map(|state| std::mem::replace(state, AccumulatorState::placeholder())),
+			);
+			part.firsts.extend(
+				finished.firsts[from * fields..(from + 1) * fields].iter_mut().map(Option::take),
+			);
+			match (&mut part.index, key) {
+				(KeyIndex::One(index), Key::One(value)) => {
+					index.insert(value, at);
+				}
+				(KeyIndex::Many(index), Key::Many(values)) => {
+					index.insert(values, at);
+				}
+				_ => unreachable!("a keyed group's key is of its groups' kind"),
+			}
+		}
+		// What the groups hold is shared out by how many each part holds, the last part that
+		// holds any taking the remainder, so the parts hold what the whole did.
+		let mut left = total;
+		let last = parts.iter().rposition(|part| part.len > 0);
+		for (at, part) in parts.iter_mut().enumerate() {
+			part.bytes = match (Some(at) == last, count) {
+				(_, 0) => 0,
+				(true, _) => left,
+				(false, count) => (total as u128 * part.len as u128 / count as u128) as usize,
+			};
+			left = left.saturating_sub(part.bytes);
+		}
+		parts
+	}
+
+	/// No groups, of the shape these are.
+	fn empty_like(&self) -> Self {
+		Self {
+			index: match &self.index {
+				KeyIndex::All => KeyIndex::All,
+				KeyIndex::One(_) => KeyIndex::One(BTreeMap::new()),
+				KeyIndex::Many(_) => KeyIndex::Many(BTreeMap::new()),
+			},
+			key: vec![Value::None; self.key.len()],
+			current: 0,
+			starts: Arc::clone(&self.starts),
+			accumulators: Vec::new(),
+			firsts: Vec::new(),
+			len: 0,
+			bytes: 0,
+		}
 	}
 
 	/// [`Self::save_all`] for every kind of groups: `GROUP ALL`'s one group
@@ -632,6 +716,55 @@ mod tests {
 		fold(&mut part, &functions, &rows[3..]);
 		main.absorb(part).expect("same shape");
 		assert_eq!(answers(main), answers(serial));
+	}
+
+	/// Groups divided by range into partitions, each partition's shares of the morsels folded in
+	/// the order of the morsels, answer the serial fold in key order, whatever the splitters.
+	#[test]
+	fn groups_split_by_range_and_folded_answer_the_serial_fold() {
+		let functions = functions();
+		let morsels: [&[(i64, i64)]; 4] = [
+			&[(3, 1), (1, 2), (3, 4), (2, 8), (11, 5)],
+			&[(1, 16), (4, 32), (9, 1)],
+			&[],
+			&[(3, 7), (12, 9), (4, 2), (1, 1), (0, 6), (10, 3)],
+		];
+		let mut serial = Groups::new(1, &functions);
+		for rows in morsels {
+			fold(&mut serial, &functions, rows);
+		}
+		let expected = answers(serial);
+		for splitters in [
+			Splitters::single(),
+			Splitters::new(vec![vec![int(3)]]),
+			Splitters::new(vec![vec![int(2)], vec![int(4)], vec![int(10)]]),
+			// A splitter no key reaches leaves partitions with no groups.
+			Splitters::new(vec![vec![int(-5)], vec![int(3)], vec![int(100)]]),
+		] {
+			let mut partitions: Vec<Vec<Groups>> =
+				(0..splitters.partitions()).map(|_| Vec::new()).collect();
+			for rows in morsels {
+				let mut groups = Groups::new(1, &functions);
+				fold(&mut groups, &functions, rows);
+				let bytes = groups.bytes();
+				let split = groups.split(&splitters);
+				assert_eq!(split.len(), splitters.partitions());
+				assert_eq!(split.iter().map(Groups::bytes).sum::<usize>(), bytes);
+				for (partition, share) in partitions.iter_mut().zip(split) {
+					partition.push(share);
+				}
+			}
+			let mut got = Vec::new();
+			for shares in partitions {
+				let mut shares = shares.into_iter();
+				let mut folded = shares.next().expect("a share of the first morsel");
+				for share in shares {
+					folded.absorb(share).expect("same shape");
+				}
+				got.extend(answers(folded));
+			}
+			assert_eq!(got, expected, "{splitters:?}");
+		}
 	}
 
 	#[test]

@@ -6,9 +6,9 @@
 //!
 //! - **Binding rows**: the binding tables produced by two GQL `MATCH` sub-plans — two
 //!   comma-separated patterns inside one `MATCH`, or two sequential `MATCH` clauses — that share
-//!   zero or more *node* variables (repeated node variables are join keys, see
-//!   `doc/gql/V2_DESIGN.md` §6). Each row is a `Value::Object` keyed by binding name (§3); the
-//!   output row is the union of a build row and a probe row.
+//!   zero or more *node* variables. Each shared node variable is a join key. Each row is a
+//!   `Value::Object` keyed by binding name, and the output row is the union of a build row and a
+//!   probe row.
 //! - **Document rows**: the rows of a SurrealQL pipeline, joined by arbitrary key expressions. The
 //!   output row is the probe row with the matched build row added under one top-level key, the
 //!   join's *alias* ([`with_alias`], [`with_alias_owned`]).
@@ -71,7 +71,7 @@ use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
 
 /// The kind of join `HashJoin` performs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JoinType {
 	/// Emit only probe rows that match at least one build row.
 	Inner,

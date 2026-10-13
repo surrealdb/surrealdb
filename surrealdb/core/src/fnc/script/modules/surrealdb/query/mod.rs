@@ -56,8 +56,8 @@ pub fn query<'js>(
 	let promise = Promise::wrap_future(&ctx_clone, async move {
 		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
-		// Wait on existing query ctx so that we can't spawn more then one query at the
-		// same time.
+		// Wait for the previous query on this context to finish, so that at most one
+		// query runs at a time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}
@@ -74,6 +74,9 @@ pub fn query<'js>(
 				query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
 			};
 
+			// The subquery context is a child of the caller's context, so every clock
+			// read inside the subquery uses the caller statement's timestamp. Neither
+			// this function nor the entry points it calls install a clock of their own.
 			let mut context = Context::new_child(query_ctx.context);
 			if let Some(v) = query.clone().vars {
 				context

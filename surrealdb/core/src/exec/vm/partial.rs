@@ -1,5 +1,5 @@
 //! What a producer hands its coordinator for one breaker. A producer is
-//! either a region batch that spilled or a fan running the same program over
+//! either a morsel that spilled or a fan running the same program over
 //! a disjoint, contiguous part of the source. The coordinator merges the
 //! partials in producer order: the order the source yielded the batches, or
 //! the order of the fans' key ranges. That is the arrival order of the serial
@@ -26,7 +26,8 @@
 //! ([`Partial::to_wire`], [`Partial::from_wire`]); its runs are named, not
 //! copied.
 
-#![cfg_attr(not(test), allow(dead_code))]
+// Lowered programs call the items in this module.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -88,8 +89,8 @@ impl std::fmt::Debug for Partial {
 pub(crate) struct PartialCounts {
 	/// For a join build, the build rows the producer read, regex rows
 	/// included; for a distinct, the rows it took; otherwise the records the
-	/// partial holds. A piece of a split partial instead counts the records
-	/// routed to it, duplicates a distinct dropped not among them.
+	/// partial holds. A piece of a split partial counts the records routed to
+	/// it; the duplicates a distinct dropped are not among them.
 	pub taken: u64,
 }
 

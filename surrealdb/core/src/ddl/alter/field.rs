@@ -15,30 +15,48 @@ use crate::expr::statements::define::DefineKind;
 use crate::iam::AuthLimit;
 use crate::val::{TableName, Value};
 
-/// Alter the field `idiom` of table `what` by the clauses of `this`, as
-/// `ALTER FIELD` does once its field and table are named.
-pub(crate) async fn alter_field_statement_apply(
-	this: &AlterFieldStatement,
-	idiom: crate::expr::Idiom,
-	what: TableName,
+/// The namespace and database an `ALTER FIELD` alters in, by name and by id.
+struct Scope<'a> {
+	ns_name: &'a str,
+	db_name: &'a str,
+	ns: catalog::NamespaceId,
+	db: catalog::DatabaseId,
+}
+
+/// Reads the definition of the field `idiom` on table `what` that an `ALTER FIELD` alters, with
+/// the scope it is altered in. Returns `None` when `if_exists` is set and it is not defined.
+///
+/// Refuses when `idiom` names a component of a record id, which is a derived field with no
+/// definition to alter, and when `what` is a lightweight relation, whose fields are managed
+/// by its table definition.
+async fn alter_field_read<'a>(
+	idiom: &crate::expr::Idiom,
+	what: &TableName,
+	if_exists: bool,
 	ctx: &FrozenContext,
-	opt: &Options,
-) -> Result<Value> {
+	opt: &'a Options,
+) -> Result<Option<(catalog::FieldDefinition, Scope<'a>)>> {
 	// Get the NS and DB
 	let (ns_name, db_name) = opt.ns_db()?;
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	let scope = Scope {
+		ns_name,
+		db_name,
+		ns,
+		db,
+	};
 	// Fetch the transaction
 	let txn = ctx.tx();
 	let name = idiom.to_raw_string();
 	// A component of a named record id is a derived field: it has no definition
 	// to alter.
-	crate::ddl::key_scan::refuse_component_name(&txn, ns, db, &what, &idiom).await?;
+	crate::ddl::key_scan::refuse_component_name(&txn, ns, db, what, idiom).await?;
 	// Get the table definition
-	let mut df = match txn.get_tb_field(ns, db, &what, &name, None).await? {
+	let df = match txn.get_tb_field(ns, db, what, &name, None).await? {
 		Some(tb) => tb.deref().clone(),
 		None => {
-			if this.if_exists {
-				return Ok(Value::None);
+			if if_exists {
+				return Ok(None);
 			}
 
 			return Err(CatalogError::FdNotFound {
@@ -48,11 +66,10 @@ pub(crate) async fn alter_field_statement_apply(
 		}
 	};
 
-	// A lightweight relation's only fields are the auto in/out pair, whose
-	// types ARE the relation's IN/OUT contract — the record-less scan and
-	// the endpoint checks rest on them — so they are managed exclusively by
-	// the table definition, never altered directly.
-	if let Some(tb) = txn.get_tb(ns, db, &what, None).await? {
+	// A lightweight relation's only fields are the in/out pair. Their types are the relation's
+	// IN/OUT contract, which the record-less scan and the endpoint checks rely on. Only the
+	// table definition may change them.
+	if let Some(tb) = txn.get_tb(ns, db, what, None).await? {
 		ensure!(
 			crate::kvs::lightweight::lightweight_relation(&tb.table_type).is_none(),
 			ExecError::Thrown(
@@ -62,9 +79,23 @@ pub(crate) async fn alter_field_statement_apply(
 			)
 		);
 	}
+	Ok(Some((df, scope)))
+}
 
-	// Snapshot the definition before mutating it so we can tell which
-	// reference target tables the change drops.
+/// Applies the clauses of `this` to the field `idiom` of table `what`, as `ALTER FIELD` does.
+pub(crate) async fn alter_field_statement_apply(
+	this: &AlterFieldStatement,
+	idiom: crate::expr::Idiom,
+	what: TableName,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let Some((mut df, scope)) = alter_field_read(&idiom, &what, this.if_exists, ctx, opt).await?
+	else {
+		return Ok(Value::None);
+	};
+	// Keep a copy of the definition from before the changes. It is compared with the altered
+	// definition to find the reference target tables that the change drops.
 	let old_definition = df.clone();
 
 	// The type and the names of the record id components it carries are set
@@ -157,20 +188,103 @@ pub(crate) async fn alter_field_statement_apply(
 		AlterKind::None => {}
 	}
 
+	alter_field_write(
+		df,
+		old_definition,
+		!matches!(this.kind, AlterKind::None),
+		(&scope, &what),
+		ctx,
+		opt,
+	)
+	.await
+}
+
+/// Applies the clauses of a statement that holds them as one definition to the field `idiom`
+/// of table `what`. Only the fields named in `fields` are copied from `altered`.
+///
+/// `altered` is that definition, with the defaults of the stored type where a clause is not
+/// set. `kind_changed` is true when the statement sets or drops the type.
+pub(crate) async fn alter_field_definition_apply(
+	altered: &catalog::FieldDefinition,
+	fields: &[String],
+	(kind_changed, if_exists): (bool, bool),
+	idiom: crate::expr::Idiom,
+	what: TableName,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let Some((mut df, scope)) = alter_field_read(&idiom, &what, if_exists, ctx, opt).await? else {
+		return Ok(Value::None);
+	};
+	let old_definition = df.clone();
+	for field in fields {
+		match field.as_str() {
+			// The type and the record id structure it names are set together.
+			"field_kind" => {
+				df.field_kind.clone_from(&altered.field_kind);
+				df.key.clone_from(&altered.key);
+			}
+			"flexible" => df.flexible = altered.flexible,
+			"readonly" => df.readonly = altered.readonly,
+			"inline" => df.inline = altered.inline,
+			"value" => {
+				df.value.clone_from(&altered.value);
+				df.value_body.clone_from(&altered.value_body);
+			}
+			"assert" => {
+				df.assert.clone_from(&altered.assert);
+				df.assert_body.clone_from(&altered.assert_body);
+			}
+			"default" => {
+				df.default.clone_from(&altered.default);
+				df.default_body.clone_from(&altered.default_body);
+			}
+			"select_permission" => {
+				df.select_permission.clone_from(&altered.select_permission);
+				df.select_body.clone_from(&altered.select_body);
+			}
+			"create_permission" => df.create_permission.clone_from(&altered.create_permission),
+			"update_permission" => df.update_permission.clone_from(&altered.update_permission),
+			"comment" => df.comment.clone_from(&altered.comment),
+			"reference" => df.reference.clone_from(&altered.reference),
+			other => anyhow::bail!(
+				"an altered field clause `{other}` that no clause of ALTER FIELD names"
+			),
+		}
+	}
+	alter_field_write(df, old_definition, kind_changed, (&scope, &what), ctx, opt).await
+}
+
+/// Validates the definition `df` that an `ALTER FIELD` produces from `old_definition`, then
+/// writes it, updates the definitions it implies, and clears the table cache.
+async fn alter_field_write(
+	mut df: catalog::FieldDefinition,
+	old_definition: catalog::FieldDefinition,
+	kind_changed: bool,
+	(scope, what): (&Scope<'_>, &TableName),
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Value> {
+	let Scope {
+		ns_name,
+		db_name,
+		ns,
+		db,
+	} = *scope;
+	let txn = ctx.tx();
+	let name = df.name.to_raw_string();
 	// Recompute auth_limit from the current principal to prevent privilege escalation
 	df.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
-	// The `id` field forbids the same clauses on ALTER as on DEFINE — VALUE,
-	// REFERENCE, COMPUTED, DEFAULT ALWAYS, READONLY, FLEXIBLE, and non-key
-	// TYPEs — validated against the fully-resolved definition, so a clause
-	// DEFINE FIELD refuses is refused here whichever ALTER sets it.
+	// The `id` field refuses the same clauses as DEFINE FIELD: VALUE, REFERENCE, COMPUTED,
+	// DEFAULT ALWAYS, READONLY, FLEXIBLE and non-key TYPEs. The check runs on the merged
+	// definition, so any ALTER that sets one of these is refused.
 	crate::exec::field_rules::id_field_restrictions(&df)?;
 
-	// The record id components the merged definition names: judged as `DEFINE
-	// FIELD OVERWRITE` judges them. Only a statement that sets or drops the type
-	// of `id` can change them; a field under a component's name was refused
-	// above.
-	if df.name.is_id() && !matches!(this.kind, AlterKind::None) {
+	// The record id components that the merged definition names are checked as
+	// `DEFINE FIELD OVERWRITE` checks them. Only a statement that sets or drops the type of
+	// `id` can change them. A field under a component's name is refused above.
+	if df.name.is_id() && kind_changed {
 		crate::ddl::define_field_statement_validate_key_components(
 			&txn,
 			ns,
@@ -186,7 +300,7 @@ pub(crate) async fn alter_field_statement_apply(
 	// resolved definition.
 	if df.inline && !opt.import {
 		let is_relation = txn
-			.get_tb(ns, db, &what, None)
+			.get_tb(ns, db, what, None)
 			.await?
 			.is_some_and(|tb| matches!(tb.table_type, catalog::TableType::Relation(_)));
 		ensure!(
@@ -217,10 +331,9 @@ pub(crate) async fn alter_field_statement_apply(
 					.to_owned(),
 			)
 		);
-		// The payload's value count is a single byte, so a table carries at
-		// most 255 INLINE fields; reject the overflowing toggle here rather
-		// than failing every subsequent edge write.
-		let fields = txn.all_tb_fields(ns, db, &what, None).await?;
+		// The adjacency payload stores its value count in one byte, so a table holds at most
+		// 255 INLINE fields. The change is rejected here, before an edge write can fail on it.
+		let fields = txn.all_tb_fields(ns, db, what, None).await?;
 		let others = fields.iter().filter(|f| f.inline && f.name != df.name).count();
 		ensure!(
 			others < u8::MAX as usize,
@@ -233,17 +346,16 @@ pub(crate) async fn alter_field_statement_apply(
 	}
 
 	if df.flexible {
-		let tb = txn.get_tb(ns, db, &what, None).await?;
+		let tb = txn.get_tb(ns, db, what, None).await?;
 		crate::exec::field_rules::flexible_restrictions(&df, tb.as_deref())?;
 	}
 
-	// A `TYPE` the statement alters is written as `DEFINE FIELD` writes one:
-	// it still holds the fields nested in the field, and the definitions it
-	// implies for the elements of an array or set are written with it. An
-	// import replays definitions written before the rule held.
-	let kind_altered = !matches!(this.kind, AlterKind::None);
-	if kind_altered && !opt.import {
-		let fields = txn.all_tb_fields(ns, db, &what, None).await?;
+	// A `TYPE` the statement alters follows the rules `DEFINE FIELD` applies to a new one.
+	// The fields nested in the field are checked against it, and the definitions it implies
+	// for the elements of an array or set are written with it. Import skips this check, so
+	// exported definitions load as they were written.
+	if kind_changed && !opt.import {
+		let fields = txn.all_tb_fields(ns, db, what, None).await?;
 		crate::exec::field_rules::define_field_nesting_restrictions(&fields, &df)?;
 	}
 
@@ -252,11 +364,11 @@ pub(crate) async fn alter_field_statement_apply(
 	// structure.
 	if let Some(key) = df.live_key() {
 		let exec = crate::ddl::frame(ctx, opt, None).await;
-		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, &what, key).await?;
+		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, what, key).await?;
 	}
 
-	txn.put_tb_field(ns, db, &what, &df).await?;
-	if kind_altered {
+	txn.put_tb_field(ns, db, what, &df).await?;
+	if kind_changed {
 		crate::ddl::define_field_statement_process_recursive_definitions(
 			ns,
 			db,
@@ -267,23 +379,23 @@ pub(crate) async fn alter_field_statement_apply(
 		)
 		.await?;
 	}
-	// Dropping the REFERENCE clause or narrowing/changing the record kind can
-	// strand reference keys under target tables the field no longer
-	// references. Purge them so the DELETE reference-purge gate stays sound.
-	// Skipped during import, which restores reference keys verbatim.
+	// Dropping REFERENCE, or narrowing or changing the record kind, can leave reference keys
+	// under target tables that the field no longer references. Those keys are purged so that
+	// DELETE's reference checks stay correct. Import skips the purge, since it restores
+	// reference keys as they were stored.
 	if !opt.import {
 		crate::exec::reference_purge::purge_dropped_reference_keys(
 			&txn,
 			ns,
 			db,
-			&what,
+			what,
 			&old_definition,
 			Some(&df),
 		)
 		.await?;
 	}
 	// Refresh the table cache
-	let Some(tb) = txn.get_tb(ns, db, &what, None).await? else {
+	let Some(tb) = txn.get_tb(ns, db, what, None).await? else {
 		return Err(CatalogError::TbNotFound {
 			name: what.clone(),
 		}

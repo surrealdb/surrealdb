@@ -87,25 +87,23 @@
 #![warn(clippy::wildcard_enum_match_arm)]
 
 pub(crate) mod constants;
-pub(crate) mod edges;
 pub(crate) mod effects;
 mod fold;
 pub(crate) mod footprint;
 mod functions;
 mod optimise;
 mod params;
-mod properties;
+pub(crate) mod pipelines;
+pub(crate) mod properties;
 pub(crate) mod reads;
 mod resolve;
 mod rules;
+pub(crate) mod summaries;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-pub(crate) use effects::{
-	Needs, effects_of_body, effects_of_expr, effects_of_plan, effects_of_plan_late_bound,
-	needs_of_expr, stored_functions_of,
-};
-pub(crate) use rules::{and, conjuncts, is_effect_free, is_false, named_reads, plan_may_raise};
+pub(crate) use effects::{effects_of_body, effects_of_expr};
+pub(crate) use rules::conjuncts;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
@@ -155,10 +153,6 @@ pub(crate) struct BindContext<'a> {
 	/// function it calls is the definition stored at that stamp, which the
 	/// current one this pass would inline is not.
 	pub versioned: bool,
-	/// Whether a `time::now()` in a condition folds to the time of binding,
-	/// one value for the statement. A statement bound before it runs, after
-	/// statements whose time it must not take, evaluates it when it runs.
-	pub folds_clock: bool,
 	/// Whether a catalog definition may be inlined into the plan: a call of a
 	/// user-defined function replaced by its body, a `DEFINE PARAM` read
 	/// replaced by its value. A statement that reads each definition as the
@@ -170,15 +164,6 @@ pub(crate) struct BindContext<'a> {
 	/// ([`CatalogWithin::nested_late`](crate::exec::planner::CatalogWithin)):
 	/// each is bound when it is planned, against the catalog it then finds.
 	pub binds_nested: bool,
-}
-
-/// Whether some name of `names` is read in `op`, or a plan nested in it,
-/// where binding substitutes a statement-scoped value — a predicate, a join
-/// key or residual, a source expression — and is not a name the plan binds
-/// itself. A plan bound with such a name left as a parameter carries a name
-/// where the access path needs a value.
-pub(crate) fn reads_in_resolvable_position(op: &LogicalOp, names: &[&str]) -> bool {
-	params::reads_in_resolvable_position(op, names)
 }
 
 /// Bind `op` for one transaction and one principal, every closure body in it
@@ -334,17 +319,11 @@ fn element_field_paths(op: LogicalOp) -> LogicalOp {
 /// taken out.
 async fn bind_taken(op: LogicalOp, bx: &BindContext<'_>, rules: Rules) -> Result<LogicalOp, Error> {
 	let caller = Caller::new(bx);
-	// A statement holding a schema statement among others is bound again,
-	// statement by statement, where each is planned: a `time::now()` its
-	// later statements read is folded there, or when they run, not now.
-	let folds_clock = bx.folds_clock
-		&& (matches!(op, LogicalOp::Ddl(_))
-			|| !crate::exec::planner::fold::changes_the_catalog(&op));
 	let op = resolve::resolve(op, bx, caller.as_ref()).await?;
 	let op = params::resolve_params(op, bx).await;
 	let capabilities = bx.ctx.get_capabilities();
 	let checks = caller.as_ref().is_none_or(Caller::checks_permissions);
-	let op = fold::fold_constants_with(op, bx.registry, &capabilities, checks, folds_clock);
+	let op = fold::fold_constants(op, bx.registry, &capabilities, checks);
 	let op = element_field_paths(op);
 	let functions = functions::Functions::gather(&op, bx, caller.as_ref()).await;
 	let permission_checked_params = params::permission_checked_names(&op, bx).await;
@@ -355,7 +334,6 @@ async fn bind_taken(op: LogicalOp, bx: &BindContext<'_>, rules: Rules) -> Result
 		permission_checked_params: &permission_checked_params,
 		next_alias: 0,
 		capabilities: &capabilities,
-		folds_clock,
 	};
 	match rules {
 		Rules::Run => Ok(optimise::optimise(op, &mut cx)),
@@ -712,7 +690,7 @@ pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
 /// statement's clause, an array, an operand or an `IF` arm's value, rather
 /// than a statement of a block or the value of a `RETURN` or another `LET`
 /// — wherever it stands in it: a statement planning refuses
-/// ([`crate::exec::vm::map`]'s `LET_IN_AN_EXPRESSION`) whether or not it runs.
+/// (the planner's `LET_IN_AN_EXPRESSION` refusal) whether or not it runs.
 pub(crate) fn holds_let_expression(expr: &LogicalExpr) -> bool {
 	use std::ops::ControlFlow;
 	expr.visit_deep(&mut |node| {
@@ -725,13 +703,6 @@ pub(crate) fn holds_let_expression(expr: &LogicalExpr) -> bool {
 		}
 	})
 	.is_break()
-}
-
-/// Whether `expr` holds a write statement, wherever it stands in it.
-pub(crate) fn holds_write_statement(expr: &LogicalExpr) -> bool {
-	let mut found = None;
-	write_walk::in_expr(expr, &mut found, &mut |_| Some(String::new()));
-	found.is_some()
 }
 
 /// Whether a schema statement changes what the session's namespace and
@@ -912,8 +883,7 @@ mod write_walk {
 		}
 		if let LogicalOp::Write(write) = op {
 			// A write the decision admits is walked into rather than returned
-			// from: its clauses may hold a write of a form that still cannot
-			// run.
+			// from: its clauses may hold a write of a form the planner declines.
 			if let Some(why) = decide(write) {
 				*found = Some(why);
 				return;
@@ -1107,7 +1077,6 @@ pub(super) mod test_fixture {
 				row_scoped: SELECT_ITERATION_PARAMS,
 				registry: &self.registry,
 				versioned: false,
-				folds_clock: true,
 				inlines_definitions: true,
 				binds_nested: true,
 			}
@@ -1163,9 +1132,8 @@ mod tests {
 	/// then be declined later, at the node, which is the ordering hazard
 	/// `unplannable_write` exists to avoid.
 	///
-	/// Asked of the traversal alone, so it keeps asserting what it means to
-	/// once every form can run and `unplannable_write` answers `None` for all
-	/// of them.
+	/// Asked of the traversal alone, so it checks the walk independently of
+	/// the clause decision that `unplannable_write` makes.
 	#[test]
 	fn a_write_is_found_through_a_scalar_as_well_as_a_child() {
 		let unplannable_write = |op: &LogicalOp| write_walk::first_write(op);

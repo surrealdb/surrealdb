@@ -92,6 +92,18 @@ impl TestReport {
 					f.indent(|f| writeln!(f, "- Signin error: {got}"))
 				})
 			}
+			super::TestReportKind::MismatchedRequest {
+				ref got,
+				ref expected,
+			} => {
+				writeln!(f, "> Test returned invalid request error")?;
+				f.indent(|f| {
+					writeln!(f, "= Expected:")?;
+					f.indent(|f| writeln!(f, "- Request error: {expected}"))?;
+					writeln!(f, "= Got:")?;
+					f.indent(|f| writeln!(f, "- Request error: {got}"))
+				})
+			}
 			super::TestReportKind::MismatchedSignup {
 				ref got,
 				ref expected,
@@ -312,6 +324,9 @@ impl TestReport {
 				TestOutputs::SigninError(res) => {
 					writeln!(f, "- Signin error: {res}")
 				}
+				TestOutputs::RequestError(res) => {
+					writeln!(f, "- Request error: {res}")
+				}
 			})
 		})
 	}
@@ -337,6 +352,10 @@ impl TestReport {
 					Some(x) => writeln!(f, "- Signup Error: {x}"),
 					None => writeln!(f, "- Any signup error"),
 				},
+				super::TestExpectation::Request(e) => match e {
+					Some(x) => writeln!(f, "- Request Error: {x}"),
+					None => writeln!(f, "- Any request error"),
+				},
 			})?;
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match &mismatch.got {
@@ -344,6 +363,7 @@ impl TestReport {
 				TestOutputs::ParsingError(e) => writeln!(f, "- Parsing error: {e}"),
 				TestOutputs::SigninError(e) => writeln!(f, "- Signin error: {e}"),
 				TestOutputs::SignupError(e) => writeln!(f, "- Signup error: {e}"),
+				TestOutputs::RequestError(e) => writeln!(f, "- Request error: {e}"),
 			})
 		})
 	}

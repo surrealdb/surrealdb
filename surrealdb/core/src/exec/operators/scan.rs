@@ -6,7 +6,6 @@
 pub(crate) mod bitmap;
 pub(crate) mod common;
 mod count;
-pub(crate) mod extents;
 pub(crate) mod fetch;
 mod fulltext;
 mod graph;
@@ -30,7 +29,7 @@ pub use count::CountOutput;
 pub(crate) use count::record_key_range;
 pub(crate) use fulltext::{FULL_TEXT_BATCH_SIZE, FullTextHits, open_full_text_index};
 pub use graph::EdgeTableSpec;
-pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec, payload_fields};
+pub(crate) use graph::{PayloadTableSpec, payload_fields};
 pub(crate) use knn::{
 	AnnTarget, PrefilterSettings, PrefilterTier, ann_graph_shape, exact_from_index_vectors,
 	knn_candidates, plan_prefilter,

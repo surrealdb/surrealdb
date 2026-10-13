@@ -4,47 +4,48 @@ use anyhow::Result;
 
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::Kind;
 use crate::val::Value;
 use crate::{define_pure_function, register_functions};
 
 // Single vector argument functions
-define_pure_function!(VectorMagnitude, "vector::magnitude", effects: EffectSet::PURE, (vector: Any) -> Float, crate::fnc::vector::magnitude);
-define_pure_function!(VectorNormalize, "vector::normalize", effects: EffectSet::PURE, (vector: Any) -> Any, crate::fnc::vector::normalize);
+define_pure_function!(VectorMagnitude, "vector::magnitude", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (vector: Any) -> Float, crate::fnc::vector::magnitude);
+define_pure_function!(VectorNormalize, "vector::normalize", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (vector: Any) -> Any, crate::fnc::vector::normalize);
 
 // Collection-of-vectors functions.
 //
 // `vector::sum` is also registered as an aggregate, so a GROUP BY query folds it
 // across rows while a direct call folds the array it is given.
-define_pure_function!(VectorSum, "vector::sum", effects: EffectSet::PURE, (vectors: Any) -> Any, crate::fnc::vector::sum);
+define_pure_function!(VectorSum, "vector::sum", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (vectors: Any) -> Any, crate::fnc::vector::sum);
 
 // Two vector argument functions
-define_pure_function!(VectorAdd, "vector::add", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::add);
-define_pure_function!(VectorAngle, "vector::angle", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::angle);
-define_pure_function!(VectorCross, "vector::cross", effects: EffectSet::PURE, rule: ReturnRule::SameAsArg(0), (a: Any, b: Any) -> Any, crate::fnc::vector::cross);
-define_pure_function!(VectorDivide, "vector::divide", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::divide);
-define_pure_function!(VectorDot, "vector::dot", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::dot);
-define_pure_function!(VectorMultiply, "vector::multiply", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::multiply);
-define_pure_function!(VectorProject, "vector::project", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::project);
-define_pure_function!(VectorSubtract, "vector::subtract", effects: EffectSet::PURE, (a: Any, b: Any) -> Any, crate::fnc::vector::subtract);
+define_pure_function!(VectorAdd, "vector::add", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Any, crate::fnc::vector::add);
+define_pure_function!(VectorAngle, "vector::angle", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::angle);
+define_pure_function!(VectorCross, "vector::cross", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, rule: ReturnRule::SameAsArg(0), (a: Any, b: Any) -> Any, crate::fnc::vector::cross);
+define_pure_function!(VectorDivide, "vector::divide", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Any, crate::fnc::vector::divide);
+define_pure_function!(VectorDot, "vector::dot", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::dot);
+define_pure_function!(VectorMultiply, "vector::multiply", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Any, crate::fnc::vector::multiply);
+define_pure_function!(VectorProject, "vector::project", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Any, crate::fnc::vector::project);
+define_pure_function!(VectorSubtract, "vector::subtract", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Any, crate::fnc::vector::subtract);
 
 // Vector with scalar
-define_pure_function!(VectorScale, "vector::scale", effects: EffectSet::PURE, (vector: Any, scalar: Number) -> Any, crate::fnc::vector::scale);
+define_pure_function!(VectorScale, "vector::scale", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (vector: Any, scalar: Number) -> Any, crate::fnc::vector::scale);
 
 // Distance functions
-define_pure_function!(VectorDistanceChebyshev, "vector::distance::chebyshev", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::chebyshev);
-define_pure_function!(VectorDistanceEuclidean, "vector::distance::euclidean", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::euclidean);
-define_pure_function!(VectorDistanceHamming, "vector::distance::hamming", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::hamming);
-define_pure_function!(VectorDistanceMahalanobis, "vector::distance::mahalanobis", effects: EffectSet::PURE, (a: Any, b: Any, cov: Any) -> Float, crate::fnc::vector::distance::mahalanobis);
-define_pure_function!(VectorDistanceManhattan, "vector::distance::manhattan", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::manhattan);
-define_pure_function!(VectorDistanceMinkowski, "vector::distance::minkowski", effects: EffectSet::PURE, (a: Any, b: Any, p: Number) -> Float, crate::fnc::vector::distance::minkowski);
+define_pure_function!(VectorDistanceChebyshev, "vector::distance::chebyshev", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::chebyshev);
+define_pure_function!(VectorDistanceEuclidean, "vector::distance::euclidean", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::euclidean);
+define_pure_function!(VectorDistanceHamming, "vector::distance::hamming", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::hamming);
+define_pure_function!(VectorDistanceMahalanobis, "vector::distance::mahalanobis", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any, cov: Any) -> Float, crate::fnc::vector::distance::mahalanobis);
+define_pure_function!(VectorDistanceManhattan, "vector::distance::manhattan", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::distance::manhattan);
+define_pure_function!(VectorDistanceMinkowski, "vector::distance::minkowski", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any, p: Number) -> Float, crate::fnc::vector::distance::minkowski);
 
 // Similarity functions
-define_pure_function!(VectorSimilarityCosine, "vector::similarity::cosine", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::cosine);
-define_pure_function!(VectorSimilarityJaccard, "vector::similarity::jaccard", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::jaccard);
-define_pure_function!(VectorSimilarityPearson, "vector::similarity::pearson", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::pearson);
-define_pure_function!(VectorSimilaritySpearman, "vector::similarity::spearman", effects: EffectSet::PURE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::spearman);
+define_pure_function!(VectorSimilarityCosine, "vector::similarity::cosine", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::cosine);
+define_pure_function!(VectorSimilarityJaccard, "vector::similarity::jaccard", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::jaccard);
+define_pure_function!(VectorSimilarityPearson, "vector::similarity::pearson", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::pearson);
+define_pure_function!(VectorSimilaritySpearman, "vector::similarity::spearman", effects: EffectSet::PURE, fallibility: Fallibility::VALUE, (a: Any, b: Any) -> Float, crate::fnc::vector::similarity::spearman);
 
 // =========================================================================
 // vector::distance::knn - IndexFunction (reads distance from KNN context)
@@ -64,6 +65,10 @@ pub struct VectorDistanceKnn;
 impl IndexFunction for VectorDistanceKnn {
 	fn name(&self) -> &'static str {
 		"vector::distance::knn"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Index, "vector::distance::knn", Fallibility::DATA)
 	}
 
 	fn signature(&self) -> Signature {

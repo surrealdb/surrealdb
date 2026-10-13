@@ -26,6 +26,7 @@ impl TestReport {
 			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
 			TestOutputs::SigninError(error) => apply_error(&mut doc, "signin-error", error),
 			TestOutputs::SignupError(error) => apply_error(&mut doc, "signup-error", error),
+			TestOutputs::RequestError(error) => apply_error(&mut doc, "request-error", error),
 		}
 
 		let mut existing = self.case.test.source.clone().into_bytes();

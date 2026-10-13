@@ -104,11 +104,12 @@ pub(crate) enum UnitObject {
 	/// A table's `SELECT` permission, with its statements planned, for a read
 	/// at the `VERSION` stamp it names, or the current state.
 	SelectPermission(crate::val::TableName, Option<u64>),
-	/// The unit of a closure's body, for values that capture `captured`,
-	/// lowered at re-entry depth `depth`.
+	/// The unit of a closure's body, for values that capture `captured` and
+	/// the row captures `rows`, lowered at re-entry depth `depth`.
 	Closure {
 		closure: ClosureId,
 		captured: Vec<String>,
+		rows: super::program::RowBits,
 		depth: u32,
 	},
 	/// An expression reached at run time through one the program did not
@@ -145,28 +146,60 @@ pub(crate) enum UnitObject {
 	},
 	/// The bundle of the stages a write that may reach any table applies to
 	/// the records of `table`, or of a table the catalog does not hold where
-	/// `generic`.
+	/// `generic`, lowered on behalf of an actor whose enforcement is `actor`
+	/// where it differs from the frame's.
 	StageBundle {
 		set: Arc<super::units::StageSetUnit>,
 		table: crate::val::TableName,
 		generic: bool,
+		actor: Option<bool>,
+	},
+	/// The order of the rows of view table `table`: the write of a view row
+	/// for each action a view's maintenance settles, as the table's
+	/// definitions state it ([`super::fault::view_rows`]).
+	ViewRows {
+		table: crate::val::TableName,
 	},
 	/// A call of a user-defined function, by its name without `fn::` and the
 	/// number of arguments it is called with, as a late-bound statement makes
 	/// it: the checks, the binding of the arguments and the body of the
 	/// definition the version names ([`super::call_unit`]).
 	FunctionCall(String, usize),
-	/// The `PERMISSIONS` predicate of a parameter, by its name, versioned by
-	/// the hash of the clause ([`super::param_unit`]).
-	ParamGuard(String),
-	/// The body of a user-defined function, by its name, compiled for the
-	/// values its arguments hold: a body that reads an argument where only a
-	/// value answers ([`super::call_unit::specialised`]).
-	SpecialisedBody(String, ArgValues),
-	/// The body of such a function compiled to read its arguments when it
-	/// runs, for a function whose calls brought more distinct values than it
-	/// is specialised for.
-	GenericBody(String),
+	/// The arm of a statement whose target is chosen when it runs, compiled
+	/// for `table` and the statement shape `shape`: `shape` is
+	/// [`shape::arm_key`](crate::exec::ir::cache::shape::arm_key) of the
+	/// statement's `ShapeDigest`. The catalog version and the frame key it
+	/// beside the object, as for every other object. Built by
+	/// [`UnitObject::dynamic_target_arm`].
+	// Read by the unit load of a dynamic-target arm.
+	#[allow(dead_code)]
+	DynamicTargetArm {
+		table: crate::val::TableName,
+		shape: u64,
+	},
+}
+
+impl UnitObject {
+	/// The arm of a dynamic-target statement compiled for `table` and the
+	/// statement shape `shape`. Keyed, as every object is, by the catalog
+	/// version and the frame beside it, so the cache checks it under the same
+	/// `CatalogDeps` as a table read.
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "constructed by the unit load lowered for a `phys.choose` dynamic-target arm"
+		)
+	)]
+	pub(crate) fn dynamic_target_arm(
+		table: crate::val::TableName,
+		shape: &crate::exec::ir::iface::premise::ShapeDigest,
+	) -> Self {
+		Self::DynamicTargetArm {
+			table,
+			shape: crate::exec::ir::cache::shape::arm_key(shape),
+		}
+	}
 }
 
 /// The argument values a specialised body is compiled for, as a key: a
@@ -183,11 +216,11 @@ pub(crate) struct ArgValues {
 }
 
 impl ArgValues {
-	/// The key of `values`; `None` for values whose encoding (with the count
-	/// of values that leads it) is longer than `max_bytes`, which are encoded
-	/// no further than that, and for values
-	/// that have no encoding (a closure). A body compiled for such values is
-	/// compiled for the call alone.
+	/// The key of `values`. Returns `None` for values whose encoding (with
+	/// the count of values that leads it) is longer than `max_bytes`, and
+	/// for values that have no encoding (a closure). The encoding stops at
+	/// `max_bytes`. A body compiled for such values is compiled for the call
+	/// alone.
 	pub(crate) fn of(values: &[crate::val::Value], max_bytes: usize) -> Option<Self> {
 		use std::io::Write as _;
 
@@ -499,12 +532,6 @@ impl<V: Clone + Send + Sync + 'static> UnitCache<V> {
 	/// A cache of table units for at most `capacity` keys.
 	pub(crate) fn tables(capacity: usize) -> Self {
 		Self::new(capacity, &TABLES_TOTAL)
-	}
-
-	/// How many keys this cache holds.
-	#[cfg(test)]
-	pub(crate) fn len(&self) -> usize {
-		self.entries.as_ref().map_or(0, |entries| entries.len())
 	}
 
 	/// How this cache's requests were served.
@@ -924,5 +951,24 @@ mod tests {
 			.await;
 		assert_eq!(served, Ok(2));
 		txn.cancel().await.unwrap();
+	}
+
+	/// A dynamic-target arm is keyed by its table and the arm key of its
+	/// statement shape: the same table and digest are one object; another
+	/// table, or a digest with another arm key, is another.
+	#[test]
+	fn dynamic_target_arm_keys_by_table_and_shape() {
+		use crate::exec::ir::iface::premise::ShapeDigest;
+		let digest = |head: u8| {
+			let mut bytes = [0u8; 32];
+			bytes[0] = head;
+			ShapeDigest(bytes)
+		};
+		let arm = |table: &str, digest: &ShapeDigest| {
+			UnitObject::dynamic_target_arm(table.into(), digest)
+		};
+		assert_eq!(arm("t", &digest(1)), arm("t", &digest(1)));
+		assert_ne!(arm("t", &digest(1)), arm("u", &digest(1)));
+		assert_ne!(arm("t", &digest(1)), arm("t", &digest(2)));
 	}
 }

@@ -1,18 +1,17 @@
 //! A request compiled as one program.
 //!
-//! Every statement of a request that arrived whole is planned and lowered
-//! when the request arrives, into one program (`Program::request`): the
-//! request's steps as data, and the program of each statement it compiled,
-//! every one lowered into the same units, which the program holding the
-//! request owns ([`super::lower::RequestUnits`]). The driver takes the steps
-//! in order: a transaction boundary, `USE`, `OPTION` and `LET` are its own
-//! actions, and a statement is a run of its program over the request's units,
-//! by the same path a statement compiled on its own runs, so its rows stream
-//! and its value takes the shape they always do.
+//! Every statement of a request that arrives whole is planned and lowered
+//! when the request arrives, into one program (`Program::request`). The
+//! program holds the request's steps as data, and the program of each
+//! statement, each with the units it needs. The driver runs the steps in
+//! order. A transaction boundary, `USE`, `OPTION` and `LET` are their own
+//! actions. A statement is a run of its program, through the same path as a
+//! statement compiled on its own, so its rows stream and its value keeps its
+//! usual shape.
 //!
 //! A plain `EXPLAIN`, whose operator renders the plan of another statement,
-//! is planned on its own path and kept beside the program by the driver as
-//! the operator that planning made ([`super::RequestEntry::Operator`]).
+//! is planned on its own path. The driver keeps that operator beside the
+//! program as [`super::RequestEntry::Operator`].
 
 use std::sync::Arc;
 
@@ -56,7 +55,8 @@ impl CompiledRequest {
 }
 
 /// One statement of a request's program, as the operator the driver runs:
-/// the statement's program, run over the request's units.
+/// the statement's program, run over its own units, or over the request's
+/// units when it holds none.
 #[derive(Debug)]
 struct RequestStatement {
 	request: Arc<Program>,
@@ -113,16 +113,18 @@ impl ExecOperator for RequestStatement {
 }
 
 impl RequestStatement {
-	/// Run the statement over the request's units, its own rows encoded in
-	/// `format` when given.
+	/// Run the statement, its own rows encoded in `format` when given.
 	fn run(
 		&self,
 		ctx: &ExecutionContext,
 		format: Option<surrealdb_rpc::RowFormat>,
 	) -> FlowResult<ValueBatchStream> {
-		// The statement's ids index the request's units, which every program
-		// beneath it shares, closure bodies among them.
-		let ctx = ctx.with_vm_units(Arc::clone(&self.request.units));
+		// A statement that holds no units of its own indexes the request's,
+		// which every program beneath it shares, closure bodies among them.
+		let ctx = match self.statement.units.is_empty() {
+			true => ctx.with_vm_units(Arc::clone(&self.request.units)),
+			false => ctx.clone(),
+		};
 		let ctx = match &self.served {
 			Some(served) => ctx.with_vm_served(Arc::clone(served)),
 			None => ctx,

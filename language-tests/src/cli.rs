@@ -149,6 +149,69 @@ impl Serialize for Backend {
 	}
 }
 
+/// How a SurrealQL test is submitted to the datastore.
+///
+/// `Request` hands the whole parsed query to the datastore at once. `Fragments`
+/// hands it over one statement per fragment, so each statement is compiled as it
+/// arrives; the two modes must produce the same results. Only SurrealQL tests
+/// have statements to split, so every other dialect runs in `Request` mode only.
+#[derive(Clone, Copy, Eq, PartialEq, Debug, Hash)]
+pub enum RunMode {
+	Request,
+	Fragments,
+}
+
+impl ValueEnum for RunMode {
+	fn value_variants<'a>() -> &'a [Self] {
+		&[RunMode::Request, RunMode::Fragments]
+	}
+
+	fn to_possible_value(&self) -> Option<PossibleValue> {
+		match self {
+			RunMode::Request => Some(
+				PossibleValue::new("request").help("Submit each test's whole query as one request"),
+			),
+			RunMode::Fragments => Some(PossibleValue::new("fragments").help(
+				"Submit each SurrealQL statement as its own fragment (needs the internal-fragments build)",
+			)),
+		}
+	}
+}
+
+impl Display for RunMode {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Request => f.write_str("request"),
+			Self::Fragments => f.write_str("fragments"),
+		}
+	}
+}
+
+impl<'de> Deserialize<'de> for RunMode {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let s = String::deserialize(deserializer)?;
+		match s.as_str() {
+			"request" => Ok(RunMode::Request),
+			"fragments" => Ok(RunMode::Fragments),
+			_ => Err(<D::Error as serde::de::Error>::custom(format_args!(
+				"Invalid mode `{s}`, expected `request` or `fragments`"
+			))),
+		}
+	}
+}
+
+impl Serialize for RunMode {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		serializer.collect_str(self)
+	}
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum UpgradeBackend {
 	RocksDb,
@@ -242,10 +305,17 @@ pub fn parse() -> ArgMatches {
 				.value_parser(EnumValueParser::<Backend>::new()).default_value("mem")
 			)
 			.arg(
+				arg!(--mode <MODE> "How SurrealQL tests are submitted: the whole query as one request, or one statement per fragment")
+				.value_parser(EnumValueParser::<RunMode>::new()).default_value("request")
+			)
+			.arg(
 				arg!(--"no-wip" "Skips tests marked work-in-progress")
 			)
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+			)
+			.arg(
+				arg!(--"report-declines" <FILE> "Write every statement the engine declined to run to FILE as JSON lines, and print their count. Grading is unchanged.")
 			)
 			.arg(
 				arg!(--endpoint <URL> "Run the suite against a remote SurrealDB instance over ws:// or http:// (requires building with `--features remote`) instead of an embedded datastore")

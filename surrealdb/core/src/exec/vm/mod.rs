@@ -1,13 +1,10 @@
-//! The physical plan and the bytecode VM that runs it.
+//! The bytecode VM that runs a planned statement.
 //!
-//! A bound [`LogicalOp`] takes three steps here, each over the representation
-//! the previous one produced:
-//!
-//! 1. [`map`] translates it into an inert [`PhysicalPlan`], reading from the catalog only what a
-//!    node needs to exist and recording each read as a dependency.
-//! 2. [`optimize`] rewrites the plan in place. Every rule is an equivalence: it changes how the
-//!    statement runs, never its rows, their order, its errors or how often anything is evaluated.
-//! 3. [`lower`] compiles the plan into a [`Program`](program::Program) and makes no decisions.
+//! A bound [`LogicalOp`] is planned by [`plan_request`](crate::exec::ir::plan_request) into a
+//! container past the physical boundary, and [`ir_lower`] lowers that container natively into a
+//! [`Program`](program::Program), planning nothing: every decision is an attribute of the
+//! physical dialect. The compile driver ([`ir_compile`]) plans and lowers every unit a program
+//! needs before the program runs ([`compile`]).
 //!
 //! The program is a sequence of pipelines, each a synchronous loop over the
 //! rows of its source, between the nodes that hold rows — sorts and
@@ -17,10 +14,9 @@
 //! the work and resumes it. A pipeline with nothing to hand back runs inside
 //! the storage cursor, on the stored bytes.
 //!
-//! The VM is the one engine: a statement whose plan holds a node it does not
-//! cover fails with an error that names the construct ([`plan_checked`]), and
-//! nothing else runs it. The contract every node must keep is
-//! `doc/executor/PHYSICAL_PLAN_REQUIREMENTS.md`.
+//! The VM is the one engine: a statement whose container holds a construct the
+//! planning or the lowering does not cover fails with an error that names the
+//! construct ([`plan_checked`]), and nothing else runs it.
 
 #[macro_use]
 pub(crate) mod plain;
@@ -35,6 +31,7 @@ mod binding;
 mod block;
 mod call_unit;
 pub(crate) mod closure;
+mod compile;
 pub(crate) mod compile_cache;
 mod conjunct;
 mod count;
@@ -45,13 +42,17 @@ pub(crate) mod footprint;
 mod manifest;
 pub(crate) mod serve;
 pub(crate) use dispatch::Deref;
-pub(crate) use map::catalog_within;
+pub(crate) use leaf::Class as LeafClass;
+pub(crate) use morsel::MorselMetrics;
 pub(crate) use program::ClosureDigest;
+pub(crate) use speculate::catalog_within;
 pub(crate) mod codec;
 pub(crate) mod depth;
 pub(crate) mod explain;
 mod external;
 mod fault;
+#[allow(dead_code)]
+pub(crate) mod fold_host;
 pub(crate) mod fuel;
 mod fulltext;
 mod function;
@@ -62,6 +63,16 @@ pub(crate) use host::out_of_line;
 mod info;
 mod inline;
 mod interp;
+pub(crate) mod ir_catalog;
+#[allow(dead_code)]
+mod ir_compile;
+pub(crate) use ir_compile::PlanSession;
+mod ir_exec;
+#[allow(dead_code)]
+mod ir_host;
+mod ir_instr;
+#[allow(dead_code)]
+pub(crate) mod ir_lower;
 mod knn;
 mod leaf;
 mod ledger;
@@ -71,31 +82,16 @@ pub(crate) use write::notify_at;
 #[cfg(test)]
 mod golden;
 pub(crate) mod live;
-mod lower;
-pub(crate) mod lower_live;
-mod map;
-mod match_plan;
 mod membership;
 mod nested;
 mod omit;
-mod optimize;
 mod param_unit;
-mod plan;
-pub(crate) mod plan_catalog;
+pub(crate) mod payload;
 pub(crate) mod program;
 pub(crate) mod request;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_body_scope;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_catalog_units;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_counts;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_dispatch;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_late_layers;
@@ -108,9 +104,7 @@ mod tests_running_compiles;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
 mod tests_stack;
-// Its golden records a build that runs no script and no model.
-#[cfg(all(test, feature = "kv-mem", not(any(feature = "scripting", feature = "ml"))))]
-mod tests_external;
+// The golden is recorded from a build that runs no script and no model.
 
 /// The units of a root program or a function bundle, which the ids of the
 /// programs beneath it index.
@@ -126,9 +120,9 @@ mod backfill;
 mod batch;
 mod distinct_spill;
 mod join_spill;
+mod morsel;
 mod partial;
 mod partition;
-mod region;
 mod row;
 mod scalar;
 mod schema_host;
@@ -139,117 +133,39 @@ mod spill;
 mod store;
 #[cfg(test)]
 #[cfg(feature = "kv-mem")]
-mod tests;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_aggregate;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_census;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_closure;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_ctl;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
 mod tests_enforced;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_explain;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_frames;
-#[cfg(all(test, feature = "kv-mem", any(feature = "gql", feature = "postgres")))]
-mod tests_front_end;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_graph;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_index_fns;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_invocations;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_join;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_kept;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_leaf;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_lookups;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_memory;
 #[cfg(test)]
 mod tests_methods;
 #[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_overlay;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_partials;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_partitions;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_paths;
-#[cfg(test)]
 mod tests_plain;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_plain_data;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_planner;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_preempt;
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests_record_format;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_recurse;
-#[cfg(all(test, feature = "kv-mem", not(target_family = "wasm")))]
-mod tests_scan_parity;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_shared;
-#[cfg(all(test, feature = "kv-mem"))]
-mod tests_sources;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_subq;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_units;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_wide;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_write_data;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_write_gate;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_write_observe;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_write_schema;
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-mod tests_write_storage;
 pub(crate) mod units;
 mod write;
 
 use std::sync::Arc;
 
 use crate::exec::ExecOperator;
+use crate::exec::ir::error::IrError;
 use crate::exec::planner::Planner;
 use crate::expr::logical::LogicalOp;
+
+/// A lowering's answer: the value, or why the VM does not run the statement.
+pub(super) type Lowered<T> = Result<T, NotCovered>;
+
+/// The frame a whole statement planned by `planner` is lowered in. Reads are checked or not by
+/// the permission ops in its plan, whatever frame the statement runs in. Whether the principal's
+/// reads are checked ([`Planner::reads_are_checked`]) is not part of the frame: the frame's
+/// principal class, names and suppression already fix it.
+pub(super) fn statement_frame(planner: &Planner<'_>) -> program::UnitFrame {
+	program::UnitFrame {
+		class_digest: planner.class_digest(planner.auth.as_deref()),
+		ns: planner.ns().map(str::to_owned),
+		db: planner.db().map(str::to_owned),
+		perms_suppressed: planner.perms_suppressed,
+		checked: true,
+	}
+}
 
 /// The error a statement fails with when the VM does not run it.
 ///
@@ -261,11 +177,11 @@ use crate::expr::logical::LogicalOp;
 /// ([`NotCovered::refusal`]) fails with the refusal.
 pub(super) fn declined(not_covered: NotCovered) -> crate::err::Error {
 	let NotCovered {
+		kind,
 		reason,
-		internal,
 		refusal,
 	} = not_covered;
-	if internal {
+	if kind == NotCoveredKind::Internal {
 		return crate::err::Error::Engine(crate::err::EngineError::Internal(reason));
 	}
 	if let Some(refusal) = refusal {
@@ -277,11 +193,17 @@ pub(super) fn declined(not_covered: NotCovered) -> crate::err::Error {
 	})
 }
 
-/// Plan `op`, already bound, to run on the VM: `None` where the statement
-/// fails to plan, for a test that asks only whether it does.
-#[cfg(test)]
-pub(crate) async fn plan(planner: &Planner<'_>, op: &LogicalOp) -> Option<Arc<dyn ExecOperator>> {
-	plan_checked(planner, op, None).await.ok()
+/// Whether `not_covered`, the answer of planning `op` with `planner`, plans `op` again late-bound
+/// after its schema statements: a statement holding a schema statement, or reaching code that may
+/// run one, whose effect the plan cannot know. What follows such a statement loads each catalog
+/// object it names, and resolves the session's names again, when it runs. Nothing is planned once
+/// the program runs. An internal refusal is an invariant the planning broke, and a language-level
+/// refusal is the statement's error; neither is retried.
+fn plans_late(planner: &Planner<'_>, op: &LogicalOp, not_covered: &NotCovered) -> bool {
+	!matches!(not_covered.kind, NotCoveredKind::Internal | NotCoveredKind::Refused)
+		&& !planner.binds_late_after_schema()
+		&& (not_covered.kind == NotCoveredKind::LateBind
+			|| crate::exec::planner::fold::changes_the_catalog(op))
 }
 
 /// Plan `op`, already bound, to run on the VM, or fail with the reason the VM
@@ -300,85 +222,39 @@ pub(crate) fn plan_checked<'a>(
 	// A boxed `dyn` future: what planning awaits nests deeply, and a caller
 	// proving a statement's future `Send` stops at the box.
 	Box::pin(async move {
-		if let LogicalOp::Explain(explain) = op {
-			// Nothing of the explained statement runs under a plain `EXPLAIN`: the
-			// ids its planning held are released once it is rendered.
-			let mark = planner.speculation.as_ref().map(|speculating| speculating.held.mark());
-			let planned = match map::explained_plan(planner, &explain.input).await {
-				Ok(planned) => planned,
-				Err(not_covered) => return Err(declined(not_covered)),
-			};
-			// Explaining a statement the planner refuses to plan
-			// raises the refusal, as planning the statement does.
-			if let Some(refusal) = planned.refusal() {
-				return Err(refusal.error());
+		// Nothing of the explained statement runs under a plain `EXPLAIN`: the
+		// ids its planning held are released once it is rendered.
+		let explained = match op {
+			LogicalOp::Explain(explain) if !explain.analyze => {
+				planner.speculation.as_ref().map(|speculating| speculating.held.mark())
 			}
-			// The VM explains a statement it runs: one it cannot lower is declined
-			// as it is when it is run.
-			let program = match lower_to_program(planner, &planned).await {
-				Ok(program) => program,
-				Err(not_covered) => return Err(declined(not_covered)),
-			};
-			let explain_node = explain::to_explain_operator(
-				&explain.input,
-				&planned,
-				explain.analyze,
-				planner.reads_are_checked(),
-			);
-			if !explain.analyze
-				&& let (Some(speculating), Some(mark)) = (&planner.speculation, mark)
-			{
-				speculating.held.release_since(mark);
+			_ => None,
+		};
+		let not_covered = match plan_statement(planner, op).await {
+			Ok(plan) => {
+				if let (Some(speculating), Some(mark)) = (&planner.speculation, explained) {
+					speculating.held.release_since(mark);
+				}
+				return Ok(plan);
 			}
-			let plan: Arc<dyn ExecOperator> = if explain.analyze {
-				Arc::new(program_operator(planner, program, &planned).analyzed(
-					explain::VmAnalysis {
-						plan: explain_node,
-						format: explain.format,
-						redact: planner.frozen().redact_volatile_explain_attrs(),
-					},
-				))
-			} else {
-				Arc::new(crate::exec::operators::ExplainPlan {
-					plan: explain_node,
-					format: explain.format,
-				})
-			};
-			return Ok(plan);
-		}
-		let not_covered = match plan_statement(planner, op).await? {
-			Ok(plan) => return Ok(plan),
 			Err(not_covered) => not_covered,
 		};
-		// A statement holding a schema statement, or reaching code that may run
-		// one, whose effect the plan cannot know is planned again late-bound
-		// after its schema statements: what follows such a statement loads each
-		// catalog object it names, and resolves the session's names again, when
-		// it runs. Nothing is planned once the program runs. An internal refusal
-		// is an invariant the planning broke, and is raised rather than retried.
-		if !not_covered.internal
-			&& !planner.binds_late_after_schema()
-			&& (not_covered.reason == speculate::DATA_DEPENDENT_DDL
-				|| crate::exec::planner::fold::changes_the_catalog(op))
-		{
+		if plans_late(planner, op, &not_covered) {
 			// What the first planning held belongs to no program.
 			if let Some(speculating) = &planner.speculation {
 				speculating.held.release_all();
 			}
 			let late = planner.binding_late_after_schema();
-			return match plan_statement(&late, unbound.unwrap_or(op)).await? {
-				Ok(plan) => Ok(plan),
-				Err(not_covered) => Err(declined(not_covered)),
-			};
+			return plan_statement(&late, unbound.unwrap_or(op)).await.map_err(declined);
 		}
 		Err(declined(not_covered))
 	})
 }
 
-/// The statements of a request lowered so far, and the units they share.
+/// The statements of a request compiled so far.
 #[derive(Default)]
 pub(crate) struct RequestBuilder {
-	units: lower::RequestUnits,
+	/// Each statement's program, which holds every unit it needs.
 	statements: Vec<Arc<program::Program>>,
 	/// Each statement's late-bound block statements, as written, which its
 	/// blocks serve when they reach them.
@@ -398,7 +274,7 @@ pub(crate) enum RequestEntry {
 
 impl RequestBuilder {
 	/// Plan `op`, bound by `planner`, as the next statement of the request,
-	/// as [`super::plan_checked`] plans a statement on its own.
+	/// as [`plan_checked`] plans a statement on its own.
 	pub(crate) async fn plan(
 		&mut self,
 		planner: &Planner<'_>,
@@ -410,82 +286,56 @@ impl RequestBuilder {
 		if matches!(op, LogicalOp::Explain(_)) {
 			return plan_checked(planner, op, unbound).await.map(RequestEntry::Operator);
 		}
-		let not_covered = match self.plan_statement(planner, op).await? {
+		let not_covered = match self.plan_statement(planner, op).await {
 			Ok(index) => return Ok(RequestEntry::Statement(index)),
 			Err(not_covered) => not_covered,
 		};
-		// As `plan_checked`: a statement holding a schema statement whose
-		// effect the plan cannot know is planned again late-bound.
-		if !not_covered.internal
-			&& !planner.binds_late_after_schema()
-			&& (not_covered.reason == speculate::DATA_DEPENDENT_DDL
-				|| crate::exec::planner::fold::changes_the_catalog(op))
-		{
+		if plans_late(planner, op, &not_covered) {
 			if let Some(speculating) = &planner.speculation {
 				speculating.held.release_all();
 			}
 			let late = planner.binding_late_after_schema();
-			return match self.plan_statement(&late, unbound.unwrap_or(op)).await? {
-				Ok(index) => Ok(RequestEntry::Statement(index)),
-				Err(not_covered) => Err(declined(not_covered)),
-			};
+			return self
+				.plan_statement(&late, unbound.unwrap_or(op))
+				.await
+				.map(RequestEntry::Statement)
+				.map_err(declined);
 		}
 		Err(declined(not_covered))
 	}
 
-	/// Map, optimize and lower `op` into the request, answering its index, or
-	/// the reason the VM does not cover it. What the statement lowered into
-	/// the request's units is taken back out where it is not covered.
-	async fn plan_statement(
-		&mut self,
-		planner: &Planner<'_>,
-		op: &LogicalOp,
-	) -> Result<Result<u32, NotCovered>, crate::err::Error> {
-		let physical = match map::map(planner, op).await {
-			Ok(physical) => physical,
-			Err(not_covered) => return Ok(Err(not_covered)),
-		};
-		if let Some(refusal) = physical.refusal() {
-			return Err(refusal.error());
-		}
-		let physical = optimize::optimize(physical);
-		let mark = self.units.len();
-		let (program, served) =
-			match lower::lower_request_statement(planner, &physical, &mut self.units).await {
-				Ok(lowered) => lowered,
-				Err(not_covered) => {
-					self.units.rewind(mark);
-					return Ok(Err(not_covered));
-				}
-			};
+	/// Plan and compile `op` into the request, answering its index, or the
+	/// reason the VM does not cover it.
+	async fn plan_statement(&mut self, planner: &Planner<'_>, op: &LogicalOp) -> Lowered<u32> {
+		let compiled = compile::compile(planner, op).await?;
 		if leaf::reporting() {
-			leaf::report(op, &program, planner.function_registry());
+			leaf::report(op, &compiled.program, planner.function_registry());
 		}
 		let Ok(index) = u32::try_from(self.statements.len()) else {
-			return Ok(Err(NotCovered::internal("more statements than a request holds")));
+			return Err(NotCovered::internal("more statements than a request holds"));
 		};
-		self.statements.push(Arc::new(program));
-		self.served.push((!served.is_empty()).then(|| served.into()));
+		self.statements.push(Arc::new(compiled.program));
+		self.served.push((!compiled.served.is_empty()).then(|| compiled.served.into()));
 		if let Some(speculating) = &planner.speculation
 			&& !speculating.held.is_empty()
 		{
 			self.held.push(Arc::clone(&speculating.held));
 		}
-		Ok(Ok(index))
+		Ok(index)
 	}
 
-	/// The program of the request: `steps`, and the statements lowered into
-	/// it, with the units they share.
+	/// The program of the request: `steps`, and the statements compiled into
+	/// it, each with the units it holds.
 	pub(crate) fn finish(
 		self,
-		planner: &Planner<'_>,
 		steps: Vec<program::RequestStep>,
 	) -> Result<request::CompiledRequest, crate::err::Error> {
 		let request = program::RequestCode {
 			steps,
 			statements: self.statements,
 		};
-		let program = lower::request_program(planner, self.units, request).map_err(declined)?;
+		let program =
+			ir_lower::request_program(Arc::from(Vec::new()), request).map_err(declined)?;
 		#[cfg(test)]
 		request::LAST.with(|last| {
 			*last.borrow_mut() = program.request.as_ref().map(|request| {
@@ -500,37 +350,40 @@ impl RequestBuilder {
 	}
 }
 
-/// Whether binding `op` with `planner` folds a call that reads the clock, in
-/// `op` or in the body of a user-defined function it reaches: a plan of it
-/// holds the time it was bound at.
-pub(crate) async fn binds_the_clock(op: &LogicalOp, planner: &Planner<'_>) -> bool {
-	map::binds_the_clock(op, planner).await
-}
-
-/// Map, optimize and lower the bound statement `op` to an operator, or the
-/// reason the VM does not cover it. A statement the planner refuses raises the
-/// refusal here, before any of it runs.
-async fn plan_statement(
+/// The message of the region-constraint rejection of the bound statement `op`, the statement at
+/// `position` of its request; `None` when every region admits what it holds, and when `op` does
+/// not bind.
+pub(crate) async fn rejection(
 	planner: &Planner<'_>,
 	op: &LogicalOp,
-) -> Result<Result<Arc<dyn ExecOperator>, NotCovered>, crate::err::Error> {
-	let physical = match map::map(planner, op).await {
-		Ok(physical) => physical,
-		Err(not_covered) => return Ok(Err(not_covered)),
-	};
-	if let Some(refusal) = physical.refusal() {
-		return Err(refusal.error());
+	position: usize,
+) -> Option<String> {
+	compile::rejection(planner, op, position).await.ok().flatten()
+}
+
+/// Plan and compile the bound statement `op` to an operator, or the reason
+/// the VM does not cover it. A statement the planner refuses answers the
+/// refusal, before any of it runs.
+async fn plan_statement(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Arc<dyn ExecOperator>> {
+	let compiled = compile::compile(planner, op).await?;
+	if leaf::reporting() {
+		leaf::report(op, &compiled.program, planner.function_registry());
 	}
-	let physical = optimize::optimize(physical);
-	match lower_to_program(planner, &physical).await {
-		Ok(program) => {
-			if leaf::reporting() {
-				leaf::report(op, &program.0, planner.function_registry());
-			}
-			Ok(Ok(wrap_as_operator(planner, program, &physical)))
-		}
-		Err(not_covered) => Ok(Err(not_covered)),
-	}
+	tracing::debug!("VM planned the statement");
+	Ok(operator(planner, compiled))
+}
+
+/// `compiled`, planned by `planner`, as the operator the planner and the executor hold. It keeps
+/// the catalog ids the statement's planning held for as long as it or a run of it lasts, since
+/// the program's draws take them.
+fn operator(planner: &Planner<'_>, compiled: ir_compile::Compiled) -> Arc<dyn ExecOperator> {
+	let held = planner
+		.speculation
+		.as_ref()
+		.map(|speculating| &speculating.held)
+		.filter(|held| !held.is_empty())
+		.cloned();
+	Arc::new(host::VmOperator::new(compiled.program).holding(held).serving(compiled.served))
 }
 
 /// Plan `op`, a plan a front end emitted rather than a statement, to run on
@@ -538,186 +391,122 @@ async fn plan_statement(
 ///
 /// The plan is compiled with no binding step: the front end owns what it
 /// asks for, and its tables are read as an unbound statement's are, each row
-/// put through the table's enforcement. A GQL `MATCH` is folded to a program
-/// of binding steps of its own ([`plan_match`]); a relational plan (the SQL
-/// front ends') is mapped, optimised and lowered as a statement is, its
-/// joins, `DISTINCT` and set operations among the pipeline's own nodes. A plan
-/// the VM does not cover fails as a statement it does not cover does, and no
-/// other engine compiles it. What the planner refuses as it compiles the plan
-/// is raised before any of it runs.
+/// put through the table's enforcement. A GQL `MATCH` is folded in the IR
+/// binder to the binding steps of its stages; a relational plan (the SQL
+/// front ends') is planned and lowered as a statement is, its joins,
+/// `DISTINCT` and set operations among the pipeline's own ops. A plan the VM
+/// does not cover fails as a statement it does not cover does, and no other
+/// engine compiles it. What the planner refuses as it compiles the plan is
+/// raised before any of it runs.
 pub(crate) async fn plan_front_end(
 	planner: &Planner<'_>,
 	op: LogicalOp,
 ) -> Result<Arc<dyn ExecOperator>, crate::err::Error> {
-	if let LogicalOp::Match(matched) = &op {
-		return plan_match(planner, matched).await;
-	}
-	match plan_statement(planner, &op).await? {
-		Ok(plan) => Ok(plan),
-		Err(not_covered) => Err(declined(not_covered)),
-	}
+	plan_statement(planner, &op).await.map_err(declined)
 }
 
-#[cfg(test)]
-thread_local! {
-	/// How many `MATCH` plans this thread has compiled to a program of their own.
-	pub(crate) static NATIVE_MATCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// A GQL `MATCH` plan as a program of its own.
-///
-/// What the planner refuses is raised as a statement's refusal is; a shape the
-/// fold cannot build, or the lowering does not cover, fails with the decline
-/// error of a statement.
-async fn plan_match(
-	planner: &Planner<'_>,
-	matched: &crate::expr::logical::LogicalMatch,
-) -> Result<Arc<dyn ExecOperator>, crate::err::Error> {
-	use crate::exec::planner::match_backend::Planning;
-	use crate::exec::planner::match_plan::MatchFold;
-	let backend = match_plan::VmBackend::new(planner);
-	let root = match (MatchFold {
-		backend: &backend,
-	})
-	.plan((*matched.plan).clone())
-	.await
-	{
-		Ok(root) => root,
-		Err(Planning::Fail(error)) => return Err(error),
-		Err(Planning::Decline(not_covered)) => return Err(declined(not_covered)),
-	};
-	let mut physical = optimize::optimize(match_plan::physical(root, backend.dependencies()));
-	let matched_op = LogicalOp::Match(matched.clone());
-	let scanned: Vec<_> = physical
-		.dependencies
-		.iter()
-		.map(
-			|plan::Dependency::Table {
-			     table,
-			     ..
-			 }| table.clone(),
-		)
-		.collect();
-	match plan_catalog::read(planner, &matched_op, scanned.iter()).await {
-		Ok(catalog) => physical.catalog = Some(Arc::new(catalog)),
-		Err(not_covered) => return Err(declined(not_covered)),
-	}
-	if let Some(refusal) = physical.refusal() {
-		return Err(refusal.error());
-	}
-	match lower_to_program(planner, &physical).await {
-		Ok((program, served)) => {
-			#[cfg(test)]
-			NATIVE_MATCHES.with(|n| n.set(n.get() + 1));
-			Ok(Arc::new(host::VmOperator::new(program).serving(served)))
-		}
-		Err(not_covered) => Err(declined(not_covered)),
-	}
-}
-
-/// Whether `plan` runs on the VM.
-#[cfg(test)]
-pub(crate) fn runs_on_vm(plan: &dyn ExecOperator) -> bool {
-	plan.name() == host::VmOperator::NAME
-}
-
-/// Lower a statement already bound and mapped to `physical` to a program,
-/// compiled in full: nothing it reaches is planned or lowered while it runs.
-///
-/// The program carries the statement's tail — its `VERSION`, `TIMEOUT` and
-/// `ONLY` — and applies it when it runs.
-async fn lower_to_program(
-	planner: &Planner<'_>,
-	physical: &plan::PhysicalPlan,
-) -> Result<(program::Program, Vec<Arc<LogicalOp>>), NotCovered> {
-	let lowered = lower::lower_serving(planner, physical).await?;
-	tracing::debug!("VM planned the statement");
-	Ok(lowered)
-}
-
-/// `program`, lowered by `planner`, as the operator the planner and the
-/// executor hold: the one adapter between a program and its `ExecOperator`
-/// interface. It keeps the catalog ids the statement's planning held for as
-/// long as it or a run of it lasts, since the program's draws take them.
-fn wrap_as_operator(
-	planner: &Planner<'_>,
-	program: (program::Program, Vec<Arc<LogicalOp>>),
-	physical: &plan::PhysicalPlan,
-) -> Arc<dyn ExecOperator> {
-	Arc::new(program_operator(planner, program, physical))
-}
-
-fn program_operator(
-	planner: &Planner<'_>,
-	(program, served): (program::Program, Vec<Arc<LogicalOp>>),
-	physical: &plan::PhysicalPlan,
-) -> host::VmOperator {
-	let held = planner
-		.speculation
-		.as_ref()
-		.map(|speculating| &speculating.held)
-		.filter(|held| !held.is_empty())
-		.cloned();
-	host::VmOperator::new(program)
-		.holding(held)
-		.serving(served)
-		.displayed_as(explain::root_name(physical))
+/// How a statement the VM does not run is handled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NotCoveredKind {
+	/// The statement's plan depends on DDL it holds: it is planned again
+	/// late-bound.
+	LateBind,
+	/// The planner's language-level refusal: the statement fails with
+	/// [`NotCovered::refusal`], which is `Some`.
+	Refused,
+	/// A construct the lowering does not cover: the statement fails with
+	/// `PlannerUnsupported`, and is planned again late-bound only where it
+	/// changes the catalog.
+	Unsupported,
+	/// An invariant of every program broke: the statement fails with an
+	/// internal error and is never planned again.
+	Internal,
 }
 
 /// Why the VM does not run a statement. The statement fails with it
-/// ([`declined`]); an [`internal`](Self::internal) one fails as an internal
-/// error.
+/// ([`declined`]), as its [`kind`](NotCoveredKind) says. The reason is message
+/// text only: control flow reads the kind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NotCovered {
+	pub(crate) kind: NotCoveredKind,
 	pub(crate) reason: String,
-	/// Whether the lowering built a program breaking an invariant every
-	/// program keeps, rather than meeting a statement it does not cover: the
-	/// statement fails with an internal error and is never declined.
-	pub(crate) internal: bool,
 	/// The error the planner raises for a statement it refuses to plan: the
-	/// statement fails with it, as it does where the refusal is found as the
-	/// statement is mapped.
-	pub(crate) refusal: Option<plan::Refusal>,
+	/// statement fails with it. `Some` exactly when `kind` is
+	/// [`NotCoveredKind::Refused`].
+	pub(crate) refusal: Option<payload::Refusal>,
 }
 
 impl NotCovered {
-	pub(crate) fn new(reason: impl Into<String>) -> Self {
+	/// A statement whose plan depends on DDL it holds, which is planned again
+	/// late-bound.
+	pub(crate) fn late_bind() -> Self {
 		Self {
-			reason: reason.into(),
-			internal: false,
+			kind: NotCoveredKind::LateBind,
+			reason: speculate::DATA_DEPENDENT_DDL.to_owned(),
 			refusal: None,
 		}
 	}
 
 	/// A statement the planner refuses to plan, for `refusal`.
-	pub(crate) fn refused(refusal: plan::Refusal) -> Self {
+	pub(crate) fn refused(refusal: payload::Refusal) -> Self {
 		Self {
+			kind: NotCoveredKind::Refused,
 			reason: "a statement the planner refuses to plan".to_owned(),
-			internal: false,
 			refusal: Some(refusal),
 		}
 	}
 
-	/// A statement that needs the ids of its database at plan time, where
-	/// `planner` could not resolve them: a session that selects no namespace
-	/// or no database fails as it would at run time, and any other cause
-	/// declines the statement.
-	pub(crate) fn unresolved_database(planner: &Planner<'_>) -> Self {
-		if planner.ns().is_none() {
-			return Self::refused(plan::Refusal::NamespaceEmpty);
+	/// A construct the lowering does not cover, named by `reason`.
+	pub(crate) fn unsupported(reason: impl Into<String>) -> Self {
+		Self {
+			kind: NotCoveredKind::Unsupported,
+			reason: reason.into(),
+			refusal: None,
 		}
-		if planner.db().is_none() {
-			return Self::refused(plan::Refusal::DatabaseEmpty);
-		}
-		Self::new("the database is not resolved at plan time")
+	}
+
+	/// A construct whose native planning or lowering is not built, named by
+	/// `what`: the statement fails with `PlannerUnsupported`, as one the
+	/// lowering does not cover does, and nothing else runs it.
+	pub(crate) fn not_yet(what: impl std::fmt::Display) -> Self {
+		Self::unsupported(format!("{NOT_YET}: {what}"))
 	}
 
 	/// A lowering that broke an invariant of every program, for `reason`.
 	pub(crate) fn internal(reason: impl Into<String>) -> Self {
 		Self {
+			kind: NotCoveredKind::Internal,
 			reason: reason.into(),
-			internal: true,
 			refusal: None,
+		}
+	}
+}
+
+/// The text every reason [`NotCovered::not_yet`] gives starts with.
+pub(crate) const NOT_YET: &str = "IR entry point not implemented";
+
+/// An IR invariant that broke is an internal outcome, with the error's
+/// message as the reason. A request the language rejects is the refusal it
+/// carries, which the statement fails with as it does where the planner
+/// refuses it; a construct the planner declines to cover is the unsupported
+/// outcome with the reason it states, and a construct whose planning or
+/// lowering is not built is [`NotCovered::not_yet`]. A plan that depends on a
+/// catalog change is the one outcome the executor plans again, late-bound,
+/// when the statement is reached.
+impl From<IrError> for NotCovered {
+	fn from(error: IrError) -> Self {
+		match error {
+			IrError::Rejected(refusal) => Self::refused(*refusal),
+			IrError::Unsupported {
+				reason,
+			} => Self::unsupported(reason),
+			IrError::LateBind {
+				..
+			} => Self::late_bind(),
+			IrError::NotYet {
+				what,
+			} => Self::not_yet(what),
+			other => Self::internal(other.to_string()),
 		}
 	}
 }

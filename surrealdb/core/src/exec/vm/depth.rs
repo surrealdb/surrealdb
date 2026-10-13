@@ -6,10 +6,10 @@
 //! expression: each expression entered spends one of the budget, and a
 //! statement that processes records spends [`RECORDS_DEPTH`] more for the
 //! records it processes. A user-defined function called there runs its body's
-//! statements one level below the call, with no level of its own. The VM
-//! evaluates such code by its own instructions, and spends what the walk here
-//! measures where the same evaluation would have spent it: at the clause, at
-//! the entry of a body, and at each call ([`ExprDepth`]).
+//! statements one level below the call, with no level of its own. The VM runs
+//! such code with its own instructions and spends the amounts this walk
+//! measures, at the same points: at the clause, at the entry of a body, and at
+//! each call ([`ExprDepth`]).
 //!
 //! Elsewhere — a statement the session runs, a function body without a write
 //! reached from one — a call spends one per re-entry and nothing per
@@ -65,9 +65,10 @@ impl ExprDepth {
 		walk.found
 	}
 
-	/// What an API handler of which this is the measure spends where it is
-	/// entered: the way to its shallowest write or, for one that writes
-	/// nothing, to its shallowest `api::invoke`, which runs another handler.
+	/// What an API handler spends where it is entered, given this measure of
+	/// its body: the way to its shallowest write or, for a handler that writes
+	/// nothing, the way to its shallowest `api::invoke`, which runs another
+	/// handler.
 	pub(crate) fn handler_charged(&self) -> u32 {
 		self.write.or(self.api_invoke).unwrap_or(0)
 	}

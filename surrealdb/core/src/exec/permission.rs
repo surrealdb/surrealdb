@@ -17,8 +17,8 @@
 //!
 //! | Clause | Route | Evaluated by |
 //! | --- | --- | --- |
-//! | a table or field `PERMISSIONS FOR select` | [`permission_to_physical`] | a scan enforcing permissions |
-//! | a field `COMPUTED` body | `scan::pipeline` | a scan materialising a row |
+//! | a table or field `PERMISSIONS FOR select` | [`permission_to_physical`] | a scan enforcing permissions; a `RETURN` ends the guard with its value, a `BREAK` or `CONTINUE` is the loop-barrier error |
+//! | a field `COMPUTED` body | `scan::pipeline` | a scan materialising a row; for a checked caller its select guard is judged before the body where [`plan_table_derivations`] says so, and a field that guard denies is never derived |
 //! | a field `DEFAULT` | [`field_default_physical`] | the write path, deriving a record id |
 //! | an event's `WHEN` and `THEN` | [`event_physical`] | the write path, after the record is stored |
 //! | a materialized view's condition and field list | [`materialized_view_physical`] | the write path, after the record is stored |
@@ -46,7 +46,7 @@ use crate::catalog::{
 	EventDefinition, FieldDefinition, IndexDefinition, KeyStructure, Permission, TableDefinition,
 };
 use crate::doc::Action as DocAction;
-use crate::err::{EngineError, Error};
+use crate::err::Error;
 use crate::exe::FlowResultExt as _;
 use crate::exec::operators::scan::pipeline::{
 	FieldState, build_field_state, compute_fields_for_value, narrowing_auth_limit,
@@ -58,7 +58,8 @@ use crate::exec::{
 use crate::expr::computed_deps::extract_computed_deps;
 pub(crate) use crate::expr::logical::GuardKind;
 use crate::expr::logical::{LogicalExpr, LogicalPermission};
-use crate::expr::{ControlFlow, Expr};
+use crate::expr::visit::{Visit as _, Visitor};
+use crate::expr::{ControlFlow, Expr, Idiom, Part};
 use crate::iam::{Action, Auth};
 use crate::val::Value;
 
@@ -290,8 +291,10 @@ impl ToSql for ComputedFieldGuard {
 
 /// [`permission_to_physical`] for a guard a read applies to the record it
 /// reads — a record read by id or dereferenced, and the fields it shows —
-/// where a `RETURN`, `BREAK` or `CONTINUE` leaving the guard is an error
-/// ([`crate::exec::scalar_unit::ScalarUnit::predicate`]).
+/// where a `RETURN` ends the guard with its value and a `BREAK` or `CONTINUE`
+/// is the loop-barrier error ([`ExecError::InvalidControlFlow`]), as
+/// [`crate::exec::scalar_unit::ScalarUnit::predicate`] and
+/// [`check_permission_for_value`] both answer.
 pub(crate) async fn read_permission_to_physical(
 	permission: &Permission,
 	logical: anyhow::Result<LogicalPermission>,
@@ -394,9 +397,9 @@ async fn clause_to_physical(
 ///
 /// A clause is definer code, so the frame is privileged
 /// ([`ExecutionContext::privileged_frame`]): it holds the session's own values
-/// and none of the caller's bindings. A stamp that can narrow no caller — the
-/// root-`Owner` stamp every field written before `AUTH LIMIT` existed carries
-/// — leaves the authority alone.
+/// and none of the caller's bindings. A stamp that can narrow no caller, such as
+/// the root-`Owner` stamp a field with no stored `AUTH LIMIT` decodes to, leaves
+/// the authority alone.
 pub(crate) fn field_default_frame(
 	ctx: &ExecutionContext,
 	field: &FieldDefinition,
@@ -690,7 +693,7 @@ fn index_entry_eval<'a>(exec: &'a ExecutionContext, image: &Value) -> EvalContex
 /// Enforcement off is expressed as suppression rather than as
 /// `skip_fetch_perms`, which also refuses writes: the view's own clauses may
 /// write, and so may an event on the view table that the row this frame stores
-/// goes on to fire. The predicate frame would refuse both at the bridge. Contrast [`event_frame`],
+/// goes on to fire. The predicate frame would refuse both.
 /// which keeps the stricter signal.
 pub(crate) fn view_frame(ctx: &ExecutionContext) -> ExecutionContext {
 	ctx.with_perms_suppressed(true)
@@ -779,7 +782,7 @@ pub(crate) async fn tables_have_full_select_permission(
 }
 
 /// Validate that the authenticated principal may read in the current namespace
-/// and database (GHSA-2v9j tenant-boundary gate for the read path).
+/// and database. This is the tenant-boundary gate for the read path.
 ///
 /// The session's *selected* ns/db can be steered with `USE` - including the RPC
 /// `use` method, which sets the context without rejecting a cross-tenant switch -
@@ -827,7 +830,7 @@ pub(crate) fn validate_record_user_access(db_ctx: &DatabaseContext) -> Result<()
 /// The guard is judged in a frame that refuses a write
 /// ([`crate::dbs::NoWriteFrame::PermissionPredicate`]): it is evaluated with
 /// enforcement disabled, so a write reached from it is a side effect the
-/// reading statement never asked for (GHSA-66r2-5gwj-gxm2).
+/// reading statement never asked for.
 /// [`check_write_permission_for_value`] is the create/update/delete
 /// counterpart, which is reached from a statement that is already writing.
 pub(crate) async fn check_permission_for_value(
@@ -888,32 +891,382 @@ async fn check_guard_for_value(
 			// The document root is what lets `$parent` inside an idiom-level filter — e.g.
 			// `PERMISSIONS FOR select WHERE acl[WHERE $parent.owner = $auth.id]`
 			// — resolve to the row under test. `$parent` is the one reader that
-			// does not fall back to `current_value`, so binding only the value
-			// left it unresolved and the whole predicate falsy, denying every row.
+			// does not fall back to `current_value`, so the document root must be bound too.
 			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value_and_doc(value);
 			eval_ctx.skip_fetch_perms = true;
 
-			// The concrete error is carried through rather than collapsed to
-			// `Internal`: this runs per permission-checked row, and a write
-			// conflict raised inside a predicate has to stay downcastable for
-			// the transactor to retry it, while a cancelled query has to keep
-			// reporting as cancelled rather than as an internal failure.
-			//
-			// A predicate that signals control flow has nowhere to send it —
-			// there is no surrounding block — so those stay an error.
-			let result = clause.evaluate(eval_ctx).await.map_err(|ctrl| match ctrl {
-				ControlFlow::Err(e) => e,
-				other => anyhow::Error::new(EngineError::Internal(format!(
-					"unexpected control flow in a permission predicate: {other}"
-				))),
-			})?;
-			Ok(result.is_truthy())
+			// What leaves the guard is its answer: a value, or a `RETURN`,
+			// which ends the guard's block with its value. A guard is a loop
+			// barrier, so a `BREAK` or `CONTINUE` has no loop to leave and is
+			// an error. The error is passed through unchanged: a write conflict stays
+			// downcastable for the transactor to retry, and a cancelled query still
+			// reports as cancelled.
+			match clause.evaluate(eval_ctx).await {
+				Ok(value) | Err(ControlFlow::Return(value)) => Ok(value.is_truthy()),
+				Err(ControlFlow::Break | ControlFlow::Continue) => {
+					Err(anyhow::Error::new(ExecError::InvalidControlFlow))
+				}
+				Err(ControlFlow::Err(e)) => Err(e),
+			}
 		}
+	}
+}
+
+/// Whether `permission`, a field's select guard planned
+/// [`Derivation::JudgeFirst`], admits the record `stored`: the row as read
+/// from storage, with nothing derived onto it.
+///
+/// This is [`check_permission_for_value`] with `$value` unbound, which an
+/// eligible guard does not read, so the guard is judged in its own frame:
+/// privileged, holding none of the caller's bindings, refusing a write, and
+/// admitting unconditionally under `skip_fetch_perms`. It is judged once per
+/// row per field: a row-independent guard is not hoisted here, and the
+/// answer is not cached.
+pub(crate) async fn judge_before_derivation(
+	permission: &PhysicalPermission,
+	stored: &Value,
+	ctx: &ExecutionContext,
+) -> anyhow::Result<bool> {
+	check_permission_for_value(permission, stored, None, ctx).await
+}
+
+/// How a field's select guard reads the record, as far as the definition
+/// alone can say.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum GuardShape {
+	/// `PERMISSIONS FOR select FULL`, or a caller whose reads are not
+	/// checked: nothing is hidden.
+	Full,
+	/// `PERMISSIONS FOR select NONE`: nothing is shown.
+	Deny,
+	/// `WHERE p`, reading exactly `reads` of the record by root field name,
+	/// and no `$value`, no parameter but the session's, no subquery and no
+	/// call that runs against the record.
+	Where {
+		reads: HashSet<String>,
+	},
+	/// `WHERE p` whose reads are not known: the analysis is incomplete
+	/// (`$value`, another parameter, a subquery, an opaque call).
+	Opaque,
+}
+
+/// One `COMPUTED` field of a table, as [`plan_derivations`] needs it.
+#[derive(Debug)]
+pub(crate) struct ComputedShape<'a> {
+	/// The root name other clauses use to read the field.
+	pub(crate) name: &'a str,
+	/// How the field's select guard reads the record.
+	pub(crate) guard: GuardShape,
+	/// The fields the body reads by root name, or `None` when its reads are
+	/// not known.
+	pub(crate) body_reads: Option<&'a [String]>,
+}
+
+/// When a `COMPUTED` field is derived relative to its own select guard.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Derivation {
+	/// Derived before the guard, which then masks the value.
+	AsMain,
+	/// Never derived for this caller: the guard denies outright.
+	Hidden,
+	/// The guard is judged first, per row, against the record as stored; the
+	/// body runs only when it admits, and the guard is not judged again.
+	JudgeFirst,
+}
+
+/// The shape of `permission` as a field's select guard for a caller whose
+/// reads are `checked`.
+///
+/// An unchecked caller sees everything, so its guard is [`GuardShape::Full`]
+/// whatever the definition says. A conditional guard is [`GuardShape::Where`]
+/// only when [`accounted_reads`] accounts for everything it reads; `$value`
+/// and every parameter the session does not bind make the analysis
+/// incomplete, as does any read of the current row that is not rooted at a
+/// field name (`@.c`), while `$auth`, `$access`, `$token` and `$session` do
+/// not.
+pub(crate) fn guard_shape(permission: &Permission, checked: bool) -> GuardShape {
+	if !checked {
+		return GuardShape::Full;
+	}
+	match permission {
+		Permission::Full => GuardShape::Full,
+		Permission::None => GuardShape::Deny,
+		Permission::Specific(expr) => match accounted_reads(expr) {
+			Some(reads) => GuardShape::Where {
+				reads: reads.into_iter().collect(),
+			},
+			None => GuardShape::Opaque,
+		},
+	}
+}
+
+/// When each `COMPUTED` field of one table is derived relative to its select
+/// guard; one answer per entry of `fields`, in the same order.
+///
+/// `other_guard_reads` is the union of what every non-computed field's guard
+/// reads, or `None` when any such guard is [`GuardShape::Opaque`].
+///
+/// A field is anything other than [`Derivation::AsMain`] only when no other
+/// reader can observe its value and its body reads nothing masked, so that
+/// withholding or deferring the derivation leaves every visible answer equal
+/// to the one derive-then-mask gives. A [`Derivation::Hidden`] field is never
+/// derived, so it reads nothing: only the bodies and guards of the fields
+/// that are not hidden count as readers. The answer is the largest set of
+/// hidden fields closed under that rule, reached by demoting to `AsMain`
+/// until nothing changes:
+///
+/// 1. a [`GuardShape::Full`] guard hides nothing: `AsMain`;
+/// 2. a field that another live computed body reads by name, that any non-computed guard reads, or
+///    that another live computed guard reads is `AsMain`, as is every field of a table where a live
+///    body's reads, a live computed guard's reads or the non-computed guards' reads are not known;
+/// 3. a [`GuardShape::Deny`] guard: [`Derivation::Hidden`], whatever its own body reads, since that
+///    body never runs;
+/// 4. a body reading a computed field whose guard is not `Full` would read a masked value:
+///    `AsMain`;
+/// 5. a [`GuardShape::Where`] guard reading no computed field: [`Derivation::JudgeFirst`], since
+///    the stored record decides it;
+/// 6. anything else (an opaque guard, or a guard reading a computed field): `AsMain`.
+///
+/// Reads only the definitions: no data, no context.
+pub(crate) fn plan_derivations(
+	fields: &[ComputedShape<'_>],
+	other_guard_reads: Option<&HashSet<String>>,
+) -> Vec<Derivation> {
+	let names: HashSet<&str> = fields.iter().map(|f| f.name).collect();
+	let mut plan: Vec<Derivation> = fields
+		.iter()
+		.map(|c| match &c.guard {
+			// Full or opaque: derived with the main read.
+			GuardShape::Full | GuardShape::Opaque => Derivation::AsMain,
+			// Denied: hidden.
+			GuardShape::Deny => Derivation::Hidden,
+			// Judged first when the guard reads no computed field.
+			GuardShape::Where {
+				reads,
+			} if !reads.iter().any(|r| names.contains(r.as_str())) => Derivation::JudgeFirst,
+			// Anything else is derived with the main read.
+			GuardShape::Where {
+				..
+			} => Derivation::AsMain,
+		})
+		.collect();
+
+	// Every pass only moves a field to `AsMain`, so this ends within
+	// `fields.len() + 1` passes.
+	loop {
+		let live = |j: usize| plan[j] != Derivation::Hidden;
+		let unknown_reads = other_guard_reads.is_none()
+			|| fields
+				.iter()
+				.enumerate()
+				.any(|(j, f)| live(j) && (f.body_reads.is_none() || f.guard == GuardShape::Opaque));
+		let next: Vec<Derivation> = fields
+			.iter()
+			.enumerate()
+			.map(|(i, c)| {
+				if plan[i] == Derivation::AsMain {
+					return Derivation::AsMain;
+				}
+				// Another reader needs the real value, or its reads cannot be shown
+				// not to need it.
+				if unknown_reads || other_guard_reads.is_some_and(|reads| reads.contains(c.name)) {
+					return Derivation::AsMain;
+				}
+				let read_by_another = fields.iter().enumerate().any(|(j, other)| {
+					j != i
+						&& live(j) && (other
+						.body_reads
+						.is_some_and(|reads| reads.iter().any(|r| r == c.name))
+						|| matches!(&other.guard, GuardShape::Where { reads } if reads.contains(c.name)))
+				});
+				if read_by_another {
+					return Derivation::AsMain;
+				}
+				// A judged body reading a value that is itself masked.
+				if plan[i] == Derivation::JudgeFirst {
+					let reads_masked = c.body_reads.is_some_and(|body_reads| {
+						fields.iter().any(|other| {
+							other.guard != GuardShape::Full
+								&& body_reads.iter().any(|r| r == other.name)
+						})
+					});
+					if reads_masked {
+						return Derivation::AsMain;
+					}
+				}
+				plan[i]
+			})
+			.collect();
+		if next == plan {
+			return plan;
+		}
+		plan = next;
+	}
+}
+
+/// [`plan_derivations`] over the `COMPUTED` fields of `fields`, the
+/// definitions of one table, for a caller whose reads are `checked`.
+///
+/// One entry per field that has a `COMPUTED` clause, keyed by the field's
+/// path as written and in the order of `fields`; a stored field has none.
+/// Every derivation site reaches the rule through this function, so a
+/// `SELECT *` and a `FETCH` of the same record derive the same fields.
+///
+/// A field is read by its root name — `a` for `a.b` — both where a body or a
+/// guard names it and where a non-computed field's guard does. A computed
+/// field's guard is the conjunction of its own and those of every field whose
+/// path is a proper prefix of its own (`a` for `a.b`), because masking a field
+/// removes everything beneath it: a `NONE` ancestor hides the field, and a
+/// conditional ancestor adds its reads to the field's own. Reads only the
+/// definitions: no data, no context.
+pub(crate) fn plan_table_derivations(
+	fields: &[FieldDefinition],
+	checked: bool,
+) -> Vec<(String, Derivation)> {
+	let mut keys: Vec<String> = Vec::new();
+	let mut roots: Vec<String> = Vec::new();
+	let mut guards: Vec<GuardShape> = Vec::new();
+	let mut bodies: Vec<Option<Vec<String>>> = Vec::new();
+	// `None` once any non-computed guard is opaque.
+	let mut other_reads: Option<HashSet<String>> = Some(HashSet::new());
+
+	for fd in fields {
+		let guard = guard_shape(&fd.select_permission, checked);
+		match &fd.computed {
+			Some(body) => {
+				let guard = fields
+					.iter()
+					.filter(|anc| {
+						anc.name.0.len() < fd.name.0.len() && fd.name.0.starts_with(&anc.name.0)
+					})
+					.fold(guard, |acc, anc| {
+						conjoin(acc, guard_shape(&anc.select_permission, checked))
+					});
+				keys.push(fd.name.to_raw_string());
+				roots.push(root_name(&fd.name));
+				guards.push(guard);
+				bodies.push(accounted_reads(body));
+			}
+			None => match guard {
+				GuardShape::Full | GuardShape::Deny => {}
+				GuardShape::Where {
+					reads,
+				} => {
+					if let Some(all) = other_reads.as_mut() {
+						all.extend(reads);
+					}
+				}
+				GuardShape::Opaque => other_reads = None,
+			},
+		}
+	}
+
+	let shapes: Vec<ComputedShape<'_>> = roots
+		.iter()
+		.zip(guards)
+		.zip(&bodies)
+		.map(|((name, guard), body_reads)| ComputedShape {
+			name,
+			guard,
+			body_reads: body_reads.as_deref(),
+		})
+		.collect();
+
+	keys.into_iter().zip(plan_derivations(&shapes, other_reads.as_ref())).collect()
+}
+
+/// The shape of two guards that must both admit: nothing is shown when either
+/// denies, nothing is hidden when both are full, and the reads of two
+/// conditional guards are the union of theirs, unknown when either's are.
+fn conjoin(a: GuardShape, b: GuardShape) -> GuardShape {
+	match (a, b) {
+		(GuardShape::Deny, _) | (_, GuardShape::Deny) => GuardShape::Deny,
+		(GuardShape::Full, other) | (other, GuardShape::Full) => other,
+		(GuardShape::Opaque, _) | (_, GuardShape::Opaque) => GuardShape::Opaque,
+		(
+			GuardShape::Where {
+				mut reads,
+			},
+			GuardShape::Where {
+				reads: more,
+			},
+		) => {
+			reads.extend(more);
+			GuardShape::Where {
+				reads,
+			}
+		}
+	}
+}
+
+/// The fields `expr` reads of the current row by root name, or `None` when
+/// that set is not known.
+///
+/// [`extract_computed_deps`] is the source of the names and of the completeness
+/// answer, and it only recognises a read rooted at a field name or at
+/// `$this`/`$self`. An idiom headed by any other part that is not a field name
+/// reads the row without being counted, and a `@` part restarts at the row; the
+/// scan in [`reads_row_unaccounted`] makes the set unknown for each, so a field
+/// such a read can reach is never withheld or deferred, whatever completeness
+/// the analysis reports.
+fn accounted_reads(expr: &Expr) -> Option<Vec<String>> {
+	let deps = extract_computed_deps(expr);
+	if !deps.is_complete || reads_row_unaccounted(expr) {
+		return None;
+	}
+	Some(deps.fields)
+}
+
+/// Whether `expr` holds an idiom that reads the current row through a shape
+/// [`extract_computed_deps`] does not list: a `@` part anywhere, or a head that
+/// is neither a field name nor a path start (a session parameter or a
+/// subexpression, which that analysis already classifies).
+fn reads_row_unaccounted(expr: &Expr) -> bool {
+	struct Scan {
+		found: bool,
+	}
+	impl Visitor for Scan {
+		type Error = std::convert::Infallible;
+
+		fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
+			if !matches!(idiom.0.first(), Some(Part::Field(_) | Part::Start(_))) {
+				self.found = true;
+			}
+			for part in &idiom.0 {
+				self.visit_part(part)?;
+			}
+			Ok(())
+		}
+
+		fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
+			if matches!(part, Part::Doc) {
+				self.found = true;
+			}
+			part.visit(self)
+		}
+	}
+	let mut scan = Scan {
+		found: false,
+	};
+	let _ = expr.visit(&mut scan);
+	scan.found
+}
+
+/// The name other clauses use to read the field at `path`: its first part,
+/// as [`extract_computed_deps`] reports reads.
+fn root_name(path: &Idiom) -> String {
+	match path.0.first() {
+		Some(Part::Field(name)) => name.as_str().to_owned(),
+		_ => path.to_raw_string(),
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::dbs::Session;
 	use crate::exec::operators::test_util::{
@@ -921,6 +1274,7 @@ mod tests {
 	};
 	use crate::iam::{Level, Role};
 	use crate::kvs::TransactionType;
+	use crate::val::Object;
 
 	// =========================================================================
 	// table_select_permission_physical
@@ -1089,7 +1443,7 @@ mod tests {
 		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
 
 		// The same principal whose authenticated level names a different database
-		// than the one it is operating in (the state left by an RPC `use` pivot)
+		// than the one it is operating in, as after an RPC `use` switches database,
 		// is denied at the read gate, before any table PERMISSIONS are consulted.
 		let pivoted = Session {
 			au: Arc::new(crate::iam::Auth::for_db(crate::iam::Role::Viewer, "test", "other")),
@@ -1182,6 +1536,132 @@ mod tests {
 	// check_permission_for_value
 	// =========================================================================
 
+	/// A root owner's context over a database, with the transaction a guard
+	/// unit runs in; the datastore is returned to outlive it.
+	async fn guard_ctx() -> (TestDb, ExecutionContext) {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
+		(db, ctx)
+	}
+
+	/// The table `SELECT` guard `src`, compiled through the production route,
+	/// so the clause is a predicate unit.
+	async fn select_guard(src: &str, ctx: &ExecutionContext) -> PhysicalPermission {
+		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
+		let def = table_with_select(Permission::Specific(parse_sql_expr(src)));
+		table_select_permission_physical(Some(&def), &planner).await.expect("the guard compiles")
+	}
+
+	/// A `RETURN` ends the guard's block with its value, which is the answer.
+	///
+	/// The guard is a predicate unit, so the answer is decided first by
+	/// `ScalarUnit::evaluate`'s predicate branch and then by
+	/// `check_guard_for_value`; both apply the same signal table, and this
+	/// passes once both mappings hold.
+	#[tokio::test]
+	async fn a_return_in_a_guard_is_its_value() {
+		let (_db, ctx) = guard_ctx().await;
+		let row = Value::None;
+
+		let admits = select_guard("{ RETURN true; false }", &ctx).await;
+		let answer = check_permission_for_value(&admits, &row, None, &ctx).await;
+		assert!(answer.expect("a RETURN is a value"), "RETURN true admits");
+
+		let denies = select_guard("{ RETURN false; true }", &ctx).await;
+		let answer = check_permission_for_value(&denies, &row, None, &ctx).await;
+		assert!(!answer.expect("a RETURN is a value"), "RETURN false denies");
+	}
+
+	/// A guard is a loop barrier: a `BREAK` reaching its end has no loop to
+	/// leave and is the loop-barrier error.
+	///
+	/// The guard is a predicate unit, so the answer is decided first by
+	/// `ScalarUnit::evaluate`'s predicate branch and then by
+	/// `check_guard_for_value`; both apply the same signal table, and this
+	/// passes once both mappings hold.
+	#[tokio::test]
+	async fn a_break_in_a_guard_is_the_loop_barrier_error() {
+		let (_db, ctx) = guard_ctx().await;
+		let guard = select_guard("IF true { BREAK }", &ctx).await;
+		let err = check_permission_for_value(&guard, &Value::None, None, &ctx)
+			.await
+			.expect_err("a BREAK has no loop to leave");
+		assert!(
+			matches!(err.downcast_ref::<ExecError>(), Some(ExecError::InvalidControlFlow)),
+			"expected InvalidControlFlow, got {err:?}"
+		);
+	}
+
+	/// An error raised in a guard leaves it as that error, not as an internal
+	/// failure, so a caller can still tell it apart.
+	///
+	/// The guard is a predicate unit, so the answer is decided first by
+	/// `ScalarUnit::evaluate`'s predicate branch and then by
+	/// `check_guard_for_value`; both apply the same signal table, and this
+	/// passes once both mappings hold.
+	#[tokio::test]
+	async fn an_error_in_a_guard_is_carried_through() {
+		let (_db, ctx) = guard_ctx().await;
+		let guard = select_guard("THROW 'x'", &ctx).await;
+		let err = check_permission_for_value(&guard, &Value::None, None, &ctx)
+			.await
+			.expect_err("a THROW is an error");
+		assert!(
+			matches!(err.downcast_ref::<ExecError>(), Some(ExecError::Thrown(_))),
+			"expected the thrown error, got {err:?}"
+		);
+		assert!(err.to_string().contains('x'), "the thrown message is kept: {err}");
+	}
+
+	// =========================================================================
+	// judge_before_derivation
+	// =========================================================================
+
+	/// A stored row `{ flag }`.
+	fn flag_row(flag: bool) -> Value {
+		Value::Object(Object::from(BTreeMap::from([(Strand::from("flag"), Value::Bool(flag))])))
+	}
+
+	/// `Deny` refuses and `Allow` admits, whatever the row.
+	#[tokio::test]
+	async fn the_verdict_of_a_deny_and_an_allow_is_fixed() {
+		let ctx = root_ctx();
+		let row = flag_row(true);
+		let deny = judge_before_derivation(&PhysicalPermission::Deny, &row, &ctx).await;
+		assert!(!deny.expect("a Deny is an answer"), "Deny refuses");
+		let allow = judge_before_derivation(&PhysicalPermission::Allow, &row, &ctx).await;
+		assert!(allow.expect("an Allow is an answer"), "Allow admits");
+	}
+
+	/// A conditional guard is judged against the stored record.
+	#[tokio::test]
+	async fn the_verdict_of_a_where_guard_follows_the_stored_row() {
+		let (_db, ctx) = guard_ctx().await;
+		let guard = select_guard("flag = true", &ctx).await;
+		let admitted = judge_before_derivation(&guard, &flag_row(true), &ctx).await;
+		assert!(admitted.expect("the guard answers"), "{{ flag: true }} is admitted");
+		let refused = judge_before_derivation(&guard, &flag_row(false), &ctx).await;
+		assert!(!refused.expect("the guard answers"), "{{ flag: false }} is refused");
+	}
+
+	/// A guard that writes is refused as a write from a permission clause,
+	/// not judged: the verdict is judged in the guard's own write-refusing
+	/// frame.
+	#[tokio::test]
+	async fn a_guard_that_writes_is_refused() {
+		let db = TestDb::new("DEFINE TABLE x SCHEMALESS;").await;
+		let ctx = db.exec_ctx().await;
+		let guard = select_guard("(CREATE x:1) != NONE", &ctx).await;
+		let err = judge_before_derivation(&guard, &flag_row(true), &ctx)
+			.await
+			.expect_err("a write from a guard is refused");
+		assert!(
+			err.to_string()
+				.contains("A PERMISSIONS clause cannot contain a statement that modifies data"),
+			"expected the permission-clause write refusal, got {err:?}"
+		);
+	}
+
 	// =========================================================================
 	// PhysicalTableSelect
 	// =========================================================================
@@ -1194,8 +1674,8 @@ mod tests {
 	/// a `DEFINE` statement sets them.
 	///
 	/// The `AUTH LIMIT` is set explicitly to the stamp that narrows nobody,
-	/// which is what a definition carries when its definer was unconstrained
-	/// and what one written before `AUTH LIMIT` existed decodes to;
+	/// the stamp a definition carries when its definer was unconstrained, and what
+	/// a definition with no stored `AUTH LIMIT` decodes to;
 	/// `FieldDefinition`'s `Default` is not that stamp.
 	fn field_with_default(src: &str) -> FieldDefinition {
 		let expr: Expr = parse_sql_expr(src);
@@ -1233,7 +1713,7 @@ mod tests {
 		clause.evaluate(EvalContext::from_exec_ctx(ctx).with_value_and_doc(row)).await
 	}
 
-	/// The field's `AUTH LIMIT` is ADR 0001's definer's-rights clamp, and a
+	/// The field's `AUTH LIMIT` applies the definer's-rights clamp, and a
 	/// stamp that can narrow no caller leaves the context as it was.
 	#[test]
 	fn the_default_frame_applies_the_fields_auth_limit() {
@@ -1288,7 +1768,7 @@ mod tests {
 	}
 
 	/// A view definition records no `AUTH LIMIT`, so a view body runs as whoever wrote the record —
-	/// the one clause here that ADR 0001's definer's rights do not reach.
+	/// the one clause here that the definer's-rights clamp does not reach.
 	#[test]
 	fn the_view_frame_disables_enforcement_without_narrowing_authority() {
 		let ctx = root_ctx_with_options();
@@ -1369,6 +1849,463 @@ mod tests {
 		let clause = Clause::uncompilable("a shape".to_owned());
 		let err = eval_clause(&clause, &Value::None, &ctx).await.expect_err("it never evaluates");
 		assert!(err.to_string().contains("a shape"), "the reason is reported: {err}");
+	}
+
+	// =========================================================================
+	// guard_shape and plan_derivations
+	// =========================================================================
+
+	fn names(items: &[&str]) -> HashSet<String> {
+		items.iter().map(|s| (*s).to_owned()).collect()
+	}
+
+	fn specific(src: &str) -> Permission {
+		Permission::Specific(parse_sql_expr(src))
+	}
+
+	fn where_reading(items: &[&str]) -> GuardShape {
+		GuardShape::Where {
+			reads: names(items),
+		}
+	}
+
+	/// A computed field for `plan_derivations`.
+	fn shape<'a>(
+		name: &'a str,
+		guard: GuardShape,
+		body_reads: Option<&'a [String]>,
+	) -> ComputedShape<'a> {
+		ComputedShape {
+			name,
+			guard,
+			body_reads,
+		}
+	}
+
+	#[test]
+	fn a_guard_reading_the_row_through_a_doc_part_is_opaque() {
+		assert_eq!(guard_shape(&specific("@.c = NONE"), true), GuardShape::Opaque);
+		assert_eq!(guard_shape(&specific("owner = $auth.id AND @.c"), true), GuardShape::Opaque);
+	}
+
+	#[test]
+	fn a_full_or_unchecked_guard_is_full() {
+		assert_eq!(guard_shape(&Permission::Full, true), GuardShape::Full);
+		assert_eq!(guard_shape(&Permission::None, false), GuardShape::Full);
+		assert_eq!(guard_shape(&specific("$value != NONE"), false), GuardShape::Full);
+	}
+
+	#[test]
+	fn a_none_guard_is_deny() {
+		assert_eq!(guard_shape(&Permission::None, true), GuardShape::Deny);
+	}
+
+	#[test]
+	fn a_guard_reading_only_the_session_reads_no_field() {
+		assert_eq!(guard_shape(&specific("$auth.admin"), true), where_reading(&[]));
+	}
+
+	#[test]
+	fn a_guard_reading_a_field_names_it() {
+		assert_eq!(guard_shape(&specific("owner = $auth.id"), true), where_reading(&["owner"]));
+	}
+
+	#[test]
+	fn a_guard_reading_value_is_opaque() {
+		assert_eq!(guard_shape(&specific("$value != NONE"), true), GuardShape::Opaque);
+	}
+
+	#[test]
+	fn a_guard_holding_a_subquery_is_opaque() {
+		assert_eq!(guard_shape(&specific("(SELECT * FROM other)"), true), GuardShape::Opaque);
+	}
+
+	/// A field whose guard hides nothing is derived as before.
+	#[test]
+	fn a_full_guard_is_derived_as_main() {
+		let reads: Vec<String> = Vec::new();
+		let fields = [shape("c", GuardShape::Full, Some(&reads))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::AsMain]);
+	}
+
+	/// A denied field nobody reads is never derived.
+	#[test]
+	fn a_denied_field_no_one_reads_is_hidden() {
+		let reads: Vec<String> = Vec::new();
+		let fields = [shape("c", GuardShape::Deny, Some(&reads))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::Hidden]);
+	}
+
+	/// Another computed body reads the denied field, so its value
+	/// is needed.
+	#[test]
+	fn a_denied_field_another_body_reads_is_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let reads_c = vec!["c".to_owned()];
+		let fields = [
+			shape("c", GuardShape::Deny, Some(&none)),
+			shape("d", GuardShape::Full, Some(&reads_c)),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::AsMain]
+		);
+	}
+
+	/// Another computed field's guard reads the field.
+	#[test]
+	fn a_field_another_computed_guard_reads_is_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let fields = [
+			shape("c", GuardShape::Deny, Some(&none)),
+			shape("d", where_reading(&["c"]), Some(&none)),
+		];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[])))[0], Derivation::AsMain);
+	}
+
+	/// A non-computed field's guard reads the field.
+	#[test]
+	fn a_field_another_guard_reads_is_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let fields = [shape("c", GuardShape::Deny, Some(&none))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&["c"]))), [Derivation::AsMain]);
+	}
+
+	/// A non-computed guard whose reads are unknown may read it.
+	#[test]
+	fn an_opaque_other_guard_makes_every_field_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let fields = [shape("c", GuardShape::Deny, Some(&none))];
+		assert_eq!(plan_derivations(&fields, None), [Derivation::AsMain]);
+	}
+
+	/// A guard reading `$value` needs the value it judges.
+	#[test]
+	fn a_guard_reading_value_is_judged_after_derivation() {
+		let none: Vec<String> = Vec::new();
+		let fields = [shape("c", GuardShape::Opaque, Some(&none))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::AsMain]);
+	}
+
+	/// A guard reading a computed field, here its own, needs that
+	/// field derived first.
+	#[test]
+	fn a_guard_reading_a_computed_field_is_judged_after_derivation() {
+		let none: Vec<String> = Vec::new();
+		let fields = [
+			shape("c", where_reading(&["d"]), Some(&none)),
+			shape("d", GuardShape::Full, Some(&none)),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::AsMain]
+		);
+	}
+
+	/// A judged body reads a computed field that is itself masked.
+	#[test]
+	fn a_body_reading_a_masked_computed_field_is_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let reads_d = vec!["d".to_owned()];
+		let fields = [
+			shape("c", where_reading(&["flag"]), Some(&reads_d)),
+			shape("d", where_reading(&["flag"]), Some(&none)),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::AsMain]
+		);
+	}
+
+	/// A denied field's body never runs, so its reads, known or not,
+	/// change nothing.
+	#[test]
+	fn a_denied_field_with_an_opaque_body_is_hidden() {
+		let fields = [shape("c", GuardShape::Deny, None)];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::Hidden]);
+	}
+
+	/// A judged field whose body reads are unknown may read any field.
+	#[test]
+	fn a_judged_field_with_an_opaque_body_makes_every_field_derived_as_main() {
+		let none: Vec<String> = Vec::new();
+		let fields =
+			[shape("c", GuardShape::Deny, Some(&none)), shape("d", where_reading(&["flag"]), None)];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::AsMain]
+		);
+	}
+
+	/// A hidden field is not a reader, so what its body reads stays
+	/// hidden or judged first, however many hidden bodies read one another.
+	#[test]
+	fn a_hidden_bodys_reads_do_not_count() {
+		let none: Vec<String> = Vec::new();
+		let reads_d = vec!["d".to_owned()];
+		let reads_c = vec!["c".to_owned()];
+		let fields = [
+			shape("c", GuardShape::Deny, Some(&reads_d)),
+			shape("d", GuardShape::Deny, Some(&reads_c)),
+			shape("e", where_reading(&["flag"]), Some(&none)),
+			shape("f", GuardShape::Deny, Some(&none)),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::Hidden, Derivation::Hidden, Derivation::JudgeFirst, Derivation::Hidden]
+		);
+	}
+
+	/// A field a live body reads is derived, and so is the field that
+	/// body's own reads then reach.
+	#[test]
+	fn a_field_made_live_by_a_reader_counts_as_a_reader() {
+		let none: Vec<String> = Vec::new();
+		let reads_c = vec!["c".to_owned()];
+		let reads_d = vec!["d".to_owned()];
+		let fields = [
+			shape("c", GuardShape::Deny, Some(&reads_d)),
+			shape("d", GuardShape::Deny, Some(&none)),
+			shape("e", GuardShape::Full, Some(&reads_c)),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::AsMain, Derivation::AsMain]
+		);
+	}
+
+	/// A guard reading stored fields is decided by the stored
+	/// record.
+	#[test]
+	fn a_guard_reading_stored_fields_is_judged_first() {
+		let none: Vec<String> = Vec::new();
+		let fields = [shape("c", where_reading(&["flag"]), Some(&none))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::JudgeFirst]);
+	}
+
+	/// A guard reading nothing of the record is judged first too.
+	#[test]
+	fn a_session_only_guard_is_judged_first() {
+		let none: Vec<String> = Vec::new();
+		let fields = [shape("c", where_reading(&[]), Some(&none))];
+		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::JudgeFirst]);
+	}
+
+	// =========================================================================
+	// plan_table_derivations
+	// =========================================================================
+
+	/// A stored field named `path` with the given select guard.
+	fn stored_field(path: &str, select: Permission) -> FieldDefinition {
+		FieldDefinition {
+			name: field_idiom(path),
+			select_permission: select,
+			..Default::default()
+		}
+	}
+
+	/// A computed field named `path` with body `body` and the given select
+	/// guard.
+	fn computed_field(path: &str, body: &str, select: Permission) -> FieldDefinition {
+		FieldDefinition {
+			name: field_idiom(path),
+			computed: Some(parse_sql_expr(body)),
+			select_permission: select,
+			..Default::default()
+		}
+	}
+
+	fn derivation_of(plan: &[(String, Derivation)], name: &str) -> Derivation {
+		plan.iter().find(|(n, _)| n == name).map(|(_, d)| *d).expect("a planned field")
+	}
+
+	#[test]
+	fn a_table_plan_covers_the_computed_fields_in_order() {
+		let fields = [
+			stored_field("flag", Permission::Full),
+			computed_field("hidden", "1 + 1", Permission::None),
+			computed_field("judged", "flag", specific("flag = true")),
+			computed_field("open", "2", Permission::Full),
+			computed_field("by_auth", "3", specific("$auth.admin")),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(
+			plan,
+			[
+				("hidden".to_owned(), Derivation::Hidden),
+				("judged".to_owned(), Derivation::JudgeFirst),
+				("open".to_owned(), Derivation::AsMain),
+				("by_auth".to_owned(), Derivation::JudgeFirst),
+			]
+		);
+	}
+
+	#[test]
+	fn an_unchecked_table_plan_derives_every_field_as_main() {
+		let fields = [
+			computed_field("hidden", "1 + 1", Permission::None),
+			computed_field("judged", "2", specific("flag = true")),
+		];
+		let plan = plan_table_derivations(&fields, false);
+		assert!(plan.iter().all(|(_, d)| *d == Derivation::AsMain));
+	}
+
+	#[test]
+	fn a_stored_fields_guard_reading_a_computed_field_makes_it_derived_as_main() {
+		let fields = [
+			stored_field("note", specific("hidden = 2")),
+			computed_field("hidden", "1 + 1", Permission::None),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn a_nested_stored_fields_guard_contributes_its_root_name() {
+		let fields = [
+			stored_field("meta.owner", specific("meta.owner = $auth.id")),
+			computed_field("meta", "{ owner: 1 }", Permission::None),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "meta"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn an_opaque_stored_guard_makes_every_computed_field_derived_as_main() {
+		let fields = [
+			stored_field("note", specific("$value != NONE")),
+			computed_field("hidden", "1 + 1", Permission::None),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn a_computed_body_reading_another_field_is_derived_as_main() {
+		let fields = [
+			computed_field("hidden", "1 + 1", Permission::None),
+			computed_field("shown", "hidden + 1", Permission::Full),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn a_visible_computed_body_with_unknown_reads_makes_every_field_derived_as_main() {
+		let fields = [
+			computed_field("hidden", "1 + 1", Permission::None),
+			computed_field("wide", "(SELECT * FROM other)", Permission::Full),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
+	}
+
+	/// A table with a shown field, a hidden one, one judged by `$auth`, and a
+	/// hidden one that calls a user-defined function: the function's reads are
+	/// unknown, but its field is never derived, so it blocks nothing.
+	#[test]
+	fn a_hidden_field_calling_a_function_is_hidden_and_blocks_no_other_field() {
+		let fields = [
+			computed_field("shown", "sequence::nextval('s')", Permission::Full),
+			computed_field("hidden", "sequence::nextval('s')", Permission::None),
+			computed_field("admin_only", "sequence::nextval('s')", specific("$auth.admin = true")),
+			computed_field("bad", "fn::r()", Permission::None),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "shown"), Derivation::AsMain);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::Hidden);
+		assert_eq!(derivation_of(&plan, "admin_only"), Derivation::JudgeFirst);
+		assert_eq!(derivation_of(&plan, "bad"), Derivation::Hidden);
+	}
+
+	/// The same table with the function call on a field that is shown: that
+	/// body may read anything, so nothing is withheld.
+	#[test]
+	fn a_shown_field_calling_a_function_makes_every_field_derived_as_main() {
+		let fields = [
+			computed_field("shown", "fn::r()", Permission::Full),
+			computed_field("hidden", "1", Permission::None),
+			computed_field("admin_only", "2", specific("$auth.admin = true")),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert!(plan.iter().all(|(_, d)| *d == Derivation::AsMain));
+	}
+
+	/// Masking `a` removes everything beneath it, so `a.b` is never derived.
+	#[test]
+	fn a_computed_field_under_a_denied_ancestor_is_hidden() {
+		let fields =
+			[stored_field("a", Permission::None), computed_field("a.b", "1 + 1", Permission::Full)];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "a.b"), Derivation::Hidden);
+	}
+
+	/// An ancestor's `WHERE` over stored fields decides the field beneath it
+	/// together with the field's own.
+	#[test]
+	fn a_computed_field_under_a_conditional_ancestor_is_judged_first() {
+		let fields = [
+			stored_field("flag", Permission::Full),
+			stored_field("a", specific("flag = true")),
+			computed_field("a.b", "1 + 1", Permission::Full),
+			computed_field("a.c", "2", specific("$auth.admin")),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "a.b"), Derivation::JudgeFirst);
+		assert_eq!(derivation_of(&plan, "a.c"), Derivation::JudgeFirst);
+	}
+
+	/// A conditional ancestor reading a computed field must be judged after
+	/// that field is derived, and so is a field beneath it.
+	#[test]
+	fn a_computed_field_under_an_ancestor_reading_a_computed_field_is_derived_as_main() {
+		let fields = [
+			stored_field("a", specific("d = 1")),
+			computed_field("d", "1", Permission::Full),
+			computed_field("a.b", "1 + 1", Permission::Full),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "a.b"), Derivation::AsMain);
+	}
+
+	/// A sibling or a longer path is not an ancestor.
+	#[test]
+	fn a_field_that_is_not_a_proper_prefix_does_not_guard_a_computed_field() {
+		let fields = [
+			stored_field("ab", Permission::None),
+			stored_field("a.b.c", Permission::None),
+			computed_field("a.b", "1", Permission::Full),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "a.b"), Derivation::AsMain);
+	}
+
+	/// An unchecked caller sees every field, ancestors included.
+	#[test]
+	fn an_unchecked_plan_ignores_an_ancestors_guard() {
+		let fields =
+			[stored_field("a", Permission::None), computed_field("a.b", "1 + 1", Permission::None)];
+		let plan = plan_table_derivations(&fields, false);
+		assert_eq!(derivation_of(&plan, "a.b"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn a_stored_guard_reading_a_computed_field_through_a_doc_part_is_derived_as_main() {
+		let fields =
+			[stored_field("s", specific("@.c = NONE")), computed_field("c", "1", Permission::None)];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "c"), Derivation::AsMain);
+	}
+
+	#[test]
+	fn a_computed_body_reading_a_computed_field_through_a_doc_part_is_derived_as_main() {
+		let fields = [
+			computed_field("c", "1", Permission::None),
+			computed_field("d", "@.c + 1", Permission::Full),
+		];
+		let plan = plan_table_derivations(&fields, true);
+		assert_eq!(derivation_of(&plan, "c"), Derivation::AsMain);
+		assert_eq!(derivation_of(&plan, "d"), Derivation::AsMain);
 	}
 
 	// =========================================================================

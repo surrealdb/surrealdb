@@ -5,10 +5,12 @@ database = true
 
 [test]
 reason = """
-	An ordinary function call reads the caller's own bindings, as the caller's
-	code does: a LET, a block-local LET and a FOR variable of the statement reach
-	the body. A name the caller does not bind is the database's parameter of that
-	name, or NONE when the database defines none.
+	A function body reads its arguments, the row names and the ordinary chain:
+	the bind parameters, the session values and the database's parameters. It
+	never reads a binding of its caller, whether a LET, a block-local LET or a
+	FOR variable of the calling statement. A name the body's own scope does not
+	bind is the database's parameter of that name, or NONE when the database
+	defines none.
 """
 
 # DEFINE PARAM $limit VALUE 10
@@ -31,28 +33,28 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-# RETURN fn::lim()
+# RETURN fn::lim(): the caller's LET is not seen
 [[test.results]]
-value = "42"
+value = "10"
 
 # RETURN { LET $limit = 3; fn::lim() }
 [[test.results]]
-value = "3"
+value = "10"
 
 # FOR $limit IN [5] { CREATE caller:1 SET v = fn::lim() }
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[5]"
+value = "[10]"
 
 # LET $x = 'bound'
 [[test.results]]
 value = "NONE"
 
-# RETURN fn::get_x()
+# RETURN fn::get_x(), which reads a name only the caller binds
 [[test.results]]
-value = "'bound'"
+value = "NONE"
 
 # RETURN fn::get_y(), which binds no $y anywhere
 [[test.results]]

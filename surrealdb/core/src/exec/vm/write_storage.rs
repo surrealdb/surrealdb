@@ -9,7 +9,10 @@
 //! codec (`vm::codec::key`) and its bytes by the record writer
 //! (`catalog::encode_record_with`, given the format and layouts the write
 //! context's slot resolves, or `Transaction::record_writer`), and the host
-//! writes them: on the statement's transaction here, as an intent on a fan.
+//! writes them: on the statement's transaction here, as an intent on the write fan-out.
+
+// Runtime support for the instructions the IR lowering emits.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -945,8 +948,8 @@ async fn record_shapes(ctx: &WriteCtx, ix: &IndexDefinition, n: &[Value]) -> Flo
 	if known.is_some_and(|known| known.records_all(recorded_shapes(n, ix))) {
 		return Ok(());
 	}
-	// The context's shapes predate any this statement recorded; the
-	// transaction's are current, and answer every write after the first of a
+	// The context's shapes were read before this statement. The transaction's
+	// shapes are the current set, and answer every write after the first of a
 	// shape without a write of their own.
 	let txn = ctx.txn();
 	let current = txn

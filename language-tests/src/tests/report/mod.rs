@@ -162,6 +162,8 @@ pub enum TestOutputs {
 	ParsingError(String),
 	SigninError(String),
 	SignupError(String),
+	/// The error the whole request was refused with.
+	RequestError(String),
 }
 
 pub struct ResultTypeMismatchReport {
@@ -262,6 +264,11 @@ pub enum TestReportKind {
 		got: String,
 		expected: String,
 	},
+	/// The request was refused with an error other than the expected one.
+	MismatchedRequest {
+		got: String,
+		expected: String,
+	},
 	MismatchedValues(Vec<Mismatch>),
 	/// A chain walk failed at one specific version. The inner kind is that
 	/// hop's own grade; the fields locate it in the walk.
@@ -318,6 +325,8 @@ pub enum TestExpectation {
 	Values(Option<Vec<TestValueExpectation>>),
 	Signin(Option<String>),
 	Signup(Option<String>),
+	/// The whole request is refused, with the given error text when one is named.
+	Request(Option<String>),
 }
 
 impl TestExpectation {
@@ -385,8 +394,38 @@ impl TestExpectation {
 				BoolOr::Bool(true) => TestExpectation::Signup(None),
 				BoolOr::Bool(false) => TestExpectation::Values(None),
 			},
+			TestDetailsResults::RequestError(x) => match x.request_error {
+				BoolOr::Value(ref x) => TestExpectation::Request(Some(x.clone())),
+				BoolOr::Bool(true) => TestExpectation::Request(None),
+				BoolOr::Bool(false) => TestExpectation::Values(None),
+			},
 		};
 		Some(res)
+	}
+}
+
+/// The output `--results accept` writes for a refused request: the error text, and only when the
+/// test expects a request error. Any other running error is not gradable and is never written.
+fn request_error_output(config: &TestConfig, error: &anyhow::Error) -> Option<TestOutputs> {
+	matches!(TestExpectation::from_test_config(config), Some(TestExpectation::Request(_)))
+		.then(|| TestOutputs::RequestError(error.to_string()))
+}
+
+/// Grades the error the whole request was refused with (the `dbs.process` `Err`). It is valid
+/// only against a `request-error` expectation that names no text or names this error's text;
+/// without that expectation the refusal is an ungradable running error.
+fn grade_running_error(config: &TestConfig, error: &anyhow::Error) -> TestReportKind {
+	let Some(TestExpectation::Request(expected)) = TestExpectation::from_test_config(config)
+	else {
+		return TestReportKind::Error(TestError::Running(format!("{error:?}")));
+	};
+	let got = error.to_string();
+	match expected {
+		Some(expected) if expected != got => TestReportKind::MismatchedRequest {
+			got,
+			expected,
+		},
+		_ => TestReportKind::Valid,
 	}
 }
 
@@ -397,20 +436,31 @@ impl TestExpectation {
 /// read.
 const ENGINE_DECLINE: &str = "The engine cannot run this statement:";
 
+/// The statements of `res` the engine declined to run, as 1-based statement
+/// numbers paired with the error message.
+fn declined_statements(res: &[Result<SurValue, String>]) -> impl Iterator<Item = (usize, &str)> {
+	res.iter().enumerate().filter_map(|(at, result)| match result {
+		Err(message) if message.contains(ENGINE_DECLINE) => Some((at + 1, message.as_str())),
+		_ => None,
+	})
+}
+
 /// Every statement of `res` the engine declined to run, as the report names
 /// them; `None` where it declined none.
 fn engine_decline(res: &[Result<SurValue, String>]) -> Option<String> {
-	let declined: Vec<String> = res
-		.iter()
-		.enumerate()
-		.filter_map(|(at, result)| match result {
-			Err(message) if message.contains(ENGINE_DECLINE) => {
-				Some(format!("statement {} was declined by the engine: {message}", at + 1))
-			}
-			_ => None,
+	let declined: Vec<String> = declined_statements(res)
+		.map(|(statement, message)| {
+			format!("statement {statement} was declined by the engine: {message}")
 		})
 		.collect();
 	(!declined.is_empty()).then(|| declined.join("\n"))
+}
+
+/// A statement the engine declined to run, for the reporting lane. The
+/// statement is its 1-based position in the test body.
+pub struct Decline {
+	pub statement: usize,
+	pub message: String,
 }
 
 pub struct TestReport {
@@ -440,6 +490,9 @@ impl TestReport {
 				..
 			}
 			| TestReportKind::MismatchedSignin {
+				..
+			}
+			| TestReportKind::MismatchedRequest {
 				..
 			}
 			| TestReportKind::MismatchedValues(_)
@@ -476,6 +529,19 @@ impl TestReport {
 		self.case.test.config.parsed.test.wip
 	}
 
+	/// The statements the engine declined to run, whatever the test's grade.
+	pub fn declines(&self) -> Vec<Decline> {
+		let Some(TestOutputs::Values(res)) = &self.outputs else {
+			return Vec::new();
+		};
+		declined_statements(res)
+			.map(|(statement, message)| Decline {
+				statement,
+				message: message.to_owned(),
+			})
+			.collect()
+	}
+
 	pub fn is_unspecified_test(&self) -> bool {
 		matches!(self.kind, TestReportKind::NoExpectation { .. })
 	}
@@ -505,7 +571,7 @@ impl TestReport {
 			TestTaskResult::SigninError(e) => {
 				(false, Some(TestOutputs::SigninError(e.to_string())))
 			}
-			TestTaskResult::RunningError(_) => (false, None),
+			TestTaskResult::RunningError(e) => (false, request_error_output(&run.case.test.config.parsed, e)),
 			TestTaskResult::Import(_, _) => (false, None),
 			TestTaskResult::BadCleanup(_) => (false, None),
 			TestTaskResult::LeakedRootState(_) => (false, None),
@@ -603,9 +669,7 @@ impl TestReport {
 		match_ctx: &MatchContext<'_>,
 	) -> TestReportKind {
 		match job_result {
-			TestTaskResult::RunningError(e) => {
-				TestReportKind::Error(TestError::Running(format!("{:?}", e)))
-			}
+			TestTaskResult::RunningError(e) => grade_running_error(config, &e),
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
 			TestTaskResult::BadCleanup(x) => TestReportKind::Error(TestError::BadCleanup(x)),
 			TestTaskResult::LeakedRootState(x) => {
@@ -1028,5 +1092,100 @@ impl TestReport {
 			matcher: expectation.value_str.clone(),
 			value,
 		})
+	}
+}
+
+#[cfg(test)]
+mod request_error_tests {
+	use toml_edit::DocumentMut;
+
+	use super::*;
+
+	fn config(results: &str) -> TestConfig {
+		toml::from_str(&format!("[test]\n{results}")).expect("test config parses")
+	}
+
+	fn refusal() -> anyhow::Error {
+		anyhow::anyhow!("The request was refused")
+	}
+
+	#[test]
+	fn request_error_text_deserialises_as_a_table_result() {
+		let cfg = config("[test.results]\nrequest-error = \"The request was refused\"");
+		assert!(cfg.unused_keys().is_empty());
+		assert!(matches!(
+			TestExpectation::from_test_config(&cfg),
+			Some(TestExpectation::Request(Some(text))) if text == "The request was refused"
+		));
+	}
+
+	#[test]
+	fn request_error_true_deserialises_without_text() {
+		let cfg = config("[test.results]\nrequest-error = true");
+		assert!(matches!(
+			TestExpectation::from_test_config(&cfg),
+			Some(TestExpectation::Request(None))
+		));
+	}
+
+	#[test]
+	fn parsing_error_table_is_unchanged() {
+		let cfg = config("[test.results]\nparsing-error = true");
+		assert!(matches!(
+			TestExpectation::from_test_config(&cfg),
+			Some(TestExpectation::Parsing(None))
+		));
+	}
+
+	#[test]
+	fn matching_request_error_is_valid() {
+		let cfg = config("[test.results]\nrequest-error = \"The request was refused\"");
+		assert!(matches!(grade_running_error(&cfg, &refusal()), TestReportKind::Valid));
+		let any = config("[test.results]\nrequest-error = true");
+		assert!(matches!(grade_running_error(&any, &refusal()), TestReportKind::Valid));
+	}
+
+	#[test]
+	fn mismatching_request_error_is_reported() {
+		let cfg = config("[test.results]\nrequest-error = \"Something else\"");
+		match grade_running_error(&cfg, &refusal()) {
+			TestReportKind::MismatchedRequest {
+				got,
+				expected,
+			} => {
+				assert_eq!(got, "The request was refused");
+				assert_eq!(expected, "Something else");
+			}
+			_ => panic!("expected a request-error mismatch"),
+		}
+	}
+
+	#[test]
+	fn running_error_without_a_request_error_expectation_stays_ungradable() {
+		for results in ["", "[test.results]\nparsing-error = true", "[[test.results]]\nvalue = \"1\""]
+		{
+			let cfg = config(results);
+			assert!(matches!(
+				grade_running_error(&cfg, &refusal()),
+				TestReportKind::Error(TestError::Running(_))
+			));
+			assert!(request_error_output(&cfg, &refusal()).is_none());
+		}
+	}
+
+	#[test]
+	fn accept_writes_the_refusal_as_a_request_error_expectation() {
+		let cfg = config("[test.results]\nrequest-error = \"Something else\"");
+		let Some(TestOutputs::RequestError(text)) = request_error_output(&cfg, &refusal()) else {
+			panic!("a request-error test carries the refusal as its output");
+		};
+
+		let mut doc = "[test]\nreason = \"r\"\n".parse::<DocumentMut>().unwrap();
+		update::apply_error(&mut doc, "request-error", &text);
+		let parsed: TestConfig = toml::from_str(&doc.to_string()).expect("rewritten config parses");
+		assert!(matches!(
+			TestExpectation::from_test_config(&parsed),
+			Some(TestExpectation::Request(Some(t))) if t == "The request was refused"
+		));
 	}
 }

@@ -1,11 +1,17 @@
 //! This module defines the API for a transaction in a key-value store.
 #![warn(clippy::missing_docs_in_private_items)]
 
+use std::sync::Arc;
+
 pub use common::future::BoxFut;
 
 use crate::consts::{COUNT_BATCH_SIZE, NORMAL_BATCH_SIZE};
 use crate::cursor::{DefaultKeysCursor, DefaultValsCursor};
 use crate::err::{Error, Result};
+use crate::snapshot::{Snapshot, ViewCapabilities};
+use crate::split::{
+	ESTIMATE_BUDGET, Estimate, SplitTarget, default_split, estimate_from_prefix, parts_for,
+};
 use crate::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStamp, IncTimeStampImpl,
 };
@@ -975,6 +981,107 @@ pub trait Transactable: Send + Sync {
 				_ => None,
 			};
 			Ok((keys.len(), resume))
+		})
+	}
+
+	/// This transaction's owned read view, or `None` when the backend cannot give one now.
+	///
+	/// The view reads what this transaction reads at this moment, its buffered writes included, and
+	/// is the handle by which code that does not hold the transaction reads it, concurrently
+	/// ([`Snapshot`]). This binds writable transactions as well as read-only ones. A
+	/// backend that cannot freeze buffered writes answers `None` whenever any are buffered, and
+	/// answers `None` whenever it has no view to give; callers fall back to the transaction's
+	/// own reads. The most a backend may answer is declared by [`Self::view_capabilities`].
+	/// The default is `None`.
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		None
+	}
+
+	/// The upper bound on the read views this backend hands out (see [`ViewCapabilities`]): the
+	/// same answer for every transaction of a datastore, plain or speculative, so it is a static
+	/// fact a planner may read once. `snapshot()` may still answer `None` where a flag is `true`.
+	/// A wrapper that holds another transaction forwards it. The default is no view of either kind,
+	/// which is what a backend answering `None` from [`Self::snapshot`] always declares.
+	fn view_capabilities(&self) -> ViewCapabilities {
+		ViewCapabilities::default()
+	}
+
+	/// Whether a plain read through this transaction joins its conflict set.
+	///
+	/// `false` is a promise: a plain `get`, `getm` or [`Snapshot`] read never makes the transaction
+	/// conflict with a later commit of the key it read, so a caller may issue such reads
+	/// speculatively without widening the transaction's conflict set. `true` is the conservative
+	/// answer every backend may give, and says nothing about whether a read does join it. The
+	/// default is `true`.
+	fn plain_reads_tracked(&self) -> bool {
+		true
+	}
+
+	/// What `rng` holds, as of `version`.
+	///
+	/// Exact when the range holds fewer than [`ESTIMATE_BUDGET`] keys, otherwise extrapolated from
+	/// the first `ESTIMATE_BUDGET` of them and flagged inexact.
+	///
+	/// The default reads up to `ESTIMATE_BUDGET` entries through [`Self::scan`].
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn estimate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Estimate>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let res = self.scan(rng.as_borrowed(), ESTIMATE_BUDGET, 0, version).await?;
+			let last = res.values.last().map(|(key, _)| key.as_slice());
+			Ok(estimate_from_prefix(
+				&rng,
+				res.values.len() as u64,
+				res.key_bytes + res.value_bytes,
+				last,
+			))
+		})
+	}
+
+	/// Boundary keys that divide `rng` into parts, as of `version`.
+	///
+	/// The boundaries are strictly inside `rng` and strictly ascending, and the parts they cut
+	/// tile `rng` exactly, so every key of the range lies in exactly one part. A backend may answer
+	/// fewer boundaries than `target` asks for, or none: a range holding no more than one key, or
+	/// keys too close to divide, is left whole.
+	///
+	/// The default finds the first and last key of the range with one [`Self::keys`] and one
+	/// [`Self::keysr`] of one key, then cuts between them with
+	/// [`split_range`](crate::split::split_range). For [`SplitTarget::Bytes`] the part count is
+	/// `ceil(estimate.bytes / max(b, 1))`; the count is clamped to `[1, MAX_SPLIT_PARTS]`.
+	#[cfg_attr(feature = "observability", tracing::instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string())))]
+	fn split<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Key<'static>>>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			if rng.is_empty() {
+				return Ok(Vec::new());
+			}
+			let first = self.keys(rng.as_borrowed(), 1, 0, version).await?.keys.pop();
+			let last = self.keysr(rng.as_borrowed(), 1, 0, version).await?.keys.pop();
+			let (Some(first), Some(last)) = (first, last) else {
+				return Ok(Vec::new());
+			};
+			let parts = match target {
+				SplitTarget::Parts(_) => parts_for(target, || 0),
+				SplitTarget::Bytes(_) => {
+					let bytes = self.estimate(rng.as_borrowed(), version).await?.bytes;
+					parts_for(target, || bytes)
+				}
+			};
+			Ok(default_split(&first, &last, parts, &rng))
 		})
 	}
 

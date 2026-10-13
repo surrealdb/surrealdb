@@ -36,7 +36,7 @@ use crate::val::Value;
 /// It carries no transaction or datastore — only the config (for
 /// `operator_buffer_size`) and the bits `buffer_stream`/`monitor_stream` read.
 /// Operators that fetch records or evaluate context-bound expressions cannot
-/// run under it; Bind/Distinct (this slice) do not.
+/// run under it. Bind and Distinct can.
 pub(crate) fn root_ctx() -> ExecutionContext {
 	ExecutionContext::Root(RootContext {
 		ctx: Context::new_test().freeze(),
@@ -56,6 +56,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		version_stamp: None,
 		guard_verdicts: Default::default(),
 		writing: false,
+		session_effects: None,
 	})
 }
 
@@ -209,37 +210,6 @@ impl TestDb {
 		Self::build(setup, false, config).await
 	}
 
-	/// As [`Self::new_with_auth`], with `config` applied.
-	#[cfg(feature = "kv-mem")]
-	pub(crate) async fn new_with_auth_and_config(
-		setup: &str,
-		config: surrealdb_cnf::ConfigMap,
-	) -> Self {
-		Self::build(setup, true, config).await
-	}
-
-	/// As [`Self::new_with_config`], with sorts that ask for `TEMPFILES` spilling
-	/// beneath `dir`.
-	#[cfg(feature = "kv-mem")]
-	pub(crate) async fn new_with_temporary_directory(
-		setup: &str,
-		dir: &std::path::Path,
-		config: surrealdb_cnf::ConfigMap,
-	) -> Self {
-		let builder = Datastore::builder().with_temporary_directory(Some(dir));
-		Self::build_from(builder, setup, false, config).await
-	}
-
-	/// As [`Self::new`], with a notification broker: live queries run, and
-	/// every notification the datastore sends arrives on the receiver.
-	pub(crate) async fn new_with_notifications(
-		setup: &str,
-	) -> (Self, crate::channel::Receiver<crate::types::PublicNotification>) {
-		let (send, recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
-		let builder = Datastore::builder().with_notify(send);
-		(Self::build_from(builder, setup, false, surrealdb_cnf::ConfigMap::empty()).await, recv)
-	}
-
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, on a
 	/// datastore that runs no maintenance tasks: nothing writes to it but the
 	/// statements a test runs. A test comparing the keyspace two runs leave
@@ -249,16 +219,6 @@ impl TestDb {
 	pub(crate) async fn quiescent(setup: &str, auth_enabled: bool) -> Self {
 		let builder = Datastore::builder().without_maintenance_tasks();
 		Self::build_from(builder, setup, auth_enabled, surrealdb_cnf::ConfigMap::empty()).await
-	}
-
-	/// As [`Self::new_with_notifications`], on a datastore that runs no
-	/// maintenance tasks ([`Self::quiescent`]).
-	pub(crate) async fn quiescent_with_notifications(
-		setup: &str,
-	) -> (Self, crate::channel::Receiver<crate::types::PublicNotification>) {
-		let (send, recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
-		let builder = Datastore::builder().with_notify(send).without_maintenance_tasks();
-		(Self::build_from(builder, setup, false, surrealdb_cnf::ConfigMap::empty()).await, recv)
 	}
 
 	/// A test database over `ds`, whose `test`/`test` namespace and database
@@ -282,16 +242,20 @@ impl TestDb {
 		dir: &std::path::Path,
 		config: surrealdb_cnf::ConfigMap,
 	) -> Self {
+		Self::new_on_rocksdb_over(Datastore::builder(), setup, dir, config).await
+	}
+
+	/// As [`Self::new_on_rocksdb`], over a datastore that `builder` prepares, such as one with a
+	/// test-owned memory governor or temporary store.
+	#[cfg(feature = "kv-rocksdb")]
+	pub(crate) async fn new_on_rocksdb_over(
+		builder: crate::kvs::ds::Builder,
+		setup: &str,
+		dir: &std::path::Path,
+		config: surrealdb_cnf::ConfigMap,
+	) -> Self {
 		let path = format!("rocksdb:{}", dir.display());
-		Self::build_at(
-			Datastore::builder(),
-			&path,
-			setup,
-			false,
-			config,
-			crate::dbs::Capabilities::all(),
-		)
-		.await
+		Self::build_at(builder, &path, setup, false, config, crate::dbs::Capabilities::all()).await
 	}
 
 	async fn build_from(
@@ -309,16 +273,6 @@ impl TestDb {
 			crate::dbs::Capabilities::all(),
 		)
 		.await
-	}
-
-	/// As [`Self::new_with_config`], over a datastore `builder` prepares: one
-	/// a test gives its own memory governor or temporary store.
-	pub(crate) async fn new_on(
-		builder: crate::kvs::ds::Builder,
-		setup: &str,
-		config: surrealdb_cnf::ConfigMap,
-	) -> Self {
-		Self::build_from(builder, setup, false, config).await
 	}
 
 	/// As [`Self::new`], or [`Self::new_with_auth`] when `auth_enabled`, with
@@ -413,25 +367,6 @@ impl TestDb {
 		self.exec_ctx_with(session, mode, false).await
 	}
 
-	/// As [`Self::exec_ctx_as`], with the datastore's live-query broker
-	/// attached as the executor attaches it for a batch, so a statement's
-	/// notifications are sent once its transaction commits.
-	pub(crate) async fn exec_ctx_with_broker(
-		&self,
-		session: &Session,
-		mode: TransactionType,
-	) -> ExecutionContext {
-		self.exec_ctx_with(session, mode, true).await
-	}
-
-	/// As [`Self::exec_ctx`], with programs yielding through `scheduler`.
-	pub(crate) async fn exec_ctx_scheduled(
-		&self,
-		scheduler: Arc<dyn crate::exec::scheduler::Scheduler>,
-	) -> ExecutionContext {
-		self.exec_ctx_full(&Self::owner(), TransactionType::Read, false, Some(scheduler)).await
-	}
-
 	async fn exec_ctx_with(
 		&self,
 		session: &Session,
@@ -480,6 +415,7 @@ impl TestDb {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			session_effects: None,
 		};
 
 		ExecutionContext::Database(DatabaseContext {

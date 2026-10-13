@@ -656,6 +656,83 @@ mod pg_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn failed_block_let_leaves_session_untouched() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		// A block that fails reverts its LETs: an earlier binding keeps its
+		// value and a name never bound stays unbound (no NONE is written).
+		client.simple_query("LET $kept = 0").await?;
+		let _ =
+			client.simple_query("BEGIN; LET $kept = 1; LET $fresh = 1; THROW 'x'; COMMIT;").await;
+		let kept = rows(client.simple_query("RETURN $kept").await?);
+		assert_eq!(kept[0].get(0), Some("0"), "failed block must not rebind an earlier LET");
+		let fresh = rows(client.simple_query("RETURN $fresh ?? 'unset'").await?);
+		assert_eq!(fresh[0].get(0), Some("unset"), "failed block must not bind a new LET");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn let_after_return_is_captured() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		// A top-level RETURN does not skip later statements, so both LETs
+		// around it persist.
+		client.simple_query("LET $a = 1; RETURN 2; LET $b = 3;").await?;
+		let joined = rows(client.simple_query("RETURN string::concat($a, '-', $b)").await?);
+		assert_eq!(joined[0].get(0), Some("1-3"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn interactive_transaction_let_applies_on_commit() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		client.simple_query("LET $k = 1").await?;
+		client.simple_query("COMMIT").await?;
+		let k = rows(client.simple_query("RETURN $k").await?);
+		assert_eq!(
+			k[0].get(0),
+			Some("1"),
+			"a LET committed in an interactive transaction persists"
+		);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn interactive_transaction_let_is_discarded_on_rollback() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		client.simple_query("LET $r = 1").await?;
+		client.simple_query("ROLLBACK").await?;
+		let r = rows(client.simple_query("RETURN $r ?? 'unset'").await?);
+		assert_eq!(r[0].get(0), Some("unset"), "a rolled-back LET must not persist");
+		// The capture does not survive into the next transaction either.
+		client.simple_query("BEGIN").await?;
+		client.simple_query("COMMIT").await?;
+		let r = rows(client.simple_query("RETURN $r ?? 'unset'").await?);
+		assert_eq!(r[0].get(0), Some("unset"), "a discarded LET must not resurface");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn interactive_transaction_let_is_discarded_on_poisoned_commit()
+	-> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		client.simple_query("LET $p = 1").await?;
+		// The failing statement poisons the transaction; COMMIT then rolls it
+		// back, so the captured LET must be dropped.
+		let _ = client.simple_query("THROW 'boom'").await;
+		client.simple_query("COMMIT").await?;
+		let p = rows(client.simple_query("RETURN $p ?? 'unset'").await?);
+		assert_eq!(p[0].get(0), Some("unset"), "a LET in a poisoned transaction must not persist");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn transaction_preamble_is_recognized() -> Result<(), Box<dyn Error>> {
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;

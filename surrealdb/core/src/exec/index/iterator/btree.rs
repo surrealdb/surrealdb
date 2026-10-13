@@ -1,10 +1,8 @@
 //! B-tree index iterators for `Idx` (non-unique) and `Uniq` (unique) indexes.
 //!
-//! A program reads a B-tree index through the VM's entry scan
-//! (`exec::vm::entries`); the iterators here serve the operator tree, which
-//! test builds keep as the oracle the VM is compared against, and the range
-//! helpers serve the bitmap candidate scans. These iterators provide efficient, batched record
-//! retrieval using B-tree index structures.  They support:
+//! These iterators return record ids in batches, so a large index range is
+//! never loaded at once. The range helpers return the raw KV range for the
+//! bitmap candidate scans, which drain the entries themselves. They support:
 //!
 //! - **Equality lookups** – [`IndexEqualIterator`] / [`UniqueEqualIterator`]
 //! - **Range scans** – [`IndexRangeIterator`] / [`UniqueRangeIterator`]
@@ -85,7 +83,7 @@ fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 /// Decode a batch of KV pairs into entry doc-IDs for bitmap candidate plans.
 ///
 /// Doc-IDs found in the entry values are inserted into `docs`. Entries whose
-/// value predates the doc-ID format (see
+/// value carries no doc-ID (see
 /// [`crate::idx::entry::IndexEntryValue`]) are pushed onto `missing` so the
 /// caller can resolve their doc-ID through the table's shared `!di` mapping.
 /// Returns the number of entries decoded.
@@ -175,8 +173,6 @@ impl IndexEqualIterator {
 }
 
 /// Iterator for equality lookups on unique (`Uniq`) indexes.
-///
-/// Equality lookup on a unique index.
 ///
 /// For non-nullish values this is a single point-get (one KV entry per
 /// value).  NONE/NULL tuples are stored with the non-unique key format
@@ -714,20 +710,24 @@ impl BTreeIterator {
 		access: &BTreeAccess,
 		direction: Direction,
 	) -> Result<Option<Self>> {
-		Ok(Some(match (access, unique) {
-			(BTreeAccess::Equality(value), true) => {
-				Self::UniqueEqual(UniqueEqualIterator::new(ns, db, ix, value)?)
+		use crate::exec::index::access_path::KeyAccess;
+		Ok(Some(match (access.resolve(None)?, unique) {
+			(Some(KeyAccess::Equality(value)), true) => {
+				Self::UniqueEqual(UniqueEqualIterator::new(ns, db, ix, &value)?)
 			}
-			(BTreeAccess::Equality(value), false) => {
+			(Some(KeyAccess::Equality(value)), false) => {
 				let reverse = matches!(direction, Direction::Backward);
-				Self::Equal(IndexEqualIterator::with_direction(ns, db, ix, value, reverse)?)
+				Self::Equal(IndexEqualIterator::with_direction(ns, db, ix, &value, reverse)?)
 			}
-			(
-				BTreeAccess::Range {
-					range,
-				},
-				true,
-			) => Self::UniqueRange(UniqueRangeIterator::new(
+			(Some(KeyAccess::Range(range)), true) => Self::UniqueRange(UniqueRangeIterator::new(
+				ns,
+				db,
+				ix,
+				range.start.as_ref(),
+				range.end.as_ref(),
+				direction,
+			)?),
+			(Some(KeyAccess::Range(range)), false) => Self::Range(IndexRangeIterator::new(
 				ns,
 				db,
 				ix,
@@ -736,41 +736,20 @@ impl BTreeIterator {
 				direction,
 			)?),
 			(
-				BTreeAccess::Range {
-					range,
-				},
-				false,
-			) => Self::Range(IndexRangeIterator::new(
-				ns,
-				db,
-				ix,
-				range.start.as_ref(),
-				range.end.as_ref(),
-				direction,
-			)?),
-			(
-				BTreeAccess::Compound {
+				Some(KeyAccess::Compound {
 					prefix,
 					range,
-				},
+				}),
 				_,
 			) => Self::Compound(CompoundIterator::new(
 				ns,
 				db,
 				ix,
-				prefix,
+				&prefix,
 				range.as_ref(),
 				direction,
 			)?),
-			(
-				BTreeAccess::FullText {
-					..
-				}
-				| BTreeAccess::Knn {
-					..
-				},
-				_,
-			) => return Ok(None),
+			(None, _) => return Ok(None),
 		}))
 	}
 
@@ -838,33 +817,29 @@ impl CompoundRangeBackwardIterator {
 /// drain raw entries directly (bitmap candidate scans).
 ///
 /// Reuses the same range construction as the streaming iterators above, so a
-/// drain sees exactly the entries the equivalent streaming scan would.
+/// drain sees exactly the entries the equivalent streaming scan would. A bound
+/// that reads the statement clock resolves against `clock`, the instant of the
+/// statement the drain runs for, or the wall clock where none is installed.
 /// `FullText`/`Knn` access shapes are not B-tree scans and return an error.
 pub(crate) fn bitmap_scan_range(
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &IndexDefinition,
 	access: &crate::exec::index::access_path::BTreeAccess,
+	clock: Option<&crate::val::Datetime>,
 ) -> Result<TypedRange<IndexEntryValue>> {
-	use crate::exec::index::access_path::BTreeAccess;
+	use crate::exec::index::access_path::KeyAccess;
 	let unique = matches!(ix.index, crate::catalog::Index::Uniq);
-	Ok(match access {
-		BTreeAccess::Equality(v) => IndexKeyspace::of(ns, db, ix).equality(unique, v)?,
-		BTreeAccess::Range {
-			range,
-		} => {
+	Ok(match access.resolve(clock)? {
+		Some(KeyAccess::Equality(v)) => IndexKeyspace::of(ns, db, ix).equality(unique, &v)?,
+		Some(KeyAccess::Range(range)) => {
 			IndexKeyspace::of(ns, db, ix).range(unique, range.start.as_ref(), range.end.as_ref())?
 		}
-		BTreeAccess::Compound {
+		Some(KeyAccess::Compound {
 			prefix,
 			range,
-		} => compute_compound_key_range(ns, db, ix, prefix, range.as_ref())?,
-		BTreeAccess::FullText {
-			..
-		}
-		| BTreeAccess::Knn {
-			..
-		} => {
+		}) => compute_compound_key_range(ns, db, ix, &prefix, range.as_ref())?,
+		None => {
 			return Err(anyhow::anyhow!("Access shape is not a B-tree scan and has no key range"));
 		}
 	})
@@ -1299,7 +1274,7 @@ mod tests {
 			fx.db,
 			fx.ix("ik"),
 			true,
-			&BTreeAccess::Equality(Value::from(20)),
+			&BTreeAccess::literal_equality(Value::from(20)),
 			Direction::Forward,
 		)
 		.expect("iterator")
@@ -1312,7 +1287,7 @@ mod tests {
 			fx.ix("ik"),
 			true,
 			&BTreeAccess::Range {
-				range: from(20),
+				range: from(20).into(),
 			},
 			Direction::Forward,
 		)
@@ -1329,7 +1304,7 @@ mod tests {
 			fx.db,
 			fx.ix("iv"),
 			false,
-			&BTreeAccess::Equality(Value::from(1)),
+			&BTreeAccess::literal_equality(Value::from(1)),
 			Direction::Forward,
 		)
 		.expect("iterator")
@@ -1342,7 +1317,7 @@ mod tests {
 			fx.ix("iv"),
 			false,
 			&BTreeAccess::Range {
-				range: from(2),
+				range: from(2).into(),
 			},
 			Direction::Forward,
 		)
@@ -1355,12 +1330,12 @@ mod tests {
 		let fx = Fixture::new(&db, "c").await;
 		let tx = fx.tx();
 		let compound = |range| BTreeAccess::Compound {
-			prefix: vec![Value::from(1)],
+			prefix: vec![Value::from(1).into()],
 			range,
 		};
 		for (range, ids) in [
 			(None, vec!["c:1", "c:2", "c:3"]),
-			(Some((BinaryOperator::MoreThanEqual, Value::from(2))), vec!["c:2", "c:3"]),
+			(Some((BinaryOperator::MoreThanEqual, Value::from(2).into())), vec!["c:2", "c:3"]),
 		] {
 			let mut it = BTreeIterator::new(
 				fx.ns,
@@ -1384,7 +1359,7 @@ mod tests {
 			},
 		};
 		let knn = BTreeAccess::Knn {
-			vector: crate::exec::index::access_path::KnnQueryVector::Literal(Arc::from([])),
+			vector: Arc::from([]),
 			k: 1,
 			ef: 1,
 		};
@@ -1614,8 +1589,8 @@ mod tests {
 		let (streamed, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
 		assert_eq!(streamed.len(), 2, "the fixture has two rows on v = 1");
 
-		let access = BTreeAccess::Equality(Value::from(1i64));
-		let mut range = bitmap_scan_range(fx.ns, fx.db, ix, &access).expect("b-tree range");
+		let access = BTreeAccess::literal_equality(Value::from(1i64));
+		let mut range = bitmap_scan_range(fx.ns, fx.db, ix, &access, None).expect("b-tree range");
 		let entries = scan(&mut range, &tx, INDEX_BATCH_SIZE).await.expect("drain");
 		let mut docs = roaring::RoaringTreemap::new();
 		let mut missing = Vec::new();
@@ -1641,15 +1616,13 @@ mod tests {
 				operator: BooleanOperator::And,
 			},
 		};
-		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &full_text).is_err());
+		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &full_text, None).is_err());
 
 		let knn = BTreeAccess::Knn {
-			vector: crate::exec::index::access_path::KnnQueryVector::Literal(
-				vec![Number::Int(1)].into(),
-			),
+			vector: vec![Number::Int(1)].into(),
 			k: 3,
 			ef: 10,
 		};
-		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &knn).is_err());
+		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &knn, None).is_err());
 	}
 }

@@ -11,14 +11,13 @@
 //! A field or a destructure — a step, or the action — met at an array applies
 //! to each of its elements: `o.b` removes `b` from every element of an array
 //! `o` holds. An index numbers a position in an array and spells a key in an
-//! object, and removes what it names in either. A step known only once
-//! evaluated is a host pipeline of the program, run over the element it is
-//! applied to, or over `NONE` for an index.
+//! A step whose target is only known at run time is a pipeline of the program.
+//! It runs over the element the step is applied to, or over `NONE` for an index.
 
 use std::pin::Pin;
 
 use super::interp::State;
-use super::plan::{Walk, WalkAction, WalkStep};
+use super::payload::{Walk, WalkAction, WalkStep};
 use super::program::Program;
 use super::write;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -131,8 +130,8 @@ fn descend<'a>(
 							LogicalDestructureField::Field(name)
 							| LogicalDestructureField::All(name)
 							| LogicalDestructureField::Destructure(name, _) => name,
-							// Names an expression, or no single field, not a
-							// location to reach.
+							// An aliased entry names an expression and a rest entry names no single
+							// field, so neither is a location to walk to.
 							LogicalDestructureField::Aliased(..)
 							| LogicalDestructureField::Rest => {
 								continue;
@@ -149,7 +148,7 @@ fn descend<'a>(
 	})
 }
 
-/// One index step, shared by its literal and evaluated spellings.
+/// Applies an index step, whether the index is a literal or evaluated at run time.
 async fn descend_index(
 	program: &Program,
 	index: usize,
@@ -210,8 +209,8 @@ fn perform<'a>(
 			}
 			WalkAction::RemoveMatching(pipeline) => {
 				if let Value::Array(arr) = value {
-					// Decided over the array as it stands, then applied, so a
-					// removal never shifts an element past the predicate.
+					// Every predicate is evaluated against the array before any removal, so a
+					// removal never changes which elements a later predicate sees.
 					let mut keep = Vec::with_capacity(arr.len());
 					for item in arr.iter() {
 						let held =
@@ -268,13 +267,12 @@ fn remove_index(value: &mut Value, index: usize) {
 
 /// Removes the locations a destructure lists from an object.
 ///
-/// An entry naming a field removes it, and one naming the contents of a field
-/// (`{ a.* }`) empties the container it holds and leaves the field. An aliased
-/// entry names an expression, and a rest entry every field the pattern did
-/// not claim, rather than a location to remove: removal raises the error the
-/// destructure raises there. The error belongs to the removal rather than to
-/// the plan, so a statement whose source yields no row reaches no entry to
-/// object to.
+/// A field entry removes that field. A `{ a.* }` entry empties the container in
+/// field `a` and keeps the field. An aliased entry names an expression and a rest
+/// entry names no single field, so neither is a location to remove. Reaching
+/// either raises an error. The error is raised during removal, not when the plan
+/// is built, so a statement whose source yields no rows never reaches the entry
+/// and raises nothing.
 fn remove_fields(obj: &mut Object, fields: &[LogicalDestructureField]) -> FlowResult<()> {
 	for field in fields {
 		match field {

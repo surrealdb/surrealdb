@@ -1,0 +1,1096 @@
+//! The items from [`Built`] through [`bind_body`] are the expression binder's interface, which
+//! `build::expr` defines and this module re-exports so that the statement binder reads one path
+//! for it. State that belongs to the statement binder lives in [`BindCx`], which implements
+//! [`ExprHost`].
+//!
+//! [`BindCx`] is the host the expression binder calls back into. It holds the rewriter of the
+//! container being built and the stack of regions around the point being bound. Every region the
+//! binder or the expression binder enters is on that stack, so [`scope::return_target`] and
+//! [`scope::loop_exit`] see the regions an expression opens between a `RETURN`, `BREAK` or
+//! `CONTINUE` and the region it leaves.
+
+#![deny(clippy::wildcard_enum_match_arm)]
+
+use std::mem;
+use std::sync::Arc;
+
+use smallvec::SmallVec;
+use surrealdb_strand::Strand;
+use surrealdb_types::ToSql;
+
+use super::ops::{LogOp, LoopKind};
+use super::scope::{self, LoopExit};
+use super::verify::timestamp_arg;
+use crate::exec::function::FunctionRegistry;
+pub(crate) use crate::exec::ir::build::expr::{
+	Built, Control, ExprHost, FieldRead, LoopSite, NameRef, bind_body, bind_expr,
+};
+use crate::exec::ir::build::logical::{
+	bind_closure, bind_loop_site, bind_value_statement, receives_row,
+};
+use crate::exec::ir::cache::deps::ValueDeps;
+use crate::exec::ir::core::facts::FactCache;
+use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::location::{LocOrigin, Location};
+use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
+use crate::exec::ir::core::value::ValueDef;
+use crate::exec::ir::core::verify::{VerifyError, VerifyRule};
+use crate::exec::ir::error::IrError;
+use crate::exec::ir::expr::ops::{ConvertSite, ExprOp, RaiseKind};
+use crate::exec::ir::iface::catalog::{EffectCx, SemanticCatalog};
+use crate::exec::ir::iface::conversion::EliminationReason;
+use crate::exec::ir::iface::frame::{AuthorityFrame, Snapshot};
+use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, SnapshotId, ValueId};
+use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties, Visibility};
+use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
+use crate::exec::ir::op_kind::OpKind;
+use crate::exec::vm::payload::Refusal;
+use crate::expr::logical::{
+	EvalFrame, LogicalClosure, LogicalExpr, LogicalFields, LogicalOp, ROW_PARAMS,
+};
+use crate::expr::{Function, Kind};
+use crate::val::Value;
+
+/// The error of an invariant the binder relies on and that no request can break: a request that
+/// breaks one is an internal error, never a user error.
+pub(crate) fn invariant(detail: &str) -> IrError {
+	IrError::Verify(VerifyError {
+		op: None,
+		rule: VerifyRule::PerOp,
+		detail: detail.to_owned(),
+	})
+}
+
+/// One region on the stack: what the binder needs to know of it while it is the innermost.
+struct Entry {
+	region: RegionId,
+	block: BlockId,
+	/// The length of the environment when the region was entered; leaving the region drops every
+	/// name bound after it.
+	env_mark: usize,
+	/// The index in the environment below which no name resolves: the length of the environment
+	/// when the innermost region that does not inherit its enclosing bindings was entered.
+	floor: usize,
+	/// The statement timestamp this region introduces, when it is a statement region or isolated
+	/// from above.
+	timestamp: Option<ValueId>,
+}
+
+/// What the binder notes of the logical plans it binds, by the identity of the plans' nodes, so
+/// that the legality the logical plan states of its pipelines can be read for the loops the
+/// binder created.
+///
+/// A node is named by its address: the notes are read while the plans the request was bound from
+/// are still borrowed, and never outlive them.
+#[derive(Debug, Default)]
+pub(crate) struct BindNotes {
+	/// Each `logical.loop` that reads, row by row, the rows below a node of a logical plan, with
+	/// the address of that node.
+	pub(crate) loops: Vec<(OpId, usize)>,
+	/// Each `logical.stmt` with the address of the logical plan of the statement it holds.
+	pub(crate) statements: Vec<(OpId, usize)>,
+	/// The statements bound as late-bound, as written, by the index their `logical.statement`
+	/// names ([`LogOp::Statement`](super::ops::LogOp::Statement)'s `served`).
+	pub(crate) served: Vec<Arc<LogicalOp>>,
+}
+
+/// The identity of the logical node `node`, as [`BindNotes`] names it.
+pub(crate) fn node_identity(node: &LogicalOp) -> usize {
+	std::ptr::from_ref(node) as usize
+}
+
+/// A name bound to an SSA value.
+struct Binding {
+	name: Strand,
+	value: ValueId,
+}
+
+/// The context a request is bound in.
+///
+/// Holds the rewriter of the container, the effect context, the stack of enclosing regions
+/// (outermost first, the container's top region at the bottom), the lexical environment and the
+/// counters the expression binder draws from. Every op it creates carries the frame, the snapshot
+/// and the statement position it was last given.
+pub(crate) struct BindCx<'a> {
+	rw: Rewriter<'a>,
+	effects: EffectCx<'a>,
+	stack: Vec<Entry>,
+	kinds: Vec<RegionKind>,
+	env: Vec<Binding>,
+	current: Option<ValueId>,
+	row: Option<ValueId>,
+	/// The value a field read or `@` reads in place of `row`, inside a body over a value (an
+	/// optional chain's `then`, a destructure alias, a broadcast); a step's argument still reads
+	/// the document root.
+	field_base: Option<ValueId>,
+	aggregating: bool,
+	/// The fields of the projection directly above the `ORDER BY` about to be bound, which the
+	/// keys resolve their aliases against.
+	order_fields: Option<LogicalFields>,
+	/// The fields of that projection, by position, whose value is a key of the `ORDER BY` bound
+	/// beneath it, each with the key's position ([`ProjectAttrs::sort_keys`]).
+	///
+	/// [`ProjectAttrs::sort_keys`]: super::ops::ProjectAttrs::sort_keys
+	sort_keys: Vec<(u16, u16)>,
+	convert_sites: u32,
+	stmt: u32,
+	frame: FrameId,
+	snapshot: SnapshotId,
+	/// The first refusal bound since it was last taken.
+	refused: Option<Refusal>,
+	/// Whether the statements bound now are planned together with the top-level statement that
+	/// holds them, which is every statement up to and including the first one that may change the
+	/// catalog; those after it are planned when their list reaches them.
+	eager: bool,
+	/// Whether a statement that is not planned eagerly and runs as a group is bound as one the
+	/// program plans when it reaches it
+	/// ([`RequestInput::serves_late`](crate::exec::ir::RequestInput)).
+	serves_late: bool,
+	/// Whether running the top-level statement being bound may change the catalog: it holds a
+	/// schema statement anywhere, or reaches a body its text does not show. A write in such a
+	/// statement may meet definitions the bind cannot read.
+	catalog_may_change: bool,
+	/// Whether the container runs after a change to the catalog its planning cannot know
+	/// ([`RequestInput::late_bound`](crate::exec::ir::RequestInput)).
+	late_bound: bool,
+	/// Whether the top-level statement being bound writes records, which defines a table the
+	/// catalog does not hold.
+	statement_writes: bool,
+	/// Whether a write of the top-level statement bound so far may run code the catalog stores
+	/// ([`Self::note_write`]).
+	after_stored_code: bool,
+	/// The first refusal of the top-level statement being bound that is raised before any of the
+	/// statement runs.
+	hoisted: Option<Refusal>,
+	/// Whether the text of each expression bound is recorded on the op that computes it: the
+	/// statements under an `EXPLAIN`, which prints their clauses as written.
+	writing: bool,
+	/// The plan-time values the bind consumed.
+	#[allow(dead_code)]
+	deps: ValueDeps,
+	/// The loops and statements noted for the logical plans they were bound from.
+	notes: BindNotes,
+	/// The table the next write bound writes to whatever its subjects name: the table of the
+	/// stage bundle being bound ([`UnitKind::StageBundle`](crate::exec::ir::unit::UnitKind)), or
+	/// of the view table whose order is being bound
+	/// ([`UnitKind::ViewRows`](crate::exec::ir::unit::UnitKind)), which writes a view row.
+	bundle_table: Option<BundleTable>,
+}
+
+/// The table a stage bundle or a view table's order is bound for.
+#[derive(Clone, Debug)]
+pub(crate) struct BundleTable {
+	pub(crate) table: surrealdb_strand::TableName,
+	/// Whether the write writes a view row: the order of the view table's rows.
+	pub(crate) view_row: bool,
+}
+
+impl<'a> BindCx<'a> {
+	/// A context over `ir`, whose top region is the innermost region, under the default frame and
+	/// snapshot of the container.
+	///
+	/// A top block that takes arguments takes the statement timestamp first: it is a unit planned
+	/// as a body of its own ([`Ir::with_top_args`]), and no statement region around it supplies
+	/// the clock.
+	pub(crate) fn new(
+		ir: &'a mut Ir,
+		facts: &'a mut FactCache,
+		effects: EffectCx<'a>,
+	) -> Result<Self, IrError> {
+		let top = ir.top();
+		let kind = ir.region(top).map(|region| region.kind).ok_or(IrError::Stale("top region"))?;
+		let block = ir
+			.region(top)
+			.and_then(|region| region.blocks.first().copied())
+			.ok_or(IrError::Stale("top block"))?;
+		let timestamp = ir.block(block).and_then(|data| data.args.first().copied());
+		Ok(Self {
+			rw: Rewriter::new(ir, facts),
+			effects,
+			stack: vec![Entry {
+				region: top,
+				block,
+				env_mark: 0,
+				floor: 0,
+				timestamp,
+			}],
+			kinds: vec![kind],
+			env: Vec::new(),
+			current: None,
+			row: None,
+			field_base: None,
+			aggregating: false,
+			order_fields: None,
+			sort_keys: Vec::new(),
+			convert_sites: 0,
+			stmt: 0,
+			frame: FrameId::new(0),
+			snapshot: SnapshotId::new(0),
+			refused: None,
+			eager: true,
+			serves_late: false,
+			catalog_may_change: false,
+			late_bound: false,
+			statement_writes: false,
+			after_stored_code: false,
+			hoisted: None,
+			writing: false,
+			deps: ValueDeps::new(),
+			notes: BindNotes::default(),
+			bundle_table: None,
+		})
+	}
+
+	/// Binds the next write as one to `table`, the table of the stage bundle being bound.
+	pub(crate) fn bind_bundle_of(&mut self, table: surrealdb_strand::TableName) {
+		self.bundle_table = Some(BundleTable {
+			table,
+			view_row: false,
+		});
+	}
+
+	/// Binds the next write as the write of a view row of `table`, the view table whose order is
+	/// being bound.
+	pub(crate) fn bind_view_rows_of(&mut self, table: surrealdb_strand::TableName) {
+		self.bundle_table = Some(BundleTable {
+			table,
+			view_row: true,
+		});
+	}
+
+	/// The table of the stage bundle or view table's order being bound, taken by the one write the
+	/// unit holds, so that a write nested in its clauses names its own.
+	pub(crate) fn take_bundle_table(&mut self) -> Option<BundleTable> {
+		self.bundle_table.take()
+	}
+
+	/// The kinds of the regions around the point being bound, outermost first.
+	pub(crate) fn kinds(&self) -> &[RegionKind] {
+		&self.kinds
+	}
+
+	/// The block ops are created in.
+	pub(crate) fn block(&self) -> Result<BlockId, IrError> {
+		self.stack.last().map(|entry| entry.block).ok_or_else(|| invariant("no region is entered"))
+	}
+
+	/// The arguments of the block ops are created in: for the top region of a unit, the statement
+	/// timestamp and then the values its kind documents.
+	pub(crate) fn block_args(&self) -> Result<SmallVec<[ValueId; 4]>, IrError> {
+		let block = self.block()?;
+		self.rw
+			.ir()
+			.block(block)
+			.map(|data| data.args.iter().copied().collect())
+			.ok_or(IrError::Stale("block"))
+	}
+
+	/// The position in the request of the statement being bound.
+	pub(crate) fn set_statement(&mut self, index: usize) -> Result<(), IrError> {
+		self.stmt = u32::try_from(index).map_err(|_| IrError::Capacity("statement index"))?;
+		Ok(())
+	}
+
+	/// The results of `op`.
+	pub(crate) fn results(&self, op: OpId) -> Result<SmallVec<[ValueId; 2]>, IrError> {
+		self.rw.ir().op(op).map(|data| data.results.clone()).ok_or(IrError::Stale("op"))
+	}
+
+	/// Creates `kind` at the end of the current block with the given operands and results.
+	pub(crate) fn emit(
+		&mut self,
+		kind: OpKind,
+		operands: &[ValueId],
+		results: &[TypeKnowledge],
+	) -> Result<OpId, IrError> {
+		self.create(kind, operands.iter().copied().collect(), results.iter().cloned().collect())
+	}
+
+	/// Records `text` as the surface text of the expression the op `op` is built from. The text
+	/// is a label that never enters identity.
+	pub(crate) fn write_text_on(&mut self, op: OpId, text: String) -> Result<(), IrError> {
+		let loc = self.rw.ir().op(op).ok_or(IrError::Stale("op"))?.loc.clone();
+		self.rw.set_location(op, loc.with_text(Arc::new(text)))
+	}
+
+	/// Creates `kind` and answers its first result.
+	pub(crate) fn emit_value(
+		&mut self,
+		kind: OpKind,
+		operands: &[ValueId],
+		result: TypeKnowledge,
+	) -> Result<ValueId, IrError> {
+		let op = self.emit(kind, operands, &[result])?;
+		self.results(op)?.first().copied().ok_or(IrError::Stale("result"))
+	}
+
+	/// A `NONE` literal at the end of the current block.
+	pub(crate) fn none_literal(&mut self) -> Result<ValueId, IrError> {
+		self.emit_value(
+			OpKind::Expr(ExprOp::Literal(Box::new(Value::None))),
+			&[],
+			TypeKnowledge::Fact {
+				kind: Kind::None,
+				source: FactSource::Literal,
+			},
+		)
+	}
+
+	/// Closes the current block with a `logical.yield` of `values`.
+	pub(crate) fn yield_logical(&mut self, values: &[ValueId]) -> Result<(), IrError> {
+		self.emit(OpKind::Logical(LogOp::Yield), values, &[]).map(drop)
+	}
+
+	/// Closes the current block with an `expr.yield` of `values`.
+	pub(crate) fn yield_expr(&mut self, values: &[ValueId]) -> Result<(), IrError> {
+		self.emit(OpKind::Expr(ExprOp::Yield), values, &[]).map(drop)
+	}
+
+	/// Erases `op` and records that it never runs.
+	pub(crate) fn erase_unreachable(&mut self, op: OpId) -> Result<(), IrError> {
+		self.rw.erase(op, EliminationReason::Unreachable)
+	}
+
+	/// Records `refusal` as the refusal bound, keeping an earlier one.
+	pub(crate) fn note_refusal(&mut self, refusal: Refusal) {
+		self.refused.get_or_insert(refusal);
+	}
+
+	/// Answers the refusal bound since it was last taken, and clears it.
+	pub(crate) fn take_refusal(&mut self) -> Option<Refusal> {
+		self.refused.take()
+	}
+
+	/// Notes that the loop `loop_op` reads, row by row, the rows below `base` in the logical plan.
+	pub(crate) fn note_loop(&mut self, loop_op: OpId, base: &LogicalOp) {
+		self.notes.loops.push((loop_op, node_identity(base)));
+	}
+
+	/// Notes that the `logical.stmt` `stmt` holds the logical plan `plan`.
+	pub(crate) fn note_statement(&mut self, stmt: OpId, plan: &LogicalOp) {
+		self.notes.statements.push((stmt, node_identity(plan)));
+	}
+
+	/// The notes made so far, which are cleared.
+	pub(crate) fn take_notes(&mut self) -> BindNotes {
+		mem::take(&mut self.notes)
+	}
+
+	/// Starts a top-level statement: its statements are planned eagerly and none has hoisted a
+	/// refusal yet.
+	pub(crate) fn begin_statement(&mut self) {
+		self.eager = true;
+		self.catalog_may_change = false;
+		self.statement_writes = false;
+		self.after_stored_code = false;
+		self.hoisted = None;
+	}
+
+	/// Notes whether running `op`, the top-level statement being bound, may change the catalog
+	/// ([`Self::catalog_may_change`]): a schema statement written anywhere in it, or an effect that
+	/// changes the catalog or runs a body the statement's text does not show (a user-defined
+	/// function, a script, a statement given as text).
+	pub(crate) fn note_catalog_change_of(&mut self, op: &LogicalOp) {
+		use crate::expr::logical::EffectSet;
+		let reached = crate::exec::logical::effects::effects_of_plan_with(
+			op,
+			&crate::exec::logical::effects::Oracle::new(self.effects.registry),
+		)
+		.set;
+		self.catalog_may_change = crate::exec::planner::fold::changes_the_catalog(op)
+			|| reached.intersects(EffectSet::CHANGES_CATALOG | EffectSet::OPAQUE_BODY);
+		self.statement_writes = reached.writes_data();
+	}
+
+	/// Notes `write`, bound now, when it may run code the catalog stores, which may change the
+	/// catalog for the writes bound after it in the statement: a delete, whose reference actions
+	/// write other tables, or a write to a table with events.
+	pub(crate) fn note_write(&mut self, write: &crate::expr::logical::LogicalWrite) {
+		use crate::exec::ir::cache::answer::CatalogAnswer;
+		use crate::expr::logical::LogicalWriteStatement;
+		self.after_stored_code |= matches!(write.statement, LogicalWriteStatement::Delete(_))
+			|| crate::exec::ir::logical::stages::written_table(write).is_none_or(
+				|table| match self.effects.catalog.events(&table) {
+					CatalogAnswer::Found(events) => !events.is_empty(),
+					CatalogAnswer::Unknown => true,
+					CatalogAnswer::NotLoaded | CatalogAnswer::Absent => false,
+				},
+			);
+	}
+
+	/// Whether a write of the statement bound before this point may run code the catalog stores
+	/// ([`Self::note_write`]).
+	pub(crate) fn after_stored_code(&self) -> bool {
+		self.after_stored_code
+	}
+
+	/// Sets whether the container runs after a change to the catalog its planning cannot know.
+	pub(crate) fn set_late_bound(&mut self, late_bound: bool) {
+		self.late_bound = late_bound;
+	}
+
+	/// Whether the definitions of a table the statement being bound writes may differ, when it
+	/// writes, from those the bind reads: the container runs after a change its planning cannot
+	/// know, or the statement may change the catalog itself ([`Self::note_catalog_change_of`]).
+	pub(crate) fn catalog_may_change(&self) -> bool {
+		self.late_bound || self.catalog_may_change
+	}
+
+	/// Whether a read bound now, nested in a statement, may meet definitions the bind cannot read:
+	/// the top-level statement may change the catalog while it runs, the read follows a statement
+	/// of its list that may have, or the container runs after a change its planning cannot know.
+	pub(crate) fn nested_read_may_meet_change(&self) -> bool {
+		(self.catalog_may_change() || !self.eager)
+			&& self.kinds.iter().any(|kind| matches!(kind, RegionKind::Subquery))
+	}
+
+	/// Whether a table the catalog the statement is bound against does not define may be defined
+	/// when a read of the statement runs: the statement writes records or may change the catalog,
+	/// the read follows a statement of its list that may have, or the container runs after a
+	/// change its planning cannot know.
+	pub(crate) fn tables_may_be_defined(&self) -> bool {
+		self.catalog_may_change() || self.statement_writes || !self.eager
+	}
+
+	/// Whether the statement bound now is planned with its top-level statement.
+	pub(crate) fn eager(&self) -> bool {
+		self.eager
+	}
+
+	/// Sets whether a statement that is not planned eagerly and runs as a group is bound as one
+	/// the program plans when it reaches it.
+	pub(crate) fn set_serves_late(&mut self, serves_late: bool) {
+		self.serves_late = serves_late;
+	}
+
+	/// Whether the statement bound now is one the program plans when it reaches it: one that is
+	/// not planned eagerly, where the container serves such statements.
+	pub(crate) fn binds_served(&self) -> bool {
+		self.serves_late && !self.eager
+	}
+
+	/// Records `op`, a statement bound as late-bound, as written, and answers the index its
+	/// `logical.statement` names.
+	pub(crate) fn note_served(&mut self, op: &LogicalOp) -> Result<u32, IrError> {
+		let at = u32::try_from(self.notes.served.len())
+			.map_err(|_| IrError::Capacity("late-bound statements of a container"))?;
+		self.notes.served.push(Arc::new(op.clone()));
+		Ok(at)
+	}
+
+	/// Sets whether the statement bound now is planned eagerly, and answers the previous setting.
+	pub(crate) fn set_eager(&mut self, eager: bool) -> bool {
+		mem::replace(&mut self.eager, eager)
+	}
+
+	/// Records `refusal` as the refusal of the whole top-level statement, keeping an earlier one.
+	pub(crate) fn hoist_refusal(&mut self, refusal: Refusal) {
+		self.hoisted.get_or_insert(refusal);
+	}
+
+	/// Answers the refusal hoisted to the top-level statement, and clears it.
+	pub(crate) fn take_hoisted(&mut self) -> Option<Refusal> {
+		self.hoisted.take()
+	}
+
+	/// Restores the refusal an enclosing bind held, which was taken to scope a nested one.
+	pub(crate) fn restore_refusal(&mut self, refusal: Option<Refusal>) {
+		self.refused = refusal;
+	}
+
+	/// Runs `body` with the text of every expression it binds recorded on the op that computes
+	/// it, and restores the previous setting whether `body` succeeded or not.
+	pub(crate) fn with_writing<R>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = mem::replace(&mut self.writing, true);
+		let outcome = body(self);
+		self.writing = outer;
+		outcome
+	}
+
+	/// Binds `name` to `value` in the innermost region; the binding ends with that region. The
+	/// value is named too, so a read of the name has a text to print: a plan's, and the refusal of
+	/// a KNN query vector read from it.
+	pub(crate) fn declare(&mut self, name: Strand, value: ValueId) {
+		let _ = self.rw.set_hint_name(value, name.clone());
+		self.env.push(Binding {
+			name,
+			value,
+		});
+	}
+
+	/// Binds `name` to `value` in the innermost region without naming the value: a name the binder
+	/// declares for a read of its own, which no text prints. The binding ends with that region.
+	pub(crate) fn declare_unnamed(&mut self, name: Strand, value: ValueId) {
+		self.env.push(Binding {
+			name,
+			value,
+		});
+	}
+
+	/// The argument at `index` of the top block of the container, which a unit binds the names it
+	/// reads from.
+	pub(crate) fn top_arg(&self, index: usize) -> Result<ValueId, IrError> {
+		let entry = self.stack.first().ok_or(IrError::Stale("top region"))?;
+		let block = self.rw.ir().block(entry.block).ok_or(IrError::Stale("top block"))?;
+		block.args.get(index).copied().ok_or(IrError::Stale("top argument"))
+	}
+
+	/// The definitions readable at the catalog version the request is bound to.
+	pub(crate) fn catalog(&self) -> &'a dyn SemanticCatalog {
+		self.effects.catalog
+	}
+
+	/// The id of the frame that evaluates as `eval` under the principal of the current frame. The
+	/// user's own frame is the current one.
+	pub(crate) fn frame_for(&mut self, eval: &EvalFrame) -> Result<FrameId, IrError> {
+		if eval.is_caller() {
+			return Ok(self.frame);
+		}
+		let current = self.rw.ir().frame(self.frame).ok_or(IrError::Stale("frame"))?;
+		if current.eval == *eval {
+			return Ok(self.frame);
+		}
+		let frame = AuthorityFrame {
+			eval: eval.clone(),
+			unit: current.unit.clone(),
+		};
+		self.rw.intern_frame(frame)
+	}
+
+	/// Runs `body` with every op it creates under `frame`, and restores the frame whether `body`
+	/// succeeded or not.
+	pub(crate) fn with_frame<R>(
+		&mut self,
+		frame: FrameId,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = mem::replace(&mut self.frame, frame);
+		let outcome = body(self);
+		self.frame = outer;
+		outcome
+	}
+
+	/// Runs `body` with every op it creates reading the data as of `version`, and restores the
+	/// snapshot whether `body` succeeded or not.
+	pub(crate) fn with_version<R>(
+		&mut self,
+		version: ValueId,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let snapshot = self.rw.intern_snapshot(Snapshot::Version(version))?;
+		let outer = mem::replace(&mut self.snapshot, snapshot);
+		let outcome = body(self);
+		self.snapshot = outer;
+		outcome
+	}
+
+	/// Runs `body` with `row` as the row a field read or `@` reads, the document root a step's
+	/// argument reads and the current value a path that starts with a lookup reads, with no field
+	/// base around it, and restores all three whether `body` succeeded or not.
+	pub(crate) fn with_row<R>(
+		&mut self,
+		row: ValueId,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = self.row.replace(row);
+		let base = self.field_base.take();
+		let current = self.current.replace(row);
+		let outcome = body(self);
+		self.row = outer;
+		self.field_base = base;
+		self.current = current;
+		outcome
+	}
+
+	/// The row a field read or `@` reads where a row frame is entered: the field base where one is
+	/// set, otherwise the frame's row.
+	pub(crate) fn frame_row(&self) -> Option<ValueId> {
+		self.field_base.or(self.row)
+	}
+
+	/// The rows a closure literal written here captures: the row a field read or `@` reads, and
+	/// the frame's row as the document root where a field base other than it is set, which a
+	/// step's argument reads.
+	pub(crate) fn literal_rows(&self) -> (Option<ValueId>, Option<ValueId>) {
+		match (self.field_base, self.row) {
+			(Some(base), Some(row)) if base != row => (Some(base), Some(row)),
+			_ => (self.frame_row(), None),
+		}
+	}
+
+	/// Leaves `fields` as the projection the next `ORDER BY` bound resolves its aliases against.
+	pub(crate) fn set_order_fields(&mut self, fields: Option<LogicalFields>) {
+		self.order_fields = fields;
+	}
+
+	/// The projection fields left for the `ORDER BY` being bound, which no other `ORDER BY` sees.
+	pub(crate) fn take_order_fields(&mut self) -> Option<LogicalFields> {
+		self.order_fields.take()
+	}
+
+	/// Leaves `keys` as the fields of the projection about to be bound that read the keys of the
+	/// sort beneath it.
+	pub(crate) fn set_sort_keys(&mut self, keys: Vec<(u16, u16)>) {
+		self.sort_keys = keys;
+	}
+
+	/// The fields left for the projection being bound that read the keys of the sort beneath it,
+	/// which no other projection sees.
+	pub(crate) fn take_sort_keys(&mut self) -> Vec<(u16, u16)> {
+		mem::take(&mut self.sort_keys)
+	}
+
+	/// Runs `body` with the aggregate functions called in it belonging to the enclosing statement,
+	/// and restores the previous answer whether `body` succeeded or not.
+	pub(crate) fn with_aggregating<R>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = mem::replace(&mut self.aggregating, true);
+		let outcome = body(self);
+		self.aggregating = outer;
+		outcome
+	}
+
+	/// Runs `body` with no aggregate function called in it belonging to an enclosing statement,
+	/// and restores the previous answer whether `body` succeeded or not. A statement in value
+	/// position is planned on its own, so a grouping around it does not take its calls.
+	pub(crate) fn without_aggregating<R>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = mem::replace(&mut self.aggregating, false);
+		let outcome = body(self);
+		self.aggregating = outer;
+		outcome
+	}
+
+	/// Runs `body` as code that sees nothing of the row, the current value or the aggregate
+	/// context around it, except `row`, which it reads as its row and as its current value;
+	/// restores all three whether `body` succeeded or not. A region isolated from above runs its
+	/// body this way, since the values those three name are defined outside it.
+	pub(crate) fn with_isolation<R>(
+		&mut self,
+		row: Option<ValueId>,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer_row = mem::replace(&mut self.row, row);
+		let outer_base = self.field_base.take();
+		let outer_current = mem::replace(&mut self.current, row);
+		let outer_aggregating = mem::replace(&mut self.aggregating, false);
+		let outcome = body(self);
+		self.row = outer_row;
+		self.field_base = outer_base;
+		self.current = outer_current;
+		self.aggregating = outer_aggregating;
+		outcome
+	}
+
+	/// Enters a `FunctionBody` region owned by `owner` and runs `body` in it, leaving the region
+	/// whether `body` succeeded or not.
+	///
+	/// The region's block arguments are the statement timestamp, one value per declared parameter
+	/// and one per row name the call passes, in that order; the parameters are bound under their
+	/// names and the row names under theirs. A name the caller binds, whether by `LET`, `FOR` or
+	/// an argument of its own, does not resolve in the body: it reads as a free name. The body
+	/// reads no row of its caller.
+	#[allow(dead_code)]
+	pub(crate) fn within_function_body<R>(
+		&mut self,
+		owner: OpId,
+		params: &[Strand],
+		row_names: &[Strand],
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let mut args = vec![timestamp_arg()];
+		args.extend(params.iter().chain(row_names).map(|_| TypeKnowledge::Unknown));
+		self.within(owner, RegionKind::FunctionBody, &args, |cx, entry| {
+			for (name, value) in params.iter().chain(row_names).zip(entry.iter().skip(1)) {
+				cx.declare(name.clone(), *value);
+			}
+			cx.with_isolation(None, body)
+		})
+	}
+
+	/// Binds each of `names` to `element` in the innermost region, and `parent` to the row the
+	/// enclosing frame reads, when it has one. The bindings end with the region.
+	pub(crate) fn declare_row_names(&mut self, element: ValueId, names: &[&str]) {
+		for name in names {
+			self.declare(Strand::new(*name), element);
+		}
+		self.declare_parent();
+	}
+
+	/// Whether a `$parent` read here, or by a statement entered here, is bound: by a name, or to
+	/// the row the enclosing frame reads ([`Self::declare_parent`]).
+	pub(crate) fn binds_parent(&self) -> bool {
+		self.row.or(self.field_base).is_some() || matches!(self.lookup("parent"), NameRef::Value(_))
+	}
+
+	/// Binds `parent` to the row the enclosing frame reads, in the innermost region: the frame's
+	/// row, or where it has none the element of the element body it stands in. Where neither is
+	/// entered `parent` stays unbound and reads as a free name.
+	pub(crate) fn declare_parent(&mut self) {
+		if let Some(parent) = self.row.or(self.field_base) {
+			self.declare(Strand::new("parent"), parent);
+		}
+	}
+
+	/// The ops of the current block, in order.
+	pub(crate) fn block_ops(&self) -> Result<&[OpId], IrError> {
+		let block = self.block()?;
+		self.rw.ir().block(block).map(|data| data.ops.as_slice()).ok_or(IrError::Stale("block"))
+	}
+
+	/// Enters a region of `kind` owned by `owner`, runs `body` with the region's block arguments
+	/// and leaves the region whether `body` succeeded or not.
+	pub(crate) fn within<R>(
+		&mut self,
+		owner: OpId,
+		kind: RegionKind,
+		args: &[TypeKnowledge],
+		body: impl FnOnce(&mut Self, &[ValueId]) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let (_, block) = self.push_region(owner, kind, args)?;
+		let entry: SmallVec<[ValueId; 4]> = match self.rw.ir().block(block) {
+			Some(data) => data.args.iter().copied().collect(),
+			None => SmallVec::new(),
+		};
+		let outcome = body(self, &entry);
+		let left = self.pop_region();
+		let value = outcome?;
+		left?;
+		Ok(value)
+	}
+
+	fn push_region(
+		&mut self,
+		owner: OpId,
+		kind: RegionKind,
+		args: &[TypeKnowledge],
+	) -> Result<(RegionId, BlockId), IrError> {
+		let (region, block) = self.rw.create_region(owner, kind, args)?;
+		let first = self.rw.ir().block(block).and_then(|data| data.args.first().copied());
+		let introduces_timestamp =
+			matches!(kind, RegionKind::Statement(_)) || kind.isolated_from_above();
+		let floor = match kind.binding_visibility() {
+			Visibility::Inherits => self.stack.last().map_or(0, |entry| entry.floor),
+			Visibility::ArgumentsOnly | Visibility::Isolated => self.env.len(),
+		};
+		self.stack.push(Entry {
+			region,
+			block,
+			env_mark: self.env.len(),
+			floor,
+			timestamp: if introduces_timestamp {
+				first
+			} else {
+				None
+			},
+		});
+		self.kinds.push(kind);
+		Ok((region, block))
+	}
+
+	fn pop_region(&mut self) -> Result<(), IrError> {
+		if self.stack.len() <= 1 {
+			return Err(invariant("a region was left that was never entered"));
+		}
+		if let Some(entry) = self.stack.pop() {
+			self.env.truncate(entry.env_mark);
+		}
+		self.kinds.pop();
+		Ok(())
+	}
+
+	/// The name a row-bound parameter resolves at this point, in the order of [`ROW_PARAMS`].
+	fn row_names(&self) -> impl Iterator<Item = ValueId> + '_ {
+		ROW_PARAMS.iter().filter_map(|name| match self.lookup(name) {
+			NameRef::Value(value) => Some(value),
+			NameRef::Free => None,
+		})
+	}
+
+	/// The `expr.raise` that ends the current block with `kind`.
+	pub(crate) fn raise(&mut self, kind: RaiseKind) -> Result<(), IrError> {
+		self.emit(OpKind::Expr(ExprOp::Raise(Box::new(kind))), &[], &[]).map(drop)
+	}
+
+	fn location(&self) -> Location {
+		Location {
+			stmt: self.stmt,
+			span: None,
+			origin: LocOrigin::Query,
+		}
+	}
+}
+
+impl ExprHost for BindCx<'_> {
+	fn ir(&self) -> &Ir {
+		self.rw.ir()
+	}
+
+	fn registry(&self) -> &FunctionRegistry {
+		self.effects.registry
+	}
+
+	fn create(
+		&mut self,
+		kind: OpKind,
+		operands: SmallVec<[ValueId; 4]>,
+		results: SmallVec<[TypeKnowledge; 2]>,
+	) -> Result<OpId, IrError> {
+		let block = self.block()?;
+		let spec = OpSpec {
+			kind,
+			operands,
+			results,
+			frame: self.frame,
+			snapshot: self.snapshot,
+			loc: self.location(),
+		};
+		self.rw.create(InsertPoint::End(block), spec)
+	}
+
+	fn enter_region(
+		&mut self,
+		owner: OpId,
+		kind: RegionKind,
+		args: &[TypeKnowledge],
+	) -> Result<(RegionId, BlockId), IrError> {
+		self.push_region(owner, kind, args)
+	}
+
+	fn leave_region(&mut self) -> Result<(), IrError> {
+		self.pop_region()
+	}
+
+	fn lookup(&self, name: &str) -> NameRef {
+		let floor = self.stack.last().map_or(0, |entry| entry.floor);
+		match self.env[floor..].iter().rev().find(|binding| binding.name.as_str() == name) {
+			Some(binding) => NameRef::Value(binding.value),
+			None => NameRef::Free,
+		}
+	}
+
+	/// Where no row frame is entered, a `NONE` literal: a field read or `@` of no document reads
+	/// `NONE`. A region that receives a row (a clause, a frame) binds its body over that row, so a
+	/// read with no row inside one, short of a region isolated from above, is an invariant break.
+	fn row(&mut self) -> Result<ValueId, IrError> {
+		if let Some(row) = self.frame_row() {
+			return Ok(row);
+		}
+		for kind in self.kinds.iter().rev() {
+			if receives_row(*kind) {
+				return Err(invariant("a row is read where no row frame is entered"));
+			}
+			if kind.isolated_from_above() {
+				break;
+			}
+		}
+		self.none_literal()
+	}
+
+	fn current(&self) -> Result<ValueId, IrError> {
+		self.current.ok_or_else(|| invariant("the current value is read where none is bound"))
+	}
+
+	fn replace_current(&mut self, value: Option<ValueId>) -> Option<ValueId> {
+		mem::replace(&mut self.current, value)
+	}
+
+	fn replace_row(&mut self, value: Option<ValueId>) -> Option<ValueId> {
+		mem::replace(&mut self.row, value)
+	}
+
+	fn replace_field_base(&mut self, value: Option<ValueId>) -> Option<ValueId> {
+		mem::replace(&mut self.field_base, value)
+	}
+
+	fn step_root(&mut self, receiver: ValueId) -> Result<ValueId, IrError> {
+		Ok(self.row.unwrap_or(receiver))
+	}
+
+	fn declare_parent_as(&mut self, value: ValueId) {
+		self.declare(Strand::new("parent"), value);
+	}
+
+	fn timestamp(&self) -> Option<ValueId> {
+		self.stack.iter().rev().find_map(|entry| entry.timestamp)
+	}
+
+	/// Answers `false` for every name, since the bind context holds no capability set. A call the
+	/// binder does not fold into a read of the statement timestamp keeps its run-time capability
+	/// check.
+	fn allows_function(&self, name: &str) -> bool {
+		let _ = name;
+		false
+	}
+
+	fn field(&self, name: &Strand) -> FieldRead {
+		let _ = name;
+		FieldRead::Plain
+	}
+
+	fn aggregating(&self) -> bool {
+		self.aggregating
+	}
+
+	fn next_convert_site(&mut self) -> ConvertSite {
+		let site = ConvertSite(self.convert_sites);
+		self.convert_sites += 1;
+		site
+	}
+
+	fn row_name_operands(&self, callee: &Function) -> SmallVec<[ValueId; 2]> {
+		match callee {
+			Function::Custom(_)
+			| Function::Module(..)
+			| Function::Silo {
+				..
+			} => self.row_names().collect(),
+			Function::Normal(_) | Function::Script(_) | Function::Model(_) => SmallVec::new(),
+		}
+	}
+
+	fn bind_value_statement(&mut self, op: &LogicalOp) -> Result<Built, IrError> {
+		self.without_aggregating(|cx| bind_value_statement(cx, op))
+	}
+
+	fn bind_loop_site(&mut self, site: LoopSite<'_>) -> Result<Built, IrError> {
+		bind_loop_site(self, site)
+	}
+
+	fn bind_closure(&mut self, closure: &LogicalClosure) -> Result<ValueId, IrError> {
+		bind_closure(self, closure)
+	}
+
+	fn writing(&self) -> bool {
+		self.writing
+	}
+
+	fn block_len(&self) -> usize {
+		self.block_ops().map_or(0, <[OpId]>::len)
+	}
+
+	fn write_text(&mut self, mark: usize, value: ValueId, expr: &LogicalExpr) {
+		let Ok(block) = self.block() else {
+			return;
+		};
+		let ir = self.rw.ir();
+		let Some(&ValueDef::OpResult {
+			op,
+			..
+		}) = ir.value(value).map(|data| &data.def)
+		else {
+			return;
+		};
+		let Some(ops) = ir.block(block).map(|data| data.ops.as_slice()) else {
+			return;
+		};
+		let Some(at) = ops.iter().rposition(|held| *held == op) else {
+			return;
+		};
+		if at < mark {
+			return;
+		}
+		let Some(data) = ir.op(op) else {
+			return;
+		};
+		let loc = data.loc.clone().with_text(Arc::new(expr.to_sql()));
+		let _ = self.rw.set_location(op, loc);
+	}
+
+	fn note_knn_vector(&mut self, knn: ValueId, vector: &LogicalExpr) {
+		let ir = self.rw.ir();
+		let Some(right) = ir
+			.value(knn)
+			.and_then(|data| match data.def {
+				ValueDef::OpResult {
+					op,
+					..
+				} => ir.op(op),
+				ValueDef::BlockArg {
+					..
+				} => None,
+			})
+			.and_then(|data| data.operands.get(1).copied())
+		else {
+			return;
+		};
+		let Some(held) = ir.value(right) else {
+			return;
+		};
+		let ValueDef::OpResult {
+			op,
+			..
+		} = held.def
+		else {
+			return;
+		};
+		if held.hint_name.is_some() {
+			return;
+		}
+		let Some(data) = ir.op(op) else {
+			return;
+		};
+		if data.loc.text().is_some() {
+			return;
+		}
+		let loc = data.loc.clone().with_text(Arc::new(vector.to_sql()));
+		let _ = self.rw.set_location(op, loc);
+	}
+
+	fn note_matches(&mut self, matches: ValueId, expr: &LogicalExpr) {
+		let ir = self.rw.ir();
+		let Some(&ValueDef::OpResult {
+			op,
+			..
+		}) = ir.value(matches).map(|data| &data.def)
+		else {
+			return;
+		};
+		let Some(data) = ir.op(op) else {
+			return;
+		};
+		if data.loc.text().is_some() {
+			return;
+		}
+		let loc = data.loc.clone().with_text(Arc::new(expr.to_sql()));
+		let _ = self.rw.set_location(op, loc);
+	}
+
+	fn bind_control(&mut self, control: Control) -> Result<Built, IrError> {
+		match scope::loop_exit(self.kinds()) {
+			LoopExit::Target(_) => {
+				let exit = match control {
+					Control::Break => LogOp::Break,
+					Control::Continue => LogOp::Next,
+				};
+				self.emit(OpKind::Logical(exit), &[], &[])?;
+			}
+			LoopExit::Barrier => self.raise(RaiseKind::InvalidControlFlow)?,
+		}
+		Ok(Built::Diverged)
+	}
+
+	fn in_recursion_body(&self) -> bool {
+		let ir = self.rw.ir();
+		for (entry, kind) in self.stack.iter().zip(&self.kinds).rev() {
+			if let Some(OpKind::Logical(LogOp::Loop {
+				kind: loop_kind,
+				..
+			})) = ir.parent_op(entry.region).and_then(|owner| ir.op(owner)).map(|data| &data.kind)
+			{
+				return *loop_kind == LoopKind::Recurse;
+			}
+			if kind.isolated_from_above() {
+				return false;
+			}
+		}
+		false
+	}
+}

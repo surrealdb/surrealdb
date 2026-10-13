@@ -1,12 +1,18 @@
 /**
 [test]
-reason = "Test that RETURN breaks nested execution in functions, transactions, blocks, and conditionals"
+reason = """
+A RETURN ends the innermost value scope it stands in: a function body's inner
+block, a statement of a transaction, a block expression, or a conditional in a
+projection. A RETURN directly inside BEGIN … COMMIT is a value statement, so the
+statements after it run (register #8). The function case needs the value-scope
+RETURN lowering of lane L9 and passes only once it merges.
+"""
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "1"
+value = "2"
 
 [[test.results]]
 value = "NONE"
@@ -16,6 +22,9 @@ value = "{ id: a:1 }"
 
 [[test.results]]
 value = "1"
+
+[[test.results]]
+value = "{ id: a:2 }"
 
 [[test.results]]
 value = "NONE"
@@ -28,7 +37,7 @@ value = "[2, 2, 4, 4]"
 
 */
 
--- Test RETURN in function definition - should return 1, not 2
+-- Test RETURN in function definition - the inner block catches its RETURN, so the function returns 2
 DEFINE FUNCTION fn::test() {
     {
         RETURN 1;
@@ -38,7 +47,7 @@ DEFINE FUNCTION fn::test() {
 
 RETURN fn::test();
 
--- Test RETURN in transaction - should stop after RETURN, not execute CREATE a:2
+-- Test RETURN in transaction - a value statement, so CREATE a:2 still runs
 BEGIN;
 CREATE ONLY a:1;
 RETURN 1;

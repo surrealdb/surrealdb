@@ -2,13 +2,13 @@
 
 **Status:** design for three stacked changes on the bounded-memory base
 (`TempStore`, `Run`/`RunSink`/`RunSource`, `Runs`/`Merge`, `QueryMemory`,
-the spilling sort, keyed groups, GQL distinct and GQL/SQL joins, and region
+the spilling sort, keyed groups, GQL distinct and GQL/SQL joins, and morsel
 batch parallelism). Nothing below is built until its step lands.
 
 | Step | Branch | Builds on | Delivers |
 | ---- | ------ | --------- | -------- |
 | A | `vm/spill-runs` | bounded-memory | run header and trailer, store-global run names, LIMIT/top-k in merge and reduce |
-| B | `vm/spill-partials` | A | one `Partial` per breaker for a spilling region batch and for a fan; one coordinator merge over partials |
+| B | `vm/spill-partials` | A | one `Partial` per breaker for a spilling morsel and for a fan; one coordinator merge over partials |
 | C | `vm/spill-partitions` | B | range partitioning of keyed breakers into N partitions, proven equivalent to the unpartitioned finish |
 
 ## The thesis
@@ -16,7 +16,7 @@ batch parallelism). Nothing below is built until its step lands.
 A sorted spilled run and a fan's partial result are the same object: a
 sequence of records `(keys, row)` in a stated order, written once through a
 `TempStore` and read back once or merged. Local spill writes runs because a
-breaker outgrew its lease; a region batch or a fan writes runs because its
+breaker outgrew its lease; a morsel or a fan writes runs because its
 result must travel to a merge that is not on its own stack. Either way the
 consumer is the same k-way merge (`Runs::merge` over a loser tree) with the
 same tie rule — the earlier source wins — so a merge over partials answers the
@@ -100,10 +100,11 @@ the keys.
   `keep` can reach. Where the query has a temporary store it takes a lease
   account (`bound_breakers`); with none it takes no account and never fails for
   memory.
-- Region bodies admit sorts and aggregates only (`body_admits` refuses
-  `JoinProbe`, `Distinct`, `SplitPush`, writes). A batch runs on a `State` of its
-  own with no lease account; its result is absorbed in batch order
-  (`Region::absorb`, `State::keep_absorbed`, `Groups::absorb`).
+- Morsel bodies admit sorts, aggregates and one distinct set of the output
+  (`placement::Policy::plan` refuses `JoinProbe`, `SplitPush`, writes). A morsel
+  runs on a `State` of its own and its result is absorbed in order
+  (`morsel::merge::absorb`, `State::keep_absorbed`, `Groups::absorb`; a distinct
+  set's rows through `morsel::merge::dedupe`).
 - `BuildId { ISA_VERSION, CARGO_PKG_VERSION, capabilities }` names the build that
   compiled a unit (`compile_cache.rs`).
 
@@ -278,7 +279,7 @@ and never spills or fails for memory.
 ### B.1 `Partial`
 
 ```rust
-/// What one producer — a region batch that spilled, or a fan — hands its
+/// What one producer — a morsel that spilled, or a fan — hands its
 /// coordinator for one breaker.
 pub(crate) struct Partial {
     /// The breaker and order every run of this partial was written under;
@@ -303,8 +304,8 @@ pub(crate) struct PartialCounts {
 }
 ```
 
-`Partial` lives in `exec/vm/partial.rs`. Region's batch struct is
-`BatchResult`, so the two never share a name.
+`Partial` lives in `exec/vm/partial.rs`. A morsel's result struct is
+`MorselResult`, so the two never share a name.
 
 A producer emits one `Partial` per breaker it ran. A partial's runs are written
 with the producer's program key. A fan that hands its partial to another
@@ -369,10 +370,16 @@ Per breaker:
   before any probe row is deferred. `SpilledJoin::finish` slices the key columns
   off each record, so the producer and arrival columns only order the build.
 
-### B.3 Region batches that spill
+### B.3 Morsels that spill
 
-Region bodies hold only sorts and aggregates, so a region batch produces sort
-and group partials only.
+A morsel's runs and partials are the spill's runs and partials. A morsel's
+sort and groups spill as the statement's do, and what a morsel hands the merge
+for a breaker it spilled is a `Partial`; a breaker it did not spill is handed on
+in memory, a sort's entries already sorted into a run of the morsel's
+(`morsel/sorted.rs`) and a keyed aggregate's groups to be merged with the groups
+of the morsels beside it by partitions of the key space (`morsel/grouped.rs`).
+Morsel bodies hold sorts, aggregates and one distinct set, so a morsel produces
+sort and group partials only; a distinct set is not spilled.
 
 - A batch whose body is not paged binds its breakers to the query's lease when
   the query can spill (`bound_batch`): one `Reservation` per spillable breaker,
@@ -631,9 +638,9 @@ uploads parts however its storage requires; nothing in the VM depends on how.
   `fan_in`; top-k: a spilled `keep` sort answers the in-memory
   top-k for every `keep` around run and pass boundaries, with ties, and a pass
   writes no more than `keep` records (counted by the store).
-- **B**: region with forced batch spill (tiny lease) answers the serial result
+- **B**: morsels with forced spill (tiny lease) answers the serial result
   for sort, sort with ties, `GROUP BY` with order-sensitive accumulators
-  (`array::group`), first values, and `GROUP ALL`; the no-spill region path
+  (`array::group`), first values, and `GROUP ALL`; the no-spill morsel path
   allocates as before (`vm_alloc` tests); N simulated fans over a shared store
   answer the serial result for every breaker, including caps' errors.
 - **C**: the equivalence tests of C.4: split partials hold only their

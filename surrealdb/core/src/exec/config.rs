@@ -26,15 +26,35 @@ pub(crate) const DEFAULT_SCAN_BATCH_BYTES: usize = 2 << 20;
 
 /// Default row count below which a batch is evaluated one row at a time.
 ///
-/// This is the highest of the thresholds the fan-out sites used before they
-/// shared one, not a measured optimum. Overridable per deployment via the
+/// This is the highest of the fan-out thresholds in use. It is not a measured
+/// optimum. Overridable per deployment via the
 /// `fan_out_row_threshold` key.
 const DEFAULT_FAN_OUT_ROW_THRESHOLD: usize = 4;
 
-/// Default row count below which the VM runs a region's batch on the
-/// statement's own task rather than handing it to a worker. Overridable per
-/// deployment via the `region_row_threshold` key.
-const DEFAULT_REGION_ROW_THRESHOLD: usize = 256;
+/// Default entries a pipeline's coordinator reads before it may split its
+/// remaining input into morsels, and the fewest rows a batch of decoded rows
+/// holds when it goes to a worker. Overridable per deployment via the
+/// `morsel_split_rows` key.
+const DEFAULT_MORSEL_SPLIT_ROWS: usize = 256;
+
+/// Default bytes a morsel over a key range aims at. Overridable per deployment
+/// via the `morsel_target_bytes` key.
+const DEFAULT_MORSEL_TARGET_BYTES: usize = 1 << 20;
+
+/// Default output bytes a morsel that is not at the front of its pipeline holds
+/// before it parks. Overridable per deployment via the `morsel_window_bytes`
+/// key.
+const DEFAULT_MORSEL_WINDOW_BYTES: usize = 1 << 20;
+
+/// Default places of the node's worker pool morsel workers never take, so that
+/// short statements keep a core. Overridable per deployment via the
+/// `morsel_oltp_reserve` key.
+const DEFAULT_MORSEL_OLTP_RESERVE: usize = 1;
+
+/// Default quanta a worker holds a place of the node's worker pool while another
+/// statement waits for one. Overridable per deployment via the
+/// `morsel_place_quantum` key.
+const DEFAULT_MORSEL_PLACE_QUANTUM: u32 = 8;
 
 /// Default units of work a running program does between two yields to the
 /// host's scheduler. Overridable per deployment via the `vm_quantum` key.
@@ -91,16 +111,15 @@ pub(crate) struct ExecConfig {
 	/// Set to 0 to disable operator-level pipeline buffering.
 	/// (default: 2)
 	pub operator_buffer_size: usize,
-	/// Default batch size for scan operators that collect records before
-	/// yielding downstream (table/index/record-id/graph/reference scans).
-	/// Memory-constrained deployments can reduce this to lower per-pipeline
-	/// in-flight memory at the cost of slightly more per-batch dispatch
-	/// overhead. Per-batch unit is values, not bytes. Permission-checked and
-	/// `FullEdge` graph scans pipeline their record resolves, holding up to
-	/// two id batches plus one resolved value batch in flight, so their
-	/// worst-case per-pipeline memory is ~2x this knob plus one materialized
-	/// batch (dominant in `FullEdge` mode); the knob still scales that bound
-	/// linearly. (default: 1000)
+	/// Default batch size for scan operators that collect records before yielding
+	/// downstream (table, index, record-id, graph and reference scans). Lowering it
+	/// reduces per-pipeline in-flight memory on memory-constrained deployments, at the
+	/// cost of more per-batch dispatch overhead. The unit is values, not bytes.
+	/// Permission-checked and `FullEdge` graph scans pipeline their record resolves,
+	/// holding up to two id batches plus one resolved value batch in flight, so their
+	/// worst-case per-pipeline memory is about twice this knob plus one materialized
+	/// batch (dominant in `FullEdge` mode). The knob still scales that bound linearly.
+	/// (default: 1000)
 	pub scan_batch_size: usize,
 	/// Approximate decoded size, in bytes, of a batch from a scan that sizes
 	/// its batches by bytes as well as rows (bitmap resolves, index scans). Every operator
@@ -111,17 +130,17 @@ pub(crate) struct ExecConfig {
 	/// batches. Accepts a byte count or a size such as `512KiB`; zero and
 	/// unparseable values are ignored. (default: 2 MiB)
 	pub scan_batch_bytes: usize,
-	/// The maximum size of the priority queue triggering usage of the priority
-	/// queue for the result collector.
+	/// The largest `ORDER BY ... LIMIT` size served by a bounded priority queue in
+	/// the result collector (default: 1000).
 	pub max_order_limit_priority_queue_size: u32,
 	/// Whether eligible `ORDER BY … LIMIT` table scans may skip record decode
 	/// for rows that cannot beat the current top-K threshold (default: true)
 	pub topk_threshold_pushdown_enabled: bool,
 	/// Maximum number of build-side rows a GQL `MATCH` hash join (and the
-	/// whole-row `Distinct` dedup that rides the same budget) may hold in memory
+	/// whole-row `Distinct` dedup that shares the budget) may hold in memory
 	/// before failing the query (default: 1,000,000). Bounds the in-memory
-	/// build/seen set for GQL v2 binding-table execution; spill to disk is a
-	/// future change (matching the `Aggregate` stance). Errors that trip this
+	/// build/seen set for GQL v2 binding-table execution. Rows are not spilled to
+	/// disk; a query over the limit fails. Errors that trip this
 	/// guard name the env knob (`SURREAL_GQL_MAX_JOIN_BUILD_ROWS`).
 	pub gql_max_join_build_rows: usize,
 	/// Maximum number of paths a single GQL `MATCH` `PathExpand` (variable-length
@@ -161,13 +180,39 @@ pub(crate) struct ExecConfig {
 	/// overlapping their reads. Rows that each run an operator plan gain a great
 	/// deal, because those plans buffer through their own tasks and so reach
 	/// more than one core. `benches/fan_out.rs` measures both settings against
-	/// each other per shape and per backend; #860 tracks acting on it.
+	/// each other per shape and per backend.
 	pub fan_out_row_threshold: usize,
-	/// The row count from which the VM may hand a batch of a region's rows to
-	/// a worker of its own (default: 256). Below it the batch runs on the
-	/// statement's task: a worker costs a task spawn, which a small batch does
-	/// not repay. `usize::MAX` runs every region serially.
-	pub region_row_threshold: usize,
+	/// The entries a pipeline's coordinator reads before it may split what is
+	/// left of its input into morsels, and the fewest rows a batch of decoded
+	/// rows holds when it is handed to a worker (default: 256). Below it
+	/// everything runs on the statement's task: a worker costs a task spawn,
+	/// which a small morsel does not repay. `usize::MAX` never splits.
+	pub morsel_split_rows: usize,
+	/// The bytes a morsel over a key range aims at (default: 1 MiB). `1` makes
+	/// every entry a morsel of its own.
+	pub morsel_target_bytes: usize,
+	/// The most places of the node's worker pool one statement's morsels may
+	/// hold at once (default: unbounded). `0` runs every morsel on the
+	/// statement's own task.
+	pub morsel_places: usize,
+	/// The places of the node's worker pool that morsel workers never take
+	/// (default: 1), so that short statements keep a core.
+	pub morsel_oltp_reserve: usize,
+	/// The output bytes a morsel that is not at the front of its pipeline holds
+	/// before it parks and hands its place back (default: 1 MiB).
+	pub morsel_window_bytes: usize,
+	/// Whether every running morsel donates its remainder at each chunk boundary where
+	/// its range can be split, instead of only when a worker is idle (default: false).
+	/// Setting it forces the most donation a run can see, so the merge's ordering and
+	/// failure rules are exercised under that load.
+	pub morsel_steal_always: bool,
+	/// The quanta (chunk boundaries of the morsel a worker runs) a worker holds a place of the
+	/// node's worker pool while another statement waits for one, before it donates what is left of
+	/// its morsel and returns the place (default: 8).
+	pub morsel_place_quantum: u32,
+	/// Whether `EXPLAIN ANALYZE` renders the morsel counters of the statement (default: false).
+	/// Off, its text is the same at every width.
+	pub morsel_explain_analyze: bool,
 	/// How many compiled units of each kind — function bodies, closure
 	/// bodies, catalog units — a node keeps for later plans to link, least
 	/// recently used evicted first (default: 1024); `0` keeps none and
@@ -191,9 +236,8 @@ pub(crate) struct ExecConfig {
 	/// alone and not kept: the cache holds at most
 	/// `specialised_body_cache_size` bodies, each folding at most this much.
 	pub specialised_body_max_arg_bytes: usize,
-	/// How many distinct argument values one function's body is compiled for
-	/// before its calls run a body that reads them when it runs, where one
-	/// compiles (default: 32).
+	/// How many distinct argument values one function is compiled for. Past this count,
+	/// its calls run a body that reads the arguments at run time (default: 32).
 	pub specialised_body_values: usize,
 	/// The bytes the node's queries may hold in their breakers — sorts,
 	/// groups, distincts, join builds — before they spill
@@ -264,7 +308,14 @@ impl Default for ExecConfig {
 			external_sorting_buffer_limit: 50_000,
 			generation_allocation_limit: 2 << 20,
 			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
-			region_row_threshold: DEFAULT_REGION_ROW_THRESHOLD,
+			morsel_split_rows: DEFAULT_MORSEL_SPLIT_ROWS,
+			morsel_target_bytes: DEFAULT_MORSEL_TARGET_BYTES,
+			morsel_places: usize::MAX,
+			morsel_oltp_reserve: DEFAULT_MORSEL_OLTP_RESERVE,
+			morsel_window_bytes: DEFAULT_MORSEL_WINDOW_BYTES,
+			morsel_steal_always: false,
+			morsel_place_quantum: DEFAULT_MORSEL_PLACE_QUANTUM,
+			morsel_explain_analyze: false,
 			compiled_unit_cache_size: DEFAULT_COMPILED_UNIT_CACHE_SIZE,
 			vm_quantum: DEFAULT_VM_QUANTUM,
 			specialised_body_cache_size: DEFAULT_SPECIALISED_BODY_CACHE_SIZE,
@@ -299,7 +350,18 @@ impl cnf::Config for ExecConfig {
 			.parse_key("gql_max_output_rows", &mut self.gql_max_output_rows)
 			.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
 			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
-			.parse_key("region_row_threshold", &mut self.region_row_threshold)
+			.parse_key("morsel_split_rows", &mut self.morsel_split_rows)
+			.parse_key_with("morsel_target_bytes", &mut self.morsel_target_bytes, |x| {
+				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
+			})
+			.parse_key("morsel_places", &mut self.morsel_places)
+			.parse_key("morsel_oltp_reserve", &mut self.morsel_oltp_reserve)
+			.parse_key_with("morsel_window_bytes", &mut self.morsel_window_bytes, |x| {
+				x.parse_bytes::<usize>().ok().filter(|&n| n > 0)
+			})
+			.parse_key_bool("morsel_steal_always", &mut self.morsel_steal_always)
+			.parse_key("morsel_place_quantum", &mut self.morsel_place_quantum)
+			.parse_key_bool("morsel_explain_analyze", &mut self.morsel_explain_analyze)
 			.parse_key("compiled_unit_cache_size", &mut self.compiled_unit_cache_size)
 			.parse_key("vm_quantum", &mut self.vm_quantum)
 			.parse_key("specialised_body_cache_size", &mut self.specialised_body_cache_size)

@@ -28,8 +28,11 @@ use surrealdb_kvs::api::{
 	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
 	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
 };
+use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
-use surrealdb_kvs::{Direction, Error, Key, KeyRange, Result, Val};
+use surrealdb_kvs::{
+	Direction, Error, Estimate, Key, KeyRange, Result, Snapshot, SplitTarget, Val,
+};
 
 /// What an [`Overlay`] touches: the keys it writes or deletes, `K`, and the
 /// ranges `[start, end)` it clears.
@@ -362,6 +365,19 @@ impl Transactable for Base {
 		self.storage().count_cost()
 	}
 
+	/// The view reads through the storage beneath, so its reads are tracked exactly as the
+	/// storage's are.
+	fn plain_reads_tracked(&self) -> bool {
+		self.storage().plain_reads_tracked()
+	}
+
+	/// A speculation reads through the storage beneath, so it declares the storage's views as the
+	/// upper bound; its own `snapshot()` answers `None`, which the trait permits under any
+	/// declaration.
+	fn view_capabilities(&self) -> ViewCapabilities {
+		self.storage().view_capabilities()
+	}
+
 	/// The view holds nothing to cancel; the transaction beneath is not the
 	/// view's to cancel.
 	fn cancel<'a>(&'a self) -> BoxFut<'a, Result<()>> {
@@ -491,6 +507,27 @@ impl Transactable for Base {
 		budget: u32,
 	) -> BoxFut<'a, Result<(usize, Option<Key<'static>>)>> {
 		self.storage().count_bounded(rng, version, budget)
+	}
+
+	fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		None
+	}
+
+	fn estimate<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Estimate>> {
+		self.storage().estimate(rng, version)
+	}
+
+	fn split<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Vec<Key<'static>>>> {
+		self.storage().split(rng, target, version)
 	}
 	fn open_keys_cursor<'a>(
 		&'a self,

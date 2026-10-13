@@ -9,6 +9,7 @@
 //! program's state.
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 
@@ -148,6 +149,12 @@ pub(super) async fn step(
 				.program
 				.clone()
 				.ok_or_else(|| ControlFlow::Err(anyhow!("a block statement with no program")))?;
+			// The group records the counters its reads keep (adjacency cache
+			// hits, payload evaluations, edges scanned) into the metrics the
+			// rendering reports.
+			let measured = Arc::new(crate::exec::OperatorMetrics::new());
+			measured.enable();
+			let frame = frame.with_vm_metrics(Arc::clone(&measured));
 			let started = web_time::Instant::now();
 			let (rows, ended) = super::host::run_group(&running, *statement, state, &frame).await;
 			let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
@@ -158,7 +165,6 @@ pub(super) async fn step(
 				| Err(ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {}
 				Err(error @ ControlFlow::Err(_)) => return Err(error),
 			}
-			let measured = crate::exec::OperatorMetrics::new();
 			let total = rows.len() as u64;
 			match total {
 				0 => measured.record_elapsed(elapsed),

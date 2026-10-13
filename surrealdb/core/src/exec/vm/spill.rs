@@ -16,8 +16,8 @@
 //! once than its query's fan-in ([`QueryMemory::fan_in`]). With more runs than
 //! that, consecutive runs are merged into one, a fan-in at a time, until few
 //! enough remain; merging consecutive runs keeps every tie in arrival order.
-//! The merge is a loser tree, `log k` comparisons a row taken over `k`
-//! sources, and charges the thread's fuel a unit a row.
+//! The merge is a loser tree: each row taken costs `log k` comparisons over
+//! `k` sources, and the thread's fuel is charged one unit per row.
 //!
 //! A merge with a limit answers the first `limit` records of the merge
 //! without one. Every pass and every run is cut to the limit, which is exact:
@@ -25,6 +25,9 @@
 //! at or before it, each of which wins a tie by source order, so it is never
 //! among the first `limit`. The earlier source wins every tie, and passes
 //! merge consecutive runs, so a cut pass keeps what the whole merge would.
+
+// The IR lowering emits calls into this module, so unused items are allowed.
+#![allow(dead_code)]
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -200,8 +203,8 @@ impl Runs {
 
 	/// Sort a sort's `rows` stably by `keys`, keep the first `limit`, and write
 	/// them as the next run, written for `spec`, each record carrying its
-	/// keys alone: the spec's arity is the number of keys. `slab` is the sort's
-	/// slab its slab rows lie in. Answers the keys of the run's last record
+	/// keys alone: the spec's arity is the number of keys. `slab` is the slab
+	/// that holds the sort's slab rows. Answers the keys of the run's last record
 	/// when the run holds exactly `limit` records.
 	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn spill_sorted(

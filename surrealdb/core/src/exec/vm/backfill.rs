@@ -6,9 +6,11 @@
 //! into the view table's record. A view's rows are metadata no statement can
 //! express — an aggregated row's stats — so they are written to storage
 //! directly, and then run through the view table's own order (its indexes, its
-//! second-order views, events, live queries and change feed), which the
-//! program holds as a unit lowered with it, as the incremental path runs the
-//! order for a created row.
+//! second-order views, events, live queries and change feed), as the
+//! incremental path runs the order for a created row. The statement that
+//! defines the view changes the catalog the order is read from, so the order
+//! is the one of the view table's catalog version when the backfill meets the
+//! table, served from the compile cache ([`super::fault::view_rows`]).
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -16,9 +18,9 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use surrealdb_kvs::key::KVKey as _;
 
-use super::host::{admitted_unit, run_value_row, unit_table};
+use super::host::run_value_row;
 use super::interp::State;
-use super::program::{Backfill, Program, StoreInstr, UnitId};
+use super::program::{Backfill, Program, StoreInstr};
 use super::scalar::Scalar;
 use super::store::{read, table_name_of, write};
 use super::write::WriteState;
@@ -84,7 +86,6 @@ pub(super) async fn step(
 		StoreInstr::BackfillRow {
 			table,
 			row,
-			order,
 		} => {
 			let table = table_name_of(&read(regs, *table))?;
 			let Value::Object(mut object) = read(regs, *row) else {
@@ -111,7 +112,7 @@ pub(super) async fn step(
 			};
 			let key = key.encode_key().map_err(ControlFlow::Err)?;
 			txn.put(key, bytes).await.map_err(ControlFlow::Err)?;
-			maintain(program, state, ctx, *order, &table, id.key, &record).await?;
+			maintain(state, ctx, &table, id.key, &record).await?;
 		}
 		StoreInstr::BackfillGroup {
 			backfill,
@@ -131,7 +132,6 @@ pub(super) async fn step(
 			table,
 			row,
 			fields,
-			order,
 		} => {
 			let table = table_name_of(&read(regs, *table))?;
 			let (group, computed) = split(backfill, read(regs, *row))?;
@@ -155,7 +155,7 @@ pub(super) async fn step(
 				.put_record(ns, db, &table, &key, Arc::clone(&record))
 				.await
 				.map_err(ControlFlow::Err)?;
-			maintain(program, state, ctx, *order, &table, key, &record).await?;
+			maintain(state, ctx, &table, key, &record).await?;
 		}
 		_ => return Err(internal("a store instruction taken as a backfill instruction")),
 	}
@@ -198,33 +198,25 @@ fn stats(
 	backfill_stats(&backfill.aggregations, &backfill.values, computed).map_err(ControlFlow::Err)
 }
 
-/// Run the order of view table `table`, unit `order`, over `record`, the row
-/// just stored under `key`: a write of its own over a write state stacked on
-/// the statement's scope, in the view table's view-maintenance context. With
-/// no `order`, the table's order is lowered the first time the backfill meets
-/// the table ([`super::fault::view_rows`]) and held for the rest of it.
+/// Run the order of view table `table` over `record`, the row just stored
+/// under `key`: a write of its own over a write state stacked on the
+/// statement's scope, in the view table's view-maintenance context. The order
+/// is the one of the table's catalog version, taken the first time the backfill
+/// meets the table ([`super::fault::view_rows`]) and held for the rest of it.
 async fn maintain(
-	program: &Program,
 	state: &mut State,
 	ctx: &ExecutionContext,
-	order: Option<UnitId>,
 	table: &TableName,
 	key: RecordIdKey,
 	record: &Record,
 ) -> FlowResult<()> {
-	let rows = match order {
-		Some(order) => {
-			let units = unit_table(program, state, ctx)?;
-			Arc::clone(admitted_unit(&units, order, ctx)?)
+	let rows = match &state.backfill_order {
+		Some((held, rows)) if held == table => Arc::clone(rows),
+		_ => {
+			let rows = super::fault::view_rows(table, ctx).await?;
+			state.backfill_order = Some((table.clone(), Arc::clone(&rows)));
+			rows
 		}
-		None => match &state.backfill_order {
-			Some((held, rows)) if held == table => Arc::clone(rows),
-			_ => {
-				let rows = super::fault::view_rows(table, ctx).await?;
-				state.backfill_order = Some((table.clone(), Arc::clone(&rows)));
-				rows
-			}
-		},
 	};
 	let scope = Arc::clone(
 		state

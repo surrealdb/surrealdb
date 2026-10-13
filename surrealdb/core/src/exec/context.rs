@@ -11,8 +11,6 @@
 //!
 //! Operators declare their minimum required context level via `ExecutionPlan::required_context()`,
 //! and the executor validates requirements before execution begins.
-//!
-//! Note: Parts of this module are work-in-progress for the hierarchical context model.
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -38,6 +36,54 @@ use crate::val::{Datetime, TableName, Value};
 
 /// Parameters passed to queries (e.g., `$param` values).
 pub(crate) type Parameters = HashMap<Strand, Arc<Value>>;
+
+/// A change a statement's program makes to the request's session, which the executor owns.
+///
+/// The program does the work that belongs to the statement's transaction (target evaluation,
+/// authorisation, catalog creation) and records an effect only after the part of the statement it
+/// stands for has succeeded. The executor applies the effects in record order
+/// (`Executor::apply_session_effects`) after the program ends, whether it returned or raised.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum SessionEffect {
+	/// `OPTION IMPORT` or `OPTION FORCE`: `what` is the value the statement sets.
+	Option {
+		name: Strand,
+		what: bool,
+	},
+	/// `USE`: the namespace and the database one level of the statement selected, each recorded
+	/// once the catalog work of its level has succeeded, namespace first.
+	Use {
+		ns: Option<Strand>,
+		db: Option<Strand>,
+	},
+	/// A session `LET`: the coerced value the request binds to `name` for the statements after.
+	Let {
+		name: Strand,
+		value: Arc<Value>,
+	},
+}
+
+/// Where a statement's program records the [`SessionEffect`]s it makes.
+///
+/// A sink is installed only on the context of a top-level statement of the request
+/// (`Executor::statement_context`). Every context derived to run other code (a function body, a
+/// closure, a subquery, a table event, a subscription, `eval::*`) holds none, so a program that
+/// runs there cannot switch the caller's namespace or database, set its options or bind a
+/// request parameter.
+#[derive(Debug, Default)]
+pub(crate) struct SessionSink(parking_lot::Mutex<Vec<SessionEffect>>);
+
+impl SessionSink {
+	/// Records `effect` after the ones recorded so far. The lock is never held across an await.
+	pub(crate) fn record(&self, effect: SessionEffect) {
+		self.0.lock().push(effect);
+	}
+
+	/// Takes the recorded effects, in the order they were recorded, leaving the sink empty.
+	pub(crate) fn take(&self) -> Vec<SessionEffect> {
+		std::mem::take(&mut *self.0.lock())
+	}
+}
 
 /// Shared cache of [`FieldState`](crate::exec::operators::scan::pipeline::FieldState)
 /// keyed by `(table_name, check_perms)`.
@@ -162,7 +208,7 @@ pub struct RootContext {
 	/// like INFO FOR ROOT, DEFINE USER ON ROOT, etc.)
 	///
 	/// Note: This is None when executing from a borrowed Datastore reference.
-	/// Root-level operations will need to handle this case.
+	/// Root-level operations must handle a None datastore.
 	pub datastore: Option<Arc<Datastore>>,
 	/// Cancellation token for cooperative cancellation, behind an `Arc` so that
 	/// deriving a context takes a reference count and no lock on the token's
@@ -177,7 +223,7 @@ pub struct RootContext {
 	/// When an operator chain is executed per-row (e.g., `GraphEdgeScan` sourced
 	/// from the current record), this holds the input value that the
 	/// `CurrentValueSource` operator yields into the stream. This is the
-	/// explicit DAG input binding -- operators read it via `CurrentValueSource`,
+	/// explicit input binding: operators read it through `CurrentValueSource`,
 	/// and it is set by `LookupPart` before executing the lookup's operator chain.
 	pub(crate) current_value: Option<Arc<Value>>,
 	/// The enclosing row a statement evaluated in scalar position reads as its
@@ -239,7 +285,7 @@ pub struct RootContext {
 	///
 	/// Two frames refuse one, and for different reasons: a `PERMISSIONS`
 	/// predicate is evaluated with enforcement disabled and must therefore be
-	/// free of observable side effects (GHSA-66r2-5gwj-gxm2), and a `COMPUTED`
+	/// free of observable side effects, and a `COMPUTED`
 	/// body runs on every read of the field and under the definer's auth. Both
 	/// are enforced twice, because a write can be reached by either route: the
 	/// write path refuses a statement it runs under the frame, and
@@ -270,6 +316,16 @@ pub struct RootContext {
 	/// else a method names every argument error raised beneath it as its own
 	/// (`InvalidMethodArguments`).
 	pub(crate) writing: bool,
+	/// Where the statement's program records the changes it makes to the request's session.
+	///
+	/// `Some` only on the context of a top-level statement of the request. The derivations that
+	/// run other code clear it: [`ExecutionContext::with_new_ctx`] (an isolated or call-body
+	/// scope), [`ExecutionContext::with_principal`], [`ExecutionContext::with_limited_auth`],
+	/// [`ExecutionContext::with_replaced_principal`], and those that enter another permission
+	/// contract or the body of a computed field. The other guard does not depend on a context:
+	/// lowering emits the instructions that record into it only for a statement of the request,
+	/// never into a unit. See [`SessionSink`].
+	pub(crate) session_effects: Option<Arc<SessionSink>>,
 }
 
 /// The state of a KNN query vector's evaluation.
@@ -635,7 +691,7 @@ impl DatabaseContext {
 			.await
 		{
 			Ok(result) => result,
-			// An index a newer release wrote is one this scan cannot choose.
+			// An index definition this build cannot read is skipped.
 			// The scan reads the table without any of the indexes, which
 			// returns the same rows, and the list is not cached.
 			Err(e)
@@ -705,6 +761,18 @@ impl ExecutionContext {
 		}
 	}
 
+	/// The sink the running statement records its session effects in: `Some` only for the
+	/// program of a top-level statement of the request.
+	pub(crate) fn session_sink(&self) -> Option<&SessionSink> {
+		self.root().session_effects.as_deref()
+	}
+
+	/// This context with `sink` installed as the sink of the statement it runs.
+	pub(crate) fn with_session_sink(mut self, sink: Arc<SessionSink>) -> Self {
+		self.root_mut().session_effects = Some(sink);
+		self
+	}
+
 	/// Get namespace-level access (may fail if only root context).
 	///
 	/// Returns an error if no namespace has been selected.
@@ -770,6 +838,20 @@ impl ExecutionContext {
 	/// handles shadowing and protected parameter names ($auth, $session, etc.).
 	pub fn value(&self, key: &str) -> Option<&Value> {
 		self.root().ctx.value(key)
+	}
+
+	/// Look up a parameter value by name as the code of a function body reads
+	/// it ([`Context::lexical_value`]): outside a body the same as
+	/// [`Self::value`], inside one never a caller's `LET` or `FOR` binding.
+	pub(crate) fn lexical_value(&self, key: &str) -> Option<&Value> {
+		self.root().ctx.lexical_value(key).map(Arc::as_ref)
+	}
+
+	/// What `key` is bound to as the code of a function body reads it
+	/// ([`Context::lexical_binding`]): a value, a KNN query vector's row being
+	/// scanned ([`Binding::Forbidden`]), or nothing.
+	pub(crate) fn lexical_binding(&self, key: &str) -> Option<Binding<'_>> {
+		self.root().ctx.lexical_binding(key)
 	}
 
 	/// Collect all parameter values from the context chain into a HashMap.
@@ -847,6 +929,7 @@ impl ExecutionContext {
 				version_stamp: r.version_stamp,
 				guard_verdicts: Arc::clone(&r.guard_verdicts),
 				writing: r.writing,
+				session_effects: None,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -867,6 +950,7 @@ impl ExecutionContext {
 					version_stamp: n.root.version_stamp,
 					guard_verdicts: Arc::clone(&n.root.guard_verdicts),
 					writing: n.root.writing,
+					session_effects: None,
 				},
 				ns: Arc::clone(&n.ns),
 			}),
@@ -890,6 +974,7 @@ impl ExecutionContext {
 						version_stamp: d.ns_ctx.root.version_stamp,
 						guard_verdicts: Arc::clone(&d.ns_ctx.root.guard_verdicts),
 						writing: d.ns_ctx.root.writing,
+						session_effects: None,
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
 				},
@@ -1087,7 +1172,7 @@ impl ExecutionContext {
 	/// disjunction, and `options_for_frame` rebuilds the
 	/// permission-predicate options from scratch whatever a nested
 	/// [`ExecutionContext::with_caller_perms`] wrote — so the predicate frame
-	/// wins on both sides of the bridge without the flags being coupled.
+	/// holds on both sides without the two flags being coupled.
 	pub fn with_skip_fetch_perms(self, skip: bool) -> Self {
 		if skip == self.root().skip_fetch_perms {
 			return self;
@@ -1099,6 +1184,8 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.skip_fetch_perms = skip;
+		// A frame with another permission contract runs clauses, never a statement of the request.
+		root.session_effects = None;
 		new
 	}
 
@@ -1109,8 +1196,11 @@ impl ExecutionContext {
 	/// `$access`, `$token`, `$session`, read through the parent chain), the
 	/// database's parameters, and whatever the frame binds itself after this;
 	/// no query parameter, session `LET`, `LET`, `FOR` variable or closure of
-	/// the caller is visible in it, nor in any context derived from it, so a
-	/// function called from the frame is isolated too.
+	/// the caller is visible in it, nor in any context derived from it. A
+	/// function called from the frame reads the arguments of the call, the
+	/// row names, the session's own values and the database's parameters, and
+	/// no query parameter either: the frame holds none to read past the call
+	/// boundary ([`Self::entering_call_body`]).
 	pub(crate) fn privileged_frame(self) -> Self {
 		let isolated = Context::new_isolated(self.ctx()).freeze();
 		self.with_new_ctx(isolated)
@@ -1198,10 +1288,15 @@ impl ExecutionContext {
 	/// their document ([`RootContext::current_row`]) — with `units` the table
 	/// the nested programs find their units in.
 	///
-	/// The scope is a child of `self`'s, so the body reads the caller's
-	/// bindings — its `LET`s, `FOR` variables, query parameters and session
-	/// `LET`s — unless `self` is a privileged frame ([`Self::privileged_frame`]),
-	/// which holds none of them. The scope binds the parameters first, so
+	/// The scope is a child of `self`'s and the boundary of the call
+	/// ([`Context::mark_call_boundary`]): the body is lexically scoped. It reads
+	/// its own bindings, the row names and the protected names of the chain
+	/// it is entered from, and the request's parameters; it never reads a
+	/// binding its caller made with `LET` or `FOR`, at any depth of calls, and
+	/// a name none of those holds is a `DEFINE PARAM` of the database or
+	/// `NONE` ([`Context::lexical_value`]). A caller that is a privileged frame
+	/// ([`Self::privileged_frame`]) holds no request parameter, so the body
+	/// reads none either. The scope binds the parameters first, so
 	/// `$parent` and `$this` shadow a parameter of the same name, as scopes
 	/// nested in that order would.
 	/// `skip_fetch_perms` and `computing_record` are carried onto the context
@@ -1234,6 +1329,7 @@ impl ExecutionContext {
 			child.add_value("parent", Arc::clone(row));
 			child.add_value("this", Arc::clone(row));
 		}
+		child.mark_call_boundary();
 		let mut new = self.with_new_ctx(child.freeze());
 		let root = new.root_mut();
 		if let Some(options) = root.options.as_mut() {
@@ -1278,6 +1374,8 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.computing_record = record;
+		// The body of a computed field is nested code, never a statement of the request.
+		root.session_effects = None;
 		new
 	}
 
@@ -1534,14 +1632,14 @@ impl ExecutionContext {
 	/// `mirror` is the `Options` constructor that says the same thing to code
 	/// that reads the options, applied here for the reason
 	/// [`ExecutionContext::with_limited_auth`] mirrors auth: a stored clause
-	/// carried across the bridge from inside this frame must land in the frame
+	/// carried from inside this frame into a nested scope must land in the frame
 	/// it was entered in. Each caller names its own rather than reconstructing
 	/// one from the pair, because `Options` draws the same distinctions under
 	/// its own names and those are the definitions of record.
 	///
 	/// `options_for_frame` rebuilds the permission-predicate and
 	/// computed-field frames from scratch and leaves every other frame's
-	/// options alone, so what is written here survives to the bridge — and a
+	/// options alone, so what is written here reaches the code that reads them, and a
 	/// frame that is both is resolved there in favour of the stricter one.
 	fn with_suppression(
 		&self,
@@ -1555,6 +1653,11 @@ impl ExecutionContext {
 			Self::Namespace(n) => &mut n.root,
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
+		// A frame that changes the permission contract (a cascade, a view body, an event) runs code
+		// the statement does not own, never a statement of the request.
+		if root.perms_suppressed != suppressed || root.caller_perms_suppressed != caller {
+			root.session_effects = None;
+		}
 		root.perms_suppressed = suppressed;
 		root.caller_perms_suppressed = caller;
 		if let Some(options) = &root.options {
@@ -1628,6 +1731,7 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.auth = Arc::new(root.auth.new_limited(limit));
+		root.session_effects = None;
 		// The options carry the auth too, so code that reads them sees the
 		// limited auth.
 		if let Some(ref opts) = root.options {
@@ -1644,6 +1748,7 @@ impl ExecutionContext {
 		let mut new = self.clone();
 		let root = new.root_mut();
 		root.auth = Arc::clone(auth);
+		root.session_effects = None;
 		if let Some(options) = root.options.as_mut() {
 			options.auth = Arc::clone(auth);
 		}
@@ -1688,14 +1793,8 @@ impl ExecutionContext {
 		Ok(self.with_new_ctx(child.freeze()))
 	}
 
-	/// Get the function registry.
-	///
-	/// Returns the registry held by the root context, which every level of
-	/// the hierarchy shares. Carrying it per-root allows different roots to
-	/// have different registries, enabling custom function registration
-	/// (e.g., enterprise-only functions).
-	/// Registry of built-in scalar, aggregate, projection and index
-	/// functions, plus the method-dispatch table.
+	/// Get the function registry: built-in scalar, aggregate, projection and index
+	/// functions, plus the method-dispatch table. The root context holds it.
 	///
 	/// Built once per datastore and read off the underlying context, so a
 	/// caller holding one of these and a caller holding only the context —
@@ -1742,6 +1841,7 @@ impl ExecutionContext {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::exec::eval_context::ComputingRecord;
 	use crate::exec::operators::test_util::root_ctx_with_options;
 
 	fn units() -> crate::exec::vm::UnitTable {
@@ -1778,7 +1878,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_call_body_sees_the_callers_bindings_outside_a_privileged_frame() {
+	fn a_call_body_never_reads_the_callers_bindings() {
 		let ctx = root_ctx_with_options()
 			.with_param("limit", Value::from(1000))
 			.with_param("session", Value::from("the session"));
@@ -1786,15 +1886,38 @@ mod tests {
 		let body = ctx
 			.entering_call_body(params.clone(), units(), RowAccess::Absent, false, None)
 			.unwrap();
-		assert_eq!(body.value("x"), Some(&Value::from(1)));
-		assert_eq!(body.value("limit"), Some(&Value::from(1000)));
+		assert_eq!(body.lexical_value("x"), Some(&Value::from(1)));
+		assert_eq!(body.lexical_value("limit"), None, "a caller's binding reached a body");
+		assert_eq!(body.lexical_value("session"), Some(&Value::from("the session")));
+		let nested = body
+			.entering_call_body(params.clone(), units(), RowAccess::Absent, false, None)
+			.unwrap();
+		assert_eq!(nested.lexical_value("limit"), None);
 		let frame = ctx.clone().privileged_frame();
 		let body =
 			frame.entering_call_body(params, units(), RowAccess::Absent, false, None).unwrap();
-		assert_eq!(body.value("x"), Some(&Value::from(1)));
-		assert_eq!(body.value("limit"), None, "a caller's binding reached a privileged frame");
-		assert_eq!(body.value("session"), Some(&Value::from("the session")));
+		assert_eq!(body.lexical_value("x"), Some(&Value::from(1)));
+		assert_eq!(
+			body.lexical_value("limit"),
+			None,
+			"a caller's binding reached a privileged frame"
+		);
+		assert_eq!(body.lexical_value("session"), Some(&Value::from("the session")));
 		assert_eq!(ctx.value("limit"), Some(&Value::from(1000)));
+		assert_eq!(ctx.lexical_value("limit"), Some(&Value::from(1000)));
+	}
+
+	#[test]
+	fn a_call_body_binds_made_inside_it_are_read() {
+		let ctx = root_ctx_with_options().with_param("limit", Value::from(1000));
+		let params = [(Strand::from("x"), Value::from(1))];
+		let body = ctx
+			.entering_call_body(params, units(), RowAccess::Absent, false, None)
+			.unwrap()
+			.with_param("inner", Value::from(2));
+		assert_eq!(body.lexical_value("inner"), Some(&Value::from(2)));
+		assert_eq!(body.lexical_value("x"), Some(&Value::from(1)));
+		assert_eq!(body.lexical_value("limit"), None);
 	}
 
 	#[test]
@@ -1942,5 +2065,78 @@ mod tests {
 		assert!(Arc::ptr_eq(&limited.root().auth, &narrowed));
 		assert!(Arc::ptr_eq(&limited.options().expect("options").auth, &narrowed));
 		assert!(!Arc::ptr_eq(&ctx.root().auth, &narrowed));
+	}
+	#[test]
+	fn a_sink_takes_the_effects_in_the_order_they_were_recorded() {
+		let sink = SessionSink::default();
+		sink.record(SessionEffect::Option {
+			name: Strand::new("IMPORT"),
+			what: true,
+		});
+		sink.record(SessionEffect::Use {
+			ns: Some(Strand::new("a")),
+			db: None,
+		});
+		sink.record(SessionEffect::Use {
+			ns: None,
+			db: Some(Strand::new("b")),
+		});
+		let taken = sink.take();
+		assert_eq!(taken.len(), 3);
+		assert!(matches!(
+			&taken[0],
+			SessionEffect::Option {
+				what: true,
+				..
+			}
+		));
+		assert_eq!(
+			taken[2],
+			SessionEffect::Use {
+				ns: None,
+				db: Some(Strand::new("b")),
+			}
+		);
+		assert!(sink.take().is_empty());
+	}
+
+	/// The sink belongs to the context of a top-level statement alone: every context derived to
+	/// run other code holds none, so a program that runs there cannot change the caller's session.
+	#[test]
+	fn only_the_statement_context_holds_the_session_sink() {
+		let ctx = root_ctx_with_options().with_session_sink(Arc::default());
+		assert!(ctx.session_sink().is_some());
+		// A context that binds a parameter is derived through `with_new_ctx`, which runs other
+		// code (a subquery's `$parent`, a function's arguments, an event's `$before`), so it holds
+		// none.
+		assert!(ctx.with_param("p", Value::None).session_sink().is_none());
+		let isolated = Context::new_isolated(ctx.ctx()).freeze();
+		assert!(ctx.with_new_ctx(Arc::clone(&isolated)).session_sink().is_none());
+		let narrowed = Arc::new(Auth::for_root(crate::iam::Role::Viewer));
+		assert!(ctx.with_principal(&narrowed).session_sink().is_none());
+		assert!(ctx.with_replaced_principal(isolated, &narrowed).session_sink().is_none());
+		let limit = crate::iam::AuthLimit::new(crate::iam::Level::No, None);
+		assert!(ctx.with_limited_auth(&limit).session_sink().is_none());
+		let body = ctx
+			.entering_call_body(
+				std::iter::empty::<(Strand, Value)>(),
+				units(),
+				RowAccess::Absent,
+				false,
+				None,
+			)
+			.expect("the call body is entered");
+		assert!(body.session_sink().is_none());
+		// A permission predicate, a cascade and a computed field run under another contract.
+		assert!(ctx.clone().with_skip_fetch_perms(true).session_sink().is_none());
+		assert!(ctx.with_perms_suppressed(true).session_sink().is_none());
+		let record = Arc::new(ComputingRecord {
+			rid: crate::val::RecordId::new(TableName::from("t"), 1_i64),
+			stored: None,
+		});
+		assert!(ctx.clone().with_computing_record(Some(record)).session_sink().is_none());
+		// A derivation that changes nothing is still the statement's own context.
+		assert!(ctx.clone().with_skip_fetch_perms(false).session_sink().is_some());
+		assert!(ctx.with_perms_suppressed(false).session_sink().is_some());
 	}
 }

@@ -248,6 +248,7 @@ pub(super) async fn handle(
 		dialect: Dialect::SurrealQl,
 		transaction: None,
 		txn_failed: false,
+		txn_lets: Vec::new(),
 		cancel,
 		registry: Arc::clone(&registry),
 		pid,
@@ -397,6 +398,11 @@ struct Connection {
 	/// Set when a statement fails inside an interactive transaction; further
 	/// queries are refused (SQLSTATE 25P02) until `COMMIT`/`ROLLBACK`.
 	txn_failed: bool,
+	/// Values of the top-level `LET` statements that succeeded inside the open
+	/// interactive transaction, in execution order. They are applied to the
+	/// session variables when the transaction commits and discarded when it
+	/// ends any other way.
+	txn_lets: Vec<(String, Value)>,
 	/// Cancellation handle for the in-flight query, tripped by a matching
 	/// CancelRequest on a side connection.
 	cancel: CancelHandle,
@@ -755,7 +761,7 @@ impl Connection {
 	}
 
 	/// Run a mock SCRAM exchange for unknown users over unencrypted connections,
-	/// ensuring unknown and known-bad users are indistinguishable (S-12).
+	/// ensuring unknown and known-bad users are indistinguishable.
 	async fn authenticate_scram_mock(&mut self, user: &str) -> Result<bool> {
 		let mut buf = BytesMut::new();
 		msg::write_authentication_sasl(&mut buf, &[sasl::MECHANISM]);
@@ -1950,7 +1956,7 @@ impl Connection {
 				msg::write_command_complete(out, "ROLLBACK");
 				continue;
 			}
-			// Session persistence, borrowed from the interactive shell
+			// Session persistence, matching the interactive shell
 			// (cli/sql.rs): the values of this unit's LET statements and the
 			// resulting session are appended as trailing `$param` expressions
 			// and read back from the last results after execution.
@@ -1960,6 +1966,7 @@ impl Connection {
 			// into the persistent connection session. Committed blocks still
 			// persist their LET/USE, matching how the interactive shell behaves.
 			let capture_session = !unit.contains_cancel();
+			let has_begin = unit.expressions.iter().any(|e| matches!(e, TopLevelExpr::Begin));
 			let let_vars = if capture_session {
 				let names = unit.get_let_statements();
 				for name in &names {
@@ -1987,6 +1994,15 @@ impl Connection {
 				results.split_off(results.len() - (let_vars.len() + 1))
 			} else {
 				Vec::new()
+			};
+			// A block that did not commit reverts its LETs, so the appended
+			// reads return the reverted values: a block whose final result is
+			// an error contributes no LET values. The `$session` half still
+			// applies, as a `USE` is never undone.
+			let let_vars = if has_begin && results.last().is_some_and(|r| r.result.is_err()) {
+				Vec::new()
+			} else {
+				let_vars
 			};
 			let mut ok = true;
 			for result in results {
@@ -2017,32 +2033,41 @@ impl Connection {
 	/// Execute SurrealQL within the open interactive transaction. On any
 	/// statement error the transaction is poisoned (25P02) until the client
 	/// ends it with COMMIT/ROLLBACK.
+	///
+	/// Text that parses as SurrealQL has a `$name` read appended for each of
+	/// its top-level `LET` statements; the successful values are held in
+	/// `txn_lets` until the transaction commits. The appended reads always
+	/// execute, so they are the last results. Text that parses only after
+	/// translation captures nothing, and `USE` is not captured.
 	async fn run_in_transaction(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		let tx = self.transaction.clone().expect("caller checked transaction is open");
 		let cancel = self.arm_cancel();
 		let config = self.ds.parser_config();
 		let lowered;
-		let query_str =
-			match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
-				Ok(_) => sql,
-				Err(_) => match surrealdb_pgsql::translate_sql(sql) {
-					Ok(translated) => {
-						lowered = translated;
-						lowered.as_str()
-					}
-					Err(_) => sql,
-				},
-			};
+		let mut let_vars = Vec::new();
+		let source = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
+			Ok(mut ast) => {
+				let_vars = ast.get_let_statements();
+				for name in &let_vars {
+					ast.add_param(name.clone());
+				}
+				QuerySource::from(ast)
+			}
+			Err(_) => match surrealdb_pgsql::translate_sql(sql) {
+				Ok(translated) => {
+					lowered = translated;
+					QuerySource::from(lowered.as_str())
+				}
+				Err(_) => QuerySource::from(sql),
+			},
+		};
 		let results = self
 			.ds
-			.run(
-				QueryRequest::new(query_str, &self.session)
-					.with_transaction(tx)
-					.with_cancel(cancel),
-			)
+			.run(QueryRequest::new(source, &self.session).with_transaction(tx).with_cancel(cancel))
 			.await;
 		match results {
-			Ok(results) => {
+			Ok(mut results) => {
+				let trailing = results.split_off(results.len().saturating_sub(let_vars.len()));
 				for result in results {
 					match result.result {
 						Ok(value) => {
@@ -2056,6 +2081,16 @@ impl Connection {
 							self.txn_failed = true;
 							break;
 						}
+					}
+				}
+				for (name, result) in let_vars.into_iter().zip(trailing) {
+					// Protected names are never written into the session
+					// variables, as in `apply_session_updates`.
+					if surrealdb_rpc::check_protected_param(&name).is_err() {
+						continue;
+					}
+					if let Ok(value) = result.result {
+						self.txn_lets.push((name, value));
 					}
 				}
 			}
@@ -2117,6 +2152,7 @@ impl Connection {
 						.map_err(|err| PgError::internal(err.to_string()))?;
 					self.transaction = Some(Arc::new(tx));
 					self.txn_failed = false;
+					self.txn_lets.clear();
 				}
 				msg::write_command_complete(out, "BEGIN");
 			}
@@ -2124,6 +2160,7 @@ impl Connection {
 				// Committing an aborted transaction rolls it back; report so.
 				Some(tx) if self.txn_failed => {
 					self.txn_failed = false;
+					self.txn_lets.clear();
 					let _ = tx.cancel().await;
 					msg::write_command_complete(out, "ROLLBACK");
 				}
@@ -2131,7 +2168,13 @@ impl Connection {
 					// The transaction was already taken, so on failure
 					// ready_status() reports 'I' and the caller emits only the
 					// error (no trailing CommandComplete), keeping the sequence valid.
+					let lets = std::mem::take(&mut self.txn_lets);
 					tx.commit().await.map_err(|err| PgError::internal(err.to_string()))?;
+					// Captured LETs become session variables only once the
+					// transaction that bound them is durable.
+					for (name, value) in lets {
+						self.session.variables.insert(name, value);
+					}
 					msg::write_command_complete(out, "COMMIT");
 				}
 				None => {
@@ -2140,6 +2183,7 @@ impl Connection {
 				}
 			},
 			TxnOp::Rollback => {
+				self.txn_lets.clear();
 				match self.transaction.take() {
 					Some(tx) => {
 						let _ = tx.cancel().await;
@@ -2465,8 +2509,8 @@ impl Connection {
 		let len = usize::try_from(len).unwrap_or(0);
 		if !(4..=max).contains(&len) {
 			// Report before closing so the client sees a diagnostic rather
-			// than a bare dropped socket. The framing is now unrecoverable, so
-			// the connection still terminates.
+			// than a bare dropped socket. A framing error cannot be recovered, so
+			// the connection terminates.
 			let _ = self.report(&PgError::protocol("invalid message length").fatal()).await;
 			return Ok(None);
 		}

@@ -841,6 +841,12 @@ impl Transactable for Transaction {
 		self.write
 	}
 
+	/// Transactions are optimistic: a commit conflicts only with writes to the keys it writes; a
+	/// plain read is never checked.
+	fn plain_reads_tracked(&self) -> bool {
+		false
+	}
+
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {
@@ -1258,15 +1264,15 @@ impl Transactable for Transaction {
 	/// bound as [`Self::delr`].
 	///
 	/// On TiKV `clr` and `del` collapse to the same in-transaction
-	/// tombstone write (the actual MVCC version reclamation happens at
-	/// GC safepoint, outside any user transaction). Without this
-	/// override, the default `clrr` impl in `kvs/api.rs` falls back to
-	/// per-key `clr` over `batch_keys` and silently bypasses
-	/// `tikv_delr_max_keys` — `REMOVE NAMESPACE EXPUNGE` on a huge
-	/// prefix would buffer unbounded deletes inside one TiKV
-	/// transaction. Forwarding to the bounded scan-delete loop keeps
-	/// soft (`delr`/`delp`) and hard (`clrr`/`clrp`) prefix-deletes on
-	/// the same safety cap.
+	/// tombstone write. MVCC versions are reclaimed later, at the GC
+	/// safepoint, outside any user transaction.
+	///
+	/// This override routes through the bounded scan-delete loop, so
+	/// `tikv_delr_max_keys` applies. The default `clrr` in `kvs/api.rs`
+	/// deletes per key over `batch_keys` and skips that cap, which would
+	/// buffer an unbounded number of deletes in one transaction for a
+	/// large prefix. Soft (`delr`/`delp`) and hard (`clrr`/`clrp`)
+	/// prefix deletes share the same cap.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn clrr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.delete_range_bounded(rng).await })
@@ -1669,7 +1675,7 @@ impl TimeStampImpl for TiKVStampImpl {
 
 	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
 		if bytes.len() == 8 {
-			// Backwards compatibilty with old timestamp
+			// An 8-byte value is a bare big-endian version number, so decode it as one.
 			let Ok(b) = <[u8; 8]>::try_from(&bytes[0..8]) else {
 				unreachable!()
 			};

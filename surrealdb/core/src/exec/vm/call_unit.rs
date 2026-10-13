@@ -10,18 +10,23 @@
 //! the capability, the definition, its `PERMISSIONS` clause under its `AUTH
 //! LIMIT` — binds and coerces the arguments, and runs the body.
 //!
+//! A function body is a barrier to `BREAK` and `CONTINUE`: the loop they name
+//! is not written in it, so a loop signal that leaves the unit raises
+//! [`ExecError::InvalidControlFlow`]. A `RETURN` in the body is the call's
+//! value.
+//!
 //! Call units are served from the compile cache ([`super::compile_cache`]),
 //! keyed by the function's name and arity, the version of its definition and
 //! the build, with one compilation per frame. The load reads the version and
 //! checks what else the unit depends on, a seam of the run-time seal
-//! ([`crate::exec::compiles::seam`]); a unit the cache does not hold is
-//! compiled in a fault ([`crate::exec::compiles::serving_fault`]) and kept.
+//! ([`crate::exec::compiles::seam`]). A unit the cache does not hold is
+//! compiled under [`crate::exec::compiles::serving_fault`] and then kept.
 
 use std::sync::Arc;
 
 use super::program::Program;
 use crate::exec::planner::Planner;
-use crate::exec::{EvalContext, ExecutionContext, FlowResult};
+use crate::exec::{Error as ExecError, EvalContext, ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
@@ -120,9 +125,18 @@ pub(super) async fn call(
 			unit
 		}
 	};
-	let running = exec.with_params(args.into_iter().enumerate().map(|(at, v)| (arg_name(at), v)));
+	// The body reads the caller's value in scope as its document, `$this` and
+	// `$parent`, as an inlined body reads the row it is written against: a
+	// permission judged over a row with its computed fields derived hands the
+	// body that row.
+	let running = exec
+		.entering_statement(ctx.value_in_scope(), true)
+		.with_params(args.into_iter().enumerate().map(|(at, v)| (arg_name(at), v)));
 	match crate::exec::trampoline::nest(super::host::gather_program(unit, running)).await {
 		Ok(value) | Err(ControlFlow::Return(value)) => Ok(value),
+		Err(ControlFlow::Break | ControlFlow::Continue) => {
+			Err(ExecError::InvalidControlFlow.into())
+		}
 		Err(other) => Err(other),
 	}
 }
@@ -162,7 +176,7 @@ async fn load(
 				.txn()
 				.ok_or_else(|| internal("a function called with no transaction".to_owned()))?,
 		);
-		let frame = super::lower::statement_frame(&planner);
+		let frame = super::statement_frame(&planner);
 		let key = planner.function_unit_key(name).await.map(|mut key| {
 			key.object = UnitObject::FunctionCall(name.to_owned(), arity);
 			key
@@ -172,9 +186,9 @@ async fn load(
 		let units =
 			exec.ctx().compiled_units().map(Arc::clone).filter(|_| exec.version_stamp().is_none());
 		let (Some(units), Some(key)) = (units, key) else {
-			// A function the catalog does not hold, or no node cache:
-			// compiled for this call alone, where the call fails as the
-			// catalog says.
+			// A function the catalog does not hold, or a frame with no unit cache,
+			// is compiled for this call alone. The call then fails as the catalog
+			// says.
 			return crate::exec::compiles::serving_fault(async {
 				compile(&planner, name, arity).await.map(|unit| (Arc::new(unit), None))
 			})
@@ -216,8 +230,9 @@ async fn load(
 				.await
 		})
 		.await?;
-		// What the fault compiled is linked under the context values the
-		// cache kept it with; one it kept for this request alone is not.
+		// The unit is linked under the context values the cache stores it with.
+		// When the cache does not return the compiled unit under those values, no
+		// context is returned and the call site keeps nothing.
 		let context = units
 			.function_calls()
 			.lookup_with_context(&key, &frame, &txn, exec.ctx())
@@ -229,7 +244,7 @@ async fn load(
 	.await
 }
 
-/// The statement `fn::name($0, …)` with `arity` arguments, bound, mapped and
+/// The statement `fn::name($0, …)` with `arity` arguments, bound, planned and
 /// lowered by `planner`.
 async fn compile(planner: &Planner<'_>, name: &str, arity: usize) -> FlowResult<Program> {
 	use crate::expr::logical::{LogicalCall, LogicalEval, LogicalExpr, LogicalOp};
@@ -244,7 +259,7 @@ async fn compile(planner: &Planner<'_>, name: &str, arity: usize) -> FlowResult<
 	lower_statement(planner, call).await
 }
 
-/// `op`, bound, mapped and lowered by `planner`. A statement holding a schema
+/// `op`, bound, planned and lowered by `planner`. A statement holding a schema
 /// statement, or calling a body that holds one, whose effect the plan cannot
 /// know is lowered again with what follows each schema statement late-bound,
 /// as a statement of a query is ([`Planner::binding_late_after_schema`]). An
@@ -259,9 +274,9 @@ async fn lower_statement(
 		Ok(program) => return Ok(program),
 		Err(not_covered) => not_covered,
 	};
-	if !not_covered.internal
+	if not_covered.kind != super::NotCoveredKind::Internal
 		&& !planner.binds_late_after_schema()
-		&& (not_covered.reason == super::speculate::DATA_DEPENDENT_DDL
+		&& (not_covered.kind == super::NotCoveredKind::LateBind
 			|| crate::exec::planner::fold::changes_the_catalog(&op))
 	{
 		let late = planner.binding_late_after_schema();
@@ -270,7 +285,7 @@ async fn lower_statement(
 	Err(refused(not_covered))
 }
 
-/// `op`, bound, mapped and lowered by `planner`, or why lowering declines it.
+/// `op`, bound, planned and lowered by `planner`, or why the VM declines it.
 async fn lower_once(
 	planner: &Planner<'_>,
 	op: crate::expr::logical::LogicalOp,
@@ -278,189 +293,8 @@ async fn lower_once(
 	let bound = crate::exec::planner::bind_statement(planner, op)
 		.await
 		.map_err(|e| ControlFlow::Err(e.into()))?;
-	let mapped = match super::map::map(planner, &bound).await {
-		Ok(mapped) => mapped,
-		Err(not_covered) => return Ok(Err(not_covered)),
-	};
-	let physical = super::optimize::optimize(mapped);
-	Ok(super::lower::lower(planner, &physical).await)
-}
-
-/// Run the body of `fn::name` for the call `ctx` is the body's evaluation of:
-/// the body compiled for the values the call's arguments hold, which a body
-/// reading an argument where only a value answers needs
-/// ([`super::program::ExternalCallee::Specialised`]). The unit is kept by the
-/// function's version and those values.
-pub(super) async fn specialised(name: &str, ctx: &EvalContext<'_>) -> FlowResult<Value> {
-	let exec = ctx.exec_ctx;
-	let unit = load_specialised(name, exec).await?;
-	match crate::exec::trampoline::nest(super::host::gather_program(unit, exec.clone())).await {
-		Ok(value) | Err(ControlFlow::Return(value)) => Ok(value),
-		Err(other) => Err(other),
-	}
-}
-
-/// The body of `fn::name` compiled for the arguments `exec` binds.
-async fn load_specialised(name: &str, exec: &ExecutionContext) -> FlowResult<Arc<Program>> {
-	use super::compile_cache::UnitObject;
-	crate::exec::compiles::seam(async {
-		let txn = exec
-			.ctx()
-			.try_tx()
-			.map(Arc::clone)
-			.ok_or_else(|| internal(format!("fn::{name} run with no transaction")))?;
-		let db_ctx = exec.database().map_err(|e| ControlFlow::Err(e.into()))?;
-		let (ns, db) = (db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id);
-		let cache = exec.ctx().get_cache();
-		let snapshot = crate::kvs::cache::ds::FunctionSnapshot::for_function(
-			cache.as_deref(),
-			&txn,
-			ns,
-			db,
-			name,
-		)
-		.await
-		.map_err(ControlFlow::Err)?
-		.ok_or_else(|| internal(format!("fn::{name} is gone while its call runs")))?;
-		let args: Vec<Value> = snapshot
-			.definition()
-			.args
-			.iter()
-			.map(|(arg, _)| exec.value(arg.as_str()).cloned().unwrap_or(Value::None))
-			.collect();
-		let (ns_name, db_name) = super::closure::names_of(exec);
-		// The call's frame is the definer's narrowed principal, which the
-		// arguments are bound in as values for binding to fold. A frame that
-		// waives permissions, as a permission predicate's does, plans with
-		// none applied: the reads in it return every row, as the frame runs
-		// them. The body serves every principal of the frame's class, so it
-		// reads the session's own values when it runs.
-		let root = exec.root();
-		let planner = Planner::with_txn(
-			exec.ctx(),
-			exec.function_registry(),
-			Arc::clone(&txn),
-			ns_name,
-			db_name,
-		)
-		.with_auth(Arc::clone(&root.auth))
-		.with_perms_suppressed(root.skip_fetch_perms || root.perms_suppressed)
-		.with_depth(super::closure::depth_of(exec))
-		.reading_session_values();
-		let body = snapshot.body().map_err(ControlFlow::Err)?.clone();
-		let function = planner.function_unit_key(name).await;
-		let units = exec.ctx().compiled_units().map(Arc::clone);
-		let (Some(units), Some(function)) = (units, function) else {
-			return compile_body(&planner, body).await;
-		};
-		let frame = super::lower::statement_frame(&planner);
-		// The values are keyed type-exact. A body compiled for values too large
-		// to keep, or for values with no encoding, is compiled for this call
-		// alone.
-		let key = super::compile_cache::ArgValues::of(&args, units.specialised_arg_bytes()).map(
-			|values| {
-				let mut key = function.clone();
-				key.object = UnitObject::SpecialisedBody(name.to_owned(), values);
-				key
-			},
-		);
-		if let Some(key) = &key
-			&& let Some(kept) =
-				units.specialised_bodies().lookup(key, &frame, &txn, exec.ctx()).await
-		{
-			return Ok(kept);
-		}
-		// A function whose calls brought more distinct values than its body
-		// is compiled for runs its body compiled to read the arguments when it
-		// runs, where that answers alike ([`reads_arguments_alike`]) and
-		// compiles.
-		let mut generic = function;
-		generic.object = UnitObject::GenericBody(name.to_owned());
-		if units.specialised_enough(&generic, false) && reads_arguments_alike(&body) {
-			let names = snapshot.definition().args.iter().map(|(arg, _)| arg.as_str().to_owned());
-			let reading = planner.shadowing(names);
-			let held = units
-				.generic_bodies()
-				.get_or_compile(&generic, &frame, &txn, exec.ctx(), || async {
-					let recording = txn.record_catalog_reads();
-					let compiled = compile_body(&reading, body.clone()).await.ok();
-					let recorded = recording.finish();
-					let deps = kept_deps(&txn, &recorded, &planner).await;
-					Ok::<_, ControlFlow>((compiled, deps))
-				})
-				.await?;
-			if let Some(body) = held {
-				return Ok(body);
-			}
-		}
-		units.specialised_enough(&generic, true);
-		let Some(key) = key else {
-			return compile_body(&planner, body).await;
-		};
-		units
-			.specialised_bodies()
-			.get_or_compile(&key, &frame, &txn, exec.ctx(), || async {
-				let recording = txn.record_catalog_reads();
-				let compiled = compile_body(&planner, body.clone()).await;
-				let recorded = recording.finish();
-				let program = compiled?;
-				let deps = kept_deps(&txn, &recorded, &planner).await;
-				Ok::<_, ControlFlow>((program, deps))
-			})
-			.await
-	})
-	.await
-}
-
-/// What else a unit compiled by `planner` depended on, from the catalog reads
-/// `recorded` noted: `None` where those cannot be named.
-async fn kept_deps(
-	txn: &crate::kvs::Transaction,
-	recorded: &crate::kvs::catalog_reads::CatalogReads,
-	planner: &Planner<'_>,
-) -> Option<(crate::exec::catalog_deps::CatalogDeps, super::units::ContextDeps)> {
-	let deps = crate::exec::catalog_deps::CatalogDeps::resolve(txn, recorded).await?;
-	super::units::ContextDeps::resolve(txn, recorded, planner.frozen(), Default::default())
-		.await
-		.map(|context| (deps, context.without(crate::exec::planner::UNIT_RUNTIME_PARAMS)))
-}
-
-/// Function body `body`, bound, mapped and lowered by `planner` in a fault.
-async fn compile_body(
-	planner: &Planner<'_>,
-	body: crate::expr::logical::LogicalOp,
-) -> FlowResult<Arc<Program>> {
-	crate::exec::compiles::serving_fault(async {
-		lower_statement(planner, body).await.map(Arc::new)
-	})
-	.await
-}
-
-/// Whether function body `body` answers alike compiled for its arguments'
-/// values and compiled to read them when it runs: a value there only chooses
-/// how a read is made. A full-text or nearest-neighbour operator, and an index
-/// function that reads what such an operator's scan found, answer otherwise
-/// where the operand is read when the body runs, since no scan serves it.
-fn reads_arguments_alike(body: &crate::expr::logical::LogicalOp) -> bool {
-	use crate::expr::logical::LogicalExpr;
-	use crate::expr::{BinaryOperator, Function};
-	let mut alike = true;
-	let _ = body.visit_scalars_deep(&mut |scalar| {
-		if scalar.any(|expr| match expr {
-			LogicalExpr::Binary {
-				op: BinaryOperator::Matches(_) | BinaryOperator::NearestNeighbor(_),
-				..
-			} => true,
-			LogicalExpr::Call(call) => matches!(
-				&call.receiver,
-				Function::Normal(name)
-					if name.starts_with("search::") || name.starts_with("vector::distance::knn")
-			),
-			_ => false,
-		}) {
-			alike = false;
-		}
-		Ok::<(), std::convert::Infallible>(())
-	});
-	alike
+	// A unit the run loads is cached under its own key and served to any frame that
+	// asks for it. Its pipelines are placed in the scope of its own statement alone,
+	// whatever statement the call is made from.
+	Ok(super::compile::compile_unit(planner, &bound).await)
 }

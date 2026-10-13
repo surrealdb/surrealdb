@@ -23,7 +23,7 @@ use super::program::{
 use crate::catalog::providers::TableProvider;
 use crate::exec::operators::check_cancelled;
 use crate::exec::operators::scan::common::resolve_version_stamp;
-use crate::exec::operators::write::ctx::WriteCtx;
+use crate::exec::operators::write::ctx::{TableExistence, WriteCtx};
 use crate::exec::operators::write::plan::{CreateFailure, WriteForm, classify_create_failure};
 use crate::exec::operators::write::row::WriteRow;
 use crate::exec::operators::write::scope::{WritePurpose, WriteScope};
@@ -51,9 +51,6 @@ mod storage;
 #[path = "write_view.rs"]
 mod view;
 
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-pub(super) use cascade::CASCADE_UNITS_RUN;
 pub(super) use cascade::{ReferenceInstr, RepairStrategy, TableRepairs};
 pub(super) use data::DataInstr;
 pub(super) use gate::GateInstr;
@@ -62,13 +59,7 @@ pub(super) use observe::{
 	Admission, ClauseDepth, EventClauses, LoweredEvents, LoweredSubscription, ObserveInstr,
 	SubscriptionFieldsLowered,
 };
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-pub(super) use observe::{LIVES_DECLINED, LIVES_LOWERED, LIVES_RUN};
 pub(super) use schema::{FieldPermission, FieldPlan, FieldWrite, SchemaInstr, SchemaPlan};
-#[cfg(test)]
-#[cfg(feature = "kv-mem")]
-pub(super) use storage::INDEX_STEPS;
 pub(super) use storage::{IndexPlan, LoweredIndexes, NativeIndexKind, StorageFact, StorageInstr};
 pub(super) use view::{LoweredView, LoweredViews, Recalc, ViewClause, ViewRows};
 
@@ -115,10 +106,10 @@ pub(super) struct WriteState {
 	/// arena it is a unit of ([`arena_of`]) and its id there.
 	admitted: Vec<(usize, super::program::UnitId)>,
 	/// The bundles of the stages the run loaded by table name for a write
-	/// that may reach any table, each by its table and the catalog version it
-	/// was loaded for, so a table's bundle is loaded once per run of the
-	/// statement while its catalog stands ([`run_stages`]).
-	bundles: Vec<(surrealdb_strand::TableName, Option<uuid::Uuid>, Arc<Program>)>,
+	/// that may reach any table, each with the definitions it was loaded for,
+	/// so a table's bundle is loaded once per run of the statement while the
+	/// definitions its write contexts read stand ([`WriteState::bundle_for`]).
+	bundles: Vec<HeldBundle>,
 	/// Whether the stages running are a stage unit's, whose failures the
 	/// [`WriteInstr::DispatchTable`] that ran them hands to the body's
 	/// handlers.
@@ -144,6 +135,17 @@ pub(super) struct WriteState {
 	/// The block statement compiled into the program whose write this is, or
 	/// `None` for the program's own.
 	pub(super) group: Option<u16>,
+}
+
+/// The bundle of a table's stages a run holds ([`WriteState::bundle_for`]),
+/// with the catalog version and the definitions of the write context it was
+/// loaded for.
+struct HeldBundle {
+	table: surrealdb_strand::TableName,
+	version: Option<uuid::Uuid>,
+	fields: Arc<[crate::catalog::FieldDefinition]>,
+	indexes: Arc<[crate::catalog::IndexDefinition]>,
+	bundle: Arc<Program>,
 }
 
 impl WriteState {
@@ -298,6 +300,40 @@ impl WriteState {
 		self.row.as_mut().ok_or_else(|| internal("a write step with no record in flight"))
 	}
 
+	/// The bundle of the stages `named`, a write that may reach any table,
+	/// applies to the records of `ctx`'s table, for the definitions `ctx`
+	/// read: held from an earlier record of the run whose context read the
+	/// same catalog version, or the same fields and indexes, or served
+	/// ([`super::fault::serve_stage_bundle`]) and held. A table whose context
+	/// was resolved again for definitions that changed while the run went on
+	/// takes the bundle of the definitions it holds now.
+	async fn bundle_for(
+		&mut self,
+		named: &Arc<super::units::StageSetUnit>,
+		ctx: &WriteCtx,
+	) -> FlowResult<Arc<Program>> {
+		let table = &ctx.table.name;
+		let version = ctx.resolved_at.0;
+		if let Some(held) = self.bundles.iter().find(|held| {
+			held.table == *table
+				&& (held.version == version
+					|| (Arc::ptr_eq(&held.fields, &ctx.fields)
+						&& Arc::ptr_eq(&held.indexes, &ctx.indexes)))
+		}) {
+			return Ok(Arc::clone(&held.bundle));
+		}
+		let bundle = super::fault::serve_stage_bundle(named, table, ctx.exec()).await?;
+		self.bundles.retain(|held| held.table != *table);
+		self.bundles.push(HeldBundle {
+			table: table.clone(),
+			version,
+			fields: Arc::clone(&ctx.fields),
+			indexes: Arc::clone(&ctx.indexes),
+			bundle: Arc::clone(&bundle),
+		});
+		Ok(bundle)
+	}
+
 	fn in_flight(&mut self) -> Result<(&mut WriteRow, Arc<WriteCtx>), ControlFlow> {
 		let ctx = self
 			.ctx
@@ -372,6 +408,13 @@ impl WriteState {
 				// so a record picks it up here, before any stage that
 				// dispatches on it runs.
 				self.row()?.load_stored_metadata(&ctx).await?;
+				// The bundle of a write that may reach any table is taken with
+				// the context, before anything of the record runs, so it is the
+				// bundle of the definitions the context read.
+				if let Some(named) = spec.tables.as_ref().and_then(|tables| tables.by_name.as_ref())
+				{
+					self.bundle_for(named, &ctx).await?;
+				}
 				self.ctx = Some(ctx);
 				next
 			}
@@ -762,7 +805,6 @@ async fn define_shared_table(
 	state: &mut State,
 ) -> FlowResult<()> {
 	use crate::catalog::{FromStored as _, StoredTableDefinition, TableDefinition, TableId};
-	use crate::exec::operators::write::ctx::TableExistence;
 	let State {
 		write,
 		reserved_taken,
@@ -852,37 +894,11 @@ async fn run_stages(program: &Program, site: u16, state: &mut State) -> FlowResu
 	let outside = || internal(&format!("a table outside the dispatch set: {}", ctx.table.name));
 	let (stages, units) = match &tables.by_name {
 		Some(named) => {
-			let table = ctx.table.name.clone();
-			// A bundle is taken again for the catalog version the record's
-			// write context read, so a table whose catalog changed while the
-			// run went on runs the stages of the definitions it holds now.
-			let version = ctx.resolved_at.0;
-			let held = write
-				.bundles
-				.iter()
-				.find(|(name, at, _)| *name == table && *at == version)
-				.map(|(_, _, b)| Arc::clone(b));
-			let bundle = match held {
-				Some(bundle) => bundle,
-				None => {
-					let bundle = super::fault::serve_stage_bundle(named, &table, &exec).await?;
-					let write = state
-						.write
-						.as_deref_mut()
-						.ok_or_else(|| internal("a write body with no write state"))?;
-					write.bundles.retain(|(name, _, _)| *name != table);
-					write.bundles.push((table, version, Arc::clone(&bundle)));
-					bundle
-				}
-			};
-			// The bundle's entry is the program of the stages, and its arena
-			// holds what they run.
-			let entry = bundle
-				.unit
-				.as_ref()
-				.and_then(|head| head.entry)
-				.ok_or_else(|| internal("a table's stages that head no bundle"))?;
-			admit(Arc::clone(&bundle.units), entry, state, &exec)?
+			let bundle = write.bundle_for(named, &ctx).await?;
+			// The bundle is the program of the stages and the root of the arena
+			// that holds what they run.
+			let units = Arc::clone(&bundle.units);
+			(bundle, units)
 		}
 		None => {
 			let unit = tables.unit(&ctx.table.name).ok_or_else(outside)?;
@@ -1338,6 +1354,12 @@ async fn run_targets(
 					}
 					if guarantees {
 						continue;
+					}
+					// A scan of the table's key range checks no catalog, so a
+					// write that requires the table defined checks it here,
+					// before it reads.
+					if matches!(form.table_existence(), TableExistence::Required) {
+						super::host::require_defined(ctx, &table, ctx.version_stamp()).await?;
 					}
 					Rows::Scan(scan_subjects(ctx, &table, range.as_deref()).await?)
 				}

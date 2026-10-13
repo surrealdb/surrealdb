@@ -1,14 +1,12 @@
 //! Constant folding over the logical plan.
 //!
 //! Reduces row-independent subexpressions in a predicate to literals, so that
-//! index analysis sees `field < <datetime literal>` rather than
-//! `field < time::now() - 1d` and can turn it into a range.
+//! index analysis sees `field < 5` rather than `field < 2 + 3`.
 //!
 //! What folds is decided by `try_fold_to_literal`, the rule shared with the
 //! physical planner: arithmetic on literals, calls to a pure, deterministic,
-//! synchronous built-in whose arguments are all literals, `time::now()` once
-//! per statement in a `WHERE` and nowhere else ([`is_condition`]), `x INSIDE []` to `false`,
-//! AND/OR short-circuits against a boolean literal, and a path over a constant
+//! synchronous built-in whose arguments are all literals, `x INSIDE []` to
+//! `false`, AND/OR short-circuits against a boolean literal, and a path over a constant
 //! that reads no storage (`{ name: 'x' }.name`, `['a', 'b'][1]`, the shapes a
 //! substituted `$obj.field` or `$arr[1]` takes), so that a comparison or a
 //! MATCHES against one is an index candidate. The last two eliminate an
@@ -20,6 +18,13 @@
 //! for a source without a schema, for a nested plan, for a checked caller
 //! reading a table with a conditional table or field permission; otherwise
 //! the computed fields, whose read runs their body.
+//!
+//! A call that reads the clock never folds, `time::now()` in a `WHERE`
+//! included: a plan holds no instant, so a plan that outlives its statement
+//! reads the clock of the statement that runs it. `at > time::now() - 1d` is
+//! still an index range, because the index analyzer reads the call as a bound
+//! that resolves when the scan opens
+//! (`BoundOperand::StatementClock`).
 //!
 //! A call folds only when the caller's function capabilities permit it:
 //! folding runs the function here, at plan time, so the name check that
@@ -71,14 +76,7 @@ use crate::expr::logical::{
 /// node are inert to read, and what the caller may execute — so the rule
 /// itself is the fold and nothing else.
 pub(super) fn apply(expr: &mut LogicalExpr, cx: &ExprContext<'_>) -> bool {
-	fold_expressions(
-		expr,
-		cx.registry,
-		cx.capabilities,
-		cx.restricted,
-		cx.aggregates_survive,
-		cx.condition,
-	)
+	fold_expressions(expr, cx.registry, cx.capabilities, cx.restricted, cx.aggregates_survive)
 }
 
 /// The [`ExprContext::restricted`] for the scalars of `node`: what a read off
@@ -102,24 +100,11 @@ pub(super) fn restricted_for(node: &LogicalOp, checks: bool) -> Option<Restricte
 ///
 /// `checks` is whether the caller is permission-checked, which decides
 /// whether a conditional permission makes a table's field reads non-inert.
-#[cfg(test)]
 pub(super) fn fold_constants(
 	op: LogicalOp,
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
 	checks: bool,
-) -> LogicalOp {
-	fold_constants_with(op, registry, capabilities, checks, true)
-}
-
-/// [`fold_constants`], folding a `time::now()` in a condition only where
-/// `folds_clock`.
-pub(super) fn fold_constants_with(
-	op: LogicalOp,
-	registry: &FunctionRegistry,
-	capabilities: &Capabilities,
-	checks: bool,
-	folds_clock: bool,
 ) -> LogicalOp {
 	rewrite_deep(op, &mut |mut node| {
 		if !matches!(node, LogicalOp::Filter(_) | LogicalOp::PermissionFilter(_)) {
@@ -131,7 +116,6 @@ pub(super) fn fold_constants_with(
 			capabilities,
 			restricted: restricted.as_ref(),
 			aggregates_survive: false,
-			condition: folds_clock && is_condition(&node),
 		};
 		let Ok(()) = node.visit_scalars_mut(&mut |scalar| {
 			apply(scalar, &cx);
@@ -149,19 +133,6 @@ pub(super) fn fold_constants_with(
 /// they were written so that decision reads what the statement said.
 pub(super) fn is_from_leaf(node: &LogicalOp) -> bool {
 	matches!(node, LogicalOp::Source(_) | LogicalOp::Values(_))
-}
-
-/// Whether the scalars of `node` are a condition: a `WHERE`, where
-/// `time::now()` is one value for the statement.
-///
-/// A condition is where one value is needed: `at > time::now() - 1d` becomes
-/// an index range only once the right side is a literal. In a projection or a
-/// data clause each call is evaluated on its own, and `CREATE |t:50| SET at =
-/// time::now()` writes the value each row's call read. A permission predicate
-/// and a mutation's `WHERE` are evaluated per row as well: neither chooses an
-/// access path.
-pub(super) fn is_condition(node: &LogicalOp) -> bool {
-	matches!(node, LogicalOp::Filter(_))
 }
 
 /// Whether a call the aggregate extractor knows must survive folding whole at
@@ -408,8 +379,8 @@ mod tests {
 		assert!(plan.contains("Filter[b = 2]"), "{plan}");
 	}
 
-	/// The driver applies [`apply`] at every node, so these read the whole
-	/// optimiser rather than the pre-pass above.
+	/// The driver applies [`apply`] at every node, so these exercise the whole
+	/// optimiser rather than only the `fold_constants` pass.
 	mod as_an_expression_rule {
 		use super::super::super::lower_test;
 		use super::super::super::rules::test_support::{rewritten, rewritten_sql};
@@ -489,10 +460,13 @@ mod tests {
 	}
 
 	#[test]
-	fn time_now_is_folded_once_per_statement() {
+	fn a_clock_read_is_never_folded() {
 		let plan = folded("SELECT * FROM t WHERE ts < time::now() - 1d").to_string();
-		assert!(!plan.contains("time::now"), "{plan}");
-		assert!(plan.contains("ts < d'"), "should be a datetime literal:\n{plan}");
+		assert!(
+			plan.contains("time::now() - 1d"),
+			"the plan holds the call, not an instant:\n{plan}"
+		);
+		assert!(!plan.contains("d'"), "no datetime literal:\n{plan}");
 	}
 
 	#[test]
@@ -501,6 +475,15 @@ mod tests {
 		assert!(plan.contains("Filter[b = 1]"), "{plan}");
 		let plan = folded("SELECT * FROM t WHERE 1 IN [] AND b = 1").to_string();
 		assert!(plan.contains("Filter[false]"), "{plan}");
+	}
+
+	#[test]
+	fn a_constant_false_predicate_keeps_the_table_source() {
+		// The predicate folds to `false` and the filter stays over the source, so the
+		// access chooser still sees the table the statement names.
+		let plan = folded("SELECT * FROM nosuch WHERE 1 IN []").to_string();
+		assert!(plan.contains("Filter[false]"), "{plan}");
+		assert!(plan.contains("nosuch"), "{plan}");
 	}
 
 	#[test]

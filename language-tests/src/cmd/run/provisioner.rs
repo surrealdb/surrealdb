@@ -631,10 +631,10 @@ impl RemotePermit {
 	}
 }
 
-/// Print the memory limits `ds` holds, and fail where a limit the run set with
-/// `--config` is not the one it holds: a key that does not reach the
-/// datastore would leave every test running under the defaults while the run
-/// reports otherwise.
+/// Print the memory limits `ds` holds, and fail where a memory or morsel
+/// setting the run set with `--config` is not the one it holds: a key that does
+/// not reach the datastore would leave every test running under the defaults
+/// while the run reports otherwise.
 fn report_memory(ds: &Datastore, config: &[(String, String)]) -> Result<()> {
 	match ds.memory_limit() {
 		Some(limit) => {
@@ -676,6 +676,24 @@ fn report_memory(ds: &Datastore, config: &[(String, String)]) -> Result<()> {
 					ds.memory_wait() == wanted,
 					"memory_wait={value} did not reach the datastore (it holds {:?})",
 					ds.memory_wait()
+				);
+			}
+			key if key.starts_with("morsel_") => {
+				let held = ds.morsel_knobs();
+				let Some((_, held)) = held.iter().find(|(name, _)| *name == key) else {
+					// A morsel key the datastore does not report is not one the lane checks.
+					continue;
+				};
+				let wanted = if key.ends_with("_bytes") {
+					parse_bytes(value)?.to_string()
+				} else if held == "true" || held == "false" {
+					value.trim().parse::<bool>()?.to_string()
+				} else {
+					value.trim().parse::<usize>()?.to_string()
+				};
+				anyhow::ensure!(
+					*held == wanted,
+					"{key}={value} did not reach the datastore (it holds {held})"
 				);
 			}
 			_ => {}
@@ -727,5 +745,29 @@ mod tests {
 		assert!(report_memory(&ds.store, &wrong).is_err());
 		let default = vec![("query_memory_max".to_owned(), "0".to_owned())];
 		report_memory(&ds.store, &default).unwrap();
+	}
+
+	/// A morsel key given with `--config` reaches the datastore the runner opens, and the check
+	/// that it was applied accepts it.
+	#[tokio::test]
+	async fn a_morsel_key_reaches_the_datastore() {
+		let config = vec![
+			("morsel_split_rows".to_owned(), "1".to_owned()),
+			("morsel_target_bytes".to_owned(), "1".to_owned()),
+			("morsel_places".to_owned(), "0".to_owned()),
+			("morsel_steal_always".to_owned(), "true".to_owned()),
+		];
+		let info = CreateInfo::new(Backend::Memory, config.clone()).await.unwrap();
+		let ds = info.produce_ds(false, Capabilities::all()).await.unwrap();
+		let held = ds.store.morsel_knobs();
+		assert!(held.contains(&("morsel_split_rows", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_target_bytes", "1".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_places", "0".to_owned())), "{held:?}");
+		assert!(held.contains(&("morsel_steal_always", "true".to_owned())), "{held:?}");
+		report_memory(&ds.store, &config).unwrap();
+		let wrong = vec![("morsel_places".to_owned(), "3".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
+		let wrong = vec![("morsel_steal_always".to_owned(), "false".to_owned())];
+		assert!(report_memory(&ds.store, &wrong).is_err());
 	}
 }

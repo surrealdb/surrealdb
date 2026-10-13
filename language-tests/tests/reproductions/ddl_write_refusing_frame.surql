@@ -12,7 +12,9 @@ reason = """
 
 	Both refusals happen when the statement is reached rather than when it is
 	defined: whether a guard or a body reaches a schema statement can depend on
-	the row, so only running it settles the question.
+	the row, so only running it settles the question. The COMPUTED body's callee
+	is redefined after the field is defined, so the read reaches the runtime
+	frame.
 
 	What this file holds is that a schema statement in either frame is refused
 	with the same message. Each frame is enforced twice — the operator that plans a

@@ -46,12 +46,15 @@ async fn ds_on_disk_with(scheme: &str, query: &str) -> TestDs {
 	TestDs::from_builder_with_guard(builder, dir)
 }
 
+// Each backend is registered behind its own feature flag, so the list cannot
+// be a `vec![]` literal and may see zero, one or several pushes.
+#[allow(clippy::vec_init_then_push)]
 fn main() -> ExitCode {
 	#[allow(unused_mut)]
 	let mut backends = Vec::new();
 
-	// The memory backend no longer supports versioning (removed in the
-	// surrealmx 0.23 upgrade), so there is no `mem_versioned` backend.
+	// The memory backend does not support versioning, so no versioned
+	// memory backend is registered.
 	#[cfg(feature = "kv-mem")]
 	backends.push(TestBackend::new("mem", || ds_from_path("memory")));
 

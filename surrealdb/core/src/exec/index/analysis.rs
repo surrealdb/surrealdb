@@ -8,12 +8,13 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use super::access_path::{
-	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
+	AccessPath, BTreeAccess, BitmapPlan, BoundOperand, IndexRef, KnnPrefilterPlan, OperandRange,
+	select_access_path,
 };
 use crate::catalog::{Index, IndexDefinition, KeyStructure};
 use crate::exec::planner::util::{
 	KnnQueryVector, KnnVectorClass, classify_knn_vector, expr_contains_matches,
-	idiom_matches_column_in, idiom_matches_containment, try_literal_to_value,
+	idiom_matches_column_in, idiom_matches_containment, try_bound_operand, try_literal_to_value,
 };
 use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalOrdering};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -47,6 +48,12 @@ pub struct IndexAnalyzer<'a> {
 	/// component match whichever way each spells it
 	/// ([`idiom_matches_column_in`]). `None` matches as written.
 	key: Option<Arc<KeyStructure>>,
+	/// Whether the caller may call `time::now()`, so that a comparison
+	/// against it is a candidate bound that reads the statement clock. The
+	/// scan reads the clock without checking the caller's capabilities, so a
+	/// caller denied the function is never offered the bound: its comparison
+	/// stays a filter, which raises the denial when it is evaluated.
+	clock_allowed: bool,
 }
 
 /// The query vectors of the KNN operators whose right operand is a parameter,
@@ -70,7 +77,16 @@ impl<'a> IndexAnalyzer<'a> {
 			scalar: None,
 			registry,
 			key: None,
+			clock_allowed: false,
 		}
+	}
+
+	/// Accept a comparison against `time::now()`, or `time::now() ± <duration
+	/// literal>`, as an index bound that reads the statement clock, where
+	/// `allowed` says the caller may call `time::now()`.
+	pub(crate) fn with_clock(mut self, allowed: bool) -> Self {
+		self.clock_allowed = allowed;
+		self
 	}
 
 	/// Match the b-tree columns that address a component of the table's
@@ -112,6 +128,12 @@ impl<'a> IndexAnalyzer<'a> {
 		} else {
 			index_ref
 		}
+	}
+
+	/// A reference to every index of the analyzer, in order, as the candidates it builds carry
+	/// them.
+	pub(crate) fn index_refs(&self) -> Vec<IndexRef> {
+		(0..self.indexes.len()).map(|idx| self.index_ref(idx)).collect()
 	}
 
 	/// Withhold the containment seek from the columns `flags` marks, per
@@ -356,7 +378,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// it is stripped from the WHERE before residual filtering and cannot
 		// be evaluated as a per-row residual (unlike a MATCHES `@@`, which is
 		// correct — if slower — as a filter). Substituting a higher-scoring OR
-		// union here would demote the KNN to a residual that no longer
+		// union here would demote the KNN to a residual that does not
 		// restricts rows to the neighbour set, returning rows outside it. Leave
 		// any KNN query to drive from its KnnScan.
 		if Self::expr_contains_knn(cond) {
@@ -394,8 +416,7 @@ impl<'a> IndexAnalyzer<'a> {
 		best
 	}
 
-	/// Try to build a bitmap fusion plan for an AND-composed WHERE clause
-	/// (issue #547).
+	/// Try to build a bitmap fusion plan for an AND-composed WHERE clause.
 	///
 	/// The plan intersects per-branch candidate bitmaps over the table's
 	/// shared doc-ID space instead of driving from a single index and
@@ -437,7 +458,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// A KNN operator must be consumed by its KnnScan (see
 		// `try_and_nested_or_union`); a KNN query's sibling conjuncts are
 		// fused by [`Self::try_knn_prefilter`] into the scan's allow-list
-		// bitmap instead (#548) — the query never becomes a plain
+		// bitmap instead, so the query never becomes a plain
 		// `BitmapFusion` source.
 		if Self::expr_contains_knn(cond) {
 			return None;
@@ -508,7 +529,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 		}
 
-		// Graph reachability semi-joins (issue #549): a single-hop
+		// Graph reachability semi-joins: a single-hop
 		// `->edge->vertex CONTAINS <literal id>` conjunct anchors at the
 		// literal and walks the inverse direction back to the candidate
 		// rows, entirely from adjacency pointer keys. Appended after the
@@ -566,10 +587,10 @@ impl<'a> IndexAnalyzer<'a> {
 		})
 	}
 
-	/// Build a bitmap union plan for a top-level OR (issue #550): every
+	/// Build a bitmap union plan for a top-level OR: every
 	/// branch's best candidate drains to a doc-ID bitmap and the union
-	/// resolves once, inherently deduplicated — replacing the
-	/// `UnionIndexScan` RecordId merge, whose dedupe set grows with the
+	/// resolves once and is inherently deduplicated. Unlike the
+	/// `UnionIndexScan` RecordId merge, it needs no dedupe set that grows with the
 	/// result size. The [`AccessPath::Union`] the plan was derived from is
 	/// returned alongside it, as the executor's overflow fallback: a union
 	/// branch exceeding its drained-entry budget abandons the bitmap plan
@@ -630,9 +651,11 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut shared_index: Option<&IndexRef> = None;
 		let mut values: Vec<&Value> = Vec::with_capacity(children.len());
 		for child in children {
+			// A clock bound and a literal are not provably distinct before
+			// the scan opens, so a branch that reads the clock proves nothing.
 			let BitmapPlan::BTree {
 				index_ref,
-				access: BTreeAccess::Equality(value),
+				access: BTreeAccess::Equality(BoundOperand::Literal(value)),
 			} = child
 			else {
 				return false;
@@ -965,7 +988,7 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Build an *exact* bitmap fusion plan for an index-only COUNT
-	/// (issue #547): `SELECT count() FROM t WHERE <fully index-backed AND>
+	/// `SELECT count() FROM t WHERE <fully index-backed AND>
 	/// GROUP ALL` becomes the cardinality of the fused bitmap, with zero
 	/// record fetches.
 	///
@@ -1108,7 +1131,7 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Split a KNN query's stripped WHERE into an exact allow-list bitmap
-	/// plan and a true residual (#548, pre-filtered vector search).
+	/// plan and a true residual (pre-filtered vector search).
 	///
 	/// Per conjunct of the AND chain:
 	/// - a conjunct containing a MATCHES operator joins the prefilter when it is exactly
@@ -1125,6 +1148,10 @@ impl<'a> IndexAnalyzer<'a> {
 	///
 	/// One covered conjunct suffices — unlike [`Self::try_bitmap_fusion`]'s
 	/// ≥ 2 rule — because it already eliminates in-traversal record fetches.
+	///
+	/// The covered conjuncts are reported by their index in the `AND` chain of `stripped`
+	/// ([`KnnPrefilterPlan::covered`]), never by their text, so a caller maps them back to its own
+	/// conjuncts whatever rewriting `stripped` went through.
 	pub(crate) fn try_knn_prefilter(
 		&self,
 		stripped: &LogicalExpr,
@@ -1137,12 +1164,14 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut conjuncts = Vec::new();
 		Self::flatten_and(stripped, &mut conjuncts);
 		let mut covered: Vec<BitmapPlan> = Vec::new();
+		let mut covered_at: Vec<usize> = Vec::new();
 		let mut residual: Vec<&LogicalExpr> = Vec::new();
 		let mut uncovered_matches = false;
-		for conjunct in conjuncts {
+		for (at, conjunct) in conjuncts.into_iter().enumerate() {
 			if expr_contains_matches(conjunct) {
 				if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
 					covered.push(leaf);
+					covered_at.push(at);
 				} else {
 					// Not exactly coverable and excluded from the residual
 					// (see the method doc): flag it so the scan keeps its
@@ -1153,6 +1182,7 @@ impl<'a> IndexAnalyzer<'a> {
 				residual.push(conjunct);
 			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
 				covered.push(leaf);
+				covered_at.push(at);
 			} else {
 				residual.push(conjunct);
 			}
@@ -1172,6 +1202,7 @@ impl<'a> IndexAnalyzer<'a> {
 		});
 		Some(KnnPrefilterPlan {
 			root,
+			covered: covered_at,
 			residual,
 			uncovered_matches,
 		})
@@ -1184,10 +1215,9 @@ impl<'a> IndexAnalyzer<'a> {
 	/// of targeted lookups. Arrays larger than this fall back to a table scan
 	/// with a predicate filter, which performs a single sequential pass.
 	///
-	/// The value 32 is currently heuristic — not measured against a specific
-	/// crossover point. Raising it requires benchmarking the per-element
-	/// `UnionIndexScan` overhead vs the table-scan cost for typical row
-	/// counts. The `index_analyzer` criterion bench at
+	/// The value 32 is a heuristic, not measured against a crossover point. Raising it requires
+	/// benchmarking the per-element `UnionIndexScan` overhead vs the table-scan cost for typical
+	/// row counts. The `index_analyzer` criterion bench at
 	/// `surrealdb/core/benches/index_analyzer.rs` is the right place to
 	/// gather that signal.
 	const MAX_IN_EXPANSION_SIZE: usize = 32;
@@ -1273,7 +1303,7 @@ impl<'a> IndexAnalyzer<'a> {
 						.iter()
 						.map(|v| AccessPath::BTreeScan {
 							index_ref: index_ref.clone(),
-							access: BTreeAccess::Equality(v.clone()),
+							access: BTreeAccess::literal_equality(v.clone()),
 							direction,
 						})
 						.collect()
@@ -1285,10 +1315,7 @@ impl<'a> IndexAnalyzer<'a> {
 						.iter()
 						.map(|v| AccessPath::BTreeScan {
 							index_ref: index_ref.clone(),
-							access: BTreeAccess::Compound {
-								prefix: vec![v.clone()],
-								range: None,
-							},
+							access: BTreeAccess::literal_compound(vec![v.clone()], None),
 							direction,
 						})
 						.collect()
@@ -1354,12 +1381,9 @@ impl<'a> IndexAnalyzer<'a> {
 						.iter()
 						.map(|v| {
 							let access = if is_composite {
-								BTreeAccess::Compound {
-									prefix: vec![v.clone()],
-									range: None,
-								}
+								BTreeAccess::literal_compound(vec![v.clone()], None)
 							} else {
-								BTreeAccess::Equality(v.clone())
+								BTreeAccess::literal_equality(v.clone())
 							};
 							AccessPath::BTreeScan {
 								index_ref: index_ref.clone(),
@@ -1566,8 +1590,17 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 	}
 
+	/// The bound operand `expr` denotes as the value side of a comparison
+	/// with `op`: a literal, or the statement clock where the caller may read
+	/// it and `op` is an equality or an ordering comparison
+	/// ([`try_bound_operand`]).
+	fn operand_of(&self, expr: &LogicalExpr, op: &BinaryOperator) -> Option<BoundOperand> {
+		try_bound_operand(expr, self.clock_allowed && is_ordering_comparison(op))
+	}
+
 	/// Extract a simple condition (path op value) from a binary expression:
-	/// one operand is a path over the row, the other a literal value.
+	/// one operand is a path over the row, the other a literal value or the
+	/// statement clock.
 	fn extract_simple_condition(
 		&self,
 		left: &LogicalExpr,
@@ -1576,10 +1609,10 @@ impl<'a> IndexAnalyzer<'a> {
 	) -> Option<SimpleCondition> {
 		let (path, value, position) = match (left, right) {
 			(lhs, rhs) if lhs.is_path() && !rhs.is_path() => {
-				(lhs.clone(), try_literal_to_value(rhs)?, IdiomPosition::Left)
+				(lhs.clone(), self.operand_of(rhs, op)?, IdiomPosition::Left)
 			}
 			(lhs, rhs) if rhs.is_path() => {
-				(rhs.clone(), try_literal_to_value(lhs)?, IdiomPosition::Right)
+				(rhs.clone(), self.operand_of(lhs, op)?, IdiomPosition::Right)
 			}
 			_ => return None,
 		};
@@ -1590,10 +1623,10 @@ impl<'a> IndexAnalyzer<'a> {
 		// compound index `(a, b)`.
 		let (op, value) = if matches!(op, BinaryOperator::Inside) && position == IdiomPosition::Left
 		{
-			if let Value::Array(arr) = &value
+			if let Some(Value::Array(arr)) = value.as_literal()
 				&& arr.len() == 1
 			{
-				(BinaryOperator::Equal, arr[0].clone())
+				(BinaryOperator::Equal, BoundOperand::Literal(arr[0].clone()))
 			} else {
 				(op.clone(), value)
 			}
@@ -1644,8 +1677,8 @@ impl<'a> IndexAnalyzer<'a> {
 			// one element. After the prefix, a single range condition on the
 			// next column is captured and encoded into the compound key
 			// range so the index scan is narrowed at the storage level.
-			let mut prefix_values = Vec::new();
-			let mut range_condition: Option<(BinaryOperator, Value)> = None;
+			let mut prefix_values: Vec<BoundOperand> = Vec::new();
+			let mut range_condition: Option<(BinaryOperator, BoundOperand)> = None;
 
 			for (col_idx, col) in ix_def.cols.iter().enumerate() {
 				// Find a condition that matches this column
@@ -1689,7 +1722,7 @@ impl<'a> IndexAnalyzer<'a> {
 				match matching_cond {
 					// No key is a whole array (see `match_operator_to_access`),
 					// so a comparison to one ends the prefix.
-					Some(cond) if matches!(cond.value, Value::Array(_)) => break,
+					Some(cond) if matches!(cond.value.as_literal(), Some(Value::Array(_))) => break,
 					Some(cond) => {
 						let is_equality =
 							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
@@ -1704,7 +1737,7 @@ impl<'a> IndexAnalyzer<'a> {
 							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
 								range_condition = Some((op, cond.value.clone()));
 							} else if matches!(cond.op, BinaryOperator::NotEqual)
-								&& matches!(cond.value, Value::None)
+								&& matches!(cond.value.as_literal(), Some(Value::None))
 							{
 								// `field != NONE`. NONE sorts first in BTree key
 								// ordering, so this is equivalent to `field > NONE`
@@ -1767,17 +1800,24 @@ impl<'a> IndexAnalyzer<'a> {
 						range: b,
 					} = &candidates[j].access
 				{
-					let range = a.clone().intersect(b.clone());
-					if range.is_empty() {
-						candidates[i].empty = true;
-						candidates.remove(j);
-					} else {
-						let covers_order = candidates[i].covers_order || candidates[j].covers_order;
-						candidates[i].access = BTreeAccess::Range {
-							range,
-						};
-						candidates[i].covers_order = covers_order;
-						candidates.remove(j);
+					// Two bounds of one side are compared to keep the tighter;
+					// where one reads the clock they cannot be, so the two
+					// candidates stay apart and the better one is chosen.
+					match a.intersect(b) {
+						Some(range) if range.is_empty() => {
+							candidates[i].empty = true;
+							candidates.remove(j);
+						}
+						Some(range) => {
+							let covers_order =
+								candidates[i].covers_order || candidates[j].covers_order;
+							candidates[i].access = BTreeAccess::Range {
+								range,
+							};
+							candidates[i].covers_order = covers_order;
+							candidates.remove(j);
+						}
+						None => j += 1,
 					}
 				} else {
 					j += 1;
@@ -1817,8 +1857,8 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 					BinaryOperator::Or => {
 						// For OR, we need all branches to use the same index
-						// This is more complex - for now, don't index OR conditions
-						// (can be enhanced later)
+						// This is more complex. OR conditions are not indexed here; the OR union
+						// analysis covers them.
 					}
 					// MATCHES operator for full-text search
 					BinaryOperator::Matches(mo) => {
@@ -1867,11 +1907,11 @@ impl<'a> IndexAnalyzer<'a> {
 		// be resolved at plan time, so it cannot be pushed down to the index
 		// and the comparison falls through to the table-scan path.
 		let (path, value, position) = match (left, right) {
-			(lhs, rhs) if lhs.is_path() && !rhs.is_path() => match try_literal_to_value(rhs) {
+			(lhs, rhs) if lhs.is_path() && !rhs.is_path() => match self.operand_of(rhs, op) {
 				Some(value) => (lhs, value, IdiomPosition::Left),
 				None => return,
 			},
-			(lhs, rhs) if rhs.is_path() => match try_literal_to_value(lhs) {
+			(lhs, rhs) if rhs.is_path() => match self.operand_of(lhs, op) {
 				Some(value) => (rhs, value, IdiomPosition::Right),
 				None => return,
 			},
@@ -1918,7 +1958,7 @@ impl<'a> IndexAnalyzer<'a> {
 	fn match_operator_to_access(
 		&self,
 		op: &BinaryOperator,
-		value: &Value,
+		value: &BoundOperand,
 		position: IdiomPosition,
 		index_type: &Index,
 	) -> Option<BTreeAccess> {
@@ -1930,13 +1970,21 @@ impl<'a> IndexAnalyzer<'a> {
 		// whole array: a comparison to one is not answered by a key or a
 		// range of keys. `IN` reads the array's elements as its keys, so an
 		// element that is itself an array is no key either.
-		if let Value::Array(arr) = value
+		if let Some(Value::Array(arr)) = value.as_literal()
 			&& (!matches!(op, BinaryOperator::Inside)
 				|| arr.iter().any(|v| matches!(v, Value::Array(_))))
 		{
 			return None;
 		}
 
+		let range = |start: Bound<BoundOperand>, end: Bound<BoundOperand>| {
+			Some(BTreeAccess::Range {
+				range: OperandRange {
+					start,
+					end,
+				},
+			})
+		};
 		match (op, position) {
 			// Equality
 			(BinaryOperator::Equal | BinaryOperator::ExactEqual, _) => {
@@ -1946,48 +1994,36 @@ impl<'a> IndexAnalyzer<'a> {
 			// Less than (field < value)
 			// More then (value > value)
 			(BinaryOperator::LessThan, IdiomPosition::Left)
-			| (BinaryOperator::MoreThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				range: Range {
-					start: Bound::Unbounded,
-					end: Bound::Excluded(value.clone()),
-				},
-			}),
+			| (BinaryOperator::MoreThan, IdiomPosition::Right) => {
+				range(Bound::Unbounded, Bound::Excluded(value.clone()))
+			}
 
 			// Less than or equal (field <= value)
 			// More than or equal (value >= field)
 			(BinaryOperator::LessThanEqual, IdiomPosition::Left)
-			| (BinaryOperator::MoreThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				range: Range {
-					start: Bound::Unbounded,
-					end: Bound::Included(value.clone()),
-				},
-			}),
+			| (BinaryOperator::MoreThanEqual, IdiomPosition::Right) => {
+				range(Bound::Unbounded, Bound::Included(value.clone()))
+			}
 
 			// Greater than (field > value)
 			// Less than (value < field)
 			(BinaryOperator::MoreThan, IdiomPosition::Left)
-			| (BinaryOperator::LessThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				range: Range {
-					start: Bound::Excluded(value.clone()),
-					end: Bound::Unbounded,
-				},
-			}),
+			| (BinaryOperator::LessThan, IdiomPosition::Right) => {
+				range(Bound::Excluded(value.clone()), Bound::Unbounded)
+			}
 
 			// Greater than or equal (field >= value)
 			// Less than or equal (value <= field)
 			(BinaryOperator::MoreThanEqual, IdiomPosition::Left)
-			| (BinaryOperator::LessThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				range: Range {
-					start: Bound::Included(value.clone()),
-					end: Bound::Unbounded,
-				},
-			}),
+			| (BinaryOperator::LessThanEqual, IdiomPosition::Right) => {
+				range(Bound::Included(value.clone()), Bound::Unbounded)
+			}
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
-				match value {
+				match value.as_literal()? {
 					// Single-element array: treat as equality (field IN [v] → field = v)
 					Value::Array(arr) if arr.len() == 1 => {
-						Some(BTreeAccess::Equality(arr[0].clone()))
+						Some(BTreeAccess::literal_equality(arr[0].clone()))
 					}
 					// A range literal states the bounds directly, so it is
 					// the same access as the two comparisons that spell it
@@ -1995,9 +2031,7 @@ impl<'a> IndexAnalyzer<'a> {
 					// The literal's own bounds carry which end is open, so
 					// every spelling (`..`, `..=`, `>..`, `>..=`) maps
 					// without a case of its own.
-					Value::Range(r) => Some(BTreeAccess::Range {
-						range: (**r).clone(),
-					}),
+					Value::Range(r) => Some(BTreeAccess::literal_range((**r).clone())),
 					_ => None,
 				}
 			}
@@ -2010,16 +2044,11 @@ impl<'a> IndexAnalyzer<'a> {
 			// before NULL, so an exclusive `> NULL` range scan silently
 			// drops rows where the field is NONE — which contradicts
 			// SurrealQL filter semantics, where `NONE != NULL` is `true`.
-			// Until the access-path model can express the union
-			// `< NULL OR > NULL` we fall through and let the table-scan
-			// + filter path handle `!= NULL` correctly.
-			(BinaryOperator::NotEqual, _) if matches!(value, Value::None) => {
-				Some(BTreeAccess::Range {
-					range: Range {
-						start: Bound::Excluded(value.clone()),
-						end: Bound::Unbounded,
-					},
-				})
+			// The access-path model cannot express the union
+			// `< NULL OR > NULL`, so this case falls through to the table-scan
+			// + filter path, which handles `!= NULL` correctly.
+			(BinaryOperator::NotEqual, _) if matches!(value.as_literal(), Some(Value::None)) => {
+				range(Bound::Excluded(value.clone()), Bound::Unbounded)
 			}
 
 			_ => None,
@@ -2065,12 +2094,10 @@ impl<'a> IndexAnalyzer<'a> {
 			Some(next) => Bound::Excluded(Value::String(next.into())),
 			None => Bound::Unbounded,
 		};
-		let access = BTreeAccess::Range {
-			range: Range {
-				start: Bound::Included(Value::String(prefix)),
-				end,
-			},
-		};
+		let access = BTreeAccess::literal_range(Range {
+			start: Bound::Included(Value::String(prefix)),
+			end,
+		});
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
 				continue;
@@ -2136,12 +2163,9 @@ impl<'a> IndexAnalyzer<'a> {
 				// to satisfy ORDER BY without a post-iteration sort. Mirrors
 				// the equality rewrite in `try_match_comparison`.
 				let access = if ix_def.cols.len() > 1 {
-					BTreeAccess::Compound {
-						prefix: vec![value.clone()],
-						range: None,
-					}
+					BTreeAccess::literal_compound(vec![value.clone()], None)
 				} else {
-					BTreeAccess::Equality(value.clone())
+					BTreeAccess::literal_equality(value.clone())
 				};
 				let index_ref = self.index_ref(idx);
 				candidates.push(IndexCandidate::new(index_ref, access));
@@ -2214,20 +2238,23 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		let path = left;
 
-		// A parameter the planner resolved to an array of numbers is that
-		// vector ([`KnnQueryVectors`]). Any other right-hand side is read
-		// exactly as brute force reads it, so a value either refuses when it
-		// runs (one that is not `array<number>`) raises the same error in both.
-		// One that reads the row being scanned matches no index: the planner
-		// refuses it before an access path is chosen.
+		// A parameter the planner resolved is that vector ([`KnnQueryVectors`]),
+		// empty where it is known only when the statement runs. Any other
+		// right-hand side is read exactly as brute force reads it, so a value
+		// either refuses when it runs (one that is not `array<number>`) raises
+		// the same error in both: a vector computed when the statement runs is
+		// the empty vector here, and the scan takes the operator's operand as
+		// its query. One that reads the row being scanned matches no index:
+		// the planner refuses it before an access path is chosen.
 		let resolved = match right {
 			LogicalExpr::Param(param) => self.knn_query_vectors.and_then(|v| v.get(param.as_str())),
 			_ => None,
 		};
 		let vector = match resolved {
-			Some(vector) => KnnQueryVector::Literal(Arc::clone(vector)),
+			Some(vector) => Arc::clone(vector),
 			None => match classify_knn_vector(right, self.registry) {
-				KnnVectorClass::Vector(vector) => vector,
+				KnnVectorClass::Vector(KnnQueryVector::Literal(vector)) => vector,
+				KnnVectorClass::Vector(KnnQueryVector::Deferred(_)) => Arc::from(Vec::new()),
 				KnnVectorClass::ReadsRow => return,
 			},
 		};
@@ -2267,7 +2294,7 @@ impl<'a> IndexAnalyzer<'a> {
 				candidates.push(IndexCandidate::new(
 					index_ref,
 					BTreeAccess::Knn {
-						vector: vector.clone(),
+						vector: Arc::clone(&vector),
 						k,
 						ef,
 					},
@@ -2320,7 +2347,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			let index_ref = self.index_ref(idx);
 			let full_range = BTreeAccess::Range {
-				range: Range::unbounded(),
+				range: OperandRange::unbounded(),
 			};
 			if covers_ordering_either_direction(
 				&index_ref,
@@ -2440,7 +2467,7 @@ impl IndexCandidate {
 				}
 			}
 			BTreeAccess::Range {
-				range: Range {
+				range: OperandRange {
 					start,
 					end,
 				},
@@ -2572,11 +2599,11 @@ impl IndexCandidate {
 				ef,
 			} => AccessPath::KnnSearch {
 				index_ref: self.index_ref.clone(),
-				vector: vector.clone(),
+				vector: Arc::clone(vector),
 				k: *k,
 				ef: *ef,
 				// The prefilter is a plan-level concern; the SELECT planner
-				// attaches it after path selection (#548).
+				// attaches it after path selection.
 				prefilter: None,
 			},
 			_ => AccessPath::BTreeScan {
@@ -2604,8 +2631,22 @@ struct SimpleCondition {
 	/// [`path_matches_column`].
 	path: LogicalExpr,
 	op: BinaryOperator,
-	value: Value,
+	value: BoundOperand,
 	position: IdiomPosition,
+}
+
+/// Whether `op` compares for equality or order, the comparisons whose value
+/// side may read the statement clock as an index bound.
+fn is_ordering_comparison(op: &BinaryOperator) -> bool {
+	matches!(
+		op,
+		BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+	)
 }
 
 /// Whether a condition's path is exactly an index column, step for step
@@ -2842,7 +2883,7 @@ mod tests {
 	// ------------------------------------------------------------------
 	// 1. Equality / single-column
 	// ------------------------------------------------------------------
-	// 0. Bitmap fusion (issue #547)
+	// 0. Bitmap fusion
 	// ------------------------------------------------------------------
 	mod bitmap_fusion {
 		use super::*;
@@ -3727,7 +3768,7 @@ mod tests {
 			assert!(matches!(
 				c.access,
 				BTreeAccess::Range {
-					range: Range {
+					range: OperandRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
 					}
@@ -3849,12 +3890,15 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate for != NONE");
 			match &c.access {
 				BTreeAccess::Range {
-					range: Range {
+					range: OperandRange {
 						start,
 						end,
 					},
 				} => {
-					assert!(matches!(start, Bound::Excluded(crate::val::Value::None)));
+					assert!(matches!(
+						start,
+						Bound::Excluded(BoundOperand::Literal(crate::val::Value::None))
+					));
 					assert!(matches!(end, Bound::Unbounded));
 				}
 				other => panic!("expected exclusive Range from NONE, got {other:?}"),
@@ -4087,7 +4131,7 @@ mod tests {
 	}
 
 	// ------------------------------------------------------------------
-	// KNN prefilter split (#548)
+	// KNN prefilter split
 	// ------------------------------------------------------------------
 	mod knn_prefilter {
 		use super::bitmap_fusion::idx_v2;
@@ -4183,7 +4227,7 @@ mod tests {
 
 		#[test]
 		fn knn_candidate_drives_over_unique_equality() {
-			// #548 regression: the unique equality outscores KNN (1000 > 800)
+			// The unique equality outscores KNN (1000 > 800),
 			// but a KNN operator can only be computed by its KnnScan, so the
 			// KNN candidate must drive unconditionally.
 			let az = analyzer(
@@ -4237,7 +4281,7 @@ mod tests {
 			assert!(!c.empty, "inclusive both sides on same value is non-empty");
 			match &c.access {
 				BTreeAccess::Range {
-					range: Range {
+					range: OperandRange {
 						start,
 						end,
 					},
@@ -4272,7 +4316,7 @@ mod tests {
 					range,
 				} => {
 					assert!(
-						matches!(range.start, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 10)
+						matches!(range.start, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 10)
 					);
 					assert!(matches!(range.end, Bound::Unbounded));
 				}
@@ -4293,7 +4337,7 @@ mod tests {
 				} => {
 					assert!(matches!(range.start, Bound::Unbounded));
 					assert!(
-						matches!(range.end, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 50)
+						matches!(range.end, Bound::Excluded(BoundOperand::Literal(crate::val::Value::Number(n))) if n.to_int() == 50)
 					);
 				}
 				other => panic!("expected single tightened Range, got {other:?}"),
@@ -4309,7 +4353,7 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					range: Range {
+					range: OperandRange {
 						start: Bound::Excluded(_),
 						..
 					},
@@ -4329,17 +4373,17 @@ mod tests {
 		fn unique_equality_beats_non_unique() {
 			let uniq_cand = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_uniq(1, "u", &["a"])], 0),
-				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
-					1,
-				))),
+				access: BTreeAccess::Equality(
+					crate::val::Value::Number(crate::val::Number::Int(1)).into(),
+				),
 				covers_order: false,
 				empty: false,
 			};
 			let nonunique_cand = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_basic(1, "i", &["a"])], 0),
-				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
-					1,
-				))),
+				access: BTreeAccess::Equality(
+					crate::val::Value::Number(crate::val::Number::Int(1)).into(),
+				),
 				covers_order: false,
 				empty: false,
 			};
@@ -4365,7 +4409,8 @@ mod tests {
 						} else {
 							Bound::Unbounded
 						},
-					},
+					}
+					.into(),
 				},
 				covers_order: false,
 				empty: false,
@@ -4379,7 +4424,7 @@ mod tests {
 			// A 12-column compound prefix must not silently outscore a
 			// unique equality (which is at most one row).
 			let big_prefix = (0..12u32)
-				.map(|i| crate::val::Value::Number(crate::val::Number::Int(i as i64)))
+				.map(|i| crate::val::Value::Number(crate::val::Number::Int(i as i64)).into())
 				.collect::<Vec<_>>();
 			let wide = IndexCandidate {
 				index_ref: IndexRef::new(
@@ -4399,9 +4444,9 @@ mod tests {
 			};
 			let unique_eq = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_uniq(2, "u_a", &["a"])], 0),
-				access: BTreeAccess::Equality(crate::val::Value::Number(crate::val::Number::Int(
-					1,
-				))),
+				access: BTreeAccess::Equality(
+					crate::val::Value::Number(crate::val::Number::Int(1)).into(),
+				),
 				covers_order: false,
 				empty: false,
 			};
@@ -4421,7 +4466,8 @@ mod tests {
 							0,
 						))),
 						end: Bound::Unbounded,
-					},
+					}
+					.into(),
 				},
 				covers_order: covers,
 				empty: false,
@@ -4435,7 +4481,7 @@ mod tests {
 			let ordered = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_basic(1, "by_b", &["b"])], 0),
 				access: BTreeAccess::Range {
-					range: Range::unbounded(),
+					range: Range::unbounded().into(),
 				},
 				covers_order: true,
 				empty: false,
@@ -4446,21 +4492,22 @@ mod tests {
 					range: Range {
 						start: Bound::Included(int(0)),
 						end: Bound::Included(int(10)),
-					},
+					}
+					.into(),
 				},
 				covers_order: false,
 				empty: false,
 			};
 			let equality = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_basic(3, "by_c", &["c"])], 0),
-				access: BTreeAccess::Equality(int(1)),
+				access: BTreeAccess::Equality(int(1).into()),
 				covers_order: false,
 				empty: false,
 			};
 			let prefix = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_basic(4, "by_cd", &["c", "d"])], 0),
 				access: BTreeAccess::Compound {
-					prefix: vec![int(1)],
+					prefix: vec![int(1).into()],
 					range: None,
 				},
 				covers_order: false,
@@ -4478,7 +4525,7 @@ mod tests {
 			let fanning = IndexCandidate {
 				index_ref: IndexRef::new(&[idx_basic(1, "by_tags", &["tags[*]"])], 0),
 				access: BTreeAccess::Range {
-					range: Range::unbounded(),
+					range: Range::unbounded().into(),
 				},
 				covers_order: true,
 				empty: false,
@@ -4542,8 +4589,11 @@ mod tests {
 			else {
 				panic!("expected Range, got {:?}", c.access);
 			};
-			assert_eq!(range.start, Bound::Included(datetime("2025-01-01T10:00:00.999999999Z")));
-			assert_eq!(range.end, Bound::Included(datetime("2025-01-01T10:00:05Z")));
+			assert_eq!(
+				range.start,
+				Bound::Included(datetime("2025-01-01T10:00:00.999999999Z").into())
+			);
+			assert_eq!(range.end, Bound::Included(datetime("2025-01-01T10:00:05Z").into()));
 			assert!(range_is_widened(&c.index_ref, &c.access), "the scan answers no conjunct");
 		}
 
@@ -4559,7 +4609,10 @@ mod tests {
 			else {
 				panic!("expected Range, got {:?}", c.access);
 			};
-			assert_eq!(range.start, Bound::Included(datetime("2025-01-01T10:00:00.999999999Z")));
+			assert_eq!(
+				range.start,
+				Bound::Included(datetime("2025-01-01T10:00:00.999999999Z").into())
+			);
 			assert_eq!(range.end, Bound::Unbounded);
 		}
 
@@ -4571,7 +4624,7 @@ mod tests {
 			let c = find_for(&cands, "by_at").expect("by_at");
 			match &c.access {
 				BTreeAccess::Equality(value) => {
-					assert_eq!(value, &datetime("2025-01-01T10:00:05.500Z"));
+					assert_eq!(value, &BoundOperand::from(datetime("2025-01-01T10:00:05.500Z")));
 				}
 				other => panic!("expected Equality, got {other:?}"),
 			}
@@ -4591,10 +4644,10 @@ mod tests {
 			else {
 				panic!("expected Compound, got {:?}", c.access);
 			};
-			assert_eq!(prefix, &vec![Value::from("f")]);
+			assert_eq!(prefix, &vec![BoundOperand::from(Value::from("f"))]);
 			assert_eq!(
 				range,
-				&Some((BinaryOperator::LessThanEqual, datetime("2025-01-01T10:00:05Z")))
+				&Some((BinaryOperator::LessThanEqual, datetime("2025-01-01T10:00:05Z").into()))
 			);
 			assert!(range_is_widened(&c.index_ref, &c.access));
 		}
@@ -4618,7 +4671,7 @@ mod tests {
 			else {
 				panic!("expected Range, got {:?}", c.access);
 			};
-			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z")));
+			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z").into()));
 			assert!(!range_is_widened(&c.index_ref, &c.access));
 		}
 
@@ -4649,7 +4702,7 @@ mod tests {
 			else {
 				panic!("expected Range, got {:?}", c.access);
 			};
-			assert_eq!(range.start, Bound::Excluded(Value::from(3)));
+			assert_eq!(range.start, Bound::Excluded(Value::from(3).into()));
 			assert!(!range_is_widened(&c.index_ref, &c.access));
 			assert!(c.covers_order, "an int component orders by value");
 		}
@@ -4666,8 +4719,157 @@ mod tests {
 			else {
 				panic!("expected Range, got {:?}", c.access);
 			};
-			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z")));
+			assert_eq!(range.start, Bound::Excluded(datetime("2025-01-01T10:00:01Z").into()));
 			assert!(!range_is_widened(&c.index_ref, &c.access));
+		}
+
+		#[test]
+		fn a_clock_bound_over_a_datetime_component_of_the_id_is_discarded() {
+			// Widening to whole seconds needs the instant, which is known only
+			// when the scan opens, so the candidate is not offered.
+			let a = keyed(vec![idx_basic(1, "by_at", &["at"])]).with_clock(true);
+			let cands = a.analyze(Some(&parse_cond("at > time::now() - 1h")), None);
+			assert_no_candidate(&cands, "by_at");
+			// A stored datetime field is no component, so its bound is offered.
+			let a = keyed(vec![idx_basic(1, "by_seen", &["seen"])]).with_clock(true);
+			let cands = a.analyze(Some(&parse_cond("seen > time::now() - 1h")), None);
+			assert!(find_for(&cands, "by_seen").is_some());
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Bounds that read the statement clock
+	// ------------------------------------------------------------------
+	mod clock_bounds {
+		use super::*;
+		use crate::exec::index::access_path::{ClockBound, ClockSign};
+
+		fn clock(offset: Option<(ClockSign, std::time::Duration)>) -> BoundOperand {
+			BoundOperand::StatementClock(ClockBound {
+				offset: offset.map(|(sign, by)| (sign, crate::val::Duration::from(by))),
+			})
+		}
+
+		fn day() -> std::time::Duration {
+			std::time::Duration::from_secs(86_400)
+		}
+
+		fn permitted<'a>(defs: Vec<IndexDefinition>) -> IndexAnalyzer<'a> {
+			analyzer(defs, None).with_clock(true)
+		}
+
+		#[test]
+		fn a_comparison_with_the_clock_minus_a_duration_is_a_range_that_reads_it() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			let cands = a.analyze(Some(&parse_cond("at > time::now() - 1d")), None);
+			let c = find_for(&cands, "ix_at").expect("ix_at");
+			let BTreeAccess::Range {
+				range,
+			} = &c.access
+			else {
+				panic!("expected Range, got {:?}", c.access);
+			};
+			assert_eq!(range.start, Bound::Excluded(clock(Some((ClockSign::Minus, day())))));
+			assert_eq!(range.end, Bound::Unbounded);
+			assert_eq!(c.access.describe(), ">time::now() - 1d");
+		}
+
+		#[test]
+		fn the_clock_alone_and_plus_a_duration_are_bounds() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			let cands = a.analyze(Some(&parse_cond("at <= time::now()")), None);
+			let c = find_for(&cands, "ix_at").expect("ix_at");
+			assert_eq!(c.access.describe(), "<=time::now()");
+			let cands = a.analyze(Some(&parse_cond("time::now() + 1d >= at")), None);
+			let c = find_for(&cands, "ix_at").expect("ix_at");
+			assert_eq!(c.access.describe(), "<=time::now() + 1d");
+			let cands = a.analyze(Some(&parse_cond("at = time::now()")), None);
+			let c = find_for(&cands, "ix_at").expect("ix_at");
+			assert_eq!(c.access, BTreeAccess::Equality(clock(None)));
+		}
+
+		#[test]
+		fn a_caller_denied_the_function_is_offered_no_bound() {
+			let a = analyzer(vec![idx_basic(1, "ix_at", &["at"])], None);
+			let cands = a.analyze(Some(&parse_cond("at > time::now() - 1d")), None);
+			assert_no_candidate(&cands, "ix_at");
+		}
+
+		#[test]
+		fn only_equality_and_order_comparisons_take_the_clock() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			for cond in ["at != time::now()", "at INSIDE [time::now()]", "at CONTAINS time::now()"]
+			{
+				let cands = a.analyze(Some(&parse_cond(cond)), None);
+				assert_no_candidate(&cands, "ix_at");
+			}
+		}
+
+		#[test]
+		fn an_offset_that_is_not_one_duration_literal_stays_a_filter() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			for cond in [
+				"at > time::now() - 1d - 1h",
+				"at > time::now() * 2",
+				"at > 1d + time::now()",
+				"at > time::now(d'2020-01-01T00:00:00Z')",
+				"at > time::unix()",
+			] {
+				let cands = a.analyze(Some(&parse_cond(cond)), None);
+				assert_no_candidate(&cands, "ix_at");
+			}
+		}
+
+		#[test]
+		fn bounds_on_opposite_sides_merge_without_comparing_the_clock() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			let cond = parse_cond("at > time::now() - 1d AND at < time::now()");
+			let cands = a.analyze(Some(&cond), None);
+			assert_eq!(cands.len(), 1, "{cands:?}");
+			assert!(!cands[0].empty);
+			assert_eq!(cands[0].access.describe(), ">time::now() - 1d <time::now()");
+			// A clock bound and a literal bound on one side are not compared,
+			// so neither can be proved the tighter and the pair is never empty.
+			let cond = parse_cond("at > time::now() AND at < d'2020-01-01T00:00:00Z'");
+			let cands = a.analyze(Some(&cond), None);
+			assert_eq!(cands.len(), 1, "{cands:?}");
+			assert!(!cands[0].empty, "a clock bound is never proved empty");
+			let cond = parse_cond("at > time::now() AND at > d'2020-01-01T00:00:00Z'");
+			let cands = a.analyze(Some(&cond), None);
+			assert_eq!(cands.len(), 1, "{cands:?}");
+			assert!(!cands[0].empty);
+		}
+
+		#[test]
+		fn the_clock_bounds_the_range_after_an_equality_prefix() {
+			let a = permitted(vec![idx_basic(1, "ix_city_at", &["city", "at"])]);
+			let cond = parse_cond("city = 'london' AND at > time::now() - 1d");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "ix_city_at").expect("ix_city_at");
+			let BTreeAccess::Compound {
+				prefix,
+				range,
+			} = &c.access
+			else {
+				panic!("expected Compound, got {:?}", c.access);
+			};
+			assert_eq!(prefix, &vec![BoundOperand::from(Value::from("london"))]);
+			assert_eq!(
+				range,
+				&Some((BinaryOperator::MoreThan, clock(Some((ClockSign::Minus, day())))))
+			);
+		}
+
+		#[test]
+		fn a_clock_equality_does_not_prove_union_branches_disjoint() {
+			let a = permitted(vec![idx_basic(1, "ix_at", &["at"])]);
+			let cond = parse_cond("at = time::now() OR at = d'2020-01-01T00:00:00Z'");
+			// The branches may read the same instant, so no fusion is declined
+			// on the strength of distinct values.
+			let plan = a.try_bitmap_union_fusion(Some(&cond), Direction::Forward);
+			if let Some((BitmapPlan::Or(children), _)) = plan {
+				assert_eq!(children.len(), 2);
+			}
 		}
 	}
 }

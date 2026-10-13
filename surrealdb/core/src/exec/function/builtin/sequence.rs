@@ -5,6 +5,7 @@ use anyhow::Result;
 use crate::err::EngineError;
 use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
 use crate::fnc::args::FromArgs;
@@ -20,6 +21,10 @@ pub struct SequenceNextval;
 impl ScalarFunction for SequenceNextval {
 	fn name(&self) -> &'static str {
 		"sequence::nextval"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "sequence::nextval", Fallibility::DATA)
 	}
 
 	fn effects(&self) -> EffectSet {
@@ -63,10 +68,10 @@ impl ScalarFunction for SequenceNextval {
 	}
 }
 
-// Every call advances the sequence and answers with the value it moved past,
-// which is what `EffectSet::ADVANCES_STATE` declares: a rule that duplicated
-// the call would consume an extra value, and one that dropped it would leave
-// the sequence where it stood.
+// Each call advances the sequence once and returns the value it moved past,
+// as `EffectSet::ADVANCES_STATE` declares. Callers must not duplicate or drop
+// a call: a duplicate consumes an extra value, and a dropped call leaves the
+// sequence where it stood.
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(SequenceNextval);
 }

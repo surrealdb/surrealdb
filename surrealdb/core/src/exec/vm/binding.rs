@@ -25,13 +25,15 @@
 //! every row it is handed and, once the pipeline above has finished, applies
 //! its writes in row order and yields the rows ([`finish_step`]).
 
+// The IR lowering emits these items, so some may be unused in a given build.
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 
 use surrealdb_strand::TableName;
 
 use super::host::{Ended, eval_on_row};
 use super::interp::{PooledState, State};
-use super::plan::Plan;
 use super::program::HostScalar;
 use crate::exec::operators::graph::distinct_edges::row_has_distinct_edges;
 use crate::exec::operators::graph::endpoint::bind_endpoints;
@@ -52,7 +54,6 @@ use crate::exec::operators::scan::fetch::FetchFieldStateCache;
 use crate::exec::operators::{EdgeBinding, EndpointField, ExpandDir, JoinType};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::ControlFlow;
-use crate::expr::logical::LogicalExpr;
 use crate::expr::match_plan::DetachMode;
 use crate::val::{Object, RecordId, Value};
 
@@ -168,9 +169,6 @@ pub(crate) enum BindingStep<P, B> {
 	/// Takes every row and yields none.
 	Drain,
 }
-
-/// A step as a plan holds it.
-pub(crate) type PlanStep = BindingStep<LogicalExpr, Box<Plan>>;
 
 /// A step as a program holds it: scalars as host scalars, a join's build side
 /// as a group.
@@ -367,7 +365,7 @@ pub(super) trait StepSink: Send {
 	) -> futures::future::BoxFuture<'a, FlowResult<Ended>>;
 }
 
-/// A sink as the place the full batches of a path expansion go.
+/// The sink that receives the full batches a path expansion produces.
 struct SinkFlush<'a> {
 	sink: &'a mut dyn StepSink,
 	state: &'a mut State,
@@ -533,15 +531,9 @@ impl RowEval<HostScalar> for HostEval<'_> {
 	}
 }
 
-/// The rows a write stage yields once the pipeline above it has finished: its
-/// writes applied to the rows it kept, in the order it was handed them, each
-/// row carrying the image of what its own write left.
-///
-/// Every write is the statement a hand-written mutation would be, planned
-/// and run in `ctx` ([`crate::exec::operators::mutate`]).
 /// The rows a step deferred once it spilled — a distinct's rows first seen,
-/// a join's pairings — to hand on in order now that the pipeline above has
-/// finished; `None` where step `split` deferred none.
+/// a join's pairings — to hand on in order once the pipeline above has
+/// finished. Returns `None` where step `split` deferred none.
 pub(super) async fn finish_deferred(
 	program: &super::program::Program,
 	split: u16,
@@ -718,8 +710,8 @@ async fn step_rows(
 				batch,
 			}),
 		) => {
-			// The endpoint nodes are fetched a batch of rows at a time, as the
-			// operator fetches them for the batch it is handed.
+			// Endpoint nodes are fetched a batch of rows at a time, the same
+			// batching the graph endpoint operator uses.
 			pending.push(row);
 			if pending.len() < *batch {
 				return Ok(Vec::new());

@@ -4,10 +4,13 @@
 //! target edge tables. It is used to implement graph traversal idioms like
 //! `person:alice->knows->person`.
 
+// Items here are built by the planned execution path, so dead-code warnings are allowed.
+#![allow(dead_code)]
+
 use std::sync::Arc;
 
-// Re-exported so the existing `pub use graph::{EdgeTableSpec, ...}` surface is
-// unchanged after the key-scan machinery moved into `graph_keys`.
+// Re-exported so callers can import `EdgeTableSpec` from this module.
+// The type itself is defined in `graph_keys`.
 pub use super::graph_keys::EdgeTableSpec;
 use crate::val::{TableName, Value};
 

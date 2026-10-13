@@ -1193,6 +1193,59 @@ jobs:
   # here. See .github/workflows/lang-tests-remote.yml.
 
   # ----------------------------------------
+  # SurrealQL never-declined lane (reporting only)
+  # ----------------------------------------
+
+  lang-decline-report:
+    name: Language decline report - ${{ matrix.engine }}
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    # Reports statements the engine declines to run; it never gates a merge and
+    # is not a required check.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [mem, rocksdb]
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: build-nightly
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: false
+          workspaces: language-tests
+          cache-key: lang
+          kache-manifest-key: lang-${{ matrix.engine }}-arm
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-make
+
+      - name: Report declined statements
+        run: cargo make ci-lang-decline-report-${{ matrix.engine }}
+
+      - name: Upload the decline report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
+        with:
+          name: lang-declines-${{ matrix.engine }}
+          path: language-tests/target/declines-*.jsonl
+          if-no-files-found: warn
+
+  # ----------------------------------------
   # SurrealQL language upgrade tests
   # ----------------------------------------
 

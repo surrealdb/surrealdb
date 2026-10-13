@@ -16,6 +16,7 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::exec::analyzer_function::StreamingAnalyzerFunction;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::{ContextLevel, EvalContext};
 use crate::expr::logical::EffectSet;
 use crate::expr::{Error, Kind};
@@ -25,7 +26,7 @@ use crate::idx::ft::highlighter::HighlightParams;
 use crate::val::{Array, Number, Object, Value};
 
 // =========================================================================
-// search::analyze - ScalarFunction (already existed)
+// search::analyze - ScalarFunction
 // =========================================================================
 
 /// Analyzes text using a specified analyzer.
@@ -39,6 +40,14 @@ pub struct SearchAnalyze;
 impl ScalarFunction for SearchAnalyze {
 	fn name(&self) -> &'static str {
 		"search::analyze"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Scalar,
+			"search::analyze",
+			Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
+		)
 	}
 
 	fn effects(&self) -> EffectSet {
@@ -74,8 +83,8 @@ impl ScalarFunction for SearchAnalyze {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			// Same argument handling as the `fnc` dispatch: exactly two
-			// arguments, returning NONE when either is not a string.
+			// Expects exactly two arguments. Returns NONE when either is not a
+			// string.
 			let (az, val): (Value, Value) = FromArgs::from_args("search::analyze", args)?;
 			let (Value::String(az), Value::String(val)) = (az, val) else {
 				return Ok(Value::None);
@@ -126,6 +135,14 @@ pub struct SearchHighlight;
 impl IndexFunction for SearchHighlight {
 	fn name(&self) -> &'static str {
 		"search::highlight"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Index,
+			"search::highlight",
+			Fallibility::VALUE.union(Fallibility::DATA)
+		)
 	}
 
 	fn signature(&self) -> Signature {
@@ -214,6 +231,10 @@ impl IndexFunction for SearchScore {
 		"search::score"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Index, "search::score", Fallibility::DATA)
+	}
+
 	fn signature(&self) -> Signature {
 		Signature::new().arg("match_ref", Kind::Number).returns(Kind::Number)
 	}
@@ -288,6 +309,10 @@ pub struct SearchOffsets;
 impl IndexFunction for SearchOffsets {
 	fn name(&self) -> &'static str {
 		"search::offsets"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Index, "search::offsets", Fallibility::DATA)
 	}
 
 	fn signature(&self) -> Signature {
@@ -385,6 +410,10 @@ impl ScalarFunction for SearchRrf {
 		"search::rrf"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "search::rrf", Fallibility::VALUE)
+	}
+
 	fn effects(&self) -> EffectSet {
 		EffectSet::PURE
 	}
@@ -417,7 +446,7 @@ impl ScalarFunction for SearchRrf {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 
-			// Same argument handling as the `fnc` dispatch.
+			// results and limit are required. rrf_constant is optional.
 			let (results, limit, Optional(rrf_constant)): (Array, i64, Optional<i64>) =
 				FromArgs::from_args("search::rrf", args)?;
 			let limit = if limit < 1 {
@@ -528,6 +557,10 @@ impl ScalarFunction for SearchLinear {
 		"search::linear"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "search::linear", Fallibility::VALUE)
+	}
+
 	fn effects(&self) -> EffectSet {
 		EffectSet::PURE
 	}
@@ -561,7 +594,7 @@ impl ScalarFunction for SearchLinear {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 
-			// Same argument handling as the `fnc` dispatch.
+			// results, weights, limit and norm are all required.
 			let (results, weights, limit, norm): (Array, Array, i64, String) =
 				FromArgs::from_args("search::linear", args)?;
 			let limit = if limit < 1 {

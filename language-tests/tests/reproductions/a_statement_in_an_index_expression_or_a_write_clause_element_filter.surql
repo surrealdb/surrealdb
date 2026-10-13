@@ -4,37 +4,10 @@ namespace = true
 database = true
 
 [test]
-reason = "A statement in an index expression, or in the element filter of a field clause, an index expression, an event or a table or field permission, is evaluated against the record the write images, and every write to the table runs: an index over a subquery is maintained by CREATE, UPDATE and DELETE, and a COUNT index's subquery guard is judged."
+reason = "A statement in the element filter of a field clause, an event or a table or field permission, or in the guard of a COUNT index, is evaluated against the record the write images, and every write to the table runs: a COUNT index's subquery guard is judged. A statement in a column of an index is refused where the index is defined, because a column reading another record cannot be maintained from the record it indexes (register #28, region_constraints/index_other_record.surql)."
 
 [[test.results]]
 value = "[{ id: cat:1, name: 'A' }]"
-
-[[test.results]]
-error = "Expected `field name` but found `['A']`"
-
-[[test.results]]
-value = "[{ id: i5:1 }]"
-
-[[test.results]]
-value = "[{ id: i5:1 }]"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ id: i6:1, v: [1] }]"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ id: i7:1, tags: ['A', 'B'] }]"
-
-[[test.results]]
-value = "[{ id: i7:1, tags: ['B'] }]"
-
-[[test.results]]
-value = "[]"
 
 [[test.results]]
 value = "NONE"
@@ -95,15 +68,6 @@ error = "Found ['A'] for field `h`, with record `j3:2`, but field must conform t
 
 */
 CREATE cat:1 SET name = 'A';
-DEFINE INDEX s ON i5 FIELDS (SELECT VALUE name FROM cat);
-CREATE i5:1;
-SELECT * FROM i5 WHERE (SELECT VALUE name FROM cat) = ['A'];
-DEFINE INDEX s6 ON i6 FIELDS v.map(|$x| (SELECT VALUE name FROM cat));
-CREATE i6:1 SET v = [1];
-DEFINE INDEX s7 ON i7 FIELDS tags[WHERE $this IN (SELECT VALUE name FROM cat)];
-CREATE i7:1 SET tags = ['A', 'B'];
-UPDATE i7:1 SET tags = ['B'];
-DELETE i7:1;
 DEFINE INDEX c ON i8 COUNT WHERE (SELECT VALUE name FROM cat)[0] = 'A';
 CREATE i8:1;
 SELECT count() FROM i8 GROUP ALL;

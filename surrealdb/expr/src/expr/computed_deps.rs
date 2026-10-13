@@ -120,12 +120,11 @@ impl Visitor for FieldDependencyExtractor {
 
 	/// Walk an `Expr`.
 	///
-	/// The match is **exhaustive (no `_` arm) on purpose**: this analysis is
-	/// security-relevant (computed-field permissions rely on its result), and
-	/// the default in a security-relevant visitor must be fail-closed. Adding a
-	/// new `Expr` variant should be a build error here so a human triages it
-	/// into "transparent" or "opaque" rather than silently defaulting to
-	/// transparent (the old fail-open behaviour).
+	/// The match is **exhaustive (no `_` arm) on purpose**. This analysis is
+	/// security-relevant, since computed-field permissions rely on its result, so
+	/// the default must fail closed. A new `Expr` variant must be a build error
+	/// here, so a person classifies it as "transparent" or "opaque" instead of it
+	/// defaulting to transparent.
 	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
 		match expr {
 			// === Transparent: walk children, no flag flip ===
@@ -178,9 +177,6 @@ impl Visitor for FieldDependencyExtractor {
 				expr.visit(self)?;
 			}
 
-			// GQL MATCH reads arbitrary fields/tables at runtime via the planner;
-			// treat it as opaque (cannot appear in a permission clause, but stay
-			// safe if it ever does).
 			// === Session parameters: transparent ===
 			// Bound by the session, never to the row (see `is_session_param`).
 			Expr::Param(param) if is_session_param(param) => {}
@@ -210,8 +206,13 @@ impl Visitor for FieldDependencyExtractor {
 			| Part::First
 			| Part::Field(_)
 			| Part::Optional
-			| Part::Doc
 			| Part::RepeatRecurse => {}
+
+			// `@` is the current row, and what follows it names a field the
+			// walk does not attribute to `deps`, so the listing is incomplete.
+			Part::Doc => {
+				self.is_complete = false;
+			}
 
 			// Walk children — any embedded expression contributes deps.
 			Part::Where(_) | Part::Value(_) | Part::Destructure(_) | Part::Recurse(_, _, _) => {
@@ -245,8 +246,7 @@ impl FieldDependencyExtractor {
 	/// Projection functions (`type::field("x")`, `type::fields(["x", "y"])`)
 	/// read fields of the current document by name, bypassing the idiom-walk
 	/// path. The match below mirrors the runtime classification in
-	/// `exec::function::builtin::type` — kept inline here (rather than
-	/// dispatched through the executor's `FunctionRegistry`) so this module
+	/// `exec::function::builtin::type`. It is kept inline so this module
 	/// stays on the AST layer with no dependency on `exec`. The runtime
 	/// registry asserts these are the only projection functions; adding a new
 	/// one requires updating both sites.
@@ -342,19 +342,15 @@ fn parse_idiom_root(s: &str) -> Option<String> {
 /// be statically determined, forcing the all-computed-fields fallback for every
 /// row of `table`.
 ///
-/// Does NOT include the permission expression source — that may contain
-/// schema-author-supplied literal secrets (see `SECURITY_GUIDE.md` §4 and
-/// CLAUDE.md "Never log sensitive user data or credentials"). Operators can
-/// inspect the expression themselves via `INFO FOR TABLE <table>` under their
-/// own auth.
+/// Does NOT include the permission expression source, because it may contain
+/// literal secrets written by the schema author. Operators can read the
+/// expression with `INFO FOR TABLE <table>` under their own auth.
 ///
-/// `table` and `field` must be schema-identifier strings — never strings built
+/// `table` and `field` must be schema-identifier strings, never strings built
 /// from user record data.
 ///
-/// Routing: plain `tracing::warn!`. The OTLP audit-log pipeline at
-/// `server/src/telemetry/audit_logs.rs` is attached to the tracing subscriber,
-/// so this lands in the compliance trail when OTLP is configured (precedent:
-/// `core/src/kvs/slowlog.rs:151`).
+/// Emitted with plain `tracing::warn!`. When OTLP is configured, the audit-log
+/// subscriber receives this event and it lands in the compliance trail.
 pub fn warn_incomplete_perm_deps(table: &str, field: &str) {
 	tracing::warn!(
 		target: TARGET,
@@ -709,6 +705,23 @@ mod tests {
 		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn doc_part_marks_incomplete() {
+		// `@.c`: the current row's field `c`, which the walk does not list
+		let at_c = Expr::Idiom(Idiom(vec![Part::Doc, Part::Field("c".into())]));
+		let deps = extract(&at_c);
+		assert!(deps.fields.is_empty());
+		assert!(!deps.is_complete);
+
+		// `@.c + 1`
+		let sum = Expr::Binary {
+			left: Box::new(at_c),
+			op: BinaryOperator::Add,
+			right: Box::new(int_expr(1)),
+		};
+		assert!(!extract(&sum).is_complete);
 	}
 
 	#[test]

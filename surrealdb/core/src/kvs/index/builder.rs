@@ -72,10 +72,9 @@ const RELEASE_GATE_OPEN: u8 = RELEASE_GATE_BUILDER | RELEASE_GATE_STATEMENT;
 /// Whether an error reports that the build crossed the process memory
 /// threshold (see [`Building::is_beyond_threshold`]).
 ///
-/// Memory pressure is load-transient: the interrupted build is safe to retry
-/// later — typically after the resume scan re-adopts it once the owner lease
-/// expires, when the pressure has receded or the process was restarted with
-/// more memory — so it must not be recorded as a permanent build failure.
+/// Memory pressure is transient. The interrupted build can be retried: the
+/// resume scan adopts it again once the owner lease expires. Such an error
+/// must not be recorded as a permanent build failure.
 fn is_memory_threshold_error(err: &anyhow::Error) -> bool {
 	matches!(err.downcast_ref::<DatastoreError>(), Some(DatastoreError::QueryBeyondMemoryThreshold))
 }
@@ -635,6 +634,7 @@ impl Building {
 			version_stamp: None,
 			guard_verdicts: Default::default(),
 			writing: false,
+			session_effects: None,
 		};
 		Ok(ExecutionContext::Database(DatabaseContext {
 			ns_ctx: NamespaceContext {
@@ -1279,8 +1279,8 @@ impl Building {
 	/// Refuse to publish a generation whose tickets came from two allocators.
 	///
 	/// A generation that owns a `!bt` counter has `next_ticket` initialised to
-	/// zero, and nothing in this version advances it — only the legacy branch
-	/// of writer admission does, and that runs solely when the counter is
+	/// zero, and nothing advances it. Only the fallback branch of writer
+	/// admission advances it, and that branch runs solely when the counter is
 	/// absent. A non-zero value therefore proves that a node predating the
 	/// counter allocated against this generation, from a sequence that also
 	/// starts at zero and cannot conflict with `!bt`. The two can hand out the
@@ -1360,8 +1360,7 @@ impl Building {
 	/// as the task is spawned, which on a small index can finish and release
 	/// before the commit lands. Registered on both outcomes: a rolled-back
 	/// statement leaves the previous definition in place, which is the one
-	/// background compaction was already reading, so the fence is no longer
-	/// needed either.
+	/// background compaction was already reading, so no fence is needed for it.
 	///
 	/// A no-op for a build with no statement behind it — a maintenance resume,
 	/// whose definition was committed long before — which keeps the statement
@@ -2586,13 +2585,12 @@ impl Building {
 				return Err(err);
 			}
 			// `apply_diskann_compaction` normally owns the transaction's
-			// lifecycle (commits on success, cancels on apply failure while
-			// holding the graph write lock — closing the #7318 race). A few
-			// pre-apply paths inside `IndexOperation::apply_diskann_compaction`
-			// (missing table or catalog lookup errors) can return without
-			// finalizing the tx, so we add an idempotent safety net here:
-			// cancel only if the tx is still open. Cancel on an already-closed
-			// tx returns `TransactionFinished` and is harmlessly discarded.
+			// lifecycle: it commits on success, and on apply failure it cancels
+			// while holding the graph write lock. A few pre-apply paths inside
+			// `IndexOperation::apply_diskann_compaction` (missing table or catalog
+			// lookup errors) can return without finalizing the tx, so cancel here
+			// only if the tx is still open. Cancelling a closed tx returns
+			// `TransactionFinished`, which is discarded.
 			let res = IndexOperation::apply_diskann_compaction(
 				&ctx,
 				ctx.get_index_stores(),
@@ -2718,8 +2716,9 @@ impl CommitAction for ReleaseBuildOwnership {
 		Box::pin((*self).release())
 	}
 
-	/// The release is owed when the transaction ends, whichever way, and not to any write of a
-	/// save point scope: the scope's rollback must leave this half to run at the commit.
+	/// The release is owed when the transaction ends, however it ends. It does not
+	/// depend on any write inside a save point scope: a scope rollback must leave
+	/// this half to run at the commit.
 	fn answers_to_scope(&self) -> bool {
 		false
 	}

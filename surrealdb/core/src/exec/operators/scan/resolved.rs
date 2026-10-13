@@ -1,19 +1,22 @@
-//! How a table source's scan is planned with respect to the schema-derived
-//! behaviours of the rows it reads — the table `SELECT` permission, the
-//! computed fields and the field-level `SELECT` permissions:
+//! How a table source's scan is planned for the rules that depend on the rows' schema:
+//! the table `SELECT` permission, the computed fields and the field-level `SELECT` permissions.
+//! The two cases below differ in where those rules are applied.
 //!
 //! - A source the analyzer resolved (`LogicalOp::Source(LogicalSource { schema: Some(_), .. })`)
-//!   carries those declarations in the plan, as a `PermissionFilter` and a stack of projection
-//!   layers above the scan. The scan is planned [`EnforcementMode::Planned`] and yields rows as
-//!   stored; a scan that reduced them itself would hand the nodes above an already-cut row, and a
-//!   computed field's own guard, written to read a stored field raw, would be judged against the
-//!   cut.
-//! - A source the analyzer did not resolve carries nothing, so the scan is planned
-//!   [`EnforcementMode::Runtime`] and applies all three per row, as the scan pipeline does.
+//!   carries the rules in the plan, as a `PermissionFilter` and a stack of projection layers above
+//!   the scan. The scan is planned [`EnforcementMode::Planned`] and yields rows as stored. If the
+//!   scan also cut rows, the nodes above would receive an already-cut row, and a computed field's
+//!   guard, which reads a stored field raw, would be judged against that cut, so the plan alone
+//!   applies the rules.
+//! - A source the analyzer did not resolve carries none of them. The scan is planned
+//!   [`EnforcementMode::Runtime`] and applies all three rules per row.
 //!
 //! The session-level gates (`should_check_perms`, `validate_record_user_access`)
-//! remain the scan's, evaluated at execution time against the authority the
+//! stay with the scan. They are checked at execution time against the authority the
 //! executor set up.
+
+// The plan lowering reaches these items; dead-code warnings are suppressed for them.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -23,9 +26,9 @@ use crate::expr::logical::Schema;
 
 /// How a `Source` node asks its scan to be planned.
 ///
-/// Decided from the node's `schema`: a resolved schema means the analyzer
-/// inserted above the source whatever the read needs, and nothing else may
-/// apply it again.
+/// Chosen from the node's `schema`. A resolved schema means the analyzer has
+/// already inserted, above the source, every stage the read needs. No other
+/// stage may apply them again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EnforcementMode {
 	/// The plan enforces; the scan yields rows as stored.
@@ -45,10 +48,10 @@ impl EnforcementMode {
 	}
 }
 
-/// The table `SELECT` permission a scan carries under
-/// [`EnforcementMode::Planned`], for the readers that are not the plan: `Deny`
-/// for a permission of `NONE` and `Allow` otherwise, the plan judging a
-/// conditional guard. Read off the definition the scan runs with.
+/// The table `SELECT` permission that a scan under
+/// [`EnforcementMode::Planned`] carries for readers outside the plan. It is
+/// `Deny` for `NONE` and `Allow` otherwise, because the plan judges any
+/// conditional guard. It is read from the definition the scan runs with.
 pub(crate) fn planned_select_permission(table_def: &TableDefinition) -> PhysicalPermission {
 	match table_def.permissions.select {
 		Permission::None => PhysicalPermission::Deny,

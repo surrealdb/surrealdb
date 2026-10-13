@@ -1,5 +1,5 @@
 //! A GQL `DISTINCT` that spills: the rows it has seen held in the query's
-//! temporary store once its lease no longer covers them, with its output in
+//! temporary store once its lease does not cover them, with its output in
 //! the order the rows arrived.
 //!
 //! In memory, a row is handed on the moment it is first seen. Once the seen
@@ -25,6 +25,9 @@
 //! partials merge ([`merge_distinct`]) into the first arrival of every row, in
 //! the order a serial distinct over the producers' rows in producer order
 //! answers them.
+
+// Runtime the IR lowering emits.
+#![allow(dead_code)]
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -220,7 +223,7 @@ impl Distinct {
 /// One producer's side of a distinct whose rows several producers take: each
 /// row it takes is kept as `[row, producer, arrival]`; runs are written
 /// sorted by that key with all but the first arrival of each row dropped,
-/// once its lease no longer covers what it holds.
+/// once its lease does not cover what it holds.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct DistinctProducer {
 	producer: i64,

@@ -17,7 +17,7 @@
 //! runs than that takes several passes. One run is written at a time per
 //! query ([`QueryMemory::writer`]), so the single writer buffer the headroom
 //! reserves is the most the query's writers hold, however many of its
-//! region's batches spill at once.
+//! morsels spill at once.
 //!
 //! A statement never fails for want of the governor's memory. What a breaker
 //! holds spills to the temporary store when the lease does not cover it.
@@ -197,7 +197,7 @@ impl QueryMemory {
 		self.host.store.clone()
 	}
 
-	/// What the query's operators may hold now: its grant less its headroom.
+	/// What the query's operators may hold: its grant less its headroom.
 	pub(crate) fn working(&self) -> usize {
 		let lease = self.lease();
 		lease.grant().saturating_sub(lease.headroom())
@@ -429,10 +429,10 @@ impl QueryMemory {
 	}
 
 	/// Charge what transaction `txn` (named by its address) has written so
-	/// far, `written` bytes, which its write buffer holds until it commits:
-	/// the growth since the last charge of the same transaction counts as
-	/// [`Self::hold_unspillable`] does: the governor sees the memory, the query
-	/// waits when other queries can give memory back, and the bytes are
+	/// far, `written` bytes, which its write buffer holds until it commits.
+	/// The growth since the last charge for the same transaction is charged as
+	/// [`Self::hold_unspillable`] charges it: the governor sees the memory, the
+	/// query waits when other queries can give memory back, and the bytes are
 	/// otherwise granted past the node's limit. It fails only where the bytes
 	/// would take the query's pinned bytes past its ceiling.
 	pub(crate) async fn hold_writes(
@@ -467,12 +467,6 @@ impl QueryMemory {
 			);
 		}
 		Ok(())
-	}
-
-	/// The bytes this query counts as spilled now.
-	#[cfg(test)]
-	pub(crate) fn spilled_bytes(&self) -> u64 {
-		self.spilled.load(Ordering::Acquire)
 	}
 
 	/// Count `bytes` of a deleted run as no longer spilled.
@@ -921,8 +915,8 @@ mod tests {
 			assert_eq!(account.settle(129), Verdict::Hold);
 			assert_eq!(memory.lease().pinned(), reserved);
 		}
-		// Across the boundary of the account's one chunk, once it holds a
-		// reservation.
+		// Settling to exactly one chunk gives back the spare chunks the account
+		// reserved beyond it.
 		assert_eq!(account.settle(64), Verdict::Hold);
 		assert_eq!(memory.lease().pinned(), 64, "two spare chunks were not given back");
 		for _ in 0..4 {

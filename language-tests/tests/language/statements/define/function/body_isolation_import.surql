@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Setup for the tests that a function called from a table permission reads the database's parameters and none of the caller's bindings, while an ordinary call reads the caller's bindings: a table whose permission asks a function that reads a parameter, and functions that read a parameter the caller may also bind."
+reason = "Setup for the tests that a function body reads its arguments, the row names and the ordinary chain (the bind parameters, the session values and the database's parameters) and never a LET or FOR binding of its caller, from a table permission and from an ordinary call alike: a table whose permission asks a function that reads a parameter, and functions that read a parameter the caller may also bind."
 run = false
 */
 

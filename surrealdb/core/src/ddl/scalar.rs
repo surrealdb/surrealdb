@@ -190,6 +190,12 @@ pub(crate) fn written_name(expr: &Expr) -> Option<String> {
 	None
 }
 
+/// The name an evaluated operand gives, naming `into` in the refusal of a result that is no
+/// string. The coercion [`ident`] applies to an operand that is not a written name.
+pub(crate) fn name_of(value: Value, into: &str) -> Result<String> {
+	coerce_into(value, into)
+}
+
 /// Read an evaluated result as `T`, naming the clause in the refusal
 /// ([`Value::coerce_naming`]).
 fn coerce_into<T: Coerce>(value: Value, into: &str) -> Result<T> {
@@ -384,9 +390,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_field_shaped_name_is_not_a_read_of_the_row() {
-		// The pin: with a row in scope, evaluating the name would read the
-		// row's `foo` and name the analyzer `surprise`. A wrong answer here is
-		// silent — the statement succeeds, against the wrong subject.
+		// With a row in scope, evaluating the name would read the row's `foo`
+		// and name the analyzer `surprise`. A wrong answer here is silent: the
+		// statement succeeds, against the wrong subject.
 		let name = analyzer_name("DEFINE ANALYZER foo");
 		let ctx = ctx_with_row(row("{ foo: 'surprise' }")).await;
 		assert_eq!(ident(&ctx, &name, "analyzer name").await.unwrap(), "foo");
@@ -433,9 +439,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_table_shaped_name_is_not_a_read_of_the_row() {
-		// A `Value::Table` coerces to no string at all, so removing this
-		// shortcut refuses rather than misnames — but it refuses every
-		// `DEFINE TABLE`, row or no row.
+		// A `Value::Table` coerces to no string at all. Without this shortcut
+		// every `DEFINE TABLE` would be refused, row or no row.
 		let name = define_table_name("DEFINE TABLE foo");
 		let ctx = ctx_with_row(row("{ foo: 'surprise' }")).await;
 		assert_eq!(ident(&ctx, &name, "table name").await.unwrap(), "foo");
@@ -543,9 +548,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_literal_subscript_is_canonicalised_without_evaluating() {
-		// The literal legs are the only reason the canonicalisation is
-		// observable: `addr['city']` and `addr.city` must store the same path,
-		// and no row is consulted to decide that.
+		// Literal subscripts are canonicalised without evaluation:
+		// `addr['city']` and `addr.city` must store the same path, and no row
+		// is consulted to decide that.
 		let (name, _) = define_field_parts("DEFINE FIELD addr['city'] ON person");
 		let ctx = ctx_with_row(row("{ addr: { city: 'surprise' } }")).await;
 		assert_eq!(idiom(&ctx, &name, "field name").await.unwrap().to_sql(), "addr.city");

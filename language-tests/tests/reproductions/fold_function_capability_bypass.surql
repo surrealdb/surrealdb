@@ -73,8 +73,10 @@ SELECT * FROM t WHERE a > math::max([1, 2]);
 -- inner call first; refusing it leaves the outer call unfoldable too.
 SELECT * FROM t WHERE a > math::floor(math::max([1, 2]));
 
--- time::now() folds by deliberate exception to the determinism gate, so it
--- needs the capability check on its own arm.
+-- time::now() bounds an index range that reads the statement clock when the
+-- scan opens, which checks no capability of its own, so the range is offered
+-- only to a caller allowed to call it: a denied call stays a filter and fails
+-- when it is evaluated.
 SELECT * FROM t WHERE at < time::now();
 
 -- An allowed function still folds, and the folded literal still drives the

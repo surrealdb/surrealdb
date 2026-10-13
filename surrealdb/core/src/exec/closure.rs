@@ -11,8 +11,8 @@
 //!   compiled on its first invocation, and then runs as a [`CompiledClosure`] does.
 //!
 //! An invocation binds its arguments in an isolated child of the caller's
-//! context holding the captures, one re-entry deeper than the call, and
-//! coerces the result to the declared return kind; see
+//! context that holds the captures. The child is one re-entry deeper than the
+//! caller. The result is coerced to the declared return kind; see
 //! [`CompiledClosure::invoke`].
 //!
 //! [`invoke`] is the route for a caller that is evaluating inside a plan and
@@ -66,8 +66,9 @@ pub(crate) async fn invoke(
 }
 
 /// Invoke `closure` with `args` from a caller that holds the handles of a
-/// function body: the frame is built from `ctx` and `opt`, with `doc` as the
-/// row the body reads.
+/// function body: the frame is built from `ctx` and `opt`. The body reads the
+/// row the closure captured where it was written, none for a stored closure,
+/// and never `doc`.
 pub(crate) async fn invoke_in(
 	closure: &Closure,
 	ctx: &FrozenContext,

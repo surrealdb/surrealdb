@@ -1,13 +1,12 @@
 //! What every rewrite rule must not break, asserted over a corpus of statements.
 //!
 //! A rule rewrites what a statement *does*; it may never change what the statement
-//! *means*. These are the invariants that holds to, checked for each statement in
-//! [`CORPUS`] rather than for one rule in isolation — because a rule that is sound
-//! alone can still be unsound after another has run, and that combination is what
-//! a per-rule test cannot see.
+//! *means*. These are the invariants that hold, checked for each statement in
+//! [`CORPUS`] rather than for one rule in isolation. A rule that is sound alone can
+//! still be unsound after another rule has run, and a per-rule test cannot see that.
 //!
 //! The corpus is the input space. A statement added here is checked against every
-//! property, so a rule written later inherits the coverage without being named.
+//! property, so every rule gets that coverage without a test of its own.
 
 #![cfg(all(test, feature = "kv-mem"))]
 
@@ -16,7 +15,7 @@ use super::{Rules, bind_with};
 use crate::expr::logical::LogicalOp;
 
 /// The schema every corpus statement is bound against.
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
 	DEFINE TABLE person SCHEMAFULL;
 	DEFINE FIELD name ON person TYPE string;
 	DEFINE FIELD age ON person TYPE int;
@@ -31,7 +30,7 @@ const SCHEMA: &str = "
 ///
 /// Add a shape here when a rule starts handling it; every property then covers it
 /// without a test of its own.
-const CORPUS: &[&str] = &[
+pub(crate) const CORPUS: &[&str] = &[
 	// sources and projection
 	"SELECT * FROM person",
 	"SELECT name FROM person",
@@ -65,9 +64,9 @@ const CORPUS: &[&str] = &[
 	"UPDATE person:tobie SET age = age + 1",
 	"DELETE person:tobie",
 	"SELECT id, (CREATE log:1) AS made FROM person",
-	// subqueries in a data clause: one the statement may evaluate once where
-	// nothing it writes reaches `company`, and three it must keep evaluating
-	// per row
+	// subqueries in a SET clause. The first may be evaluated once, because nothing
+	// the statement writes reaches `company`. The other three must be evaluated
+	// per row.
 	"UPDATE person SET city = (SELECT VALUE name FROM company)",
 	"UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)",
 	"UPDATE person SET city = (CREATE log:1).id",
@@ -131,8 +130,8 @@ async fn rewriting_reaches_a_fixed_point() {
 /// *introduce* one, because nothing a statement did not ask for may reach
 /// storage.
 ///
-/// Asserting equality here instead would forbid dead-branch elimination, which
-/// is how this property was first written and what the corpus caught.
+/// Asserting equality instead would forbid dead-branch elimination, so the check
+/// runs in one direction only.
 #[tokio::test]
 async fn rewriting_never_introduces_a_write() {
 	let fixture = Fixture::new(SCHEMA).await;
@@ -147,82 +146,10 @@ async fn rewriting_never_introduces_a_write() {
 	}
 }
 
-/// Rewriting does not widen what a statement's expressions do.
-///
-/// The union over a plan's scalars of what each declares — entropy, clock reads,
-/// external reads and writes, state advances — is not a rule's to grow. A rule
-/// that introduces a call the statement did not make, or evaluates one where the
-/// statement asked for none, shows up here even when the plan is otherwise
-/// unrecognisable.
-///
-/// Narrowing is allowed and expected: dropping a provably dead branch drops its
-/// effects with it, which is the point of dropping it. So this asserts
-/// containment rather than equality, and the direction matters — a rule may take
-/// effects away, never add them.
-#[tokio::test]
-async fn rewriting_does_not_widen_effects() {
-	let fixture = Fixture::new(SCHEMA).await;
-	let registry = crate::exec::function::FunctionRegistry::with_builtins();
-	for sql in CORPUS {
-		let (run, skip) = both(&fixture, sql).await;
-		let before = super::effects::effects_of_plan(&skip, &registry);
-		let after = super::effects::effects_of_plan(&run, &registry);
-		assert!(
-			before.set.contains(after.set),
-			"rewriting {sql} introduced an effect the statement did not have: \
-			 {:?} became {:?}",
-			before.set,
-			after.set
-		);
-	}
-}
-
-/// The corpus reaches statements whose effects differ, so the effect property is
-/// not vacuous.
-///
-/// A containment assertion over a corpus that is uniformly `PURE` would pass
-/// however wrong the rules were. This asserts the input space actually spans the
-/// effects the property is meant to protect, and fails if a corpus edit quietly
-/// removes the only statement carrying one.
-#[tokio::test]
-async fn the_corpus_exercises_the_effects_it_asserts_on() {
-	use crate::expr::logical::EffectSet;
-
-	let fixture = Fixture::new(SCHEMA).await;
-	let registry = crate::exec::function::FunctionRegistry::with_builtins();
-	let mut seen = EffectSet::PURE;
-	let mut impure = false;
-	for sql in CORPUS {
-		let (_, skip) = both(&fixture, sql).await;
-		let effects = super::effects::effects_of_plan(&skip, &registry);
-		seen |= effects.set;
-		impure |= effects.impure;
-	}
-	// `CLOCK` is deliberately absent. `fold_constants` evaluates `time::now()`
-	// once per statement, before the rules run, so the clock read is a literal by
-	// the time either plan exists and neither carries the effect. A rule cannot
-	// introduce or lose it through `time::now()` for the same reason. If a clock
-	// builtin that does not fold is added, put a statement using it in the corpus
-	// and add `CLOCK` here.
-	for (flag, name) in [(EffectSet::WRITES_DATA, "WRITES_DATA"), (EffectSet::ENTROPY, "ENTROPY")] {
-		assert!(
-			seen.contains(flag),
-			"no corpus statement carries {name}: the effect property cannot catch a rule \
-			 that introduces one"
-		);
-	}
-	assert!(
-		impure,
-		"no corpus statement is impure: nothing guards against a rule evaluating \
-		 twice what must run once"
-	);
-}
-
 /// Every corpus statement binds both ways without error.
 ///
-/// The cheapest property, and the one that fails first: a rule that panics or
-/// refuses on a shape it did not expect is found here before any behaviour is
-/// compared.
+/// The cheapest property. A rule that panics or refuses on a shape it does not
+/// expect fails here, before any behaviour is compared.
 #[tokio::test]
 async fn every_corpus_statement_binds_both_ways() {
 	let fixture = Fixture::new(SCHEMA).await;

@@ -16,7 +16,7 @@
 //! call ([`GuardScope::PerCall`]): one that reads the row it is judged over
 //! (`$this`, a field, the document), a parameter other than the session's
 //! values, a clock, entropy or anything else not deterministic within the
-//! statement (ADR 0006: a permission predicate reads the clock per call), or
+//! statement, or
 //! a body it cannot see. One that reads records — a nested statement, a graph
 //! lookup, a record link — is judged once only in a transaction that cannot
 //! write, since a statement that writes may change what it reads.
@@ -32,7 +32,7 @@ use crate::expr::FlowResult;
 use crate::expr::logical::{EffectSet, LogicalExpr};
 
 /// How often a predicate's verdict stands within one statement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum GuardScope {
 	/// Judged at every call.
 	PerCall,
@@ -267,7 +267,7 @@ mod tests {
 		assert_eq!(count, 1, "a guarded parameter read on every row");
 	}
 
-	/// A predicate that reads the clock is judged at every call (ADR 0006).
+	/// A predicate that reads the clock is judged at every call.
 	#[tokio::test]
 	async fn a_predicate_reading_the_clock_is_judged_per_call() {
 		let db = TestDb::new_with_auth(SETUP).await;

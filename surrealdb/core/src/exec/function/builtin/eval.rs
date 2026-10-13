@@ -40,6 +40,7 @@ use crate::ctx::Context;
 use crate::dbs::Variables;
 use crate::exe::FlowResultExt as _;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::operators::collect_shaped_value;
 use crate::exec::{Error as ExecError, EvalContext, ExecOperator, ExecutionContext};
 use crate::expr::Kind;
@@ -90,7 +91,9 @@ async fn evaluate_nested(
 	// capabilities and the explicit bindings, but not the caller's scope. The
 	// `ExecutionContext` is rebuilt around it, preserving auth / ns-db level.
 	// The bindings are read when the nested program runs, so one compilation
-	// serves every value they hold.
+	// serves every value they hold. The nested query reads the caller
+	// statement's timestamp: its context inherits it, and no clock of its own
+	// is installed here.
 	let mut isolated = Context::new_isolated(exec_ctx.ctx());
 	let mut bound: Vec<String> = Vec::new();
 	if let Some(bindings) = bindings {
@@ -185,6 +188,14 @@ impl ScalarFunction for EvalSurql {
 		"eval::surql"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Scalar,
+			"eval::surql",
+			Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
+		)
+	}
+
 	fn effects(&self) -> EffectSet {
 		EffectSet::OPAQUE_BODY | EffectSet::WRITES_DATA
 	}
@@ -225,6 +236,14 @@ impl ScalarFunction for EvalGql {
 		"eval::gql"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(
+			Scalar,
+			"eval::gql",
+			Fallibility::VALUE.union(Fallibility::CONTEXT).union(Fallibility::DATA)
+		)
+	}
+
 	fn effects(&self) -> EffectSet {
 		EffectSet::OPAQUE_BODY | EffectSet::WRITES_DATA
 	}
@@ -257,9 +276,9 @@ impl ScalarFunction for EvalGql {
 	}
 }
 
-// Both run whatever statement they are handed, so neither may be duplicated,
-// dropped or folded. `is_writer_builtin` already holds them out of every
-// purity decision; the flag says the same thing at the registration.
+// Both run the statement they are handed, so the planner must not duplicate,
+// drop or fold a call to either. `is_writer_builtin` keeps them out of every
+// purity decision, and the effects each function declares say the same.
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(EvalSurql);
 	registry.register(EvalGql);
@@ -381,6 +400,37 @@ mod tests {
 			assert_eq!(bob, parse(bob_sees), "`{sql}` as bob");
 			assert_eq!(alice_again, parse(alice_sees), "`{sql}` as alice after bob");
 		}
+	}
+
+	/// The nested query reads the caller statement's timestamp, so `time::now()`
+	/// in its text equals the caller's own read within one statement: the
+	/// executor installs the clock in the context the nested query inherits.
+	#[tokio::test]
+	async fn a_nested_query_reads_the_callers_clock() {
+		let db = TestDb::new_with_capabilities("", false, eval_allowed()).await;
+		let value = last(
+			&db,
+			&TestDb::owner(),
+			"RETURN [time::now(), eval::surql('RETURN time::now()'), eval::surql('time::now()')]",
+		)
+		.await;
+		let Value::Array(reads) = value else {
+			panic!("an array of three reads, found {value:?}");
+		};
+		assert_eq!(reads.len(), 3);
+		assert_eq!(reads[0], reads[1], "the nested read is the caller's");
+		assert_eq!(reads[0], reads[2], "a bare expression reads the same clock");
+	}
+
+	/// A `RETURN` inside the nested text ends only the nested query: the
+	/// caller's statement carries on with the nested query's value.
+	#[tokio::test]
+	async fn a_return_in_nested_text_ends_only_the_nested_query() {
+		let db = TestDb::new_with_capabilities("", false, eval_allowed()).await;
+		assert_eq!(
+			last(&db, &TestDb::owner(), "RETURN [eval::surql('RETURN 1; 2'), 3]").await,
+			parse("[1, 3]"),
+		);
 	}
 
 	/// With no `allow-eval-query`, every call is refused naming the function,

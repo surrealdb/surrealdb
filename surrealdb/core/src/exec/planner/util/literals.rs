@@ -14,9 +14,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::ops::Bound;
 
 use crate::dbs::capabilities::Capabilities;
-use crate::err::Error;
-use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::index::access_path::{BoundOperand, ClockBound, ClockSign};
 use crate::expr::logical::{
 	LogicalExpr, LogicalLiteral, LogicalOp, LogicalPostfixOperator, LogicalRecordIdKey,
 	LogicalRecordIdKeyRange, LogicalRecordIdLit, LogicalSource, LogicalValues, Schema, SourceRef,
@@ -372,28 +371,61 @@ pub(crate) fn try_literal_to_value(expr: &LogicalExpr) -> Option<Value> {
 	}
 }
 
-/// The expression a record-id key denotes when it is used as a range bound.
-/// A generated key draws a fresh value per evaluation and a nested range is
-/// not a point, so neither can bound a range.
-pub(crate) fn key_lit_to_expr(key: &LogicalRecordIdKey) -> Result<LogicalExpr, Error> {
-	match key {
-		LogicalRecordIdKey::Number(n) => Ok(LogicalExpr::Literal(LogicalLiteral::Integer(*n))),
-		LogicalRecordIdKey::String(s) => {
-			Ok(LogicalExpr::Literal(LogicalLiteral::String(s.clone())))
-		}
-		LogicalRecordIdKey::Uuid(u) => Ok(LogicalExpr::Literal(LogicalLiteral::Uuid(*u))),
-		LogicalRecordIdKey::Array(items) => Ok(LogicalExpr::Array(items.clone())),
-		LogicalRecordIdKey::Object(entries) => Ok(LogicalExpr::Object(entries.clone())),
-		LogicalRecordIdKey::Generate(_) => Err(ExecError::Query {
-			message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
-				.to_string(),
-		}
-		.into()),
-		LogicalRecordIdKey::Range(_) => Err(ExecError::Query {
-			message: "Nested range keys cannot be used in graph range bounds".to_string(),
-		}
-		.into()),
+/// The statement clock `expr` reads as an index bound: `time::now()`, or
+/// `time::now() + <duration literal>` or `time::now() - <duration literal>`.
+///
+/// Anything else that reads the clock, a nested offset or an offset that is not
+/// a duration literal among them, answers `None` and stays a filter.
+pub(crate) fn try_clock_bound(expr: &LogicalExpr) -> Option<ClockBound> {
+	fn is_now(expr: &LogicalExpr) -> bool {
+		matches!(
+			expr,
+			LogicalExpr::Call(call)
+				if call.args.is_empty()
+					&& matches!(&call.receiver, Function::Normal(name) if name == "time::now")
+		)
 	}
+	if is_now(expr) {
+		return Some(ClockBound {
+			offset: None,
+		});
+	}
+	let LogicalExpr::Binary {
+		left,
+		op,
+		right,
+	} = expr
+	else {
+		return None;
+	};
+	let sign = match op {
+		BinaryOperator::Add => ClockSign::Plus,
+		BinaryOperator::Subtract => ClockSign::Minus,
+		_ => return None,
+	};
+	if !is_now(left) {
+		return None;
+	}
+	let Some(Value::Duration(by)) = try_literal_to_value(right) else {
+		return None;
+	};
+	Some(ClockBound {
+		offset: Some((sign, by)),
+	})
+}
+
+/// The bound operand `expr` denotes: its literal value, or where `clock` the
+/// statement clock it reads ([`try_clock_bound`]). The caller sets `clock` only
+/// where the caller of the statement may call `time::now()`, because a scan
+/// reads the clock without a function-name check of its own.
+pub(crate) fn try_bound_operand(expr: &LogicalExpr, clock: bool) -> Option<BoundOperand> {
+	if let Some(value) = try_literal_to_value(expr) {
+		return Some(BoundOperand::Literal(value));
+	}
+	if clock {
+		return try_clock_bound(expr).map(BoundOperand::StatementClock);
+	}
+	None
 }
 
 // ============================================================================
@@ -411,16 +443,12 @@ pub(crate) fn key_lit_to_expr(key: &LogicalRecordIdKey) -> Result<LogicalExpr, E
 /// constant before the extractor saw it. Leave it clear elsewhere: in a
 /// predicate the extractor never looks, and `math::max([1, 2])` is just a
 /// call on literals.
-///
-/// `in_condition` is whether `expr` is a condition, where `time::now()` folds
-/// to one value for the statement; see [`try_fold_to_literal`].
 pub(crate) fn fold_expressions(
 	expr: &mut LogicalExpr,
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
 	restricted_fields: Option<&RestrictedFields>,
 	keep_aggregates: bool,
-	in_condition: bool,
 ) -> bool {
 	fn fold(
 		expr: &mut LogicalExpr,
@@ -428,44 +456,25 @@ pub(crate) fn fold_expressions(
 		capabilities: &Capabilities,
 		restricted_fields: Option<&RestrictedFields>,
 		keep_aggregates: bool,
-		in_condition: bool,
 		changed: &mut bool,
 	) {
 		// A closure body is evaluated where the closure is invoked, by later
 		// statements in other transactions; nothing in it is folded here.
 		if !matches!(expr, LogicalExpr::Closure(_)) {
 			for child in expr.children_mut() {
-				fold(
-					child,
-					registry,
-					capabilities,
-					restricted_fields,
-					keep_aggregates,
-					in_condition,
-					changed,
-				);
+				fold(child, registry, capabilities, restricted_fields, keep_aggregates, changed);
 			}
 		}
 		if keep_aggregates && is_aggregate_call(expr, registry) {
 			return;
 		}
-		if let Some(folded) =
-			try_fold_to_literal(expr, registry, capabilities, restricted_fields, in_condition)
-		{
+		if let Some(folded) = try_fold_to_literal(expr, registry, capabilities, restricted_fields) {
 			*expr = folded;
 			*changed = true;
 		}
 	}
 	let mut changed = false;
-	fold(
-		expr,
-		registry,
-		capabilities,
-		restricted_fields,
-		keep_aggregates,
-		in_condition,
-		&mut changed,
-	);
+	fold(expr, registry, capabilities, restricted_fields, keep_aggregates, &mut changed);
 	changed
 }
 
@@ -694,12 +703,11 @@ fn evaluation_is_inert(expr: &LogicalExpr, restricted_fields: Option<&Restricted
 		// depends on the key.
 		LogicalExpr::RecordId(rid) => record_id_key_is_inert(&rid.key, restricted_fields),
 		LogicalExpr::Table(_) | LogicalExpr::Constant(_) | LogicalExpr::Mock(_) => true,
-		// A parameter that still reaches here is one resolution deliberately
-		// left alone: a closure, whose captures make substitution lossy, or a
-		// `DEFINE PARAM` whose permission clause is evaluated per read. Both
-		// dispatch on evaluation, so neither may be discarded. A parameter
-		// carrying a plain value was already replaced by its literal, and
-		// folds on that literal instead.
+		// A parameter that reaches here is left unresolved on purpose: a closure,
+		// whose captures make substitution lossy, or a `DEFINE PARAM` whose
+		// permission clause runs on every read. Both dispatch on evaluation, so
+		// neither may be discarded. A parameter holding a plain value is replaced
+		// by its literal before this point and folds on that literal instead.
 		LogicalExpr::Param(_) => false,
 		// A single field read is inert only when the row it reads from is a
 		// record and reading that particular field evaluates nothing. Field
@@ -831,8 +839,6 @@ fn record_id_key_is_inert(
 /// Attempt to reduce a constant expression to a literal.
 ///
 /// Handles:
-/// - `time::now()` → a datetime literal (special case: non-deterministic, but folded once per
-///   statement by deliberate exception)
 /// - Calls to a context-free, deterministic function whose arguments are all already literals
 ///   (math::floor, string::lowercase, type::int, etc.)
 /// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
@@ -840,6 +846,12 @@ fn record_id_key_is_inert(
 /// - A field of an object literal, an index into a literal, and the first or last element of a
 ///   collection literal (`{ a: 1 }.a`, `['x', 'y'][1]`) — the shapes a resolved parameter or a
 ///   folded record path leaves behind
+///
+/// A call that reads the clock is not folded wherever it appears, `time::now()`
+/// in a condition included: a plan holds no instant, and the call reads the
+/// statement's clock when it runs (see `doc/adr/0006-clock-reads-keep-their-evaluation.md`).
+/// The index analyzer reads `time::now()` and `time::now() ± <duration literal>`
+/// as an index bound that resolves when the scan opens ([`try_bound_operand`]).
 ///
 /// Both conditions on a call matter and they are different questions:
 /// `ScalarFunction::is_pure` asks whether it can run without an execution
@@ -865,24 +877,8 @@ pub(crate) fn try_fold_to_literal(
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
 	restricted_fields: Option<&RestrictedFields>,
-	in_condition: bool,
 ) -> Option<LogicalExpr> {
 	match expr {
-		// `time::now()` is the statement's time. In a condition it is one
-		// value for the statement, which is what lets `at > time::now() - 1d`
-		// become an index range. Everywhere else it is a clock read evaluated
-		// per call, and so is every other clock reader in every position: the
-		// `time::*` accessors that default to the clock read it again each
-		// call. See doc/adr/0006-clock-reads-keep-their-evaluation.md.
-		LogicalExpr::Call(call)
-			if in_condition
-				&& matches!(&call.receiver, Function::Normal(name) if name == "time::now")
-				&& call.args.is_empty()
-				&& capabilities.allows_function_name("time::now") =>
-		{
-			Some(LogicalExpr::Literal(LogicalLiteral::Datetime(crate::val::Datetime::now())))
-		}
-
 		// Context-free, deterministic call whose arguments are all literals.
 		// After bottom-up folding, nested expressions like `math::floor(20 + 0.5)`
 		// will have their arguments folded first, so we only need to check
@@ -1169,8 +1165,7 @@ fn try_eval_binary(op: &BinaryOperator, left: Value, right: Value) -> Option<Val
 ///   context-free but not deterministic, so it is left for per-row evaluation.
 /// - Call only functions `capabilities` permits the caller to execute.
 ///
-/// `time::now()` is evaluated once at plan time, consistent with how most
-/// databases evaluate `NOW()` once per statement/transaction.
+/// A clock read such as `time::now()` is left as a call.
 ///
 /// A [`LogicalExpr::Subquery`] is not entered: the plan inside it is bound and
 /// folded on its own.
@@ -1184,7 +1179,7 @@ pub(crate) fn fold_condition_expressions(
 	capabilities: &Capabilities,
 	restricted_fields: Option<&RestrictedFields>,
 ) -> bool {
-	fold_expressions(expr, registry, capabilities, restricted_fields, false, true)
+	fold_expressions(expr, registry, capabilities, restricted_fields, false)
 }
 
 #[cfg(test)]

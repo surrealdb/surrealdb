@@ -24,6 +24,7 @@ use surrealdb_gql as gql;
 use surrealdb_rpc::capabilities::ExperimentalTarget;
 use surrealdb_types::{Object, Value as SurValue};
 
+use crate::cli::RunMode;
 use crate::cmd::util::ImportFailure;
 use crate::cmd::{graphql, util};
 use crate::tests::case::{Dialect, TestCase};
@@ -163,13 +164,17 @@ pub struct EmbeddedExecutor {
 	/// Built in [`EmbeddedExecutor::prepare`]; mutated by signin/signup and read
 	/// by the query and cleanup.
 	session: Session,
+	/// How a SurrealQL query under test is submitted: as one request, or as
+	/// the fragments of one stream.
+	mode: RunMode,
 }
 
 impl EmbeddedExecutor {
-	pub fn new(dbs: Arc<Datastore>) -> Self {
+	pub fn new(dbs: Arc<Datastore>, mode: RunMode) -> Self {
 		EmbeddedExecutor {
 			dbs,
 			session: Session::default(),
+			mode,
 		}
 	}
 }
@@ -219,11 +224,17 @@ impl Executor for EmbeddedExecutor {
 					};
 
 				let start = Instant::now();
-				let result = dbs.process(query, session, None).await;
+				let result = match self.mode {
+					RunMode::Request => dbs
+						.process(query, session, None)
+						.await
+						.map(|x| {
+							x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect()
+						})
+						.map_err(|e| anyhow::anyhow!(e)),
+					RunMode::Fragments => super::run_fragments(dbs, query, session).await,
+				};
 				let did_timeout = start.elapsed() > timeout;
-				let result = result
-					.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
-					.map_err(|e| anyhow::anyhow!(e));
 				Ok(ExecOutcome::Executed {
 					did_timeout,
 					result,
@@ -330,7 +341,8 @@ mod remote_executor {
 	use super::{ExecOutcome, Executor, Unsupported};
 	use crate::cmd::graphql;
 	use crate::cmd::remote::{RawCredentials, RemoteConn, extract_results};
-	use crate::cmd::util::ImportFailure;
+	use crate::cli::RunMode;
+use crate::cmd::util::ImportFailure;
 	use crate::tests::case::{Dialect, TestCase};
 	use crate::tests::run::CaseImports;
 	use crate::tests::schema::{AuthLevel, BoolOr, TestAuth, TestConfig};

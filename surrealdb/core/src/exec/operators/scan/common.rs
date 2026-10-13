@@ -3,6 +3,9 @@
 //! Contains helpers that are used by multiple scan operators (reference scan,
 //! graph edge scan, etc.) to avoid code duplication.
 
+// Not every helper in this module has a caller in every build, so dead code is allowed.
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -26,9 +29,9 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 /// Fail the query when the process is past `SURREAL_MEMORY_THRESHOLD`.
 ///
 /// Scans that materialise records call this once per fetched batch, and
-/// again once computed fields have been materialised into its rows or records
-/// the transaction's cache shares have been cloned out of it, so a query that
-/// keeps decoding records fails with
+/// again after computed fields are materialised into their rows and after
+/// cache-shared records are cloned out of the transaction's cache. A query
+/// that keeps decoding records fails with
 /// [`DatastoreError::QueryBeyondMemoryThreshold`] rather than growing the
 /// process until the operating system kills it. Without allocation tracking
 /// the threshold is never reached and this always returns `Ok`.
@@ -61,21 +64,18 @@ pub(crate) fn probe_batch_len(budget: usize, max_rows: usize) -> usize {
 	(budget / PROBE_ROW_BYTES).clamp(1, max_rows)
 }
 
-/// The number of records the next read may take so that a read like the one
-/// just made stays near `budget` bytes.
+/// The number of records the next read may take so that it stays near
+/// `budget` bytes.
 ///
 /// A record's size is the average of `read_bytes` over `read_rows`, as
 /// [`ReadAhead::read`] reports them: the bytes the read held, before any
 /// permission check.
 ///
-/// The prediction describes the read just made, not the next one, so the next
-/// read is at most twice `current`, the length that read was made with: a run
-/// of narrow records grows the read gradually, and wide records that follow
-/// it are read in a chunk no larger than twice the last one before the size
-/// shrinks again. The result is never below 1 and never above `max_rows`, so a
-/// read never grows past the row cap it would have without a byte budget. A
-/// read that found no record says nothing about record size, so it keeps
-/// `current`.
+/// The estimate describes the read just made, so the next read is at most
+/// twice `current`, the length of that read. A run of narrow records grows
+/// the read gradually, and wide records are read in a chunk no larger than
+/// twice the last one before the size shrinks. The result is never below 1
+/// and never above `max_rows`. A read that found no record keeps `current`.
 pub(crate) fn next_batch_len(
 	read_bytes: usize,
 	read_rows: usize,
@@ -544,14 +544,10 @@ pub(crate) async fn evaluate_bound_key(
 /// to evaluating `version_expr` when no enclosing `VersionScope` was
 /// inserted. Re-evaluating the expression inside the scan would run
 /// under the just-set `version_stamp`, which can change how nested
-/// lookups resolve. The motivating case: a `DEFINE PARAM $hist VALUE
-/// time::now() PERMISSIONS FULL` followed by `SELECT … VERSION $hist`.
-/// The param's storage revision is strictly after the `time::now()`
-/// snapshot it stores, so `txn.get_db_param(..., version_stamp=$hist)`
-/// from the re-evaluation can't find the param at that version, falls
-/// back to `Value::None`, and the subsequent cast to `Datetime` fails
-/// even though `VersionScope`'s unversioned evaluation already produced
-/// the right timestamp.
+/// lookups resolve. A param defined with `VALUE time::now()` is stored at a
+/// revision after the snapshot it holds, so a lookup of it at that stamp finds
+/// nothing, yields `NONE`, and the cast to `datetime` fails. The
+/// `VersionScope` evaluation already produces the right timestamp.
 pub(crate) async fn resolve_version_stamp(
 	ctx: &ExecutionContext,
 	version_expr: Option<&Clause>,

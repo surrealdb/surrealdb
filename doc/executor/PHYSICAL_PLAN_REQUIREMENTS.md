@@ -21,7 +21,8 @@ LogicalOp ──map──▶ PhysicalPlan ──optimize (IR → IR)──▶ Ph
 - **Lower** turns the plan into a VM program and makes no choices. A statement holding a node the
   VM does not cover fails with an error that names it (ADR 0007).
 
-The language suite's expectations are the reference.
+The language suite's expectations are the reference. What the physical plan owns, and what it may
+only narrow of what the logical plan allows, is stated in [`PLAN_LAYERS.md`](PLAN_LAYERS.md).
 
 ---
 
@@ -354,12 +355,17 @@ The VM fans out to threads. What the transaction layer allows today:
 | order requirement | concat extents in key order, merge by sort key, or unordered | §4 |
 | fold | concat, sorted merge, top-k merge, partial monoid (`count`, `sum`, `min`, `max`), hash aggregate | the consumer |
 | width | number of extents | optimize, from the row-count estimate; 1 when unknown |
+| placement | `Serial`, or `Morsels` with an input, a combine and whether the paging is replayed, per pipeline; stored on the pipeline's source node | `exec/vm/place.rs`, the last step of optimize, through `Policy::plan` over the logical legality (`PLAN_LAYERS.md`) |
 
 ### 8.2 Requirements
 
 - **Only read-only legs fan out.** A leg containing a write, a writing function, or an effect whose
   count is observable runs on one task in input order. A mutation nested anywhere in a `SELECT`
-  makes the whole plan read-write (ADR 0001, Decision 4).
+  makes the whole plan read-write (ADR 0001, Decision 4). Every pipeline of a statement that writes
+  is placed serial, and so is every read nested in it: a plan nested in a statement, and a unit
+  that lowering compiles into the statement's program, is placed in the scope of the statements
+  around it. A unit a running program loads from the compile cache is placed in a scope of its
+  own.
 - **Parallel reads need a snapshot-read interface.** Without one, fan-out runs extents
   concurrently on one transaction and serialises on rocksdb and tikv. Implementing it for
   rocksdb and surrealkv is a prerequisite for fan-out to speed anything up.

@@ -13,6 +13,10 @@
 mod aggregate;
 mod builtin;
 pub(crate) use builtin::evaluate_streaming;
+#[cfg(feature = "scripting")]
+pub(crate) use builtin::timezone_at;
+#[cfg(all(test, feature = "kv-mem"))]
+mod fallibility_probes;
 mod index;
 mod macros;
 mod method;
@@ -30,15 +34,15 @@ pub use aggregate::{Accumulator, AggregateFunction};
 use anyhow::Result;
 pub(crate) use builtin::aggregates::AccumulatorState;
 pub use index::{
-	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchContext, MatchInfo,
-	MatchesContext,
+	IndexContext, IndexContextKind, IndexFunction, KnnContext, MatchContext, MatchesContext,
 };
 pub use method::{MethodDescriptor, ValueKind};
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
-pub(crate) use registry::experimental_target;
+pub(crate) use registry::{FnKind, check_fallibility_row, experimental_target};
 pub use signature::{ReturnRule, Signature};
 
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::{BoxFut, EvalContext};
 use crate::expr::Kind;
 pub use crate::expr::logical::EffectSet;
@@ -80,9 +84,9 @@ pub(crate) fn check_arity(
 	Ok(())
 }
 
-/// A scalar function that can be invoked during query execution.
+/// The async walk a metered pure function runs over its arguments.
 ///
-/// A pure function's walk over its arguments ([`ScalarFunction::metered`]).
+/// See [`ScalarFunction::metered`] for when a function provides one.
 pub type MeteredFn = fn(Vec<Value>) -> BoxFut<'static, Result<Value>>;
 
 /// Scalar functions operate on individual values and return a single value.
@@ -142,6 +146,19 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// context: `rand::float` needs no context and still draws entropy.
 	fn effects(&self) -> EffectSet;
 
+	/// What a call's failure can depend on: the failure classes of the body
+	/// for arguments of the signature's kinds. Argument coercion (arity and
+	/// kind) is the call's `VALUE`, not the builtin's.
+	///
+	/// A class is a superset when unsure: a declared class may name a
+	/// dependency the body never exercises, and never omits one it does.
+	/// [`Fallibility::INFALLIBLE`] says no well-kinded argument, capability,
+	/// principal or stored state makes the body raise. Every implementor
+	/// declares a class; there is no default, so an undeclared one does not
+	/// compile.
+	#[allow(unused)]
+	fn fallibility(&self) -> Fallibility;
+
 	/// The argument positions in which this builtin accepts a closure it
 	/// then runs — `check` of `array::any`, `mapper` of `array::fold`, the
 	/// `closure` of `value::chain`. Empty for a builtin that runs nothing it
@@ -173,8 +190,10 @@ pub trait ScalarFunction: Send + Sync + Debug {
 	/// Two decisions read this. The planner's literal folder evaluates a call
 	/// once at plan time and substitutes the result for the whole statement, so
 	/// it folds only deterministic functions; everything else is evaluated per
-	/// row. `time::now()` is the one deliberate exception, folded per statement
-	/// by an explicit case in the folder rather than through this answer. The
+	/// row. A CLOCK read is not deterministic, so the folder folds none: a
+	/// plan holds no instant, and `time::now()` reads the statement's clock
+	/// when it runs, as an operand of an index bound
+	/// (`BoundOperand::StatementClock`) or from the context everywhere else. The
 	/// logical rules ask the same question of every call inside an expression
 	/// before treating that expression as pure, which is what lets a rule
 	/// substitute it for each occurrence of a name.

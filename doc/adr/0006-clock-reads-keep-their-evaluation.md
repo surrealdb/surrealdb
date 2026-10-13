@@ -1,67 +1,67 @@
-# ADR 0006: A clock read keeps the evaluation the language gives it
+# ADR 0006: A clock read answers the statement's instant
 
-**Status:** Accepted · **Scope:** `time::now()` wherever it is folded or planned —
-`surrealdb/core/src/exec/logical/fold.rs`, `surrealdb/core/src/exec/planner/util/literals.rs`
+**Status:** Accepted · **Scope:** every read of the clock (`EffectSet::CLOCK`) and every place that folds,
+plans or caches an expression that holds one —
+`surrealdb/core/src/ctx/context.rs`, `surrealdb/core/src/dbs/executor.rs`,
+`surrealdb/core/src/exec/function/builtin/time.rs`, `surrealdb/core/src/exec/planner/util/literals.rs`,
+`surrealdb/core/src/exec/index/access_path.rs`
 
 ## Context
 
-`time::now()` reads the wall clock, so two calls can answer differently. Whether a statement over
-many rows reads it once or once per row is observable: `CREATE |t:50| SET at = time::now()` writes
-either one timestamp or up to fifty.
+`time::now()` reads the wall clock, so two calls can answer differently. Whether one statement reads
+it once or many times is observable: `CREATE |t:50| SET at = time::now()` writes one timestamp or up
+to fifty, and `SELECT * FROM t WHERE at <= time::now()` compares a record stamped by an earlier
+statement of the same request with an instant that has moved on.
 
-The language has an answer: **every call is evaluated where it
-stands, once per row**. The VM keeps that answer everywhere but one place: in a
-condition it folds `time::now()` to one value for the statement, because `at > time::now() - 1d`
-becomes an index range only once its right side is a literal. That is a deliberate choice — the
-statement's time, as SQL's `NOW()` is. It is observable, but only by a condition that reads the clock more finely than the
-statement takes to run; a time-window comparison does not.
-
-A fold that reaches every expression — a projection, a data clause — collapses per-row values the
-language promises into one, and that is observable. No rewrite may do that.
-
-The cost of per-row evaluation is not a reason to fold. `Utc::now()` reads `CLOCK_REALTIME` through
-the vDSO on Linux: no system call, no lock, and independent on every thread, so it scales with the
-threads reading it. On a host whose clock source is not the TSC it falls back to a system call,
-which is slower but still correct. What parallel evaluation does change is order, not cost: rows
-evaluated on different threads read the clock in no particular order, and two rows can read the
-same instant. The language has never promised that values are distinct or increasing — clock
-resolution and clock adjustment already break both — so per-call evaluation keeps no promise that
-parallelism would break.
+A plan that holds the instant it was made at is wrong for every run after the first. A program the
+compile cache keeps, a statement planned when its request arrives and run later in the request, and
+a function body compiled once and called from many statements each outlive the moment they were
+planned.
 
 ## Decision
 
-1. **In a projection, a data clause, a permission predicate, a mutation's `WHERE`, and every other
-   position that is not a condition, `time::now()` is evaluated per call, per row.** It is never
-   folded there. A rewrite that duplicates or removes a clock read is removing or adding an
-   evaluation, and is held to the evaluation contract like any other.
-2. **In a `WHERE` condition, `time::now()` is one value for the statement.** It is the only position
-   where a rewrite may fold it, because the fold is what lets an index answer the
-   condition.
-3. **Only `time::now()` has a statement-scoped exception, because it is the statement's time.** The
-   exception is not a property of the `CLOCK` effect. The `time::*` accessors that read the clock
-   when given no datetime (`time::nano()`, `time::year()`) read it again on every call, in a
-   condition too: `WHERE time::nano() % 2 = 0` is a fresh bit per evaluation, and
-   `reproductions/defaulting_time_reads_the_clock.surql` pins that a subquery holding one stays a
-   subquery. Nothing else that is non-deterministic folds in any position: entropy's per-row
-   variation is the point (`WHERE rand::float() < 0.1` samples each row), and an external call, a
-   counter or a wait is observed once per call. The position is generic (`ExprContext::condition`);
-   the exception it grants is named.
-4. **A clock value is never baked into a plan that outlives the statement.** Under ADR 0003 plans
-   are cached. A condition's single value is taken when the statement starts and held in a slot the
-   plan reads, not written into the plan as a literal. Folding it at plan time is correct only while
-   the plan is used once.
-5. **Both positions are pinned by tests**, and no rule may change what either one answers:
-   - `language/functions/time/now_evaluated_per_call.surql`, a
-     projection, `SET` and `INSERT` read the clock per row.
-   - `exec::logical::fold` unit tests: a `WHERE` folds the call and a projection in the same
-     statement does not; a data clause keeps the call; `rand::float()` stays a call in a `WHERE`.
+1. **A clock read answers one instant per top-level statement.** `time::now()`, `time::timezone()`
+   and the `time::*` accessors that default an omitted datetime to the current time
+   (`time::year()`, `time::nano()`, ...) all read it, in a projection, a data clause, a condition, a
+   permission predicate or a stored clause alike. Two reads in one statement agree whatever row,
+   iteration or nested frame they run in, and a `SLEEP` inside the statement does not advance the
+   instant. Two top-level statements of one request read two instants.
+2. **The instant lives on the `Context`.** The executor installs it with
+   `Context::set_statement_clock` once per top-level statement, immediately before the statement
+   runs. Every context derived from it copies it: a `FOR` body, a block member, a subquery, a
+   function or closure body, triggered code, `eval::surql` and `eval::gql`, and a script's
+   `surrealdb.query()` therefore read the clock of the top-level statement that runs them and install
+   none of their own. `statement_clock` (`builtin/time.rs`) reads it, and takes the wall clock at
+   the call only where no statement installed one. An `ASYNC` event body is a statement of its own,
+   so it takes its own instant.
+3. **A script reads the same instant.** `surrealdb.functions.time.*` answers `now` and `timezone`
+   from the context's instant and substitutes it for an omitted or `NONE` datetime argument of the
+   accessors that default one. The set of names is the registry's `EffectSet::CLOCK`, never a list
+   kept beside it.
+4. **No fold evaluates a clock read, and no plan holds an instant.** `try_fold_to_literal` folds only
+   calls the registry declares deterministic, which a clock read is not, so a plan holds the call
+   and a program the compile cache serves reads the clock of the statement that runs it. The fold
+   host refuses any value that reads the clock (`NotFoldable::Clock`).
+5. **A condition that compares with the clock is still an index range.** The index analyzer reads
+   `time::now()` and `time::now() +/- <duration literal>` as a bound that reads the clock
+   (`BoundOperand::StatementClock`), and the scan resolves it from the context's instant when it
+   opens. `EXPLAIN` prints the bound as the call, never as an instant. The bound is offered only to
+   a caller allowed to call `time::now()`, because the scan reads the clock without a
+   function-name check of its own: a caller denied the function keeps the comparison as a filter,
+   which raises the denial when it is evaluated. Two bounds of one side, one of which reads the
+   clock, are not compared before the scan opens, so neither is taken as the tighter and no range
+   holding one is proved empty. A bound over a datetime component of the record id is not offered,
+   since widening it to whole seconds needs the instant.
+6. **Entropy and external calls stay per call.** `rand::*` and generated record ids vary per row by
+   design, and an `http::*` call is observed once per call. Only the clock has a statement-scoped
+   answer, because it is the statement's time.
 
 ## Consequences
 
-- The fold of `time::now()` is gated on its position being a condition (`fold::is_condition`).
-- A condition's clock fold is a statement-start value held in a slot the plan reads (Decision 4), so
-  a cached plan never serves a stale timestamp.
-- The same reasoning applies to every call whose answer depends on when it runs. Entropy
-  (`rand::*`, generated record ids) is per call, per row, and never folded in any position. An
-  external call (`http::*`) is evaluated exactly where and as often as written, in every position,
-  because the number of calls is itself observable.
+- A statement is never planned again because it read the clock.
+- Both clock positions are pinned by tests: `language/functions/time/now_evaluated_per_call.surql`
+  (one instant for every row of a statement) and `reproductions/one_statement_reads_one_clock.surql`
+  (one instant across a loop body, a subquery, a function body, a closure, a nested query and a
+  script, and two instants across two statements).
+- `every_clock_builtin_reads_the_context` (`builtin/time.rs`) pins that each `EffectSet::CLOCK`
+  builtin reads the context and refuses the context-free call.

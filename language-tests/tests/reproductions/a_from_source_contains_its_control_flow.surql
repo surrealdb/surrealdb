@@ -8,13 +8,16 @@ reason = """
 A FROM source is a value position: a RETURN raised while evaluating it names
 the value to iterate, so the statement still answers with rows and the rest of
 the pipeline still runs. The signal must not escape and become the enclosing
-statement's own result. BREAK and CONTINUE have no loop to act on there and
-stay invalid control flow, including inside an enclosing FOR: the loop raises
-rather than taking the signal as its own, and the writes it had made are rolled
-back with the statement.
+statement's own result. BREAK and CONTINUE with no enclosing FOR have no loop
+to act on there and are invalid control flow. Written inside a FOR's body, a
+FROM source is part of the loop: the signal reaches the FOR, which ends or
+continues as the signal says, and the writes the loop had made stay.
 
 A record id's key is the one part of it that is an expression, so it draws the
-same boundary per key, for an array key and an object key alike.
+same boundary per key, for an array key and an object key alike; a BREAK or
+CONTINUE in a key written inside a FOR's body reaches that FOR as well. Outside
+any FOR, a source and a key element are the statement's own, and the signal is
+invalid control flow there.
 """
 
 [[test.results]]
@@ -78,7 +81,7 @@ error = "Invalid control flow statement, break or continue statement found outsi
 error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-error = "Invalid control flow statement, break or continue statement found outside of loop."
+value = "NONE"
 
 [[test.results]]
 value = "[{ a: 7, id: t:{ k: 1 } }]"
@@ -90,10 +93,10 @@ value = "t:{ a: 1 }"
 value = "[{ a: 7, id: t:{ k: 1 } }]"
 
 [[test.results]]
-error = "Invalid control flow statement, break or continue statement found outside of loop."
+value = "NONE"
 
 [[test.results]]
-error = "The table 'u' does not exist"
+value = "[{ count: 1 }]"
 */
 
 CREATE t:1 SET a = 1;
@@ -132,7 +135,8 @@ SELECT * FROM t WHERE id = t:[(RETURN 1)];
 LET $r = (SELECT VALUE a FROM (RETURN t:1));
 RETURN $r;
 
--- BREAK/CONTINUE have no loop to act on in a source position.
+-- With no FOR around it, BREAK/CONTINUE in a source position is invalid control flow.
+-- Inside a FOR, a source is part of the loop body: the FOR ends.
 SELECT * FROM (BREAK);
 SELECT * FROM (CONTINUE);
 FOR $i IN [1] { SELECT * FROM (BREAK); };
@@ -142,8 +146,7 @@ CREATE t:{ k: 1 } SET a = 7;
 RETURN t:{ a: (RETURN 1) };
 SELECT * FROM t:{ k: (RETURN 1) };
 
--- A BREAK inside a record id key raises rather than breaking the enclosing
--- loop: the loop's own write is rolled back with the statement, so the table
--- it would have created is absent.
+-- A BREAK inside a record id key written in a FOR's body ends that FOR, and the
+-- write the iteration had made before it stays.
 FOR $i IN [1, 2] { CREATE u:[$i] SET a = $i; SELECT * FROM t:[(BREAK)]; };
 SELECT count() FROM u GROUP ALL;

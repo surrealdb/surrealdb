@@ -487,7 +487,7 @@ on another thread, a Durable Object or another machine (`EDGE_PLAN.md` rule 6).
 
 **Streams, not buffers.** A work item writes its output into a stream as it produces it, with
 backpressure, never into a local buffer collected afterwards (`EDGE_PLAN.md` rule 6). A region's
-batches (`vm/region.rs`), which today run and are replayed in order through the paged merge, become
+batches (`vm/morsel/`), which today run and are replayed in order through the paged merge, become
 one stream per morsel, each with a fixed window, read by a merge that pulls from them.
 
 **The fan bundle is the VM, not the engine.** A fan's start time must not dominate a fanned

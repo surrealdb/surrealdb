@@ -12,7 +12,7 @@ use surrealdb_rpc::capabilities::{
 use surrealdb_core::syn::runtime::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
-use crate::cli::Backend;
+use crate::cli::{Backend, RunMode};
 
 fn bool_or_f<T>() -> BoolOr<T> {
 	BoolOr::Bool(false)
@@ -429,6 +429,12 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub upgrade: bool,
 
+	/// The run modes this test is valid in. Absent means every mode; a present
+	/// list restricts the file to the modes it names, so an empty list runs
+	/// the file in none. See [`TestDetails::runs_in_mode`].
+	#[serde(default)]
+	pub modes: Option<Vec<RunMode>>,
+
 	/// Marks a script written in the SurrealQL of the released binary that runs
 	/// it, in a spelling the current parser no longer accepts.
 	///
@@ -484,6 +490,7 @@ impl Default for TestDetails {
 			issue: Default::default(),
 			wip: false,
 			upgrade: Default::default(),
+			modes: Default::default(),
 			legacy_syntax: Default::default(),
 			version: Default::default(),
 			importing_version: Default::default(),
@@ -587,6 +594,12 @@ pub enum Unrepaired {
 }
 
 impl TestDetails {
+	/// Whether the test is valid in `mode`: always when `modes` is absent,
+	/// otherwise only when the list names it.
+	pub fn runs_in_mode(&self, mode: RunMode) -> bool {
+		self.modes.as_ref().is_none_or(|modes| modes.contains(&mode))
+	}
+
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
 
@@ -609,6 +622,9 @@ impl TestDetails {
 				TestDetailsResults::SigninError(x) => res.append(
 					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
 				),
+				TestDetailsResults::RequestError(x) => res.append(
+					&mut x._unused_keys.keys().map(|x| format!("test.results.{x}")).collect(),
+				),
 			}
 		}
 		res
@@ -623,6 +639,9 @@ pub enum TestDetailsResults {
 	ParserError(ParsingTestResult),
 	SigninError(SigninErrorResult),
 	SignupError(SignupErrorResult),
+	/// The whole request was refused: the `dbs.process` call itself returned an error, so no
+	/// statement produced a result.
+	RequestError(RequestErrorResult),
 }
 
 impl<'de> Deserialize<'de> for TestDetailsResults {
@@ -644,6 +663,10 @@ impl<'de> Deserialize<'de> for TestDetailsResults {
 				Deserialize::deserialize(value)
 					.map_err(to_deser_error)
 					.map(TestDetailsResults::SignupError)
+			} else if t.contains_key("request-error") {
+				Deserialize::deserialize(value)
+					.map_err(to_deser_error)
+					.map(TestDetailsResults::RequestError)
 			} else {
 				Deserialize::deserialize(value)
 					.map_err(to_deser_error)
@@ -677,6 +700,15 @@ pub struct SigninErrorResult {
 #[serde(rename_all = "kebab-case")]
 pub struct SignupErrorResult {
 	pub signup_error: BoolOr<String>,
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct RequestErrorResult {
+	pub request_error: BoolOr<String>,
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -1055,4 +1087,88 @@ pub struct BenchDetails {
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+#[cfg(test)]
+mod request_error_tests {
+	use super::*;
+
+	#[test]
+	fn request_error_table_is_not_sent_to_parser_error() {
+		let cfg: TestConfig =
+			toml::from_str("[test.results]\nrequest-error = \"refused\"").expect("parses");
+		match cfg.test.results {
+			Some(TestDetailsResults::RequestError(x)) => {
+				assert!(matches!(x.request_error, BoolOr::Value(ref t) if t == "refused"));
+			}
+			other => panic!("expected RequestError, got {other:?}"),
+		}
+	}
+
+	#[test]
+	fn unrecognised_table_still_parses_as_parser_error() {
+		let result = toml::from_str::<TestConfig>("[test.results]\nparsing-error = true");
+		assert!(matches!(result.unwrap().test.results, Some(TestDetailsResults::ParserError(_))));
+	}
+
+	#[test]
+	fn unknown_keys_beside_request_error_are_reported() {
+		let cfg: TestConfig =
+			toml::from_str("[test.results]\nrequest-error = true\nextra = 1").expect("parses");
+		assert_eq!(cfg.unused_keys(), vec!["test.results.extra".to_owned()]);
+	}
+}
+
+#[cfg(test)]
+mod modes_tests {
+	use super::*;
+
+	fn details(toml: &str) -> TestDetails {
+		toml::from_str::<TestConfig>(toml).expect("parses").test
+	}
+
+	#[test]
+	fn absent_modes_run_in_both_modes() {
+		let d = details("[test]\nrun = true");
+		assert!(d.modes.is_none());
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn modes_parse_and_restrict_the_file() {
+		let d = details("[test]\nmodes = [\"request\"]");
+		assert_eq!(d.modes, Some(vec![RunMode::Request]));
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(!d.runs_in_mode(RunMode::Fragments));
+
+		let d = details("[test]\nmodes = [\"fragments\"]");
+		assert!(!d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn both_modes_listed_run_in_both() {
+		let d = details("[test]\nmodes = [\"request\", \"fragments\"]");
+		assert!(d.runs_in_mode(RunMode::Request));
+		assert!(d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn an_empty_list_runs_in_no_mode() {
+		let d = details("[test]\nmodes = []");
+		assert!(!d.runs_in_mode(RunMode::Request));
+		assert!(!d.runs_in_mode(RunMode::Fragments));
+	}
+
+	#[test]
+	fn an_unknown_mode_is_rejected() {
+		assert!(toml::from_str::<TestConfig>("[test]\nmodes = [\"streaming\"]").is_err());
+	}
+
+	#[test]
+	fn modes_is_a_declared_key_not_an_unused_one() {
+		let d = details("[test]\nmodes = [\"request\"]");
+		assert!(d.unused_keys().is_empty());
+	}
 }

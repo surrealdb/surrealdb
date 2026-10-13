@@ -16,7 +16,7 @@ use crate::val::{Number, Value};
 /// reads `[1, 2]` and gives `{ a: [{ b: 1 }, { b: 1 }] }` and
 /// `{ a: [{ b: 2 }, { b: 2 }] }`: every element of `a` takes the value the row
 /// was split on at its own position.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SplitTarget {
 	/// One position, named by the path.
 	At(FieldPath),
@@ -132,7 +132,7 @@ pub(crate) fn split_target(expr: &LogicalExpr) -> Option<SplitTarget> {
 	fn walk(expr: &LogicalExpr, w: &mut Walk) -> Option<()> {
 		w.ends_on_every = false;
 		match expr {
-			// The value a body is applied to: the walk is already there.
+			// The current value. The walk already points at it, so nothing is added.
 			LogicalExpr::Current => Some(()),
 			LogicalExpr::Field(name) => {
 				w.parts.push(FieldPathPart::Field(name.as_str().to_owned()));
@@ -272,11 +272,11 @@ pub(crate) fn split_row(value: Value, targets: &[SplitTarget], output: &mut Vec<
 	output.extend(current);
 }
 
-/// Split a single value on the collection `on` found at `path`.
+/// Split a single value on the collection `on` read at `target`.
 ///
-/// If `on` is an array or set, produces one copy of `value` per element with
-/// the field at `path` replaced by that element. Otherwise, returns the value
-/// unchanged.
+/// If `on` is an array or set, produces one copy of `value` per element, with
+/// the position `target` names set to that element. An empty array or set,
+/// and any other value, leaves `value` as one row, unchanged.
 fn split_value_on_path(value: Value, on: Value, target: &SplitTarget, output: &mut Vec<Value>) {
 	match on {
 		Value::Array(arr) => {
@@ -329,16 +329,15 @@ mod tests {
 	use super::*;
 	use crate::val::{Array, Object, Set};
 
-	/// Split `value` on the field `name`, reading the collection off the value
-	/// the way the operator's compiled key would for a stored field.
+	/// Split `value` on the field `name`, reading the collection from that field.
 	fn split_on_field(value: Value, name: &str, output: &mut Vec<Value>) {
 		let target = SplitTarget::At(FieldPath::field(name));
 		let on = target.read(&value);
 		split_value_on_path(value, on, &target, output);
 	}
 
-	/// The logical form of an idiom, as the planner's `SPLIT` targets reach
-	/// this module.
+	/// Parses `sql` as an idiom, lowers it, and returns its `SPLIT` target, or
+	/// `None` if the target names no position. Panics if `sql` does not parse or lower.
 	fn target_of(sql: &str) -> Option<SplitTarget> {
 		let expr = crate::expr::logical::lower_expr(crate::expr::Expr::Idiom(
 			crate::syn::idiom(sql).expect("idiom"),

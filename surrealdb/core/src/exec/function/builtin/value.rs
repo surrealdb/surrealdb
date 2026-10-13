@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::exec::EvalContext;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::exec::vm::calls::StreamingClosureEvaluator;
 use crate::expr::Kind;
 use crate::expr::logical::EffectSet;
@@ -20,6 +21,10 @@ pub struct ValueDiff;
 impl ScalarFunction for ValueDiff {
 	fn name(&self) -> &'static str {
 		"value::diff"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::diff", Fallibility::INFALLIBLE)
 	}
 
 	fn effects(&self) -> EffectSet {
@@ -66,6 +71,10 @@ impl ScalarFunction for ValuePatch {
 		"value::patch"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::patch", Fallibility::VALUE)
+	}
+
 	fn effects(&self) -> EffectSet {
 		EffectSet::PURE
 	}
@@ -102,11 +111,11 @@ impl ScalarFunction for ValuePatch {
 // value::chain - Chain a value through a closure
 // =========================================================================
 //
-// `value::chain` and `value::expect` run the closure they are handed, in
-// their second argument, against the row the call is evaluated against.
-// Both declare that position through `closure_args`, so a closure arriving
-// there as a value is judged as running a body the call cannot see; the
-// builtins themselves are pure.
+// `value::chain` and `value::expect` run the closure passed as their second
+// argument against the row the call is evaluated on. Both declare that
+// argument position through `closure_args`, so the closure is checked as code
+// that runs against the calling row, not as a plain value. The builtins
+// themselves are pure.
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueChain;
@@ -114,6 +123,10 @@ pub struct ValueChain;
 impl ScalarFunction for ValueChain {
 	fn name(&self) -> &'static str {
 		"value::chain"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::chain", Fallibility::VALUE)
 	}
 
 	fn effects(&self) -> EffectSet {
@@ -154,14 +167,18 @@ impl ScalarFunction for ValueChain {
 	}
 }
 
-// value::expect: Assert a value with a closure returning bool
-// Original value is passed on if closure returns true
+// `value::expect` asserts a value with a closure that returns bool.
+// The original value is returned unchanged when the closure returns true.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ValueExpect;
 
 impl ScalarFunction for ValueExpect {
 	fn name(&self) -> &'static str {
 		"value::expect"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Scalar, "value::expect", Fallibility::VALUE)
 	}
 
 	fn effects(&self) -> EffectSet {

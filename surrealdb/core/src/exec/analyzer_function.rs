@@ -9,12 +9,12 @@
 //! compiled call per piece of text with the text bound to `$input` — so the
 //! analyzer names none of that.
 //!
-//! The call is compiled rather than interpreted, on the cache's miss, and is
-//! taken once per indexing or query operation rather than once per piece of
-//! text: an analyzer
-//! runs its function over every field value it indexes, so the cost of
-//! resolving the definition and its permission belongs to the operation and
-//! not to the text.
+//! The call is compiled on a cache miss and resolved once per indexing or
+//! query operation, not once per piece of text. An analyzer runs its function
+//! over every field value it indexes, so the cost of resolving the definition
+//! and its permission belongs to the operation, not to each piece of text.
+//! The compiled call is kept in the operation's map and reused for every piece
+//! of text the operation covers.
 //!
 //! The stack the trait hands down is unused here: the compiled call grows none.
 
@@ -36,26 +36,26 @@ use crate::val::Value;
 ///
 /// Bound as a local parameter of the call rather than in the context, so it is
 /// visible to the argument and to nothing else — a function body naming this
-/// reads its own caller's binding, not this one.
+/// finds nothing under it, as a body reads no binding of its caller.
 const INPUT: &str = "__surrealdb_analyzer_input";
 
 /// The engine's [`AnalyzerFunction`], holding the frame the
 /// analyzer's function is evaluated in.
 ///
-/// Borrowed rather than owned: every call site already has the context in hand
-/// for the duration of the indexing or query operation it is serving.
+/// Borrowed rather than owned: each caller keeps the context alive for the
+/// whole indexing or query operation it serves.
 pub(crate) struct StreamingAnalyzerFunction<'a> {
 	exec: &'a ExecutionContext,
-	/// The compiled call, keyed by the name it calls. An analyzer names one
-	/// function, so this holds one entry; keying it is what keeps that an
-	/// observation rather than an assumption.
+	/// The compiled call, keyed by the function name it calls. An analyzer
+	/// usually names one function, so the map holds one entry. The key keeps
+	/// a second name from being served the first name's compiled call.
 	///
-	/// A `Mutex` rather than a `RefCell` so the whole is `Sync`: an index
-	/// build runs on a spawned task, whose future must be `Send`, and holds
-	/// one of these across the awaits that index a batch. The lock is never
-	/// held across an await — a miss drops it, compiles, and takes it again —
-	/// so a second compile of the same name is possible and writes the same
-	/// expression.
+	/// A `Mutex` rather than a `RefCell`, so the struct is `Sync`: an index
+	/// build runs on a spawned task whose future must be `Send`, and holds
+	/// this across the awaits that index a batch. The lock is never held
+	/// across an await. On a miss it is dropped, the call compiles, and the
+	/// lock is taken again, so two tasks may compile the same name and both
+	/// write the same expression.
 	compiled: Mutex<HashMap<String, Clause>>,
 }
 
@@ -122,8 +122,8 @@ impl<'a> StreamingAnalyzerFunction<'a> {
 impl AnalyzerFunction for StreamingAnalyzerFunction<'_> {
 	/// The function is called with no row: it transforms the text it is handed
 	/// and has no record to read fields from. Compiling the call applies the
-	/// session's capability check for the function, as the per-row engine's
-	/// does.
+	/// session's capability check for the function. The check runs at compile
+	/// time, so it is not repeated for each piece of text.
 	fn call<'a>(&'a self, name: &'a str, input: Strand) -> BoxAnalyzerFut<'a> {
 		Box::pin(async move {
 			let compiled = self.call_expr(name).await?;

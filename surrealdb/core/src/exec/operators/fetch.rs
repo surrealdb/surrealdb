@@ -1,3 +1,6 @@
+// Runtime that compiled programs call to run FETCH and record dereferences.
+#![allow(dead_code)]
+
 use surrealdb_strand::Strand;
 
 use crate::catalog::providers::TableProvider;
@@ -209,7 +212,7 @@ fn fetch_field_path<'a, S: FetchWalk, E: FetchIndex<S>>(
 				// Evaluate it, then mutably index into an array (numeric,
 				// negative/out-of-range skips silently) or key into an object
 				// (string or numeric-as-string key); anything else is a no-op,
-				// matching the other unsupported-part fallthrough below.
+				// matching how other unsupported parts are handled.
 				WalkStep::Index => {
 					let index_value = index.index(ctx, &path[depth]).await?;
 					let next = match (&mut *current, &index_value) {
@@ -381,8 +384,21 @@ pub(crate) async fn process_fetched_record(
 	rid: &RecordId,
 	val: &mut Value,
 ) -> crate::expr::FlowResult<bool> {
+	process_fetched_record_for(ctx, rid, val, None).await
+}
+
+/// [`process_fetched_record`] for a reader of the record's fields `needed`: the computed fields
+/// derived are those `needed` names, with the ones they read and the ones a field permission reads
+/// ([`super::scan::pipeline::filter_field_state_for_projection`]); every one where `needed` is
+/// `None`.
+pub(crate) async fn process_fetched_record_for(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	val: &mut Value,
+	needed: Option<&std::collections::HashSet<String>>,
+) -> crate::expr::FlowResult<bool> {
 	let db_ctx = ctx.database().context("process_fetched_record requires database context")?;
-	// SECURITY (GHSA-2v9j): confine record materialization to the caller's
+	// SECURITY: confine record materialization to the caller's
 	// tenant. This path serves record dereference and the FETCH clause, which
 	// resolve records by id with no preceding scan, so it is the fetch-side
 	// equivalent of the scan-operator tenant guard.
@@ -412,7 +428,7 @@ pub(crate) async fn process_fetched_record(
 
 	// 2. Build FieldState (computed fields + field permissions)
 	let field_state =
-		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, None).await?;
+		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, needed).await?;
 	let field_state = reading_own_record(ctx, rid, field_state);
 
 	// 3. Evaluate computed fields and apply field-level permissions
@@ -451,8 +467,8 @@ pub(crate) async fn fetch_record_no_perms(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	// A program lowered with the units that read each table it can reach
-	// reads the record through its table's unit.
+	// When the program has a unit for the record's table,
+	// the record is read through that unit.
 	if let Some(deref) = ctx.vm_deref()
 		&& let Some(fetched) = deref.fetch(ctx, rid, false).await
 	{
@@ -493,8 +509,8 @@ pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	// A program lowered with the units that read each table it can reach
-	// reads the record through its table's unit.
+	// When the program has a unit for the record's table,
+	// the record is read through that unit.
 	// A computed field whose value does not coerce to its kind fails the
 	// dereference naming the field.
 	if let Some(deref) = ctx.vm_deref()

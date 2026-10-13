@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use super::saved::{Loading, Saving};
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::{Number, Value};
 
@@ -23,6 +24,10 @@ impl AggregateFunction for Count {
 		"count"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "count", Fallibility::INFALLIBLE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(CountAccumulator::default())
 	}
@@ -32,7 +37,7 @@ impl AggregateFunction for Count {
 	}
 
 	fn signature(&self) -> Signature {
-		// count() takes no arguments - we pass a dummy value during evaluation
+		// count() takes no arguments. Evaluation passes a placeholder value that update() ignores.
 		Signature::new().returns(Kind::Int)
 	}
 }
@@ -110,6 +115,10 @@ impl AggregateFunction for CountField {
 		"count"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "count", Fallibility::INFALLIBLE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(CountFieldAccumulator::default())
 	}
@@ -147,7 +156,7 @@ impl Accumulator for CountFieldAccumulator {
 	}
 
 	fn update(&mut self, value: Value) -> Result<()> {
-		// Count truthy values (matches old behavior)
+		// Only truthy values are counted. None and false are skipped.
 		if value.is_truthy() {
 			self.count += 1;
 		}

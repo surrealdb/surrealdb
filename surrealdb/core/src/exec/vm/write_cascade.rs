@@ -8,7 +8,7 @@
 //! the referencing record in flight, and the repair its field declares runs;
 //! the keys are removed once every one is repaired.
 //!
-//! What a field's repair is, was decided when the statement was lowered
+//! A field's repair is fixed when the statement is lowered
 //! ([`TableRepairs`]): nothing for `IGNORE`, a refusal for `REJECT`, the
 //! referencing record deleted for `CASCADE`, the link taken out for `UNSET`,
 //! and for `THEN` the definition's own expression as a host pipeline,
@@ -23,6 +23,9 @@
 //! record's table, as the catalog held them when the statement was lowered. A
 //! key naming a field of such a table that it does not hold fails as the
 //! catalog's lookup of the field does.
+
+// Instructions the IR lowering emits.
+#![allow(dead_code)]
 
 use std::sync::Arc;
 
@@ -46,9 +49,9 @@ pub(in crate::exec::vm) enum ReferenceInstr {
 	/// Delete the records joined to the deleted record by a graph edge, as the
 	/// purge's edge cascade deletes them: statement `unit`, run with the
 	/// deleted record bound, in the frame that restores the actor's own
-	/// permissions. `None` names the edge cascade running the stages the
-	/// instruction is one of, which their arena does not hold: the stages an
-	/// edge cascade loads by name, run only beneath it.
+	/// permissions. `None` means the stages this instruction belongs to are run
+	/// by an edge cascade, which their arena does not hold. Such stages run
+	/// only beneath an edge cascade.
 	PurgeEdges {
 		unit: Option<UnitId>,
 	},
@@ -120,8 +123,8 @@ assert_plain!(RepairStrategy);
 
 #[cfg(test)]
 thread_local! {
-	/// How many statements of a cascade this thread has run as units, for
-	/// tests that must know a cascade ran as bytecode.
+	/// Number of cascade statements this thread has run as units. Tests
+	/// read it to confirm that a cascade ran as bytecode.
 	pub(in crate::exec::vm) static CASCADE_UNITS_RUN: std::cell::Cell<usize> =
 		const { std::cell::Cell::new(0) };
 }
@@ -277,8 +280,8 @@ async fn purge_edges(program: &Program, unit: Option<UnitId>, state: &mut State)
 		let units = Arc::clone(&cascade.units);
 		return run_found(cascade, units, key, exec, state).await.map(|_| ());
 	};
-	// The cascade is named to the stages it runs, whose own edge cascades
-	// are it.
+	// The stages named here belong to the cascade they run in, so their
+	// own edge cascades are that cascade.
 	let units = super::super::host::unit_table(program, state, ctx.exec())?;
 	let cascade = units
 		.get(unit.0 as usize)
@@ -304,8 +307,8 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 		tables.iter().find(|repairs| repairs.table == referencing.table).ok_or_else(|| {
 			internal(&format!("a referencing table outside the repairs: {}", referencing.table))
 		})?;
-	// A key naming a field the table does not key that way is the failure the
-	// catalog's own lookup of it reports.
+	// A key naming a field the table does not hold fails with the
+	// catalog's own field lookup error.
 	let (_, strategy) =
 		repairs.fields.iter().find(|(name, _)| *name == field).ok_or_else(|| {
 			ControlFlow::Err(anyhow::anyhow!(CatalogError::FdNotFound {
@@ -345,11 +348,11 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 
 /// Take the deleted record `rid` out of `field` of `referencing`.
 ///
-/// Which statement that is depends on what the field holds, and the field's
-/// declared kind does not settle it: a redefined kind leaves old rows behind.
-/// So the referencing record is read and the shape decided per record. A
+/// Which statement applies depends on what the field holds, and the field's
+/// declared kind does not settle it, because rows written before a kind change keep their old
+/// shape. So the referencing record is read and the shape decided per record. A
 /// field holding nothing needs no repair; any shape but a link and a
-/// collection of links is the refusal that the reference key names a field
+/// collection of links fails, since the reference key names a field
 /// whose value cannot hold one.
 async fn unset_link(
 	program: &Program,
@@ -524,7 +527,7 @@ async fn run_write(
 	})
 	.await;
 	ran?;
-	// A run that changed the catalog leaves its state behind.
+	// A run that changed the catalog does not return its state to the pool.
 	let after = caller.try_txn().map(|txn| txn.catalog_stamps());
 	if after == stamp
 		&& let Some(write) = state.write.as_deref_mut()

@@ -1240,6 +1240,55 @@ run_task = { name = [
     "test-lang",
 ], fork = true, parallel = false }
 
+# The never-declined lane. It runs the whole `tests/` tree, `wip` files
+# included, and reports every statement the engine declined to run as JSON
+# lines in `language-tests/target/declines-<backend>.jsonl`. Grading is
+# unchanged, so the runner exits non-zero when tests fail; the task fails only
+# when the run did not reach its `declines: N` line, i.e. the runner crashed.
+[tasks.test-lang-decline-report]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Report the statements the engine declines to run, without failing on their count"
+script = """
+    #!/bin/bash -ex
+    cd language-tests
+    if [ "${_TEST_LANG_FEATURES}" != "" ]; then
+        cargo build --locked --features ${_TEST_LANG_FEATURES}
+    else
+        cargo build --locked
+    fi
+    log="target/declines-${_TEST_API_ENGINE}.log"
+    set +e
+    ./target/debug/surrealql-test --color never run --jobs 12 --backend ${_TEST_API_ENGINE} \
+        --report-declines "target/declines-${_TEST_API_ENGINE}.jsonl" 2>&1 | tee "$log"
+    set -e
+    grep -q '^declines: [0-9]' "$log"
+"""
+
+[tasks.ci-lang-decline-report-mem]
+category = "CI - LANGUAGE TESTS"
+description = "Report declined statements with the in-memory engine"
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
+run_task = { name = [
+    "test-lang-decline-report",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-decline-report-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Report declined statements with the RocksDB engine"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
+run_task = { name = [
+    "test-lang-decline-report",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-decline-report]
+category = "CI - LANGUAGE TESTS"
+description = "Report the statements the engine declines to run on mem and rocksdb"
+dependencies = [
+    "ci-lang-decline-report-mem",
+    "ci-lang-decline-report-rocksdb",
+]
+
 [tasks.ci-parser]
 category = "CI - CHECK"
 description = "Run the SurrealQL parser's golden corpus check and its invariant harnesses"

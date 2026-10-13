@@ -2,43 +2,20 @@
 
 use super::Planner;
 use crate::err::Error;
+use crate::exec::BoxFut;
 use crate::exec::clause::ScalarMetadata;
-use crate::exec::logical::Needs;
-use crate::exec::{AccessMode, BoxFut};
 use crate::expr::Function;
 use crate::expr::logical::{LogicalExpr, LogicalOp, LogicalRecursePath};
 use crate::val::Value;
 
 impl Planner<'_> {
-	/// The description of the scalar `expr`, with its requirements and its
-	/// folded constant; see [`ScalarMetadata`].
+	/// The description of the scalar `expr`, with its folded constant; see [`ScalarMetadata`].
 	pub(crate) async fn scalar_metadata(&self, expr: LogicalExpr) -> Result<ScalarMetadata, Error> {
 		crate::exec::compiles::note();
 		self.check_depth()?;
 		self.validate_scalar(&expr).await?;
-		let mut functions = Vec::new();
-		crate::exec::logical::stored_functions_of(&expr, &mut functions);
-		let mut stored = Vec::with_capacity(functions.len());
-		for function in functions {
-			let mode = crate::kvs::catalog_reads::sealed(
-				false,
-				self.resolve_function_access_mode(&function),
-			)
-			.await;
-			stored.push((function, mode));
-		}
 		let literal = super::static_value(&expr).or_else(|| self.constant_path_value(&expr));
-		let needs = if literal.is_some() {
-			Needs::NOTHING
-		} else {
-			crate::exec::logical::needs_of_expr(&expr, self.function_registry(), &|function| {
-				stored
-					.iter()
-					.find(|(held, _)| held == function)
-					.map_or(AccessMode::ReadWrite, |(_, mode)| *mode)
-			})
-		};
-		Ok(ScalarMetadata::new(expr, needs, literal))
+		Ok(ScalarMetadata::new(expr, literal))
 	}
 
 	/// Validate the shapes whose compilation raises before clause evaluation.

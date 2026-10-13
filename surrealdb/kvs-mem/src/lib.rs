@@ -188,6 +188,12 @@ impl Transactable for Transaction {
 		self.write
 	}
 
+	/// Transactions run under snapshot isolation, whose commit checks write-write overlap only: a
+	/// plain read never joins the conflict set.
+	fn plain_reads_tracked(&self) -> bool {
+		false
+	}
+
 	/// Cancels the transaction.
 	#[cfg_attr(
 		feature = "observability",
@@ -1262,5 +1268,34 @@ mod tests {
 			Datastore::new(config).await.err(),
 			Some(Error::UnsupportedVersionedQueries)
 		));
+	}
+
+	/// A plain read, by `get` or `getm`, never joins the conflict set: the reader commits although
+	/// another transaction wrote and committed the key it read. The answer is static, so it holds
+	/// for read and write transactions alike.
+	#[tokio::test]
+	async fn plain_reads_are_untracked() {
+		let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
+		let a = Key::from(b"a".as_slice());
+		let b = Key::from(b"b".as_slice());
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(a.clone(), b"one".to_vec()).await.unwrap();
+		tx.commit().await.unwrap();
+		// R reads A by `get` and by `getm`, and writes B.
+		let r = ds.transaction(TransactionType::Write).await.unwrap();
+		assert!(!r.plain_reads_tracked());
+		assert_eq!(r.get(a.clone(), None).await.unwrap().as_deref(), Some(&b"one"[..]));
+		let keys = [a.clone()];
+		r.getm(&keys, None).await.unwrap();
+		r.set(b.clone(), b"r".to_vec()).await.unwrap();
+		// T writes A and commits.
+		let t = ds.transaction(TransactionType::Write).await.unwrap();
+		t.set(a.clone(), b"two".to_vec()).await.unwrap();
+		t.commit().await.unwrap();
+		// R commits: its reads were not tracked.
+		r.commit().await.unwrap();
+		let rd = ds.transaction(TransactionType::Read).await.unwrap();
+		assert!(!rd.plain_reads_tracked());
+		rd.cancel().await.unwrap();
 	}
 }

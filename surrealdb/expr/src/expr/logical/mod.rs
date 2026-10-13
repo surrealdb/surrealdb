@@ -2340,9 +2340,9 @@ impl LogicalOp {
 	/// it here rather than re-descending from the callback. Two stopping
 	/// rules:
 	///
-	/// - A [`LogicalExpr::Closure`] body is not entered. A closure body is bound by nothing where
-	///   it is written: it resolves its sources, parameters and calls where the closure is invoked,
-	///   so a plan inside one is not a plan of this statement.
+	/// - A [`LogicalExpr::Closure`] body is not entered. Its captured names are fixed where the
+	///   closure is written, but its sources and calls resolve where it is invoked, so a plan
+	///   inside one is not a plan of this statement.
 	/// - A [`LogicalOp::Match`] plan is a leaf, as it is to [`Self::visit`], since its stages are
 	///   not row semantics. Its scalars are walked like any other node's, so a plan one of them
 	///   holds is still reached.

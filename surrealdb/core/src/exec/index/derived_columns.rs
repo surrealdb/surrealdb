@@ -29,23 +29,21 @@
 //! column are in no `id` order either ([`id_orders_coarsely`]), whichever
 //! column the index holds.
 //!
-//! # Removing the widening
+//! # The switch
 //!
-//! [`derived_datetime_index_needs_widening`] is the one switch. While it is
-//! `true`, [`coarse_column`] marks the datetime components of an index, and
-//! every behaviour above follows from that mark. An index entry encoding of
-//! datetimes whose byte order is chronological makes the mark unnecessary:
-//! the function then answers `false`, no column is marked, and `widen_access`,
-//! `range_is_widened` and `IndexRef::orders_coarsely` answer as they do for a
-//! column that is not one. Deleting the function, [`coarse_columns`], the
-//! widening and its tests removes the rest; no other module reads the switch.
+//! [`derived_datetime_index_needs_widening`] is the only switch. While it
+//! returns `true`, [`coarse_column`] marks the datetime components of an index,
+//! and every behaviour above follows from that mark. It returns `false` only
+//! when datetime index entries order chronologically; then no column is marked,
+//! and `widen_access`, `range_is_widened` and `IndexRef::orders_coarsely` answer
+//! as they do for a column that is not one. No other module reads the switch.
 
 use std::borrow::Cow;
 use std::ops::Bound;
 
 use chrono::TimeDelta;
 
-use super::access_path::{BTreeAccess, ColumnFlags, IndexRef};
+use super::access_path::{BTreeAccess, BoundOperand, ColumnFlags, IndexRef};
 use crate::catalog::{ComponentOrder, KeyOrigin, KeyStructure};
 use crate::exec::logical::reads::KeyColumn;
 use crate::expr::logical::LogicalExpr;
@@ -55,11 +53,10 @@ use crate::val::{Datetime, Value};
 /// Whether a b-tree index over a datetime component of the record id must
 /// widen the bounds of a range over it.
 ///
-/// `true` while the index entry for a datetime is its RFC 3339 key text, whose
-/// order is chronological only down to the whole second. This is the one place
-/// that says so; every widening, every refusal of an exact answer and every
-/// withheld ordering over such a column starts from the mark it gives
-/// ([`coarse_column`]).
+/// `true`: the index entry for a datetime is its RFC 3339 key text, whose order
+/// is chronological only down to the whole second. Every widening, refusal of an
+/// exact answer and withheld ordering over such a column is decided from the
+/// mark that [`coarse_column`] gives.
 pub(crate) const fn derived_datetime_index_needs_widening() -> bool {
 	true
 }
@@ -81,11 +78,11 @@ pub(crate) fn coarse_columns(key: &KeyStructure, cols: &[Idiom]) -> Option<Colum
 	flags.contains(&true).then_some(flags)
 }
 
-/// Whether the record ids of a table keyed by `key` order other than by value
-/// where an index entry ends with one: the id names a component whose key
+/// Whether the entries of an index that ends with the record id list their
+/// records out of `id` order. This is so when the id names a component whose key
 /// bytes do not order its values exactly ([`KeyStructure::all_exactly_ordered`]),
-/// a datetime ordering only by the whole second. The entries that agree on
-/// every column of an index then list their records in no `id` order.
+/// such as a datetime, which orders only by the whole second. Entries that agree
+/// on every column of the index then have no `id` order between them.
 ///
 /// This holds whatever [`derived_datetime_index_needs_widening`] answers: the
 /// id an entry ends with is encoded as the record key is.
@@ -130,11 +127,15 @@ fn widened(datetime: &Datetime, side: Side) -> Option<Datetime> {
 /// `bound` widened as a bound on `side`: a datetime becomes the inclusive bound
 /// that reaches its whole second ([`widened`]), and `None` where none does.
 /// Anything else, including no bound, is as it was.
-fn widen_bound(bound: &Bound<Value>, side: Side) -> Option<Bound<Value>> {
+///
+/// A bound that reads the statement clock has no instant to widen before the
+/// scan opens, so it has no widening either.
+fn widen_bound(bound: &Bound<BoundOperand>, side: Side) -> Option<Bound<BoundOperand>> {
 	match bound {
-		Bound::Included(Value::Datetime(datetime)) | Bound::Excluded(Value::Datetime(datetime)) => {
-			widened(datetime, side).map(|datetime| Bound::Included(Value::Datetime(datetime)))
-		}
+		Bound::Included(operand) | Bound::Excluded(operand) if operand.is_clock() => None,
+		Bound::Included(BoundOperand::Literal(Value::Datetime(datetime)))
+		| Bound::Excluded(BoundOperand::Literal(Value::Datetime(datetime))) => widened(datetime, side)
+			.map(|datetime| Bound::Included(BoundOperand::Literal(Value::Datetime(datetime)))),
 		other => Some(other.clone()),
 	}
 }
@@ -150,9 +151,10 @@ fn widen_bound(bound: &Bound<Value>, side: Side) -> Option<Bound<Value>> {
 /// do not satisfy the predicate, which is judged again over them
 /// ([`range_is_widened`]).
 ///
-/// Answers `false`, leaving `access` as it was, when a datetime bound has no
-/// widening ([`widened`]): dropping it would leave an access that no longer
-/// reads as widened and could be taken as exact, so the caller discards it.
+/// Answers `false`, leaving `access` unchanged, when a datetime bound has no
+/// widening ([`widened`]), which includes a bound that reads the statement
+/// clock. Dropping such a bound would leave an access that does not read as
+/// widened and could be taken as exact, so the caller must discard `access`.
 #[must_use]
 pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 	match access {
@@ -171,8 +173,13 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 			prefix,
 			range,
 		} if index.orders_coarsely(prefix.len()) => {
-			let Some((op, Value::Datetime(datetime))) = range.as_ref() else {
+			let Some((op, operand)) = range.as_ref() else {
 				return true;
+			};
+			let datetime = match operand {
+				BoundOperand::Literal(Value::Datetime(datetime)) => datetime,
+				BoundOperand::StatementClock(_) => return false,
+				BoundOperand::Literal(_) => return true,
 			};
 			let (side, op) = match op {
 				BinaryOperator::MoreThan | BinaryOperator::MoreThanEqual => {
@@ -186,7 +193,7 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 			let Some(datetime) = widened(datetime, side) else {
 				return false;
 			};
-			*range = Some((op, Value::Datetime(datetime)));
+			*range = Some((op, BoundOperand::Literal(Value::Datetime(datetime))));
 		}
 		_ => {}
 	}
@@ -201,17 +208,16 @@ pub(crate) fn widen_access(index: &IndexRef, access: &mut BTreeAccess) -> bool {
 /// this: an exact scan, a key-only count, a bitmap that stands for its
 /// predicate, and the rendering of a plan whose filter the scan would replace.
 pub(crate) fn range_is_widened(index: &IndexRef, access: &BTreeAccess) -> bool {
-	let is_datetime = |bound: &Bound<Value>| {
-		matches!(bound, Bound::Included(Value::Datetime(_)) | Bound::Excluded(Value::Datetime(_)))
-	};
+	// A bound that reads the statement clock is a datetime once resolved.
+	let is_datetime = |operand: &BoundOperand| matches!(&*operand.witness(), Value::Datetime(_));
 	match access {
 		BTreeAccess::Range {
 			range,
-		} => index.orders_coarsely(0) && (is_datetime(&range.start) || is_datetime(&range.end)),
+		} => index.orders_coarsely(0) && range.operands().any(is_datetime),
 		BTreeAccess::Compound {
 			prefix,
-			range: Some((_, Value::Datetime(_))),
-		} => index.orders_coarsely(prefix.len()),
+			range: Some((_, operand)),
+		} => index.orders_coarsely(prefix.len()) && is_datetime(operand),
 		_ => false,
 	}
 }
@@ -258,8 +264,8 @@ fn key_columns(key: &KeyStructure) -> Vec<KeyColumn> {
 /// A `COUNT` index's `guard` with each read of a component of `key` at the
 /// record, bare or through the record (`$this.city`, `@.city`, `$this['city']`),
 /// spelled as the read of the element of the id, which is how an index
-/// evaluates it, or `None` when it reads none. The image a guard is evaluated over holds no
-/// component fields.
+/// evaluates it. `None` when the guard reads no component. The image a guard is
+/// evaluated over holds no component fields.
 pub(crate) fn canonical_guard(
 	key: Option<&KeyStructure>,
 	guard: &LogicalExpr,
@@ -271,9 +277,9 @@ pub(crate) fn canonical_guard(
 /// Whether `guard`, the stored `WHERE` of a `COUNT` index, is the condition
 /// `cond` a count is asked for: both render as the same SurrealQL, as written
 /// or, where `key` names the components of the table's record ids, once each
-/// read of a component is spelled as the element of the id. A condition a
-/// layer moved beneath itself reads a component that way, and a guard is
-/// written with the component's name.
+/// read of a component is spelled as the element of the id. A condition that an
+/// earlier lowering pass has rewritten to read a component by its id element
+/// still matches a guard written with the component's name.
 pub(crate) fn guard_counts(key: Option<&KeyStructure>, guard: &Expr, cond: &LogicalExpr) -> bool {
 	use surrealdb_types::ToSql;
 
@@ -299,6 +305,7 @@ mod tests {
 	use chrono::{TimeZone, Utc};
 	use surrealdb_strand::Strand;
 
+	use super::super::access_path::OperandRange;
 	use super::*;
 	use crate::catalog::{Index, IndexDefinition, IndexId};
 	use crate::expr::{KeyNames, Kind, KindLiteral};
@@ -346,20 +353,20 @@ mod tests {
 		Datetime(whole + TimeDelta::nanoseconds(i64::from(nanos)))
 	}
 
-	fn value(datetime: Datetime) -> Value {
-		Value::Datetime(datetime)
+	fn value(datetime: Datetime) -> BoundOperand {
+		BoundOperand::Literal(Value::Datetime(datetime))
 	}
 
 	fn range(start: Bound<Datetime>, end: Bound<Datetime>) -> BTreeAccess {
-		let value = |bound: Bound<Datetime>| match bound {
-			Bound::Included(d) => Bound::Included(Value::Datetime(d)),
-			Bound::Excluded(d) => Bound::Excluded(Value::Datetime(d)),
+		let bound = |bound: Bound<Datetime>| match bound {
+			Bound::Included(d) => Bound::Included(value(d)),
+			Bound::Excluded(d) => Bound::Excluded(value(d)),
 			Bound::Unbounded => Bound::Unbounded,
 		};
 		BTreeAccess::Range {
-			range: Range {
-				start: value(start),
-				end: value(end),
+			range: OperandRange {
+				start: bound(start),
+				end: bound(end),
 			},
 		}
 	}
@@ -437,9 +444,9 @@ mod tests {
 		assert!(widen_access(&ix, &mut access));
 		let BTreeAccess::Range {
 			range:
-				Range {
-					start: Bound::Included(Value::Datetime(start)),
-					end: Bound::Included(Value::Datetime(end)),
+				OperandRange {
+					start: Bound::Included(BoundOperand::Literal(Value::Datetime(start))),
+					end: Bound::Included(BoundOperand::Literal(Value::Datetime(end))),
 				},
 		} = access
 		else {
@@ -464,7 +471,7 @@ mod tests {
 	fn a_compound_range_widens_the_column_after_its_prefix() {
 		let ix = index(&["city", "time"]);
 		let compound = |op, datetime| BTreeAccess::Compound {
-			prefix: vec![Value::from("london")],
+			prefix: vec![Value::from("london").into()],
 			range: Some((op, value(datetime))),
 		};
 		let mut lower = compound(BinaryOperator::MoreThan, at(10, 0, 5, 500_000_000));
@@ -494,7 +501,7 @@ mod tests {
 
 		let compound = index(&["city", "time"]);
 		let before = BTreeAccess::Compound {
-			prefix: vec![Value::from("london")],
+			prefix: vec![Value::from("london").into()],
 			range: Some((BinaryOperator::MoreThan, value(far))),
 		};
 		let mut access = before.clone();
@@ -511,7 +518,7 @@ mod tests {
 
 		let by_city = index(&["city", "time"]);
 		let both = BTreeAccess::Compound {
-			prefix: vec![Value::from("london"), value(at(10, 0, 5, 500_000_000))],
+			prefix: vec![Value::from("london").into(), value(at(10, 0, 5, 500_000_000))],
 			range: None,
 		};
 		let mut prefix = both.clone();
@@ -519,23 +526,19 @@ mod tests {
 		assert_eq!(prefix, both);
 
 		// A range over a column that is no datetime component is as written.
-		let strings = BTreeAccess::Range {
-			range: Range {
-				start: Bound::Included(Value::from("a")),
-				end: Bound::Unbounded,
-			},
-		};
+		let strings = BTreeAccess::literal_range(Range {
+			start: Bound::Included(Value::from("a")),
+			end: Bound::Unbounded,
+		});
 		let mut range = strings.clone();
 		assert!(widen_access(&index(&["city"]), &mut range));
 		assert_eq!(range, strings);
 
 		// A bound that is no datetime is as written on a datetime column.
-		let none = BTreeAccess::Range {
-			range: Range {
-				start: Bound::Excluded(Value::None),
-				end: Bound::Unbounded,
-			},
-		};
+		let none = BTreeAccess::literal_range(Range {
+			start: Bound::Excluded(Value::None),
+			end: Bound::Unbounded,
+		});
 		let mut range = none.clone();
 		assert!(widen_access(&ix, &mut range));
 		assert_eq!(range, none);
@@ -553,26 +556,24 @@ mod tests {
 		assert!(range_is_widened(
 			&by_city,
 			&BTreeAccess::Compound {
-				prefix: vec![Value::from("london")],
+				prefix: vec![Value::from("london").into()],
 				range: Some((BinaryOperator::LessThanEqual, value(at(10, 0, 5, 0)))),
 			}
 		));
 		assert!(!range_is_widened(
 			&by_city,
 			&BTreeAccess::Compound {
-				prefix: vec![Value::from("london")],
+				prefix: vec![Value::from("london").into()],
 				range: None,
 			}
 		));
 		// The range is on `city`, which orders exactly.
 		assert!(!range_is_widened(
 			&index(&["city"]),
-			&BTreeAccess::Range {
-				range: Range {
-					start: Bound::Included(Value::from("a")),
-					end: Bound::Unbounded,
-				},
-			}
+			&BTreeAccess::literal_range(Range {
+				start: Bound::Included(Value::from("a")),
+				end: Bound::Unbounded,
+			})
 		));
 	}
 

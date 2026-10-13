@@ -1,74 +1,77 @@
-//! Range partitions of a keyed breaker's partials: the key space divided into
-//! `N` ranges, each finished on its own and the finished ranges put together
-//! in key order.
+//! Range partitions of a keyed breaker's partials. The key space is cut into
+//! `N` ranges. Each range is finished on its own, and the finished ranges are
+//! put together in key order.
 //!
-//! What is partitioned is a [`Partial`], never a live breaker. A producer
-//! finishes its breaker into a partial, [`Partial::split`] divides it into
-//! one partial per partition, and partition `i` is finished by the machinery
-//! that finishes unpartitioned partials, over the `i`-th share of every
-//! producer in producer order: an aggregate by [`merge_partials`] as a
-//! keyed fold, a distinct by [`merge_distinct_counted`], a join by
-//! [`SpilledJoin::from_partials`] and its `defer`/`finish`. No runtime path
-//! partitions by default: a caller that holds partials chooses [`Splitters`]
-//! and a partition count.
+//! The unit that is partitioned is a [`Partial`], never a live breaker. A
+//! producer finishes its breaker into a partial. [`Partial::split`] cuts that
+//! partial into one partial per partition. Partition `i` is then finished by
+//! the code that finishes unpartitioned partials, using the `i`-th share of
+//! every producer, in producer order:
+//! - an aggregate uses [`merge_partials`] as a keyed fold;
+//! - a distinct uses [`merge_distinct_counted`];
+//! - a join uses [`SpilledJoin::from_partials`], then `defer` and `finish`.
 //!
-//! The route of a key is the number of splitters that order strictly before
-//! it under `Ord for [Value]`; splitters are strictly ascending by that
-//! order. Two keys that compare `Equal` therefore have the same route, and
-//! so equal keys of a breaker, which is `Value: Ord` equality in groups,
-//! distinct and joins alike, always meet in one partition. The route is
-//! monotone: a key that orders before another never routes after it.
-//! Splitter choice only balances the partitions; it never changes what the
-//! partitions answer.
+//! Partitioning is opt-in. A caller that holds partials picks the
+//! [`Splitters`] and the partition count itself.
 //!
-//! Only the columns a breaker's equality compares are routed on
+//! The route of a key is the number of splitters that order strictly before it
+//! under `Ord for [Value]`. Splitters are strictly ascending under that order.
+//! Keys that compare `Equal` therefore route to the same partition. Groups,
+//! distinct and joins all compare keys with `Value`'s `Ord`, so equal keys
+//! always meet in one partition. The route is monotone: a key that orders
+//! before another never routes after it. Splitters only affect balance. They
+//! never change the answers.
+//!
+//! Only the columns that a breaker's equality compares are routed on
 //! ([`route_width`]): a group's whole key, a distinct's row, a join's key
-//! columns. A producer's index and a record's arrival, which follow those
-//! columns, never decide a partition, so every arrival of a key meets in one
-//! partition and the partition's merge decides ties by source order exactly
-//! as an unpartitioned merge does. A sort is not partitioned.
+//! columns. A producer index or a record's arrival never decides the
+//! partition. So every arrival of a key meets in one partition, and that
+//! partition's merge breaks ties by source order, as an unpartitioned merge
+//! does. A sort is not partitioned.
 //!
-//! A partial is split by reading each of its runs once, in order, writing
-//! the records of each partition as a piece of that partition's run, and
-//! deleting the run as soon as it is read. The query has one run writer, so
-//! one piece is open at a time; a piece stays open while consecutive records
-//! of the run route to one partition, which is the whole run when the key
-//! ranges are contiguous in it. Records a partial still holds are routed in
-//! memory. A join's `side` records, build rows whose key holds a regex, match
-//! across key ranges and are replicated to every partition.
+//! A partial is split by reading each of its runs once, in order. The records
+//! for each partition are written as a piece of that partition's run. A
+//! source run is deleted as soon as it has been read. A query has one run
+//! writer, so only one piece is open at a time. A piece stays open while
+//! consecutive records route to the same partition. When the key ranges are
+//! contiguous in a run, that means the whole run. Records that a partial still
+//! holds in memory are routed in memory. A join's `side` records are build rows
+//! whose key holds a regex. They can match across key ranges, so they are copied
+//! to every partition.
 //!
-//! The partitions of an aggregate finish in index order, which is key order,
-//! so their groups concatenate into the unpartitioned aggregate's
-//! ([`PartitionedFold`]). `GROUP ALL` has the empty key, which orders before
-//! or equal to every splitter, so its one group routes to partition 0 and
-//! the other partitions finish to no rows. The partitions of a distinct and
-//! of a join finish into runs keyed `[producer, arrival]` and
-//! `[probe arrival, place]`, unique per record, that one merge by key puts
-//! back in the order of the unpartitioned finish.
+//! Partitions of an aggregate finish in index order, which is key order. Their
+//! groups concatenate into the same result as the unpartitioned aggregate
+//! ([`PartitionedFold`]). `GROUP ALL` has the empty key. That key orders before
+//! or equal to every splitter, so its one group routes to partition 0, and the
+//! other partitions finish with no rows. Partitions of a distinct and of a join
+//! finish into runs keyed `[producer, arrival]` and `[probe arrival, place]`.
+//! Each key is unique per record, so one merge by key restores the order of the
+//! unpartitioned finish.
 //!
-//! A distinct's `max_rows` is checked on each partition's kept rows and on
-//! their sum, so it fails exactly when the unpartitioned distinct does, with
-//! its error. A join's build-row cap is checked on the producers' counts
-//! before anything is split; probe rows are numbered across every partition,
-//! so the output cap counts the same rows as the unpartitioned join. A probe
-//! row with no key yields at once and is deferred in partition 0. A probe row
-//! whose key holds a regex matches build rows of every range, so the join's
-//! partitions are united ([`SpilledJoin::union`]) and finished as one.
+//! A distinct's `max_rows` is checked against each partition's kept rows and
+//! against their sum. It fails exactly when the unpartitioned distinct fails,
+//! with the same error. A join's build-row cap is checked on the producers'
+//! counts before anything is split. Probe rows are numbered across all
+//! partitions, so the output cap counts the same rows as the unpartitioned join.
+//! A probe row with no key yields at once and is deferred to partition 0. A
+//! probe row whose key holds a regex matches build rows in every range. So the
+//! join's partitions are united ([`SpilledJoin::union`]) and finished as one.
 //!
-//! `Value::cmp` answers `Equal` where `partial_cmp` has no answer, which makes
-//! it non-transitive in two places: floats and decimals that agree to about
-//! sixteen significant digits without being equal, and a value holding a
-//! geometry with a NaN coordinate, whose comparison with a geometry of its
-//! kind has no answer. Such a key is routed like any other and never sent to an
-//! unpartitioned path. Two keys that compare `Equal` there may route apart, and
-//! a partition's result for them then depends on the splitters, as the
-//! unpartitioned breaker's depends on the shape of its tree. Keys that compare
-//! under a total preorder are unaffected. A closure compares `Equal` to every
-//! other closure, whatever either holds; that is a total preorder, so closures
-//! always route together and form one group, one distinct row or one join key,
-//! as they do unpartitioned.
+//! `Value::cmp` returns `Equal` where `partial_cmp` has no answer. This makes it
+//! non-transitive in two cases: floats and decimals that agree to about sixteen
+//! significant digits without being equal, and a value holding a geometry with a
+//! NaN coordinate, which has no comparison answer against a geometry of its kind.
+//! Such a key is routed like any other key and is never sent to an unpartitioned
+//! path. In these cases two keys that compare `Equal` can route to different
+//! partitions, so the partition's result for them depends on the splitters. The
+//! unpartitioned breaker's result depends on the shape of its tree in the same
+//! way. Keys that compare under a total preorder are not affected. A closure
+//! compares `Equal` to every other closure, whatever either holds. That is a
+//! total preorder, so closures always route together and form one group, one
+//! distinct row or one join key, as they do unpartitioned.
 
-#![cfg_attr(not(test), allow(dead_code))]
+// Items in this module may have no caller in the current build.
+#![allow(dead_code)]
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -216,16 +219,15 @@ impl Partial {
 		Ok(sample)
 	}
 
-	/// This partial divided by `splitters` into one partial per partition, in
-	/// partition order. Partition `i` holds, in this partial's order, its
-	/// runs' records that route to `i` — written as runs through `memory`
-	/// readable as `sharing` says — and its held records that route to `i`;
-	/// every partition holds every `side` record. A split partial's
-	/// `counts.taken` is the records routed to it, plus, on partition 0 only,
-	/// its side records, so the partitions' counts sum to this partial's
-	/// records; for a distinct those are the deduplicated records it holds, not
-	/// every row it took. Consumes this partial; its runs are deleted as they are
-	/// read.
+	/// This partial cut by `splitters` into one partial per partition, in partition
+	/// order. Partition `i` gets, in this partial's order, the records of its runs
+	/// that route to `i`, written as runs through `memory` and readable as `sharing`
+	/// says. It also gets the held records that route to `i`. Every partition gets
+	/// every `side` record. A split partial's `counts.taken` is the records routed
+	/// to it. Partition 0 also counts the side records, so the partitions' counts sum
+	/// to this partial's records. For a distinct, these are the deduplicated records
+	/// the partial holds, not every row it took. This consumes the partial. Its runs
+	/// are deleted as they are read.
 	pub(crate) async fn split(
 		self,
 		memory: &Arc<QueryMemory>,
@@ -276,14 +278,13 @@ impl Partial {
 				super::fuel::tick(ctx, 1).await?;
 			}
 			close(&mut parts, &mut open).await?;
-			// One reader and one writer are open at a time, and each source run's
-			// bytes are released before the next is read. Every unread source run
-			// of this and later producers, and every piece already written for
-			// earlier runs, still count against the quota; what the split adds
-			// above the unsplit partials' footprint peaks at one source run's
-			// bytes, that run plus its pieces. A source run is a whole spill, not a
-			// part, so that peak can exceed the `part_size * (1 + fan_in)` headroom,
-			// as an unpartitioned merge pass does with its input runs and output.
+			// One reader and one writer are open at a time. Each source run's bytes are
+			// released before the next run is read. Unread source runs, and pieces already
+			// written for earlier runs, still count against the quota. The split adds at
+			// most one source run's bytes above the unsplit partials' footprint: that run
+			// plus its pieces. A source run is a whole spill, so this peak can exceed the
+			// `part_size * (1 + fan_in)` headroom, as an unpartitioned merge pass can with
+			// its input and output runs.
 			drop(source);
 			drop(run);
 		}

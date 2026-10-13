@@ -9,6 +9,7 @@ use super::Rejected;
 use super::saved::{Loading, Saving};
 use crate::catalog::aggregation;
 use crate::exec::function::{Accumulator, AggregateFunction, Signature};
+use crate::exec::ir::iface::Fallibility;
 use crate::expr::Kind;
 use crate::val::{Number, TryAdd as _, Value};
 
@@ -23,6 +24,10 @@ pub struct MathSum;
 impl AggregateFunction for MathSum {
 	fn name(&self) -> &'static str {
 		"math::sum"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::sum", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -122,6 +127,10 @@ impl AggregateFunction for MathMean {
 		"math::mean"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::mean", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MeanAccumulator::default())
 	}
@@ -195,7 +204,7 @@ impl Accumulator for MeanAccumulator {
 	fn finalize(&self) -> Result<Value> {
 		self.rejected.check()?;
 		if self.count == 0 {
-			// Return NaN for empty groups (matches old behavior)
+			// An empty group has no mean, so it finalises to NaN.
 			Ok(Value::Number(Number::Float(f64::NAN)))
 		} else {
 			let mean = self.sum.to_float() / self.count as f64;
@@ -229,6 +238,10 @@ pub struct MathMin;
 impl AggregateFunction for MathMin {
 	fn name(&self) -> &'static str {
 		"math::min"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::min", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -360,6 +373,10 @@ impl AggregateFunction for MathMax {
 		"math::max"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::max", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(MaxAccumulator::default())
 	}
@@ -489,6 +506,10 @@ impl AggregateFunction for MathStddev {
 		"math::stddev"
 	}
 
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::stddev", Fallibility::VALUE)
+	}
+
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
 		Box::new(SpreadAccumulator::deviation())
 	}
@@ -505,6 +526,10 @@ pub struct MathVariance;
 impl AggregateFunction for MathVariance {
 	fn name(&self) -> &'static str {
 		"math::variance"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::variance", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {
@@ -611,10 +636,10 @@ impl Accumulator for SpreadAccumulator {
 			.as_any()
 			.downcast_ref::<SpreadAccumulator>()
 			.ok_or_else(|| anyhow::anyhow!("Cannot merge incompatible accumulators"))?;
-		// Both functions share this accumulator, so the downcast above no longer
-		// distinguishes them the way the two separate Welford types used to.
-		// Finalising against the wrong one would return a variance where a
-		// deviation was asked for, silently.
+		// Both spread kinds share this accumulator, so the downcast alone cannot tell them apart.
+		// The check below rejects a merge across kinds.
+		// Finalising a mixed merge would return a variance where a deviation was asked for.
+		// Such a merge is an error, never a silent result.
 		anyhow::ensure!(
 			self.spread == other.spread,
 			"Cannot merge a {:?} accumulator into a {:?} one",
@@ -686,6 +711,10 @@ pub struct MathMedian;
 impl AggregateFunction for MathMedian {
 	fn name(&self) -> &'static str {
 		"math::median"
+	}
+
+	fn fallibility(&self) -> Fallibility {
+		crate::declare_fallibility!(Aggregate, "math::median", Fallibility::VALUE)
 	}
 
 	fn create_accumulator(&self) -> Box<dyn Accumulator> {

@@ -6,9 +6,12 @@ reason = """
 	record user to trigger them — an owner session bypasses permission guards
 	entirely.
 
-	Every DEFINE here succeeds. Definition time does not look through a function
-	call: whether a callee reaches its schema statement can depend on which
-	branch its arguments select, so only reaching the statement settles it.
+	Every DEFINE here succeeds. A `select` guard is not checked at definition
+	time: whether a callee reaches its schema statement can depend on which
+	branch its arguments select, so only reaching the statement settles it. The
+	COMPUTED body's callee is read-only when the field is defined and is
+	redefined with its schema statement afterwards, so the definition-time check
+	of register #17 accepts it and the read reaches the runtime frame.
 
 	The row `computed_holder:1` is created before the COMPUTED field is defined.
 	A COMPUTED field is derived on every read, so a write to the table after the
@@ -26,7 +29,6 @@ DEFINE FUNCTION fn::define_from_guard() {
 } PERMISSIONS FULL;
 
 DEFINE FUNCTION fn::define_from_computed() {
-	DEFINE TABLE smuggled_by_computed SCHEMALESS;
 	RETURN 'computed';
 } PERMISSIONS FULL;
 
@@ -42,6 +44,12 @@ CREATE computed_holder:1 SET n = 1;
 DEFINE FIELD computed ON computed_holder TYPE string
 	COMPUTED fn::define_from_computed()
 	PERMISSIONS FULL;
+
+-- The callee reaches its schema statement only after the field is defined.
+DEFINE FUNCTION OVERWRITE fn::define_from_computed() {
+	DEFINE TABLE smuggled_by_computed SCHEMALESS;
+	RETURN 'computed';
+} PERMISSIONS FULL;
 
 DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN ( $rid );
 

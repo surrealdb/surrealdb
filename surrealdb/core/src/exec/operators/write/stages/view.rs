@@ -15,7 +15,7 @@
 //! order](super::super::plan::WritePlan::view_maintenance), which is the view
 //! table's own indexes, views, events, subscriptions and change feed. A view
 //! table is a real table — a second-order view can read it, a subscription can
-//! watch it, an index can cover it — and `DEFINE TABLE … AS SELECT` already
+//! watch it, an index can cover it — and `DEFINE TABLE … AS SELECT`
 //! runs that lifecycle over every row of its initial build.
 //!
 //! # The frame
@@ -66,6 +66,65 @@ pub(crate) struct ViewSources<'a> {
 // ===========================================================================
 // One row per group
 // ===========================================================================
+
+/// The extremes `analysis`'s stats keep, each as the aggregate function that recomputes it and
+/// the aggregate argument it reads, once each, in the order of the aggregations that first keep
+/// it: the columns of a recalculation before its count.
+pub(crate) fn extremes_of(analysis: &AggregationAnalysis) -> Vec<(String, usize)> {
+	let mut extremes: Vec<(String, usize)> = Vec::new();
+	for aggregation in &analysis.aggregations {
+		let extreme = match aggregation.to_stat() {
+			AggregationStat::NumberMax {
+				arg,
+				..
+			} => ("math::max", arg),
+			AggregationStat::NumberMin {
+				arg,
+				..
+			} => ("math::min", arg),
+			AggregationStat::TimeMax {
+				arg,
+				..
+			} => ("time::max", arg),
+			AggregationStat::TimeMin {
+				arg,
+				..
+			} => ("time::min", arg),
+			AggregationStat::Count {
+				..
+			}
+			| AggregationStat::CountValue {
+				..
+			}
+			| AggregationStat::Sum {
+				..
+			}
+			| AggregationStat::Mean {
+				..
+			}
+			| AggregationStat::StdDev {
+				..
+			}
+			| AggregationStat::Variance {
+				..
+			}
+			| AggregationStat::Accumulate {
+				..
+			} => continue,
+		};
+		let extreme = (extreme.0.to_owned(), extreme.1);
+		if !extremes.contains(&extreme) {
+			extremes.push(extreme);
+		}
+	}
+	extremes
+}
+
+/// The names a recalculation reads the key values of its group from, one per group expression
+/// of `analysis`, in order.
+pub(crate) fn group_names(analysis: &AggregationAnalysis) -> Vec<String> {
+	(0..analysis.group_expressions.len()).map(|index| format!("__view_group_{index}")).collect()
+}
 
 /// The statement [`recalculate_aggregates`] runs: `SELECT VALUE [extremes…,
 /// count()]` over the view's sources, narrowed to the group whose key values

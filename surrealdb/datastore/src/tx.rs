@@ -51,7 +51,7 @@ use surrealdb_kvs::key::{
 };
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::value::{EncodeContext, Encoded, KVValue};
-use surrealdb_kvs::{FeatureLevel, Key, KeyRange, Release};
+use surrealdb_kvs::{Estimate, FeatureLevel, Key, KeyRange, Release, Snapshot, SplitTarget};
 use surrealdb_observe::{
 	ExecutionObserver, Outcome, TenantIdentity, TransactionEvent, TransactionEventSafe,
 	TransactionMetrics,
@@ -583,7 +583,7 @@ pub struct Transaction {
 	/// transaction had not yet read when the delete ran.
 	range_deletes: AtomicU64,
 	/// Whether this transaction holds the stored-format ledger entry: it wrote the entry, or read
-	/// it, and no save point rollback has since discarded the observation
+	/// it, and no save point rollback has discarded the observation
 	/// ([`Self::admit_stored_format`]).
 	stored_format_admitted: AtomicBool,
 	/// Whether this transaction read the stored-format ledger entry from storage and found it
@@ -671,8 +671,8 @@ pub struct Transaction {
 	///
 	/// Which of the scope's writes survive is then unknown, so the buffered index
 	/// deltas can be neither kept nor dropped: keeping them risks flushing a term
-	/// change for a posting that no longer exists, and dropping them risks a
-	/// posting no bitmap names. Their frames can no longer be held at the storage
+	/// change for a posting that does not exist, and dropping them risks a
+	/// posting no bitmap names. Their frames cannot be held at the storage
 	/// stack's depth either, so an outer release would fold the wrong one.
 	///
 	/// Refusing the commit is what makes the choice unnecessary, and it has to be
@@ -762,7 +762,7 @@ pub struct Transaction {
 	/// every row a provisional allocator wrote — but not the allocators, nor the
 	/// record that this transaction defined a sequence, which live here. Left
 	/// in place, a `DEFINE SEQUENCE` the rollback undid would still be served
-	/// from, on a definition that no longer exists; and an allocator built
+	/// from, on a definition that does not exist; and an allocator built
 	/// inside the scope would keep serving from a window whose claim row is
 	/// gone, leaving what it issues unfenced for other nodes, which claim past
 	/// the rows they can see. Restoring the snapshot puts both back as they
@@ -980,7 +980,7 @@ impl IndexBuildReservationRelease {
 
 	async fn mark_build_error_if_uncommitted(&self, release_err: &anyhow::Error) -> Result<()> {
 		let br = BuildReservationKey::decode_key(&self.key)?;
-		// One reservation now covers an entire user transaction's mutation
+		// One reservation covers an entire user transaction's mutation
 		// batch on this index. Any committed `!bg(generation, ticket, *)`
 		// entry signals that at least one mutation in that batch became
 		// durable, so the build does not need to be marked errored. Use the
@@ -2295,7 +2295,7 @@ impl Transaction {
 			self.discard_commit_actions().await;
 			// The `lq` rows the queued KILLEDs were owed for are still there,
 			// so their clients must not be told otherwise. Nothing drains the
-			// queue on this path today, but leaving it full makes that a latent
+			// queue on this path, but leaving it full makes that a latent
 			// hazard rather than an impossibility.
 			// Classify the commit failure so the surrealdb.transaction.* metric
 			// family can carry an `error_class` attribute. `e` is a concrete
@@ -2859,7 +2859,7 @@ impl Transaction {
 	/// on one value would compare unequal normal forms and refuse a write that
 	/// should succeed. Nothing reached from these value types encodes an
 	/// unordered collection — `Object` is a `VecMap` — so the property holds
-	/// today, and a value type that breaks it breaks `normalised == want`
+	/// for them, and a value type that breaks it breaks `normalised == want`
 	/// regardless of this retry.
 	async fn stored_bytes_matching<K>(&self, key: &K, want: &[u8]) -> Result<Option<Val>>
 	where
@@ -4130,7 +4130,7 @@ impl Transaction {
 	/// The table's ring then starts at `floor`: its base and its known floor are `floor`, and its
 	/// head is unchanged, so a floor never moves past the head. The descriptors of the generations
 	/// that leave the ring, from the old base up to but excluding `floor` in ring order, are
-	/// cleared with every version of their keys, so no store keeps a descriptor the ring no longer
+	/// cleared with every version of their keys, so no store keeps a descriptor the ring does not
 	/// names: a layout key is written once, and a soft delete would leave it readable at an earlier
 	/// version. One range is cleared, or two when the retired generations wrap past 65535. A floor
 	/// equal to the base retires nothing and writes the ring again. The table's catalog version is
@@ -6150,6 +6150,44 @@ impl Transaction {
 		Ok((n, resume.map(|key| key.into_inner().into_owned())))
 	}
 
+	/// Record `rows` entries and their key and value bytes read through this transaction's read
+	/// view ([`Self::snapshot`]), whose cursors are not metered, as the chunk of a scan the
+	/// transaction's own cursors record themselves.
+	pub fn record_view_scan(&self, rows: u64, key_bytes: u64, value_bytes: u64) {
+		self.metrics.record_scan(rows, key_bytes, value_bytes);
+	}
+
+	/// This transaction's owned read view, or `None` when the backend cannot give one
+	/// ([`Transactor::snapshot`]).
+	pub fn snapshot(&self) -> Option<Arc<dyn Snapshot>> {
+		self.tr.snapshot()
+	}
+
+	/// What a range or region holds ([`Transactor::estimate`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn estimate(&self, rng: impl AnyRange, version: Option<u64>) -> Result<Estimate> {
+		Ok(self.tr.estimate(rng.into_key_range(), version).await?)
+	}
+
+	/// Boundary keys that divide a range or region into parts
+	/// ([`Transactor::split`]).
+	#[cfg_attr(
+		feature = "observability",
+		tracing::instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)
+	)]
+	pub async fn split(
+		&self,
+		rng: impl AnyRange,
+		target: SplitTarget,
+		version: Option<u64>,
+	) -> Result<Vec<Vec<u8>>> {
+		let bounds = self.tr.split(rng.into_key_range(), target, version).await?;
+		Ok(bounds.into_iter().map(|key| key.into_inner().into_owned()).collect())
+	}
+
 	// --------------------------------------------------
 	// Cursor functions
 	// --------------------------------------------------
@@ -6563,7 +6601,7 @@ impl Transaction {
 	/// The caller holds them from a snapshot served under the catalog version this transaction
 	/// read for the table, so they list the generations its own read would. They are ignored for
 	/// a table this transaction has stamped, which reads its layouts through itself because a
-	/// stamp may follow a mint a save point rollback has since undone, and for a table whose
+	/// stamp may follow a mint that a save point rollback has undone, and for a table whose
 	/// layouts the transaction already holds.
 	pub fn adopt_table_layouts(&self, layouts: &Arc<TableLayouts>) {
 		let (ns, db, tb) = (layouts.namespace(), layouts.database(), layouts.table());
@@ -7539,7 +7577,7 @@ impl Transaction {
 		// still describes the state an outer rollback returns to.
 		self.provisional_save_points.lock().await.pop();
 		// The scope's commit actions, and whatever it did to the layouts, belong to the enclosing
-		// scope now.
+		// scope.
 		self.save_point_marks.lock().await.pop();
 		Ok(())
 	}
@@ -7558,7 +7596,7 @@ impl Transaction {
 		// write the rollback undid, and a read must not be answered from it.
 		self.cache.rollback_save_point();
 		// The caches kept for later speculations were filled by reads that saw
-		// the writes now undone, and the journal above reaches only this
+		// the writes the rollback undoes, and the journal above reaches only this
 		// transaction's own cache, so none of them may outlive the rollback.
 		self.speculative_caches.lock().await.clear();
 		// Whether a locked read's conflict registration survives a savepoint
@@ -9219,7 +9257,7 @@ impl Transaction {
 			let _changed = self.reserve_write_slot()?;
 			self.tr.set(version_key.encode_key()?, reprinted.kv_encode_value()?).await?;
 		}
-		// Every cached view of this table now carries a stale `cache_lives_ts`:
+		// Every cached view of this table carries a stale `cache_lives_ts`:
 		// the by-id and by-name definitions, the database's table list, and the
 		// table's compiled live-query list. A re-read within this transaction
 		// serving any of them would key the datastore live-query cache on the
@@ -10435,13 +10473,13 @@ impl DatabaseProvider for Transaction {
 /// Compile stored live-query subscriptions.
 ///
 /// Every stored subscription appears in the result, including one whose text
-/// no longer compiles: that is carried as
+/// does not compile: that is carried as
 /// [`catalog::SubscriptionQuery::Uncompilable`] rather than dropped. A
 /// subscription in that state can never match another document, but it still
 /// has `lq`/`lv` keys and a client waiting on them, so the statements that tear
-/// subscriptions down or report them must still see it. Dropping it here is
-/// what previously left such a client waiting on a `KILLED` that could never
-/// arrive, and hid the row from the `INFO` an operator would use to find it.
+/// subscriptions down or report them must still see it. Dropping it here would leave
+/// such a client waiting on a `KILLED` that could never
+/// arrive, and would hide the row from the `INFO` an operator would use to find it.
 ///
 /// Compiling must also not fail the reading statement, which is the other half
 /// of the same requirement: the subscription belongs to some other client, and
@@ -11179,7 +11217,7 @@ impl TableProvider for Transaction {
 
 			// Defining a field can add (or change) a REFERENCE, so the
 			// database-wide reference-target summary memoized for the DELETE
-			// purge gate may now be stale. Drop it so it is recomputed on next
+			// purge gate may be stale. Drop it so it is recomputed on next
 			// use. (ALTER/REMOVE FIELD instead clear the whole transaction
 			// cache, which covers this entry too.)
 			self.cache.remove(&cache::tx::Lookup::DbReferenceTargets(ns, db));
@@ -11554,7 +11592,7 @@ impl TableProvider for Transaction {
 						}
 					}
 				}
-				// Every slot should be populated by now
+				// Every slot is populated by this point.
 				out.into_iter()
 					.map(|o| {
 						o.ok_or_else(|| {
@@ -13254,7 +13292,7 @@ enum TableDefinitionChange {
 	Created(Option<TableId>),
 	/// The key held a definition and now holds different bytes. `forfeits` is whether the new
 	/// definition makes the table a view or a lightweight relation, or does not decode: whatever
-	/// was settled about the table's rows then no longer holds.
+	/// was settled about the table's rows then does not hold.
 	Rewritten {
 		forfeits: bool,
 	},

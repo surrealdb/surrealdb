@@ -6,14 +6,21 @@ auth = { level = "owner" }
 
 [test]
 reason = """
-A RETURN written inside the value of a LET or of a RETURN at the top level of a query. In a LET's
-value it ends the LET statement, which answers with the returned value and leaves its variable
-unbound, so a later `RETURN $x` reads whatever an earlier statement bound to `$x`; the statements
-after it still run. In a RETURN's value it is that RETURN's value. A type annotation on the LET is
-not checked against the returned value. Inside a transaction it ends the transaction, so the
-writes after it are not made. A BREAK in a LET's value ends the enclosing loop. A LET in the
-value of a block may not bind a protected variable, and the block's writes are undone.
+A RETURN written inside the value of a LET is caught by the value scope it stands in: a block, a
+value IF or FOR, a subquery. The LET binds the caught value and answers NONE, so a later `RETURN $x`
+reads that value. A RETURN that stands in no value scope ends its top-level statement with its value.
+A statement-level IF or FOR inside the scope passes its RETURN to the scope, and a block nested in
+the scope as a statement is a value scope of its own, so
+`{ { { RETURN 'deep' } }; 'shallow' }` binds 'shallow'. A type annotation on the LET is checked against the caught value. Inside
+a transaction a caught RETURN ends only its scope, so the statements after the LET run and the
+transaction commits. A BREAK in a LET's value ends the enclosing loop. A LET in the value of a block
+may not bind a protected variable, and the block's writes are undone. In an
+expression, `{ 1 + (RETURN 5) }` adds the subquery's value, so `$x` is 6: a statement in scalar
+position that is a value scope takes its own RETURN and resumes after itself.
 """
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "1"
@@ -22,46 +29,43 @@ value = "1"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "2"
 
 [[test.results]]
-value = "2"
+value = "NONE"
 
 [[test.results]]
 value = "3"
 
 [[test.results]]
-value = "2"
+value = "NONE"
 
 [[test.results]]
-value = "'deep'"
+value = "'shallow'"
 
 [[test.results]]
-value = "2"
+value = "NONE"
 
 [[test.results]]
-value = "7"
-
-[[test.results]]
-value = "[2, NONE]"
+value = "[7, NONE]"
 
 [[test.results]]
 value = "'inner'"
 
 [[test.results]]
-value = "'g'"
+value = "NONE"
 
 [[test.results]]
-value = "[2, [ret_g:1]]"
+value = "['g', [ret_g:1]]"
 
 [[test.results]]
-value = "'five'"
+error = "Tried to set `$x`, but couldn't coerce value: Expected `int` but found `'five'`"
 
 [[test.results]]
-value = "5"
+value = "NONE"
 
 [[test.results]]
-value = "2"
+value = "6"
 
 [[test.results]]
 value = "NONE"
@@ -73,13 +77,16 @@ value = "[ret_j:0, ret_j:1]"
 value = "NONE"
 
 [[test.results]]
-value = "1"
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: ret_k:1 }]"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "The table 'ret_k' does not exist"
+value = "[ret_k:1]"
 
 [[test.results]]
 error = "'session' is a protected variable and cannot be set"

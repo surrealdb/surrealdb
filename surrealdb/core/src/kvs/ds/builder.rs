@@ -346,14 +346,6 @@ impl Builder {
 		self
 	}
 
-	/// Have queries spill nowhere, where the platform would otherwise give the
-	/// datastore a default store.
-	#[cfg(test)]
-	pub(crate) fn without_temp_store(mut self) -> Self {
-		self.no_temp_store = true;
-		self
-	}
-
 	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self {
 		self.temporary_directory = directory.map(|x| Arc::new(x.as_ref().to_path_buf()));
 		self
@@ -440,7 +432,7 @@ impl Builder {
 
 		let datastore = this.build_with_tx_builder_buckets(builder, buckets).await?;
 
-		// The broker was built before the datastore (because the datastore owns it). Now that
+		// The broker was built before the datastore (because the datastore owns it). Once
 		// the catalog is reachable, hand the broker a resolver so cross-node routing can
 		// look peer endpoints up from the `node:` keyspace without needing an in-memory
 		// topology table. Brokers that don't need it ignore the call (default no-op).
@@ -590,7 +582,7 @@ impl Builder {
 		// refresher that owns the cadence.
 		crate::sys::refresh_if_cold().await;
 		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
-		// nothing hands out a bare `Datastore` any more.
+		// the datastore is only handed out behind this `Arc`.
 		let datastore = Arc::new(datastore);
 		// A build that may open no transaction leaves the feature level and the
 		// ledger to `check_version`, which reads both once the backend serves.

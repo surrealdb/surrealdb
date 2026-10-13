@@ -11,6 +11,17 @@
 //! which bounds a chain of events that write back to their own table in
 //! frames that never repeat.
 //!
+//! It also holds the units whose planning is open on the planners that share
+//! it ([`CycleGuard::try_enter_unit`]), keyed by what the unit is (its
+//! request: a function body or guard, a table's read unit, events, a view's
+//! recalculation, a cascade) and the frame it is planned for. A compile
+//! interns each unit it asks for once and plans its requests one after
+//! another, so a unit that recurses into itself within one compile links to
+//! the slot it already holds and the recursion runs, spending the
+//! computation-depth budget. A unit asked for again from a compile its own
+//! planning started has no slot of that compile to link to, and is refused
+//! where it is entered again.
+//!
 //! Orthogonal to the runtime data-cycle guards (`skip_fetch_perms`,
 //! `computing_record`) — those break cycles during evaluation, this one
 //! breaks them during plan construction.
@@ -23,6 +34,8 @@ use surrealdb_strand::TableName;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::doc::Action;
+use crate::exec::vm::ir_lower::UnitRequest;
+use crate::exec::vm::program::UnitFrame;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TableKey {
@@ -36,6 +49,25 @@ pub(crate) struct CycleGuard {
 	inner: Arc<Mutex<HashSet<TableKey>>>,
 	/// How many lowerings of each table's events for each action are open.
 	events: Arc<Mutex<HashMap<EventsKey, usize>>>,
+	/// The units whose planning is open.
+	units: Arc<Mutex<HashSet<UnitKey>>>,
+}
+
+/// A unit a compile plans: what it is, and the frame it is planned for.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct UnitKey {
+	request: UnitRequest,
+	frame: UnitFrame,
+}
+
+impl UnitKey {
+	/// The unit `request` names, planned for `frame`.
+	pub(crate) fn new(request: UnitRequest, frame: UnitFrame) -> Self {
+		Self {
+			request,
+			frame,
+		}
+	}
 }
 
 /// A table's events for one action.
@@ -48,7 +80,8 @@ struct EventsKey {
 impl CycleGuard {
 	/// Whether no compilation of a table and no lowering of a table's events
 	/// is open on the guard: what a planner holding it compiles is then
-	/// what a fresh planner compiles.
+	/// what a fresh planner compiles. An open unit changes nothing a planner
+	/// compiles, so it does not count.
 	pub(crate) fn is_idle(&self) -> bool {
 		self.inner.lock().is_empty() && self.events.lock().is_empty()
 	}
@@ -81,64 +114,29 @@ impl CycleGuard {
 		}
 	}
 
-	/// Count one more lowering of `(ns, db, table)`'s events for `action`
-	/// open, unless `limit` are open already. The count drops when the entry
-	/// does.
+	/// Try to push the unit `key` onto the units whose planning is open.
+	/// Returns `Some(entry)` on success — when `entry` drops, the unit is
+	/// closed. Returns `None` if its planning is open already: planning it now
+	/// is a cycle through a compile its own planning started.
 	#[must_use]
-	pub(crate) fn try_enter_events(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		table: TableName,
-		action: Action,
-		limit: usize,
-	) -> Option<EventsEntry> {
-		let key = EventsKey {
-			table: TableKey {
-				ns,
-				db,
-				table,
-			},
-			action,
-		};
-		let mut open = self.events.lock();
-		let count = open.entry(key.clone()).or_default();
-		if *count >= limit {
+	pub(crate) fn try_enter_unit(&self, key: UnitKey) -> Option<UnitEntry> {
+		let mut units = self.units.lock();
+		if !units.insert(key.clone()) {
 			return None;
 		}
-		*count += 1;
-		Some(EventsEntry {
-			events: Arc::clone(&self.events),
+		Some(UnitEntry {
+			units: Arc::clone(&self.units),
 			key,
 		})
 	}
 
 	#[cfg(test)]
-	fn contains(&self, ns: NamespaceId, db: DatabaseId, table: &TableName) -> bool {
+	pub(crate) fn contains(&self, ns: NamespaceId, db: DatabaseId, table: &TableName) -> bool {
 		self.inner.lock().contains(&TableKey {
 			ns,
 			db,
 			table: table.clone(),
 		})
-	}
-}
-
-/// One open lowering of a table's events for an action, counted until it
-/// drops.
-pub(crate) struct EventsEntry {
-	events: Arc<Mutex<HashMap<EventsKey, usize>>>,
-	key: EventsKey,
-}
-
-impl Drop for EventsEntry {
-	fn drop(&mut self) {
-		let mut open = self.events.lock();
-		if let Some(count) = open.get_mut(&self.key) {
-			*count -= 1;
-			if *count == 0 {
-				open.remove(&self.key);
-			}
-		}
 	}
 }
 
@@ -153,116 +151,14 @@ impl Drop for CycleGuardEntry {
 	}
 }
 
-#[cfg(test)]
-mod tests {
-	use surrealdb_strand::TableName;
+/// A unit whose planning is open, closed when dropped.
+pub(crate) struct UnitEntry {
+	units: Arc<Mutex<HashSet<UnitKey>>>,
+	key: UnitKey,
+}
 
-	use super::*;
-
-	fn key(name: &str) -> (NamespaceId, DatabaseId, TableName) {
-		(NamespaceId(1), DatabaseId(2), TableName::new(name))
-	}
-
-	#[test]
-	fn empty_guard_does_not_contain_anything() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		assert!(!g.contains(ns, db, &t));
-	}
-
-	#[test]
-	fn try_enter_succeeds_on_empty_guard() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		let entry = g.try_enter(ns, db, t.clone());
-		assert!(entry.is_some());
-		assert!(g.contains(ns, db, &t));
-	}
-
-	#[test]
-	fn try_enter_fails_when_key_present() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		let _outer = g.try_enter(ns, db, t.clone()).expect("first push must succeed");
-		let inner = g.try_enter(ns, db, t);
-		assert!(inner.is_none(), "second push of same key must return None");
-	}
-
-	#[test]
-	fn drop_removes_entry() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		{
-			let _entry = g.try_enter(ns, db, t.clone()).expect("push");
-			assert!(g.contains(ns, db, &t));
-		}
-		assert!(!g.contains(ns, db, &t), "entry should be removed when guard drops");
-	}
-
-	#[test]
-	fn distinct_keys_coexist() {
-		let g = CycleGuard::default();
-		let (ns, db, t1) = key("foo");
-		let (_, _, t2) = key("bar");
-		let _e1 = g.try_enter(ns, db, t1.clone()).expect("push t1");
-		let _e2 = g.try_enter(ns, db, t2.clone()).expect("push t2");
-		assert!(g.contains(ns, db, &t1));
-		assert!(g.contains(ns, db, &t2));
-	}
-
-	#[test]
-	fn re_entry_after_drop_succeeds() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		drop(g.try_enter(ns, db, t.clone()).expect("first push"));
-		let again = g.try_enter(ns, db, t);
-		assert!(again.is_some(), "re-entry after drop should succeed");
-	}
-
-	#[test]
-	fn cloned_guards_share_state() {
-		let g1 = CycleGuard::default();
-		let g2 = g1.clone();
-		let (ns, db, t) = key("foo");
-		let _entry = g1.try_enter(ns, db, t.clone()).expect("push via g1");
-		assert!(g2.contains(ns, db, &t), "g2 should see the key pushed via g1");
-		assert!(g2.try_enter(ns, db, t).is_none(), "g2's try_enter for the same key must fail");
-	}
-
-	#[test]
-	fn cross_database_keys_are_distinct() {
-		let g = CycleGuard::default();
-		let t = TableName::new("foo");
-		let _e1 = g.try_enter(NamespaceId(1), DatabaseId(2), t.clone()).expect("(ns=1, db=2)");
-		// Same table name in a different database is not a cycle.
-		let e2 = g.try_enter(NamespaceId(1), DatabaseId(3), t);
-		assert!(e2.is_some(), "same table name in different db must not collide");
-	}
-
-	#[test]
-	fn events_are_refused_past_the_limit_for_one_action() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		let open: Vec<_> = (0..3)
-			.map(|_| g.try_enter_events(ns, db, t.clone(), Action::Update, 3).expect("under"))
-			.collect();
-		assert!(g.try_enter_events(ns, db, t.clone(), Action::Update, 3).is_none());
-		drop(open);
-		assert!(
-			g.try_enter_events(ns, db, t, Action::Update, 3).is_some(),
-			"the count drops with its entries"
-		);
-	}
-
-	#[test]
-	fn events_of_each_action_are_counted_apart() {
-		let g = CycleGuard::default();
-		let (ns, db, t) = key("foo");
-		let _update = g.try_enter_events(ns, db, t.clone(), Action::Update, 1).expect("update");
-		assert!(g.try_enter_events(ns, db, t.clone(), Action::Update, 1).is_none());
-		let _create = g.try_enter_events(ns, db, t.clone(), Action::Create, 1).expect("create");
-		let _delete = g.try_enter_events(ns, db, t, Action::Delete, 1).expect("delete");
-		let (_, _, other) = key("bar");
-		assert!(g.try_enter_events(ns, db, other, Action::Update, 1).is_some());
+impl Drop for UnitEntry {
+	fn drop(&mut self) {
+		self.units.lock().remove(&self.key);
 	}
 }

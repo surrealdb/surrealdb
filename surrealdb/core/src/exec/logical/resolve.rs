@@ -3,13 +3,14 @@
 //! The pass runs first in [`super::bind`]. It gives every table source its
 //! [`Schema`] and desugars the three schema-derived behaviours the
 //! engine enforces on a read into plan nodes, exactly where the scan pipeline
-//! applies them today and only for the callers it applies them to:
+//! applies them, and only for the callers it applies them to:
 //!
 //! | Declaration | Node | Condition |
 //! |---|---|---|
 //! | table `PERMISSIONS FOR select WHERE p` | `PermissionFilter[p]` directly above the `Source`, `p` judged with the computed fields it reads derived | the caller is permission-checked |
 //! | table `PERMISSIONS FOR select NONE` | `PermissionFilter[false]` | the caller is permission-checked |
-//! | `COMPUTED e` on field `c` | the column `e AS c : kind @computed` of a derivation layer | the statement reads `c`, or a guard the statement brings into the plan does |
+//! | `COMPUTED e` on field `c` | the column `e AS c : kind @computed` of a derivation layer | the statement reads `c`, or a guard the statement brings into the plan does, and the caller is unchecked or `c`'s select guard is not decided before the body |
+//! | `COMPUTED e` on field `c` with a select guard decided before the body (`PERMISSIONS FOR select NONE`, or `WHERE p` reading only stored fields) | no derivation column; the guard-layer column `NONE AS c @permission`, or `(IF p THEN e ELSE NONE END) AS c : kind @permission` | the caller is permission-checked and the statement reads `c` |
 //! | field `PERMISSIONS FOR select WHERE p` on `f` | the column `(IF p THEN f ELSE NONE END) AS f @permission` of the guard layer | the caller is permission-checked and `f` can reach the caller |
 //! | field `PERMISSIONS FOR select NONE` on `f` | the column `NONE AS f @permission` of the guard layer | the caller is permission-checked and `f` can reach the caller |
 //! | either on a nested or wildcard path `a.b`, `arr.*.f` | a guard-layer column on the root field, built from [`LogicalExpr::SetField`] and [`LogicalExpr::Broadcast`] | the caller is permission-checked |
@@ -33,12 +34,16 @@
 //! — the `PermissionFilter` does that itself (the VM's `Lowering::permission`;
 //! `exec::permission::ComputedFieldGuard` for a compiled guard), so the row
 //! passes it as stored.
-//! Computed fields are then derived from storage. For a checked caller the stored fields' guards
+//! Computed fields are then derived from storage; for a checked caller, a computed field whose
+//! select guard is decided before its body (`exec::permission::plan_table_derivations`) is not
+//! derived here: a `NONE` guard never derives it, and a `WHERE` guard reading only stored fields
+//! is judged against the record as stored, once per row, and derives the body only when it
+//! admits. For a checked caller the stored fields' guards
 //! then run, each judged against the *unreduced* record — raw stored fields
 //! and the computed fields as first derived — with `$value` the field's
 //! value, and a denied field is cut. If anything was cut, every computed
 //! field is re-derived against the reduced record: a body reading a cut field
-//! now sees `NONE`, and a self-dereference through `id` reads the reduced
+//! sees `NONE`, and a self-dereference through `id` reads the reduced
 //! view. Last the computed fields' own guards run, judged against the
 //! unreduced record with `$value` the final computed value. An unchecked
 //! caller gets the derivation alone.
@@ -67,8 +72,9 @@
 //!    columns never read one another and a field reading another computed field sits one layer
 //!    higher. A column is `c := body_c` in the `Computed` frame with the field's declared kind.
 //!    Emitted for checked and unchecked callers alike, for the needed fields outside Cr and for
-//!    every field a judged guard (below) reads, with what those depend on. Nothing is emitted when
-//!    nothing is needed.
+//!    every field a judged guard (below) reads, with what those depend on, except the fields of a
+//!    checked caller whose select guard is decided before the body (item 2). Nothing is emitted
+//!    when nothing is needed.
 //! 2. **The guard layer B**, checked callers only. A field's guard is a column only where the field
 //!    can reach the caller: for g ∈ S when the statement reads g or the row as a whole, when a
 //!    needed re-derivation reads g, or when a needed re-derived body dereferences its own id and so
@@ -80,6 +86,11 @@
 //!    - c ∈ C ∖ Cr with a `WHERE` select permission: `c := IF p_c THEN c ELSE NONE END`, `$value`
 //!      left in `p_c` for the layer to bind to c's value. `Permission` frame, the field's kind.
 //!      `NONE` is `c := NONE`; `FULL` gets no column.
+//!    - c ∈ C ∖ Cr whose guard is decided before the body ([`Derivation::JudgeFirst`]): `c := IF
+//!      p_c THEN body_c ELSE NONE END` with no derivation column, `p_c` reading stored fields only,
+//!      so it is judged against the record as stored. `Permission` frame for the whole column, the
+//!      field's kind, so a write the body reaches is refused as a permission clause refuses it.
+//!      [`Derivation::Hidden`] (`NONE`) is `c := NONE` with no derivation column.
 //!    - c ∈ Cr: `c := body_c` in the `Computed` frame when its select permission is `FULL`,
 //!      otherwise `c := IF p_c THEN body_c ELSE NONE END` in the `Permission` frame, `$value` left
 //!      in `p_c` as above — `IF false THEN body_c …` for `NONE` when another needed re-derivation
@@ -163,7 +174,7 @@
 //! itself, and the entries it publishes can never be served to another
 //! transaction; a rolled-back version is never read again. A table no
 //! catalog write has ever stamped has no version and is shared under the
-//! content hash of its definition instead. A table the snapshot does not yet
+//! content hash of its definition instead. A table the snapshot does not
 //! hold is loaded through the transaction and published under its version
 //! for the next bind on the node. A `VERSION`ed read has no shared form and
 //! goes to the transaction. The definitions' clauses are compiled from their
@@ -182,6 +193,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, PermissionKind, TableDefinition};
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::permission::{Derivation, plan_table_derivations};
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, evaluates_against_row, resolve_param_value, try_value_to_logical_expr,
 };
@@ -347,6 +359,12 @@ struct FieldFacts {
 	kind: Option<Kind>,
 	computed: Option<LogicalExpr>,
 	select: LogicalPermission,
+	/// When a computed field is derived relative to its select guard for a
+	/// checked caller, as [`plan_table_derivations`] decides it over the whole
+	/// table; [`Derivation::AsMain`] for a stored field. An unchecked caller
+	/// has no guard to defer to, and the layers read this only for a checked
+	/// one.
+	derivation: Derivation,
 	/// The definer's authority, when it narrows the caller's; `None` for the
 	/// root-Owner stamp, which narrows nothing.
 	auth: Option<crate::iam::AuthLimit>,
@@ -863,8 +881,7 @@ fn tables_in_expr(expr: &LogicalExpr) -> Vec<TableName> {
 	out
 }
 
-/// Whether a clause has a logical form but holds a write no operator compiles
-/// yet.
+/// Whether a clause has a logical form but holds a write no operator compiles.
 ///
 /// Such a clause leaves its table to runtime enforcement, exactly as a clause
 /// with no logical form does: both are clauses the engine cannot
@@ -923,6 +940,7 @@ fn table_facts(
 		write.push((*clause, permission));
 	}
 	let mut fields = Vec::with_capacity(defs.len());
+	let derivations = plan_table_derivations(defs, true);
 	// Every record of the table is keyed by a record id of the table, so the
 	// kind of `id` is checked; a declared field's kind is enforced on write
 	// alone and is not.
@@ -968,12 +986,17 @@ fn table_facts(
 			}),
 			select_permission: select.clone(),
 		});
+		let derivation = derivations
+			.iter()
+			.find_map(|(key, plan)| (*key == name).then_some(*plan))
+			.unwrap_or(Derivation::AsMain);
 		fields.push(FieldFacts {
 			name,
 			path: declared,
 			kind: fd.field_kind.clone(),
 			computed,
 			select,
+			derivation,
 			auth,
 			key_part: fd.key_part,
 		});
@@ -1250,8 +1273,8 @@ impl Resolver<'_> {
 			// whole plan.
 			//
 			// Resolution binds sources and substitutes params; it does not
-			// settle the write's own permission obligations, which ADR 0001
-			// makes the write operator's stage list.
+			// settle the write's own permission obligations. The write
+			// operator's stage list carries them.
 			LogicalOp::Write(write) => {
 				// `map_children` reaches the `Rows` source alone: the rows the
 				// statement writes, which its own `PERMISSIONS` clause gates
@@ -1761,6 +1784,25 @@ impl Resolver<'_> {
 			return Ok(None);
 		}
 
+		// The fields outside Cr whose select guard a checked caller is judged
+		// by before the body runs, or denied by without it: neither has a
+		// derivation column. A field in Cr keeps its re-derivation column,
+		// which is already a guard over the body.
+		let deferred: HashSet<Strand> = if scope.checks {
+			computed
+				.iter()
+				.filter(|field| {
+					field.derivation != Derivation::AsMain && !rederived.contains(field.root())
+				})
+				.map(|field| field.root().clone())
+				.collect()
+		} else {
+			HashSet::new()
+		};
+		let judge_first = |field: &FieldFacts| {
+			field.derivation == Derivation::JudgeFirst && deferred.contains(field.root())
+		};
+
 		// The guards in logical form, their nested plans resolved once, in the
 		// permission scope.
 		let mut guards: HashMap<String, LogicalExpr> = HashMap::new();
@@ -1845,20 +1887,25 @@ impl Resolver<'_> {
 		// on — a guard is judged against the unreduced record, so of a
 		// re-derived field it reads the first derivation.
 		let derived: HashSet<Strand> = {
-			let mut derived: HashSet<Strand> =
-				needed.iter().filter(|name| !rederived.contains(*name)).cloned().collect();
+			let mut derived: HashSet<Strand> = needed
+				.iter()
+				.filter(|name| !rederived.contains(*name) && !deferred.contains(*name))
+				.cloned()
+				.collect();
 			derived.extend(closure(guard_reads));
 			derived
 		};
 		for field in &computed {
-			if derived.contains(field.root()) && !bodies.contains_key(field.root()) {
+			let body_needed = derived.contains(field.root())
+				|| (judge_first(field) && needed.contains(field.root()));
+			if body_needed && !bodies.contains_key(field.root()) {
 				let mut body = field.computed.clone().expect("a computed field");
 				self.resolve_expr(&mut body, &self.computed_scope(table, field, scope))?;
 				bodies.insert(field.root().clone(), body);
 			}
 		}
 
-		// The derivation layers, one per rank, columns in definition order.
+		// The derivation layers, one per rank, columns in the order the catalog lists the fields.
 		let mut derivations: Vec<Vec<LogicalField>> = Vec::new();
 		for field in &computed {
 			if !derived.contains(field.root()) {
@@ -1917,7 +1964,10 @@ impl Resolver<'_> {
 		on_computed.sort_by_key(|field| rank_of[field.root()]);
 		for field in on_computed {
 			let name = field.root();
-			let rederivation = is_rederived(name).then(|| bodies[name].clone());
+			// The body a guard column evaluates: a re-derivation, or the body of
+			// a field whose guard is judged before it runs.
+			let rederivation =
+				(is_rederived(name) || judge_first(field)).then(|| bodies[name].clone());
 			let column = match (&field.select, rederivation) {
 				(LogicalPermission::Full, None) => continue,
 				(LogicalPermission::Full, Some(body)) => LogicalField::column(
@@ -3613,7 +3663,9 @@ mod tests {
 		// It is judged against the record, so it reads `secret` from the guard
 		// layer's input — never through the caller's guard, where it would be
 		// `NONE` — and every read of `gated` above the layer is of the guarded
-		// value. `secret` itself is not read, so it gets no column.
+		// value. The guard reads stored fields only, so it is judged before the
+		// body and `gated` has no derivation column. `secret` itself is not
+		// read, so it gets no column.
 		let fixture = Fixture::new(
 			"DEFINE TABLE item SCHEMAFULL PERMISSIONS FULL;
 			 DEFINE FIELD counter ON item TYPE option<number>;
@@ -3625,20 +3677,91 @@ mod tests {
 		let plan = fixture.bind_as(&record_user(), "SELECT gated AS alias FROM item").await;
 		assert_eq!(
 			layers(&plan),
-			[
-				"Project[*, (IF secret = NONE THEN gated ELSE NONE END) AS gated : string @permission]",
-				"Project[*, 'G' AS gated : string @computed]",
-			],
+			["Project[*, (IF secret = NONE THEN 'G' ELSE NONE END) AS gated : string @permission]"],
 			"{plan}"
 		);
 		assert!(plan.contains("Project[gated AS alias]"), "{plan}");
 		// So does a `WHERE` on it.
 		let plan = fixture.bind_as(&record_user(), "SELECT id FROM item WHERE gated = 'G'").await;
 		assert!(plan.contains("Filter[gated = 'G']"), "{plan}");
-		assert_eq!(layers(&plan).len(), 2, "{plan}");
-		// `*` over a table with a restricted field gets the same stack.
+		assert_eq!(layers(&plan).len(), 1, "{plan}");
+		// `*` over a table with a restricted field puts the denied field's
+		// column in the same guard layer.
 		let plan = fixture.bind_as(&record_user(), "SELECT * FROM item").await;
-		assert_eq!(layers(&plan).len(), 2, "{plan}");
+		assert_eq!(layers(&plan).len(), 1, "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_denied_computed_field_is_not_derived() {
+		// `hidden` denies every caller outright, so its body never runs for a
+		// checked caller: no derivation layer holds it, and the guard layer
+		// sets it to `NONE`. `shown` has no guard and is derived as before.
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMAFULL PERMISSIONS FULL;
+			 DEFINE FIELD a ON t TYPE int;
+			 DEFINE FIELD shown ON t TYPE int COMPUTED a + 1;
+			 DEFINE FIELD hidden ON t TYPE int COMPUTED a + 2 PERMISSIONS FOR select NONE;",
+		)
+		.await;
+		let plan = fixture.bind_as(&record_user(), "SELECT * FROM t").await;
+		assert_eq!(
+			layers(&plan),
+			[
+				"Project[*, NONE AS hidden @permission]",
+				"Project[*, a + 1 AS shown : int @computed]",
+			],
+			"{plan}"
+		);
+		assert!(!plan.contains("a + 2"), "{plan}");
+		// An unchecked caller is shown everything, so both derive, in the order the catalog
+		// lists the fields.
+		let plan = fixture.bind_as(&owner(), "SELECT * FROM t").await;
+		assert_eq!(
+			layers(&plan),
+			["Project[*, a + 2 AS hidden : int @computed, a + 1 AS shown : int @computed]"],
+			"{plan}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_judge_first_computed_field_is_derived_under_its_guard() {
+		// The guard reads a stored field only, so it is judged before the body:
+		// the guard layer's column is the guard over the body, and no
+		// derivation layer holds the field.
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMAFULL PERMISSIONS FULL;
+			 DEFINE FIELD owner ON t TYPE record<user>;
+			 DEFINE FIELD a ON t TYPE int;
+			 DEFINE FIELD c ON t TYPE int COMPUTED a * 2 PERMISSIONS FOR select WHERE $auth.id = owner;",
+		)
+		.await;
+		let plan = fixture.bind_as(&record_user(), "SELECT c FROM t").await;
+		assert_eq!(
+			layers(&plan),
+			["Project[*, (IF $auth.id = owner THEN a * 2 ELSE NONE END) AS c : int @permission]"],
+			"{plan}"
+		);
+		assert!(!plan.contains("@computed"), "{plan}");
+		// An unchecked caller derives the body with no guard.
+		let plan = fixture.bind_as(&owner(), "SELECT c FROM t").await;
+		assert_eq!(layers(&plan), ["Project[*, a * 2 AS c : int @computed]"], "{plan}");
+	}
+
+	#[tokio::test]
+	async fn a_denied_computed_field_another_body_reads_is_derived() {
+		// `visible` reads `hidden`, so `hidden`'s value is needed by a body the
+		// caller may see: it keeps its derivation column, and the guard layer
+		// masks it afterwards.
+		let fixture = Fixture::new(
+			"DEFINE TABLE t SCHEMAFULL PERMISSIONS FULL;
+			 DEFINE FIELD a ON t TYPE int;
+			 DEFINE FIELD hidden ON t TYPE int COMPUTED a + 2 PERMISSIONS FOR select NONE;
+			 DEFINE FIELD visible ON t TYPE int COMPUTED hidden * 2;",
+		)
+		.await;
+		let plan = fixture.bind_as(&record_user(), "SELECT hidden, visible FROM t").await;
+		assert!(plan.contains("a + 2 AS hidden : int @computed"), "{plan}");
+		assert!(plan.contains("NONE AS hidden @permission"), "{plan}");
 	}
 
 	#[tokio::test]
@@ -4178,10 +4301,11 @@ mod tests {
 		)
 		.await
 		.expect("binds");
-		// `score` reads `len`, so the two derive one rank apart, beneath the
-		// guard layer.
+		// `score`'s guard reads a stored field only, so it is judged before the
+		// body and `score` has no derivation column: `len` derives beneath the
+		// guard layer, which holds `score`'s body.
 		let layers = layer_nodes(&plan);
-		let [guards, upper, lower] = layers.as_slice() else {
+		let [guards, lower] = layers.as_slice() else {
 			panic!("{plan}");
 		};
 		let (mut filter, mut project) = (None, None);
@@ -4206,7 +4330,6 @@ mod tests {
 		};
 		// What each column coerces to, and who evaluates it.
 		assert_eq!(kind_and_mode(column(lower, "len")), (Some(Kind::Int), EvalMode::Computed));
-		assert_eq!(kind_and_mode(column(upper, "score")), (Some(Kind::Int), EvalMode::Computed));
 		assert_eq!(kind_and_mode(column(guards, "secret")), (None, EvalMode::Permission));
 		assert_eq!(kind_and_mode(column(guards, "score")), (Some(Kind::Int), EvalMode::Permission));
 		// What the schema reads each column as: the body `string::len(name)`
@@ -4311,8 +4434,7 @@ mod tests {
 	/// name it, so `peel` returns it as the leaf, and a leaf is not among the
 	/// stages `resolve_pipeline` hands to `resolve_scalars`. A target computed
 	/// by a `SELECT` would therefore keep unresolved schema and permission
-	/// state, and be handed to the write operator that way once one consumes
-	/// this form.
+	/// state, and reach the write operator in that state.
 	///
 	/// Checked through the structure rather than the rendered plan, which
 	/// prints a write as `Write[CREATE]` and shows neither its targets nor
@@ -4372,7 +4494,7 @@ mod tests {
 
 	/// The gather lowers the clause a source can be resolved under and no
 	/// other: a plan that performs no mutation names none, so a read carries
-	/// the select clause alone, as it did before the write side existed.
+	/// the select clause alone.
 	#[test]
 	fn a_plan_names_the_clauses_its_mutations_are_gated_by() {
 		let clauses = |sql| plan_write_clauses(&super::super::lower_test(sql));
@@ -4616,7 +4738,7 @@ mod tests {
 		let plan = fixture.bind_as(&record_user(), "SELECT city, time FROM reading").await;
 		assert!(!plan.contains("@permission"), "{plan}");
 		assert!(plan.contains("@computed @key"), "{plan}");
-		// The control: a body that follows its own id is judged against what the
+		// A body that follows its own id is judged against what the
 		// caller may see of the record, so the guard is in the plan.
 		let plan = fixture.bind_as(&record_user(), "SELECT peek FROM reading").await;
 		assert!(plan.contains("@permission"), "{plan}");

@@ -8,10 +8,10 @@
 //! data on the function's registry row, so the passes read a declaration
 //! rather than each deriving its own from the function's name or shape.
 //!
-//! The default-open hazard this closes: a builtin with no declared effects is
-//! pure, and a forgotten declaration silently licenses a rewrite of real
-//! behaviour. Every builtin therefore declares its set at its definition — the
-//! `define_*_function!` macros require it — and the registry's guard test pins
+//! A builtin with no declared effects is treated as pure, so a forgotten
+//! declaration would silently license a rewrite of real behaviour. Every
+//! builtin therefore declares its set at its definition: the
+//! `define_*_function!` macros require it, and the registry's guard test pins
 //! every set that is not [`EffectSet::PURE`] by name.
 //!
 //! Answering with more effects than a function has only forbids rewrites, so
@@ -32,7 +32,7 @@ use crate::expr::{BinaryOperator, Function, Kind, PrefixOperator};
 /// [`writes_data`](Self::writes_data) — never by a pass testing a flag itself,
 /// so a flag's meaning for rewrites is stated in one place.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct EffectSet(u16);
+pub struct EffectSet(u32);
 
 impl EffectSet {
 	/// No effect: the result is a function of the arguments alone.
@@ -65,11 +65,35 @@ impl EffectSet {
 	pub const READS_DATA: Self = Self(1 << 8);
 	/// Reads a definition from the catalog.
 	pub const READS_CATALOG: Self = Self(1 << 9);
-	/// Reads the session: `$session`, `$auth`, `$token`.
-	pub const READS_SESSION: Self = Self(1 << 10);
+	// Bit 10 is reserved and assigned to no flag.
 	/// Evaluates against the row it is called on rather than against its
 	/// arguments alone.
 	pub const READS_ROW: Self = Self(1 << 11);
+	/// Reads the principal and connection data that are constant for the
+	/// request: `$auth`, `$token`, `$access`, `$session`, and the
+	/// `session::{ac, rd, token, id, ip, origin}` functions.
+	pub const READS_PRINCIPAL: Self = Self(1 << 12);
+	/// Reads the namespace or database in use, which changes at `USE`:
+	/// `session::{ns, db}`.
+	pub const READS_SESSION_DB: Self = Self(1 << 13);
+	/// Writes the session: a session `LET`, which a cancelled statement undoes,
+	/// and `USE`, which it does not.
+	pub const WRITES_SESSION: Self = Self(1 << 14);
+	/// Sends live-query notifications.
+	pub const NOTIFY: Self = Self(1 << 15);
+	/// Queues asynchronous work that runs after the call returns.
+	pub const DEFERS: Self = Self(1 << 16);
+	/// Raises by a catalog rule rather than by its arguments: an `ASSERT`, a
+	/// `READONLY` field, a `REJECT` clause.
+	pub const MAY_REJECT: Self = Self(1 << 17);
+	/// Changes the catalog, so that every catalog read ordered after it may
+	/// answer differently.
+	pub const CHANGES_CATALOG: Self = Self(1 << 18);
+
+	/// Every read of the session: [`Self::READS_PRINCIPAL`] and
+	/// [`Self::READS_SESSION_DB`]. A union of two flags rather than a flag, so
+	/// it is absent from [`Self::ALL`].
+	pub const READS_SESSION: Self = Self(Self::READS_PRINCIPAL.0 | Self::READS_SESSION_DB.0);
 
 	/// The effects that make a second call answer differently from the first,
 	/// or leave something behind; see [`is_deterministic`](Self::is_deterministic).
@@ -81,15 +105,34 @@ impl EffectSet {
 			| Self::ENTROPY.0
 			| Self::CLOCK.0
 			| Self::BLOCKING.0
-			| Self::OPAQUE_BODY.0,
+			| Self::OPAQUE_BODY.0
+			| Self::WRITES_SESSION.0
+			| Self::NOTIFY.0
+			| Self::DEFERS.0
+			| Self::CHANGES_CATALOG.0,
 	);
+
+	/// [`Self::NON_DETERMINISTIC`] but for [`Self::CLOCK`]: the effects that keep a call from
+	/// running for several rows at once; see
+	/// [`is_deterministic_but_for_clock`](Self::is_deterministic_but_for_clock).
+	pub const NON_DETERMINISTIC_BUT_FOR_CLOCK: Self =
+		Self(Self::NON_DETERMINISTIC.0 & !Self::CLOCK.0);
 
 	/// The effects that leave something behind once the statement is done; see
 	/// [`mutates_state`](Self::mutates_state).
-	const MUTATING: Self =
-		Self(Self::WRITES_DATA.0 | Self::WRITES_EXTERNAL.0 | Self::ADVANCES_STATE.0);
+	const MUTATING: Self = Self(
+		Self::WRITES_DATA.0
+			| Self::WRITES_EXTERNAL.0
+			| Self::ADVANCES_STATE.0
+			| Self::WRITES_SESSION.0
+			| Self::NOTIFY.0
+			| Self::DEFERS.0
+			| Self::CHANGES_CATALOG.0,
+	);
 
-	/// Every flag, with its name, in bit order.
+	/// Every single flag, once, with its name, in bit order. A union constant
+	/// such as [`Self::READS_SESSION`] is not listed, so [`Debug`] names each
+	/// flag once.
 	const ALL: &'static [(EffectSet, &'static str)] = &[
 		(Self::WRITES_DATA, "WRITES_DATA"),
 		(Self::WRITES_EXTERNAL, "WRITES_EXTERNAL"),
@@ -101,9 +144,28 @@ impl EffectSet {
 		(Self::OPAQUE_BODY, "OPAQUE_BODY"),
 		(Self::READS_DATA, "READS_DATA"),
 		(Self::READS_CATALOG, "READS_CATALOG"),
-		(Self::READS_SESSION, "READS_SESSION"),
 		(Self::READS_ROW, "READS_ROW"),
+		(Self::READS_PRINCIPAL, "READS_PRINCIPAL"),
+		(Self::READS_SESSION_DB, "READS_SESSION_DB"),
+		(Self::WRITES_SESSION, "WRITES_SESSION"),
+		(Self::NOTIFY, "NOTIFY"),
+		(Self::DEFERS, "DEFERS"),
+		(Self::MAY_REJECT, "MAY_REJECT"),
+		(Self::CHANGES_CATALOG, "CHANGES_CATALOG"),
 	];
+
+	/// Every effect a set can name: the union of every flag in [`Self::ALL`]. The answer for a
+	/// body nothing is known about, so a test of any flag by [`intersects`](Self::intersects)
+	/// finds it.
+	pub const TOP: Self = {
+		let mut bits = 0;
+		let mut i = 0;
+		while i < Self::ALL.len() {
+			bits |= Self::ALL[i].0.0;
+			i += 1;
+		}
+		Self(bits)
+	};
 
 	/// The set holding every flag of either operand.
 	pub const fn union(self, other: Self) -> Self {
@@ -129,12 +191,24 @@ impl EffectSet {
 	/// leaves nothing behind: the two properties a rewrite needs before it may
 	/// duplicate, drop or fold a call.
 	///
-	/// A read of the transaction's own snapshot, the catalog, the session or
-	/// the row does not disturb this: within one statement each answers the
-	/// same every time it is asked, so a call that only reads them may be
-	/// evaluated once for many rows or once per mention.
+	/// A read of the transaction's own snapshot, the catalog, the principal,
+	/// the namespace and database in use ([`Self::READS_PRINCIPAL`],
+	/// [`Self::READS_SESSION_DB`]) or the row does not disturb this: within one
+	/// statement each answers the same every time it is asked, so a call that
+	/// only reads them may be evaluated once for many rows or once per mention.
+	/// A `READS_DATA` expression is deterministic only within a statement in
+	/// which no write reaches the read; a caller that cannot show that must not
+	/// treat the answer as stable. [`Self::MAY_REJECT`] is neutral: it neither
+	/// makes a call non-deterministic nor leaves anything behind.
 	pub const fn is_deterministic(self) -> bool {
 		!self.intersects(Self::NON_DETERMINISTIC)
+	}
+
+	/// [`is_deterministic`](Self::is_deterministic) but for reads of the clock: whether a second
+	/// call answers the same, as the clock allows, and leaves nothing behind. Calls such a set
+	/// describes may run for several rows at once, each reading the clock when it runs.
+	pub const fn is_deterministic_but_for_clock(self) -> bool {
+		!self.intersects(Self(Self::NON_DETERMINISTIC.0 & !Self::CLOCK.0))
 	}
 
 	/// Whether a call may stage a write, which is what decides the transaction
@@ -144,7 +218,8 @@ impl EffectSet {
 	}
 
 	/// Whether a call changes state that outlives the statement — a data
-	/// write, a write outside the transaction, a counter advanced — so that
+	/// write, a write outside the transaction, a counter advanced, a session
+	/// write, a notification, deferred work, a catalog change — so that
 	/// how many times it runs is itself part of the answer. A grouped
 	/// projection holding such a call is evaluated per row rather than once
 	/// per group, and not at all for a group that saw no rows.
@@ -308,12 +383,11 @@ impl Effects {
 	/// after another expression of the same row, leaves the world as
 	/// evaluating it once in written order would.
 	///
-	/// [`Self::impure`] is the whole of the answer today: every [`node_set`]
-	/// arm that can contribute a [`EffectSet::NON_DETERMINISTIC`] flag has a
-	/// matching arm in [`node_is_impure`], so `!impure` already implies
-	/// `set.is_deterministic()`. The second term is kept so that an arm gaining
-	/// a flag without a matching `impure` arm is turned down rather than
-	/// silently admitted.
+	/// [`Self::impure`] decides the answer. Every [`node_set`] arm that can
+	/// contribute a [`EffectSet::NON_DETERMINISTIC`] flag has a matching arm in
+	/// [`node_is_impure`], so `!impure` implies `set.is_deterministic()`. The
+	/// second term catches an arm that adds such a flag without a matching
+	/// `impure` arm, and reports the expression as not effect free.
 	pub const fn effect_free(self) -> bool {
 		!self.impure && self.set.is_deterministic()
 	}
@@ -829,8 +903,8 @@ fn node_is_impure(expr: &LogicalExpr, children: &[ChildFacts], oracle: &dyn Effe
 		// caller of this predicate is about to keep one evaluation in place of
 		// two, where the difference is the answer itself.
 		//
-		// A `[WHERE …]` filter fetches the same way and is not saved by its
-		// predicate's shape: the predicate is evaluated with each element of
+		// A `[WHERE …]` filter fetches the same way, whatever the shape of its
+		// predicate: the predicate is evaluated with each element of
 		// the base as the current value, so a leading field in it reads off
 		// that element, and an element that is a record id is fetched. The
 		// predicate alone cannot show this, because it names the field
@@ -1595,17 +1669,21 @@ mod tests {
 		assert!(
 			(EffectSet::READS_DATA
 				| EffectSet::READS_CATALOG
-				| EffectSet::READS_SESSION
+				| EffectSet::READS_PRINCIPAL
+				| EffectSet::READS_SESSION_DB
 				| EffectSet::READS_ROW)
 				.is_deterministic()
 		);
+		assert!(EffectSet::READS_SESSION.is_deterministic());
 		for (flag, _) in EffectSet::ALL {
 			let stable = matches!(
 				*flag,
 				EffectSet::READS_DATA
 					| EffectSet::READS_CATALOG
-					| EffectSet::READS_SESSION
+					| EffectSet::READS_PRINCIPAL
+					| EffectSet::READS_SESSION_DB
 					| EffectSet::READS_ROW
+					| EffectSet::MAY_REJECT
 			);
 			assert_eq!(flag.is_deterministic(), stable, "{flag:?}");
 		}
@@ -1616,7 +1694,13 @@ mod tests {
 		for (flag, _) in EffectSet::ALL {
 			let outlives = matches!(
 				*flag,
-				EffectSet::WRITES_DATA | EffectSet::WRITES_EXTERNAL | EffectSet::ADVANCES_STATE
+				EffectSet::WRITES_DATA
+					| EffectSet::WRITES_EXTERNAL
+					| EffectSet::ADVANCES_STATE
+					| EffectSet::WRITES_SESSION
+					| EffectSet::NOTIFY
+					| EffectSet::DEFERS
+					| EffectSet::CHANGES_CATALOG
 			);
 			assert_eq!(flag.mutates_state(), outlives, "{flag:?}");
 		}
@@ -1638,7 +1722,41 @@ mod tests {
 			format!("{:?}", EffectSet::WRITES_EXTERNAL | EffectSet::READS_EXTERNAL),
 			"WRITES_EXTERNAL | READS_EXTERNAL"
 		);
-		assert_eq!(EffectSet::ALL.len(), 12, "every flag is named");
+		assert_eq!(EffectSet::ALL.len(), 18, "every flag is named");
+		assert_eq!(
+			format!("{:?}", EffectSet::READS_PRINCIPAL | EffectSet::READS_SESSION_DB),
+			"READS_PRINCIPAL | READS_SESSION_DB"
+		);
+		assert_eq!(
+			format!("{:?}", EffectSet::READS_SESSION),
+			format!("{:?}", EffectSet::READS_PRINCIPAL | EffectSet::READS_SESSION_DB)
+		);
+	}
+
+	#[test]
+	fn the_session_union_is_the_two_split_reads_and_no_listed_flag() {
+		assert_eq!(
+			EffectSet::READS_SESSION,
+			EffectSet::READS_PRINCIPAL | EffectSet::READS_SESSION_DB
+		);
+		assert!(EffectSet::ALL.iter().all(|(flag, _)| *flag != EffectSet::READS_SESSION));
+		let mut seen = EffectSet::PURE;
+		for (flag, _) in EffectSet::ALL {
+			assert!(!seen.intersects(*flag), "{flag:?} overlaps an earlier flag");
+			seen |= *flag;
+		}
+		// Bit 10 is reserved and no flag holds it.
+		assert!(!seen.intersects(EffectSet(1 << 10)));
+	}
+
+	#[test]
+	fn top_holds_every_flag_and_is_neither_deterministic_nor_inert() {
+		for (flag, _) in EffectSet::ALL {
+			assert!(EffectSet::TOP.contains(*flag), "TOP lacks {flag:?}");
+		}
+		assert!(EffectSet::TOP.contains(EffectSet::READS_SESSION));
+		assert!(!EffectSet::TOP.is_deterministic());
+		assert!(EffectSet::TOP.mutates_state());
 	}
 
 	fn effects(text: &str) -> Effects {

@@ -49,6 +49,22 @@ and ends the run (wasm has no unwinding), identified by the `running` line
 logged immediately before it. The first-party IndexedDB backend runs the
 suite this way from `surrealdb-kvs-indxdb`'s `suite` test target.
 
+## Test modules
+
+| Module | Covers |
+| --- | --- |
+| `builder_surface` | The `TransactionBuilder` surface: shutdown, compaction, range destruction, metrics, the "local" flag. |
+| `defaults` | The `Transactable` methods with shared default implementations. |
+| `edges` | Empty and inverted ranges, the `0xff` prefix boundary, large values, extreme limits. |
+| `lifecycle` | Closed-state reporting, operations on finished transactions, double commits, read-only enforcement. |
+| `multi` | Concurrent readers and writers, and the two same-key write models. |
+| `raw` | Point and range reads and writes, batches, the scan-cursor battery. |
+| `read_view` | `split` and `estimate` on every backend; the read view (`snapshot`) and its range cursors on backends that have one: later commits invisible, resume, `narrow`, `fill`, and commit and cancel waiting for open cursors. |
+| `savepoint` | `new_save_point` / `rollback_to_save_point` / `release_last_save_point`. |
+| `snapshot` | Read-snapshot isolation. |
+| `timestamp` | Timestamp oracle monotonicity and the safe-timestamp watermark. |
+| `versioned` | Reads as of a version. |
+
 ## Writing tests
 
 A test is a private `async fn(&TestBackend)` registered with `kvs_test!`.

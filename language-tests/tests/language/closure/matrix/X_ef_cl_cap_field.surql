@@ -1,0 +1,8 @@
+/**
+[test]
+reason = "The body is written in `RETURN [{ k: 8, v: 10 }, { k: 8, v: 1 }][WHERE array::any([v], |$e| $e >= k)]`. It runs and reads the names and the row of the frame where the closure is written."
+
+[[test.results]]
+value = "[{ k: 8, v: 10 }]"
+*/
+RETURN [{ k: 8, v: 10 }, { k: 8, v: 1 }][WHERE array::any([v], |$e| $e >= k)];

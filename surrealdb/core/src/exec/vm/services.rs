@@ -17,12 +17,13 @@
 //! A B-tree index is read through [`Services::read_range`] like any other
 //! range of the keyspace; its keys and entries are encoded and decoded by the
 //! kernels the index write path shares (see `super::entries`). The index
-//! reads that remain services are a bitmap evaluation and the two candidate
-//! searches.
+//! reads that go through this trait are a bitmap evaluation and the two
+//! candidate searches.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use super::ir_host::{EngineIrHost, IrHostService};
 use super::program::DefHash;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
@@ -52,6 +53,12 @@ use crate::val::{Number, RecordId, RecordIdKey, RecordIdKeyRange, TableName, Val
 /// The reads of storage and index structures a program runs under, for one
 /// database.
 pub(super) trait Services {
+	/// The host's services for IR-lowered instructions, or `None` when the host has none.
+	#[allow(dead_code)]
+	fn ir_host(&self) -> Option<&dyn IrHostService> {
+		None
+	}
+
 	/// The next at most `limit` entries of `range` along `direction`, as
 	/// stored keys and values, narrowing `range` to what is left to read; none
 	/// once it is read. A read of the keyspace alone: what the keys hold is the
@@ -335,18 +342,21 @@ pub(super) enum Admission {
 }
 
 /// A `DEFINE PARAM` as a read of it finds it: its value, the hash of its
-/// `PERMISSIONS` clause, and how the clause admits readers.
+/// `PERMISSIONS` clause, how the clause admits readers, and the definition
+/// the clause is read from.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct DbParam {
 	pub(super) value: Value,
 	pub(super) permission: DefHash,
 	pub(super) admission: Admission,
+	pub(super) definition: Arc<crate::catalog::ParamDefinition>,
 }
 
 /// The services of the engine this process runs: the datastore, the index
 /// stores and the transaction of the running statement's context.
 pub(super) struct EngineServices<'a> {
 	ctx: &'a ExecutionContext,
+	ir: EngineIrHost<'a>,
 }
 
 impl<'a> EngineServices<'a> {
@@ -354,11 +364,16 @@ impl<'a> EngineServices<'a> {
 	pub(super) fn new(ctx: &'a ExecutionContext) -> Self {
 		Self {
 			ctx,
+			ir: EngineIrHost::new(ctx),
 		}
 	}
 }
 
 impl Services for EngineServices<'_> {
+	fn ir_host(&self) -> Option<&dyn IrHostService> {
+		Some(&self.ir)
+	}
+
 	async fn read_range(
 		&self,
 		range: &mut RawRange,
@@ -640,6 +655,7 @@ impl Services for EngineServices<'_> {
 					value: definition.value.clone(),
 					permission: DefHash::of_param(&definition),
 					admission,
+					definition,
 				}))
 			}
 			Err(e) => {

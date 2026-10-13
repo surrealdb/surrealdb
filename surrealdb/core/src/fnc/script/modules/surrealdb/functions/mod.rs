@@ -2,9 +2,12 @@ use js::Result;
 use js::prelude::Async;
 
 use super::query::QueryContext;
+use crate::ctx::FrozenContext;
+use crate::exec::function::timezone_at;
+use crate::expr::logical::EffectSet;
 use crate::fnc;
 use crate::fnc::script::modules::impl_module_def;
-use crate::val::Value;
+use crate::val::{Datetime, Value};
 
 mod api;
 mod array;
@@ -69,11 +72,51 @@ impl_module_def!(
 	"schema" => (schema::Package)
 );
 
+/// Whether the registry declares `name` a CLOCK read (`EffectSet::CLOCK`).
+/// The set is the registry's, so a script and a statement cannot disagree on
+/// which names read the clock.
+fn reads_the_clock(ctx: &FrozenContext, name: &str) -> bool {
+	ctx.function_registry().get(name).is_some_and(|f| f.effects().contains(EffectSet::CLOCK))
+}
+
+/// Runs a clock read from a script at the statement's clock instant. Every
+/// clock read in one statement gets the same instant. If the context has no
+/// statement clock, the wall clock is used.
+///
+/// `time::now` and `time::timezone` answer from that instant. For a function
+/// that defaults an omitted datetime to the current time, the instant is
+/// passed when the argument list is empty or its only argument is `NONE`.
+/// Any other arguments are passed through unchanged, so arity and type errors
+/// come from [`fnc::synchronous`].
+fn run_clock_read(
+	ctx: &FrozenContext,
+	doc: Option<&crate::doc::CursorDoc>,
+	name: &str,
+	mut args: Vec<Value>,
+) -> anyhow::Result<Value> {
+	let clock = ctx.statement_clock().copied().unwrap_or_else(Datetime::now);
+	match name {
+		"time::now" if args.is_empty() => Ok(clock.into()),
+		"time::timezone" if args.is_empty() => timezone_at(clock),
+		"time::now" | "time::timezone" => fnc::synchronous(ctx, doc, name, args),
+		_ => {
+			if matches!(args.as_slice(), [] | [Value::None]) {
+				args = vec![clock.into()];
+			}
+			fnc::synchronous(ctx, doc, name, args)
+		}
+	}
+}
+
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
 	let res = {
 		let this = js_ctx.userdata::<QueryContext<'_>>().expect("query context should be set");
 		// Process the called function
-		fnc::synchronous(this.context, this.doc, name, args)
+		if reads_the_clock(this.context, name) {
+			run_clock_read(this.context, this.doc, name, args)
+		} else {
+			fnc::synchronous(this.context, this.doc, name, args)
+		}
 	};
 	// Convert any response error
 	res.map_err(|err| {

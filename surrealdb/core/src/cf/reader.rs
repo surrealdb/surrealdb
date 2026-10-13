@@ -19,17 +19,26 @@ pub(crate) async fn show_changes(
 	ctx: &crate::ctx::FrozenContext,
 	opt: &crate::dbs::Options,
 ) -> Result<crate::val::Value> {
+	let changes = changes(ctx, opt, this.table.as_ref(), this.since.clone(), this.limit).await?;
+	Ok(changes.into())
+}
+
+/// The change sets `SHOW CHANGES` reports, each as the value it shows: the session's permission
+/// to view the database's tables is checked first, then the selected namespace and database are
+/// resolved, raising where either is missing, then the feed is read as [`read`] reads it.
+pub(crate) async fn changes(
+	ctx: &crate::ctx::FrozenContext,
+	opt: &crate::dbs::Options,
+	table: Option<&TableName>,
+	since: ShowSince,
+	limit: Option<u32>,
+) -> Result<Vec<crate::val::Value>> {
 	use crate::iam::{Action, ResourceKind};
 	ctx.is_allowed(opt, Action::View, ResourceKind::Table, crate::expr::Base::Db)?;
 	let txn = ctx.tx();
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let changes = read(&txn, ns, db, this.table.as_ref(), this.since.clone(), this.limit).await?;
-	let changes = changes
-		.iter()
-		.cloned()
-		.map(|change| change.into_value())
-		.collect::<Result<Vec<crate::val::Value>>>()?;
-	Ok(changes.into())
+	let changes = read(&txn, ns, db, table, since, limit).await?;
+	changes.iter().cloned().map(|change| change.into_value()).collect()
 }
 
 // Reads the change feed for a specific database or a table,
@@ -78,21 +87,21 @@ pub async fn read(
 	}
 	.range_where(Cow::Borrowed(ts_bytes)..)?;
 
-	// Limit the changefeed results with a default
+	// The row limit defaults to 100 and is capped at 1000.
 	let limit = limit.unwrap_or(100).min(1000);
-	// Create an empty buffer for the timestamp
+	// Timestamp of the change set being built, or None before the first entry.
 	let mut current_ts: Option<Vec<u8>> = None;
-	// Create an empty buffer for the table mutations
+	// Table mutations of the change set being built.
 	let mut buf: Vec<TableMutations> = Vec::new();
-	// Create an empty buffer for the final changesets
+	// Completed change sets, in scan order.
 	let mut res = Vec::<ChangeSet>::new();
 	// Debug-only guard: the scan is ascending so versionstamps must be monotonic.
 	#[cfg(debug_assertions)]
 	let mut prev_ts: Option<Vec<u8>> = None;
 
-	// iterate over _x and put decoded elements to r. The values stay encoded until
-	// the table filter below has run, so an entry belonging to another table is
-	// never decoded and cannot fail a read of the table that was asked for.
+	// Entries arrive in ascending versionstamp order. Values stay encoded until the table
+	// filter below has run, so an entry for another table is never decoded and cannot
+	// fail a read of the requested table.
 	for (k, v) in tx.scan_raw(range, limit, 0, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", crate::key::Key::from(k.as_slice()));
@@ -100,9 +109,8 @@ pub async fn read(
 		// Decode the changefeed entry key
 		let key = ChangeFeedKey::decode_key(&k)?;
 
-		// Invariant: scan order is ascending, so each entry's versionstamp must be
-		// >= the previous one. Process-local HLC stamping is monotonic within a node;
-		// cross-node ordering is provided by the backend timestamp oracle.
+		// Invariant: each entry's versionstamp is >= the previous entry's. Stamps are
+		// monotonic within a node, and the backend timestamp oracle orders them across nodes.
 		#[cfg(debug_assertions)]
 		{
 			if let Some(p) = &prev_ts {
@@ -118,9 +126,10 @@ pub async fn read(
 		if tb.is_some_and(|tb| *tb != *key.tb) {
 			continue;
 		}
-		// Decode the mutations now that this entry is known to be wanted
+		// Decode the mutations only for entries that passed the table filter
 		let v = TableMutations::kv_decode_value(&v, ())?;
-		// Get the timestamp of the changefeed entry
+		// Entries with the same timestamp form one change set. A new timestamp closes
+		// the previous set.
 		match current_ts {
 			Some(ref x) => {
 				if key.ts != x.as_slice() {

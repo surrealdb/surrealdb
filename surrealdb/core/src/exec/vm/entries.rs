@@ -13,7 +13,7 @@
 //! write path shares (`idx::kernels::btree`), so a scan reads exactly the
 //! entries a write stores for the values it admits.
 
-use crate::exec::index::access_path::{BTreeAccess, IndexRef};
+use crate::exec::index::access_path::{BTreeAccess, IndexRef, KeyAccess};
 use crate::exec::index::iterator::btree::INDEX_BATCH_SIZE;
 use crate::exec::vm::services::Services;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -26,6 +26,11 @@ use crate::val::RecordId;
 /// The key range B-tree index `index` holds the entries of `access` in,
 /// from the bounds kernel. Fails when `access` is not one a B-tree index
 /// answers.
+///
+/// A bound that reads the statement clock resolves here, as the scan opens, to
+/// the instant of the top-level statement `ctx` runs in (the wall clock where
+/// none is installed), so a program that outlives its statement reads the clock
+/// of the statement that runs it.
 pub(super) fn entry_range(
 	ctx: &ExecutionContext,
 	index: &IndexRef,
@@ -34,21 +39,15 @@ pub(super) fn entry_range(
 	let db = ctx.database().context("the VM requires a database context")?;
 	let ks = IndexKeyspace::of(db.ns_ctx.ns.namespace_id, db.db.database_id, index.definition());
 	let unique = index.is_unique();
-	let range = match access {
-		BTreeAccess::Equality(value) => ks.equality(unique, value),
-		BTreeAccess::Range {
-			range,
-		} => ks.range(unique, range.start.as_ref(), range.end.as_ref()),
-		BTreeAccess::Compound {
+	let resolved = access.resolve(ctx.ctx().statement_clock()).map_err(ControlFlow::Err)?;
+	let range = match &resolved {
+		Some(KeyAccess::Equality(value)) => ks.equality(unique, value),
+		Some(KeyAccess::Range(range)) => ks.range(unique, range.start.as_ref(), range.end.as_ref()),
+		Some(KeyAccess::Compound {
 			prefix,
 			range,
-		} => ks.compound(prefix, range.as_ref().map(|(op, value)| (op, value))),
-		BTreeAccess::FullText {
-			..
-		}
-		| BTreeAccess::Knn {
-			..
-		} => {
+		}) => ks.compound(prefix, range.as_ref().map(|(op, value)| (op, value))),
+		None => {
 			return Err(ControlFlow::Err(anyhow::anyhow!("an index source with no B-tree access")));
 		}
 	};
@@ -85,17 +84,15 @@ impl EntryScan {
 	/// The record ids the next batch of entries names; empty once the range
 	/// is read.
 	///
-	/// A batch asks for about `wanted` entries — the records the reader takes
-	/// next, so the scan reads no further ahead than its records are read —
-	/// and no fewer than [`MIN_ENTRY_READ`], no more than
-	/// [`INDEX_BATCH_SIZE`] or the fuel left ([`super::fuel::batch`]); and
-	/// no more than `paged`, the rows the reading pipeline's own paging still
-	/// takes, though never fewer than [`MIN_ENTRY_READ`] for it: a scan under
-	/// a `LIMIT` reads at most that many entries past the last row the limit
-	/// admits, and a filter that rejects most entries still reads them in
-	/// batches rather than one at a time. It spends a unit per entry read, so entries that name no
-	/// record the scan keeps — repeats of one record, or entries whose record is gone — are
-	/// paid for as they are read.
+	/// A batch asks for about `wanted` entries, the records the reader takes
+	/// next, so the scan never reads further ahead than those records need.
+	/// The size is at least [`MIN_ENTRY_READ`], at most [`INDEX_BATCH_SIZE`]
+	/// and at most the fuel left ([`super::fuel::batch`]). It is also capped by
+	/// `paged`, the rows the reading pipeline's paging still takes, but never
+	/// falls below [`MIN_ENTRY_READ`]: under a `LIMIT`, at most that many entries
+	/// are read past the last admitted row. Each entry read spends one unit,
+	/// including entries that name no kept record (repeats of one record, or a
+	/// record that is gone).
 	pub(super) async fn next_batch(
 		&mut self,
 		ctx: &ExecutionContext,

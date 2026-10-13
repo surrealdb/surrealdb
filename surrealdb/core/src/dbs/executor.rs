@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::{Pin, pin};
@@ -11,12 +12,11 @@ use futures::{Stream, StreamExt};
 use rand::Rng;
 use surrealdb_datastore::close::{AfterCommitWait, AfterCommitWaits, CommitAction};
 use surrealdb_expr::parser::TopLevelExpr;
+use surrealdb_strand::Strand;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 use web_time::Instant;
 
-use crate::catalog::providers::{
-	CatalogProvider, DatabaseProvider, NamespaceProvider, RootProvider,
-};
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, RootProvider};
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{
@@ -26,6 +26,10 @@ use crate::dbs::{
 use crate::err;
 use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::cache::deps::BindingOrigin;
+use crate::exec::ir::iface::premise::{OpenRegionShape, RegionContext, TxnContext};
+use crate::exec::ir::iface::region_kind::StatementCommit;
+use crate::exec::ir::logical::constraints::rejection_message;
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::logical::{
@@ -35,8 +39,7 @@ use crate::expr::logical::{
 use crate::expr::paths::{DB, NS};
 use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::visit::{Visit, Visitor};
-use crate::expr::{Base, ControlFlow, Expr, FlowResult};
-use crate::iam::{Action, ResourceKind};
+use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::kvs::slowlog::{ParamVisitor, SlowLogVisit};
 use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
 use crate::observe::{
@@ -85,17 +88,15 @@ const LIVE_KILL_CONFLICT_MAX_BACKOFF: Duration = Duration::from_millis(32);
 ///
 /// Lives in `dbs` rather than the observe crate because it downcasts to
 /// [`crate::kvs::Error`], a core-only type the leaf crate cannot depend on.
-/// It stays `pub` and re-exported as `crate::observe::classify_anyhow_error`,
-/// which is where it used to live: an out-of-tree observer filling the
-/// `error_class` attribute has only an `anyhow::Error` to work from, and the
-/// alternative is re-deriving the kvs-is-retryable rule that this function
-/// exists to keep in one place.
+/// It stays `pub` and is re-exported as `crate::observe::classify_anyhow_error`,
+/// so an out-of-tree observer that fills the `error_class` attribute works from
+/// an `anyhow::Error` alone. The kvs-is-retryable rule lives in this one function.
 pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
 	use crate::observe::error_class::{INTERNAL, STORAGE, TXN_CONFLICT, classify_types_error};
 	// Both shapes reach here. A bare `kvs::Error` comes straight from the
 	// store; the `err::Error::Kvs`-wrapped one comes from every `Transaction`
-	// write, which goes through `map_err(Error::from)`. Matching only the bare
-	// one classified a write conflict as `internal`.
+	// write, which goes through `map_err(Error::from)`. Both are matched, so a
+	// write conflict is classified the same whichever shape arrives.
 	if let Some(kvs_err) = crate::kvs::storage_error(err) {
 		if kvs_err.is_retryable() {
 			return TXN_CONFLICT;
@@ -141,13 +142,301 @@ fn encode_rows(
 	Ok(frame.take_encoded())
 }
 
+/// How an explicit transaction block ended: the terminal state of the block
+/// and, for a failure, where the request met it.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum BlockEnd {
+	/// `COMMIT` succeeded.
+	Committed,
+	/// `CANCEL` ended a block that had not failed.
+	Cancelled,
+	/// A statement failed (`FailCause::Error`) or a nested `BEGIN` aborted the
+	/// block (`FailCause::NestedBegin`). `end` is what terminated the block
+	/// afterwards.
+	Failed {
+		cause: FailCause,
+		end: FailedEnd,
+	},
+	/// A block that had not failed ran out of statements before its `COMMIT` or
+	/// `CANCEL`.
+	Unterminated,
+	/// `COMMIT` itself failed. `error` is the storage error's text,
+	/// `indeterminate` is set when the commit's outcome is unknown, and
+	/// `conflict` when the failure is a retryable write conflict.
+	CommitFailed {
+		error: String,
+		indeterminate: bool,
+		conflict: bool,
+	},
+	/// A timeout or cancellation was observed before a statement ran. `end` is
+	/// what terminated the block afterwards.
+	Interrupted {
+		reason: Reason,
+		end: InterruptEnd,
+	},
+	/// The memory threshold was crossed before a statement ran.
+	MemoryThreshold,
+	/// The block's transaction could not be opened, so none of its statements
+	/// ran. `end` is what terminated the block afterwards.
+	BeginFailed {
+		end: FailedEnd,
+	},
+}
+
+/// What made a block fail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FailCause {
+	/// A statement of the block returned an error.
+	Error,
+	/// A `BEGIN` was met inside the open block.
+	NestedBegin,
+}
+
+/// What terminated a failed block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FailedEnd {
+	Commit,
+	Cancel,
+	/// The request ran out of statements first.
+	RequestEnd,
+}
+
+/// What terminated an interrupted block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum InterruptEnd {
+	Commit,
+	Cancel,
+	/// The request ran out of statements first.
+	RequestEnd,
+}
+
+/// What one result slot answers.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum SlotValue {
+	/// The statement's value is `NONE`.
+	None,
+	/// The statement is answered by a query error of `kind`.
+	Error {
+		text: Cow<'static, str>,
+		kind: Option<QueryError>,
+	},
+	/// The statement is answered by an internal error.
+	Internal {
+		text: Cow<'static, str>,
+	},
+}
+
+/// The slot rewrites one block end implies. Every field is `None` when that
+/// group of slots keeps what it holds.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct SlotRewrite {
+	/// What every slot recorded since the block's `BEGIN` becomes.
+	pub recorded: Option<SlotValue>,
+	/// What each statement met after the failure or interrupt point answers,
+	/// up to the terminator.
+	pub following: Option<SlotValue>,
+	/// The block's terminating `COMMIT` or `CANCEL`. `None` means the
+	/// terminator takes no slot: the block has no terminator
+	/// (`RequestEnd`, `MemoryThreshold`) or the terminator is not answered.
+	pub terminator: Option<SlotValue>,
+	/// The statement observed at the moment an interrupt was reported, when it
+	/// is not the block's terminator. `None` means the block end involves no
+	/// interrupt.
+	pub interrupted_statement: Option<SlotValue>,
+}
+
+const CANCELLED_TXN: &str = "The query was not executed due to a cancelled transaction";
+const FAILED_TXN: &str = "The query was not executed due to a failed transaction";
+
+fn error_slot(text: &'static str, kind: QueryError) -> Option<SlotValue> {
+	Some(SlotValue::Error {
+		text: Cow::Borrowed(text),
+		kind: Some(kind),
+	})
+}
+
+/// The slot rewrites of a block end, as one pure function of the end.
+///
+/// Texts and kinds are the ones a client of the request sees. Slots recorded
+/// before the failure point are rewritten whenever the block does not commit,
+/// because the rollback discards what they report. The failing statement's own
+/// slot is not part of the rewrite: it is that statement's own error.
+pub(super) fn finalise_slots(end: &BlockEnd) -> SlotRewrite {
+	let mut rewrite = SlotRewrite {
+		recorded: None,
+		following: None,
+		terminator: None,
+		interrupted_statement: None,
+	};
+	match end {
+		BlockEnd::Committed => {
+			rewrite.terminator = Some(SlotValue::None);
+		}
+		BlockEnd::Cancelled => {
+			rewrite.recorded = error_slot(CANCELLED_TXN, QueryError::Cancelled);
+			rewrite.terminator = Some(SlotValue::None);
+		}
+		BlockEnd::Failed {
+			cause: FailCause::Error,
+			end,
+		} => {
+			rewrite.recorded = error_slot(FAILED_TXN, QueryError::NotExecuted);
+			rewrite.following = error_slot(CANCELLED_TXN, QueryError::Cancelled);
+			rewrite.terminator = match end {
+				FailedEnd::Commit => error_slot(
+					"Cannot COMMIT: the transaction was aborted due to a prior error",
+					QueryError::NotExecuted,
+				),
+				// CANCEL answers NONE however the block ended, as it does for a
+				// healthy block.
+				FailedEnd::Cancel => Some(SlotValue::None),
+				FailedEnd::RequestEnd => None,
+			};
+		}
+		BlockEnd::Failed {
+			cause: FailCause::NestedBegin,
+			end,
+		} => {
+			rewrite.recorded = error_slot(FAILED_TXN, QueryError::NotExecuted);
+			rewrite.following = error_slot(FAILED_TXN, QueryError::NotExecuted);
+			rewrite.terminator = match end {
+				FailedEnd::Commit => error_slot(
+					"Cannot COMMIT: the transaction was aborted due to a nested BEGIN",
+					QueryError::NotExecuted,
+				),
+				FailedEnd::Cancel => rewrite.following.clone(),
+				FailedEnd::RequestEnd => None,
+			};
+		}
+		BlockEnd::Unterminated => {
+			rewrite.recorded = Some(SlotValue::Internal {
+				text: Cow::Borrowed("Missing COMMIT statement"),
+			});
+		}
+		BlockEnd::CommitFailed {
+			error,
+			indeterminate,
+			conflict,
+		} => {
+			rewrite.recorded = if *indeterminate {
+				Some(SlotValue::Error {
+					text: Cow::Borrowed(
+						"The transaction's commit outcome is unknown, so whether this query \
+						 was applied is undetermined",
+					),
+					kind: None,
+				})
+			} else {
+				error_slot(FAILED_TXN, QueryError::NotExecuted)
+			};
+			// A retryable conflict keeps its structured kind. An unknown
+			// outcome carries none, so neither a retry nor a not-executed
+			// reading applies.
+			let kind = if *conflict {
+				Some(QueryError::TransactionConflict)
+			} else if *indeterminate {
+				None
+			} else {
+				Some(QueryError::NotExecuted)
+			};
+			rewrite.terminator = Some(SlotValue::Error {
+				text: Cow::Owned(format!("Cannot COMMIT: {error}")),
+				kind,
+			});
+		}
+		BlockEnd::Interrupted {
+			reason,
+			end,
+		} => {
+			rewrite.recorded = error_slot(CANCELLED_TXN, QueryError::Cancelled);
+			// The statement observed at the interrupt answers as every statement
+			// after it does, unless it is the terminator, which has its own slot.
+			rewrite.following = Some(match reason {
+				Reason::Timedout(d) => SlotValue::Error {
+					text: Cow::Owned(format!("Timed out: {d}")),
+					kind: Some(QueryError::TimedOut {
+						duration: d.0,
+					}),
+				},
+				Reason::Canceled => SlotValue::Error {
+					text: Cow::Borrowed(CANCELLED_TXN),
+					kind: Some(QueryError::Cancelled),
+				},
+			});
+			rewrite.terminator = match end {
+				InterruptEnd::Commit => Some(match reason {
+					Reason::Timedout(d) => SlotValue::Error {
+						text: Cow::Owned(format!("Cannot COMMIT: timed out ({d})")),
+						kind: Some(QueryError::TimedOut {
+							duration: d.0,
+						}),
+					},
+					Reason::Canceled => SlotValue::Error {
+						text: Cow::Borrowed("Cannot COMMIT: the transaction was cancelled"),
+						kind: Some(QueryError::Cancelled),
+					},
+				}),
+				InterruptEnd::Cancel => rewrite.following.clone(),
+				InterruptEnd::RequestEnd => None,
+			};
+			rewrite.interrupted_statement = rewrite.following.clone();
+		}
+		BlockEnd::MemoryThreshold => {
+			rewrite.recorded = error_slot(CANCELLED_TXN, QueryError::Cancelled);
+		}
+		BlockEnd::BeginFailed {
+			end,
+		} => {
+			// Nothing was recorded since the `BEGIN`: no statement of the block
+			// ran, and each one met is answered as it is pulled.
+			rewrite.following = error_slot(
+				"Tried to start a transaction while another transaction was open",
+				QueryError::NotExecuted,
+			);
+			rewrite.terminator = match end {
+				FailedEnd::Commit => error_slot(
+					"Cannot COMMIT: the transaction could not be started",
+					QueryError::NotExecuted,
+				),
+				// CANCEL answers NONE however the block ended.
+				FailedEnd::Cancel => Some(SlotValue::None),
+				FailedEnd::RequestEnd => None,
+			};
+		}
+	}
+	rewrite
+}
+
+/// The result a slot answers. `time` is the elapsed time of the statement the
+/// slot belongs to, zero for a statement that never ran.
+fn slot_result(slot: &SlotValue, time: Duration) -> QueryResult {
+	QueryResult {
+		time,
+		result: slot_outcome(slot),
+		query_type: QueryType::Other,
+	}
+}
+
+fn slot_outcome(slot: &SlotValue) -> std::result::Result<surrealdb_types::Value, TypesError> {
+	match slot {
+		SlotValue::None => Ok(surrealdb_types::Value::None),
+		SlotValue::Error {
+			text,
+			kind,
+		} => Err(TypesError::query(text.to_string(), kind.clone())),
+		SlotValue::Internal {
+			text,
+		} => Err(TypesError::internal(text.to_string())),
+	}
+}
+
 /// Where a streaming execution sends its output.
 ///
 /// Only rows stream: a statement's `QueryResult` is one small entry either way,
 /// so [`Executor::results`] still accumulates them, and this sends
-/// [`QueryStreamItem`]s alongside. That is what keeps the transaction-block
-/// bookkeeping — which rewrites already-produced results when a block fails —
-/// working unchanged.
+/// [`QueryStreamItem`]s alongside. The transaction-block bookkeeping, which
+/// rewrites already-produced results when a block fails, reads them the same way
+/// whether or not they are streamed.
 ///
 /// The ordering it maintains is the one the wire requires: a statement's rows
 /// go out while it runs, and its `Finished` only once its outcome is final.
@@ -209,6 +498,182 @@ impl CommitAction for FlushOnCommit {
 	}
 }
 
+/// What the top-level `LET`s of one stream may retain between statements.
+///
+/// A stream that is not held in memory as a whole (an import) binds every
+/// top-level `LET` into the request context for the rest of the stream, so
+/// without a bound the carried parameters grow with the input. Each limit is
+/// checked as a `LET` binds, by [`CarryBound::admit`]: `names` caps the
+/// distinct names bound, `bytes` caps an estimate of the values bound. A limit
+/// of `None` is not checked and costs nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CarryBound {
+	pub names: Option<usize>,
+	pub bytes: Option<usize>,
+}
+
+impl CarryBound {
+	/// No limit on either count.
+	pub(crate) const UNBOUNDED: CarryBound = CarryBound {
+		names: None,
+		bytes: None,
+	};
+
+	/// Record the binding of `name` to `value` in `carried`, or refuse it.
+	///
+	/// A rebinding replaces the entry of its name, so it counts once. The
+	/// estimate of a value is walked only when `bytes` is set. A refused
+	/// binding leaves `carried` unchanged.
+	fn admit(&self, carried: &mut Carried, name: &str, value: &Value) -> Result<(), ExecError> {
+		if self.names.is_none() && self.bytes.is_none() {
+			return Ok(());
+		}
+		let previous = carried.held.get(name).copied();
+		if let Some(limit) = self.names
+			&& previous.is_none()
+			&& carried.held.len() >= limit
+		{
+			return Err(ExecError::InvalidStatement(format!(
+				"The stream defined more parameters with LET than its limit of {limit}"
+			)));
+		}
+		let size = match self.bytes {
+			Some(_) => name.len() + estimate_bytes(value),
+			None => 0,
+		};
+		let total = carried.bytes - previous.unwrap_or(0) + size;
+		if let Some(limit) = self.bytes
+			&& total > limit
+		{
+			return Err(ExecError::InvalidStatement(format!(
+				"The stream retains more than {limit} bytes of parameters"
+			)));
+		}
+		carried.held.insert(name.to_owned(), size);
+		carried.bytes = total;
+		Ok(())
+	}
+}
+
+/// The request `LET` bindings written since the open block's `BEGIN`, each with
+/// what it overwrote, so a block that does not commit can put them back.
+///
+/// A block's mark is set by [`LetUndo::begin`] and cleared by exactly one of
+/// [`LetUndo::commit`] or [`LetUndo::rollback`]; there is at most one open
+/// block because blocks never nest. [`LetUndo::record`] is a no-op while no
+/// mark is set, so top-level `LET`s outside a block and every statement of a
+/// session transaction record nothing. `USE` and the session variables are
+/// written elsewhere and are never recorded: a block's end does not undo them.
+#[derive(Default)]
+struct LetUndo {
+	mark: Option<usize>,
+	log: Vec<(Strand, Option<Arc<Value>>)>,
+}
+
+impl LetUndo {
+	/// Whether a block is open, which is exactly when [`LetUndo::record`]
+	/// keeps what it is given.
+	fn is_open(&self) -> bool {
+		self.mark.is_some()
+	}
+
+	/// Open a block: what is recorded from here on belongs to it.
+	fn begin(&mut self) {
+		self.mark = Some(self.log.len());
+	}
+
+	/// Record that `name` held `prev` before the binding about to overwrite
+	/// it, `None` where the request context held no binding of its own. Kept
+	/// only while a block is open.
+	fn record(&mut self, name: &str, prev: Option<Arc<Value>>) {
+		if self.mark.is_some() {
+			self.log.push((Strand::from(name), prev));
+		}
+	}
+
+	/// The block committed: keep its bindings and forget how to undo them.
+	fn commit(&mut self) {
+		if let Some(mark) = self.mark.take() {
+			self.log.truncate(mark);
+		}
+	}
+
+	/// The block did not commit: put its bindings back in reverse order of
+	/// writing, so a name written twice ends at the value it held at `BEGIN`.
+	/// A name that held nothing is restored as absent, so a `DEFINE PARAM` of
+	/// the same name, which resolves only while the request binds none, is
+	/// answered again rather than shadowed by `NONE`.
+	fn rollback(&mut self, ctx: &mut Context) {
+		if let Some(mark) = self.mark.take() {
+			while self.log.len() > mark {
+				if let Some((name, prev)) = self.log.pop() {
+					ctx.restore_value(&name, prev);
+				}
+			}
+		}
+	}
+}
+
+/// The top-level `LET` bindings a stream holds, as [`CarryBound::admit`]
+/// tracks them: each name with the bytes estimated for its current value, and
+/// the sum of those estimates.
+#[derive(Default)]
+struct Carried {
+	held: HashMap<String, usize>,
+	bytes: usize,
+}
+
+/// An estimate of the memory `value` retains: the inline size of every node
+/// plus the heap bytes of its strings and byte buffers.
+///
+/// Iterative, so a deeply nested value cannot overflow the stack. The
+/// estimate is a measure for the bound, not an allocator's account.
+fn estimate_bytes(value: &Value) -> usize {
+	use crate::val::RecordIdKey;
+
+	let node = std::mem::size_of::<Value>();
+	let mut total = 0;
+	let mut stack = vec![value];
+	while let Some(value) = stack.pop() {
+		total += node;
+		match value {
+			Value::String(s) => total += s.len(),
+			Value::Bytes(b) => total += b.len(),
+			Value::Array(a) => stack.extend(a.iter()),
+			Value::Set(s) => stack.extend(s.iter()),
+			Value::Object(o) => {
+				for (key, value) in o.0.iter() {
+					total += key.len();
+					stack.push(value);
+				}
+			}
+			Value::RecordId(id) => {
+				total += id.table.as_str().len();
+				match &id.key {
+					RecordIdKey::String(s) => total += s.len(),
+					RecordIdKey::Array(a) => stack.extend(a.iter()),
+					RecordIdKey::Object(o) => {
+						for (key, value) in o.0.iter() {
+							total += key.len();
+							stack.push(value);
+						}
+					}
+					RecordIdKey::Number(_) | RecordIdKey::Uuid(_) | RecordIdKey::Range(_) => {}
+				}
+			}
+			Value::Range(r) => {
+				for bound in [&r.start, &r.end] {
+					if let std::ops::Bound::Included(v) | std::ops::Bound::Excluded(v) = bound {
+						stack.push(v);
+					}
+				}
+			}
+			_ => {}
+		}
+	}
+	total
+}
+
 /// Executes the statements of a query, one at a time, on the bytecode VM.
 pub struct Executor {
 	results: Vec<QueryResult>,
@@ -246,10 +711,8 @@ pub struct Executor {
 	/// opened. [`Executor::run_live`] takes it, so the statement registers
 	/// under the id and unit it arrived with; it is empty outside the one
 	/// statement that set it.
-	arrived_live: Option<(
-		crate::expr::statements::LiveStatement,
-		Option<crate::exec::vm::lower_live::Arrived>,
-	)>,
+	arrived_live:
+		Option<(crate::expr::statements::LiveStatement, Option<crate::exec::vm::live::Arrived>)>,
 	/// Why the transaction-control statement about to run cannot act where it
 	/// stands, as request lowering marked it. Set by a driver immediately
 	/// before it hands the statement to [`Executor::run_surface_statement`]
@@ -262,6 +725,47 @@ pub struct Executor {
 	/// [`Executor::execute_begin_statement`]. [`Executor::streams_rows`] is
 	/// false for as long as it is set.
 	holding: bool,
+	/// True while the statements of a transaction the caller holds across
+	/// requests run, which is exactly the span of
+	/// [`Executor::execute_statements_with_transaction`]. It is what
+	/// [`Executor::region_context`] reads to tell a session transaction from
+	/// an explicit block, since both run with `in_block` set.
+	in_session_txn: bool,
+	/// True while the executor drives a stream whose every statement is a
+	/// fragment of its own, which is exactly the span of
+	/// [`Executor::execute_fragments`]. A statement met while an explicit block
+	/// is open then continues the region an earlier fragment opened.
+	fragmented: bool,
+	/// Where each name the request binds came from, as a history per name of
+	/// `(from, origin)` pairs in ascending `from`: the origin holds for the
+	/// statements at positions `from` and after, until the next pair. An input
+	/// recorded by [`Executor::note_inputs`] holds from position 0.
+	/// [`Executor::compile_request`] adds a pair for a top-level `LET` at
+	/// position `p` from `p + 1`: `LetConst` where `constant_value` denotes its
+	/// value and `LetComputed` where the run computes it. A block that ends adds
+	/// a `LetComputed` pair from the statement after its terminator for every
+	/// name a `LET` inside it bound, because the block's end may have put the
+	/// bindings back. A name absent here has no recorded origin.
+	binding_origins: HashMap<String, Vec<(usize, BindingOrigin)>>,
+	/// What the top-level `LET`s of the stream this executor drives may retain.
+	carry: CarryBound,
+	/// The top-level `LET` bindings admitted so far, under `carry`.
+	carried: Carried,
+	/// Set when a `LET` was refused by `carry`. The stream ends at the
+	/// statement that set it: a block it was inside is cancelled and nothing
+	/// after it is pulled.
+	carry_crossed: bool,
+	/// The message of the region rejection ([`rejection_message`]) found
+	/// while the request was compiled at its arrival, before any statement of
+	/// it ran. It refuses the request as a whole: no statement runs, and the
+	/// driver answers the request with it.
+	request_rejection: Option<String>,
+	/// The bindings the open explicit block has written, for the undo its end
+	/// may owe them.
+	let_undo: LetUndo,
+	/// Where the program of a top-level statement records the changes it makes
+	/// to this session, which [`Executor::apply_session_effects`] applies.
+	session_sink: Arc<crate::exec::context::SessionSink>,
 }
 
 /// What a request's statement needs to be compiled with the rest of the
@@ -510,6 +1014,15 @@ impl Executor {
 			misplaced_control: None,
 			explicit_emission: Emission::Stream,
 			holding: false,
+			in_session_txn: false,
+			fragmented: false,
+			binding_origins: HashMap::new(),
+			carry: CarryBound::UNBOUNDED,
+			carried: Carried::default(),
+			carry_crossed: false,
+			request_rejection: None,
+			let_undo: LetUndo::default(),
+			session_sink: Arc::default(),
 		}
 	}
 
@@ -541,6 +1054,142 @@ impl Executor {
 	/// boundary, beside the executor's other stop conditions.
 	fn consumer_gone(&self) -> bool {
 		self.stream.as_ref().is_some_and(StreamSink::is_closed)
+	}
+
+	/// The region context `place` is compiled in: how the statement commits,
+	/// which transaction holds it, and the regions an earlier batch left open.
+	///
+	/// A session transaction holds every statement of its request. Otherwise
+	/// `BEGIN`, `COMMIT`, `CANCEL` and a nested `BEGIN` belong to the explicit
+	/// block they open, end or abort, and any other statement is in the block
+	/// while one is open and commits on its own when none is.
+	///
+	/// The open-region shape is empty except in fragments mode, where each
+	/// statement is a fragment of its own: a statement met while an explicit
+	/// block is open, a `COMMIT` or `CANCEL` among them, continues the explicit
+	/// region an earlier fragment opened. A session transaction is held by the
+	/// caller across requests rather than left open by an earlier fragment, so
+	/// it never continues.
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "the producer of the D10 section 6.7 premise, which the KV program cache consumes"
+		)
+	)]
+	fn region_context(&self, place: &StatementPlace) -> RegionContext {
+		let (commit, txn) = if self.in_session_txn {
+			(StatementCommit::InTxn, TxnContext::Session)
+		} else {
+			match place.role {
+				StatementRole::Begin
+				| StatementRole::Commit
+				| StatementRole::Cancel
+				| StatementRole::Misplaced(MisplacedControl::NestedBegin) => {
+					(StatementCommit::InTxn, TxnContext::Explicit)
+				}
+				StatementRole::Run
+				| StatementRole::Option
+				| StatementRole::Misplaced(
+					MisplacedControl::BeginInSession
+					| MisplacedControl::CommitOutsideBlock
+					| MisplacedControl::CancelOutsideBlock,
+				) if self.in_block => (StatementCommit::InTxn, TxnContext::Explicit),
+				StatementRole::Run | StatementRole::Option | StatementRole::Misplaced(_) => {
+					(StatementCommit::Auto, TxnContext::None)
+				}
+			}
+		};
+		let stack_shape = if self.fragmented && self.in_block && !self.in_session_txn {
+			OpenRegionShape {
+				open: TxnContext::Explicit,
+				continues: true,
+			}
+		} else {
+			OpenRegionShape {
+				open: TxnContext::None,
+				continues: false,
+			}
+		};
+		RegionContext {
+			commit,
+			txn,
+			stack_shape,
+		}
+	}
+
+	/// Where the value `name` holds when the statement at position `at` runs
+	/// came from.
+	///
+	/// A name the request binds with a top-level `LET` before `at` is
+	/// `LetConst` where its value is a constant by `constant_value`, the test
+	/// [`Executor::compile_request`] folds constants by, and `LetComputed`
+	/// where the run computes it; a later `LET` of the name, before `at`,
+	/// decides again, and a `LET` at or after `at` has no say. A name a block
+	/// bound is `LetComputed` for every statement after the block's `COMMIT` or
+	/// `CANCEL`, since a block that does not commit puts the name back to a
+	/// value this walk does not name. A name recorded by
+	/// [`Executor::note_inputs`] is `SessionVar` or `ClientParam`. A name with
+	/// no recorded origin is `LetComputed`, so a caller that cannot place a name
+	/// never treats its value as known.
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "the producer of the binding chain's origins, which the IR entry consumes"
+		)
+	)]
+	fn binding_origin(&self, name: &str, at: usize) -> BindingOrigin {
+		self.binding_origins
+			.get(name)
+			.and_then(|history| history.iter().rev().find(|(from, _)| *from <= at))
+			.map_or(BindingOrigin::LetComputed, |(_, origin)| *origin)
+	}
+
+	/// Record the names the request's inputs bind: the session's variables
+	/// first, then the request's own, which replace a session variable of the
+	/// same name as they do in the context. Called before the request is
+	/// compiled, so that a top-level `LET` of one of the names replaces its
+	/// origin.
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "records the inputs `binding_origin` reports, which the driver names once the IR entry consumes them"
+		)
+	)]
+	fn note_inputs<S, C>(&mut self, session: S, client: C)
+	where
+		S: IntoIterator,
+		S::Item: Into<String>,
+		C: IntoIterator,
+		C::Item: Into<String>,
+	{
+		for name in session {
+			self.binding_origins.insert(name.into(), vec![(0, BindingOrigin::SessionVar)]);
+		}
+		for name in client {
+			self.binding_origins.insert(name.into(), vec![(0, BindingOrigin::ClientParam)]);
+		}
+	}
+
+	/// Record that the origin of `name` is `origin` for the statements at
+	/// position `from` and after.
+	fn note_let_origin(&mut self, name: &str, from: usize, origin: BindingOrigin) {
+		self.binding_origins.entry(name.to_owned()).or_default().push((from, origin));
+	}
+
+	/// The explicit block the walk has open ends at position `at`: every name
+	/// its `LET`s bound is `LetComputed` for the statements after it, since a
+	/// block that does not commit, and a `COMMIT` that fails, put the names
+	/// back to what they held at `BEGIN`. A terminator with no open block is
+	/// misplaced and changes nothing.
+	fn end_block_origins(&mut self, explicit: &mut bool, block_names: &mut Vec<String>, at: usize) {
+		if std::mem::take(explicit) {
+			for name in std::mem::take(block_names) {
+				self.note_let_origin(&name, at + 1, BindingOrigin::LetComputed);
+			}
+		}
 	}
 
 	/// Whether the statement about to run should stream its rows.
@@ -635,39 +1284,50 @@ impl Executor {
 		}
 	}
 
-	/// Install a fresh [`StatementCounters`] on the executor's context for
-	/// the next statement and return a clone of the handle so the caller
-	/// can read the counts after the statement returns. The iterator
-	/// (deep in the execution path) inherits the same handle through the
-	/// child contexts it derives from `self.ctx`.
+	/// Install a fresh [`StatementCounters`] and the statement clock on the
+	/// executor's context for the next top-level statement, and return a
+	/// clone of the counters handle so the caller can read the counts after
+	/// the statement returns. The iterator (deep in the execution path)
+	/// inherits the same handle through the child contexts it derives from
+	/// `self.ctx`.
+	///
+	/// The clock is read here, once per top-level statement, so every CLOCK
+	/// read the statement makes answers the instant it started, however long
+	/// it runs. A statement a block serves when it reaches it, a function or
+	/// closure body, a nested query and an event body run in contexts derived
+	/// from `self.ctx` and read the clock of the top-level statement that
+	/// runs them. Under the contention described below the previous
+	/// statement's clock stays installed, so a stale instant, never the
+	/// wall clock, is the failure mode.
 	///
 	/// Between statements the executor holds the only strong reference to
 	/// `self.ctx`, so `Arc::get_mut` succeeds. If it ever fails — i.e.
 	/// some child kept a strong reference past statement completion —
 	/// the iterator would record into the previous statement's
 	/// counters (or `None`) while `count_result_rows` reads zero from
-	/// the new one, silently underreporting `RETURN NONE` DML row
-	/// counts (the very case `StatementCounters` exists to fix).
+	/// the new one, silently underreporting the affected rows of DML statements
+	/// that use `RETURN NONE`, which is what `StatementCounters` exists to count.
 	///
 	/// We treat that as a programmer error: in debug builds it
 	/// panics so tests fail loud; in release builds it logs a `warn`
 	/// (deduped per process) so production telemetry surfaces the bug
 	/// without turning a row-count discrepancy into an outage.
-	fn install_statement_counters(&mut self) -> Arc<StatementCounters> {
+	fn install_statement_state(&mut self) -> Arc<StatementCounters> {
 		let counters = StatementCounters::new();
 		if let Some(ctx) = Arc::get_mut(&mut self.ctx) {
 			ctx.set_statement_counters(Some(Arc::clone(&counters)));
+			ctx.set_statement_clock(crate::val::Datetime::now());
 		} else {
 			debug_assert!(
 				false,
-				"install_statement_counters: ctx Arc was contended at statement boundary"
+				"install_statement_state: ctx Arc was contended at statement boundary"
 			);
 			static WARNED: std::sync::atomic::AtomicBool =
 				std::sync::atomic::AtomicBool::new(false);
 			if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
 				tracing::warn!(
 					target: "surrealdb::core::dbs",
-					"install_statement_counters: ctx Arc contended at statement boundary; \
+					"install_statement_state: ctx Arc contended at statement boundary; \
 					 result_rows on RETURN NONE DML may underreport. This is a bug — \
 					 future occurrences will not log."
 				);
@@ -678,19 +1338,42 @@ impl Executor {
 
 	fn execute_option_statement(&mut self, stmt: &OptionStatement) -> Result<()> {
 		// Allowed to run?
-		self.ctx.is_allowed(&self.opt, Action::Edit, ResourceKind::Option, Base::Db)?;
+		crate::exec::session::option_allowed(&self.ctx, &self.opt)?;
+		self.apply_option(&stmt.name, stmt.what);
+		Ok(())
+	}
 
-		if stmt.name.eq_ignore_ascii_case("IMPORT") {
-			self.opt.set_import(stmt.what);
-		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
-			let force = if stmt.what {
+	/// Set the option `name` to `what` on the session. Only `IMPORT` and `FORCE` have an effect.
+	fn apply_option(&mut self, name: &str, what: bool) {
+		if name.eq_ignore_ascii_case("IMPORT") {
+			self.opt.set_import(what);
+		} else if name.eq_ignore_ascii_case("FORCE") {
+			let force = if what {
 				Force::All
 			} else {
 				Force::None
 			};
 			self.opt.force = force;
 		}
+	}
 
+	/// Select the namespace and database one level of a `USE` names on the session: the
+	/// options and the `$session` value. The cached session information is the caller's to
+	/// invalidate once the statement's levels are applied.
+	fn apply_use(&mut self, ns: Option<Strand>, db: Option<Strand>) -> FlowResult<()> {
+		let ctx = context_mut(&mut self.ctx)?;
+		if let Some(ns) = ns {
+			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_ns(Some(ns.as_str().into()));
+			session.put(NS.as_ref(), Value::String(ns));
+			ctx.add_value("session", session.into());
+		}
+		if let Some(db) = db {
+			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+			self.opt.set_db(Some(db.as_str().into()));
+			session.put(DB.as_ref(), Value::String(db));
+			ctx.add_value("session", session.into());
+		}
 		Ok(())
 	}
 
@@ -731,13 +1414,11 @@ impl Executor {
 		} else {
 			Outcome::Success
 		};
-		// Classify the batch error using the FIRST errored statement's
-		// structured `surrealdb_types::Error`. Operators see the
-		// dominant error class for the batch on `surrealdb.query.*`;
-		// per-statement classification happens via
-		// `surrealdb.statement.*` once executor emit sites are wired
-		// to populate it (today only the unexecuted-statement paths
-		// do so explicitly).
+		// The batch error is classified from the first errored statement's
+		// structured `surrealdb_types::Error`, so operators see the dominant
+		// error class for the batch on `surrealdb.query.*`. Per-statement classes
+		// are reported on `surrealdb.statement.*`, which only the unexecuted-statement
+		// paths populate.
 		let error_class = results
 			.iter()
 			.find_map(|r| r.result.as_ref().err())
@@ -897,9 +1578,8 @@ impl Executor {
 
 		let session_value = self.ctx.value("session")?;
 
-		// Extract fields from the session Value. `Value::String` holds a `Strand`, so we just
-		// move it into `SessionInfo` without the `Strand -> String -> Strand` round-trip the
-		// previous `into_string()` chain incurred on every batch.
+		// Extract fields from the session Value. `Value::String` holds a `Strand`, so it is
+		// moved into `SessionInfo` as it is, with no `Strand -> String -> Strand` round-trip.
 		let ns = match session_value.pick(NS.as_ref()) {
 			Value::String(s) => Some(s),
 			_ => None,
@@ -940,8 +1620,8 @@ impl Executor {
 			v => Some(v),
 		};
 
-		// Note: exp is not in the session object, it's in the Session struct
-		// For now, we leave it as None
+		// Note: exp is not in the session object; it lives in the Session struct.
+		// It is left as None here.
 		let exp = None;
 
 		Some(std::sync::Arc::new(SessionInfo {
@@ -967,6 +1647,58 @@ impl Executor {
 	/// param — because those are not the statement's rows and must not reach
 	/// the consumer as such.
 	async fn execute_operator_plan(
+		&mut self,
+		plan: StatementPlan,
+		txn: Arc<Transaction>,
+		stream_rows: bool,
+	) -> FlowResult<Value> {
+		let result = self.execute_planned(plan, txn, stream_rows).await;
+		// The drain runs whether the program returned or raised, before the statement's result is
+		// recorded or sent and before the next step runs. An error it raises replaces the result.
+		self.apply_session_effects(result.is_ok())?;
+		result
+	}
+
+	/// Apply, in the order they were recorded, the changes the statement that just ran made to
+	/// the session.
+	///
+	/// A program records an effect only after the part of the statement it stands for has
+	/// succeeded, so draining after a failure leaves exactly what the statement had done by then
+	/// (`USE NS a DB b` keeps the namespace when the database half fails). Nothing records on a
+	/// statement the engine ran as written, so the drain is then empty. A refused effect fails
+	/// the statement. `succeeded` says whether the program returned: the cached session
+	/// information is dropped after a `USE` only then.
+	fn apply_session_effects(&mut self, succeeded: bool) -> FlowResult<()> {
+		use crate::exec::context::SessionEffect;
+		let mut selected = false;
+		for effect in self.session_sink.take() {
+			match effect {
+				SessionEffect::Option {
+					name,
+					what,
+				} => self.apply_option(name.as_str(), what),
+				SessionEffect::Use {
+					ns,
+					db,
+				} => {
+					self.apply_use(ns, db)?;
+					selected = true;
+				}
+				SessionEffect::Let {
+					name,
+					value,
+				} => self.bind_session_let(name.as_str(), value)?,
+			}
+		}
+		// USE changes ns/db, which the cached session information holds. A statement that failed
+		// part-way leaves the cache as it was, as the statement run as written does.
+		if selected && succeeded {
+			self.cached_session = None;
+		}
+		Ok(())
+	}
+
+	async fn execute_planned(
 		&mut self,
 		plan: StatementPlan,
 		txn: Arc<Transaction>,
@@ -1111,7 +1843,8 @@ impl Executor {
 				plan.access_mode() != crate::exec::AccessMode::ReadOnly,
 				plan.required_context(),
 			)
-			.await?;
+			.await?
+			.with_session_sink(Arc::clone(&self.session_sink));
 
 		// A statement whose rows stream to a consumer that takes them encoded
 		// is run to hand them on encoded, which its operators may do without
@@ -1286,6 +2019,7 @@ impl Executor {
 				writes,
 			)),
 			writing: false,
+			session_effects: None,
 		};
 
 		// The plan's declared context level is the minimum it needs (see
@@ -1300,13 +2034,11 @@ impl Executor {
 		// needed more. At or below the minimum, resolution failures surface
 		// exactly as before.
 		//
-		// SECURITY: `USE` no longer implicitly creates namespaces for
-		// sessions without `DEFINE NAMESPACE`-equivalent authorization, so
-		// this must not paper over a missing target by writing a fresh
-		// namespace into the catalog on the read path (which would also
-		// fail on a read-only transaction). `expect_ns_by_name` /
-		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound`
-		// instead.
+		// SECURITY: `USE` never implicitly creates a namespace for a session that lacks
+		// `DEFINE NAMESPACE`-equivalent authorization, so this must not paper over a
+		// missing target by writing a fresh namespace into the catalog on the read path
+		// (which would also fail on a read-only transaction). `expect_ns_by_name` /
+		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound` instead.
 
 		let ns_def = if required_level >= ContextLevel::Namespace {
 			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
@@ -1483,9 +2215,9 @@ impl Executor {
 		stmt: TopLevelStatement,
 	) -> FlowResult<Value> {
 		// A statement's result shape defaults to scalar; a statement that reaches
-		// a plan (`execute_operator_plan`) overrides it. It
-		// selects how the result is converted to a public value, so it is reset per
-		// statement here rather than inherited from the previous one.
+		// a plan (`execute_operator_plan`) overrides it. The shape selects how the
+		// result is converted to a public value, so it is reset for each statement
+		// here and never carried over from the one before.
 		self.result_shape = OutputShape::Scalar;
 		let res = match stmt {
 			TopLevelStatement::Ast(stmt) => self.run_surface_statement(stmt, txn, start).await,
@@ -1611,10 +2343,12 @@ impl Executor {
 		start: &Instant,
 	) -> FlowResult<Value> {
 		if let LogicalOp::Let(binding) = stmt.plan {
+			let bare_return = matches!(*binding.value, LogicalOp::Return(_));
 			return self
 				.run_binding(
 					binding.name,
 					binding.kind,
+					bare_return,
 					&stmt.text,
 					|| Ok(*binding.value),
 					txn,
@@ -1690,142 +2424,36 @@ impl Executor {
 			}
 		};
 
-		// SECURITY (GHSA-2v9j): `USE` moves the session's *selected*
-		// namespace/database to caller-supplied operands. The
-		// authenticated Auth level — not the (about-to-be-overwritten)
-		// selected ns/db — is the source of truth for tenant scope, so
-		// the principal must be verified as authorized for the target
-		// BEFORE the switch takes effect (SECURITY_GUIDE section 3).
-		// Without this gate a Database- or Namespace-level principal
-		// could pivot into a foreign tenant and reach any table there
-		// whose PERMISSIONS are satisfiable (e.g. `PERMISSIONS FULL`),
-		// collapsing the namespace/database isolation boundary. This
-		// mirrors the custom-API tenant gate added for
-		// GHSA-848m-r628-vrxw (`api/invocation.rs`, `kvs/ds.rs`), which
-		// had never been applied to the `USE` / `/sql` executor path.
-		// A switch that only changes one of ns/db keeps the other from
-		// the current session (`or(self.opt...)`); Root and anonymous
-		// (`Level::No`) principals are unrestricted by `can_access_ns_db`.
-		let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
-		let target_db = use_db.as_deref().or(self.opt.db.as_deref());
-		if let Some(ns_name) = target_ns {
-			let db_name = target_db.unwrap_or_default();
-			if !self.opt.auth.can_access_ns_db(ns_name, db_name) {
-				// Report the narrowest boundary that failed: if the
-				// namespace itself is in scope, the database is the
-				// offending operand, otherwise the namespace is.
-				let err = if self.opt.auth.level().ns() == Some(ns_name) {
-					ExecError::DbNotAllowed {
-						db: db_name.to_owned(),
-					}
-				} else {
-					ExecError::NsNotAllowed {
-						ns: ns_name.to_owned(),
-					}
-				};
-				return Err(ControlFlow::Err(anyhow::Error::new(err)));
-			}
-		}
-
-		// SECURITY: implicit creation of a namespace or database via
-		// `USE` requires the same authorization as the explicit
-		// `DEFINE NAMESPACE` / `DEFINE DATABASE` statements
-		// (SECURITY_GUIDE section 3). Re-selecting an existing
-		// namespace or database is unrestricted; downstream
-		// operations against a non-existent resource surface
-		// `NsNotFound` / `DbNotFound` naturally rather than a
-		// silently auto-created resource the session was never
-		// allowed to create.
-		let create_ns = if let Some(ns_name) = use_ns.as_deref() {
-			if txn.get_ns_by_name(ns_name, None).await?.is_some()
-				|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
-			{
-				true
-			} else {
-				self.opt.auth.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root()).is_ok()
-			}
-		} else {
-			false
-		};
-		let create_db = if let Some(db_name) = use_db.as_deref() {
-			let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
-			if let Some(ns_name) = target_ns {
-				if txn.get_db_by_name(ns_name, db_name, None).await?.is_some()
-					|| (!self.ctx.auth_enabled() && self.opt.auth.is_anon())
-				{
-					true
-				} else if txn.get_ns_by_name(ns_name, None).await?.is_none()
-					&& self
-						.opt
-						.auth
-						.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root())
-						.is_err()
-				{
-					// SECURITY: `ensure_ns_db` is
-					// `get_or_add_db_upwards(..., upwards = true)`
-					// and silently `get_or_add_ns`-es a missing
-					// parent (see `kvs/tx.rs::get_or_add_db_upwards`).
-					// Without this gate, a namespace-level Editor —
-					// including one on a stale token whose
-					// namespace has since been dropped — could
-					// recreate the parent namespace as a side
-					// effect of `USE NS dropped DB anything` or
-					// `USE DB anything` against a stale
-					// session-level ns.
-					false
-				} else {
-					self.opt
-						.auth
-						.is_allowed(Action::Edit, &ResourceKind::Database.on_ns(ns_name))
-						.is_ok()
-				}
-			} else {
-				false
-			}
-		} else {
-			false
-		};
-
-		let ctx = context_mut(&mut self.ctx)?;
-
-		// Apply new namespace
-		if let Some(ns) = use_ns {
-			if create_ns {
-				txn.get_or_add_ns(Some(ctx), &ns).await?;
-			}
-
-			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_ns(Some(ns.as_str().into()));
-			session.put(NS.as_ref(), ns.into());
-			ctx.add_value("session", session.into());
-		}
-
-		// Apply new database
-		if let Some(db) = use_db {
-			let Some(ns) = &self.opt.ns else {
-				return Err(ControlFlow::Err(anyhow::anyhow!(
-					"Cannot use database without namespace"
-				)));
+		// The levels are applied after the transactional half returns, whether it succeeded or
+		// failed part-way: a namespace the statement selected stays selected when its database
+		// is refused.
+		let mut levels = Vec::new();
+		let selected = crate::exec::session::use_targets(
+			&self.ctx,
+			&self.opt,
+			&txn,
+			use_ns,
+			use_db,
+			|level| levels.push(level),
+		)
+		.await;
+		for level in levels {
+			let crate::exec::context::SessionEffect::Use {
+				ns,
+				db,
+			} = level
+			else {
+				unreachable!("a USE records only levels");
 			};
-
-			if create_db {
-				txn.ensure_ns_db(Some(ctx), ns, &db).await?;
-			}
-
-			let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_db(Some(db.as_str().into()));
-			session.put(DB.as_ref(), db.into());
-			ctx.add_value("session", session.into());
+			self.apply_use(ns, db)?;
 		}
+		selected?;
 
 		// Invalidate cached session info since USE changes ns/db
 		self.cached_session = None;
 
 		// Return the current namespace and database
-		Ok(Value::from(map! {
-			"namespace" => self.opt.ns.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
-			"database" => self.opt.db.as_deref().map(|x| Value::String(x.into())).unwrap_or(Value::None),
-		}))
+		Ok(crate::exec::session::use_answer(self.opt.ns.as_deref(), self.opt.db.as_deref()))
 	}
 
 	/// Run a top-level `LET`, binding its result into the batch's scope.
@@ -1854,10 +2482,12 @@ impl Executor {
 		}
 		let name = stm.name.to_string();
 		let kind = stm.kind.clone();
+		let bare_return = matches!(stm.what, Expr::Return(_));
 		let statement = TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(Box::new(stm))));
 		self.run_binding(
 			name,
 			kind,
+			bare_return,
 			&statement,
 			|| {
 				let TopLevelStatement::Ast(TopLevelExpr::Expr(Expr::Let(stm))) = &statement else {
@@ -1877,10 +2507,20 @@ impl Executor {
 
 	/// Bind an evaluated right-hand side into request scope, enforcing
 	/// protected names, coercion, and the bound value's depth before publication.
+	///
+	/// The value is a value scope: a RETURN in it ends the value with what it
+	/// returns, which the name is bound to. A value that is itself a RETURN
+	/// (`bare_return`) stands in no value scope, so its RETURN ends the
+	/// statement with its value and binds nothing.
+	#[expect(
+		clippy::too_many_arguments,
+		reason = "the binding, how its value is planned and the statement's transaction"
+	)]
 	async fn run_binding(
 		&mut self,
 		name: String,
 		kind: Option<crate::expr::Kind>,
+		bare_return: bool,
 		statement: &impl ToSql,
 		lower_value: impl FnOnce() -> FlowResult<LogicalOp>,
 		txn: Arc<Transaction>,
@@ -1915,7 +2555,10 @@ impl Executor {
 		// values are not the statement's rows and must not stream.
 		let res = self.execute_operator_plan(plan, Arc::clone(&txn), false).await;
 
-		let res = res?;
+		let res = match res {
+			Err(ControlFlow::Return(value)) if !bare_return => value,
+			res => res?,
+		};
 		let result = match &kind {
 			Some(kind) => {
 				let kind = kind.clone();
@@ -1938,8 +2581,7 @@ impl Executor {
 		// value.
 		crate::val::check_value_depth(&result)?;
 
-		// Set the parameter
-		context_mut(&mut self.ctx)?.add_value(name, result.into());
+		self.bind_session_let(&name, Arc::new(result))?;
 
 		// The runtime formatter redacts credentials, including nested user
 		// definitions. The plan names every parameter the statement references.
@@ -1948,6 +2590,33 @@ impl Executor {
 		}
 		// Finalise transaction, returning nothing unless it couldn't commit
 		Ok(Value::None)
+	}
+
+	/// Bind the value of a top-level `LET` into the request's scope for the statements after it.
+	///
+	/// The value is already coerced and its depth checked, and a protected name is refused here
+	/// as it is before the value is computed. A binding the stream's carry bound
+	/// refuses fails the statement and ends the stream. An open block remembers what the binding
+	/// overwrites, the request context's own binding and never one a parent holds, so a block that
+	/// does not commit restores exactly what was there, absence included.
+	fn bind_session_let(&mut self, name: &str, value: Arc<Value>) -> FlowResult<()> {
+		// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) is never bound by a
+		// `LET`, whichever path delivers the binding.
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name) {
+			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
+				name: name.to_owned(),
+			})));
+		}
+		if let Err(refused) = self.carry.admit(&mut self.carried, name, &value) {
+			self.carry_crossed = true;
+			return Err(ControlFlow::from(anyhow::Error::new(refused)));
+		}
+		if self.let_undo.is_open() {
+			let prev = self.ctx.own_value(name).cloned();
+			self.let_undo.record(name, prev);
+		}
+		context_mut(&mut self.ctx)?.add_value(name.to_owned(), value);
+		Ok(())
 	}
 
 	/// Run a `KILL`.
@@ -2043,7 +2712,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		converted: &crate::expr::statements::LiveStatement,
-	) -> Option<crate::exec::vm::lower_live::Arrived> {
+	) -> Option<crate::exec::vm::live::Arrived> {
 		let txn = kvs.transaction(TransactionType::Read).await.ok()?;
 		let txn = Arc::new(txn.with_tenant_identity(self.ctx.tenant_identity().cloned()));
 		let Ok(ctx) = context_mut(&mut self.ctx) else {
@@ -2379,6 +3048,35 @@ impl Executor {
 		}
 	}
 
+	/// Replaces the slots recorded from `start` on with the rewrite's
+	/// `recorded` answer, when it has one.
+	fn rewrite_recorded(&mut self, start: usize, rewrite: &SlotRewrite) {
+		let Some(slot) = &rewrite.recorded else {
+			return;
+		};
+		for res in &mut self.results[start..] {
+			res.query_type = QueryType::Other;
+			res.result = slot_outcome(slot);
+		}
+	}
+
+	/// Pushes the slot of a statement met while a block runs on to its
+	/// terminator: the terminator's slot when `terminates`, else the slot of a
+	/// statement after the failure or interrupt point. Answers whether a slot
+	/// was pushed.
+	fn push_fast_forward_slot(&mut self, rewrite: &SlotRewrite, terminates: bool) -> bool {
+		let slot = if terminates {
+			&rewrite.terminator
+		} else {
+			&rewrite.following
+		};
+		let Some(slot) = slot else {
+			return false;
+		};
+		self.results.push(slot_result(slot, Duration::ZERO));
+		true
+	}
+
 	/// Await `wait`, work a statement left for after its commit, for no longer
 	/// than what remains of `budget` and of the query's deadline, and only
 	/// while the query is not cancelled. The time waited is taken from
@@ -2490,30 +3188,30 @@ impl Executor {
 				.with_write_keys_limit(kvs.transaction_max_write_keys())
 		}) else {
 			// couldn't create a transaction.
-			// Fast forward until we hit CANCEL or COMMIT
+			// Fast forward until we hit CANCEL or COMMIT, which take their
+			// terminator slot like every other statement of the block.
 			while let Some(stmt) = stream.next().await {
 				yield_now!();
 				let stmt = stmt?;
 				let place = place_statement(grouper, &stmt);
-				if let StatementRole::Cancel | StatementRole::Commit = place.role {
-					return Ok(());
-				}
-
-				let kind = stmt.statement_type();
-				self.results.push(QueryResult {
-					time: Duration::ZERO,
-					result: Err(TypesError::query(
-						"Tried to start a transaction while another transaction was open"
-							.to_string(),
-						Some(QueryError::NotExecuted),
-					)),
-					query_type: QueryType::Other,
+				let end = match place.role {
+					StatementRole::Commit => FailedEnd::Commit,
+					StatementRole::Cancel => FailedEnd::Cancel,
+					_ => FailedEnd::RequestEnd,
+				};
+				let terminates = !matches!(end, FailedEnd::RequestEnd);
+				let rewrite = finalise_slots(&BlockEnd::BeginFailed {
+					end,
 				});
+				self.push_fast_forward_slot(&rewrite, terminates);
 				self.emit_statement_event_unexecuted(
 					kvs,
-					kind,
+					stmt.statement_type(),
 					crate::observe::error_class::TXN_CREATE_FAILED,
 				);
+				if terminates {
+					return Ok(());
+				}
 			}
 
 			// Ran out of statements but still didn't hit a COMMIT or CANCEL
@@ -2523,9 +3221,29 @@ impl Executor {
 		};
 		let txn = Arc::new(txn);
 		self.in_block = true;
+		self.let_undo.begin();
 		let ran = self.execute_begin_statement_timed(kvs, txn, stream, grouper).await;
 		self.in_block = false;
-		ran
+		// The block's single exit: its bindings stand only where it committed.
+		// Every other end, and every error, puts them back.
+		let undone = match &ran {
+			Ok(BlockEnd::Committed) => {
+				self.let_undo.commit();
+				Ok(())
+			}
+			_ => match context_mut(&mut self.ctx) {
+				Ok(ctx) => {
+					self.let_undo.rollback(ctx);
+					Ok(())
+				}
+				Err(e) => {
+					self.let_undo.commit();
+					Err(e)
+				}
+			},
+		};
+		let end = ran.map(|_end| ());
+		end.and(undone)
 	}
 
 	/// [`Self::execute_begin_statement_impl`] once the block's transaction is
@@ -2536,7 +3254,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 		stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
-	) -> Result<()>
+	) -> Result<BlockEnd>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
@@ -2592,7 +3310,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 		mut stream: Pin<&mut S>,
 		grouper: &mut RequestGrouper,
-	) -> Result<()>
+	) -> Result<BlockEnd>
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
@@ -2600,7 +3318,6 @@ impl Executor {
 		// notifications.
 		let receiver = self.prepare_broker(true, kvs.live_query_broker());
 		let start_results = self.results.len();
-		let mut skip_remaining = false;
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
@@ -2636,13 +3353,8 @@ impl Executor {
 					let _ = txn.cancel().await;
 					// The rollback discards the statements already recorded as
 					// successful, so their results have to say so.
-					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::query(
-							"The query was not executed due to a cancelled transaction".to_string(),
-							Some(QueryError::Cancelled),
-						));
-					}
+					let rewrite = finalise_slots(&BlockEnd::MemoryThreshold);
+					self.rewrite_recorded(start_results, &rewrite);
 					return Err(e);
 				}
 			};
@@ -2652,13 +3364,11 @@ impl Executor {
 				let _ = txn.cancel().await;
 
 				let cancelled_count = self.results.len().saturating_sub(start_results);
-				for res in &mut self.results[start_results..] {
-					res.query_type = QueryType::Other;
-					res.result = Err(TypesError::query(
-						"The query was not executed due to a cancelled transaction".to_string(),
-						Some(QueryError::Cancelled),
-					));
-				}
+				let rewrite = finalise_slots(&BlockEnd::Interrupted {
+					reason: done,
+					end: InterruptEnd::RequestEnd,
+				});
+				self.rewrite_recorded(start_results, &rewrite);
 				let cancel_class = match done {
 					Reason::Timedout(_) => crate::observe::error_class::CTX_TIMEOUT,
 					Reason::Canceled => crate::observe::error_class::CTX_CANCELLED,
@@ -2667,87 +3377,64 @@ impl Executor {
 					self.emit_statement_event_unexecuted(kvs, StatementType::Other, cancel_class);
 				}
 
-				while let Some(stmt) = stream.next().await {
-					yield_now!();
-					let stmt = stmt?;
-					let place = place_statement(grouper, &stmt);
-					let kind = stmt.statement_type();
-					// The statement that was pulled when `done` was observed may itself
-					// have closed the block in the grouping, and it is dropped here. The
-					// COMMIT or CANCEL that ends this fast-forward is then the next one
-					// in the text, which the grouper sees outside a block, so both of
-					// its roles stand for the end of the block.
-					match place.role {
+				// The statement pulled when `done` was observed is the first one answered,
+				// then the rest of the block's statements up to its terminator. Each takes
+				// exactly one slot, so the batch has one `QueryResult` per statement.
+				let mut observed = Some((stmt.statement_type(), place.role));
+				let mut first = true;
+				loop {
+					let (kind, role) = match observed.take() {
+						Some(first) => first,
+						None => {
+							let Some(stmt) = stream.next().await else {
+								break;
+							};
+							yield_now!();
+							let stmt = stmt?;
+							let place = place_statement(grouper, &stmt);
+							(stmt.statement_type(), place.role)
+						}
+					};
+					// A COMMIT or CANCEL the grouping places outside a block still stands
+					// for the end of the block that was open.
+					let end = match role {
 						StatementRole::Commit
-						| StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock) => {
-							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
-							// Still emit one `QueryResult` for this COMMIT statement so the batch
-							// has one row per statement (mirrors successful COMMIT, which
-							// pushes Ok(NONE) in the main `TopLevelExpr::Commit` branch
-							// below) (#7207).
-							self.results.push(QueryResult {
-								time: Duration::ZERO,
-								result: Err(match done {
-									Reason::Timedout(d) => TypesError::query(
-										format!("Cannot COMMIT: timed out ({d})"),
-										Some(QueryError::TimedOut {
-											duration: d.0,
-										}),
-									),
-									Reason::Canceled => TypesError::query(
-										"Cannot COMMIT: the transaction was cancelled".to_string(),
-										Some(QueryError::Cancelled),
-									),
-								}),
-								query_type: QueryType::Other,
-							});
-							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
-							return Ok(());
-						}
-						role => {
-							let result = Err(match done {
-								Reason::Timedout(d) => TypesError::query(
-									format!("Timed out: {d}"),
-									Some(QueryError::TimedOut {
-										duration: d.0,
-									}),
-								),
-								Reason::Canceled => TypesError::query(
-									"The query was not executed due to a cancelled transaction"
-										.to_string(),
-									Some(QueryError::Cancelled),
-								),
-							});
-							self.results.push(QueryResult {
-								time: Duration::ZERO,
-								result,
-								query_type: QueryType::Other,
-							});
-							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
-							if matches!(
-								role,
-								StatementRole::Cancel
-									| StatementRole::Misplaced(
-										MisplacedControl::CancelOutsideBlock
-									)
-							) {
-								return Ok(());
-							}
-						}
+						| StatementRole::Misplaced(MisplacedControl::CommitOutsideBlock) => InterruptEnd::Commit,
+						StatementRole::Cancel
+						| StatementRole::Misplaced(MisplacedControl::CancelOutsideBlock) => InterruptEnd::Cancel,
+						_ => InterruptEnd::RequestEnd,
+					};
+					let interrupted = BlockEnd::Interrupted {
+						reason: done,
+						end,
+					};
+					let rewrite = finalise_slots(&interrupted);
+					// After timeout/cancel the txn is already gone, so a COMMIT cannot
+					// succeed. The terminator answers its own slot, the statement observed
+					// at the interrupt and each one after it answer the interrupt's.
+					let terminates = !matches!(end, InterruptEnd::RequestEnd);
+					let slot = if terminates {
+						&rewrite.terminator
+					} else if first {
+						&rewrite.interrupted_statement
+					} else {
+						&rewrite.following
+					};
+					if let Some(slot) = slot {
+						self.results.push(slot_result(slot, Duration::ZERO));
+						self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
 					}
+					if terminates {
+						return Ok(interrupted);
+					}
+					first = false;
 				}
 
 				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
-				return Ok(());
-			}
-
-			// A statement skipped after a `RETURN` is skipped whatever the
-			// grouping made of it, so a `BEGIN` the block never reaches does not
-			// abort it; only the statement that ends the block is still run.
-			if skip_remaining
-				&& !matches!(place.role, StatementRole::Commit | StatementRole::Cancel)
-			{
-				continue;
+				return Ok(BlockEnd::Interrupted {
+					reason: done,
+					end: InterruptEnd::RequestEnd,
+				});
 			}
 
 			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
@@ -2783,13 +3470,11 @@ impl Executor {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
-					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::query(
-							"The query was not executed due to a failed transaction".to_string(),
-							Some(QueryError::NotExecuted),
-						));
-					}
+					let rewrite = finalise_slots(&BlockEnd::Failed {
+						cause: FailCause::NestedBegin,
+						end: FailedEnd::RequestEnd,
+					});
+					self.rewrite_recorded(start_results, &rewrite);
 
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
@@ -2812,57 +3497,40 @@ impl Executor {
 						yield_now!();
 						let stmt = stmt?;
 						let place = place_statement(grouper, &stmt);
-						match place.role {
-							StatementRole::Commit => {
-								self.results.push(QueryResult {
-									time: Duration::ZERO,
-									result: Err(TypesError::query(
-										"Cannot COMMIT: the transaction was aborted due to a nested BEGIN"
-											.to_string(),
-										Some(QueryError::NotExecuted),
-									)),
-									query_type: QueryType::Other,
-								});
-								return Ok(());
-							}
-							role => {
-								self.results.push(QueryResult {
-									time: Duration::ZERO,
-									result: Err(TypesError::query(
-										"The query was not executed due to a failed transaction"
-											.to_string(),
-										Some(QueryError::NotExecuted),
-									)),
-									query_type: QueryType::Other,
-								});
-								if matches!(role, StatementRole::Cancel) {
-									return Ok(());
-								}
-							}
+						let end = match place.role {
+							StatementRole::Commit => FailedEnd::Commit,
+							StatementRole::Cancel => FailedEnd::Cancel,
+							_ => FailedEnd::RequestEnd,
+						};
+						let failed = BlockEnd::Failed {
+							cause: FailCause::NestedBegin,
+							end,
+						};
+						let rewrite = finalise_slots(&failed);
+						let terminates = !matches!(end, FailedEnd::RequestEnd);
+						self.push_fast_forward_slot(&rewrite, terminates);
+						if terminates {
+							return Ok(failed);
 						}
 					}
 
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
-					return Ok(());
+					return Ok(BlockEnd::Failed {
+						cause: FailCause::NestedBegin,
+						end: FailedEnd::RequestEnd,
+					});
 				}
 				StatementRole::Cancel => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
-					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::query(
-							"The query was not executed due to a cancelled transaction".to_string(),
-							Some(QueryError::Cancelled),
-						));
-					}
+					let rewrite = finalise_slots(&BlockEnd::Cancelled);
+					self.rewrite_recorded(start_results, &rewrite);
 
 					// CANCEL returns NONE
-					self.results.push(QueryResult {
-						time: before.elapsed(),
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if let Some(slot) = &rewrite.terminator {
+						self.results.push(slot_result(slot, before.elapsed()));
+					}
 
 					self.emit_statement_event_cached(
 						kvs,
@@ -2875,7 +3543,7 @@ impl Executor {
 						None,
 					);
 
-					return Ok(());
+					return Ok(BlockEnd::Cancelled);
 				}
 				StatementRole::Commit => {
 					// Commit the transaction.
@@ -2892,11 +3560,9 @@ impl Executor {
 						}
 
 						// COMMIT returns NONE
-						self.results.push(QueryResult {
-							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
-							query_type: QueryType::Other,
-						});
+						if let Some(slot) = &finalise_slots(&BlockEnd::Committed).terminator {
+							self.results.push(slot_result(slot, before.elapsed()));
+						}
 
 						self.emit_statement_event_cached(
 							kvs,
@@ -2909,57 +3575,26 @@ impl Executor {
 							None,
 						);
 
-						return Ok(());
+						return Ok(BlockEnd::Committed);
 					};
 
 					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
 					// Surface the failure on a dedicated COMMIT result row; mark prior statement
-					// slots as not executed so nothing implies a successful commit (#7207).
+					// slots as not executed so nothing implies a successful commit.
 					//
 					// Unless the commit's outcome is unknown, in which case "not
 					// executed" is a false statement about statements that may
 					// well have been applied.
-					let indeterminate = crate::kvs::is_indeterminate_commit(&e);
-					for res in &mut self.results[start_results..] {
-						res.query_type = QueryType::Other;
-						res.result = Err(if indeterminate {
-							TypesError::query(
-								"The transaction's commit outcome is unknown, so whether this \
-								 query was applied is undetermined"
-									.to_string(),
-								None,
-							)
-						} else {
-							TypesError::query(
-								"The query was not executed due to a failed transaction"
-									.to_string(),
-								Some(QueryError::NotExecuted),
-							)
-						});
-					}
-
-					// A retryable write conflict keeps its structured
-					// TransactionConflict kind (wire -32009) so SDK
-					// `isRetryableConflict()`/`.retry()` fire. An unknown
-					// outcome carries no kind, so neither the conflict-retry
-					// path nor a not-executed reading applies. Anything else
-					// (constraint failure, txn already finished) stays
-					// NotExecuted.
-					let commit_error_kind = if crate::kvs::is_retryable_transaction_conflict(&e) {
-						Some(QueryError::TransactionConflict)
-					} else if indeterminate {
-						None
-					} else {
-						Some(QueryError::NotExecuted)
+					let commit_failed = BlockEnd::CommitFailed {
+						error: e.to_string(),
+						indeterminate: crate::kvs::is_indeterminate_commit(&e),
+						conflict: crate::kvs::is_retryable_transaction_conflict(&e),
 					};
-					self.results.push(QueryResult {
-						time: before.elapsed(),
-						result: Err(TypesError::query(
-							format!("Cannot COMMIT: {e}"),
-							commit_error_kind,
-						)),
-						query_type: QueryType::Other,
-					});
+					let rewrite = finalise_slots(&commit_failed);
+					self.rewrite_recorded(start_results, &rewrite);
+					if let Some(slot) = &rewrite.terminator {
+						self.results.push(slot_result(slot, before.elapsed()));
+					}
 
 					// `Cannot COMMIT` surfaces as a caller-visible failure ("the
 					// transaction your statements ran inside could not
@@ -2977,7 +3612,7 @@ impl Executor {
 						Some(crate::observe::error_class::CLIENT),
 					);
 
-					return Ok(());
+					return Ok(commit_failed);
 				}
 				StatementRole::Option => {
 					let Dispatch::Option(option) = stmt.dispatch() else {
@@ -3014,17 +3649,16 @@ impl Executor {
 					// iterators inside this BEGIN/COMMIT block can
 					// surface affected-row counts independently of the
 					// post-RETURN value shape.
-					let counters = self.install_statement_counters();
+					let counters = self.install_statement_state();
 					let statement_index = self.current_index();
 					let r: Result<Value> = match self
 						.execute_plan_in_transaction(Arc::clone(&txn), &before, stmt)
 						.await
 					{
 						Ok(x) => Ok(x),
-						Err(ControlFlow::Return(value)) => {
-							skip_remaining = true;
-							Ok(value)
-						}
+						// A `RETURN` ends its own statement with its value, which is the catch
+						// every path shares. The statements after it run.
+						Err(ControlFlow::Return(value)) => Ok(value),
 						// A `BREAK` or `CONTINUE` no loop of the statement caught is
 						// the statement's error, which fails the block as any other
 						// does.
@@ -3037,14 +3671,11 @@ impl Executor {
 								ControlFlow::Err(e) => e,
 								_ => anyhow!(ExecError::InvalidControlFlow),
 							};
-							for res in &mut self.results[start_results..] {
-								res.query_type = QueryType::Other;
-								res.result = Err(TypesError::query(
-									"The query was not executed due to a failed transaction"
-										.to_string(),
-									Some(QueryError::NotExecuted),
-								));
-							}
+							let rewrite = finalise_slots(&BlockEnd::Failed {
+								cause: FailCause::Error,
+								end: FailedEnd::RequestEnd,
+							});
+							self.rewrite_recorded(start_results, &rewrite);
 
 							// Convert the anyhow error before pushing so we can both
 							// classify it for the metric attribute and store it on the
@@ -3074,46 +3705,36 @@ impl Executor {
 
 							let _ = txn.cancel().await;
 
-							while let Some(stmt) = stream.next().await {
+							// A refused `LET` ends the stream, so nothing after it is pulled.
+							while !self.carry_crossed
+								&& let Some(stmt) = stream.next().await
+							{
 								yield_now!();
 								let stmt = stmt?;
 								let place = place_statement(grouper, &stmt);
-								match place.role {
-									StatementRole::Commit => {
-										// Aborted txn: COMMIT must error (same intent as
-										// `txn.commit()` failure above — descriptive
-										// `Cannot COMMIT:` prefix) (#7207).
-										self.results.push(QueryResult {
-												time: Duration::ZERO,
-												result: Err(TypesError::query(
-													"Cannot COMMIT: the transaction was aborted due to a prior error"
-														.to_string(),
-													Some(QueryError::NotExecuted),
-												)),
-												query_type: QueryType::Other,
-											});
-										return Ok(());
-									}
-									StatementRole::Cancel => {
-										return Ok(());
-									}
-									_ => {
-										self.results.push(QueryResult {
-												time: Duration::ZERO,
-												result: Err(TypesError::query(
-													"The query was not executed due to a cancelled transaction"
-														.to_string(),
-													Some(QueryError::Cancelled),
-												)),
-												query_type: QueryType::Other,
-											});
-									}
+								let end = match place.role {
+									StatementRole::Commit => FailedEnd::Commit,
+									StatementRole::Cancel => FailedEnd::Cancel,
+									_ => FailedEnd::RequestEnd,
+								};
+								let failed = BlockEnd::Failed {
+									cause: FailCause::Error,
+									end,
+								};
+								let rewrite = finalise_slots(&failed);
+								let terminates = !matches!(end, FailedEnd::RequestEnd);
+								self.push_fast_forward_slot(&rewrite, terminates);
+								if terminates {
+									return Ok(failed);
 								}
 							}
 
 							// ran out of statements before the transaction ended.
 							// Just break as we have nothing else we can do.
-							return Ok(());
+							return Ok(BlockEnd::Failed {
+								cause: FailCause::Error,
+								end: FailedEnd::RequestEnd,
+							});
 						}
 					};
 
@@ -3178,12 +3799,10 @@ impl Executor {
 		// Be conservative and treat this essentially as a CANCEL statement.
 		let _ = txn.cancel().await;
 
-		for res in &mut self.results[start_results..] {
-			res.query_type = QueryType::Other;
-			res.result = Err(TypesError::internal("Missing COMMIT statement".to_string()));
-		}
+		let rewrite = finalise_slots(&BlockEnd::Unterminated);
+		self.rewrite_recorded(start_results, &rewrite);
 
-		Ok(())
+		Ok(BlockEnd::Unterminated)
 	}
 
 	#[cfg_attr(
@@ -3279,6 +3898,7 @@ impl Executor {
 
 		// Every statement runs in the caller's transaction, as a block's do.
 		self.in_block = true;
+		self.in_session_txn = true;
 		for stmt in statements {
 			// See `consumer_gone`: the rest of the batch is abandoned rather
 			// than run. The transaction spans requests and its owner still
@@ -3307,7 +3927,7 @@ impl Executor {
 			// off this field, and one they never see is one they never tear
 			// down when the session ends or its principal changes.
 			let query_type = stmt.query_type();
-			let counters = self.install_statement_counters();
+			let counters = self.install_statement_state();
 			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await;
 			self.misplaced_control = None;
 
@@ -3327,7 +3947,7 @@ impl Executor {
 				},
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
 					time,
-					result: Err(TypesError::internal("Invalid control flow".to_string())),
+					result: Err(types_error_from_anyhow(anyhow!(ExecError::InvalidControlFlow))),
 					query_type: QueryType::Other,
 				},
 			};
@@ -3337,12 +3957,10 @@ impl Executor {
 				.as_ref()
 				.err()
 				.map(crate::observe::error_class::classify_types_error);
-			// Counters are accurate for DML (SELECT row counts come
-			// from the value shape, which we no longer have post
-			// conversion — passing `None` is fine since the helper
-			// short-circuits to counter-driven counts on DML and
-			// returns 0 on non-DML when value is `None`, matching the
-			// previous behaviour for this entry point).
+			// Counters are accurate for DML (SELECT row counts come from the value shape,
+			// which does not exist after conversion, so passing `None` is fine: the helper
+			// short-circuits to counter-driven counts on DML and returns 0 on non-DML when
+			// the value is `None`.
 			let stmt_result_rows =
 				Self::count_result_rows(statement_type, Some(counters.as_ref()), None);
 			self.emit_statement_event_cached(
@@ -3372,6 +3990,13 @@ impl Executor {
 			name = "executor",
 			target = "surrealdb::core::dbs",
 			skip_all
+		)
+	)]
+	#[cfg_attr(
+		not(test),
+		expect(
+			dead_code,
+			reason = "the unbounded form of the stream entry point; the datastore passes its carry bound to the bounded form"
 		)
 	)]
 	pub(crate) async fn execute_stream<S>(
@@ -3416,6 +4041,25 @@ impl Executor {
 			surrealdb.statement_type = tracing::field::Empty,
 		),
 	))]
+	pub(crate) async fn execute_statement_stream_bounded<S>(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		skip_success_results: bool,
+		carry: CarryBound,
+		stream: S,
+	) -> Result<Vec<QueryResult>>
+	where
+		S: Stream<Item = Result<TopLevelStatement>>,
+	{
+		let mut this = Executor::new(kvs, ctx, opt);
+		this.carry = carry;
+		this.run_statement_stream(kvs, skip_success_results, stream).await?;
+		Ok(this.results)
+	}
+
+	/// [`Executor::execute_statement_stream_bounded`] with no bound on what the
+	/// stream's top-level `LET`s retain.
 	pub(crate) async fn execute_statement_stream<S>(
 		kvs: &Datastore,
 		ctx: FrozenContext,
@@ -3426,8 +4070,37 @@ impl Executor {
 	where
 		S: Stream<Item = Result<TopLevelStatement>>,
 	{
+		Self::execute_statement_stream_bounded(
+			kvs,
+			ctx,
+			opt,
+			skip_success_results,
+			CarryBound::UNBOUNDED,
+			stream,
+		)
+		.await
+	}
+
+	/// Execute `statements` as the fragments of one stream.
+	///
+	/// Runs exactly what [`Executor::execute_statements`] runs, except that no
+	/// request program is compiled up front: each statement is compiled when it
+	/// arrives, as a fragment of its own. One executor spans every fragment, so
+	/// the `LET`s of earlier fragments are visible to later ones. The fragments
+	/// are a stream, so the `LET`s they retain are held to
+	/// [`IMPORT_CARRY_BOUND`](crate::kvs::ds::IMPORT_CARRY_BOUND).
+	#[cfg(feature = "internal-fragments")]
+	pub(crate) async fn execute_fragments(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		statements: Vec<TopLevelStatement>,
+	) -> Result<Vec<QueryResult>> {
 		let mut this = Executor::new(kvs, ctx, opt);
-		this.run_statement_stream(kvs, skip_success_results, stream).await?;
+		this.fragmented = true;
+		this.carry = crate::kvs::ds::IMPORT_CARRY_BOUND;
+		let stream = futures::stream::iter(statements.into_iter().map(Ok));
+		crate::exec::compiles::request(this.run_statement_stream(kvs, false, stream)).await?;
 		Ok(this.results)
 	}
 
@@ -3573,7 +4246,7 @@ impl Executor {
 					let result = self.execute_option_statement(&stmt);
 					let outcome = Outcome::from(&result);
 					// `execute_option_statement` returns `anyhow::Result`; the
-					// only failure today is a permission denial via the
+					// only failure is a permission denial via the
 					// capability gate (`is_allowed(..., Action::Edit,
 					// ResourceKind::Option, ...)`), so the bounded error class
 					// is `permission`, not the generic `client` bucket.
@@ -3616,9 +4289,8 @@ impl Executor {
 					// `types_error_from_anyhow` below (see the `if let
 					// Err(e)` arm). We can't classify before that conversion
 					// because we'd consume the error twice, so reach for the
-					// `txn_create_failed` constant: the only way
-					// `execute_begin_statement` errors today is when the
-					// transaction creation itself failed.
+					// `txn_create_failed` constant, because the only error that
+					// `execute_begin_statement` raises is a failed transaction creation.
 					let error_class = begin_result
 						.as_ref()
 						.err()
@@ -3664,7 +4336,7 @@ impl Executor {
 					// Install fresh per-statement counters so DML
 					// iterators can record affected rows independently of
 					// the post-RETURN value shape.
-					let counters = self.install_statement_counters();
+					let counters = self.install_statement_state();
 					let statement_index = self.current_index();
 					let result = self.execute_bare_statement(kvs, &start, stmt).await;
 					self.misplaced_control = None;
@@ -3722,9 +4394,21 @@ impl Executor {
 			// the statement was a `BEGIN` that has now resolved, every statement
 			// its block held — can be sent onward.
 			self.finalise_results().await;
+			// A `LET` the carry bound refused was the last statement of the stream.
+			if self.carry_crossed {
+				break;
+			}
+			// A request the language rejects runs nothing further.
+			if self.request_rejection.is_some() {
+				break;
+			}
 			yield_now!();
 		}
 		self.emit_query_event_for_results(kvs, batch_start, &self.results[batch_results_start..]);
+		if let Some(message) = self.request_rejection.take() {
+			self.results.truncate(batch_results_start);
+			return Err(anyhow::Error::new(Error::Exec(ExecError::InvalidStatement(message))));
+		}
 		Ok(())
 	}
 }
@@ -3855,6 +4539,14 @@ impl Executor {
 				request.program = program;
 			}
 		}
+		// A request the language rejects runs no statement: each statement
+		// reached before the driver stops answers with the rejection.
+		if let Some(message) = &self.request_rejection {
+			return Some(CompiledStatement {
+				plan: Err(Error::Exec(ExecError::InvalidStatement(message.clone()))),
+				logged: None,
+			});
+		}
 		let request = self.request.as_mut()?;
 		let compiled = request.compiled.as_mut()?.get_mut(position)?.take()?;
 		let plan = match compiled.entry {
@@ -3896,8 +4588,7 @@ impl Executor {
 	/// statement, a write, which may define a table or run code that changes
 	/// it, a `USE`, a `LIVE` or `ACCESS`, or anything whose effects are not
 	/// known — and it reads no parameter an earlier `LET` binds to what only
-	/// the run computes; past the first statement, only where binding folds no
-	/// read of the clock. It is compiled under the session the statements
+	/// the run computes. It is compiled under the session the statements
 	/// before it leave: the names a `USE` writes, the options an `OPTION`
 	/// sets, the constants a `LET` binds. Every other statement is served
 	/// when it is reached, planned for the catalog its transaction reads then
@@ -3916,17 +4607,31 @@ impl Executor {
 			std::iter::repeat_with(|| None).take(entries.len()).collect();
 		let mut builder = crate::exec::vm::RequestBuilder::default();
 		let mut steps: Vec<RequestStep> = Vec::with_capacity(entries.len());
-		let mut opt = self.opt.clone();
-		let mut session = self.ctx.value("session").cloned().unwrap_or(Value::None);
-		let mut bound: Vec<(String, Value)> = Vec::new();
-		let mut computed: std::collections::HashSet<String> = std::collections::HashSet::new();
+		let mut plan_session = crate::exec::vm::PlanSession::new(
+			self.opt.clone(),
+			self.ctx.value("session").cloned().unwrap_or(Value::None),
+		);
 		let keep_logged = self.ctx.slow_log().is_some();
 		let mut same_txn = true;
 		let mut changed = false;
 		let mut in_block = self.in_block;
+		// The `LET`s of the walk start afresh; the inputs, from position 0, stay.
+		for history in self.binding_origins.values_mut() {
+			history.retain(|(from, _)| *from == 0);
+		}
+		// The names the open explicit block has bound, which its end may undo:
+		// those an earlier fragment of the block bound, then those of the walk.
+		// A session transaction's statements are never undone by a block end.
+		let mut block_names: Vec<String> = Vec::new();
+		let mut explicit = in_block && !self.in_session_txn && self.let_undo.is_open();
+		// The first region-constraint rejection of a request compiled from its
+		// first statement, with the statement's position.
+		let mut judged: Option<(usize, String)> = None;
+		if explicit {
+			block_names.extend(self.let_undo.log.iter().map(|(name, _)| name.to_string()));
+		}
 		for (at, entry) in entries.iter_mut().enumerate() {
 			let planning = at >= first;
-			let is_first = at == first;
 			if planning && at > first && !in_block {
 				same_txn &= matches!(
 					entry,
@@ -3942,30 +4647,28 @@ impl Executor {
 					if planning && at > first && !in_block {
 						same_txn = false;
 					}
+					if !in_block {
+						explicit = true;
+						block_names.clear();
+					}
 					in_block = true;
 					RequestStep::Begin
 				}
 				RequestEntry::Commit => {
+					self.end_block_origins(&mut explicit, &mut block_names, at);
 					in_block = false;
 					same_txn &= !planning;
 					RequestStep::Commit
 				}
 				RequestEntry::Cancel => {
+					self.end_block_origins(&mut explicit, &mut block_names, at);
 					in_block = false;
 					same_txn &= !planning;
 					RequestStep::Cancel
 				}
 				RequestEntry::Option(option) => {
 					if planning {
-						if option.name.eq_ignore_ascii_case("IMPORT") {
-							opt.set_import(option.what);
-						} else if option.name.eq_ignore_ascii_case("FORCE") {
-							opt.force = if option.what {
-								Force::All
-							} else {
-								Force::None
-							};
-						}
+						plan_session.option(&option.name, option.what);
 					}
 					RequestStep::Option {
 						name: option.name.to_string(),
@@ -3976,14 +4679,7 @@ impl Executor {
 					if planning {
 						changed = true;
 						if let Some((ns, db)) = names {
-							if let Some(ns) = ns {
-								opt.set_ns(Some(ns.as_str().into()));
-								session.put(NS.as_ref(), ns.clone().into());
-							}
-							if let Some(db) = db {
-								opt.set_db(Some(db.as_str().into()));
-								session.put(DB.as_ref(), db.clone().into());
-							}
+							plan_session.use_names(ns.as_deref(), db.as_deref());
 						}
 					}
 					match names {
@@ -4014,34 +4710,32 @@ impl Executor {
 					// reached.
 					let constant = match value.as_ref() {
 						Some(Ok(op)) if planning => {
-							compiled[at] = Some(
-								self.compile_one(
+							let planned = self
+								.compile_one(
 									txn,
 									op,
-									&opt,
-									&session,
-									&bound,
-									&computed,
+									&plan_session,
 									inline,
-									is_first,
 									keep_logged,
 									&mut builder,
 								)
-								.await,
-							);
+								.await;
+							if first == 0 && judged.is_none() {
+								judged = self.judge(txn, op, &plan_session, at, &planned).await;
+							}
+							compiled[at] = Some(planned);
 							constant_value(op, kind.as_ref())
 						}
 						_ => None,
 					};
-					bound.retain(|(bound_name, _)| bound_name != name);
-					match constant {
-						Some(constant) => {
-							computed.remove(name.as_str());
-							bound.push((name.clone(), constant));
-						}
-						None => {
-							computed.insert(name.clone());
-						}
+					let origin = match constant {
+						Some(_) => BindingOrigin::LetConst,
+						None => BindingOrigin::LetComputed,
+					};
+					plan_session.bind_let(name, constant);
+					self.note_let_origin(name, at + 1, origin);
+					if explicit {
+						block_names.push(name.clone());
 					}
 					changed |= planning && !*read_only;
 					RequestStep::Let {
@@ -4055,21 +4749,21 @@ impl Executor {
 				} => {
 					match op.as_ref() {
 						Some(Ok(lowered)) if planning => {
-							compiled[at] = Some(
-								self.compile_one(
+							let planned = self
+								.compile_one(
 									txn,
 									lowered,
-									&opt,
-									&session,
-									&bound,
-									&computed,
+									&plan_session,
 									inline,
-									is_first,
 									keep_logged,
 									&mut builder,
 								)
-								.await,
-							);
+								.await;
+							if first == 0 && judged.is_none() {
+								judged =
+									self.judge(txn, lowered, &plan_session, at, &planned).await;
+							}
+							compiled[at] = Some(planned);
 						}
 						// A statement with no logical form fails with that,
 						// whatever the catalog holds.
@@ -4124,13 +4818,15 @@ impl Executor {
 			};
 			steps.push(step);
 		}
-		let program = crate::exec::planner::finish_request(
-			&self.ctx,
-			&self.function_registry,
-			Arc::clone(txn),
-			builder,
-			steps,
-		);
+		// Compiled from the first statement, nothing of the request has run:
+		// a statement the language rejects refuses the request as a whole,
+		// whether it is compiled now or served when it is reached. The first
+		// rejection in statement order answers. A statement compiled after
+		// others ran fails alone, as any statement that fails to plan does.
+		if first == 0 {
+			self.request_rejection = judged.map(|(_, message)| message);
+		}
+		let program = crate::exec::planner::finish_request(builder, steps);
 		match program {
 			Ok(program) => (compiled, Some(program)),
 			// A request whose program cannot be put together plans each
@@ -4139,25 +4835,80 @@ impl Executor {
 		}
 	}
 
+	/// The region-constraint rejection of `op`, the statement at `position`
+	/// of the request, planned as `planned`. A statement compiled now was
+	/// judged by its compile, and is bound again only to number a rejection
+	/// by its position. A statement served or planned when it is reached is
+	/// bound here when it may hold a rejected construct ([`may_be_rejected`]).
+	async fn judge(
+		&self,
+		txn: &Arc<Transaction>,
+		op: &LogicalOp,
+		planning: &crate::exec::vm::PlanSession,
+		position: usize,
+		planned: &PlannedStatement,
+	) -> Option<(usize, String)> {
+		match &planned.entry {
+			Planned::Compiled(Ok(_)) => None,
+			Planned::Compiled(Err(error)) => {
+				let message = rejection_message(error)?.to_owned();
+				Some(
+					self.rejection_of(txn, op, planning, position)
+						.await
+						.unwrap_or((position, message)),
+				)
+			}
+			Planned::Served {
+				..
+			}
+			| Planned::Reached {
+				..
+			} => match may_be_rejected(op) {
+				true => self.rejection_of(txn, op, planning, position).await,
+				false => None,
+			},
+		}
+	}
+
+	/// The region-constraint rejection of `op`, the statement at `position`
+	/// of the request, bound in `txn` under the session the statements
+	/// before it leave; `None` when every region admits what it holds.
+	async fn rejection_of(
+		&self,
+		txn: &Arc<Transaction>,
+		op: &LogicalOp,
+		planning: &crate::exec::vm::PlanSession,
+		position: usize,
+	) -> Option<(usize, String)> {
+		let mut ctx = Context::snapshot(&self.ctx);
+		ctx.set_transaction(Arc::clone(txn));
+		ctx.add_value("session", planning.session.clone().into());
+		for (name, value) in &planning.bound {
+			ctx.add_value(name.clone(), value.clone().into());
+		}
+		let ctx = ctx.freeze();
+		crate::exec::planner::request_statement_rejection(
+			op.clone(),
+			&ctx,
+			&self.function_registry,
+			Arc::clone(txn),
+			Some(Arc::clone(&planning.opt.auth)),
+			position,
+		)
+		.await
+		.map(|message| (position, message))
+	}
+
 	/// Compile `op`, a statement of the request, in `txn` under the session
 	/// the statements before it leave, into the request `builder` builds;
-	/// or, where it is not `inline`, where it reads a parameter only the run
-	/// computes, or where binding it past the first statement would fold a
-	/// read of the clock, leave it to be served when it is reached.
-	#[expect(
-		clippy::too_many_arguments,
-		reason = "the statement, the session the statements before it leave, and the request"
-	)]
+	/// or, where it is not `inline`, or where it reads a parameter only the run
+	/// computes, leave it to be served when it is reached.
 	async fn compile_one(
 		&self,
 		txn: &Arc<Transaction>,
 		op: &LogicalOp,
-		opt: &Options,
-		session: &Value,
-		bound: &[(String, Value)],
-		computed: &std::collections::HashSet<String>,
+		planning: &crate::exec::vm::PlanSession,
 		inline: bool,
-		first: bool,
 		keep_logged: bool,
 		builder: &mut crate::exec::vm::RequestBuilder,
 	) -> PlannedStatement {
@@ -4166,13 +4917,14 @@ impl Executor {
 			entry: served_for(op.clone(), false),
 			logged: keep_logged.then(|| op.clone()),
 		};
-		if !inline || (!computed.is_empty() && reads_any(op, computed)) {
+		if !inline || (!planning.computed.is_empty() && reads_any(op, &planning.computed)) {
 			return served();
 		}
+		let opt = &planning.opt;
 		let mut ctx = Context::snapshot(&self.ctx);
 		ctx.set_transaction(Arc::clone(txn));
-		ctx.add_value("session", session.clone().into());
-		for (name, value) in bound {
+		ctx.add_value("session", planning.session.clone().into());
+		for (name, value) in &planning.bound {
 			ctx.add_value(name.clone(), value.clone().into());
 		}
 		let ctx = ctx.freeze();
@@ -4186,14 +4938,61 @@ impl Executor {
 			builder,
 		)
 		.await;
-		if !first && planned.binds_the_clock {
-			return served();
-		}
 		PlannedStatement {
-			entry: Planned::Compiled(planned.entry),
+			entry: Planned::Compiled(planned),
 			logged,
 		}
 	}
+}
+
+/// Whether `op` may hold a construct a region constraint rejects: a schema
+/// statement, whose stored clauses are judged where it is written; a write,
+/// schema statement, `LET` or `SLEEP` nested anywhere inside it; or a closure
+/// literal, whose body the walk of the plan does not enter. Every row of the
+/// constraint table names one of those, so a statement that holds none is
+/// admitted without being bound.
+fn may_be_rejected(op: &LogicalOp) -> bool {
+	if matches!(op, LogicalOp::Ddl(_)) {
+		return true;
+	}
+	// The walk is in pre-order, so the first node it visits is `op` itself.
+	let mut visited = 0_usize;
+	op.visit_ops_deep(&mut |node| {
+		visited += 1;
+		let nested = visited > 1;
+		let held = match node {
+			LogicalOp::Write(_) | LogicalOp::Ddl(_) | LogicalOp::Let(_) | LogicalOp::Sleep(_) => {
+				nested
+			}
+			_ => false,
+		};
+		if held
+			|| node
+				.visit_scalars(&mut |expr| {
+					if holds_closure(expr) {
+						Err(())
+					} else {
+						Ok(())
+					}
+				})
+				.is_err()
+		{
+			std::ops::ControlFlow::Break(())
+		} else {
+			std::ops::ControlFlow::Continue(())
+		}
+	})
+	.is_break()
+}
+
+/// Whether `expr` is or holds a closure literal.
+fn holds_closure(expr: &crate::expr::logical::LogicalExpr) -> bool {
+	if matches!(expr, crate::expr::logical::LogicalExpr::Closure(_)) {
+		return true;
+	}
+	let mut found = false;
+	expr.for_each_child(&mut |child| found = found || holds_closure(child));
+	found
 }
 
 /// How `op`, a statement planned when it is reached, is planned then: served
@@ -4351,9 +5150,17 @@ fn visit_scalar_params<V: Visitor<Error = ()>>(
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_types::ToSql;
+	use std::borrow::Cow;
+	use std::sync::Arc;
 
-	use super::{shape_statement_value, visit_plan_params};
+	use surrealdb_types::{QueryError, ToSql};
+
+	use super::{
+		BlockEnd, Carried, CarryBound, FailCause, FailedEnd, InterruptEnd, LetUndo, SlotRewrite,
+		SlotValue, finalise_slots, shape_statement_value, visit_plan_params,
+	};
+	use crate::ctx::Context;
+	use crate::ctx::reason::Reason;
 	use crate::dbs::Session;
 	use crate::exec::OutputShape;
 	use crate::expr::logical::lower;
@@ -4570,13 +5377,10 @@ mod tests {
 		assert_eq!(run(&together).await, expected);
 	}
 
-	/// A cancellation observed as a block's own `COMMIT` is pulled drops that
-	/// `COMMIT`, and the fast-forward ends at the next `COMMIT` of the text,
-	/// which the grouping sees outside a block. That one answers as a
-	/// `COMMIT` of the cancelled block, as it does when the cancellation is
-	/// observed at any other statement of the block.
+	/// A cancellation observed as a block's own `COMMIT` is pulled answers that
+	/// `COMMIT` as a `COMMIT` of the cancelled block, and the block ends there.
 	#[tokio::test]
-	async fn a_cancellation_at_a_commit_ends_at_the_next_commit() {
+	async fn a_cancellation_at_a_commit_answers_that_commit() {
 		use futures::StreamExt;
 		use surrealdb_expr::parser::TopLevelExpr;
 
@@ -4594,15 +5398,10 @@ mod tests {
 		let canceller = ctx.add_cancel();
 		ctx.attach_session(&ses).expect("the session attaches");
 
-		let ast = crate::syn::parse("BEGIN; CREATE a:1; COMMIT; CREATE b:1; COMMIT; RETURN 1;")
-			.expect("the request parses");
-		let mut commits = 0;
+		let ast = crate::syn::parse("BEGIN; CREATE a:1; COMMIT;").expect("the request parses");
 		let stream = futures::stream::iter(ast.expressions).map(move |expr| {
 			if matches!(expr, TopLevelExpr::Commit) {
-				commits += 1;
-				if commits == 1 {
-					canceller.cancel();
-				}
+				canceller.cancel();
 			}
 			Ok(expr)
 		});
@@ -4617,19 +5416,234 @@ mod tests {
 				Err(e) => e.to_string(),
 			})
 			.collect();
-		assert_eq!(results.len(), 5, "one result per statement: {messages:?}");
-		for (index, message) in messages[1..3].iter().enumerate() {
-			assert!(
-				message.contains("The query was not executed due to a cancelled transaction"),
-				"statement {}: {message}",
-				index + 1
+		assert_eq!(results.len(), 3, "one result per statement: {messages:?}");
+		assert!(
+			messages[1].contains("The query was not executed due to a cancelled transaction"),
+			"the CREATE: {}",
+			messages[1]
+		);
+		assert!(
+			messages[2].contains("Cannot COMMIT: the transaction was cancelled"),
+			"the COMMIT: {}",
+			messages[2]
+		);
+	}
+
+	/// An executor over a memory datastore whose namespace and database exist.
+	async fn executor_in_memory() -> (Arc<Datastore>, super::Executor) {
+		use crate::catalog::providers::CatalogProvider;
+		use crate::kvs::TransactionType;
+
+		let ds = Datastore::new("memory").await.expect("a memory datastore");
+		let setup = ds.transaction(TransactionType::Write).await.expect("a transaction");
+		setup.ensure_ns_db(None, "test", "test").await.expect("the namespace and database");
+		setup.commit().await.expect("committing the namespace");
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let opt = ds.setup_options(&ses);
+		let mut ctx = ds.setup_ctx().expect("a context");
+		ctx.attach_session(&ses).expect("the session attaches");
+		let exec = super::Executor::new(&ds, ctx.freeze(), opt);
+		(ds, exec)
+	}
+
+	/// The region context of each statement, by the state the driver holds it in.
+	#[tokio::test]
+	async fn region_context_follows_where_the_statement_runs() {
+		use crate::exec::ir::iface::premise::{OpenRegionShape, RegionContext, TxnContext};
+		use crate::exec::ir::iface::region_kind::StatementCommit;
+		use crate::expr::logical::{RequestGrouper, RequestStatementKind as Kind};
+
+		let none = OpenRegionShape {
+			open: TxnContext::None,
+			continues: false,
+		};
+		let auto = RegionContext {
+			commit: StatementCommit::Auto,
+			txn: TxnContext::None,
+			stack_shape: none,
+		};
+		let explicit = RegionContext {
+			commit: StatementCommit::InTxn,
+			txn: TxnContext::Explicit,
+			stack_shape: none,
+		};
+		let session = RegionContext {
+			commit: StatementCommit::InTxn,
+			txn: TxnContext::Session,
+			stack_shape: none,
+		};
+		let continued = OpenRegionShape {
+			open: TxnContext::Explicit,
+			continues: true,
+		};
+		let (_ds, mut exec) = executor_in_memory().await;
+
+		// Auto-commit statements, a transaction control statement with nothing to
+		// act on among them.
+		let mut grouper = RequestGrouper::new(false);
+		for kind in [Kind::Run, Kind::Option, Kind::Commit, Kind::Cancel] {
+			assert_eq!(exec.region_context(&grouper.place(kind)), auto, "{kind:?} outside a block");
+		}
+
+		// A block: `BEGIN` is placed before the driver marks the block open.
+		let mut grouper = RequestGrouper::new(false);
+		assert_eq!(exec.region_context(&grouper.place(Kind::Begin)), explicit, "BEGIN");
+		exec.in_block = true;
+		for kind in [Kind::Run, Kind::Option, Kind::Begin, Kind::Commit] {
+			assert_eq!(exec.region_context(&grouper.place(kind)), explicit, "{kind:?} in a block");
+		}
+		exec.in_block = false;
+		assert_eq!(exec.region_context(&grouper.place(Kind::Run)), auto, "after the block");
+
+		// A session transaction holds every statement, the misplaced ones included.
+		exec.in_block = true;
+		exec.in_session_txn = true;
+		let mut grouper = RequestGrouper::new(true);
+		for kind in [Kind::Run, Kind::Option, Kind::Begin, Kind::Commit, Kind::Cancel] {
+			assert_eq!(
+				exec.region_context(&grouper.place(kind)),
+				session,
+				"{kind:?} in a session transaction"
 			);
 		}
-		assert!(
-			messages[3].contains("Cannot COMMIT: the transaction was cancelled"),
-			"the second COMMIT: {}",
-			messages[3]
+
+		// Fragments mode: a statement met while a block is open continues the
+		// region an earlier fragment opened, and the `BEGIN` that opens it does
+		// not.
+		exec.in_block = false;
+		exec.in_session_txn = false;
+		exec.fragmented = true;
+		let mut grouper = RequestGrouper::new(false);
+		assert_eq!(exec.region_context(&grouper.place(Kind::Begin)), explicit, "fragment BEGIN");
+		exec.in_block = true;
+		for kind in [Kind::Run, Kind::Option, Kind::Begin, Kind::Commit] {
+			assert_eq!(
+				exec.region_context(&grouper.place(kind)),
+				RegionContext {
+					stack_shape: continued,
+					..explicit
+				},
+				"{kind:?} in a block of fragments"
+			);
+		}
+		exec.in_block = false;
+		assert_eq!(
+			exec.region_context(&grouper.place(Kind::Run)),
+			auto,
+			"fragment after the block"
 		);
+		exec.in_block = true;
+		exec.in_session_txn = true;
+		let mut grouper = RequestGrouper::new(true);
+		assert_eq!(
+			exec.region_context(&grouper.place(Kind::Run)),
+			session,
+			"a session transaction is not continued"
+		);
+	}
+
+	/// Run `sql` as one request through an executor that has had `inputs`
+	/// noted, and hand the executor back for its origins to be read.
+	async fn executor_after_request(
+		sql: &str,
+		inputs: Option<(&[&str], &[&str])>,
+	) -> (usize, super::Executor) {
+		let (ds, mut exec) = executor_in_memory().await;
+		if let Some((session, client)) = inputs {
+			exec.note_inputs(session.iter().copied(), client.iter().copied());
+		}
+		let statements: Vec<_> = crate::syn::parse(sql)
+			.expect("the request parses")
+			.expressions
+			.into_iter()
+			.map(crate::dbs::TopLevelStatement::Ast)
+			.collect();
+		let count = statements.len();
+		exec.prepare_request(&statements);
+		let stream = exec.counted(futures::stream::iter(statements.into_iter().map(Ok)));
+		crate::exec::compiles::request(exec.run_statement_stream(&ds, false, stream))
+			.await
+			.expect("the request runs");
+		(count, exec)
+	}
+
+	/// The origin of each bound name: inputs by their source, `LET`s by the
+	/// constant test, the last binding of a name before the asking statement
+	/// deciding.
+	#[tokio::test]
+	async fn binding_origin_reports_where_each_name_came_from() {
+		use crate::exec::ir::cache::deps::BindingOrigin::{
+			ClientParam, LetComputed, LetConst, SessionVar,
+		};
+
+		let (end, exec) = executor_after_request(
+			"LET $constant = 1; LET $computed = time::now(); \
+			LET $flips = 1; LET $flips = time::now(); \
+			LET $rebound = 2; LET $rebound_by_let = time::now();",
+			Some((
+				&["from_session", "shadowed", "rebound", "rebound_by_let"],
+				&["from_client", "shadowed", "rebound_by_let"],
+			)),
+		)
+		.await;
+
+		for (name, origin) in [
+			("from_session", SessionVar),
+			("from_client", ClientParam),
+			("shadowed", ClientParam),
+			("constant", LetConst),
+			("computed", LetComputed),
+			("flips", LetComputed),
+			("rebound", LetConst),
+			("rebound_by_let", LetComputed),
+			("never_bound", LetComputed),
+		] {
+			assert_eq!(exec.binding_origin(name, end), origin, "${name}");
+		}
+	}
+
+	/// A statement is told the origin its own position sees: a `LET` after it
+	/// does not reach back, and the name's earlier binding still stands.
+	#[tokio::test]
+	async fn binding_origin_is_per_statement_position() {
+		use crate::exec::ir::cache::deps::BindingOrigin::{LetComputed, LetConst};
+
+		let (end, exec) =
+			executor_after_request("LET $x = time::now(); RETURN $x; LET $x = 1;", None).await;
+		assert_eq!(exec.binding_origin("x", 0), LetComputed, "before any binding");
+		assert_eq!(exec.binding_origin("x", 1), LetComputed, "the first binding");
+		assert_eq!(exec.binding_origin("x", 2), LetComputed, "the statement before the rebinding");
+		assert_eq!(exec.binding_origin("x", 3), LetConst, "after the rebinding");
+		assert_eq!(exec.binding_origin("x", end), LetConst, "at the end of the request");
+	}
+
+	/// A block that cancels puts its bindings back, so the name it rebound is
+	/// not a constant after it; a name the block did not bind keeps its origin.
+	#[tokio::test]
+	async fn binding_origin_after_a_block_that_does_not_commit_is_computed() {
+		use crate::exec::ir::cache::deps::BindingOrigin::{LetComputed, LetConst};
+
+		let (_, exec) = executor_after_request(
+			"LET $x = time::now(); LET $y = 1; BEGIN; LET $x = 1; LET $z = 2; CANCEL; \
+			RETURN $x;",
+			None,
+		)
+		.await;
+		assert_eq!(exec.binding_origin("x", 4), LetConst, "inside the block");
+		assert_eq!(exec.binding_origin("x", 6), LetComputed, "after CANCEL");
+		assert_eq!(exec.binding_origin("z", 6), LetComputed, "a name only the block bound");
+		assert_eq!(exec.binding_origin("y", 6), LetConst, "a name the block left alone");
+	}
+
+	/// A `COMMIT` can fail at run time and take its block back, so the names
+	/// the block bound are not constants after it either.
+	#[tokio::test]
+	async fn binding_origin_after_a_committed_block_is_computed() {
+		use crate::exec::ir::cache::deps::BindingOrigin::{LetComputed, LetConst};
+
+		let (_, exec) = executor_after_request("BEGIN; LET $x = 1; COMMIT; RETURN $x;", None).await;
+		assert_eq!(exec.binding_origin("x", 2), LetConst, "inside the block");
+		assert_eq!(exec.binding_origin("x", 3), LetComputed, "after COMMIT");
 	}
 
 	#[tokio::test]
@@ -4846,6 +5860,244 @@ mod tests {
 				err
 			);
 		}
+	}
+
+	/// Bind each of `names` to a small value in turn under `bound`, reporting
+	/// the outcome of each.
+	fn admit_each(bound: CarryBound, names: &[&str]) -> Vec<bool> {
+		let mut carried = Carried::default();
+		names
+			.iter()
+			.map(|name| bound.admit(&mut carried, name, &Value::from(1i64)).is_ok())
+			.collect()
+	}
+
+	/// Bindings under the name bound pass; the one that crosses it fails.
+	#[test]
+	fn carry_bound_admits_names_up_to_the_bound() {
+		let bound = CarryBound {
+			names: Some(2),
+			bytes: None,
+		};
+		assert_eq!(admit_each(bound, &["a", "b", "c"]), [true, true, false]);
+	}
+
+	/// A rebinding replaces its entry, so it does not count twice.
+	#[test]
+	fn carry_bound_counts_a_rebinding_once() {
+		let bound = CarryBound {
+			names: Some(2),
+			bytes: None,
+		};
+		assert_eq!(admit_each(bound, &["a", "a", "a", "b", "b"]), [true; 5]);
+		assert_eq!(admit_each(bound, &["a", "b", "a", "c"]), [true, true, true, false]);
+	}
+
+	/// A refused binding is not recorded, so a later rebinding of a held name
+	/// still passes.
+	#[test]
+	fn carry_bound_leaves_a_refused_binding_unrecorded() {
+		let bound = CarryBound {
+			names: Some(1),
+			bytes: None,
+		};
+		let mut carried = Carried::default();
+		let one = Value::from(1i64);
+		assert!(bound.admit(&mut carried, "a", &one).is_ok());
+		assert!(bound.admit(&mut carried, "b", &one).is_err());
+		assert!(bound.admit(&mut carried, "a", &one).is_ok());
+		assert_eq!(carried.held.len(), 1);
+	}
+
+	/// The byte bound is checked against the estimate of the values held, and
+	/// a rebinding to a smaller value releases the bytes of the old one.
+	#[test]
+	fn carry_bound_checks_bytes_only_when_set() {
+		let big = Value::from("x".repeat(1000));
+		let small = Value::from(1i64);
+
+		let unbounded = CarryBound::UNBOUNDED;
+		let mut carried = Carried::default();
+		assert!(unbounded.admit(&mut carried, "a", &big).is_ok());
+		assert!(carried.held.is_empty(), "an unbounded stream tracks nothing");
+
+		let bound = CarryBound {
+			names: None,
+			bytes: Some(1500),
+		};
+		let mut carried = Carried::default();
+		assert!(bound.admit(&mut carried, "a", &big).is_ok());
+		let err = bound.admit(&mut carried, "b", &big).expect_err("the second value crosses");
+		assert!(err.to_string().contains("1500 bytes"), "got: {err}");
+		assert!(bound.admit(&mut carried, "a", &small).is_ok());
+		assert!(bound.admit(&mut carried, "b", &big).is_ok());
+	}
+
+	fn int(n: i64) -> Arc<Value> {
+		Arc::new(Value::from(n))
+	}
+
+	/// What `name` holds in `ctx`, `None` where it holds nothing.
+	fn held(ctx: &Context, name: &str) -> Option<Value> {
+		ctx.value(name).cloned()
+	}
+
+	/// A commit keeps the block's bindings and forgets the log, so a later
+	/// block's rollback cannot reach them.
+	#[test]
+	fn let_undo_commit_truncates_to_the_mark() {
+		let mut ctx = Context::new_test();
+		let mut undo = LetUndo::default();
+		undo.begin();
+		undo.record("a", None);
+		ctx.add_value("a", int(1));
+		undo.commit();
+		assert!(!undo.is_open());
+		assert!(undo.log.is_empty());
+
+		undo.begin();
+		undo.record("b", None);
+		ctx.add_value("b", int(2));
+		undo.rollback(&mut ctx);
+		assert_eq!(held(&ctx, "a"), Some(Value::from(1i64)), "the committed binding stands");
+		assert_eq!(held(&ctx, "b"), None, "a name the block introduced is absent again");
+	}
+
+	/// A rollback replays the log in reverse, so a rebinding returns to the
+	/// value it held at `BEGIN` and a name that held nothing returns to absent.
+	#[test]
+	fn let_undo_rollback_restores_a_rebinding_and_an_absent_name() {
+		let mut ctx = Context::new_test();
+		ctx.add_value("x", int(0));
+		let mut undo = LetUndo::default();
+		undo.begin();
+		for (name, value) in [("x", 1i64), ("x", 2), ("y", 3)] {
+			undo.record(name, ctx.own_value(name).cloned());
+			ctx.add_value(name, int(value));
+		}
+		assert_eq!(undo.log.len(), 3);
+		undo.rollback(&mut ctx);
+		assert!(!undo.is_open());
+		assert!(undo.log.is_empty());
+		assert_eq!(held(&ctx, "x"), Some(Value::from(0i64)));
+		assert_eq!(held(&ctx, "y"), None);
+	}
+
+	/// Outside a block nothing is recorded, and a rollback with no block open
+	/// changes nothing.
+	#[test]
+	fn let_undo_records_nothing_outside_a_block() {
+		let mut ctx = Context::new_test();
+		ctx.add_value("x", int(1));
+		let mut undo = LetUndo::default();
+		undo.record("x", None);
+		assert!(undo.log.is_empty());
+		undo.rollback(&mut ctx);
+		assert_eq!(held(&ctx, "x"), Some(Value::from(1i64)));
+	}
+
+	/// An import whose carried names cross the bound fails the `LET` that
+	/// crosses it and stops there.
+	#[tokio::test]
+	async fn import_stream_stops_at_the_let_that_crosses_the_carry_bound() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; CREATE person:1; LET $a = 1; LET $b = 2; LET $c = 3; \
+		           CREATE person:2;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let bound = CarryBound {
+			names: Some(2),
+			bytes: None,
+		};
+		let results = ds.execute_import_bounded(&sess, None, body, bound).await.unwrap();
+
+		assert_eq!(results.len(), 1, "only the crossing LET reports");
+		let err = results[0].result.as_ref().unwrap_err();
+		assert!(err.message().contains("limit of 2"), "got: {err:?}");
+
+		let verify = ds.execute("SELECT VALUE id FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap().as_array().unwrap();
+		assert_eq!(rows.len(), 1, "the statement before the crossing ran, the one after did not");
+	}
+
+	/// A bound crossed inside an open block cancels the block, and the stream
+	/// ends there.
+	#[tokio::test]
+	async fn import_stream_cancels_the_open_block_at_the_carry_bound() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; BEGIN; CREATE person:1; LET $a = 1; LET $b = 2; COMMIT; \
+		           CREATE person:2;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let bound = CarryBound {
+			names: Some(1),
+			bytes: None,
+		};
+		let results = ds.execute_import_bounded(&sess, None, body, bound).await.unwrap();
+		assert!(results.iter().any(|r| r.result.is_err()), "the crossing LET reports an error");
+
+		let verify = ds.execute("SELECT VALUE id FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap().as_array().unwrap();
+		assert!(rows.is_empty(), "neither the block nor the statement after it ran");
+	}
+
+	/// A top-level `RETURN` ends its own statement; the statements after it run.
+	#[tokio::test]
+	async fn import_stream_continues_after_a_top_level_return() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; CREATE person:1; RETURN 1; CREATE person:2;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+		assert!(results.is_empty(), "no statement failed, so nothing reports");
+
+		let verify = ds.execute("SELECT VALUE id FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap().as_array().unwrap();
+		assert_eq!(rows.len(), 2, "the statement after the RETURN ran");
+	}
+
+	/// A failing statement after a `BEGIN` cancels the block, whichever
+	/// statement of the import it arrives in.
+	#[tokio::test]
+	async fn import_stream_cancels_a_block_whose_later_statement_fails() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; BEGIN; CREATE person:1; THROW 'x'; COMMIT; CREATE person:2;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+		assert!(results.iter().any(|r| r.result.is_err()), "the failing statement reports");
+
+		let verify = ds.execute("SELECT VALUE id FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap().as_array().unwrap();
+		assert_eq!(rows.len(), 1, "the block was cancelled, the statement after it ran");
 	}
 
 	#[tokio::test]
@@ -5415,5 +6667,447 @@ mod tests {
 			);
 			assert_eq!(lives(&ds, &ses).await, vec![id_of(&id)], "the KILL did not apply");
 		}
+	}
+
+	fn err(text: &'static str, kind: Option<QueryError>) -> Option<SlotValue> {
+		Some(SlotValue::Error {
+			text: Cow::Borrowed(text),
+			kind,
+		})
+	}
+
+	fn owned_err(text: String, kind: Option<QueryError>) -> Option<SlotValue> {
+		Some(SlotValue::Error {
+			text: Cow::Owned(text),
+			kind,
+		})
+	}
+
+	const CANCELLED: &str = "The query was not executed due to a cancelled transaction";
+	const FAILED: &str = "The query was not executed due to a failed transaction";
+
+	/// Every row of the block-end table: what the recorded slots, the statements after the
+	/// failure point and the terminator answer.
+	#[test]
+	fn finalise_slots_answers_every_block_end() {
+		let timed_out =
+			Reason::Timedout(crate::val::Duration::from(std::time::Duration::from_secs(3)));
+		let timed_out_kind = Some(QueryError::TimedOut {
+			duration: std::time::Duration::from_secs(3),
+		});
+		let timed_out_text =
+			format!("Timed out: {}", crate::val::Duration::from(std::time::Duration::from_secs(3)));
+		let timed_out_commit = format!(
+			"Cannot COMMIT: timed out ({})",
+			crate::val::Duration::from(std::time::Duration::from_secs(3))
+		);
+		let rows: Vec<(&str, BlockEnd, SlotRewrite)> = vec![
+			(
+				"committed",
+				BlockEnd::Committed,
+				SlotRewrite {
+					recorded: None,
+					following: None,
+					terminator: Some(SlotValue::None),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"healthy cancel",
+				BlockEnd::Cancelled,
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: None,
+					terminator: Some(SlotValue::None),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"failed statement, COMMIT",
+				BlockEnd::Failed {
+					cause: FailCause::Error,
+					end: FailedEnd::Commit,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: err(
+						"Cannot COMMIT: the transaction was aborted due to a prior error",
+						Some(QueryError::NotExecuted),
+					),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"failed statement, CANCEL",
+				BlockEnd::Failed {
+					cause: FailCause::Error,
+					end: FailedEnd::Cancel,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: Some(SlotValue::None),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"failed statement, request end",
+				BlockEnd::Failed {
+					cause: FailCause::Error,
+					end: FailedEnd::RequestEnd,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: None,
+					interrupted_statement: None,
+				},
+			),
+			(
+				"nested BEGIN, COMMIT",
+				BlockEnd::Failed {
+					cause: FailCause::NestedBegin,
+					end: FailedEnd::Commit,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(FAILED, Some(QueryError::NotExecuted)),
+					terminator: err(
+						"Cannot COMMIT: the transaction was aborted due to a nested BEGIN",
+						Some(QueryError::NotExecuted),
+					),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"nested BEGIN, CANCEL",
+				BlockEnd::Failed {
+					cause: FailCause::NestedBegin,
+					end: FailedEnd::Cancel,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(FAILED, Some(QueryError::NotExecuted)),
+					terminator: err(FAILED, Some(QueryError::NotExecuted)),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"nested BEGIN, request end",
+				BlockEnd::Failed {
+					cause: FailCause::NestedBegin,
+					end: FailedEnd::RequestEnd,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: err(FAILED, Some(QueryError::NotExecuted)),
+					terminator: None,
+					interrupted_statement: None,
+				},
+			),
+			(
+				"unterminated",
+				BlockEnd::Unterminated,
+				SlotRewrite {
+					recorded: Some(SlotValue::Internal {
+						text: Cow::Borrowed("Missing COMMIT statement"),
+					}),
+					following: None,
+					terminator: None,
+					interrupted_statement: None,
+				},
+			),
+			(
+				"commit failed, determinate, not a conflict",
+				BlockEnd::CommitFailed {
+					error: "boom".to_string(),
+					indeterminate: false,
+					conflict: false,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: None,
+					terminator: owned_err(
+						"Cannot COMMIT: boom".to_string(),
+						Some(QueryError::NotExecuted),
+					),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"commit failed, determinate, conflict",
+				BlockEnd::CommitFailed {
+					error: "boom".to_string(),
+					indeterminate: false,
+					conflict: true,
+				},
+				SlotRewrite {
+					recorded: err(FAILED, Some(QueryError::NotExecuted)),
+					following: None,
+					terminator: owned_err(
+						"Cannot COMMIT: boom".to_string(),
+						Some(QueryError::TransactionConflict),
+					),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"commit failed, indeterminate",
+				BlockEnd::CommitFailed {
+					error: "boom".to_string(),
+					indeterminate: true,
+					conflict: false,
+				},
+				SlotRewrite {
+					recorded: err(
+						"The transaction's commit outcome is unknown, so whether this query was \
+						 applied is undetermined",
+						None,
+					),
+					following: None,
+					terminator: owned_err("Cannot COMMIT: boom".to_string(), None),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"timed out, COMMIT",
+				BlockEnd::Interrupted {
+					reason: timed_out,
+					end: InterruptEnd::Commit,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: owned_err(timed_out_text.clone(), timed_out_kind.clone()),
+					terminator: owned_err(timed_out_commit, timed_out_kind.clone()),
+					interrupted_statement: owned_err(
+						timed_out_text.clone(),
+						timed_out_kind.clone(),
+					),
+				},
+			),
+			(
+				"timed out, CANCEL",
+				BlockEnd::Interrupted {
+					reason: timed_out,
+					end: InterruptEnd::Cancel,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: owned_err(timed_out_text.clone(), timed_out_kind.clone()),
+					terminator: owned_err(timed_out_text.clone(), timed_out_kind.clone()),
+					interrupted_statement: owned_err(
+						timed_out_text.clone(),
+						timed_out_kind.clone(),
+					),
+				},
+			),
+			(
+				"timed out, request end",
+				BlockEnd::Interrupted {
+					reason: timed_out,
+					end: InterruptEnd::RequestEnd,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: owned_err(timed_out_text.clone(), timed_out_kind.clone()),
+					terminator: None,
+					interrupted_statement: owned_err(timed_out_text, timed_out_kind),
+				},
+			),
+			(
+				"cancelled, COMMIT",
+				BlockEnd::Interrupted {
+					reason: Reason::Canceled,
+					end: InterruptEnd::Commit,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: err(
+						"Cannot COMMIT: the transaction was cancelled",
+						Some(QueryError::Cancelled),
+					),
+					interrupted_statement: err(CANCELLED, Some(QueryError::Cancelled)),
+				},
+			),
+			(
+				"cancelled, CANCEL",
+				BlockEnd::Interrupted {
+					reason: Reason::Canceled,
+					end: InterruptEnd::Cancel,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: err(CANCELLED, Some(QueryError::Cancelled)),
+					interrupted_statement: err(CANCELLED, Some(QueryError::Cancelled)),
+				},
+			),
+			(
+				"cancelled, request end",
+				BlockEnd::Interrupted {
+					reason: Reason::Canceled,
+					end: InterruptEnd::RequestEnd,
+				},
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: err(CANCELLED, Some(QueryError::Cancelled)),
+					terminator: None,
+					interrupted_statement: err(CANCELLED, Some(QueryError::Cancelled)),
+				},
+			),
+			(
+				"memory threshold",
+				BlockEnd::MemoryThreshold,
+				SlotRewrite {
+					recorded: err(CANCELLED, Some(QueryError::Cancelled)),
+					following: None,
+					terminator: None,
+					interrupted_statement: None,
+				},
+			),
+			(
+				"begin failed, commit",
+				BlockEnd::BeginFailed {
+					end: FailedEnd::Commit,
+				},
+				SlotRewrite {
+					recorded: None,
+					following: err(
+						"Tried to start a transaction while another transaction was open",
+						Some(QueryError::NotExecuted),
+					),
+					terminator: err(
+						"Cannot COMMIT: the transaction could not be started",
+						Some(QueryError::NotExecuted),
+					),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"begin failed, cancel",
+				BlockEnd::BeginFailed {
+					end: FailedEnd::Cancel,
+				},
+				SlotRewrite {
+					recorded: None,
+					following: err(
+						"Tried to start a transaction while another transaction was open",
+						Some(QueryError::NotExecuted),
+					),
+					terminator: Some(SlotValue::None),
+					interrupted_statement: None,
+				},
+			),
+			(
+				"begin failed, request end",
+				BlockEnd::BeginFailed {
+					end: FailedEnd::RequestEnd,
+				},
+				SlotRewrite {
+					recorded: None,
+					following: err(
+						"Tried to start a transaction while another transaction was open",
+						Some(QueryError::NotExecuted),
+					),
+					terminator: None,
+					interrupted_statement: None,
+				},
+			),
+		];
+		for (name, end, expected) in rows {
+			assert_eq!(finalise_slots(&end), expected, "block end: {name}");
+		}
+	}
+
+	/// The effects a program records are applied in the order they were recorded, to the options,
+	/// the `$session` value and the request's parameters, and the cached session is dropped.
+	#[tokio::test]
+	async fn the_drain_applies_session_effects_in_record_order() {
+		use surrealdb_strand::Strand;
+
+		use crate::exec::context::SessionEffect;
+
+		let (_ds, mut exec) = executor_in_memory().await;
+		exec.cached_session = exec.get_session_info();
+		assert!(exec.cached_session.is_some());
+		exec.session_sink.record(SessionEffect::Option {
+			name: Strand::new("IMPORT"),
+			what: true,
+		});
+		exec.session_sink.record(SessionEffect::Use {
+			ns: Some(Strand::new("other")),
+			db: None,
+		});
+		exec.session_sink.record(SessionEffect::Use {
+			ns: None,
+			db: Some(Strand::new("db2")),
+		});
+		exec.session_sink.record(SessionEffect::Let {
+			name: Strand::new("x"),
+			value: Arc::new(Value::from(7_i64)),
+		});
+		exec.apply_session_effects(true).expect("the effects apply");
+		assert!(exec.opt.import);
+		assert_eq!(exec.opt.ns.as_deref(), Some("other"));
+		assert_eq!(exec.opt.db.as_deref(), Some("db2"));
+		assert!(exec.cached_session.is_none());
+		assert_eq!(exec.ctx.value("x"), Some(&Value::from(7_i64)));
+		assert!(exec.session_sink.take().is_empty());
+	}
+
+	/// A `USE` that fails after its namespace level keeps that level, as the statement run as
+	/// written does: the program records a level only once its catalog work has succeeded.
+	#[tokio::test]
+	async fn a_use_keeps_the_namespace_level_when_its_database_level_fails() {
+		use surrealdb_strand::Strand;
+
+		use crate::exec::context::SessionEffect;
+
+		let (_ds, mut exec) = executor_in_memory().await;
+		exec.cached_session = exec.get_session_info();
+		exec.session_sink.record(SessionEffect::Use {
+			ns: Some(Strand::new("kept")),
+			db: None,
+		});
+		exec.apply_session_effects(false).expect("the namespace level applies");
+		assert_eq!(exec.opt.ns.as_deref(), Some("kept"));
+		assert_eq!(exec.opt.db.as_deref(), Some("test"));
+		// The statement failed, so the cached session information stays as it was.
+		assert!(exec.cached_session.is_some());
+	}
+
+	/// A session `LET` the drain binds is remembered by an open block, which a `CANCEL` undoes and
+	/// a `COMMIT` keeps, and a binding the carry bound refuses ends the stream.
+	#[tokio::test]
+	async fn a_drained_let_follows_the_undo_and_carry_rules_of_the_executor() {
+		use surrealdb_strand::Strand;
+
+		use crate::exec::context::SessionEffect;
+
+		let (_ds, mut exec) = executor_in_memory().await;
+		exec.let_undo.begin();
+		exec.session_sink.record(SessionEffect::Let {
+			name: Strand::new("a"),
+			value: Arc::new(Value::from(1_i64)),
+		});
+		exec.apply_session_effects(true).expect("the binding applies");
+		assert_eq!(exec.ctx.value("a"), Some(&Value::from(1_i64)));
+		assert_eq!(exec.let_undo.log.len(), 1);
+		exec.let_undo.rollback(super::context_mut(&mut exec.ctx).expect("a unique context"));
+		assert_eq!(exec.ctx.value("a"), None);
+
+		exec.carry = CarryBound {
+			names: Some(0),
+			bytes: None,
+		};
+		exec.session_sink.record(SessionEffect::Let {
+			name: Strand::new("b"),
+			value: Arc::new(Value::from(2_i64)),
+		});
+		assert!(exec.apply_session_effects(true).is_err());
+		assert!(exec.carry_crossed);
+		assert_eq!(exec.ctx.value("b"), None);
 	}
 }

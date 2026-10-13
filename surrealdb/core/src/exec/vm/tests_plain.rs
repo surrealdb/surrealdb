@@ -1,34 +1,38 @@
-//! Source scans that keep a lowered program plain data and keep the run side
-//! from planning, over what the compile-time witness (`plain.rs`) cannot see.
+//! Source scans that check two things the compile-time witness (`plain.rs`)
+//! cannot see: that a lowered program is plain data, and that the run side
+//! never plans.
 //!
-//! The type scan starts at `Program` and follows every type the `vm` module
-//! declares that a reachable declaration names. Each reachable declaration's
-//! body is rejected when it names a `dyn` object, a function pointer or
-//! closure trait, an interior-mutable cell or lock, a weak handle, `Any`, an
-//! engine object by type name or a `&'static str`. The audited exceptions
-//! are listed by type name with their reason in [`AUDITED`]; a hand-written
-//! `PartialEq` on a reachable type, or a hand-written unwind-safety
-//! implementation anywhere, must be listed there too. Catalog definitions a
-//! program carries are listed in [`CARRIED_CATALOG`].
+//! The type scan starts at `Program` and follows every type declared in the
+//! `vm` module that a reachable declaration names. The body of each reachable
+//! declaration must not name a `dyn` object, a function pointer or closure
+//! trait, an interior-mutable cell or lock, a weak handle, `Any`, an engine
+//! object by type name, or a `&'static str`. Audited exceptions are listed by
+//! type name with their reason in [`AUDITED`]. A hand-written `PartialEq` on
+//! a reachable type, or a hand-written unwind-safety implementation anywhere,
+//! must also be listed there. Catalog definitions a program carries are
+//! listed in [`CARRIED_CATALOG`].
 //!
-//! The run scan reads every file of the module that runs a program and
-//! rejects a reference to the planner, the lowering or the statement bodies
-//! of `ddl`: the VM never plans, binds or lowers while a program runs, and
-//! never hands a statement's work to its Rust body. The files and functions
-//! that plan when the query arrives, the host's answer to a fault and the
+//! The run scan reads every file of the module that runs a program. It
+//! rejects references to the planner, the lowering, or the statement bodies
+//! in `ddl`. A running program never plans, binds, or lowers, and never
+//! hands a statement's work to its Rust body. The files and functions that
+//! plan when the query arrives, the host's answer to a fault, and the
 //! declared dynamic-code services are listed by name in [`PLAN_TIME_FILES`]
-//! and [`PLAN_TIME_FUNCTIONS`]. The loader scan holds the interpreter and the
-//! modules facing the host ([`LOADER_FILES`]) to loading and running units:
-//! none names the planner, a compiled expression or a compiler entry point,
-//! none names an item of the call services (`calls`) but those listed with
-//! why each compiles nothing ([`LOADER_CALLS`]), and none
-//! reaches the host's compilation for a fault, imports included, but the
-//! host's answer to the instruction that yields for a unit ([`FAULT_SITES`]).
+//! and [`PLAN_TIME_FUNCTIONS`].
+//!
+//! The loader scan holds the interpreter and the host-facing modules
+//! ([`LOADER_FILES`]) to loading and running units. None of them names the
+//! planner, a compiled expression, or a compiler entry point. Items of the
+//! call services (`calls`) are allowed only if listed in [`LOADER_CALLS`],
+//! each with why it compiles nothing. No such file reaches the host's
+//! compilation for a fault, imports included, except the host's answer to
+//! the instruction that yields for a unit ([`FAULT_SITES`]).
+//!
 //! The scans are lexical: they see what a file names, not what the items it
 //! names reach in turn. That a running program compiles nothing outside a
-//! fault through any of them is asserted where it runs, by the count of
-//! compilations made while a program runs ([`crate::exec::compiles`]). The
-//! operator scan keeps `ExecOperator` to [`OPERATOR_FILES`].
+//! fault is asserted where it runs, by counting the compilations made while
+//! a program runs ([`crate::exec::compiles`]). The operator scan keeps
+//! `ExecOperator` to [`OPERATOR_FILES`].
 //!
 //! Each scan has a self-test proving it flags the token it forbids, and every
 //! listed exception is checked to be still needed.
@@ -130,21 +134,22 @@ const FORBIDDEN_TYPES: &[&str] = &[
 ];
 
 /// Files that lower a program when the query arrives, or name nothing that
-/// runs: the run scan skips them.
+/// runs: the run scan skips them, and every file of the lowering
+/// (`ir_lower/`). `compile.rs` plans and lowers a statement through the IR,
+/// and `ir_catalog.rs` reads the catalog that planning answers from.
 const PLAN_TIME_FILES: &[&str] = &[
+	"compile.rs",
 	"footprint.rs",
+	"ir_catalog.rs",
 	"serve.rs",
 	"inline.rs",
-	"lower_live.rs",
-	"map.rs",
-	"match_plan.rs",
 	"mod.rs",
-	"optimize.rs",
 	"plain.rs",
-	"plan.rs",
-	"plan_catalog.rs",
 	"speculate.rs",
 ];
+
+/// The directory of the lowering, whose files the run scan skips.
+const LOWERING_DIR: &str = "ir_lower/";
 
 /// Functions of run-side files the run scan skips, with why each may plan.
 const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
@@ -168,7 +173,8 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	(
 		"fault.rs",
 		"failure_of",
-		"a compile-cache miss: the error a closure body no unit of which is lowered reports",
+		"a compile-cache miss: the error a closure body that lowers no unit reports, which the \
+		 planner answers by compiling the body",
 	),
 	(
 		"fault.rs",
@@ -200,24 +206,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"call_unit.rs",
-		"load_specialised",
-		"the host's answer to a call of a body that reads an argument where only a value answers: \
-		 links the node's body compiled for the call's values, or compiles it in a fault",
-	),
-	(
-		"call_unit.rs",
-		"kept_deps",
-		"the host's answer to a compile-cache miss: what else a body compiled for a call read, \
-		 judged with the planning context it folded in",
-	),
-	(
-		"call_unit.rs",
-		"compile_body",
-		"the host's answer to a compile-cache miss: compiles a function's body for a call's values, \
-		 or to read them when it runs",
-	),
-	(
-		"call_unit.rs",
 		"lower_statement",
 		"the host's answer to a fault: lowers a call or a body, and again late-bound after its \
 		 schema statements where their effect cannot be known",
@@ -226,12 +214,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		"call_unit.rs",
 		"lower_once",
 		"the host's answer to a fault: binds, maps and lowers a call or a body once",
-	),
-	(
-		"param_unit.rs",
-		"guard",
-		"the host's answer to a read of a parameter whose clause the program did not lower: links \
-		 the node's unit of the clause, or compiles it in a fault",
 	),
 	(
 		"schema_host.rs",
@@ -287,6 +269,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"schema_host.rs",
+		"alter_field_clauses",
+		"declared schema service: a field whose clauses are held as the definition they form, \
+		 altered by the code ALTER FIELD alters with",
+	),
+	(
+		"schema_host.rs",
 		"check_index_column",
 		"declared schema service: an index column that is evaluated, or a written one no field \
 		 settles, checked as DEFINE INDEX checks one",
@@ -321,6 +309,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		 DEFINE FIELD and ALTER FIELD give it, as their bodies check them",
 	),
 	(
+		"live.rs",
+		"compile",
+		"the compile of a subscription's unit, as its LIVE statement arrives or in a fault on a \
+		 write that finds no unit held",
+	),
+	(
 		"descriptor.rs",
 		"from_cache",
 		"a compile-cache miss: compiles what a table's read applies, its statements planned with \
@@ -336,16 +330,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		"call_script_dynamic",
 		"declared dynamic-code service: runs script source supplied as data",
 	),
-	(
-		"dispatch.rs",
-		"candidates",
-		"plan time: the tables a read by id can reach, when the query arrives",
-	),
-	(
-		"dispatch.rs",
-		"fetch_reach",
-		"plan time: the tables a FETCH reads records of, from the kinds of the fields it walks",
-	),
 	("dispatch.rs", "table_unit", "plan time: links or lowers one table's read unit"),
 	(
 		"dispatch.rs",
@@ -353,39 +337,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 		"plan time, or a fault: one table's read unit and its footprint, from the compile cache",
 	),
 	("dispatch.rs", "lower_table_unit", "plan time: lowers one table's read unit"),
-	(
-		"dispatch.rs",
-		"build",
-		"plan time: asks the compile cache for the dispatch units when the query arrives",
-	),
-	("dispatch.rs", "seal", "plan time: gives a lowered program its dispatch units"),
-	(
-		"dispatch.rs",
-		"seal_knowing",
-		"plan time: gives a lowered program its dispatch units and those of the tables its \
-		 caller knows its records belong to",
-	),
-	(
-		"units.rs",
-		"catalog_unit",
-		"plan time: links the node's catalog unit, or lowers and keeps it, when the query arrives",
-	),
-	(
-		"units.rs",
-		"catalog_unit_unsealed",
-		"plan time: the work of `catalog_unit`, run unsealed off the catalog",
-	),
-	(
-		"units.rs",
-		"referencing_unnoted",
-		"plan time: the reference fields a delete's repairs are lowered from, when it arrives",
-	),
-	(
-		"units.rs",
-		"reference_fields",
-		"plan time: every reference field of a database, which the repairs of each table are \
-		 lowered from, when the query arrives",
-	),
 ];
 
 /// What the run scan rejects outside plan time: the planner, the lowering,
@@ -831,8 +782,7 @@ fn type_scan(files: &BTreeMap<String, String>, root: &str) -> Vec<String> {
 fn run_scan(files: &BTreeMap<String, String>) -> Vec<String> {
 	let mut problems = Vec::new();
 	for (file, text) in files {
-		let base = file.rsplit('/').next().unwrap_or(file);
-		if base.starts_with("lower") && file == base || PLAN_TIME_FILES.contains(&file.as_str()) {
+		if file.starts_with(LOWERING_DIR) || PLAN_TIME_FILES.contains(&file.as_str()) {
 			continue;
 		}
 		let mut text = strip(text);
@@ -1005,15 +955,15 @@ fn the_run_scan_flags_each_planning_reference() {
 			"`{source}` is not flagged for `{token}`: {problems:?}"
 		);
 	}
-	// Plan-time files, plan-time functions, imports and comments are not run
-	// side.
+	// Plan-time files, plan-time functions, imports and comments are not on
+	// the run side.
 	let files = BTreeMap::from([
-		("lower_x.rs".to_owned(), "fn f() { Planner::new() }".to_owned()),
-		("map.rs".to_owned(), "fn f() { Planner::new() }".to_owned()),
+		("ir_lower/x.rs".to_owned(), "fn f() { Planner::new() }".to_owned()),
+		("serve.rs".to_owned(), "fn f() { Planner::new() }".to_owned()),
 		(
 			"dispatch.rs".to_owned(),
 			"use crate::exec::planner::Planner;\n\
-			 async fn seal(planner: &Planner<'_>) { super::lower::lower(planner) }\n\
+			 async fn table_unit(planner: &Planner<'_>) { super::compile::compile(planner) }\n\
 			 fn run() { /* Planner */ }"
 				.to_owned(),
 		),
@@ -1044,9 +994,9 @@ const LOADER_FORBIDDEN: &[&str] = &[
 
 /// The items of the call services (`vm::calls`) that [`LOADER_FILES`] may
 /// name, each with why it compiles nothing. Every other path through the
-/// module is rejected, imports included, each item of a
-/// grouped import on its own; so is a glob import from it, a rename of it or
-/// the module named alone, which the scan could not follow. A listed item is
+/// module is rejected, imports included, and each item of a grouped import
+/// is checked on its own. So is a glob import from it, a rename of it, or
+/// the module named alone, which the scan cannot follow. A listed item is
 /// matched with everything beneath it, so each is an item and none a module;
 /// the closure value and its body, whose members include compilations, are
 /// listed in [`LOADER_CLOSURE_PATHS`] instead.
@@ -1102,6 +1052,10 @@ const LOADER_CLOSURE_MEMBERS: &[(&str, &str)] = &[
 	("captures", "the values the closure captured"),
 	("frame", "the frame an invocation runs a unit in"),
 	("dives", "whether an invocation spends the computation-depth budget"),
+	("with_rows", "the value holding the row its literal captured, made with no body"),
+	("runs_over_invoking_row", "whether the body runs over the invoking frame's row"),
+	("rows", "which row captures the value holds, which its unit is found by"),
+	("captured_rows", "the row the value captured, which its invocation runs the body over"),
 	(
 		"capturing_forbidden_row",
 		"marks a value the VM's literal makes as having captured a KNN query vector's row being \
@@ -1370,7 +1324,7 @@ fn the_loader_scan_flags_each_compiler_reference() {
 		);
 	}
 	// The members the scan rejects are read from the closure value's source,
-	// so a member added there is rejected until it is listed.
+	// so a member added there is rejected unless it is listed.
 	let members = closure_members();
 	for member in ["of_stored", "invoke", "invoke_linked"] {
 		assert!(members.iter().any(|m| m == member), "`{member}` not found in {members:?}");
@@ -1476,6 +1430,7 @@ fn closure() -> crate::val::Value {
 
 #[test]
 fn a_program_refuses_a_closure_value_as_an_internal_error() {
+	use super::NotCoveredKind;
 	use super::plain::ValueData;
 	use crate::exec::index::access_path::{BTreeAccess, BitmapPlan};
 	use crate::val::{Array, Object, RecordId, RecordIdKey, Value};
@@ -1494,16 +1449,20 @@ fn a_program_refuses_a_closure_value_as_an_internal_error() {
 	{
 		let refused = ValueData::new(value.clone(), "a constant")
 			.expect_err(&format!("{value:?} holds a closure"));
-		assert!(refused.internal, "{value:?} is declined rather than refused");
+		assert_eq!(
+			refused.kind,
+			NotCoveredKind::Internal,
+			"{value:?} is declined rather than refused"
+		);
 		// An internal refusal fails the statement as an internal error.
 		let error = super::declined(refused);
 		assert!(error.to_string().contains("closure"), "{error}");
 	}
 	assert!(ValueData::new(vec![Value::from(1), closure()], "the constant pool").is_err());
-	assert!(ValueData::new(BTreeAccess::Equality(closure()), "an index access").is_err());
+	assert!(ValueData::new(BTreeAccess::literal_equality(closure()), "an index access").is_err());
 	let compound = BTreeAccess::Compound {
-		prefix: vec![Value::from(1)],
-		range: Some((crate::expr::BinaryOperator::MoreThan, closure())),
+		prefix: vec![Value::from(1).into()],
+		range: Some((crate::expr::BinaryOperator::MoreThan, closure().into())),
 	};
 	assert!(ValueData::new(compound, "an index access").is_err());
 	let graph = |key: RecordIdKey| BitmapPlan::Graph {

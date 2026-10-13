@@ -9,7 +9,7 @@
 //! condition before the settled one still runs and still decides first; this
 //! rule only drops what the order has already made unreachable. That keeps it
 //! sound for a condition that writes, throws or draws entropy, and keeps which
-//! error a statement raises exactly as it was.
+//! error a statement raises unchanged.
 //!
 //! Three shapes, in the order they are recognised:
 //!
@@ -31,10 +31,12 @@ use crate::expr::logical::{
 	LogicalEval, LogicalExpr, LogicalIf, LogicalIfOp, LogicalLiteral, LogicalOp, OpKind,
 };
 
-/// The same collapse for an `IF` in statement position
+/// Collapses an `IF` in statement position
 /// ([`LogicalOp::If`]): what is left of it, or — where no condition is left
 /// to evaluate — the expression statement of the arm it falls through to, as
-/// the expression form collapses to that arm's value.
+/// the expression form collapses to that arm's value. An arm that writes or
+/// holds a `RETURN` stays an `IF` with no condition: the statement `IF` is the
+/// region the arm runs in.
 ///
 /// An arm that never runs goes, with the statements and closures it holds,
 /// unless it holds a `LET` planning refuses whether or not it runs
@@ -84,8 +86,12 @@ fn apply_op(node: &mut LogicalOp, _cx: &mut RuleContext<'_>) -> bool {
 		match otherwise {
 			// An `ELSE` that writes stays a branch: a write in one spends the
 			// computation-depth budget the branch's nesting spends
-			// ([`crate::exec::vm::depth`]).
-			Some(arm) if writes_op(&arm) => LogicalOp::If(LogicalIfOp::new(Vec::new(), Some(arm))),
+			// ([`crate::exec::vm::depth`]). So does one that holds a `RETURN`: a
+			// statement `IF` passes the `RETURN` to the scope around it, where
+			// the block its arm falls through to would end with it.
+			Some(arm) if writes_op(&arm) || returns_op(&arm) => {
+				LogicalOp::If(LogicalIfOp::new(Vec::new(), Some(arm)))
+			}
 			otherwise => LogicalOp::Eval(LogicalEval {
 				expr: otherwise
 					.map_or(LogicalExpr::Literal(LogicalLiteral::None), LogicalOp::into_scalar),
@@ -194,6 +200,19 @@ fn collapse(conditional: &mut LogicalIf) -> Option<LogicalExpr> {
 		branches: kept,
 		otherwise,
 	})))
+}
+
+/// Whether statement `op`, or a statement it holds, is a `RETURN`.
+fn returns_op(op: &LogicalOp) -> bool {
+	use std::ops::ControlFlow;
+	op.visit_ops_deep(&mut |node| {
+		if matches!(node, LogicalOp::Return(_)) {
+			ControlFlow::Break(())
+		} else {
+			ControlFlow::Continue(())
+		}
+	})
+	.is_break()
 }
 
 /// Whether statement `op`, or a statement it holds, writes.
@@ -436,5 +455,16 @@ mod tests {
 			let kept = rewritten(lower(sql)).to_string();
 			assert!(kept.contains("If"), "`{sql}`: an arm holding a refused LET went: {kept}");
 		}
+	}
+
+	/// A statement `IF` whose arm holds a `RETURN` stays an `IF` once its condition is settled:
+	/// the `RETURN` goes to the scope around the `IF`, where the block the arm falls through to
+	/// would end with it.
+	#[test]
+	fn a_settled_statement_if_holding_a_return_stays_an_if() {
+		let kept = rewritten(lower("{ IF true { RETURN 1 }; 2 }")).to_string();
+		assert!(kept.contains("If"), "a settled IF holding a RETURN was collapsed: {kept}");
+		let folded = rewritten(lower("{ IF true { 1 }; 2 }")).to_string();
+		assert!(!folded.contains("If"), "a settled IF holding no RETURN stayed: {folded}");
 	}
 }

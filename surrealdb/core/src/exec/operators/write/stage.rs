@@ -9,10 +9,11 @@
 //! which image or action a stage acts on, and at what position it sits.
 //!
 //! [`StageId`] is what an order is made of. Naming a stage rather than holding
-//! its implementation is what lets the orders be written down before the
-//! implementations exist, and what keeps the order in one file rather than
-//! distributed across the stages themselves.
+//! its implementation lets an order be written as plain data, and keeps the
+//! whole order in one file rather than spread across the stages themselves.
 
+// Dead-code lint is allowed for the items in this module.
+#![allow(dead_code)]
 // A stage list is only a contract while every stage is named. A wildcard arm
 // over `StageId` — in the registry, or in an order's assembly — absorbs a new
 // stage silently, which is the one failure this module is shaped to prevent.

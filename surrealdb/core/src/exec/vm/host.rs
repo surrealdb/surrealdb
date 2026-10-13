@@ -15,12 +15,14 @@ use std::sync::Arc;
 
 use common::future::stream::Yielder;
 use futures::StreamExt;
+use surrealdb_strand::Strand;
 
 use super::batch::RecordReader;
 use super::groups::GroupMut;
 use super::interp::{self, Arrivals, Groups, Paging, Pending, Region, State, Step};
+use super::ir_host::IrResume;
+use super::morsel::Rows;
 use super::program::{Enforce, Instr, Pipeline, Program, STACK_REGISTERS, Source, StoreInstr};
-use super::region::Rows;
 use super::row::{RowReader, StoredRow, ValueRow};
 use super::scalar::Scalar;
 use super::services::{EngineServices, Services};
@@ -40,6 +42,7 @@ use crate::exec::operators::scan::{
 	FULL_TEXT_BATCH_SIZE, FusedCandidates, MergeMode, RESOLVE_BATCH_SIZE, record_key_range,
 };
 use crate::exec::permission::validate_record_user_access;
+use crate::exec::planner::placement::MorselInput;
 use crate::exec::vm::degree::DegreeCounter;
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -55,9 +58,6 @@ use crate::val::{RecordIdKey, Value};
 pub(crate) struct VmOperator {
 	program: Arc<Program>,
 	metrics: Arc<OperatorMetrics>,
-	/// The operator at the top of the plan `EXPLAIN` renders for the
-	/// program's statement ([`ExecOperator::display_name`]).
-	display: &'static str,
 	/// The catalog ids the statement's planning held, which the program's
 	/// draws take: kept until the operator and every run of it are dropped.
 	held: Option<Arc<super::speculate::HeldIds>>,
@@ -75,27 +75,15 @@ impl VmOperator {
 		Self {
 			program: Arc::new(program),
 			metrics: Arc::new(OperatorMetrics::new()),
-			display: Self::NAME,
 			held: None,
 			served: None,
 			analysis: None,
 		}
 	}
 
-	pub(super) fn analyzed(mut self, analysis: super::explain::VmAnalysis) -> Self {
-		self.analysis = Some(analysis);
-		self
-	}
-
 	/// This operator serving `served`, its program's late-bound statements.
 	pub(super) fn serving(mut self, served: Vec<Arc<crate::expr::logical::LogicalOp>>) -> Self {
 		self.served = (!served.is_empty()).then(|| served.into());
-		self
-	}
-
-	/// This operator shown by `display` ([`ExecOperator::display_name`]).
-	pub(super) fn displayed_as(mut self, display: &'static str) -> Self {
-		self.display = display;
 		self
 	}
 
@@ -922,24 +910,23 @@ where
 	cell.get_or_init(|| async { super::interp::KnnQueryOutcome::of(evaluate().await) }).await.read()
 }
 
-/// The query vector of KNN search `search` of the program, computed when the
-/// statement runs: evaluated by the first source of the run that searches with
-/// it, as it opens, and read by every other.
+/// The query vector `query` of a KNN search, computed when the statement runs:
+/// evaluated by the first source of the run that searches with it, as it opens,
+/// and read by every other.
 async fn evaluate_knn_search(
 	program: &Program,
-	search: u16,
+	query: &Arc<super::program::KnnQuery>,
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Arc<[crate::val::Number]>> {
-	let at = search as usize;
-	let query = program
-		.knn_searches
-		.get(at)
-		.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("a KNN search the program lacks")))?;
-	if state.knn_searches.len() <= at {
-		state.knn_searches.resize_with(at + 1, Default::default);
-	}
-	let cell = Arc::clone(&state.knn_searches[at]);
+	let cell = match state.knn_searches.iter().find(|(held, _)| Arc::ptr_eq(held, query)) {
+		Some((_, cell)) => Arc::clone(cell),
+		None => {
+			let cell = super::interp::KnnQueryCell::default();
+			state.knn_searches.push((Arc::clone(query), Arc::clone(&cell)));
+			cell
+		}
+	};
 	read_knn_query(&cell, || evaluate_knn_query(program, &query.vector, ctx)).await
 }
 
@@ -957,13 +944,7 @@ pub(super) fn forget_knn_queries(program: &Program, group: Option<u16>, state: &
 			*held = Default::default();
 		}
 	}
-	for (at, query) in program.knn_searches.iter().enumerate() {
-		if query.group == group
-			&& let Some(held) = state.knn_searches.get_mut(at)
-		{
-			*held = Default::default();
-		}
-	}
+	state.knn_searches.retain(|(query, _)| query.group != group);
 }
 
 /// Run the pipelines of `program` that `group` owns — the program's own for
@@ -1030,13 +1011,19 @@ pub(super) async fn run_pipelines(
 			if let Some(join) = streamed {
 				state.held[join] = None;
 			}
-			if let Some(table) = pipeline.source.table() {
+			// The table a read names is still required defined, as opening it would.
+			if let Source::Vacant {
+				table,
+			} = &pipeline.source
+			{
+				require_defined(ctx, table, version).await?;
+			} else if let Some(table) = pipeline.source.table() {
 				let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 					.await
 					.map_err(ControlFlow::Err)?;
 				let db_ctx = ctx.database().context("the VM requires a database context")?;
 				let hidden = matches!(pipeline.source, Source::Scan { .. })
-					&& hidden_absence(pipeline, &descriptor, db_ctx)?;
+					&& absence_hidden(&descriptor, db_ctx)?;
 				if !hidden {
 					descriptor.defined().map_err(ControlFlow::Err)?;
 				}
@@ -1069,6 +1056,9 @@ pub(super) async fn run_pipelines(
 				..
 			}
 			| Source::LightweightEdges {
+				..
+			}
+			| Source::Vacant {
 				..
 			}
 			| Source::Union(_) => {
@@ -1123,6 +1113,31 @@ pub(super) async fn run_pipelines(
 					super::count::Counted::Count(n) => output.batch(n).into_values(),
 					super::count::Counted::Rows(rows) => rows,
 				};
+				for row in rows {
+					out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?;
+				}
+				out_of_line(|| flush(state, yielder, flush_at, ctx)).await?;
+			}
+			// The change sets, read when the source opens, each a row.
+			Source::Changes {
+				table,
+				since,
+				limit,
+			} => {
+				let opt = ctx.options().ok_or_else(|| {
+					ControlFlow::Err(anyhow::anyhow!(
+						"a change feed read without the session's options"
+					))
+				})?;
+				let rows = crate::cf::reader::changes(
+					ctx.ctx(),
+					opt,
+					table.as_ref(),
+					since.clone(),
+					*limit,
+				)
+				.await
+				.map_err(ControlFlow::Err)?;
 				for row in rows {
 					out_of_line(|| run_value_row(program, pipeline, row, state, ctx)).await?;
 				}
@@ -1450,7 +1465,7 @@ pub(super) async fn run_storage_source(
 			let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
 				.await
 				.map_err(ControlFlow::Err)?;
-			if hidden_absence(pipeline, &descriptor, db_ctx)? {
+			if absence_hidden(&descriptor, db_ctx)? {
 				return Ok(false);
 			}
 			let def = descriptor.defined().map_err(ControlFlow::Err)?;
@@ -1489,6 +1504,12 @@ pub(super) async fn run_storage_source(
 					.await
 				}
 			}
+		}
+		Source::Vacant {
+			table,
+		} => {
+			require_defined(ctx, table, version).await?;
+			Ok(false)
 		}
 		Source::Record {
 			table,
@@ -1579,7 +1600,7 @@ pub(super) async fn run_storage_source(
 				decode.as_ref(),
 			)?;
 			let mut rows = Rows::of(program, pipeline, ctx);
-			let paged = super::region::body_breakers(&pipeline.code).paged;
+			let paged = super::morsel::body_breakers(&pipeline.code).paged;
 			loop {
 				records.paged = rows.wanted(paged, state);
 				let row = match records.next(ctx).await {
@@ -1635,7 +1656,7 @@ pub(super) async fn run_storage_source(
 				)
 				.await;
 			};
-			let access = crate::exec::index::access_path::BTreeAccess::Equality(key);
+			let access = crate::exec::index::access_path::BTreeAccess::literal_equality(key);
 			let mut records = IndexRecords::open(
 				ctx,
 				index,
@@ -1673,7 +1694,7 @@ pub(super) async fn run_storage_source(
 			let mut branches = branches
 				.iter()
 				.map(|b| match &b.read {
-					super::plan::BranchRead::BTree(access) => {
+					super::payload::BranchRead::BTree(access) => {
 						let distinct = branch_distinct && access_repeats_records(&b.index, access);
 						IndexRecords::open(
 							ctx,
@@ -1685,7 +1706,7 @@ pub(super) async fn run_storage_source(
 							decode.as_ref(),
 						)
 					}
-					super::plan::BranchRead::FullText {
+					super::payload::BranchRead::FullText {
 						query,
 						operator,
 					} => Ok(IndexRecords::full_text(
@@ -1879,6 +1900,7 @@ pub(super) async fn run_storage_source(
 			table,
 			index,
 			vector,
+			vector_query,
 			k,
 			ef,
 			slot,
@@ -1896,11 +1918,9 @@ pub(super) async fn run_storage_source(
 			}
 			// A vector computed when the statement runs is evaluated as the
 			// source opens, before the search reads anything.
-			let vector = match vector {
-				super::program::KnnSearchVector::Literal(vector) => Arc::clone(vector),
-				super::program::KnnSearchVector::Query(at) => {
-					read!(evaluate_knn_search(program, *at, state, ctx).await)
-				}
+			let vector = match vector_query {
+				Some(query) => read!(evaluate_knn_search(program, query, state, ctx).await),
+				None => Arc::clone(vector),
 			};
 			let candidates = read!(
 				super::knn::search(
@@ -2099,6 +2119,9 @@ pub(super) async fn run_storage_source(
 		| Source::WriteEdges {
 			..
 		}
+		| Source::Changes {
+			..
+		}
 		| Source::Once => unreachable!("a source that is not a storage read"),
 	}
 }
@@ -2271,21 +2294,40 @@ impl IndexRecords {
 	}
 }
 
-/// Whether the table `descriptor` names is absent and a scan of it by
-/// `pipeline`, which enforces the table's permissions per row, owes the
-/// caller no rows rather than the error of an undefined table: a caller whose
-/// reads are checked is denied a table that does not exist, as one whose
-/// permission it fails, so its scan reads as empty.
-fn hidden_absence(
-	pipeline: &Pipeline,
+/// Whether the table `descriptor` names is absent and the caller's reads are
+/// permission-checked, so that the absence is not disclosed to it. Whatever
+/// reads or writes a table by name answers an absent table with this verdict,
+/// so that no statement tells a checked caller more of the catalog than its
+/// scan does: a scan of the table by name, whether it feeds a read or a write,
+/// reads as empty, as a scan of a table whose permission the caller fails.
+fn absence_hidden(
 	descriptor: &crate::exec::vm::descriptor::TableDescriptor,
 	db_ctx: &crate::exec::DatabaseContext,
 ) -> FlowResult<bool> {
-	if descriptor.definition.is_some() || !matches!(pipeline.enforce, Some(Enforce::Rows(_))) {
+	if descriptor.definition.is_some() {
 		return Ok(false);
 	}
 	crate::exec::permission::should_check_perms(db_ctx, crate::iam::Action::View)
 		.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))
+}
+
+/// Require `table`, which a write names and reads no record of, to be
+/// defined: raise the error of an undefined table, except for a caller whose
+/// reads are permission-checked, to whom the absence is hidden
+/// ([`absence_hidden`]).
+pub(super) async fn require_defined(
+	ctx: &ExecutionContext,
+	table: &crate::val::TableName,
+	version: Option<u64>,
+) -> FlowResult<()> {
+	let db_ctx = ctx.database().context("the VM requires a database context")?;
+	let descriptor = crate::exec::vm::descriptor::table_at(ctx, table, version)
+		.await
+		.map_err(ControlFlow::Err)?;
+	if !absence_hidden(&descriptor, db_ctx)? {
+		descriptor.defined().map_err(ControlFlow::Err)?;
+	}
+	Ok(())
 }
 
 /// Raise the internal error of a scan that was planned as a read of a record
@@ -2342,7 +2384,7 @@ fn record_id(row: &Value) -> Option<crate::val::RecordId> {
 /// for a scan with no pushdown or whose sort holds no cell, and for a
 /// key-range scan cut by the second of a datetime component, which reads no
 /// stored bytes for the key ([`CoarseGate`]).
-fn armed_probe(
+pub(super) fn armed_probe(
 	pipeline: &Pipeline,
 	state: &State,
 ) -> Option<Arc<crate::exec::topk_pushdown::TopKThresholdProbe>> {
@@ -2356,7 +2398,7 @@ fn armed_probe(
 
 /// The cut a key-range scan makes beneath a bounded sort ordered first by a
 /// datetime component of the record id, which the scan delivers in the order
-/// of its whole second ([`super::plan::CoarseCutoff`]).
+/// of its whole second ([`super::payload::CoarseCutoff`]).
 ///
 /// The sort publishes the first key of the last row it keeps once it holds
 /// as many as it keeps. A record whose component is in a second past that
@@ -2551,6 +2593,21 @@ async fn scan_range(
 	// takes reads no more records than that before it hands its rows on.
 	let first = state.scan_hint.take();
 	if pipeline.in_place {
+		// A body in the storage cursor planned as morsels reads its key range in parts; a scan cut
+		// by a coarse gate reads in one cursor, which the gate stops.
+		if coarse.is_none() && super::morsel::effective_input(pipeline) == Some(MorselInput::Range)
+		{
+			// Morsels decode a packed record through the layouts the gate lists as the scan
+			// opens.
+			let mut gate = gate;
+			gate.refresh(&ctx.txn()).await.map_err(ControlFlow::Err)?;
+			let layouts = Some(Arc::clone(gate.layouts()));
+			return super::morsel::scan_range_in_place(
+				program, pipeline, range, direction, version, first, layouts, state, ctx, yielder,
+				flush_at,
+			)
+			.await;
+		}
 		return scan_in_place(
 			program, pipeline, range, gate, direction, version, first, state, ctx, yielder,
 			flush_at, coarse,
@@ -2967,7 +3024,7 @@ fn scan_row(
 /// settled as a value. So a packed record never becomes a sort's stored bytes
 /// or a frame's late transcode, and neither needs layouts when it is read
 /// again.
-fn in_place_row(
+pub(super) fn in_place_row(
 	program: &Program,
 	pipeline: &Pipeline,
 	key: &[u8],
@@ -3106,6 +3163,9 @@ fn finish_in_place(step: anyhow::Result<Step>) -> anyhow::Result<bool> {
 		| Ok(Step::External {
 			..
 		})
+		| Ok(Step::Ir {
+			..
+		})
 		| Ok(Step::Degree {
 			..
 		})
@@ -3141,16 +3201,15 @@ pub(super) async fn run_rows(
 	Ok(false)
 }
 
-/// Run a pipeline's body for one row held in memory, evaluating what it hands
-/// back, and settle the row where the body sent it.
+/// Run host pipeline `pipeline`, an index into `program.host_code`, over `image`
+/// in place and synchronously, when its body answers without handing the host a
+/// step. `image` is read as a document row.
+/// `None` when the body hands the host a step or fails, having kept nothing it
+/// did; the caller then runs the pipeline whole.
 ///
-/// A run over a state that is already inside an [`Instr::TryNone`] region, as a
-/// statement the body runs is, leaves those regions as it found them: it
-/// catches only the errors of the regions it opens itself.
-/// Host pipeline `pipeline`'s answer over `image` when its body answers
-/// without handing the host a step: run in place, synchronously, over a row
-/// that is a document. `None` when the body hands the host a step or fails,
-/// having kept nothing it did; the caller then runs the pipeline whole.
+/// A run over a state already inside an [`Instr::TryNone`] region leaves those
+/// regions as it found them: it catches only the errors of the regions it opens
+/// itself.
 pub(super) fn run_image_inline(
 	program: &Program,
 	pipeline: u16,
@@ -3411,20 +3470,32 @@ async fn enforce_row(
 	};
 	let frame = frame_ctx(state, ctx, None);
 	match enforce {
-		Enforce::Rows(_) => {
+		Enforce::Rows {
+			needed,
+			..
+		} => {
 			let Some(rid) = record else {
 				return Ok(true);
 			};
-			// The table's read unit enforces the row where one serves the
-			// frame, as a read of the record by id is enforced.
-			if let Some(deref) = frame.vm_deref()
+			// The table's read unit, which derives every field, enforces the
+			// row where one serves the frame and the pipeline reads the row
+			// whole, as a read of the record by id is enforced.
+			if needed.is_none()
+				&& let Some(deref) = frame.vm_deref()
 				&& let Some(read) =
 					out_of_line(|| deref.read_record(frame, &rid.table, row, true)).await
 			{
 				return read;
 			}
-			out_of_line(|| crate::exec::operators::fetch::process_fetched_record(frame, &rid, row))
-				.await
+			out_of_line(|| {
+				crate::exec::operators::fetch::process_fetched_record_for(
+					frame,
+					&rid,
+					row,
+					needed.as_deref(),
+				)
+			})
+			.await
 		}
 		Enforce::Image(table) => {
 			if record.is_none() {
@@ -3509,6 +3580,10 @@ async fn run_body(
 					&value_row
 				}
 			};
+			// The row the closures this stretch makes capture, built when the
+			// first needs it and shared by the rest: `row` is borrowed for as long
+			// as the stretch runs, so it is the row every one of them reads.
+			let mut captured_row: Option<Arc<Value>> = None;
 			let mut small;
 			let mut stack;
 			let mut spilled;
@@ -3711,7 +3786,6 @@ async fn run_body(
 									args,
 									dst,
 									frame,
-									elem,
 								} = &pipeline.code[at]
 								else {
 									unreachable!("a call step at a call instruction")
@@ -3721,17 +3795,21 @@ async fn run_body(
 									.map(|arg| interp::read_operand(regs, reader, program, *arg))
 									.collect::<anyhow::Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
-								let element = elem.map(|elem| regs[elem as usize].to_value());
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
-								let eval_ctx = match &element {
-									Some(element) => eval_ctx.with_value(element),
-									None => eval_ctx,
+								// A body that runs over its document root holds its current
+								// value as an element, which a call lowered at the body's own
+								// level reads; a call in a pipeline of its own reads that
+								// pipeline's row.
+								let spec = &program.calls[*call as usize];
+								let eval_ctx = match state.element.as_deref() {
+									Some(element) if spec.reads_element && !state.rowless => {
+										eval_ctx.with_value(element)
+									}
+									_ => eval_ctx,
 								};
-								let value = out_of_line(|| {
-									call_builtin(&program.calls[*call as usize], args, eval_ctx)
-								})
-								.await?;
+								let value =
+									out_of_line(|| call_builtin(spec, args, eval_ctx)).await?;
 								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
 								pc = at + 1;
 							}
@@ -3749,33 +3827,59 @@ async fn run_body(
 										"an index-function step at an index-function instruction"
 									)
 								};
-								let mut args = args
-									.iter()
-									.map(|arg| interp::read_operand(regs, reader, program, *arg))
-									.collect::<anyhow::Result<Vec<_>>>()
-									.map_err(ControlFlow::Err)?;
-								let spec = &program.calls[*call as usize];
-								let query = interp::runtime_query(spec, &mut args)
-									.map_err(ControlFlow::Err)?;
-								let run = state
-									.index_run_for(
-										*call,
-										spec,
-										ctx.function_registry(),
-										query.as_deref(),
-									)
-									.map_err(ControlFlow::Err)?;
-								let eval_ctx = frame_eval(program, state, ctx, *frame);
-								let eval_ctx = row_eval(state, eval_ctx, &row);
-								let value = out_of_line(|| async {
-									run.function
-										.invoke_async(&eval_ctx, &run.context, args)
-										.await
-										.map_err(ControlFlow::Err)
-								})
-								.await?;
-								regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
-								pc = at + 1;
+								if let Some(super::program::IndexBinding::KnnHolds {
+									slot,
+								}) = &program.calls[*call as usize].index
+								{
+									let distances = state.knn_context(*slot);
+									let eval_ctx = frame_eval(program, state, ctx, *frame);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									let record = match eval_ctx.value_in_scope().within_context() {
+										Some(Value::RecordId(rid)) => Some(rid),
+										Some(Value::Object(object)) => match object.get("id") {
+											Some(Value::RecordId(rid)) => Some(rid),
+											_ => None,
+										},
+										_ => None,
+									};
+									let held = match record {
+										Some(rid) => distances.get(rid).await.is_some(),
+										None => false,
+									};
+									regs[*dst as usize] =
+										Scalar::Value(Cow::Owned(Value::Bool(held)));
+									pc = at + 1;
+								} else {
+									let mut args = args
+										.iter()
+										.map(|arg| {
+											interp::read_operand(regs, reader, program, *arg)
+										})
+										.collect::<anyhow::Result<Vec<_>>>()
+										.map_err(ControlFlow::Err)?;
+									let spec = &program.calls[*call as usize];
+									let query = interp::runtime_query(spec, &mut args)
+										.map_err(ControlFlow::Err)?;
+									let run = state
+										.index_run_for(
+											*call,
+											spec,
+											ctx.function_registry(),
+											query.as_deref(),
+										)
+										.map_err(ControlFlow::Err)?;
+									let eval_ctx = frame_eval(program, state, ctx, *frame);
+									let eval_ctx = row_eval(state, eval_ctx, &row);
+									let value = out_of_line(|| async {
+										run.function
+											.invoke_async(&eval_ctx, &run.context, args)
+											.await
+											.map_err(ControlFlow::Err)
+									})
+									.await?;
+									regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
+									pc = at + 1;
+								}
 							}
 							Step::Matches {
 								at,
@@ -3884,7 +3988,6 @@ async fn run_body(
 										function,
 										frame,
 										outer,
-										elem,
 									} => {
 										if state.functions.len() <= *function as usize {
 											state.functions.resize_with(
@@ -3895,18 +3998,20 @@ async fn run_body(
 										let mut known = std::mem::take(
 											&mut state.functions[*function as usize],
 										);
-										let element =
-											elem.map(|elem| regs[elem as usize].to_value());
 										let eval_ctx = frame_eval(program, state, ctx, *outer);
 										let eval_ctx = row_eval(state, eval_ctx, &row);
-										let eval_ctx = match &element {
-											Some(element) => eval_ctx.with_value(element),
-											None => eval_ctx,
-										};
 										let spec = &program.functions[*function as usize];
+										// Only a guard lowered as a unit reads the table.
+										let units = match spec.guard {
+											Some((_, super::program::GuardCode::Unit(_), _)) => {
+												Some(unit_table(program, state, eval_ctx.exec_ctx)?)
+											}
+											Some((_, super::program::GuardCode::Host(_), _))
+											| None => None,
+										};
 										let entered = out_of_line(|| {
 											super::function::enter(
-												program, spec, &mut known, &eval_ctx,
+												program, spec, &mut known, &eval_ctx, units,
 											)
 										})
 										.await;
@@ -3969,7 +4074,6 @@ async fn run_body(
 										args,
 										dst,
 										outer,
-										elem,
 									} => {
 										let args = args
 											.iter()
@@ -3978,27 +4082,50 @@ async fn run_body(
 											})
 											.collect::<anyhow::Result<Vec<_>>>()
 											.map_err(ControlFlow::Err)?;
-										let element =
-											elem.map(|elem| regs[elem as usize].to_value());
 										let entered = state.calls[(*frame - CALL_FRAME) as usize]
 											.take()
 											.expect("a function called after it is entered");
-										let eval_ctx = frame_eval(program, state, ctx, *outer);
-										let eval_ctx = row_eval(state, eval_ctx, &row);
-										let eval_ctx = match &element {
-											Some(element) => eval_ctx.with_value(element),
-											None => eval_ctx,
-										};
 										let spec = &program.functions[*function as usize];
-										let units = unit_table(program, state, eval_ctx.exec_ctx)?;
-										let principal =
-											state.call_principals[(*frame - CALL_FRAME) as usize];
-										let value = out_of_line(|| {
-											super::function::call(
-												units, spec, &entered, principal, &eval_ctx, args,
-											)
-										})
-										.await?;
+										// A redefined function runs the call unit of the definition
+										// the transaction reads now, from the caller's evaluation.
+										let value = if entered.redefined {
+											let mut linked = state
+												.functions
+												.get_mut(*function as usize)
+												.and_then(|known| known.linked.take());
+											let eval_ctx = frame_eval(program, state, ctx, *outer);
+											let eval_ctx = row_eval(state, eval_ctx, &row);
+											let value = out_of_line(|| {
+												super::call_unit::call(
+													&spec.name,
+													spec.plan_depth,
+													args,
+													&eval_ctx,
+													&mut linked,
+												)
+											})
+											.await;
+											if let Some(known) =
+												state.functions.get_mut(*function as usize)
+											{
+												known.linked = linked;
+											}
+											value?
+										} else {
+											let eval_ctx = frame_eval(program, state, ctx, *outer);
+											let eval_ctx = row_eval(state, eval_ctx, &row);
+											let units =
+												unit_table(program, state, eval_ctx.exec_ctx)?;
+											let principal = state.call_principals
+												[(*frame - CALL_FRAME) as usize];
+											out_of_line(|| {
+												super::function::call(
+													units, spec, &entered, principal, &eval_ctx,
+													args,
+												)
+											})
+											.await?
+										};
 										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
 									}
 									Instr::Dive {
@@ -4042,9 +4169,12 @@ async fn run_body(
 									None => row_eval(state, eval_ctx, &row),
 								};
 								let spec = &program.subqueries[*subquery as usize];
+								let inputs = unit_inputs(regs, reader, program, &spec.inputs)
+									.map_err(ControlFlow::Err)?;
 								let units = unit_table(program, state, ctx)?;
 								let evaluated =
-									out_of_line(|| run_subprogram(&units, spec, eval_ctx)).await;
+									out_of_line(|| run_subprogram(&units, spec, eval_ctx, inputs))
+										.await;
 								match (evaluated, caught) {
 									(Ok(value), _) => {
 										regs[*dst as usize] = Scalar::Value(Cow::Owned(value));
@@ -4081,6 +4211,8 @@ async fn run_body(
 									Instr::MakeClosure {
 										closure,
 										slots,
+										row: row_operand,
+										root: root_operand,
 										dst,
 									} => {
 										let index = *closure as usize;
@@ -4101,7 +4233,10 @@ async fn run_body(
 										for name in &spec.framed {
 											let bound = match eval_ctx.write_binding(name) {
 												Some(value) => Some(value),
-												None => match eval_ctx.exec_ctx.binding(name) {
+												None => match eval_ctx
+													.exec_ctx
+													.lexical_binding(name)
+												{
 													Some(crate::ctx::Binding::Value(value)) => {
 														Some(value.as_ref())
 													}
@@ -4116,12 +4251,21 @@ async fn run_body(
 												captures.insert(name.as_str(), value.clone());
 											}
 										}
+										let (current, root) = closure_rows(
+											spec,
+											(*row_operand, *root_operand),
+											(regs, reader, program),
+											state,
+											(&*row, &mut captured_row),
+										)
+										.map_err(ControlFlow::Err)?;
 										let compiled =
 											crate::exec::vm::calls::CompiledClosure::planned(
 												&spec.closure,
 												spec.digest,
 												captures,
-											);
+											)
+											.with_rows(current, root);
 										let compiled = match forbidden {
 											Some(row) => compiled.capturing_forbidden_row(row),
 											None => compiled,
@@ -4316,6 +4460,15 @@ async fn run_body(
 									frame.with_skip_fetch_perms(true)
 								} else {
 									frame
+								};
+								// Every depth reads the inputs, evaluated once, from the frame it
+								// runs in.
+								let frame = match spec.inputs.is_empty() {
+									true => frame,
+									false => frame.with_params(
+										unit_inputs(regs, reader, program, &spec.inputs)
+											.map_err(ControlFlow::Err)?,
+									),
 								};
 								let units = match spec.body {
 									Some(_) => Some(unit_table(program, state, ctx)?),
@@ -4700,6 +4853,32 @@ async fn run_body(
 									None => at + 1,
 								};
 							}
+							Step::Ir {
+								at,
+							} => {
+								let Instr::Ir(instr) = &pipeline.code[at] else {
+									unreachable!("an IR step at an IR instruction")
+								};
+								let services = EngineServices::new(ctx);
+								let Some(host) = services.ir_host() else {
+									return Err(ControlFlow::Err(anyhow::anyhow!(
+										"an IR instruction ran on a host with no IR service"
+									)));
+								};
+								match out_of_line(|| {
+									super::ir_host::run(
+										host, instr, at, program, reader, regs, state,
+									)
+								})
+								.await?
+								{
+									IrResume::At(resume) => pc = resume,
+									IrResume::EndRow => break Ok(Stretch::Ended(Ended::Next)),
+									IrResume::StopPipeline => {
+										break Ok(Stretch::Ended(Ended::Stop));
+									}
+								}
+							}
 							Step::Next => break Ok(Stretch::Ended(Ended::Next)),
 							Step::Stop => break Ok(Stretch::Ended(Ended::Stop)),
 							Step::LandRow {
@@ -4966,9 +5145,9 @@ impl super::binding::StepSink for Below<'_> {
 /// join's owner starts again. A pairing is the probe row with the build row
 /// set under the join's alias; a probe row that is no object is paired as it
 /// is. A build row pairs only if the residual holds of the row paired, and a
-/// [`JoinMatch::Left`](super::plan::JoinMatch::Left) join emits a probe row no
+/// [`JoinMatch::Left`](super::payload::JoinMatch::Left) join emits a probe row no
 /// build row pairs with once, with `NULL` under the alias. A
-/// [`JoinMatch::Semi`](super::plan::JoinMatch::Semi) join emits a probe row
+/// [`JoinMatch::Semi`](super::payload::JoinMatch::Semi) join emits a probe row
 /// some build row matches once, as it is, and judges no residual.
 async fn run_join(
 	program: &Program,
@@ -4989,7 +5168,7 @@ async fn run_join(
 	let looked = match spec.lookup {
 		Some((group, key))
 			if state.joins[join as usize].is_none()
-				&& state.join_lookups[join as usize] < super::plan::LOOKUP_EVALUATIONS
+				&& state.join_lookups[join as usize] < super::payload::LOOKUP_EVALUATIONS
 				&& keys.get(key).is_some_and(lookup_key) =>
 		{
 			state.join_lookups[join as usize] += 1;
@@ -5035,7 +5214,7 @@ async fn pair_built(
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Ended> {
-	use super::plan::JoinMatch;
+	use super::payload::JoinMatch;
 	let pipeline = &program.pipelines[spec.pipeline];
 	if spec.kind == JoinMatch::Semi {
 		if table.matches(&keys).next().is_none() {
@@ -5306,7 +5485,7 @@ async fn pair_held(
 
 /// End join `join`'s held row once its right input has streamed past it:
 /// pair the right rows a regex key matched, then — for a
-/// [`JoinMatch::Left`](super::plan::JoinMatch::Left) join whose row nothing
+/// [`JoinMatch::Left`](super::payload::JoinMatch::Left) join whose row nothing
 /// paired with — emit the row once with `NULL` under the alias. A held row
 /// whose key holds a regex is paired with the right rows kept, as
 /// [`run_join`] pairs a probe row with its build table.
@@ -5338,7 +5517,7 @@ async fn finish_held_join(
 	let Some(held) = state.held[join as usize].take() else {
 		return Ok(());
 	};
-	if !held.matched && !held.stopped && spec.kind == super::plan::JoinMatch::Left {
+	if !held.matched && !held.stopped && spec.kind == super::payload::JoinMatch::Left {
 		let paired = crate::exec::operators::with_alias_owned(held.probe, &spec.alias, Value::Null);
 		let pipeline = &program.pipelines[spec.pipeline];
 		out_of_line(|| run_value_row(program, pipeline, paired, state, ctx)).await?;
@@ -5464,7 +5643,7 @@ impl super::join_spill::Pairer for PlanPairer<'_> {
 				};
 				out.push(paired);
 			}
-			if out.is_empty() && spec.kind == super::plan::JoinMatch::Left {
+			if out.is_empty() && spec.kind == super::payload::JoinMatch::Left {
 				out.push(crate::exec::operators::with_alias_owned(probe, &spec.alias, Value::Null));
 			}
 			Ok(out)
@@ -5787,11 +5966,11 @@ async fn gathered(state: &mut State, ctx: &ExecutionContext) -> FlowResult<()> {
 /// Bound the breakers of `program` by the query's memory: every sort but a
 /// brute-force KNN's charges what it holds to the query's lease, which opens
 /// it with its spill headroom, and spills once the lease no longer covers it.
-/// A sort its plan labels [`Spill::Bounded`](super::plan::Spill) keeps a
+/// A sort its plan labels [`Spill::Bounded`](super::payload::Spill) keeps a
 /// bounded number of rows: it takes nothing from its lease until it holds
 /// more than a chunk, and takes no account at all when the query has no
 /// temporary store: it prunes in memory and never fails for memory. A sort
-/// labelled [`Spill::Spillable`](super::plan::Spill) under
+/// labelled [`Spill::Spillable`](super::payload::Spill) under
 /// `TEMPFILES` also spills each time it holds the external sorting buffer
 /// limit's rows, when the context
 /// names a temporary directory. An aggregate so labelled charges its groups.
@@ -5802,7 +5981,7 @@ fn bound_breakers(program: &Program, state: &mut State, ctx: &ExecutionContext) 
 	bind_breakers(program, state, &Arc::clone(memory), tempfiles_limit(ctx));
 }
 
-/// Bound a region batch's breakers by its query's lease, where the query can
+/// Bound a morsel's breakers by its query's lease, where the query can
 /// spill: as the statement's are, but a sort never spills by its row count.
 pub(super) fn bound_batch(program: &Program, state: &mut State, ctx: &ExecutionContext) {
 	if let Some(memory) = ctx.ctx().memory().filter(|memory| memory.can_spill()) {
@@ -5828,7 +6007,7 @@ fn bind_breakers(
 		}
 		// A keep sort holds a bounded buffer, so it has no need to be
 		// accounted where it could not spill.
-		if spec.held == super::plan::Spill::Bounded && !memory.can_spill() {
+		if spec.held == super::payload::Spill::Bounded && !memory.can_spill() {
 			continue;
 		}
 		state.sort_accounts[at] = memory.reservation();
@@ -5846,7 +6025,7 @@ fn bind_breakers(
 		});
 	}
 	for (at, sink) in program.aggregates.iter().enumerate() {
-		if sink.held == super::plan::Spill::Spillable {
+		if sink.held == super::payload::Spill::Spillable {
 			let savable = state
 				.aggregates
 				.functions
@@ -6036,7 +6215,7 @@ pub(super) async fn seal_groups(
 	let memory = sealing_memory(state)?;
 	if !spill_groups(state, at, &memory, ctx).await? {
 		return Err(ControlFlow::Err(anyhow::anyhow!(
-			"Internal error: a region batch spilled groups its statement cannot save"
+			"Internal error: a morsel spilled groups its statement cannot save"
 		)));
 	}
 	Ok(())
@@ -6047,7 +6226,7 @@ pub(super) async fn seal_groups(
 fn sealing_memory(state: &State) -> FlowResult<Arc<crate::exec::memory::QueryMemory>> {
 	state.memory.clone().filter(|memory| memory.can_spill()).ok_or_else(|| {
 		ControlFlow::Err(anyhow::anyhow!(
-			"Internal error: a region batch spilled where its statement cannot"
+			"Internal error: a morsel spilled where its statement cannot"
 		))
 	})
 }
@@ -6181,6 +6360,52 @@ pub(super) async fn host_scalar_in(
 	}
 }
 
+/// The current value and document root a closure literal captures, each absent
+/// where the literal captures none.
+type ClosureRows = (Option<Arc<Value>>, Option<Arc<Value>>);
+
+/// The row captures of the value the literal `spec` makes where the pipeline
+/// running over `state` stands: the current value and the document root of
+/// the literal, each read from its operand, or from the pipeline's `row` for
+/// a capture of the row the pipeline runs over, which `captured_row` holds
+/// for the rest of the stretch once it is built.
+///
+/// A pipeline with no row has none to capture, and no document root where its
+/// row is no document ([`State::undocumented`]), exactly as
+/// [`Instr::DocumentRoot`] reads them: a capture of the pipeline's row, and a
+/// document root of any kind, is then absent. A row the two captures share is
+/// held once.
+fn closure_rows(
+	spec: &super::program::ClosureValueSpec,
+	operands: (Option<super::program::Operand>, Option<super::program::Operand>),
+	(regs, reader, program): (&[Scalar<'_>], &(dyn RowReader + Sync), &Program),
+	state: &State,
+	(row, captured_row): (&Value, &mut Option<Arc<Value>>),
+) -> anyhow::Result<ClosureRows> {
+	use super::program::RowKind;
+	let mut pipeline_row = || Arc::clone(captured_row.get_or_insert_with(|| Arc::new(row.clone())));
+	let (row_operand, root_operand) = operands;
+	let current = match (spec.row_captures.row, row_operand) {
+		(None, _) => None,
+		(Some(RowKind::PipelineRow), _) => (!state.rowless).then(&mut pipeline_row),
+		(Some(_), Some(operand)) => {
+			Some(Arc::new(interp::read_operand(regs, reader, program, operand)?))
+		}
+		(Some(_), None) => anyhow::bail!("a row capture of a closure literal with no operand"),
+	};
+	let root = match (spec.row_captures.root, root_operand) {
+		(None, _) => None,
+		_ if state.rowless || state.undocumented => None,
+		(Some(RowKind::PipelineRow), _) => Some(pipeline_row()),
+		(Some(_), Some(operand)) if row_operand == Some(operand) => current.clone(),
+		(Some(_), Some(operand)) => {
+			Some(Arc::new(interp::read_operand(regs, reader, program, operand)?))
+		}
+		(Some(_), None) => anyhow::bail!("a row capture of a closure literal with no operand"),
+	};
+	Ok((current, root))
+}
+
 /// `eval_ctx` over `row`, the row the pipeline running over `state` runs
 /// over: its current value and document, its current value alone where the
 /// row is no document ([`State::undocumented`]), and neither where the
@@ -6235,8 +6460,7 @@ pub(super) fn frame_eval<'c>(
 	eval_ctx
 }
 
-/// The context a host step reads in: permission or call frame `frame` when
-/// set, and
+/// The context a host step reads in: permission or call frame `frame` when set,
 /// otherwise the block's current frame or the statement's.
 fn frame_ctx<'c>(
 	state: &'c State,
@@ -6354,31 +6578,44 @@ fn column_frame(program: &Program, frame: Option<u16>) -> bool {
 }
 
 /// What `signal`, raised by a statement evaluated in `frame` and taken by no
-/// catch, raises there. A permission predicate and a projection layer's column
-/// have nowhere to send a `RETURN`, `BREAK` or `CONTINUE`, so it is an error,
-/// as the permission operator and the projection layer report it: the signal
-/// never leaves the frame, and a predicate's value never becomes the value of
-/// the statement it guards. Outside those frames, and for an error, the
-/// signal passes through unchanged.
+/// catch, raises there. A permission frame and a projection layer's column are
+/// barriers to a loop: the loop a `BREAK` or `CONTINUE` names is not written
+/// in them, so each raises [`crate::exec::Error::InvalidControlFlow`], the
+/// error every barrier answers with. A `RETURN` is the value of the block that
+/// holds it, which the statement evaluated in the frame takes
+/// (`Lowering::own_catch`); one that reaches here was taken by
+/// none, and has nowhere to go: a predicate's value never becomes the value of
+/// the statement it guards, so it is an error. Outside those frames, and for
+/// an error, the signal passes through unchanged.
 fn escaped_signal(program: &Program, frame: Option<u16>, signal: ControlFlow) -> ControlFlow {
 	match signal {
 		ControlFlow::Err(_) => signal,
-		signal if column_frame(program, frame) => column_signal(&signal),
-		signal if super::program::is_permission_frame(frame) => {
-			ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
-				"unexpected control flow in a permission predicate: {signal}"
-			))))
+		signal if column_frame(program, frame) => column_signal(signal),
+		ControlFlow::Break | ControlFlow::Continue
+			if super::program::is_permission_frame(frame) =>
+		{
+			ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidControlFlow))
+		}
+		ControlFlow::Return(_) if super::program::is_permission_frame(frame) => {
+			ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(
+				"unexpected control flow in a permission predicate: return".to_owned(),
+			)))
 		}
 		signal => signal,
 	}
 }
 
-/// The error `signal` raises out of a projection layer's column, which has
-/// nowhere to send one, as the projection layer reports it.
-fn column_signal(signal: &ControlFlow) -> ControlFlow {
-	ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
-		"unexpected control flow in a layer column: {signal}"
-	))))
+/// The error `signal` raises out of a projection layer's column: a `BREAK` or
+/// `CONTINUE` has no loop to target there, and a `RETURN` has nowhere to go.
+fn column_signal(signal: ControlFlow) -> ControlFlow {
+	match signal {
+		ControlFlow::Break | ControlFlow::Continue => {
+			ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidControlFlow))
+		}
+		signal => ControlFlow::Err(anyhow::Error::new(crate::err::EngineError::Internal(format!(
+			"unexpected control flow in a layer column: {signal}"
+		)))),
+	}
 }
 
 /// The bindings projection function `call` names answers for `args`, as a
@@ -6516,6 +6753,22 @@ pub(super) fn admitted_unit_as<'u>(
 	Ok(program)
 }
 
+/// The name and value of each of `inputs`, read where the instruction that
+/// runs their unit sits.
+fn unit_inputs(
+	regs: &[Scalar<'_>],
+	row: &dyn RowReader,
+	program: &Program,
+	inputs: &[super::program::UnitInput],
+) -> anyhow::Result<Vec<(Strand, Value)>> {
+	inputs
+		.iter()
+		.map(|input| {
+			Ok((input.name.clone(), interp::read_operand(regs, row, program, input.value)?))
+		})
+		.collect()
+}
+
 /// The value of subquery `spec` evaluated in `eval_ctx`: its unit, a program
 /// of its own, run over the context the enclosing row derives
 /// ([`crate::exec::vm::subquery::subquery_context`]), and its rows gathered — its one value, `NONE`
@@ -6525,13 +6778,20 @@ pub(super) fn admitted_unit_as<'u>(
 /// The unit runs on the frame stack of the statement's driver, when there is
 /// one, so what it nests does not hold this evaluation's frames on the native
 /// stack beneath its own. It runs only in a frame that matches the one it was
-/// lowered for.
+/// lowered for. `inputs` are the values of the spec's
+/// [`UnitInput`](super::program::UnitInput)s, bound under their names in that
+/// context.
 async fn run_subprogram(
 	units: &super::UnitTable,
 	spec: &super::program::SubquerySpec,
 	eval_ctx: EvalContext<'_>,
+	inputs: Vec<(Strand, Value)>,
 ) -> FlowResult<Value> {
 	let ctx = crate::exec::vm::subquery::subquery_context(&eval_ctx, spec.inherits_row);
+	let ctx = match inputs.is_empty() {
+		true => ctx,
+		false => ctx.with_params(inputs),
+	};
 	let unit = Arc::clone(admitted_unit(units, spec.unit, &ctx)?);
 	// A unit that holds no arena of its own finds the units its ids name in
 	// the table it was found in.

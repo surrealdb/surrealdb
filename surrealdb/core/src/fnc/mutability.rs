@@ -16,10 +16,12 @@
 //! are handled by the visited set: a cycle contributes whatever facts its
 //! members carry, nothing more.
 //!
-//! This is an execution-planning input only. It is not a gate on what a user
-//! may define: a write reached from a `PERMISSIONS` predicate or a `COMPUTED`
-//! body is refused at request time by the frame in [`crate::dbs::Options`],
-//! which is the enforcement point.
+//! `DEFINE FIELD ... COMPUTED` consumes the answer as a gate: it refuses a
+//! definition whose body [`ResolvedMutability::possibly_writes`]. Everywhere
+//! else it is an execution-planning input only. The frame in
+//! [`crate::dbs::Options`] remains the enforcement point for a callee redefined
+//! after the field and for a `PERMISSIONS` predicate, whose write is refused at
+//! request time.
 
 use std::collections::HashSet;
 
@@ -48,11 +50,11 @@ pub(crate) struct ResolvedMutability {
 	pub(crate) opaque_effects: bool,
 	/// A reachable call names a function this snapshot does not define.
 	pub(crate) undefined_callee: bool,
-	/// Some body reached — the starting expression's or a callee's — calls a
-	/// builtin or method the caller's `keeps_row_order` predicate answers
-	/// for, so calls made for several rows at once may answer what calls
-	/// made one row after another would not. Complete only when
-	/// [`Self::write`] is `None`: a write already keeps every row in order.
+	/// A reached body (the starting expression or a callee) calls a builtin
+	/// or method that `keeps_row_order` flags, so calls made for several
+	/// rows at once may return different answers than calls made one row
+	/// at a time. Complete only when [`Self::write`] is `None`: a write
+	/// already keeps every row in order.
 	pub(crate) keeps_row_order: bool,
 }
 
@@ -95,9 +97,9 @@ pub(crate) async fn resolve_mutability(
 	};
 
 	let mut visited: HashSet<String> = root.calls.iter().cloned().collect();
-	// Seed from the ordered `calls` set, not from `visited`, so which writer is
-	// reported first when several are reachable does not depend on HashSet
-	// iteration order (a nondeterministic answer otherwise).
+	// Seed from the ordered `calls` set, not from `visited`, so the writer
+	// reported when several are reachable does not depend on HashSet
+	// iteration order.
 	let mut pending: Vec<String> = root.calls.iter().cloned().collect();
 
 	while resolved.write.is_none() {
@@ -137,7 +139,8 @@ pub(crate) async fn resolve_mutability(
 }
 
 #[cfg(all(test, feature = "kv-mem"))]
-// The combined cfg hides the test-ness from clippy's `allow-unwrap-in-tests`.
+// Under this combined cfg clippy's `allow-unwrap-in-tests` does not apply, so the allow is set
+// here.
 #[allow(clippy::unwrap_used)]
 mod tests {
 	use std::sync::Arc;

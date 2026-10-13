@@ -1,0 +1,117 @@
+### SELECT * FROM person
+range in place
+### SELECT name FROM person
+range in place
+### SELECT name, age FROM person
+range in place
+### SELECT * FROM person:tobie
+range in place
+### SELECT * FROM person WHERE age > 18
+serial in place
+### SELECT * FROM person WHERE age > 18 AND age > 3
+serial in place
+### SELECT * FROM person WHERE true
+range in place
+### SELECT * FROM person WHERE false
+serial in place
+### SELECT * FROM person WHERE age > 18 AND city = 'SF'
+serial in place
+### SELECT * FROM person WHERE age > 18 OR age < 5
+serial in place
+### SELECT * FROM person WHERE NOT (age > 18 AND city = 'SF')
+batches
+### SELECT * FROM person WHERE age > 1 + 2
+serial in place
+### SELECT * FROM person WHERE city = NONE
+range in place
+### SELECT * FROM person ORDER BY age
+serial in place
+### SELECT * FROM person ORDER BY age LIMIT 10
+serial in place
+### SELECT * FROM person LIMIT 10 START 5
+range in place
+### SELECT count() FROM person GROUP ALL
+serial
+### SELECT city, count() FROM person GROUP BY city
+range in place, serial
+### SELECT * FROM person WHERE id IN (SELECT VALUE id FROM person WHERE age > 18)
+serial in place, serial
+### SELECT (SELECT VALUE name FROM company) AS names FROM person
+range in place, serial
+### SELECT ->works_at->company FROM person
+batches
+### SELECT * FROM person WHERE ->works_at->company
+batches
+### CREATE person:tobie SET name = 'Tobie', age = 30
+### UPDATE person:tobie SET age = 31
+serial
+### UPDATE person:tobie SET age = age + 1
+serial
+### DELETE person:tobie
+serial
+### SELECT id, (CREATE log:1) AS made FROM person
+serial
+### UPDATE person SET city = (SELECT VALUE name FROM company)
+serial in place, serial
+### UPDATE person SET city = (SELECT VALUE name FROM company WHERE name = $this)
+serial, serial
+### UPDATE person SET city = (CREATE log:1).id
+serial
+### UPDATE person SET city = (SELECT VALUE rand::uuid() FROM company)
+serial, serial
+### CREATE |person:3|
+### CREATE |person:1..4|
+### SELECT * FROM |person:3|
+serial, range in place
+### RETURN |person:3|
+### RETURN IF true THEN 1 ELSE 2 END
+### RETURN IF false THEN (CREATE log:1) ELSE 2 END
+### RETURN IF $c THEN 1 ELSE IF true THEN 2 ELSE 3 END
+### SELECT * FROM person WHERE age > rand::int(1, 10)
+serial
+### SELECT * FROM person WHERE age > time::now()
+serial in place
+### SELECT * FROM person #2
+batches
+### SELECT name, age FROM person WHERE age > 10
+serial in place
+### SELECT ->works_at->company FROM person #2
+batches
+### SELECT *, (SELECT VALUE name FROM company) AS c FROM person
+range in place, serial
+### SELECT * FROM person FETCH company
+batches
+### SELECT * FROM person WHERE name @@ 'a'
+batches
+### SELECT * FROM person WHERE emb <|3, 40|> [1, 2, 3]
+batches
+### SELECT math::sum(age) FROM person GROUP ALL
+range in place, serial
+### SELECT city, count() FROM person GROUP BY city #2
+range in place, serial
+### SELECT * FROM person LIMIT 5 START 2
+batches
+### SELECT * FROM person ORDER BY age LIMIT 3
+batches
+### SELECT time::now() FROM person
+batches
+### SELECT rand() FROM person
+serial
+### SELECT * FROM (SELECT * FROM person LIMIT 50) LIMIT 5
+batches, serial
+### SELECT city, math::max(twice) AS top FROM person GROUP BY city
+batches, serial
+### SELECT city, math::sum(twice) AS total FROM person GROUP BY city
+batches, serial
+### SELECT twice FROM person WHERE twice > 10 LIMIT 7
+batches
+### SELECT twice FROM person LIMIT 7
+batches
+### MATCH (n:person) RETURN DISTINCT n.city AS city ORDER BY city
+serial, serial, serial
+### MATCH (n:person) RETURN n.name AS name SKIP 1 LIMIT 2
+serial
+### MATCH (n:person) RETURN n.city AS city, count(*) AS c GROUP BY n.city ORDER BY city
+serial, serial, serial
+### SELECT DISTINCT city FROM person
+range in place

@@ -29,7 +29,7 @@
 
 use std::panic::{RefUnwindSafe, UnwindSafe};
 
-use crate::exec::index::access_path::{BTreeAccess, BitmapPlan};
+use crate::exec::index::access_path::{BTreeAccess, BitmapPlan, BoundOperand};
 use crate::val::{RecordIdKey, Value};
 
 /// The bounds a plain type satisfies.
@@ -47,8 +47,8 @@ macro_rules! assert_plain {
 	};
 }
 
-// The witness holds for plain data in every build, which keeps the macro and
-// its bounds in use before a module invokes it.
+// The witness holds for plain data in every build. This assertion keeps the
+// macro and its bounds in use even before any module invokes it.
 assert_plain!(String);
 
 /// Data a program holds that carries values — a constant, the constant pool,
@@ -121,6 +121,14 @@ impl<'a> Walk<'a> {
 		}
 	}
 
+	/// The value of a bound operand: a literal's, and none for the statement
+	/// clock, which holds a duration and no value.
+	fn operand(&mut self, operand: &'a BoundOperand) {
+		if let Some(value) = operand.as_literal() {
+			self.value(value);
+		}
+	}
+
 	fn key(&mut self, key: &'a RecordIdKey) {
 		match key {
 			RecordIdKey::Array(items) => self.pending.extend(items.iter()),
@@ -181,20 +189,17 @@ impl sealed::Sealed for BTreeAccess {}
 impl Values for BTreeAccess {
 	fn values<'a>(&'a self, walk: &mut Walk<'a>) {
 		match self {
-			BTreeAccess::Equality(value) => walk.value(value),
+			BTreeAccess::Equality(operand) => walk.operand(operand),
 			BTreeAccess::Range {
 				range,
-			} => {
-				walk.bound(&range.start);
-				walk.bound(&range.end);
-			}
+			} => range.operands().for_each(|operand| walk.operand(operand)),
 			BTreeAccess::Compound {
 				prefix,
 				range,
 			} => {
-				walk.pending.extend(prefix.iter());
-				if let Some((_, value)) = range {
-					walk.value(value);
+				prefix.iter().for_each(|operand| walk.operand(operand));
+				if let Some((_, operand)) = range {
+					walk.operand(operand);
 				}
 			}
 			BTreeAccess::FullText {

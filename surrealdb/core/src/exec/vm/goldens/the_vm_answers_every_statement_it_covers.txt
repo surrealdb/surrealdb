@@ -355,11 +355,11 @@ NONE
 { age: NONE, n: 'dan' }
 { age: 45, n: 'Eve' }
 ### SELECT ({ RETURN 1 }) = 1 AS a FROM person
-{ a: 1 }
-{ a: 1 }
-{ a: 1 }
-{ a: 1 }
-{ a: 1 }
+{ a: true }
+{ a: true }
+{ a: true }
+{ a: true }
+{ a: true }
 ### SELECT * FROM person WHERE <int> name = 1
 error: Could not cast into `int` using input `'ann'`
 ### SELECT *, name AS n FROM person
@@ -1465,11 +1465,11 @@ error: Invalid control flow statement, break or continue statement found outside
 ### FOR $i IN [1, 2] { person:[IF $i > 1 { CONTINUE } ELSE { $i }] }
 error: Invalid control flow statement, break or continue statement found outside of loop.
 ### SELECT person:[({ RETURN age }), name] AS k, person:{ a: ({ RETURN 1 }) + 1 } AS o FROM person
-{ k: person:[30, 'ann'], o: person:{ a: 1 } }
-{ k: person:[17, 'Bob'], o: person:{ a: 1 } }
-{ k: person:[30, 'cat'], o: person:{ a: 1 } }
-{ k: person:[NONE, 'dan'], o: person:{ a: 1 } }
-{ k: person:[45, 'Eve'], o: person:{ a: 1 } }
+{ k: person:[30, 'ann'], o: person:{ a: 2 } }
+{ k: person:[17, 'Bob'], o: person:{ a: 2 } }
+{ k: person:[30, 'cat'], o: person:{ a: 2 } }
+{ k: person:[NONE, 'dan'], o: person:{ a: 2 } }
+{ k: person:[45, 'Eve'], o: person:{ a: 2 } }
 ### SELECT IF age > 40 THEN 'old' ELSE IF age > 20 THEN name.uppercase() END AS a FROM person
 { a: 'ANN' }
 { a: NONE }
@@ -1504,11 +1504,7 @@ NONE
 { age: 30, city: 'x', id: person:3, name: 'cat' }
 { age: 45, id: person:5, name: 'Eve', nested: { x: 2 } }
 ### SELECT ({ RETURN age }) + 1 AS a, IF age > 20 THEN ({ RETURN 'r' }) ELSE 0 END AS b FROM person
-{ a: 30, b: 'r' }
-{ a: 17, b: 0 }
-{ a: 30, b: 'r' }
-{ a: NONE, b: 0 }
-{ a: 45, b: 'r' }
+error: Cannot perform addition with 'none' and 'int'
 ### SELECT ({ age + 1 }) AS a, ($this.name) AS n FROM person
 error: Cannot perform addition with 'none' and 'int'
 ### (SELECT VALUE name FROM person ORDER BY name)[0]
@@ -1516,7 +1512,7 @@ error: Cannot perform addition with 'none' and 'int'
 ### (SELECT VALUE name FROM person WHERE <int> 'x')
 error: Could not cast into `int` using input `'x'`
 ### ({ RETURN 5 }) * 2
-5
+10
 ### SELECT fn::inc(age) AS a, fn::named($this) AS n FROM person
 error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `NONE`
 ### SELECT * FROM person WHERE fn::inc(age) > 20 ORDER BY age
@@ -1530,13 +1526,9 @@ error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x
 ### fn::inc(1, 2)
 error: Incorrect arguments for function fn::inc(). The function expects 1 argument.
 ### fn::inc(({ RETURN 3 }))
-3
+4
 ### SELECT fn::inc(({ RETURN age })) AS a FROM person
-{ a: 30 }
-{ a: 17 }
-{ a: 30 }
-{ a: NONE }
-{ a: 45 }
+error: Incorrect arguments for function fn::inc(). Failed to coerce argument `$x`: Expected `int` but found `NONE`
 ### SELECT fn::mix(age, 3) AS m, fn::pick(age) AS p, fn::as_text(name) AS t FROM person
 error: Incorrect arguments for function fn::mix(). Failed to coerce argument `$a`: Expected `int` but found `NONE`
 ### fn::mix(2)

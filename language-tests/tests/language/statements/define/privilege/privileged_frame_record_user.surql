@@ -11,7 +11,9 @@ reason = """
 	wherever the permission reads it: directly, through a function it calls, or in
 	a closure. The permission reads the database parameter and the session's own
 	values. A field VALUE, ASSERT, DEFAULT, COMPUTED field and event body are held
-	to the same frame. An ordinary call, outside any of them, reads the LET.
+	to the same frame. A function body called outside any of them is lexically
+	scoped: it reads its arguments, the row names and the ordinary chain, and
+	never the LET, so it reads the database parameter too.
 """
 
 # LET $allowed = true
@@ -38,9 +40,9 @@ value = "[viaauth:1]"
 [[test.results]]
 value = "[]"
 
-# An ordinary call reads the LET
+# An ordinary call reads the database parameter, not the LET
 [[test.results]]
-value = "true"
+value = "false"
 
 # CREATE with a field VALUE reading $allowed
 [[test.results]]

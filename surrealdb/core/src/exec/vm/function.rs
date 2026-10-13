@@ -3,24 +3,34 @@
 //! A call enters the function by reading its definition and comparing its hash
 //! with the one the program was lowered from: the body, the unit it runs, and
 //! the predicate that judges its `PERMISSIONS` clause were all lowered when
-//! the program was planned, so a definition that hashes otherwise is an
-//! internal error and the call fails closed. Nothing here binds, plans or
-//! lowers.
+//! the program was planned. A definition that hashes otherwise was defined,
+//! redefined or altered after the program was lowered, and the call runs
+//! through the function's call unit for the definition the transaction reads
+//! now ([`super::call_unit`]), which judges the new predicate and runs the new
+//! body. Nothing here binds, plans or lowers.
 //!
 //! A read of a parameter resolves a name in this order — the row's `$this`, the
 //! frame's bindings, the write bindings, the context, `$parent` — and then
 //! reads `DEFINE PARAM`, judging the definition's `PERMISSIONS` clause with
 //! the predicate the program holds for it, or with the parameter's unit where
 //! the definition holds another clause ([`super::param_unit`]).
+//!
+//! The context is read lexically ([`crate::ctx::Context::lexical_value`]): a
+//! function body is a call boundary, and what it reads of the context is its
+//! arguments, the bindings made inside it, the row names, the protected names
+//! and the request's parameters. A binding its caller made with `LET` or
+//! `FOR` is never read, at any depth of calls; the name is then a `DEFINE
+//! PARAM` of the database, or `NONE`. Outside a body the read is the plain
+//! chain read.
 
 use std::sync::Arc;
 
 use surrealdb_strand::Strand;
 
 use super::UnitTable;
-use super::host::{admitted_unit_as, gather_program, host_scalar};
+use super::host::{admitted_unit, admitted_unit_as, gather_program, host_scalar};
 use super::interp::FunctionMemo;
-use super::program::{DefHash, FunctionSpec, HostScalar, ParamSpec, Program};
+use super::program::{DefHash, FunctionSpec, GuardCode, HostScalar, ParamSpec, Program};
 use super::services::{Admission, EngineServices, Services};
 use crate::catalog::FunctionDefinition;
 use crate::ctx::Binding;
@@ -40,6 +50,12 @@ use crate::val::Value;
 pub(crate) struct EnteredCall {
 	pub(crate) definition: Arc<FunctionDefinition>,
 	pub(crate) limited: ExecutionContext,
+	/// Whether the definition hashes otherwise than the one the program was
+	/// lowered from, or the call is planned per call
+	/// ([`FunctionSpec::per_call`]): the call then runs through the
+	/// function's call unit, which judges the definition's `PERMISSIONS`
+	/// clause itself.
+	pub(crate) redefined: bool,
 }
 
 thread_local! {
@@ -158,13 +174,16 @@ fn admits(frame: &super::program::UnitFrame, ctx: &ExecutionContext) -> bool {
 /// `known` is what an earlier entry of the run learned of the function: the
 /// definition it found to hash as the program expects, so a definition read
 /// back as the same allocation is not hashed again, and the principal the body
-/// ran under for the caller's auth. Answers the call entered and the digest of
-/// the principal its body runs under.
+/// ran under for the caller's auth. `units` is the table of the root program,
+/// which a guard lowered as a unit is read from; the caller passes it for such
+/// a guard alone. Answers the call entered and the digest of the principal its
+/// body runs under.
 pub(super) async fn enter(
 	program: &Program,
 	spec: &FunctionSpec,
 	known: &mut FunctionMemo,
 	ctx: &EvalContext<'_>,
+	units: Option<UnitTable>,
 ) -> FlowResult<(EnteredCall, u64)> {
 	let func_name = spec.qualified.as_str();
 	// Require database context (propagate core Error so it downcasts to Validation).
@@ -195,25 +214,29 @@ pub(super) async fn enter(
 			other => other,
 		})?;
 	let stands = known.definition.as_ref().is_some_and(|known| Arc::ptr_eq(known, &definition));
-	if !stands {
-		if !spec.defined || hash_of(&definition) != spec.def_hash {
-			return Err(internal(format!(
-				"fn::{} was redefined after the program that calls it was lowered",
-				spec.name
-			)));
-		}
-		known.definition = Some(Arc::clone(&definition));
-		known.principal = None;
-	}
-	// Apply auth limiting: cap the caller's privileges to the definer's auth level.
+	let redefined = spec.per_call
+		|| !stands
+			&& (known.redefined.as_ref().is_some_and(|known| Arc::ptr_eq(known, &definition))
+				|| !spec.defined
+				|| hash_of(&definition) != spec.def_hash);
 	let caller = &ctx.exec_ctx.root().auth;
-	if !matches!(&known.principal, Some(held) if Arc::ptr_eq(&held.caller, caller)) {
-		known.principal = Some(narrowed_for(caller, &definition, func_name)?);
-	}
-	let held = known.principal.as_ref().expect("a principal derived above");
-	let limited = ctx.exec_ctx.with_principal(&held.limited);
-	// A caller evaluated one expression at a time spends the way to the call,
-	// its arguments evaluated beneath it ([`super::depth`]).
+	// Apply auth limiting: cap the caller's privileges to the definer's auth level.
+	let narrowed = if redefined {
+		known.redefined = Some(Arc::clone(&definition));
+		narrowed_for(caller, &definition, func_name)?
+	} else {
+		if !stands {
+			known.definition = Some(Arc::clone(&definition));
+			known.principal = None;
+		}
+		if !matches!(&known.principal, Some(held) if Arc::ptr_eq(&held.caller, caller)) {
+			known.principal = Some(narrowed_for(caller, &definition, func_name)?);
+		}
+		known.principal.clone().expect("a principal derived above")
+	};
+	let limited = ctx.exec_ctx.with_principal(&narrowed.limited);
+	// A caller evaluated one expression at a time spends depth up to the call,
+	// and the arguments are evaluated beneath that depth ([`super::depth`]).
 	let limited = match limited.per_expression_depth() {
 		true => limited.dive_by(spec.depth.site).map_err(ControlFlow::Err)?,
 		false => limited,
@@ -221,7 +244,8 @@ pub(super) async fn enter(
 	// The body's units admit the class of the narrowed principal in the
 	// database the call runs in.
 	let principal = super::host::class_digest_here(&limited);
-	if !ctx.skip_fetch_perms && limited.should_check_perms(Action::View)? {
+	// The call unit of a redefined function judges the predicate of the definition it runs.
+	if !redefined && !ctx.skip_fetch_perms && limited.should_check_perms(Action::View)? {
 		let denied = || ExecError::FunctionPermissions {
 			name: func_name.to_owned(),
 		};
@@ -229,7 +253,8 @@ pub(super) async fn enter(
 			LogicalPermissionRef::Full => {}
 			LogicalPermissionRef::None => return Err(denied().into()),
 			LogicalPermissionRef::Specific(_) => {
-				let Some((hash, pipeline, scope)) = spec.guard else {
+				let (judged_in, row) = (&limited, ctx.value_in_scope().within_context());
+				let Some((hash, code, scope)) = spec.guard else {
 					return Err(internal(format!(
 						"fn::{} has a permission predicate the program did not lower",
 						spec.name
@@ -247,14 +272,28 @@ pub(super) async fn enter(
 					crate::exec::guard_verdicts::GuardKind::Function,
 					&spec.name,
 					hash.0,
-					|| {
-						judge(
-							program,
-							pipeline,
-							&limited,
-							ctx.value_in_scope().within_context(),
-							denied,
-						)
+					move || async move {
+						match code {
+							GuardCode::Host(pipeline) => {
+								judge(program, pipeline, judged_in, row, denied).await
+							}
+							// The unit runs in the permission frame `judge` builds, which it
+							// must have been lowered for.
+							GuardCode::Unit(unit) => {
+								let Some(units) = units else {
+									return Err(internal(format!(
+										"the permission predicate of fn::{} is a unit and the call holds no unit table",
+										spec.name
+									)));
+								};
+								let frame = permission_frame(judged_in, GuardKind::Read, None);
+								let guard = admitted_unit(&units, unit, &frame)?;
+								// The units the guard's own statements run are in the table that
+								// holds the guard.
+								let judged_in = judged_in.with_vm_units(Arc::clone(&units));
+								judge(guard, 0, &judged_in, row, denied).await
+							}
+						}
 					},
 				)
 				.await?;
@@ -265,6 +304,7 @@ pub(super) async fn enter(
 		EnteredCall {
 			definition,
 			limited,
+			redefined,
 		},
 		principal,
 	))
@@ -330,9 +370,12 @@ pub(super) fn returned(
 ///
 /// The unit is `spec.unchecked_body` where the call is evaluated with
 /// permissions skipped and the body was bound for a checked principal, and
-/// `spec.body` otherwise; a call whose program lowered neither was lowered
-/// past the computation-depth budget and raises the error that names it. `units` is the table the
-/// unit ids of the program that holds `spec` index.
+/// `spec.body` otherwise. A call whose program lowered neither was lowered
+/// past the computation-depth budget, and raises the error that names it.
+/// `units` is the table the unit ids of the program that holds `spec` index.
+///
+/// A call that entered a redefined function runs the function's call unit
+/// instead ([`super::call_unit::call`]), and never reaches here.
 pub(super) async fn call(
 	units: UnitTable,
 	spec: &FunctionSpec,
@@ -342,11 +385,11 @@ pub(super) async fn call(
 	evaluated: Vec<Value>,
 ) -> FlowResult<Value> {
 	let bound = bind_args(spec, entered, evaluated)?;
-	// A body evaluated one expression at a time spends the way to its first
-	// write as it is entered, and needs what it spends at its deepest left
-	// inside the re-entry the call spends; one entered that way from code
-	// that is not spends the call's planner depth, and one more for the body
-	// as a block ([`super::depth`]).
+	// A body evaluated one expression at a time spends depth up to its first
+	// write as it is entered, and its deepest point must fit inside the
+	// re-entry the call spends. A body that writes, entered from code that is
+	// not evaluated one expression at a time, spends the call's planner depth
+	// and one more for the body as a block ([`super::depth`]).
 	let entering = |limited: &ExecutionContext| {
 		limited.check_dive_by(spec.depth.deepest.saturating_add(1))?;
 		limited.dive_by(spec.depth.body)
@@ -392,12 +435,15 @@ pub(super) async fn call(
 	// The body runs one re-entry deeper, the budget being the context's,
 	// consumed per call, in the frame the call was reached in, as a scalar
 	// subquery of the call: `$this` and `$parent` denote the caller's row,
-	// which is also the document its statements read, and a `RETURN` in the
-	// body surfaces as a signal for the caller to unwrap. The arguments are
+	// which is also the document its statements read. A `RETURN` in the body
+	// is the call's value, and the body is a barrier to `BREAK` and `CONTINUE`:
+	// the loop they name is not written in it. The arguments are
 	// the parameters of the context it runs in, which also holds the table its
 	// nested programs find their units in. The body's evaluation is built from
 	// that context alone, so none of the caller's block-local parameters or
-	// write bindings reach it.
+	// write bindings reach it. The context is the call boundary: the body
+	// reads its arguments, the row names and the request's parameters, and
+	// never a `LET` or `FOR` binding of the caller ([`frame_param`]).
 	// Where the caller's value in scope is a KNN query vector's row being
 	// scanned, the body's context forbids it
 	// ([`ExecutionContext::entering_call_body`]).
@@ -418,8 +464,8 @@ pub(super) async fn call(
 	let result = match result {
 		Ok(v) => v,
 		Err(ControlFlow::Return(v)) => v,
+		// The loop a BREAK or CONTINUE names is not written in the body.
 		Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-			// BREAK/CONTINUE inside a function (outside of loop) is an error.
 			return Err(ExecError::InvalidControlFlow.into());
 		}
 		Err(e) => return Err(e),
@@ -435,8 +481,9 @@ pub(super) async fn call(
 /// it, and it runs in the caller's task — in place where it hands the host no
 /// step. The call spends the re-entry a called body spends, so what the body
 /// re-enters — the query an `eval` in it plans and runs — spends the
-/// computation-depth budget from there, and a `RETURN` in the body is its
-/// value.
+/// computation-depth budget from there. A `RETURN` in the body is its value,
+/// and the body is a barrier to `BREAK` and `CONTINUE`, which raise
+/// [`ExecError::InvalidControlFlow`]: the loop they name is not written in it.
 async fn call_light(
 	body: &Arc<Program>,
 	limited: &ExecutionContext,
@@ -566,8 +613,10 @@ pub(super) fn frame_param(
 	if let Some(value) = ctx.write_binding(name) {
 		return Ok(Some(value.clone()));
 	}
-	// The context's parameter chain, including the protected `$auth`,
-	// `$access`, `$token` and `$session`.
+	// The context's parameter chain as the frame reads it, including the
+	// protected `$auth`, `$access`, `$token` and `$session`: inside a function
+	// body it stops at the call boundary, then answers the row names and the
+	// request's parameters, so a caller's `LET` or `FOR` binding is not read.
 	if let Some(v) = chain_param(ctx, name)? {
 		return Ok(Some(v));
 	}
@@ -587,12 +636,13 @@ pub(super) fn frame_param(
 	Ok(None)
 }
 
-/// The value `ctx`'s parameter chain binds `name` to, or `None` where it binds
-/// none: a refusal where it binds it to a KNN query vector's row being
-/// scanned, as the `$parent` or `$this` of a statement or body entered from
-/// the vector's evaluation ([`Binding::Forbidden`]).
+/// The value `ctx`'s parameter chain binds `name` to as the frame reads it
+/// ([`ExecutionContext::lexical_binding`]), or `None` where it binds none: a
+/// refusal where it binds it to a KNN query vector's row being scanned, as the
+/// `$parent` or `$this` of a statement or body entered from the vector's
+/// evaluation ([`Binding::Forbidden`]).
 fn chain_param(ctx: &EvalContext<'_>, name: &str) -> crate::expr::FlowResult<Option<Value>> {
-	match ctx.exec_ctx.binding(name) {
+	match ctx.exec_ctx.lexical_binding(name) {
 		Some(Binding::Value(value)) => Ok(Some(Value::clone(value))),
 		Some(Binding::Forbidden(row)) => Err(row.error()),
 		None => Ok(None),
@@ -646,10 +696,12 @@ pub(super) async fn stored_param(
 /// Read `DEFINE PARAM` for `spec` in the database `ctx` runs in, and judge the
 /// definition's `PERMISSIONS` clause.
 ///
-/// A predicate is judged on every read — it reads the row the parameter is
-/// read on — with the pipeline the program lowered for the clause the
-/// definition had then, or, for a clause hashing otherwise, with the
-/// parameter's unit ([`super::param_unit`]).
+/// A predicate is judged with the pipeline the program lowered for the clause
+/// the definition had then, or, for a clause hashing otherwise, as a stored
+/// clause ([`super::param_unit`]) over the row the parameter is read on. Its
+/// verdict stands for the statement where the predicate's scope lets it
+/// ([`crate::exec::guard_verdicts`]), and is judged again on every read
+/// otherwise.
 async fn read_db_param(
 	program: &Program,
 	spec: &ParamSpec,
@@ -675,45 +727,64 @@ async fn read_db_param(
 			Admission::Full => {}
 			Admission::None => return Err(denied().into()),
 			Admission::Predicate => {
-				// A clause other than the one the program lowered is judged by
-				// the parameter's unit, compiled from the clause read now.
-				let unit;
-				let (program, pipeline, scope) = match spec.guard {
+				// A clause other than the one the program lowered is judged as
+				// a stored clause, compiled from the clause read on this call.
+				match spec.guard {
 					Some((hash, pipeline, scope)) if hash == found.permission => {
-						(program, pipeline, scope)
+						crate::exec::guard_verdicts::judged(
+							ctx.exec_ctx,
+							scope,
+							crate::exec::guard_verdicts::GuardKind::Param,
+							spec.name.as_str(),
+							found.permission.0,
+							|| {
+								judge(
+									program,
+									pipeline,
+									ctx.exec_ctx,
+									ctx.value_in_scope().within_context(),
+									denied,
+								)
+							},
+						)
+						.await
 					}
 					_ => {
-						let Some(loaded) =
-							super::param_unit::guard(spec.name.as_str(), ctx.exec_ctx)
-								.await
-								.map_err(|flow| match flow {
-									ControlFlow::Err(e) => e,
-									_ => anyhow::Error::new(denied()),
-								})?
-						else {
-							return Err(anyhow::Error::new(denied()));
+						// The scope of the clause the definition holds now, which the
+						// program did not lower.
+						let scope = match found.definition.permissions_body.logical_ref() {
+							Ok(LogicalPermissionRef::Specific(predicate)) => {
+								crate::exec::guard_verdicts::GuardScope::of(
+									predicate,
+									ctx.exec_ctx.function_registry(),
+								)
+							}
+							Ok(_) | Err(_) => crate::exec::guard_verdicts::GuardScope::PerCall,
 						};
-						unit = loaded;
-						(&*unit, 0, crate::exec::guard_verdicts::GuardScope::PerCall)
-					}
-				};
-				crate::exec::guard_verdicts::judged(
-					ctx.exec_ctx,
-					scope,
-					crate::exec::guard_verdicts::GuardKind::Param,
-					spec.name.as_str(),
-					found.permission.0,
-					|| {
-						judge(
-							program,
-							pipeline,
+						crate::exec::guard_verdicts::judged(
 							ctx.exec_ctx,
-							ctx.value_in_scope().within_context(),
-							denied,
+							scope,
+							crate::exec::guard_verdicts::GuardKind::Param,
+							spec.name.as_str(),
+							found.permission.0,
+							|| async {
+								let frame = permission_frame(ctx.exec_ctx, GuardKind::Read, None);
+								let verdict = super::param_unit::verdict(
+									spec.name.as_str(),
+									&frame,
+									ctx.value_in_scope().within_context(),
+								)
+								.await;
+								match verdict {
+									Ok(Some(verdict)) if verdict.is_truthy() => Ok(()),
+									Err(ControlFlow::Err(e)) => Err(ControlFlow::Err(e)),
+									Ok(_) | Err(_) => Err(denied().into()),
+								}
+							},
 						)
-					},
-				)
-				.await
+						.await
+					}
+				}
 				.map_err(|flow| match flow {
 					ControlFlow::Err(e) => e,
 					// A guard raises nothing else: `judge` turns every other

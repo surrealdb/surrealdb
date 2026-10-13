@@ -59,6 +59,13 @@ pub(crate) async fn define_field_definition_apply(
 	crate::ddl::define_field_statement_validate_computed_options(ns, db, ctx.tx(), definition)
 		.await?;
 
+	// Validate the user-defined functions a computed body calls. An import
+	// restores definitions in export order, so a callee may be defined after
+	// the field that names it.
+	if !opt.import {
+		define_field_statement_validate_computed_callees(ns, db, &ctx.tx(), definition).await?;
+	}
+
 	// Validate computed field dependencies for cycles
 	crate::ddl::define_field_statement_validate_computed_cycles(ns, db, ctx.tx(), definition)
 		.await?;
@@ -105,8 +112,8 @@ pub(crate) async fn define_field_definition_apply(
 	);
 
 	// INLINE embeds the field's value into the edge's adjacency payloads;
-	// it only means something on stored edges. Skipped during import: an
-	// export of a since-demoted table must still replay.
+	// it only means something on stored edges. It is skipped on import, so
+	// an export whose table is no longer a relation still replays.
 	if definition.inline && !opt.import {
 		anyhow::ensure!(
 			existing_table_is_relation(&txn, ns, db, &definition.table).await?,
@@ -176,7 +183,7 @@ pub(crate) async fn define_field_definition_apply(
 	}
 
 	// Refuse a field nested in something that cannot hold it, from either
-	// end. An import replays definitions written before the rule held.
+	// end. An import skips this check, so exported definitions still replay.
 	if !opt.import {
 		let fields = txn.all_tb_fields(ns, db, &tb_name, None).await?;
 		define_field_nesting_restrictions(&fields, definition)?;
@@ -193,9 +200,9 @@ pub(crate) async fn define_field_definition_apply(
 	// Process the statement
 	txn.put_tb_field(ns, db, &tb_name, definition).await?;
 
-	// Overwriting an existing reference field can drop target tables it used
-	// to reference (the REFERENCE clause removed, or the record kind narrowed
-	// or changed); purge the now-stranded reference keys so the DELETE
+	// Overwriting an existing reference field can drop target tables it
+	// referenced (the REFERENCE clause removed, or the record kind narrowed
+	// or changed); purge the stranded reference keys so the DELETE
 	// reference-purge gate stays sound. Skipped during import, which restores
 	// reference keys verbatim.
 	if !opt.import
@@ -448,11 +455,12 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 		// the definition instead.
 		//
 		// `contains_mutation` walks this body alone — subqueries, idiom parts,
-		// blocks, closure bodies and call arguments. A call to a user-defined
-		// function is opaque to it: the callee's body lives in the catalog and
-		// may take the writing branch only on inputs this field never supplies.
-		// Those are left to the runtime frame, which refuses the write at the
-		// point it is actually reached.
+		// blocks, closure bodies and call arguments. The user-defined functions
+		// the body calls live in the catalog, so they are checked against it
+		// when the definition is applied
+		// ([`define_field_statement_validate_computed_callees`]). A callee
+		// redefined after the field is not checked again: the runtime frame
+		// refuses the write at the point it is reached.
 		ensure!(!computed.contains_mutation(), ExecError::ComputedWrite(definition.name.to_sql()));
 
 		// Ensure the field is not the `id` field
@@ -509,6 +517,40 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 	Ok(())
 }
 
+/// Refuse a `COMPUTED` body whose user-defined callees may write, as seen in
+/// `txn`'s catalog at the version the definition is written at.
+///
+/// The answer is [`ResolvedMutability::possibly_writes`], so a callee that is
+/// not defined yet and an opaque callable (a script, `eval`, a closure arriving
+/// as data) count as writers. The check reads the catalog as of the
+/// transaction's current state and is made when the definition is applied, not
+/// when a statement holding it is planned, because a callee defined earlier in
+/// the same request is in no catalog before then.
+///
+/// [`ResolvedMutability::possibly_writes`]: crate::fnc::mutability::ResolvedMutability::possibly_writes
+pub(crate) async fn define_field_statement_validate_computed_callees(
+	ns: NamespaceId,
+	db: DatabaseId,
+	txn: &Transaction,
+	definition: &catalog::FieldDefinition,
+) -> Result<()> {
+	let Some(body) = definition.computed.as_ref() else {
+		return Ok(());
+	};
+	let resolved = crate::fnc::mutability::resolve_mutability(
+		txn,
+		ns,
+		db,
+		None,
+		&body.function_facts(),
+		&|_| false,
+		None,
+	)
+	.await?;
+	ensure!(!resolved.possibly_writes(), ExecError::ComputedWrite(definition.name.to_sql()));
+	Ok(())
+}
+
 /// Validate that defining this field does not create a dependency cycle.
 ///
 /// Builds a dependency graph from the value-producing clauses of all fields on
@@ -517,7 +559,7 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 /// value the write path may have to produce another field's value from.
 /// `ASSERT` does not: it validates a value rather than producing one, so two
 /// fields asserting against each other is ordinary.
-/// Only checks same-table dependencies (cross-table cycles are future work).
+/// Only same-table dependencies are checked; cycles across tables are not detected.
 pub(crate) async fn define_field_statement_validate_computed_cycles(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -556,7 +598,7 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		let Some(name) = fd.name.field_name() else {
 			continue;
 		};
-		// Skip the field being (re)defined -- we'll use the new definition below
+		// Skip the field being defined; its new definition is inserted below.
 		if name == field_name {
 			continue;
 		}
