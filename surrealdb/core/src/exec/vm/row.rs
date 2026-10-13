@@ -71,6 +71,13 @@ pub(super) trait RowReader {
 			_ => false,
 		})
 	}
+
+	/// The refusal a read of this row raises where it is a KNN query vector's
+	/// row being scanned ([`ForbiddenRowReader`]), for a step that takes
+	/// another value where the pipeline has no row; `None` for any other row.
+	fn forbids(&self) -> Option<anyhow::Error> {
+		None
+	}
 }
 
 /// A top-level field name, encoded once for the lookups that find it.
@@ -472,6 +479,34 @@ impl RowReader for ValueRow<'_> {
 			Value::Object(object) => names.iter().any(|name| object.contains_key(name.as_str())),
 			_ => false,
 		})
+	}
+}
+
+/// The row of a pipeline that runs over none where a per-row evaluation would
+/// have run over the row being scanned: a KNN query vector's
+/// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)). Every read of it
+/// fails with the vector's refusal.
+pub(super) struct ForbiddenRowReader<'a>(pub(super) &'a crate::exec::context::ForbiddenRow);
+
+impl RowReader for ForbiddenRowReader<'_> {
+	fn field(&self, _name: &FieldName) -> anyhow::Result<Scalar<'_>> {
+		Err(self.0.refusal())
+	}
+
+	fn field_int(&self, _name: &FieldName) -> anyhow::Result<Option<i64>> {
+		Err(self.0.refusal())
+	}
+
+	fn record(&self) -> anyhow::Result<Value> {
+		Err(self.0.refusal())
+	}
+
+	fn has_any_field(&self, _names: &[surrealdb_strand::Strand]) -> anyhow::Result<bool> {
+		Err(self.0.refusal())
+	}
+
+	fn forbids(&self) -> Option<anyhow::Error> {
+		Some(self.0.refusal())
 	}
 }
 

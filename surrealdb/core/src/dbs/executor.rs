@@ -1275,6 +1275,7 @@ impl Executor {
 			session: self.get_session_info(),
 			current_value: None,
 			current_row: None,
+			forbidden_row: None,
 			skip_fetch_perms: false,
 			perms_suppressed: false,
 			caller_perms_suppressed: false,

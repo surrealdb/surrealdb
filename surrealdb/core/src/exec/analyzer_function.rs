@@ -129,10 +129,8 @@ impl AnalyzerFunction for StreamingAnalyzerFunction<'_> {
 			let compiled = self.call_expr(name).await?;
 			let mut params = HashMap::with_capacity(1);
 			params.insert(Strand::new(INPUT), Value::String(input));
-			let eval = EvalContext {
-				local_params: Some(&params),
-				..EvalContext::from_exec_ctx(self.exec)
-			};
+			let mut eval = EvalContext::from_exec_ctx(self.exec);
+			eval.local_params = Some(&params);
 			let val = compiled.evaluate(eval).await.catch_return()?;
 			if let Value::String(val) = val {
 				Ok(val)

@@ -29,7 +29,8 @@ before relying on anything else:
   slower true one. The oracle is the brute-force form `<|k,METRIC|>`, which
   `KnnTopK` computes exactly over a scan.
 
-Three wrong behaviours are pinned rather than hidden, each marked at its case:
+Two wrong behaviours are pinned rather than hidden, each marked at its case,
+and a third shape is refused:
 
 1. A FULLTEXT index left behind by `ALTER INDEX ... PREPARE REMOVE` is dropped
    from the plan, so the plan reads as a full table scan — but the `@@`
@@ -42,19 +43,15 @@ Three wrong behaviours are pinned rather than hidden, each marked at its case:
    with no error and no diagnostic in the plan beyond the missing `KnnScan`.
    Correct behaviour would be to answer the k nearest by brute force, as
    `<|k,METRIC|>` does over the same data.
-3. Two ANDed KNN operators collapse to a single `KnnScan`, with the second
-   constraint absent and no residual `Filter`, so the query answers the
-   surviving operator's top-K alone. The vec2 fixture orders records under
-   `pa` and reverses that order under `pb`, so the two 2-nearest sets are
-   disjoint and the correct answer to every conjunction pinned here is `[]`;
-   the recorded answer is two records that satisfy only one constraint. The
-   count() path does NOT rescue this one — it aggregates over the same single
-   scan and reports 2 against an oracle of 0. It reproduces for two indexes on
-   two columns, for one index queried with two vectors, and for the
-   brute-force `<|k,METRIC|>` spelling, which uses no vector index at all —
-   so the lost conjunct is in predicate planning, not in index selection.
-   Each column's operator is pinned alone first, so the conjunction is a
-   statement about losing a conjunct and not about an unindexed column.
+3. A WHERE clause supports a single KNN operator: a search answers one, so
+   two ANDed KNN operators are refused when the statement is planned, its
+   `EXPLAIN` and its `count()` included, rather than one served and the other
+   dropped. The vec2 fixture orders records under `pa` and reverses that order
+   under `pb`, so the two 2-nearest sets are disjoint and the intersection the
+   oracle computes from two separate searches is `[]`. The refusal holds for
+   two indexes on two columns, for one index queried with two vectors, and for
+   the brute-force `<|k,METRIC|>` spelling, which uses no vector index at all.
+   Each column's operator is pinned alone first.
 """
 
 [[test.results]]
@@ -423,48 +420,34 @@ value = "[vec2:4, vec2:5]"
 value = "[vec2:4, vec2:5]"
 
 [[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    KnnScan [ctx: Db] [index: vec2_a, k: 2, ef: 40, dimension: 2]
-''''
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
-value = "[vec2:1, vec2:2]"
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = '''
-'SelectProject [ctx: Db] [projections: *]
-    Aggregate [ctx: Db] [mode: GROUP ALL]
-        KnnScan [ctx: Db] [index: vec2_a, k: 2, ef: 40, dimension: 2]
-''''
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
-value = "[{ count: 2 }]"
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
 value = "[{ count: 0 }]"
 
 [[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    KnnTopK [ctx: Db] [field: pa, k: 2, distance: Euclidean, dimension: 2]
-        TableScan [ctx: Db] [table: vec2, direction: Forward]
-''''
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
-value = "[vec2:1, vec2:2]"
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
-value = '''
-'ProjectValue [ctx: Db] [expr: id]
-    KnnScan [ctx: Db] [index: vec2_a, k: 2, ef: 40, dimension: 2]
-''''
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
-value = "[vec2:1, vec2:2]"
+error = "Invalid query: A WHERE clause supports a single KNN operator (<|k, …|>); found 2."
 
 [[test.results]]
 value = "[vec2:4, vec2:5]"
@@ -758,38 +741,30 @@ EXPLAIN SELECT VALUE id FROM vec2 WHERE pb <|2,40|> $near;
 SELECT VALUE id FROM vec2 WHERE pb <|2,40|> $near ORDER BY id;
 SELECT VALUE id FROM vec2 WHERE pb <|2,EUCLIDEAN|> $near ORDER BY id;
 
--- DEFECT. Two ANDed KNN operators collapse to a single KnnScan. The second
--- constraint is absent with no residual Filter, so the query answers the
--- surviving operator's top-K and returns two records that satisfy only one of
--- the two constraints. Correct answer: [], which the brute-force intersection
--- below returns.
+-- Two ANDed KNN operators are refused, plan and rows alike. The brute-force
+-- intersection below answers the conjunction from two separate searches: [].
 EXPLAIN SELECT VALUE id FROM vec2 WHERE pa <|2,40|> $near AND pb <|2,40|> $near;
 
 SELECT VALUE id FROM vec2 WHERE pa <|2,40|> $near AND pb <|2,40|> $near;
 
 SELECT VALUE id FROM vec2 WHERE id IN (SELECT VALUE id FROM vec2 WHERE pa <|2,EUCLIDEAN|> $near) AND id IN (SELECT VALUE id FROM vec2 WHERE pb <|2,EUCLIDEAN|> $near) ORDER BY id;
 
--- The count path does NOT rescue this one: unlike the `@@` case above, it
--- aggregates over the same single KnnScan and reports 2 where the oracle
--- reports 0. Correct answer: 0.
+-- The count path is refused the same way; the oracle reports 0.
 EXPLAIN SELECT count() FROM vec2 WHERE pa <|2,40|> $near AND pb <|2,40|> $near GROUP ALL;
 
 SELECT count() FROM vec2 WHERE pa <|2,40|> $near AND pb <|2,40|> $near GROUP ALL;
 
 SELECT count() FROM vec2 WHERE id IN (SELECT VALUE id FROM vec2 WHERE pa <|2,EUCLIDEAN|> $near) AND id IN (SELECT VALUE id FROM vec2 WHERE pb <|2,EUCLIDEAN|> $near) GROUP ALL;
 
--- DEFECT. The brute-force spelling collapses identically: a single KnnTopK on
--- `pa` over a table scan, with the `pb` constraint gone. Since this form uses
--- no vector index at all, the lost conjunct is in predicate planning and not in
--- index selection. Correct answer: [].
+-- The brute-force spelling is refused identically: the rule is the WHERE
+-- clause's, not the index's.
 EXPLAIN SELECT VALUE id FROM vec2 WHERE pa <|2,EUCLIDEAN|> $near AND pb <|2,EUCLIDEAN|> $near;
 
 SELECT VALUE id FROM vec2 WHERE pa <|2,EUCLIDEAN|> $near AND pb <|2,EUCLIDEAN|> $near;
 
--- DEFECT. Two constraints on ONE column against ONE index collapse the same
--- way, so the shape does not need two indexes to lose a term. The two vectors
--- are at opposite ends of `pa`, so their 2-nearest sets are disjoint and the
--- correct answer is again [].
+-- Two constraints on ONE column against ONE index are refused the same way.
+-- The two vectors are at opposite ends of `pa`, so the oracle's intersection
+-- of their 2-nearest sets is again [].
 EXPLAIN SELECT VALUE id FROM vec2 WHERE pa <|2,40|> $near AND pa <|2,40|> [48f, 5f];
 
 SELECT VALUE id FROM vec2 WHERE pa <|2,40|> $near AND pa <|2,40|> [48f, 5f];

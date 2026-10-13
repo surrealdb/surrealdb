@@ -43,6 +43,7 @@ use crate::dbs::capabilities::Targets;
 use crate::dbs::{Capabilities, MessageBroker, Options, Session, StatementCounters, Variables};
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
+use crate::exec::context::ForbiddenRow;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
 #[cfg(feature = "http")]
@@ -62,6 +63,19 @@ use crate::val::Value;
 use crate::val::convert_public::convert_public_value_to_internal;
 
 pub type FrozenContext = Arc<Context>;
+
+/// What a parameter name is bound to in a context's chain
+/// ([`Context::binding`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Binding<'a> {
+	/// A value.
+	Value(&'a Arc<Value>),
+	/// A KNN query vector's row being scanned, which a statement or a body
+	/// entered from the vector's evaluation binds as its `$parent` and
+	/// `$this`: the parameter has no value, and a read of it fails with the
+	/// row's refusal ([`ForbiddenRow::error`]).
+	Forbidden(&'a Arc<ForbiddenRow>),
+}
 
 /// Ambient state for one query batch: datastore handles, cancellation, capabilities,
 /// and **request-wide** configuration (node id, auth enabled, dynamic config, live/broker).
@@ -88,6 +102,10 @@ pub struct Context {
 	cancel_token: Option<tokio_util::sync::CancellationToken>,
 	// A collection of read only values stored in this context.
 	values: HashMap<Strand, Arc<Value>>,
+	// The parameter names this context binds to a KNN query vector's row being
+	// scanned rather than to a value ([`Binding::Forbidden`]). A name is in
+	// at most one of `values` and `forbidden` at one level.
+	forbidden: Vec<(Strand, Arc<ForbiddenRow>)>,
 	// An optional datastore cache
 	cache: Option<Arc<DatastoreCache>>,
 	// The index store
@@ -198,6 +216,7 @@ impl Debug for Context {
 			.field("deadline", &self.deadline)
 			.field("cancelled", &self.cancelled)
 			.field("values", &self.values)
+			.field("forbidden", &self.forbidden)
 			.finish()
 	}
 }
@@ -207,6 +226,7 @@ impl Context {
 	pub(crate) fn background(parent: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log: None,
@@ -277,6 +297,7 @@ impl Context {
 	) -> Self {
 		Context {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
@@ -325,6 +346,7 @@ impl Context {
 	pub(crate) fn new_isolated(parent: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
@@ -390,6 +412,7 @@ impl Context {
 		Self {
 			// Flatten all values from the parent chain into this context
 			values: from.collect_values(HashMap::default()),
+			forbidden: from.collect_forbidden(),
 			deadline: from.deadline,
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::clone(&from.cancelled),
@@ -446,6 +469,7 @@ impl Context {
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			deadline: None,
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
@@ -512,6 +536,7 @@ impl Context {
 	) -> Result<Context> {
 		let mut ctx = Self {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log,
@@ -563,6 +588,7 @@ impl Context {
 	pub(crate) fn new_test() -> Context {
 		Self {
 			values: HashMap::default(),
+			forbidden: Vec::new(),
 			parent: None,
 			deadline: None,
 			slow_log: None,
@@ -874,7 +900,23 @@ impl Context {
 	where
 		K: Into<Strand>,
 	{
-		self.values.insert(key.into(), value);
+		let key = key.into();
+		if !self.forbidden.is_empty() {
+			self.forbidden.retain(|(name, _)| *name != key);
+		}
+		self.values.insert(key, value);
+	}
+
+	/// Bind each of `names` to `row`, a KNN query vector's row being scanned,
+	/// rather than to a value: [`Self::binding`] answers
+	/// [`Binding::Forbidden`] for it, and a value bound at this level after it,
+	/// or at a deeper one, shadows it.
+	pub(crate) fn add_forbidden(&mut self, names: &[&str], row: &Arc<ForbiddenRow>) {
+		for name in names {
+			self.values.remove(*name);
+			self.forbidden.retain(|(bound, _)| bound.as_str() != *name);
+			self.forbidden.push((Strand::from(*name), Arc::clone(row)));
+		}
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -885,7 +927,9 @@ impl Context {
 		K: Into<Strand>,
 		V: Into<Arc<Value>>,
 	{
-		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+		for (key, value) in iter {
+			self.add_value(key, value.into());
+		}
 	}
 
 	#[cfg(test)]
@@ -1139,20 +1183,62 @@ impl Context {
 
 	/// Get a value from the context. If no value is stored under the
 	/// provided key, then this will return None.
+	///
+	/// A name bound to a KNN query vector's row being scanned holds no value
+	/// and answers `None` here: an expression's read of a parameter resolves
+	/// it through [`Self::binding`], which refuses it.
 	pub(crate) fn value(&self, key: &str) -> Option<&Value> {
 		self.shared_value(key).map(Arc::as_ref)
 	}
 
 	/// The allocation [`Self::value`] answers for `key`.
 	fn shared_value(&self, key: &str) -> Option<&Arc<Value>> {
-		match self.values.get(key) {
-			Some(v) => Some(v),
-			None if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => match &self.parent {
-				Some(p) => p.shared_value(key),
-				_ => None,
-			},
-			None => None,
+		match self.binding(key) {
+			Some(Binding::Value(value)) => Some(value),
+			Some(Binding::Forbidden(_)) | None => None,
 		}
+	}
+
+	/// What `key` is bound to in this context's chain: the innermost binding,
+	/// a value or a forbidden row, or `None` where no level binds it. An
+	/// isolated context reads only the protected names (`$auth`, `$access`,
+	/// `$token`, `$session`) from its parents.
+	pub(crate) fn binding(&self, key: &str) -> Option<Binding<'_>> {
+		if let Some(value) = self.values.get(key) {
+			return Some(Binding::Value(value));
+		}
+		if let Some((_, row)) = self.forbidden.iter().find(|(name, _)| name.as_str() == key) {
+			return Some(Binding::Forbidden(row));
+		}
+		match &self.parent {
+			Some(p) if PROTECTED_PARAM_NAMES.contains(&key) || !self.isolated => p.binding(key),
+			_ => None,
+		}
+	}
+
+	/// The names [`Self::binding`] answers [`Binding::Forbidden`] for, with
+	/// the row each is bound to, for a snapshot that flattens the chain.
+	fn collect_forbidden(&self) -> Vec<(Strand, Arc<ForbiddenRow>)> {
+		let mut names = Vec::new();
+		let mut level = Some(self);
+		while let Some(ctx) = level {
+			for (name, _) in &ctx.forbidden {
+				if !names.contains(name) {
+					names.push(name.clone());
+				}
+			}
+			level = match &ctx.parent {
+				Some(p) if !ctx.isolated => Some(p.as_ref()),
+				_ => None,
+			};
+		}
+		names
+			.into_iter()
+			.filter_map(|name| match self.binding(name.as_str()) {
+				Some(Binding::Forbidden(row)) => Some((name, Arc::clone(row))),
+				Some(Binding::Value(_)) | None => None,
+			})
+			.collect()
 	}
 
 	/// Collect context values into the provided map: every value
@@ -1164,7 +1250,15 @@ impl Context {
 		map: HashMap<Strand, Arc<Value>>,
 	) -> HashMap<Strand, Arc<Value>> {
 		let mut map = match &self.parent {
-			Some(p) if !self.isolated => p.collect_values(map),
+			Some(p) if !self.isolated => {
+				let mut map = p.collect_values(map);
+				// A name this level binds to a forbidden row shadows the
+				// parents' value of it.
+				for (name, _) in &self.forbidden {
+					map.remove(name);
+				}
+				map
+			}
 			Some(p) => {
 				let mut map = map;
 				for name in PROTECTED_PARAM_NAMES {

@@ -1190,7 +1190,7 @@ pub(super) async fn run_write(
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
 ) -> FlowResult<()> {
-	super::host::evaluate_knn_queries(program, group, state, ctx).await?;
+	super::host::forget_knn_queries(program, group, state);
 	for pipeline in program.pipelines.iter().filter(|pipeline| pipeline.group == group) {
 		match &pipeline.source {
 			Source::WriteTargets {
@@ -1305,8 +1305,9 @@ async fn run_targets(
 	for target in targets {
 		let mut subjects = match target {
 			super::program::Target::Scalar(scalar) => {
-				let value =
-					super::host::host_scalar(program, scalar, ctx, ctx.value("this")).await?;
+				let (this, forbidding) = ctx.enclosing_row();
+				let ctx = forbidding.as_ref().unwrap_or(ctx);
+				let value = super::host::host_scalar(program, scalar, ctx, this).await?;
 				let mut named = Vec::new();
 				target_subjects(value, form, deferable, &mut named)
 					.map_err(|err| refused_by(err, form))?;
@@ -1401,7 +1402,8 @@ async fn insert_scalar(
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<Value> {
-	let this = ctx.value("this");
+	let (this, forbidding) = ctx.enclosing_row();
+	let ctx = forbidding.as_ref().unwrap_or(ctx);
 	match scalar {
 		super::program::HostScalar::Code(pipeline) => {
 			let image = this.cloned().unwrap_or(Value::None);
@@ -1487,7 +1489,8 @@ async fn run_edges(
 	flush_at: usize,
 ) -> FlowResult<()> {
 	write_state(state)?.per_record = true;
-	let this = ctx.value("this");
+	let (this, forbidding) = ctx.enclosing_row();
+	let ctx = forbidding.as_ref().unwrap_or(ctx);
 	let endpoint = |scalar| super::host::host_scalar(program, scalar, ctx, this);
 	let froms = relate_endpoints(endpoint(from).await?, RelateSide::From)?;
 	let tos = relate_endpoints(endpoint(to).await?, RelateSide::To)?;

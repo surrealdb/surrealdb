@@ -454,6 +454,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 			function,
 			frame,
 			outer,
+			elem: self.element,
 		});
 		let dst = self.register()?;
 		match callee.inline {
@@ -501,6 +502,7 @@ impl<'ctx> Lowering<'_, 'ctx> {
 					args,
 					dst,
 					outer,
+					elem: self.element,
 				});
 			}
 		}

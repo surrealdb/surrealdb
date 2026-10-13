@@ -1000,6 +1000,10 @@ struct Lowering<'p, 'ctx> {
 	paths: Vec<crate::exec::field_path::FieldPath>,
 	limits: Vec<LimitSpec>,
 	sorts: Vec<SortSpec>,
+	/// The query vectors KNN searches compute when the statement runs, and
+	/// the plan's name for each ([`super::plan::KnnTarget::Deferred`]).
+	knn_searches: Vec<super::program::KnnQuery>,
+	knn_search_ids: Vec<u64>,
 	splits: Vec<super::program::SplitSpec>,
 	joins: Vec<super::program::JoinSpec>,
 	/// The group that owns each distinct set.
@@ -1485,6 +1489,8 @@ fn lend<'c>(from: &mut Lowering<'_, 'c>, to: &mut Lowering<'_, 'c>) {
 		paths,
 		limits,
 		sorts,
+		knn_searches,
+		knn_search_ids,
 		splits,
 		joins,
 		distincts,
@@ -1737,6 +1743,8 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			paths: Vec::new(),
 			limits: Vec::new(),
 			sorts: Vec::new(),
+			knn_searches: Vec::new(),
+			knn_search_ids: Vec::new(),
 			splits: Vec::new(),
 			joins: Vec::new(),
 			distincts: Vec::new(),
@@ -1912,6 +1920,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			paths: self.paths,
 			limits: self.limits,
 			sorts: self.sorts,
+			knn_searches: self.knn_searches,
 			splits: self.splits,
 			joins: self.joins,
 			distincts: self.distincts,
@@ -3481,13 +3490,18 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				let id = self.sorts.len() as u16;
 				let (vector, knn_query) = match vector {
 					super::plan::KnnTarget::Literal(vector) => {
-						(super::program::KnnVector::Literal(vector.clone()), None)
+						(super::program::KnnVector::Literal(Arc::clone(vector)), None)
 					}
-					super::plan::KnnTarget::Deferred(expr) => (
+					super::plan::KnnTarget::Deferred {
+						expr,
+						..
+					} => (
 						super::program::KnnVector::Query(id),
 						Some(super::program::KnnQuery {
-							scalar: crate::exec::vm::host::out_of_line(|| self.host_scalar(expr))
-								.await?,
+							vector: crate::exec::vm::host::out_of_line(|| {
+								self.deferred_vector(expr)
+							})
+							.await?,
 							group: self.current_group,
 						}),
 					),
@@ -4204,6 +4218,13 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				let path = (self.paths.len() - 1) as u32;
 				let row = self.current()?;
 				let key = self.register()?;
+				// A query vector computed when the statement runs is evaluated
+				// by the host the first time a row is ranked against it
+				// (`Step::KnnQuery`), which a body in the storage cursor cannot
+				// hand it.
+				if matches!(rank.vector, super::program::KnnVector::Query(_)) {
+					self.uses_eval = true;
+				}
 				// A row with no vector to rank takes no place in the order.
 				end_row.push(self.emit(Instr::KnnRank {
 					src: Operand::Reg(row),
@@ -4924,10 +4945,39 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 					}
 					None => None,
 				};
+				let vector = match vector {
+					super::plan::KnnTarget::Literal(vector) => {
+						super::program::KnnSearchVector::Literal(Arc::clone(vector))
+					}
+					super::plan::KnnTarget::Deferred {
+						expr,
+						search,
+					} => {
+						// The scans of one KNN operator share one evaluation.
+						let at = match self.knn_search_ids.iter().position(|id| id == search) {
+							Some(at) => at,
+							None => {
+								let vector = crate::exec::vm::host::out_of_line(|| {
+									self.deferred_vector(expr)
+								})
+								.await?;
+								self.knn_searches.push(super::program::KnnQuery {
+									vector,
+									group: self.current_group,
+								});
+								self.knn_search_ids.push(*search);
+								self.knn_searches.len() - 1
+							}
+						};
+						super::program::KnnSearchVector::Query(u16::try_from(at).map_err(|_| {
+							NotCovered::internal("more KNN searches than a program holds")
+						})?)
+					}
+				};
 				Ok(Source::Knn {
 					table: table.clone(),
 					index: index.clone(),
-					vector: Arc::clone(vector),
+					vector,
 					k: *k,
 					ef: *ef,
 					slot: self.index_scope.knn.then(|| self.knn_slot()),
@@ -7233,6 +7283,17 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// root. Where the root is unknown an element body holds no argument that
 	/// reads a row.
 	pub(super) async fn step_arg(&mut self, arg: &LogicalExpr, recv: Operand) -> Lowered<Operand> {
+		// An argument that may read no value in scope (a literal, a parameter,
+		// a builtin over them) is evaluated where it stands: the root is never
+		// read, and where it is a KNN query vector's row being scanned, reading
+		// it would fail. One holding code whose reads it does not show (a
+		// user-defined function, a closure) is evaluated against the root.
+		if !crate::exec::planner::row_scope::may_read_value_in_scope(
+			arg,
+			self.planner.function_registry(),
+		) {
+			return crate::exec::vm::host::out_of_line(|| self.value(arg)).await;
+		}
 		let root = match self.document {
 			DocumentRoot::Unknown => {
 				return crate::exec::vm::host::out_of_line(|| self.value(arg)).await;
@@ -7911,6 +7972,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			args,
 			dst,
 			frame: self.eval_frame,
+			elem: self.element,
 		});
 		// A builtin may read the row it is called on.
 		self.uses_eval = true;
@@ -8031,6 +8093,18 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 			return Ok(HostScalar::Const(super::plain::ValueData::new(value, "a host scalar")?));
 		}
 		Ok(HostScalar::Code(crate::exec::vm::host::out_of_line(|| self.host_code(expr)).await?))
+	}
+
+	/// A KNN query vector computed when the statement runs: `expr` as a host
+	/// scalar, and as written.
+	async fn deferred_vector(
+		&mut self,
+		expr: &LogicalExpr,
+	) -> Lowered<super::program::DeferredVector> {
+		Ok(super::program::DeferredVector {
+			scalar: crate::exec::vm::host::out_of_line(|| self.host_scalar(expr)).await?,
+			text: surrealdb_types::ToSql::to_sql(expr).into(),
+		})
 	}
 
 	/// The host pipeline, of [`Program::host_code`], that emits `expr`'s value
@@ -8264,12 +8338,22 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 	/// element: the row the pipeline runs over, and the element where it runs
 	/// over none: the document root is taken where there is one, else the
 	/// current value. Otherwise the statement document already in force.
-	fn element_statement_doc(&mut self) -> Lowered<Option<Reg>> {
+	///
+	/// A statement that reads no enclosing row ([`reads_enclosing_row`]) is
+	/// taken over the element itself: what it is taken over is never read, and
+	/// where the row is a KNN query vector's row being scanned, reading it
+	/// would fail.
+	///
+	/// [`reads_enclosing_row`]: crate::exec::planner::row_scope::reads_enclosing_row
+	fn element_statement_doc(&mut self, op: &LogicalOp) -> Lowered<Option<Reg>> {
 		let (DocumentRoot::RowElseReceiver, None, Some(element)) =
 			(self.document, self.statement_doc, self.element)
 		else {
 			return Ok(self.statement_doc);
 		};
+		if !crate::exec::planner::row_scope::reads_enclosing_row(op) {
+			return Ok(Some(element));
+		}
 		let root = self.register()?;
 		self.emit(Instr::DocumentRoot {
 			or: Operand::Reg(element),
@@ -9306,7 +9390,7 @@ impl<'p, 'ctx> Lowering<'p, 'ctx> {
 				}
 				LogicalExpr::Subquery(op) if self.is_native(expr) => {
 					let outer = self.statement_doc;
-					self.statement_doc = self.element_statement_doc()?;
+					self.statement_doc = self.element_statement_doc(op)?;
 					let value =
 						crate::exec::vm::host::out_of_line(|| self.subquery_value(op)).await;
 					self.statement_doc = outer;

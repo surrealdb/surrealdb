@@ -26,6 +26,7 @@
 
 pub use self::cancel::CancelHandle;
 pub use self::canceller::Canceller;
+pub(crate) use self::context::Binding;
 pub use self::context::{Context, FrozenContext};
 
 pub mod cancel;

@@ -6,14 +6,14 @@ database = true
 [test]
 issue = 476
 reason = """
-Brute-force KNN (`<|k, DIST|>`) with a non-literal query vector. Right-hand
-sides computed at plan time — bind parameters, function calls (including
-closure arguments), arrays with computed elements — evaluate once at stream
-open in the KnnTopK operator, with the `array<number>` coercion and its error
-messages. Right-hand sides that are unsupported (subqueries, idioms) register
-no executor entry and evaluate to false per row, so such queries return no
-rows instead of erroring; the same per-row false applies to KNN in projection
-position, bare expressions, and an Approximate form without an HNSW index.
+Brute-force KNN (`<|k, DIST|>`) with a non-literal query vector. A right-hand
+side that does not read the record being scanned — a bind parameter, a function
+call (including one with a closure argument), an array with computed elements,
+an uncorrelated subquery — is evaluated once, before the scan reads anything,
+with the `array<number>` coercion and its error messages. One that reads the
+record being scanned (a field) fails planning. KNN in projection position, a
+bare expression, and an Approximate form without an HNSW index evaluate to
+false per row.
 Dimension mismatches skip records (no error). Operands of a KNN evaluated as a
 predicate are deliberately not computed, so an erroring operand yields false
 rather than an error. A multi-source FROM restores the stripped conjunct so
@@ -33,13 +33,13 @@ value = "[{ id: pts:3, point: [8f, 9f, 10f, 11f] }]"
 value = "[{ id: q:1, vec: [2f, 3f, 4f, 5f] }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: pts:1 }, { id: pts:2 }]"
 
 [[test.results]]
 value = "[{ id: pts:1 }, { id: pts:2 }]"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN query vector cannot depend on the record being scanned: point"
 
 [[test.results]]
 error = "Expected `array<number>` but found `NONE`"
@@ -51,7 +51,7 @@ error = "Expected `number` but found `'a'` when coercing element at index 0 of `
 error = "Expected `array<number>` but found `42`"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: pts:1 }, { id: pts:3 }]"
 
 [[test.results]]
 value = "[{ id: pts:1, near: false }, { id: pts:2, near: false }, { id: pts:3, near: false }]"
@@ -60,7 +60,7 @@ value = "[{ id: pts:1, near: false }, { id: pts:2, near: false }, { id: pts:3, n
 value = "[]"
 
 [[test.results]]
-value = "[]"
+value = "[{ d: 2f, id: pts:1 }, { d: 4f, id: pts:2 }]"
 
 [[test.results]]
 value = "NONE"
@@ -109,11 +109,11 @@ CREATE pts:1 SET point = [1f,2f,3f,4f];
 CREATE pts:2 SET point = [4f,5f,6f,7f];
 CREATE pts:3 SET point = [8f,9f,10f,11f];
 CREATE q:1 SET vec = [2f,3f,4f,5f];
--- 1. subquery RHS: unsupported by the legacy tree -> false per row
+-- 1. uncorrelated subquery RHS: evaluated once
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> (SELECT VALUE vec FROM ONLY q:1);
 -- 2. function-call RHS with a closure argument: computed once, works
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> array::map([2,3,4,5], |$x| <float> $x);
--- 3. per-row field idiom RHS: unsupported -> false per row
+-- 3. per-row field idiom RHS: reads the record being scanned, a planning error
 SELECT id FROM pts WHERE point <|1,EUCLIDEAN|> point;
 -- 4. undefined param RHS: coercion error
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $undefined;
@@ -121,13 +121,13 @@ SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $undefined;
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> ['a','b','c','d'];
 -- 6. scalar RHS: coercion error
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> 42;
--- 7. residual cond alongside an unsupported RHS: still false per row
+-- 7. residual cond alongside a subquery RHS: the ranking keeps the rows the condition admits
 SELECT id FROM pts WHERE point <|3,EUCLIDEAN|> (SELECT VALUE vec FROM ONLY q:1) AND id != pts:2;
 -- 8. projection-position KNN: no executor entry -> false
 SELECT id, point <|2,EUCLIDEAN|> [2f,3f,4f,5f] AS near FROM pts;
 -- 9. dimension mismatch: records skipped, no error
 SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> [1f,2f];
--- 10. vector::distance::knn() with an unsupported RHS
+-- 10. vector::distance::knn() with a subquery RHS
 SELECT id, vector::distance::knn() AS d FROM pts WHERE point <|2,EUCLIDEAN|> (SELECT VALUE vec FROM ONLY q:1);
 -- 11. FOREACH-bound param vector
 FOR $v IN [[2f,3f,4f,5f]] { CREATE res:1 SET out = (SELECT id FROM pts WHERE point <|2,EUCLIDEAN|> $v); };

@@ -128,7 +128,12 @@ pub(super) async fn run_source(
 			if kept.rows.is_empty() {
 				return Ok(false);
 			}
-			let rows = match key_at(ctx.value("parent"), outer) {
+			let parent = match ctx.binding("parent") {
+				Some(crate::ctx::Binding::Value(parent)) => Some(parent.as_ref()),
+				Some(crate::ctx::Binding::Forbidden(row)) => return Err(row.error()),
+				None => None,
+			};
+			let rows = match key_at(parent, outer) {
 				Some(key) => {
 					kept.candidates(key).map(|at| (Vec::new(), kept.rows[at].clone())).collect()
 				}
@@ -363,7 +368,9 @@ async fn values(
 		} => {
 			// Nested, the statement's `$this` is the enclosing row: the
 			// expression reads it as its current value and its document.
-			let value = host_scalar(program, value, ctx, ctx.value("this")).await.catch_return()?;
+			let (this, forbidding) = ctx.enclosing_row();
+			let ctx = forbidding.as_ref().unwrap_or(ctx);
+			let value = host_scalar(program, value, ctx, this).await.catch_return()?;
 			let rows = match value {
 				Value::Array(array) => {
 					let mut rows = Vec::with_capacity(array.len());
@@ -834,14 +841,9 @@ async fn run_statement(
 	// and the record a computed frame computes, carried in.
 	let frame = {
 		let eval_ctx = super::host::frame_eval(program, state, ctx, frame);
-		let mut nested_ctx = eval_ctx.exec_ctx.clone();
-		if let Some(row) = row {
-			let row = Arc::new(row.clone());
-			nested_ctx = nested_ctx.with_shared_param(&["parent", "this"], &row);
-			if spec.inherits_row {
-				nested_ctx = nested_ctx.with_current_row(row);
-			}
-		}
+		let exec_ctx = eval_ctx.exec_ctx;
+		let mut nested_ctx =
+			exec_ctx.entering_statement(exec_ctx.row_access(row), spec.inherits_row);
 		if eval_ctx.skip_fetch_perms {
 			nested_ctx = nested_ctx.with_skip_fetch_perms(true);
 		}

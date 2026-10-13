@@ -175,7 +175,7 @@ impl IndexFunction for SearchHighlight {
 			let rid = extract_record_id(ctx)?;
 
 			// Get the current document value
-			let doc = ctx.current_value.unwrap_or(&Value::None);
+			let doc = ctx.value_in_scope().read()?.unwrap_or(&Value::None);
 
 			// Get the full-text index resources (lazy init); no index on
 			// the scan table covering the idiom → NONE.
@@ -748,7 +748,7 @@ impl ScalarFunction for SearchLinear {
 ///
 /// The current row is a Value::Object with an "id" field containing the RecordId.
 fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
-	let current = ctx.current_value.ok_or_else(|| {
+	let current = ctx.value_in_scope().read()?.ok_or_else(|| {
 		anyhow::anyhow!("Index function requires a current document (must be used in SELECT)")
 	})?;
 

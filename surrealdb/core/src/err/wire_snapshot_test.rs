@@ -1033,6 +1033,18 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		(
+			"InvalidKnnVector",
+			ExecError::InvalidKnnVector {
+				vector: "sample".to_string(),
+			},
+		),
+		(
+			"UncoercibleKnnVector",
+			ExecError::UncoercibleKnnVector {
+				message: "sample".to_string(),
+			},
+		),
+		(
 			"InvalidParam",
 			ExecError::InvalidParam {
 				name: "sample".to_string(),

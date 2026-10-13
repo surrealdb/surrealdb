@@ -619,6 +619,7 @@ impl Building {
 			session: None,
 			current_value: None,
 			current_row: None,
+			forbidden_row: None,
 			// Suppression is derived from the options the build carries, not
 			// fixed: a build started from a frame that suppressed enforcement
 			// must key a record the way a write in that frame keys it, or the

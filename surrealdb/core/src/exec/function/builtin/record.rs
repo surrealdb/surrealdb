@@ -126,8 +126,7 @@ impl ScalarFunction for RecordIsEdge {
 			let args = FromArgs::from_args("record::is_edge", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			let doc =
-				ctx.document_root.or(ctx.current_value).map(|v| CursorDoc::new(None, v.clone()));
+			let doc = ctx.document().within_context().map(|v| CursorDoc::new(None, v.clone()));
 			crate::fnc::record::is::edge((frozen, opt, doc.as_ref()), args).await
 		})
 	}

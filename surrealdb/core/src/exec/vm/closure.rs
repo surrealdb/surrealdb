@@ -962,10 +962,18 @@ async fn run_body(
 	bound: Bound,
 	registry: Option<Arc<ClosureUnits>>,
 ) -> FlowResult<Value> {
+	if let Some(forbidden) = closure.captured_forbidden_row() {
+		return Err(forbidden.error());
+	}
 	let (program, units) = (&held.unit, &held.table);
-	let row = ctx.document_root.or(ctx.current_value);
+	let access = ctx.document();
+	// Where the caller's document is a KNN query vector's row being scanned,
+	// the body runs over no row in the caller's context, which refuses a read
+	// of it.
+	let forbidden = matches!(access, crate::exec::context::RowAccess::Forbidden(_));
+	let row = access.within_context();
 	let has_row = row.is_some();
-	let undocumented = ctx.document_root.is_none() && ctx.current_value.is_some();
+	let undocumented = !ctx.root_document().is_present() && ctx.value_in_scope().is_present();
 	let captures = &closure.captures().0;
 	let mut slots = Vec::with_capacity(head.slots.len());
 	let args = bound.len();
@@ -1005,7 +1013,9 @@ async fn run_body(
 		// state without the frames only the host's steps read; one that
 		// hands the host a step is continued by the host where it stopped,
 		// on that state where it can be.
-		let (row, start, mut state) = if held.steps.load(Ordering::Relaxed) {
+		// A body run over a forbidden row is run by the host, whose run of it
+		// refuses a read of that row.
+		let (row, start, mut state) = if forbidden || held.steps.load(Ordering::Relaxed) {
 			(row, 0, state(slots)?)
 		} else {
 			let mut inline = state(slots)?;

@@ -1643,6 +1643,22 @@ impl<'ctx> Planner<'ctx> {
 		self.shadowing(std::iter::empty()).with_perms_suppressed(true)
 	}
 
+	/// Whether nothing around the statement this plans binds `$parent`: it is
+	/// a statement the session runs at its top level — not one nested in
+	/// another statement, a block, a loop or an `IF`, a function body, a nested
+	/// query (`eval`) or a stored clause — and the session holds no parameter
+	/// of that name. A `$parent` such a statement reads falls back to the
+	/// document it is evaluated against: per row, the row.
+	pub(crate) fn binds_no_parent(&self) -> bool {
+		self.depth == 0
+			&& self.function_path.is_empty()
+			&& self.depth_sites.is_none()
+			&& !self.stored_clause
+			&& self.statement_nesting.ifs == 0
+			&& !self.statement_nesting.nested
+			&& self.ctx.value("parent").is_none()
+	}
+
 	/// Whether an enclosing `FOR`, closure, user-defined function or block
 	/// `LET` binds `name`, so that a read of it is not the ambient context's
 	/// value.

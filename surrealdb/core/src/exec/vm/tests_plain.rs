@@ -1102,6 +1102,16 @@ const LOADER_CLOSURE_MEMBERS: &[(&str, &str)] = &[
 	("captures", "the values the closure captured"),
 	("frame", "the frame an invocation runs a unit in"),
 	("dives", "whether an invocation spends the computation-depth budget"),
+	(
+		"capturing_forbidden_row",
+		"marks a value the VM's literal makes as having captured a KNN query vector's row being \
+		 scanned",
+	),
+	(
+		"captured_forbidden_row",
+		"the KNN query vector's row being scanned the value captured, which refuses the \
+		 invocation",
+	),
 ];
 
 /// The public members of the closure value (`CompiledClosure`), as its impl

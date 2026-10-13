@@ -646,7 +646,15 @@ impl<'a> Explainer<'a> {
 					("index".to_string(), index.name.to_string()),
 					("k".to_string(), k.to_string()),
 					("ef".to_string(), ef.to_string()),
-					("dimension".to_string(), vector.len().to_string()),
+					(
+						"dimension".to_string(),
+						match vector {
+							super::plan::KnnTarget::Literal(vector) => vector.len().to_string(),
+							super::plan::KnnTarget::Deferred {
+								..
+							} => "deferred".to_string(),
+						},
+					),
 				];
 				// A run that built its rows from the ids the search returned, and
 				// whose search judged no candidate on its record, read no record.
@@ -719,7 +727,9 @@ impl<'a> Explainer<'a> {
 							"dimension".to_string(),
 							match vector {
 								super::plan::KnnTarget::Literal(vector) => vector.len().to_string(),
-								super::plan::KnnTarget::Deferred(_) => "deferred".to_string(),
+								super::plan::KnnTarget::Deferred {
+									..
+								} => "deferred".to_string(),
 							},
 						),
 					],

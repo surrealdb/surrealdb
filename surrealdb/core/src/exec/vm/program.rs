@@ -285,22 +285,29 @@ pub(super) enum Instr {
 	},
 	/// `dst` = builtin [`Program::calls`]`[call]` applied to `args`, invoked
 	/// by name through the function registry in permission frame `frame`
-	/// when set, and otherwise in the frame the body runs in.
+	/// when set, and otherwise in the frame the body runs in. The call is
+	/// evaluated against `elem` as its value in scope where it is set — the
+	/// element a body is evaluated against — and against the row otherwise;
+	/// its document is the row either way.
 	Call {
 		call: u32,
 		args: Vec<Operand>,
 		dst: Reg,
 		frame: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// Enter user-defined function [`Program::functions`]`[function]`, called
 	/// from permission or call frame `outer` when set: read its definition,
 	/// check it is the one the program was lowered for, check it may be
 	/// called and open call frame `frame`, under the definer's auth, for its
-	/// arguments to be evaluated in.
+	/// arguments to be evaluated in. Its `PERMISSIONS` clause is judged over
+	/// `elem` where it is set — the element a body is evaluated against, which
+	/// the body then runs over — and over the row otherwise.
 	FunctionEnter {
 		function: u32,
 		frame: u16,
 		outer: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// Bind `args`, the arguments of the function entered into call frame
 	/// `frame`, as its definition declares them, into the registers from
@@ -321,13 +328,16 @@ pub(super) enum Instr {
 		dst: Reg,
 	},
 	/// `dst` = the function entered into call frame `frame`, applied to
-	/// `args` and run as its body's subroutine; the frame closes.
+	/// `args` and run as its body's subroutine, over `elem` where it is set —
+	/// the element a body is evaluated against — and over the row otherwise;
+	/// the frame closes.
 	FunctionCall {
 		function: u32,
 		frame: u16,
 		args: Vec<Operand>,
 		dst: Reg,
 		outer: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// `dst` = `src` converted to an array as builtin
 	/// [`Program::calls`]`[call]` converts its argument at 1-based
@@ -440,7 +450,10 @@ pub(super) enum Instr {
 	/// `dst` = the distance from the query vector of `rank` to the vector at
 	/// [`Program::paths`]`[path]` of the value in `src`, as a brute-force
 	/// KNN ranks a row. A row with no such vector, or one the distance does
-	/// not apply to, takes no rank: control jumps to `none`.
+	/// not apply to, takes no rank: control jumps to `none`. A query vector
+	/// computed when the statement runs that the run has not evaluated yet is
+	/// evaluated by the host first
+	/// ([`Step::KnnQuery`](super::interp::Step::KnnQuery)).
 	KnnRank {
 		src: Operand,
 		path: u32,
@@ -3347,17 +3360,44 @@ pub(super) struct KnnRank {
 /// Where the vector a brute-force KNN ranks rows against comes from.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum KnnVector {
-	Literal(Vec<crate::val::Number>),
+	Literal(std::sync::Arc<[crate::val::Number]>),
 	/// The query of [`SortSpec::knn_query`] of sort `0`, which the host
-	/// evaluated when the statement started.
+	/// evaluates the first time a row is ranked against it
+	/// ([`Step::KnnQuery`](super::interp::Step::KnnQuery)).
 	Query(u16),
 }
 
-/// A query vector the host evaluates once, over no row, when the pipelines of
-/// `group` start, and coerces to `array<number>`.
+/// Where the vector a KNN search looks for the nearest neighbours of comes
+/// from.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum KnnSearchVector {
+	Literal(std::sync::Arc<[crate::val::Number]>),
+	/// The vector [`Program::knn_searches`]`[0]` computes, which the host
+	/// evaluates when the first source searching with it opens, before the
+	/// search, and every other source of the run searches with too.
+	Query(u16),
+}
+
+/// A query vector computed when the statement runs: evaluated once, with the
+/// row being scanned forbidden to it
+/// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)), and coerced to
+/// `array<number>`.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct DeferredVector {
+	pub(super) scalar: HostScalar,
+	/// The vector as written, which a refusal of a read of the row being
+	/// scanned names.
+	pub(super) text: std::sync::Arc<str>,
+}
+
+/// A query vector the host evaluates once per run of the pipelines of
+/// `group`: a brute-force ranking's the first time a row is ranked against
+/// it, held in [`State::knn_queries`](super::interp::State), and a KNN
+/// search's when the first source searching with it opens, held in
+/// [`State::knn_searches`](super::interp::State).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct KnnQuery {
-	pub(super) scalar: HostScalar,
+	pub(super) vector: DeferredVector,
 	pub(super) group: Option<u16>,
 }
 
@@ -5000,8 +5040,7 @@ pub(super) enum Source {
 	Knn {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		/// The query vector, shared with the plan it was lowered from.
-		vector: std::sync::Arc<[crate::val::Number]>,
+		vector: KnnSearchVector,
 		k: u32,
 		ef: u32,
 		/// Where the distance of each record found is published for
@@ -5540,6 +5579,10 @@ pub(crate) struct Program {
 	pub(super) paths: Vec<FieldPath>,
 	pub(super) limits: Vec<LimitSpec>,
 	pub(super) sorts: Vec<SortSpec>,
+	/// The query vectors KNN searches compute when the statement runs, each
+	/// shared by the searches of one KNN operator ([`KnnSearchVector::Query`])
+	/// and evaluated once per run of the group that owns it.
+	pub(super) knn_searches: Vec<KnnQuery>,
 	pub(super) splits: Vec<SplitSpec>,
 	pub(super) joins: Vec<JoinSpec>,
 	/// For each distinct set, the group whose start empties it.

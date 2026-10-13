@@ -173,7 +173,7 @@ pub enum AccessPath {
 	KnnSearch {
 		index_ref: IndexRef,
 		/// The query vector to search for nearest neighbors of
-		vector: Arc<[Number]>,
+		vector: KnnQueryVector,
 		/// Number of nearest neighbors to return
 		k: u32,
 		/// ANN search expansion factor
@@ -340,6 +340,26 @@ pub enum BitmapPlan {
 	},
 }
 
+/// The query vector of a KNN, as planned: the search of an ANN index or a
+/// brute-force ranking.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KnnQueryVector {
+	/// A numeric array known when the access path is chosen: written in the
+	/// statement, or the plan-time value of a parameter
+	/// ([`Planner::resolve_query_vector`](crate::exec::planner::Planner::resolve_query_vector)).
+	Literal(Arc<[Number]>),
+	/// The right-hand side of the KNN operator, evaluated once with no row in
+	/// scope before the search reads any input: any expression that does not
+	/// read the row being scanned
+	/// ([`classify_knn_vector`](crate::exec::planner::util::classify_knn_vector)),
+	/// such as a parameter a `LET` or a `FOR` of an enclosing block or a
+	/// closure argument binds, a function call, a cast, an `IF`, an
+	/// uncorrelated subquery or an array with computed elements. The value is
+	/// coerced to `array<number>`; one that does not coerce, or an evaluation
+	/// that fails, fails the query.
+	Deferred(LogicalExpr),
+}
+
 /// How to access an index.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BTreeAccess {
@@ -373,7 +393,7 @@ pub enum BTreeAccess {
 	/// KNN vector search access via ANN index.
 	Knn {
 		/// The query vector
-		vector: Arc<[Number]>,
+		vector: KnnQueryVector,
 		/// Number of nearest neighbors
 		k: u32,
 		/// ANN search expansion factor
@@ -966,9 +986,13 @@ impl ElementColumns {
 	pub(crate) fn analyzer<'a>(
 		&self,
 		with: Option<&'a With>,
+		registry: &'a crate::exec::function::FunctionRegistry,
 	) -> crate::exec::index::analysis::IndexAnalyzer<'a> {
-		let analyzer =
-			crate::exec::index::analysis::IndexAnalyzer::new(Arc::clone(&self.indexes), with);
+		let analyzer = crate::exec::index::analysis::IndexAnalyzer::new(
+			Arc::clone(&self.indexes),
+			with,
+			registry,
+		);
 		let analyzer = match &self.scalar {
 			Some(scalar) => analyzer.with_scalar_columns(Arc::clone(scalar)),
 			None => analyzer,
@@ -1917,7 +1941,7 @@ mod tests {
 				},
 				AccessPath::KnnSearch {
 					index_ref: ft,
-					vector: vec![Number::Int(1)].into(),
+					vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
 					k: 3,
 					ef: 10,
 					prefilter: None,
@@ -1998,7 +2022,7 @@ mod tests {
 			);
 			assert_eq!(
 				BTreeAccess::Knn {
-					vector: vec![Number::Int(1), Number::Int(2)].into(),
+					vector: KnnQueryVector::Literal(vec![Number::Int(1), Number::Int(2)].into()),
 					k: 4,
 					ef: 40,
 				}
@@ -2151,7 +2175,7 @@ mod tests {
 				ft_defs,
 				0,
 				BTreeAccess::Knn {
-					vector: vec![Number::Int(1)].into(),
+					vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
 					k: 3,
 					ef: 10,
 				},
@@ -2322,7 +2346,7 @@ mod tests {
 			assert_eq!(residual("a = 5", &ft, &["a"]), Some("a = 5".to_owned()));
 
 			let knn = BTreeAccess::Knn {
-				vector: vec![Number::Int(1)].into(),
+				vector: KnnQueryVector::Literal(vec![Number::Int(1)].into()),
 				k: 3,
 				ef: 10,
 			};

@@ -12,7 +12,8 @@ use super::access_path::{
 };
 use crate::catalog::{Index, IndexDefinition, KeyStructure};
 use crate::exec::planner::util::{
-	expr_contains_matches, idiom_matches_column_in, idiom_matches_containment, try_literal_to_value,
+	KnnQueryVector, KnnVectorClass, classify_knn_vector, expr_contains_matches,
+	idiom_matches_column_in, idiom_matches_containment, try_literal_to_value,
 };
 use crate::expr::logical::{LogicalCall, LogicalExpr, LogicalOrdering};
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -38,6 +39,9 @@ pub struct IndexAnalyzer<'a> {
 	/// holds no array; a column past the end of its index's flags is not
 	/// known to. `None` knows of none. Carried on each [`IndexRef`] made.
 	scalar: Option<Arc<[super::access_path::ColumnFlags]>>,
+	/// The function registry, which says which calls read the row (see
+	/// [`classify_knn_vector`]).
+	registry: &'a crate::exec::function::FunctionRegistry,
 	/// The structure of the table's record ids, when they name their
 	/// components: a b-tree column and a path that address the same
 	/// component match whichever way each spells it
@@ -53,13 +57,18 @@ pub type KnnQueryVectors = HashMap<String, Arc<[Number]>>;
 
 impl<'a> IndexAnalyzer<'a> {
 	/// Create a new analyzer for the given table and indexes.
-	pub fn new(indexes: Arc<[IndexDefinition]>, with_hints: Option<&'a With>) -> Self {
+	pub fn new(
+		indexes: Arc<[IndexDefinition]>,
+		with_hints: Option<&'a With>,
+		registry: &'a crate::exec::function::FunctionRegistry,
+	) -> Self {
 		Self {
 			indexes,
 			with_hints,
 			knn_query_vectors: None,
 			no_containment: None,
 			scalar: None,
+			registry,
 			key: None,
 		}
 	}
@@ -2205,28 +2214,21 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 		let path = left;
 
-		// Extract numeric vector from right side: a parameter's resolved value,
-		// or a literal.
-		let vector = match right {
-			LogicalExpr::Param(param) => {
-				match self.knn_query_vectors.and_then(|v| v.get(param.as_str())) {
-					Some(vector) => Arc::clone(vector),
-					None => return,
-				}
-			}
-			right => match try_literal_to_value(right) {
-				Some(Value::Array(arr)) => {
-					let mut nums: Vec<Number> = Vec::with_capacity(arr.len());
-					for v in arr.iter() {
-						match v {
-							Value::Number(n) => nums.push(*n),
-							// Not every element is a number.
-							_ => return,
-						}
-					}
-					Arc::from(nums)
-				}
-				_ => return,
+		// A parameter the planner resolved to an array of numbers is that
+		// vector ([`KnnQueryVectors`]). Any other right-hand side is read
+		// exactly as brute force reads it, so a value either refuses when it
+		// runs (one that is not `array<number>`) raises the same error in both.
+		// One that reads the row being scanned matches no index: the planner
+		// refuses it before an access path is chosen.
+		let resolved = match right {
+			LogicalExpr::Param(param) => self.knn_query_vectors.and_then(|v| v.get(param.as_str())),
+			_ => None,
+		};
+		let vector = match resolved {
+			Some(vector) => KnnQueryVector::Literal(Arc::clone(vector)),
+			None => match classify_knn_vector(right, self.registry) {
+				KnnVectorClass::Vector(vector) => vector,
+				KnnVectorClass::ReadsRow => return,
 			},
 		};
 
@@ -2265,7 +2267,7 @@ impl<'a> IndexAnalyzer<'a> {
 				candidates.push(IndexCandidate::new(
 					index_ref,
 					BTreeAccess::Knn {
-						vector: Arc::clone(&vector),
+						vector: vector.clone(),
 						k,
 						ef,
 					},
@@ -2570,7 +2572,7 @@ impl IndexCandidate {
 				ef,
 			} => AccessPath::KnnSearch {
 				index_ref: self.index_ref.clone(),
-				vector: Arc::clone(vector),
+				vector: vector.clone(),
 				k: *k,
 				ef: *ef,
 				// The prefilter is a plan-level concern; the SELECT planner
@@ -2749,7 +2751,9 @@ mod tests {
 	}
 
 	fn analyzer<'a>(defs: Vec<IndexDefinition>, with: Option<&'a With>) -> IndexAnalyzer<'a> {
-		IndexAnalyzer::new(Arc::<[_]>::from(defs.into_boxed_slice()), with)
+		static REGISTRY: std::sync::LazyLock<crate::exec::function::FunctionRegistry> =
+			std::sync::LazyLock::new(crate::exec::function::FunctionRegistry::with_builtins);
+		IndexAnalyzer::new(Arc::<[_]>::from(defs.into_boxed_slice()), with, &REGISTRY)
 	}
 
 	/// An analyzer that knows every column of `defs` to be declared a kind

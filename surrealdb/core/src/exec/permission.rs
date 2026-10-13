@@ -241,8 +241,10 @@ impl ComputedFieldGuard {
 		if matches!(self.state.get(), Some(None)) {
 			return self.guard.evaluate(ctx).await;
 		}
-		// Only a record carries fields to derive.
-		let Some(row @ Value::Object(_)) = ctx.document_root.or(ctx.current_value) else {
+		// Only a record carries fields to derive. Where there is none, the
+		// guard's own evaluation meets the row as the frame holds it.
+		let crate::exec::context::RowAccess::Present(row @ Value::Object(_)) = ctx.document()
+		else {
 			return self.guard.evaluate(ctx).await;
 		};
 		let frame = Self::frame(ctx.exec_ctx);

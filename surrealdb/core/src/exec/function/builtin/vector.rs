@@ -113,7 +113,7 @@ impl IndexFunction for VectorDistanceKnn {
 
 /// Extract the RecordId from the current row value.
 fn extract_record_id(ctx: &EvalContext<'_>) -> Result<crate::val::RecordId> {
-	let current = ctx.current_value.ok_or_else(|| {
+	let current = ctx.value_in_scope().read()?.ok_or_else(|| {
 		anyhow::anyhow!(
 			"vector::distance::knn requires a current document (must be used in SELECT)"
 		)

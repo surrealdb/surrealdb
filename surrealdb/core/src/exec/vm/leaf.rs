@@ -161,6 +161,11 @@ pub(super) fn step(step: &Step) -> Class {
 		Step::Degree {
 			..
 		} => Class::Kernel(&[Storage]),
+		// The query vector is evaluated as an expression the program holds,
+		// whose own items are classified where it is lowered.
+		Step::KnnQuery {
+			..
+		} => Class::Kernel(&[Params]),
 		Step::Write {
 			..
 		} => Class::NonLeaf(Bar::Write),
@@ -697,9 +702,6 @@ pub(super) fn instr(
 		| Instr::Extract {
 			..
 		}
-		| Instr::KnnRank {
-			..
-		}
 		| Instr::Mock {
 			..
 		}
@@ -996,6 +998,17 @@ pub(super) fn instr(
 		} => named(step(&Step::Degree {
 			at: 0,
 		})),
+		// A query vector computed when the statement runs is evaluated by the
+		// host before the first row is ranked against it.
+		Instr::KnnRank {
+			rank,
+			..
+		} => match rank.vector {
+			super::program::KnnVector::Literal(_) => named(Class::Leaf),
+			super::program::KnnVector::Query(_) => named(step(&Step::KnnQuery {
+				at: 0,
+			})),
+		},
 		Instr::ExternalEnter {
 			external,
 			..

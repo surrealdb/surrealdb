@@ -141,8 +141,10 @@ pub(crate) async fn run_module_export(
 		ctx.exec_ctx.version_stamp(),
 	);
 
-	// Build CursorDoc from current value
-	let doc = ctx.current_value.map(|v| CursorDoc::new(None, v.clone()));
+	// The module receives the value in scope as its document; where that is a
+	// KNN query vector's row being scanned, the call is refused before it
+	// runs, whether or not the module reads it.
+	let doc = ctx.value_in_scope().read()?.map(|v| CursorDoc::new(None, v.clone()));
 
 	let result = crate::fnc::module::module_executable_run(
 		&export.executable,

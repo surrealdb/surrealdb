@@ -2608,12 +2608,22 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 	// A `KNN` operator the statement's `WHERE` holds beside what a scan or a
 	// brute-force search consumes is refused before a row is read, and a
 	// brute-force search ranks the rows the other conditions leave.
-	let knn_refusal = knn_placement_refusal(&stages);
+	let registry = planner.function_registry();
+	// A KNN operator ranks the field its left operand names, whether written
+	// as a path or as a projection of one.
+	for stage in &mut stages {
+		if let RowStage::Filter(predicate) = stage
+			&& crate::exec::planner::util::has_knn_operator(predicate)
+		{
+			crate::exec::planner::util::resolve_knn_field_operands(predicate, registry);
+		}
+	}
+	let knn_refusal = knn_placement_refusal(planner, &stages, registry).await;
 	let brute = match knn_refusal {
 		Some(_) => None,
 		None => stages.iter().rev().find_map(|stage| match stage {
 			RowStage::Filter(predicate) => {
-				crate::exec::planner::util::extract_bruteforce_knn(predicate)
+				crate::exec::planner::util::extract_bruteforce_knn(predicate, registry)
 			}
 			RowStage::Layer(..) | RowStage::Permission(..) => None,
 		}),
@@ -2628,7 +2638,7 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 	let ranked_at = brute.as_ref().and_then(|_| {
 		stages.iter().rposition(|stage| match stage {
 			RowStage::Filter(predicate) => {
-				crate::exec::planner::util::extract_bruteforce_knn(predicate).is_some()
+				crate::exec::planner::util::extract_bruteforce_knn(predicate, registry).is_some()
 			}
 			RowStage::Layer(..) | RowStage::Permission(..) => false,
 		})
@@ -2956,6 +2966,22 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 		}
 	}
 	if has_knn && leaves.len() > 1 {
+		// The scans search with the one KNN operator's vector, so one
+		// evaluation of it serves them all, the scans the union clones
+		// included.
+		let mut search = None;
+		for leaf in &mut leaves {
+			if let Plan::KnnScan {
+				vector: super::plan::KnnTarget::Deferred {
+					search: leaf_search,
+					..
+				},
+				..
+			} = leaf
+			{
+				*leaf_search = *search.get_or_insert(*leaf_search);
+			}
+		}
 		knn_union_sources(planner, &mut leaves, &tables).await?;
 	}
 	if enforced.contains(&true) {
@@ -3039,14 +3065,89 @@ async fn map_rows(planner: &Planner<'_>, op: &LogicalOp, versioned: bool) -> Map
 	})
 }
 
-/// The refusal planning raises for a `KNN` operator it cannot place: one of the retired `<|k|>`
-/// form, or one under an `OR` or a `NOT`, where no scan or search consumes it.
-fn knn_placement_refusal(stages: &[RowStage]) -> Option<super::plan::Refusal> {
-	use crate::exec::planner::util::{has_knn_ktree_operator, has_knn_operator};
-	for stage in stages {
-		let RowStage::Filter(predicate) = stage else {
-			continue;
+/// The refusal of a `KNN` operator no scan or search can serve, before a row
+/// is read.
+///
+/// - More than one operator a search would serve (`<|k, DIST|>`, `<|k, EF|>`) across the
+///   statement's conditions: a search answers one, and serving one while dropping the others would
+///   answer a different query.
+/// - A query vector that reads the row being scanned
+///   ([`reads_scanned_row`](crate::exec::planner::row_scope::reads_scanned_row)), which has no
+///   value before a row is read, or that reads `$parent` where nothing around the statement binds
+///   it ([`Planner::binds_no_parent`]), which falls back to that row
+///   ([`reads_enclosing_parent`](crate::exec::planner::row_scope::reads_enclosing_parent)).
+/// - A query vector known when the statement is planned — written, a constant expression's value,
+///   or a parameter's plan-time value ([`known_query_vector`]) — that does not coerce to
+///   `array<number>`, refused with the coercion's error, or that no distance ranks a record
+///   against: an empty one, or one holding a NaN or an infinity
+///   ([`is_rankable_query_vector`](crate::exec::planner::util::is_rankable_query_vector)). A vector
+///   computed when the statement runs is checked as it is evaluated, with the same errors.
+/// - One of the retired `<|k|>` form, or one under an `OR` or a `NOT`, where no scan or search
+///   consumes it.
+///
+/// A KNN operator inside a closure literal is none of the statement's: it
+/// runs, when the closure is invoked, as an ordinary expression.
+async fn knn_placement_refusal(
+	planner: &Planner<'_>,
+	stages: &[RowStage],
+	registry: &crate::exec::function::FunctionRegistry,
+) -> Option<super::plan::Refusal> {
+	use crate::exec::planner::util::{
+		KnnQueryVector, KnnVectorClass, classify_knn_vector, count_knn_source_operators,
+		first_row_dependent_knn_vector, has_knn_ktree_operator, has_knn_operator,
+		is_rankable_query_vector, knn_query_vectors,
+	};
+	let predicates = || {
+		stages.iter().filter_map(|stage| match stage {
+			RowStage::Filter(predicate) => Some(predicate),
+			RowStage::Layer(..) | RowStage::Permission(..) => None,
+		})
+	};
+	let operators: usize = predicates().map(count_knn_source_operators).sum();
+	if operators > 1 {
+		return Some(super::plan::Refusal::Query {
+			message: format!(
+				"A WHERE clause supports a single KNN operator (<|k, …|>); found {operators}."
+			),
+		});
+	}
+	let reads_unbound_parent = |vector: &LogicalExpr| {
+		planner.binds_no_parent() && crate::exec::planner::row_scope::reads_enclosing_parent(vector)
+	};
+	if let Some(vector) = predicates()
+		.find_map(|predicate| first_row_dependent_knn_vector(predicate, registry))
+		.or_else(|| predicates().flat_map(knn_query_vectors).find(|v| reads_unbound_parent(v)))
+	{
+		return Some(super::plan::Refusal::Query {
+			message: format!(
+				"The KNN query vector cannot depend on the record being scanned: {}",
+				surrealdb_types::ToSql::to_sql(&vector)
+			),
+		});
+	}
+	for vector in predicates().flat_map(knn_query_vectors) {
+		let known = match classify_knn_vector(&vector, registry) {
+			KnnVectorClass::Vector(KnnQueryVector::Literal(known)) => known,
+			KnnVectorClass::Vector(KnnQueryVector::Deferred(expr)) => {
+				match known_query_vector(planner, &expr).await {
+					Some(Ok(known)) => known,
+					Some(Err(error)) => {
+						return Some(super::plan::Refusal::UncoercibleKnnVector {
+							message: error.to_string(),
+						});
+					}
+					None => continue,
+				}
+			}
+			KnnVectorClass::ReadsRow => continue,
 		};
+		if !is_rankable_query_vector(&known) {
+			return Some(super::plan::Refusal::InvalidKnnVector {
+				vector: surrealdb_types::ToSql::to_sql(&vector),
+			});
+		}
+	}
+	for predicate in predicates() {
 		if !has_knn_operator(predicate) {
 			continue;
 		}
@@ -3074,32 +3175,49 @@ fn knn_placement_refusal(stages: &[RowStage]) -> Option<super::plan::Refusal> {
 }
 
 /// The brute-force search `params` name: the field it ranks, the query
-/// vector, how many rows it keeps and the distance. A query-vector parameter
-/// binding leaves in place is resolved here, once
-/// ([`Planner::resolve_query_vector`]); a query vector the statement's
-/// parameters do not hold is computed when the statement runs.
+/// vector, how many rows it keeps and the distance.
 async fn brute_force_search(
 	planner: &Planner<'_>,
 	params: crate::exec::planner::util::BruteForceKnnParams,
 ) -> (LogicalExpr, super::plan::KnnTarget, u32, crate::catalog::Distance) {
-	use crate::exec::planner::util::BruteForceKnnVector;
-	let vector = match params.vector {
-		BruteForceKnnVector::Literal(vector) => super::plan::KnnTarget::Literal(vector),
-		BruteForceKnnVector::Deferred(expr) => {
-			let vector = match &expr {
-				LogicalExpr::Param(param) => {
-					planner.resolve_query_vector(param.as_str()).await.map(|v| v.to_vec())
-				}
-				other => crate::exec::planner::static_value(other)
-					.and_then(|value| value.coerce_to::<Vec<crate::val::Number>>().ok()),
-			};
-			match vector {
-				Some(vector) => super::plan::KnnTarget::Literal(vector),
-				None => super::plan::KnnTarget::Deferred(expr),
-			}
-		}
-	};
+	let vector = knn_target(planner, params.vector).await;
 	(params.field, vector, params.k, params.distance)
+}
+
+/// The query vector of a KNN search or ranking as the plan holds it: a vector
+/// known when the statement is planned ([`known_query_vector`]) is that
+/// vector; any other is computed when the statement runs.
+async fn knn_target(
+	planner: &Planner<'_>,
+	vector: crate::exec::planner::util::KnnQueryVector,
+) -> super::plan::KnnTarget {
+	use crate::exec::planner::util::KnnQueryVector;
+	match vector {
+		KnnQueryVector::Literal(vector) => super::plan::KnnTarget::Literal(vector),
+		KnnQueryVector::Deferred(expr) => match known_query_vector(planner, &expr).await {
+			Some(Ok(vector)) => super::plan::KnnTarget::Literal(vector),
+			Some(Err(_)) | None => super::plan::KnnTarget::deferred(expr),
+		},
+	}
+}
+
+/// What a KNN operator's right-hand side `expr` is known to be when the
+/// statement is planned: a constant expression's value, or the plan-time value
+/// of a parameter ([`Planner::plan_time_value`]), coerced to `array<number>`
+/// as the vector computed when the statement runs is — the vector, or the
+/// coercion's error. `None` where nothing is known: a parameter with no
+/// plan-time value, or one whose value is `NONE`, and any other expression.
+async fn known_query_vector(
+	planner: &Planner<'_>,
+	expr: &LogicalExpr,
+) -> Option<Result<std::sync::Arc<[crate::val::Number]>, crate::val::CoerceError>> {
+	let value = match expr {
+		LogicalExpr::Param(param) => {
+			planner.plan_time_value(param.as_str()).await.filter(|value| !value.is_none())?
+		}
+		other => crate::exec::planner::static_value(other)?,
+	};
+	Some(value.coerce_to::<Vec<crate::val::Number>>().map(std::sync::Arc::from))
 }
 
 /// The `MATCHES` clauses of `predicate` whose query is a parameter bound
@@ -4297,7 +4415,7 @@ async fn table_access(
 			Ok(Plan::KnnScan {
 				table,
 				index: index_ref,
-				vector,
+				vector: knn_target(planner, vector).await,
 				k,
 				ef,
 				filter,

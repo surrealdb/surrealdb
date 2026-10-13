@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, IndexDefinition, NamespaceDefinition, TableDefinition};
-use crate::ctx::{Context, FrozenContext};
+use crate::ctx::{Binding, Context, FrozenContext};
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
 use crate::exec::Error as ExecError;
@@ -193,6 +193,10 @@ pub struct RootContext {
 	/// recursed path's expressions against the idiom's document root. A
 	/// relational plan never sets it: its scans supply their own rows.
 	pub(crate) current_row: Option<Arc<Value>>,
+	/// Set while a KNN query vector is evaluated: where a per-row evaluation
+	/// would read the row being scanned, a read fails rather than finding
+	/// `NONE` or another row. See [`ForbiddenRow`].
+	pub(crate) forbidden_row: Option<Arc<ForbiddenRow>>,
 	/// When true, RecordId dereferences bypass permission checks.
 	///
 	/// Propagated from `EvalContext` at subquery / lookup / recursion boundaries
@@ -266,6 +270,136 @@ pub struct RootContext {
 	/// else a method names every argument error raised beneath it as its own
 	/// (`InvalidMethodArguments`).
 	pub(crate) writing: bool,
+}
+
+/// The state of a KNN query vector's evaluation.
+///
+/// A KNN search or ranking evaluates a query vector computed when the
+/// statement runs once, with no row in scope, before it reads any input. A
+/// per-row evaluation of the same expression would have had the row being
+/// scanned; that row is absent rather than `NONE`, and an expression that
+/// reads it fails with [`ForbiddenRow::error`], the planner's refusal of a
+/// vector that depends on it. Where a read meets it follows where a per-row
+/// evaluation would have found that row:
+///
+/// - with `row` set, the value in scope of a frame that has none — a field, `@`, the row as the
+///   root of a path, `$this` and `$self`, the document root a `$parent` with no binding falls back
+///   to, a projection or index function, a script's or a module's document — and, through it, the
+///   same reads in a function body or a closure invoked without a row;
+/// - `$parent` and `$this` bound to the forbidden row ([`Binding::Forbidden`]) rather than to a
+///   value: inside a statement the vector holds, which binds the row being scanned as both, and
+///   inside a function body called without a row, which binds the caller's row as both.
+///
+/// The bindings are entries of the parameter chain ([`Context::add_forbidden`]),
+/// so they follow its scoping: a binding of either name made inside the
+/// statement — a statement nested in a SELECT of the vector binds that
+/// SELECT's row — is its own, and a frame isolated from the statement's
+/// parameters (a closure's body, a table's permission) does not see them. A
+/// closure's parameters are its own bindings and never meet them. A forbidden
+/// binding holds no value: [`ExecutionContext::value`] answers `None` for it,
+/// and only [`ExecutionContext::binding`] tells it apart from no binding.
+#[derive(Debug, Clone)]
+pub(crate) struct ForbiddenRow {
+	/// The query vector as written, which the error renders.
+	vector: Arc<str>,
+	/// Whether the value in scope of a frame that has none is the row being
+	/// scanned.
+	row: bool,
+}
+
+/// The names a statement or a body binds to the row it is entered from.
+const ROW_PARAMS: [&str; 2] = ["parent", "this"];
+
+impl ForbiddenRow {
+	/// The error a read of the row being scanned raises: the planner's refusal
+	/// of a query vector that depends on it.
+	#[cold]
+	pub(crate) fn error(&self) -> crate::expr::ControlFlow {
+		crate::expr::ControlFlow::Err(self.refusal())
+	}
+
+	/// [`Self::error`], for a caller that returns `anyhow::Result`.
+	#[cold]
+	pub(crate) fn refusal(&self) -> anyhow::Error {
+		anyhow::Error::new(ExecError::Query {
+			message: format!(
+				"The KNN query vector cannot depend on the record being scanned: {}",
+				self.vector
+			),
+		})
+	}
+
+	/// Whether the value in scope of a frame that has none is the row being
+	/// scanned.
+	pub(crate) fn covers_row(&self) -> bool {
+		self.row
+	}
+}
+
+/// What a frame holds as its row ([`ExecutionContext::row_access`]): a row, no
+/// row, or no row where a per-row evaluation would have held a KNN query
+/// vector's row being scanned. Code that reads the row reads it through
+/// [`Self::read`], which refuses the forbidden one; code that hands it to a
+/// nested frame hands the whole of it on
+/// ([`ExecutionContext::entering_statement`],
+/// [`ExecutionContext::entering_call_body`]), so the nested frame forbids it in
+/// turn.
+#[must_use]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum RowAccess<'f, T> {
+	/// The row.
+	Present(T),
+	/// No row.
+	Absent,
+	/// No row, where a per-row evaluation would have held the row being
+	/// scanned.
+	Forbidden(&'f Arc<ForbiddenRow>),
+}
+
+impl<'f, T> RowAccess<'f, T> {
+	/// The row, for code that reads it: `None` where there is none, the
+	/// vector's refusal where it is forbidden.
+	pub(crate) fn read(self) -> anyhow::Result<Option<T>> {
+		match self {
+			Self::Present(row) => Ok(Some(row)),
+			Self::Absent => Ok(None),
+			Self::Forbidden(forbidden) => Err(forbidden.refusal()),
+		}
+	}
+
+	/// The row, for a callee that runs in the same execution context as the
+	/// frame and so meets a forbidden row through that context itself
+	/// ([`RootContext::forbidden_row`]): the row where one is present, `None`
+	/// otherwise.
+	pub(crate) fn within_context(self) -> Option<T> {
+		match self {
+			Self::Present(row) => Some(row),
+			Self::Absent | Self::Forbidden(_) => None,
+		}
+	}
+
+	/// Whether there is a row.
+	pub(crate) fn is_present(&self) -> bool {
+		matches!(self, Self::Present(_))
+	}
+
+	/// The same access, borrowing the row.
+	pub(crate) fn as_ref(&self) -> RowAccess<'f, &T> {
+		match self {
+			Self::Present(row) => RowAccess::Present(row),
+			Self::Absent => RowAccess::Absent,
+			Self::Forbidden(forbidden) => RowAccess::Forbidden(forbidden),
+		}
+	}
+
+	/// The same access, with the row mapped by `f`.
+	pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> RowAccess<'f, U> {
+		match self {
+			Self::Present(row) => RowAccess::Present(f(row)),
+			Self::Absent => RowAccess::Absent,
+			Self::Forbidden(forbidden) => RowAccess::Forbidden(forbidden),
+		}
+	}
 }
 
 impl std::fmt::Debug for RootContext {
@@ -704,6 +838,7 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
 				current_row: r.current_row.clone(),
+				forbidden_row: r.forbidden_row.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
 				perms_suppressed: r.perms_suppressed,
 				caller_perms_suppressed: r.caller_perms_suppressed,
@@ -723,6 +858,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
 					current_row: n.root.current_row.clone(),
+					forbidden_row: n.root.forbidden_row.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
 					perms_suppressed: n.root.perms_suppressed,
 					caller_perms_suppressed: n.root.caller_perms_suppressed,
@@ -745,6 +881,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
 						current_row: d.ns_ctx.root.current_row.clone(),
+						forbidden_row: d.ns_ctx.root.forbidden_row.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
 						perms_suppressed: d.ns_ctx.root.perms_suppressed,
 						caller_perms_suppressed: d.ns_ctx.root.caller_perms_suppressed,
@@ -812,6 +949,129 @@ impl ExecutionContext {
 	/// the same row to share it rather than copy it.
 	pub(crate) fn current_row_shared(&self) -> Option<&Arc<Value>> {
 		self.root().current_row.as_ref()
+	}
+
+	/// Derive the context a KNN query `vector` is evaluated in: no enclosing
+	/// row, and a read of the row being scanned fails (see [`ForbiddenRow`]).
+	pub(crate) fn with_forbidden_row(&self, vector: Arc<str>) -> Self {
+		let mut new = self.clone();
+		let root = new.root_mut();
+		root.current_row = None;
+		root.forbidden_row = Some(Arc::new(ForbiddenRow {
+			vector,
+			row: true,
+		}));
+		new
+	}
+
+	/// Derive a context isolated from the KNN query vector evaluated around
+	/// this one, for a frame that reaches no row of its caller's (a nested
+	/// query run by `eval`): with no row being scanned in reach, a read of the
+	/// value in scope finds none rather than failing.
+	pub(crate) fn without_forbidden_row(&self) -> Self {
+		let mut new = self.clone();
+		new.root_mut().forbidden_row = None;
+		new
+	}
+
+	/// The state of the KNN query vector evaluated around this context, if
+	/// any; see [`ForbiddenRow`].
+	#[cfg(test)]
+	pub(crate) fn forbidden_row(&self) -> Option<&ForbiddenRow> {
+		self.root().forbidden_row.as_deref()
+	}
+
+	/// The context a statement or a body entered from a frame with no row runs
+	/// in, where this one's value in scope is the row being scanned of a KNN
+	/// query vector: the statement or body binds that row as its `$parent`
+	/// and `$this`, which read as forbidden; its own value in scope is that
+	/// row only where `inherits_row` says it reads the enclosing one (a block,
+	/// a function body). A binding of either name made inside it is its own.
+	/// `None` where nothing changes (see [`ForbiddenRow`]).
+	fn forbidding_row_params(&self, inherits_row: bool) -> Option<Self> {
+		let forbidden = self.root().forbidden_row.as_ref().filter(|forbidden| forbidden.row)?;
+		let state = ForbiddenRow {
+			vector: Arc::clone(&forbidden.vector),
+			row: inherits_row,
+		};
+		let mut child = Context::new_child(self.ctx());
+		child.add_forbidden(&ROW_PARAMS, forbidden);
+		let mut new = self.with_new_ctx(child.freeze());
+		new.root_mut().forbidden_row = Some(Arc::new(state));
+		Some(new)
+	}
+
+	/// `row`, a frame's row in this context, as the frame holds it: where there
+	/// is none and the KNN query vector evaluated around this context forbids
+	/// the value in scope, the forbidden row ([`RowAccess::Forbidden`]).
+	pub(crate) fn row_access<T>(&self, row: Option<T>) -> RowAccess<'_, T> {
+		match row {
+			Some(row) => RowAccess::Present(row),
+			None => match self.root().forbidden_row.as_ref() {
+				Some(forbidden) if forbidden.covers_row() => RowAccess::Forbidden(forbidden),
+				_ => RowAccess::Absent,
+			},
+		}
+	}
+
+	/// The context a statement entered from a frame runs in (a subquery, a
+	/// nested statement): the frame's `row` bound as its `$parent` and
+	/// `$this`, and as its current row where `inherits_row` says it reads the
+	/// enclosing one (a block, a function body); a forbidden row bound as
+	/// forbidden ([`Self::forbidding_row_params`]); nothing bound where the
+	/// frame has no row.
+	pub(crate) fn entering_statement(
+		&self,
+		row: RowAccess<'_, &Value>,
+		inherits_row: bool,
+	) -> Self {
+		match row {
+			RowAccess::Present(row) => {
+				let row = Arc::new(row.clone());
+				let entered = self.with_shared_param(&ROW_PARAMS, &row);
+				if inherits_row {
+					entered.with_current_row(row)
+				} else {
+					entered
+				}
+			}
+			RowAccess::Forbidden(_) => {
+				self.forbidding_row_params(inherits_row).unwrap_or_else(|| self.clone())
+			}
+			RowAccess::Absent => self.clone(),
+		}
+	}
+
+	/// What `key` is bound to in this context's parameter chain: a value, a
+	/// KNN query vector's row being scanned ([`Binding::Forbidden`]), or
+	/// nothing. The resolution of a parameter an expression reads goes through
+	/// it, so a forbidden binding is refused rather than read.
+	#[inline]
+	pub(crate) fn binding(&self, key: &str) -> Option<Binding<'_>> {
+		self.root().ctx.binding(key)
+	}
+
+	/// The enclosing row a statement reads as `$this` — in its source, in a
+	/// write's subjects — and the context to evaluate those reads in when it
+	/// differs from this one.
+	///
+	/// Where `$this` is bound to a KNN query vector's row being scanned
+	/// ([`Binding::Forbidden`]), there is no row to hand on, and the context
+	/// returned refuses a read of the value in scope, as the per-row
+	/// evaluation would have read that row (see [`ForbiddenRow`]).
+	pub(crate) fn enclosing_row(&self) -> (Option<&Value>, Option<Self>) {
+		match self.binding("this") {
+			Some(Binding::Value(row)) => (Some(row.as_ref()), None),
+			Some(Binding::Forbidden(row)) => {
+				let mut forbidding = self.clone();
+				forbidding.root_mut().forbidden_row = Some(Arc::new(ForbiddenRow {
+					vector: Arc::clone(&row.vector),
+					row: true,
+				}));
+				(None, Some(forbidding))
+			}
+			None => (None, None),
+		}
 	}
 
 	/// Derive a context that skips permission checks on RecordId dereferences.
@@ -952,7 +1212,7 @@ impl ExecutionContext {
 		&self,
 		params: impl IntoIterator<Item = (N, Value)>,
 		units: crate::exec::vm::UnitTable,
-		row: Option<&Arc<Value>>,
+		row: RowAccess<'_, &Arc<Value>>,
 		skip_fetch_perms: bool,
 		computing_record: Option<&Arc<ComputingRecord>>,
 	) -> anyhow::Result<Self> {
@@ -962,6 +1222,14 @@ impl ExecutionContext {
 			child.add_value(name, Arc::new(value));
 		}
 		child.set_vm_units(units);
+		// A body called without a row, where the caller's value in scope is a
+		// KNN query vector's row being scanned, binds that row as its
+		// `$parent` and `$this`, which read as forbidden. Like a row, it is
+		// bound after the arguments: one of either name reads as the row.
+		if let RowAccess::Forbidden(forbidden) = row {
+			child.add_forbidden(&ROW_PARAMS, forbidden);
+		}
+		let row = row.within_context();
 		if let Some(row) = row {
 			child.add_value("parent", Arc::clone(row));
 			child.add_value("this", Arc::clone(row));
@@ -1223,11 +1491,7 @@ impl ExecutionContext {
 		&self,
 		params: impl IntoIterator<Item = (N, Value)>,
 	) -> Self {
-		let mut child = Context::new_child(self.ctx());
-		for (name, value) in params {
-			child.add_value(name, Arc::new(value));
-		}
-		self.with_new_ctx(child.freeze())
+		self.with_params_in(params, None)
 	}
 
 	/// Suppress permission enforcement for a referential-integrity cascade,
@@ -1495,8 +1759,9 @@ mod tests {
 		let table = units();
 		let params =
 			[(Strand::from("x"), Value::from(1)), (Strand::from("this"), Value::from("param"))];
-		let body =
-			ctx.entering_call_body(params, Arc::clone(&table), Some(&row), false, None).unwrap();
+		let body = ctx
+			.entering_call_body(params, Arc::clone(&table), RowAccess::Present(&row), false, None)
+			.unwrap();
 		assert_eq!(body.value("x"), Some(&Value::from(1)));
 		// The row shadows a parameter of the same name, as the scope nested
 		// over the parameters' did.
@@ -1518,11 +1783,14 @@ mod tests {
 			.with_param("limit", Value::from(1000))
 			.with_param("session", Value::from("the session"));
 		let params = [(Strand::from("x"), Value::from(1))];
-		let body = ctx.entering_call_body(params.clone(), units(), None, false, None).unwrap();
+		let body = ctx
+			.entering_call_body(params.clone(), units(), RowAccess::Absent, false, None)
+			.unwrap();
 		assert_eq!(body.value("x"), Some(&Value::from(1)));
 		assert_eq!(body.value("limit"), Some(&Value::from(1000)));
 		let frame = ctx.clone().privileged_frame();
-		let body = frame.entering_call_body(params, units(), None, false, None).unwrap();
+		let body =
+			frame.entering_call_body(params, units(), RowAccess::Absent, false, None).unwrap();
 		assert_eq!(body.value("x"), Some(&Value::from(1)));
 		assert_eq!(body.value("limit"), None, "a caller's binding reached a privileged frame");
 		assert_eq!(body.value("session"), Some(&Value::from("the session")));
@@ -1534,7 +1802,7 @@ mod tests {
 		let enclosing = Arc::new(Value::from("enclosing"));
 		let ctx = root_ctx_with_options().with_current_row(Arc::clone(&enclosing));
 		let params = [(Strand::from("x"), Value::from(1))];
-		let body = ctx.entering_call_body(params, units(), None, false, None).unwrap();
+		let body = ctx.entering_call_body(params, units(), RowAccess::Absent, false, None).unwrap();
 		assert_eq!(body.value("x"), Some(&Value::from(1)));
 		assert_eq!(body.value("this"), None);
 		assert_eq!(body.value("parent"), None);
@@ -1545,10 +1813,13 @@ mod tests {
 	fn a_call_body_carries_the_frame_of_the_call() {
 		let ctx = root_ctx_with_options();
 		let no_params = std::iter::empty::<(Strand, Value)>();
-		let plain = ctx.entering_call_body(no_params.clone(), units(), None, false, None).unwrap();
+		let plain = ctx
+			.entering_call_body(no_params.clone(), units(), RowAccess::Absent, false, None)
+			.unwrap();
 		assert!(!plain.root().skip_fetch_perms);
 		assert!(plain.root().computing_record.is_none());
-		let skipping = ctx.entering_call_body(no_params, units(), None, true, None).unwrap();
+		let skipping =
+			ctx.entering_call_body(no_params, units(), RowAccess::Absent, true, None).unwrap();
 		assert!(skipping.root().skip_fetch_perms);
 		assert!(!ctx.root().skip_fetch_perms);
 	}
@@ -1561,13 +1832,106 @@ mod tests {
 		};
 		root.options.as_mut().expect("options").dive = 1;
 		let no_params = std::iter::empty::<(Strand, Value)>();
-		let body = ctx.entering_call_body(no_params.clone(), units(), None, false, None).unwrap();
+		let body = ctx
+			.entering_call_body(no_params.clone(), units(), RowAccess::Absent, false, None)
+			.unwrap();
 		assert_eq!(budget(&body), 0);
 		assert_eq!(budget(&ctx), 1);
-		let refused = body.entering_call_body(no_params, units(), None, false, None);
+		let refused = body.entering_call_body(no_params, units(), RowAccess::Absent, false, None);
 		assert!(refused.is_err());
 		assert!(body.check_dive().is_err());
 		assert!(ctx.check_dive().is_ok());
+	}
+
+	/// Whether `ctx` binds `name` to a KNN query vector's row being scanned.
+	fn forbidden(ctx: &ExecutionContext, name: &str) -> bool {
+		matches!(ctx.binding(name), Some(Binding::Forbidden(_)))
+	}
+
+	#[test]
+	fn a_knn_vector_forbids_the_value_in_scope_and_binds_no_parameter() {
+		let ctx = root_ctx_with_options().with_current_row(Arc::new(Value::from("enclosing")));
+		let vector = ctx.with_forbidden_row(Arc::from("$v"));
+		let state = vector.forbidden_row().expect("a forbidden row");
+		assert!(state.covers_row());
+		// The enclosing row is not the value in scope of the vector.
+		assert!(vector.current_row().is_none());
+		// `$parent` is not bound by the vector itself: an enclosing statement's
+		// binding stays its own, and an unbound one falls back to the row.
+		assert_eq!(vector.value("parent"), None);
+		assert!(ctx.forbidden_row().is_none());
+		let refusal = state.refusal().to_string();
+		assert_eq!(
+			refusal,
+			"Invalid query: The KNN query vector cannot depend on the record being scanned: $v"
+		);
+	}
+
+	#[test]
+	fn a_statement_entered_from_a_knn_vector_binds_the_forbidden_row() {
+		let vector = root_ctx_with_options().with_forbidden_row(Arc::from("$v"));
+		// A SELECT has rows of its own; a block reads the enclosing row.
+		let select = vector.forbidding_row_params(false).expect("a statement of the vector");
+		assert!(forbidden(&select, "parent"));
+		assert!(forbidden(&select, "this"));
+		// A forbidden binding holds no value, and is no parameter collected.
+		assert_eq!(select.value("parent"), None);
+		assert!(!select.collect_params().contains_key("parent"));
+		assert!(!select.forbidden_row().expect("the state").covers_row());
+		let block = vector.forbidding_row_params(true).expect("a statement of the vector");
+		assert!(block.forbidden_row().expect("the state").covers_row());
+		// A statement nested in the SELECT binds that SELECT's row of its own.
+		let nested = select.with_param("parent", Value::from("own row"));
+		assert_eq!(nested.value("parent"), Some(&Value::from("own row")));
+		assert!(forbidden(&nested, "this"));
+		// A frame isolated from the statement's parameters does not see it.
+		let isolated = select.with_new_ctx(Context::new_isolated(select.ctx()).freeze());
+		assert!(isolated.binding("parent").is_none());
+		// A copy of the chain carries it.
+		let snapshot = select.with_new_ctx(Context::snapshot(select.ctx()).freeze());
+		assert!(forbidden(&snapshot, "parent"));
+		// Inside the SELECT, a statement entered with no row binds nothing new.
+		assert!(select.forbidding_row_params(false).is_none());
+		// Outside a vector, nothing changes.
+		assert!(root_ctx_with_options().forbidding_row_params(true).is_none());
+	}
+
+	#[test]
+	fn a_call_body_without_a_row_from_a_knn_vector_binds_the_forbidden_row() {
+		let vector = root_ctx_with_options().with_forbidden_row(Arc::from("$v"));
+		let params =
+			[(Strand::from("x"), Value::from(1)), (Strand::from("parent"), Value::from(2))];
+		let body = vector
+			.entering_call_body(params, units(), vector.row_access(None), false, None)
+			.unwrap();
+		assert!(forbidden(&body, "this"));
+		// An argument of the name reads as the row, as a body given one reads
+		// that row over it.
+		assert!(forbidden(&body, "parent"));
+		assert_eq!(body.value("x"), Some(&Value::from(1)));
+		assert!(body.forbidden_row().expect("the state").covers_row());
+		// A body given a row binds that row.
+		let row = Arc::new(Value::from("row"));
+		let no_params = std::iter::empty::<(Strand, Value)>();
+		let body = vector
+			.entering_call_body(no_params, units(), RowAccess::Present(&row), false, None)
+			.unwrap();
+		assert_eq!(body.value("this"), Some(&Value::from("row")));
+		assert_eq!(body.value("parent"), Some(&Value::from("row")));
+	}
+
+	#[test]
+	fn the_enclosing_row_of_a_statement_entered_from_a_knn_vector_is_forbidden() {
+		let vector = root_ctx_with_options().with_forbidden_row(Arc::from("$v"));
+		let select = vector.forbidding_row_params(false).expect("a statement of the vector");
+		let (row, forbidding) = select.enclosing_row();
+		assert!(row.is_none());
+		let forbidding = forbidding.expect("a context that forbids the value in scope");
+		assert!(forbidding.forbidden_row().expect("the state").covers_row());
+		let bound = select.with_param("this", Value::from("own row"));
+		let (row, forbidding) = bound.enclosing_row();
+		assert_eq!(row, Some(&Value::from("own row")));
+		assert!(forbidding.is_none());
 	}
 
 	#[test]

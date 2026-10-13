@@ -850,29 +850,120 @@ async fn start_group(
 	}
 }
 
-/// Evaluate the query vectors of the brute-force KNN sorts `group` owns, once,
-/// over no row and before any pipeline reads: a vector that does not coerce
-/// to `array<number>` fails the statement as it starts.
-pub(super) async fn evaluate_knn_queries(
+/// The query vector `vector` computes: evaluated once, with no row in scope
+/// and the row being scanned forbidden to it, and coerced to
+/// `array<number>`. A value that does not coerce, an evaluation that fails,
+/// one that reads the row being scanned, or a vector no distance ranks a
+/// record against (empty, or holding a NaN or an infinity) fails the
+/// statement.
+pub(super) async fn evaluate_knn_query(
 	program: &Program,
-	group: Option<u16>,
+	vector: &super::program::DeferredVector,
+	ctx: &ExecutionContext,
+) -> FlowResult<Arc<[crate::val::Number]>> {
+	let value = match &vector.scalar {
+		super::program::HostScalar::Const(value) => Value::clone(value),
+		scalar => {
+			let forbidden = ctx.with_forbidden_row(Arc::clone(&vector.text));
+			host_scalar(program, scalar, &forbidden, None).await?
+		}
+	};
+	let values = value
+		.coerce_to::<Vec<crate::val::Number>>()
+		.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
+	if !crate::exec::planner::util::is_rankable_query_vector(&values) {
+		return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::InvalidKnnVector {
+			vector: vector.text.to_string(),
+		})));
+	}
+	Ok(Arc::from(values))
+}
+
+/// Evaluate the query vector of brute-force KNN sort `sort`, computed when the
+/// statement runs, into its cell of [`State::knn_queries`] unless the run has
+/// evaluated it already.
+///
+/// The host calls it when a row reaches a ranking against a vector the run
+/// has not evaluated ([`Step::KnnQuery`]): a pipeline whose rows never reach
+/// the ranking — a limit that admits none, a source with no row, a condition
+/// beneath the ranking that rejects every row — never evaluates the vector.
+/// The cell is shared by the batches of a region, which wait on the one
+/// evaluation the first of them starts.
+pub(super) async fn evaluate_knn_query_of(
+	program: &Program,
+	sort: u16,
 	state: &mut State,
 	ctx: &ExecutionContext,
 ) -> FlowResult<()> {
-	for (at, spec) in program.sorts.iter().enumerate() {
-		let Some(query) = &spec.knn_query else {
-			continue;
-		};
-		if query.group != group {
-			continue;
-		}
-		let value = host_scalar(program, &query.scalar, ctx, None).await?;
-		let vector = value
-			.coerce_to::<Vec<crate::val::Number>>()
-			.map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
-		state.knn_queries[at] = Some(Arc::new(vector));
+	let at = sort as usize;
+	let Some(query) = program.sorts.get(at).and_then(|spec| spec.knn_query.as_ref()) else {
+		return Ok(());
+	};
+	if state.knn_queries.len() <= at {
+		state.knn_queries.resize_with(at + 1, Default::default);
 	}
+	let cell = Arc::clone(&state.knn_queries[at]);
+	read_knn_query(&cell, || evaluate_knn_query(program, &query.vector, ctx)).await?;
 	Ok(())
+}
+
+/// The vector `cell` holds, evaluated by `evaluate` unless an earlier reader
+/// of the cell evaluated it, or is evaluating it, already. `evaluate` runs at
+/// most once for the cell: every reader, the one that ran it included, takes
+/// the one outcome it left, a failure included ([`super::interp::KnnQueryOutcome`]).
+pub(super) async fn read_knn_query<F, E>(
+	cell: &super::interp::KnnQueryCell,
+	evaluate: F,
+) -> FlowResult<Arc<[crate::val::Number]>>
+where
+	F: FnOnce() -> E,
+	E: std::future::Future<Output = FlowResult<Arc<[crate::val::Number]>>>,
+{
+	cell.get_or_init(|| async { super::interp::KnnQueryOutcome::of(evaluate().await) }).await.read()
+}
+
+/// The query vector of KNN search `search` of the program, computed when the
+/// statement runs: evaluated by the first source of the run that searches with
+/// it, as it opens, and read by every other.
+async fn evaluate_knn_search(
+	program: &Program,
+	search: u16,
+	state: &mut State,
+	ctx: &ExecutionContext,
+) -> FlowResult<Arc<[crate::val::Number]>> {
+	let at = search as usize;
+	let query = program
+		.knn_searches
+		.get(at)
+		.ok_or_else(|| ControlFlow::Err(anyhow::anyhow!("a KNN search the program lacks")))?;
+	if state.knn_searches.len() <= at {
+		state.knn_searches.resize_with(at + 1, Default::default);
+	}
+	let cell = Arc::clone(&state.knn_searches[at]);
+	read_knn_query(&cell, || evaluate_knn_query(program, &query.vector, ctx)).await
+}
+
+/// Let go of the query vectors of the brute-force KNN sorts and the KNN
+/// searches `group` owns, as a run of its pipelines starts: each run evaluates
+/// its own, the first time a row is ranked against it
+/// ([`evaluate_knn_query_of`]) or a source searches with it
+/// ([`evaluate_knn_search`]), where a run of a correlated statement may compute
+/// another vector than the run before.
+pub(super) fn forget_knn_queries(program: &Program, group: Option<u16>, state: &mut State) {
+	for (at, spec) in program.sorts.iter().enumerate() {
+		if spec.knn_query.as_ref().is_some_and(|query| query.group == group)
+			&& let Some(held) = state.knn_queries.get_mut(at)
+		{
+			*held = Default::default();
+		}
+	}
+	for (at, query) in program.knn_searches.iter().enumerate() {
+		if query.group == group
+			&& let Some(held) = state.knn_searches.get_mut(at)
+		{
+			*held = Default::default();
+		}
+	}
 }
 
 /// Run the pipelines of `program` that `group` owns — the program's own for
@@ -887,7 +978,7 @@ pub(super) async fn run_pipelines(
 	yielder: &mut Out<'_, '_>,
 	flush_at: usize,
 ) -> FlowResult<()> {
-	evaluate_knn_queries(program, group, state, ctx).await?;
+	forget_knn_queries(program, group, state);
 	for (index, pipeline) in
 		program.pipelines.iter().enumerate().filter(|(_, pipeline)| pipeline.group == group)
 	{
@@ -1803,13 +1894,21 @@ pub(super) async fn run_storage_source(
 					}
 				};
 			}
+			// A vector computed when the statement runs is evaluated as the
+			// source opens, before the search reads anything.
+			let vector = match vector {
+				super::program::KnnSearchVector::Literal(vector) => Arc::clone(vector),
+				super::program::KnnSearchVector::Query(at) => {
+					read!(evaluate_knn_search(program, *at, state, ctx).await)
+				}
+			};
 			let candidates = read!(
 				super::knn::search(
 					program,
 					ctx,
 					table,
 					index,
-					vector,
+					&vector,
 					*k,
 					*ef,
 					version,
@@ -3009,6 +3108,9 @@ fn finish_in_place(step: anyhow::Result<Step>) -> anyhow::Result<bool> {
 		})
 		| Ok(Step::Degree {
 			..
+		})
+		| Ok(Step::KnnQuery {
+			..
 		}) => Err(anyhow::anyhow!("an in-place pipeline evaluated an expression")),
 		Ok(Step::Yield {
 			..
@@ -3385,9 +3487,28 @@ async fn run_body(
 	base: usize,
 	mut start: usize,
 ) -> FlowResult<Ended> {
+	// A pipeline that runs over no row, where a per-row evaluation would have
+	// run over a KNN query vector's row being scanned, reads that row as
+	// forbidden.
+	let forbidden = if state.rowless {
+		frame_ctx(state, ctx, None).root().forbidden_row.clone().filter(|f| f.covers_row())
+	} else {
+		None
+	};
 	let step = loop {
 		let step = {
-			let reader = ValueRow(&row);
+			let value_row;
+			let forbidden_row;
+			let reader: &(dyn RowReader + Sync) = match &forbidden {
+				Some(forbidden) => {
+					forbidden_row = super::row::ForbiddenRowReader(forbidden);
+					&forbidden_row
+				}
+				None => {
+					value_row = ValueRow(&row);
+					&value_row
+				}
+			};
 			let mut small;
 			let mut stack;
 			let mut spilled;
@@ -3417,7 +3538,7 @@ async fn run_body(
 						if super::fuel::charge(1) {
 							out_of_line(|| super::fuel::yield_point(ctx)).await?;
 						}
-						match interp::run_row(program, pipeline, &reader, regs, state, pc)
+						match interp::run_row(program, pipeline, reader, regs, state, pc)
 							.map_err(ControlFlow::Err)?
 						{
 							Step::Yield {
@@ -3425,6 +3546,23 @@ async fn run_body(
 							} => {
 								out_of_line(|| super::fuel::yield_point(ctx)).await?;
 								pc = resume;
+							}
+							Step::KnnQuery {
+								at,
+							} => {
+								let Instr::KnnRank {
+									rank,
+									..
+								} = &pipeline.code[at]
+								else {
+									unreachable!("a KNN query step at a KNN ranking instruction")
+								};
+								let super::program::KnnVector::Query(sort) = rank.vector else {
+									unreachable!("a KNN query step for a literal query vector")
+								};
+								out_of_line(|| evaluate_knn_query_of(program, sort, state, ctx))
+									.await?;
+								pc = at;
 							}
 							Step::Param {
 								param,
@@ -3435,7 +3573,7 @@ async fn run_body(
 								let eval_ctx = frame_eval(program, state, ctx, frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
 								let spec = &program.params[param as usize];
-								let value = match super::function::frame_param(spec, &eval_ctx) {
+								let value = match super::function::frame_param(spec, &eval_ctx)? {
 									Some(value) => value,
 									None => {
 										out_of_line(|| {
@@ -3459,7 +3597,7 @@ async fn run_body(
 								else {
 									unreachable!("an access step at an access instruction")
 								};
-								let base = interp::read_operand(regs, &reader, program, *src)
+								let base = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
@@ -3485,7 +3623,7 @@ async fn run_body(
 								else {
 									unreachable!("an each step at an each instruction")
 								};
-								let base = interp::read_operand(regs, &reader, program, *src)
+								let base = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
@@ -3573,17 +3711,23 @@ async fn run_body(
 									args,
 									dst,
 									frame,
+									elem,
 								} = &pipeline.code[at]
 								else {
 									unreachable!("a call step at a call instruction")
 								};
 								let args = args
 									.iter()
-									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.map(|arg| interp::read_operand(regs, reader, program, *arg))
 									.collect::<anyhow::Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
+								let element = elem.map(|elem| regs[elem as usize].to_value());
 								let eval_ctx = frame_eval(program, state, ctx, *frame);
 								let eval_ctx = row_eval(state, eval_ctx, &row);
+								let eval_ctx = match &element {
+									Some(element) => eval_ctx.with_value(element),
+									None => eval_ctx,
+								};
 								let value = out_of_line(|| {
 									call_builtin(&program.calls[*call as usize], args, eval_ctx)
 								})
@@ -3607,7 +3751,7 @@ async fn run_body(
 								};
 								let mut args = args
 									.iter()
-									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.map(|arg| interp::read_operand(regs, reader, program, *arg))
 									.collect::<anyhow::Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
 								let spec = &program.calls[*call as usize];
@@ -3647,7 +3791,7 @@ async fn run_body(
 								};
 								let query = match query {
 									Some(query) => Some(
-										interp::read_operand(regs, &reader, program, *query)
+										interp::read_operand(regs, reader, program, *query)
 											.map_err(ControlFlow::Err)?,
 									),
 									None => None,
@@ -3709,11 +3853,11 @@ async fn run_body(
 										} => (method, recv, args, dst, frame, true),
 										_ => unreachable!("a method step at a method instruction"),
 									};
-								let recv = interp::read_operand(regs, &reader, program, *recv)
+								let recv = interp::read_operand(regs, reader, program, *recv)
 									.map_err(ControlFlow::Err)?;
 								let args = args
 									.iter()
-									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.map(|arg| interp::read_operand(regs, reader, program, *arg))
 									.collect::<anyhow::Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
 								let method = &program.methods[*method_index as usize];
@@ -3740,6 +3884,7 @@ async fn run_body(
 										function,
 										frame,
 										outer,
+										elem,
 									} => {
 										if state.functions.len() <= *function as usize {
 											state.functions.resize_with(
@@ -3750,8 +3895,14 @@ async fn run_body(
 										let mut known = std::mem::take(
 											&mut state.functions[*function as usize],
 										);
+										let element =
+											elem.map(|elem| regs[elem as usize].to_value());
 										let eval_ctx = frame_eval(program, state, ctx, *outer);
 										let eval_ctx = row_eval(state, eval_ctx, &row);
+										let eval_ctx = match &element {
+											Some(element) => eval_ctx.with_value(element),
+											None => eval_ctx,
+										};
 										let spec = &program.functions[*function as usize];
 										let entered = out_of_line(|| {
 											super::function::enter(
@@ -3778,7 +3929,7 @@ async fn run_body(
 										let args = args
 											.iter()
 											.map(|arg| {
-												interp::read_operand(regs, &reader, program, *arg)
+												interp::read_operand(regs, reader, program, *arg)
 											})
 											.collect::<anyhow::Result<Vec<_>>>()
 											.map_err(ControlFlow::Err)?;
@@ -3802,7 +3953,7 @@ async fn run_body(
 										dst,
 									} => {
 										let value =
-											interp::read_operand(regs, &reader, program, *src)
+											interp::read_operand(regs, reader, program, *src)
 												.map_err(ControlFlow::Err)?;
 										let entered = state.calls[(*frame - CALL_FRAME) as usize]
 											.take()
@@ -3818,19 +3969,26 @@ async fn run_body(
 										args,
 										dst,
 										outer,
+										elem,
 									} => {
 										let args = args
 											.iter()
 											.map(|arg| {
-												interp::read_operand(regs, &reader, program, *arg)
+												interp::read_operand(regs, reader, program, *arg)
 											})
 											.collect::<anyhow::Result<Vec<_>>>()
 											.map_err(ControlFlow::Err)?;
+										let element =
+											elem.map(|elem| regs[elem as usize].to_value());
 										let entered = state.calls[(*frame - CALL_FRAME) as usize]
 											.take()
 											.expect("a function called after it is entered");
 										let eval_ctx = frame_eval(program, state, ctx, *outer);
 										let eval_ctx = row_eval(state, eval_ctx, &row);
+										let eval_ctx = match &element {
+											Some(element) => eval_ctx.with_value(element),
+											None => eval_ctx,
+										};
 										let spec = &program.functions[*function as usize];
 										let units = unit_table(program, state, eval_ctx.exec_ctx)?;
 										let principal =
@@ -3871,7 +4029,7 @@ async fn run_body(
 									.map(|doc| {
 										interp::read_operand(
 											regs,
-											&reader,
+											reader,
 											program,
 											super::program::Operand::Reg(doc),
 										)
@@ -3930,15 +4088,30 @@ async fn run_body(
 										let mut captures = crate::dbs::Variables::new();
 										for (name, slot) in spec.slots.iter().zip(slots) {
 											let value =
-												interp::read_operand(regs, &reader, program, *slot)
+												interp::read_operand(regs, reader, program, *slot)
 													.map_err(ControlFlow::Err)?;
 											captures.insert(name.as_str(), value);
 										}
 										let eval_ctx = frame_eval(program, state, ctx, spec.frame);
+										// A parameter the body reads that is bound to a KNN
+										// query vector's row being scanned has no value to
+										// capture: the closure captures the refusal, which an
+										// invocation raises.
+										let mut forbidden = None;
 										for name in &spec.framed {
-											let bound = eval_ctx
-												.write_binding(name)
-												.or_else(|| eval_ctx.exec_ctx.value(name));
+											let bound = match eval_ctx.write_binding(name) {
+												Some(value) => Some(value),
+												None => match eval_ctx.exec_ctx.binding(name) {
+													Some(crate::ctx::Binding::Value(value)) => {
+														Some(value.as_ref())
+													}
+													Some(crate::ctx::Binding::Forbidden(row)) => {
+														forbidden = Some(Arc::clone(row));
+														None
+													}
+													None => None,
+												},
+											};
 											if let Some(value) = bound {
 												captures.insert(name.as_str(), value.clone());
 											}
@@ -3949,6 +4122,10 @@ async fn run_body(
 												spec.digest,
 												captures,
 											);
+										let compiled = match forbidden {
+											Some(row) => compiled.capturing_forbidden_row(row),
+											None => compiled,
+										};
 										(
 											Value::Closure(Box::new(crate::val::Closure::Builtin(
 												Arc::new(compiled),
@@ -3963,7 +4140,7 @@ async fn run_body(
 										frame,
 									} => {
 										let target =
-											interp::read_operand(regs, &reader, program, *target)
+											interp::read_operand(regs, reader, program, *target)
 												.map_err(ControlFlow::Err)?;
 										let Value::Closure(closure) = &target else {
 											unreachable!(
@@ -3973,7 +4150,7 @@ async fn run_body(
 										let mut values = Vec::with_capacity(args.len());
 										for arg in args {
 											values.push(
-												interp::read_operand(regs, &reader, program, *arg)
+												interp::read_operand(regs, reader, program, *arg)
 													.map_err(ControlFlow::Err)?,
 											);
 										}
@@ -4018,7 +4195,7 @@ async fn run_body(
 								at,
 							} => {
 								let (frame, closures) =
-									closures_handed(program, &pipeline.code[at], regs, &reader)
+									closures_handed(program, &pipeline.code[at], regs, reader)
 										.map_err(ControlFlow::Err)?;
 								let mut linked = Vec::with_capacity(closures.len());
 								{
@@ -4056,7 +4233,7 @@ async fn run_body(
 								else {
 									unreachable!("a lookup step at a lookup instruction")
 								};
-								let origin = interp::read_operand(regs, &reader, program, *src)
+								let origin = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let spec = &program.lookups[*lookup as usize];
 								let doc = if state.rowless {
@@ -4102,7 +4279,7 @@ async fn run_body(
 										dst,
 									} => {
 										let value =
-											interp::read_operand(regs, &reader, program, *src)
+											interp::read_operand(regs, reader, program, *src)
 												.map_err(ControlFlow::Err)?;
 										let eval_ctx = frame_eval(program, state, ctx, None);
 										let eval_ctx = match &state.recursion {
@@ -4125,11 +4302,11 @@ async fn run_body(
 										unreachable!("a recursion step at a recursion instruction")
 									}
 								};
-								let value = interp::read_operand(regs, &reader, program, *src)
+								let value = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let target = target
 									.map(|target| {
-										interp::read_operand(regs, &reader, program, target)
+										interp::read_operand(regs, reader, program, target)
 									})
 									.transpose()
 									.map_err(ControlFlow::Err)?;
@@ -4201,7 +4378,7 @@ async fn run_body(
 								else {
 									unreachable!("a destructure step at a destructure instruction")
 								};
-								let value = interp::read_operand(regs, &reader, program, *src)
+								let value = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let skip = frame_eval(program, state, ctx, *frame).skip_fetch_perms;
 								let frame = frame_ctx(state, ctx, *frame).clone();
@@ -4225,7 +4402,7 @@ async fn run_body(
 								};
 								let value = interp::read_operand(
 									regs,
-									&reader,
+									reader,
 									program,
 									super::program::Operand::Reg(*src),
 								)
@@ -4371,7 +4548,7 @@ async fn run_body(
 								};
 								let args = args
 									.iter()
-									.map(|arg| interp::read_operand(regs, &reader, program, *arg))
+									.map(|arg| interp::read_operand(regs, reader, program, *arg))
 									.collect::<anyhow::Result<Vec<_>>>()
 									.map_err(ControlFlow::Err)?;
 								let eval_ctx = frame_eval(program, state, ctx, None);
@@ -4427,13 +4604,13 @@ async fn run_body(
 										let args = args
 											.iter()
 											.map(|arg| {
-												interp::read_operand(regs, &reader, program, *arg)
+												interp::read_operand(regs, reader, program, *arg)
 											})
 											.collect::<anyhow::Result<Vec<_>>>()
 											.map_err(ControlFlow::Err)?;
 										let this = this
 											.map(|this| {
-												interp::read_operand(regs, &reader, program, this)
+												interp::read_operand(regs, reader, program, this)
 											})
 											.transpose()
 											.map_err(ControlFlow::Err)?;
@@ -4493,7 +4670,7 @@ async fn run_body(
 								else {
 									unreachable!("a degree step at a degree instruction")
 								};
-								let current = interp::read_operand(regs, &reader, program, *src)
+								let current = interp::read_operand(regs, reader, program, *src)
 									.map_err(ControlFlow::Err)?;
 								let counted = match DegreeCounter::source(Some(&current)) {
 									Some(rid) => {
@@ -6914,4 +7091,84 @@ fn refuse_unwritable(spec: &super::program::WriteSpec, ctx: &ExecutionContext) -
 		))));
 	}
 	Ok(())
+}
+
+#[cfg(test)]
+mod knn_query_cell {
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicUsize, Ordering};
+
+	use super::read_knn_query;
+	use crate::exec::vm::interp::KnnQueryCell;
+	use crate::expr::ControlFlow;
+
+	/// The error the vector's one evaluation raises.
+	fn refusal() -> anyhow::Error {
+		anyhow::Error::new(crate::exec::Error::InvalidKnnVector {
+			vector: "$v".to_owned(),
+		})
+	}
+
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_failed_evaluation_runs_once_and_every_reader_raises_it() {
+		let cell = KnnQueryCell::default();
+		let calls = Arc::new(AtomicUsize::new(0));
+		let readers: Vec<_> = (0..8)
+			.map(|_| {
+				let cell = Arc::clone(&cell);
+				let calls = Arc::clone(&calls);
+				tokio::spawn(async move {
+					read_knn_query(&cell, || async {
+						calls.fetch_add(1, Ordering::SeqCst);
+						// Let the other readers reach the cell while this one
+						// evaluates.
+						tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+						Err(ControlFlow::Err(refusal()))
+					})
+					.await
+				})
+			})
+			.collect();
+		let expected = crate::err::anyhow_to_types_error(refusal());
+		for reader in readers {
+			let Err(ControlFlow::Err(error)) = reader.await.expect("a reader") else {
+				panic!("a reader that does not raise the evaluation's failure");
+			};
+			// Every reader raises the failure as the caller would have seen it.
+			assert_eq!(crate::err::anyhow_to_types_error(error), expected);
+		}
+		// A reader after the failure raises it too, evaluating nothing.
+		let late = read_knn_query(&cell, || async {
+			calls.fetch_add(1, Ordering::SeqCst);
+			Ok(Arc::from(vec![crate::val::Number::Int(1)]))
+		})
+		.await;
+		assert!(matches!(late, Err(ControlFlow::Err(_))));
+		assert_eq!(calls.load(Ordering::SeqCst), 1);
+	}
+
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_vector_is_evaluated_once_for_every_reader() {
+		let cell = KnnQueryCell::default();
+		let calls = Arc::new(AtomicUsize::new(0));
+		let readers: Vec<_> = (0..8)
+			.map(|_| {
+				let cell = Arc::clone(&cell);
+				let calls = Arc::clone(&calls);
+				tokio::spawn(async move {
+					read_knn_query(&cell, || async {
+						calls.fetch_add(1, Ordering::SeqCst);
+						tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+						Ok(Arc::from(vec![crate::val::Number::Int(5)]))
+					})
+					.await
+				})
+			})
+			.collect();
+		for reader in readers {
+			let vector = reader.await.expect("a reader").expect("the vector");
+			assert_eq!(&*vector, &[crate::val::Number::Int(5)]);
+		}
+		assert_eq!(calls.load(Ordering::SeqCst), 1);
+	}
 }

@@ -6,9 +6,11 @@ database = true
 [test]
 reason = """
 A brute-force KNN (`<|k,DIST|>`) skips every record whose vector cannot be
-compared with the query vector: an empty query vector or one of another
-dimension ranks no record, and in a table holding vectors of several dimensions
-only the records of the query's dimension are ranked. A distance an ANN index does not serve stays brute force.
+compared with the query vector: a query vector of another dimension ranks no
+record, and in a table holding vectors of several dimensions only the records
+of the query's dimension are ranked. An empty query vector has no dimension a
+record's could share, and is refused, under every distance and as a
+parameter's value. A distance an ANN index does not serve stays brute force.
 """
 
 [[test.results]]
@@ -18,19 +20,19 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: []"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: []"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: []"
 
 [[test.results]]
 value = "[{ id: bpts:9, point: [1.5f, 0f, 0f] }]"
@@ -39,7 +41,7 @@ value = "[{ id: bpts:9, point: [1.5f, 0f, 0f] }]"
 value = "[bpts:1, bpts:2]"
 
 [[test.results]]
-value = "[]"
+error = "Invalid query: The KNN query vector must be a non-empty array of finite numbers: []"
 */
 DEFINE INDEX hn ON pts FIELDS point HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
 FOR $i IN 0..4 {

@@ -23,7 +23,9 @@ use super::interp::FunctionMemo;
 use super::program::{DefHash, FunctionSpec, HostScalar, ParamSpec, Program};
 use super::services::{Admission, EngineServices, Services};
 use crate::catalog::FunctionDefinition;
+use crate::ctx::Binding;
 use crate::dbs::capabilities::Error as CapabilitiesError;
+use crate::exec::context::RowAccess;
 use crate::exec::operators::permission_frame;
 use crate::exec::vm::calls::helpers::{validate_arg_count, validate_return};
 use crate::exec::{Error as ExecError, EvalContext, ExecutionContext, FlowResult};
@@ -245,7 +247,15 @@ pub(super) async fn enter(
 					crate::exec::guard_verdicts::GuardKind::Function,
 					&spec.name,
 					hash.0,
-					|| judge(program, pipeline, &limited, ctx.current_value, denied),
+					|| {
+						judge(
+							program,
+							pipeline,
+							&limited,
+							ctx.value_in_scope().within_context(),
+							denied,
+						)
+					},
 				)
 				.await?;
 			}
@@ -388,7 +398,10 @@ pub(super) async fn call(
 	// nested programs find their units in. The body's evaluation is built from
 	// that context alone, so none of the caller's block-local parameters or
 	// write bindings reach it.
-	let row = ctx.current_value.map(|row| shared_row(limited_ctx, row));
+	// Where the caller's value in scope is a KNN query vector's row being
+	// scanned, the body's context forbids it
+	// ([`ExecutionContext::entering_call_body`]).
+	let row = ctx.value_in_scope().map(|row| shared_row(limited_ctx, row));
 	let running = limited_ctx.entering_call_body(
 		entered
 			.definition
@@ -433,14 +446,18 @@ async fn call_light(
 	use std::borrow::Cow;
 	let deeper = limited.dive_by(1).map_err(ControlFlow::Err)?;
 	let limited = &deeper;
+	// The body runs in `limited`, which carries a KNN query vector's
+	// forbidden row from the caller's context: a run over no row refuses a
+	// read of it there.
+	let row = ctx.value_in_scope().within_context();
 	let state = |slots: Vec<Value>| -> FlowResult<_> {
 		let mut state = super::host::unit_state(body, limited)?;
 		state.permissions_bypassed = ctx.skip_fetch_perms;
-		state.rowless = ctx.current_value.is_none();
+		state.rowless = row.is_none();
 		state.slots = slots;
 		Ok(state)
 	};
-	let row = ctx.current_value.map_or(Cow::Owned(Value::None), Cow::Borrowed);
+	let row = row.map_or(Cow::Owned(Value::None), Cow::Borrowed);
 	let pipeline = &body.pipelines[0];
 	let mut inline = state(bound)?;
 	let (row, start, mut state) =
@@ -506,55 +523,80 @@ fn entry_of(
 /// The value of parameter `spec` in `ctx` where the frame answers it, resolved
 /// in the order the module documents; `None` where only `DEFINE PARAM` can, for
 /// [`stored_param`] to read.
-pub(super) fn frame_param(spec: &ParamSpec, ctx: &EvalContext<'_>) -> Option<Value> {
+///
+/// Inside a KNN query vector's evaluation, a row parameter that would read the
+/// row being scanned per row fails instead
+/// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)).
+pub(super) fn frame_param(
+	spec: &ParamSpec,
+	ctx: &EvalContext<'_>,
+) -> crate::expr::FlowResult<Option<Value>> {
 	let name = spec.name.as_str();
 	// Handle special params $this and $self. When the current value is
 	// available (per-row context), use it directly. When it is not (scalar
 	// context, e.g. a subquery's FROM clause), a `$this` the subquery bound as
 	// a parameter is read before defaulting to NONE.
 	if matches!(name, "this" | "self") {
-		if let Some(v) = ctx.current_value {
-			return Some(v.clone());
+		let in_scope = ctx.value_in_scope();
+		if let RowAccess::Present(v) = in_scope {
+			return Ok(Some(v.clone()));
 		}
 		if let Some(local_params) = ctx.local_params
 			&& let Some(v) = local_params.get(name)
 		{
-			return Some(v.clone());
+			return Ok(Some(v.clone()));
 		}
-		if let Some(v) = ctx.exec_ctx.value(name) {
-			return Some(v.clone());
+		if let RowAccess::Forbidden(forbidden) = in_scope {
+			return Err(forbidden.error());
 		}
-		return Some(Value::None);
+		if let Some(v) = chain_param(ctx, name)? {
+			return Ok(Some(v));
+		}
+		return Ok(Some(Value::None));
 	}
 	// Block-local parameters shadow global ones.
 	if let Some(local_params) = ctx.local_params
 		&& let Some(value) = local_params.get(name)
 	{
-		return Some(value.clone());
+		return Ok(Some(value.clone()));
 	}
 	// A write-path binding sits between the two: a `LET $value = ...` in the
 	// body being evaluated is an inner scope and wins, while the binding
 	// shadows a session or database parameter of the same name.
 	if let Some(value) = ctx.write_binding(name) {
-		return Some(value.clone());
+		return Ok(Some(value.clone()));
 	}
 	// The context's parameter chain, including the protected `$auth`,
 	// `$access`, `$token` and `$session`.
-	if let Some(v) = ctx.exec_ctx.value(name) {
-		return Some(v.clone());
+	if let Some(v) = chain_param(ctx, name)? {
+		return Ok(Some(v));
 	}
 	// `$parent` falls back to the document root when not explicitly bound,
 	// except in code a write reaches, where an unbound `$parent` is `NONE`
 	// ([`crate::exec::context::RootContext::writing`]).
 	if name == "parent" {
 		if ctx.exec_ctx.root().writing {
-			return Some(Value::None);
+			return Ok(Some(Value::None));
 		}
-		if let Some(v) = ctx.document_root {
-			return Some(v.clone());
+		match ctx.root_document() {
+			RowAccess::Present(v) => return Ok(Some(v.clone())),
+			RowAccess::Forbidden(forbidden) => return Err(forbidden.error()),
+			RowAccess::Absent => {}
 		}
 	}
-	None
+	Ok(None)
+}
+
+/// The value `ctx`'s parameter chain binds `name` to, or `None` where it binds
+/// none: a refusal where it binds it to a KNN query vector's row being
+/// scanned, as the `$parent` or `$this` of a statement or body entered from
+/// the vector's evaluation ([`Binding::Forbidden`]).
+fn chain_param(ctx: &EvalContext<'_>, name: &str) -> crate::expr::FlowResult<Option<Value>> {
+	match ctx.exec_ctx.binding(name) {
+		Some(Binding::Value(value)) => Ok(Some(Value::clone(value))),
+		Some(Binding::Forbidden(row)) => Err(row.error()),
+		None => Ok(None),
+	}
 }
 
 /// The value of `DEFINE PARAM` for `spec` in `ctx`, which no frame answers.
@@ -591,10 +633,7 @@ pub(super) async fn stored_param(
 		.await
 		{
 			let db_level = ctx.exec_ctx.with_database(ns_def, db_def);
-			let db_ctx = EvalContext {
-				exec_ctx: &db_level,
-				..ctx.clone()
-			};
+			let db_ctx = ctx.with_exec_ctx(&db_level);
 			return Ok(read_db_param(program, spec, &db_ctx).await?);
 		}
 		// The database does not exist yet: the parameter cannot be found.
@@ -664,7 +703,15 @@ async fn read_db_param(
 					crate::exec::guard_verdicts::GuardKind::Param,
 					spec.name.as_str(),
 					found.permission.0,
-					|| judge(program, pipeline, ctx.exec_ctx, ctx.current_value, denied),
+					|| {
+						judge(
+							program,
+							pipeline,
+							ctx.exec_ctx,
+							ctx.value_in_scope().within_context(),
+							denied,
+						)
+					},
 				)
 				.await
 				.map_err(|flow| match flow {

@@ -39,6 +39,23 @@ pub(crate) enum Error {
 		message: String,
 	},
 
+	/// A KNN query vector no distance ranks a record against: one that holds
+	/// no number, or a NaN or an infinity. `vector` is the vector as written.
+	#[error(
+		"Invalid query: The KNN query vector must be a non-empty array of finite numbers: {vector}"
+	)]
+	InvalidKnnVector {
+		vector: String,
+	},
+
+	/// A KNN query vector known when the statement is planned that does not
+	/// coerce to `array<number>`: `message` is the coercion's error, which a
+	/// vector computed when the statement runs raises as it is evaluated.
+	#[error("{message}")]
+	UncoercibleKnnVector {
+		message: String,
+	},
+
 	/// it is not possible to set a variable with the specified name
 	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
@@ -608,6 +625,13 @@ impl LeafError for Error {
 			// The statement carries a key that cannot be a real one, which the
 			// caller can see and correct in the text they sent.
 			Error::AccessRedactedKey {
+				..
+			} => TypesError::validation(message, None),
+			// The query names its own vector, which the caller can correct.
+			Error::InvalidKnnVector {
+				..
+			}
+			| Error::UncoercibleKnnVector {
 				..
 			} => TypesError::validation(message, None),
 			// The definition itself is malformed, so the client can act on it.

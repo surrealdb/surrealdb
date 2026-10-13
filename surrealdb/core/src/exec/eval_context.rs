@@ -1,4 +1,13 @@
 //! Borrowed execution frame for scalar VM units and engine host services.
+//!
+//! The current value and the document root are read only through the
+//! accessors defined here, which answer a [`RowAccess`]: a row, no row, or no
+//! row where a per-row evaluation would have held a KNN query vector's row
+//! being scanned ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)). The
+//! caller reads it ([`RowAccess::read`], which refuses the forbidden row) or
+//! hands the whole of it to a nested frame, so a forbidden row is never taken
+//! for an absent one; field privacy makes a read that bypassed the accessors a
+//! compile error anywhere outside this module.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,7 +16,7 @@ use surrealdb_strand::Strand;
 
 use crate::dbs::Capabilities;
 use crate::exec::ExecutionContext;
-use crate::exec::context::SessionInfo;
+use crate::exec::context::{RowAccess, SessionInfo};
 use crate::kvs::Transaction;
 use crate::val::{RecordId, Value};
 
@@ -71,7 +80,11 @@ pub struct EvalContext<'a> {
 
 	/// Current row for per-row expressions (projections, filters).
 	/// None when evaluating in "scalar context" (USE, LIMIT, TIMEOUT, etc.)
-	pub current_value: Option<&'a Value>,
+	///
+	/// Private to this module: an absent value may be a KNN query vector's
+	/// row being scanned, so it is read through [`Self::value_in_scope`] and
+	/// set through the builders.
+	current_value: Option<&'a Value>,
 
 	/// Block-local parameters (LET bindings within current block scope).
 	/// These shadow global parameters with the same name.
@@ -84,7 +97,10 @@ pub struct EvalContext<'a> {
 	/// Original document root for the current row.  Needed by IndexPart to
 	/// evaluate dynamic key expressions (`[field]`, `[$param]`) against the
 	/// document rather than the chain's current position.
-	pub document_root: Option<&'a Value>,
+	///
+	/// Private to this module, as [`Self::current_value`] is: read through
+	/// [`Self::root_document`] and [`Self::document`].
+	document_root: Option<&'a Value>,
 
 	/// `$before`: the field, or the record, as it stood before the statement.
 	pub write_before: Option<&'a Value>,
@@ -256,6 +272,40 @@ impl<'a> EvalContext<'a> {
 		}
 	}
 
+	/// The same evaluation in another execution context: one deriving from
+	/// this one's (a parameter binding, an auth limit, a database level). The
+	/// row, local parameters, write bindings and frame flags are kept.
+	pub(crate) fn with_exec_ctx(&self, exec_ctx: &'a ExecutionContext) -> Self {
+		Self {
+			exec_ctx,
+			..self.clone()
+		}
+	}
+
+	/// The value in scope: the row a per-row expression is evaluated against,
+	/// or the element a body is evaluated against. What a field, `$this`, a
+	/// projection builtin or an index function reads, and the row a call hands
+	/// its callee.
+	#[inline]
+	pub(crate) fn value_in_scope(&self) -> RowAccess<'a, &'a Value> {
+		self.exec_ctx.row_access(self.current_value)
+	}
+
+	/// The document root: the row a path started from, which an unbound
+	/// `$parent` falls back to.
+	#[inline]
+	pub(crate) fn root_document(&self) -> RowAccess<'a, &'a Value> {
+		self.exec_ctx.row_access(self.document_root)
+	}
+
+	/// The document: the document root, or the value in scope where there is
+	/// none. The row a nested frame is entered from — a subquery's `$parent`
+	/// and `$this`, a closure's value in scope.
+	#[inline]
+	pub(crate) fn document(&self) -> RowAccess<'a, &'a Value> {
+		self.exec_ctx.row_access(self.document_root.or(self.current_value))
+	}
+
 	/// Resolve a write-path binding by the name it is spelled with, or `None`
 	/// where the name is not one of them or the slot is empty.
 	///
@@ -357,5 +407,53 @@ impl<'a> EvalContext<'a> {
 	#[allow(dead_code)]
 	pub fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.exec_ctx.ctx().get_capabilities()
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::root_ctx_with_options;
+
+	#[test]
+	fn a_row_access_tells_a_forbidden_row_from_an_absent_one() {
+		let plain = root_ctx_with_options();
+		let vector = plain.with_forbidden_row(Arc::from("$v"));
+		let row = Value::from("row");
+		let root = Value::from("root");
+
+		// Outside a KNN query vector, no row in scope is absent, and reads as
+		// none.
+		let ctx = EvalContext::from_exec_ctx(&plain);
+		assert!(matches!(ctx.value_in_scope(), RowAccess::Absent));
+		assert!(matches!(ctx.document(), RowAccess::Absent));
+		assert!(ctx.value_in_scope().read().unwrap().is_none());
+
+		// Inside one, it is the row being scanned: every accessor answers it
+		// as forbidden, a read of it fails, and only a callee run in the same
+		// context takes it as none, meeting the forbidden row there itself.
+		let ctx = EvalContext::from_exec_ctx(&vector);
+		let refusal =
+			"Invalid query: The KNN query vector cannot depend on the record being scanned: $v";
+		assert!(matches!(ctx.value_in_scope(), RowAccess::Forbidden(_)));
+		assert!(matches!(ctx.root_document(), RowAccess::Forbidden(_)));
+		assert!(matches!(ctx.document(), RowAccess::Forbidden(_)));
+		assert_eq!(ctx.value_in_scope().read().unwrap_err().to_string(), refusal);
+		assert!(ctx.document().within_context().is_none());
+
+		// A row in scope is read as it is, forbidden row or not, and the
+		// document is the root where there is one.
+		let ctx = EvalContext::from_exec_ctx(&vector).with_value(&row);
+		assert_eq!(ctx.value_in_scope().read().unwrap(), Some(&row));
+		assert_eq!(ctx.document().read().unwrap(), Some(&row));
+		assert!(matches!(ctx.root_document(), RowAccess::Forbidden(_)));
+		let ctx = EvalContext::from_exec_ctx(&vector).with_value_and_doc(&row);
+		assert_eq!(ctx.root_document().read().unwrap(), Some(&row));
+		let ctx = EvalContext {
+			document_root: Some(&root),
+			..EvalContext::from_exec_ctx(&vector).with_value(&row)
+		};
+		assert_eq!(ctx.document().read().unwrap(), Some(&root));
+		assert_eq!(ctx.value_in_scope().read().unwrap(), Some(&row));
 	}
 }

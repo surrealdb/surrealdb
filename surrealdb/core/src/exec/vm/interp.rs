@@ -164,6 +164,12 @@ pub(super) enum Step {
 	Degree {
 		at: usize,
 	},
+	/// Evaluate the query vector of brute-force KNN ranking instruction `at`,
+	/// computed when the statement runs, which no row of the run has been
+	/// ranked against yet; then take `at` again.
+	KnnQuery {
+		at: usize,
+	},
 	/// The fuel is spent: reach a yield point
 	/// ([`super::fuel::yield_point`]), then resume the row at instruction
 	/// `resume` with the same registers. Every driver of a body matches it:
@@ -304,8 +310,11 @@ pub(super) struct State {
 	pub(super) topk_cells:
 		Vec<Option<std::sync::Arc<crate::exec::topk_pushdown::TopKThresholdCell>>>,
 	/// For each sort of a brute-force KNN whose query vector is computed when
-	/// the statement runs, the vector, once evaluated.
-	pub(super) knn_queries: Vec<Option<std::sync::Arc<Vec<crate::val::Number>>>>,
+	/// the statement runs, the cell its vector is evaluated into.
+	pub(super) knn_queries: Vec<KnnQueryCell>,
+	/// For each of [`Program::knn_searches`](super::program::Program), the
+	/// cell its vector is evaluated into.
+	pub(super) knn_searches: Vec<KnnQueryCell>,
 	/// For each sort that may spill, the rows it holds before it writes them
 	/// out as a run whatever its query's memory (a sort under `TEMPFILES`),
 	/// and its order.
@@ -544,6 +553,71 @@ pub(super) struct State {
 	pub(super) row_frame: Option<super::row_frame::RowFrame>,
 }
 
+/// The query vector of a brute-force KNN sort, or of a KNN search, that is
+/// computed when the statement runs: empty until the first row of the run is
+/// ranked against it ([`Step::KnnQuery`]), or the first source searching with
+/// it opens, which evaluates it once. A region's batches share the statement's
+/// cell ([`RunShare`]), so the batch that ranks the first row evaluates it for
+/// all of them, and a batch whose rows all fail a condition beneath the
+/// ranking evaluates nothing.
+///
+/// The cell holds the evaluation's outcome, a failure included, so a vector
+/// whose evaluation fails is never evaluated again in the run: every reader
+/// that waited on it, or comes after it, raises the same failure.
+pub(super) type KnnQueryCell = std::sync::Arc<tokio::sync::OnceCell<KnnQueryOutcome>>;
+
+/// What the one evaluation of a KNN query vector left in its [`KnnQueryCell`].
+#[derive(Debug, Clone)]
+pub(super) enum KnnQueryOutcome {
+	/// The vector.
+	Vector(std::sync::Arc<[crate::val::Number]>),
+	/// The evaluation failed: the error as it reaches the caller of the query
+	/// ([`crate::err::anyhow_to_types_error`]), which every reader raises.
+	Failed(surrealdb_types::Error),
+	/// The evaluation signalled `BREAK`, `CONTINUE` or `RETURN`.
+	Break,
+	Continue,
+	Return(Value),
+}
+
+impl KnnQueryOutcome {
+	/// The outcome `evaluated` leaves for every reader of the cell.
+	pub(super) fn of(
+		evaluated: crate::expr::FlowResult<std::sync::Arc<[crate::val::Number]>>,
+	) -> Self {
+		match evaluated {
+			Ok(vector) => Self::Vector(vector),
+			Err(crate::expr::ControlFlow::Err(error)) => {
+				Self::Failed(crate::err::anyhow_to_types_error(error))
+			}
+			Err(crate::expr::ControlFlow::Break) => Self::Break,
+			Err(crate::expr::ControlFlow::Continue) => Self::Continue,
+			Err(crate::expr::ControlFlow::Return(value)) => Self::Return(value),
+		}
+	}
+
+	/// The vector, where the evaluation computed one.
+	pub(super) fn vector(&self) -> Option<&std::sync::Arc<[crate::val::Number]>> {
+		match self {
+			Self::Vector(vector) => Some(vector),
+			Self::Failed(_) | Self::Break | Self::Continue | Self::Return(_) => None,
+		}
+	}
+
+	/// The outcome as a reader raises it.
+	pub(super) fn read(&self) -> crate::expr::FlowResult<std::sync::Arc<[crate::val::Number]>> {
+		match self {
+			Self::Vector(vector) => Ok(std::sync::Arc::clone(vector)),
+			Self::Failed(error) => {
+				Err(crate::expr::ControlFlow::Err(anyhow::Error::new(error.clone())))
+			}
+			Self::Break => Err(crate::expr::ControlFlow::Break),
+			Self::Continue => Err(crate::expr::ControlFlow::Continue),
+			Self::Return(value) => Err(crate::expr::ControlFlow::Return(value.clone())),
+		}
+	}
+}
+
 /// What the batches of a statement's region share with the statement: its
 /// aggregate functions, the distances its scan published, the query vectors
 /// of its brute-force searches, and the resolutions of the index functions and `MATCHES` operators
@@ -552,7 +626,7 @@ pub(super) struct RunShare {
 	registry: u64,
 	aggregates: std::sync::Arc<ResolvedAggregates>,
 	knn_contexts: Vec<Option<std::sync::Arc<crate::exec::function::KnnContext>>>,
-	knn_queries: Vec<Option<std::sync::Arc<Vec<crate::val::Number>>>>,
+	knn_queries: Vec<KnnQueryCell>,
 	index_runs: Vec<Option<IndexRun>>,
 	matches_evals: Vec<Option<std::sync::Arc<crate::exec::vm::matches::MatchesEval>>>,
 }
@@ -840,7 +914,8 @@ impl State {
 		self.sort_slabs.resize_with(sorts, Vec::new);
 		self.sort_arrivals.resize(sorts, Arrivals::default());
 		self.topk_cells.resize(sorts, None);
-		self.knn_queries.resize(sorts, None);
+		self.knn_queries.resize_with(sorts, KnnQueryCell::default);
+		self.knn_searches.resize_with(program.knn_searches.len(), KnnQueryCell::default);
 		self.sort_spill.resize(sorts, None);
 		self.sort_runs.resize_with(sorts, || None);
 		self.sort_accounts.resize_with(sorts, crate::exec::memory::Reservation::unbounded);
@@ -885,6 +960,7 @@ impl State {
 			sort_slabs,
 			topk_cells,
 			knn_queries,
+			knn_searches,
 			sort_spill,
 			sort_runs,
 			sort_accounts,
@@ -964,6 +1040,7 @@ impl State {
 		emptied(sort_slabs);
 		emptied(topk_cells);
 		emptied(knn_queries);
+		emptied(knn_searches);
 		emptied(sort_spill);
 		emptied(sort_runs);
 		emptied(sort_accounts);
@@ -1221,6 +1298,7 @@ impl State {
 			sort_slabs: Vec::new(),
 			topk_cells: Vec::new(),
 			knn_queries: Vec::new(),
+			knn_searches: Vec::new(),
 			sort_spill: Vec::new(),
 			sort_runs: Vec::new(),
 			sort_accounts: Vec::new(),
@@ -2561,6 +2639,9 @@ pub(super) fn run_row<'r>(
 				dst,
 			} => {
 				regs[*dst as usize] = if state.rowless || state.undocumented {
+					if let Some(refusal) = row.forbids() {
+						return Err(refusal);
+					}
 					read(regs, *or)?
 				} else {
 					Scalar::Value(std::borrow::Cow::Owned(row.record()?))
@@ -2633,19 +2714,25 @@ pub(super) fn run_row<'r>(
 				dst,
 				none,
 			} => {
-				let value = read_value(regs, *src)?;
-				let query: &Vec<crate::val::Number> = match &rank.vector {
+				let query: &[crate::val::Number] = match &rank.vector {
 					super::program::KnnVector::Literal(vector) => vector,
-					super::program::KnnVector::Query(sort) => state
-						.knn_queries
-						.get(*sort as usize)
-						.and_then(Option::as_deref)
-						.ok_or_else(|| {
-							anyhow::anyhow!(
-								"a brute-force KNN ranking before its query is evaluated"
-							)
-						})?,
+					super::program::KnnVector::Query(sort) => {
+						match state
+							.knn_queries
+							.get(*sort as usize)
+							.and_then(|cell| cell.get())
+							.and_then(KnnQueryOutcome::vector)
+						{
+							Some(query) => query.as_ref(),
+							None => {
+								return Ok(Step::KnnQuery {
+									at: pc,
+								});
+							}
+						}
+					}
 				};
+				let value = read_value(regs, *src)?;
 				// A row ranks only with a vector of the query's dimension:
 				// `extract_vector` refuses a longer one, and a shorter one is
 				// refused here, before a distance could only fail on it.

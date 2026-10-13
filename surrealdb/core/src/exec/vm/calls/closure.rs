@@ -110,6 +110,14 @@ pub struct CompiledClosure {
 	/// a call does; a stored clause evaluated as a unit
 	/// ([`crate::exec::scalar_unit`]) does not, as no call is made.
 	dives: bool,
+	/// Set where a parameter its body reads was bound, where the closure was
+	/// made, to a KNN query vector's row being scanned
+	/// ([`Binding::Forbidden`](crate::ctx::Binding::Forbidden)): that binding
+	/// holds no value `captures` could carry, and the body reads it from
+	/// `captures` alone, so the closure carries the refusal instead, which an
+	/// invocation raises. Making the closure, and passing it along, reads
+	/// nothing.
+	forbidden: Option<Arc<crate::exec::context::ForbiddenRow>>,
 }
 
 impl std::fmt::Debug for CompiledClosure {
@@ -141,9 +149,16 @@ impl BuiltinClosureObj for CompiledClosure {
 	/// carries — and captured the same values, which is what makes two
 	/// `Closure::Expr` values equal. Any other builtin closure is a different
 	/// closure.
+	/// Equal closures behave alike when invoked: the same source over the same
+	/// captures, and both or neither carrying a refusal of a KNN query vector's
+	/// row being scanned, which `captures` cannot hold.
 	fn dyn_eq(&self, other: &dyn BuiltinClosureObj) -> bool {
 		match other.as_any().downcast_ref::<CompiledClosure>() {
-			Some(other) => self.sql == other.sql && self.captures == other.captures,
+			Some(other) => {
+				self.sql == other.sql
+					&& self.captures == other.captures
+					&& self.forbidden.is_some() == other.forbidden.is_some()
+			}
 			None => false,
 		}
 	}
@@ -171,7 +186,24 @@ impl CompiledClosure {
 			logical: Arc::clone(closure),
 			digest,
 			dives: true,
+			forbidden: None,
 		}
+	}
+
+	/// This value, having captured a KNN query vector's row being scanned
+	/// (`forbidden`) as a parameter its body reads.
+	pub(crate) fn capturing_forbidden_row(
+		mut self,
+		forbidden: Arc<crate::exec::context::ForbiddenRow>,
+	) -> Self {
+		self.forbidden = Some(forbidden);
+		self
+	}
+
+	/// The KNN query vector state whose row being scanned the closure
+	/// captured, which an invocation is refused with.
+	pub(crate) fn captured_forbidden_row(&self) -> Option<&crate::exec::context::ForbiddenRow> {
+		self.forbidden.as_deref()
 	}
 
 	/// This value invoked with no call made: an invocation spends nothing of
@@ -211,6 +243,7 @@ impl CompiledClosure {
 			logical,
 			digest,
 			dives: true,
+			forbidden: None,
 		})
 	}
 

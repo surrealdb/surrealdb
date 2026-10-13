@@ -242,6 +242,13 @@ impl<'ctx> Planner<'ctx> {
 		vectors
 	}
 
+	/// The value of parameter `name` when the statement is planned
+	/// ([`Self::resolve_param`]): `None` where it has none, a name an enclosing
+	/// `FOR`, closure, user-defined function or block `LET` binds included.
+	pub(crate) async fn plan_time_value(&self, name: &str) -> Option<crate::val::Value> {
+		self.resolve_param(name).await
+	}
+
 	/// The value of parameter `name` as a KNN query vector, when it is an
 	/// array of numbers at plan time ([`Self::resolve_param`]).
 	pub(crate) async fn resolve_query_vector(
@@ -1158,7 +1165,7 @@ impl<'ctx> Planner<'ctx> {
 		// The key lets the analyzer match a column that addresses a component
 		// of the record id, and widen a range over a datetime one.
 		let key = self.record_key_structure(txn, ns_id, db_id, table_name).await;
-		let analyzer = columns.analyzer(with).with_key(key.clone());
+		let analyzer = columns.analyzer(with, self.function_registry()).with_key(key.clone());
 		let candidates = analyzer.analyze(Some(cond), None);
 
 		// Look for a candidate that fully covers the WHERE condition
@@ -1242,7 +1249,7 @@ impl<'ctx> Planner<'ctx> {
 			self.with_array_columns_as_elements(txn, ns_id, db_id, table_name, indexes).await?;
 
 		let key = self.record_key_structure(txn, ns_id, db_id, table_name).await;
-		let analyzer = columns.analyzer(with).with_key(key);
+		let analyzer = columns.analyzer(with, self.function_registry()).with_key(key);
 		analyzer.try_bitmap_count_fusion(cond, &exact_col)
 	}
 
@@ -1705,8 +1712,10 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(None);
 		};
 
-		let analyzer =
-			columns.analyzer(with).with_key(key).with_knn_query_vectors(&knn_query_vectors);
+		let analyzer = columns
+			.analyzer(with, self.function_registry())
+			.with_key(key)
+			.with_knn_query_vectors(&knn_query_vectors);
 		let candidates = analyzer.analyze(analysis_cond, order);
 
 		// A key range is chosen unless an index candidate outranks it, and only

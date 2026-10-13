@@ -623,7 +623,7 @@ impl MatchesEval {
 		G: std::future::Future<Output = FlowResult<Value>>,
 	{
 		// Rows without a record id never match and never error.
-		let Some(rid) = extract_record_id(ctx.current_value) else {
+		let Some(rid) = extract_record_id(ctx.value_in_scope().read()?) else {
 			return Ok(Value::Bool(false));
 		};
 

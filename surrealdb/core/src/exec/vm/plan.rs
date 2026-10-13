@@ -346,6 +346,16 @@ pub(crate) enum Refusal {
 	Query {
 		message: String,
 	},
+	/// A KNN query vector known when the statement is planned that no
+	/// distance ranks a record against, as written in `vector`.
+	InvalidKnnVector {
+		vector: String,
+	},
+	/// A KNN query vector known when the statement is planned that does not
+	/// coerce to `array<number>`, with the coercion's error.
+	UncoercibleKnnVector {
+		message: String,
+	},
 	/// A statement written where no statement of its kind may stand, with the
 	/// message raised for it.
 	InvalidStatement {
@@ -405,6 +415,16 @@ impl Refusal {
 			} => crate::err::Error::Exec(crate::exec::Error::Query {
 				message: message.clone(),
 			}),
+			Self::InvalidKnnVector {
+				vector,
+			} => crate::err::Error::Exec(crate::exec::Error::InvalidKnnVector {
+				vector: vector.clone(),
+			}),
+			Self::UncoercibleKnnVector {
+				message,
+			} => crate::err::Error::Exec(crate::exec::Error::UncoercibleKnnVector {
+				message: message.clone(),
+			}),
 			Self::InvalidStatement {
 				message,
 			} => crate::err::Error::Exec(crate::exec::Error::InvalidStatement(message.clone())),
@@ -457,6 +477,16 @@ impl Refusal {
 			crate::err::Error::Exec(crate::exec::Error::Query {
 				message,
 			}) => Some(Self::Query {
+				message: message.clone(),
+			}),
+			crate::err::Error::Exec(crate::exec::Error::InvalidKnnVector {
+				vector,
+			}) => Some(Self::InvalidKnnVector {
+				vector: vector.clone(),
+			}),
+			crate::err::Error::Exec(crate::exec::Error::UncoercibleKnnVector {
+				message,
+			}) => Some(Self::UncoercibleKnnVector {
 				message: message.clone(),
 			}),
 			crate::err::Error::Exec(crate::exec::Error::InvalidParam {
@@ -712,8 +742,7 @@ pub(crate) enum Plan {
 	KnnScan {
 		table: TableName,
 		index: crate::exec::index::access_path::IndexRef,
-		/// The query vector, resolved once when the statement is planned.
-		vector: std::sync::Arc<[crate::val::Number]>,
+		vector: KnnTarget,
 		k: u32,
 		ef: u32,
 		/// What the search gates each candidate on, where the statement's
@@ -1100,14 +1129,35 @@ pub(crate) enum JoinMatch {
 	Semi,
 }
 
-/// The query vector of a brute-force KNN.
+/// The query vector of a KNN search or a brute-force KNN.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum KnnTarget {
 	/// A vector known when the statement is planned.
-	Literal(Vec<crate::val::Number>),
-	/// An expression evaluated once when the statement runs, over no row, and
-	/// coerced to `array<number>`.
-	Deferred(LogicalExpr),
+	Literal(std::sync::Arc<[crate::val::Number]>),
+	/// An expression evaluated once when the statement runs, before the search
+	/// reads any input, and coerced to `array<number>`. It reads no row: the
+	/// row being scanned is forbidden to it, and a read of it fails the
+	/// statement ([`crate::exec::context::ForbiddenRow`]).
+	///
+	/// `search` names the evaluation: the KNN scans of one statement's sources
+	/// that search with the same operator's vector carry the same `search`, and
+	/// share one evaluation of it per run of the statement.
+	Deferred {
+		expr: LogicalExpr,
+		search: u64,
+	},
+}
+
+impl KnnTarget {
+	/// A vector computed when the statement runs, by `expr`, under a `search`
+	/// of its own.
+	pub(crate) fn deferred(expr: LogicalExpr) -> Self {
+		static SEARCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+		Self::Deferred {
+			expr,
+			search: SEARCHES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+		}
+	}
 }
 
 /// What a KNN scan gates each candidate of its search on, in the order the

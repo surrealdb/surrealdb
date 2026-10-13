@@ -98,7 +98,10 @@ async fn evaluate_nested(
 		isolated.attach_variables(Variables::from(bindings))?;
 	}
 	let isolated = isolated.freeze();
-	let mut eval_ctx = exec_ctx.with_new_ctx(isolated);
+	// The statement reaches no row of the call site's, so inside a KNN query
+	// vector's evaluation the row being scanned is out of its reach rather than
+	// forbidden to it.
+	let mut eval_ctx = exec_ctx.with_new_ctx(isolated).without_forbidden_row();
 
 	// The permission-predicate no-write signal lives on the caller's
 	// `EvalContext` (set in `exec::permission`), not on the root this builtin

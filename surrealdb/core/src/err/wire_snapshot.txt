@@ -227,6 +227,8 @@ Thrown	{ cause: NONE, code: -32006, kind: 'Thrown', message: 'An error occurred:
 NsEmpty	{ cause: NONE, code: -32600, details: { kind: 'NamespaceEmpty' }, kind: 'Validation', message: 'Specify a namespace to use' }
 DbEmpty	{ cause: NONE, code: -32600, details: { kind: 'DatabaseEmpty' }, kind: 'Validation', message: 'Specify a database to use' }
 Query	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid query: sample' }
+InvalidKnnVector	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid query: The KNN query vector must be a non-empty array of finite numbers: sample' }
+UncoercibleKnnVector	{ cause: NONE, code: -32000, kind: 'Validation', message: 'sample' }
 InvalidParam	{ cause: NONE, code: -32600, details: { details: { name: 'sample' }, kind: 'InvalidParameter' }, kind: 'Validation', message: "'sample' is a protected variable and cannot be set" }
 InvalidFetch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found NONE on FETCH CLAUSE, but FETCH expects an idiom, a string or fields' }
 InvalidLimit	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample but the LIMIT clause must evaluate to a positive integer' }

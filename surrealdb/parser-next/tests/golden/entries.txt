@@ -970,7 +970,7 @@ bf8be8623a7c5e53 language-tests/tests/language/indexes/knn/hnsw_knn_cosine_new_e
 0058ce82fe8b6e52 language-tests/tests/language/indexes/knn/hnsw_knn_with_condition.surql
 ed6d7fe24eaf6407 language-tests/tests/language/indexes/knn/hnsw_knn_with_condition_new_executor.surql
 3da7e8c07b25e5a0 language-tests/tests/language/indexes/knn/knn_bruteforce_nonliteral_vector.surql
-34d36995dc833ead language-tests/tests/language/indexes/knn/knn_index_query_vector_bound_per_call.surql
+ced873049f5e8406 language-tests/tests/language/indexes/knn/knn_index_query_vector_bound_per_call.surql
 ef84d722df8624c9 language-tests/tests/language/indexes/knn/knn_index_record_id_rows.surql
 723563d8ed077eaf language-tests/tests/language/indexes/knn/knn_index_record_id_rows_plan.surql
 0dcc878847f5c193 language-tests/tests/language/indexes/knn/knn_index_record_id_rows_version.surql

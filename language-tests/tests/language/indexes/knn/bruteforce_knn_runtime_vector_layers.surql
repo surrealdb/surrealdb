@@ -8,9 +8,10 @@ reason = """
 Brute-force KNN whose query vector is computed when the statement runs, over a
 table with a computed field. The conditions written beside the search, before
 or after it, judge the rows first and the search ranks what they leave; the
-computed field is readable in those conditions and in the projection. A vector
-that does not coerce to `array<number>` fails the statement even over a table
-with no rows, and a valid one over an empty table yields nothing.
+computed field is readable in those conditions and in the projection. The
+vector is evaluated the first time a row is ranked against it, so over a table
+with no rows it is never evaluated: a valid one and one that would not coerce
+to `array<number>` both yield nothing.
 """
 
 [[test.results]]
@@ -59,7 +60,7 @@ value = "[{ id: pts:2 }]"
 value = "[]"
 
 [[test.results]]
-error = "Expected `number` but found `'a'` when coercing element at index 0 of `array<number>`"
+value = "[]"
 */
 DEFINE TABLE pts SCHEMAFULL;
 DEFINE FIELD point ON pts TYPE array<float>;

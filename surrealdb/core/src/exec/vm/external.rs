@@ -174,7 +174,13 @@ async fn judge(
 				_ => crate::exec::guard_verdicts::GuardKind::Module,
 			};
 			crate::exec::guard_verdicts::judged(ctx.exec_ctx, scope, kind, name, hash.0, || {
-				super::function::judge(program, pipeline, ctx.exec_ctx, ctx.current_value, denied)
+				super::function::judge(
+					program,
+					pipeline,
+					ctx.exec_ctx,
+					ctx.value_in_scope().within_context(),
+					denied,
+				)
 			})
 			.await
 		}

@@ -52,7 +52,10 @@ pub(crate) async fn run_script(
 		// re-enters SurrealQL (via `surrealdb.query`) keeps counting from the depth the planner
 		// already reached, rather than getting a fresh budget.
 		let opt = opt.with_dive_consumed(plan_depth);
-		let doc = ctx.current_value.map(|v| CursorDoc::new(None, v.clone()));
+		// The script receives the value in scope as its document (`this`);
+		// where that is a KNN query vector's row being scanned, the call is
+		// refused before it runs, whether or not the script reads it.
+		let doc = ctx.value_in_scope().read()?.map(|v| CursorDoc::new(None, v.clone()));
 		Ok(script::run(&frozen_ctx, &opt, doc.as_ref(), source, args).await?)
 	}
 	#[cfg(not(feature = "scripting"))]
