@@ -269,6 +269,47 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   Verified by: `skip_fetch_perms_disables_every_check`,
   `a_record_user_is_confined_to_its_own_namespace_and_database`,
   `record_users_are_always_permission_checked` (`exec/permission.rs`).
+- A `COMPUTED` field that reads another computed field is derived after it, on
+  every path that derives them: the streaming engine (`build_field_state_raw`
+  in `exec/operators/scan/pipeline.rs`) and the document pipeline
+  (`Document::computed_fields_inner` in `doc/compute.rs`), which derives the
+  values a write `PERMISSIONS` predicate reads through `gate_doc`, as well as a
+  mutating statement's `WHERE` snapshot, its output and its observers. Both
+  order the fields with `topological_sort_computed_fields`; the document
+  pipeline caches that order per table context (`DocumentContext::computed_order`).
+  The field list itself is in name order, so walking it derives a field from
+  `NONE` wherever it sorts before a field it reads, and a predicate written to
+  deny (`WHERE can_edit` over `can_edit COMPUTED !is_locked`) admits the write.
+  Both engines also know a field by `computed_field_name` (`expr/computed_deps.rs`),
+  the unescaped name a read of it records, when they key the dependency map,
+  build the order and choose which fields a selective evaluation derives. A
+  field whose name needs quoting (`` `is-locked` ``) keyed by its escaped form
+  matches no read: it is neither ordered before nor derived for the fields and
+  predicates that read it, and they read `NONE`. The write path's field graph
+  (`field_eval_order` in `doc/document.rs`, which orders `DEFAULT`/`VALUE`/
+  `ASSERT` clauses and materialises the computed fields they read) and the
+  `DEFINE FIELD` cycle check key fields the same way, so an `ASSERT` written to
+  deny reads the derived value and a cycle among quoted fields is refused.
+  Only a top-level field has such a name; a nested field has none and is never
+  matched by name. Keyed by its path, the nested field `is.locked` would share
+  a key with the top-level `` `is.locked` `` and stand in for it: an `ASSERT`
+  reading the quoted computed field would again read `NONE`, and the streaming
+  read path (`PermissionPass::applies_to`), which tells a computed field's
+  `SELECT` permission from a stored one's by that key, would defer the nested
+  field's cut past re-derivation, so a computed field reading it would carry
+  the denied value out.
+  Verified by: `computed_fields_are_derived_after_the_computed_fields_they_read`,
+  `a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name`,
+  `the_field_graph_matches_quoted_fields_by_their_unescaped_names`,
+  `the_field_graph_tells_a_quoted_field_from_a_nested_path`
+  (`doc/document.rs`); end to end by
+  `reproductions/a_write_permission_computes_fields_in_dependency_order.surql`,
+  `reproductions/a_write_permission_derives_a_computed_chain_in_dependency_order.surql`,
+  `reproductions/a_write_permission_reads_quoted_computed_fields.surql`,
+  `reproductions/field_clauses_read_quoted_fields.surql`,
+  `reproductions/field_clauses_tell_a_quoted_field_from_a_nested_path.surql`,
+  `reproductions/field_permissions_tell_a_quoted_computed_field_from_a_nested_path.surql`
+  and `reproductions/a_computed_field_is_derived_after_the_fields_it_reads.surql`.
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
 - A `SELECT` permission expression (the WHERE clause in `PERMISSIONS FOR select`)

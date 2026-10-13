@@ -53,6 +53,31 @@ pub fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 	}
 }
 
+/// The name a read of a defined field records, if a read can name that field
+/// at all: the string [`extract_computed_deps`] records when an expression
+/// reads it.
+///
+/// Everything that matches field definitions against recorded reads keys them
+/// by this name: the computed-field dependency map, the order computed fields
+/// are derived in and the set a selective evaluation derives, the write path's
+/// field graph, and the definition-time cycle check.
+///
+/// A read records the root identifier of the path it reads, unescaped, so only
+/// a top-level field has such a name: its bare identifier. A field defined as
+/// `` `is-locked` `` is `is-locked` here; `Idiom::to_raw_string` would escape
+/// it into a key no recorded read matches.
+///
+/// A field below the top level has none, since no read records a path below
+/// its root, and must not be given one: spelled as its path, the nested field
+/// `is.locked` would share a key with the top-level field `` `is.locked` ``,
+/// and a read of the one would resolve to the other.
+pub fn computed_field_name(name: &Idiom) -> Option<&str> {
+	match name.0.as_slice() {
+		[Part::Field(field)] => Some(field.as_str()),
+		_ => None,
+	}
+}
+
 /// Extract a static field name from an idiom part, if it represents one.
 ///
 /// Matches `Part::Field("name")` and `Part::Value(Literal::String("name"))` —

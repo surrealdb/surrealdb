@@ -372,12 +372,20 @@ impl FieldDefinition {
 	/// The same-table fields one clause of this field reads, excluding the field
 	/// itself — naming your own field is reading the value under consideration,
 	/// not asking for one to be produced first.
+	///
+	/// The field's own name is taken as
+	/// [`computed_field_name`](crate::expr::computed_deps::computed_field_name),
+	/// the form a read of it records, so a field whose name needs quoting is
+	/// recognised reading itself. A nested field has no such name, since a read
+	/// of its path records only the root, so nothing it reads is taken for
+	/// itself: a top-level field whose quoted name spells its path is another
+	/// field.
 	fn reads_of(&self, expr: &Expr) -> Vec<String> {
-		let own_name = self.name.to_raw_string();
+		let own_name = crate::expr::computed_deps::computed_field_name(&self.name);
 		crate::expr::computed_deps::extract_computed_deps(expr)
 			.fields
 			.into_iter()
-			.filter(|dep| *dep != own_name)
+			.filter(|dep| Some(dep.as_str()) != own_name)
 			.collect()
 	}
 
@@ -445,6 +453,48 @@ mod tests {
 	use std::str::FromStr;
 
 	use super::*;
+
+	/// A clause reading its own field's value is not a dependency, whether or
+	/// not the field's name needs quoting: the read records the bare
+	/// identifier, and the field is recognised by that same name.
+	#[test]
+	fn a_clause_reading_its_own_field_is_not_a_dependency() {
+		for raw in ["n", "`n-x`", "`verrouillé`"] {
+			let name = Idiom::from_str(raw).unwrap();
+			let def = FieldDefinition {
+				name: name.clone(),
+				table: TableName::from("t"),
+				value: Some(Expr::Idiom(name.clone())),
+				assert: Some(Expr::Idiom(name)),
+				..Default::default()
+			};
+			assert!(
+				def.production_dependencies().is_empty(),
+				"`{raw}` reads itself as a dependency: {:?}",
+				def.production_dependencies()
+			);
+			assert!(
+				def.assert_dependencies().is_empty(),
+				"`{raw}` asserts against itself as a dependency: {:?}",
+				def.assert_dependencies()
+			);
+		}
+	}
+
+	/// A nested field reading the top-level field whose quoted name spells its
+	/// path reads another field, not itself.
+	#[test]
+	fn a_nested_field_reading_a_quoted_field_spelling_its_path_has_a_dependency() {
+		let def = FieldDefinition {
+			name: Idiom::from_str("is.locked").unwrap(),
+			table: TableName::from("t"),
+			value: Some(Expr::Idiom(Idiom::from_str("`is.locked`").unwrap())),
+			assert: Some(Expr::Idiom(Idiom::from_str("`is.locked`").unwrap())),
+			..Default::default()
+		};
+		assert_eq!(def.production_dependencies(), vec!["is.locked".to_owned()]);
+		assert_eq!(def.assert_dependencies(), vec!["is.locked".to_owned()]);
+	}
 
 	/// The stored field path is the idiom's canonical raw rendering — the
 	/// same text `Idiom`'s own wire format has always carried, so the encoded

@@ -15,7 +15,9 @@ use crate::catalog::{
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Operable, Processable};
 use crate::doc::alter::ComputedData;
-use crate::expr::computed_deps::{ComputedDeps, extract_computed_deps};
+use crate::expr::computed_deps::{
+	ComputedDeps, computed_field_name, extract_computed_deps, topological_sort_computed_fields,
+};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::val::{RecordId, TableName, Value};
@@ -128,9 +130,13 @@ pub(crate) struct NsDbTbCtx {
 	/// Precomputed once so the write path can read the id field's kind and
 	/// default in O(1) without rescanning the field list per record.
 	pub(crate) id_field_idx: Option<usize>,
-	/// Which same-table fields each computed field reads, keyed by field name.
+	/// Which same-table fields each computed field reads, keyed by
+	/// [`computed_field_name`].
 	/// See [`computed_field_deps`].
 	pub(crate) computed_deps: HashMap<String, ComputedDeps>,
+	/// The order this table's computed fields are derived in. See
+	/// [`computed_eval_order`].
+	pub(crate) computed_order: Arc<[usize]>,
 	/// The order the write path processes this table's fields in, derived from
 	/// the dependencies between their clauses. See [`field_eval_order`].
 	pub(crate) field_order: Arc<FieldEvalOrder>,
@@ -183,6 +189,13 @@ pub(crate) struct FieldEvalOrder {
 /// the alternative is rebuilding the graph for every record a statement
 /// touches.
 ///
+/// Dependencies are matched against the fields by [`computed_field_name`], the
+/// name a read records, so a field whose name needs quoting is ordered before,
+/// and materialised for, the clauses that read it. Only a top-level field has
+/// such a name: a read of a nested path records its root, so a nested field is
+/// ordered by its parent edge alone, and is never mistaken for a top-level
+/// field whose quoted name spells its path.
+///
 /// A dependency on a field this table does not define is ignored — a schemaless
 /// record may or may not carry it, and either way there is no definition whose
 /// processing could be ordered against. A clause whose dependencies could not
@@ -199,8 +212,11 @@ fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 	}
 
 	// Resolve dependency names against the fields this table defines
-	let by_name: HashMap<String, usize> =
-		fields.iter().enumerate().map(|(i, fd)| (fd.name.to_raw_string(), i)).collect();
+	let by_name: HashMap<&str, usize> = fields
+		.iter()
+		.enumerate()
+		.filter_map(|(i, fd)| Some((computed_field_name(&fd.name)?, i)))
+		.collect();
 	// edges[i] lists the fields that must be processed after field `i`
 	let mut edges: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
 	let mut indegree: Vec<usize> = vec![0; fields.len()];
@@ -208,7 +224,7 @@ fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 	let mut deps_by_field: Vec<Vec<usize>> = vec![Vec::new(); fields.len()];
 	for (i, fd) in fields.iter().enumerate() {
 		for dep in fd.production_dependencies() {
-			if let Some(&j) = by_name.get(&dep) {
+			if let Some(&j) = by_name.get(dep.as_str()) {
 				deps_by_field[i].push(j);
 				add_edge(j, i, &mut edges, &mut indegree);
 			}
@@ -263,7 +279,7 @@ fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 		}
 		pending.extend(deps_by_field[i].iter().copied());
 		for dep in fd.assert_dependencies() {
-			if let Some(&j) = by_name.get(&dep) {
+			if let Some(&j) = by_name.get(dep.as_str()) {
 				pending.push(j);
 			}
 		}
@@ -283,7 +299,8 @@ fn field_eval_order(fields: &[FieldDefinition]) -> FieldEvalOrder {
 	}
 }
 
-/// Which same-table fields each computed field reads.
+/// Which same-table fields each computed field reads, keyed by
+/// [`computed_field_name`], the name those reads record.
 ///
 /// Derived once when a table context is built, for the same reason the field
 /// definitions themselves are loaded here: the alternative is walking every
@@ -295,8 +312,54 @@ fn computed_field_deps(fields: &[FieldDefinition]) -> HashMap<String, ComputedDe
 		.iter()
 		.filter_map(|fd| {
 			let computed = fd.computed.as_ref()?;
-			Some((fd.name.to_raw_string(), extract_computed_deps(computed)))
+			let name = computed_field_name(&fd.name)?;
+			Some((name.to_owned(), extract_computed_deps(computed)))
 		})
+		.collect()
+}
+
+/// The order a table's `COMPUTED` fields are derived in: indices into the
+/// field list, covering exactly its computed fields, each placed after the
+/// computed fields its body reads.
+///
+/// A body reads the record it is derived onto, so a computed field reading
+/// another one sees that field's value only when it is derived second;
+/// derived first, it reads `NONE`. The field list arrives in name order, which
+/// bears no relation to that requirement.
+///
+/// This is the order the streaming read path derives the same fields in
+/// (`build_field_state_raw` in `exec/operators/scan/pipeline.rs`): both take
+/// the computed fields in field-list order and sort them with
+/// [`topological_sort_computed_fields`] over the dependencies
+/// [`computed_field_deps`] extracts, so a record's computed fields hold the
+/// same values whichever engine derives them. A dependency on a field that is
+/// not computed imposes no order, and a cycle — which `DEFINE FIELD` rejects —
+/// leaves its fields at the end in field-list order rather than dropping them.
+/// A nested computed field, which `DEFINE FIELD` also rejects, has no name a
+/// read records, so nothing is ordered against it and it is derived last.
+fn computed_eval_order(
+	fields: &[FieldDefinition],
+	deps: &HashMap<String, ComputedDeps>,
+) -> Arc<[usize]> {
+	let mut named: Vec<(usize, &str)> = Vec::new();
+	let mut unnamed: Vec<usize> = Vec::new();
+	for (idx, fd) in fields.iter().enumerate().filter(|(_, fd)| fd.computed.is_some()) {
+		match computed_field_name(&fd.name) {
+			Some(name) => named.push((idx, name)),
+			None => unnamed.push(idx),
+		}
+	}
+	let graph: Vec<(String, Vec<String>)> = named
+		.iter()
+		.map(|&(_, name)| {
+			let reads = deps.get(name).map_or_else(Vec::new, |deps| deps.fields.clone());
+			(name.to_owned(), reads)
+		})
+		.collect();
+	topological_sort_computed_fields(&graph)
+		.into_iter()
+		.map(|pos| named[pos].0)
+		.chain(unnamed)
 		.collect()
 }
 
@@ -342,6 +405,7 @@ impl NsDbTbCtx {
 			// Locate the id field once for the write path
 			let id_field_idx = id_field_index(&fields);
 			let computed_deps = computed_field_deps(&fields);
+			let computed_order = computed_eval_order(&fields, &computed_deps);
 			let field_order = Arc::new(field_eval_order(&fields));
 			// Return the document context
 			Ok(Self {
@@ -351,6 +415,7 @@ impl NsDbTbCtx {
 				fields,
 				id_field_idx,
 				computed_deps,
+				computed_order,
 				field_order,
 			})
 		} else {
@@ -359,6 +424,7 @@ impl NsDbTbCtx {
 			// Locate the id field once for the write path
 			let id_field_idx = id_field_index(&fields);
 			let computed_deps = computed_field_deps(&fields);
+			let computed_order = computed_eval_order(&fields, &computed_deps);
 			let field_order = Arc::new(field_eval_order(&fields));
 			// Return the document context
 			Ok(Self {
@@ -368,6 +434,7 @@ impl NsDbTbCtx {
 				fields,
 				id_field_idx,
 				computed_deps,
+				computed_order,
 				field_order,
 			})
 		}
@@ -408,9 +475,13 @@ pub(crate) struct NsDbTbMutCtx {
 	/// Precomputed once so the write path can read the id field's kind and
 	/// default in O(1) without rescanning the field list per record.
 	pub(crate) id_field_idx: Option<usize>,
-	/// Which same-table fields each computed field reads, keyed by field name.
+	/// Which same-table fields each computed field reads, keyed by
+	/// [`computed_field_name`].
 	/// See [`computed_field_deps`].
 	pub(crate) computed_deps: HashMap<String, ComputedDeps>,
+	/// The order this table's computed fields are derived in. See
+	/// [`computed_eval_order`].
+	pub(crate) computed_order: Arc<[usize]>,
 	/// The order the write path processes this table's fields in, derived from
 	/// the dependencies between their clauses. See [`field_eval_order`].
 	pub(crate) field_order: Arc<FieldEvalOrder>,
@@ -516,6 +587,7 @@ impl NsDbTbMutCtx {
 			// Locate the id field once for the write path
 			let id_field_idx = id_field_index(&fields);
 			let computed_deps = computed_field_deps(&fields);
+			let computed_order = computed_eval_order(&fields, &computed_deps);
 			let field_order = Arc::new(field_eval_order(&fields));
 			// Return the document context
 			Ok(Self {
@@ -529,6 +601,7 @@ impl NsDbTbMutCtx {
 				lives,
 				id_field_idx,
 				computed_deps,
+				computed_order,
 				field_order,
 			})
 		} else {
@@ -543,6 +616,7 @@ impl NsDbTbMutCtx {
 			// Locate the id field once for the write path
 			let id_field_idx = id_field_index(&fields);
 			let computed_deps = computed_field_deps(&fields);
+			let computed_order = computed_eval_order(&fields, &computed_deps);
 			let field_order = Arc::new(field_eval_order(&fields));
 			// Return the document context
 			Ok(Self {
@@ -556,6 +630,7 @@ impl NsDbTbMutCtx {
 				lives,
 				id_field_idx,
 				computed_deps,
+				computed_order,
 				field_order,
 			})
 		}
@@ -662,8 +737,6 @@ impl DocumentContext {
 		}
 	}
 
-	/// Which same-table fields each computed field reads. Derived once when the
-	/// context was built; see [`computed_field_deps`].
 	/// The write-path field processing order for this table.
 	/// See [`field_eval_order`].
 	pub(crate) fn field_order(&self) -> Result<&Arc<FieldEvalOrder>> {
@@ -676,6 +749,8 @@ impl DocumentContext {
 		}
 	}
 
+	/// Which same-table fields each computed field reads. Derived once when the
+	/// context was built; see [`computed_field_deps`].
 	pub(crate) fn computed_deps(&self) -> Result<&HashMap<String, ComputedDeps>> {
 		match self {
 			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
@@ -683,6 +758,19 @@ impl DocumentContext {
 			)),
 			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.computed_deps),
 			DocumentContext::NsDbTbMutCtx(ctx) => Ok(&ctx.computed_deps),
+		}
+	}
+
+	/// The order this table's computed fields are derived in, as indices into
+	/// [`Self::fd`]. Derived once when the context was built; see
+	/// [`computed_eval_order`].
+	pub(crate) fn computed_order(&self) -> Result<&Arc<[usize]>> {
+		match self {
+			DocumentContext::NsDbCtx(_) => Err(anyhow::anyhow!(
+				"Fields not defined in DocumentContext, this is certainly a bug and should be reported."
+			)),
+			DocumentContext::NsDbTbCtx(ctx) => Ok(&ctx.computed_order),
+			DocumentContext::NsDbTbMutCtx(ctx) => Ok(&ctx.computed_order),
 		}
 	}
 
@@ -1063,7 +1151,7 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
-	use super::{FieldDefinition, computed_field_deps};
+	use super::{FieldDefinition, computed_eval_order, computed_field_deps, field_eval_order};
 	use crate::syn;
 
 	fn field(name: &str, computed: Option<&str>) -> FieldDefinition {
@@ -1076,7 +1164,9 @@ mod tests {
 
 	/// Only computed fields get an entry, keyed by the same raw name the
 	/// resolver looks them up by. A non-computed field must not appear, or the
-	/// resolver would treat it as a computed field with no dependencies.
+	/// resolver would treat it as a computed field with no dependencies. A
+	/// nested computed field, which `DEFINE FIELD` rejects, has no name a read
+	/// records, so it gets no entry either.
 	#[test]
 	fn derives_deps_for_computed_fields_only() {
 		let fields = vec![
@@ -1087,11 +1177,137 @@ mod tests {
 
 		let deps = computed_field_deps(&fields);
 
-		assert_eq!(deps.len(), 2, "only the two computed fields are keyed");
+		assert_eq!(deps.len(), 1, "only the top-level computed field is keyed");
 		assert!(!deps.contains_key("plain"));
 		let total = deps.get("total").expect("keyed by raw name");
 		assert!(total.fields.iter().any(|f| f == "price"));
 		assert!(total.fields.iter().any(|f| f == "qty"));
-		assert!(deps.contains_key("nested.deep"), "keyed by the full raw path");
+		assert!(!deps.contains_key("nested.deep"), "a nested path is not a name a read records");
+		assert_eq!(eval_order(&fields), vec!["total", "nested.deep"], "but it is still derived");
+	}
+
+	/// The names derived, in the order `computed_eval_order` derives them.
+	fn eval_order(fields: &[FieldDefinition]) -> Vec<String> {
+		computed_eval_order(fields, &computed_field_deps(fields))
+			.iter()
+			.map(|&idx| fields[idx].name.to_raw_string())
+			.collect()
+	}
+
+	/// A computed field is derived after every computed field it reads,
+	/// whichever sorts first by name; a stored field it reads imposes nothing,
+	/// and a field that is not computed is not derived at all.
+	#[test]
+	fn computed_fields_are_derived_after_the_computed_fields_they_read() {
+		let fields = vec![
+			field("a", Some("b * 10")),
+			field("b", Some("c * 10")),
+			field("c", Some("n")),
+			field("can_edit", Some("!is_locked")),
+			field("is_locked", Some("status = 'locked'")),
+			field("n", None),
+		];
+		let order = eval_order(&fields);
+		assert_eq!(order.len(), 5, "every computed field, and only those: {order:?}");
+		let at = |name: &str| order.iter().position(|n| n == name).expect(name);
+		assert!(at("c") < at("b") && at("b") < at("a"), "{order:?}");
+		assert!(at("is_locked") < at("can_edit"), "{order:?}");
+	}
+
+	/// A field whose name has to be quoted is keyed and ordered by the name a
+	/// read of it records, which is the unescaped identifier: a field reading
+	/// `` `is-locked` `` is derived after it, and the dependency map finds it.
+	#[test]
+	fn a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name() {
+		let fields = vec![
+			field("can_edit", Some("!`is-locked`")),
+			field("`is-locked`", Some("status = 'locked'")),
+			field("ready", Some("`verrouillé` == false")),
+			field("`verrouillé`", Some("can_edit == false")),
+		];
+		let deps = computed_field_deps(&fields);
+		assert!(deps.contains_key("is-locked"), "{:?}", deps.keys());
+		assert!(deps.contains_key("verrouillé"), "{:?}", deps.keys());
+		let order: Vec<&str> = computed_eval_order(&fields, &deps)
+			.iter()
+			.filter_map(|&idx| super::computed_field_name(&fields[idx].name))
+			.collect();
+		let at = |name: &str| order.iter().position(|n| *n == name).expect(name);
+		assert!(at("is-locked") < at("can_edit"), "{order:?}");
+		assert!(at("can_edit") < at("verrouillé"), "{order:?}");
+		assert!(at("verrouillé") < at("ready"), "{order:?}");
+	}
+
+	/// A field with only a `VALUE` clause, for the write-path field graph.
+	fn value_field(name: &str, value: &str) -> FieldDefinition {
+		FieldDefinition {
+			name: syn::idiom(name).unwrap().into(),
+			value: Some(syn::expr(value).unwrap().into()),
+			..Default::default()
+		}
+	}
+
+	/// The write path's field graph knows a field whose name needs quoting by
+	/// the name a read of it records: a clause reading one is ordered after it,
+	/// a COMPUTED one an `ASSERT` reads is materialised for it, and a cycle
+	/// among them is reported, which is what makes the write path refuse it.
+	#[test]
+	fn the_field_graph_matches_quoted_fields_by_their_unescaped_names() {
+		let fields = vec![value_field("`a-dep`", "`z-src` + 1"), value_field("`z-src`", "10")];
+		let order = field_eval_order(&fields);
+		assert_eq!(order.order, vec![1, 0], "`z-src` is processed before `a-dep`");
+		assert!(order.cycle.is_none());
+
+		let mut guard = field("guard", None);
+		guard.assert = Some(syn::expr("`is-locked` != true").unwrap().into());
+		let fields = vec![guard, field("`is-locked`", Some("status = 'locked'"))];
+		let order = field_eval_order(&fields);
+		assert!(order.required_computed.contains(&1), "the ASSERT's computed read is materialised");
+
+		let fields = vec![value_field("`c-1`", "`c-2`"), value_field("`c-2`", "`c-1`")];
+		assert!(field_eval_order(&fields).cycle.is_some(), "a quoted cycle is reported");
+	}
+
+	/// A top-level field whose quoted name spells a path is not the nested field
+	/// at that path. A read of the quoted field resolves to it whichever of the
+	/// two the field list holds last, a nested field reading it is ordered after
+	/// it rather than taken to be reading itself, and a cycle through it is
+	/// reported.
+	#[test]
+	fn the_field_graph_tells_a_quoted_field_from_a_nested_path() {
+		let quoted = || field("`is.locked`", Some("status = 'locked'"));
+		let nested = || field("is.locked", None);
+		let guard = || {
+			let mut guard = field("guard", None);
+			guard.assert = Some(syn::expr("`is.locked` != true").unwrap().into());
+			guard
+		};
+		for fields in [vec![guard(), quoted(), nested()], vec![guard(), nested(), quoted()]] {
+			let computed = fields.iter().position(|fd| fd.computed.is_some()).unwrap();
+			let order = field_eval_order(&fields);
+			assert!(order.required_computed.contains(&computed), "{:?}", order.required_computed);
+			assert_eq!(order.required_computed.len(), 1, "{:?}", order.required_computed);
+		}
+
+		let fields = vec![value_field("is.locked", "`is.locked`"), quoted()];
+		let order = field_eval_order(&fields);
+		assert_eq!(order.order, vec![1, 0], "the quoted field is processed first");
+		assert!(order.required_computed.contains(&1), "and derived for the nested one");
+
+		let fields = vec![
+			value_field("`is.locked`", "x"),
+			value_field("is.locked", "1"),
+			value_field("x", "`is.locked`"),
+		];
+		assert!(field_eval_order(&fields).cycle.is_some(), "the cycle through it is reported");
+	}
+
+	/// A cycle, which `DEFINE FIELD` refuses, still derives every field.
+	#[test]
+	fn a_computed_cycle_still_derives_every_field() {
+		let fields = vec![field("x", Some("y")), field("y", Some("x")), field("z", Some("1"))];
+		let mut order = eval_order(&fields);
+		order.sort();
+		assert_eq!(order, vec!["x", "y", "z"]);
 	}
 }

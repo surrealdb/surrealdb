@@ -759,7 +759,13 @@ pub(crate) async fn build_field_state_raw(
 
 	for fd in field_defs.iter() {
 		if let Some(ref expr) = fd.computed {
-			let field_name = fd.name.to_raw_string();
+			// A computed field is top-level (`DEFINE FIELD` rejects a nested
+			// one), so it has a name a read records, and its value is stored
+			// on the record under that name.
+			let Some(field_name) = crate::expr::computed_deps::computed_field_name(&fd.name) else {
+				continue;
+			};
+			let field_name = field_name.to_owned();
 
 			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 
@@ -1147,12 +1153,15 @@ impl PermissionPass {
 	///
 	/// `dep_map` is keyed by every `COMPUTED` field on the table and is *not*
 	/// narrowed by the projection, unlike `computed_fields`, so it stays a
-	/// sound classifier for a state built for a selective `SELECT`.
+	/// sound classifier for a state built for a selective `SELECT`. It knows
+	/// each by `computed_field_name`, which only a top-level field has; a
+	/// nested field is stored, and must not be looked up by its path, where it
+	/// would be taken for the computed field whose quoted name spells that path
+	/// (`` `is.locked` `` for `is.locked`) and its cut deferred past
+	/// re-derivation.
 	fn applies_to(self, state: &FieldState, idiom: &crate::expr::Idiom) -> bool {
-		let computed = match idiom.0.as_slice() {
-			[crate::expr::Part::Field(name)] => state.dep_map.contains_key(name.as_str()),
-			_ => state.dep_map.contains_key(&idiom.to_raw_string()),
-		};
+		let computed = crate::expr::computed_deps::computed_field_name(idiom)
+			.is_some_and(|name| state.dep_map.contains_key(name));
 		match self {
 			PermissionPass::All => true,
 			PermissionPass::Stored => !computed,

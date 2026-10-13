@@ -228,6 +228,7 @@ impl Document {
 			return Ok(());
 		};
 		let fields = Arc::clone(self.doc_ctx.fd()?);
+		let order = Arc::clone(self.doc_ctx.computed_order()?);
 
 		// Resolve which computed fields to evaluate before borrowing a view, so
 		// the immutable `&self` the resolution needs is released first.
@@ -248,7 +249,7 @@ impl Document {
 			},
 		};
 
-		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, doc, plan).await
+		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, &order, doc, plan).await
 	}
 
 	/// Resolve the transitive closure of computed fields a set of projection
@@ -288,22 +289,33 @@ impl Document {
 	}
 
 	/// Run a resolved [`ComputePlan`] against one `doc`.
+	#[allow(clippy::too_many_arguments)]
 	async fn apply_compute_plan(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		fields: &[FieldDefinition],
+		order: &[usize],
 		doc: &mut CursorDoc,
 		plan: ComputePlan,
 	) -> anyhow::Result<()> {
 		match plan {
 			ComputePlan::Full => {
-				Document::computed_fields_inner(stk, ctx, opt, rid, fields, doc, None).await
+				Document::computed_fields_inner(stk, ctx, opt, rid, fields, order, doc, None).await
 			}
 			ComputePlan::Selective(required) => {
-				Document::computed_fields_inner(stk, ctx, opt, rid, fields, doc, Some(&required))
-					.await
+				Document::computed_fields_inner(
+					stk,
+					ctx,
+					opt,
+					rid,
+					fields,
+					order,
+					doc,
+					Some(&required),
+				)
+				.await
 			}
 			// The projection doesn't reach any computed field: leave the cursor
 			// untouched. `fields_computed` stays false so a later full evaluation
@@ -340,8 +352,9 @@ impl Document {
 			return Ok(());
 		};
 		let fields = Arc::clone(self.doc_ctx.fd()?);
+		let order = Arc::clone(self.doc_ctx.computed_order()?);
 		let plan = self.resolve_compute_plan(needed_roots)?;
-		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, doc, plan).await
+		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, &order, doc, plan).await
 	}
 
 	/// Populate the computed fields on one view, unless that view holds no
@@ -423,12 +436,24 @@ impl Document {
 		Ok(())
 	}
 
+	/// Derive the computed fields of `fields` onto `doc`: every one, or only
+	/// those in `required`.
+	///
+	/// `order` is the table's computed-field order, indices into `fields` (see
+	/// `DocumentContext::computed_order`). Each body reads `doc`, so a field
+	/// reading another computed field has to be derived after it: walking
+	/// `fields` itself, which is in name order, would derive one from `NONE`
+	/// wherever it sorts before a field it reads. `required` is closed over
+	/// those reads, so restricting to it keeps every field it derives after the
+	/// fields that one reads.
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn computed_fields_inner(
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		rid: &RecordId,
 		fields: &[FieldDefinition],
+		order: &[usize],
 		doc: &mut CursorDoc,
 		required: Option<&HashSet<String>>,
 	) -> anyhow::Result<()> {
@@ -439,15 +464,16 @@ impl Document {
 			return Ok(());
 		}
 
-		// Compute the fields
-		for fd in fields.iter() {
+		// Compute the fields, each after the computed fields it reads
+		for &idx in order {
+			let fd = &fields[idx];
 			let Some(computed) = &fd.computed else {
 				continue;
 			};
 			// Restrict to the resolved closure when in selective mode.
 			if let Some(required) = required {
-				let field_name = fd.name.to_raw_string();
-				if !required.contains(&field_name) {
+				let field_name = crate::expr::computed_deps::computed_field_name(&fd.name);
+				if !field_name.is_some_and(|name| required.contains(name)) {
 					continue;
 				}
 			}

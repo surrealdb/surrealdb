@@ -551,6 +551,14 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 /// `ASSERT` does not: it validates a value rather than producing one, so two
 /// fields asserting against each other is ordinary.
 /// Only checks same-table dependencies (cross-table cycles are future work).
+///
+/// Fields are keyed by `computed_field_name`, the name a read of them records,
+/// which is the same graph the write path orders the fields by; keyed by their
+/// escaped names, a cycle among fields whose names need quoting would go
+/// unrefused here. A nested field has no such name: no read records it, so no
+/// cycle passes through it, and it is left out rather than keyed by its path,
+/// where it would stand in for a top-level field whose quoted name spells that
+/// path.
 pub(crate) async fn define_field_statement_validate_computed_cycles(
 	_this: &DefineFieldStatement,
 	ns: NamespaceId,
@@ -564,7 +572,7 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 	}
 
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
-	let field_name = definition.name.to_raw_string();
+	let field_name = crate::expr::computed_deps::computed_field_name(&definition.name);
 
 	// Build adjacency list: field_name -> the fields its clauses read.
 	// Deps are always extracted on the fly (they are not stored).
@@ -576,16 +584,20 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		if !fd.has_production_clause() {
 			continue;
 		}
-		let name = fd.name.to_raw_string();
+		let Some(name) = crate::expr::computed_deps::computed_field_name(&fd.name) else {
+			continue;
+		};
 		// Skip the field being (re)defined -- we'll use the new definition below
-		if name == field_name {
+		if Some(name) == field_name {
 			continue;
 		}
-		graph.insert(name, fd.production_dependencies());
+		graph.insert(name.to_owned(), fd.production_dependencies());
 	}
 
 	// Insert/replace the field being defined with its freshly-extracted deps
-	graph.insert(field_name, definition.production_dependencies());
+	if let Some(field_name) = field_name {
+		graph.insert(field_name.to_owned(), definition.production_dependencies());
+	}
 
 	// Iterative DFS cycle detection.
 	// States: 0 = unvisited, 1 = in current path, 2 = fully visited

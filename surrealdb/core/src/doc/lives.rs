@@ -558,9 +558,28 @@ impl Document {
 			// reads, mirroring what SELECT does, but the savings on
 			// live tables are usually small and the bookkeeping less
 			// obvious. Pass `None` to keep behaviour conservative.
-			if let Err(e) =
-				Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), fields, &mut doc, None)
-					.await
+			let order = match self.doc_ctx.computed_order() {
+				Ok(o) => o,
+				Err(e) => {
+					tracing::debug!(
+						target: "surrealdb::core::doc::lives",
+						error = %e,
+						"LIVE notification skipped: computed field order unavailable",
+					);
+					return None;
+				}
+			};
+			if let Err(e) = Document::computed_fields_inner(
+				stk,
+				ctx,
+				opt,
+				rid.as_ref(),
+				fields,
+				order,
+				&mut doc,
+				None,
+			)
+			.await
 			{
 				tracing::debug!(
 					target: "surrealdb::core::doc::lives",
