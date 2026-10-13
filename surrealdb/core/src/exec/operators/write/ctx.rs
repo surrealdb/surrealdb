@@ -12,6 +12,7 @@ use std::sync::{Arc, OnceLock, Weak};
 use surrealdb_datastore::index_shapes::TableIndexShapes;
 
 use super::scope::WriteScope;
+use super::stages::schema::views_can_observe;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Error as CatalogError, EventDefinition, FieldDefinition,
@@ -228,6 +229,10 @@ pub(crate) struct WriteCtx {
 	pub(crate) events: Arc<[EventDefinition]>,
 	/// The foreign materialised views this write maintains.
 	pub(crate) views: Arc<[TableDefinition]>,
+	/// Whether the views count as observers of the record, and so are handed
+	/// its `COMPUTED` fields derived: [`views_can_observe`] of `views`, read
+	/// once because answering it analyses every computed body of the table.
+	pub(crate) views_observe: bool,
 	/// The indexes this write maintains.
 	pub(crate) indexes: Arc<[IndexDefinition]>,
 	/// The live-query subscriptions this write notifies.
@@ -353,6 +358,8 @@ impl WriteCtx {
 			)
 			.await
 			.map_err(ControlFlow::Err)?;
+		let views_observe =
+			views_can_observe(&catalog.tables, &catalog.fields, exec.function_registry());
 		Ok(Self {
 			ns: catalog.ns,
 			db: catalog.db,
@@ -360,6 +367,7 @@ impl WriteCtx {
 			fields: catalog.fields,
 			events: catalog.events,
 			views: catalog.tables,
+			views_observe,
 			indexes: catalog.indexes,
 			lives: catalog.lives,
 			live_units: catalog.live_units,
@@ -389,6 +397,7 @@ impl WriteCtx {
 			fields: Arc::clone(&self.fields),
 			events: Arc::clone(&self.events),
 			views: Arc::clone(&self.views),
+			views_observe: self.views_observe,
 			indexes: Arc::clone(&self.indexes),
 			lives: Arc::clone(&self.lives),
 			live_units: Arc::clone(&self.live_units),

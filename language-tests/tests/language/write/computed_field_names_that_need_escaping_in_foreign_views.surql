@@ -11,12 +11,9 @@ name the record would hold it by. A name that has to be backticked when written
 groups, and projects, like any other: the view holds the derived value rather than
 `NONE`, and the group follows the record as the field's inputs change.
 
-`plain` is the control. The table carries an event, so its writes are observed and
-derive the computed fields onto the record the views are recomputed from.
+`plain` is the control, a name that needs no backticks. The table has no event, live
+query or changefeed, so the views alone make its writes derive the computed fields.
 """
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -84,7 +81,6 @@ DEFINE FIELD src ON b TYPE option<string>;
 DEFINE FIELD plain   ON b COMPUTED src;
 DEFINE FIELD `the x` ON b COMPUTED src;
 DEFINE FIELD `a-b`   ON b COMPUTED string::concat(src, '!');
-DEFINE EVENT observed ON b WHEN false THEN {};
 
 DEFINE TABLE by_plain AS SELECT count() AS n, plain FROM b GROUP BY plain;
 DEFINE TABLE by_space AS SELECT count() AS n, `the x` FROM b GROUP BY `the x`;
