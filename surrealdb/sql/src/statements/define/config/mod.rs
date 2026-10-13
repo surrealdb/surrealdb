@@ -1,5 +1,6 @@
 pub mod api;
 pub mod defaults;
+
 use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
 
@@ -9,7 +10,7 @@ pub use graphql::GraphQLConfig;
 
 use super::DefineKind;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineConfigStatement {
 	pub kind: DefineKind,
@@ -22,6 +23,12 @@ pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 	Default(DefaultConfig),
+}
+
+impl Default for ConfigInner {
+	fn default() -> Self {
+		ConfigInner::Default(DefaultConfig::default())
+	}
 }
 
 impl ToSql for DefineConfigStatement {

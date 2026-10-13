@@ -29,6 +29,12 @@ impl Fields {
 	}
 }
 
+impl Default for Fields {
+	fn default() -> Self {
+		Self::all()
+	}
+}
+
 impl ToSql for Fields {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {

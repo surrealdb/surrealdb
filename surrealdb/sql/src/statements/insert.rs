@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::{CoverStmts, Data, Expr, Literal, Output};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,

@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::{CoverStmts, EventKind, Expr, Literal};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineEventStatement {
 	pub kind: DefineKind,

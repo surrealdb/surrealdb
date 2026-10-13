@@ -1,9 +1,10 @@
 /// Whether a DEFINE EVENT runs inline with the triggering write or is
 /// dispatched asynchronously, and the retry/nesting budget when async.
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum EventKind {
+	#[default]
 	Sync,
 	Async {
 		/// Maximum retry count for async events (0 disables retries; event still runs once).

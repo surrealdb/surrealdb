@@ -5,7 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::{Block, CoverStmts, Expr, Kind, Literal, Permission};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFunctionStatement {
 	pub kind: DefineKind,

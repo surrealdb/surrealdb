@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::{CoverStmts, Expr, Index, Literal};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

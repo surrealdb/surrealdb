@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::ModuleName;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveModuleStatement {
 	pub name: ModuleName,

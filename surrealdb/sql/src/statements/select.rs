@@ -6,7 +6,7 @@ use crate::{
 	Cond, CoverStmts, Explain, Expr, Fetchs, Fields, Groups, Limit, Literal, Splits, Start, With,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub fields: Fields,

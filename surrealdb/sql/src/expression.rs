@@ -448,3 +448,8 @@ impl ToSql for Expr {
 		}
 	}
 }
+impl Default for Expr {
+	fn default() -> Self {
+		Expr::Literal(Literal::None)
+	}
+}

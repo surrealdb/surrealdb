@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::{BinaryOperator, Expr, Literal};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Block(pub Vec<Expr>);
 

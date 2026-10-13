@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::{CoverStmts, Data, Expr, Literal, Output, RecordIdKeyLit, RecordIdLit};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RelateStatement {
 	pub only: bool,

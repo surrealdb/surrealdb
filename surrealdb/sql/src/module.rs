@@ -27,6 +27,12 @@ impl ToSql for ModuleName {
 	}
 }
 
+impl Default for ModuleName {
+	fn default() -> Self {
+		Self::Module(String::new())
+	}
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ModuleExecutable {

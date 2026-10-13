@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::{CoverStmts, Expr};
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query

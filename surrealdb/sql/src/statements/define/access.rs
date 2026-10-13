@@ -4,7 +4,7 @@ use super::DefineKind;
 use crate::access::AccessDuration;
 use crate::{AccessType, Base, CoverStmts, Expr, Literal};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

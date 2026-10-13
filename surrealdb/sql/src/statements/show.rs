@@ -3,6 +3,7 @@ use common::fmt::{EscapeKwFreeIdent, SqlDatetime};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::TableName;
+use crate::statements::show::ShowSince::Versionstamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,8 +12,14 @@ pub enum ShowSince {
 	Versionstamp(u64),
 }
 
+impl Default for ShowSince {
+	fn default() -> Self {
+		Versionstamp(1)
+	}
+}
+
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
 	pub table: Option<TableName>,

@@ -5,10 +5,11 @@ use surrealdb_types::{Number as PublicNumber, SqlFormat, ToSql, write_sql};
 use crate::Cond;
 use crate::scoring::Scoring;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Index {
 	/// (Basic) non unique
+	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
