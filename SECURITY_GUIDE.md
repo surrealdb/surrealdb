@@ -488,6 +488,22 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   permission without end. Computed fields are derived in dependency order
   (`topological_sort_computed_fields`, `Lowering::guard_derivations`), so a
   field reading another reads it derived.
+  Each of these points, the write path's field graph (`field_eval_order` in
+  `doc/document.rs`, which orders the `DEFAULT`, `VALUE` and `ASSERT` clauses
+  and materialises the computed fields they read) and the `DEFINE FIELD` cycle
+  check (`define_field_statement_validate_computed_cycles`) know a field by
+  `Idiom::field_name` (`expr/idiom/mod.rs`): the unescaped name a read of it
+  records (`extract_computed_deps`). `Idiom::to_raw_string` backticks a name
+  that needs quoting (`` `is-locked` ``), and a field keyed by that matches no
+  read: it is neither derived for nor ordered before the predicates and clauses
+  that read it, they read `NONE`, and a gate or `ASSERT` written to deny admits
+  the write. Only a top-level field has such a name. A read of a nested path
+  records its root, so a nested field is never matched by name, and the nested
+  field `is.locked` never stands in for the top-level `` `is.locked` ``: not in
+  those graphs, and not in the runtime path's `PermissionPass::applies_to`,
+  which tells a computed field's `SELECT` permission from a stored one's by
+  that name and would otherwise cut a denied nested field only after a computed
+  field reading it was derived.
   A predicate that calls a user-defined, scripted, module or silo function
   names no field the function's body reads off the row, so every computed field
   is derived for it: `extract_computed_deps` marks such a call opaque, as
@@ -495,8 +511,17 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   Verified by: `a_permission_membership_reading_a_computed_field_is_not_lifted`
   (`exec/logical/rules/decorrelate.rs`),
   `live_select_permission_reads_computed_fields` (`tests/it/live.rs`),
-  `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`); end
-  to end by
+  `a_call_running_its_own_body_marks_incomplete` (`expr/computed_deps.rs`),
+  `a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name`,
+  `the_field_graph_matches_quoted_fields_by_their_unescaped_names` and
+  `the_field_graph_tells_a_quoted_field_from_a_nested_path` (`doc/document.rs`),
+  `a_clause_reading_its_own_field_is_not_a_dependency` and
+  `a_nested_field_reading_a_quoted_field_spelling_its_path_has_a_dependency`
+  (`catalog/schema/field.rs`); end to end by
+  `reproductions/a_write_permission_reads_quoted_computed_fields.surql`,
+  `reproductions/field_clauses_read_quoted_fields.surql`,
+  `reproductions/field_clauses_tell_a_quoted_field_from_a_nested_path.surql`,
+  `reproductions/field_permissions_tell_a_quoted_computed_field_from_a_nested_path.surql`,
   `reproductions/a_table_select_permission_reads_computed_fields.surql`,
   `reproductions/a_field_write_permission_reads_computed_fields.surql`,
   `reproductions/a_write_permission_computes_fields_in_dependency_order.surql`,

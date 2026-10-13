@@ -763,6 +763,48 @@ mod tests {
 		}
 	}
 
+	/// A clause reading its own field is not a dependency, whether or not the
+	/// field's name needs quoting: the read records the bare identifier, and
+	/// the field is recognised by that same name.
+	#[test]
+	fn a_clause_reading_its_own_field_is_not_a_dependency() {
+		for raw in ["n", "`n-x`", "`verrouillé`"] {
+			let name = Idiom::from_str(raw).unwrap();
+			let def = FieldDefinition {
+				name: name.clone(),
+				table: TableName::from("t"),
+				value: Some(Expr::Idiom(name.clone())),
+				assert: Some(Expr::Idiom(name)),
+				..Default::default()
+			};
+			assert!(
+				def.production_dependencies().is_empty(),
+				"`{raw}` reads itself as a dependency: {:?}",
+				def.production_dependencies()
+			);
+			assert!(
+				def.assert_dependencies().is_empty(),
+				"`{raw}` asserts against itself as a dependency: {:?}",
+				def.assert_dependencies()
+			);
+		}
+	}
+
+	/// A nested field reading the top-level field whose quoted name spells its
+	/// path reads another field, not itself.
+	#[test]
+	fn a_nested_field_reading_a_quoted_field_spelling_its_path_has_a_dependency() {
+		let def = FieldDefinition {
+			name: Idiom::from_str("is.locked").unwrap(),
+			table: TableName::from("t"),
+			value: Some(Expr::Idiom(Idiom::from_str("`is.locked`").unwrap())),
+			assert: Some(Expr::Idiom(Idiom::from_str("`is.locked`").unwrap())),
+			..Default::default()
+		};
+		assert_eq!(def.production_dependencies(), vec!["is.locked".to_owned()]);
+		assert_eq!(def.assert_dependencies(), vec!["is.locked".to_owned()]);
+	}
+
 	/// The logical bodies are the stored text compiled for the streaming
 	/// engine: a definition built from a statement carries them, a definition
 	/// read back from storage carries them, and both compile to the same

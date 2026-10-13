@@ -527,6 +527,7 @@ mod tests {
 
 	use super::{FieldDefinition, computed_field_deps, field_eval_order, id_field_index};
 	use crate::catalog::DefineDefault;
+	use crate::expr::computed_deps::topological_sort_computed_fields;
 	use crate::expr::{KeyNames, Kind, KindLiteral};
 	use crate::syn;
 	use crate::val::TableName;
@@ -624,6 +625,103 @@ mod tests {
 		let own = vec![valued("`own n`", "`own n` ?? 'init'")];
 		assert!(field_eval_order(&own).cycle.is_none(), "reading itself is not a cycle");
 	}
+
+	/// A computed field whose name has to be quoted is keyed and ordered by the
+	/// name a read of it records, which is the unescaped identifier: the
+	/// dependency map finds it, and a field reading `` `is-locked` `` is derived
+	/// after it, both in the write path's field order and in the computed order
+	/// the derivations sort by.
+	#[test]
+	fn a_quoted_computed_field_is_keyed_and_ordered_by_its_unescaped_name() {
+		let fields = vec![
+			field("can_edit", Some("!`is-locked`")),
+			field("`is-locked`", Some("status = 'locked'")),
+			field("ready", Some("`verrouillé` == false")),
+			field("`verrouillé`", Some("can_edit == false")),
+		];
+		let deps = computed_field_deps(&fields);
+		assert!(deps.contains_key("is-locked"), "{:?}", deps.keys());
+		assert!(deps.contains_key("verrouillé"), "{:?}", deps.keys());
+
+		let check = |order: &[&str]| {
+			let at = |name: &str| order.iter().position(|n| *n == name).expect(name);
+			assert!(at("is-locked") < at("can_edit"), "{order:?}");
+			assert!(at("can_edit") < at("verrouillé"), "{order:?}");
+			assert!(at("verrouillé") < at("ready"), "{order:?}");
+		};
+		let eval = field_eval_order(&fields);
+		assert!(eval.cycle.is_none());
+		let names: Vec<&str> =
+			eval.order.iter().map(|&i| fields[i].name.field_name().unwrap()).collect();
+		check(&names);
+
+		let graph: Vec<(String, Vec<String>)> = fields
+			.iter()
+			.map(|fd| {
+				let name = fd.name.field_name().unwrap().to_owned();
+				let reads = deps[&name].fields.clone();
+				(name, reads)
+			})
+			.collect();
+		let names: Vec<&str> = topological_sort_computed_fields(&graph)
+			.into_iter()
+			.map(|i| graph[i].0.as_str())
+			.collect();
+		check(&names);
+	}
+
+	/// The write path's field graph knows a field whose name needs quoting by
+	/// the name a read of it records: a clause reading one is ordered after it,
+	/// a COMPUTED one an `ASSERT` reads is materialised for it, and a cycle
+	/// among them is reported, which is what makes the write path refuse it.
+	#[test]
+	fn the_field_graph_matches_quoted_fields_by_their_unescaped_names() {
+		let fields = vec![valued("`a-dep`", "`z-src` + 1"), valued("`z-src`", "10")];
+		let order = field_eval_order(&fields);
+		assert_eq!(order.order, vec![1, 0], "`z-src` is processed before `a-dep`");
+		assert!(order.cycle.is_none());
+
+		let mut guard = field("guard", None);
+		guard.assert = Some(syn::expr("`is-locked` != true").unwrap());
+		let fields = vec![guard, field("`is-locked`", Some("status = 'locked'"))];
+		let order = field_eval_order(&fields);
+		assert!(order.required_computed.contains(&1), "the ASSERT's computed read is materialised");
+
+		let fields = vec![valued("`c-1`", "`c-2`"), valued("`c-2`", "`c-1`")];
+		assert!(field_eval_order(&fields).cycle.is_some(), "a quoted cycle is reported");
+	}
+
+	/// A top-level field whose quoted name spells a path is not the nested field
+	/// at that path. A read of the quoted field resolves to it whichever of the
+	/// two the field list holds last, a nested field reading it is ordered after
+	/// it rather than taken to be reading itself, and a cycle through it is
+	/// reported.
+	#[test]
+	fn the_field_graph_tells_a_quoted_field_from_a_nested_path() {
+		let quoted = || field("`is.locked`", Some("status = 'locked'"));
+		let nested = || field("is.locked", None);
+		let guard = || {
+			let mut guard = field("guard", None);
+			guard.assert = Some(syn::expr("`is.locked` != true").unwrap());
+			guard
+		};
+		for fields in [vec![guard(), quoted(), nested()], vec![guard(), nested(), quoted()]] {
+			let computed = fields.iter().position(|fd| fd.computed.is_some()).unwrap();
+			let order = field_eval_order(&fields);
+			assert!(order.required_computed.contains(&computed), "{:?}", order.required_computed);
+			assert_eq!(order.required_computed.len(), 1, "{:?}", order.required_computed);
+		}
+
+		let fields = vec![valued("is.locked", "`is.locked`"), quoted()];
+		let order = field_eval_order(&fields);
+		assert_eq!(order.order, vec![1, 0], "the quoted field is processed first");
+		assert!(order.required_computed.contains(&1), "and derived for the nested one");
+
+		let fields =
+			vec![valued("`is.locked`", "x"), valued("is.locked", "1"), valued("x", "`is.locked`")];
+		assert!(field_eval_order(&fields).cycle.is_some(), "the cycle through it is reported");
+	}
+
 	/// The `id` of `reading` naming `city` and `time`, then the fields in
 	/// `rest`, as the catalog lists them: the two virtual definitions of the
 	/// components straight after `id`.
