@@ -58,14 +58,14 @@ mod sys;
 pub mod api;
 pub(crate) use surrealdb_catalog as catalog;
 /// The SurrealQL abstract syntax tree, as produced by [`syn`].
-pub(crate) use surrealdb_sql as sql;
+pub use surrealdb_sql as sql;
 mod config;
 pub mod ctx;
 pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod exec;
-pub(crate) use surrealdb_expr::expr;
+pub use surrealdb_expr::expr;
 #[cfg(feature = "gql")]
 pub mod gql;
 #[cfg(feature = "graphql")]
@@ -107,9 +107,9 @@ pub mod observe;
 pub mod options;
 pub mod rpc;
 pub mod syn;
-pub(crate) use surrealdb_expr::val;
+pub use surrealdb_expr::val;
 
-pub(crate) mod types {
+pub mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.
 
 	pub use surrealdb_types::{
