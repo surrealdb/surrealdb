@@ -277,7 +277,7 @@ for a read-only compatible entry, open otherwise. The other findings list what
 the target refuses after it has opened the store, one statement or row at a
 time. Run it before lowering the level or starting the earlier release.
 
-## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, and named record-id components
+## v3.4.0 — export/import contract changes, vector indexes that lost records sharing a vector, a doc-ID → elements mapping on vector indexes, JACCARD/PEARSON as distances, named record-id components, and pre-filtered KNN choosing its strategy by cost
 
 **Impact**:
 
@@ -342,6 +342,14 @@ time. Run it before lowering the level or starting the earlier release.
   range open at its upper end (`WHERE time > $since`) reads the table rather
   than the index. Rows are unchanged. `REBUILD INDEX`, once every node runs this
   release, restores the index plans for a field that never held an array.
+- A pre-filtered HNSW KNN search no longer widens its `ef`: it reads the new
+  `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`, which defaults to `1`, where it read
+  `SURREAL_KNN_PREFILTER_EF_BOOST` (`4`), which now applies to DiskANN alone.
+  Such a search also scores the matching records exactly wherever that costs
+  less than walking the graph, not only up to
+  `SURREAL_KNN_PREFILTER_EXACT_THRESHOLD` (2000) matches. Latency drops for
+  most filters and recall holds or rises; see below to keep the previous
+  behaviour.
 - On a store several nodes share (TiKV, and the enterprise engines), a write to
   a DiskANN index no longer fails with a retryable `TransactionConflict` when
   background compaction of the index runs at the same time. The upgrade is not
@@ -534,6 +542,38 @@ different dimensions are refused.
 nearest-first searches until it is. Review stored or compared results of
 `vector::similarity::jaccard` and of `vector::distance::knn()` under either
 metric, whose values change.
+
+### Pre-filtered KNN chooses its strategy by cost
+
+A KNN search beside conditions that an index answers restricts itself to the
+records matching them (an allow-list). It then either scores those records
+exactly, or walks the HNSW graph and admits only matching candidates. The exact
+tier was taken up to 2000 matches and the walk above that, with `ef` widened
+fourfold. The walk already continues past the candidates the filter rejects, so
+the widening multiplied its cost for little recall, and none for a selective
+filter; and for an index that keeps a doc-ID → elements mapping, scoring the
+matches exactly stays cheaper than the walk well past 2000 matches.
+
+Now an HNSW traversal is widened by `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST`,
+which defaults to `1`. `SURREAL_KNN_PREFILTER_EF_BOOST` keeps its default of `4`
+and applies to DiskANN alone: with an allow-list alone, DiskANN searches its top
+`l` candidates and admits the members among them, so its width still decides
+how many matches a selective filter finds. An HNSW search that
+can score the matches from the vectors its index stores takes the exact tier
+wherever `matches² × SURREAL_KNN_PREFILTER_EXACT_COST` (default `5`) is at most
+`ef × m0 × nodes in the graph`. `SURREAL_KNN_PREFILTER_EXACT_THRESHOLD` stays a
+floor below which the exact tier is always taken. DiskANN, an index defined
+before the doc-ID → elements mapping, and a search that judges each record (a
+condition no index answers, or a table permission for a checked caller) keep
+the cardinality rule alone. `EXPLAIN ANALYZE` reports the tier taken as
+`prefilter_tier`.
+
+**What to do**: nothing, unless a workload relies on the previous search
+widths. A deployment that set `SURREAL_KNN_PREFILTER_EF_BOOST` to tune HNSW
+searches sets `SURREAL_KNN_PREFILTER_HNSW_EF_BOOST` instead.
+`SURREAL_KNN_PREFILTER_HNSW_EF_BOOST=4` restores HNSW's widening, and a
+large `SURREAL_KNN_PREFILTER_EXACT_COST` keeps every search above the threshold
+on the graph.
 
 ### A deeply nested value stored by an older release can error on read
 

@@ -3,7 +3,7 @@
 timeout = 120000
 
 [test]
-reason = "Pre-filtered vector search (#548), graph tier: an allow-list larger than the exact threshold (default 2000) keeps the ANN traversal, gating candidate admission on bitmap membership with boosted ef. 2500 of 3000 records match the covered conjunct; the nearest matching points are returned and EXPLAIN ANALYZE reports the graph tier."
+reason = "Pre-filtered vector search (#548), graph tier: an allow-list larger than the exact threshold (default 2000) keeps the ANN traversal, gating candidate admission on bitmap membership. 2500 of 3000 records match the covered conjunct, which the cost model keeps on the graph; the nearest matching points are returned and EXPLAIN ANALYZE reports the graph tier and the width of its walk, the requested ef, which an HNSW walk is not widened beyond by default."
 issue = 548
 
 [[test.results]]
@@ -26,7 +26,7 @@ value = '''
 "SelectProject [ctx: Db] [projections: id, distance] {rows: 3}
     Sort [ctx: Db] [sort_keys: vector::distance::knn() ASC] {rows: 3}
         Filter [ctx: Db] [predicate: category = 'a'] {rows: 3}
-            KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph] {rows: 3}
+            KnnScan [ctx: Db] [index: hn_pt1, k: 3, ef: 40, dimension: 1, prefilter_tier: graph, prefilter_ef: 40] {rows: 3}
                 BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'a'] {rows: 2500}
 
 Total rows: 3"'''

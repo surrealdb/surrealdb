@@ -111,6 +111,11 @@ where
 		self.m_max
 	}
 
+	/// The number of nodes the layer holds.
+	pub(super) fn len(&self) -> usize {
+		self.graph.len()
+	}
+
 	pub(super) fn get_edges(&self, e_id: ElementId) -> Option<&S> {
 		self.graph.get_edges(e_id)
 	}

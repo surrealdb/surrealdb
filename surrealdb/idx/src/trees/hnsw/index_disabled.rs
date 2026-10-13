@@ -114,6 +114,11 @@ impl HnswIndex {
 	}
 
 	/// Unreachable, as no value of this type exists.
+	pub async fn graph_shape(&self, _env: &dyn IndexEnv) -> Result<crate::trees::AnnGraphShape> {
+		match self.0 {}
+	}
+
+	/// Unreachable, as no value of this type exists.
 	pub async fn exact_knn_search(
 		&self,
 		_env: &dyn IndexEnv,

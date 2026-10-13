@@ -299,6 +299,14 @@ where
 		Ok(q_id)
 	}
 
+	/// The base layer's node count and neighbour bound.
+	fn shape(&self) -> crate::trees::AnnGraphShape {
+		crate::trees::AnnGraphShape {
+			nodes: self.layer0.len() as u64,
+			degree: self.layer0.m_max() as u32,
+		}
+	}
+
 	/// Generates a random level for a new element using the level multiplier `ml`.
 	fn get_random_level(&mut self) -> usize {
 		let unif: f64 = self.rng.random(); // generate a uniform random number between 0 and 1
@@ -4294,6 +4302,56 @@ mod tests {
 				assert_eq!(got, expected, "{label}, ef {ef}");
 			}
 		}
+		Ok(())
+	}
+
+	/// The graph shape counts the compacted base layer's nodes, one per
+	/// distinct vector whatever the records sharing it, and bounds their
+	/// neighbours by `m0`; vectors still pending compaction are not counted.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_graph_shape_counts_the_compacted_base_layer() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 8, 100, false, true, false);
+		let v = |c: [i16; 2]| -> SharedVector { Vector::I16(Array1::from_vec(c.to_vec())).into() };
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+				VECTOR_DOC_ELEMENTS_FORMAT_VERSION,
+			)
+			.await?;
+			ctx.tx().commit().await?;
+			h
+		};
+		async fn shape(ds: &TestIndexStore, h: &HnswIndex) -> Result<crate::trees::AnnGraphShape> {
+			let ctx = new_ctx(ds, TransactionType::Read).await;
+			let shape = h.graph_shape(&ctx).await;
+			ctx.tx().cancel().await?;
+			shape
+		}
+		assert_eq!(shape(&ds, &h).await?.nodes, 0);
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			// Records 1 and 2 share a vector: one element, one node.
+			let records: [(i64, [i16; 2]); 4] =
+				[(1, [1, 1]), (2, [1, 1]), (3, [2, 2]), (4, [3, 3])];
+			for (key, c) in records {
+				let content = vec![Value::from(v(c).deref())];
+				h.index(&ctx, &RecordIdKey::Number(key), None, Some(content)).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		// Pending until compacted.
+		assert_eq!(shape(&ds, &h).await?.nodes, 0);
+		compact_committed(&ds, &h).await;
+		let shape = shape(&ds, &h).await?;
+		assert_eq!(shape.nodes, 3);
+		assert_eq!(shape.degree, p.m0 as u32);
 		Ok(())
 	}
 

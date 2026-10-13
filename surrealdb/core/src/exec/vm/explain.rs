@@ -4,7 +4,7 @@
 //! the program under EXPLAIN ANALYZE and renders its counters through these
 //! nodes; no display node executes an expression or a statement.
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use futures::StreamExt;
 use surrealdb_strand::TableName;
@@ -17,9 +17,7 @@ use super::plan::{
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::metrics::OperatorMetrics;
 use crate::exec::operators::scan::bitmap::evaluate_fusion;
-use crate::exec::operators::scan::{
-	BitmapNode, FusedCandidates, MergeMode, PrefilterTier, choose_prefilter_tier,
-};
+use crate::exec::operators::scan::{BitmapNode, FusedCandidates, MergeMode, PrefilterTier};
 use crate::exec::planner::CountDecision;
 use crate::exec::{AccessMode, ExecOperator, FlowResult, ValueBatch, ValueBatchStream};
 use crate::expr::BinaryOperator;
@@ -34,9 +32,9 @@ pub(crate) struct ExplainNode {
 	pub(crate) attrs: Vec<(String, String)>,
 	pub(crate) children: Vec<Arc<dyn ExecOperator>>,
 	pub(crate) metrics: Option<Arc<OperatorMetrics>>,
-	/// For a KNN scan under `EXPLAIN ANALYZE`: the strategy its prefilter's
-	/// allow-list chose, once [`Self::measured`] has been evaluated.
-	tier: Option<Arc<AtomicU8>>,
+	/// For a KNN scan under `EXPLAIN ANALYZE`: what its prefilter's allow-list
+	/// chose, once [`Self::measured`] has been evaluated.
+	tier: Option<Arc<PrefilterChoice>>,
 	/// For a bitmap scan under `EXPLAIN ANALYZE`: whether an overflowing
 	/// branch made it answer with its fallback.
 	fallback: Option<Arc<AtomicBool>>,
@@ -85,10 +83,16 @@ impl ExecOperator for ExplainNode {
 
 	fn attrs(&self) -> Vec<(String, String)> {
 		let mut attrs = self.attrs.clone();
-		if let Some(label) =
-			self.tier.as_ref().and_then(|tier| PrefilterTier::label(tier.load(Ordering::Relaxed)))
+		if let Some(choice) = self.tier.as_ref()
+			&& let Some(label) = PrefilterTier::label(choice.tier.load(Ordering::Relaxed))
 		{
 			attrs.push(("prefilter_tier".to_string(), label.to_string()));
+			// The width of a walk the allow-list gates, where the triage chose
+			// one.
+			let ef = choice.walk_ef.load(Ordering::Relaxed);
+			if ef > 0 {
+				attrs.push(("prefilter_ef".to_string(), ef.to_string()));
+			}
 		}
 		if self.fallback.as_ref().is_some_and(|taken| taken.load(Ordering::Relaxed)) {
 			attrs.push(("union_tier".to_string(), "fallback".to_string()));
@@ -129,6 +133,15 @@ impl ExecOperator for ExplainNode {
 	}
 }
 
+/// What a KNN scan's prefilter chose under `EXPLAIN ANALYZE`: the tier as a
+/// [`PrefilterTier`] code (`0` = not measured), and the width of the walk the
+/// allow-list gates (`0` = no walk).
+#[derive(Debug, Default)]
+struct PrefilterChoice {
+	tier: AtomicU8,
+	walk_ef: AtomicU32,
+}
+
 /// A bitmap tree of the plan, evaluated again for the analysed plan: its nodes
 /// record the cardinality they produce, and the outcome of the evaluation
 /// tells what the run chose by it.
@@ -142,10 +155,19 @@ enum Measured {
 	Prefilter {
 		table: TableName,
 		bitmap: Arc<BitmapNode>,
-		tier: Arc<AtomicU8>,
+		tier: Arc<PrefilterChoice>,
 		/// Whether the statement reads at a `VERSION`, which no allow-list
 		/// serves.
 		versioned: bool,
+		/// The index searched, and the `ef` the search was asked for.
+		index: crate::exec::index::access_path::IndexRef,
+		ef: u32,
+		/// Whether the exact tier judges a condition on each member it reads,
+		/// apart from the table's permission.
+		judges_condition: bool,
+		/// Whether the table's permission is judged on each candidate, for a
+		/// caller whose reads are checked.
+		judges_permission: bool,
 	},
 	/// The doc-IDs a fused plan resolves, or the overflow that made it answer
 	/// with its fallback.
@@ -166,23 +188,37 @@ impl Measured {
 				bitmap,
 				tier,
 				versioned,
+				index,
+				ef,
+				judges_condition,
+				judges_permission,
 			} => {
-				let chosen = if *versioned {
-					PrefilterTier::Fallback
+				let (chosen, walk_ef) = if *versioned {
+					(PrefilterTier::Fallback, None)
 				} else {
 					match bitmap
 						.build_allowlist(ctx, table, *surrealdb_cnf::BITMAP_BRANCH_BUDGET)
 						.await?
 					{
-						Some(allowed) => choose_prefilter_tier(
-							allowed.len(),
-							*surrealdb_cnf::KNN_PREFILTER_EXACT_THRESHOLD,
-							*surrealdb_cnf::KNN_PREFILTER_EF_BOOST_THRESHOLD,
-						),
-						None => PrefilterTier::Fallback,
+						Some(allowed) => {
+							let per_row = *judges_condition
+								|| (*judges_permission && !ctx.root().skip_fetch_perms);
+							let decision = super::knn::decide_prefilter(
+								ctx,
+								table,
+								index.definition(),
+								allowed.len(),
+								*ef,
+								per_row,
+							)
+							.await?;
+							(decision.tier(), decision.walk_ef())
+						}
+						None => (PrefilterTier::Fallback, None),
 					}
 				};
-				tier.store(chosen as u8, Ordering::Relaxed);
+				tier.tier.store(chosen as u8, Ordering::Relaxed);
+				tier.walk_ef.store(walk_ef.unwrap_or(0), Ordering::Relaxed);
 			}
 			Self::Fusion {
 				table,
@@ -637,12 +673,19 @@ impl<'a> Explainer<'a> {
 						let bitmap =
 							crate::exec::planner::bitmap_plan_to_node(prefilter.root.clone());
 						if self.measure {
-							let cell = Arc::new(AtomicU8::new(0));
+							let cell = Arc::new(PrefilterChoice::default());
 							self.measured.push(Arc::new(Measured::Prefilter {
 								table: table.clone(),
 								bitmap: Arc::clone(&bitmap),
 								tier: Arc::clone(&cell),
 								versioned: self.versioned,
+								index: index.clone(),
+								ef: *ef,
+								judges_condition: prefilter.residual.is_some()
+									|| prefilter.uncovered_matches,
+								judges_permission: filter
+									.as_ref()
+									.is_some_and(|filter| !filter.permissions.is_empty()),
 							}));
 							tier = Some(cell);
 							vec![bitmap as Arc<dyn ExecOperator>]

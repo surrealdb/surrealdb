@@ -12,7 +12,7 @@ use roaring::RoaringTreemap;
 use crate::catalog::{Error, Index, keeps_vector_doc_elements};
 use crate::exec::{ExecutionContext, FlowResult};
 use crate::expr::{ControlFlow, ControlFlowExt};
-use crate::idx::trees::{KnnCondFilter, KnnIteratorResult};
+use crate::idx::trees::{AnnGraphShape, KnnCondFilter, KnnIteratorResult};
 use crate::val::{Number, RecordId, TableName};
 
 /// Execution strategy chosen by the KNN prefilter triage (#548), keyed on
@@ -71,6 +71,116 @@ pub(crate) fn choose_prefilter_tier(allow_len: u64, t_exact: u64, t_boost: u64) 
 	} else {
 		PrefilterTier::GraphUnboosted
 	}
+}
+
+/// The settings the prefilter triage weighs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrefilterSettings {
+	/// Allow-list size at or below which the exact tier is always taken.
+	pub(crate) exact_threshold: u64,
+	/// Allow-list size above which the gated traversal is not widened.
+	pub(crate) boost_threshold: u64,
+	/// The `ef` multiplier of the widened traversal.
+	pub(crate) boost: u32,
+	/// The ceiling of the widened `ef`.
+	pub(crate) ef_max: u32,
+	/// The cost of scoring one member exactly, in traversal distance
+	/// computations.
+	pub(crate) exact_cost: u32,
+}
+
+impl PrefilterSettings {
+	/// Whether [`plan_prefilter`] weighs the graph for an allow-list of
+	/// `allow_len` members: it does not at or below the exact threshold, where
+	/// the exact tier is taken whatever the graph, so a caller need not read
+	/// the graph's shape there.
+	pub(crate) fn weighs_graph(&self, allow_len: u64) -> bool {
+		allow_len > self.exact_threshold
+	}
+
+	/// The settings the configuration sets for a search of `index`: an HNSW
+	/// traversal and a DiskANN search are widened by settings of their own,
+	/// since only DiskANN's admits members from a fixed-width candidate list.
+	pub(crate) fn configured(index: &Index) -> Self {
+		Self {
+			exact_threshold: *surrealdb_cnf::KNN_PREFILTER_EXACT_THRESHOLD,
+			boost_threshold: *surrealdb_cnf::KNN_PREFILTER_EF_BOOST_THRESHOLD,
+			boost: match index {
+				Index::Hnsw(_) => *surrealdb_cnf::KNN_PREFILTER_HNSW_EF_BOOST,
+				_ => *surrealdb_cnf::KNN_PREFILTER_EF_BOOST,
+			},
+			ef_max: *surrealdb_cnf::KNN_PREFILTER_EF_MAX,
+			exact_cost: *surrealdb_cnf::KNN_PREFILTER_EXACT_COST,
+		}
+	}
+}
+
+/// The tier and the traversal `ef` of a search restricted to an allow-list of
+/// `allow_len` members, requested with `ef`.
+///
+/// The cardinality decides first ([`choose_prefilter_tier`]). Where `graph`
+/// describes the graph the traversal would walk — an index that scores the
+/// members from the vectors it stores, with nothing to judge per record — a
+/// graph tier gives way to the exact tier wherever scoring the members costs
+/// no more than the traversal, in distance computations:
+///
+/// - the exact tier scores every member: `allow_len × exact_cost`;
+/// - the traversal admits a share `s = allow_len / nodes` of the candidates it meets, so it expands
+///   about `ef / s` nodes of `degree` neighbours each: `ef × degree / s`.
+///
+/// Multiplying both by `allow_len`, the exact tier is taken wherever
+/// `allow_len² × exact_cost ≤ ef × degree × nodes`. The share is capped at
+/// one: an allow-list naming more records than the graph holds nodes —
+/// records sharing a vector, or vectors not yet compacted into the graph —
+/// admits about every candidate, so `nodes` counts as at least `allow_len`.
+/// The exact tier's `ef` is the requested one, which it does not use.
+pub(crate) fn plan_prefilter(
+	allow_len: u64,
+	ef: u32,
+	graph: Option<AnnGraphShape>,
+	settings: &PrefilterSettings,
+) -> (PrefilterTier, u32) {
+	let tier = choose_prefilter_tier(allow_len, settings.exact_threshold, settings.boost_threshold);
+	let walk_ef = match tier {
+		PrefilterTier::Exact => return (tier, ef),
+		PrefilterTier::Graph => boosted_ef(ef, settings.boost, settings.ef_max),
+		_ => ef,
+	};
+	if let Some(graph) = graph {
+		let members = u128::from(allow_len);
+		let nodes = u128::from(graph.nodes.max(allow_len));
+		let exact = members.saturating_mul(members).saturating_mul(u128::from(settings.exact_cost));
+		let walk = u128::from(walk_ef) * u128::from(graph.degree) * nodes;
+		if exact <= walk {
+			return (PrefilterTier::Exact, ef);
+		}
+	}
+	(tier, walk_ef)
+}
+
+/// The shape of the graph ANN index `target` searches, where the prefilter's
+/// cost model can weigh it: an HNSW graph, brought level with the snapshot as
+/// a search would be. `None` for any other index.
+pub(crate) async fn ann_graph_shape(
+	target: &AnnTarget<'_>,
+) -> Result<Option<AnnGraphShape>, ControlFlow> {
+	let AnnTarget {
+		frozen_ctx,
+		index_def,
+		ikb,
+		table_id,
+	} = *target;
+	let Index::Hnsw(hnsw_params) = &index_def.index else {
+		return Ok(None);
+	};
+	let hnsw_index = frozen_ctx
+		.get_index_stores()
+		.get_index_hnsw(frozen_ctx, table_id, ikb, hnsw_params, index_def.format_version)
+		.await
+		.context("Failed to get HNSW index")?;
+	let shape =
+		hnsw_index.graph_shape(frozen_ctx).await.context("Failed to read the HNSW graph")?;
+	Ok(Some(shape))
 }
 
 /// Boosted ef for allow-list-gated traversal: `ef·boost` capped at `ef_max`,
@@ -284,7 +394,10 @@ pub(crate) async fn knn_candidates(
 #[cfg(test)]
 mod tests {
 
-	use super::{PrefilterTier, boosted_ef, choose_prefilter_tier};
+	use super::{
+		AnnGraphShape, PrefilterSettings, PrefilterTier, boosted_ef, choose_prefilter_tier,
+		plan_prefilter,
+	};
 
 	/// The full decision table of the prefilter triage (#548): every tier is
 	/// allow-list-gated, differing only in graph use and ef boosting.
@@ -305,6 +418,112 @@ mod tests {
 		// results whenever the nearest overall neighbours are excluded).
 		assert_eq!(choose(T_BOOST + 1), GraphUnboosted);
 		assert_eq!(choose(u64::MAX), GraphUnboosted);
+	}
+
+	/// Where the graph can be weighed, the exact tier is taken wherever scoring
+	/// the members costs no more than the gated traversal, so the crossover
+	/// grows with the square root of the graph; the boost widens only a graph
+	/// tier, and the traversal is weighed at the width it would search.
+	#[test]
+	fn prefilter_cost_model() {
+		use PrefilterTier::*;
+		let settings = PrefilterSettings {
+			exact_threshold: 2_000,
+			boost_threshold: 100_000,
+			boost: 1,
+			ef_max: 1_024,
+			exact_cost: 5,
+		};
+		let graph = |nodes| {
+			Some(AnnGraphShape {
+				nodes,
+				degree: 32,
+			})
+		};
+		let plan = |len, nodes| plan_prefilter(len, 64, graph(nodes), &settings);
+		// The exact tier holds while len² × 5 ≤ 64 × 32 × nodes: up to 4_525
+		// members of 50_000 nodes (√20_480_000 ≈ 4_525.4).
+		assert_eq!(plan(2_500, 50_000), (Exact, 64));
+		assert_eq!(plan(4_525, 50_000), (Exact, 64));
+		assert_eq!(plan(4_526, 50_000), (Graph, 64));
+		// Four times the nodes, twice the crossover (√81_920_000 ≈ 9_050.97).
+		assert_eq!(plan(9_050, 200_000), (Exact, 64));
+		assert_eq!(plan(9_051, 200_000), (Graph, 64));
+		// At or below the threshold the exact tier holds whatever the graph,
+		// and the graph is not weighed.
+		assert_eq!(plan(2_000, 1), (Exact, 64));
+		assert!(!settings.weighs_graph(0));
+		assert!(!settings.weighs_graph(2_000));
+		assert!(settings.weighs_graph(2_001));
+		// No graph to weigh: the cardinality alone decides.
+		assert_eq!(plan_prefilter(4_000, 64, None, &settings), (Graph, 64));
+		assert_eq!(plan_prefilter(200_000, 64, None, &settings), (GraphUnboosted, 64));
+		// A boost widens a graph tier, and the traversal is weighed at that
+		// width: 256 × 32 × 50_000 / 5 has its crossover at 9_050.
+		let boosted = PrefilterSettings {
+			boost: 4,
+			..settings
+		};
+		assert_eq!(plan_prefilter(9_050, 64, graph(50_000), &boosted), (Exact, 64));
+		assert_eq!(plan_prefilter(9_051, 64, graph(50_000), &boosted), (Graph, 256));
+		// Above the boost threshold the traversal is not widened.
+		assert_eq!(plan_prefilter(200_000, 64, graph(1_000_000), &boosted), (GraphUnboosted, 64));
+		// A graph holding fewer nodes than the allow-list names (none at all
+		// before its first compaction, or records sharing vectors) admits
+		// about every candidate: the share is capped at one, so the traversal
+		// is weighed at `ef × degree` per member, here 2_048 × 2_500 against
+		// 2_500² × 5 for the exact tier.
+		assert_eq!(plan(2_500, 0), (Graph, 64));
+		assert_eq!(plan(2_500, 1_000), (Graph, 64));
+		// Below `ef × degree / exact_cost` (409) members the exact tier would
+		// win at any share, which only a threshold below that reaches.
+		let low = PrefilterSettings {
+			exact_threshold: 0,
+			..settings
+		};
+		assert_eq!(plan_prefilter(409, 64, graph(0), &low), (Exact, 64));
+		assert_eq!(plan_prefilter(410, 64, graph(0), &low), (Graph, 64));
+		// Extreme sizes do not overflow the comparison.
+		assert_eq!(plan_prefilter(u64::MAX, u32::MAX, graph(u64::MAX), &boosted).0, GraphUnboosted);
+	}
+
+	/// An HNSW traversal is widened by its own setting, any other index's
+	/// search by the general one; unset, they widen HNSW not at all and DiskANN
+	/// fourfold.
+	#[test]
+	fn prefilter_boost_follows_the_index_kind() {
+		use crate::catalog::{DiskAnnParams, Distance, HnswParams, Index, VectorType};
+		use crate::val::Number;
+		let hnsw = Index::Hnsw(HnswParams {
+			dimension: 2,
+			distance: Distance::Euclidean,
+			vector_type: VectorType::F32,
+			m: 8,
+			m0: 16,
+			ml: Number::Float(0.5),
+			ef_construction: 40,
+			extend_candidates: false,
+			keep_pruned_connections: false,
+			use_hashed_vector: false,
+		});
+		let diskann = Index::DiskAnn(DiskAnnParams {
+			dimension: 2,
+			distance: Distance::Euclidean,
+			vector_type: VectorType::F32,
+			degree: 16,
+			l_build: 40,
+			alpha: Number::Float(1.2),
+			use_hashed_vector: false,
+		});
+		let boost = |index: &Index| PrefilterSettings::configured(index).boost;
+		assert_eq!(boost(&hnsw), *surrealdb_cnf::KNN_PREFILTER_HNSW_EF_BOOST);
+		assert_eq!(boost(&diskann), *surrealdb_cnf::KNN_PREFILTER_EF_BOOST);
+		if std::env::var_os("SURREAL_KNN_PREFILTER_HNSW_EF_BOOST").is_none() {
+			assert_eq!(boost(&hnsw), 1);
+		}
+		if std::env::var_os("SURREAL_KNN_PREFILTER_EF_BOOST").is_none() {
+			assert_eq!(boost(&diskann), 4);
+		}
 	}
 
 	/// ef boosting saturates, respects the cap, and never clamps below the

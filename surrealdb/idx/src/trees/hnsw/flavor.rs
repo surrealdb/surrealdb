@@ -213,6 +213,11 @@ impl HnswFlavor {
 		with_hnsw!(self, h => h.get_random_level())
 	}
 
+	/// The base layer's node count and neighbour bound.
+	pub(super) fn shape(&self) -> crate::trees::AnnGraphShape {
+		with_hnsw!(self, h => h.shape())
+	}
+
 	/// The graph's committed element vectors, for reads outside the graph.
 	pub(super) fn elements(&self) -> &crate::trees::hnsw::elements::HnswElements {
 		with_hnsw!(self, h => &h.elements)

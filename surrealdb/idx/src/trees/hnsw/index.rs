@@ -1036,6 +1036,12 @@ impl HnswIndex {
 		Ok(res)
 	}
 
+	/// The shape of the graph as this transaction's snapshot holds it, brought
+	/// level with the snapshot as a search would be.
+	pub async fn graph_shape(&self, env: &dyn IndexEnv) -> Result<crate::trees::AnnGraphShape> {
+		Ok(self.reconciled(env).await?.shape())
+	}
+
 	/// Exact k-nearest neighbours among the `allow_list` members, scored from
 	/// the vectors the index stores rather than from the records.
 	///

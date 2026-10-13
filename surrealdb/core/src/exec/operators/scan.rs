@@ -32,8 +32,8 @@ pub(crate) use fulltext::{FULL_TEXT_BATCH_SIZE, FullTextHits, open_full_text_ind
 pub use graph::EdgeTableSpec;
 pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec, payload_fields};
 pub(crate) use knn::{
-	AnnTarget, PrefilterTier, boosted_ef, choose_prefilter_tier, exact_from_index_vectors,
-	knn_candidates,
+	AnnTarget, PrefilterSettings, PrefilterTier, ann_graph_shape, exact_from_index_vectors,
+	knn_candidates, plan_prefilter,
 };
 pub(crate) use record_id::execute_record_lookup;
 pub(crate) use reference::ref_key_range;

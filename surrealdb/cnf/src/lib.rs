@@ -349,9 +349,23 @@ pub static KNN_PREFILTER_ENABLED: LazyLock<bool> =
 /// graph entirely and scores the members exactly (default: 2000). Below this
 /// cardinality a bounded fetch-and-score over the bitmap is cheaper than a
 /// graph traversal and — unlike filtered ANN search under a highly selective
-/// filter — guaranteed to find the true top-K.
+/// filter — guaranteed to find the true top-K. Above it, an HNSW search that
+/// can score the members from the vectors the index stores still takes the
+/// exact tier wherever [`KNN_PREFILTER_EXACT_COST`] estimates it cheaper than
+/// the gated traversal.
 pub static KNN_PREFILTER_EXACT_THRESHOLD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_KNN_PREFILTER_EXACT_THRESHOLD", u64, 2_000);
+
+/// The cost of scoring one allow-list member exactly from the vectors an HNSW
+/// index stores, in distance computations of the gated graph traversal
+/// (default: 5). The traversal admits about one candidate in `1 / s` for an
+/// allow-list holding a share `s = members / nodes` of the graph's nodes, so
+/// it computes about `ef × degree / s` distances, while the exact tier scores
+/// every member; the exact tier is taken wherever `members × cost` is at most
+/// that, which is `members² × cost ≤ ef × degree × nodes` (with `s` capped at
+/// one). A larger cost keeps more searches on the graph.
+pub static KNN_PREFILTER_EXACT_COST: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_EXACT_COST", u32, 5);
 
 /// Allow-list size above which the gated ANN traversal stops boosting `ef`
 /// (default: 100000). Large allow-lists barely reject candidates on typical
@@ -363,12 +377,25 @@ pub static KNN_PREFILTER_EXACT_THRESHOLD: LazyLock<u64> =
 pub static KNN_PREFILTER_EF_BOOST_THRESHOLD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_KNN_PREFILTER_EF_BOOST_THRESHOLD", u64, 100_000);
 
-/// `ef` multiplier for allow-list-gated ANN traversal (default: 4). A
-/// selective allow-list rejects most candidates, effectively thinning the
-/// graph; boosting the search width counteracts the recall loss. Applied as
-/// `max(ef, ef * boost)` capped by [`KNN_PREFILTER_EF_MAX`].
+/// `ef` multiplier for an allow-list-gated DiskANN search (default: 4). With
+/// an allow-list alone, DiskANN searches its top `l` candidates and admits the
+/// members among them, so a selective allow-list leaves few admissible ones in
+/// that list; widening the search counteracts the loss. Applied as
+/// `max(ef, ef * boost)` capped by [`KNN_PREFILTER_EF_MAX`]. An HNSW search is
+/// widened by [`KNN_PREFILTER_HNSW_EF_BOOST`] instead.
 pub static KNN_PREFILTER_EF_BOOST: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_KNN_PREFILTER_EF_BOOST", u32, 4);
+
+/// `ef` multiplier for an allow-list-gated HNSW traversal (default: 1, no
+/// widening). The gated traversal walks on past the candidates the allow-list
+/// rejects, so its recall at the requested `ef` holds up without widening. A
+/// wider search costs time in proportion and buys little recall, and none
+/// where the filter is selective enough that the traversal ends before it
+/// holds `ef` admitted candidates, since that end does not depend on `ef`;
+/// the exact tier serves such filters. Applied as `max(ef, ef * boost)`
+/// capped by [`KNN_PREFILTER_EF_MAX`].
+pub static KNN_PREFILTER_HNSW_EF_BOOST: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_HNSW_EF_BOOST", u32, 1);
 
 /// Ceiling for the boosted `ef` of an allow-list-gated ANN traversal
 /// (default: 1024). Never clamps below the user-requested `ef`.

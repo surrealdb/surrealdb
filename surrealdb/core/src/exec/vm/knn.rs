@@ -10,12 +10,12 @@
 //! program ([`KnnGate`]); the search runs each on a candidate record's data
 //! and takes a row emitted as a pass.
 //!
-//! The allow-list decides the strategy by its cardinality
-//! ([`choose_prefilter_tier`]): a small list is scored exactly, without the
-//! graph; a larger one gates the graph traversal on membership, with a wider
-//! search for the mid tier. A list that overflows its branch budget, an index
-//! with no shared doc-IDs or a versioned read search the graph with the full
-//! condition judged on every candidate.
+//! The allow-list decides the strategy ([`plan_prefilter`]): a list small
+//! enough, or one whose members cost less to score exactly than the graph
+//! traversal they would gate, is scored exactly, without the graph; a larger
+//! one gates the graph traversal on membership. A list that overflows its
+//! branch budget, an index with no shared doc-IDs or a versioned read search
+//! the graph with the full condition judged on every candidate.
 
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -32,8 +32,8 @@ use crate::exec::field_path_convert::field_path_from_idiom;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::operators::KnnTopKHeap;
 use crate::exec::operators::scan::{
-	AnnTarget, PrefilterTier, boosted_ef, choose_prefilter_tier, exact_from_index_vectors,
-	knn_allow_list,
+	AnnTarget, PrefilterSettings, PrefilterTier, ann_graph_shape, exact_from_index_vectors,
+	knn_allow_list, plan_prefilter,
 };
 use crate::exec::permission::validate_record_user_access;
 use crate::exec::{ExecutionContext, FlowResult};
@@ -75,28 +75,18 @@ pub(super) async fn search(
 	let judges_permission = gate.permission.is_some() && !ctx.root().skip_fetch_perms;
 
 	// Pre-filtered search: the covered conjuncts become an allow-list of
-	// doc-IDs, and the strategy follows its cardinality. When the list cannot
-	// be built, the full condition is judged on every candidate.
-	let mut tier = None;
+	// doc-IDs, and the strategy follows its cardinality and, where the graph
+	// can be weighed, its cost. When the list cannot be built, the full
+	// condition is judged on every candidate, as it is for a versioned read,
+	// which no allow-list serves.
 	let mut allow: Option<RoaringTreemap> = None;
 	let mut in_search = gate.residual;
-	if let Some(prefilter) = gate.prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids()) {
-		if version.is_some() {
-			tier = Some(PrefilterTier::Fallback);
-		} else {
-			match knn_allow_list(ctx, table, &prefilter.root).await? {
-				Some(list) => {
-					tier = Some(choose_prefilter_tier(
-						list.len(),
-						*surrealdb_cnf::KNN_PREFILTER_EXACT_THRESHOLD,
-						*surrealdb_cnf::KNN_PREFILTER_EF_BOOST_THRESHOLD,
-					));
-					in_search = prefilter.residual;
-					allow = Some(list);
-				}
-				None => tier = Some(PrefilterTier::Fallback),
-			}
-		}
+	if let Some(prefilter) = gate.prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids())
+		&& version.is_none()
+		&& let Some(list) = knn_allow_list(ctx, table, &prefilter.root).await?
+	{
+		in_search = prefilter.residual;
+		allow = Some(list);
 	}
 	// The condition that holds the `MATCHES` clauses supersedes the residual
 	// whenever no allow-list restricts the search, and stays beside one that
@@ -112,27 +102,34 @@ pub(super) async fn search(
 		in_search = None;
 	}
 
-	if matches!(tier, Some(PrefilterTier::Exact)) {
-		let allow = allow.as_ref().expect("the exact tier holds an allow-list");
-		let per_row = matches_gate
-			.or(gate.prefilter.as_ref().and_then(|p| p.residual))
-			.or(judges_permission.then_some(gate.permission).flatten());
-		return exact(program, ctx, table, index, vector, k, allow, per_row).await;
-	}
-
-	// The graph tiers: the allow-list gates admission, with a wider search
-	// on the mid-selectivity tier.
-	let (ef, search_allow) = match tier {
-		Some(PrefilterTier::Graph) => (
-			boosted_ef(
-				ef,
-				*surrealdb_cnf::KNN_PREFILTER_EF_BOOST,
-				*surrealdb_cnf::KNN_PREFILTER_EF_MAX,
-			),
-			allow.as_ref(),
-		),
-		Some(PrefilterTier::GraphUnboosted) => (ef, allow.as_ref()),
-		_ => (ef, None),
+	// What the exact tier judges on each member it reads; with nothing to
+	// judge, an index that keeps its doc-ID → elements mapping scores the
+	// members from the vectors it stores, which is the scoring the cost model
+	// weighs against the traversal.
+	let per_row = matches_gate
+		.or(gate.prefilter.as_ref().and_then(|p| p.residual))
+		.or(judges_permission.then_some(gate.permission).flatten());
+	let decision = match &allow {
+		Some(list) => {
+			Some(decide_prefilter(ctx, table, index_def, list.len(), ef, per_row.is_some()).await?)
+		}
+		None => None,
+	};
+	// A walk restricted to the allow-list is gated on it at the width the
+	// triage chose; a search with no allow-list (none was planned, or it could
+	// not be built) walks the graph at the requested width.
+	let (ef, search_allow) = match decision {
+		Some(PrefilterDecision::Exact {
+			ids,
+		}) => {
+			let allow = allow.as_ref().expect("an exact decision holds an allow-list");
+			return exact(program, ctx, table, index, vector, k, allow, per_row, ids).await;
+		}
+		Some(PrefilterDecision::Walk {
+			ef,
+			..
+		}) => (ef, allow.as_ref()),
+		None => (ef, None),
 	};
 	// A search with no condition to judge still judges the permission of each
 	// candidate, whether the allow-list admits it or the graph order does, so
@@ -168,6 +165,9 @@ pub(super) async fn search(
 /// elements mapping is scored as one with a `per_row` judge is: each member
 /// is read, judged by `per_row` where there is one, and scored against
 /// `vector`, so a record that is rejected takes no slot.
+///
+/// `ids` are the table id and key base the index is opened with, where the
+/// caller has read them already.
 #[expect(clippy::too_many_arguments)]
 async fn exact(
 	program: &Program,
@@ -178,6 +178,7 @@ async fn exact(
 	k: u32,
 	allow: &RoaringTreemap,
 	per_row: Option<u16>,
+	ids: Option<TargetIds>,
 ) -> FlowResult<Vec<(RecordId, f64)>> {
 	validate_record_user_access(ctx.database()?)?;
 	let services = EngineServices::new(ctx);
@@ -200,7 +201,8 @@ async fn exact(
 		}
 	};
 	if per_row.is_none()
-		&& let Some(scored) = from_index_vectors(ctx, table, index_def, vector, k, allow).await?
+		&& let Some(scored) =
+			from_index_vectors(ctx, table, index_def, vector, k, allow, ids).await?
 	{
 		return Ok(scored);
 	}
@@ -273,20 +275,106 @@ async fn exact(
 	Ok(heap.into_sorted_nearest_first().map(|(distance, rid)| (rid, distance.to_float())).collect())
 }
 
-/// The members of `allow` nearest `vector` as [`exact`] answers them, scored
-/// from the vectors ANN index `index_def` stores; `None` where the index keeps
-/// no doc-ID → elements mapping and the members' records must be scored.
-async fn from_index_vectors(
+/// The table id and key base an [`AnnTarget`] opens an ANN index with.
+type TargetIds = (crate::catalog::TableId, crate::idx::IndexKeyBase);
+
+/// What a search restricted to an allow-list does with it
+/// ([`decide_prefilter`]).
+pub(super) enum PrefilterDecision {
+	/// Score the members exactly, without the graph. `ids` are the table id
+	/// and key base to open the index with, where the decision read them.
+	Exact {
+		ids: Option<TargetIds>,
+	},
+	/// Walk the graph, admitting members only, `ef` wide: `tier` is
+	/// [`PrefilterTier::Graph`] or [`PrefilterTier::GraphUnboosted`].
+	Walk {
+		tier: PrefilterTier,
+		ef: u32,
+	},
+}
+
+impl PrefilterDecision {
+	/// The tier, as `EXPLAIN ANALYZE` reports it.
+	pub(super) fn tier(&self) -> PrefilterTier {
+		match self {
+			Self::Exact {
+				..
+			} => PrefilterTier::Exact,
+			Self::Walk {
+				tier,
+				..
+			} => *tier,
+		}
+	}
+
+	/// The width of the walk, `None` for the exact tier.
+	pub(super) fn walk_ef(&self) -> Option<u32> {
+		match self {
+			Self::Exact {
+				..
+			} => None,
+			Self::Walk {
+				ef,
+				..
+			} => Some(*ef),
+		}
+	}
+}
+
+/// What a search of ANN index `index_def` of `table`, restricted to an
+/// allow-list of `allow_len` members and requested with `ef`, does with the
+/// list ([`plan_prefilter`]), where `per_row` is whether the exact tier would
+/// judge each member it reads.
+///
+/// The graph's shape is read only where the decision weighs it: an HNSW index,
+/// above the exact threshold, that the exact tier scores from the vectors it
+/// stores, with nothing judged per member. Elsewhere neither the table nor the
+/// graph is read.
+pub(super) async fn decide_prefilter(
 	ctx: &ExecutionContext,
 	table: &TableName,
 	index_def: &crate::catalog::IndexDefinition,
-	vector: &[Number],
-	k: u32,
-	allow: &RoaringTreemap,
-) -> FlowResult<Option<Vec<(RecordId, f64)>>> {
-	if !crate::catalog::keeps_vector_doc_elements(index_def.format_version) {
-		return Ok(None);
-	}
+	allow_len: u64,
+	ef: u32,
+	per_row: bool,
+) -> FlowResult<PrefilterDecision> {
+	let settings = PrefilterSettings::configured(&index_def.index);
+	let weighed = matches!(index_def.index, Index::Hnsw(_))
+		&& settings.weighs_graph(allow_len)
+		&& !per_row
+		&& crate::catalog::keeps_vector_doc_elements(index_def.format_version);
+	let (graph, ids) = if weighed {
+		let (table_id, ikb) = target_ids(ctx, table, index_def).await?;
+		let graph = ann_graph_shape(&AnnTarget {
+			frozen_ctx: &ctx.root().ctx,
+			index_def,
+			ikb: &ikb,
+			table_id,
+		})
+		.await?;
+		(graph, Some((table_id, ikb)))
+	} else {
+		(None, None)
+	};
+	Ok(match plan_prefilter(allow_len, ef, graph, &settings) {
+		(PrefilterTier::Exact, _) => PrefilterDecision::Exact {
+			ids,
+		},
+		(tier, ef) => PrefilterDecision::Walk {
+			tier,
+			ef,
+		},
+	})
+}
+
+/// The table id and key base an [`AnnTarget`] opens ANN index `index_def` of
+/// `table` with, the table's definition read at the current version.
+async fn target_ids(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &crate::catalog::IndexDefinition,
+) -> FlowResult<TargetIds> {
 	let db_ctx = ctx.database()?;
 	let Some(table_def) = db_ctx.get_table_def(table, None).await.context("Failed to get table")?
 	else {
@@ -300,12 +388,36 @@ async fn from_index_vectors(
 		index_def.table_name.clone(),
 		index_def.index_id,
 	);
+	Ok((table_def.table_id, ikb))
+}
+
+/// The members of `allow` nearest `vector` as [`exact`] answers them, scored
+/// from the vectors ANN index `index_def` stores; `None` where the index keeps
+/// no doc-ID → elements mapping and the members' records must be scored.
+/// `ids` are the table id and key base to open the index with, where the
+/// caller has read them already.
+async fn from_index_vectors(
+	ctx: &ExecutionContext,
+	table: &TableName,
+	index_def: &crate::catalog::IndexDefinition,
+	vector: &[Number],
+	k: u32,
+	allow: &RoaringTreemap,
+	ids: Option<TargetIds>,
+) -> FlowResult<Option<Vec<(RecordId, f64)>>> {
+	if !crate::catalog::keeps_vector_doc_elements(index_def.format_version) {
+		return Ok(None);
+	}
+	let (table_id, ikb) = match ids {
+		Some(ids) => ids,
+		None => target_ids(ctx, table, index_def).await?,
+	};
 	let scored = exact_from_index_vectors(
 		&AnnTarget {
 			frozen_ctx: &ctx.root().ctx,
 			index_def,
 			ikb: &ikb,
-			table_id: table_def.table_id,
+			table_id,
 		},
 		vector,
 		k,

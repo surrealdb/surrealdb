@@ -137,6 +137,11 @@ where
 	pub(super) fn clear(&mut self) {
 		self.nodes.clear();
 	}
+
+	/// The number of nodes the graph holds.
+	pub(in crate::trees) fn len(&self) -> usize {
+		self.nodes.len()
+	}
 }
 
 #[cfg(test)]
@@ -144,10 +149,6 @@ impl<S> UndirectedGraph<S>
 where
 	S: DynamicSet,
 {
-	pub(in crate::trees) fn len(&self) -> usize {
-		self.nodes.len()
-	}
-
 	pub(in crate::trees) fn nodes(&self) -> &HashMap<ElementId, S> {
 		&self.nodes
 	}

@@ -17,6 +17,16 @@ pub(crate) mod pending;
 pub mod store;
 pub mod vector;
 
+/// The size of an ANN graph's base layer, which a filtered traversal walks:
+/// the nodes it holds and the most neighbours a node keeps. An estimate for
+/// the planner's cost model, not a count of the records the index answers
+/// for: elements still queued for insertion are not in the graph yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnnGraphShape {
+	pub nodes: u64,
+	pub degree: u32,
+}
+
 /// For earch KNN result we have the RecordID, the distance (f64), and an optional record.
 /// Optimisation: The optional record is present if a filter has checked if the record is truthy has
 /// been used
