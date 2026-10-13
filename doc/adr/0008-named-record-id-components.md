@@ -295,10 +295,11 @@ never a bound, so `DELETE reading WHERE time < time::now() - 30d` reads the rang
 selects (the whole table when none is pinned) and filters. A deferred bound holding a clock, entropy,
 I/O or write effect is never pushed. The retention form that reaches a range is
 `LET $cut = time::now() - 30d; DELETE reading WHERE city = $city AND time < $cut;`: the bound is a
-value when the statement is planned. A mutation reads a secondary index, on any table, only for a
-literal bound, so an index on the time component serves a retention `DELETE` whose cutoff is written
-as a literal and not one bound by `$cut`. The two positions are pinned by
-`planner/id_components_clock_bound.surql` and `planner/id_components_mutation_where.surql`.
+value when the statement is planned. A statement-scoped parameter in a mutation's `WHERE` is
+substituted before the access path is chosen, as in a `SELECT`'s, so an index on the time component
+serves `DELETE reading WHERE time < $cut` too. The positions are pinned by
+`planner/id_components_clock_bound.surql`, `planner/id_components_mutation_where.surql` and
+`planner/mutation_index_param_bounds.surql`.
 
 **Nothing persisted changes.** Record keys, index entries, bodies, changefeeds and view formats are
 as they were: components are never stored. A 3.x database opens unchanged on a release that has this

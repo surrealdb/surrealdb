@@ -5,8 +5,9 @@
 //! literal where index analysis, constant folding and source classification
 //! need one.
 //!
-//! Two clause positions are rewritten: a predicate, and a `FROM` source. Every
-//! other clause keeps its parameters and resolves them per row. What is
+//! Two clause positions are rewritten: a predicate (a mutation's `WHERE`
+//! included), and a `FROM` source. Every other clause — a mutation's data
+//! clause among them — keeps its parameters and resolves them per row. What is
 //! substituted in those two positions, and what is deliberately left for
 //! runtime:
 //!
@@ -61,7 +62,8 @@ use crate::exec::planner::util::{
 };
 use crate::expr::logical::{
 	LogicalDdl, LogicalDdlStatement, LogicalEval, LogicalExpr, LogicalFilter, LogicalForeach,
-	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, SourceRef,
+	LogicalJoin, LogicalLet, LogicalOp, LogicalPermissionFilter, LogicalSource, LogicalWrite,
+	SourceRef,
 };
 use crate::expr::operator::BinaryOperator;
 use crate::val::Value;
@@ -240,6 +242,13 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 				predicate,
 				..
 			}) => collect_resolvable_names(predicate, &mut names, &mut outside_query_vectors),
+			// A mutation's `WHERE` is a predicate: it chooses the records the
+			// write reads, by the access path a read under it would take.
+			LogicalOp::Write(LogicalWrite {
+				cond: Some(cond),
+				..
+			}) => collect_resolvable_names(cond, &mut names, &mut outside_query_vectors),
+			LogicalOp::Write(_) => {}
 			LogicalOp::Join(LogicalJoin {
 				on,
 				filter,
@@ -287,7 +296,6 @@ fn referenced_and_bound(op: &LogicalOp) -> ReferencedNames {
 			| LogicalOp::VersionScope(_)
 			| LogicalOp::Only(_)
 			| LogicalOp::Match(_)
-			| LogicalOp::Write(_)
 			| LogicalOp::Explain(_)
 			| LogicalOp::Eval(_)
 			| LogicalOp::If(_)
@@ -399,6 +407,12 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 				guard,
 			})
 		}
+		LogicalOp::Write(mut write) => {
+			if let Some(cond) = &mut write.cond {
+				substitute(cond, subs);
+			}
+			LogicalOp::Write(write)
+		}
 		LogicalOp::Join(mut join) => {
 			for (left, right) in &mut join.on {
 				substitute(left, subs);
@@ -467,7 +481,6 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 		| LogicalOp::VersionScope(_)
 		| LogicalOp::Only(_)
 		| LogicalOp::Match(_)
-		| LogicalOp::Write(_)
 		| LogicalOp::Explain(_)
 		| LogicalOp::Eval(_)
 		| LogicalOp::If(_)
@@ -713,6 +726,28 @@ mod tests {
 		.to_string();
 		for expected in ["$p AS q", "LIMIT $p", "START $p"] {
 			assert!(plan.contains(expected), "missing {expected:?} in:\n{plan}");
+		}
+	}
+
+	/// A mutation's `WHERE` is a predicate, substituted like a `SELECT`'s, so
+	/// its access path sees the bound a context value (a `LET`, or a client
+	/// bind parameter) holds. Its data clause keeps the parameter.
+	#[tokio::test]
+	async fn substitutes_a_mutation_condition_and_not_its_data() {
+		for statement in [
+			"DELETE t WHERE a < $p AND b = $this.b",
+			"UPDATE t SET c = $p WHERE a < $p AND b = $this.b",
+		] {
+			let plan = bound(lower(statement), vec![("p", int(5)), ("this", int(1))]).await;
+			let LogicalOp::Write(write) = &plan else {
+				panic!("{statement}: not a write:\n{plan}");
+			};
+			let cond = write.cond.as_ref().expect("a condition").to_string();
+			assert_eq!(cond, "a < 5 AND b = $this.b", "{statement}");
+			if let Some(data) = &write.data {
+				let values: Vec<String> = data.values().iter().map(|v| v.to_string()).collect();
+				assert_eq!(values, ["$p"], "{statement}");
+			}
 		}
 	}
 

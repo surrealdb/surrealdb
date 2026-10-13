@@ -883,10 +883,8 @@ are three ways to reach the old records without reading the rest:
 
 - pin the leading components: `DELETE reading WHERE city = $city AND time < $cut;`,
   once per city;
-- define an index on the component, `DEFINE INDEX by_time ON reading FIELDS time;`.
-  A mutation reads an index, on any table, only for a bound written as a literal
-  (`DELETE reading WHERE time < d'2025-01-01T00:00:00Z'`); with `$cut` it reads
-  the table. A `SELECT` reads the index with either;
+- define an index on the component, `DEFINE INDEX by_time ON reading FIELDS time;`,
+  which `DELETE reading WHERE time < $cut` reads as a `SELECT` does;
 - order the key by time, `[time: datetime, city: string]`, when time is what
   most reads and deletes bound. A range over the first component needs no
   prefix, and a read by city alone then has no leading component to bound it.
