@@ -276,7 +276,15 @@ impl<'ctx> Planner<'ctx> {
 // Free Functions
 // ============================================================================
 
-/// Find the index of the group-by key for an expression.
+/// Find the index of the group-by key for an expression: its alias is named in
+/// `GROUP BY`, or else the expression is a path that is.
+///
+/// The alias is judged first because a `GROUP BY` name that is some field's
+/// alias means that field (`plan_aggregation` resolves the keys the same way),
+/// whatever else the name spells. In
+/// `SELECT g1 AS g0, g2 AS g1 … GROUP BY g0, g1` the path `g1` that the first
+/// field projects is also the name of the second key, but the first field is
+/// key 0.
 pub(super) fn find_group_key_index(
 	expr: &Expr,
 	alias: Option<&Idiom>,
@@ -284,14 +292,14 @@ pub(super) fn find_group_key_index(
 ) -> Option<usize> {
 	use surrealdb_types::ToSql;
 
-	if let Expr::Idiom(idiom) = expr
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql())
+	if let Some(alias) = alias
+		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql())
 	{
 		return Some(idx);
 	}
 
-	if let Some(alias) = alias
-		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == alias.to_sql())
+	if let Expr::Idiom(idiom) = expr
+		&& let Some(idx) = group_by.iter().position(|g| g.to_sql() == idiom.to_sql())
 	{
 		return Some(idx);
 	}

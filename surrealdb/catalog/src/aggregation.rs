@@ -1219,17 +1219,13 @@ impl AggregationAnalysis {
 						})
 					};
 
+					// An alias names a group key by the name `GROUP BY` wrote, so it is looked
+					// up among `groups`. `group_expressions` cannot stand in for them: a key's
+					// entry is replaced by the expression of the field that names it, so in
+					// `SELECT g1 AS g0, g2 AS g1 … GROUP BY g0, g1` the alias `g1` of the second
+					// field would match key 0, whose entry is by then the expression `g1`.
 					if let Some((alias, x)) = alias.as_ref().and_then(|alias| {
-						group_expressions
-							.iter()
-							.position(|x| {
-								if let Expr::Idiom(i) = x {
-									*i == *alias
-								} else {
-									false
-								}
-							})
-							.map(|x| (alias, x))
+						groups.0.iter().position(|g| g.0 == *alias).map(|x| (alias, x))
 					}) {
 						// The alias is used within the group statement, therefore this expression
 						// is a group expression. i.e. year in the statement:
