@@ -145,3 +145,92 @@ impl_into_cow!(ShowStatement);
 impl_into_cow!(SleepStatement);
 impl_into_cow!(UpdateStatement);
 impl_into_cow!(UpsertStatement);
+
+#[cfg(test)]
+mod tests {
+	use std::default::Default;
+
+	use surrealdb_types::ToSql;
+
+	use super::*;
+
+	// Ensure that both Default & ToSQL exist
+	macro_rules! gentest_default_tosql {
+        ($($t:ty, $name:ident),* $(,)?) => {$(
+            #[test]
+            fn $name(){
+                <$t>::default().to_sql();
+            }
+        )*};
+    }
+
+	gentest_default_tosql!(AlterAccessStatement, test_alter_access_statement);
+	gentest_default_tosql!(AlterAnalyzerStatement, test_alter_analyzer_statement);
+	gentest_default_tosql!(AlterApiStatement, test_alter_api_statement);
+	gentest_default_tosql!(AlterBucketStatement, test_alter_bucket_statement);
+	gentest_default_tosql!(AlterConfigStatement, test_alter_config_statement);
+	gentest_default_tosql!(AlterDatabaseStatement, test_alter_database_statement);
+	gentest_default_tosql!(AlterEventStatement, test_alter_event_statement);
+	gentest_default_tosql!(AlterFieldStatement, test_alter_field_statement);
+	gentest_default_tosql!(AlterFunctionStatement, test_alter_function_statement);
+	gentest_default_tosql!(AlterIndexStatement, test_alter_index_statement);
+	gentest_default_tosql!(AlterModuleStatement, test_alter_module_statement);
+	gentest_default_tosql!(AlterNamespaceStatement, test_alter_namespace_statement);
+	gentest_default_tosql!(AlterParamStatement, test_alter_param_statement);
+	gentest_default_tosql!(AlterSequenceStatement, test_alter_sequence_statement);
+	gentest_default_tosql!(AlterSystemStatement, test_alter_system_statement);
+	gentest_default_tosql!(AlterTableStatement, test_alter_table_statement);
+	gentest_default_tosql!(AlterUserStatement, test_alter_user_statement);
+	gentest_default_tosql!(CreateStatement, test_create_statement);
+	gentest_default_tosql!(DefineAccessStatement, test_define_access_statement);
+	gentest_default_tosql!(DefineAnalyzerStatement, test_define_analyzer_statement);
+	gentest_default_tosql!(DefineApiStatement, test_define_api_statement);
+	gentest_default_tosql!(DefineBucketStatement, test_define_bucket_statement);
+	gentest_default_tosql!(DefineConfigStatement, test_define_config_statement);
+	gentest_default_tosql!(DefineDatabaseStatement, test_define_database_statement);
+	gentest_default_tosql!(DefineEventStatement, test_define_event_statement);
+	gentest_default_tosql!(DefineFieldStatement, test_define_field_statement);
+	gentest_default_tosql!(DefineFunctionStatement, test_define_function_statement);
+	gentest_default_tosql!(DefineIndexStatement, test_define_index_statement);
+	gentest_default_tosql!(DefineModelStatement, test_define_model_statement);
+	// Probably the one case that doesn't really make sense
+	// gentest_default_tosql!(DefineModuleStatement, test_define_module_statement);
+	gentest_default_tosql!(DefineNamespaceStatement, test_define_namespace_statement);
+	gentest_default_tosql!(DefineParamStatement, test_define_param_statement);
+	gentest_default_tosql!(DefineSequenceStatement, test_define_sequence_statement);
+	gentest_default_tosql!(DefineTableStatement, test_define_table_statement);
+	gentest_default_tosql!(DefineUserStatement, test_define_user_statement);
+	gentest_default_tosql!(DeleteStatement, test_delete_statement);
+	gentest_default_tosql!(ForeachStatement, test_foreach_statement);
+	gentest_default_tosql!(IfelseStatement, test_ifelse_statement);
+	gentest_default_tosql!(InsertStatement, test_insert_statement);
+	gentest_default_tosql!(KillStatement, test_kill_statement);
+	gentest_default_tosql!(LiveStatement, test_live_statement);
+	gentest_default_tosql!(OptionStatement, test_option_statement);
+	gentest_default_tosql!(OutputStatement, test_output_statement);
+	gentest_default_tosql!(RebuildIndexStatement, test_rebuild_index_statement);
+	gentest_default_tosql!(RelateStatement, test_relate_statement);
+	gentest_default_tosql!(RemoveAccessStatement, test_remove_access_statement);
+	gentest_default_tosql!(RemoveAnalyzerStatement, test_remove_analyzer_statement);
+	gentest_default_tosql!(RemoveApiStatement, test_remove_api_statement);
+	gentest_default_tosql!(RemoveBucketStatement, test_remove_bucket_statement);
+	gentest_default_tosql!(RemoveConfigStatement, test_remove_config_statement);
+	gentest_default_tosql!(RemoveDatabaseStatement, test_remove_database_statement);
+	gentest_default_tosql!(RemoveEventStatement, test_remove_event_statement);
+	gentest_default_tosql!(RemoveFieldStatement, test_remove_field_statement);
+	gentest_default_tosql!(RemoveFunctionStatement, test_remove_function_statement);
+	gentest_default_tosql!(RemoveIndexStatement, test_remove_index_statement);
+	gentest_default_tosql!(RemoveModelStatement, test_remove_model_statement);
+	gentest_default_tosql!(RemoveModuleStatement, test_remove_module_statement);
+	gentest_default_tosql!(RemoveNamespaceStatement, test_remove_namespace_statement);
+	gentest_default_tosql!(RemoveParamStatement, test_remove_param_statement);
+	gentest_default_tosql!(RemoveSequenceStatement, test_remove_sequence_statement);
+	gentest_default_tosql!(RemoveTableStatement, test_remove_table_statement);
+	gentest_default_tosql!(RemoveUserStatement, test_remove_user_statement);
+	gentest_default_tosql!(SelectStatement, test_select_statement);
+	gentest_default_tosql!(SetStatement, test_set_statement);
+	gentest_default_tosql!(ShowStatement, test_show_statement);
+	gentest_default_tosql!(SleepStatement, test_sleep_statement);
+	gentest_default_tosql!(UpdateStatement, test_update_statement);
+	gentest_default_tosql!(UpsertStatement, test_upsert_statement);
+}
