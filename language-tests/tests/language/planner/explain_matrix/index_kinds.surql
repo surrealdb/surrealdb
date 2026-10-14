@@ -630,16 +630,16 @@ SELECT id FROM uq WITH NOINDEX ORDER BY email;
 -- `CONTAINS` against a `*` column is an element seek. Two rows hold 'x' and
 -- each is emitted once: a row is reached through one entry per matching
 -- element, and only one of `fan:1`'s two elements matches.
-EXPLAIN SELECT id FROM fan WHERE tags CONTAINS 'x';
-SELECT id FROM fan WHERE tags CONTAINS 'x';
-SELECT id FROM fan WITH NOINDEX WHERE tags CONTAINS 'x';
+EXPLAIN SELECT id FROM fan WHERE tags.* CONTAINS 'x';
+SELECT id FROM fan WHERE tags.* CONTAINS 'x';
+SELECT id FROM fan WITH NOINDEX WHERE tags.* CONTAINS 'x';
 
 -- The count goes through the key-only path rather than the scan, so it is
 -- asserted separately from the rows above: it counts index entries, which is
 -- the number of rows only while no row matches twice.
-EXPLAIN SELECT count() FROM fan WHERE tags CONTAINS 'x' GROUP ALL;
-SELECT count() FROM fan WHERE tags CONTAINS 'x' GROUP ALL;
-SELECT count() FROM fan WITH NOINDEX WHERE tags CONTAINS 'x' GROUP ALL;
+EXPLAIN SELECT count() FROM fan WHERE tags.* CONTAINS 'x' GROUP ALL;
+SELECT count() FROM fan WHERE tags.* CONTAINS 'x' GROUP ALL;
+SELECT count() FROM fan WITH NOINDEX WHERE tags.* CONTAINS 'x' GROUP ALL;
 
 -- Whole-array equality is not an access a `*` column offers — its entries are
 -- elements — so the index is left out of the plan and the scan answers.
@@ -697,12 +697,12 @@ CREATE fanu:4 SET tags = ['s', 's'];
 SELECT count() FROM fanu WHERE tags CONTAINS 's' GROUP ALL;
 SELECT count() FROM fanu WITH NOINDEX WHERE tags CONTAINS 's' GROUP ALL;
 
-EXPLAIN SELECT id FROM fanu WHERE tags CONTAINS 'p';
-SELECT id FROM fanu WHERE tags CONTAINS 'p';
-SELECT id FROM fanu WITH NOINDEX WHERE tags CONTAINS 'p';
-EXPLAIN SELECT count() FROM fanu WHERE tags CONTAINS 'p' GROUP ALL;
-SELECT count() FROM fanu WHERE tags CONTAINS 'p' GROUP ALL;
-SELECT count() FROM fanu WITH NOINDEX WHERE tags CONTAINS 'p' GROUP ALL;
+EXPLAIN SELECT id FROM fanu WHERE tags.* CONTAINS 'p';
+SELECT id FROM fanu WHERE tags.* CONTAINS 'p';
+SELECT id FROM fanu WITH NOINDEX WHERE tags.* CONTAINS 'p';
+EXPLAIN SELECT count() FROM fanu WHERE tags.* CONTAINS 'p' GROUP ALL;
+SELECT count() FROM fanu WHERE tags.* CONTAINS 'p' GROUP ALL;
+SELECT count() FROM fanu WITH NOINDEX WHERE tags.* CONTAINS 'p' GROUP ALL;
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- Unconditional COUNT index (`Index::Count(None)`)
@@ -958,12 +958,12 @@ RETURN (SELECT id FROM prg WITH NOINDEX WHERE state = 'on').len();
 };
 
 -- `dupe:1` owns two entries keyed 'x' and is emitted once.
-EXPLAIN SELECT id FROM dupe WHERE tags CONTAINS 'x';
-SELECT id FROM dupe WHERE tags CONTAINS 'x';
-SELECT id FROM dupe WITH NOINDEX WHERE tags CONTAINS 'x';
-EXPLAIN SELECT count() FROM dupe WHERE tags CONTAINS 'x' GROUP ALL;
-SELECT count() FROM dupe WHERE tags CONTAINS 'x' GROUP ALL;
-SELECT count() FROM dupe WITH NOINDEX WHERE tags CONTAINS 'x' GROUP ALL;
+EXPLAIN SELECT id FROM dupe WHERE tags.* CONTAINS 'x';
+SELECT id FROM dupe WHERE tags.* CONTAINS 'x';
+SELECT id FROM dupe WITH NOINDEX WHERE tags.* CONTAINS 'x';
+EXPLAIN SELECT count() FROM dupe WHERE tags.* CONTAINS 'x' GROUP ALL;
+SELECT count() FROM dupe WHERE tags.* CONTAINS 'x' GROUP ALL;
+SELECT count() FROM dupe WITH NOINDEX WHERE tags.* CONTAINS 'x' GROUP ALL;
 
 -- The same non-unique index accepts the row defect (4) rejects under UNIQUE.
 CREATE dupe:4 SET tags = ['s', 's'];

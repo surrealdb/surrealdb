@@ -196,7 +196,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: tags CONTAINSALL ['x', 'y']]
+    Filter [ctx: Db] [predicate: tags.* CONTAINSALL ['x', 'y']]
         UnionIndexScan [ctx: Db] [table: rsa, branches: 2]
             IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'x', direction: Forward]
             IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'y', direction: Forward]
@@ -217,7 +217,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['x', 'y']]
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['x', 'y']]
         UnionIndexScan [ctx: Db] [table: rsa, branches: 2]
             IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'x', direction: Forward]
             IndexScan [ctx: Db] [table: rsa, index: rsa_tags, access: = 'y', direction: Forward]
@@ -238,7 +238,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
-    Filter [ctx: Db] [predicate: n = 3 OR tags CONTAINS 'z']
+    Filter [ctx: Db] [predicate: n = 3 OR tags.* CONTAINS 'z']
         BitmapScan [ctx: Db] [table: rsa]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: rsa_n, access: = 3]
@@ -358,7 +358,7 @@ value = "[rsf:1, rsf:2]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Limit [ctx: Db] [limit: 2]
-        Filter [ctx: Db] [predicate: b = 1 AND tags CONTAINS 'x' AND note = 'keep']
+        Filter [ctx: Db] [predicate: b = 1 AND tags.* CONTAINS 'x' AND note = 'keep']
             IndexScan [ctx: Db] [table: rsf, index: rsf_b_tags, access: [1, 'x'], direction: Forward]
 "'''
 
@@ -643,7 +643,7 @@ SELECT VALUE id FROM rsv WITH NOINDEX WHERE country = 'fr' OR country = 'be' ORD
 -- element -- and a record reaching the union carries at least one of them,
 -- which is strictly weaker than carrying all of them. The leaf survives, and
 -- the rows prove why: rsa:2 and rsa:3 are in the union and not in the answer.
-EXPLAIN SELECT VALUE id FROM rsa WHERE tags CONTAINSALL ['x', 'y'];
+EXPLAIN SELECT VALUE id FROM rsa WHERE tags[*] CONTAINSALL ['x', 'y'];
 SELECT VALUE id FROM rsa WHERE tags CONTAINSALL ['x', 'y'] ORDER BY id;
 SELECT VALUE id FROM rsa WITH NOINDEX WHERE tags CONTAINSALL ['x', 'y'] ORDER BY id;
 SELECT count() FROM rsa WHERE tags CONTAINSALL ['x', 'y'] GROUP ALL;
@@ -651,7 +651,7 @@ SELECT count() FROM rsa WITH NOINDEX WHERE tags CONTAINSALL ['x', 'y'] GROUP ALL
 
 -- B2: `CONTAINSANY` over the same two elements is the leaf the union does
 -- prove -- the control B1 is read against. Same branches, no residual.
-EXPLAIN SELECT VALUE id FROM rsa WHERE tags CONTAINSANY ['x', 'y'];
+EXPLAIN SELECT VALUE id FROM rsa WHERE tags[*] CONTAINSANY ['x', 'y'];
 SELECT VALUE id FROM rsa WHERE tags CONTAINSANY ['x', 'y'] ORDER BY id;
 SELECT VALUE id FROM rsa WITH NOINDEX WHERE tags CONTAINSANY ['x', 'y'] ORDER BY id;
 SELECT count() FROM rsa WHERE tags CONTAINSANY ['x', 'y'] GROUP ALL;
@@ -663,7 +663,7 @@ SELECT count() FROM rsa WITH NOINDEX WHERE tags CONTAINSANY ['x', 'y'] GROUP ALL
 -- union of two exact bitmaps is the disjunction, so this re-check rejects
 -- nothing and the rows cannot tell it apart from its absence; the plan is the
 -- whole assertion here.
-EXPLAIN SELECT VALUE id FROM rsa WHERE n = 3 OR tags CONTAINS 'z';
+EXPLAIN SELECT VALUE id FROM rsa WHERE n = 3 OR tags[*] CONTAINS 'z';
 SELECT VALUE id FROM rsa WHERE n = 3 OR tags CONTAINS 'z' ORDER BY id;
 SELECT VALUE id FROM rsa WITH NOINDEX WHERE n = 3 OR tags CONTAINS 'z' ORDER BY id;
 SELECT count() FROM rsa WHERE n = 3 OR tags CONTAINS 'z' GROUP ALL;
@@ -734,7 +734,7 @@ SELECT count() FROM rsa WITH NOINDEX WHERE tags CONTAINSANY [] GROUP ALL;
 -- proved by the access exactly as the leading equality is, so no `Filter`
 -- stands above the scan -- and no `Distinct` either, because a pinned fanning
 -- column reaches each matching record through one entry.
-EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x';
+EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags[*] CONTAINS 'x';
 SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x' ORDER BY id;
 SELECT VALUE id FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS 'x' ORDER BY id;
 SELECT count() FROM rsf WHERE b = 1 AND tags CONTAINS 'x' GROUP ALL;
@@ -748,7 +748,7 @@ SELECT count() FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS 'x' GROUP ALL
 -- limited query: index order and table order differ, so the first two rows of
 -- each are legitimately different rows and comparing them would assert a scan
 -- order nothing promises.
-EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x' LIMIT 2;
+EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags[*] CONTAINS 'x' LIMIT 2;
 array::sort((SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x'));
 array::sort((SELECT VALUE id FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS 'x'));
 
@@ -757,7 +757,7 @@ array::sort((SELECT VALUE id FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS
 -- so the limit cannot be pushed into the scan and stands as its own `Limit`
 -- above the filter. The scan drops its `predicate:` attribute: the residual
 -- has moved to the `Filter`, which names the survivor alone.
-EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x' AND note = 'keep' LIMIT 2;
+EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND tags[*] CONTAINS 'x' AND note = 'keep' LIMIT 2;
 array::sort((SELECT VALUE id FROM rsf WHERE b = 1 AND tags CONTAINS 'x' AND note = 'keep'));
 array::sort((SELECT VALUE id FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS 'x' AND note = 'keep'));
 SELECT count() FROM rsf WHERE b = 1 AND tags CONTAINS 'x' AND note = 'keep' GROUP ALL;
@@ -765,7 +765,7 @@ SELECT count() FROM rsf WITH NOINDEX WHERE b = 1 AND tags CONTAINS 'x' AND note 
 
 -- D4: the containment spelled with the value on the left. Same prefix, same
 -- absence of a residual.
-EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND 'x' INSIDE tags;
+EXPLAIN SELECT VALUE id FROM rsf WHERE b = 1 AND 'x' INSIDE tags[*];
 SELECT VALUE id FROM rsf WHERE b = 1 AND 'x' INSIDE tags ORDER BY id;
 SELECT VALUE id FROM rsf WITH NOINDEX WHERE b = 1 AND 'x' INSIDE tags ORDER BY id;
 SELECT count() FROM rsf WHERE b = 1 AND 'x' INSIDE tags GROUP ALL;
@@ -813,7 +813,7 @@ SELECT count() FROM rsf WITH NOINDEX WHERE b = 1 GROUP ALL;
 
 -- E1: both columns pinned from the mirror order. D1's assertion, restated
 -- where the fanning column leads.
-EXPLAIN SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x' AND b = 1;
+EXPLAIN SELECT VALUE id FROM rsm WHERE tags[*] CONTAINS 'x' AND b = 1;
 SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x' AND b = 1 ORDER BY id;
 SELECT VALUE id FROM rsm WITH NOINDEX WHERE tags CONTAINS 'x' AND b = 1 ORDER BY id;
 SELECT count() FROM rsm WHERE tags CONTAINS 'x' AND b = 1 GROUP ALL;
@@ -821,14 +821,14 @@ SELECT count() FROM rsm WITH NOINDEX WHERE tags CONTAINS 'x' AND b = 1 GROUP ALL
 
 -- E2: E1 under a LIMIT -- D2 in the mirror order, so the pushdown depends on
 -- the predicate being consumed and not on where the fanning column sits.
-EXPLAIN SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x' AND b = 1 LIMIT 2;
+EXPLAIN SELECT VALUE id FROM rsm WHERE tags[*] CONTAINS 'x' AND b = 1 LIMIT 2;
 array::sort((SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x' AND b = 1));
 array::sort((SELECT VALUE id FROM rsm WITH NOINDEX WHERE tags CONTAINS 'x' AND b = 1));
 
 -- E3: the containment alone. It pins the leading column, so the access is a
 -- one-value prefix, the leaf is proved, and the pinned fanning column again
 -- costs no `Distinct` even though the trailing scalar varies under it.
-EXPLAIN SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x';
+EXPLAIN SELECT VALUE id FROM rsm WHERE tags[*] CONTAINS 'x';
 SELECT VALUE id FROM rsm WHERE tags CONTAINS 'x' ORDER BY id;
 SELECT VALUE id FROM rsm WITH NOINDEX WHERE tags CONTAINS 'x' ORDER BY id;
 SELECT count() FROM rsm WHERE tags CONTAINS 'x' GROUP ALL;

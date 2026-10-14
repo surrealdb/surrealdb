@@ -48,8 +48,11 @@ error = "Database index `tagged_pair` already contains ['m', 8], with record `ta
 value = "[{ id: tagged:base }]"
 
 */
+-- Each containment spells the flatten (`tags.*`): only then is a stored scalar
+-- ruled out, so only then may the element index answer it.
+
 -- The index is what serves the read, not a table scan.
-EXPLAIN SELECT id FROM tagged WHERE tags CONTAINS 'p';
+EXPLAIN SELECT id FROM tagged WHERE tags.* CONTAINS 'p';
 
 -- A record THIS binary writes owns every combination of its elements, so each
 -- of the four is claimed and a probe for any one of them collides. ['m', 8] is
@@ -60,4 +63,4 @@ CREATE tagged:probe_n7 SET tags = ['n'], nums = [7];
 CREATE tagged:probe_m8 SET tags = ['m'], nums = [8];
 
 -- Reading across both writers' entries returns each record once.
-SELECT id FROM tagged WHERE tags CONTAINS 'p';
+SELECT id FROM tagged WHERE tags.* CONTAINS 'p';

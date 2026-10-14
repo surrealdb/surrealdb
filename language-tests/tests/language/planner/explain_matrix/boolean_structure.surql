@@ -454,7 +454,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: tags CONTAINS 'red' AND b = true]
+    Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' AND b = true]
         BitmapScan [ctx: Db] [table: bs]
             BitmapAnd [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -471,7 +471,7 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: tags CONTAINS 'red' AND b = true]
+        Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' AND b = true]
             BitmapScan [ctx: Db] [table: bs]
                 BitmapAnd [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
@@ -487,7 +487,7 @@ value = "[{ count: 3 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR b = false]
+    Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' OR b = false]
         BitmapScan [ctx: Db] [table: bs]
             BitmapOr [ctx: Db]
                 BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
@@ -504,7 +504,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:4 }, { id: bs:6 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR b = false]
+        Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' OR b = false]
             BitmapScan [ctx: Db] [table: bs]
                 BitmapOr [ctx: Db]
                     BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
@@ -520,7 +520,7 @@ value = "[{ count: 5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR tags CONTAINS 'blue']
+    Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' OR tags.* CONTAINS 'blue']
         UnionIndexScan [ctx: Db] [table: bs, branches: 2]
             IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
             IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'blue', direction: Forward]
@@ -536,7 +536,7 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:6 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: tags CONTAINS 'red' OR tags CONTAINS 'blue']
+        Filter [ctx: Db] [predicate: tags.* CONTAINS 'red' OR tags.* CONTAINS 'blue']
             UnionIndexScan [ctx: Db] [table: bs, branches: 2]
                 IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
                 IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'blue', direction: Forward]
@@ -578,7 +578,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+    Filter [ctx: Db] [predicate: not(tags.* CONTAINS 'red')]
         IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -592,7 +592,7 @@ value = "[{ id: bs:5 }]"
 value = '''
 "SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+        Filter [ctx: Db] [predicate: not(tags.* CONTAINS 'red')]
             IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
@@ -925,37 +925,37 @@ SELECT count() FROM bs WITH NOINDEX WHERE a = 'x' AND b = true AND u = 'p' GROUP
 -- and bs:3 match both OR branches through several entries each, so a union that
 -- deduped by entry rather than by record would emit a row twice and inflate the
 -- count.
-EXPLAIN SELECT id FROM bs WHERE tags CONTAINS 'red';
-SELECT id FROM bs WHERE tags CONTAINS 'red';
-SELECT id FROM bs WITH NOINDEX WHERE tags CONTAINS 'red';
-EXPLAIN SELECT count() FROM bs WHERE tags CONTAINS 'red' GROUP ALL;
-SELECT count() FROM bs WHERE tags CONTAINS 'red' GROUP ALL;
-SELECT count() FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' GROUP ALL;
+EXPLAIN SELECT id FROM bs WHERE tags[*] CONTAINS 'red';
+SELECT id FROM bs WHERE tags[*] CONTAINS 'red';
+SELECT id FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red';
+EXPLAIN SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' GROUP ALL;
+SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' GROUP ALL;
+SELECT count() FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' GROUP ALL;
 
 -- Fan-out branch intersected with a scalar branch.
-EXPLAIN SELECT id FROM bs WHERE tags CONTAINS 'red' AND b = true;
-SELECT id FROM bs WHERE tags CONTAINS 'red' AND b = true;
-SELECT id FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' AND b = true;
-EXPLAIN SELECT count() FROM bs WHERE tags CONTAINS 'red' AND b = true GROUP ALL;
-SELECT count() FROM bs WHERE tags CONTAINS 'red' AND b = true GROUP ALL;
-SELECT count() FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' AND b = true GROUP ALL;
+EXPLAIN SELECT id FROM bs WHERE tags[*] CONTAINS 'red' AND b = true;
+SELECT id FROM bs WHERE tags[*] CONTAINS 'red' AND b = true;
+SELECT id FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' AND b = true;
+EXPLAIN SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' AND b = true GROUP ALL;
+SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' AND b = true GROUP ALL;
+SELECT count() FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' AND b = true GROUP ALL;
 
 -- Fan-out branch unioned with a scalar branch.
-EXPLAIN SELECT id FROM bs WHERE tags CONTAINS 'red' OR b = false;
-SELECT id FROM bs WHERE tags CONTAINS 'red' OR b = false;
-SELECT id FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' OR b = false;
-EXPLAIN SELECT count() FROM bs WHERE tags CONTAINS 'red' OR b = false GROUP ALL;
-SELECT count() FROM bs WHERE tags CONTAINS 'red' OR b = false GROUP ALL;
-SELECT count() FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' OR b = false GROUP ALL;
+EXPLAIN SELECT id FROM bs WHERE tags[*] CONTAINS 'red' OR b = false;
+SELECT id FROM bs WHERE tags[*] CONTAINS 'red' OR b = false;
+SELECT id FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' OR b = false;
+EXPLAIN SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' OR b = false GROUP ALL;
+SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' OR b = false GROUP ALL;
+SELECT count() FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' OR b = false GROUP ALL;
 
 -- Two branches of the same fan-out index. bs:1 and bs:3 satisfy both branches,
 -- so this is the shape where per-entry dedupe emits a row twice.
-EXPLAIN SELECT id FROM bs WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue';
-SELECT id FROM bs WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue';
-SELECT id FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue';
-EXPLAIN SELECT count() FROM bs WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM bs WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM bs WITH NOINDEX WHERE tags CONTAINS 'red' OR tags CONTAINS 'blue' GROUP ALL;
+EXPLAIN SELECT id FROM bs WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue';
+SELECT id FROM bs WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue';
+SELECT id FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue';
+EXPLAIN SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM bs WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM bs WITH NOINDEX WHERE tags[*] CONTAINS 'red' OR tags[*] CONTAINS 'blue' GROUP ALL;
 
 -- NOT around the only fan-out leaf: the negation of an element test is not the
 -- complement of any key range, so no candidate may come from idx_tags. bs:4's
@@ -970,12 +970,12 @@ SELECT count() FROM bs WITH NOINDEX WHERE NOT (tags CONTAINS 'red') GROUP ALL;
 -- AND NOT over a fan-out column. The subtracted bitmap is per-element, so
 -- subtracting it must remove every record holding at least one matching
 -- element — bs:1 and bs:3 both go, leaving only bs:5.
-EXPLAIN SELECT id FROM bs WHERE b = true AND NOT (tags CONTAINS 'red');
-SELECT id FROM bs WHERE b = true AND NOT (tags CONTAINS 'red');
-SELECT id FROM bs WITH NOINDEX WHERE b = true AND NOT (tags CONTAINS 'red');
-EXPLAIN SELECT count() FROM bs WHERE b = true AND NOT (tags CONTAINS 'red') GROUP ALL;
-SELECT count() FROM bs WHERE b = true AND NOT (tags CONTAINS 'red') GROUP ALL;
-SELECT count() FROM bs WITH NOINDEX WHERE b = true AND NOT (tags CONTAINS 'red') GROUP ALL;
+EXPLAIN SELECT id FROM bs WHERE b = true AND NOT (tags[*] CONTAINS 'red');
+SELECT id FROM bs WHERE b = true AND NOT (tags[*] CONTAINS 'red');
+SELECT id FROM bs WITH NOINDEX WHERE b = true AND NOT (tags[*] CONTAINS 'red');
+EXPLAIN SELECT count() FROM bs WHERE b = true AND NOT (tags[*] CONTAINS 'red') GROUP ALL;
+SELECT count() FROM bs WHERE b = true AND NOT (tags[*] CONTAINS 'red') GROUP ALL;
+SELECT count() FROM bs WITH NOINDEX WHERE b = true AND NOT (tags[*] CONTAINS 'red') GROUP ALL;
 
 -- The same fan-out shapes against `plain`, whose index is declared on the bare
 -- column rather than on `plain[*]`. The index still holds one entry per element,

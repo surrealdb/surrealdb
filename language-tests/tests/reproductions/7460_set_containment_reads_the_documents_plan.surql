@@ -8,9 +8,9 @@ auth = { level = "owner" }
 issue = 7460
 reason = """
 The plan companion of `7460_set_containment_reads_the_documents`: a
-flattened index over a field declared as a set does not serve a containment,
-which scans the table, while the same index over an array field still serves
-the containment.
+flattened index over a field declared as a set does not serve a containment
+written with the flatten, which scans the table, while the same index over an
+array field still serves it.
 """
 
 [[test.results]]
@@ -34,7 +34,8 @@ value = "NONE"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: s CONTAINS 3, pre_decode_filter: yes]
+    Filter [ctx: Db] [predicate: s.* CONTAINS 3]
+        TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
 [[test.results]]
@@ -50,5 +51,5 @@ DEFINE INDEX ix ON t FIELDS s.*;
 DEFINE TABLE a SCHEMALESS;
 DEFINE FIELD s ON a TYPE array<int>;
 DEFINE INDEX ix ON a FIELDS s.*;
-EXPLAIN SELECT id FROM t WHERE s CONTAINS 3;
-EXPLAIN SELECT id FROM a WHERE s CONTAINS 3;
+EXPLAIN SELECT id FROM t WHERE s.* CONTAINS 3;
+EXPLAIN SELECT id FROM a WHERE s.* CONTAINS 3;

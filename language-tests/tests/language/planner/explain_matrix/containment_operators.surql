@@ -302,7 +302,7 @@ value = "[bag:b, bag:d]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    Filter [ctx: Db] [predicate: tags CONTAINSALL ['red', 'green']] {rows: 1}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSALL ['red', 'green']] {rows: 1}
         UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 1}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 1}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 1}
@@ -324,7 +324,7 @@ value = "[{ count: 1 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 1}
-    Filter [ctx: Db] [predicate: ['red', 'green'] ALLINSIDE tags] {rows: 1}
+    Filter [ctx: Db] [predicate: ['red', 'green'] ALLINSIDE tags.*] {rows: 1}
         UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 1}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 1}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 1}
@@ -340,7 +340,7 @@ value = "[bag:a]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 4}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 'green']] {rows: 4}
         UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
@@ -362,7 +362,7 @@ value = "[{ count: 4 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 4}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 'green']] {rows: 4}
         UnionIndexScan [ctx: Db] [table: bag, branches: 2, merge_by_id: Asc] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
@@ -378,7 +378,7 @@ value = "[bag:a, bag:b, bag:c, bag:e]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    Filter [ctx: Db] [predicate: ['red', 'green'] ANYINSIDE tags] {rows: 4}
+    Filter [ctx: Db] [predicate: ['red', 'green'] ANYINSIDE tags.*] {rows: 4}
         UnionIndexScan [ctx: Db] [table: bag, branches: 2] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
@@ -394,7 +394,7 @@ value = "[bag:a, bag:b, bag:c, bag:e]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 4}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green', 'blue']] {rows: 4}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 'green', 'blue']] {rows: 4}
         UnionIndexScan [ctx: Db] [table: bag, branches: 3] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 4}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'green', direction: Forward] {rows: 4}
@@ -525,7 +525,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11', 't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', 't21', 't22', 't23', 't24', 't25', 't26', 't27', 't28', 't29', 't30', 't31', 't32']] {rows: 3}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 't02', 't03', 't04', 't05', 't06', 't07', 't08', 't09', 't10', 't11', 't12', 't13', 't14', 't15', 't16', 't17', 't18', 't19', 't20', 't21', 't22', 't23', 't24', 't25', 't26', 't27', 't28', 't29', 't30', 't31', 't32']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: bag, branches: 32] {rows: 3}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 'red', direction: Forward] {rows: 3}
             IndexScan [ctx: Db] [table: bag, index: idx_bag_tags, access: = 't02', direction: Forward] {rows: 3}
@@ -618,7 +618,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
-    Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
+    Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 'green']] {rows: 3}
         UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
             IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
             IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
@@ -641,7 +641,7 @@ value = "[{ count: 3 }]"
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 3}
     Sort [ctx: Db] [sort_keys: id ASC] {rows: 3}
-        Filter [ctx: Db] [predicate: tags CONTAINSANY ['red', 'green']] {rows: 3}
+        Filter [ctx: Db] [predicate: tags.* CONTAINSANY ['red', 'green']] {rows: 3}
             UnionIndexScan [ctx: Db] [table: box, branches: 2] {rows: 3}
                 IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 3}
                 IndexScan [ctx: Db] [table: box, index: idx_box, access: ['green'], direction: Forward] {rows: 3}
@@ -676,7 +676,7 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "ProjectValue [ctx: Db] [expr: id] {rows: 2}
-    Filter [ctx: Db] [predicate: code INSIDE ['x', 'y'] AND tags CONTAINS 'red'] {rows: 2}
+    Filter [ctx: Db] [predicate: code INSIDE ['x', 'y'] AND tags.* CONTAINS 'red'] {rows: 2}
         IndexScan [ctx: Db] [table: box, index: idx_box, access: ['red'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
@@ -1073,17 +1073,17 @@ SELECT VALUE n FROM sc WITH NOINDEX WHERE n IN [1,2,3,4,5,6,7,8,9,10,11,12,13,14
 -- seek reaches each record through one entry and the plan carries no Distinct.
 -- bag:e holds the same tag twice, so the seek's own {rows: N} is what proves
 -- the entries collapse in the index rather than above it, and count() agrees.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINS 'red';
-SELECT VALUE id FROM bag WHERE tags CONTAINS 'red';
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINS 'red';
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINS 'red';
+SELECT VALUE id FROM bag WHERE tags.* CONTAINS 'red';
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINS 'red';
 SELECT count() FROM bag WHERE tags CONTAINS 'red' GROUP ALL;
 SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINS 'red' GROUP ALL;
 
 -- B2: B1's question with the operands swapped. `v INSIDE field` must reach
 -- the same access as `field CONTAINS v`; only the rendered predicate differs.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE 'red' INSIDE tags;
-SELECT VALUE id FROM bag WHERE 'red' INSIDE tags;
-SELECT VALUE id FROM bag WITH NOINDEX WHERE 'red' INSIDE tags;
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE 'red' INSIDE tags.*;
+SELECT VALUE id FROM bag WHERE 'red' INSIDE tags.*;
+SELECT VALUE id FROM bag WITH NOINDEX WHERE 'red' INSIDE tags.*;
 
 -- B3: CONTAINSNOT is a negation and may not be served from the element index.
 EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSNOT 'red';
@@ -1101,16 +1101,16 @@ SELECT VALUE id FROM bag WITH NOINDEX WHERE 'red' NOTINSIDE tags;
 -- -- the union yields records holding EITHER tag -- so the predicate must
 -- survive as a residual Filter above it. A union with no Filter here would
 -- return the wrong rows.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSALL ['red', 'green'];
-SELECT VALUE id FROM bag WHERE tags CONTAINSALL ['red', 'green'];
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINSALL ['red', 'green'];
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINSALL ['red', 'green'];
+SELECT VALUE id FROM bag WHERE tags.* CONTAINSALL ['red', 'green'];
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINSALL ['red', 'green'];
 SELECT count() FROM bag WHERE tags CONTAINSALL ['red', 'green'] GROUP ALL;
 SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSALL ['red', 'green'] GROUP ALL;
 
 -- B6: ALLINSIDE is B5's CONTAINSALL with the operands swapped.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE ['red', 'green'] ALLINSIDE tags;
-SELECT VALUE id FROM bag WHERE ['red', 'green'] ALLINSIDE tags;
-SELECT VALUE id FROM bag WITH NOINDEX WHERE ['red', 'green'] ALLINSIDE tags;
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE ['red', 'green'] ALLINSIDE tags.*;
+SELECT VALUE id FROM bag WHERE ['red', 'green'] ALLINSIDE tags.*;
+SELECT VALUE id FROM bag WITH NOINDEX WHERE ['red', 'green'] ALLINSIDE tags.*;
 
 -- B7: CONTAINSANY is exactly the union, so the branches ARE the answer and no
 -- residual Filter is needed -- which is what makes the union's own dedupe
@@ -1118,9 +1118,9 @@ SELECT VALUE id FROM bag WITH NOINDEX WHERE ['red', 'green'] ALLINSIDE tags;
 -- emitted once: UnionIndexScan merges its branches on record id, so no
 -- Distinct is wrapped around it, and the branch row counts summing to more
 -- than the union's output is that merge visible in the plan.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green'];
-SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green'];
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'];
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green'];
+SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green'];
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINSANY ['red', 'green'];
 SELECT count() FROM bag WHERE tags CONTAINSANY ['red', 'green'] GROUP ALL;
 SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] GROUP ALL;
 
@@ -1129,21 +1129,21 @@ SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] GRO
 -- id merge and the sort is eliminated -- a different dedupe path from B7, and
 -- the one shape where the row comparison against the oracle is literal rather
 -- than set-wise.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
-SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
+SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
 
 -- B9: ANYINSIDE is B7's CONTAINSANY with the operands swapped.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE ['red', 'green'] ANYINSIDE tags;
-SELECT VALUE id FROM bag WHERE ['red', 'green'] ANYINSIDE tags;
-SELECT VALUE id FROM bag WITH NOINDEX WHERE ['red', 'green'] ANYINSIDE tags;
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE ['red', 'green'] ANYINSIDE tags.*;
+SELECT VALUE id FROM bag WHERE ['red', 'green'] ANYINSIDE tags.*;
+SELECT VALUE id FROM bag WITH NOINDEX WHERE ['red', 'green'] ANYINSIDE tags.*;
 
 -- B10: three branches with two records overlapping two branches each (bag:a in
 -- red+green, bag:c in red+blue). Two simultaneous overlaps is what separates a
 -- real set union from a merge that only collapses adjacent duplicates.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green', 'blue'];
-SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red', 'green', 'blue'];
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green', 'blue'];
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green', 'blue'];
+SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red', 'green', 'blue'];
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINSANY ['red', 'green', 'blue'];
 SELECT count() FROM bag WHERE tags CONTAINSANY ['red', 'green', 'blue'] GROUP ALL;
 SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green', 'blue'] GROUP ALL;
 
@@ -1203,9 +1203,9 @@ SELECT count() FROM bag WITH NOINDEX WHERE tags *= 'red' GROUP ALL;
 -- of the threshold are pinned here too. 32 elements: still a union, and the
 -- count pair pins that a 32-branch union dedupes as the 2- and 3-branch ones
 -- of B7 and B10 do.
-EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
-SELECT VALUE id FROM bag WHERE tags CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
-SELECT VALUE id FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
+EXPLAIN ANALYZE SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
+SELECT VALUE id FROM bag WHERE tags.* CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
+SELECT VALUE id FROM bag WITH NOINDEX WHERE tags.* CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'];
 SELECT count() FROM bag WHERE tags CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'] GROUP ALL;
 SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red','t02','t03','t04','t05','t06','t07','t08','t09','t10','t11','t12','t13','t14','t15','t16','t17','t18','t19','t20','t21','t22','t23','t24','t25','t26','t27','t28','t29','t30','t31','t32'] GROUP ALL;
 
@@ -1238,9 +1238,9 @@ SELECT count() FROM bag WITH NOINDEX WHERE tags CONTAINSANY ['red','t02','t03','
 -- C1: a prefix scan on the leading fanning column, not an equality seek. The
 -- containment pins that column to one element and `code` does not fan, so the
 -- prefix covers one key per record and the plan carries no Distinct.
-EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags CONTAINS 'red';
-SELECT VALUE id FROM box WHERE tags CONTAINS 'red';
-SELECT VALUE id FROM box WITH NOINDEX WHERE tags CONTAINS 'red';
+EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags.* CONTAINS 'red';
+SELECT VALUE id FROM box WHERE tags.* CONTAINS 'red';
+SELECT VALUE id FROM box WITH NOINDEX WHERE tags.* CONTAINS 'red';
 SELECT count() FROM box WHERE tags CONTAINS 'red' GROUP ALL;
 SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINS 'red' GROUP ALL;
 
@@ -1251,9 +1251,9 @@ SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINS 'red' GROUP ALL;
 -- The recorded rows are the oracle's set in a different order, not a different
 -- answer: the union emits branch-major and the oracle's scan emits by record
 -- id, and no ORDER BY was asked for. C3 pins the ordered form.
-EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags CONTAINSANY ['red', 'green'];
-SELECT VALUE id FROM box WHERE tags CONTAINSANY ['red', 'green'];
-SELECT VALUE id FROM box WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'];
+EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags.* CONTAINSANY ['red', 'green'];
+SELECT VALUE id FROM box WHERE tags.* CONTAINSANY ['red', 'green'];
+SELECT VALUE id FROM box WITH NOINDEX WHERE tags.* CONTAINSANY ['red', 'green'];
 SELECT count() FROM box WHERE tags CONTAINSANY ['red', 'green'] GROUP ALL;
 SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] GROUP ALL;
 
@@ -1262,16 +1262,16 @@ SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] GRO
 -- by id and an explicit sort stays in the plan. Pinned because the wrong
 -- choice here -- claiming an id merge over prefix scans -- would emit rows out
 -- of order while still looking like a valid plan.
-EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
-SELECT VALUE id FROM box WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
-SELECT VALUE id FROM box WITH NOINDEX WHERE tags CONTAINSANY ['red', 'green'] ORDER BY id;
+EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
+SELECT VALUE id FROM box WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
+SELECT VALUE id FROM box WITH NOINDEX WHERE tags.* CONTAINSANY ['red', 'green'] ORDER BY id;
 
 -- C4: a containment match on the fanning leading column pins it to a single
 -- element, which leaves one key per record, so the trailing equality can
 -- extend the prefix to both columns and no residual Filter is needed.
-EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags CONTAINS 'red' AND code = 'x';
-SELECT VALUE id FROM box WHERE tags CONTAINS 'red' AND code = 'x';
-SELECT VALUE id FROM box WITH NOINDEX WHERE tags CONTAINS 'red' AND code = 'x';
+EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE tags.* CONTAINS 'red' AND code = 'x';
+SELECT VALUE id FROM box WHERE tags.* CONTAINS 'red' AND code = 'x';
+SELECT VALUE id FROM box WITH NOINDEX WHERE tags.* CONTAINS 'red' AND code = 'x';
 SELECT count() FROM box WHERE tags CONTAINS 'red' AND code = 'x' GROUP ALL;
 SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINS 'red' AND code = 'x' GROUP ALL;
 
@@ -1279,9 +1279,9 @@ SELECT count() FROM box WITH NOINDEX WHERE tags CONTAINS 'red' AND code = 'x' GR
 -- one. The containment pins the prefix and the IN list is left as a residual
 -- rather than being expanded into one prefix per literal -- a narrower scan is
 -- available in principle, so this records the plan actually chosen.
-EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE code IN ['x', 'y'] AND tags CONTAINS 'red';
-SELECT VALUE id FROM box WHERE code IN ['x', 'y'] AND tags CONTAINS 'red';
-SELECT VALUE id FROM box WITH NOINDEX WHERE code IN ['x', 'y'] AND tags CONTAINS 'red';
+EXPLAIN ANALYZE SELECT VALUE id FROM box WHERE code IN ['x', 'y'] AND tags.* CONTAINS 'red';
+SELECT VALUE id FROM box WHERE code IN ['x', 'y'] AND tags.* CONTAINS 'red';
+SELECT VALUE id FROM box WITH NOINDEX WHERE code IN ['x', 'y'] AND tags.* CONTAINS 'red';
 SELECT count() FROM box WHERE code IN ['x', 'y'] AND tags CONTAINS 'red' GROUP ALL;
 SELECT count() FROM box WITH NOINDEX WHERE code IN ['x', 'y'] AND tags CONTAINS 'red' GROUP ALL;
 
@@ -1373,9 +1373,9 @@ SELECT count() FROM ord WITH NOINDEX WHERE lines.*.sku IN ['s1', 's2'] GROUP ALL
 -- and not nest:a, whose elements are the two strings. The seek is an equality
 -- on an array-valued index entry, and the count pair pins that the two-element
 -- key is visited once rather than once per element.
-EXPLAIN ANALYZE SELECT VALUE id FROM nest WHERE tags CONTAINS ['red', 'green'];
-SELECT VALUE id FROM nest WHERE tags CONTAINS ['red', 'green'];
-SELECT VALUE id FROM nest WITH NOINDEX WHERE tags CONTAINS ['red', 'green'];
+EXPLAIN ANALYZE SELECT VALUE id FROM nest WHERE tags.* CONTAINS ['red', 'green'];
+SELECT VALUE id FROM nest WHERE tags.* CONTAINS ['red', 'green'];
+SELECT VALUE id FROM nest WITH NOINDEX WHERE tags.* CONTAINS ['red', 'green'];
 SELECT count() FROM nest WHERE tags CONTAINS ['red', 'green'] GROUP ALL;
 SELECT count() FROM nest WITH NOINDEX WHERE tags CONTAINS ['red', 'green'] GROUP ALL;
 
@@ -1439,9 +1439,9 @@ SELECT count() FROM tl WITH NOINDEX WHERE code IN ['x', 'y'] GROUP ALL;
 -- observable difference between an exact seek and a seek-then-collapse. The
 -- containment is still re-checked per record as a residual Filter rather than
 -- being treated as proven by the key range.
-EXPLAIN ANALYZE SELECT VALUE id FROM tl WHERE code = 'x' AND tags CONTAINS 'red';
-SELECT VALUE id FROM tl WHERE code = 'x' AND tags CONTAINS 'red';
-SELECT VALUE id FROM tl WITH NOINDEX WHERE code = 'x' AND tags CONTAINS 'red';
+EXPLAIN ANALYZE SELECT VALUE id FROM tl WHERE code = 'x' AND tags.* CONTAINS 'red';
+SELECT VALUE id FROM tl WHERE code = 'x' AND tags.* CONTAINS 'red';
+SELECT VALUE id FROM tl WITH NOINDEX WHERE code = 'x' AND tags.* CONTAINS 'red';
 SELECT count() FROM tl WHERE code = 'x' AND tags CONTAINS 'red' GROUP ALL;
 SELECT count() FROM tl WITH NOINDEX WHERE code = 'x' AND tags CONTAINS 'red' GROUP ALL;
 

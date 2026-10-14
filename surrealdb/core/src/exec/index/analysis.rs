@@ -148,8 +148,21 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Whether a containment leaf over `path` may seek column `col` of index
-	/// `idx`: the column holds elements for the path, and is not withheld.
-	/// Every containment match goes through here.
+	/// `idx`. Every containment match goes through here.
+	///
+	/// An element column (`tags.*`) is keyed by the elements of a stored
+	/// array, while `tags CONTAINS v` is also satisfied by values that hold no
+	/// element entry for `v`: a string or uuid holding `v` as a substring, an
+	/// object with key `v`, a range spanning `v`, a geometry containing `v`.
+	/// The seek is taken only when the column holds elements for the path, is
+	/// not withheld, and either:
+	/// - the query path itself takes every element (`tags.* CONTAINS v`, `tags[*]`), under which a
+	///   stored scalar or set evaluates to `NONE` and cannot match. The flatten step (`tags...`)
+	///   does not qualify: it returns a scalar unchanged. Nor is the rule exact: a stored object is
+	///   kept whole and a stored record link is replaced by the record it names, and either matches
+	///   a key `v` with no element entry for it, so the seek misses that record. Only evidence from
+	///   the writer can rule such values out; or
+	/// - the seek on the column is known to be complete ([`Self::element_seek_is_complete`]).
 	fn seeks_containment(&self, idx: usize, col: usize, path: &LogicalExpr) -> bool {
 		let withheld = self
 			.no_containment
@@ -157,6 +170,21 @@ impl<'a> IndexAnalyzer<'a> {
 			.is_some_and(|flags| flags.get(idx).and_then(|f| f.get(col)).copied().unwrap_or(false));
 		!withheld
 			&& self.indexes[idx].cols.get(col).is_some_and(|c| path_matches_containment(path, c))
+			&& (path_takes_each(path) || self.element_seek_is_complete(idx, col))
+	}
+
+	/// Whether a seek for an element on column `col` of index `idx` finds
+	/// every record whose stored value contains that element.
+	///
+	/// The writer keys an array by its elements, while other stored values can
+	/// contain a value they hold no element entry for: a string or uuid a
+	/// substring, an object or a linked record a key, a range a value it
+	/// spans, a geometry a geometry. The seek is complete only for a column no
+	/// record stored such a value in. A declared kind does not establish that
+	/// (`DEFINE FIELD` does not rewrite records stored before it, and an import
+	/// skips coercion), and nothing records it yet, so this is `false`.
+	fn element_seek_is_complete(&self, _idx: usize, _col: usize) -> bool {
+		false
 	}
 
 	/// The analyzer reading the query vector of a KNN operator whose right
@@ -2796,6 +2824,30 @@ fn path_matches_containment(path: &LogicalExpr, index_col: &Idiom) -> bool {
 	idiom_matches_containment(path, index_col)
 }
 
+/// Whether the expression path takes every element of a value (`.*` /
+/// `[*]`). That step maps a stored scalar or set to `NONE`, but keeps an
+/// object and follows a record link (see `IndexAnalyzer::seeks_containment`).
+fn path_takes_each(mut path: &LogicalExpr) -> bool {
+	loop {
+		match path {
+			LogicalExpr::Each(_) => return true,
+			LogicalExpr::Broadcast {
+				body,
+				..
+			} if path_takes_each(body) => return true,
+			LogicalExpr::Optional {
+				then,
+				..
+			} if path_takes_each(then) => return true,
+			_ => {}
+		}
+		match path.step_base() {
+			Some(base) => path = base,
+			None => return false,
+		}
+	}
+}
+
 /// The least string greater than every string carrying `prefix`.
 ///
 /// Incrementing the last scalar value that can be incremented, and dropping
@@ -3345,7 +3397,7 @@ mod tests {
 
 		#[test]
 		fn a_withheld_element_column_is_not_sought_for_containment() {
-			for cond in ["acl CONTAINS 'a'", "'a' INSIDE acl", "acl CONTAINSANY ['a', 'b']"] {
+			for cond in ["acl.* CONTAINS 'a'", "'a' INSIDE acl.*", "acl.* CONTAINSANY ['a', 'b']"] {
 				assert!(seeks(&["acl.*"], cond, false), "{cond}");
 				assert!(!seeks(&["acl.*"], cond, true), "{cond}");
 			}
@@ -3704,7 +3756,7 @@ mod tests {
 			// pins each: the prefix addresses one key per record, the same
 			// as an all-equality prefix over scalar columns.
 			let a = analyzer(vec![idx_basic(1, "ix_tn", &["tags.*", "nums.*"])], None);
-			let cond = parse_cond("tags CONTAINS 'x' AND nums CONTAINS 1");
+			let cond = parse_cond("tags.* CONTAINS 'x' AND nums.* CONTAINS 1");
 			let cands = a.analyze(Some(&cond), None);
 			let c = find_for(&cands, "ix_tn").expect("ix_tn");
 			match &c.access {
@@ -3784,6 +3836,82 @@ mod tests {
 			// Compound analysis rejects (no leading column); single-column
 			// analysis also rejects (b is not the first column of the index).
 			assert_no_candidate(&cands, "ix_ab");
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Wildcard index containment matching
+	// ------------------------------------------------------------------
+	mod wildcard_containment {
+		use super::*;
+
+		#[test]
+		fn untyped_column_with_string_scalar_declines_index() {
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			let cond = parse_cond("tags CONTAINS 'x'");
+			let cands = a.analyze(Some(&cond), None);
+			assert_no_candidate(&cands, "by_tag");
+		}
+
+		#[test]
+		fn untyped_column_with_inside_string_scalar_declines_index() {
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			let cond = parse_cond("'x' INSIDE tags");
+			let cands = a.analyze(Some(&cond), None);
+			assert_no_candidate(&cands, "by_tag");
+		}
+
+		#[test]
+		fn untyped_column_with_containsany_strings_declines_expansion() {
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			let cond = parse_cond("tags CONTAINSANY ['x', 'y']");
+			assert!(a.try_containment_expansion(Some(&cond), Direction::Forward).is_none());
+		}
+
+		#[test]
+		fn untyped_column_with_flattened_query_matches_index() {
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			let cond = parse_cond("tags.* CONTAINS 'x'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_tag").expect("by_tag");
+			match &c.access {
+				BTreeAccess::Equality(v) => assert_eq!(v.as_literal(), Some(&Value::from("x"))),
+				other => panic!("expected Equality, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn untyped_column_with_bracket_flattened_query_matches_index() {
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			let cond = parse_cond("tags[*] CONTAINS 'x'");
+			let cands = a.analyze(Some(&cond), None);
+			let c = find_for(&cands, "by_tag").expect("by_tag");
+			match &c.access {
+				BTreeAccess::Equality(v) => assert_eq!(v.as_literal(), Some(&Value::from("x"))),
+				other => panic!("expected Equality, got {other:?}"),
+			}
+		}
+
+		#[test]
+		fn untyped_column_with_flatten_step_query_declines_index() {
+			// `tags...` returns a stored string unchanged, so it can still
+			// match by substring with no element entry.
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*..."])], None);
+			for cond in ["tags... CONTAINS 'x'", "'x' INSIDE tags..."] {
+				let cands = a.analyze(Some(&parse_cond(cond)), None);
+				assert_no_candidate(&cands, "by_tag");
+			}
+		}
+
+		#[test]
+		fn untyped_column_with_non_string_declines_index() {
+			// A stored range spans a number, and a stored geometry contains
+			// a geometry, without either being an element of the column.
+			let a = analyzer(vec![idx_basic(1, "by_tag", &["tags.*"])], None);
+			for cond in ["tags CONTAINS 42", "42 INSIDE tags", "tags CONTAINS (1.0, 2.0)"] {
+				let cands = a.analyze(Some(&parse_cond(cond)), None);
+				assert_no_candidate(&cands, "by_tag");
+			}
 		}
 	}
 

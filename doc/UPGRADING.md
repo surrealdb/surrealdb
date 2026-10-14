@@ -326,6 +326,11 @@ inside a cancelled transaction must bind it again outside the transaction.
 - A value containing a deeply nested `GeometryCollection` that was stored by an
   earlier release may now return `The value is nested too deeply` when read. It
   can be repaired in place by overwriting the field; see below.
+- A containment condition (`CONTAINS`, `INSIDE`, `CONTAINSANY`, `CONTAINSALL`,
+  `ANYINSIDE`, `ALLINSIDE`) on a field indexed as `field.*` is answered by a
+  table scan unless the query itself writes the flatten (`field.* CONTAINS v`).
+  Results are now complete; on a large table the plain spelling is slower. See
+  below.
 - B-tree index plans follow what each index has recorded storing, not a
   field's declared type. An index built by an earlier release recorded nothing,
   so every query over it plans as if its fields could hold an array, typed or
@@ -624,6 +629,26 @@ UPDATE deep:1 SET g = NONE;
 Nothing a current release stores can newly reach this state: the write guard now
 counts the same `GeometryCollection` nesting the read path does, so a value that
 would be unreadable is rejected at the write instead.
+
+### Containment over an element index uses the index only through `.*`
+
+An index on `field.*` is keyed by the elements of each stored array. A
+condition such as `field CONTAINS 'x'` is also satisfied by stored values that
+hold no element entry for `'x'`: a string or uuid containing it as a substring,
+a range spanning it, a geometry containing it, an object with it as a key. An
+earlier release answered the condition from the index and silently omitted
+those records. This release answers the plain spelling by reading the table,
+whether the field has a declared type or not, because a declared type does not
+rewrite records stored before it.
+
+The flattened spelling still seeks the index: `field.* CONTAINS v` and
+`v INSIDE field[*]` (and the multi-value forms) evaluate a stored scalar to
+`NONE`, so it cannot match. A stored object, a record link, or a set in a field
+not declared as one is not found through the index under that spelling.
+
+**What to do**: where every stored value of the field is an array, write the
+condition with the flatten — `field.* CONTAINS v`, `field[*] CONTAINS v`,
+`field.* CONTAINSANY [..]` — to keep the index seek.
 
 ### A named record id cannot be read by an earlier release
 

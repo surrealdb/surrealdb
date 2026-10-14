@@ -623,14 +623,14 @@ RETURN array::sort((UPDATE m WITH NOINDEX SET and_n = 1 WHERE name = 'a' AND qty
 -- scan beneath it, whose answer still equals the forced-scan oracle.
 -- ---------------------------------------------------------------------------
 
-UPDATE m SET hit = 1 WHERE tags CONTAINS 'x' EXPLAIN;
-DELETE m WHERE tags CONTAINS 'z' EXPLAIN;
-UPSERT m SET hit = 1 WHERE tags CONTAINS 'x' EXPLAIN;
-SELECT id FROM m WHERE tags CONTAINS 'x' EXPLAIN;
-EXPLAIN SELECT id FROM m WHERE tags CONTAINS 'x';
+UPDATE m SET hit = 1 WHERE tags.* CONTAINS 'x' EXPLAIN;
+DELETE m WHERE tags.* CONTAINS 'z' EXPLAIN;
+UPSERT m SET hit = 1 WHERE tags.* CONTAINS 'x' EXPLAIN;
+SELECT id FROM m WHERE tags.* CONTAINS 'x' EXPLAIN;
+EXPLAIN SELECT id FROM m WHERE tags.* CONTAINS 'x';
 RETURN array::sort((UPDATE m SET con_i = 1 WHERE tags CONTAINS 'x' RETURN VALUE id));
 RETURN array::sort((UPDATE m WITH NOINDEX SET con_n = 1 WHERE tags CONTAINS 'x' RETURN VALUE id));
-SELECT count() FROM m WHERE tags CONTAINS 'x' GROUP ALL EXPLAIN;
+SELECT count() FROM m WHERE tags.* CONTAINS 'x' GROUP ALL EXPLAIN;
 SELECT count() FROM m WHERE tags CONTAINS 'x' GROUP ALL;
 SELECT count() FROM m WITH NOINDEX WHERE tags CONTAINS 'x' GROUP ALL;
 
@@ -655,9 +655,9 @@ SELECT id FROM m WHERE id IN [m:1, m:3] EXPLAIN;
 -- so nothing fans out and the plan carries no `Distinct`.
 -- ---------------------------------------------------------------------------
 
-UPDATE m SET hit = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' EXPLAIN;
-SELECT id FROM m WHERE grp = 'g1' AND tags CONTAINS 'y' EXPLAIN;
-EXPLAIN SELECT id FROM m WHERE grp = 'g1' AND tags CONTAINS 'y';
+UPDATE m SET hit = 1 WHERE grp = 'g1' AND tags.* CONTAINS 'y' EXPLAIN;
+SELECT id FROM m WHERE grp = 'g1' AND tags.* CONTAINS 'y' EXPLAIN;
+EXPLAIN SELECT id FROM m WHERE grp = 'g1' AND tags.* CONTAINS 'y';
 RETURN array::sort((UPDATE m SET ncon_i = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' RETURN VALUE id));
 RETURN array::sort((UPDATE m WITH NOINDEX SET ncon_n = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' RETURN VALUE id));
 SELECT count() FROM m WHERE grp = 'g1' AND tags CONTAINS 'y' GROUP ALL;
@@ -696,9 +696,9 @@ SELECT count() FROM f WITH NOINDEX WHERE grp = 'g1' GROUP ALL;
 -- there is no `Distinct` above the scan -- the absence of that node against its
 -- presence above is the observable difference between an exact seek and a seek
 -- followed by a collapse.
-UPDATE f SET hit = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' EXPLAIN;
-SELECT id FROM f WHERE grp = 'g1' AND tags CONTAINS 'y' EXPLAIN;
-EXPLAIN SELECT id FROM f WHERE grp = 'g1' AND tags CONTAINS 'y';
+UPDATE f SET hit = 1 WHERE grp = 'g1' AND tags.* CONTAINS 'y' EXPLAIN;
+SELECT id FROM f WHERE grp = 'g1' AND tags.* CONTAINS 'y' EXPLAIN;
+EXPLAIN SELECT id FROM f WHERE grp = 'g1' AND tags.* CONTAINS 'y';
 RETURN array::sort((SELECT VALUE id FROM f WHERE grp = 'g1' AND tags CONTAINS 'y'));
 RETURN array::sort((UPDATE f SET pin_i = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' RETURN VALUE id));
 RETURN array::sort((UPDATE f WITH NOINDEX SET pin_n = 1 WHERE grp = 'g1' AND tags CONTAINS 'y' RETURN VALUE id));

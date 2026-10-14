@@ -597,19 +597,19 @@ SELECT count() FROM ev WITH NOINDEX WHERE cat = 'alpha' GROUP ALL;
 -- `tags[*]` holds one key per element, so ev:3 has two keys carrying 'y'. The
 -- row set and the count reach the answer by different paths, either of which
 -- can disagree with the table scan, so both are asserted.
-EXPLAIN SELECT * FROM ev WHERE tags CONTAINS 'y';
+EXPLAIN SELECT * FROM ev WHERE tags[*] CONTAINS 'y';
 array::sort((SELECT VALUE id FROM ev WHERE tags CONTAINS 'y'));
 array::sort((SELECT VALUE id FROM ev WITH NOINDEX WHERE tags CONTAINS 'y'));
 
-EXPLAIN SELECT count() FROM ev WHERE tags CONTAINS 'y' GROUP ALL;
-SELECT count() FROM ev WHERE tags CONTAINS 'y' GROUP ALL;
-SELECT count() FROM ev WITH NOINDEX WHERE tags CONTAINS 'y' GROUP ALL;
+EXPLAIN SELECT count() FROM ev WHERE tags[*] CONTAINS 'y' GROUP ALL;
+SELECT count() FROM ev WHERE tags[*] CONTAINS 'y' GROUP ALL;
+SELECT count() FROM ev WITH NOINDEX WHERE tags[*] CONTAINS 'y' GROUP ALL;
 
 -- A limit over a fanning scan. The row identities depend on key order, which
 -- nothing promises, so the assertions are on how many rows come back and on
 -- whether they are distinct records — which is what a limit applied to keys
 -- rather than to records would get wrong.
-EXPLAIN SELECT * FROM ev WHERE tags CONTAINS 'y' LIMIT 2;
+EXPLAIN SELECT * FROM ev WHERE tags[*] CONTAINS 'y' LIMIT 2;
 array::len((SELECT VALUE id FROM ev WHERE tags CONTAINS 'y' LIMIT 2));
 array::len(array::distinct((SELECT VALUE id FROM ev WHERE tags CONTAINS 'y' LIMIT 2)));
 array::len((SELECT VALUE id FROM ev WITH NOINDEX WHERE tags CONTAINS 'y' LIMIT 2));
@@ -629,7 +629,7 @@ EXPLAIN ANALYZE SELECT count() FROM ev WHERE cat = 'alpha' GROUP ALL;
 
 -- The scan's own row count is where a fanning index emitting one row per key
 -- rather than one per record would show up, ahead of any dedup above it.
-EXPLAIN ANALYZE SELECT * FROM ev WHERE tags CONTAINS 'y';
+EXPLAIN ANALYZE SELECT * FROM ev WHERE tags[*] CONTAINS 'y';
 EXPLAIN ANALYZE SELECT * FROM ev WITH NOINDEX WHERE tags CONTAINS 'y';
 
 -- === WITH INDEX allow-list, and WITH NOINDEX ===

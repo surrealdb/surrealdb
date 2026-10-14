@@ -957,23 +957,23 @@ CREATE sh_flatten:3 SET tags = ['blue', 'red', 'blue'];
 -- `access:`, a `predicate:` recheck on each fetched row, and no `Distinct`
 -- above the scan. sh_flatten:3 is reached through one entry, because its
 -- repeated element is stored once.
-EXPLAIN SELECT id FROM sh_flatten WHERE tags CONTAINS 'blue';
-SELECT id FROM sh_flatten WHERE tags CONTAINS 'blue';
-SELECT id FROM sh_flatten WITH NOINDEX WHERE tags CONTAINS 'blue';
+EXPLAIN SELECT id FROM sh_flatten WHERE tags.* CONTAINS 'blue';
+SELECT id FROM sh_flatten WHERE tags.* CONTAINS 'blue';
+SELECT id FROM sh_flatten WITH NOINDEX WHERE tags.* CONTAINS 'blue';
 
 -- E2: E1 under ANALYZE. The scan's own {rows: N} counts the index entries it
 -- read; with the flatten column pinned that is already the record count, so
 -- nothing above the scan has to collapse anything. E7 is the same measurement
 -- over a range that does fan out.
-EXPLAIN ANALYZE SELECT id FROM sh_flatten WHERE tags CONTAINS 'blue';
+EXPLAIN ANALYZE SELECT id FROM sh_flatten WHERE tags.* CONTAINS 'blue';
 
 -- E3: the count of E1, which goes through IndexCountScan rather than the row
 -- path, so it can disagree with both the indexed rows and the oracle. The
 -- index-only count is offered only to a scan that does not fan out, which the
 -- pinned flatten column of E1 satisfies.
-EXPLAIN SELECT count() FROM sh_flatten WHERE tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM sh_flatten WHERE tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM sh_flatten WITH NOINDEX WHERE tags CONTAINS 'blue' GROUP ALL;
+EXPLAIN SELECT count() FROM sh_flatten WHERE tags.* CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM sh_flatten WHERE tags.* CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM sh_flatten WITH NOINDEX WHERE tags.* CONTAINS 'blue' GROUP ALL;
 
 -- E4: scalar equality against the whole array column. A flatten column is
 -- offered only to containment predicates, so equality is not seeked at all and
@@ -1031,14 +1031,14 @@ CREATE sh_bracket:3 SET tags = ['blue', 'red', 'blue'];
 INFO FOR TABLE sh_bracket;
 
 -- F2: same plan and same rows as E1, `Distinct`-free for the same reason.
-EXPLAIN SELECT id FROM sh_bracket WHERE tags CONTAINS 'blue';
-SELECT id FROM sh_bracket WHERE tags CONTAINS 'blue';
-SELECT id FROM sh_bracket WITH NOINDEX WHERE tags CONTAINS 'blue';
+EXPLAIN SELECT id FROM sh_bracket WHERE tags[*] CONTAINS 'blue';
+SELECT id FROM sh_bracket WHERE tags[*] CONTAINS 'blue';
+SELECT id FROM sh_bracket WITH NOINDEX WHERE tags[*] CONTAINS 'blue';
 
 -- F3: same count plan and same count as E3.
-EXPLAIN SELECT count() FROM sh_bracket WHERE tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM sh_bracket WHERE tags CONTAINS 'blue' GROUP ALL;
-SELECT count() FROM sh_bracket WITH NOINDEX WHERE tags CONTAINS 'blue' GROUP ALL;
+EXPLAIN SELECT count() FROM sh_bracket WHERE tags[*] CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM sh_bracket WHERE tags[*] CONTAINS 'blue' GROUP ALL;
+SELECT count() FROM sh_bracket WITH NOINDEX WHERE tags[*] CONTAINS 'blue' GROUP ALL;
 
 -- ===========================================================================
 -- Shape G: array-of-objects element `emails.*.norm`. Flatten then traverse -

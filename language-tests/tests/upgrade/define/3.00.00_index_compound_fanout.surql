@@ -63,20 +63,23 @@ value = "[{ id: tagged:base }]"
 value = "[{ id: tagged:base }]"
 
 */
+-- Each containment spells the flatten (`tags.*`): only then is a stored scalar
+-- ruled out, so only then may the element index answer it.
+
 -- The records themselves survive the hop.
 SELECT * FROM tagged ORDER BY id;
 -- Served by the old binary's index entries. `tagged:base` owns several of them
 -- under the 'p' prefix, and must still arrive once.
-SELECT id FROM tagged WHERE tags CONTAINS 'p';
+SELECT id FROM tagged WHERE tags.* CONTAINS 'p';
 -- The oracle: a table scan cannot consult the index at all.
-SELECT id FROM tagged WITH NOINDEX WHERE tags CONTAINS 'p';
+SELECT id FROM tagged WITH NOINDEX WHERE tags.* CONTAINS 'p';
 -- A count over the same predicate counts records, not entries.
-SELECT count() FROM tagged WHERE tags CONTAINS 'p' GROUP ALL;
-SELECT count() FROM tagged WITH NOINDEX WHERE tags CONTAINS 'p' GROUP ALL;
+SELECT count() FROM tagged WHERE tags.* CONTAINS 'p' GROUP ALL;
+SELECT count() FROM tagged WITH NOINDEX WHERE tags.* CONTAINS 'p' GROUP ALL;
 -- A single-element row is the same under either writer's expansion.
-SELECT id FROM tagged WHERE tags CONTAINS 'z';
+SELECT id FROM tagged WHERE tags.* CONTAINS 'z';
 -- Pinning BOTH fanning columns addresses one combination of the record's
 -- elements, which is the read that a partially recorded entry set cannot
 -- answer. The oracle is a table scan and never consults the index.
-SELECT id FROM tagged WHERE tags CONTAINS 'p' AND nums CONTAINS 2;
-SELECT id FROM tagged WITH NOINDEX WHERE tags CONTAINS 'p' AND nums CONTAINS 2;
+SELECT id FROM tagged WHERE tags.* CONTAINS 'p' AND nums.* CONTAINS 2;
+SELECT id FROM tagged WITH NOINDEX WHERE tags.* CONTAINS 'p' AND nums.* CONTAINS 2;
