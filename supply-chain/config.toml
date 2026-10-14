@@ -73,9 +73,6 @@ audit-as-crates-io = false
 [policy.surrealdb-keyspace-macro]
 audit-as-crates-io = false
 
-[policy.surrealdb-stored-derive]
-audit-as-crates-io = false
-
 [policy.surrealdb-kvs]
 audit-as-crates-io = false
 
@@ -136,6 +133,9 @@ audit-as-crates-io = false
 criteria = "safe-to-run"
 
 [policy.surrealdb-sqon]
+audit-as-crates-io = false
+
+[policy.surrealdb-stored-derive]
 audit-as-crates-io = false
 
 [policy.surrealdb-strand]
@@ -1571,7 +1571,7 @@ version = "4.1.0"
 criteria = "safe-to-run"
 
 [[exemptions.rustls]]
-version = "0.23.45"
+version = "0.23.46"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-platform-verifier-android]]
