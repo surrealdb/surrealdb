@@ -586,9 +586,10 @@ fn built_of(cx: &mut BindCx<'_>, flow: Flow) -> Result<Built, IrError> {
 pub(crate) const LET_IN_AN_EXPRESSION: &str =
 	"LET statements can only appear at the top level of a query or inside a block expression";
 
-/// Binds a statement in value position: a block and a `FOR` as ops of their own, a `LET` as the
-/// refusal of a `LET` written as an expression, any other statement as an `expr.subquery` holding
-/// it.
+/// Binds a statement in value position: a block as an op of its own, a `FOR` as an op of its own
+/// where it stands in a statement's region or a statement list ([`runs_statements`]) and as an
+/// `expr.subquery` holding it elsewhere, a `LET` as the refusal of a `LET` written as an
+/// expression, any other statement as an `expr.subquery` holding it.
 ///
 /// Where the `LET` is planned with its top-level statement the refusal is the whole statement's,
 /// raised before any of it runs, whether or not the `LET` is reached; otherwise it is raised where
@@ -598,7 +599,10 @@ pub(crate) const LET_IN_AN_EXPRESSION: &str =
 pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Built, IrError> {
 	let flow = match op {
 		LogicalOp::Sequence(sequence) => bind_sequence(cx, sequence, Pos::Value)?,
-		LogicalOp::Foreach(foreach) => bind_foreach(cx, foreach, Pos::Value)?,
+		LogicalOp::Foreach(foreach) if runs_statements(cx) => {
+			bind_foreach(cx, foreach, Pos::Value)?
+		}
+		LogicalOp::Foreach(_) => return bind_subquery(cx, op),
 		LogicalOp::Let(_) if cx.defers_let() => return refusing_subquery(cx),
 		LogicalOp::Let(_) => {
 			let refusal = Refusal::InvalidStatement {
@@ -643,6 +647,15 @@ pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Resul
 		| LogicalOp::Sleep(_) => return bind_subquery(cx, op),
 	};
 	built_of(cx, flow)
+}
+
+/// Whether the point being bound stands in a region whose ops run as statements: a statement's
+/// region, the region of an `expr.subquery`, or a statement list ([`BindCx::in_statement_list`]).
+/// A `FOR` loop runs only as a statement; in any other region (a clause, an operand, a loop or
+/// closure body) its value is that of a subquery holding it.
+fn runs_statements(cx: &BindCx<'_>) -> bool {
+	cx.in_statement_list()
+		|| matches!(cx.kinds().last(), Some(RegionKind::Statement(_) | RegionKind::Subquery))
 }
 
 /// The `expr.subquery` whose region raises the refusal of a `LET` written as an expression, which
@@ -4107,6 +4120,31 @@ fn collection_of(cx: &BindCx<'_>, value: ValueId) -> Option<Collection> {
 	}
 }
 
+/// Whether `closure` is a literal the builtin `name` runs in place over an array's elements, when
+/// written as the closure of a call that passes the array and the closure alone: `name` is one of
+/// the array builtins that run a closure per element and stop or collect by its answer, and the
+/// literal declares no more parameters than the builtin passes it (the element, and for
+/// `array::map` its position too). Such a body reads `$this` as the call reads it
+/// ([`BindCx::mark_closure_in_place`]); `fold`, `reduce`, the `set` builtins and a closure handed
+/// in by name do not run in place.
+fn runs_in_place(name: &str, closure: &LogicalExpr) -> bool {
+	let passes = match name {
+		"array::map" => 2,
+		"array::filter"
+		| "array::filter_index"
+		| "array::find"
+		| "array::find_index"
+		| "array::index_of"
+		| "array::any"
+		| "array::some"
+		| "array::includes"
+		| "array::all"
+		| "array::every" => 1,
+		_ => return false,
+	};
+	matches!(closure, LogicalExpr::Closure(literal) if literal.args.len() <= passes)
+}
+
 /// A builtin called as `module::name(collection, …, closure)`, when it binds as a loop.
 fn closure_site_of_call(cx: &BindCx<'_>, call: &LogicalCall, slot: usize) -> Option<ClosureSite> {
 	let Function::Normal(name) = &call.receiver else {
@@ -4158,12 +4196,20 @@ fn bind_closure_call(
 	call: &LogicalCall,
 	slot: usize,
 ) -> Result<Built, IrError> {
+	let in_place = if let Function::Normal(name) = &call.receiver {
+		call.args.len() == 2 && slot == 1 && runs_in_place(name.as_str(), &call.args[slot])
+	} else {
+		false
+	};
 	let Some(site) = closure_site_of_call(cx, call, slot) else {
-		return bind_plain_call(cx, call);
+		return bind_plain_call(cx, call, in_place.then_some(slot));
 	};
 	let mut values = Vec::with_capacity(call.args.len());
 	for (index, arg) in call.args.iter().enumerate() {
 		let built = if index == slot {
+			if in_place {
+				cx.mark_closure_in_place();
+			}
 			bind_closure_arg(cx, arg)?
 		} else {
 			bind_expr(cx, arg)?
@@ -4184,10 +4230,18 @@ fn bind_closure_call(
 }
 
 /// The `expr.call` of `call`: its arguments, then the row names a callee that reads them is
-/// passed.
-fn bind_plain_call(cx: &mut BindCx<'_>, call: &LogicalCall) -> Result<Built, IrError> {
+/// passed. The closure literal at `in_place`, where one is given, is one the builtin runs in place
+/// ([`runs_in_place`]).
+fn bind_plain_call(
+	cx: &mut BindCx<'_>,
+	call: &LogicalCall,
+	in_place: Option<usize>,
+) -> Result<Built, IrError> {
 	let mut operands = Vec::with_capacity(call.args.len());
-	for arg in &call.args {
+	for (index, arg) in call.args.iter().enumerate() {
+		if in_place == Some(index) {
+			cx.mark_closure_in_place();
+		}
 		let Built::Value(value) = bind_expr(cx, arg)? else {
 			return Ok(Built::Diverged);
 		};
@@ -4219,6 +4273,13 @@ fn bind_method_closure(
 		return Ok(Built::Diverged);
 	};
 	let site = closure_site_of_method(cx, receiver, name.as_str(), args, slot);
+	let in_place = args.len() == 1
+		&& slot == 0
+		&& cx
+			.registry()
+			.get_method(name.as_str())
+			.and_then(|method| method.resolve(&crate::val::Value::Array(Default::default())))
+			.is_some_and(|builtin| runs_in_place(builtin.name(), &args[slot]));
 	let dispatch = match site {
 		Some(_) => None,
 		None => Some(cx.emit_value(
@@ -4230,6 +4291,9 @@ fn bind_method_closure(
 	let bound = with_step_root(cx, receiver, |cx| {
 		let mut values = Vec::with_capacity(args.len());
 		for (index, arg) in args.iter().enumerate() {
+			if in_place && index == slot {
+				cx.mark_closure_in_place();
+			}
 			let built = if site.is_some() && index == slot {
 				bind_closure_arg(cx, arg)?
 			} else {
@@ -4767,7 +4831,10 @@ fn bind_recurse(cx: &mut BindCx<'_>, recurse: &LogicalRecurse) -> Result<Built, 
 /// and whose `ClosureBody` region is isolated from above.
 ///
 /// The body captures every name it reads that the lexical environment binds where the closure is
-/// written, and nothing of the row there: making the closure reads no row. The region's block
+/// written, and nothing of the row there: making the closure reads no row. A literal that no
+/// builtin runs in place ([`runs_in_place`]) captures `$this` too where the statement it stands in
+/// was entered with one ([`BindCx::declare_statement_row_names`]): the document of the frame that
+/// statement is entered from, not the row the statement reads. The region's block
 /// arguments are the statement timestamp, the parameters, the captured names in operand order,
 /// then, where the body reads a row by a field, `@`, the current value, `$this`, `$self` or a call
 /// that reads its caller's row, the row of the frame that invokes the closure. A parameter shadows
@@ -4780,23 +4847,25 @@ pub(crate) fn bind_closure(
 	cx: &mut BindCx<'_>,
 	closure: &LogicalClosure,
 ) -> Result<ValueId, IrError> {
+	let in_place = cx.take_closure_in_place();
 	let params: Vec<Strand> =
 		closure.args.iter().map(|(param, _)| Strand::new(param.as_str())).collect();
-	let (captured, reads_row) = captures_of(cx, closure, &params);
+	let (captured, reads_row) = captures_of(cx, closure, &params, in_place);
 	let reads_root = reads_row && closure_reads_root(closure);
 	// A row name a row binds where the literal is written names the invoking row in the body; one
-	// nothing binds there stays a name of the frame the body runs in.
+	// nothing binds there stays a name of the frame the body runs in. A `$this` the body takes only
+	// to hand to the literals it holds does not name it.
 	let row_named: Vec<&str> = ROW_PARAMS
 		.into_iter()
 		.filter(|name| {
 			!params
 				.iter()
-				.chain(captured.iter().map(|(held, _)| held))
+				.chain(captured.iter().filter(|held| !held.entered).map(|held| &held.name))
 				.any(|held| held.as_str() == *name)
 				&& matches!(cx.lookup(name), NameRef::Value(_))
 		})
 		.collect();
-	let operands: Vec<ValueId> = captured.iter().map(|(_, value)| *value).collect();
+	let operands: Vec<ValueId> = captured.iter().map(|held| held.value).collect();
 	let attrs = ClosureAttrs {
 		params: closure
 			.args
@@ -4805,7 +4874,7 @@ pub(crate) fn bind_closure(
 			.collect(),
 		returns: closure.returns.clone(),
 		body_sql: Arc::clone(&closure.body_sql),
-		captures: captured.iter().map(|(name, _)| name.clone()).collect(),
+		captures: captured.iter().map(|held| held.name.clone()).collect(),
 		reads_row,
 		reads_root,
 		literal: ClosureLiteral::of(closure),
@@ -4830,8 +4899,12 @@ pub(crate) fn bind_closure(
 		cx.within(op, RegionKind::ClosureBody, &entry, |cx, args| {
 			let captures =
 				args.get(1 + params.len()..).ok_or(IrError::Stale("closure captures"))?;
-			for ((name, _), value) in captured.iter().zip(captures) {
-				cx.declare_variable(name.clone(), *value);
+			for (held, value) in captured.iter().zip(captures) {
+				if held.entered {
+					cx.declare_entered(held.name.clone(), *value);
+				} else {
+					cx.declare_variable(held.name.clone(), *value);
+				}
 			}
 			for (name, value) in params.iter().zip(args.iter().skip(1)) {
 				cx.declare_variable(name.clone(), *value);
@@ -4852,7 +4925,10 @@ pub(crate) fn bind_closure(
 						cx.declare(Strand::new(*name), row);
 					}
 				}
-				bind_body(cx, &closure.body)
+				let outer = cx.replace_closure_row(row);
+				let bound = bind_body(cx, &closure.body);
+				cx.replace_closure_row(outer);
+				bound
 			})
 		})
 	})?;
@@ -4861,7 +4937,8 @@ pub(crate) fn bind_closure(
 
 /// The names a closure body reads as the row it is invoked over, unless a variable of that name
 /// holds where the closure is written, which it captures, whatever rows are bound to the name
-/// inside that variable's scope.
+/// inside that variable's scope. A literal no builtin runs in place captures `$this` where the
+/// statement it stands in was entered with one, as it captures a variable.
 const ROW_PARAMS: [&str; 2] = ["this", "self"];
 
 /// The names `closure`'s body reads that the lexical environment binds at the point the closure
@@ -4869,25 +4946,75 @@ const ROW_PARAMS: [&str; 2] = ["this", "self"];
 /// whether the body reads the row, by a field, `@`, the current value, `$this` or `$self`. The
 /// names are those a value of the literal captures, so the head of the unit lowered for a value
 /// names them.
+///
+/// `in_place` says a builtin runs the literal in place ([`runs_in_place`]): its body reads `$this`
+/// as the call reads it, so it captures no `$this` a statement was entered with as the name it
+/// reads. It takes that `$this` only where a closure literal its body holds reads it, as an
+/// entered name it hands on to that literal ([`Captured`]).
 fn captures_of(
 	cx: &BindCx<'_>,
 	closure: &LogicalClosure,
 	params: &[Strand],
-) -> (Vec<(Strand, ValueId)>, bool) {
+	in_place: bool,
+) -> (Vec<Captured>, bool) {
 	let mut names = Vec::new();
 	for name in free_params(closure) {
 		if params.contains(&name) {
 			continue;
 		}
-		if ROW_PARAMS.contains(&name.as_str()) {
-			if let Some(value) = cx.lookup_variable(name.as_str()) {
-				names.push((name, value));
+		let mut entered = false;
+		let held = if !ROW_PARAMS.contains(&name.as_str()) {
+			match cx.lookup(name.as_str()) {
+				NameRef::Value(value) => Some(value),
+				NameRef::Free => None,
 			}
-		} else if let NameRef::Value(value) = cx.lookup(name.as_str()) {
-			names.push((name, value));
+		} else if name.as_str() != "this" {
+			cx.lookup_variable(name.as_str())
+		} else if !in_place {
+			cx.lookup_variable_or_entered(name.as_str())
+		} else if let Some(value) = cx.lookup_variable(name.as_str()) {
+			Some(value)
+		} else if nested_literal_reads(&closure.body, name.as_str()) {
+			entered = true;
+			cx.lookup_variable_or_entered(name.as_str())
+		} else {
+			None
+		};
+		if let Some(value) = held {
+			names.push(Captured {
+				name,
+				value,
+				entered,
+			});
 		}
 	}
 	(names, closure_reads_row(closure))
+}
+
+/// A name a closure literal captures, with its value where the literal is written.
+struct Captured {
+	name: Strand,
+	value: ValueId,
+	/// Whether the body binds the name as the `$this` a statement was entered with
+	/// ([`BindCx::declare_entered`]) rather than as a variable: the `$this` a literal a builtin
+	/// runs in place takes only to hand on to the closure literals its body holds.
+	entered: bool,
+}
+
+/// Whether a closure literal written in `expr` reads `name` as a name it does not bind, short of
+/// a statement in value position, which binds the names it is entered with itself, and of a
+/// literal whose parameters bind `name`.
+fn nested_literal_reads(expr: &LogicalExpr, name: &str) -> bool {
+	if let LogicalExpr::Closure(inner) = expr {
+		return !inner.args.iter().any(|(param, _)| param.as_str() == name)
+			&& free_params(inner).iter().any(|free| free.as_str() == name);
+	}
+	if matches!(expr, LogicalExpr::Subquery(_)) {
+		return false;
+	}
+	let mut found = false;
+	expr.for_each_child(&mut |child| found |= nested_literal_reads(child, name));
+	found
 }
 
 /// The parameters `closure`'s body reads that no binding within the body binds, each once, in

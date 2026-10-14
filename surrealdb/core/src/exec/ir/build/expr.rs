@@ -868,7 +868,8 @@ fn bind_current_region(
 
 /// A `LazyOperand` region of the destructure `owner` with one argument, the value destructured,
 /// which `body` reads as its document: as `Current`, as the base of a field read or `@`, as the
-/// root a step's argument reads and as `$parent`.
+/// root a step's argument reads and as `$parent`, `$this` and `$self`, a statement it holds
+/// included. The body reads nothing of the row of the frame around the destructure.
 fn bind_document_region(
 	host: &mut dyn ExprHost,
 	owner: OpId,
@@ -879,14 +880,17 @@ fn bind_document_region(
 			return Err(IrError::Stale("region argument"));
 		};
 		host.declare_parent_as(argument);
-		with_current(host, argument, |host| {
+		let names = host.declare_row_names_until(argument);
+		let bound = with_current(host, argument, |host| {
 			let row = host.replace_row(Some(argument));
 			let base = host.replace_field_base(Some(argument));
 			let bound = bind_body(host, body);
 			host.replace_field_base(base);
 			host.replace_row(row);
 			bound
-		})
+		});
+		host.end_row_names(names);
+		bound
 	})
 }
 

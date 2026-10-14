@@ -103,9 +103,19 @@ pub(crate) fn node_identity(node: &LogicalOp) -> usize {
 struct Binding {
 	name: Strand,
 	value: ValueId,
-	/// Whether the binding is a variable — a `LET`, a `FOR` variable, a parameter or a closure's
-	/// capture of one — rather than a name the binder binds to a row.
-	variable: bool,
+	kind: BindingKind,
+}
+
+/// What bound a name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindingKind {
+	/// A variable: a `LET`, a `FOR` variable, a parameter or a closure's capture of one.
+	Variable,
+	/// A name the binder binds to a row of the frame it binds.
+	Row,
+	/// `$this` or `$parent` bound to the document of the frame a statement in value position is
+	/// entered from ([`BindCx::declare_statement_row_names`]).
+	Entered,
 }
 
 /// The context a request is bound in.
@@ -133,6 +143,12 @@ pub(crate) struct BindCx<'a> {
 	/// filter over that row binds `$parent` to the document root.
 	step_root_row: Option<ValueId>,
 	aggregating: bool,
+	/// Whether the closure literal bound next is the closure argument a builtin runs in place over
+	/// an array's elements ([`Self::mark_closure_in_place`]).
+	closure_in_place: bool,
+	/// The row of the closure body being bound: the row of the frame that invokes the closure,
+	/// which the closure may be invoked without.
+	closure_row: Option<ValueId>,
 	/// The fields of the projection directly above the `ORDER BY` about to be bound, which the
 	/// keys resolve their aliases against.
 	order_fields: Option<LogicalFields>,
@@ -241,6 +257,8 @@ impl<'a> BindCx<'a> {
 			step_root: None,
 			step_root_row: None,
 			aggregating: false,
+			closure_in_place: false,
+			closure_row: None,
 			order_fields: None,
 			sort_keys: Vec::new(),
 			convert_sites: 0,
@@ -623,7 +641,7 @@ impl<'a> BindCx<'a> {
 		self.env.push(Binding {
 			name,
 			value,
-			variable: false,
+			kind: BindingKind::Row,
 		});
 	}
 
@@ -634,28 +652,50 @@ impl<'a> BindCx<'a> {
 		self.env.push(Binding {
 			name,
 			value,
-			variable: true,
+			kind: BindingKind::Variable,
 		});
 	}
 
 	/// The value of the innermost variable named `name` ([`Self::declare_variable`]), passing
 	/// over the bindings of that name to a row nested inside it; `None` where no variable holds it.
 	pub(crate) fn lookup_variable(&self, name: &str) -> Option<ValueId> {
+		self.lookup_kinds(name, &[BindingKind::Variable])
+	}
+
+	/// The value of the innermost variable named `name`, or of the innermost binding of `name` to
+	/// the document a statement in value position is entered from, whichever is nearer, passing
+	/// over the bindings of that name to a row nested inside it; `None` where neither holds it.
+	pub(crate) fn lookup_variable_or_entered(&self, name: &str) -> Option<ValueId> {
+		self.lookup_kinds(name, &[BindingKind::Variable, BindingKind::Entered])
+	}
+
+	fn lookup_kinds(&self, name: &str, kinds: &[BindingKind]) -> Option<ValueId> {
 		let floor = self.stack.last().map_or(0, |entry| entry.floor);
 		self.env[floor..]
 			.iter()
 			.rev()
-			.find(|binding| binding.variable && binding.name.as_str() == name)
+			.find(|binding| kinds.contains(&binding.kind) && binding.name.as_str() == name)
 			.map(|binding| binding.value)
+	}
+
+	/// Binds `name` to `value` in the innermost region as the document a statement is entered
+	/// with, which [`Self::lookup_variable_or_entered`] finds and a row name nested inside it
+	/// shadows. The binding ends with that region.
+	pub(crate) fn declare_entered(&mut self, name: Strand, value: ValueId) {
+		self.declare_unnamed_as(name, value, BindingKind::Entered);
 	}
 
 	/// Binds `name` to `value` in the innermost region without naming the value: a name the binder
 	/// declares for a read of its own, which no text prints. The binding ends with that region.
 	pub(crate) fn declare_unnamed(&mut self, name: Strand, value: ValueId) {
+		self.declare_unnamed_as(name, value, BindingKind::Row);
+	}
+
+	fn declare_unnamed_as(&mut self, name: Strand, value: ValueId, kind: BindingKind) {
 		self.env.push(Binding {
 			name,
 			value,
-			variable: false,
+			kind,
 		});
 	}
 
@@ -788,6 +828,25 @@ impl<'a> BindCx<'a> {
 		outcome
 	}
 
+	/// Marks the closure literal bound next as the closure argument a builtin runs in place over an
+	/// array's elements: its body reads `$this` as the call reads it, and captures no `$this` a
+	/// statement around the call is entered with. The literal takes the mark
+	/// ([`Self::take_closure_in_place`]).
+	pub(crate) fn mark_closure_in_place(&mut self) {
+		self.closure_in_place = true;
+	}
+
+	/// Makes `row` the row of the closure body being bound, and answers the previous one.
+	pub(crate) fn replace_closure_row(&mut self, row: Option<ValueId>) -> Option<ValueId> {
+		mem::replace(&mut self.closure_row, row)
+	}
+
+	/// Whether the closure literal being bound was marked to run in place
+	/// ([`Self::mark_closure_in_place`]), clearing the mark.
+	pub(crate) fn take_closure_in_place(&mut self) -> bool {
+		mem::take(&mut self.closure_in_place)
+	}
+
 	/// Runs `body` with no aggregate function called in it belonging to an enclosing statement,
 	/// and restores the previous answer whether `body` succeeded or not. A statement in value
 	/// position is planned on its own, so a grouping around it does not take its calls.
@@ -890,6 +949,11 @@ impl<'a> BindCx<'a> {
 	/// `self` as well where `inherits_row` holds. The bindings shadow every outer binding of the
 	/// names, a closure's parameters included. A frame with no row binds none, and neither does an
 	/// element body, whose element is not the document.
+	///
+	/// `this` and `parent` are bound as the statement's entry names, which a closure literal the
+	/// statement holds may capture ([`Self::lookup_variable_or_entered`]), where the document is a
+	/// row the bind knows the frame has; the row or document root of a closure body, which an
+	/// invocation may not pass, binds them as row names. `self` is bound as a row name.
 	pub(crate) fn declare_statement_row_names(&mut self, inherits_row: bool) {
 		if self.field_base.is_some() {
 			return;
@@ -898,13 +962,18 @@ impl<'a> BindCx<'a> {
 		let Some(document) = root.or(self.row) else {
 			return;
 		};
-		let names: &[&str] = if inherits_row {
-			&["this", "self", "parent"]
+		let invoked = self.closure_row.is_some()
+			&& (self.closure_row == Some(document) || self.step_root == Some(document));
+		let kind = if invoked {
+			BindingKind::Row
 		} else {
-			&["this", "parent"]
+			BindingKind::Entered
 		};
-		for name in names {
-			self.declare_unnamed(Strand::new(*name), document);
+		for name in ["this", "parent"] {
+			self.declare_unnamed_as(Strand::new(name), document, kind);
+		}
+		if inherits_row {
+			self.declare_unnamed(Strand::new("self"), document);
 		}
 	}
 
