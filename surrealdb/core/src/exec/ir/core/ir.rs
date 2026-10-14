@@ -26,6 +26,7 @@ use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, SnapshotId, 
 use crate::exec::ir::iface::premise::CatalogVersionVector;
 use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties};
 use crate::exec::ir::iface::types::TypeKnowledge;
+use crate::exec::ir::phys::hop_key::{HopKey, HopKeyTable};
 use crate::exec::ir::phys::matches::{IndexScope, MatchesAttr, MatchesTable};
 use crate::exec::ir::phys::placement_attr::{PlacementAttr, PlacementTable};
 use crate::exec::vm::program::UnitFrame;
@@ -95,6 +96,8 @@ pub(crate) struct Ir {
 	pub(super) placement: PlacementTable,
 	/// What the physical plan decided for each `MATCHES` operator; never identity.
 	pub(super) matches: MatchesTable,
+	/// The key condition the physical plan decided for each graph hop; never identity.
+	pub(super) hop_keys: HopKeyTable,
 	/// For each op id, the number of live ops whose provenance holds it. `Bound` holds the op's
 	/// own id. An id no live op holds has no entry.
 	pub(super) holders: HashMap<OpId, u32>,
@@ -179,6 +182,7 @@ impl Ir {
 			generations: SecondaryMap::new(),
 			placement: PlacementTable::new(),
 			matches: MatchesTable::new(),
+			hop_keys: HopKeyTable::new(),
 			holders: HashMap::new(),
 			logical_ids: Vec::new(),
 			bind_scope: SecondaryMap::new(),
@@ -335,15 +339,33 @@ impl Ir {
 		self.matches.knn_scoped(op)
 	}
 
-	/// Whether the `KNN` operator `op`, which a search is in scope for, judges the rows of a loop
-	/// over a table defining a vector index that no search of the statement reads.
+	/// Whether the `KNN` operator `op`, which a search is in scope for, judges the subjects of a
+	/// write that no search of the statement reads.
 	pub(crate) fn knn_unsearched(&self, op: OpId) -> bool {
 		self.matches.knn_unsearched(op)
+	}
+
+	/// Whether the literal `op` stands for a `KNN` operator no search answers, and so reads the row
+	/// as that operator does.
+	pub(crate) fn knn_unanswered(&self, op: OpId) -> bool {
+		self.matches.knn_unanswered(op)
 	}
 
 	/// The `MATCHES` decisions. Like placement, they are not identity and never bump a generation.
 	pub(crate) fn matches_table_mut(&mut self) -> &mut MatchesTable {
 		&mut self.matches
+	}
+
+	/// The key condition the physical plan decided for the graph hop `op`, or `None` when it has
+	/// none.
+	pub(crate) fn hop_key(&self, op: OpId) -> Option<&HopKey> {
+		self.hop_keys.get(op)
+	}
+
+	/// The graph hops' key conditions. Like placement, they are not identity and never bump a
+	/// generation. Their writer is private to the physical dialect.
+	pub(crate) fn hop_key_table_mut(&mut self) -> &mut HopKeyTable {
+		&mut self.hop_keys
 	}
 
 	/// Whether the definition of `def` is visible at `user`: `def` is an argument of a block

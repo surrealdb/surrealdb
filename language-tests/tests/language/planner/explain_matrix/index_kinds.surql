@@ -26,11 +26,10 @@ case that produces it:
    2 where the guard admits 3. The correct answer is the true count; the
    correct behaviour is for the count read paths to skip a `prepare_remove`
    index the way the B-tree access-path analysis already does.
-2. `WITH NOINDEX` does not suppress the unconditional count fast path, because
+2. `WITH NOINDEX` does not change the plan of the unconditional count, because
    the matcher behind `CountScan` never consults the source's index hint. The
-   hint returns the same stale number the unhinted query does, where it should
-   force the key-range count. The guarded path does honour the hint, which is
-   what makes the unconditional one's silence a defect rather than a policy.
+   hinted read still returns the true count, so the hint is the escape hatch
+   from defect (1) on both the unconditional and the guarded path.
 3. A UNIQUE index over a fanning-out column rejects a row whose own array
    repeats an element, reporting the record being written as the conflicting
    holder. One row holding `['s','s']` has one distinct element and violates
@@ -455,7 +454,7 @@ value = "[{ id: prc:4 }]"
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = "[{ count: 3 }]"
+value = "[{ count: 4 }]"
 
 [[test.results]]
 value = "4"
@@ -733,10 +732,10 @@ EXPLAIN SELECT count() FROM ctr GROUP ALL;
 SELECT count() FROM ctr GROUP ALL;
 RETURN (SELECT id FROM ctr WITH NOINDEX).len();
 
--- DEFECT (2), first half. `WITH NOINDEX` does not change the plan either,
+-- DEFECT (2). `WITH NOINDEX` does not change the plan either,
 -- because the matcher behind `CountScan` never looks at the source's index
--- hint. The number is right here only because the index is still maintained;
--- the same hint is asserted below against an unmaintained one.
+-- hint. The number is right here because the index is still maintained; the
+-- same hint is asserted below against an unmaintained one.
 EXPLAIN SELECT count() FROM ctr WITH NOINDEX GROUP ALL;
 SELECT count() FROM ctr WITH NOINDEX GROUP ALL;
 
@@ -894,12 +893,11 @@ SELECT id FROM pr WITH NOINDEX WHERE email = 'a@x';
 
 ALTER INDEX prc_count ON prc PREPARE REMOVE;
 
--- DEFECT (1), unconditional half, and DEFECT (2), second half. The plan is
--- unchanged — as it is for every state of a COUNT index — and `CountScan`
--- still sums the deltas of an index writes no longer maintain, so the count is
--- right until the next write and wrong afterwards. `WITH NOINDEX` reports the
--- same stale number. Correct answer for all three reads below: 4, which only a
--- formulation that cannot reach the count fast path reports.
+-- DEFECT (1), unconditional half. The plan is unchanged — as it is for every
+-- state of a COUNT index — and `CountScan` still sums the deltas of an index
+-- writes no longer maintain, so the count is right until the next write and
+-- wrong afterwards. `WITH NOINDEX` reports the true count. Correct answer for
+-- all three reads below: 4; the unhinted read reports 3.
 EXPLAIN SELECT count() FROM prc GROUP ALL;
 CREATE prc:4;
 SELECT count() FROM prc GROUP ALL;

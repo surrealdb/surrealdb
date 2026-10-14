@@ -280,7 +280,7 @@ pub(crate) enum Admission {
 /// The rows of the region-constraint table, each naming the regions it constrains.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Section4bRow {
-	/// A filter, order key, group key or split clause: rejects a write, DDL, a `LET` and `SLEEP`.
+	/// A filter, order key, group key or split clause: rejects a write, DDL and `SLEEP`.
 	ConditionClause,
 	/// A permission frame or an assertion: rejects a write and DDL.
 	PermissionOrAssertFrame,

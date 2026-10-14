@@ -62,8 +62,8 @@ value = "NONE"
 value = '''
 'SelectProject [ctx: Db] [projections: id]
     Limit [ctx: Db] [limit: 1]
-        Sort [ctx: Db] [sort_keys: id ASC, keep: 1]
-            IndexScan [ctx: Db] [table: item, index: by_category, access: [category:01K00000000000000000000001], direction: Forward]
+        Filter [ctx: Db] [predicate: category = $category]
+            TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
@@ -114,7 +114,8 @@ RETURN fn::literal();
 SELECT VALUE id FROM item WHERE category = category:01K00000000000000000000001 ORDER BY id LIMIT 1;
 SELECT VALUE id FROM item WHERE category = category:01K00000000000000000000001 ORDER BY id LIMIT 1 START 1;
 
--- The index does not supply id order under the pinned prefix, so the sort stays.
+-- The index does not supply id order under the pinned prefix, so a plan over it
+-- keeps the sort; a table scan reads in id order and needs none.
 EXPLAIN SELECT id FROM item WHERE category = category:01K00000000000000000000001 ORDER BY id LIMIT 1;
 DEFINE FUNCTION fn::explained($category: record<category>) {
 	RETURN EXPLAIN SELECT id FROM item WHERE category = $category ORDER BY id LIMIT 1;

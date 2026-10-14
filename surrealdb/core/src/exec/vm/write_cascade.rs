@@ -267,7 +267,7 @@ async fn purge_edges(program: &Program, unit: Option<UnitId>, state: &mut State)
 			.vm_edge_cascade()
 			.cloned()
 			.ok_or_else(|| internal("an edge cascade's stages run beneath no edge cascade"))?;
-		let frame = caller.with_param(purge::PURGE_VERTEX, vertex);
+		let frame = caller.with_params([(purge::PURGE_VERTEX, vertex)]);
 		let exec = frame.dive().map_err(ControlFlow::Err)?;
 		let key = (Arc::as_ptr(&cascade).cast::<()>() as usize, UnitId(u32::MAX));
 		let admitted = state.write.as_deref().is_some_and(|write| write.admitted.contains(&key));
@@ -326,7 +326,7 @@ async fn repair(program: &Program, tables: &[TableRepairs], state: &mut State) -
 			let frame = ctx
 				.exec()
 				.for_reference_cascade()
-				.with_param(purge::PURGE_REFERENCING, Value::from(referencing));
+				.with_params([(purge::PURGE_REFERENCING, Value::from(referencing))]);
 			run_statement(program, *unit, frame, state)
 				.await
 				.map(|_| ())
@@ -365,7 +365,7 @@ async fn unset_link(
 	let exec = held_exec(state)?;
 	let frame = exec
 		.with_perms_suppressed(true)
-		.with_param(purge::PURGE_REFERENCING, Value::from(referencing.clone()));
+		.with_params([(purge::PURGE_REFERENCING, Value::from(referencing.clone()))]);
 	let rows = run_statement(program, read, frame.clone(), state).await?;
 	let Value::Array(rows) = rows else {
 		return Err(internal("a read of the referencing record that answered no list"));
@@ -377,7 +377,7 @@ async fn unset_link(
 	if matches!(held, Value::RecordId(_)) {
 		run_statement(program, unset, frame, state).await.map(|_| ())
 	} else if matches!(held, Value::Array(_) | Value::Set(_)) {
-		let frame = frame.with_param(purge::PURGE_DELETED, Value::from(rid.clone()));
+		let frame = frame.with_params([(purge::PURGE_DELETED, Value::from(rid.clone()))]);
 		run_statement(program, subtract, frame, state).await.map(|_| ())
 	} else if matches!(held, Value::None) {
 		Ok(())
@@ -571,7 +571,7 @@ async fn custom(
 	let exec = held_exec(state)?;
 	let frame = exec
 		.with_perms_suppressed(true)
-		.with_param(purge::REFERENCE, Value::from(rid.clone()))
+		.with_params([(purge::REFERENCE, Value::from(rid.clone()))])
 		.dive()
 		.map_err(|err| purge::wrap(rid, ControlFlow::Err(err)))?;
 	let ran = run_image(program, clause, Value::from(referencing), Some(frame), state, &exec).await;

@@ -607,7 +607,7 @@ pub(super) fn frame_param(
 	{
 		return Ok(Some(value.clone()));
 	}
-	// A write-path binding sits between the two: a `LET $value = ...` in the
+	// A write-path binding sits between the two: a `LET $limit = ...` in the
 	// body being evaluated is an inner scope and wins, while the binding
 	// shadows a session or database parameter of the same name.
 	if let Some(value) = ctx.write_binding(name) {

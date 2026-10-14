@@ -91,7 +91,7 @@ value = "[{ d: 10f, id: pts:1 }, { d: 20f, id: pts:2 }]"
 value = '''
 'VersionScope [ctx: Db] [version: $ts]
     ProjectValue [ctx: Db] [expr: id]
-        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 1]
+        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: deferred]
             TableScan [ctx: Db] [table: pts, direction: Forward]
 ''''
 

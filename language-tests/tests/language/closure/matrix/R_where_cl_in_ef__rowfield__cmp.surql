@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Position: a closure inside an element filter inside a `WHERE` over table rows; the body reads the field `lim` of the row through a comparison (`E >= $m`). A closure in an element filter reads the element where it is written, not the row it is invoked over."
+reason = "Position: a closure inside an element filter inside a `WHERE` over table rows; the body reads the field `lim` of the row through a comparison (`E >= $m`). A bare field in an element filter reads the element, including in a closure a builtin invokes within the filter: the invoking frame is the element filter, whose row is the element."
 
 [[test.results]]
 value = "[{ id: t:1, lim: 8, n: 1 }]"

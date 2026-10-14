@@ -616,6 +616,8 @@ mod tests {
 				returns: None,
 				body_sql: "1".into(),
 				captures: Box::new([]),
+				reads_row: false,
+				reads_root: false,
 				literal: Default::default(),
 			})),
 			ExprTag::If => ExprOp::If,

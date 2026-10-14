@@ -969,6 +969,7 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
+			surrealdb_rpc::check_protected_param(&key)?;
 			let req = Command::Unset {
 				key,
 			}

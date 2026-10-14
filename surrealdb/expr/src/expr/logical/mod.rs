@@ -1351,6 +1351,20 @@ pub struct LogicalLet {
 	/// The declared kind the value is coerced to.
 	pub kind: Option<Kind>,
 	pub value: Box<LogicalOp>,
+	/// Whether the planner wrote this `LET` to bind a name that a plan reads from the frame it was
+	/// written in, as opposed to the query writing it. Only a written `LET` is refused a name the
+	/// system binds (`surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES`).
+	pub synthetic: bool,
+}
+
+impl LogicalLet {
+	/// Whether `LET` refuses to bind this name: a protected parameter name, and a name the system
+	/// binds. A `LET` the planner wrote may bind a name the system binds, never a protected one.
+	pub fn is_refused(&self) -> bool {
+		let name = self.name.as_str();
+		surrealdb_cnf::is_refused_let_name(name)
+			&& !(self.synthetic && surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES.contains(&name))
+	}
 }
 
 /// `RETURN what FETCH …`.
@@ -3621,6 +3635,7 @@ mod tests {
 				name: "x".to_string(),
 				kind: Some(Kind::Int),
 				value: leaf(),
+				synthetic: false,
 			}),
 			LogicalOp::Return(LogicalReturn {
 				what: leaf(),
@@ -4512,6 +4527,7 @@ Join[SEMI AS _join0    ON a = _join0.b    WHERE _join0.n > m    @permission]
 					value: Box::new(LogicalOp::Eval(LogicalEval {
 						expr: expr("1 + 1"),
 					})),
+					synthetic: false,
 				}),
 				LogicalOp::Foreach(LogicalForeach {
 					param: Param::from("i".to_string()),
@@ -4591,6 +4607,7 @@ Project[a]
 			value: Box::new(LogicalOp::Eval(LogicalEval {
 				expr: expr("[1, (SELECT * FROM t), { RETURN 2; }]"),
 			})),
+			synthetic: false,
 		});
 		let expected = "\
 Let[$x]

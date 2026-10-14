@@ -292,6 +292,12 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"schema_host.rs",
+		"check_computed_callees",
+		"declared schema service: whether the functions a COMPUTED body calls are read-only, \
+		 read from the catalog as DEFINE FIELD reads them",
+	),
+	(
+		"schema_host.rs",
 		"refuse_removing_id",
 		"declared schema service: what REMOVE FIELD refuses of the id of a table whose \
 		 definitions read its record id components, judged as its body judges it",
@@ -1052,10 +1058,8 @@ const LOADER_CLOSURE_MEMBERS: &[(&str, &str)] = &[
 	("captures", "the values the closure captured"),
 	("frame", "the frame an invocation runs a unit in"),
 	("dives", "whether an invocation spends the computation-depth budget"),
-	("with_rows", "the value holding the row its literal captured, made with no body"),
-	("runs_over_invoking_row", "whether the body runs over the invoking frame's row"),
-	("rows", "which row captures the value holds, which its unit is found by"),
-	("captured_rows", "the row the value captured, which its invocation runs the body over"),
+	("reading_row", "the value whose body reads the invoking row, made with no body"),
+	("rows", "which rows the value's unit takes, which its unit is found by"),
 	(
 		"capturing_forbidden_row",
 		"marks a value the VM's literal makes as having captured a KNN query vector's row being \

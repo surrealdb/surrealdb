@@ -14,7 +14,8 @@ written as a statement of a block is a value scope too, so `{ { RETURN 1 }; RETU
 in a function body and in a closure body alike. A statement-level IF or FOR pushes no scope, so its
 RETURN passes outwards and ends the top-level statement it stands in; a RETURN that reaches the
 top-level statement ends that statement with its value, as in `LET $bare = RETURN 5` and
-`WHERE RETURN false`. A statement in scalar position that is a value scope takes its own RETURN into
+`WHERE RETURN false`. Parentheses alone open no value scope, so `LET $v = (RETURN 8)` ends its
+statement with 8 as `LET $bare = RETURN 5` does. A statement in scalar position that is a value scope takes its own RETURN into
 its own destination and resumes after itself.
 """
 
@@ -31,10 +32,10 @@ value = "NONE"
 value = "1"
 
 [[test.results]]
-value = "NONE"
+value = "8"
 
 [[test.results]]
-value = "8"
+value = "NONE"
 
 [[test.results]]
 value = "6"

@@ -80,7 +80,9 @@ fn corpus(kind: &Kind) -> Vec<String> {
 				Kind::Bytes,
 				Kind::Duration,
 				Kind::Datetime,
-				Kind::Array(Box::new(Kind::Any), None),
+				// An array of numbers, not of `any`: the corpus of `array<any>` is drawn from
+				// this one, so an `any` element here would never bottom out.
+				Kind::Array(Box::new(Kind::Number), None),
 				Kind::Object,
 				Kind::Uuid,
 			] {
@@ -289,12 +291,14 @@ struct Subject {
 	signature: Signature,
 }
 
-/// Every builtin of `kind` named by [`FALLIBILITY`] that the registry holds, with its signature
-/// and effects. A projection or index function carries no effects declaration.
+/// Every builtin of `kind` named by [`FALLIBILITY`] that the registry holds and SurrealQL text can
+/// call, with its signature and effects. A projection or index function carries no effects
+/// declaration. A builtin the parser's path table does not hold, such as `array::collect`, which
+/// only the planner and the GQL lowering name, cannot be written in a probe and is not a subject.
 fn subjects(registry: &FunctionRegistry, kind: FnKind) -> Vec<Subject> {
 	let mut out = Vec::new();
 	for &(row_kind, name, class) in FALLIBILITY {
-		if row_kind != kind {
+		if row_kind != kind || crate::expr::builtin_paths::lookup(name).is_none() {
 			continue;
 		}
 		let (effects, signature) = match kind {

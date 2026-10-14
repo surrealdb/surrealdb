@@ -10359,8 +10359,10 @@ mod test {
 		assert_eq!(results.len(), 1, "only the crossing LET reports");
 		let err = results[0].result.as_ref().unwrap_err();
 		assert!(err.message().contains(&format!("limit of {limit}")), "got: {err:?}");
+		// Nothing after the crossing ran, so no statement created the table.
 		let rows = past_limit.execute("SELECT VALUE id FROM marker", &session, None).await?;
-		assert!(rows[0].result.as_ref().unwrap().as_array().unwrap().is_empty());
+		let err = rows[0].result.as_ref().unwrap_err();
+		assert!(err.message().contains("'marker' does not exist"), "got: {err:?}");
 
 		Ok(())
 	}

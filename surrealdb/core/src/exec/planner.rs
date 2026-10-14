@@ -1605,6 +1605,9 @@ pub(crate) async fn plan_request_statement(
 		planner = planner.with_auth(auth);
 	}
 	planner.speculate_with(speculation);
+	let within =
+		crate::exec::vm::out_of_line(|| crate::exec::vm::catalog_within(&planner, &op, &[])).await;
+	let planner = planner.reaching(within);
 	let unbound = matches!(
 		op,
 		LogicalOp::Sequence(_) | LogicalOp::Foreach(_) | LogicalOp::Let(_) | LogicalOp::Eval(_)

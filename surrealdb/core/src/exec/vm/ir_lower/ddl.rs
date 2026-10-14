@@ -782,11 +782,18 @@ impl Ddl<'_, '_> {
 	/// Where operand `slot` is read from, lowering the expression that defines it where it is
 	/// first read. An operand is read once.
 	fn read(&mut self, slot: OperandSlot) -> Result<Operand, IrError> {
+		self.read_labelled(slot, false)
+	}
+
+	/// [`Self::read`], with the method calls of the expression naming their argument errors as
+	/// code a write reaches does where `writing` holds.
+	fn read_labelled(&mut self, slot: OperandSlot, writing: bool) -> Result<Operand, IrError> {
 		if self.read.contains_key(&slot) {
 			return Err(IrError::Stale("ir_lower::ddl: an operand read twice"));
 		}
 		let value = self.value_of(slot)?;
 		let mut lowerer = Lowerer::in_context(&mut *self.em, self.ir, &mut *self.cx);
+		lowerer.label_as_writing(writing);
 		let operand = lowerer.value(value)?;
 		let needs = lowerer.needs();
 		self.needs = self.needs.merged(&needs);
@@ -795,12 +802,13 @@ impl Ddl<'_, '_> {
 	}
 
 	/// A register holding what the operand `slot` evaluates to in the statement's frame. A value a
-	/// second evaluation may answer differently is evaluated by the statement's run alone.
+	/// second evaluation may answer differently is evaluated by the statement's run alone. Its
+	/// method calls name their argument errors as code a write reaches does.
 	fn evaluated(&mut self, slot: OperandSlot) -> Result<Reg, IrError> {
 		if self.real_run_only(slot)? {
 			self.store(StoreInstr::RealRunOnly);
 		}
-		match self.read(slot)? {
+		match self.read_labelled(slot, true)? {
 			Operand::Reg(reg) => Ok(reg),
 			other @ (Operand::Const(_) | Operand::Field(_)) => self.load(other),
 		}

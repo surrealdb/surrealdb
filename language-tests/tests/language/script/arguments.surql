@@ -11,8 +11,8 @@ value = "NONE"
 value = "[{ id: article:test, summary: 'SurrealDB is awesome, advanced, cool' }]"
 
 */
-LET $value = 'SurrealDB';
+LET $name = 'SurrealDB';
 LET $words = ['awesome', 'advanced', 'cool'];
-CREATE article:test SET summary = function($value, $words) {
+CREATE article:test SET summary = function($name, $words) {
 	return `${arguments[0]} is ${arguments[1].join(', ')}`;
 };

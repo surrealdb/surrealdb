@@ -1637,6 +1637,7 @@ mod tests {
 				name: "x".to_string(),
 				kind: Some(Kind::Int),
 				value: leaf(),
+				synthetic: false,
 			}),
 			LogicalOp::Return(LogicalReturn {
 				what: leaf(),

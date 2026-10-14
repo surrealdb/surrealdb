@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "The body is written in `DEFINE FIELD s ON w VALUE $value.a.filter(|$e| $e >= $m)`. It runs and reads the names and the row of the frame where the closure is written."
+reason = "The body is written in `DEFINE FIELD s ON w VALUE $value.a.filter(|$e| $e >= $m)`. It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

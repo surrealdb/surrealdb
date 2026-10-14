@@ -1156,6 +1156,8 @@ fn print_op(op: &ExprOp, out: &mut String) {
 			print_list(map.key("captures"), &attrs.captures, |out, name| {
 				print_string(out, name.as_str());
 			});
+			print_bool(map.key("reads_row"), attrs.reads_row);
+			print_bool(map.key("reads_root"), attrs.reads_root);
 		}
 		ExprOp::Agg {
 			kind,
@@ -2288,11 +2290,15 @@ fn parse_op(tag: ExprTag, text: &str) -> Result<ExprOp, ParseError> {
 				.into_iter()
 				.map(read_strand)
 				.collect::<Result<Box<[Strand]>, ParseError>>()?;
+			let reads_row = map.take("reads_row")?.boolean()?;
+			let reads_root = map.take("reads_root")?.boolean()?;
 			ExprOp::ClosureCreate(Box::new(ClosureAttrs {
 				params,
 				returns,
 				body_sql,
 				captures,
+				reads_row,
+				reads_root,
 				literal: Default::default(),
 			}))
 		}
@@ -2487,6 +2493,8 @@ mod tests {
 				returns: Some(Kind::String),
 				body_sql: "$a + 'x'".into(),
 				captures: Box::new([]),
+				reads_row: false,
+				reads_root: false,
 				literal: Default::default(),
 			})),
 			ExprTag::If => ExprOp::If,
@@ -2978,6 +2986,8 @@ mod tests {
 			returns: None,
 			body_sql: "".into(),
 			captures: Box::new([]),
+			reads_row: false,
+			reads_root: false,
 			literal: Default::default(),
 		})));
 		ops.push(ExprOp::Postfix {

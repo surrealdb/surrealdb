@@ -145,6 +145,8 @@ struct HeldBundle {
 	version: Option<uuid::Uuid>,
 	fields: Arc<[crate::catalog::FieldDefinition]>,
 	indexes: Arc<[crate::catalog::IndexDefinition]>,
+	events: Arc<[crate::catalog::EventDefinition]>,
+	views: Arc<[crate::catalog::TableDefinition]>,
 	bundle: Arc<Program>,
 }
 
@@ -303,7 +305,8 @@ impl WriteState {
 	/// The bundle of the stages `named`, a write that may reach any table,
 	/// applies to the records of `ctx`'s table, for the definitions `ctx`
 	/// read: held from an earlier record of the run whose context read the
-	/// same catalog version, or the same fields and indexes, or served
+	/// same catalog version, or the same fields, indexes, events and views,
+	/// which are every definition a bundle's stages are lowered from, or served
 	/// ([`super::fault::serve_stage_bundle`]) and held. A table whose context
 	/// was resolved again for definitions that changed while the run went on
 	/// takes the bundle of the definitions it holds now.
@@ -318,7 +321,9 @@ impl WriteState {
 			held.table == *table
 				&& (held.version == version
 					|| (Arc::ptr_eq(&held.fields, &ctx.fields)
-						&& Arc::ptr_eq(&held.indexes, &ctx.indexes)))
+						&& Arc::ptr_eq(&held.indexes, &ctx.indexes)
+						&& Arc::ptr_eq(&held.events, &ctx.events)
+						&& Arc::ptr_eq(&held.views, &ctx.views)))
 		}) {
 			return Ok(Arc::clone(&held.bundle));
 		}
@@ -329,9 +334,17 @@ impl WriteState {
 			version,
 			fields: Arc::clone(&ctx.fields),
 			indexes: Arc::clone(&ctx.indexes),
+			events: Arc::clone(&ctx.events),
+			views: Arc::clone(&ctx.views),
 			bundle: Arc::clone(&bundle),
 		});
 		Ok(bundle)
+	}
+
+	/// Whether the failure a handler resumed with is a `BREAK`, `CONTINUE` or `RETURN`, which
+	/// leaves the record with what it wrote, rather than an error.
+	fn holds_signal(&self) -> bool {
+		self.failure.as_ref().is_some_and(|failure| !matches!(failure, ControlFlow::Err(_)))
 	}
 
 	fn in_flight(&mut self) -> Result<(&mut WriteRow, Arc<WriteCtx>), ControlFlow> {
@@ -453,7 +466,13 @@ impl WriteState {
 			}
 			WriteInstr::SavepointRollback => {
 				let (_, ctx) = self.in_flight()?;
-				ctx.txn().rollback_to_save_point().await.map_err(ControlFlow::Err)?;
+				// A `BREAK`, `CONTINUE` or `RETURN` the attempt signalled leaves it with what it
+				// wrote, as it leaves a write that runs with no savepoint; an error undoes it.
+				if self.holds_signal() {
+					ctx.txn().release_last_save_point().await.map_err(ControlFlow::Err)?;
+				} else {
+					ctx.txn().rollback_to_save_point().await.map_err(ControlFlow::Err)?;
+				}
 				next
 			}
 			WriteInstr::TryBegin {
@@ -467,7 +486,9 @@ impl WriteState {
 				next
 			}
 			WriteInstr::ClearMutated => {
-				self.row()?.mutated = false;
+				if !self.holds_signal() {
+					self.row()?.mutated = false;
+				}
 				next
 			}
 			WriteInstr::RethrowSignal => match self.failure.take() {

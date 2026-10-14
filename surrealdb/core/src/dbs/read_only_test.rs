@@ -290,13 +290,16 @@ mod vm {
 
 		/// Whether this is the plan refusing a statement in a clause whose region does not admit
 		/// it, such as a write in a `WHERE` clause: the request is refused before any statement
-		/// of it runs, so no program holds the statement.
+		/// of it runs, so no program holds the statement. The planner's own classifier
+		/// ([`rejection_message`](crate::exec::ir::logical::constraints::rejection_message))
+		/// tells a region rejection from any other invalid statement.
 		fn is_region_refusal(&self) -> bool {
-			matches!(
-				self,
-				Outcome::Declined(Error::Exec(crate::exec::Error::InvalidStatement(message)))
-					if message.contains("is not allowed in a")
-			)
+			match self {
+				Outcome::Declined(error) => {
+					crate::exec::ir::logical::constraints::rejection_message(error).is_some()
+				}
+				Outcome::Program(_) => false,
+			}
 		}
 	}
 

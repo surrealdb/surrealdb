@@ -68,6 +68,7 @@ pub(crate) async fn frame(
 		current_value: None,
 		current_row: doc.map(|doc| Arc::new(doc.doc.as_ref().clone())),
 		forbidden_row: None,
+		inherited_knn: None,
 		// All three follow the caller's `perms`, as they do for any other
 		// expression the engine evaluates inside a caller's frame:
 		// enforcement is off in this frame whichever of the three a reader

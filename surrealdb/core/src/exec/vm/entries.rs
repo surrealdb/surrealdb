@@ -28,9 +28,9 @@ use crate::val::RecordId;
 /// answers.
 ///
 /// A bound that reads the statement clock resolves here, as the scan opens, to
-/// the instant of the top-level statement `ctx` runs in (the wall clock where
-/// none is installed), so a program that outlives its statement reads the clock
-/// of the statement that runs it.
+/// the instant of the statement `ctx` runs in (the wall clock where none is
+/// installed), so a program that outlives its statement reads the clock of the
+/// statement that runs it.
 pub(super) fn entry_range(
 	ctx: &ExecutionContext,
 	index: &IndexRef,

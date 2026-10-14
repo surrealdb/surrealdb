@@ -428,18 +428,21 @@ mod tests {
 		);
 	}
 
-	/// A clause that holds a statement, a closure or a call of a function under an `AUTH LIMIT` is
-	/// refused, since this lowering does not narrow the principal. The same clause with no limit
-	/// lowers.
+	/// A clause that holds a statement or a call of a function under an `AUTH LIMIT` lowers: each
+	/// is a unit planned for the principal the limit narrows the caller to. A clause that makes a
+	/// closure there is refused, since no unit of that principal is requested for its body. The
+	/// same clauses with no limit lower.
 	#[test]
-	fn a_clause_that_holds_a_statement_under_an_auth_limit_is_refused() {
+	fn a_clause_that_makes_a_closure_under_an_auth_limit_is_refused() {
 		let definitions = || vec![sync("one", "true", &["(SELECT * FROM audit)"])];
-		let limited = container_with(
-			definitions(),
-			|_| {},
-			Some(surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None)),
-			truth,
-		);
+		let limit = || Some(surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None));
+		let closing = |b: &mut Builder, args: &[ValueId], at: usize| match at {
+			0 => truth(b, args, at),
+			_ => b.closure(),
+		};
+		let limited = container_with(definitions(), |_| {}, limit(), truth);
+		assert!(lower(&limited).is_ok());
+		let limited = container_with(definitions(), |_| {}, limit(), closing);
 		assert!(matches!(lower(&limited), Err(IrError::NotYet { .. })));
 		assert!(lower(&container(definitions(), truth)).is_ok());
 	}

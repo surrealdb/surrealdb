@@ -159,8 +159,10 @@ SurrealDB's security model rests on four pillars:
   record user can print. It must also be read-only and must run only after the
   identity is settled, so an unverified credential never triggers it.
 - `$session.data` is server-computed, but it is **not** unforgeable, and no
-  invariant may be written as if it were. `PROTECTED_PARAM_NAMES` is consulted
-  only by `LET`, `UNSET`, `db.set` and RPC `set`/`unset`; the constructs that
+  invariant may be written as if it were. `PROTECTED_PARAM_NAMES`, with the
+  names the system binds in a frame (`surrealdb_cnf::is_refused_let_name`), is
+  consulted only by `LET`, `UNSET`, `db.set`, RPC `set`/`unset` and request
+  variables; the constructs that
   bind a caller-chosen parameter name — `FOR $session IN [...]`, closure
   parameters, user-defined function arguments — bind it unchecked, and
   `Context::value` prefers a locally-inserted key over the parent chain. The
@@ -1398,7 +1400,8 @@ Flag when changes touch:
   seen as `record` and remains denied.
 - eval must reject transaction-control and session-level top-level statements
   (BEGIN/CANCEL/COMMIT/USE/LIVE/KILL/OPTION/SHOW/access), bound recursion, and
-  honour `PROTECTED_PARAM_NAMES` for caller bindings. The recursion bound is
+  honour `PROTECTED_PARAM_NAMES` and the names the system binds
+  (`surrealdb_cnf::is_refused_let_name`) for caller bindings. The recursion bound is
   expression-nesting depth charged against `max_computation_depth`, carried in as a
   budget so a query reached through nested `eval` calls cannot reset it; there is no
   separate eval-only depth constant.

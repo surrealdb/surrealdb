@@ -4,43 +4,43 @@ namespace = true
 database = true
 
 [test]
-reason = "A statement or a block that a method argument's closure holds reads the current value of the step through `$this` and `$parent`, which in a frame with no row is the method's receiver, as the same statement written without a closure does: the answer is the same whether or not the body also reads the current value elsewhere. An element filter in the body that reads `$parent` reads the row of the frame the literal is written in, which is none in a frame with no row, whether or not the body reads the current value elsewhere, and whether the filter is at the body's own level or in a block, a `LET` or an `IF` the body holds; in a frame with a row it reads that row. A closure nested in such a block, with an element filter that reads `$parent`, reads the same row. The closure-free twins (`concat`, a literal array) are the control."
+reason = "A statement that a method argument's closure holds reads `$this` as the document of the frame that invokes the closure, which a frame with no row does not have, so the statement reads no rows, and a bare `$this` in the body is `NONE`; the answer is the same whether or not the body also reads `$this` elsewhere. A statement or a block in the body takes the document of the frame that invokes the closure as its `$parent`, which a frame with no row does not have, so a statement over `$parent` reads no rows and a block reads `NONE`. The same statement written without a closure (`concat`) reads the receiver as the step's root. An element filter in the body that reads `$parent` reads the row of the frame the literal is written in, which is none in a frame with no row, whether or not the body reads the current value elsewhere, and whether the filter is at the body's own level or in a block, a `LET` or an `IF` the body holds; in a frame with a row it reads that row. A closure nested in such a block, with an element filter that reads `$parent`, reads the same row. The closure-free twins (`concat`, a literal array) are the control."
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
 value = "[{ lim: 1 }, { lim: 2 }, [1, 2]]"
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
-value = "[[{ lim: 1 }, { lim: 2 }], [{ lim: 1 }, { lim: 2 }]]"
+value = "[NONE, NONE]"
 
 [[test.results]]
-value = "[[{ lim: 1 }, { lim: 2 }], [{ lim: 1 }, { lim: 2 }]]"
+value = "[NONE, NONE]"
 
 [[test.results]]
 value = "[{ lim: 1 }, { lim: 2 }, [{ lim: 1 }, { lim: 2 }]]"
 
 [[test.results]]
-value = "[2, 2]"
+value = "[0, 0]"
 
 [[test.results]]
-value = "[2, 2]"
+value = "[0, 0]"
 
 [[test.results]]
-value = "[1, 5, 10]"
+value = "[]"
 
 [[test.results]]
-value = "[1, 5, 10]"
+value = "[]"
 
 [[test.results]]
 value = "[1]"
@@ -73,7 +73,7 @@ value = "[[3]]"
 value = "[[3]]"
 
 [[test.results]]
-value = "[[3, [{ lim: 2 }]]]"
+value = "[[3, NONE]]"
 
 [[test.results]]
 value = "[3]"

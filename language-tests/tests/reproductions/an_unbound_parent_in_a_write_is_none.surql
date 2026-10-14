@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "In the clauses of a write statement and of the field definitions, events and RETURN projection it evaluates, an unbound $parent is NONE rather than the record being written; a statement nested in the write binds $parent to that record, and a write nested in a SELECT reads the SELECT row as $parent."
+reason = "In the clauses of a write statement and of the field definitions, events and RETURN projection it evaluates, an unbound $parent is NONE rather than the record being written; a statement nested in the write binds $parent to that record, and a write nested in a SELECT reads the SELECT row as $parent. A LET of $parent is refused, so no session binding of it is read in a write."
 
 [[test.results]]
 value = "[{ a: 1, id: t:1 }]"
@@ -49,10 +49,10 @@ value = "[NONE]"
 value = "[2]"
 
 [[test.results]]
-value = "NONE"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[7]"
+value = "[NONE]"
 
 [[test.results]]
 value = "[]"
@@ -79,7 +79,7 @@ value = "[[1]]"
 value = "[[7]]"
 
 [[test.results]]
-value = "[NONE]"
+value = "[7]"
 
 [[test.results]]
 value = "[[1]]"
@@ -124,7 +124,7 @@ value = "[1]"
 value = "[{ a: 1, pa: NONE }]"
 
 [[test.results]]
-value = "[7]"
+value = "[NONE]"
 
 [[test.results]]
 value = "NONE"
@@ -139,7 +139,7 @@ value = "[1]"
 value = "[1]"
 
 [[test.results]]
-value = "[[7]]"
+value = "[[NONE]]"
 
 [[test.results]]
 value = "[]"
@@ -151,8 +151,7 @@ value = "[[1, 1]]"
 value = "[{ a: 5, fc: NONE, id: v:2 }]"
 
 [[test.results]]
-value = "[{ a: 5, fc: NONE, id: v:2, z: 7 }]"
-
+value = "[{ a: 5, fc: NONE, id: v:2 }]"
 */
 CREATE t:1 SET a = 1;
 CREATE t:2 SET a = 2;

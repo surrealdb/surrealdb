@@ -89,7 +89,7 @@ use crate::exec::ir::logical::ops::{
 use crate::exec::ir::logical::verify::timestamp_arg;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::ops::{PhysOp, PhysTag};
-use crate::exec::ir::{RequestInput, RequestStatement, registry};
+use crate::exec::ir::registry;
 use crate::exec::vm::program::UnitFrame;
 use crate::expr::logical::{EffectSet, EvalFrame, JoinKind, RelationAlias};
 use crate::expr::{BinaryOperator, Function, Kind, With};
@@ -4059,6 +4059,7 @@ fn no_mixed_statement_reaches_convert() {
 #[cfg(feature = "kv-mem")]
 mod kv {
 	use super::*;
+	use crate::exec::ir::{RequestInput, RequestStatement};
 	use crate::kvs::Datastore;
 
 	/// A datastore with the test namespace and database in place.
@@ -4202,8 +4203,35 @@ mod kv {
 		.await;
 	}
 
-	/// The language tests' files, as the path and the text, in path order. The text is used as
-	/// written: the header comment is a SurrealQL comment, and no expectation is read.
+	/// Whether the language suite runs the file `text` as a test: its header sets no `run = false`
+	/// in its `[test]` table. A file that does is a fixture another file imports (a schema, a
+	/// dataset a benchmark loads), which the suite never runs on its own.
+	fn the_suite_runs(text: &str) -> bool {
+		let Some(header) = text
+			.trim_start()
+			.strip_prefix("/**")
+			.and_then(|rest| rest.split_once("*/").map(|(header, _)| header))
+		else {
+			return true;
+		};
+		let mut in_test = false;
+		for line in header.lines().map(str::trim) {
+			if line.starts_with('[') {
+				in_test = line == "[test]";
+			} else if in_test
+				&& let Some((key, value)) = line.split_once('=')
+				&& key.trim() == "run"
+				&& value.trim() == "false"
+			{
+				return false;
+			}
+		}
+		true
+	}
+
+	/// The language tests' files the suite runs ([`the_suite_runs`]), as the path and the text, in
+	/// path order. The text is used as written: the header comment is a SurrealQL comment, and no
+	/// expectation is read.
 	fn corpus() -> Vec<(String, String)> {
 		fn visit(dir: &Path, out: &mut Vec<PathBuf>) {
 			for entry in fs::read_dir(dir).expect("the directory reads") {
@@ -4224,7 +4252,7 @@ mod kv {
 			.into_iter()
 			.filter_map(|path| {
 				let text = fs::read_to_string(&path).ok()?;
-				Some((path.to_string_lossy().into_owned(), text))
+				the_suite_runs(&text).then(|| (path.to_string_lossy().into_owned(), text))
 			})
 			.collect()
 	}
@@ -4233,6 +4261,8 @@ mod kv {
 	/// e-graph.
 	const NONDETERMINISTIC: &[&str] = &[
 		"rand::",
+		// `array::shuffle` and its method form draw a fresh order on every call.
+		"shuffle",
 		"uuid",
 		"ulid",
 		"time::now",
@@ -4305,17 +4335,21 @@ mod kv {
 	}
 
 	/// `answers` with each record id key the engine generates (twenty lowercase letters and
-	/// digits) and each UUID (a request id the engine generates) replaced by one marker, so two
-	/// runs that generate them compare equal.
+	/// digits), each UUID (a request id the engine generates) and each wall-clock time an
+	/// `EXPLAIN ANALYZE` reports (`elapsed: 1.2ms`) replaced by one marker, so two runs that
+	/// generate them compare equal.
 	fn without_generated_ids(answers: &Result<Vec<Result<String, String>>, String>) -> String {
 		let generated = regex::Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*):[0-9a-z]{20}\b")
 			.expect("the pattern compiles");
 		let uuid =
 			regex::Regex::new(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 				.expect("the pattern compiles");
+		let elapsed =
+			regex::Regex::new(r"elapsed: [0-9.]+(?:ns|µs|ms|s)\b").expect("the pattern compiles");
 		let answers = format!("{answers:?}");
 		let answers = generated.replace_all(&answers, "$1:<generated>");
-		uuid.replace_all(&answers, "<uuid>").into_owned()
+		let answers = uuid.replace_all(&answers, "<uuid>");
+		elapsed.replace_all(&answers, "elapsed: <elapsed>").into_owned()
 	}
 
 	/// With the registered rules, the logical-only run answers every statement of the corpus as

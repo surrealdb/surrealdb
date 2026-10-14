@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Position: a closure inside an element filter over an array of objects; the body reads a `LET` of the statement through an index argument (`E >= [0, 8, 100][$m]`). It runs and reads the names and the row of the frame where the closure is written."
+reason = "Position: a closure inside an element filter over an array of objects; the body reads a `LET` of the statement through an index argument (`E >= [0, 8, 100][$m]`). It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

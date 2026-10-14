@@ -882,7 +882,7 @@ async fn check_guard_for_value(
 			let bound_ctx;
 			let exec_ctx = match value_param {
 				Some(v) => {
-					bound_ctx = ctx.with_param("value", v.clone());
+					bound_ctx = ctx.with_params([("value", v.clone())]);
 					&bound_ctx
 				}
 				None => ctx,

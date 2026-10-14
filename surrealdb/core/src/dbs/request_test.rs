@@ -396,16 +396,19 @@ fn two_statements_read_two_clocks() {
 	assert!(results[2].as_ref().is_ok_and(|v| v.contains("true")), "{results:?}");
 }
 
-/// One statement reads one clock whatever it runs in between: a `SLEEP` inside
-/// the statement does not advance the instant its clock reads answer.
+/// Each statement of a block starts at an instant of its own: a statement after
+/// a `SLEEP` of the block reads a later clock, and the reads of one statement
+/// agree.
 #[test]
-fn one_statement_holding_a_sleep_reads_one_clock() {
+fn the_statements_of_a_block_read_a_clock_each() {
 	let results = answers(
 		"",
-		"{ LET $a = time::now(); SLEEP 20ms; LET $b = time::now(); RETURN $a = $b AND $a = time::now() };",
+		"{ LET $a = time::now(); SLEEP 20ms; LET $b = [time::now(), time::now()]; \
+		   RETURN [$a < $b[0], $b[0] = $b[1]] };",
 	);
 	assert_eq!(results.len(), 1, "{results:?}");
-	assert!(results[0].as_ref().is_ok_and(|v| v.contains("true")), "{results:?}");
+	let answer = results[0].as_ref().expect("the block answers");
+	assert!(answer.contains("true") && !answer.contains("false"), "{results:?}");
 }
 
 /// An embedded script reads the clock of the statement running it, through
@@ -417,10 +420,11 @@ fn one_statement_holding_a_sleep_reads_one_clock() {
 fn a_script_reads_the_statement_clock() {
 	let results = answers(
 		"",
-		"{ LET $a = time::now(); SLEEP 30ms; \
-		   LET $b = function() { return surrealdb.functions.time.now(); }; \
-		   LET $c = function() { return surrealdb.query('RETURN time::now()'); }; \
-		   RETURN [time::millis($a) = time::millis($b), time::millis($a) = time::millis($c)] };",
+		"{ SLEEP 30ms; \
+		   LET $b = [function() { return surrealdb.functions.time.now(); }, time::now()]; \
+		   LET $c = [function() { return surrealdb.query('RETURN time::now()'); }, time::now()]; \
+		   RETURN [time::millis($b[0]) = time::millis($b[1]), \
+		           time::millis($c[0]) = time::millis($c[1])] };",
 	);
 	assert_eq!(results.len(), 1, "{results:?}");
 	let answer = results[0].as_ref().expect("the block answers");

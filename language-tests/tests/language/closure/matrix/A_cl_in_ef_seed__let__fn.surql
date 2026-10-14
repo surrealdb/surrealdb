@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Position: a closure inside an element filter over an array of objects; the body reads a `LET` of the statement through a builtin call (`math::max([E, $m]) = E`). It runs and reads the names and the row of the frame where the closure is written."
+reason = "Position: a closure inside an element filter over an array of objects; the body reads a `LET` of the statement through a builtin call (`math::max([E, $m]) = E`). It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

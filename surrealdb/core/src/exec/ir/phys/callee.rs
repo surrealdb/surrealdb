@@ -8,9 +8,13 @@
 //!
 //! A call in a stored-clause region is code a statement stores and never runs, and is left as it
 //! is. A call in a statement that may change the catalog as it runs is planned per call
-//! ([`SemanticCatalog::calls_current`]). A definition the memo answers `Unknown` for is one the
-//! plan cannot know (a schema statement before the call's statement, or a read at a `VERSION`
-//! stamp): the call states it is late-bound, and its statement is planned again when it is reached.
+//! ([`SemanticCatalog::calls_current`]), whether or not the memo can answer its definition. So is
+//! a call that reads at a `VERSION` stamp of its statement (an op under a
+//! [`Snapshot::Version`]): it runs the definition the stamp holds, and its body's calls the
+//! definitions the stamp holds, which the run reads when it evaluates the stamp. A definition the
+//! memo answers `Unknown` for in any other statement is one the plan cannot know (a schema
+//! statement before the call's statement): the call states it is late-bound, and its statement is
+//! planned again when it is reached.
 //! The fill of the memo loads every function a container calls (`vm::ir_catalog::fill`), so a
 //! definition answered `NotLoaded` here is an invariant break.
 
@@ -24,6 +28,7 @@ use crate::exec::ir::core::rewriter::Rewriter;
 use crate::exec::ir::core::walk::ancestors;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::catalog::{CatalogAnswer, SemanticCatalog};
+use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::OpId;
 use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::op_kind::OpKind;
@@ -48,25 +53,31 @@ pub(crate) fn read_callees(
 ) -> Result<u32, IrError> {
 	let mut sites = Vec::new();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
-		if let Some(OpKind::Expr(ExprOp::Call(call))) = ir.op(op).map(|data| &data.kind)
+		if let Some(data) = ir.op(op)
+			&& let OpKind::Expr(ExprOp::Call(call)) = &data.kind
 			&& let Function::Custom(name) = &call.function
 			&& !in_stored_clause(ir, op)
 		{
-			sites.push((op, name.clone()));
+			let versioned = matches!(ir.snapshot(data.snapshot), Some(Snapshot::Version(_)));
+			sites.push((op, name.clone(), versioned));
 		}
 		Walk::Continue
 	});
 	let mut stated = 0;
 	let mut rw = Rewriter::new(ir, facts);
-	for (op, name) in sites {
+	for (op, name, versioned) in sites {
+		let per_call = versioned || catalog.calls_current();
 		let callee = match catalog.function(&name) {
-			CatalogAnswer::Found(definition) if catalog.calls_current() => {
+			CatalogAnswer::Found(definition) if per_call => {
 				Some(CalleeFacts::PerCall(defined(&definition, registry)))
 			}
 			CatalogAnswer::Found(definition) => {
 				Some(CalleeFacts::Defined(defined(&definition, registry)))
 			}
+			// The stamp may hold a definition the current catalog does not.
+			CatalogAnswer::Absent if versioned => Some(CalleeFacts::PerCall(unknown_definition())),
 			CatalogAnswer::Absent => Some(CalleeFacts::Absent),
+			CatalogAnswer::Unknown if per_call => Some(CalleeFacts::PerCall(unknown_definition())),
 			CatalogAnswer::Unknown => Some(CalleeFacts::LateBound),
 			CatalogAnswer::NotLoaded => {
 				return Err(IrError::Invariant {
@@ -115,6 +126,21 @@ pub(crate) fn defined(
 		writes: definition.block.function_facts().direct_writes,
 		body_depth: clamp(depth.charged()),
 		deepest: clamp(depth.deepest),
+	}
+}
+
+/// What a call planned per call holds of a definition the plan cannot read: one whose body may
+/// write and that spends no depth the plan can state. The call reads the definition the
+/// transaction holds when it is made, as every call planned per call does.
+fn unknown_definition() -> DefinedCallee {
+	DefinedCallee {
+		hash: 0,
+		permission: CalleePermission::Predicate {
+			scope: None,
+		},
+		writes: true,
+		body_depth: 0,
+		deepest: 0,
 	}
 }
 

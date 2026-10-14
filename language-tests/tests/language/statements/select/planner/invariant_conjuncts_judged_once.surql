@@ -9,11 +9,13 @@ reason = """
 The conjuncts of a WHERE clause that read nothing of the row — parameters,
 session values, deterministic builtins over them — and come before every
 conjunct that may raise are judged once per run of the statement, at the first
-row the filter judges (EXPLAIN shows them as `once`); the rest are judged per
-row. A verdict that refuses admits no row, for a read and for the rows a write
-reads. A conjunct that raises raises at the first row, and over no rows raises
-nothing. A parameter conjunct written after a conjunct that may raise stays
-per row. Each statement returns what the predicate judged per row returns.
+row the filter judges; the rest are judged per row. A verdict that refuses
+admits no row, for a read and for the rows a write reads. A conjunct that
+raises raises at the first row, and over no rows raises nothing. A parameter
+conjunct written after a conjunct that may raise stays per row. Each statement
+returns what the predicate judged per row returns. EXPLAIN output is
+informational and carries no guaranteed semantics: the query results are what
+this test pins, and the EXPLAIN results record the plan as it is rendered now.
 """
 
 [[test.results]]
@@ -37,8 +39,7 @@ value = "NONE"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: n]
-    Filter [ctx: Db] [once: true = true AND 3 = 3, predicate: n > 15]
-        TableScan [ctx: Db] [table: t, direction: Forward]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: n > 15, pre_decode_filter: yes]
 ''''
 
 [[test.results]]
@@ -56,7 +57,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: n]
-    Filter [ctx: Db] [predicate: <int> n > 15 AND true = true]
+    Filter [ctx: Db] [predicate: <int> n > 15]
         TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 

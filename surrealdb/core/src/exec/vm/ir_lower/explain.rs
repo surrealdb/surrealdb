@@ -26,14 +26,14 @@
 //!   beneath a node that enforces a definer's declaration ([`ExplainNode::hides_metrics`]).
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use surrealdb_strand::TableName;
 use surrealdb_types::ToSql;
 
 use super::super::plain::ValueData;
-use super::super::program::{Analysis, Instr, Operand, Pipeline, Program, Source};
+use super::super::program::{Analysis, BlockInstr, Instr, Operand, Pipeline, Program, Source};
 use super::emit::Emitter;
+use super::expr::{Claim, Lowerer, Needs};
 use super::pipe::{PoolBase, ReadScope, lower_scope};
 use super::place::{Lowered, Provenance};
 use super::read::{IndexResolver, bitmap_plan, producer_of};
@@ -55,13 +55,15 @@ use crate::exec::ir::logical::seam::invariant;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::{
 	BitmapShape, BranchReadShape, CountShape, IndexBranchShape, KeyBoundShape, KeyEqShape,
-	KeyRangeShape, KnnTargetShape, MatchStepAttrs, OmissionShape, PhysOp, ProjectionShape,
+	KeyRangeShape, KnnTargetShape, MatchStepAttrs, OmissionShape, PhysOp, PhysTag, ProjectionShape,
 	SortKeyReadShape, WriteSubjectsShape,
 };
 use crate::exec::metrics::OperatorMetrics;
 use crate::exec::operators::scan::{BitmapNode, MergeMode};
 use crate::exec::planner::bitmap_plan_to_node;
-use crate::exec::vm::explain::{ExplainChild, ExplainNode, Measured, PrefilterChoice};
+use crate::exec::vm::explain::{
+	AnalysedPlan, ExplainChild, ExplainNode, MeasureKind, MeasureSpec, Measured,
+};
 use crate::exec::vm::payload::{JoinBuild, JoinMatch, LOOKUP_EVALUATIONS, ValuesRead};
 use crate::expr::BinaryOperator;
 use crate::expr::logical::{EvalMode, OutputPath};
@@ -84,12 +86,12 @@ pub(crate) struct ExplainScope<'a> {
 pub(crate) enum Purpose {
 	/// `EXPLAIN`: the plan alone.
 	Plan,
-	/// `EXPLAIN ANALYZE` rendered after the statement ran: every node reports the metrics of the
-	/// run, and a bitmap tree is measured by evaluating it again.
+	/// `EXPLAIN ANALYZE` of a statement: every node reports the one set of metrics the run
+	/// records, and a bitmap tree the run decided by is measured by evaluating it again after the
+	/// run.
 	Measured,
-	/// `EXPLAIN ANALYZE` of a statement a program runs as a group of its own: every node reports
-	/// the one set of metrics that run records, and a bitmap tree is described by its nodes
-	/// alone.
+	/// `EXPLAIN ANALYZE` of a statement a block holds among others: every node reports the one
+	/// set of metrics that run records, and a bitmap tree is described by its nodes alone.
 	Described,
 }
 
@@ -287,6 +289,11 @@ impl<'a> TreeWalk<'a> {
 		match &data.kind {
 			// A value a `LET` binds is read by its name; the `LET` is a statement of its own.
 			OpKind::Phys(PhysOp::Let(_)) => Ok(self.expression(value)),
+			// The rendering a plain `EXPLAIN` answers is a value, which no plan stands for.
+			OpKind::Phys(PhysOp::Explain {
+				analyze: false,
+				..
+			}) => Ok(self.expression(value)),
 			OpKind::Phys(kind) => self.plan_of_op(op, kind),
 			// A value that is no plan is the value the statement evaluates.
 			OpKind::Expr(_) => Ok(self.expression(value)),
@@ -906,6 +913,20 @@ impl<'a> TreeWalk<'a> {
 		let Some(data) = self.ir.op(op) else {
 			return String::new();
 		};
+		// A plain `EXPLAIN` is the rendering of the plan it explains, whatever text it was written
+		// as.
+		if let OpKind::Phys(PhysOp::Explain {
+			analyze: false,
+			format,
+		}) = &data.kind
+		{
+			return match explained_tree(self.ir, op, self.scope, Purpose::Plan) {
+				Ok(tree) => {
+					crate::exec::operators::ExplainPlan::render(tree.as_ref(), *format).to_sql()
+				}
+				Err(_) => PhysTag::Explain.mnemonic().to_string(),
+			};
+		}
 		if let Some(text) = data.loc.text() {
 			return text.to_owned();
 		}
@@ -1153,8 +1174,38 @@ impl<'a> TreeWalk<'a> {
 	}
 
 	fn bitmap_of(&self, shape: &BitmapShape) -> Result<Arc<BitmapNode>, IrError> {
-		let plan = bitmap_plan(shape, &|index| self.resolve(index))?;
-		Ok(bitmap_plan_to_node(plan))
+		Ok(bitmap_plan_to_node(self.bitmap_plan_of(shape)?))
+	}
+
+	fn bitmap_plan_of(&self, shape: &BitmapShape) -> Result<access_path::BitmapPlan, IrError> {
+		bitmap_plan(shape, &|index| self.resolve(index))
+	}
+
+	/// Makes the bitmap tree `plan` of `table` the one child of `node`, measured as `kind` states
+	/// after the statement runs: its nodes report what that evaluation produced, and `node` what
+	/// it decided.
+	fn measured_beneath(
+		&mut self,
+		node: &mut ExplainNode,
+		table: &TableName,
+		plan: access_path::BitmapPlan,
+		kind: MeasureKind,
+	) -> Result<(), IrError> {
+		let root = ValueData::new(plan, "a measured bitmap plan")
+			.map_err(|_| invariant("a measured bitmap plan holds a closure value"))?;
+		let measured = Measured::of(MeasureSpec {
+			table: table.clone(),
+			root,
+			kind,
+		});
+		let at = u16::try_from(self.measured.len())
+			.map_err(|_| IrError::Capacity("measured bitmap trees"))?;
+		node.children = vec![ExplainChild::bitmap(Arc::clone(&measured.bitmap)).into_operator()];
+		node.tier.clone_from(&measured.tier);
+		node.fallback.clone_from(&measured.fallback);
+		node.measure = Some(at);
+		self.measured.push(Arc::new(measured));
+		Ok(())
 	}
 
 	fn source(&mut self, op: OpId, kind: &PhysOp) -> Result<ExplainNode, IrError> {
@@ -1262,30 +1313,19 @@ impl<'a> TreeWalk<'a> {
 				Ok(self.node("UnionIndexScan", ContextLevel::Database, union, children))
 			}
 			PhysOp::Bitmap(attrs) => {
-				let bitmap = self.bitmap_of(&attrs.root)?;
-				let mut taken = None;
-				let children = if self.measure {
-					let cell = Arc::new(AtomicBool::new(false));
-					self.measured.push(Arc::new(Measured::Fusion {
-						table: attrs.table.clone(),
-						bitmap: Arc::clone(&bitmap),
+				let plan = self.bitmap_plan_of(&attrs.root)?;
+				let table = vec![("table".to_string(), attrs.table.to_string())];
+				if self.measure {
+					let mut node = self.node("BitmapScan", ContextLevel::Database, table, vec![]);
+					let kind = MeasureKind::Fusion {
 						// A bitmap with a region has a fallback; one with none is anchored.
 						anchored: regions.is_empty(),
-						fallback: Arc::clone(&cell),
-					}));
-					taken = Some(cell);
-					vec![ExplainChild::bitmap(bitmap)]
-				} else {
-					self.bitmap_nodes(bitmap)
-				};
-				let mut node = self.node(
-					"BitmapScan",
-					ContextLevel::Database,
-					vec![("table".to_string(), attrs.table.to_string())],
-					children,
-				);
-				node.fallback = taken;
-				Ok(node)
+					};
+					self.measured_beneath(&mut node, &attrs.table, plan, kind)?;
+					return Ok(node);
+				}
+				let children = self.bitmap_nodes(bitmap_plan_to_node(plan));
+				Ok(self.node("BitmapScan", ContextLevel::Database, table, children))
 			}
 			PhysOp::FullTextScan(attrs) => Ok(self.node(
 				"FullTextScan",
@@ -1566,7 +1606,7 @@ impl<'a> TreeWalk<'a> {
 			let prefilter = filter.prefilter.as_ref().filter(|_| shared_ids);
 			judged = match prefilter {
 				Some(prefilter) => {
-					prefilter_node = Some(self.bitmap_of(&prefilter.root)?);
+					prefilter_node = Some(self.bitmap_plan_of(&prefilter.root)?);
 					judges_condition = prefilter.residual || prefilter.uncovered_matches;
 					prefilter.residual.then(|| slots.next()).flatten()
 				}
@@ -1576,29 +1616,25 @@ impl<'a> TreeWalk<'a> {
 		if let Some(region) = judged {
 			scan.push(("predicate".to_string(), self.region_text(region)?));
 		}
-		let mut tier = None;
-		let children = match prefilter_node {
-			Some(bitmap) if self.measure => {
-				let cell = Arc::new(PrefilterChoice::default());
-				self.measured.push(Arc::new(Measured::Prefilter {
-					table: attrs.table.clone(),
-					bitmap: Arc::clone(&bitmap),
-					tier: Arc::clone(&cell),
+		match prefilter_node {
+			Some(plan) if self.measure => {
+				let mut node = self.node("KnnScan", ContextLevel::Database, scan, vec![]);
+				let kind = MeasureKind::Prefilter {
 					versioned: self.versioned,
 					index,
 					ef: attrs.ef,
 					judges_condition,
 					judges_permission,
-				}));
-				tier = Some(cell);
-				vec![ExplainChild::bitmap(bitmap)]
+				};
+				self.measured_beneath(&mut node, &attrs.table, plan, kind)?;
+				Ok(node)
 			}
-			Some(bitmap) => self.bitmap_nodes(bitmap),
-			None => vec![],
-		};
-		let mut node = self.node("KnnScan", ContextLevel::Database, scan, children);
-		node.tier = tier;
-		Ok(node)
+			Some(plan) => {
+				let children = self.bitmap_nodes(bitmap_plan_to_node(plan));
+				Ok(self.node("KnnScan", ContextLevel::Database, scan, children))
+			}
+			None => Ok(self.node("KnnScan", ContextLevel::Database, scan, vec![])),
+		}
 	}
 
 	// -----------------------------------------------------------------------------------------
@@ -1917,7 +1953,7 @@ impl<'a> TreeWalk<'a> {
 				let field = attrs.field.to_string();
 				let dimension = match &attrs.vector {
 					KnnTargetShape::Literal(vector) => vector.len().to_string(),
-					KnnTargetShape::Deferred(_) => "deferred".to_string(),
+					KnnTargetShape::Deferred(..) => "deferred".to_string(),
 				};
 				Ok(self.node(
 					"KnnTopK",
@@ -2610,14 +2646,27 @@ pub(super) fn explain_in(ir: &Ir) -> Option<(OpId, bool)> {
 	explain_of(ir, ir.top())
 }
 
-/// The `phys.explain` that `region` holds, with whether it is `ANALYZE`.
+/// The `phys.explain` that `region` holds, with whether it is `ANALYZE`: the outermost one, which
+/// no other `phys.explain` of the region explains, where an `EXPLAIN` explains another.
 pub(super) fn explain_of(ir: &Ir, region: RegionId) -> Option<(OpId, bool)> {
-	ops_in(ir, region).find_map(|op| match &ir.op(op)?.kind {
-		OpKind::Phys(PhysOp::Explain {
+	ops_in(ir, region).find_map(|op| {
+		let data = ir.op(op)?;
+		let OpKind::Phys(PhysOp::Explain {
 			analyze,
 			..
-		}) => Some((op, *analyze)),
-		OpKind::Phys(_) | OpKind::Expr(_) | OpKind::Logical(_) => None,
+		}) = &data.kind
+		else {
+			return None;
+		};
+		let explained = data.results.iter().any(|result| {
+			ir.uses(*result).iter().any(|read| {
+				matches!(
+					ir.op(read.user).map(|user| &user.kind),
+					Some(OpKind::Phys(PhysOp::Explain { .. }))
+				)
+			})
+		});
+		(!explained).then_some((op, *analyze))
 	})
 }
 
@@ -2690,6 +2739,17 @@ pub(super) enum Explained {
 		scope: ReadScope,
 		analysis: Analysis,
 	},
+	/// `EXPLAIN ANALYZE` of a statement that reads no rows (an expression, a control-flow
+	/// statement, a plain `EXPLAIN`): one pipeline over [`Source::Once`] that evaluates the
+	/// explained value and emits it as its one row, with the instructions each op emitted for
+	/// itself, what it needs of the program and what its run renders. A `RETURN`, `BREAK` or
+	/// `CONTINUE` the statement signals ends the run with no row.
+	AnalysedValue {
+		pipeline: Pipeline,
+		claims: Vec<Claim>,
+		needs: Needs,
+		analysis: Analysis,
+	},
 }
 
 /// Lowers the `EXPLAIN` the statement `region` holds, whose op is `explain`, into `em` for the
@@ -2698,7 +2758,7 @@ pub(super) enum Explained {
 /// A plain `EXPLAIN` is [`lower_plain`]'s rendering as one pipeline over [`Source::Once`]. An
 /// analysed one lowers the statement it explains as the read group of a block's statement
 /// ([`lower_scope`]), and states the analysis its run renders ([`analysis_of`], redacting what
-/// the context redacts).
+/// the context redacts), its tree built for `purpose`.
 pub(super) fn lower_explained(
 	cx: &mut LowerCx<'_>,
 	em: &mut Emitter,
@@ -2706,6 +2766,7 @@ pub(super) fn lower_explained(
 	region: RegionId,
 	explain: OpId,
 	base: PoolBase,
+	purpose: Purpose,
 ) -> Result<Explained, IrError> {
 	let data = ir.op(explain).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 	let OpKind::Phys(PhysOp::Explain {
@@ -2720,7 +2781,44 @@ pub(super) fn lower_explained(
 		emit_constant_row(em, rendered)?;
 		return Ok(Explained::Plain(em.finish_pipeline(Source::Once)?));
 	}
-	let analysis = analysis_of(ir, explain, &scope_of(cx), cx.redact_volatile())?;
+	let analysis = analysis_of(ir, explain, &scope_of(cx), cx.redact_volatile(), purpose)?;
+	let [input] = <[ValueId; 1]>::try_from(data.operands.as_slice())
+		.map_err(|_| invariant("a phys.explain with other than one operand"))?;
+	let producer = producer_of(ir, input)?;
+	let rendered = match &ir.op(producer).ok_or(IrError::Stale("ir_lower::explain: op"))?.kind {
+		OpKind::Phys(PhysOp::Explain {
+			analyze: false,
+			..
+		}) => Some(render_plain(cx, ir, producer)?),
+		_ => None,
+	};
+	if rendered.is_some() || reads_no_rows(ir, producer) {
+		let mut lowerer = Lowerer::in_context(em, ir, cx);
+		let value = match rendered {
+			Some(rendered) => Operand::Const(lowerer.emitter().constant(rendered)?),
+			None => match ir.op(producer).map(|held| (&held.kind, held.regions.as_slice())) {
+				Some((
+					OpKind::Phys(PhysOp::Statement {
+						..
+					}),
+					[statement],
+				)) => {
+					let held = lowerer.enter(*statement);
+					let value = statement_value(&mut lowerer, ir, *statement);
+					lowerer.leave(held);
+					value?
+				}
+				_ => lowerer.value(input)?,
+			},
+		};
+		let pipeline = lowerer.emit_value_pipeline(value)?;
+		return Ok(Explained::AnalysedValue {
+			pipeline,
+			claims: lowerer.take_claims(),
+			needs: lowerer.needs(),
+			analysis,
+		});
+	}
 	let scope = lower_scope(em, cx, ir, &mut FactCache::new(), region, base, true)?;
 	Ok(Explained::Analysed {
 		scope,
@@ -2728,17 +2826,75 @@ pub(super) fn lower_explained(
 	})
 }
 
+/// The value of the control-flow statement whose region is `region`, lowered where the analysed
+/// run evaluates it: the value its region yields, or the value of the `RETURN` that ends it, which
+/// leaves the run with no row.
+fn statement_value(
+	lowerer: &mut Lowerer<'_>,
+	ir: &Ir,
+	region: RegionId,
+) -> Result<Operand, IrError> {
+	let last = ops_in(ir, region).last().ok_or_else(|| invariant("a statement with no end"))?;
+	let data = ir.op(last).ok_or(IrError::Stale("ir_lower::explain: op"))?;
+	match (&data.kind, data.operands.as_slice()) {
+		(OpKind::Phys(PhysOp::Yield) | OpKind::Expr(ExprOp::Yield), [value]) => {
+			lowerer.value(*value)
+		}
+		(OpKind::Phys(PhysOp::Return), [value]) => {
+			let value = lowerer.value(*value)?;
+			let em = lowerer.emitter();
+			let returned = em.reg()?;
+			em.emit(Instr::Load {
+				dst: returned,
+				src: value,
+			});
+			em.emit(Instr::Block(BlockInstr::Return {
+				value: returned,
+			}));
+			Ok(Operand::Reg(returned))
+		}
+		_ => Err(IrError::NotYet {
+			what: "ir_lower::explain: EXPLAIN ANALYZE of a statement that ends in no value",
+		}),
+	}
+}
+
+/// Whether the op `producer`, which defines the value an `EXPLAIN ANALYZE` explains, is a
+/// statement that reads no rows: an expression, or a statement of control flow.
+fn reads_no_rows(ir: &Ir, producer: OpId) -> bool {
+	matches!(
+		ir.op(producer).map(|data| &data.kind),
+		Some(OpKind::Expr(_) | OpKind::Phys(PhysOp::Statement { .. }))
+	)
+}
+
+/// [`analysis_of`] for the context `cx`: its tree reads what the context's compile resolved, and
+/// is redacted as the context redacts.
+pub(super) fn analysis_in(
+	cx: &LowerCx<'_>,
+	ir: &Ir,
+	explain: OpId,
+	purpose: Purpose,
+) -> Result<Analysis, IrError> {
+	analysis_of(ir, explain, &scope_of(cx), cx.redact_volatile(), purpose)
+}
+
 /// What `EXPLAIN ANALYZE` of the statement the `phys.explain` `explain` explains renders: the
-/// plan, cut where every operator of it writes the one set of metrics the run of the statement
-/// records, or its JSON with those metrics to fill.
+/// display tree of its plan, every operator of which reports the one set of metrics the run of the
+/// statement records, built for `purpose`.
 ///
-/// `redact` is whether elapsed time and batch counts are left out of the rendering.
+/// `redact` is whether elapsed time and batch counts are left out of the rendering. Answers an
+/// invariant error for [`Purpose::Plan`].
 pub(crate) fn analysis_of(
 	ir: &Ir,
 	explain: OpId,
 	scope: &ExplainScope<'_>,
 	redact: bool,
+	purpose: Purpose,
 ) -> Result<Analysis, IrError> {
+	if purpose == Purpose::Plan {
+		return Err(invariant("an analysis of a plan that reports no metrics"));
+	}
 	let data = ir.op(explain).ok_or(IrError::Stale("ir_lower::explain: op"))?;
 	let OpKind::Phys(PhysOp::Explain {
 		format,
@@ -2747,24 +2903,12 @@ pub(crate) fn analysis_of(
 	else {
 		return Err(invariant("an analysis of an op that is not a phys.explain"));
 	};
-	let tree = explained_tree(ir, explain, scope, Purpose::Described)?;
-	let shared =
-		|| invariant("EXPLAIN ANALYZE of a plan whose operators report metrics of their own");
-	let pieces = crate::exec::operators::analyze_text_pieces(tree.as_ref()).ok_or_else(shared)?;
-	let json = match format {
-		crate::expr::ExplainFormat::Text => None,
-		crate::expr::ExplainFormat::Json => {
-			let template =
-				crate::exec::operators::analyze_json_template(tree.as_ref()).ok_or_else(shared)?;
-			Some(
-				ValueData::new(crate::val::Value::Object(template), "an analysed plan")
-					.map_err(|_| invariant("an analysed plan holds a closure value"))?,
-			)
-		}
-	};
+	let tree = explained_tree(ir, explain, scope, purpose)?;
+	let plan = AnalysedPlan::of(tree.as_ref())
+		.ok_or_else(|| invariant("EXPLAIN ANALYZE of a plan with a node the walk did not build"))?;
 	Ok(Analysis {
-		pieces,
-		json,
+		plan,
+		format: *format,
 		redact,
 	})
 }

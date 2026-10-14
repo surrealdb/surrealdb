@@ -215,7 +215,7 @@ mod tests {
 	/// target read from `deferred` where it is not a literal.
 	fn knn_topk(b: &mut Builder, rows: ValueId, deferred: Option<ValueId>) -> OpId {
 		let (vector, operands) = match deferred {
-			Some(target) => (KnnTargetShape::Deferred("$v".to_owned()), vec![rows, target]),
+			Some(target) => (KnnTargetShape::Deferred("$v".to_owned(), false), vec![rows, target]),
 			None => (KnnTargetShape::Literal(vec![Number::Int(1), Number::Int(2)]), vec![rows]),
 		};
 		b.create_kind(

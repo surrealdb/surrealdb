@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure captures the row names it reads where the literal is written, as it captures LET and function parameters: a closure created in one place and invoked in another reads the row of the first. A closure that is itself a method argument reads the current value of that position, which in a frame with no row is the method's receiver, as a closure-free argument there does."
+reason = "A closure captures the LET and function parameters it reads where the literal is written, and nothing of the row there: its body reads the row of the frame that invokes it, its document root or, where it has none, its current value, as `$this`, `@` and its fields. A closure created in one frame and invoked in another reads the row of the second, and one invoked by a method in a frame with no row reads none. A closure-free method argument in a frame with no row reads the receiver as its current value and `$this`."
 
 [[test.results]]
 value = "[{ id: t:1, n: 10 }]"
@@ -25,34 +25,34 @@ value = "2"
 value = "NONE"
 
 [[test.results]]
-error = "Cannot perform addition with 'int' and 'none'"
+value = "[[11]]"
 
 [[test.results]]
 value = "NONE"
-
-[[test.results]]
-error = "Cannot perform addition with 'int' and 'none'"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "11"
 
 [[test.results]]
 value = "[[11]]"
 
 [[test.results]]
-value = "[]"
+value = "NONE"
 
 [[test.results]]
-value = "[]"
+error = "Cannot perform addition with 'int' and 'none'"
 
 [[test.results]]
-value = "[[3, 4], [3, 4]]"
+value = "[[11]]"
 
 [[test.results]]
-value = "[[[3]], [[4]]]"
+value = "[1, 10]"
+
+[[test.results]]
+value = "[1, 5, 10, 15, 20]"
+
+[[test.results]]
+value = "[NONE, NONE]"
+
+[[test.results]]
+value = "[[NONE], [NONE]]"
 
 [[test.results]]
 value = "[{ k: 3 }, { k: 4 }, [3, 4]]"

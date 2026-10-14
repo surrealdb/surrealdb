@@ -242,9 +242,9 @@ pub(super) fn write_body(
 			em.emit(Instr::Jump {
 				target: skip,
 			});
-			// A failed attempt is undone before anything else looks at the transaction. A signal
-			// leaves once it is; an error is classified, and a retry reads the record it names
-			// afresh unless the statement ran out of time in between.
+			// A failed attempt is undone before anything else looks at the transaction, and an
+			// error is classified: a retry reads the record it names afresh unless the statement
+			// ran out of time in between. A signal leaves with what the attempt wrote.
 			em.bind(attempt)?;
 			em.emit(write(WriteInstr::SavepointRollback));
 			em.emit(write(WriteInstr::ClearMutated));

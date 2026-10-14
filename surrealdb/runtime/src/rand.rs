@@ -76,7 +76,14 @@ pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value> {
 					.to_string(),
 			}
 		);
-		surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(min..=max))
+		// A bound that is not finite, or a range whose width is not, has no uniform distribution.
+		let Ok(uniform) = rand::distr::Uniform::new_inclusive(min, max) else {
+			bail!(Error::InvalidFunctionArguments {
+				name: String::from("rand::float"),
+				message: "The bounds of the range must be finite numbers.".to_string(),
+			});
+		};
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.sample(uniform))
 	} else {
 		surrealdb_expr::val::rnd::with_rng(|rng| rng.random::<f64>())
 	};

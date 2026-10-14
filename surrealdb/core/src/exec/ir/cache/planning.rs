@@ -64,7 +64,7 @@ use crate::exec::ir::iface::catalog::{
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{FrameId, ValueId};
 use crate::exec::ir::phys::access::{ReadVersion, TableAnswers};
-use crate::expr::logical::ITERATION_PARAMS;
+use crate::expr::logical::{ITERATION_PARAMS, LogicalExpr};
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::{CatalogSnapshot, TableSnapshot};
 use crate::val::{Datetime, TableName, Value};
@@ -84,6 +84,10 @@ pub(crate) struct PlanningCatalog {
 	/// Whether each call of a user-defined function runs the definition read when it is made
 	/// ([`SemanticCatalog::calls_current`]).
 	calls_current: bool,
+	/// The `VERSION` stamp the compile's planner reads the catalog at, or `None` for the
+	/// transaction's current state: the stamp function definitions are read at, and the stamp of
+	/// every read under no `VERSION` of its own ([`PhysicalCatalog::read_stamp`]).
+	read_stamp: Option<u64>,
 	/// What the datastore offers, which the compile's caller states.
 	backend: BackendCaps,
 	/// Whether a read after a catalog change is planned here as one that knows nothing of its
@@ -126,6 +130,10 @@ struct MemoState {
 	sources: HashMap<SourceKey, Arc<TableAnswers>>,
 	/// The table reads answered `NotLoaded` since the pending reads were last taken.
 	pending_sources: HashSet<SourceKey>,
+	/// The conjuncts whose record paths the planner folded, as an access-path decision reads
+	/// them ([`PhysicalCatalog::record_folded`]), filled by the caller
+	/// ([`PlanningCatalog::insert_record_folded`]).
+	record_folds: HashMap<LogicalExpr, LogicalExpr>,
 	slots: BTreeMap<usize, Arc<SlotTable>>,
 	current: Option<Current>,
 	/// Whether the compile has passed a catalog change. Kept for the rest of the compile: it is
@@ -217,6 +225,7 @@ impl PlanningCatalog {
 			session,
 			shadowed: BTreeSet::new(),
 			calls_current: false,
+			read_stamp: None,
 			backend: BackendCaps::default(),
 			plans_unknown_reads: false,
 			state: Mutex::new(MemoState {
@@ -233,6 +242,7 @@ impl PlanningCatalog {
 				pending_field_views: BTreeSet::new(),
 				sources: HashMap::new(),
 				pending_sources: HashSet::new(),
+				record_folds: HashMap::new(),
 				slots: BTreeMap::new(),
 				current: None,
 				catalog_changed: false,
@@ -252,6 +262,16 @@ impl PlanningCatalog {
 	/// answered by [`SemanticCatalog::calls_current`].
 	pub(crate) fn with_calls_current(mut self, calls_current: bool) -> Self {
 		self.calls_current = calls_current;
+		self
+	}
+
+	/// Reads at `stamp`, a `VERSION` stamp the compile's planner reads the catalog at, where it is
+	/// one. A call compiled at a stamp runs the definition the stamp holds, so the definition the
+	/// call states ([`SemanticCatalog::function`]) is that one: a call unit compiled at the stamp
+	/// holds the hash of the definition its run enters. A read under no `VERSION` of its own reads
+	/// the records and the indexes the stamp holds ([`PhysicalCatalog::read_stamp`]).
+	pub(crate) fn at_stamp(mut self, stamp: Option<u64>) -> Self {
+		self.read_stamp = stamp;
 		self
 	}
 
@@ -586,6 +606,11 @@ impl PlanningCatalog {
 		let mut state = self.lock();
 		state.pending_sources.remove(&key);
 		state.sources.insert(key, answers);
+	}
+
+	/// Holds `folded` as the conjunct `conjunct` an access-path decision reads.
+	pub(crate) fn insert_record_folded(&self, conjunct: LogicalExpr, folded: LogicalExpr) {
+		self.lock().record_folds.insert(conjunct, folded);
 	}
 
 	/// Whether the memo holds the answers for the read `key`.
@@ -1011,7 +1036,7 @@ impl PlanningCatalog {
 				loaded.functions.push((name.clone(), None));
 				continue;
 			}
-			let def = match self.txn.get_db_function(ns, db, name, None).await {
+			let def = match self.txn.get_db_function(ns, db, name, self.read_stamp).await {
 				Ok(def) => Some(def),
 				Err(e)
 					if is_catalog_error(&e, |e| matches!(e, CatalogError::FcNotFound { .. })) =>
@@ -1173,12 +1198,20 @@ impl PhysicalCatalog for PlanningCatalog {
 		PlanningCatalog::stats_epoch(self)
 	}
 
+	fn read_stamp(&self) -> Option<u64> {
+		self.read_stamp
+	}
+
 	fn index_ready(&self, index: &IndexRef) -> CatalogAnswer<bool> {
 		PlanningCatalog::index_ready(self, index)
 	}
 
 	fn version_stamp(&self, at: &Datetime) -> Option<u64> {
 		at.to_version_stamp(self.txn.version_impl().as_ref()).ok()
+	}
+
+	fn record_folded(&self, conjunct: &LogicalExpr) -> Option<LogicalExpr> {
+		self.lock().record_folds.get(conjunct).cloned()
 	}
 
 	fn backend(&self) -> BackendCaps {

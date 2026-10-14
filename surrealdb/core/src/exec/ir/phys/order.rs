@@ -685,6 +685,7 @@ mod tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		}))
 	}
 

@@ -38,7 +38,7 @@ value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id, dist] {rows: 2}
-    KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 4] {rows: 2}
+    KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: deferred] {rows: 2}
         TableScan [ctx: Db] [table: pts, direction: Forward] {rows: 2}
 
 Total rows: 2''''

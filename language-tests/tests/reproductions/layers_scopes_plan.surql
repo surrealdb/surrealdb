@@ -46,7 +46,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
@@ -54,7 +54,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: row]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
@@ -80,7 +80,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
@@ -142,7 +142,7 @@ value = '''
 "SelectProject [ctx: Db] [projections: id]
     Filter [ctx: Db] [predicate: fn::peek() = 'hidden']
         ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-            ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
                 TableScan [ctx: Db] [table: t, direction: Forward]
 "'''
 
@@ -150,7 +150,7 @@ value = '''
 value = '''
 'SelectProject [ctx: Db] [projections: s]
     ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-        ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+        ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
             TableScan [ctx: Db] [table: t, direction: Forward]
 ''''
 
@@ -165,7 +165,7 @@ value = '''
     Eval['n']
 ) END)) = 'hidden']
         ProjectLayer [ctx: Db] [columns: secret = <permission> @permission, c = <permission> : int @permission]
-            ProjectLayer [ctx: Db] [columns: c = <computed> : int @computed, is_owner = <computed> : bool @computed]
+            ProjectLayer [ctx: Db] [columns: is_owner = <computed> : bool @computed]
                 TableScan [ctx: Db] [table: t, direction: Forward]
 "'''
 */

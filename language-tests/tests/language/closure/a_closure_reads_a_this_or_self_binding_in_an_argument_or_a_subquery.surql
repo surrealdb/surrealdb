@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure written where a binding holds `$this` or `$self` (a block `LET`, a statement `LET`) reads that binding, whether the literal is a method argument, is invoked inside an argument, is nested in the body of another such closure, or is written in a subquery of another closure's body, and whether or not that body reads the name anywhere else. The binding is not a constant in the second statement, which a closure-free read would take as the receiver. A name no binding holds is the root of the argument. In a frame with a row, a statement `LET` is read by a literal invoked in place and not by a method argument's closure, whose `$this` is the row."
+reason = "A closure written in a frame that binds `$this` or `$self` reads that binding, whether the literal is a method argument, is invoked inside an argument, is nested in the body of another such closure, or is written in a subquery of another closure's body. `LET $this` and `LET $self` are refused wherever they are written, in a block, in a clause and at the top level, so each statement that holds one raises the refusal. A `$this` read where none is bound is the current value of the frame: none at the top level, the row in a statement over rows, and the row a subquery's source yields inside a subquery."
 
 [[test.results]]
 value = "[{ id: ts:1, lim: 1 }]"
@@ -13,83 +13,82 @@ value = "[{ id: ts:1, lim: 1 }]"
 value = "[{ id: ts:2, lim: 8 }]"
 
 [[test.results]]
-value = "[8]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[8]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3]"
+error = "'self' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'self' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+error = "'this' is a protected variable and cannot be set"
+
+[[test.results]]
+value = "[NONE]"
+
+[[test.results]]
+value = "[NONE]"
 
 [[test.results]]
 value = "[5]"
 
 [[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[1, 3]"
-
-[[test.results]]
-value = "[[3], [3]]"
-
-[[test.results]]
-value = "[[3]]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3, [3]]"
-
-[[test.results]]
-value = "[NONE, [3]]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[[3], [3]]"
-
-[[test.results]]
-value = "[[3], [3]]"
-
-[[test.results]]
-value = "[[3, 1], [3, 8]]"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3]"
-
-[[test.results]]
-value = "[3]"
+value = "[5]"
 
 [[test.results]]
 value = "[[1], [8]]"
 
 [[test.results]]
-value = "[3, 3]"
-
+value = "[1, 8]"
 */
 
 CREATE ts:1 SET lim = 1;

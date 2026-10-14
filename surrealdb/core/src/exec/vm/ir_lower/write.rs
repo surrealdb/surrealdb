@@ -342,10 +342,14 @@ fn touched(instr: &Instr, out: &mut Vec<Touch>) -> bool {
 		Instr::Call {
 			args,
 			dst,
+			elem,
 			..
 		} => {
 			for arg in args {
 				read(out, arg);
+			}
+			if let Some(elem) = elem {
+				out.push(Touch::Read(*elem));
 			}
 			out.push(Touch::Write(*dst));
 		}

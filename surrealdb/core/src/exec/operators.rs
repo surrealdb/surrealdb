@@ -25,9 +25,6 @@ pub(crate) use aggregate::{
 };
 pub(crate) use distinct::SeenSet;
 pub use explain::ExplainPlan;
-pub(crate) use explain::{
-	analyze_json_template, analyze_text_pieces, render_analyze_json, render_analyze_text,
-};
 use futures::StreamExt;
 pub use graph::{EdgeBinding, EndpointField, ExpandDir, PathMode, ShortestSelector};
 pub use join::JoinType;

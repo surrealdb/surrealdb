@@ -4,10 +4,17 @@ namespace = true
 database = true
 
 [test]
-reason = "Register #28, row ConditionClause: a LET is not allowed in a WHERE clause. The request is refused at plan time, before any statement of it runs."
+reason = "A block in a WHERE clause is an ordinary block: its LET binds a name for the rest of the block, and the clause keeps the row when the block's value is true."
 
-[test.results]
-request-error = "Invalid statement: LET is not allowed in a WHERE clause (statement 2)"
+[[test.results]]
+value = "[{ id: t:1 }]"
+
+[[test.results]]
+value = "[t:1]"
+
+[[test.results]]
+value = "[]"
 */
 CREATE t:1;
-SELECT VALUE id FROM t WHERE { LET $a = 1; $a = 1 };
+SELECT VALUE id FROM t WHERE { LET $a = 1; $a == 1 };
+SELECT VALUE id FROM t WHERE { LET $a = 1; $a == 2 };

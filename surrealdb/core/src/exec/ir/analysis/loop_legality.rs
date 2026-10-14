@@ -1122,8 +1122,9 @@ pub(crate) fn refusal_of(set: EffectSet) -> Option<ChainRefusal> {
 mod tests {
 	use super::*;
 	use crate::exec::function::FunctionRegistry;
-	use crate::exec::logical::effects_of_expr;
+	use crate::exec::logical::effects::{SummaryOracle, scalar_effects};
 	use crate::exec::logical::pipelines::chain_legality;
+	use crate::exec::logical::summaries::CatalogSummaries;
 	use crate::expr::logical::LogicalExpr;
 
 	fn expr(sql: &str) -> LogicalExpr {
@@ -1153,6 +1154,8 @@ mod tests {
 	#[test]
 	fn refusal_order_matches_pipelines() {
 		let registry = FunctionRegistry::with_builtins();
+		let summaries = CatalogSummaries::none();
+		let oracle = SummaryOracle::new(&registry, &summaries);
 		let cases: [(&str, Option<ChainRefusal>); 8] = [
 			("age + 1", None),
 			("time::now()", None),
@@ -1165,15 +1168,26 @@ mod tests {
 		];
 		for (sql, expected) in cases {
 			let expression = expr(sql);
-			let set = effects_of_expr(&expression, &registry).set;
+			// The effects of the expression and of every statement written in it, as the chain
+			// legality of the pipelines folds them.
+			let set = scalar_effects(&expression, &oracle);
 			assert_eq!(refusal_of(set), expected, "{sql}");
 			assert_eq!(chain_of(set), chain_legality([&expression], &registry), "{sql}");
 		}
 	}
 
+	/// The chain refusals are every non-determinism but the clock and the effects the body barrier
+	/// refuses: a session write, deferred work and a catalog change stop a loop through
+	/// [`barrier_of`], and a notification is only ever raised with the data write or the deferred
+	/// work that sends it.
 	#[test]
-	fn the_refusal_set_is_non_determinism_but_the_clock() {
+	fn the_refusal_set_is_non_determinism_but_the_clock_and_the_barriers() {
 		let refused = REFUSALS.iter().fold(EffectSet::PURE, |all, (set, _)| all.union(*set));
-		assert_eq!(refused, EffectSet::NON_DETERMINISTIC_BUT_FOR_CLOCK);
+		let barriers = EffectSet::WRITES_SESSION
+			.union(EffectSet::DEFERS)
+			.union(EffectSet::CHANGES_CATALOG)
+			.union(EffectSet::NOTIFY);
+		assert!(!refused.intersects(barriers));
+		assert_eq!(refused.union(barriers), EffectSet::NON_DETERMINISTIC_BUT_FOR_CLOCK);
 	}
 }

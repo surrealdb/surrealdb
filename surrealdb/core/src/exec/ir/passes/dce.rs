@@ -25,7 +25,8 @@
 //! Some ops are never removed for lack of uses: terminators, requests, transactions and
 //! statements, writes and write stages, `TIMEOUT`, depth charges, ops without a result, ops that
 //! hold a write, ops whose region holds a `RETURN`, `BREAK` or `CONTINUE` that lands outside
-//! them, and the ops of a statement an `EXPLAIN` explains, which prints them. Code inside a stored
+//! them, a `LET` in a container that serves late-bound statements, which read it by name, and the
+//! ops of a statement an `EXPLAIN` explains, which prints them. Code inside a stored
 //! clause is bound and analysed but never rewritten.
 //!
 //! Ops go in reverse program order, so an op's readers are gone before the op is judged. A sweep
@@ -177,7 +178,31 @@ fn is_pinned(ir: &Ir, op: OpId) -> bool {
 	) {
 		return true;
 	}
-	holds_write(ir, op) || lets_control_escape(ir, op)
+	holds_write(ir, op) || lets_control_escape(ir, op) || read_by_served_statements(ir, op)
+}
+
+/// Whether `op` is a `LET` local to its list in a container that serves late-bound statements:
+/// such a statement is planned when the list reaches it and reads the names bound around it by
+/// name, so the binding stands whatever the container's own ops read of it.
+fn read_by_served_statements(ir: &Ir, op: OpId) -> bool {
+	if !matches!(ir.op(op).map(|data| &data.kind), Some(OpKind::Logical(LogOp::Let(_)))) {
+		return false;
+	}
+	let mut serves = false;
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |at| {
+		if matches!(
+			ir.op(at).map(|data| &data.kind),
+			Some(OpKind::Logical(LogOp::Statement {
+				served: Some(_),
+				..
+			}))
+		) {
+			serves = true;
+			return Walk::Stop;
+		}
+		Walk::Continue
+	});
+	serves
 }
 
 /// Whether `op` stands in a region of an op whose value an `EXPLAIN` explains: the `EXPLAIN`

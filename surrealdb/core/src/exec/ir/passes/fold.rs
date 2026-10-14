@@ -3,14 +3,17 @@
 //! redundant.
 //!
 //! A value is folded only where a decision consumes it: the condition of an `IF`, a conjunct of a
-//! filter or permission predicate, or the iterable of a loop that may be unrolled. A folded
+//! filter or permission predicate, the iterable of a loop that may be unrolled, or the call a
+//! source reads its rows from, which names a table when it folds to one. A folded
 //! constant replaces the decision it feeds, after the observer has been told which value the
 //! decision consumed. A fold that raises is never applied: the op stays and raises at run time
 //! where it stands. A value the folder refuses stays as it is.
 //!
 //! An `IF` arm is collapsed only when its block ends in a yield and no `RETURN`, `BREAK` or
 //! `CONTINUE` inside it lands on the arm or beyond it, because a value arm catches a `RETURN` and
-//! inlining it would move that landing. A collapse the rewriter refuses is no rewrite.
+//! inlining it would move that landing. An arm that holds a write is not collapsed either: the
+//! computation depth the write's events resume from counts the arms that enclose it. A collapse
+//! the rewriter refuses is no rewrite.
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::future::Future;
@@ -20,7 +23,7 @@ use smallvec::{SmallVec, smallvec};
 
 use super::driver::{LoCx, LoPass, PassConfig, PassReport};
 use super::rehome::{and_chain, rebuild_and_chain};
-use crate::exec::ir::analysis::{fallibility, types};
+use crate::exec::ir::analysis::{effects, fallibility, types};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::pattern::{GREEDY_DEFAULT, Limit, Pattern, PatternSet, apply_greedy};
@@ -36,7 +39,7 @@ use crate::exec::ir::iface::fold::{FoldConsumer, FoldOutcome, FoldRequest};
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
 use crate::exec::ir::iface::types::TypeKnowledge;
-use crate::exec::ir::logical::ops::{LogOp, LoopKind};
+use crate::exec::ir::logical::ops::{LogOp, LoopKind, SourceAttrs, SourceRefShape};
 use crate::exec::ir::op_kind::OpKind;
 use crate::expr::{BinaryOperator, Kind};
 use crate::val::Value;
@@ -84,6 +87,9 @@ struct Sites {
 	clauses: Vec<(OpId, RegionId)>,
 	/// The iterable of each loop an unroll may consume.
 	iterables: Vec<ValueId>,
+	/// Each unlocked source whose operand is a call, which names a table when the call folds to
+	/// one.
+	sources: Vec<OpId>,
 }
 
 async fn run_fold(cx: &mut LoCx<'_>) -> Result<PassReport, IrError> {
@@ -96,6 +102,7 @@ async fn run_fold(cx: &mut LoCx<'_>) -> Result<PassReport, IrError> {
 		}
 		let mut applied = apply_ifs(cx, &sites.ifs)?;
 		applied += apply_clauses(cx, &sites.clauses)?;
+		applied += apply_sources(cx, &sites.sources)?;
 		let greedy = apply_greedy(cx.ir, cx.facts, &rules, cx.folder, GREEDY_DEFAULT).await?;
 		applied += greedy.rewrites;
 		report.rewrites = report.rewrites.saturating_add(applied);
@@ -155,6 +162,13 @@ fn sweep(ir: &Ir, unroll: bool) -> Sites {
 					}
 				}
 			}
+		} else if let OpKind::Logical(LogOp::Source(attrs)) = &data.kind
+			&& matches!(attrs.source_ref, SourceRefShape::Dynamic)
+			&& !attrs.for_update
+			&& data.operands.first().is_some_and(|operand| call_of(ir, *operand))
+			&& !in_stored_clause(ir, op)
+		{
+			sites.sources.push(op);
 		} else if let OpKind::Logical(LogOp::Loop {
 			kind,
 			..
@@ -196,7 +210,81 @@ fn requests(ir: &Ir, sites: &Sites) -> Vec<(ValueId, FoldConsumer)> {
 	for source in &sites.iterables {
 		out.push((*source, FoldConsumer::Unroll));
 	}
+	for source in &sites.sources {
+		if let Some(operand) = ir.op(*source).and_then(|data| data.operands.first()) {
+			out.push((*operand, FoldConsumer::DynamicTargetTable));
+		}
+	}
 	out
+}
+
+/// Whether `value` is the result of a call of a function by name.
+fn call_of(ir: &Ir, value: ValueId) -> bool {
+	single_result_def(ir, value)
+		.and_then(|op| ir.op(op))
+		.is_some_and(|data| matches!(data.kind, OpKind::Expr(ExprOp::Call(_))))
+}
+
+/// Replaces each source whose call folded to a table by a source naming that table, and answers
+/// the rewrites made.
+///
+/// The table source reads the table as a literal name does: it takes the access path, ordering and
+/// paging of a table read. It is not resolved, so its read enforces what the table declares when
+/// it runs. A call that folds to any other value stays a source its call names when the statement
+/// runs.
+fn apply_sources(cx: &mut LoCx<'_>, sources: &[OpId]) -> Result<u32, IrError> {
+	let mut rewrites = 0;
+	for source in sources {
+		let Some(data) = cx.ir.op(*source) else {
+			continue;
+		};
+		let (OpKind::Logical(LogOp::Source(attrs)), [operand], [rows]) =
+			(&data.kind, data.operands.as_slice(), data.results.as_slice())
+		else {
+			continue;
+		};
+		let (operand, rows) = (*operand, *rows);
+		let Some(FoldOutcome::Constant {
+			value: Value::Table(table),
+			..
+		}) = cx.facts.fold_outcome(operand)
+		else {
+			continue;
+		};
+		let kind = OpKind::Logical(LogOp::Source(Box::new(SourceAttrs {
+			source_ref: SourceRefShape::Table(table.clone()),
+			with: attrs.with.clone(),
+			for_update: false,
+			may_be_defined: attrs.may_be_defined,
+			may_meet_change: attrs.may_meet_change,
+			resolved: false,
+		})));
+		let spec = OpSpec {
+			kind,
+			operands: SmallVec::new(),
+			results: smallvec![TypeKnowledge::Unknown],
+			frame: data.frame,
+			snapshot: data.snapshot,
+			loc: data.loc.clone(),
+		};
+		cx.observer.consumed(&*cx.ir, operand, FoldConsumer::DynamicTargetTable);
+		let mut rw = Rewriter::new(&mut *cx.ir, &mut *cx.facts);
+		let named = rw.derived(&[*source], |rw| rw.create(InsertPoint::Before(*source), spec))?;
+		let named = rw
+			.ir()
+			.op(named)
+			.and_then(|made| made.results.first().copied())
+			.ok_or(IrError::Stale("op"))?;
+		rw.replace_all_uses(rows, named)?;
+		rw.erase(*source, EliminationReason::FoldedConstant)?;
+		if rw.ir().uses(operand).is_empty()
+			&& let Some(call) = single_result_def(rw.ir(), operand)
+		{
+			rw.erase(call, EliminationReason::FoldedConstant)?;
+		}
+		rewrites += 1;
+	}
+	Ok(rewrites)
 }
 
 /// Asks the folder for `value` and stores the answer. A literal needs no fold, and a value that
@@ -307,8 +395,9 @@ fn collapse_if(cx: &mut LoCx<'_>, op: OpId) -> Result<u32, IrError> {
 }
 
 /// Whether the arm `region` may be inlined into the block of its `IF`: it is one block without
-/// arguments that ends in a yield of `arity` values, and no `RETURN`, `BREAK` or `CONTINUE` inside
-/// it lands on the arm or beyond it.
+/// arguments that ends in a yield of `arity` values, no `RETURN`, `BREAK` or `CONTINUE` inside
+/// it lands on the arm or beyond it, and it holds no write, whose events spend the computation
+/// depth of the arms around it.
 fn collapsible(ir: &Ir, region: RegionId, arity: usize) -> bool {
 	let Some(held) = ir.region(region) else {
 		return false;
@@ -328,7 +417,8 @@ fn collapsible(ir: &Ir, region: RegionId, arity: usize) -> bool {
 	}
 	let mut stays = true;
 	ir.walk(region, WalkOrder::PreOrder, &mut |op| {
-		if control_stays_inside(ir, op, region) {
+		let writes = ir.op(op).is_some_and(|data| effects::is_write(&data.kind));
+		if !writes && control_stays_inside(ir, op, region) {
 			Walk::Continue
 		} else {
 			stays = false;

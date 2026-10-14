@@ -45,12 +45,15 @@ pub(crate) mod digest;
 mod duplicate;
 pub(crate) mod facts;
 mod hold_left;
+pub(crate) mod hop_key;
 mod index_answer;
 mod keyed_record;
 mod knn;
+mod knn_ids;
 pub(crate) mod matches;
 mod nested;
 mod offer;
+mod once;
 pub(crate) mod ops;
 pub(crate) mod order;
 pub(crate) mod pipeline;
@@ -236,8 +239,8 @@ impl PhysOp {
 	}
 
 	/// The kinds the op may own beyond the regions [`PhysOp::region_kinds`] names: the clause
-	/// regions of the write stage, assignment or live query it was converted from. The logical op
-	/// hosts them the same way.
+	/// regions of the write stage, assignment or live query it was converted from, which the
+	/// logical op hosts the same way, and the predicate a filter judges once.
 	#[allow(clippy::wildcard_enum_match_arm)]
 	pub(crate) fn tail_region_kinds(&self) -> &'static [RegionKind] {
 		use crate::exec::ir::logical::verify::{LIVE_TAIL, PLACE_TAIL, stage_tail};
@@ -251,6 +254,8 @@ impl PhysOp {
 				..
 			} => PLACE_TAIL,
 			PhysOp::Live(..) => LIVE_TAIL,
+			// The predicate judged once, when the filter holds one.
+			PhysOp::Filter => &[RegionKind::Clause(ClauseRole::Where)],
 			_ => &[],
 		}
 	}
@@ -699,7 +704,7 @@ impl PhysOp {
 			}
 			PhysOp::KnnTopK(attrs) => match attrs.vector {
 				KnnTargetShape::Literal(..) => exactly(1, 1),
-				KnnTargetShape::Deferred(_) => exactly(2, 1),
+				KnnTargetShape::Deferred(..) => exactly(2, 1),
 			},
 			PhysOp::Count(attrs) => match &attrs.shape {
 				CountShape::All {

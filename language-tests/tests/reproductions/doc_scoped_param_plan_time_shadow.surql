@@ -5,9 +5,10 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = """Verify that LET bindings for doc-scoped param names ($parent) do not \
-interfere with correlated subquery behavior at plan time. Row-scoped params \
-must be deferred to runtime so that ScalarSubquery can bind $parent per-row."""
+reason = """A LET of `$parent` is refused, as `$parent` is a name the system binds for a \
+subquery, so no session binding of it reaches a correlated subquery. A subquery \
+reads the outer row as `$parent` whether its projection or its WHERE reads it, \
+and the statements that follow a refused LET answer as they do without one."""
 
 [[test.results]]
 value = "NONE"
@@ -25,7 +26,7 @@ value = "[{ id: items:2, name: 'beta' }]"
 value = "[{ name: 'alpha', sub: { pname: 'alpha' } }, { name: 'beta', sub: { pname: 'beta' } }]"
 
 [[test.results]]
-value = "NONE"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[{ name: 'alpha', sub: { pname: 'alpha' } }, { name: 'beta', sub: { pname: 'beta' } }]"
@@ -34,7 +35,7 @@ value = "[{ name: 'alpha', sub: { pname: 'alpha' } }, { name: 'beta', sub: { pna
 value = "[{ name: 'alpha', sub: [{ name: 'alpha' }] }, { name: 'beta', sub: [{ name: 'beta' }] }]"
 
 [[test.results]]
-value = "NONE"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[{ name: 'alpha', sub: [{ name: 'alpha' }] }, { name: 'beta', sub: [{ name: 'beta' }] }]"
@@ -49,18 +50,14 @@ CREATE items:2 SET name = "beta";
 -- $parent should be the current outer document for each row.
 SELECT name, (SELECT $parent.name AS pname FROM ONLY true) AS sub FROM items ORDER BY name;
 
--- LET shadow on $parent: the per-row injection at execution time should
--- still shadow the LET binding, so results should match the baseline.
+-- A LET of $parent is refused, so the results that follow match the baseline.
 LET $parent = "should_not_appear";
 SELECT name, (SELECT $parent.name AS pname FROM ONLY true) AS sub FROM items ORDER BY name;
 
--- Critical path: $parent in subquery WHERE (affected by resolve_condition_params).
--- Without a LET shadow, $parent.name should be the outer document's name,
--- so the subquery finds the matching item.
+-- $parent in a subquery WHERE is the outer document, so the subquery finds
+-- the matching item.
 SELECT name, (SELECT name FROM items WHERE name = $parent.name) AS sub FROM items ORDER BY name;
 
--- Same query WITH a LET shadow. If plan-time resolution incorrectly folds
--- $parent to "should_not_appear", then $parent.name would be NONE and
--- the subquery would return no results.
+-- The same query after a refused LET of $parent reads the outer row's name.
 LET $parent = "should_not_appear";
 SELECT name, (SELECT name FROM items WHERE name = $parent.name) AS sub FROM items ORDER BY name;

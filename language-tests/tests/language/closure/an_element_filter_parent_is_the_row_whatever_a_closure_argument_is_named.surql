@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "An element filter in a closure body binds `$parent` to the row of the frame the closure is written in, as it does outside a closure, nearer than a closure argument of that name entered before the filter: in a `SELECT` projection, a `WHERE`, an `UPDATE` `SET` and a `DELETE` `WHERE` the filter reads the record, and in a frame with no row it reads none. The same filter with a `LET $parent` in place of the argument is the control."
+reason = "An element filter in a closure body binds `$parent` to the row of the frame the closure is written in, as it does outside a closure, nearer than a closure argument of that name entered before the filter: in a `SELECT` projection, a `WHERE`, an `UPDATE` `SET` and a `DELETE` `WHERE` the filter reads the record, and in a frame with no row it reads none. A `LET $parent` is refused wherever it is written, as `$parent` is a name the system binds, so each statement that holds one raises the refusal."
 
 [[test.results]]
 value = "[{ id: ap:1, lim: 1 }]"
@@ -16,7 +16,7 @@ value = "[{ id: ap:2, lim: 8 }]"
 value = "[[[]], [[]]]"
 
 [[test.results]]
-value = "[[[]], [[]]]"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[[[5, 10]], [[10]]]"
@@ -25,13 +25,13 @@ value = "[[[5, 10]], [[10]]]"
 value = "[[5, 10], [10]]"
 
 [[test.results]]
-value = "[[5, 10], [10]]"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[ap:2]"
 
 [[test.results]]
-value = "[ap:2]"
+error = "'parent' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[[[]], [[]]]"

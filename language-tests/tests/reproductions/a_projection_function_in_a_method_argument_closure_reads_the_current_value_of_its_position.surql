@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure that is a method argument and calls a projection function (`type::field`, `type::fields`) beside a read of the document root, as a method argument that reads a field does, reads the current value of its position: the value is the record where the statement writes one (an `UPDATE` or `CREATE` `SET`, which answers as the same body does without the projection call), and the method's receiver in a frame with no row (a `RETURN`, an `INSERT` value). The projection function reads the same value as `$this` does. A closure written in the body of another closure reads the current value that closure holds."
+reason = "A closure that is a method argument and calls a projection function (`type::field`, `type::fields`) beside a read of the document root, as a method argument that reads a field does, reads the document of the frame that invokes it: the record where the statement writes one (an `UPDATE` or `CREATE` `SET`, which answers as the same body does without the projection call), and none in a frame with no row (a `RETURN`, an `INSERT` value), where both reads are `NONE`. The projection function reads the same value as `$this` does. A closure written in the body of another closure reads the document that closure runs with. A `RETURN` in a block of the body ends that block, which is the value of its array element."
 
 [[test.results]]
 value = "[{ id: t:1, k: 1, n: 30 }]"
@@ -19,7 +19,7 @@ value = "[[[1, 20]]]"
 value = "[[[1, 20]]]"
 
 [[test.results]]
-value = "[[30]]"
+value = "[[[1, 30]]]"
 
 [[test.results]]
 value = "[[[1, 20]]]"
@@ -28,13 +28,13 @@ value = "[[[1, 20]]]"
 value = "[[[NONE, NONE]]]"
 
 [[test.results]]
-value = "[[[[1], NONE]]]"
+value = "[[[NONE, NONE]]]"
 
 [[test.results]]
-value = "[[[1], NONE]]"
+value = "[[NONE, NONE]]"
 
 [[test.results]]
-value = "[[[[1], NONE]]]"
+value = "[[[NONE, NONE]]]"
 
 [[test.results]]
 value = "[[[1, 20]]]"
@@ -46,7 +46,7 @@ value = "[[[[1, 20]]]]"
 value = "[[[[1, 20]]]]"
 
 [[test.results]]
-value = "[[30]]"
+value = "[[[1, 30]]]"
 
 [[test.results]]
 value = "[[[[1, 20]]]]"

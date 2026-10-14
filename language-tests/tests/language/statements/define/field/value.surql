@@ -1,5 +1,6 @@
 /**
 [test]
+reason = "A field's `VALUE` clause reads `$value` as the value written to the field. `$value` is a name the system binds, so a `LET $value` is refused and a later write still reads the field's value."
 
 [[test.results]]
 value = "NONE"
@@ -20,7 +21,7 @@ value = "[{ id: user:a, test: 'GBR' }]"
 value = "[{ id: user:b, test: 'b' }]"
 
 [[test.results]]
-value = "NONE"
+error = "'value' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "[{ id: user:c, test: 'GBR' }]"

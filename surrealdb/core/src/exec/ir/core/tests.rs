@@ -1565,6 +1565,8 @@ fn closure_kind() -> OpKind {
 		returns: None,
 		body_sql: "".into(),
 		captures: Box::new([]),
+		reads_row: false,
+		reads_root: false,
 		literal: Default::default(),
 	})))
 }

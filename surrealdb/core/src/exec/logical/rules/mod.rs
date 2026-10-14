@@ -92,7 +92,7 @@ pub(super) mod filter;
 pub(super) mod identity;
 pub(super) mod inline;
 pub(super) mod join;
-pub(super) mod kind;
+pub(crate) mod kind;
 pub(super) mod layers;
 pub(super) mod prune;
 pub(super) mod unify;

@@ -124,7 +124,8 @@ value = "[item:1, item:2]"
 value = '''
 "VersionScope [ctx: Db] [version: $ts]
     ProjectValue [ctx: Db] [expr: id]
-        TableScan [ctx: Db] [table: item, direction: Forward, predicate: kind = 'a', pre_decode_filter: yes]
+        Sort [ctx: Db] [sort_keys: id ASC]
+            TableScan [ctx: Db] [table: item, direction: Forward, predicate: kind = 'a', pre_decode_filter: yes]
 "'''
 */
 

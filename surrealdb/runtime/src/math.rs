@@ -95,9 +95,12 @@ pub fn ceil((arg,): (Number,)) -> Result<Value> {
 	Ok(arg.ceil().into())
 }
 
+/// `arg` held within `min..=max`. Fails when the bounds are not ordered, and a NaN bound is
+/// ordered with nothing.
 pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value> {
+	let is_nan = |bound: &Number| matches!(bound, Number::Float(f) if f.is_nan());
 	ensure!(
-		min <= max,
+		min <= max && !is_nan(&min) && !is_nan(&max),
 		Error::InvalidFunctionArguments {
 			name: "math::clamp".to_string(),
 			message: "Lowerbound for clamp must be smaller than the upperbound".to_string(),

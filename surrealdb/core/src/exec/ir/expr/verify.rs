@@ -17,10 +17,10 @@
 //! | V-E7 | `depth_charge` removes at least one level |
 //! | V-E8 | `literal` holds no closure value |
 //! | V-E9 | `subquery` takes a strategy other than `Apply` only in the physical phase |
-//! | V-E10 | `closure_create` takes one operand per captured name, then the row and the root |
+//! | V-E10 | `closure_create` takes one operand per captured name |
 //! | V-E11 | `tuple_row` addresses only operands and regions it holds, and its one use is an element of an `array` |
 //! | V-E12 | `call` passes row names only to a user-defined, module or silo function, no more than its operands, and holds a callee's facts only for a user-defined function in the physical phase |
-//! | V-E13 | `closure_create` holds one body whose entry arguments are the timestamp, the parameters, then one per operand |
+//! | V-E13 | `closure_create` holds one body whose entry arguments are the timestamp, the parameters, one per operand, then the invoking row where it reads one |
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
@@ -401,11 +401,10 @@ fn one_use(ir: &Ir, dispatch_result: ValueId) -> Rule {
 }
 
 /// V-E10: a closure creation's operands are the values it captures, one per name in `captures` in
-/// order, then the row when its body reads one, and the document root after the row when the
-/// literal captures both.
+/// order.
 fn closure_operands_follow_captures(attrs: &ClosureAttrs, data: &OpData) -> Rule {
 	let names = attrs.captures.len();
-	if (names..=names + 2).contains(&data.operands.len()) {
+	if data.operands.len() == names {
 		Ok(())
 	} else {
 		Err(format!(
@@ -416,8 +415,8 @@ fn closure_operands_follow_captures(attrs: &ClosureAttrs, data: &OpData) -> Rule
 }
 
 /// V-E13: a closure creation holds one body, whose entry block takes the statement timestamp first,
-/// then one argument per parameter, then one per operand of the creation, the captured values and
-/// the rows among them.
+/// then one argument per parameter, then one per operand of the creation, then the invoking row
+/// where the creation states that its body reads one.
 fn closure_body_takes_entry_layout(ir: &Ir, attrs: &ClosureAttrs, data: &OpData) -> Rule {
 	let [region] = data.regions.as_slice() else {
 		return Err(format!(
@@ -432,14 +431,19 @@ fn closure_body_takes_entry_layout(ir: &Ir, attrs: &ClosureAttrs, data: &OpData)
 	let Some(entry) = entry else {
 		return Err("V-E13: a closure body holds no entry block".into());
 	};
-	let wanted = 1 + attrs.params.len() + data.operands.len();
+	let wanted = 1
+		+ attrs.params.len()
+		+ data.operands.len()
+		+ usize::from(attrs.reads_row)
+		+ usize::from(attrs.reads_root);
 	if entry.args.len() != wanted {
 		return Err(format!(
-			"V-E13: a closure body takes {} entry arguments, not the timestamp, {} parameters and \
-			 {} operands",
+			"V-E13: a closure body takes {} entry arguments, not the timestamp, {} parameters, \
+			 {} operands and {} rows",
 			entry.args.len(),
 			attrs.params.len(),
-			data.operands.len()
+			data.operands.len(),
+			usize::from(attrs.reads_row)
 		));
 	}
 	if !entry.args.first().is_some_and(|first| is_timestamp(ir, *first)) {
@@ -732,6 +736,8 @@ mod tests {
 					returns: None,
 					body_sql: "1".into(),
 					captures: Box::new([]),
+					reads_row: false,
+					reads_root: false,
 					literal: Default::default(),
 				})),
 				&[],
@@ -756,6 +762,8 @@ mod tests {
 					returns: None,
 					body_sql: "1".into(),
 					captures: captures.iter().map(|name| strand(name)).collect(),
+					reads_row: false,
+					reads_root: false,
 					literal: Default::default(),
 				})),
 				operands,
@@ -904,6 +912,8 @@ mod tests {
 				returns: None,
 				body_sql: "1".into(),
 				captures: Box::new([]),
+				reads_row: false,
+				reads_root: false,
 				literal: Default::default(),
 			})),
 			&[],
@@ -1285,7 +1295,7 @@ mod tests {
 	}
 
 	#[test]
-	fn a_closure_creation_takes_one_operand_per_capture_and_the_row() {
+	fn a_closure_creation_takes_one_operand_per_capture() {
 		let mut fx = Fixture::new();
 		let block = fx.statement();
 		let one = fx.literal(block);
@@ -1297,15 +1307,13 @@ mod tests {
 		};
 		let none = create(&[], &[]);
 		let captured = create(&["a"], &[one]);
-		let with_row = create(&["a"], &[one, two]);
+		let two_captured = create(&["a", "b"], &[one, two]);
 		let missing = create(&["a", "b"], &[one]);
-		let with_root = create(&[], &[one, two]);
-		let extra = create(&[], &[one, two, one]);
+		let extra = create(&["a"], &[one, two]);
 		fx.passes(none);
 		fx.passes(captured);
-		fx.passes(with_row);
+		fx.passes(two_captured);
 		fx.fails(missing, "V-E10");
-		fx.passes(with_root);
 		fx.fails(extra, "V-E10");
 	}
 
@@ -1338,6 +1346,8 @@ mod tests {
 				returns: None,
 				body_sql: "1".into(),
 				captures: Box::new([]),
+				reads_row: false,
+				reads_root: false,
 				literal: Default::default(),
 			})),
 			&[],

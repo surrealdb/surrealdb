@@ -178,6 +178,17 @@ pub(crate) trait ExprHost {
 	fn declare_parent_as(&mut self, value: ValueId) {
 		let _ = value;
 	}
+	/// Binds `$this` and `$self` to `value` until [`Self::end_row_names`] is handed the mark this
+	/// answers, and `$parent` too where the frame has no row and no name binds it. A host that
+	/// keeps no names ignores it, and the names then read as free names.
+	fn declare_row_names_until(&mut self, value: ValueId) -> usize {
+		let _ = value;
+		0
+	}
+	/// Ends the bindings made since `mark` ([`Self::declare_row_names_until`]).
+	fn end_row_names(&mut self, mark: usize) {
+		let _ = mark;
+	}
 	/// The statement timestamp argument visible at this point.
 	fn timestamp(&self) -> Option<ValueId>;
 	/// Whether the request's capabilities allow a call of the builtin `name`. The binder reads a
@@ -644,26 +655,45 @@ fn bind_with<'e>(
 
 /// `arg`, an index or an argument of a method taken from `receiver`, bound against the document
 /// root the host answers ([`ExprHost::step_root`]): the root is what a field read, `@` and the
-/// current value denote inside it. An argument that reads no row has the one value whatever the
-/// root, so it is bound as it stands. The row and the current value are restored whether or not
+/// current value denote inside it, what `$this` and `$self` name, and what `$parent` names in a
+/// frame with no row where no name binds it ([`ExprHost::declare_row_names_until`]), so a
+/// statement or a block the argument holds reads it through those names.
+/// An argument that reads no row and holds no statement has the one value whatever the root, so
+/// it is bound as it stands. The row, the current value and the names are restored whether or not
 /// the bind fails.
 fn bind_step_arg(
 	host: &mut dyn ExprHost,
 	receiver: ValueId,
 	arg: &LogicalExpr,
 ) -> Result<Built, IrError> {
-	if !name_scope::reads_row(arg) {
+	if !name_scope::step_arg_reads_row(arg) && !holds_statement(arg) {
 		return bind_expr(host, arg);
 	}
 	let root = host.step_root(receiver)?;
+	let names = host.declare_row_names_until(root);
 	let row = host.replace_row(Some(root));
 	let base = host.replace_field_base(None);
 	let current = host.replace_current(Some(root));
 	let built = bind_expr(host, arg);
 	host.replace_current(current);
 	host.replace_field_base(base);
+	host.end_row_names(names);
 	host.replace_row(row);
 	built
+}
+
+/// Whether `expr` holds a statement or a block outside any closure literal: one reads the row it
+/// is entered from through `$this` and `$parent`. A closure body is a frame of its own.
+fn holds_statement(expr: &LogicalExpr) -> bool {
+	if matches!(expr, LogicalExpr::Subquery(_)) {
+		return true;
+	}
+	if matches!(expr, LogicalExpr::Closure(_)) {
+		return false;
+	}
+	let mut found = false;
+	expr.for_each_child(&mut |child| found = found || holds_statement(child));
+	found
 }
 
 /// A path step: `op` over the values of `operands`, bound in order.
@@ -950,6 +980,10 @@ fn destructure_shape<'e>(
 
 /// An `IF` chain. The first condition is the operand of `expr.if`, its value the then region, and
 /// the rest of the chain the else region: a nested `expr.if`, or the `ELSE` value, or `NONE`.
+///
+/// An `IF` whose conditions are all settled holds only the arm it falls through to, which is the
+/// `IF true` of that arm: the arm keeps the region of a branch, whose nesting a write in it spends
+/// of the computation-depth budget ([`crate::exec::vm::depth`]).
 fn bind_if(
 	host: &mut dyn ExprHost,
 	branches: &[(LogicalExpr, LogicalExpr)],
@@ -957,7 +991,15 @@ fn bind_if(
 ) -> Result<Built, IrError> {
 	let none = LogicalExpr::Literal(LogicalLiteral::None);
 	let Some(((condition, then), rest)) = branches.split_first() else {
-		return bind_expr(host, otherwise.unwrap_or(&none));
+		let Some(arm) = otherwise else {
+			return bind_expr(host, &none);
+		};
+		let Built::Value(test) =
+			bind_expr(host, &LogicalExpr::Literal(LogicalLiteral::Bool(true)))?
+		else {
+			return Ok(Built::Diverged);
+		};
+		return if_over(host, test, arm, |host| bind_body(host, &none));
 	};
 	let Built::Value(test) = bind_expr(host, condition)? else {
 		return Ok(Built::Diverged);

@@ -370,13 +370,10 @@ pub(crate) fn lower_with(
 	{
 		return explain::lower_plain(cx, ir, explain);
 	}
-	// `EXPLAIN ANALYZE` of a read answers the rendering of what the run of the explained statement
-	// measured, which the statement runs as the one group of a statement program to produce.
+	// `EXPLAIN ANALYZE` answers the rendering of what the run of the explained statement measured,
+	// which the statement runs as the one group of a statement program to produce.
 	if ir.phase() >= Phase::Physical
 		&& let Some((explain, true)) = explain::explain_in(ir)
-		&& write_in(ir).is_none()
-		&& timed_write_in(ir, ir.top())?.is_none()
-		&& ops_in(ir, ir.top()).any(|op| makes_rows(ir, op))
 	{
 		let mut em = Emitter::new();
 		let program = block::lower_analysed_program(&mut em, cx, ir, explain)?;
@@ -423,7 +420,9 @@ pub(crate) fn lower_with(
 	if let Some(op) = schema_op(ir, ir.top())? {
 		return schema_program(cx, ir, facts, op);
 	}
-	if block::holds_control(ir)? {
+	// An expression nothing reads still runs where it stands, as a statement of the list does,
+	// since it may raise or write.
+	if block::holds_control(ir)? || holds_unread(ir) {
 		return lower_statement_program(cx, ir, None);
 	}
 	// A block unit of expressions alone is the value it yields, as a statement of expressions
@@ -905,13 +904,13 @@ pub(crate) fn lower_guard_unit(cx: &mut LowerCx<'_>, ir: &Ir) -> Result<Lowered,
 /// closure's body.
 ///
 /// The region takes the statement timestamp, the literal's parameters, its captures in the order
-/// `template` names them, then the captured row where the literal reads one and the captured
-/// document root where it captures both; a different count is an invariant break. A parameter or a
-/// capture is a read of the unit's slot of that name ([`ClosureTemplate::slots`]), which an
-/// invocation fills with its arguments and the value's captures. The captured row is the unit's
-/// row, which is not read as an object: it is whatever value the literal captured. Where the
-/// literal captures the document root too, the root is the unit's row and the captured row is the
-/// element the invocation holds. The timestamp is read by no instruction.
+/// `template` names them, then the invoking row where the body reads one and, after it, that
+/// frame's document root where the body reads it apart from the row; a different count is an
+/// invariant break. A parameter or a capture is a read of the unit's slot of that name
+/// ([`ClosureTemplate::slots`]), which an invocation fills with its arguments and the value's
+/// captures. The invoking row is the unit's row, which is not read as an object: it is whatever
+/// value the invocation runs the body over. The document root is [`Instr::DocumentRoot`] of that
+/// row. The timestamp is read by no instruction.
 ///
 /// The head names the template's literal, digest, captures, row captures and slots, the frame
 /// the context lowers for and the effects of the body's ops. The unit always runs in a frame of
@@ -959,13 +958,19 @@ pub(crate) fn lower_closure_unit(
 				})?;
 			lowerer.bind_slot_value(*arg, slot, Some(Strand::new(name)));
 		}
-		match (template.row, template.root, args.as_slice()) {
-			(true, true, [.., element, root]) => {
-				lowerer.bind_closure_element(*element);
-				lowerer.bind_row(*root, false);
+		let rows = &args[1 + params + template.captures.len()..];
+		match (template.row, template.root, rows) {
+			(false, false, []) => {}
+			(true, false, [row]) => lowerer.bind_closure_row(*row),
+			(true, true, [row, root]) => {
+				lowerer.bind_closure_row(*row);
+				lowerer.bind_closure_root(*root);
 			}
-			(true, false, [.., row]) => lowerer.bind_row(*row, false),
-			_ => {}
+			_ => {
+				return Err(IrError::Invariant {
+					what: "a closure body whose rows its literal does not name",
+				});
+			}
 		}
 		let value = lowerer.region_value(top)?;
 		let pipeline = lowerer.emit_value_pipeline(value)?;
@@ -1180,6 +1185,13 @@ pub(super) fn check_write_region(ir: &Ir, region: RegionId, write: OpId) -> Resu
 				over_rows || (subjects.is_some() && data.results.first().copied() == subjects)
 			}
 			OpKind::Phys(PhysOp::Write(_)) => op == write,
+			// The `EXPLAIN ANALYZE` that renders what the run of the write measured.
+			OpKind::Phys(PhysOp::Explain {
+				analyze: true,
+				..
+			}) => data.operands.first().is_some_and(|read| {
+				ir.op(write).is_some_and(|written| written.results.first() == Some(read))
+			}),
 			OpKind::Phys(PhysOp::Loop {
 				kind: LoopKind::Write,
 				..
@@ -1269,6 +1281,18 @@ pub(super) fn apply_needs(program: &mut Program, needs: &Needs) {
 	program.keeps_row_order = needs.keeps_row_order;
 	program.reach.clone_from(&needs.reach);
 	program.access_mode = program.access_mode.combine(needs.access_mode);
+}
+
+/// Whether the top region of `ir` holds an expression, other than a literal, that defines a value
+/// no operation reads.
+fn holds_unread(ir: &Ir) -> bool {
+	ops_in(ir, ir.top()).any(|op| {
+		ir.op(op).is_some_and(|data| {
+			matches!(&data.kind, OpKind::Expr(expr) if !matches!(expr.tag(), ExprTag::Literal | ExprTag::Yield))
+				&& !data.results.is_empty()
+				&& data.results.iter().all(|result| ir.uses(*result).is_empty())
+		})
+	})
 }
 
 /// Checks that the value the op `data` defines is read where lowering reaches it.
@@ -1814,11 +1838,14 @@ mod tests {
 		b.physical();
 		assert_eq!(refused(&b), "ir_lower::lower: more than one phys.eval");
 
-		// A value nothing reads is never run, so it is not skipped silently.
+		// A value nothing reads runs where it stands, as a statement of a statement program.
 		let mut b = one_plus_two();
 		b.call("math::abs", &[]);
 		b.physical();
-		assert_eq!(refused(&b), "ir_lower::lower: an expression no operation reads");
+		match lower(&b.ir, &FactCache::new()) {
+			Ok(lowered) => assert!(lowered.program.scalar),
+			Err(error) => panic!("the container lowers: {error}"),
+		}
 
 		// A value only a lazy region reads would be skipped when the region is, so it is not run
 		// on that path alone.
@@ -1961,6 +1988,8 @@ mod tests {
 				returns: None,
 				body_sql: "NONE".into(),
 				captures: Box::new([]),
+				reads_row: false,
+				reads_root: false,
 				literal: ClosureLiteral::none_written_as("NONE"),
 			})),
 			&[],

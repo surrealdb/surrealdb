@@ -112,6 +112,14 @@ pub(crate) fn reads_enclosing_row(op: &LogicalOp) -> bool {
 	walker.found
 }
 
+/// Whether `op`, a plan in scalar position, names `$this`, `$self` or `$parent` anywhere inside
+/// it, as a scalar or as a `FROM` source.
+pub(crate) fn names_row_param(op: &LogicalOp) -> bool {
+	let mut walker = ParamWalker::new(|_| true, AnalysisScope::Recursive);
+	let _ = walker.walk_op(op);
+	walker.found
+}
+
 /// Whether `op`, a plan in scalar position, names `$parent` anywhere inside it, as a scalar or
 /// as a `FROM` source.
 pub(crate) fn names_parent(op: &LogicalOp) -> bool {

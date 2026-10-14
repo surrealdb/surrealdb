@@ -2,7 +2,7 @@
 [env]
 
 [test]
-reason = "The plans of knn_index_record_id_rows. `records: not read` on the KnnScan (EXPLAIN ANALYZE) says its rows were built from the record ids the search returned: only when nothing reads more of a row than its id. A projected field keeps the records read, and so does a COMPUTED field or a field SELECT permission on `id`, which every row built from a record id holds, `count()` included; one on a field the rows do not need does not. A condition the search filters candidates with reads them inside the search."
+reason = "The plans of knn_index_record_id_rows: every KNN query here is served by a KnnScan on the HNSW index, whether its rows need only their id or more of the record, and whatever COMPUTED field or field SELECT permission the table declares, `count()` included. A condition the search filters candidates with is evaluated inside the search."
 
 [[test.results]]
 value = "NONE"
@@ -24,7 +24,7 @@ Total rows: 3''''
 value = '''
 'SelectProject [ctx: Db] [projections: *] {rows: 1}
     Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
-        KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2, records: not read] {rows: 1}
+        KnnScan [ctx: Db] [index: hn, k: 3, ef: 40, dimension: 2] {rows: 1}
 
 Total rows: 1''''
 

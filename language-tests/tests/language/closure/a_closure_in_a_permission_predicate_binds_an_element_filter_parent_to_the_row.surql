@@ -6,13 +6,10 @@ imports = ["language/closure/a_closure_in_a_permission_predicate_binds_an_elemen
 auth = { namespace = "test", database = "test", access = "user", rid = "user:test" }
 
 [test]
-reason = "An element filter in a closure that a record user's `PERMISSIONS FOR select WHERE` predicate holds binds `$parent` to the row, nearer than a closure argument named `parent`: the table with the argument and the table with the `LET $parent` twin admit the same row. Runs as a record user."
+reason = "An element filter in a closure that a record user's `PERMISSIONS FOR select WHERE` predicate holds binds `$parent` to the row, nearer than a closure argument named `parent`: the table admits the row the filter keeps. A predicate that binds `$parent` with a `LET` is refused at DEFINE, see a_permission_predicate_refuses_a_let_of_a_system_name. Runs as a record user."
 
 [[test.results]]
 value = "[pt_parent:2]"
 
-[[test.results]]
-value = "[pt_parent_cf:2]"
 */
 SELECT VALUE id FROM pt_parent ORDER BY id;
-SELECT VALUE id FROM pt_parent_cf ORDER BY id;

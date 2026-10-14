@@ -23,6 +23,10 @@ bench-pprof = ["bench", "dep:pprof"]
 # over ws/http and `reqwest` for the GraphQL/OpenGQL HTTP routes the SDK doesn't
 # expose. Off by default so normal / CI builds stay lean.
 remote = ["dep:surrealdb", "dep:reqwest", "dep:rustls"]
+# Enables `run --mode fragments`, which submits each statement through
+# `Datastore::execute_fragments`; core compiles that entry point only under
+# its own `internal-fragments` feature.
+internal-fragments = ["surrealdb-core/internal-fragments"]
 
 [dependencies]
 # Crates for running surrealdb.

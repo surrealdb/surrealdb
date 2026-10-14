@@ -135,24 +135,24 @@ impl<'a> StreamingBucketOps<'a> {
 					)
 					.await?;
 					let mut exec_ctx =
-						self.exec_ctx.with_param("action", Value::from(op.to_string()));
+						self.exec_ctx.with_params([("action", Value::from(op.to_string()))]);
 					if let Some(key) = key {
-						exec_ctx = exec_ctx.with_param(
+						exec_ctx = exec_ctx.with_params([(
 							"file",
 							Value::File(File {
 								bucket: self.bucket.name.to_string(),
 								key: key.to_string(),
 							}),
-						);
+						)]);
 					}
 					if let Some(target) = target {
-						exec_ctx = exec_ctx.with_param(
+						exec_ctx = exec_ctx.with_params([(
 							"target",
 							Value::File(File {
 								bucket: self.bucket.name.to_string(),
 								key: target.to_string(),
 							}),
-						);
+						)]);
 					}
 
 					// SECURITY: the bucket predicate runs with the caller's auth. Nested permission

@@ -1,8 +1,7 @@
 //! Closure expressions - closure creation and invocation.
 //!
 //! A closure literal makes a value ([`ClosureExec`]); creating it captures
-//! the parameters the body references and the row it reads where it is
-//! written. The value is a [`Closure::Builtin`]
+//! the parameters the body references and reads no row. The value is a [`Closure::Builtin`]
 //! carrying a [`CompiledClosure`]: the closure as written, its digest and its
 //! captures. It holds no compiled body. A call binds the arguments in an
 //! isolated child context, one unit deeper into the computation-depth budget
@@ -98,13 +97,6 @@ pub struct CompiledClosure {
 	returns: Option<Kind>,
 	/// The parameters captured where the closure was created.
 	captures: Variables,
-	/// The current value at the literal, when its body reads it. Held apart
-	/// from `captures`, which name what the body reads: it is never a variable.
-	row: Option<Arc<Value>>,
-	/// The document root at the literal, when its body reads it. The body
-	/// runs over it, and an index or method argument, or a statement,
-	/// reads it.
-	root: Option<Arc<Value>>,
 	/// The closure as written, for rendering.
 	sql: String,
 	/// The closure as written, which a unit is lowered from on a compile
@@ -118,13 +110,9 @@ pub struct CompiledClosure {
 	/// a call does; a stored clause evaluated as a unit
 	/// ([`crate::exec::scalar_unit`]) does not, as no call is made.
 	dives: bool,
-	/// Whether the body runs over the row of the frame that invokes it rather
-	/// than over a row it captured: a stored clause evaluated as a unit is the
-	/// expression of the row it is evaluated against.
-	over_invoking_row: bool,
-	/// Whether the body reads the row, where it runs over the invoking frame's:
-	/// its unit is lowered to read it as the row a captured one would be.
-	reads_invoking_row: bool,
+	/// Whether the body reads the row of the frame that invokes it, which its
+	/// unit is then lowered to take.
+	reads_row: bool,
 	/// Set where a parameter its body reads was bound, where the closure was
 	/// made, to a KNN query vector's row being scanned
 	/// ([`Binding::Forbidden`](crate::ctx::Binding::Forbidden)): that binding
@@ -152,14 +140,7 @@ impl BuiltinClosureObj for CompiledClosure {
 	}
 
 	fn captured_values(&self) -> Vec<&Value> {
-		let mut values: Vec<&Value> = self.captures.0.values().collect();
-		values.extend(self.row.as_deref());
-		// A row the two captures share is held once.
-		match (&self.row, &self.root) {
-			(Some(row), Some(root)) if Arc::ptr_eq(row, root) => {}
-			_ => values.extend(self.root.as_deref()),
-		}
-		values
+		self.captures.0.values().collect()
 	}
 
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
@@ -168,8 +149,7 @@ impl BuiltinClosureObj for CompiledClosure {
 
 	/// Two compiled closures are equal when they were written the same way —
 	/// parameters, return kind and body, all of which the rendered source
-	/// carries — and captured the same values, the row they captured among
-	/// them: two values one literal makes over different rows are unequal.
+	/// carries — and captured the same values.
 	/// This is what makes two `Closure::Expr` values equal. Any other builtin
 	/// closure is a different closure.
 	/// Equal closures behave alike when invoked: the same source over the same
@@ -180,8 +160,6 @@ impl BuiltinClosureObj for CompiledClosure {
 			Some(other) => {
 				self.sql == other.sql
 					&& self.captures == other.captures
-					&& self.row == other.row
-					&& self.root == other.root
 					&& self.forbidden.is_some() == other.forbidden.is_some()
 			}
 			None => false,
@@ -207,41 +185,21 @@ impl CompiledClosure {
 			args: closure.args.clone(),
 			returns: closure.returns.clone(),
 			captures,
-			row: None,
-			root: None,
 			sql: closure.to_sql(),
 			logical: Arc::clone(closure),
 			digest,
 			dives: true,
-			over_invoking_row: false,
-			reads_invoking_row: false,
+			reads_row: false,
 			forbidden: None,
 		}
 	}
 
-	/// This value holding the row captures `row`, the current value at the
-	/// literal, and `root`, its document root.
-	pub(crate) fn with_rows(mut self, row: Option<Arc<Value>>, root: Option<Arc<Value>>) -> Self {
-		self.row = row;
-		self.root = root;
-		self
-	}
-
-	/// Which row captures the value holds, which the unit that runs it is
-	/// lowered for. A value run over the invoking frame's row that reads it
-	/// is lowered as one that captured the current value.
+	/// The rows a unit run for the value is lowered to take: the invoking row
+	/// where the body reads one.
 	pub(crate) fn rows(&self) -> crate::exec::vm::program::RowBits {
 		crate::exec::vm::program::RowBits {
-			row: self.row.is_some() || self.reads_invoking_row,
-			root: self.root.is_some(),
+			row: self.reads_row,
 		}
-	}
-
-	/// The row captures the value holds: the current value at the literal and
-	/// its document root. An invocation runs the body over them and reads
-	/// nothing of the invoking frame's row.
-	pub(crate) fn captured_rows(&self) -> (Option<&Arc<Value>>, Option<&Arc<Value>>) {
-		(self.row.as_ref(), self.root.as_ref())
 	}
 
 	/// This value, having captured a KNN query vector's row being scanned
@@ -267,18 +225,11 @@ impl CompiledClosure {
 		self
 	}
 
-	/// This value evaluated over the row of the frame that invokes it, which
-	/// its body reads where `reads_row`: a stored clause is the expression of
-	/// the row it is evaluated against, and captures none.
-	pub(crate) fn over_invoking_row(mut self, reads_row: bool) -> Self {
-		self.over_invoking_row = true;
-		self.reads_invoking_row = reads_row;
+	/// This value with a body that reads the row of the frame that invokes it
+	/// where `reads_row` holds.
+	pub(crate) fn reading_row(mut self, reads_row: bool) -> Self {
+		self.reads_row = reads_row;
 		self
-	}
-
-	/// Whether the body runs over the invoking frame's row, not a captured one.
-	pub(crate) fn runs_over_invoking_row(&self) -> bool {
-		self.over_invoking_row
 	}
 
 	/// Whether an invocation spends a unit of the computation-depth budget.
@@ -303,18 +254,16 @@ impl CompiledClosure {
 			body_sql,
 		});
 		let digest = ClosureDigest::of(&logical);
+		let reads_row = crate::exec::ir::build::logical::closure_reads_row(&logical);
 		Ok(Self {
 			args: logical.args.clone(),
 			returns: logical.returns.clone(),
 			captures: captures.clone(),
-			row: None,
-			root: None,
 			sql: logical.to_sql(),
 			logical,
 			digest,
 			dives: true,
-			over_invoking_row: false,
-			reads_invoking_row: false,
+			reads_row,
 			forbidden: None,
 		})
 	}
@@ -347,11 +296,10 @@ impl CompiledClosure {
 	/// closure-taking builtin such as `array::map`, fails with
 	/// [`ExecError::ComputationDepthExceeded`] once the budget is spent.
 	///
-	/// The body evaluates over the row the value captured where the literal was
-	/// written: the current value its fields, `$this` and `@` read, and the
-	/// document root its index and method arguments and its statements read.
-	/// Nothing of the caller's row or names is read; the invocation supplies
-	/// its arguments. A `RETURN` in the body is its value; `BREAK` and
+	/// The body evaluates over the invoking frame's row: its document root,
+	/// or its current value where it has no document root, which its fields,
+	/// `$this` and `@` read. Nothing of the caller's names is read; the
+	/// invocation supplies its arguments. A `RETURN` in the body is its value; `BREAK` and
 	/// `CONTINUE` have no loop to reach and are errors.
 	pub(crate) async fn invoke(
 		&self,
@@ -448,8 +396,8 @@ impl CompiledClosure {
 	/// isolated child of the caller's context, one budget unit deeper where
 	/// the call spends one. It carries the request's parameters for the
 	/// functions the body calls, binds the captures, then binds the arguments
-	/// `bound`. The row captures are not bound here; the unit reads them as
-	/// its row and element. `units` is the closure units the invocation brings,
+	/// `bound`. The invoking row is not bound here; the unit reads it as
+	/// its row. `units` is the closure units the invocation brings,
 	/// if any. The frame computes the record the caller computes, where it does,
 	/// and waives the reads' checks where the caller's reads waive them.
 	pub(crate) fn frame(

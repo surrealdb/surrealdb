@@ -371,3 +371,44 @@ async fn a_permission_derives_a_field_reading_a_denied_table_unchecked() {
 		assert_eq!(late, fresh, "`{sql}` planned late-bound");
 	}
 }
+
+/// A table whose `SELECT` permission reads a computed field through a
+/// function, and a function whose body holds a schema statement, so that the
+/// statements of a block after a call of it are served late-bound.
+const THROUGH_A_FUNCTION: &str = "
+	DEFINE ACCESS user ON DATABASE TYPE RECORD;
+	DEFINE TABLE user SCHEMALESS PERMISSIONS FULL;
+	CREATE user:alice;
+	DEFINE FUNCTION fn::hidden() { RETURN hidden; };
+	DEFINE FUNCTION fn::late($when: string) { IF $when = 'never' { DEFINE TABLE late_never }; RETURN 0; } PERMISSIONS FULL;
+	DEFINE TABLE doc SCHEMALESS PERMISSIONS FOR select WHERE fn::hidden() != true, FOR create, update FULL;
+	DEFINE FIELD hidden ON doc COMPUTED status = 'secret';
+	CREATE doc:pub SET status = 'public';
+	CREATE doc:sec SET status = 'secret';
+";
+
+#[tokio::test]
+async fn a_statement_after_a_possible_catalog_change_applies_the_permission() {
+	for (sql, expected) in [
+		("SELECT VALUE id FROM doc:sec WHERE fn::late('now') = 0", "[]"),
+		("SELECT VALUE id FROM doc:sec", "[]"),
+		("SELECT VALUE id FROM doc ORDER BY id", "[doc:pub]"),
+		("SELECT VALUE id FROM doc WHERE id = doc:sec", "[]"),
+		("SELECT VALUE id FROM doc:pub..=sec", "[doc:pub]"),
+		("SELECT count() FROM doc GROUP ALL", "[{ count: 1 }]"),
+	] {
+		let session = record_user("alice");
+		let db = TestDb::new_with_auth(THROUGH_A_FUNCTION).await;
+		let block = format!("{{ LET $late = fn::late('now'); RETURN {sql}; }};");
+		let parsed = format!("{:?}", Value::from(crate::syn::value(expected).expect("parses")));
+		let request = format!("{block}{block}{sql};");
+		let results = db.datastore().execute(&request, &session, None).await.expect("runs");
+		for (at, result) in results.into_iter().enumerate() {
+			let answer = match result.result {
+				Ok(value) => format!("{:?}", Value::from(value)),
+				Err(e) => format!("error: {}", e.message()),
+			};
+			assert_eq!(answer, parsed, "`{sql}` at statement {at}");
+		}
+	}
+}

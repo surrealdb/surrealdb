@@ -167,6 +167,7 @@ pub(crate) fn captures_of(closure: &LogicalClosure) -> Captures {
 			statement: false,
 			filter: None,
 			filter_args: 0,
+			statement_args: 0,
 			under_element: false,
 		},
 	);
@@ -206,6 +207,12 @@ pub(crate) fn holds_row_reading_closure(expr: &LogicalExpr) -> bool {
 	let mut found = false;
 	expr.for_each_child(&mut |child| found = found || holds_row_reading_closure(child));
 	found
+}
+
+/// Whether `expr`, an index or a method argument, reads the document root it is evaluated
+/// against: through the row ([`reads_row`]) or through a call that reads it.
+pub(crate) fn step_arg_reads_row(expr: &LogicalExpr) -> bool {
+	reads_row(expr) || calls_reading_row(expr)
 }
 
 /// Whether `expr` holds a call that reads the row it is evaluated against: a custom or other
@@ -264,6 +271,10 @@ struct Scope {
 	/// argument entered after that, inside the predicate, is nearer to a `$parent` read than the
 	/// filter's own binding.
 	filter_args: usize,
+	/// How many closure arguments were in scope where the innermost statement [`Self::statement`]
+	/// counts stands. The statement binds `$this`, `$self` and `$parent` to the document it is
+	/// taken over, so only an argument entered after that is nearer to a read of those names.
+	statement_args: usize,
 	/// Inside a construct that binds an element as the current value of its own, however deep:
 	/// the frame may since have become an index or method argument, a block, or the body of a
 	/// closure, which keep the element body they stand in. A rescoping subquery ends it.
@@ -337,8 +348,17 @@ impl<'a> Walker<'a> {
 		let filter_binds = name == "parent"
 			&& scope.filter.is_some()
 			&& !self.args[scope.filter_args.min(self.args.len())..].contains(&name);
+		// A statement outside an element body binds the row names to the document it is taken
+		// over, nearer than a closure argument of that name entered before the statement.
+		let statement_binds = scope.statement
+			&& !scope.under_element
+			&& !self.args[scope.statement_args.min(self.args.len())..].contains(&name);
+		let statement_kind =
+			RowScopeKind::from_param_name(name).filter(|_| statement_binds && !scope.rescoped);
 		let scope_of = if filter_binds {
 			NameScope::RowVarying(RowScopeKind::Parent)
+		} else if let Some(kind) = statement_kind {
+			NameScope::RowVarying(kind)
 		} else {
 			NameScope::of(name, &self.args)
 		};
@@ -535,6 +555,7 @@ impl<'a> Walker<'a> {
 			Scope {
 				frame: Frame::Statement,
 				statement: true,
+				statement_args: self.args.len(),
 				..scope
 			}
 		} else {
@@ -548,6 +569,7 @@ impl<'a> Walker<'a> {
 				statement: false,
 				filter: None,
 				filter_args: 0,
+				statement_args: 0,
 				under_element: false,
 			}
 		};

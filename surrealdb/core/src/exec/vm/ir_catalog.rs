@@ -26,23 +26,31 @@ use crate::exec::ir::cache::planning::PlanningCatalog;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::rewriter::Rewriter;
+use crate::exec::ir::core::walk::{ancestors, ops_in};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
-use crate::exec::ir::iface::catalog::SourceKey;
+use crate::exec::ir::iface::catalog::{EffectCx, SourceKey};
+use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::OpId;
+use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
 use crate::exec::ir::iface::statements::{AlterObject, DdlChecks, DefineObject, RemoveObject};
 use crate::exec::ir::logical::ddl::{
 	field_definition_of, literal_operand, written_field, written_field_template,
 };
-use crate::exec::ir::logical::ops::LogOp;
+use crate::exec::ir::logical::ops::{LogOp, LoopKind, StepAttrs};
 use crate::exec::ir::op_kind::OpKind;
-use crate::exec::ir::phys::access::{ReadVersion, RestrictedSelect, TableAnswers, source_key};
+use crate::exec::ir::phys::access::{
+	InlineFields, ReadVersion, RestrictedSelect, TableAnswers, source_key,
+};
+use crate::exec::ir::phys::access_expr::{Reconstructed, predicate_of_region};
 use crate::exec::ir::phys::seed_host::AnswerLoader;
+use crate::exec::ir::unit::UnitKind;
 use crate::exec::planner::Planner;
 use crate::exec::vm::NotCovered;
 use crate::exec::vm::payload::CountSelect;
 use crate::exec::vm::program::FieldRefusal;
 use crate::expr::logical::EffectSet;
+use crate::expr::lookup::LookupKind;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::with::With;
 use crate::expr::{Function, Idiom};
@@ -57,7 +65,8 @@ fn unreadable() -> IrError {
 }
 
 /// Reads every table read of `ir` into `memo`, every function `ir` calls, and the definitions
-/// they reach.
+/// they reach. The edge tables of a graph hop with a `WHERE` are read as current table reads,
+/// for the key condition the physical plan decides for the hop.
 ///
 /// Tables are read in program order. A schema statement before a read means the definitions held
 /// do not describe the catalog the read runs against, so the memo is told of the change
@@ -111,6 +120,26 @@ pub(crate) async fn fill(
 						Ok(None) => {}
 						Err(error) => {
 							failure.get_or_insert(error);
+						}
+					}
+				}
+			}
+			LogOp::Loop {
+				kind: LoopKind::GraphStep,
+				step: Some(step),
+				..
+			} => {
+				if let StepAttrs::Lookup(attrs) = step.as_ref()
+					&& matches!(attrs.kind, LookupKind::Graph(_))
+					&& attrs.cond && matches!(
+					ir.snapshot(data.snapshot),
+					Some(Snapshot::Current) | None
+				) && !after_schema(ir, op, &schema_ops)
+				{
+					for subject in attrs.subjects.iter() {
+						let key: SourceKey = (subject.table.clone(), None, ReadVersion::Current);
+						if seen.insert(key.clone()) {
+							keys.push(key);
 						}
 					}
 				}
@@ -171,12 +200,36 @@ fn holds(ir: &Ir, owner: OpId, op: OpId) -> bool {
 	}
 }
 
-/// Reads the answers of every table read the memo was asked for and does not hold.
+/// Reads the answers of every table read the memo was asked for and does not hold, and of every
+/// table read `ir` names that the memo does not hold.
 ///
 /// A read of a table the first fill did not name (introduced by a rewrite pass) is pending after
-/// its lookup; this reads it. Reading adds no pending read.
-#[allow(dead_code)]
-pub(crate) async fn top_up(planner: &Planner<'_>, memo: &PlanningCatalog) -> Result<(), IrError> {
+/// its lookup, or stands in the container as a source the pass made; this reads it. Reading adds
+/// no pending read.
+pub(crate) async fn top_up(
+	ir: &Ir,
+	planner: &Planner<'_>,
+	memo: &PlanningCatalog,
+) -> Result<(), IrError> {
+	let mut failure: Option<IrError> = None;
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+		if matches!(ir.op(op).map(|data| &data.kind), Some(OpKind::Logical(LogOp::Source(..)))) {
+			match source_key(ir, op, memo, memo) {
+				// A lookup of a key the memo does not hold leaves it pending.
+				Ok(Some(key)) => {
+					let _ = memo.table_answers(&key);
+				}
+				Ok(None) => {}
+				Err(error) => {
+					failure.get_or_insert(error);
+				}
+			}
+		}
+		Walk::Continue
+	});
+	if let Some(error) = failure {
+		return Err(error);
+	}
 	for key in memo.take_pending_sources() {
 		if memo.holds_answers(&key) {
 			continue;
@@ -187,6 +240,91 @@ pub(crate) async fn top_up(planner: &Planner<'_>, memo: &PlanningCatalog) -> Res
 	}
 	while memo.load_pending().await.map_err(|_| unreadable())? {}
 	Ok(())
+}
+
+/// Folds the row-independent record paths of the predicate of every filter of `ir`
+/// ([`Planner::fold_constant_record_paths`]) and holds each conjunct the fold changed in the memo,
+/// as the access-path decision reads it ([`PlanningCatalog::insert_record_folded`]).
+///
+/// Only a container of a request's own statements folds: the code of any other unit is compiled
+/// for the requests that reach it, which the values of this transaction's records do not hold for.
+/// A container that may change state, calls a stored function, or reads at a version folds
+/// nothing: a change, or a function that may make one, could alter a record between the plan-time
+/// read and the per-row read the fold stands for, and a versioned read observes a snapshot the walk
+/// does not. A filter in stored code
+/// folds nothing either, since stored code is compiled for every request that reaches it.
+pub(crate) async fn fill_record_folds(
+	ir: &Ir,
+	facts: &mut FactCache,
+	cx: &EffectCx<'_>,
+	planner: &Planner<'_>,
+	memo: &PlanningCatalog,
+	unit: &UnitKind,
+) -> Result<(), IrError> {
+	if !matches!(
+		unit,
+		UnitKind::Request | UnitKind::RequestStatement { .. } | UnitKind::ServedStatement { .. }
+	) {
+		return Ok(());
+	}
+	let top: Vec<OpId> = ops_in(ir, ir.top()).collect();
+	for op in top {
+		let set = effects::of_with(ir, facts, cx, op).set;
+		if set.mutates_state() {
+			return Ok(());
+		}
+	}
+	let mut unfoldable = false;
+	let mut regions = Vec::new();
+	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
+		let Some(data) = ir.op(op) else {
+			return Walk::Continue;
+		};
+		match &data.kind {
+			OpKind::Logical(LogOp::VersionScope) => {
+				unfoldable = true;
+				return Walk::Stop;
+			}
+			OpKind::Expr(ExprOp::Call(call)) if matches!(call.function, Function::Custom(_)) => {
+				unfoldable = true;
+				return Walk::Stop;
+			}
+			OpKind::Logical(LogOp::Filter) if !in_stored_clause(ir, op) => {
+				regions.extend(data.regions.iter().copied().filter(|region| {
+					ir.region(*region).is_some_and(|held| {
+						matches!(held.kind, RegionKind::Clause(ClauseRole::Where))
+					})
+				}));
+			}
+			_ => {}
+		}
+		Walk::Continue
+	});
+	if unfoldable {
+		return Ok(());
+	}
+	for region in regions {
+		// A predicate the rebuild cannot read is left to the decision, which reads it as it does
+		// any other.
+		let mut predicate = Reconstructed::default();
+		if !matches!(predicate_of_region(ir, region, &mut predicate), Ok(true)) {
+			continue;
+		}
+		for (_, conjunct) in predicate.conjuncts {
+			let mut folded = conjunct.clone();
+			if planner.fold_constant_record_paths(&mut folded).await && folded != conjunct {
+				memo.insert_record_folded(conjunct, folded);
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Whether `op` stands inside a stored clause.
+fn in_stored_clause(ir: &Ir, op: OpId) -> bool {
+	ancestors(ir, op).any(|(region, _)| {
+		ir.region(region).is_some_and(|held| matches!(held.kind, RegionKind::StoredClause(_)))
+	})
 }
 
 /// Loads the table answers a conversion asks for, through the planner and into the memo.
@@ -276,6 +414,30 @@ fn count_select_of(table: Option<&crate::catalog::TableDefinition>) -> CountSele
 	}
 }
 
+/// The `INLINE` fields of `table`, declared by `fields`, when it is a relation table that is not
+/// lightweight: its inline generation and each field's raw name, in the order an adjacency entry
+/// holds their values.
+fn inline_of(
+	table: &crate::catalog::TableDefinition,
+	fields: &[FieldDefinition],
+) -> Option<Arc<InlineFields>> {
+	match &table.table_type {
+		crate::catalog::TableType::Relation(relation) if !relation.lightweight => {}
+		_ => return None,
+	}
+	let names = crate::doc::inline_fields(fields)
+		.into_iter()
+		.map(|field| match field.name.0.as_slice() {
+			[crate::expr::Part::Field(name)] => name.as_str().to_owned(),
+			_ => field.name.to_raw_string(),
+		})
+		.collect();
+	Some(Arc::new(InlineFields {
+		generation: table.graph_inline_gen,
+		names,
+	}))
+}
+
 /// What the access-path decision reads about the table read `key` names.
 ///
 /// The reads are the planner's: the table definition, the lightweight relation test, the
@@ -361,6 +523,7 @@ pub(super) async fn read_answers(
 		planner.resolve_restricted_select_prefixes(table).await.into();
 	let permissioned = planner.reads_are_checked()
 		&& !current.as_ref().is_some_and(|def| matches!(def.permissions.select, Permission::Full));
+	let inline = current.as_deref().and_then(|def| inline_of(def, &fields));
 	let base = TableAnswers {
 		table: table.clone(),
 		defined,
@@ -372,6 +535,7 @@ pub(super) async fn read_answers(
 		allows_clock: planner.allows_clock_bound(),
 		fields,
 		select,
+		inline,
 		..plain
 	};
 	if matches!(base.restricted, RestrictedSelect::Unresolved) {

@@ -249,7 +249,13 @@ impl Ir {
 				inputs.push(map.original_value(*arg).ok_or(IrError::Stale("unit input"))?);
 			}
 		}
-		copy.matches.carry(&self.matches, copied.iter().copied());
+		copy.matches.carry(
+			&self.matches,
+			copied.iter().copied(),
+			&|value| map.map_value(value),
+			&|region| map.map_region(region),
+		);
+		copy.hop_keys.carry(&self.hop_keys, copied.iter().copied());
 		copy.placement.carry(&self.placement, copied);
 		Ok(RegionUnit {
 			ir: copy,
@@ -937,7 +943,18 @@ impl<'s, 'd> Transplant<'s, 'd> {
 	/// linked into the container.
 	fn record(&mut self) {
 		let src = self.src;
-		self.dst.matches.carry(&src.matches, self.ops.iter().copied());
+		// A value the code reads from outside an adopted copy is the original's value.
+		let (map, mode) = (&self.map, &self.mode);
+		let values = |value: ValueId| {
+			map.map_value(value).or_else(|| match mode {
+				Mode::Adopt(original) => original.original_value(value),
+				Mode::Copy(..) | Mode::Clone => None,
+			})
+		};
+		self.dst.matches.carry(&src.matches, self.ops.iter().copied(), &values, &|region| {
+			map.map_region(region)
+		});
+		self.dst.hop_keys.carry(&src.hop_keys, self.ops.iter().copied());
 		for at in 0..self.ops.len() {
 			let (from, new) = self.ops[at];
 			let Some(data) = self.dst.ops.get(new) else {

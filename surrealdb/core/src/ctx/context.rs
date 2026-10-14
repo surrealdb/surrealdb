@@ -249,6 +249,13 @@ impl Debug for Context {
 	}
 }
 
+/// Whether a variable named `name` may not be bound to a context: a protected name always, and a
+/// name the system binds in a frame (`$this`, `$value`, ...) where the binding is a request's
+/// variable rather than a closure's capture of the frame's own binding.
+fn bound_name_refused(name: &str, request: bool) -> bool {
+	PROTECTED_PARAM_NAMES.contains(&name) || (request && surrealdb_cnf::is_refused_let_name(name))
+}
+
 impl Context {
 	/// Creates a new empty background context. It carries the parent's
 	/// statement clock: the work it runs, a live subscription's clauses for one
@@ -1083,16 +1090,17 @@ impl Context {
 		self.statement_counters.as_ref()
 	}
 
-	/// Install the instant every CLOCK read answers while the top-level
-	/// statement about to run executes. Called by the executor once per
-	/// top-level statement, so a `sleep` inside the statement does not advance
-	/// it. Contexts derived afterwards carry it.
+	/// Install the instant every CLOCK read answers while the statement about
+	/// to run executes. Called by the executor once per top-level statement
+	/// and by a block for each of its statements when it starts, so a `sleep`
+	/// inside the statement does not advance it. Contexts derived afterwards
+	/// carry it.
 	pub(crate) fn set_statement_clock(&mut self, clock: Datetime) {
 		self.statement_clock = Some(clock);
 	}
 
-	/// The instant of the top-level statement running around this context, or
-	/// `None` where no statement installed one.
+	/// The instant of the statement running around this context, or `None`
+	/// where no statement installed one.
 	pub(crate) fn statement_clock(&self) -> Option<&Datetime> {
 		self.statement_clock.as_ref()
 	}
@@ -1545,14 +1553,16 @@ impl Context {
 	/// Binds the captures of a closure as values of this context, refusing a
 	/// protected name as [`Self::attach_variables`] does. A capture is the
 	/// closure's own binding, not a request parameter, so a function the
-	/// closure's body calls does not read it.
+	/// closure's body calls does not read it. A capture may be named as a
+	/// value the system binds (`$this`, `$value`, ...): the closure captured
+	/// the frame's binding of it.
 	pub(crate) fn attach_captures(&mut self, vars: Variables) -> Result<(), Error> {
 		self.bind_variables(vars, false)
 	}
 
 	fn bind_variables(&mut self, vars: Variables, request: bool) -> Result<(), Error> {
 		for (name, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+			if bound_name_refused(name.as_str(), request) {
 				return Err(ExecError::InvalidParam {
 					name: name.into_string(),
 				}
@@ -1585,7 +1595,7 @@ impl Context {
 	/// [`Self::attach_variables`] attaches them.
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
-			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+			if bound_name_refused(name.as_str(), true) {
 				return Err(ExecError::InvalidParam {
 					name,
 				}
@@ -2407,6 +2417,33 @@ mod tests {
 		frame.attach_variables(own).expect("variables attach");
 		assert_eq!(frame.lexical_value("p"), Some(&int(2)));
 		assert_eq!(frame.lexical_value("q"), None);
+	}
+
+	/// A request's variables refuse a protected name and each name the system binds; a
+	/// closure's captures refuse only a protected name, for a closure written in a frame
+	/// that binds `$value` captures that binding.
+	#[test]
+	fn request_variables_refuse_the_names_the_system_binds() {
+		use crate::dbs::Variables;
+		use crate::val::Value;
+
+		for name in ["auth", "this", "self", "parent", "value", "input", "before", "after", "event"]
+		{
+			let mut vars = Variables::new();
+			vars.insert(name, Value::from(1));
+			assert!(
+				Context::new_test().attach_variables(vars.clone()).is_err(),
+				"`{name}` bound as a request variable"
+			);
+			assert_eq!(
+				Context::new_test().attach_captures(vars).is_err(),
+				name == "auth",
+				"`{name}` bound as a capture"
+			);
+		}
+		let mut vars = Variables::new();
+		vars.insert("limit", Value::from(1));
+		Context::new_test().attach_variables(vars).expect("an ordinary name attaches");
 	}
 
 	/// The scope a body is planned in holds the request parameters and the

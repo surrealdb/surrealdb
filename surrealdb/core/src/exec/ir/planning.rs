@@ -13,7 +13,8 @@
 //!    ([`fill_field_checks`]).
 //! 4. The container is verified at the logical boundary, and leaves the bound phase.
 //! 5. The loop optimiser runs with [`PassConfig::PRODUCTION`] and the plan-time folder of the
-//!    request.
+//!    request, and the row-independent record paths of the filters' predicates are folded for the
+//!    access-path decisions ([`fill_record_folds`]).
 //! 6. The e-graph plans each statement of the container. A statement it leaves alone keeps the
 //!    default conversion's plan.
 //! 7. The fill reads the answers of the table reads the passes introduced, and the container is
@@ -66,14 +67,17 @@ use crate::exec::ir::cache::deps::ValueDeps;
 use crate::exec::ir::cache::planning::PlanningCatalog;
 use crate::exec::ir::logical::constraints::RegionRejection;
 use crate::exec::ir::logical::seam::{BindNotes, node_identity};
+use crate::exec::logical::is_identity_cast;
 use crate::exec::logical::pipelines::{Legality, LegalityIndex, statement_legality_with};
 use crate::exec::logical::summaries::CatalogSummaries;
 use crate::exec::planner::Planner;
 use crate::exec::vm::PlanSession;
 use crate::exec::vm::fold_host::HOST_RUNNER;
-use crate::exec::vm::ir_catalog::{PlannerLoader, fill, fill_field_checks, top_up};
+use crate::exec::vm::ir_catalog::{
+	PlannerLoader, fill, fill_field_checks, fill_record_folds, top_up,
+};
 use crate::exec::vm::payload::Refusal;
-use crate::expr::logical::{LogicalOp, lower, lower_expr};
+use crate::expr::logical::{LogicalExpr, LogicalOp, lower, lower_expr};
 
 /// What planning reads of the request's environment besides its statements.
 pub(crate) struct PlanningInput<'a> {
@@ -149,11 +153,12 @@ pub(crate) async fn plan_request(
 		None => Vec::new(),
 	};
 	let (memo, lowered) = prepare(input, planning, txn, ids).await?;
+	let statements = bound_statements(input, &lowered);
+	charge_prefix_chains(planner, &statements)?;
 	let registry = planner.function_registry();
 	let folder =
 		VmFolder::new(CapabilityPolicy::Request(Arc::clone(&planning.capabilities)), &HOST_RUNNER);
 	let frames = FrameTable::default();
-	let statements = bound_statements(input, &lowered);
 	let bound = RequestInput {
 		statements: &statements,
 		scope: input.scope.clone(),
@@ -168,6 +173,52 @@ pub(crate) async fn plan_request(
 		})));
 	}
 	plan_bound(ir, &bound, notes, planning, memo, &folder).await
+}
+
+/// Refuses `statements` when a chain of prefix operators in one of them is deeper than the
+/// computation-depth budget leaves: each operator of a chain is one step of evaluation, charged
+/// from the depth the planner was entered at. A cast the binder removes as yielding its operand
+/// ([`is_identity_cast`]) is no step. Answers [`Refusal::ComputationDepthExceeded`].
+///
+/// The charge is read from the logical form, before any fold, so a chain of literals is refused
+/// as one of values known only when the statement runs is.
+fn charge_prefix_chains(
+	planner: &Planner<'_>,
+	statements: &[RequestStatement<'_>],
+) -> Result<(), IrError> {
+	let budget = planner.frozen().config.exec.max_computation_depth;
+	let entered = planner.current_depth();
+	let mut within = |expr: &LogicalExpr| -> ControlFlow<()> {
+		let mut depth = entered;
+		let mut node = expr;
+		while let LogicalExpr::Prefix {
+			expr: next,
+			..
+		} = node
+		{
+			if !is_identity_cast(node) {
+				depth += 1;
+				if depth > budget {
+					return ControlFlow::Break(());
+				}
+			}
+			node = next;
+		}
+		ControlFlow::Continue(())
+	};
+	for statement in statements {
+		let RequestStatement::Logical(op) = statement else {
+			continue;
+		};
+		let charged = op.visit_scalars_deep(&mut |scalar| match scalar.visit_deep(&mut within) {
+			ControlFlow::Continue(()) => Ok(()),
+			ControlFlow::Break(()) => Err(()),
+		});
+		if charged.is_err() {
+			return Err(IrError::Rejected(Box::new(Refusal::ComputationDepthExceeded)));
+		}
+	}
+	Ok(())
 }
 
 /// The region-constraint rejection of `input`, bound as [`plan_request`] binds it and planned no
@@ -242,7 +293,11 @@ async fn prepare(
 					|| input.late_bound
 					|| matches!(input.unit, UnitKind::StageBundle { .. }),
 			)
-			.with_calls_current(planner.calls_current());
+			.with_calls_current(planner.calls_current())
+			.at_stamp(match planner.plan_time_version {
+				crate::exec::planner::PlanTimeVersion::Current => None,
+				crate::exec::planner::PlanTimeVersion::At(stamp) => Some(stamp),
+			});
 	if let (Some(ns), Some(db)) = (planner.ns(), planner.db()) {
 		memo = memo.with_database_names(ns, db);
 	}
@@ -453,6 +508,7 @@ async fn plan_bound(
 		super::core::rewriter::Rewriter::new(&mut ir, &mut facts).advance_phase(Phase::Logical)?;
 		run_lo(&mut ir, &mut facts, folder, &effects, &PassConfig::PRODUCTION, &mut NoObserver)
 			.await?;
+		fill_record_folds(&ir, &mut facts, &effects, planner, &memo, &bound.unit).await?;
 	}
 	// The legality of each logical loop, which the e-graph's surgery keeps current and the
 	// physical boundary's verification judges each placed pipeline against.
@@ -485,7 +541,7 @@ async fn plan_bound(
 		outcomes
 	};
 
-	top_up(planner, &memo).await?;
+	top_up(&ir, planner, &memo).await?;
 	let physical_deps = {
 		let cx = PhysCx {
 			effects: EffectCx {

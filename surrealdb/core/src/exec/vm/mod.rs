@@ -213,7 +213,10 @@ fn plans_late(planner: &Planner<'_>, op: &LogicalOp, not_covered: &NotCovered) -
 /// `LET` or expression the planning may plan again late-bound after its
 /// schema statements: each statement it holds is bound again where it is
 /// planned, the ones after a change late-bound, from the statement as
-/// written.
+/// written. A block a statement of which may change the catalog through code
+/// no speculative run models ([`speculate::hides_a_change_point`]) is planned
+/// that way from the start: its statements after the change are planned
+/// when the block reaches them.
 pub(crate) fn plan_checked<'a>(
 	planner: &'a Planner<'_>,
 	op: &'a LogicalOp,
@@ -230,6 +233,10 @@ pub(crate) fn plan_checked<'a>(
 			}
 			_ => None,
 		};
+		if speculate::hides_a_change_point(planner, op).await {
+			let late = planner.binding_late_after_schema();
+			return plan_statement(&late, unbound.unwrap_or(op)).await.map_err(declined);
+		}
 		let not_covered = match plan_statement(planner, op).await {
 			Ok(plan) => {
 				if let (Some(speculating), Some(mark)) = (&planner.speculation, explained) {
@@ -285,6 +292,14 @@ impl RequestBuilder {
 		// plan, which its own operator makes.
 		if matches!(op, LogicalOp::Explain(_)) {
 			return plan_checked(planner, op, unbound).await.map(RequestEntry::Operator);
+		}
+		if speculate::hides_a_change_point(planner, op).await {
+			let late = planner.binding_late_after_schema();
+			return self
+				.plan_statement(&late, unbound.unwrap_or(op))
+				.await
+				.map(RequestEntry::Statement)
+				.map_err(declined);
 		}
 		let not_covered = match self.plan_statement(planner, op).await {
 			Ok(index) => return Ok(RequestEntry::Statement(index)),

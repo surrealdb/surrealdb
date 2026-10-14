@@ -161,7 +161,7 @@ error = "Invalid query: The `<|k|>` KNN operator (KTree / M-Tree) is no longer s
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2]
+    KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: deferred]
         TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 
@@ -172,7 +172,7 @@ value = "[pt:2, pt:3]"
 value = '''
 'SelectProject [ctx: Db] [projections: *]
     Aggregate [ctx: Db] [mode: GROUP ALL]
-        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2]
+        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: deferred]
             TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 
@@ -245,7 +245,7 @@ value = "[]"
 [[test.results]]
 value = '''
 'SelectProject [ctx: Db] [projections: id]
-    KnnTopK [ctx: Db] [field: point, k: 2, distance: Manhattan, dimension: 2]
+    KnnTopK [ctx: Db] [field: point, k: 2, distance: Manhattan, dimension: deferred]
         TableScan [ctx: Db] [table: pt, direction: Forward]
 ''''
 

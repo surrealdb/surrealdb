@@ -1,5 +1,4 @@
 use common::fmt::EscapeKwFreeIdent;
-use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -18,9 +17,10 @@ impl SetStatement {
 		self.what.read_only()
 	}
 
-	/// returns if the set is setting a protected param.
+	/// returns if the set is setting a name a user may not set: a protected param or a name the
+	/// system binds.
 	pub fn is_protected_set(&self) -> bool {
-		PROTECTED_PARAM_NAMES.contains(&self.name.as_str())
+		surrealdb_cnf::is_refused_let_name(self.name.as_str())
 	}
 }
 

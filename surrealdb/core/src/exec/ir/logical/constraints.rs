@@ -1,13 +1,13 @@
 //! The region constraints: which constructs a region of a given kind admits.
 //!
 //! One rule per row of the constraint table. A condition, order, group or split clause admits no
-//! write, definition, `LET` or `SLEEP`; a permission or assertion frame admits no write or
-//! definition; a computed, value or default field clause admits no write (through a function's
-//! summary as well as directly) and no definition; a stored index column admits no
-//! non-deterministic construct and no read of another record. The expression row would reject a
-//! `LET` used as an expression, a transaction-control statement and `USE`. The parser and the
-//! binder never build those shapes, so that row is disabled and rejects nothing. A row or a
-//! construct that is not enabled admits.
+//! write, definition or `SLEEP`, and a block in it is an ordinary block that binds a `LET`; a
+//! permission or assertion frame admits no write or definition; a computed, value or default field
+//! clause admits no write (through a function's summary as well as directly) and no definition; a
+//! stored index column admits no non-deterministic construct and no read of another record. The
+//! expression row would reject a `LET` used as an expression, a transaction-control statement and
+//! `USE`. The parser and the binder never build those shapes, so that row is disabled and rejects
+//! nothing. A row or a construct that is not enabled admits.
 //!
 //! [`admits`] is the table and nothing else. [`check`] and [`rejection_of`] apply it to a
 //! container: they walk the ops of a region and of every region nested in it, and judge each op
@@ -68,7 +68,7 @@ struct Row {
 /// (`Clause(WriteCond)`) is not covered.
 const CONDITION_CLAUSE: Row = Row {
 	row: Section4bRow::ConditionClause,
-	rejects: &[Construct::Write, Construct::Ddl, Construct::Let, Construct::Sleep],
+	rejects: &[Construct::Write, Construct::Ddl, Construct::Sleep],
 	enabled: true,
 };
 

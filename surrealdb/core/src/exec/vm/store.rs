@@ -1259,9 +1259,9 @@ async fn step_inner(
 		StoreInstr::SessionLetChecks {
 			name,
 		} => {
-			// SECURITY: a protected name is refused before the value is evaluated, so a refused
-			// `LET` has no side effects.
-			if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+			// SECURITY: a protected name, and a name the system binds, is refused before the value
+			// is evaluated, so a refused `LET` has no side effects.
+			if surrealdb_cnf::is_refused_let_name(name.as_str()) {
 				return Err(ControlFlow::Err(anyhow::Error::new(
 					crate::exec::Error::InvalidParam {
 						name: name.as_str().to_owned(),
@@ -1399,6 +1399,19 @@ async fn step_inner(
 					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
 					let txn = ctx.txn();
 					super::schema_host::check_key_components(&txn, ns, db, kind, &definition)
+						.await
+						.map_err(ControlFlow::Err)?;
+				}
+				FieldCheck::ComputedCallees {
+					field: reg,
+					ns,
+					db,
+				} => {
+					let definition = field(*reg)?;
+					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+					let txn = ctx.txn();
+					super::schema_host::check_computed_callees(&txn, ns, db, &definition)
 						.await
 						.map_err(ControlFlow::Err)?;
 				}

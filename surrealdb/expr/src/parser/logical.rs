@@ -672,6 +672,7 @@ impl Lower<'_> {
 						Some(self.kind(rec[1])?)
 					},
 					value: Box::new(self.logical_statement(rec[2], stored)?),
+					synthetic: false,
 				})
 			}
 			Tag::Return => LogicalOp::Return(LogicalReturn {

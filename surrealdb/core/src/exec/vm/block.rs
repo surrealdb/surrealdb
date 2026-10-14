@@ -9,7 +9,6 @@
 //! program's state.
 
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use anyhow::{Context as _, anyhow};
 
@@ -149,49 +148,13 @@ pub(super) async fn step(
 				.program
 				.clone()
 				.ok_or_else(|| ControlFlow::Err(anyhow!("a block statement with no program")))?;
-			// The group records the counters its reads keep (adjacency cache
-			// hits, payload evaluations, edges scanned) into the metrics the
-			// rendering reports.
-			let measured = Arc::new(crate::exec::OperatorMetrics::new());
-			measured.enable();
-			let frame = frame.with_vm_metrics(Arc::clone(&measured));
-			let started = web_time::Instant::now();
-			let (rows, ended) = super::host::run_group(&running, *statement, state, &frame).await;
-			let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
-			// A signal ends the statement analysed, as it ends the drain of
-			// the plan `EXPLAIN ANALYZE` measures; an error is raised.
-			match ended {
-				Ok(())
-				| Err(ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_)) => {}
-				Err(error @ ControlFlow::Err(_)) => return Err(error),
-			}
-			let total = rows.len() as u64;
-			match total {
-				0 => measured.record_elapsed(elapsed),
-				rows => measured.record_batch(rows, elapsed),
-			}
 			let analysis = &program.analyses[*analysis as usize];
-			let rendered = match &analysis.json {
-				Some(template) => match &**template {
-					Value::Object(template) => crate::exec::operators::render_analyze_json(
-						template,
-						&measured,
-						analysis.redact,
-						total,
-					),
-					_ => {
-						return Err(ControlFlow::Err(anyhow!(
-							"an analysed plan that is no object"
-						)));
-					}
-				},
-				None => crate::exec::operators::render_analyze_text(
-					&analysis.pieces,
-					&measured,
-					analysis.redact,
-					total,
-				),
-			};
+			let rendered = super::explain::analysed_run(analysis, &frame, |frame| async move {
+				let (rows, ended) =
+					super::host::run_group(&running, *statement, state, &frame).await;
+				(rows.len() as u64, ended)
+			})
+			.await?;
 			write(regs, *dst, value_of(vec![rendered], true, *collect));
 		}
 		// The host runs a nested statement over the row it is evaluated for.
@@ -253,6 +216,10 @@ pub(super) async fn step(
 		BlockInstr::Save => {
 			state.saved.push(state.frame.clone());
 			state.save_frames(state.saved.len());
+		}
+		BlockInstr::Clock => {
+			let frame = state.frame.take().unwrap_or_else(|| ctx.clone());
+			state.frame = Some(frame.with_statement_clock(crate::val::Datetime::now()));
 		}
 		BlockInstr::Resolve => {
 			let current = state.frame.clone().unwrap_or_else(|| ctx.clone());

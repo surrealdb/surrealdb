@@ -64,7 +64,8 @@ pub(crate) enum Determinism {
 	/// Reads stored data: equal answers within one statement only where no write of the
 	/// statement reaches the footprint.
 	WithinStatementUnlessWritten,
-	/// A clock read: one value per top-level statement.
+	/// A clock read: one value per statement, whether the statement is a top-level one or one of a
+	/// statement list.
 	PerStatement,
 	NonDeterministic,
 }

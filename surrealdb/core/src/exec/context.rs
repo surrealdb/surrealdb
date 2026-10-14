@@ -243,6 +243,10 @@ pub struct RootContext {
 	/// would read the row being scanned, a read fails rather than finding
 	/// `NONE` or another row. See [`ForbiddenRow`].
 	pub(crate) forbidden_row: Option<Arc<ForbiddenRow>>,
+	/// The distances the KNN search of the statement around a statement in value position
+	/// publishes, which an index function of the inner statement reports against where the inner
+	/// statement runs no search of its own.
+	pub(crate) inherited_knn: Option<Arc<crate::exec::function::KnnContext>>,
 	/// When true, RecordId dereferences bypass permission checks.
 	///
 	/// Propagated from `EvalContext` at subquery / lookup / recursion boundaries
@@ -921,6 +925,7 @@ impl ExecutionContext {
 				current_value: r.current_value.clone(),
 				current_row: r.current_row.clone(),
 				forbidden_row: r.forbidden_row.clone(),
+				inherited_knn: r.inherited_knn.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
 				perms_suppressed: r.perms_suppressed,
 				caller_perms_suppressed: r.caller_perms_suppressed,
@@ -942,6 +947,7 @@ impl ExecutionContext {
 					current_value: n.root.current_value.clone(),
 					current_row: n.root.current_row.clone(),
 					forbidden_row: n.root.forbidden_row.clone(),
+					inherited_knn: n.root.inherited_knn.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
 					perms_suppressed: n.root.perms_suppressed,
 					caller_perms_suppressed: n.root.caller_perms_suppressed,
@@ -966,6 +972,7 @@ impl ExecutionContext {
 						current_value: d.ns_ctx.root.current_value.clone(),
 						current_row: d.ns_ctx.root.current_row.clone(),
 						forbidden_row: d.ns_ctx.root.forbidden_row.clone(),
+						inherited_knn: d.ns_ctx.root.inherited_knn.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
 						perms_suppressed: d.ns_ctx.root.perms_suppressed,
 						caller_perms_suppressed: d.ns_ctx.root.caller_perms_suppressed,
@@ -1047,6 +1054,21 @@ impl ExecutionContext {
 			row: true,
 		}));
 		new
+	}
+
+	/// Derive the context a statement in value position runs in, whose index functions report
+	/// against `knn`, the distances the search of the statement around it publishes, where it runs
+	/// no search of its own.
+	pub(crate) fn with_inherited_knn(&self, knn: Arc<crate::exec::function::KnnContext>) -> Self {
+		let mut new = self.clone();
+		new.root_mut().inherited_knn = Some(knn);
+		new
+	}
+
+	/// The distances of the KNN search of the statement around this one, if any
+	/// ([`Self::with_inherited_knn`]).
+	pub(crate) fn inherited_knn(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
+		self.root().inherited_knn.as_ref()
 	}
 
 	/// Derive a context isolated from the KNN query vector evaluated around
@@ -1454,8 +1476,28 @@ impl ExecutionContext {
 	/// This is used by LET statements to add variables to the execution context.
 	/// Creates a proper child FrozenContext, preserving the parent chain for
 	/// correct scoped parameter lookup and shadowing.
+	///
+	/// The derived context runs the rest of the same program, so it keeps the
+	/// session sink of this one. A context that runs other code with a name
+	/// bound (a subquery's `$parent`, a cascade, a function's arguments) is
+	/// derived with [`Self::with_params`], which holds none.
 	pub fn with_param(&self, name: impl Into<Strand>, value: Value) -> Self {
-		self.with_params([(name, value)])
+		let mut bound = self.with_params([(name, value)]);
+		bound.root_mut().session_effects.clone_from(&self.root().session_effects);
+		bound
+	}
+
+	/// Derive a context whose CLOCK reads answer `clock`, the instant a statement of a block
+	/// started at.
+	///
+	/// The derived context runs the rest of the same program, so it keeps the session sink of
+	/// this one, as [`Self::with_param`] does.
+	pub(crate) fn with_statement_clock(&self, clock: crate::val::Datetime) -> Self {
+		let mut child = Context::new_child(self.ctx());
+		child.set_statement_clock(clock);
+		let mut derived = self.with_new_ctx(child.freeze());
+		derived.root_mut().session_effects.clone_from(&self.root().session_effects);
+		derived
 	}
 
 	/// Derive a context in one child scope binding each of `names` to
@@ -2106,10 +2148,10 @@ mod tests {
 	fn only_the_statement_context_holds_the_session_sink() {
 		let ctx = root_ctx_with_options().with_session_sink(Arc::default());
 		assert!(ctx.session_sink().is_some());
-		// A context that binds a parameter is derived through `with_new_ctx`, which runs other
-		// code (a subquery's `$parent`, a function's arguments, an event's `$before`), so it holds
-		// none.
-		assert!(ctx.with_param("p", Value::None).session_sink().is_none());
+		// Binding a parameter for the rest of the same program keeps it; binding names for other
+		// code (a subquery's `$parent`, a function's arguments, an event's `$before`) does not.
+		assert!(ctx.with_param("p", Value::None).session_sink().is_some());
+		assert!(ctx.with_params([("p", Value::None)]).session_sink().is_none());
 		let isolated = Context::new_isolated(ctx.ctx()).freeze();
 		assert!(ctx.with_new_ctx(Arc::clone(&isolated)).session_sink().is_none());
 		let narrowed = Arc::new(Auth::for_root(crate::iam::Role::Viewer));

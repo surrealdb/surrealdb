@@ -103,6 +103,9 @@ pub(crate) fn node_identity(node: &LogicalOp) -> usize {
 struct Binding {
 	name: Strand,
 	value: ValueId,
+	/// Whether the binding is a variable — a `LET`, a `FOR` variable, a parameter or a closure's
+	/// capture of one — rather than a name the binder binds to a row.
+	variable: bool,
 }
 
 /// The context a request is bound in.
@@ -123,6 +126,12 @@ pub(crate) struct BindCx<'a> {
 	/// optional chain's `then`, a destructure alias, a broadcast); a step's argument still reads
 	/// the document root.
 	field_base: Option<ValueId>,
+	/// The document root a step's argument reads where it is not `row`: set inside a closure body
+	/// invoked over a row that is not its document root.
+	step_root: Option<ValueId>,
+	/// The row `step_root` stands beside: the row of the closure body that sets it. An element
+	/// filter over that row binds `$parent` to the document root.
+	step_root_row: Option<ValueId>,
 	aggregating: bool,
 	/// The fields of the projection directly above the `ORDER BY` about to be bound, which the
 	/// keys resolve their aliases against.
@@ -150,6 +159,12 @@ pub(crate) struct BindCx<'a> {
 	/// schema statement anywhere, or reaches a body its text does not show. A write in such a
 	/// statement may meet definitions the bind cannot read.
 	catalog_may_change: bool,
+	/// Whether the statements written in the top-level statement's expressions may meet a
+	/// catalog it changes while it runs: it may change the catalog, and it holds a schema
+	/// statement or a write anywhere in it. A statement that may change the catalog only through
+	/// a body it calls, and writes nothing, reads in its nested statements the catalog it was
+	/// bound against.
+	nested_may_change: bool,
 	/// Whether the container runs after a change to the catalog its planning cannot know
 	/// ([`RequestInput::late_bound`](crate::exec::ir::RequestInput)).
 	late_bound: bool,
@@ -162,6 +177,10 @@ pub(crate) struct BindCx<'a> {
 	/// The first refusal of the top-level statement being bound that is raised before any of the
 	/// statement runs.
 	hoisted: Option<Refusal>,
+	/// Whether a `LET` written as an expression is raised where it stands, when a record reaches
+	/// it, rather than as the refusal of the whole top-level statement: the subscripts and filters
+	/// of a write's place ([`Self::deferring_let`]).
+	defers_let: bool,
 	/// Whether the text of each expression bound is recorded on the op that computes it: the
 	/// statements under an `EXPLAIN`, which prints their clauses as written.
 	writing: bool,
@@ -219,6 +238,8 @@ impl<'a> BindCx<'a> {
 			current: None,
 			row: None,
 			field_base: None,
+			step_root: None,
+			step_root_row: None,
 			aggregating: false,
 			order_fields: None,
 			sort_keys: Vec::new(),
@@ -230,10 +251,12 @@ impl<'a> BindCx<'a> {
 			eager: true,
 			serves_late: false,
 			catalog_may_change: false,
+			nested_may_change: false,
 			late_bound: false,
 			statement_writes: false,
 			after_stored_code: false,
 			hoisted: None,
+			defers_let: false,
 			writing: false,
 			deps: ValueDeps::new(),
 			notes: BindNotes::default(),
@@ -267,6 +290,25 @@ impl<'a> BindCx<'a> {
 	/// The kinds of the regions around the point being bound, outermost first.
 	pub(crate) fn kinds(&self) -> &[RegionKind] {
 		&self.kinds
+	}
+
+	/// Whether the point being bound stands directly in a statement list: the innermost region is
+	/// the body of a block, an arm of an `IF`, the body of a `FOR` or a function body. A
+	/// statement of such a list starts at an instant of its own; a point in a clause, a subquery
+	/// or a closure body belongs to the statement that holds it.
+	pub(crate) fn in_statement_list(&self) -> bool {
+		matches!(
+			self.kinds.last(),
+			Some(
+				RegionKind::Block
+					| RegionKind::ValueBlock
+					| RegionKind::StatementIf
+					| RegionKind::ValueIf
+					| RegionKind::StatementFor
+					| RegionKind::ValueFor
+					| RegionKind::FunctionBody
+			)
+		)
 	}
 
 	/// The block ops are created in.
@@ -381,6 +423,7 @@ impl<'a> BindCx<'a> {
 	pub(crate) fn begin_statement(&mut self) {
 		self.eager = true;
 		self.catalog_may_change = false;
+		self.nested_may_change = false;
 		self.statement_writes = false;
 		self.after_stored_code = false;
 		self.hoisted = None;
@@ -397,9 +440,39 @@ impl<'a> BindCx<'a> {
 			&crate::exec::logical::effects::Oracle::new(self.effects.registry),
 		)
 		.set;
-		self.catalog_may_change = crate::exec::planner::fold::changes_the_catalog(op)
-			|| reached.intersects(EffectSet::CHANGES_CATALOG | EffectSet::OPAQUE_BODY);
+		let holds_schema = crate::exec::planner::fold::changes_the_catalog(op);
+		self.catalog_may_change =
+			holds_schema || reached.intersects(EffectSet::CHANGES_CATALOG | EffectSet::OPAQUE_BODY);
+		self.nested_may_change = self.catalog_may_change
+			&& (holds_schema
+				|| op
+					.visit_ops_deep(&mut |node| {
+						if matches!(node, LogicalOp::Write(_)) {
+							std::ops::ControlFlow::Break(())
+						} else {
+							std::ops::ControlFlow::Continue(())
+						}
+					})
+					.is_break());
 		self.statement_writes = reached.writes_data();
+	}
+
+	/// Whether `op`, a statement of a list, is a point after which the list's statements may meet a
+	/// catalog it changed: it holds a schema statement, or, where the container serves the
+	/// statements it does not plan eagerly, it reaches code whose effect on the catalog the plan
+	/// cannot see (a body its text does not show, or an effect that changes the catalog).
+	pub(crate) fn changes_the_catalog_for_later(&self, op: &LogicalOp) -> bool {
+		use crate::expr::logical::EffectSet;
+		if crate::exec::planner::fold::changes_the_catalog(op) {
+			return true;
+		}
+		self.serves_late
+			&& crate::exec::logical::effects::effects_of_plan_with(
+				op,
+				&crate::exec::logical::effects::Oracle::new(self.effects.registry),
+			)
+			.set
+			.intersects(EffectSet::CHANGES_CATALOG | EffectSet::OPAQUE_BODY)
 	}
 
 	/// Notes `write`, bound now, when it may run code the catalog stores, which may change the
@@ -437,10 +510,11 @@ impl<'a> BindCx<'a> {
 	}
 
 	/// Whether a read bound now, nested in a statement, may meet definitions the bind cannot read:
-	/// the top-level statement may change the catalog while it runs, the read follows a statement
-	/// of its list that may have, or the container runs after a change its planning cannot know.
+	/// the top-level statement may change the catalog while it runs and holds a schema statement
+	/// or a write ([`Self::note_catalog_change_of`]), the read follows a statement of its list
+	/// that may have, or the container runs after a change its planning cannot know.
 	pub(crate) fn nested_read_may_meet_change(&self) -> bool {
-		(self.catalog_may_change() || !self.eager)
+		(self.late_bound || self.nested_may_change || !self.eager)
 			&& self.kinds.iter().any(|kind| matches!(kind, RegionKind::Subquery))
 	}
 
@@ -488,6 +562,37 @@ impl<'a> BindCx<'a> {
 		self.hoisted.get_or_insert(refusal);
 	}
 
+	/// Whether a `LET` written as an expression bound now is raised where it stands, when it is
+	/// reached, and never hoisted to the top-level statement: in a write's place
+	/// ([`Self::deferring_let`]), and in code the catalog stores (an event's `WHEN` and `THEN`, a
+	/// field's clauses, a stored clause of a definition), which raises it as the clause runs.
+	pub(crate) fn defers_let(&self) -> bool {
+		self.defers_let || self.in_stored_code()
+	}
+
+	/// Whether the point being bound stands in code the catalog stores: an event's `WHEN` or
+	/// `THEN`, a field's clause, or a stored clause of a definition.
+	pub(crate) fn in_stored_code(&self) -> bool {
+		self.kinds.iter().any(|kind| {
+			matches!(
+				kind,
+				RegionKind::EventFrame | RegionKind::FieldFrame(_) | RegionKind::StoredClause(_)
+			)
+		})
+	}
+
+	/// Runs `body` with a `LET` written as an expression in it raised where it stands
+	/// ([`Self::defers_let`]), and restores the previous setting whether `body` succeeded or not.
+	pub(crate) fn deferring_let<R>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let outer = mem::replace(&mut self.defers_let, true);
+		let outcome = body(self);
+		self.defers_let = outer;
+		outcome
+	}
+
 	/// Answers the refusal hoisted to the top-level statement, and clears it.
 	pub(crate) fn take_hoisted(&mut self) -> Option<Refusal> {
 		self.hoisted.take()
@@ -518,7 +623,30 @@ impl<'a> BindCx<'a> {
 		self.env.push(Binding {
 			name,
 			value,
+			variable: false,
 		});
+	}
+
+	/// [`Self::declare`] of a variable: a `LET`, a `FOR` variable, a parameter, or a closure's
+	/// capture of one ([`Self::lookup_variable`]).
+	pub(crate) fn declare_variable(&mut self, name: Strand, value: ValueId) {
+		let _ = self.rw.set_hint_name(value, name.clone());
+		self.env.push(Binding {
+			name,
+			value,
+			variable: true,
+		});
+	}
+
+	/// The value of the innermost variable named `name` ([`Self::declare_variable`]), passing
+	/// over the bindings of that name to a row nested inside it; `None` where no variable holds it.
+	pub(crate) fn lookup_variable(&self, name: &str) -> Option<ValueId> {
+		let floor = self.stack.last().map_or(0, |entry| entry.floor);
+		self.env[floor..]
+			.iter()
+			.rev()
+			.find(|binding| binding.variable && binding.name.as_str() == name)
+			.map(|binding| binding.value)
 	}
 
 	/// Binds `name` to `value` in the innermost region without naming the value: a name the binder
@@ -527,6 +655,7 @@ impl<'a> BindCx<'a> {
 		self.env.push(Binding {
 			name,
 			value,
+			variable: false,
 		});
 	}
 
@@ -587,6 +716,20 @@ impl<'a> BindCx<'a> {
 		outcome
 	}
 
+	/// Runs `body` with every op it creates reading the current state, under no `VERSION` of the
+	/// code around it, and restores the snapshot whether `body` succeeded or not: the body of a
+	/// closure, which reads at the stamp of the frame that invokes it.
+	pub(crate) fn with_current_state<R>(
+		&mut self,
+		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
+	) -> Result<R, IrError> {
+		let snapshot = self.rw.intern_snapshot(Snapshot::Current)?;
+		let outer = mem::replace(&mut self.snapshot, snapshot);
+		let outcome = body(self);
+		self.snapshot = outer;
+		outcome
+	}
+
 	/// Runs `body` with `row` as the row a field read or `@` reads, the document root a step's
 	/// argument reads and the current value a path that starts with a lookup reads, with no field
 	/// base around it, and restores all three whether `body` succeeded or not.
@@ -609,16 +752,6 @@ impl<'a> BindCx<'a> {
 	/// set, otherwise the frame's row.
 	pub(crate) fn frame_row(&self) -> Option<ValueId> {
 		self.field_base.or(self.row)
-	}
-
-	/// The rows a closure literal written here captures: the row a field read or `@` reads, and
-	/// the frame's row as the document root where a field base other than it is set, which a
-	/// step's argument reads.
-	pub(crate) fn literal_rows(&self) -> (Option<ValueId>, Option<ValueId>) {
-		match (self.field_base, self.row) {
-			(Some(base), Some(row)) if base != row => (Some(base), Some(row)),
-			_ => (self.frame_row(), None),
-		}
 	}
 
 	/// Leaves `fields` as the projection the next `ORDER BY` bound resolves its aliases against.
@@ -669,20 +802,26 @@ impl<'a> BindCx<'a> {
 	}
 
 	/// Runs `body` as code that sees nothing of the row, the current value or the aggregate
-	/// context around it, except `row`, which it reads as its row and as its current value;
-	/// restores all three whether `body` succeeded or not. A region isolated from above runs its
-	/// body this way, since the values those three name are defined outside it.
+	/// context around it, except `row`, which it reads as its row and as its current value, and
+	/// `root`, which a step's argument reads in place of `row`; restores all of them whether `body`
+	/// succeeded or not. A region isolated from above runs its body this way, since the values
+	/// those name are defined outside it.
 	pub(crate) fn with_isolation<R>(
 		&mut self,
 		row: Option<ValueId>,
+		root: Option<ValueId>,
 		body: impl FnOnce(&mut Self) -> Result<R, IrError>,
 	) -> Result<R, IrError> {
 		let outer_row = mem::replace(&mut self.row, row);
+		let outer_root = mem::replace(&mut self.step_root, root);
+		let outer_root_row = mem::replace(&mut self.step_root_row, root.and(row));
 		let outer_base = self.field_base.take();
 		let outer_current = mem::replace(&mut self.current, row);
 		let outer_aggregating = mem::replace(&mut self.aggregating, false);
 		let outcome = body(self);
 		self.row = outer_row;
+		self.step_root = outer_root;
+		self.step_root_row = outer_root_row;
 		self.field_base = outer_base;
 		self.current = outer_current;
 		self.aggregating = outer_aggregating;
@@ -708,10 +847,15 @@ impl<'a> BindCx<'a> {
 		let mut args = vec![timestamp_arg()];
 		args.extend(params.iter().chain(row_names).map(|_| TypeKnowledge::Unknown));
 		self.within(owner, RegionKind::FunctionBody, &args, |cx, entry| {
-			for (name, value) in params.iter().chain(row_names).zip(entry.iter().skip(1)) {
+			let values = entry.get(1..).unwrap_or(&[]);
+			let (declared, rows) = values.split_at(params.len().min(values.len()));
+			for (name, value) in params.iter().zip(declared) {
+				cx.declare_variable(name.clone(), *value);
+			}
+			for (name, value) in row_names.iter().zip(rows) {
 				cx.declare(name.clone(), *value);
 			}
-			cx.with_isolation(None, body)
+			cx.with_isolation(None, None, body)
 		})
 	}
 
@@ -731,11 +875,36 @@ impl<'a> BindCx<'a> {
 	}
 
 	/// Binds `parent` to the row the enclosing frame reads, in the innermost region: the frame's
-	/// row, or where it has none the element of the element body it stands in. Where neither is
-	/// entered `parent` stays unbound and reads as a free name.
+	/// row, or where it has none the element of the element body it stands in. In a closure body
+	/// invoked over a row that is not its document root, the frame's row is that root. Where
+	/// neither is entered `parent` stays unbound and reads as a free name.
 	pub(crate) fn declare_parent(&mut self) {
-		if let Some(parent) = self.row.or(self.field_base) {
+		let root = self.step_root.filter(|_| self.row.is_some() && self.row == self.step_root_row);
+		if let Some(parent) = root.or(self.row).or(self.field_base) {
 			self.declare(Strand::new("parent"), parent);
+		}
+	}
+
+	/// Binds the row names a statement in value position takes from the frame it is entered from
+	/// to that frame's document, the row [`Self::declare_parent`] binds: `this` and `parent`, and
+	/// `self` as well where `inherits_row` holds. The bindings shadow every outer binding of the
+	/// names, a closure's parameters included. A frame with no row binds none, and neither does an
+	/// element body, whose element is not the document.
+	pub(crate) fn declare_statement_row_names(&mut self, inherits_row: bool) {
+		if self.field_base.is_some() {
+			return;
+		}
+		let root = self.step_root.filter(|_| self.row.is_some() && self.row == self.step_root_row);
+		let Some(document) = root.or(self.row) else {
+			return;
+		};
+		let names: &[&str] = if inherits_row {
+			&["this", "self", "parent"]
+		} else {
+			&["this", "parent"]
+		};
+		for name in names {
+			self.declare_unnamed(Strand::new(*name), document);
 		}
 	}
 
@@ -743,6 +912,16 @@ impl<'a> BindCx<'a> {
 	pub(crate) fn block_ops(&self) -> Result<&[OpId], IrError> {
 		let block = self.block()?;
 		self.rw.ir().block(block).map(|data| data.ops.as_slice()).ok_or(IrError::Stale("block"))
+	}
+
+	/// Whether the current block ends in a terminator.
+	pub(crate) fn ends_in_terminator(&self) -> Result<bool, IrError> {
+		let ir = self.rw.ir();
+		Ok(self
+			.block_ops()?
+			.last()
+			.and_then(|op| ir.op(*op))
+			.is_some_and(|data| data.kind.is_terminator()))
 	}
 
 	/// Enters a region of `kind` owned by `owner`, runs `body` with the region's block arguments
@@ -911,11 +1090,27 @@ impl ExprHost for BindCx<'_> {
 	}
 
 	fn step_root(&mut self, receiver: ValueId) -> Result<ValueId, IrError> {
-		Ok(self.row.unwrap_or(receiver))
+		Ok(self.step_root.or(self.row).unwrap_or(receiver))
 	}
 
 	fn declare_parent_as(&mut self, value: ValueId) {
 		self.declare(Strand::new("parent"), value);
+	}
+
+	fn declare_row_names_until(&mut self, value: ValueId) -> usize {
+		let mark = self.env.len();
+		let parent = self.row.is_none() && matches!(self.lookup("parent"), NameRef::Free);
+		for name in ["this", "self"] {
+			self.declare_unnamed(Strand::new(name), value);
+		}
+		if parent {
+			self.declare_unnamed(Strand::new("parent"), value);
+		}
+		mark
+	}
+
+	fn end_row_names(&mut self, mark: usize) {
+		self.env.truncate(mark);
 	}
 
 	fn timestamp(&self) -> Option<ValueId> {
@@ -956,8 +1151,15 @@ impl ExprHost for BindCx<'_> {
 		}
 	}
 
+	/// The statement takes the document of the frame it is entered from as its `$this` and
+	/// `$parent`, and one that runs over that row ([`LogicalOp::inherits_row`]) as its `$self` as
+	/// well ([`BindCx::declare_statement_row_names`]). The bindings end with the statement.
 	fn bind_value_statement(&mut self, op: &LogicalOp) -> Result<Built, IrError> {
-		self.without_aggregating(|cx| bind_value_statement(cx, op))
+		let mark = self.env.len();
+		self.declare_statement_row_names(op.inherits_row());
+		let built = self.without_aggregating(|cx| bind_value_statement(cx, op));
+		self.env.truncate(mark);
+		built
 	}
 
 	fn bind_loop_site(&mut self, site: LoopSite<'_>) -> Result<Built, IrError> {

@@ -90,6 +90,7 @@ pub fn lower(expr: impl Into<surface::Expr>) -> Lowered<LogicalOp> {
 			name: stmt.name.into_string(),
 			kind: stmt.kind,
 			value: Box::new(lower(stmt.what)?),
+			synthetic: false,
 		})),
 		surface::Expr::Return(stmt) => Ok(LogicalOp::Return(LogicalReturn {
 			what: Box::new(lower_value_statement(stmt.what)?),

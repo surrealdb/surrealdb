@@ -28,8 +28,16 @@ impl<'a> Oracle<'a> {
 }
 
 impl EffectOracle for Oracle<'_> {
+	/// A scalar builtin answers its declared effects. An index function reads the row it is
+	/// called on and the index state the statement's search or full-text clause holds for it.
 	fn builtin(&self, name: &str) -> Option<EffectSet> {
-		self.registry.get(name).map(|function| function.effects())
+		match self.registry.get(name) {
+			Some(function) => Some(function.effects()),
+			None => self
+				.registry
+				.is_index_function(name)
+				.then_some(EffectSet::READS_ROW.union(EffectSet::READS_DATA)),
+		}
 	}
 
 	fn closure_args(&self, name: &str) -> Option<&'static [usize]> {
@@ -157,6 +165,27 @@ pub(crate) fn effects_of_expr(
 	registry: &FunctionRegistry,
 ) -> crate::expr::logical::Effects {
 	effects_of(expr, &Oracle::new(registry))
+}
+
+/// Whether evaluating `expr` may read the statement clock: it calls a builtin that declares
+/// [`EffectSet::CLOCK`], applies a body the expression does not hold ([`EffectSet::OPAQUE_BODY`]),
+/// or holds a statement, whose reads and writes of stored data run clauses (`DEFAULT`, `VALUE`,
+/// events, computed fields, permissions) the expression does not show. A result of `false` is a
+/// guarantee that no read of the clock is made on behalf of the expression.
+pub(crate) fn may_read_clock(expr: &LogicalExpr, registry: &FunctionRegistry) -> bool {
+	use std::ops::ControlFlow;
+	let oracle = Oracle::new(registry);
+	if effects_of(expr, &oracle).set.intersects(EffectSet::CLOCK.union(EffectSet::OPAQUE_BODY)) {
+		return true;
+	}
+	expr.visit_deep(&mut |inner| {
+		if matches!(inner, LogicalExpr::Subquery(_)) {
+			ControlFlow::Break(())
+		} else {
+			ControlFlow::Continue(())
+		}
+	})
+	.is_break()
 }
 
 /// The effects of a closure body `body`: those of the expression and of every

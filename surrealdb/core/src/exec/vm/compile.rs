@@ -256,9 +256,13 @@ pub(super) async fn compile_stage_bundle(
 		LogicalWriteStatement::Update(_) | LogicalWriteStatement::Upsert(_) => Action::Update,
 		LogicalWriteStatement::Delete(_) => Action::Delete,
 	};
+	let op = LogicalOp::Write(write.clone());
+	// The stages reach what the write's own expressions may redefine as the write's statement
+	// does: each call runs the definition the transaction holds when it is made.
+	let within = super::speculate::catalog_within(planner, &op, &[]).await;
+	let planner = &planner.shadowing(std::iter::empty()).reaching(within);
 	let session = session_of(planner);
 	let indexes = SharedIndexes::new();
-	let op = LogicalOp::Write(write.clone());
 	let unit = UnitKind::StageBundle {
 		table: table.clone(),
 		action,
@@ -392,20 +396,14 @@ pub(super) async fn compile_subscription(
 	crate::kvs::catalog_reads::sealed(false, compiler.subscription(root)).await
 }
 
-/// The name a closure literal stands under in the statement [`closure_body`] compiles, before it
-/// is put in its place.
-const CLOSURE_LITERAL: &str = "__closure_literal";
-
-/// The unit of `closure`'s body for values that capture `captured` and hold the row captures
+/// The unit of `closure`'s body for values that capture `captured` and whose unit takes the rows
 /// `rows`, compiled by `planner` from a statement that makes the literal: a block that binds each
-/// captured name as a local of its own, so the literal captures it, and that makes the literal
-/// over a row where the values hold one, so the body reads it as that row, and in an element
-/// filter over that row where the values hold the document root too, so the body reads the
-/// element beside the root. The unit is the body unit the statement's program holds, with the
-/// table its ids index.
+/// captured name as a local of its own, so the literal captures it, then evaluates the literal,
+/// whose body takes the invoking row where it reads one. The unit is the body unit the
+/// statement's program holds, with the table its ids index.
 ///
-/// A unit whose head names other captures or row captures than the values hold is an internal
-/// error: a value links only a unit whose head it matches.
+/// A unit whose head names other captures or rows than the values hold is an internal error: a
+/// value links only a unit whose head it matches.
 pub(super) async fn closure_body(
 	planner: &Planner<'_>,
 	closure: &Arc<crate::expr::logical::LogicalClosure>,
@@ -413,42 +411,9 @@ pub(super) async fn closure_body(
 	rows: super::program::RowBits,
 ) -> Lowered<super::units::ClosureUnit> {
 	use crate::expr::logical::{LogicalEval, LogicalExpr, LogicalLet, LogicalLiteral};
-	let literal = LogicalExpr::Closure(Box::new((**closure).clone()));
-	let made = match (rows.row, rows.root) {
-		(false, false) => LogicalOp::Eval(LogicalEval {
-			expr: literal,
-		}),
-		(false, true) => {
-			return Err(NotCovered::internal(
-				"a closure value that holds a document root and no current value",
-			));
-		}
-		(true, root) => {
-			let text = match root {
-				false => format!("SELECT VALUE ${CLOSURE_LITERAL} FROM [NONE]"),
-				true => format!("SELECT VALUE [NONE][WHERE ${CLOSURE_LITERAL}] FROM [NONE]"),
-			};
-			let parsed = crate::syn::expr(&text).map_err(|e| {
-				NotCovered::internal(format!("the statement of a closure body did not parse: {e}"))
-			})?;
-			let mut select = crate::expr::logical::lower(parsed).map_err(|e| {
-				NotCovered::internal(format!("the statement of a closure body did not lower: {e}"))
-			})?;
-			let mut literal = Some(literal);
-			let _ = select.visit_scalars_deep_mut(&mut |expr| {
-				if matches!(expr, LogicalExpr::Param(param) if param.as_str() == CLOSURE_LITERAL)
-					&& let Some(literal) = literal.take()
-				{
-					*expr = literal;
-				}
-				Ok::<(), ()>(())
-			});
-			if literal.is_some() {
-				return Err(NotCovered::internal("a closure body's statement holds no literal"));
-			}
-			select
-		}
-	};
+	let made = LogicalOp::Eval(LogicalEval {
+		expr: LogicalExpr::Closure(Box::new((**closure).clone())),
+	});
 	let mut stmts: Vec<LogicalOp> = captured
 		.iter()
 		.map(|name| {
@@ -458,6 +423,7 @@ pub(super) async fn closure_body(
 				value: Box::new(LogicalOp::Eval(LogicalEval {
 					expr: LogicalExpr::Literal(LogicalLiteral::None),
 				})),
+				synthetic: true,
 			})
 		})
 		.collect();

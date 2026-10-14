@@ -112,6 +112,7 @@ use crate::exec::ir::logical::verify::{loop_body_args, timestamp_arg};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::unit::{UnitForm, UnitKind};
 use crate::exec::ir::{RequestInput, RequestStatement};
+use crate::exec::logical::may_read_clock;
 use crate::exec::operators::write::plan::WriteFacts;
 use crate::exec::operators::{SplitTarget, split_target};
 use crate::exec::planner::analyse_aggregation;
@@ -124,11 +125,12 @@ use crate::expr::logical::{
 	LogicalClosure, LogicalData, LogicalEval, LogicalExpr, LogicalFetch, LogicalField,
 	LogicalFields, LogicalFilter, LogicalForeach, LogicalIfOp, LogicalInsertRows, LogicalJoin,
 	LogicalLet, LogicalLimit, LogicalLiteral, LogicalLookup, LogicalLookupSubject, LogicalOp,
-	LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalRecurse,
-	LogicalRecurseInstruction, LogicalRecursePath, LogicalReturn, LogicalSequence, LogicalSleep,
-	LogicalSort, LogicalSource, LogicalSplit, LogicalSubquery, LogicalThrow, LogicalValues,
-	LogicalWrite, LogicalWriteSource, LogicalWriteStatement, OutputPath, RequestStatementKind,
-	Schema, SourceRef, lower, lower_expr, lower_fields, lower_request,
+	LogicalOrdering, LogicalPermissionFilter, LogicalProject, LogicalRecordIdKey,
+	LogicalRecordIdKeyRange, LogicalRecurse, LogicalRecurseInstruction, LogicalRecursePath,
+	LogicalReturn, LogicalSequence, LogicalSleep, LogicalSort, LogicalSource, LogicalSplit,
+	LogicalSubquery, LogicalThrow, LogicalValues, LogicalWrite, LogicalWriteSource,
+	LogicalWriteStatement, OutputPath, RequestStatementKind, Schema, SourceRef, lower, lower_expr,
+	lower_fields, lower_request,
 };
 use crate::expr::{Function, Idiom, Kind, Output, Part};
 
@@ -590,11 +592,14 @@ pub(crate) const LET_IN_AN_EXPRESSION: &str =
 ///
 /// Where the `LET` is planned with its top-level statement the refusal is the whole statement's,
 /// raised before any of it runs, whether or not the `LET` is reached; otherwise it is raised where
-/// the `LET` stands, when it is reached.
+/// the `LET` stands, when it is reached. Where the bind defers it ([`BindCx::defers_let`]: a
+/// write's place, code the catalog stores) the `LET` is the `expr.subquery` whose region raises
+/// the refusal, so it is raised only when the value is evaluated.
 pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Built, IrError> {
 	let flow = match op {
 		LogicalOp::Sequence(sequence) => bind_sequence(cx, sequence, Pos::Value)?,
 		LogicalOp::Foreach(foreach) => bind_foreach(cx, foreach, Pos::Value)?,
+		LogicalOp::Let(_) if cx.defers_let() => return refusing_subquery(cx),
 		LogicalOp::Let(_) => {
 			let refusal = Refusal::InvalidStatement {
 				message: LET_IN_AN_EXPRESSION.to_owned(),
@@ -638,6 +643,23 @@ pub(crate) fn bind_value_statement(cx: &mut BindCx<'_>, op: &LogicalOp) -> Resul
 		| LogicalOp::Sleep(_) => return bind_subquery(cx, op),
 	};
 	built_of(cx, flow)
+}
+
+/// The `expr.subquery` whose region raises the refusal of a `LET` written as an expression, which
+/// is raised when the value is evaluated.
+fn refusing_subquery(cx: &mut BindCx<'_>) -> Result<Built, IrError> {
+	let subquery = cx.emit(
+		OpKind::Expr(ExprOp::Subquery(NestedStrategy::Apply)),
+		&[],
+		&[TypeKnowledge::Unknown],
+	)?;
+	let result = first_result(cx, subquery)?;
+	cx.within(subquery, RegionKind::Subquery, &[], |cx, _| {
+		cx.raise(RaiseKind::Refused(Box::new(Refusal::InvalidStatement {
+			message: LET_IN_AN_EXPRESSION.to_owned(),
+		})))
+	})?;
+	Ok(Built::Value(result))
 }
 
 /// Binds `input`, the statement an `EXPLAIN` explains, and answers the value its plan stands for.
@@ -889,6 +911,60 @@ pub(super) fn first_result(cx: &BindCx<'_>, op: OpId) -> Result<ValueId, IrError
 }
 
 /// A bare expression: its value as an operand, or an `eval` of its own as a statement.
+/// Binds what `bind` builds for `expr`, the expression a statement of a statement list evaluates,
+/// as the one statement of a `logical.statement` of its own when `expr` may read the clock.
+///
+/// A clock read answers the instant its statement started at, and every statement of a list
+/// starts at an instant of its own, so the reads of two statements of one list are never one value.
+/// The region holds the expression alone: the statement's own control flow (the name a `LET`
+/// binds, a `RETURN`, the arms of an `IF`, the body of a `FOR`) stays in the list. An expression
+/// that cannot read the clock, and one bound where no statement list stands, is bound in place.
+fn bind_instant(
+	cx: &mut BindCx<'_>,
+	expr: &LogicalExpr,
+	bind: impl FnOnce(&mut BindCx<'_>) -> Result<Built, IrError>,
+) -> Result<Built, IrError> {
+	let listed = cx.in_statement_list();
+	bind_instant_in(cx, listed, expr, bind)
+}
+
+/// [`bind_instant`] for a statement that stands in a statement list when `listed`, which an `IF`
+/// decides once for every condition of its chain.
+fn bind_instant_in(
+	cx: &mut BindCx<'_>,
+	listed: bool,
+	expr: &LogicalExpr,
+	bind: impl FnOnce(&mut BindCx<'_>) -> Result<Built, IrError>,
+) -> Result<Built, IrError> {
+	if !listed || !may_read_clock(expr, cx.registry()) {
+		return bind(cx);
+	}
+	let owner = cx.emit(
+		OpKind::Logical(LogOp::Statement {
+			changes_catalog: false,
+			served: None,
+		}),
+		&[],
+		&[TypeKnowledge::Unknown],
+	)?;
+	let built = cx.within(
+		owner,
+		RegionKind::Statement(StatementCommit::InTxn),
+		&[timestamp_arg()],
+		|cx, _| {
+			let built = bind(cx)?;
+			if let Built::Value(value) = built {
+				cx.yield_logical(&[value])?;
+			}
+			Ok(built)
+		},
+	)?;
+	match built {
+		Built::Value(_) => first_result(cx, owner).map(Built::Value),
+		Built::Diverged => Ok(Built::Diverged),
+	}
+}
+
 fn bind_eval(cx: &mut BindCx<'_>, eval: &LogicalEval, pos: Pos) -> Result<Flow, IrError> {
 	// A parenthesised `LET` that is a whole statement, or the whole value of a `RETURN` or another
 	// `LET`, is that `LET`, not one written as an expression.
@@ -897,7 +973,7 @@ fn bind_eval(cx: &mut BindCx<'_>, eval: &LogicalEval, pos: Pos) -> Result<Flow, 
 	{
 		return bind_let(cx, statement);
 	}
-	let Built::Value(value) = bind_expr(cx, &eval.expr)? else {
+	let Built::Value(value) = bind_instant(cx, &eval.expr, |cx| bind_expr(cx, &eval.expr))? else {
 		return Ok(Flow::Diverged);
 	};
 	match pos {
@@ -910,7 +986,9 @@ fn bind_eval(cx: &mut BindCx<'_>, eval: &LogicalEval, pos: Pos) -> Result<Flow, 
 
 /// `SLEEP`: its duration, then the op.
 fn bind_sleep(cx: &mut BindCx<'_>, sleep: &LogicalSleep) -> Result<Flow, IrError> {
-	let Built::Value(duration) = bind_expr(cx, &sleep.duration)? else {
+	let Built::Value(duration) =
+		bind_instant(cx, &sleep.duration, |cx| bind_expr(cx, &sleep.duration))?
+	else {
 		return Ok(Flow::Diverged);
 	};
 	cx.emit_value(OpKind::Logical(LogOp::Sleep), &[duration], TypeKnowledge::Unknown)
@@ -919,7 +997,8 @@ fn bind_sleep(cx: &mut BindCx<'_>, sleep: &LogicalSleep) -> Result<Flow, IrError
 
 /// `THROW`: its value, then the terminator.
 fn bind_throw(cx: &mut BindCx<'_>, throw: &LogicalThrow) -> Result<Flow, IrError> {
-	let Built::Value(value) = bind_expr(cx, &throw.value)? else {
+	let Built::Value(value) = bind_instant(cx, &throw.value, |cx| bind_expr(cx, &throw.value))?
+	else {
 		return Ok(Flow::Diverged);
 	};
 	cx.emit(OpKind::Expr(ExprOp::Throw), &[value], &[])?;
@@ -937,9 +1016,12 @@ fn bind_control(cx: &mut BindCx<'_>, control: Control) -> Result<Flow, IrError> 
 ///
 /// A `FETCH` is taken into the value the statement yields: into each row of a read, as a `FETCH`
 /// over its pipeline is, and into the one value of any other statement, as a `logical.fetch` over
-/// that value whose regions are the fetch paths.
+/// that value whose regions are the fetch paths. A statement that runs as a group (a write, or a
+/// read whose own `FETCH` the outer one follows) is the group whose value the fetch reads.
 fn bind_return(cx: &mut BindCx<'_>, statement: &LogicalReturn) -> Result<Flow, IrError> {
-	let flow = if statement.fetch.is_empty() {
+	let flow = if let (Some(valued), true) = (let_of(&statement.what), statement.fetch.is_empty()) {
+		bind_valued_let(cx, valued)?
+	} else if statement.fetch.is_empty() {
 		bind_listed(cx, &statement.what, Pos::Value)?
 	} else if starts_a_read(&statement.what) {
 		let fetched = LogicalOp::Fetch(LogicalFetch {
@@ -948,7 +1030,8 @@ fn bind_return(cx: &mut BindCx<'_>, statement: &LogicalReturn) -> Result<Flow, I
 		});
 		bind_listed(cx, &fetched, Pos::Value)?
 	} else {
-		match bind_value(cx, &statement.what)? {
+		let what = bind_listed(cx, &statement.what, Pos::Value)?;
+		match value_of(cx, what)? {
 			Some(value) => Flow::Value(bind_fetch(cx, value, &statement.fetch)?),
 			None => Flow::Diverged,
 		}
@@ -1000,13 +1083,47 @@ fn bind_fetch(
 /// `LET`: a name bound to the value for the rest of the statement list it stands in.
 ///
 /// A `LET` that is a whole statement sets a parameter of the session, which no later statement
-/// region reads through this value; one anywhere else is local to its region. A protected name is
-/// refused. Where the `LET` is planned with its top-level statement the refusal is the whole
+/// region reads through this value; one anywhere else is local to its region. A protected name
+/// and a name the system binds (`this`, `value`, ...) are refused, unless the planner wrote the
+/// `LET`. Where the `LET` is planned with its top-level statement the refusal is the whole
 /// statement's, raised before any of it runs, whether or not the `LET` is reached; where it
 /// follows a statement that may change the catalog it is planned when its list reaches it, so the
 /// raise stands at the `LET` and is not bound at all when the `LET` is never reached.
 fn bind_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, IrError> {
-	if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&statement.name.as_str()) {
+	bind_let_as(cx, statement, false)
+}
+
+/// The `LET` that `op` is when it is one, written bare or in parentheses.
+fn let_of(op: &LogicalOp) -> Option<&LogicalLet> {
+	if let LogicalOp::Let(statement) = op {
+		return Some(statement);
+	}
+	if let LogicalOp::Eval(eval) = op
+		&& let LogicalExpr::Subquery(inner) = &eval.expr
+		&& let LogicalOp::Let(statement) = inner.as_ref()
+	{
+		return Some(statement);
+	}
+	None
+}
+
+/// A `LET` that is the whole value of a `RETURN` or of another `LET`: in code of the request it
+/// binds a name local to its region and its value is `NONE`; in code the catalog stores it is a
+/// `LET` written as an expression, raised where it stands when the clause reaches it.
+fn bind_valued_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, IrError> {
+	if cx.in_stored_code() {
+		cx.raise(RaiseKind::Refused(Box::new(Refusal::InvalidStatement {
+			message: LET_IN_AN_EXPRESSION.to_owned(),
+		})))?;
+		return Ok(Flow::Diverged);
+	}
+	bind_let_as(cx, statement, true)
+}
+
+/// [`bind_let`], binding a name local to the region whatever region it stands in where `local`
+/// says so.
+fn bind_let_as(cx: &mut BindCx<'_>, statement: &LogicalLet, local: bool) -> Result<Flow, IrError> {
+	if statement.is_refused() {
 		let refusal = Refusal::ProtectedParam {
 			name: statement.name.clone(),
 		};
@@ -1017,15 +1134,18 @@ fn bind_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, IrError
 		cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
 		return Ok(Flow::Diverged);
 	}
-	let binding = if matches!(cx.kinds().last(), Some(RegionKind::Statement(_))) {
+	let binding = if !local && matches!(cx.kinds().last(), Some(RegionKind::Statement(_))) {
 		LetBinding::Session
 	} else {
 		LetBinding::Local
 	};
 	// The value of a block's `LET` that is a statement runs as a group of its own.
-	let flow = match binding {
-		LetBinding::Local => bind_listed(cx, &statement.value, Pos::Value)?,
-		LetBinding::Session => bind_op(cx, &statement.value, Pos::Value)?,
+	let flow = match let_of(&statement.value) {
+		Some(valued) => bind_valued_let(cx, valued)?,
+		None => match binding {
+			LetBinding::Local => bind_listed(cx, &statement.value, Pos::Value)?,
+			LetBinding::Session => bind_op(cx, &statement.value, Pos::Value)?,
+		},
 	};
 	let Some(value) = value_of(cx, flow)? else {
 		return Ok(Flow::Diverged);
@@ -1041,7 +1161,7 @@ fn bind_let(cx: &mut BindCx<'_>, statement: &LogicalLet) -> Result<Flow, IrError
 		TypeKnowledge::Unknown,
 	)?;
 	if binding == LetBinding::Local {
-		cx.declare(name, bound);
+		cx.declare_variable(name, bound);
 	}
 	Ok(Flow::None)
 }
@@ -1085,7 +1205,9 @@ fn bind_sequence(
 /// `FOR`: a loop over the value of its range, whose body is the statement list of the block and
 /// binds the parameter to the element.
 fn bind_foreach(cx: &mut BindCx<'_>, foreach: &LogicalForeach, pos: Pos) -> Result<Flow, IrError> {
-	let Built::Value(source) = bind_expr(cx, &foreach.range)? else {
+	let Built::Value(source) =
+		bind_instant(cx, &foreach.range, |cx| bind_expr(cx, &foreach.range))?
+	else {
 		return Ok(Flow::Diverged);
 	};
 	let sink = LoopSink::Discard;
@@ -1102,7 +1224,7 @@ fn bind_foreach(cx: &mut BindCx<'_>, foreach: &LogicalForeach, pos: Pos) -> Resu
 	)?;
 	let refusal = cx.within(op, pos.foreach(), &entry, |cx, args| {
 		let element = args.first().copied().ok_or(IrError::Stale("loop element"))?;
-		cx.declare(Strand::new(foreach.param.as_str()), element);
+		cx.declare_variable(Strand::new(foreach.param.as_str()), element);
 		bind_list(cx, statements_of(&foreach.body), Pos::Statement, Tail::Discard)
 	})?;
 	owner_flow(cx, op, refusal)
@@ -1113,21 +1235,25 @@ fn bind_foreach(cx: &mut BindCx<'_>, foreach: &LogicalForeach, pos: Pos) -> Resu
 /// conditions having been settled, is the `IF true` of that arm: the arm keeps the region of a
 /// branch, which passes a `RETURN` outwards, where a block would catch it.
 fn bind_if(cx: &mut BindCx<'_>, branch: &LogicalIfOp, pos: Pos) -> Result<Flow, IrError> {
+	let listed = cx.in_statement_list();
 	if branch.conditions.is_empty() && branch.arms.len() == 1 {
 		let settled = [LogicalExpr::Literal(crate::expr::logical::LogicalLiteral::Bool(true))];
-		return bind_if_chain(cx, &settled, &branch.arms, pos);
+		return bind_if_chain(cx, &settled, &branch.arms, pos, listed);
 	}
-	bind_if_chain(cx, &branch.conditions, &branch.arms, pos)
+	bind_if_chain(cx, &branch.conditions, &branch.arms, pos, listed)
 }
 
 /// The chain of `IF` and `ELSE IF` arms that starts at `conditions[0]`, whose arms are `arms`,
 /// the `ELSE` arm last when there is one. A condition after the first is bound in the else region
-/// of the one before it, so it is evaluated only when reached.
+/// of the one before it, so it is evaluated only when reached. `listed` is whether the `IF` stands
+/// in a statement list, in which case each condition that may read the clock starts at an instant
+/// of its own.
 fn bind_if_chain(
 	cx: &mut BindCx<'_>,
 	conditions: &[LogicalExpr],
 	arms: &[LogicalOp],
 	pos: Pos,
+	listed: bool,
 ) -> Result<Flow, IrError> {
 	let Some(first) = conditions.first() else {
 		return Err(invariant("an IF holds no condition"));
@@ -1135,14 +1261,15 @@ fn bind_if_chain(
 	let Some(then) = arms.first() else {
 		return Err(invariant("an IF condition holds no arm"));
 	};
-	let Built::Value(condition) = bind_expr(cx, first)? else {
+	let Built::Value(condition) = bind_instant_in(cx, listed, first, |cx| bind_expr(cx, first))?
+	else {
 		return Ok(Flow::Diverged);
 	};
 	let op = cx.emit(OpKind::Logical(LogOp::If), &[condition], &[TypeKnowledge::Unknown])?;
 	let then_refusal = cx.within(op, pos.branch(), &[], |cx, _| bind_arm(cx, then, pos))?;
 	let else_refusal = cx.within(op, pos.branch(), &[], |cx, _| {
 		if conditions.len() > 1 {
-			let flow = bind_if_chain(cx, &conditions[1..], &arms[1..], pos)?;
+			let flow = bind_if_chain(cx, &conditions[1..], &arms[1..], pos, listed)?;
 			if let Some(value) = value_of(cx, flow)? {
 				cx.yield_logical(&[value])?;
 			}
@@ -1178,7 +1305,7 @@ pub(super) fn statements_of(body: &LogicalOp) -> &[LogicalOp] {
 /// terminator, if any.
 ///
 /// A statement is planned eagerly when the list is and no statement before it may change the
-/// catalog; the first such statement itself still is.
+/// catalog ([`BindCx::changes_the_catalog_for_later`]); the first such statement itself still is.
 pub(super) fn bind_list(
 	cx: &mut BindCx<'_>,
 	statements: &[LogicalOp],
@@ -1186,19 +1313,33 @@ pub(super) fn bind_list(
 	tail: Tail,
 ) -> Result<Option<Refusal>, IrError> {
 	let outer = cx.eager();
-	let first_change = statements.iter().position(changes_the_catalog);
+	let first_change =
+		statements.iter().position(|statement| cx.changes_the_catalog_for_later(statement));
 	let eager_at = |at: usize| outer && first_change.is_none_or(|first| at <= first);
 	let mut last = Flow::None;
 	for (at, statement) in statements.iter().enumerate() {
 		cx.set_eager(eager_at(at));
 		last = bind_listed(cx, statement, pos)?;
 		if last == Flow::Diverged {
+			// A statement that diverges inside a region of its own (a group whose source breaks
+			// out of the loop around it) ends the list when it is reached, and leaves the list's
+			// block open: the list still closes with its own terminator, which is never reached.
+			let open = !cx.ends_in_terminator()?;
 			let refusal = bind_unreachable(cx, statements, at + 1, pos, &eager_at);
 			cx.set_eager(outer);
+			if open && matches!(refusal, Ok(None)) {
+				close_list(cx, Flow::None, tail)?;
+			}
 			return refusal;
 		}
 	}
 	cx.set_eager(outer);
+	close_list(cx, last, tail)?;
+	Ok(None)
+}
+
+/// Closes the current statement list as `tail` says, with the value `last` left.
+fn close_list(cx: &mut BindCx<'_>, last: Flow, tail: Tail) -> Result<(), IrError> {
 	match tail {
 		Tail::Value => {
 			if let Some(value) = value_of(cx, last)? {
@@ -1207,7 +1348,7 @@ pub(super) fn bind_list(
 		}
 		Tail::Discard => cx.yield_logical(&[])?,
 	}
-	Ok(None)
+	Ok(())
 }
 
 /// Binds the statements of `statements` from `from` on, which follow a terminator of their list.
@@ -1442,6 +1583,14 @@ fn bind_relational(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError>
 			first_result(cx, owner).map(Flow::Value)
 		}
 		LogicalOp::VersionScope(scope) => {
+			if let Some(refusal) = version_over_statement_refusal(&scope.input) {
+				if cx.eager() {
+					cx.hoist_refusal(refusal.clone());
+					return raise_refused(cx, refusal);
+				}
+				cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
+				return Ok(Flow::Diverged);
+			}
 			let Built::Value(version) = bind_expr(cx, &scope.version)? else {
 				return Ok(Flow::Diverged);
 			};
@@ -1677,6 +1826,62 @@ fn bind_row_run(cx: &mut BindCx<'_>, op: &LogicalOp) -> Result<Flow, IrError> {
 	});
 	cx.take_sort_keys();
 	Ok(Flow::Value(rows?))
+}
+
+/// What a `VERSION` clause beside a statement in `FROM` raises.
+const SUBQUERY_SOURCE_VERSION: &str = "VERSION clause cannot be used with a subquery source. \
+	 Place the VERSION clause inside the subquery instead.";
+
+/// The refusal of a `VERSION` over `input`, the pipeline it scopes, when a statement is among the
+/// pipeline's sources: a stamp is read at tables, and a statement in `FROM` is none, so the clause
+/// belongs inside that statement. Raised before the stamp or any source is evaluated. The walk
+/// descends the clauses of the statement's own pipeline; a source behind any other node is not
+/// the statement's own and is not judged here.
+fn version_over_statement_refusal(input: &LogicalOp) -> Option<Refusal> {
+	let mut op = input;
+	let leaf = loop {
+		op = match op {
+			LogicalOp::Project(node) if node.is_layer() => return None,
+			LogicalOp::Timeout(node) => &node.input,
+			LogicalOp::Fetch(node) => &node.input,
+			LogicalOp::Project(node) => &node.input,
+			LogicalOp::Limit(node) => &node.input,
+			LogicalOp::Sort(node) => &node.input,
+			LogicalOp::Aggregate(node) => &node.input,
+			LogicalOp::Split(node) => &node.input,
+			LogicalOp::Filter(node) => &node.input,
+			LogicalOp::Source(_)
+			| LogicalOp::Values(_)
+			| LogicalOp::Match(_)
+			| LogicalOp::Subquery(_)
+			| LogicalOp::Write(_)
+			| LogicalOp::Ddl(_)
+			| LogicalOp::UnionAll(_)
+			| LogicalOp::Join(_)
+			| LogicalOp::PermissionFilter(_)
+			| LogicalOp::Distinct(_)
+			| LogicalOp::VersionScope(_)
+			| LogicalOp::Only(_)
+			| LogicalOp::Explain(_)
+			| LogicalOp::Eval(_)
+			| LogicalOp::Sequence(_)
+			| LogicalOp::Let(_)
+			| LogicalOp::Return(_)
+			| LogicalOp::Foreach(_)
+			| LogicalOp::If(_)
+			| LogicalOp::Throw(_)
+			| LogicalOp::Break(_)
+			| LogicalOp::Continue(_)
+			| LogicalOp::Info(_)
+			| LogicalOp::Sleep(_) => break op,
+		};
+	};
+	let holds_a_statement = matches!(leaf, LogicalOp::Subquery(_))
+		|| matches!(leaf, LogicalOp::UnionAll(union)
+			if union.inputs.iter().any(|input| matches!(input, LogicalOp::Subquery(_))));
+	holds_a_statement.then(|| Refusal::Query {
+		message: SUBQUERY_SOURCE_VERSION.to_owned(),
+	})
 }
 
 /// The refusal of a `KNN` operator of the filters of `run`, a select loop's per-row nodes, whose
@@ -2657,6 +2862,7 @@ pub(super) fn bind_source(cx: &mut BindCx<'_>, source: &LogicalSource) -> Result
 		for_update: source.for_update,
 		may_be_defined: cx.tables_may_be_defined(),
 		may_meet_change,
+		resolved: source.schema.is_some(),
 	};
 	let op = cx.emit(
 		OpKind::Logical(LogOp::Source(Box::new(attrs))),
@@ -2784,18 +2990,23 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 	// definitions. Like a write that names no one table, it takes its stages from the
 	// bundle of the table each record is written to, served for the definitions that record's
 	// write context reads.
+	let may_meet_change = !cx.eager() || cx.catalog_may_change() || cx.after_stored_code();
 	let table = match bundle {
 		Some(bundle) => Some(bundle.table),
-		None if !cx.eager() || cx.catalog_may_change() || cx.after_stored_code() => None,
+		None if may_meet_change => None,
 		None => written_table(write),
 	};
+	// Such a write may meet definitions that change between its runs as well, so it checks the
+	// write contexts it keeps against the catalog before taking them again.
+	let catalog_fixed =
+		catalog_fixed_of(write, cx.registry()) && !(table.is_none() && may_meet_change);
 	cx.note_write(write);
 	let gates = gates_of(cx.catalog(), table.as_ref());
 	let mut attrs = write_attrs_of(write, facts, &run)?;
 	attrs.statement = table.is_none().then(|| Arc::new(write.clone()));
 	attrs.gates = gates.gates;
 	attrs.image = image_of(cx.catalog(), table.as_ref());
-	attrs.stored = stored_of(cx.catalog(), table.as_ref(), catalog_fixed_of(write, cx.registry()));
+	attrs.stored = stored_of(cx.catalog(), table.as_ref(), catalog_fixed);
 	let schema = schema_of(cx.catalog(), cx.registry(), table.as_ref());
 	attrs.stored.schema = schema.facts.clone();
 	let indexes = indexes_of(cx.catalog(), table.as_ref());
@@ -2884,11 +3095,11 @@ fn bind_write(cx: &mut BindCx<'_>, write: &LogicalWrite) -> Result<Flow, IrError
 		let fields = lower_fields(fields.clone()).map_err(|error| {
 			invariant(&format!("the RETURN clause of a write has no logical form: {error}"))
 		})?;
+		// The columns bind `$parent` from the frame around the write, as the clause does, so the
+		// record the projection reads is never its own `$parent`.
 		enter_row_region(cx, op, RegionKind::Clause(ClauseRole::ReturnClause), |cx, row| {
-			cx.with_row(row, |cx| {
-				let projected = bind_projection(cx, &fields, &[], false, Vec::new(), row)?;
-				cx.yield_expr(&[projected])
-			})
+			let projected = bind_projection(cx, &fields, &[], false, Vec::new(), row)?;
+			cx.yield_expr(&[projected])
 		})?;
 	}
 	if let Some(view) = &field_view.view {
@@ -3081,6 +3292,7 @@ fn bind_stored_rows(
 		for_update: false,
 		may_be_defined: cx.tables_may_be_defined(),
 		may_meet_change: cx.nested_read_may_meet_change(),
+		resolved: false,
 	};
 	let op =
 		cx.emit(OpKind::Logical(LogOp::Source(Box::new(attrs))), &[], &[TypeKnowledge::Unknown])?;
@@ -3537,12 +3749,15 @@ fn bind_unset(cx: &mut BindCx<'_>, path: &Idiom) -> Result<bool, IrError> {
 }
 
 /// Binds the `[WHERE ..]` predicate of each filter part of a place as a region of the op that
-/// carries the place, in the order of the parts.
+/// carries the place, in the order of the parts. A `LET` written as an expression in one is raised
+/// when the place is evaluated for a record ([`BindCx::deferring_let`]).
 fn bind_filters(cx: &mut BindCx<'_>, op: OpId, filters: &[LogicalExpr]) -> Result<(), IrError> {
-	for filter in filters {
-		row_clause(cx, op, RegionKind::Clause(ClauseRole::Where), filter)?;
-	}
-	Ok(())
+	cx.deferring_let(|cx| {
+		for filter in filters {
+			row_clause(cx, op, RegionKind::Clause(ClauseRole::Where), filter)?;
+		}
+		Ok(())
+	})
 }
 
 /// A place and what its parts hold.
@@ -3562,7 +3777,8 @@ struct BoundPlace {
 /// `first_region`: a place that stands beside others in one op follows the slots they took.
 ///
 /// A subscript is evaluated with no record in scope, so it is bound against a row that holds
-/// `NONE`: a field it names reads nothing, as it does when the statement runs. A part no place
+/// `NONE`: a field it names reads nothing, as it does when the statement runs. A `LET` written as
+/// an expression in it is raised when the place is evaluated for a record. A part no place
 /// addresses (a method call, `[START n]`, a lookup, a destructure, a recursion) embeds nothing
 /// into the place, so the expressions it was written with are never bound and nothing in them is
 /// evaluated. A subscript the statement wrote as a number is a [`PlacePart::Index`].
@@ -3607,8 +3823,9 @@ fn bind_place(
 						row
 					}
 				};
-				let Some(slot) =
-					cx.with_row(row, |cx| bind_operand(cx, expr, first_slot, &mut operands))?
+				let Some(slot) = cx.with_row(row, |cx| {
+					cx.deferring_let(|cx| bind_operand(cx, expr, first_slot, &mut operands))
+				})?
 				else {
 					return Ok(None);
 				};
@@ -4054,19 +4271,22 @@ fn bind_method_closure(
 	}
 }
 
-/// Runs `body` with the document root an argument of a step is evaluated against as the row and
-/// as the current value, with no field base around it, and restores all three whether `body`
-/// succeeded or not.
+/// Runs `body` with the document root an argument of a step is evaluated against as the row, as
+/// the current value, as `$this` and `$self`, and as `$parent` in a frame with no row where no
+/// name binds it, with no field base around it, and restores all of them whether `body` succeeded
+/// or not.
 fn with_step_root<R>(
 	cx: &mut BindCx<'_>,
 	receiver: ValueId,
 	body: impl FnOnce(&mut BindCx<'_>) -> Result<R, IrError>,
 ) -> Result<R, IrError> {
 	let root = cx.step_root(receiver)?;
+	let names = cx.declare_row_names_until(root);
 	let row = cx.replace_row(Some(root));
 	let base = cx.replace_field_base(None);
 	let current = cx.replace_current(Some(root));
 	let outcome = body(cx);
+	cx.end_row_names(names);
 	cx.replace_row(row);
 	cx.replace_field_base(base);
 	cx.replace_current(current);
@@ -4268,6 +4488,23 @@ fn bind_lookup_statement(
 	bind_value_statement(cx, &super::lookup::statement(lookup, only))
 }
 
+/// What the planner raises for a graph range subject whose bound is a generated key, which names
+/// no value to bound the range by. Where the lookup is planned with its top-level statement the
+/// refusal is the whole statement's; otherwise it is raised where the lookup stands.
+fn generated_bound_refusal(range: &LogicalRecordIdKeyRange) -> Option<Refusal> {
+	let generated = [&range.start, &range.end].into_iter().any(|bound| {
+		matches!(
+			bound,
+			std::ops::Bound::Included(LogicalRecordIdKey::Generate(_))
+				| std::ops::Bound::Excluded(LogicalRecordIdKey::Generate(_))
+		)
+	});
+	generated.then(|| Refusal::Query {
+		message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
+			.to_owned(),
+	})
+}
+
 /// One hop of a graph or reference lookup: a loop of kind `GraphStep` over the value `base` names,
 /// whose elements are the records the lookup's subjects reach from it. `only_path` is
 /// [`LookupAttrs::only_path`].
@@ -4304,6 +4541,15 @@ fn bind_hop(
 				range,
 				referencing_field,
 			} => {
+				if let Some(refusal) = generated_bound_refusal(range) {
+					if cx.eager() {
+						cx.hoist_refusal(refusal.clone());
+						raise_refused(cx, refusal)?;
+					} else {
+						cx.raise(RaiseKind::Refused(Box::new(refusal)))?;
+					}
+					return Ok(Built::Diverged);
+				}
 				let shape = key_range_shape(range)?;
 				for expr in range_key_exprs(range) {
 					let Built::Value(value) = bind_expr(cx, expr)? else {
@@ -4521,16 +4767,15 @@ fn bind_recurse(cx: &mut BindCx<'_>, recurse: &LogicalRecurse) -> Result<Built, 
 /// and whose `ClosureBody` region is isolated from above.
 ///
 /// The body captures every name it reads that the lexical environment binds where the closure is
-/// written, and the row when it reads a field, `@` or the current value: the row a field read
-/// reads there and, where that is an element other than the document root, the root a step's
-/// argument reads ([`BindCx::literal_rows`]). The region's block arguments are the statement
-/// timestamp, the parameters, the captured names in operand order, then the captured rows; a
-/// parameter shadows a captured name. The body reads the one captured row as its current value
-/// too, and as `$this` and `$self` where neither a parameter nor a capture names them; a body that
-/// captures both reads the element as its current value and as the base of a field read or `@`, and
-/// the root as its row. It reads no other value of the region around it: the current value and the
-/// aggregate context of that region do not reach it. A body that reads the row of a literal written
-/// where no row is reads `NONE` as its current value.
+/// written, and nothing of the row there: making the closure reads no row. The region's block
+/// arguments are the statement timestamp, the parameters, the captured names in operand order,
+/// then, where the body reads a row by a field, `@`, the current value, `$this`, `$self` or a call
+/// that reads its caller's row, the row of the frame that invokes the closure. A parameter shadows
+/// a captured name. The body reads that row as its row and current value, and as `$this` and
+/// `$self` where a row binds the name where the literal is written and neither a parameter nor a
+/// capture names it. One that nothing binds there stays a name of the frame the body runs in. The
+/// body reads no other value of the region around it: the current value and the aggregate context
+/// of that region do not reach it.
 pub(crate) fn bind_closure(
 	cx: &mut BindCx<'_>,
 	closure: &LogicalClosure,
@@ -4538,14 +4783,20 @@ pub(crate) fn bind_closure(
 	let params: Vec<Strand> =
 		closure.args.iter().map(|(param, _)| Strand::new(param.as_str())).collect();
 	let (captured, reads_row) = captures_of(cx, closure, &params);
-	let (row, root) = if reads_row {
-		cx.literal_rows()
-	} else {
-		(None, None)
-	};
-	let mut operands: Vec<ValueId> = captured.iter().map(|(_, value)| *value).collect();
-	operands.extend(row);
-	operands.extend(root);
+	let reads_root = reads_row && closure_reads_root(closure);
+	// A row name a row binds where the literal is written names the invoking row in the body; one
+	// nothing binds there stays a name of the frame the body runs in.
+	let row_named: Vec<&str> = ROW_PARAMS
+		.into_iter()
+		.filter(|name| {
+			!params
+				.iter()
+				.chain(captured.iter().map(|(held, _)| held))
+				.any(|held| held.as_str() == *name)
+				&& matches!(cx.lookup(name), NameRef::Value(_))
+		})
+		.collect();
+	let operands: Vec<ValueId> = captured.iter().map(|(_, value)| *value).collect();
 	let attrs = ClosureAttrs {
 		params: closure
 			.args
@@ -4555,6 +4806,8 @@ pub(crate) fn bind_closure(
 		returns: closure.returns.clone(),
 		body_sql: Arc::clone(&closure.body_sql),
 		captures: captured.iter().map(|(name, _)| name.clone()).collect(),
+		reads_row,
+		reads_root,
 		literal: ClosureLiteral::of(closure),
 	};
 	let op = cx.emit(
@@ -4565,45 +4818,57 @@ pub(crate) fn bind_closure(
 	let mut entry = vec![timestamp_arg()];
 	entry.extend(params.iter().map(|_| TypeKnowledge::Unknown));
 	entry.extend(operands.iter().map(|_| TypeKnowledge::Unknown));
-	cx.within(op, RegionKind::ClosureBody, &entry, |cx, args| {
-		let captures = args.get(1 + params.len()..).ok_or(IrError::Stale("closure captures"))?;
-		for ((name, _), value) in captured.iter().zip(captures) {
-			cx.declare(name.clone(), *value);
-		}
-		for (name, value) in params.iter().zip(args.iter().skip(1)) {
-			cx.declare(name.clone(), *value);
-		}
-		let (row_arg, element) = match (row, root, captures) {
-			(Some(_), Some(_), [.., element, root]) => (Some(*root), Some(*element)),
-			(Some(_), None, [.., row]) => (Some(*row), None),
-			_ => (None, None),
-		};
-		cx.with_isolation(row_arg, |cx| {
-			if let Some(element) = element {
-				cx.replace_field_base(Some(element));
-				cx.replace_current(Some(element));
-			} else if reads_row && row_arg.is_none() {
-				let none = cx.none_literal()?;
-				cx.replace_current(Some(none));
+	if reads_row {
+		entry.push(TypeKnowledge::Unknown);
+	}
+	if reads_root {
+		entry.push(TypeKnowledge::Unknown);
+	}
+	// The body is isolated from the region around it, its `VERSION` included: it reads at the
+	// stamp of the frame that invokes it.
+	cx.with_current_state(|cx| {
+		cx.within(op, RegionKind::ClosureBody, &entry, |cx, args| {
+			let captures =
+				args.get(1 + params.len()..).ok_or(IrError::Stale("closure captures"))?;
+			for ((name, _), value) in captured.iter().zip(captures) {
+				cx.declare_variable(name.clone(), *value);
 			}
-			if let Some(current) = element.or(row_arg) {
-				for name in ["this", "self"] {
-					let named = params.iter().chain(captured.iter().map(|(name, _)| name));
-					if !named.into_iter().any(|held| held.as_str() == name) {
-						cx.declare(Strand::new(name), current);
+			for (name, value) in params.iter().zip(args.iter().skip(1)) {
+				cx.declare_variable(name.clone(), *value);
+			}
+			let (row, root) = match (reads_row, reads_root) {
+				(false, _) => (None, None),
+				(true, false) => (Some(*args.last().ok_or(IrError::Stale("closure row"))?), None),
+				(true, true) => {
+					let [row, root] = args[args.len().saturating_sub(2)..] else {
+						return Err(IrError::Stale("closure row"));
+					};
+					(Some(row), Some(root))
+				}
+			};
+			cx.with_isolation(row, root, |cx| {
+				if let Some(row) = row {
+					for name in &row_named {
+						cx.declare(Strand::new(*name), row);
 					}
 				}
-			}
-			bind_body(cx, &closure.body)
+				bind_body(cx, &closure.body)
+			})
 		})
 	})?;
 	first_result(cx, op)
 }
 
+/// The names a closure body reads as the row it is invoked over, unless a variable of that name
+/// holds where the closure is written, which it captures, whatever rows are bound to the name
+/// inside that variable's scope.
+const ROW_PARAMS: [&str; 2] = ["this", "self"];
+
 /// The names `closure`'s body reads that the lexical environment binds at the point the closure
 /// is written, each with its value, in the order the body first reads them ([`free_params`]), and
-/// whether the body reads the row, by a field, `@` or the current value. The names are those a
-/// value of the literal captures, so the head of the unit lowered for a value names them.
+/// whether the body reads the row, by a field, `@`, the current value, `$this` or `$self`. The
+/// names are those a value of the literal captures, so the head of the unit lowered for a value
+/// names them.
 fn captures_of(
 	cx: &BindCx<'_>,
 	closure: &LogicalClosure,
@@ -4614,7 +4879,11 @@ fn captures_of(
 		if params.contains(&name) {
 			continue;
 		}
-		if let NameRef::Value(value) = cx.lookup(name.as_str()) {
+		if ROW_PARAMS.contains(&name.as_str()) {
+			if let Some(value) = cx.lookup_variable(name.as_str()) {
+				names.push((name, value));
+			}
+		} else if let NameRef::Value(value) = cx.lookup(name.as_str()) {
 			names.push((name, value));
 		}
 	}
@@ -4689,16 +4958,53 @@ fn note_free(name: &str, bound: &[&str], names: &mut Vec<Strand>) {
 	names.push(Strand::new(name));
 }
 
-/// Whether `closure`'s body reads the row where it is written, anywhere in it: a field, `@` or
-/// the current value, or a call of a projection function or of a function that is not a
-/// builtin, which reads the row of its caller. A literal that reads it captures the row
-/// ([`bind_closure`]).
+/// Whether `closure`'s body reads the document root of the frame that invokes it through an index
+/// or a method argument. The body then takes the root beside the row it reads by a field, which
+/// differ where the frame is an element filter's body: the row is the element and the root is the
+/// row the filter is applied over.
+pub(crate) fn closure_reads_root(closure: &LogicalClosure) -> bool {
+	crate::exec::planner::name_scope::captures_of(closure).root_by_step
+}
+
+/// Whether `closure`'s body reads the row it is invoked over. The body names a row read
+/// ([`mentions_row`]) and the read is of the invoking row: the current value at the body's own
+/// level or in a statement or block it holds, or the document root through an index, a method
+/// argument, a statement or a `$parent` read in an element filter
+/// ([`captures_of`](crate::exec::planner::name_scope::captures_of)). A read inside an element
+/// filter, a lookup's clause, a recursion or a destructure of the body is of the element that
+/// construct binds, not of the invoking row. The body of a literal that reads it takes the
+/// invoking row ([`bind_closure`]).
 pub(crate) fn closure_reads_row(closure: &LogicalClosure) -> bool {
+	if !mentions_row(closure) {
+		return false;
+	}
+	let captures = crate::exec::planner::name_scope::captures_of(closure);
+	captures.reads_current
+		|| captures.reads_root()
+		|| captures.parent_in_block
+		|| captures.parent_in_statement
+		|| captures.nested_reads_root
+		|| captures.nested_step_arg_reads_row
+}
+
+/// Whether `closure`'s body names a row read anywhere in it: a field, `@`, the current value,
+/// `$this`, `$self` or `$parent` that no parameter names, a statement in value position that names
+/// one of those three whether a parameter names it or not (the statement binds them to the
+/// document it is taken over), or a call of a projection function or of a function that is not a
+/// builtin, which reads the row of its caller.
+fn mentions_row(closure: &LogicalClosure) -> bool {
+	use crate::exec::planner::row_scope::names_row_param;
+	let named = |name: &str| closure.args.iter().any(|(param, _)| param.as_str() == name);
 	closure
 		.body
 		.visit_deep(&mut |expr| {
 			let reads = if let LogicalExpr::Call(call) = expr {
 				call_reads_row(&call.receiver)
+			} else if let LogicalExpr::Param(param) = expr {
+				(ROW_PARAMS.contains(&param.as_str()) || param.as_str() == "parent")
+					&& !named(param.as_str())
+			} else if let LogicalExpr::Subquery(op) = expr {
+				names_row_param(op)
 			} else {
 				matches!(expr, LogicalExpr::Field(_) | LogicalExpr::Doc | LogicalExpr::Current)
 			};

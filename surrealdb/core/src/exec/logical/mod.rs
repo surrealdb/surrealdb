@@ -102,8 +102,9 @@ pub(crate) mod summaries;
 use std::convert::Infallible;
 use std::sync::Arc;
 
-pub(crate) use effects::{effects_of_body, effects_of_expr};
+pub(crate) use effects::{effects_of_body, effects_of_expr, may_read_clock};
 pub(crate) use rules::conjuncts;
+pub(crate) use rules::kind::is_identity_cast;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
@@ -658,7 +659,8 @@ pub(crate) fn unplannable_write_in_expr(expr: &LogicalExpr) -> Option<String> {
 	found
 }
 
-/// Whether `expr` holds a `LET` of a protected name in a statement it nests,
+/// Whether `expr` holds a `LET` of a protected name or of a name the system binds in a statement
+/// it nests,
 /// wherever it stands in it: a statement planning refuses, whether or not it
 /// runs.
 pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
@@ -670,7 +672,7 @@ pub(crate) fn holds_protected_let(expr: &LogicalExpr) -> bool {
 		match plan
 			.visit_ops_deep(&mut |op| {
 				if let LogicalOp::Let(stmt) = op
-					&& surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stmt.name.as_str())
+					&& stmt.is_refused()
 				{
 					ControlFlow::Break(())
 				} else {

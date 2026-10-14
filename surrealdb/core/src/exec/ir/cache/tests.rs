@@ -17,7 +17,7 @@ use super::deps::{
 	ValueDep, ValueDeps, ValueRef, ValueUse, context_names, reads_principal,
 };
 use super::names::{NameSet, collect};
-use super::planning::{PlanBinding, PlanningCatalog};
+use super::planning::PlanningCatalog;
 use super::shape::{arm_key, digest};
 use super::slots::{OccurrenceClass, SlotTable};
 use crate::exec::ir::core::walk::ops_in;
@@ -897,14 +897,15 @@ mod datastore {
 	use surrealdb_strand::Strand;
 
 	use super::{
-		BindingOrigin, FoldConsumer, FrameId, LiteralOrdinal, PlanBinding, PlanningCatalog, SlotId,
-		TableName, ValueDep, ValueDeps, ValueRef, ValueUse, context_names, reads_principal,
-		statement, table_of,
+		BindingOrigin, FoldConsumer, FrameId, LiteralOrdinal, PlanningCatalog, SlotId, TableName,
+		ValueDep, ValueDeps, ValueRef, ValueUse, context_names, reads_principal, statement,
+		table_of,
 	};
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::ctx::FrozenContext;
 	use crate::exec::ir::cache::answer::{CatalogAnswer, ExactAnswer, FreeName, SessionValues};
+	use crate::exec::ir::cache::planning::PlanBinding;
 	use crate::exec::ir::egraph::{EgraphMode, set_mode};
 	use crate::exec::ir::error::IrError;
 	use crate::exec::ir::iface::IndexRef;

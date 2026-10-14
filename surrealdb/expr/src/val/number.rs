@@ -558,12 +558,35 @@ impl Number {
 		}
 	}
 
+	/// `self` held within `min..=max`, which the caller orders, NaN excluded. A decimal held
+	/// between bounds that do not convert to an ordered pair of decimals is clamped as a float.
+	/// Never panics: bounds that the conversion to floats leaves out of order hold `self` at the
+	/// bound it passes, and a NaN `self` stays NaN.
 	pub fn clamp(self, min: Self, max: Self) -> Self {
+		fn clamp_f64(n: f64, low: f64, high: f64) -> f64 {
+			if n < low {
+				low
+			} else if n > high {
+				high
+			} else {
+				n
+			}
+		}
+		let exact = |bound: Self| match bound {
+			Number::Float(f) => Decimal::from_f64(f),
+			other => Some(other.to_decimal()),
+		};
 		match (self, min, max) {
-			(Number::Int(n), Number::Int(min), Number::Int(max)) => n.clamp(min, max).into(),
-			(Number::Decimal(n), min, max) => n.clamp(min.to_decimal(), max.to_decimal()).into(),
-			(Number::Float(n), min, max) => n.clamp(min.to_float(), max.to_float()).into(),
-			(Number::Int(n), min, max) => n.to_float().clamp(min.to_float(), max.to_float()).into(),
+			(Number::Int(n), Number::Int(min), Number::Int(max)) if min <= max => {
+				n.clamp(min, max).into()
+			}
+			(Number::Decimal(n), min, max) => match (exact(min), exact(max)) {
+				(Some(low), Some(high)) if low <= high => n.clamp(low, high).into(),
+				_ => {
+					clamp_f64(Number::Decimal(n).to_float(), min.to_float(), max.to_float()).into()
+				}
+			},
+			(n, min, max) => clamp_f64(n.to_float(), min.to_float(), max.to_float()).into(),
 		}
 	}
 
@@ -1058,16 +1081,41 @@ impl TryFloatDiv for Number {
 	}
 }
 
+// `+`, `-`, `*` and `/` never panic. Over two integers `+`, `-` and `*` wrap on overflow in every
+// build, and a quotient an integer cannot hold (a division by zero, `MIN / -1`) is the float of the
+// division; a decimal result that overflows or divides by zero is the float of the operation. The
+// checked forms that raise instead are `TryAdd`, `TrySub`, `TryMul` and `TryDiv`.
+
+/// `exact` of `v` and `w` as a decimal, or `float` of the two as floats where the decimal
+/// overflows.
+fn decimal_or_float(
+	v: Decimal,
+	w: Decimal,
+	exact: fn(Decimal, Decimal) -> Option<Decimal>,
+	float: fn(f64, f64) -> f64,
+) -> Number {
+	match exact(v, w) {
+		Some(result) => Number::Decimal(result),
+		None => {
+			Number::Float(float(v.to_f64().unwrap_or_default(), w.to_f64().unwrap_or_default()))
+		}
+	}
+}
+
 impl ops::Add for Number {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_add(w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v + w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(v, w, Decimal::checked_add, |a, b| a + b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 + w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v + w as f64),
-			(v, w) => Number::from(v.as_decimal() + w.as_decimal()),
+			(v, w) => {
+				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_add, |a, b| a + b)
+			}
 		}
 	}
 }
@@ -1076,12 +1124,16 @@ impl<'b> ops::Add<&'b Number> for &Number {
 	type Output = Number;
 	fn add(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v + w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_add(*w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v + w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v + w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(*v, *w, Decimal::checked_add, |a, b| a + b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 + w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v + *w as f64),
-			(v, w) => Number::from(v.to_decimal() + w.to_decimal()),
+			(v, w) => {
+				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_add, |a, b| a + b)
+			}
 		}
 	}
 }
@@ -1090,12 +1142,16 @@ impl ops::Sub for Number {
 	type Output = Self;
 	fn sub(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_sub(w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v - w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(v, w, Decimal::checked_sub, |a, b| a - b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 - w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v - w as f64),
-			(v, w) => Number::from(v.as_decimal() - w.as_decimal()),
+			(v, w) => {
+				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_sub, |a, b| a - b)
+			}
 		}
 	}
 }
@@ -1104,12 +1160,16 @@ impl<'b> ops::Sub<&'b Number> for &Number {
 	type Output = Number;
 	fn sub(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v - w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_sub(*w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v - w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v - w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(*v, *w, Decimal::checked_sub, |a, b| a - b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 - w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v - *w as f64),
-			(v, w) => Number::from(v.to_decimal() - w.to_decimal()),
+			(v, w) => {
+				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_sub, |a, b| a - b)
+			}
 		}
 	}
 }
@@ -1118,12 +1178,16 @@ impl ops::Mul for Number {
 	type Output = Self;
 	fn mul(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_mul(w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(v, w, Decimal::checked_mul, |a, b| a * b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 * w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v * w as f64),
-			(v, w) => Number::from(v.as_decimal() * w.as_decimal()),
+			(v, w) => {
+				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_mul, |a, b| a * b)
+			}
 		}
 	}
 }
@@ -1132,12 +1196,16 @@ impl<'b> ops::Mul<&'b Number> for &Number {
 	type Output = Number;
 	fn mul(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v * w),
+			(Number::Int(v), Number::Int(w)) => Number::Int(v.wrapping_mul(*w)),
 			(Number::Float(v), Number::Float(w)) => Number::Float(v * w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v * w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(*v, *w, Decimal::checked_mul, |a, b| a * b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 * w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v * *w as f64),
-			(v, w) => Number::from(v.to_decimal() * w.to_decimal()),
+			(v, w) => {
+				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_mul, |a, b| a * b)
+			}
 		}
 	}
 }
@@ -1146,12 +1214,19 @@ impl ops::Div for Number {
 	type Output = Self;
 	fn div(self, other: Self) -> Self {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
+			(Number::Int(v), Number::Int(w)) => match v.checked_div(w) {
+				Some(quotient) => Number::Int(quotient),
+				None => Number::Float(v as f64 / w as f64),
+			},
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(v, w, Decimal::checked_div, |a, b| a / b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(v as f64 / w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v / w as f64),
-			(v, w) => Number::from(v.as_decimal() / w.as_decimal()),
+			(v, w) => {
+				decimal_or_float(v.as_decimal(), w.as_decimal(), Decimal::checked_div, |a, b| a / b)
+			}
 		}
 	}
 }
@@ -1160,12 +1235,19 @@ impl<'b> ops::Div<&'b Number> for &Number {
 	type Output = Number;
 	fn div(self, other: &'b Number) -> Number {
 		match (self, other) {
-			(Number::Int(v), Number::Int(w)) => Number::Int(v / w),
+			(Number::Int(v), Number::Int(w)) => match v.checked_div(*w) {
+				Some(quotient) => Number::Int(quotient),
+				None => Number::Float(*v as f64 / *w as f64),
+			},
 			(Number::Float(v), Number::Float(w)) => Number::Float(v / w),
-			(Number::Decimal(v), Number::Decimal(w)) => Number::Decimal(v / w),
+			(Number::Decimal(v), Number::Decimal(w)) => {
+				decimal_or_float(*v, *w, Decimal::checked_div, |a, b| a / b)
+			}
 			(Number::Int(v), Number::Float(w)) => Number::Float(*v as f64 / w),
 			(Number::Float(v), Number::Int(w)) => Number::Float(v / *w as f64),
-			(v, w) => Number::from(v.to_decimal() / w.to_decimal()),
+			(v, w) => {
+				decimal_or_float(v.to_decimal(), w.to_decimal(), Decimal::checked_div, |a, b| a / b)
+			}
 		}
 	}
 }
@@ -1173,9 +1255,10 @@ impl<'b> ops::Div<&'b Number> for &Number {
 impl Neg for Number {
 	type Output = Self;
 
+	/// The negation; the integer `MIN` wraps to itself, as `-` wraps in every build.
 	fn neg(self) -> Self::Output {
 		match self {
-			Self::Int(n) => Number::Int(-n),
+			Self::Int(n) => Number::Int(n.wrapping_neg()),
 			Self::Float(n) => Number::Float(-n),
 			Self::Decimal(n) => Number::Decimal(-n),
 		}

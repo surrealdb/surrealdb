@@ -327,12 +327,8 @@ impl Lowerer<'_> {
 		self.refuse_in_fold("ir_lower::fold: phys.block")?;
 		self.require_frame(data)?;
 		let loops_fail = self.loops_fail();
-		self.run_unit(region, true, |_, root, label| {
-			Some(Catch {
-				root,
-				label,
-				loops_fail,
-			})
+		self.run_unit(region, true, |lowerer, root, label| {
+			Some(lowerer.catch_of(root, label, loops_fail))
 		})
 	}
 
@@ -374,6 +370,35 @@ impl Lowerer<'_> {
 		});
 		self.em.bind(resume)?;
 		Ok(Operand::Reg(dst))
+	}
+
+	/// The value the call `data` is evaluated against where it is not the row: the element of the
+	/// element body being lowered where the `$this` the call passes is that element, and the
+	/// document root of a closure body where the `$this` it passes is that root, as an index or a
+	/// method argument of the body passes it. `None` where the call is evaluated against the row.
+	fn called_on_element(
+		&mut self,
+		data: &OpData,
+		call: &CallAttrs,
+	) -> Result<Option<Reg>, IrError> {
+		let this = data
+			.operands
+			.len()
+			.checked_sub(usize::from(call.row_names))
+			.and_then(|at| data.operands.get(at));
+		let Some(element) = self.element() else {
+			return match this {
+				Some(&root) if self.is_closure_root(root) => match self.value(root)? {
+					Operand::Reg(root) => Ok(Some(root)),
+					_ => Err(invariant("a closure body's document root read into no register")),
+				},
+				_ => Ok(None),
+			};
+		};
+		let Some(this) = this else {
+			return Ok(Some(element));
+		};
+		Ok((self.value(*this)? == Operand::Reg(element)).then_some(element))
 	}
 
 	/// The value the call `data` of the user-defined function `name` answers, run as the unit its
@@ -496,10 +521,12 @@ impl Lowerer<'_> {
 		})?;
 		let frame = self.em.call_frame()?;
 		let outer = self.frame.program;
+		let elem = self.called_on_element(data, call)?;
 		self.emit(Instr::FunctionEnter {
 			function,
 			frame,
 			outer,
+			elem,
 		});
 		self.frame.program = Some(frame);
 		let args = self.values(args);
@@ -512,6 +539,7 @@ impl Lowerer<'_> {
 			args,
 			dst,
 			outer,
+			elem,
 		});
 		self.requires(ContextLevel::Database);
 		self.keeps_row_order = true;

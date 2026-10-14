@@ -1784,6 +1784,14 @@ pub async fn set_unset(new_db: impl CreateDb) {
 	assert_eq!(name, value);
 	// `token` is a reserved variable
 	db.set("token", value).await.unwrap_err();
+	// as is each name the system binds, which can be neither set nor unset
+	for name in [
+		"auth", "access", "token", "session", "this", "self", "parent", "value", "input", "before",
+		"after", "event",
+	] {
+		db.set(name, value).await.unwrap_err();
+		db.unset(name).await.unwrap_err();
+	}
 	// make sure we can still run queries after trying to set a protected variable
 	db.query("RETURN true").await.unwrap().check().unwrap();
 	db.unset(key).await.unwrap();

@@ -18,7 +18,9 @@
 //! path no layer writes: it reads what the source's row holds, so it is offered, and every other
 //! conjunct of that filter is withheld. A
 //! projection that is not the identity withholds the ordering as well, since a sort key then names
-//! a projected value. An op that is not part of the logical dialect ends the walk.
+//! a projected value. A resolver layer withholds only an ordering a key of which may read a column
+//! it writes: a key on any other path orders the source's rows as they stand beneath the layer,
+//! which passes them through in order. An op that is not part of the logical dialect ends the walk.
 //!
 //! A union of sources ends the walk too, except for [`offer_across`], which crosses it to offer
 //! one member the predicate the statement states over every member's rows. Such an offer states
@@ -95,8 +97,13 @@ pub(super) struct Offer {
 struct State {
 	/// Whether a filter met at this point reads the source's own rows.
 	collecting: bool,
-	/// Whether a sort key met at this point names a field of the source's rows.
+	/// Whether a sort key met at this point names a field of the source's rows, unless it names
+	/// one of `ordering_layered`.
 	ordering_open: bool,
+	/// The first key of each column the resolver layers crossed so far write, other than those of
+	/// the key part: a sort key reading one orders by what the layer derives, which no read of the
+	/// source delivers.
+	ordering_layered: Vec<String>,
 	ordering: Option<LogicalOrdering>,
 	limited: bool,
 	/// Past resolver layers alone, the first key of each column they write: a `KNN` operator over
@@ -124,6 +131,7 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 	let mut state = State {
 		collecting: true,
 		ordering_open: true,
+		ordering_layered: Vec::new(),
 		ordering: None,
 		limited: false,
 		layered: None,
@@ -184,7 +192,7 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 			}
 			LogOp::Sort(attrs) => {
 				if state.ordering_open && state.ordering.is_none() {
-					state.ordering = match &attrs.ordering {
+					let ordering = match &attrs.ordering {
 						SortShape::Random => Some(LogicalOrdering::Random),
 						SortShape::Keys(keys) => {
 							let flags: Vec<(bool, bool, bool)> = keys
@@ -194,6 +202,16 @@ fn offer_walk(ir: &Ir, source: OpId, across: bool) -> Result<Offer, IrError> {
 							ordering_of(ir, &flags, &user.regions)
 						}
 					};
+					match ordering {
+						Some(LogicalOrdering::Order(keys))
+							if keys
+								.iter()
+								.any(|key| reads_layered(&key.value, &state.ordering_layered)) =>
+						{
+							state.ordering_open = false;
+						}
+						ordering => state.ordering = ordering,
+					}
 				}
 			}
 			LogOp::Limit {
@@ -451,7 +469,26 @@ fn reshape(ir: &Ir, op: OpId, attrs: &ProjectAttrs, state: &mut State) {
 		columns
 	});
 	state.collecting = false;
-	state.ordering_open &= derives_key_only(ir, op, attrs);
+	if !attrs.layer {
+		state.ordering_open = false;
+	} else if !derives_key_only(ir, op, attrs) {
+		state.ordering_layered.extend(layer_columns(attrs));
+	}
+}
+
+/// Whether the sort key `key` may read one of `columns`: a path whose first key is one of them,
+/// or anything other than a path once any column is written.
+fn reads_layered(key: &LogicalExpr, columns: &[String]) -> bool {
+	if columns.is_empty() {
+		return false;
+	}
+	if !key.is_path() {
+		return true;
+	}
+	match key.output_path().parts().first() {
+		Some(OutputPathPart::Field(name)) => columns.contains(name),
+		Some(OutputPathPart::Lookup(_)) | None => true,
+	}
 }
 
 /// The first key of each column the resolver layer `attrs` writes.

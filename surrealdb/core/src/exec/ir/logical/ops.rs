@@ -518,6 +518,10 @@ pub(crate) struct SourceAttrs {
 	/// Whether the read is nested in a statement that may change the catalog before it runs, so
 	/// it enforces the definitions it meets when it runs rather than any the bind inlined.
 	pub(crate) may_meet_change: bool,
+	/// Whether schema resolution gave the read its table's schema, so that the table's permission,
+	/// computed fields and field guards stand as the nodes above it wherever the statement needs
+	/// them, and the read itself enforces nothing.
+	pub(crate) resolved: bool,
 }
 
 /// The attributes of a `MATCH` update stage.

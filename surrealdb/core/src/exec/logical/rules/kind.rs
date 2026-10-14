@@ -153,6 +153,20 @@ fn simplified(expr: &LogicalExpr, schema: &Schema) -> Option<LogicalExpr> {
 	}
 }
 
+/// Whether `expr` is a cast that yields its operand unchanged whatever row it is evaluated
+/// against: a cast to a kind that names one representation, of an operand checked to have that
+/// kind with no field known. The binder removes such a cast, so it is no step of evaluation.
+pub(crate) fn is_identity_cast(expr: &LogicalExpr) -> bool {
+	let LogicalExpr::Prefix {
+		op: PrefixOperator::Cast(kind),
+		expr: inner,
+	} = expr
+	else {
+		return false;
+	};
+	checks_only(kind) && inner.checked_kind(&Schema::open()).as_ref() == Some(kind)
+}
+
 /// Whether a cast to `kind` of a value already of that kind yields the value:
 /// the kind names one representation, so the cast has nothing to convert.
 fn checks_only(kind: &Kind) -> bool {

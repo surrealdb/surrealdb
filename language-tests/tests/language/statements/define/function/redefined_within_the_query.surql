@@ -81,7 +81,7 @@ fn::outer();
 -- The same inside one block.
 {
 	DEFINE FUNCTION fn::bar() { RETURN 1 };
-	LET $before = fn::bar();
+	LET $first = fn::bar();
 	DEFINE FUNCTION OVERWRITE fn::bar() { RETURN 2 };
-	RETURN [$before, fn::bar()];
+	RETURN [$first, fn::bar()];
 };

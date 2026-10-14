@@ -18,11 +18,13 @@ use surrealdb_strand::Strand;
 
 use super::access_expr::conjunct_values;
 use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Rewriter};
 use crate::exec::ir::core::value::ValueDef;
-use crate::exec::ir::core::walk::ops_in;
+use crate::exec::ir::core::walk::{ancestors, ops_in};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ExprOp, ShortCircuitOp};
+use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
 use crate::exec::ir::iface::region_kind::{ClauseRole, RegionKind};
 use crate::exec::ir::iface::types::TypeKnowledge;
@@ -37,6 +39,9 @@ struct Copy {
 	into: RegionId,
 	/// The value each copied value became.
 	values: HashMap<ValueId, ValueId>,
+	/// The rows of `from` a rowless copy stands with no value for ([`rowless_value_copy`]): its
+	/// block arguments. Empty for any other copy.
+	rowless: SmallVec<[ValueId; 2]>,
 }
 
 /// Builds a `Clause(Where)` region under `owner` that yields the conjunction of the conjuncts of
@@ -129,6 +134,7 @@ pub(super) fn conjunct_region_across(
 			from: *src,
 			into,
 			values: HashMap::new(),
+			rowless: SmallVec::new(),
 		};
 		for (old, new) in old_args.iter().zip(args.iter()) {
 			copy.values.insert(*old, *new);
@@ -237,6 +243,7 @@ pub(super) fn value_region(
 		from: src,
 		into,
 		values: HashMap::new(),
+		rowless: SmallVec::new(),
 	};
 	for old in stands.document {
 		copy.values.insert(*old, arg);
@@ -285,17 +292,23 @@ pub(super) fn region_copy(
 		from: src,
 		into: rw.ir().enclosing_region(visible_at),
 		values: HashMap::new(),
+		rowless: SmallVec::new(),
 	};
 	copy_region(rw, &mut copy, src, owner)
 }
 
 /// Copies the cone of `value`, a `KNN` query vector the region `src` computes, to stand before `at`
 /// as [`value_copy`] does, with each block argument of `src`, the row being scanned, read as
-/// `$this` where the copy stands, and returns the copy of `value`.
+/// `$this` where the copy stands, and returns the copy of `value`. The read is left out where no
+/// op of the copy takes the row as an operand.
 ///
 /// The vector is evaluated once, with no row in scope and the row being scanned forbidden to it
 /// ([`ForbiddenRow`](crate::exec::context::ForbiddenRow)), so a read of that `$this` fails with the
-/// vector's refusal; a call's row names, which the call is lowered without, are never read.
+/// vector's refusal; a call's row names, which the call is lowered without, are never read. A
+/// closure literal that captures the row by a name is copied to read that name from the frame it
+/// is made in instead, as a literal written where no row is in scope does: the frame binds it to
+/// the row being scanned, and the closure carries the refusal to an invocation that reads it, so
+/// making the closure and passing it along read nothing.
 pub(super) fn rowless_value_copy(
 	rw: &mut Rewriter<'_>,
 	src: RegionId,
@@ -313,29 +326,36 @@ pub(super) fn rowless_value_copy(
 		from: src,
 		into: rw.ir().enclosing_region(at),
 		values: HashMap::new(),
+		rowless: args.iter().copied().collect(),
 	};
-	if !args.is_empty() && reads_region_args(rw.ir(), src, value) {
-		let data = rw.ir().op(at).ok_or(IrError::Stale("op"))?;
-		let (frame, snapshot, loc) = (data.frame, data.snapshot, data.loc.clone());
-		let this = rw.create(
-			InsertPoint::Before(at),
-			OpSpec {
-				kind: OpKind::Expr(ExprOp::FreeParam {
-					name: Strand::new("this"),
-				}),
-				operands: SmallVec::new(),
-				results: smallvec![TypeKnowledge::Unknown],
-				frame,
-				snapshot,
-				loc,
-			},
-		)?;
-		let this = result_of(rw.ir(), this)?;
-		for arg in args {
-			copy.values.insert(arg, this);
-		}
+	if args.is_empty() || !reads_region_args(rw.ir(), src, value) {
+		return copy_value(rw, &mut copy, value, InsertPoint::Before(at));
 	}
-	copy_value(rw, &mut copy, value, InsertPoint::Before(at))
+	let data = rw.ir().op(at).ok_or(IrError::Stale("op"))?;
+	let (frame, snapshot, loc) = (data.frame, data.snapshot, data.loc.clone());
+	let read = rw.create(
+		InsertPoint::Before(at),
+		OpSpec {
+			kind: OpKind::Expr(ExprOp::FreeParam {
+				name: Strand::new("this"),
+			}),
+			operands: SmallVec::new(),
+			results: smallvec![TypeKnowledge::Unknown],
+			frame,
+			snapshot,
+			loc,
+		},
+	)?;
+	let this = result_of(rw.ir(), read)?;
+	for arg in args {
+		copy.values.insert(arg, this);
+	}
+	let copied = copy_value(rw, &mut copy, value, InsertPoint::Before(at))?;
+	// A read nothing takes would run where it stands and refuse the vector.
+	if rw.ir().uses(this).is_empty() {
+		rw.erase(read, EliminationReason::DeadPure)?;
+	}
+	Ok(copied)
 }
 
 /// Copies the cone of `value`, which the region `src` defines, to stand before `at`, and returns
@@ -356,6 +376,7 @@ pub(super) fn value_copy(
 		from: src,
 		into: rw.ir().enclosing_region(at),
 		values: HashMap::new(),
+		rowless: SmallVec::new(),
 	};
 	copy_value(rw, &mut copy, value, InsertPoint::Before(at))
 }
@@ -525,6 +546,151 @@ fn copy_value(
 	copy.values.get(&value).copied().ok_or(IrError::Stale("a copied value"))
 }
 
+/// The positions among the operands of `data`, an `expr.closure_create` of a rowless copy
+/// ([`rowless_value_copy`]), of the captures that are a row of the copy; empty for any other op.
+fn rowless_captures(copy: &Copy, data: &OpData) -> SmallVec<[usize; 2]> {
+	if copy.rowless.is_empty() || !matches!(&data.kind, OpKind::Expr(ExprOp::ClosureCreate(_))) {
+		return SmallVec::new();
+	}
+	data.operands
+		.iter()
+		.enumerate()
+		.filter(|(_, operand)| copy.rowless.contains(operand))
+		.map(|(at, _)| at)
+		.collect()
+}
+
+/// The positions among the operands of `data`, the op `op` of a rowless copy
+/// ([`rowless_value_copy`]), of the row names of an `expr.call` that are a row of the copy and
+/// that the call's lowering does not read; empty for any other op. The lowering reads none of
+/// them but the first, and that one only where the call stands in a loop's body, which it
+/// compares with the loop's element. The copy passes each as an `expr.free_param` of `$parent`
+/// made beside the call, which nothing reads either, rather than as the read of the row the copy
+/// makes where it stands.
+fn rowless_unread_row_names(ir: &Ir, copy: &Copy, op: OpId, data: &OpData) -> SmallVec<[usize; 2]> {
+	if copy.rowless.is_empty() {
+		return SmallVec::new();
+	}
+	let OpKind::Expr(ExprOp::Call(call)) = &data.kind else {
+		return SmallVec::new();
+	};
+	let first_row_name = data.operands.len().saturating_sub(usize::from(call.row_names));
+	let in_loop = ancestors(ir, op)
+		.take_while(|(region, _)| *region != copy.from)
+		.any(|(region, _)| ir.region(region).is_some_and(|held| held.kind == RegionKind::Loop));
+	let unread_from = if in_loop {
+		first_row_name + 1
+	} else {
+		first_row_name
+	};
+	data.operands
+		.iter()
+		.enumerate()
+		.skip(unread_from)
+		.filter(|(_, operand)| copy.rowless.contains(operand))
+		.map(|(at, _)| at)
+		.collect()
+}
+
+/// An `expr.free_param` of `name`, made at `at` with the frame, snapshot and location of `data`.
+fn free_param_before(
+	rw: &mut Rewriter<'_>,
+	data: &OpData,
+	name: &str,
+	at: InsertPoint,
+) -> Result<ValueId, IrError> {
+	let read = rw.create(
+		at,
+		OpSpec {
+			kind: OpKind::Expr(ExprOp::FreeParam {
+				name: Strand::new(name),
+			}),
+			operands: SmallVec::new(),
+			results: smallvec![TypeKnowledge::Unknown],
+			frame: data.frame,
+			snapshot: data.snapshot,
+			loc: data.loc.clone(),
+		},
+	)?;
+	result_of(rw.ir(), read)
+}
+
+/// Copies `data`, an `expr.closure_create` whose captures at `dropped` are a row of a rowless
+/// copy, to `at` without those captures: its body reads each such name from the frame the closure
+/// is made in, as an `expr.free_param` at the head of the body.
+fn copy_closure_reading_rows_by_name(
+	rw: &mut Rewriter<'_>,
+	copy: &mut Copy,
+	op: OpId,
+	data: &OpData,
+	dropped: &[usize],
+	at: InsertPoint,
+) -> Result<OpId, IrError> {
+	let OpKind::Expr(ExprOp::ClosureCreate(attrs)) = &data.kind else {
+		return Err(IrError::Stale("a closure literal"));
+	};
+	let mut kept = attrs.as_ref().clone();
+	kept.captures = attrs
+		.captures
+		.iter()
+		.enumerate()
+		.filter(|(position, _)| !dropped.contains(position))
+		.map(|(_, name)| name.clone())
+		.collect();
+	let mut operands: SmallVec<[ValueId; 4]> = SmallVec::new();
+	for (position, operand) in data.operands.iter().enumerate() {
+		if !dropped.contains(&position) {
+			operands.push(copy_value(rw, copy, *operand, at)?);
+		}
+	}
+	let results: SmallVec<[TypeKnowledge; 2]> = data
+		.results
+		.iter()
+		.map(|result| {
+			rw.ir()
+				.value(*result)
+				.map(|value| value.ty.clone())
+				.ok_or(IrError::Stale("result value"))
+		})
+		.collect::<Result<_, _>>()?;
+	let new = rw.create(
+		at,
+		OpSpec {
+			kind: OpKind::Expr(ExprOp::ClosureCreate(Box::new(kept))),
+			operands,
+			results,
+			frame: data.frame,
+			snapshot: data.snapshot,
+			loc: data.loc.clone(),
+		},
+	)?;
+	let made: SmallVec<[ValueId; 2]> =
+		rw.ir().op(new).map(|held| held.results.clone()).unwrap_or_default();
+	for (old, now) in data.results.iter().zip(made.iter()) {
+		copy.values.insert(*old, *now);
+	}
+	let [body] = data.regions.as_slice() else {
+		return Err(IrError::Stale("a closure literal's body"));
+	};
+	// The body's arguments are the timestamp, the parameters, the captures in operand order and
+	// the rows it takes; a dropped capture's argument becomes a read of its name.
+	let first_capture = 1 + attrs.params.len();
+	let names: Vec<(usize, Strand)> = dropped
+		.iter()
+		.map(|position| {
+			let name = attrs
+				.captures
+				.get(*position)
+				.cloned()
+				.ok_or(IrError::Stale("a closure capture's name"))?;
+			Ok((first_capture + position, name))
+		})
+		.collect::<Result<_, IrError>>()?;
+	copy_region_reading_by_name(rw, copy, *body, new, &names)?;
+	rw.carry_decisions(op, new);
+	Ok(new)
+}
+
 /// Copies the op `op` to `at`, with the regions it owns.
 fn copy_op(
 	rw: &mut Rewriter<'_>,
@@ -533,9 +699,18 @@ fn copy_op(
 	at: InsertPoint,
 ) -> Result<OpId, IrError> {
 	let data = rw.ir().op(op).ok_or(IrError::Stale("op"))?.clone();
+	let dropped = rowless_captures(copy, &data);
+	if !dropped.is_empty() {
+		return copy_closure_reading_rows_by_name(rw, copy, op, &data, &dropped, at);
+	}
+	let unread = rowless_unread_row_names(rw.ir(), copy, op, &data);
 	let mut operands: SmallVec<[ValueId; 4]> = SmallVec::new();
-	for operand in &data.operands {
-		operands.push(copy_value(rw, copy, *operand, at)?);
+	for (position, operand) in data.operands.iter().enumerate() {
+		let copied = match unread.contains(&position) {
+			true => free_param_before(rw, &data, "parent", at)?,
+			false => copy_value(rw, copy, *operand, at)?,
+		};
+		operands.push(copied);
 	}
 	let results: SmallVec<[TypeKnowledge; 2]> = data
 		.results
@@ -578,24 +753,65 @@ fn copy_region(
 	region: RegionId,
 	owner: OpId,
 ) -> Result<(), IrError> {
+	copy_region_reading_by_name(rw, copy, region, owner, &[])
+}
+
+/// [`copy_region`], with each block argument of `region` at a position `by_name` lists left out
+/// of the copy's arguments and read instead by an `expr.free_param` of the name it lists, at the
+/// head of the copy's block.
+fn copy_region_reading_by_name(
+	rw: &mut Rewriter<'_>,
+	copy: &mut Copy,
+	region: RegionId,
+	owner: OpId,
+	by_name: &[(usize, Strand)],
+) -> Result<(), IrError> {
 	let ir = rw.ir();
 	let kind = ir.region(region).ok_or(IrError::Stale("region"))?.kind;
 	let block = single_block(ir, region)?;
 	let old_args: SmallVec<[ValueId; 2]> =
 		ir.block(block).map(|held| held.args.iter().copied().collect()).unwrap_or_default();
-	let types: Vec<TypeKnowledge> = old_args
+	let named = |position: usize| by_name.iter().find(|(at, _)| *at == position);
+	let kept: SmallVec<[ValueId; 2]> = old_args
+		.iter()
+		.enumerate()
+		.filter(|(position, _)| named(*position).is_none())
+		.map(|(_, arg)| *arg)
+		.collect();
+	let types: Vec<TypeKnowledge> = kept
 		.iter()
 		.map(|arg| ir.value(*arg).map(|value| value.ty.clone()).ok_or(IrError::Stale("value")))
 		.collect::<Result<_, _>>()?;
 	let body: Vec<OpId> = ops_in(ir, region).collect();
+	let frame = rw.ir().op(owner).map(|data| (data.frame, data.snapshot, data.loc.clone()));
 	let (_, new_block) = rw.create_region(owner, kind, &types)?;
 	let new_args: SmallVec<[ValueId; 2]> = rw
 		.ir()
 		.block(new_block)
 		.map(|held| held.args.iter().copied().collect())
 		.unwrap_or_default();
-	for (old, now) in old_args.iter().zip(new_args.iter()) {
+	for (old, now) in kept.iter().zip(new_args.iter()) {
 		copy.values.insert(*old, *now);
+	}
+	if !by_name.is_empty() {
+		let (frame, snapshot, loc) = frame.ok_or(IrError::Stale("op"))?;
+		for (position, name) in by_name {
+			let old = *old_args.get(*position).ok_or(IrError::Stale("a region argument"))?;
+			let read = rw.create(
+				InsertPoint::End(new_block),
+				OpSpec {
+					kind: OpKind::Expr(ExprOp::FreeParam {
+						name: name.clone(),
+					}),
+					operands: SmallVec::new(),
+					results: smallvec![TypeKnowledge::Unknown],
+					frame,
+					snapshot,
+					loc: loc.clone(),
+				},
+			)?;
+			copy.values.insert(old, result_of(rw.ir(), read)?);
+		}
 	}
 	for member in body {
 		copy_op(rw, copy, member, InsertPoint::End(new_block))?;

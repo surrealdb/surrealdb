@@ -32,7 +32,9 @@ use smallvec::SmallVec;
 use super::facts::NestedReading;
 use super::ops::{KeyEqShape, KeyRangeShape, PhysOp, PhysTag, SortAttrs, SortKeyReadShape};
 use super::placement::{Placement, install, place_all_reading};
-use super::{chain, conjunct, hold_left, index_answer, nested, prefilter, recheck};
+use super::{
+	chain, conjunct, hold_left, hop_key, index_answer, knn_ids, nested, once, prefilter, recheck,
+};
 use crate::catalog::KeyStructure;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::index::key_range::DeliveredKeyOrder;
@@ -86,9 +88,13 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 /// Before the strategies, every join whose left input yields at most one row holds that row
 /// ([`hold_left::run`]), judged from the inputs the rules left.
 ///
-/// Then each scan states the prefilter of the filter it feeds ([`prefilter::run`]). Each index scan
+/// Then every filter judges once the conjuncts that answer the same at every row ([`once::run`]).
+///
+/// Then each scan states the prefilter of the filter it feeds ([`prefilter::run`]), and each KNN
+/// scan whether its rows need only their ids ([`knn_ids::run`]). Each index scan
 /// states whether that filter only rechecks its access ([`recheck::run`]). Both use the predicate
-/// the rules left.
+/// the rules left. Each graph hop states the key condition its `WHERE` is judged by
+/// ([`hop_key::run`]).
 ///
 /// Then every pipeline is placed again through `placement`, using the facts of the container the
 /// rules left and the strategies ([`NestedReading::Strategy`]). The new placements replace the
@@ -115,8 +121,11 @@ pub(crate) async fn run(
 		apply_greedy(ir, facts, &registry::build().phys_patterns, folder, GREEDY_DEFAULT).await?;
 	report.rewrites += hold_left::run(ir, facts, cx)?;
 	report.rewrites += nested::run(ir, facts, cx)?;
+	report.rewrites += once::run(ir, facts, cx)?;
 	prefilter::run(ir, facts, cx)?;
+	knn_ids::run(ir, facts, cx)?;
 	recheck::run(ir, facts)?;
+	hop_key::run(ir, facts, cx);
 	let placed =
 		place_all_reading(ir, facts, placement, cx.physical.backend(), NestedReading::Strategy)?;
 	install(ir.placement_table_mut(), placed);
@@ -936,6 +945,9 @@ fn keeps_stored_fields(kind: &PhysOp) -> bool {
 /// An exact scan lists precisely the
 /// records whose pinned columns satisfy the conjuncts its access was chosen from, so a conjunct
 /// that states one of those comparisons ([`index_answer::answers`]) judges no row the scan kept.
+/// Where the scan answers every conjunct the whole predicate goes; otherwise only the answered
+/// conjuncts that are total ([`conjunct::judge`]) go, and one that may raise, such as a membership
+/// in a range the predicate builds, stays where it is judged.
 /// Only the table's permission may stand between the filter and the scan, since it keeps a row's
 /// fields as stored; another filter does not, since the conjunct it holds may judge the row first.
 /// A predicate left with nothing to judge removes the filter, and one that also holds a predicate
@@ -975,11 +987,17 @@ impl Pattern<PhysDialect> for AnsweredByIndex {
 			return Ok(false);
 		};
 		let leaves = conjunct::leaves(ir, &site);
-		let dropped: Vec<ValueId> = leaves
+		let answered: Vec<ValueId> = leaves
 			.iter()
 			.copied()
 			.filter(|leaf| index_answer::answers(ir, *leaf, &scan.access, cols))
 			.collect();
+		// The scan answers the whole predicate, or the conjuncts that neither raise nor have an
+		// effect alone among those it answers.
+		let dropped: Vec<ValueId> = match answered.len() == leaves.len() {
+			true => answered,
+			false => answered.into_iter().filter(|leaf| conjunct::judge(ir, *leaf).total).collect(),
+		};
 		if dropped.is_empty() {
 			return Ok(false);
 		}

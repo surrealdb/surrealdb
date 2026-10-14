@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure whose body reads `$this` or `$self` reads the binding of that name that holds where the literal is written: a block `LET`, a `FOR` variable, a function parameter, or a statement `LET` of the frame. The closure-free read at the same place is the control, and an unbound name is the current value, as it is without a binding. A literal that is an index or a method argument reads the binding too where a block `LET` holds the name (`[1].map(|$e| $e + $this)` answers `[8]` as the constant closure-free `[1].concat([1 + $this])` answers `[1, 8]`); the closure-free read of a binding that is not a constant reads the receiver and raises, which is the last of the three statements. A closure written in a block that another closure's body holds reads the same binding. The last statements keep the answer of a name bound by a statement `LET` when the closure is written where a row exists."
+reason = "A closure whose body reads `$this` or `$self` reads the binding of that name that holds where the literal is written: a `FOR` variable or a function parameter. The closure-free read at the same place is the control, and an unbound name is the current value, as it is without a binding. `LET $this` and `LET $self` are refused wherever they are written, in a block, in a clause, in a field definition and at the top level, so each statement that holds one raises the refusal and a `$this` or `$self` read after a refused `LET` is unbound."
 
 [[test.results]]
 value = "[{ id: pt:1, lim: 1 }]"
@@ -13,28 +13,28 @@ value = "[{ id: pt:1, lim: 1 }]"
 value = "[{ id: pt:2, lim: 8 }]"
 
 [[test.results]]
-value = "3"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "3"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "3"
+error = "'self' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "3"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "true"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "true"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "3"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "6"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "NONE"
@@ -67,28 +67,28 @@ value = "[3]"
 value = "[3]"
 
 [[test.results]]
-value = "[3, 3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3, 3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[[1, 3], [8, 3]]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3, 3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[3, 3]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "NONE"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "NONE"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "[[3, 3], [3, 3]]"
+value = "[[NONE, NONE], [NONE, NONE]]"
 
 [[test.results]]
 value = "NONE"
@@ -97,40 +97,40 @@ value = "NONE"
 value = "[1, 8]"
 
 [[test.results]]
-value = "[8]"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-error = "Cannot perform addition with 'int' and 'array'"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "3"
-
-[[test.results]]
-value = "3"
+error = "'this' is a protected variable and cannot be set"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "3"
-
-[[test.results]]
-value = "[3, 3]"
-
-[[test.results]]
-value = "[3, 3]"
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "3"
+value = "NONE"
 
 [[test.results]]
-value = "3"
+value = "[1, 8]"
+
+[[test.results]]
+value = "[1, 8]"
+
+[[test.results]]
+error = "'self' is a protected variable and cannot be set"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
 */
 CREATE pt:1 SET lim = 1;
 CREATE pt:2 SET lim = 8;

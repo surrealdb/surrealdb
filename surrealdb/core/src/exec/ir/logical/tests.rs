@@ -12,8 +12,6 @@ use std::sync::Arc;
 use smallvec::{SmallVec, smallvec};
 use surrealdb_strand::{Strand, TableName};
 
-use super::ddl::{DdlForm, DdlOperand, DdlStep, guard_order};
-use super::ddl_define::template_holes;
 use super::ops::{
 	AccessAttrs, AggregateShape, AlterAttrs, AssignAttrs, ClosureLoopAttrs, DefineAttrs, EventDefs,
 	EventsAttrs, FieldShape, FieldsShape, GateClause, ImageView, LetAttrs, LetBinding, LiveAttrs,
@@ -41,7 +39,7 @@ use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::print::AttrSyntax;
 use crate::exec::ir::core::rewriter::{InsertPoint, OpSpec, Provenance, Rewriter};
 use crate::exec::ir::core::verify::VerifyRule;
-use crate::exec::ir::expr::ops::{ExprOp, KeyBound, KeyRange, NestedStrategy};
+use crate::exec::ir::expr::ops::{ExprOp, KeyBound, KeyRange};
 use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, SemanticCatalog};
 use crate::exec::ir::iface::choose::{
 	ArmBody, ArmEquivalence, ArmLabel, ArmSpec, ChooseGranularity, ChooseOrigin, ChooseSpec,
@@ -53,8 +51,8 @@ use crate::exec::ir::iface::frame::FrameTable;
 use crate::exec::ir::iface::identity::AttrDigest;
 use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, SnapshotId, ValueId};
 use crate::exec::ir::iface::region_kind::{
-	ClauseRole, ErrorScope, FieldRole, LoopRule, RegionKind, RegionProperties, ReturnRule,
-	StatementCommit, StoredRole, TxnKind,
+	ClauseRole, ErrorScope, FieldRole, RegionKind, RegionProperties, StatementCommit, StoredRole,
+	TxnKind,
 };
 use crate::exec::ir::iface::statements::{
 	AccessOp, AlterObject, BindStepShape, ContentMode, DdlChecks, DdlGuard, DefineObject,
@@ -200,6 +198,7 @@ fn fixture(tag: LogTag) -> LogOp {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		})),
 		LogTag::Values => LogOp::Values {
 			for_update: false,
@@ -1907,6 +1906,7 @@ fn rich_fixtures() -> Vec<LogOp> {
 			for_update: true,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		})),
 		LogOp::Write(Box::new(WriteAttrs {
 			form: WriteForm::Upsert,
@@ -3278,7 +3278,6 @@ mod region_constraints {
 			(log(fixture(LogTag::Remove)), Construct::Ddl),
 			(log(fixture(LogTag::Alter)), Construct::Ddl),
 			(log(fixture(LogTag::Rebuild)), Construct::Ddl),
-			(log(fixture(LogTag::Let)), Construct::Let),
 			(log(fixture(LogTag::Sleep)), Construct::Sleep),
 		]
 	}
@@ -3291,7 +3290,7 @@ mod region_constraints {
 			(
 				vec![WHERE, ORDER, GROUP, SPLIT],
 				Section4bRow::ConditionClause,
-				vec![Construct::Write, Construct::Ddl, Construct::Let, Construct::Sleep],
+				vec![Construct::Write, Construct::Ddl, Construct::Sleep],
 			),
 			(
 				vec![
@@ -3374,7 +3373,7 @@ mod region_constraints {
 	/// constructs admit.
 	#[test]
 	fn region_constraints_rows() {
-		// ConditionClause: a write, a definition, a LET and a SLEEP in a condition, order, group
+		// ConditionClause: a write, a definition and a SLEEP in a condition, order, group
 		// or split clause. The group key of an aggregate is the error scope it owns.
 		let owners: Vec<(OpKind, RegionKind, RegionKind)> = vec![
 			(log(fixture(LogTag::Filter)), WHERE, WHERE),
@@ -3406,8 +3405,8 @@ mod region_constraints {
 		for inner in [log(fixture(LogTag::Source)), log(fixture(LogTag::Break))] {
 			assert_admitted(&holding(log(fixture(LogTag::Filter)), WHERE, inner), "a read");
 		}
-		// A LET written in a block of a condition is the condition's; one written in a closure
-		// body is the closure's. A write is rejected through a closure.
+		// A LET written in a block of a condition is admitted, as is one written in a closure
+		// body. A write is rejected through a closure.
 		let nested = |inner: LogOp| {
 			container(|rw, stmt| {
 				let clause = region_of(rw, stmt, log(fixture(LogTag::Filter)), WHERE);
@@ -3415,13 +3414,7 @@ mod region_constraints {
 				put(rw, block, log(inner));
 			})
 		};
-		assert_rejected(
-			&nested(fixture(LogTag::Let)),
-			Construct::Let,
-			Section4bRow::ConditionClause,
-			WHERE,
-			"a LET in a block of a condition",
-		);
+		assert_admitted(&nested(fixture(LogTag::Let)), "a LET in a block of a condition");
 		let closure = |inner: LogOp| {
 			container(|rw, stmt| {
 				let clause = region_of(rw, stmt, log(fixture(LogTag::Filter)), WHERE);
@@ -3430,6 +3423,8 @@ mod region_constraints {
 					returns: None,
 					body_sql: "".into(),
 					captures: Box::new([]),
+					reads_row: false,
+					reads_root: false,
 					literal: Default::default(),
 				};
 				let body = region_of(
@@ -3786,10 +3781,12 @@ mod binding {
 	use crate::exec::ir::core::ir::{Walk, WalkOrder};
 	use crate::exec::ir::core::value::ValueDef;
 	use crate::exec::ir::error::IrError;
-	use crate::exec::ir::expr::ops::RaiseKind;
+	use crate::exec::ir::expr::ops::{NestedStrategy, RaiseKind};
 	use crate::exec::ir::iface::conversion::EliminationReason;
-	use crate::exec::ir::iface::region_kind::{Construct, Section4bRow};
+	use crate::exec::ir::iface::region_kind::{Construct, LoopRule, ReturnRule, Section4bRow};
 	use crate::exec::ir::logical::constraints::RegionRejection;
+	use crate::exec::ir::logical::ddl::{DdlForm, DdlOperand, DdlStep, guard_order};
+	use crate::exec::ir::logical::ddl_define::template_holes;
 	use crate::exec::ir::logical::ops::DecisiveKind;
 	use crate::exec::ir::logical::seam::{BindCx, ExprHost, LoopSite, NameRef};
 	use crate::exec::ir::{RequestInput, RequestStatement, UnitKind};
@@ -6287,13 +6284,6 @@ mod binding {
 				2,
 			),
 			(
-				"CREATE t:1; SELECT VALUE id FROM t WHERE { LET $a = 1; $a == 1 };",
-				Construct::Let,
-				Section4bRow::ConditionClause,
-				RegionKind::Clause(ClauseRole::Where),
-				2,
-			),
-			(
 				"CREATE t:1; SELECT VALUE id FROM t WHERE { SLEEP 1ms; true };",
 				Construct::Sleep,
 				Section4bRow::ConditionClause,
@@ -6364,6 +6354,7 @@ mod binding {
 			"CREATE t:1; SELECT VALUE id FROM t;",
 			"SELECT VALUE (CREATE w:1 RETURN NONE) FROM t;",
 			"{ LET $a = 1; SLEEP 1ms; $a };",
+			"CREATE t:1; SELECT VALUE id FROM t WHERE { LET $a = 1; $a == 1 };",
 			"DEFINE FIELD f ON v VALUE 1;",
 			"DEFINE INDEX i ON q FIELDS a;",
 			"SELECT * FROM [{ a: 1 }] WHERE [1, 2].map(|$x| { LET $y = $x; RETURN $y + 1 }) = [2, 3];",

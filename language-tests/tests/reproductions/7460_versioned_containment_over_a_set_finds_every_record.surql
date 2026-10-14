@@ -35,6 +35,9 @@ value = "[{ id: t:2, s: {3, 4} }]"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[t:1, t:2]"
 
 [[test.results]]
@@ -51,6 +54,8 @@ DEFINE FIELD s ON t TYPE set<int>;
 DEFINE INDEX ix ON t FIELDS s.*;
 CREATE t:1 SET s = <set>[1, 2, 3];
 CREATE t:2 SET s = <set>[3, 4];
+-- The stamp is taken after the writes have committed, so a read at it sees both records.
+SLEEP 50ms;
 LET $ts = time::now();
 SELECT VALUE id FROM t WHERE s.* CONTAINS 3 ORDER BY id VERSION $ts;
 { LET $tb = 't'; SELECT VALUE id FROM type::table($tb) WHERE s.* CONTAINS 3 ORDER BY id VERSION $ts };

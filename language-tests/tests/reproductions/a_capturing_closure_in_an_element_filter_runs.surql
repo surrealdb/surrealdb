@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A closure written in an element filter runs and reads, for every source a captured name or row can come from, the value it has where the literal is written: a statement LET, a DEFINE PARAM, a function argument, a FOR variable, an outer closure's argument, $this, an element field, $parent, $value, $after, a stored closure, the document root an index argument reads, and the document root an element filter inside the closure body binds as its `$parent` (the literal captures it even where an enclosing filter binds `$parent` around the literal). The session names are read when the closure runs. A block-bodied closure that reads the row reads the current value where it is written and is taken over the document root, so it is not run in place of the element; one that reads no row runs as any other."
+reason = "A closure written in an element filter runs and reads, for every source a captured name or row can come from, the value it has where the literal is written: a statement LET, a DEFINE PARAM, a function argument, a FOR variable, an outer closure's argument, $this, an element field, $parent, $value, $after, a stored closure, the document root an index argument reads, and the document root an element filter inside the closure body binds as its `$parent` (the literal captures it even where an enclosing filter binds `$parent` around the literal). The session names are read when the closure runs. A block-bodied closure handed to a builtin in an element body runs over the element, so its `$this` is the element in a `SELECT` as in a `RETURN`; one handed to a method runs over the row. A bare field in a closure that a method of the element's field runs reads the frame's row, not the element."
 
 [[test.results]]
 value = "NONE"
@@ -121,13 +121,13 @@ value = "[[10]]"
 value = "[{ id: b:1, k: 9, n: 1 }]"
 
 [[test.results]]
-value = "[[]]"
+value = "[[2]]"
 
 [[test.results]]
 value = "[2]"
 
 [[test.results]]
-value = "[]"
+value = "[{ a: [1, 10], k: 5 }]"
 
 [[test.results]]
 value = "NONE"
@@ -178,7 +178,7 @@ value = "[[], [], [10]]"
 value = "[10]"
 
 [[test.results]]
-value = "[[1, 2], [], []]"
+value = "[[], [], []]"
 
 [[test.results]]
 value = "[[], [], [10]]"

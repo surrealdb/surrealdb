@@ -8,13 +8,13 @@ timeout = 15000
 
 [test]
 reason = """
-	A scan at a stamp delivers `ORDER BY id` exactly where the record-id
-	structure of the stamp orders the keys by `id`. A table whose record id
-	names no component delivers it, so the `Sort` goes, descending as well as
-	ascending — the scan reads backward for the reverse. A table whose record
-	id names a datetime component orders its keys by the whole second alone,
-	so its `Sort` stays, and a stamp only the run can evaluate names no state
-	to read a structure at, so the `Sort` stays there whatever the table.
+	A scan at a stamp delivers `ORDER BY id` only where the plan can read the
+	record-id structure of the stamp and it orders the keys by `id`. A stamp
+	only the run can evaluate names no state to read a structure at, so the
+	`Sort` stays there whatever the table. A stamp a `LET` computes is one: the
+	request is planned before the `LET` runs. A table whose record id names a
+	datetime component orders its keys by the whole second alone, so its `Sort`
+	stays at any stamp. The rows come back in `id` order whichever plan answers.
 """
 
 [[test.results]]
@@ -51,14 +51,16 @@ value = "NONE"
 value = '''
 'VersionScope [ctx: Db] [version: $ts]
     ProjectValue [ctx: Db] [expr: id]
-        TableScan [ctx: Db] [table: item, direction: Forward]
+        Sort [ctx: Db] [sort_keys: id ASC]
+            TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
 value = '''
 'VersionScope [ctx: Db] [version: $ts]
     ProjectValue [ctx: Db] [expr: id]
-        TableScan [ctx: Db] [table: item, direction: Backward]
+        Sort [ctx: Db] [sort_keys: id DESC]
+            TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
@@ -98,9 +100,9 @@ SLEEP 50ms;
 LET $ts = time::now();
 SLEEP 50ms;
 
--- A plain record id walks its key space in `id` order at the stamp.
+-- A stamp a `LET` computes is evaluated by the run, so the `Sort` stays.
 EXPLAIN SELECT VALUE id FROM item ORDER BY id VERSION $ts;
--- The reverse of that order is the same key space read backward.
+-- So it does for the reverse order.
 EXPLAIN SELECT VALUE id FROM item ORDER BY id DESC VERSION $ts;
 -- A stamp only the run can evaluate names no structure to judge.
 EXPLAIN SELECT VALUE id FROM item ORDER BY id VERSION $ts + 0ns;

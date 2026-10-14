@@ -124,7 +124,7 @@ use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
-use crate::exec::ir::expr::ops::ExprOp;
+use crate::exec::ir::expr::ops::{ClosureAttrs, ExprOp};
 use crate::exec::ir::iface::IndexRef;
 use crate::exec::ir::iface::ids::{FrameId, OpId, RegionId};
 use crate::exec::ir::iface::region_kind::RegionKind;
@@ -1297,9 +1297,28 @@ impl<'c, P: UnitPlanner, L: Lower> Compiler<'c, P, L> {
 			}
 			let path: Arc<[UnitRequest]> =
 				path.iter().cloned().chain([need.request.clone()]).collect();
-			let scope = scope.or(scoped);
+			let mut scope = scope.or(scoped);
+			// A region copied out of its requester is code of the requester's: it spends the
+			// computation-depth budget as the stored code the requester was lowering when it asked
+			// for the region, an event clause or a function body.
+			if need.request.is_relative()
+				&& let Some(sites) = self.cx.requested_sites(id)
+				&& let Some(scope) = scope.as_mut()
+			{
+				scope.depth_sites = Some(sites);
+			}
 			let container = self.take(*planned, path, scope.clone(), guards)?;
-			let lowered = self.lower_scoped(container, shape, scope)?;
+			// A unit of a statement in an expression stands where the region it is copied from
+			// stood when it was asked for; any other unit stands at its own top.
+			let nesting = if matches!(need.request, UnitRequest::Subquery { .. }) {
+				self.cx.requested_nesting(id)
+			} else {
+				Default::default()
+			};
+			let outer = self.cx.renest(nesting);
+			let lowered = self.lower_scoped(container, shape, scope);
+			self.cx.renest(outer);
+			let lowered = lowered?;
 			let slot = id.0 as usize;
 			if self.programs.len() <= slot {
 				self.programs.resize(slot + 1, None);
@@ -1596,6 +1615,7 @@ pub(crate) fn held_for(
 		} => vec![*region],
 		UnitRequest::ClosureBody {
 			digest,
+			captures,
 		} => {
 			let mut sites = Vec::new();
 			ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
@@ -1603,6 +1623,7 @@ pub(crate) fn held_for(
 					&& let OpKind::Expr(ExprOp::ClosureCreate(attrs)) = &data.kind
 					&& let Some(literal) = attrs.literal.0.as_ref()
 					&& ClosureDigest::of(literal) == *digest
+					&& captures_named(attrs, captures)
 				{
 					sites.push(ir.enclosing_region(op));
 				}
@@ -1794,17 +1815,23 @@ pub(crate) fn region_limit(ask: &Ask<'_>) -> Result<Option<crate::iam::AuthLimit
 	Ok(frame.eval.auth.clone().filter(|limit| base.eval.auth.as_ref() != Some(limit)))
 }
 
+/// Whether the closure creation `attrs` captures exactly `captures`, in order.
+fn captures_named(attrs: &ClosureAttrs, captures: &[String]) -> bool {
+	attrs.captures.len() == captures.len()
+		&& attrs.captures.iter().zip(captures).all(|(held, named)| held.as_str() == named)
+}
+
 /// The body of the closure literal a [`UnitRequest::ClosureBody`] names, copied out of the
 /// requesting container, with what the unit's head names: `None` for any other request.
 /// `stamps` and `version` are the catalog stamps and the `VERSION` stamp of the transaction the
 /// planner plans in.
 ///
-/// The literal is the `expr.closure_create` whose literal has the request's digest. Every such op
-/// of the container must agree on the literal compared whole, on the names it captures and on
-/// whether it captures the row, because one request stands for all of them and a run takes the
-/// unit only for a value whose closure, captures and row captures its head names. Where two
-/// disagree (two literals that print alike, or one literal whose captures differ by site) the
-/// body is refused, not planned for one of them. A container that makes no closure of the digest
+/// The literal is the `expr.closure_create` whose literal has the request's digest and whose
+/// captures are the request's. Every such op of the container must agree on the literal compared
+/// whole and on whether its body reads the invoking row, because one request stands for all of
+/// them and a run takes the unit only for a value whose closure, captures and rows its head
+/// names. Where two disagree (two literals that print alike) the body is refused, not planned for
+/// one of them. A container that makes no closure of the digest
 /// is an internal error.
 ///
 /// The body region is isolated: it reads no value of the requester beyond the literals copied in,
@@ -1816,6 +1843,7 @@ pub(crate) fn closure_unit(
 ) -> Result<Option<Resolved>, NotCovered> {
 	let UnitRequest::ClosureBody {
 		digest,
+		captures,
 	} = ask.request
 	else {
 		return Ok(None);
@@ -1827,6 +1855,7 @@ pub(crate) fn closure_unit(
 			&& let OpKind::Expr(ExprOp::ClosureCreate(attrs)) = &data.kind
 			&& let Some(literal) = attrs.literal.0.as_ref()
 			&& ClosureDigest::of(literal) == *digest
+			&& captures_named(attrs, captures)
 		{
 			made.push((
 				op,
@@ -1834,8 +1863,8 @@ pub(crate) fn closure_unit(
 					closure: Arc::clone(literal),
 					digest: *digest,
 					captures: attrs.captures.iter().map(|name| name.as_str().to_owned()).collect(),
-					row: data.operands.len() > attrs.captures.len(),
-					root: data.operands.len() > attrs.captures.len() + 1,
+					row: attrs.reads_row,
+					root: attrs.reads_root,
 					stamps,
 					version,
 				},
@@ -1852,7 +1881,6 @@ pub(crate) fn closure_unit(
 		*other.closure == *template.closure
 			&& other.captures == template.captures
 			&& other.row == template.row
-			&& other.root == template.root
 	});
 	if !agree {
 		return Err(NotCovered::unsupported(
@@ -2463,16 +2491,20 @@ mod tests {
 		let mut script = Script::default();
 		script.asks.insert(0, vec![function("f")]);
 		script.reports.insert(0, (AccessMode::ReadOnly, ContextLevel::Namespace, false));
-		script.reports.insert(1, (AccessMode::ReadOnly, ContextLevel::Database, false));
+		script.reports.insert(1, (AccessMode::ReadWrite, ContextLevel::Database, true));
 		let mut answers = Answers::default();
 		answers.units.insert(function("f"), None);
 		let compiled = run(compiler(&script, &answers).program(container(), BTreeSet::new()))
 			.map_err(|e| e.reason)
 			.expect("the program compiles");
 		let program = &compiled.program;
-		assert_eq!(program.access_mode, AccessMode::ReadOnly);
+		assert_eq!(program.access_mode, AccessMode::ReadWrite);
 		assert_eq!(program.required_context, ContextLevel::Namespace);
-		assert!(!program.keeps_row_order);
+		assert!(program.keeps_row_order);
+		let [call] = &program.functions[..] else {
+			panic!("the root holds the call of f");
+		};
+		assert_eq!(call.body_access_mode, AccessMode::ReadWrite);
 	}
 
 	/// A frame of `class` that checks permissions, in no database.

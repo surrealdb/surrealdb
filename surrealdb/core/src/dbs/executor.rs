@@ -1293,12 +1293,13 @@ impl Executor {
 	///
 	/// The clock is read here, once per top-level statement, so every CLOCK
 	/// read the statement makes answers the instant it started, however long
-	/// it runs. A statement a block serves when it reaches it, a function or
-	/// closure body, a nested query and an event body run in contexts derived
-	/// from `self.ctx` and read the clock of the top-level statement that
-	/// runs them. Under the contention described below the previous
-	/// statement's clock stays installed, so a stale instant, never the
-	/// wall clock, is the failure mode.
+	/// it runs. A nested query and an event body run in contexts derived from
+	/// `self.ctx` and read that instant. The statements of a block, of the
+	/// body of a `FOR` or an `IF`, and of a function body each take an instant
+	/// of their own when they start, in a context derived from this one, and
+	/// the statements they hold read that. Under the contention described
+	/// below the previous statement's clock stays installed, so a stale
+	/// instant, never the wall clock, is the failure mode.
 	///
 	/// Between statements the executor holds the only strong reference to
 	/// `self.ctx`, so `Arc::get_mut` succeeds. If it ever fails — i.e.
@@ -2009,6 +2010,7 @@ impl Executor {
 			current_value: None,
 			current_row: None,
 			forbidden_row: None,
+			inherited_knn: None,
 			skip_fetch_perms: false,
 			perms_suppressed: false,
 			caller_perms_suppressed: false,
@@ -2469,7 +2471,7 @@ impl Executor {
 	) -> FlowResult<Value> {
 		// Reject protected names first, before any work: avoids planning
 		// or computing a value we'll throw away.
-		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stm.name.as_str()) {
+		if surrealdb_cnf::is_refused_let_name(stm.name.as_str()) {
 			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: stm.name.to_string(),
 			})));
@@ -2526,7 +2528,7 @@ impl Executor {
 		txn: Arc<Transaction>,
 		start: &Instant,
 	) -> FlowResult<Value> {
-		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+		if surrealdb_cnf::is_refused_let_name(name.as_str()) {
 			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: name.clone(),
 			})));
@@ -2600,9 +2602,10 @@ impl Executor {
 	/// overwrites, the request context's own binding and never one a parent holds, so a block that
 	/// does not commit restores exactly what was there, absence included.
 	fn bind_session_let(&mut self, name: &str, value: Arc<Value>) -> FlowResult<()> {
-		// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) is never bound by a
-		// `LET`, whichever path delivers the binding.
-		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name) {
+		// SECURITY: a protected name (`$auth`, `$token`, `$session`, `$access`) or a name the
+		// system binds (`$this`, `$value`, ...) is never bound by a `LET`, whichever path delivers
+		// the binding.
+		if surrealdb_cnf::is_refused_let_name(name) {
 			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: name.to_owned(),
 			})));
@@ -6050,9 +6053,11 @@ mod tests {
 		let results = ds.execute_import_bounded(&sess, None, body, bound).await.unwrap();
 		assert!(results.iter().any(|r| r.result.is_err()), "the crossing LET reports an error");
 
+		// Neither the block nor the statement after it ran, so no statement
+		// created the table.
 		let verify = ds.execute("SELECT VALUE id FROM person", &sess, None).await.unwrap();
-		let rows = verify[0].result.as_ref().unwrap().as_array().unwrap();
-		assert!(rows.is_empty(), "neither the block nor the statement after it ran");
+		let err = verify[0].result.as_ref().unwrap_err();
+		assert!(err.message().contains("'person' does not exist"), "got: {err:?}");
 	}
 
 	/// A top-level `RETURN` ends its own statement; the statements after it run.

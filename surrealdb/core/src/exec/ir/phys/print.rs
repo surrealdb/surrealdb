@@ -2499,7 +2499,7 @@ text_enum!(BitmapShape {
 
 text_enum!(KnnTargetShape {
 	unit []
-	tuple [Literal(vector: Vec<Number>), Deferred(text: String)]
+	tuple [Literal(vector: Vec<Number>), Deferred(text: String, before_rows: bool)]
 	named []
 });
 

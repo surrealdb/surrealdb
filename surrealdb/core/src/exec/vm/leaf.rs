@@ -233,9 +233,11 @@ fn block(instr: &BlockInstr) -> Class {
 			..
 		} => Class::Kernel(&[Params]),
 		BlockInstr::Resolve => Class::Kernel(&[Catalog]),
+		BlockInstr::Clock => Class::Kernel(&[Clock]),
+		// The analysis evaluates the bitmap trees the run decided by again.
 		BlockInstr::RunAnalyzed {
 			..
-		} => Class::Kernel(&[Clock]),
+		} => Class::Kernel(&[Clock, Storage]),
 		// A late-bound statement is served from the compile cache, compiled
 		// there on a miss, and run in the frame.
 		BlockInstr::RunServed {
@@ -708,9 +710,6 @@ pub(super) fn instr(
 			..
 		}
 		| Instr::LoadSlot {
-			..
-		}
-		| Instr::LoadElement {
 			..
 		}
 		| Instr::SortKey {

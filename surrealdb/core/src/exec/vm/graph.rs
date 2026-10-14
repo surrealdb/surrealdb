@@ -86,7 +86,7 @@ pub(super) async fn lookup(
 	// `$parent` is the row the lookup is taken over, for every hop's `WHERE`.
 	let conds = match doc {
 		Some(doc) if spec.hops.iter().any(|hop| hop.cond.is_some()) => {
-			Some(ctx.with_param("parent", doc.clone()))
+			Some(ctx.with_params([("parent", doc.clone())]))
 		}
 		_ => None,
 	};

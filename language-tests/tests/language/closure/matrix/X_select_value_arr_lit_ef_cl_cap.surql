@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "The body is written in `SELECT VALUE a[WHERE array::any([$this], |$e| $e >= $m)] FROM [{ a: [1, 10] }]`. It runs and reads the names and the row of the frame where the closure is written."
+reason = "The body is written in `SELECT VALUE a[WHERE array::any([$this], |$e| $e >= $m)] FROM [{ a: [1, 10] }]`. It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

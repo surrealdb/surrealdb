@@ -37,6 +37,7 @@ use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ExprOp, ShortCircuitOp};
 use crate::exec::ir::iface::catalog::{CatalogAnswer, PhysCx, SourceKey};
+use crate::exec::ir::iface::frame::Snapshot;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::logical::ops::LoopKind;
 use crate::exec::ir::op_kind::OpKind;
@@ -48,9 +49,9 @@ use crate::expr::{BinaryOperator, PrefixOperator};
 /// changed.
 ///
 /// A table's key structure is read from the physical catalog's answers for the scan's own read
-/// (the table, its `WITH` hint, the current snapshot). A table the catalog does not hold, or
-/// answers as unknown, gives its scan no prefilter: the scan then decodes every row, as the
-/// predicate judges it.
+/// (the table, its `WITH` hint, and the current snapshot or a stamp only the run evaluates). A
+/// table the catalog does not hold, or answers as unknown, gives its scan no prefilter: the scan
+/// then decodes every row, as the predicate judges it.
 pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result<usize, IrError> {
 	let mut scans = Vec::new();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
@@ -94,8 +95,13 @@ fn prefilter_of(ir: &Ir, cx: &PhysCx<'_>, scan: OpId) -> Option<PreDecodeShape> 
 			if attrs.lightweight {
 				return None;
 			}
-			let answers: SourceKey =
-				(attrs.table.clone(), attrs.read.with.clone(), ReadVersion::Current);
+			// A read at a stamp only the run evaluates is answered under its own key; the key
+			// structure it answers is the table's.
+			let version = match ir.snapshot(data.snapshot) {
+				Some(Snapshot::Version(_)) => ReadVersion::Deferred,
+				Some(Snapshot::Current) | None => ReadVersion::Current,
+			};
+			let answers: SourceKey = (attrs.table.clone(), attrs.read.with.clone(), version);
 			match cx.physical.table_answers(&answers) {
 				CatalogAnswer::Found(found) => found.key.clone(),
 				CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => {

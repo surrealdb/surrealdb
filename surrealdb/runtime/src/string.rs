@@ -140,6 +140,11 @@ pub async fn repeat_walk((val, num): (String, i64)) -> Result<Value> {
 		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("string::repeat({num})")))
 	})?;
 	limit("string::repeat", val.len().saturating_mul(count))?;
+	// Repeating nothing is nothing, however many times: the walk below would spend a stretch on
+	// every repetition.
+	if val.is_empty() {
+		return Ok(String::new().into());
+	}
 	let mut out = String::with_capacity(val.len().saturating_mul(count));
 	let mut left = count;
 	while left > 0 {

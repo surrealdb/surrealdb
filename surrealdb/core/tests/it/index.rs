@@ -73,10 +73,10 @@ const SQL_CREATE_CANCEL: &str = "
 	    CANCEL;";
 const SQL_UPDATE_COMMIT: &str = "
         BEGIN;
-			LET $before = (SELECT * FROM (SELECT * FROM aaa LIMIT 10000) ORDER rand() LIMIT 10);
+			LET $picked = (SELECT * FROM (SELECT * FROM aaa LIMIT 10000) ORDER rand() LIMIT 10);
 			LET $ret = [
-				$before,
-				(UPDATE $before.id CONTENT {
+				$picked,
+				(UPDATE $picked.id CONTENT {
 					field1: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 					field2: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
 					field3: rand::enum(['cupcake', 'cakecup', 'cheese', 'pie', 'noms']),
@@ -90,9 +90,9 @@ const SQL_UPDATE_COMMIT: &str = "
 		COMMIT;";
 const SQL_DELETE_COMMIT: &str = "
 		BEGIN;
-			LET $before = (SELECT * FROM (SELECT * FROM aaa LIMIT 10000) ORDER rand() LIMIT 10);
+			LET $picked = (SELECT * FROM (SELECT * FROM aaa LIMIT 10000) ORDER rand() LIMIT 10);
 			LET $ret = [
-				(DELETE $before.id RETURN before),
+				(DELETE $picked.id RETURN before),
 				[],
 			];
 			if (rand() < 0.1) {

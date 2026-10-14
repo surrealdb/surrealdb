@@ -256,6 +256,7 @@ impl Emitter {
 		let query = std::sync::Arc::new(KnnQuery {
 			vector: make(self)?,
 			group: self.group(),
+			before_rows: false,
 		});
 		self.knn_searches.push((value, std::sync::Arc::clone(&query)));
 		Ok(query)
@@ -857,7 +858,6 @@ mod tests {
 			plan_depth: 0,
 			index: None,
 			closure_args: Vec::new(),
-			reads_element: false,
 		};
 		assert_eq!(em.call(call.clone()).unwrap(), 0);
 		assert_eq!(em.call(call).unwrap(), 1);

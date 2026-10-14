@@ -29,19 +29,15 @@
 //! - **The selection** ([`run`]). Every handled `KNN` operator in the statement's projection is
 //!   `true`, because every row the search yields is one it admits. A statement in value position
 //!   inside the projection is not entered, and an aggregate's fields are not rewritten.
-//! - **The unanswered** ([`run`]). Where no search runs for a select loop over one table that
-//!   defines no vector index, or over a table that is not defined, and whose predicate holds a
-//!   `KNN` operator (no brute-force search ranks its rows, as when its query vector is one only a
-//!   row binds), each `KNN` operator of the loop and of the clauses that shape its rows is `false`,
-//!   the value it takes against a search context that holds no result. A statement in value
-//!   position is a select loop of its own. Any other loop no search runs beneath keeps its
-//!   operators: a loop over a union of sources, and a read of a table defining a vector index,
-//!   built or not, that no search was planned over. Lowering judges a kept operator of a union per
-//!   row: it holds for a row whose record a search of the statement yielded before the row was
-//!   read, and so does one over a literal query vector whose read no search reads (its index is
-//!   withheld from the caller): no row is one a search yielded. An operator over any other vector,
-//!   of a read no search was planned over or of a write whose subjects no search reads, is marked
-//!   unsearched, and has no instruction.
+//! - **The unanswered** ([`run`]). Where no search runs for a select loop over one read, whose
+//!   predicate holds a `KNN` operator (no index search was planned, as under `WITH NOINDEX` or over
+//!   an index being removed, and no brute-force search ranks its rows, as when its query vector is
+//!   one only a row binds), each `KNN` operator of the loop and of the clauses that shape its rows
+//!   is `false`, the value it takes against a search context that holds no result. A statement in
+//!   value position is a select loop of its own. A loop over a union of sources, and a write whose
+//!   subjects no search reads, keep their operators: lowering judges each per row, holding for a
+//!   row whose record a search of the statement yielded before the row was read. A write's operator
+//!   over a vector that is not a literal is marked unsearched, and has no instruction.
 //!
 //! The query vector of a brute-force search is a literal where the plan knows it: a literal, a
 //! parameter the catalog holds as a non-empty array of numbers, or an expression the planner
@@ -64,7 +60,7 @@ use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
 use crate::exec::ir::expr::types::result_type;
-use crate::exec::ir::iface::catalog::{CatalogAnswer, ExactAnswer, PhysCx};
+use crate::exec::ir::iface::catalog::{ExactAnswer, PhysCx};
 use crate::exec::ir::iface::conversion::EliminationReason;
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
@@ -249,7 +245,8 @@ pub(super) struct Exact {
 
 /// The approximate operators of the stages over the one table source a read at a stamp makes,
 /// each with the brute-force operator it is ranked as: an operator whose field is the first column
-/// of a vector index of `indexes` (the table's indexes at the stamp), over that index's distance.
+/// of a vector index of `indexes` (the table's indexes at the stamp, or those it declares now for a
+/// stamp only the run evaluates), over that index's distance.
 /// An index entry describes the present, so the nearest rows are ranked among the records the
 /// read finds at the stamp.
 pub(super) fn exact_at_stamp(
@@ -815,21 +812,14 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		Walk::Continue
 	});
 	let mut unanswered = Vec::new();
-	let mut unsearched = Vec::new();
 	for looped in loops {
-		if read_beneath(ir, looped) != Some(false) {
-			continue;
-		}
-		if unindexed_read(ir, looped, cx) {
+		if read_beneath(ir, looped) == Some(false) && !united(ir, looped) {
 			unanswered.extend(unsearched_operators(ir, looped));
-		} else if !united(ir, looped) {
-			unsearched.extend(
-				unsearched_operators(ir, looped).into_iter().filter(|op| !literal_vector(ir, *op)),
-			);
 		}
 	}
-	// The loop over a write's subjects is judged the same way: its `KNN` operators hold for the
-	// subjects a search yields, and no search may read them.
+	// The loop over a write's subjects keeps its `KNN` operators: they hold for the subjects a
+	// search yields. One over a vector that is not a literal, of a write no search reads, is
+	// marked unsearched.
 	let mut writes = Vec::new();
 	ir.walk(ir.top(), WalkOrder::PreOrder, &mut |op| {
 		if matches!(
@@ -843,6 +833,7 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		}
 		Walk::Continue
 	});
+	let mut unsearched = Vec::new();
 	for write in writes {
 		if read_beneath(ir, write) != Some(true) {
 			let mut held = Vec::new();
@@ -858,9 +849,14 @@ pub(crate) fn run(ir: &mut Ir, facts: &mut FactCache, cx: &PhysCx<'_>) -> Result
 		ir.matches_table_mut().mark_unsearched(op);
 	}
 	if !unanswered.is_empty() {
+		let mut literals = Vec::with_capacity(unanswered.len());
 		let mut rw = Rewriter::new(ir, facts);
 		for op in unanswered {
-			rw.derived(&[op], |rw| answer(rw, op, false))?;
+			literals.push(rw.derived(&[op], |rw| answer(rw, op, false))?);
+		}
+		// The literal stands for an operator that reads the row, so a filter judges it per row.
+		for literal in literals {
+			ir.matches_table_mut().mark_unanswered(literal);
 		}
 	}
 	Ok(())
@@ -891,48 +887,6 @@ fn united(ir: &Ir, looped: OpId) -> bool {
 				..
 			}) => rows = data.operands.first().copied(),
 			OpKind::Phys(PhysOp::Union) => return true,
-			_ => return false,
-		}
-	}
-	false
-}
-
-/// Whether the select loop `looped` reads, directly or under a table's enforcement, one table
-/// scan of a table that defines no vector index, or a table that is not defined. A table whose
-/// indexes the memo does not hold is not one.
-fn unindexed_read(ir: &Ir, looped: OpId, cx: &PhysCx<'_>) -> bool {
-	let mut rows = ir.op(looped).and_then(|data| data.operands.first().copied());
-	while let Some(value) = rows.take() {
-		let Some(ValueDef::OpResult {
-			op,
-			..
-		}) = ir.value(value).map(|data| data.def)
-		else {
-			return false;
-		};
-		let Some(data) = ir.op(op) else {
-			return false;
-		};
-		match &data.kind {
-			OpKind::Phys(PhysOp::Enforced {
-				..
-			}) => rows = data.operands.first().copied(),
-			OpKind::Phys(PhysOp::Vacant {
-				..
-			}) => return true,
-			OpKind::Phys(PhysOp::TableScan(attrs)) => {
-				return match cx.physical.indexes(&attrs.table) {
-					CatalogAnswer::Found(indexes) => !indexes.iter().any(|index| {
-						matches!(
-							index.index,
-							crate::catalog::Index::Hnsw(_) | crate::catalog::Index::DiskAnn(_)
-						)
-					}),
-					CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => {
-						false
-					}
-				};
-			}
 			_ => return false,
 		}
 	}
@@ -1239,8 +1193,12 @@ fn settle(
 		Target::Literal(vector) => (KnnTargetShape::Literal(vector), None),
 		Target::Deferred(value) => {
 			let text = vector_text(rw.ir(), ranked.region, value)?;
+			let before_rows = matches!(
+				defining_op(rw.ir(), value).and_then(|op| rw.ir().op(op)).map(|data| &data.kind),
+				Some(OpKind::Expr(ExprOp::FreeParam { .. } | ExprOp::CatalogParam { .. }))
+			);
 			(
-				KnnTargetShape::Deferred(text),
+				KnnTargetShape::Deferred(text, before_rows),
 				Some(rowless_value_copy(rw, ranked.region, value, looped)?),
 			)
 		}
@@ -1453,8 +1411,9 @@ fn collect_operators(ir: &Ir, region: RegionId, out: &mut Vec<OpId>) {
 	}
 }
 
-/// Replaces the operator `op` by the literal `answered`, and erases what only it read.
-fn answer(rw: &mut Rewriter<'_>, op: OpId, answered: bool) -> Result<(), IrError> {
+/// Replaces the operator `op` by the literal `answered`, erases what only it read, and answers the
+/// literal's op.
+fn answer(rw: &mut Rewriter<'_>, op: OpId, answered: bool) -> Result<OpId, IrError> {
 	let data = rw.ir().op(op).ok_or(IrError::Stale("op"))?.clone();
 	let kind = ExprOp::Literal(Box::new(Value::Bool(answered)));
 	let ty = result_type(&kind, &[]);
@@ -1491,7 +1450,7 @@ fn answer(rw: &mut Rewriter<'_>, op: OpId, answered: bool) -> Result<(), IrError
 		rw.erase(producer, EliminationReason::DeadPure)?;
 		pending.extend(operands);
 	}
-	Ok(())
+	Ok(literal)
 }
 
 /// The query vector `value`, which the `Clause(Where)` region `region` computes, as the statement

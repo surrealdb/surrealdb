@@ -91,7 +91,7 @@ DEFINE FUNCTION fn::d() { DEFINE TABLE smuggled; RETURN 1; };
 DEFINE FIELD h ON t3 COMPUTED fn::d();
 
 -- A read-only function is accepted.
-DEFINE FUNCTION fn::r($x) { RETURN $x * 2; };
+DEFINE FUNCTION fn::r($x: int) { RETURN $x * 2; };
 DEFINE FIELD ok ON t4 COMPUTED fn::r(2);
 
 -- A sequence draw is accepted.

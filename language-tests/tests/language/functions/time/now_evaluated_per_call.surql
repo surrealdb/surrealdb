@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Every clock read answers one instant per top-level statement (register row #7), whatever the position: a projection, a data clause and an insert source over many rows each read the clock once for the statement, so the rows of one statement all hold the same value, and a later statement reads a later instant, which every record the earlier statements stamped lies at or before."
+reason = "Every clock read answers one instant per statement (register row #7), whatever the position: a projection, a data clause and an insert source over many rows each read the clock once for the statement, so the rows of one statement all hold the same value, and a later statement reads a later instant, which every record the earlier statements stamped lies at or before."
 
 [[test.results]]
 value = "true"

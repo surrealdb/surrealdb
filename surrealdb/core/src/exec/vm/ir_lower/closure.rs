@@ -36,12 +36,8 @@
 //!
 //! `expr.closure_create` is an [`Instr::MakeClosure`]: the value is the closure the literal
 //! states, carrying what its body captures and no code. Its operands are the captured values, one
-//! per name of its attributes in order, then the row when the body reads one, and then the
-//! document root where the literal stands in a body whose element is not the root. A captured
-//! value is read from the register that holds it. A row or root that is the row of the pipeline
-//! being lowered has no operand, because the host holds that row. Any other row is the element of
-//! the enclosing body, and any other root the root a step's argument reads, each read from its
-//! register.
+//! per name of its attributes in order, each read from the register that holds it. The value reads
+//! no row: its body runs over the row of the frame that invokes it.
 //!
 //! The body runs as a unit of the program: the op asks for it as
 //! [`UnitRequest::ClosureBody`], keyed by the digest of the closure as written, and the value's
@@ -63,9 +59,7 @@
 
 use std::sync::Arc;
 
-use super::super::program::{
-	ClosureDigest, ClosureValueSpec, Instr, Operand, RowCaptures, RowKind,
-};
+use super::super::program::{ClosureDigest, ClosureValueSpec, Instr, Operand};
 use super::expr::{Lowerer, exactly, invariant, not_yet, region_at};
 use super::units::UnitRequest;
 use crate::exec::AccessMode;
@@ -229,33 +223,18 @@ impl Lowerer<'_> {
 				"ir_lower::closure: a closure parsed from text carries no literal",
 			));
 		};
-		let names = attrs.captures.len();
-		let (captured, row, root) = match data.operands.len() {
-			held if held == names => (data.operands.as_slice(), None, None),
-			held if held == names + 1 => (&data.operands[..names], data.operands.get(names), None),
-			held if held == names + 2 => {
-				(&data.operands[..names], data.operands.get(names), data.operands.get(names + 1))
-			}
-			_ => return Err(IrError::Stale("ir_lower::closure: operand arity")),
-		};
+		if data.operands.len() != attrs.captures.len() {
+			return Err(IrError::Stale("ir_lower::closure: operand arity"));
+		}
 		let slot_operands =
-			captured.iter().map(|value| self.value(*value)).collect::<Result<Vec<_>, _>>()?;
-		let (row_kind, row_operand) = match row {
-			None => (None, None),
-			Some(row) if self.is_pipeline_row(*row) => (Some(RowKind::PipelineRow), None),
-			Some(row) => (Some(RowKind::Element), Some(self.value(*row)?)),
-		};
-		let (root_kind, root_operand) = match root {
-			None => (None, None),
-			Some(root) if self.is_pipeline_row(*root) => (Some(RowKind::PipelineRow), None),
-			Some(root) => (Some(RowKind::StepRoot), Some(self.value(*root)?)),
-		};
+			data.operands.iter().map(|value| self.value(*value)).collect::<Result<Vec<_>, _>>()?;
 		let slots: Vec<String> =
 			attrs.captures.iter().map(|name| name.as_str().to_owned()).collect();
 		let framed = free_names(self.ir, body, &slots);
 		let digest = ClosureDigest::of(literal);
 		let unit = self.unit_for(UnitRequest::ClosureBody {
 			digest,
+			captures: slots.clone(),
 		})?;
 		let index = self.em.closure_value(ClosureValueSpec {
 			closure: Arc::clone(literal),
@@ -266,17 +245,12 @@ impl Lowerer<'_> {
 			frame: self.frame.program,
 			// The compile driver writes the access mode of the lowered body unit here.
 			access_mode: AccessMode::ReadOnly,
-			row_captures: RowCaptures {
-				row: row_kind,
-				root: root_kind,
-			},
+			reads_row: attrs.reads_row,
 		})?;
 		let dst = self.em.reg()?;
 		self.emit(Instr::MakeClosure {
 			closure: index,
 			slots: slot_operands,
-			row: row_operand,
-			root: root_operand,
 			dst,
 		});
 		Ok(Operand::Reg(dst))
@@ -311,6 +285,7 @@ impl Lowerer<'_> {
 			args,
 			dst,
 			frame: self.frame.program,
+			elem: self.element(),
 		});
 		self.keeps_row_order = true;
 		// A callee that no closure literal makes may write, so the invocation counts as a write.
@@ -671,10 +646,20 @@ mod tests {
 			let one = b.literal(crate::val::Value::from(1_i64));
 			b.add_phys(PhysOp::Eval, &[one]);
 			b.physical();
-			// A loop with no body region defines no value, and the lowering refuses it.
+			// A loop with no body region defines no value. The statement list refuses it as a
+			// stale form where it checks the loop's regions, and as a loop it has no lowering for
+			// otherwise.
+			let lowered = crate::exec::vm::ir_lower::lower(&b.ir, &FactCache::new());
 			assert!(
-				crate::exec::vm::ir_lower::lower(&b.ir, &FactCache::new()).is_err(),
-				"{kind:?}"
+				matches!(
+					lowered,
+					Err(IrError::Stale("ir_lower::block: region arity")
+						| IrError::NotYet {
+							what: "ir_lower::lower: phys.loop"
+						})
+				),
+				"{kind:?}: {:?}",
+				lowered.err()
 			);
 		}
 	}
@@ -820,6 +805,7 @@ mod tests {
 			args,
 			dst,
 			frame,
+			elem,
 		} = &code[invoke]
 		else {
 			unreachable!()
@@ -827,6 +813,7 @@ mod tests {
 		assert_eq!(*target, src);
 		assert_eq!(args.len(), 2);
 		assert_eq!(*frame, None);
+		assert_eq!(*elem, None, "outside an element body the invocation runs over the row");
 		assert_eq!(operand, Operand::Reg(*dst));
 		assert!(needs.keeps_row_order);
 	}
@@ -870,6 +857,8 @@ mod tests {
 			returns: None,
 			body_sql: Arc::from("NONE"),
 			captures: captures.iter().map(surrealdb_strand::Strand::new).collect(),
+			reads_row: false,
+			reads_root: false,
 			literal: ClosureLiteral::none_written_as("NONE"),
 		}
 	}
@@ -919,8 +908,6 @@ mod tests {
 		let Instr::MakeClosure {
 			closure,
 			slots,
-			row,
-			root,
 			dst,
 		} = &code[make]
 		else {
@@ -928,7 +915,6 @@ mod tests {
 		};
 		assert_eq!(operand, Operand::Reg(*dst));
 		assert_eq!(slots.len(), 1);
-		assert!(row.is_none() && root.is_none());
 		// The captured value is read where the literal is written, and the closure is made once.
 		assert_eq!(code.iter().filter(|i| matches!(i, Instr::MakeClosure { .. })).count(), 1);
 		let spec = &program.closure_values[*closure as usize];
@@ -936,13 +922,14 @@ mod tests {
 		assert_eq!(spec.framed, ["g"]);
 		assert_eq!(spec.frame, None);
 		assert_eq!(spec.access_mode, AccessMode::ReadOnly);
-		assert_eq!(spec.row_captures, RowCaptures::default());
+		assert!(!spec.reads_row);
 		// The body is the unit the request names, keyed by the digest of the literal.
 		assert_eq!(
 			needed,
 			vec![Needed {
 				request: UnitRequest::ClosureBody {
-					digest: spec.digest
+					digest: spec.digest,
+					captures: vec!["a".to_owned()],
 				},
 				id: spec.body,
 			}]
@@ -962,94 +949,6 @@ mod tests {
 		assert_eq!(program.closure_values.len(), 2, "each site has its own entry");
 		assert_eq!(program.closure_values[0].body, program.closure_values[1].body);
 		assert_eq!(needed.len(), 1, "the body is asked for once");
-	}
-
-	#[test]
-	fn a_closure_that_captures_the_element_of_its_body_holds_the_register_it_is_read_from() {
-		// `xs[WHERE |$a| ..]`: the literal stands in the body of the filter and reads the element.
-		let mut b = Builder::new();
-		let xs = param(&mut b, "xs");
-		let looped = b.add_phys_value(loop_of(LoopKind::ElementFilter), &[xs]);
-		b.open_with(
-			looped,
-			RegionKind::Loop,
-			&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
-			|b, args| {
-				let made = make_closure(b, closure_attrs(&[]), &[args[0]], |b, _| param(b, "g"));
-				let truth = b.add(ExprOp::Truthy, &[made]);
-				b.yield_phys(truth);
-			},
-		);
-		let result = b.result_of(looped);
-		let mut cx = LowerCx::detached();
-		let (_, program, _) = lower_in(&mut cx, &b.ir, result).expect("the literal lowers");
-		let code = code_of(&program);
-		let Instr::ElemNext {
-			elem: element,
-			..
-		} = code[position(code, |i| matches!(i, Instr::ElemNext { .. }))]
-		else {
-			unreachable!()
-		};
-		let Instr::MakeClosure {
-			closure,
-			row,
-			..
-		} = &code[position(code, |i| matches!(i, Instr::MakeClosure { .. }))]
-		else {
-			unreachable!()
-		};
-		assert_eq!(*row, Some(Operand::Reg(element)));
-		let spec = &program.closure_values[*closure as usize];
-		assert_eq!(
-			spec.row_captures,
-			RowCaptures {
-				row: Some(RowKind::Element),
-				root: None
-			}
-		);
-	}
-
-	#[test]
-	fn a_closure_that_captures_the_pipelines_row_holds_no_operand_for_it() {
-		let mut b = Builder::new();
-		let left = param(&mut b, "l");
-		let owner = b.add_with_regions(
-			ExprOp::ShortCircuit {
-				op: crate::exec::ir::expr::ops::ShortCircuitOp::And,
-			},
-			&[left],
-		);
-		let mut row = None;
-		b.region_with_args(owner, RegionKind::LazyOperand, &[TypeKnowledge::Unknown], |b, args| {
-			row = Some(args[0]);
-			make_closure(b, closure_attrs(&[]), &[args[0]], |b, _| param(b, "g"))
-		});
-		let result = b.result_of(owner);
-		let mut em = Emitter::new();
-		let mut cx = LowerCx::detached();
-		let mut lowerer = Lowerer::in_context(&mut em, &b.ir, &mut cx);
-		lowerer.bind_row(row.expect("the region has a row"), true);
-		lowerer.value(result).expect("the literal lowers");
-		em.emit(Instr::EndRow);
-		let pipeline = em.finish_pipeline(Source::Once).expect("the pipeline ends");
-		let program = em.finish_program(vec![pipeline], AccessMode::ReadOnly).expect("a program");
-		let Some(Instr::MakeClosure {
-			closure,
-			row,
-			..
-		}) = code_of(&program).iter().find(|i| matches!(i, Instr::MakeClosure { .. }))
-		else {
-			panic!("the closure is made")
-		};
-		assert!(row.is_none(), "the host holds the pipeline's own row");
-		assert_eq!(
-			program.closure_values[*closure as usize].row_captures,
-			RowCaptures {
-				row: Some(RowKind::PipelineRow),
-				root: None
-			}
-		);
 	}
 
 	#[test]
@@ -1098,7 +997,7 @@ mod tests {
 			framed: Vec::new(),
 			frame: None,
 			access_mode: AccessMode::ReadWrite,
-			row_captures: RowCaptures::default(),
+			reads_row: false,
 		})
 		.expect("the spec is held");
 		let program = em.finish_program(Vec::new(), AccessMode::ReadOnly).expect("a program");

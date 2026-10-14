@@ -272,6 +272,24 @@ impl Ddl<'_, '_> {
 			});
 		}
 		let template = self.constant(template_value)?;
+		// The functions a `COMPUTED` body calls, judged against the catalog as the statements
+		// before this one leave it, and skipped on an import, which restores a callee after the
+		// field that names it.
+		if definition.computed.is_some() {
+			let import = self.label()?;
+			self.store(StoreInstr::JumpIfImport {
+				target: import,
+			});
+			let computed_field = self.load(template)?;
+			self.store(StoreInstr::FieldCheck {
+				check: FieldCheck::ComputedCallees {
+					field: computed_field,
+					ns,
+					db,
+				},
+			});
+			self.bind(import)?;
+		}
 		// The record id components an `id` names, judged against the catalog and the rows of the
 		// table's views as the statements before this one leave them.
 		if name.is_id() {

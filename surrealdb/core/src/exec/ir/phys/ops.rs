@@ -928,8 +928,10 @@ pub(crate) struct KnnScanAttrs {
 pub(crate) enum KnnTargetShape {
 	Literal(Vec<Number>),
 	/// The vector is the value of the op's last operand, written as `text`: the text a refusal of
-	/// its value names.
-	Deferred(String),
+	/// its value names. With `before_rows`, the operand is a parameter the request binds or the
+	/// catalog stores, which the statement evaluates before it reads a row: an unrankable one
+	/// refuses the statement whatever it reads, as one known when the statement is planned does.
+	Deferred(String, bool),
 }
 
 /// The attributes of a brute-force nearest-neighbour search.

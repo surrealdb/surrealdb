@@ -55,16 +55,14 @@
 //! does not lower for the frame fails each invocation with the reason, or
 //! with the error its compilation reports, kept once per closure and frame.
 //!
-//! The unit is one pipeline over the row the value captured where its literal
-//! was written — the document root the literal read, or the current value it
-//! read where it read no document root, which the run marks so the body reads
-//! it as no document, with the current value as the body's element where it
-//! reads both ([`RowBits`]) — emitting the body's value, and each invocation
-//! runs it over a state of its own: nothing one invocation computes — a
-//! statement the body evaluates once per run, a sort, a page — is seen by the
-//! next. The invoking frame's row is never read. A body invoked from a
-//! computed field in the middle of computing it runs with the record being
-//! computed, as the field's own expression does.
+//! The unit is one pipeline over the invocation's row — its document root,
+//! or its current value where it has no document, which the run marks so the
+//! body reads it as no document — emitting the body's value, and each
+//! invocation runs it over a state of its own: nothing one invocation
+//! computes — a statement the body evaluates once per run, a sort, a page —
+//! is seen by the next. A body invoked from a computed field in the middle
+//! of computing it runs with the record being computed, as the field's own
+//! expression does.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -921,14 +919,12 @@ fn captured(closure: &CompiledClosure) -> Vec<String> {
 /// `ctx` with the arguments `bound`, in a frame holding `registry` where the
 /// invocation brings a table of its own.
 ///
-/// The unit's row is the document root the value captured, and where it
-/// holds none the current value it captured, which the body then reads as no
-/// document ([`super::interp::State::undocumented`]); a value that captured
-/// neither runs the unit rowless. A value that captured both binds the
-/// current value as the body's element, held by the invocation's state beside
-/// the slots ([`super::program::Instr::LoadElement`]). The invocation's own row is never read,
-/// except by a stored clause evaluated as a unit, which is the expression of
-/// the row it is invoked over.
+/// The unit's row is the invocation's document root, and where it has none
+/// its current value, which the body then reads as no document
+/// ([`super::interp::State::undocumented`]). Where that document is a KNN
+/// query vector's row being scanned, the body runs over no row in the
+/// caller's context, which refuses a read of that row when the body makes
+/// one: a body that only hands the row on, to a statement or a call, runs.
 async fn run_body(
 	held: &RunUnit,
 	head: &ClosureHead,
@@ -941,21 +937,22 @@ async fn run_body(
 		return Err(forbidden.error());
 	}
 	let (program, units) = (&held.unit, &held.table);
-	let (current, root) = closure.captured_rows();
 	if head.rows != closure.rows() {
 		return Err(internal("a closure unit run for a value holding other row captures"));
 	}
-	// A stored clause evaluated as a unit runs over the row it is evaluated
-	// against, as its document or, where it has none, as its current value.
-	// Where that document is a KNN query vector's row being scanned, the body
-	// runs over no row in the caller's context, which refuses a read of it.
-	let (row, undocumented, forbidden) = if closure.runs_over_invoking_row() {
-		let access = ctx.document();
-		let forbidden = matches!(access, crate::exec::context::RowAccess::Forbidden(_));
-		let undocumented = !ctx.root_document().is_present() && ctx.value_in_scope().is_present();
-		(access.within_context(), undocumented, forbidden)
-	} else {
-		(root.or(current).map(|captured| &**captured), root.is_none() && current.is_some(), false)
+	let access = ctx.document();
+	let forbidden = matches!(access, crate::exec::context::RowAccess::Forbidden(_));
+	let undocumented = !ctx.root_document().is_present() && ctx.value_in_scope().is_present();
+	// From an element filter's body the row is the element and the document root stays the row
+	// the filter is applied over, which a bare field and an index or method argument read apart.
+	let element_row = ctx.in_element() && ctx.root_document().is_present();
+	let root = match element_row {
+		true => ctx.root_document().within_context().cloned(),
+		false => None,
+	};
+	let row = match element_row {
+		true => ctx.value_in_scope().within_context(),
+		false => access.within_context(),
 	};
 	let has_row = row.is_some();
 	let captures = &closure.captures().0;
@@ -964,9 +961,6 @@ async fn run_body(
 	for name in &head.slots[args..] {
 		slots.push(captures.get(name.as_str()).cloned().unwrap_or(Value::None));
 	}
-	// A value that captured both binds the current value as the body's
-	// element, shared with it rather than copied.
-	let element = current.filter(|_| root.is_some());
 	#[cfg(test)]
 	BODIES_RUN.with(|run| run.set(run.get() + 1));
 	// An invocation computing a record, or whose reads waive the checks its
@@ -977,8 +971,8 @@ async fn run_body(
 		&& (!ctx.skip_fetch_perms || ctx.exec_ctx.root().skip_fetch_perms)
 	{
 		// Nothing the unit runs reads the frame or re-enters, so it runs in
-		// place in the caller's frame, over the row the value captured; the
-		// call still spends the depth it would.
+		// place in the caller's frame, over the row where it is; the call
+		// still spends the depth it would.
 		let exec = ctx.exec_ctx;
 		if closure.dives() && exec.options().is_some_and(|options| options.dive < 1) {
 			return Err(crate::exec::Error::ComputationDepthExceeded.into());
@@ -991,8 +985,8 @@ async fn run_body(
 			state.permissions_bypassed = ctx.skip_fetch_perms;
 			state.rowless = !has_row;
 			state.undocumented = undocumented;
+			state.root.clone_from(&root);
 			state.slots = slots;
-			state.element = element.map(Arc::clone);
 			state.keep_slots_now(exec)?;
 			Ok(state)
 		};
@@ -1040,8 +1034,8 @@ async fn run_body(
 	state.permissions_bypassed = ctx.skip_fetch_perms;
 	state.rowless = !has_row;
 	state.undocumented = undocumented;
+	state.root = root;
 	state.slots = slots;
-	state.element = element.map(Arc::clone);
 	state.keep_slots(&running).await?;
 	let program = Arc::clone(program);
 	// Run on the statement's frame stack, so a body that invokes its own

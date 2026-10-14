@@ -1135,20 +1135,23 @@ mod tests {
 	}
 
 	/// A computed field that calls a function with effects refuses the chain that derives it,
-	/// whether the answer holds the field or not.
+	/// whether the answer holds the field or not. `DEFINE FIELD` refuses a COMPUTED body whose
+	/// callee writes when the field is defined, so the writing body of `fn::touch_page` is
+	/// defined after the field; only the summary sees it.
 	#[tokio::test]
 	async fn a_computed_field_calling_a_function_refuses_by_its_summary() {
 		let fixture = Fixture::new(
 			"
 			DEFINE SEQUENCE s;
 			DEFINE TABLE page SCHEMALESS;
-			DEFINE FUNCTION fn::touch_page($id: record) {
-				UPSERT stats:reads SET n += 1;
-				RETURN time::now()
-			};
+			DEFINE FUNCTION fn::touch_page($id: record) { RETURN time::now() };
 			DEFINE FUNCTION fn::draw() { LET $n = 1; RETURN sequence::nextval('s') };
 			DEFINE FIELD last_read ON page COMPUTED fn::touch_page(id);
 			DEFINE FIELD drawn ON page COMPUTED fn::draw();
+			DEFINE FUNCTION OVERWRITE fn::touch_page($id: record) {
+				UPSERT stats:reads SET n += 1;
+				RETURN time::now()
+			};
 			",
 		)
 		.await;

@@ -216,7 +216,9 @@ pub struct Session {
 	///
 	/// Server-computed: nothing a client sends populates it. `session` is in
 	/// [`surrealdb_cnf::PROTECTED_PARAM_NAMES`], so `LET`, `UNSET`, `db.set`
-	/// and the RPC `set`/`unset` methods all refuse to bind the name.
+	/// and the RPC `set`/`unset` methods all refuse to bind the name, as they
+	/// do each name the system binds in a frame
+	/// ([`surrealdb_cnf::SYSTEM_BOUND_PARAM_NAMES`]).
 	///
 	/// SECURITY: that is not the same as unforgeable, and this field must not
 	/// be documented as if it were. Only those statement forms consult the

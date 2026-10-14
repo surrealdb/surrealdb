@@ -58,6 +58,10 @@ pub(super) struct Catch {
 	/// Whether a `BREAK` or `CONTINUE` is an error there, as it is in a
 	/// record-id key element, which no loop encloses.
 	pub(super) loops_fail: bool,
+	/// Where the body jumps on a `BREAK` and on a `CONTINUE`, when a `FOR` of
+	/// the program's own code takes them; `None` lets the signal propagate.
+	pub(super) on_break: Option<Label>,
+	pub(super) on_continue: Option<Label>,
 }
 
 /// Where a `RETURN` a block statement raises is taken, by the `LET` or
@@ -210,13 +214,6 @@ pub(super) enum Instr {
 		slot: u16,
 		dst: Reg,
 	},
-	/// `dst` = the current value a closure value captured at its literal,
-	/// which the invocation holds beside the slots
-	/// ([`State::element`](super::interp::State)): the body's element where
-	/// the value also captured the document root.
-	LoadElement {
-		dst: Reg,
-	},
 	/// `dst` = key `key` of the sorted row the pipeline is running: a value a
 	/// projection shares with the sort beneath it.
 	SortKey {
@@ -299,22 +296,29 @@ pub(super) enum Instr {
 	},
 	/// `dst` = builtin [`Program::calls`]`[call]` applied to `args`, invoked
 	/// by name through the function registry in permission frame `frame`
-	/// when set, and otherwise in the frame the body runs in.
+	/// when set, and otherwise in the frame the body runs in. The call is
+	/// evaluated against `elem` as its value in scope where it is set — the
+	/// element a body is evaluated against — and against the row otherwise;
+	/// its document is the row either way.
 	Call {
 		call: u32,
 		args: Vec<Operand>,
 		dst: Reg,
 		frame: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// Enter user-defined function [`Program::functions`]`[function]`, called
 	/// from permission or call frame `outer` when set: read its definition,
 	/// check it is the one the program was lowered for, check it may be
 	/// called and open call frame `frame`, under the definer's auth, for its
-	/// arguments to be evaluated in.
+	/// arguments to be evaluated in. Its `PERMISSIONS` clause is judged over
+	/// `elem` where it is set — the element a body is evaluated against, which
+	/// the body then runs over — and over the row otherwise.
 	FunctionEnter {
 		function: u32,
 		frame: u16,
 		outer: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// Bind `args`, the arguments of the function entered into call frame
 	/// `frame`, as its definition declares them, into the registers from
@@ -335,13 +339,16 @@ pub(super) enum Instr {
 		dst: Reg,
 	},
 	/// `dst` = the function entered into call frame `frame`, applied to
-	/// `args` and run as its body's subroutine; the frame closes.
+	/// `args` and run as its body's subroutine, over `elem` where it is set —
+	/// the element a body is evaluated against — and over the row otherwise;
+	/// the frame closes.
 	FunctionCall {
 		function: u32,
 		frame: u16,
 		args: Vec<Operand>,
 		dst: Reg,
 		outer: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// `dst` = `src` converted to an array as builtin
 	/// [`Program::calls`]`[call]` converts its argument at 1-based
@@ -387,7 +394,8 @@ pub(super) enum Instr {
 	/// permission frame `frame` when set. A `RETURN` the subquery signals is
 	/// its own value, stored in `caught`'s register before jumping to its
 	/// label, when the expression takes one, and a `BREAK` or `CONTINUE` is an
-	/// error where `caught` says so; otherwise the signal propagates, and out
+	/// error where `caught` says so and jumps to its pad where `caught` names
+	/// one; otherwise the signal propagates, and out
 	/// of a projection layer's column frame ([`PermissionSpec::column`]) any
 	/// signal is an error.
 	Subquery {
@@ -400,16 +408,10 @@ pub(super) enum Instr {
 	/// `dst` = the value closure literal [`Program::closure_values`]`[closure]`
 	/// makes: the parameters its body reads captured where it is written,
 	/// those the program holds itself from `slots`, in the order its closure value spec lists them,
-	/// and the rest from the frame, and the row it reads there: the current value
-	/// from `row` and the document root from `root`, each where the
-	/// [`ClosureValueSpec::row_captures`] names one of a kind that holds
-	/// its value in a register. A capture of the row the pipeline runs over has
-	/// no operand: the host holds that row.
+	/// and the rest from the frame. It reads no row.
 	MakeClosure {
 		closure: u32,
 		slots: Vec<Operand>,
-		row: Option<Operand>,
-		root: Option<Operand>,
 		dst: Reg,
 	},
 	/// `dst` = the closure the object in `recv` holds in field `name`, raising
@@ -426,12 +428,14 @@ pub(super) enum Instr {
 		src: Operand,
 	},
 	/// `dst` = the closure in `target` invoked with `args`, from frame
-	/// `frame` when set.
+	/// `frame` when set. Where `elem` is set the body runs over the element in
+	/// it, the document root staying the row, as from an element body.
 	Invoke {
 		target: Operand,
 		args: Vec<Operand>,
 		dst: Reg,
 		frame: Option<u16>,
+		elem: Option<Reg>,
 	},
 	/// `dst` = graph lookup [`Program::lookups`]`[lookup]` from the value
 	/// in `src`: an array of what the hops reach, flattened over an array of origins, or `NONE`
@@ -990,6 +994,10 @@ pub(super) enum BlockInstr {
 	/// catalog allows, in the current frame and in every saved one: a schema
 	/// statement just run may have created, removed or replaced either.
 	Resolve,
+	/// Start a statement of the block: the current frame answers every CLOCK
+	/// read with the instant this takes, until the frame is restored or the
+	/// next statement of the block starts.
+	Clock,
 	/// Raise `RETURN` with the value in `value`.
 	Return {
 		value: Reg,
@@ -1019,8 +1027,9 @@ pub(super) enum BlockInstr {
 	/// them: a scalar statement's last value or `NONE`, otherwise its rows as
 	/// an array. A `RETURN` it signals is its own value, stored in `caught`'s
 	/// register before jumping to its label, when the expression takes one,
-	/// and a `BREAK` or `CONTINUE` is an error where `caught` says so;
-	/// otherwise the signal propagates.
+	/// and a `BREAK` or `CONTINUE` is an error where `caught` says so and
+	/// jumps to its pad where `caught` names one; otherwise the signal
+	/// propagates.
 	Nested {
 		nested: u32,
 		dst: Reg,
@@ -1096,18 +1105,13 @@ pub(crate) struct ServedSpec {
 }
 
 /// What `EXPLAIN ANALYZE` of a statement a block runs renders, fixed when the
-/// query arrives: the text of the statement's plan, cut where every operator
-/// of it writes the one set of metrics the run of the statement records, or
-/// its JSON with those metrics to fill, and whether the volatile metrics are
-/// left out.
+/// query arrives: the display tree of the statement's plan with the bitmap
+/// trees measured after the run, the format it renders in, and whether the
+/// volatile metrics are left out.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Analysis {
-	/// The rendering of the plan between the places its metrics are written
-	/// (`exec::operators::explain::analyze_text_pieces`).
-	pub(super) pieces: Vec<String>,
-	/// For `FORMAT JSON`, the plan's JSON whose `metrics` objects the run
-	/// fills (`exec::operators::explain::analyze_json_template`).
-	pub(super) json: Option<super::plain::ValueData<Value>>,
+	pub(super) plan: super::explain::AnalysedPlan,
+	pub(super) format: crate::expr::ExplainFormat,
 	/// Whether elapsed time and batch counts are left out.
 	pub(super) redact: bool,
 }
@@ -2640,6 +2644,16 @@ pub(super) enum FieldCheck {
 		db: Reg,
 		kind: crate::expr::statements::define::DefineKind,
 	},
+	/// The user-defined functions the `COMPUTED` body of the definition in
+	/// `field` calls are read-only in the catalog of the database `ns`, `db`
+	/// as the check runs, so a callee an earlier statement of the request
+	/// defines is judged by that definition and one not defined yet counts as
+	/// a writer (`ddl::define::field::define_field_statement_validate_computed_callees`).
+	ComputedCallees {
+		field: Reg,
+		ns: Reg,
+		db: Reg,
+	},
 	/// No definition of the table named in `table` reads a component of its
 	/// record id, judged against the catalog of the database `ns`, `db` and
 	/// the rows its views hold, so `REMOVE FIELD id` may remove its `id`
@@ -2802,6 +2816,8 @@ pub(super) enum WriteInstr {
 	},
 	SavepointPush,
 	SavepointRelease,
+	/// Undo the attempt's writes to its savepoint for a held error; for a held
+	/// `BREAK`, `CONTINUE` or `RETURN`, release the savepoint, keeping them.
 	SavepointRollback,
 	/// Open a region whose failure resumes the body at `handler`.
 	TryBegin {
@@ -2809,7 +2825,8 @@ pub(super) enum WriteInstr {
 	},
 	/// Close the innermost region.
 	TryEnd,
-	/// The record's writes were rolled back: it counts as not written.
+	/// The record's writes were rolled back for a held error: it counts as not
+	/// written. A held signal leaves it as it stands.
 	ClearMutated,
 	/// Propagate a held `BREAK`, `CONTINUE` or `RETURN`.
 	RethrowSignal,
@@ -2943,6 +2960,11 @@ impl Instr {
 			| Instr::Jump {
 				target,
 			} => vec![target],
+			Instr::VerdictJump {
+				admitted,
+				refused,
+				..
+			} => vec![admitted, refused],
 			Instr::TryNone {
 				catch,
 				..
@@ -2988,7 +3010,14 @@ impl Instr {
 					caught,
 					..
 				},
-			) => caught.iter_mut().map(|catch| &mut catch.label).collect(),
+			) => caught
+				.iter_mut()
+				.flat_map(|catch| {
+					std::iter::once(&mut catch.label)
+						.chain(catch.on_break.as_mut())
+						.chain(catch.on_continue.as_mut())
+				})
+				.collect(),
 			Instr::MethodResolve {
 				closure,
 				..
@@ -3547,6 +3576,10 @@ pub(super) struct DeferredVector {
 pub(super) struct KnnQuery {
 	pub(super) vector: DeferredVector,
 	pub(super) group: Option<u16>,
+	/// Whether a run of the group evaluates a brute-force ranking's vector as it starts, before
+	/// any row is read: a parameter the request binds or the catalog stores, which refuses the
+	/// statement when unrankable whatever it reads.
+	pub(super) before_rows: bool,
 }
 
 /// The ordering of one sort key.
@@ -4190,53 +4223,18 @@ pub(super) struct ClosureValueSpec {
 	pub(super) frame: Option<u16>,
 	/// What invoking the literal's body does to the transaction.
 	pub(super) access_mode: AccessMode,
-	/// The row the literal captures where it is written.
-	pub(super) row_captures: RowCaptures,
+	/// Whether the literal's body reads the row of the frame that invokes it.
+	pub(super) reads_row: bool,
 }
 
 assert_plain!(ClosureValueSpec);
 
-/// What a closure literal captures of the row where it is written, apart from
-/// the parameters it names: the current value, which its fields, `$this` and
-/// `@` read, and the document root, which its index and method arguments and
-/// its statements read. Each is held by the value the literal makes and is
-/// not a parameter: no name carries it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct RowCaptures {
-	/// The current value at the literal.
-	pub(super) row: Option<RowKind>,
-	/// The document root at the literal.
-	pub(super) root: Option<RowKind>,
-}
-
-assert_plain!(RowCaptures);
-
-/// Where a row capture is read from where the literal is written, which the
-/// host answers by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RowKind {
-	/// The element of an element, broadcast, optional or destructure body:
-	/// the register the capture operand names.
-	Element,
-	/// The root an index or a method argument is evaluated against, where the
-	/// literal is itself one: the register the capture operand names.
-	StepRoot,
-	/// The row the pipeline runs over. The capture has no operand, and the
-	/// host captures the pipeline's row, or none where the pipeline has no row.
-	PipelineRow,
-}
-
-assert_plain!(RowKind);
-
-/// Which row captures a closure value holds, and a body unit expects: the unit
-/// reads its element from the current value held and is run over the document
-/// root held, or over none.
+/// Which rows a closure body unit is lowered to take: the invoking row where
+/// the body reads one.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) struct RowBits {
-	/// The value holds the current value of the literal.
+	/// The body reads the invoking row.
 	pub(super) row: bool,
-	/// The value holds the document root of the literal.
-	pub(super) root: bool,
 }
 
 assert_plain!(RowBits);
@@ -4245,7 +4243,7 @@ assert_plain!(RowBits);
 /// unit is lowered to. A kept unit is keyed by it, so a unit lowered for
 /// another version is never linked; it changes whenever an instruction, an
 /// operand or a spec changes what it means.
-pub(crate) const ISA_VERSION: u32 = 3;
+pub(crate) const ISA_VERSION: u32 = 5;
 
 /// The content digest of a closure as written: SHA-256 over the canonical
 /// encoding [`Self::of`] states. It is the code reference a closure value
@@ -5052,11 +5050,6 @@ pub(super) struct CallSpec {
 	/// ([`ScalarFunction::closure_args`](crate::exec::function::ScalarFunction::closure_args)):
 	/// the operands [`Instr::Call`] links a unit for before the call.
 	pub(super) closure_args: Vec<u16>,
-	/// Whether the call is lowered in a closure body unit that holds its
-	/// current value beside the document root, at the level of the unit
-	/// itself, so that it reads the captured current value
-	/// ([`State::element`]) and not the row of a pipeline it stands in.
-	pub(super) reads_element: bool,
 }
 
 /// A `MATCHES` operator a body evaluates against the row: what it probes

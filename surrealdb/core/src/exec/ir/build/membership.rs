@@ -193,6 +193,7 @@ fn membership_filter(join: LogicalJoin) -> Result<LogicalOp, IrError> {
 				value: Box::new(LogicalOp::Eval(LogicalEval {
 					expr: outer_key,
 				})),
+				synthetic: true,
 			}));
 			LogicalExpr::Param(crate::expr::Param::from(name))
 		} else {

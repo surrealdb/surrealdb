@@ -63,6 +63,8 @@ fn propagate_op(op: &mut LogicalOp, scope: &mut Scope) {
 			}
 		}
 		LogicalOp::Throw(throw) => substitute(&mut throw.value, scope),
+		// The explained statement reads the constants as the statement it explains would.
+		LogicalOp::Explain(explain) => propagate_op(&mut explain.input, scope),
 		LogicalOp::Break(_) | LogicalOp::Continue(_) | LogicalOp::Sleep(_) => {}
 		LogicalOp::Eval(eval) => propagate_expr(&mut eval.expr, scope),
 		// A statement that is no block, binding or control flow binds nothing
@@ -87,7 +89,6 @@ fn propagate_op(op: &mut LogicalOp, scope: &mut Scope) {
 		| LogicalOp::Timeout(_)
 		| LogicalOp::VersionScope(_)
 		| LogicalOp::Only(_)
-		| LogicalOp::Explain(_)
 		| LogicalOp::Info(_)) => {
 			for (name, constant) in visible(scope) {
 				if !rebinds(other, name) {
@@ -305,5 +306,18 @@ mod tests {
 			assert_eq!(out.matches("$x").count(), 2, "`{sql}`: only the condition reads $x: {out}");
 			assert!(out.contains("false"), "`{sql}`: the arm did not read the literal: {out}");
 		}
+	}
+
+	/// The statement an `EXPLAIN` describes reads the constants of its own
+	/// blocks, and a block's binding ends with the block.
+	#[test]
+	fn an_explained_statement_reads_its_constants() {
+		let out = propagated("EXPLAIN RETURN { { LET $x = 1; $x + 1 }; $x }");
+		assert!(out.contains("1 + 1"), "the read of $x in the block was left: {out}");
+		assert_eq!(
+			out.matches("$x").count(),
+			2,
+			"only the LET and the read after it name $x: {out}"
+		);
 	}
 }

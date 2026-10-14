@@ -423,6 +423,11 @@ pub(super) struct State {
 	/// value, and an expression it evaluates reads the value as its current
 	/// value and no document, as [`Instr::DocumentRoot`] does.
 	pub(super) undocumented: bool,
+	/// The document root of a closure body invoked from an element filter's
+	/// body, whose row is the element: an index or a method argument the
+	/// body evaluates reads it ([`Instr::DocumentRoot`]). `None` in any other
+	/// pipeline, whose document root is its row.
+	pub(super) root: Option<Value>,
 	/// For a write statement, the record in flight and what the statement
 	/// has written so far.
 	pub(super) write: Option<Box<super::write::WriteState>>,
@@ -444,11 +449,6 @@ pub(super) struct State {
 	pub(super) group_writes: Vec<Option<Box<super::write::WriteState>>>,
 	/// The values a block has bound its `LET` and `FOR` names to, by slot.
 	pub(super) slots: Vec<Value>,
-	/// The current value a closure value captured at its literal, which a body
-	/// run over the document root it captured loads as its element
-	/// ([`Instr::LoadElement`]). It is shared with the value, so an invocation
-	/// copies no document to hold it.
-	pub(super) element: Option<std::sync::Arc<Value>>,
 	/// What each nested statement run once has taken, by
 	/// [`Program::nested`](super::program::Program::nested) index, until the
 	/// group it is evaluated in starts again.
@@ -1027,6 +1027,7 @@ impl State {
 			unchecked_reads,
 			rowless,
 			undocumented,
+			root,
 			write,
 			frame,
 			saved,
@@ -1035,7 +1036,6 @@ impl State {
 			program,
 			group_writes,
 			slots,
-			element,
 			once,
 			lookups,
 			join_lookups,
@@ -1109,6 +1109,7 @@ impl State {
 		*unchecked_reads = false;
 		*rowless = false;
 		*undocumented = false;
+		*root = None;
 		*write = None;
 		*frame = None;
 		emptied(saved);
@@ -1117,7 +1118,6 @@ impl State {
 		*program = None;
 		emptied(group_writes);
 		emptied(slots);
-		*element = None;
 		emptied(once);
 		emptied(lookups);
 		emptied(join_lookups);
@@ -1379,6 +1379,7 @@ impl State {
 			landing: None,
 			rowless: false,
 			undocumented: false,
+			root: None,
 			write: None,
 			frame: None,
 			saved: Vec::new(),
@@ -1387,7 +1388,6 @@ impl State {
 			program: None,
 			group_writes: Vec::new(),
 			slots: Vec::new(),
-			element: None,
 			once: Vec::new(),
 			lookups: Vec::new(),
 			join_lookups: Vec::new(),
@@ -2361,13 +2361,6 @@ pub(super) fn run_row<'r>(
 				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
 				pc += 1;
 			}
-			Instr::LoadElement {
-				dst,
-			} => {
-				let value = state.element.as_deref().cloned().unwrap_or(Value::None);
-				regs[*dst as usize] = Scalar::Value(std::borrow::Cow::Owned(value));
-				pc += 1;
-			}
 			Instr::LoadParam {
 				param,
 				dst,
@@ -2707,7 +2700,9 @@ pub(super) fn run_row<'r>(
 				or,
 				dst,
 			} => {
-				regs[*dst as usize] = if state.rowless || state.undocumented {
+				regs[*dst as usize] = if let Some(root) = &state.root {
+					Scalar::Value(std::borrow::Cow::Owned(root.clone()))
+				} else if state.rowless || state.undocumented {
 					if let Some(refusal) = row.forbids() {
 						return Err(refusal);
 					}

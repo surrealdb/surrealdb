@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Position: a closure inside an element filter inside a `WHERE` over table rows; the body reads a `LET` of the statement through an array index (`E >= $m[1]`). It runs and reads the names and the row of the frame where the closure is written."
+reason = "Position: a closure inside an element filter inside a `WHERE` over table rows; the body reads a `LET` of the statement through an array index (`E >= $m[1]`). It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "[{ id: t:1, lim: 8, n: 1 }]"

@@ -39,6 +39,7 @@ use super::info::InfoLowered;
 use super::pipe::{self, PoolBase, ReadScope};
 use super::place::Lowered;
 use super::read::{self, IndexResolver, NoIndexes};
+use super::stage::StatementNesting;
 use super::subscription::{self, LoweredLive};
 use super::write_stmt::{self, LoweredWrite};
 use super::{dispatch, events, explain, info};
@@ -165,9 +166,12 @@ pub(crate) enum UnitRequest {
 		suppressed: bool,
 		caller: bool,
 	},
-	/// The body of the closure literal of the requesting container whose digest is `digest`.
+	/// The body of the closure literals of the requesting container whose digest is `digest` and
+	/// that capture `captures`, in the order their bodies read them: one literal written where
+	/// different names are bound captures differently, and each capture shape is a unit of its own.
 	ClosureBody {
 		digest: ClosureDigest,
+		captures: Vec<String>,
 	},
 	/// The body region `region` of a loop of the requesting container, run as a unit over the one
 	/// value it is given as its element: the body of a recursion.
@@ -335,6 +339,10 @@ pub(crate) struct LowerCx<'a> {
 	/// evaluated one expression at a time ([`crate::exec::vm::depth`]): an event clause or a
 	/// function body. `None` for a statement the session runs.
 	depth_sites: Option<std::sync::Arc<crate::exec::vm::depth::ExprDepth>>,
+	/// Where the container being lowered stands below the statement the session runs: nowhere for
+	/// a statement of the request or a unit of its own place (a body, an event's clauses), and
+	/// where the region it is copied from stands for the unit of a statement in an expression.
+	nesting: StatementNesting,
 	/// The enforcement of the actor the container being lowered runs on behalf of, where it
 	/// differs from the frame's ([`LowerCx::actor_suppressed`]).
 	actor_suppressed: Option<bool>,
@@ -345,6 +353,12 @@ pub(crate) struct LowerCx<'a> {
 	container: ContainerId,
 	/// The key of each slot of the unit table, in slot order.
 	slots: Vec<Key>,
+	/// For each slot, in slot order, the measure of the stored code being lowered when the slot
+	/// was asked for ([`LowerCx::requested_sites`]).
+	slot_sites: Vec<Option<std::sync::Arc<crate::exec::vm::depth::ExprDepth>>>,
+	/// For each slot, in slot order, where the region the slot's unit is copied from stands when
+	/// it was asked for ([`LowerCx::requested_nesting`]).
+	slot_nesting: Vec<StatementNesting>,
 	/// The slot of each interned request that holds one.
 	index: HashMap<Key, UnitId>,
 	/// The requests interned since the last [`LowerCx::take_needed`].
@@ -374,10 +388,13 @@ impl<'a> LowerCx<'a> {
 			reads_checked: true,
 			depth,
 			depth_sites: None,
+			nesting: StatementNesting::default(),
 			actor_suppressed: None,
 			unit_inputs: 0,
 			container: ContainerId(0),
 			slots: Vec::new(),
+			slot_sites: Vec::new(),
+			slot_nesting: Vec::new(),
 			index: HashMap::new(),
 			fresh: Vec::new(),
 			slotless: std::collections::HashSet::new(),
@@ -540,6 +557,35 @@ impl<'a> LowerCx<'a> {
 		self.depth_sites.as_deref()
 	}
 
+	/// The measure of the stored code that was being lowered when the slot `id` was asked for:
+	/// what a unit of a region of that code ([`UnitRequest::is_relative`]) spends is measured
+	/// with the code it was copied from. `None` where the request came from a statement the
+	/// session runs.
+	pub(crate) fn requested_sites(
+		&self,
+		id: UnitId,
+	) -> Option<std::sync::Arc<crate::exec::vm::depth::ExprDepth>> {
+		self.slot_sites.get(id.0 as usize).cloned().flatten()
+	}
+
+	/// Where the container being lowered stands below the statement the session runs
+	/// ([`StatementNesting`]).
+	pub(crate) fn nesting(&self) -> StatementNesting {
+		self.nesting
+	}
+
+	/// Makes `nesting` where what is lowered next stands, and answers where what was lowered
+	/// stood ([`Self::nesting`]).
+	pub(crate) fn renest(&mut self, nesting: StatementNesting) -> StatementNesting {
+		std::mem::replace(&mut self.nesting, nesting)
+	}
+
+	/// Where the region the unit of slot `id` is copied from stood when the slot was asked for: a
+	/// unit of a statement in an expression stands there.
+	pub(crate) fn requested_nesting(&self, id: UnitId) -> StatementNesting {
+		self.slot_nesting.get(id.0 as usize).copied().unwrap_or_default()
+	}
+
 	/// Makes `actor` the enforcement of the actor the container being lowered runs on behalf of,
 	/// and answers the one it replaces ([`Self::actor_suppressed`]).
 	pub(crate) fn reactor(&mut self, actor: Option<bool>) -> Option<bool> {
@@ -598,6 +644,8 @@ impl<'a> LowerCx<'a> {
 	/// that held one is asked for afresh. The requests not yet taken are dropped.
 	pub(crate) fn rewind(&mut self, mark: Mark) {
 		self.slots.truncate(mark.slots);
+		self.slot_sites.truncate(mark.slots);
+		self.slot_nesting.truncate(mark.slots);
 		self.index.retain(|_, id| (id.0 as usize) < mark.slots);
 		self.slotless.clear();
 		self.fresh.clear();
@@ -609,6 +657,17 @@ impl<'a> LowerCx<'a> {
 	/// A request that holds no slot ([`UnitRequest::takes_slot`]) is an internal error: it is
 	/// asked for through [`LowerCx::need`].
 	pub(crate) fn unit_for(&mut self, request: UnitRequest) -> Result<UnitId, IrError> {
+		self.unit_within(request, StatementNesting::default())
+	}
+
+	/// [`Self::unit_for`] of a request asked where the regions `around` it place it within the
+	/// container being lowered, which the slot records within where the container stands
+	/// ([`Self::requested_nesting`]). A slot asked for again keeps where it was first asked.
+	pub(crate) fn unit_within(
+		&mut self,
+		request: UnitRequest,
+		around: StatementNesting,
+	) -> Result<UnitId, IrError> {
 		if !request.takes_slot() {
 			return Err(IrError::Stale("ir_lower::units: a request that holds no unit slot"));
 		}
@@ -619,6 +678,8 @@ impl<'a> LowerCx<'a> {
 		let slot = u32::try_from(self.slots.len()).map_err(|_| IrError::Capacity("vm units"))?;
 		let id = UnitId(slot);
 		self.slots.push(key.clone());
+		self.slot_sites.push(self.depth_sites.clone());
+		self.slot_nesting.push(self.nesting.within(around));
 		self.index.insert(key.clone(), id);
 		self.fresh.push(Needed {
 			request: key.2,
@@ -666,6 +727,14 @@ pub(super) trait UnitSink {
 	/// The slot of the unit table that holds the unit `request` names, as
 	/// [`LowerCx::unit_for`] answers it.
 	fn unit_for(&mut self, request: UnitRequest) -> Result<UnitId, IrError>;
+
+	/// The slot of the unit table that holds the unit `request` names, asked where the regions
+	/// `around` place it, as [`LowerCx::unit_within`] answers it.
+	fn unit_within(
+		&mut self,
+		request: UnitRequest,
+		around: StatementNesting,
+	) -> Result<UnitId, IrError>;
 
 	/// Reports `request`, which holds no slot of the unit table, as [`LowerCx::need`] does.
 	fn need(&mut self, request: UnitRequest) -> Result<(), IrError>;
@@ -725,7 +794,8 @@ pub(super) trait UnitSink {
 	) -> Result<(HostScalar, Needs), IrError>;
 
 	/// Lowers the `EXPLAIN` the statement `region` holds, whose op is `explain`, into `em` as the
-	/// group of a block's statement ([`explain::lower_explained`]).
+	/// group of a block's statement, an analysed one's tree built for `purpose`
+	/// ([`explain::lower_explained`]).
 	fn lower_explained(
 		&mut self,
 		em: &mut Emitter,
@@ -733,7 +803,17 @@ pub(super) trait UnitSink {
 		region: RegionId,
 		explain: OpId,
 		base: PoolBase,
+		purpose: explain::Purpose,
 	) -> Result<explain::Explained, IrError>;
+
+	/// What `EXPLAIN ANALYZE` of the statement the `phys.explain` `explain` explains renders, its
+	/// tree built for `purpose` ([`explain::analysis_in`]).
+	fn explain_analysis(
+		&mut self,
+		ir: &Ir,
+		explain: OpId,
+		purpose: explain::Purpose,
+	) -> Result<crate::exec::vm::program::Analysis, IrError>;
 
 	/// Lowers the schema statement whose op is `op` into `em` as one pipeline's code, with the
 	/// operands it evaluates lowered in this context ([`ddl::lower_ddl`]).
@@ -754,6 +834,14 @@ pub(super) trait UnitSink {
 impl UnitSink for LowerCx<'_> {
 	fn unit_for(&mut self, request: UnitRequest) -> Result<UnitId, IrError> {
 		LowerCx::unit_for(self, request)
+	}
+
+	fn unit_within(
+		&mut self,
+		request: UnitRequest,
+		around: StatementNesting,
+	) -> Result<UnitId, IrError> {
+		LowerCx::unit_within(self, request, around)
 	}
 
 	fn need(&mut self, request: UnitRequest) -> Result<(), IrError> {
@@ -826,8 +914,18 @@ impl UnitSink for LowerCx<'_> {
 		region: RegionId,
 		explain: OpId,
 		base: PoolBase,
+		purpose: explain::Purpose,
 	) -> Result<explain::Explained, IrError> {
-		explain::lower_explained(self, em, ir, region, explain, base)
+		explain::lower_explained(self, em, ir, region, explain, base, purpose)
+	}
+
+	fn explain_analysis(
+		&mut self,
+		ir: &Ir,
+		explain: OpId,
+		purpose: explain::Purpose,
+	) -> Result<crate::exec::vm::program::Analysis, IrError> {
+		explain::analysis_in(self, ir, explain, purpose)
 	}
 
 	fn lower_schema(
@@ -993,11 +1091,11 @@ pub(crate) struct ClosureTemplate {
 	pub(crate) digest: ClosureDigest,
 	/// The names the literal captures, in the order of the body region's capture arguments.
 	pub(crate) captures: Vec<String>,
-	/// Whether the literal captures the current value where it is written, which the body region
-	/// takes after its captures.
+	/// Whether the body reads the row it is invoked over, which the body region takes after its
+	/// captures, and then the document root where `root` holds.
 	pub(crate) row: bool,
-	/// Whether the literal captures the document root where it is written beside the current
-	/// value, which the body region takes as its last argument.
+	/// Whether the body reads the document root of the frame that invokes it apart from that row,
+	/// which the body region takes after the row.
 	pub(crate) root: bool,
 	/// How many table catalog versions the transaction had stamped when the body was planned.
 	pub(crate) stamps: u64,
@@ -1027,16 +1125,14 @@ impl ClosureTemplate {
 		slots
 	}
 
-	/// The row captures a value of the literal holds: the current value where the literal reads
-	/// the row, and the document root where it captures one beside it.
+	/// The rows the unit takes: the invoking row where the body reads one.
 	pub(crate) fn rows(&self) -> RowBits {
 		RowBits {
 			row: self.row,
-			root: self.root,
 		}
 	}
 
-	/// The signature of the unit's head: its slots by name, run over the row the value captured.
+	/// The signature of the unit's head: its slots by name, run over the invoking row.
 	pub(crate) fn sig(&self) -> UnitSig {
 		UnitSig {
 			params: self.slots().iter().map(|name| name.as_str().into()).collect(),
@@ -1281,7 +1377,6 @@ mod tests {
 			template.rows(),
 			RowBits {
 				row: true,
-				root: false,
 			}
 		);
 		let sig = template.sig();

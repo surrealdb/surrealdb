@@ -77,6 +77,7 @@ use super::emit::{BoundSlot, Emitter};
 use super::explain::Explained;
 use super::info::InfoLowered;
 use super::pipe::{PoolBase, ReadScope, Reads};
+use super::stage::StatementNesting;
 use super::units::{LowerCx, UnitRequest, UnitSink};
 use super::write_stmt::LoweredWrite;
 use crate::exec::config::ExecConfig;
@@ -227,8 +228,20 @@ pub(super) struct Beside {
 	claims: Vec<Claim>,
 	region: Option<RegionId>,
 	catch: Option<ReturnScope>,
+	loop_pads: Option<LoopPads>,
 	statement_doc: Option<Reg>,
 	element: Option<Reg>,
+	closure_root: Option<ValueId>,
+}
+
+/// The labels a `BREAK` and a `CONTINUE` that a statement held in an expression signals jump to,
+/// where the expression stands in a statement list of the program's own code inside a `FOR`: the
+/// pads the list emits after the statement being lowered, which restore the frames saved since the
+/// loop's iteration began and jump to its exit and to its next element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LoopPads {
+	pub(super) on_break: Label,
+	pub(super) on_continue: Label,
 }
 
 /// Where a `RETURN` that a statement held in an expression signals is taken.
@@ -298,9 +311,15 @@ pub(super) struct Lowerer<'a> {
 	/// The block arguments a unit's top region binds to names of the frame the unit runs in, each
 	/// read by the name through the frame in every pipeline.
 	named_args: HashMap<ValueId, Strand>,
-	/// The block argument of a closure body unit that is the element its value captured beside
-	/// the document root, read from the invocation in every pipeline.
-	closure_element: Option<ValueId>,
+	/// Whether the expression being lowered is a schema statement's evaluated value, whose method
+	/// calls name their argument errors as code a write reaches does
+	/// ([`MethodSpec::writing`](super::super::program::MethodSpec)).
+	writing_labels: bool,
+	/// Whether the pipeline being lowered is a closure body that reads the row it is invoked over.
+	closure_row: bool,
+	/// The block argument that is the document root of the frame a closure body is invoked over,
+	/// where the body reads it apart from its row.
+	closure_root: Option<ValueId>,
 	/// Whether the pipeline being lowered is one built beside the program's own, which runs in a
 	/// state of its own and reads a block's names through the frame.
 	aside: bool,
@@ -309,6 +328,11 @@ pub(super) struct Lowerer<'a> {
 	/// Where a `RETURN` signalled by a statement held in the expression being lowered is taken.
 	/// `None` leaves the signal to propagate.
 	catch: Option<ReturnScope>,
+	/// Where a `BREAK` or `CONTINUE` signalled by a statement held in the expression being lowered
+	/// jumps, when the expression stands in a statement list inside a `FOR`; `None` leaves the
+	/// signal to propagate. Whether a statement took them is noted in `loop_pads_taken`.
+	loop_pads: Option<LoopPads>,
+	loop_pads_taken: std::cell::Cell<bool>,
 	/// The register that holds the document a statement held in the expression is taken over as
 	/// its `$this` and `$parent`, where the code being lowered sets one aside from the row.
 	statement_doc: Option<Reg>,
@@ -327,6 +351,21 @@ pub(super) struct Lowerer<'a> {
 	/// The reads of the pipelines of the read statement whose body this lowerer lowers, the
 	/// pipeline in flight among them. `None` for a lowerer of any other code.
 	reads: Option<&'a mut Reads>,
+}
+
+/// Whether the lowering of the op that makes `used` reads that operand. A call reads none of the
+/// row names the binder passes after its arguments but the first, which it compares with the
+/// element of the element body it stands in or with the document root of the closure body it
+/// stands in ([`CallAttrs::row_names`]).
+fn lowered_use(ir: &Ir, used: &crate::exec::ir::core::value::Use) -> bool {
+	let Some(data) = ir.op(used.user) else {
+		return true;
+	};
+	let OpKind::Expr(ExprOp::Call(call)) = &data.kind else {
+		return true;
+	};
+	let first_row_name = data.operands.len().saturating_sub(usize::from(call.row_names));
+	usize::from(used.operand) <= first_row_name
 }
 
 /// Where the value `v` of `ir` is read from once the instructions emitted into `em` have run.
@@ -430,16 +469,34 @@ impl<'a> Lowerer<'a> {
 		self.slots.insert(v, bound);
 	}
 
+	/// Makes the method calls this lowerer lowers name their argument errors as code a write
+	/// reaches does where `writing` holds: a schema statement's evaluated value.
+	pub(super) fn label_as_writing(&mut self, writing: bool) {
+		self.writing_labels = writing;
+	}
+
+	/// Makes the block argument `arg` the row a closure body is invoked over.
+	pub(super) fn bind_closure_row(&mut self, arg: ValueId) {
+		self.closure_row = true;
+		self.bind_row(arg, false);
+	}
+
+	/// Makes the block argument `arg` the document root of the frame a closure body is invoked
+	/// over: the row of that frame's evaluation, or the row where it has none.
+	pub(super) fn bind_closure_root(&mut self, arg: ValueId) {
+		self.closure_root = Some(arg);
+	}
+
+	/// Whether `value` is the document root of the frame the closure body being lowered is
+	/// invoked over ([`Lowerer::bind_closure_root`]).
+	pub(super) fn is_closure_root(&self, value: ValueId) -> bool {
+		self.closure_root == Some(value)
+	}
+
 	/// Makes the block argument `arg` a read of the parameter `name` of the frame the program runs
 	/// in, in every pipeline and scope.
 	pub(super) fn bind_named_arg(&mut self, arg: ValueId, name: Strand) {
 		self.named_args.insert(arg, name);
-	}
-
-	/// Makes the block argument `arg` the element a closure value captured beside the document
-	/// root, which the invocation holds ([`Instr::LoadElement`]), in every pipeline and scope.
-	pub(super) fn bind_closure_element(&mut self, arg: ValueId) {
-		self.closure_element = Some(arg);
 	}
 
 	/// How many reads of a block's name by a pipeline built beside have been lowered.
@@ -499,10 +556,13 @@ impl<'a> Lowerer<'a> {
 		let Some(units) = self.units.as_deref_mut() else {
 			return Err(invariant("a block statement lowered with no lowering context"));
 		};
+		// A read of the row of the pipeline being lowered is a read of `$parent` in the group.
+		let parents = self.em.read_as_parent(self.rows.keys().copied().collect());
 		let aside = self.em.set_aside();
 		let mark = self.em.open_group(group);
 		let lowered = units.lower_statement(&mut *self.em, ir, region, base);
 		let closed = self.em.close_group(mark);
+		self.em.restore_parent_rows(parents);
 		self.em.restore(aside);
 		let scope = lowered?;
 		let permissions = closed?;
@@ -534,6 +594,8 @@ impl<'a> Lowerer<'a> {
 		let Some(units) = self.units.as_deref_mut() else {
 			return not_yet("ir_lower::expr: a block statement with no lowering context");
 		};
+		// A read of the row of the pipeline being lowered is a read of `$parent` in the group.
+		let parents = self.em.read_as_parent(self.rows.keys().copied().collect());
 		let aside = self.em.set_aside();
 		let mark = self.em.open_group(group);
 		let lowered =
@@ -547,6 +609,7 @@ impl<'a> Lowerer<'a> {
 				}
 			});
 		let closed = self.em.close_group(mark);
+		self.em.restore_parent_rows(parents);
 		self.em.restore(aside);
 		let (lowered, timed) = lowered?;
 		let permissions = closed?;
@@ -560,8 +623,9 @@ impl<'a> Lowerer<'a> {
 	}
 
 	/// Lowers the `EXPLAIN` the statement `region` holds, whose op is `explain`, as the group
-	/// `group` of the program, numbering the pools of an analysed statement from `base`, and
-	/// answers what it lowered with the range of permission frames it filled.
+	/// `group` of the program, numbering the pools of an analysed statement from `base` and
+	/// building its tree for `purpose`, and answers what it lowered with the range of permission
+	/// frames it filled.
 	///
 	/// The pipeline in flight is set aside while the group is built, and what the group needs of
 	/// the program is merged into this lowerer's. A lowerer built without a lowering context
@@ -572,29 +636,53 @@ impl<'a> Lowerer<'a> {
 		explain: OpId,
 		base: PoolBase,
 		group: u16,
+		purpose: super::explain::Purpose,
 	) -> Result<(Explained, std::ops::Range<u16>), IrError> {
 		let ir = self.ir;
 		let Some(units) = self.units.as_deref_mut() else {
 			return Err(invariant("a block statement lowered with no lowering context"));
 		};
+		// A read of the row of the pipeline being lowered is a read of `$parent` in the group.
+		let parents = self.em.read_as_parent(self.rows.keys().copied().collect());
 		let aside = self.em.set_aside();
 		let mark = self.em.open_group(group);
-		let lowered = units.lower_explained(&mut *self.em, ir, region, explain, base);
+		let lowered = units.lower_explained(&mut *self.em, ir, region, explain, base, purpose);
 		let closed = self.em.close_group(mark);
+		self.em.restore_parent_rows(parents);
 		self.em.restore(aside);
 		let explained = lowered?;
 		let permissions = closed?;
-		if let Explained::Analysed {
-			scope,
-			..
-		} = &explained
-		{
-			self.absorb(&scope.reads.needs);
-			if scope.reads.table.is_some() {
-				self.requires(ContextLevel::Database);
+		match &explained {
+			Explained::Analysed {
+				scope,
+				..
+			} => {
+				self.absorb(&scope.reads.needs);
+				if scope.reads.table.is_some() {
+					self.requires(ContextLevel::Database);
+				}
 			}
+			Explained::AnalysedValue {
+				needs,
+				..
+			} => self.absorb(needs),
+			Explained::Plain(_) => {}
 		}
 		Ok((explained, permissions))
+	}
+
+	/// What `EXPLAIN ANALYZE` of the statement the `phys.explain` `explain` explains renders, its
+	/// tree built for `purpose` and redacted as the lowering context redacts.
+	pub(super) fn explain_analysis(
+		&mut self,
+		explain: OpId,
+		purpose: super::explain::Purpose,
+	) -> Result<crate::exec::vm::program::Analysis, IrError> {
+		let ir = self.ir;
+		let Some(units) = self.units.as_deref_mut() else {
+			return Err(invariant("a block statement lowered with no lowering context"));
+		};
+		units.explain_analysis(ir, explain, purpose)
 	}
 
 	/// Lowers the schema statement `region` holds as the group `group` of the program, and answers
@@ -716,10 +804,14 @@ impl<'a> Lowerer<'a> {
 			units: None,
 			slots,
 			named_args: HashMap::new(),
-			closure_element: None,
+			writing_labels: false,
+			closure_row: false,
+			closure_root: None,
 			aside: false,
 			named: Vec::new(),
 			catch: None,
+			loop_pads: None,
+			loop_pads_taken: std::cell::Cell::new(false),
 			statement_doc: None,
 			element: None,
 			unit_frame: None,
@@ -889,9 +981,21 @@ impl<'a> Lowerer<'a> {
 	/// A lowerer built without a unit table answers [`IrError::Invariant`]: every lowerer of the
 	/// operand subset is built in a lowering context ([`Lowerer::in_context`]), and the plan-time
 	/// folder's subset refuses every op that runs a unit before it asks for one.
+	///
+	/// The unit of a statement in an expression stands where the region it is copied from does
+	/// ([`StatementNesting::around`]), which the computation-depth count of the events a write in
+	/// it fires resumes from.
 	pub(super) fn unit_for(&mut self, request: UnitRequest) -> Result<UnitId, IrError> {
+		let around = if let UnitRequest::Subquery {
+			region,
+		} = &request
+		{
+			StatementNesting::around(self.ir, *region)
+		} else {
+			StatementNesting::default()
+		};
 		match self.units.as_deref_mut() {
-			Some(units) => units.unit_for(request),
+			Some(units) => units.unit_within(request, around),
 			None => Err(invariant("a unit asked for with no lowering context")),
 		}
 	}
@@ -1016,6 +1120,19 @@ impl<'a> Lowerer<'a> {
 		self.context = self.context.max(level);
 	}
 
+	/// The context level the program needs for what was lowered so far, which
+	/// [`Self::restore_required`] takes back to.
+	pub(super) fn required(&self) -> ContextLevel {
+		self.context
+	}
+
+	/// Takes the context level the program needs back to `level`, from [`Self::required`]: what was
+	/// lowered since runs after the session's names are resolved again, and raises for a missing
+	/// level where it reads it rather than before the program starts.
+	pub(super) fn restore_required(&mut self, level: ContextLevel) {
+		self.context = level;
+	}
+
 	/// Records that the instructions lowered may write through the transaction.
 	pub(super) fn writes(&mut self) {
 		self.access_mode = AccessMode::ReadWrite;
@@ -1084,8 +1201,10 @@ impl<'a> Lowerer<'a> {
 			claims: std::mem::take(&mut self.claims),
 			region: self.region.take(),
 			catch: self.catch.take(),
+			loop_pads: self.loop_pads.take(),
 			statement_doc: self.statement_doc.take(),
 			element: self.element.take(),
+			closure_root: self.closure_root.take(),
 		}
 	}
 
@@ -1098,8 +1217,10 @@ impl<'a> Lowerer<'a> {
 		self.claims = beside.claims;
 		self.region = beside.region;
 		self.catch = beside.catch;
+		self.loop_pads = beside.loop_pads;
 		self.statement_doc = beside.statement_doc;
 		self.element = beside.element;
+		self.closure_root = beside.closure_root;
 	}
 
 	/// Runs `body` with a `RETURN` signalled by a statement held in the code it lowers taken as
@@ -1120,6 +1241,12 @@ impl<'a> Lowerer<'a> {
 		lowered
 	}
 
+	/// Makes `scope` where a `RETURN` that a statement held in an expression signals is taken, for
+	/// everything this lowerer lowers from here on.
+	pub(super) fn catch_returns(&mut self, scope: ReturnScope) {
+		self.catch = Some(scope);
+	}
+
 	/// Whether a `BREAK` or `CONTINUE` signalled in the code being lowered is an error, as the
 	/// [`ReturnScope`] it is lowered under says.
 	pub(super) fn loops_fail(&self) -> bool {
@@ -1134,11 +1261,42 @@ impl<'a> Lowerer<'a> {
 	/// to the statement that owns the frame.
 	pub(super) fn own_catch(&self, dst: Reg, resume: Label) -> Option<Catch> {
 		let scope = self.catch?;
-		(scope.any_frame || !is_permission_frame(self.frame.program)).then_some(Catch {
+		(scope.any_frame || !is_permission_frame(self.frame.program))
+			.then(|| self.catch_of(dst, resume, scope.loops_fail))
+	}
+
+	/// The catch of a statement whose `RETURN` is stored in `dst` before the body resumes at
+	/// `resume`, and whose `BREAK` or `CONTINUE` is an error where `loops_fail` says so, and
+	/// otherwise jumps to the loop pads the code being lowered holds, if any.
+	pub(super) fn catch_of(&self, dst: Reg, resume: Label, loops_fail: bool) -> Catch {
+		let pads = match loops_fail {
+			true => None,
+			false => self.loop_pads,
+		};
+		if pads.is_some() {
+			self.loop_pads_taken.set(true);
+		}
+		Catch {
 			root: dst,
 			label: resume,
-			loops_fail: scope.loops_fail,
-		})
+			loops_fail,
+			on_break: pads.map(|pads| pads.on_break),
+			on_continue: pads.map(|pads| pads.on_continue),
+		}
+	}
+
+	/// Makes `pads` where a `BREAK` or `CONTINUE` signalled by a statement held in the code lowered
+	/// from here on jumps, and answers what held before, for [`Self::restore_loop_pads`].
+	pub(super) fn set_loop_pads(&mut self, pads: Option<LoopPads>) -> (Option<LoopPads>, bool) {
+		let outer = std::mem::replace(&mut self.loop_pads, pads);
+		(outer, self.loop_pads_taken.replace(false))
+	}
+
+	/// Puts back the pads [`Self::set_loop_pads`] answered, and answers whether a statement took
+	/// the pads it set.
+	pub(super) fn restore_loop_pads(&mut self, outer: (Option<LoopPads>, bool)) -> bool {
+		self.loop_pads = outer.0;
+		self.loop_pads_taken.replace(outer.1)
 	}
 
 	/// Runs `body` with a statement in the code it lowers taken over the document in `doc`, as
@@ -1300,16 +1458,21 @@ impl<'a> Lowerer<'a> {
 						dst,
 					});
 					Operand::Reg(dst)
+				} else if self.closure_root == Some(v) {
+					let row = self.em.reg()?;
+					self.emit(Instr::LoadRow {
+						dst: row,
+					});
+					let dst = self.em.reg()?;
+					self.emit(Instr::DocumentRoot {
+						or: Operand::Reg(row),
+						dst,
+					});
+					Operand::Reg(dst)
 				} else if let Some(at) = self.unit_input(v) {
 					self.load_unit_input(at)?
 				} else if self.em.is_parent_row(v) {
 					self.load_parent()?
-				} else if self.closure_element == Some(v) {
-					let dst = self.em.reg()?;
-					self.emit(Instr::LoadElement {
-						dst,
-					});
-					Operand::Reg(dst)
 				} else if let Some(name) = self.named_args.get(&v).cloned() {
 					let param = self.em.param(ParamSpec {
 						name,
@@ -1414,7 +1577,8 @@ impl<'a> Lowerer<'a> {
 				continue;
 			}
 			let read_inside = ir.uses(result).iter().any(|used| {
-				ancestors(ir, used.user).any(|(_, enclosing)| enclosing == Some(owner))
+				lowered_use(ir, used)
+					&& ancestors(ir, used.user).any(|(_, enclosing)| enclosing == Some(owner))
 			});
 			if read_inside {
 				self.value(result)?;
@@ -2448,25 +2612,37 @@ impl<'a> Lowerer<'a> {
 	/// ([`crate::exec::ir::phys::matches::IndexScope`]): [`Instr::CallIndexFn`]. The reference
 	/// argument is read here, not evaluated: it is the clause's number, a literal in range. A
 	/// clause whose query is a name bound around the statement hands the call its value as the
-	/// last argument. A call no scope covers has no instruction.
+	/// last argument. A call that names no clause of its scope is refused for the statement
+	/// ([`Lowerer::unbound_index_call`]).
 	fn index_call(&mut self, name: &str, args: &[ValueId]) -> Result<Operand, IrError> {
 		use super::super::program::IndexBinding;
 		use crate::exec::function::IndexContextKind;
 		use crate::exec::ir::phys::matches::ClauseQuery;
 		let ir = self.ir;
-		let Some(scope) = ir.index_scope(self.owner()?) else {
-			return not_yet("ir_lower::expr: expr.call of an index function no clause covers");
-		};
 		let Some(function) = self.registry.get_index_function(name) else {
 			return Err(IrError::Stale("ir_lower::expr: an index function"));
+		};
+		let Some(scope) = ir.index_scope(self.owner()?) else {
+			return Err(self.unbound_index_call(
+				name,
+				args,
+				None,
+				"ir_lower::expr: expr.call of an index function no clause covers",
+			));
 		};
 		let mut args: Vec<ValueId> = args.to_vec();
 		let mut query = None;
 		let binding = match function.index_context_kind() {
 			IndexContextKind::FullText => {
 				let Some(at) = function.index_ref_arg_index().filter(|at| *at < args.len()) else {
-					return not_yet("ir_lower::expr: an index function without its reference");
+					return Err(self.unbound_index_call(
+						name,
+						&args,
+						Some(scope),
+						"ir_lower::expr: an index function without its reference",
+					));
 				};
+				let written = args.clone();
 				let reference = args.remove(at);
 				self.unread(reference, self.owner()?)?;
 				let rf = match query_operand(ir, reference) {
@@ -2480,15 +2656,30 @@ impl<'a> Lowerer<'a> {
 						crate::val::Number::Int(_)
 						| crate::val::Number::Float(_)
 						| crate::val::Number::Decimal(_) => {
-							return not_yet("ir_lower::expr: an index reference out of range");
+							return Err(self.unbound_index_call(
+								name,
+								&written,
+								Some(scope),
+								"ir_lower::expr: an index reference out of range",
+							));
 						}
 					},
 					QueryOperand::Literal(_) | QueryOperand::Named(_) | QueryOperand::Other => {
-						return not_yet("ir_lower::expr: an index reference that is not a literal");
+						return Err(self.unbound_index_call(
+							name,
+							&written,
+							Some(scope),
+							"ir_lower::expr: an index reference that is not a literal",
+						));
 					}
 				};
 				let Some(clause) = scope.resolve(rf) else {
-					return not_yet("ir_lower::expr: an index reference no clause declares");
+					return Err(self.unbound_index_call(
+						name,
+						&written,
+						Some(scope),
+						"ir_lower::expr: an index reference no clause declares",
+					));
 				};
 				let (text, query_arg) = match &clause.query {
 					ClauseQuery::Text(text) => (text.clone(), false),
@@ -2513,7 +2704,12 @@ impl<'a> Lowerer<'a> {
 			}
 			IndexContextKind::Knn => {
 				if !scope.knn {
-					return not_yet("ir_lower::expr: a KNN index function no KNN operator covers");
+					return Err(self.unbound_index_call(
+						name,
+						&args,
+						Some(scope),
+						"ir_lower::expr: a KNN index function no KNN operator covers",
+					));
 				}
 				if let Some(at) = function.index_ref_arg_index()
 					&& at < args.len()
@@ -2532,7 +2728,6 @@ impl<'a> Lowerer<'a> {
 			plan_depth: self.depth,
 			index: Some(binding),
 			closure_args: Vec::new(),
-			reads_element: false,
 		})?;
 		self.emit(Instr::CallAllowed {
 			call,
@@ -2566,11 +2761,78 @@ impl<'a> Lowerer<'a> {
 		Ok(Operand::Reg(dst))
 	}
 
+	/// The error for the call of index function `name` over `args` (as written, its reference
+	/// among them) that names no clause of `scope`, the scope the physical plan states for it:
+	/// the refusal the statement is answered with, which reads as the planner's error for an
+	/// index reference that is no literal in range, a statement whose `WHERE` holds no `MATCHES`
+	/// clause or `KNN` operator, or no `MATCHES` clause with the reference. A call in a closure
+	/// body over a row or a permission frame is not refused: `what` names the lowering that does
+	/// not cover it.
+	fn unbound_index_call(
+		&self,
+		name: &str,
+		args: &[ValueId],
+		scope: Option<&crate::exec::ir::phys::matches::IndexScope>,
+		what: &'static str,
+	) -> IrError {
+		use crate::exec::function::IndexContextKind;
+		if self.closure_row || self.frame.program.is_some() {
+			return IrError::NotYet {
+				what,
+			};
+		}
+		let Some(function) = self.registry.get_index_function(name) else {
+			return IrError::Stale("ir_lower::expr: an index function");
+		};
+		let message =
+			match function.index_context_kind() {
+				IndexContextKind::Knn => {
+					format!("Index function '{name}': no KNN operator found in WHERE condition")
+				}
+				IndexContextKind::FullText => {
+					let rf =
+						function.index_ref_arg_index().and_then(|at| args.get(at)).and_then(
+							|reference| match query_operand(self.ir, *reference) {
+								QueryOperand::Literal(Value::Number(crate::val::Number::Int(
+									n,
+								))) if (0..=255).contains(&n) => Some(n as u8),
+								QueryOperand::Literal(Value::Number(
+									crate::val::Number::Float(n),
+								)) if (0.0..=255.0).contains(&n) && n.fract() == 0.0 => Some(n as u8),
+								QueryOperand::Literal(_)
+								| QueryOperand::Named(_)
+								| QueryOperand::Other => None,
+							},
+						);
+					let mut available: Vec<u8> = scope
+						.map(|scope| scope.clauses.iter().map(|clause| clause.rf).collect())
+						.unwrap_or_default();
+					available.sort_unstable();
+					available.dedup();
+					match rf {
+						None => format!(
+							"Index function '{name}': index_ref argument must be a literal integer in range 0..255"
+						),
+						Some(_) if available.is_empty() => format!(
+							"Index function '{name}': no MATCHES clause found in WHERE condition"
+						),
+						Some(rf) => format!(
+							"Index function '{name}': no MATCHES clause found for match_ref {rf} (available: {:?})",
+							available.iter().collect::<Vec<_>>()
+						),
+					}
+				}
+			};
+		IrError::Rejected(Box::new(crate::exec::vm::payload::Refusal::Query {
+			message,
+		}))
+	}
+
 	/// The `KNN` operator being lowered, which no search answers whole. Neither operand is
 	/// evaluated. Where no search is in scope for it the operator is `false`. Where one is, the
 	/// operator holds for a row whose record a search of the statement yielded before the row was
-	/// read, unless the plan marks it unsearched (a read no search was planned over), which has no
-	/// instruction. The check is a
+	/// read, unless the plan marks it unsearched (a write whose subjects no search reads), which
+	/// has no instruction. The check is a
 	/// [`Instr::CallIndexFn`] bound to the statement's distance slot
 	/// ([`IndexBinding::KnnHolds`](super::super::program::IndexBinding::KnnHolds)).
 	fn nearest(&mut self, left: ValueId, right: ValueId) -> Result<Operand, IrError> {
@@ -2588,7 +2850,6 @@ impl<'a> Lowerer<'a> {
 					slot: self.em.knn_slot(),
 				}),
 				closure_args: Vec::new(),
-				reads_element: false,
 			})?;
 			self.keeps_row_order = true;
 			let dst = self.em.reg()?;
@@ -2809,7 +3070,6 @@ impl<'a> Lowerer<'a> {
 			plan_depth: self.depth,
 			index: None,
 			closure_args,
-			reads_element: false,
 		})?;
 		self.emit(Instr::CallAllowed {
 			call,
@@ -2822,6 +3082,7 @@ impl<'a> Lowerer<'a> {
 			args,
 			dst,
 			frame: self.frame.program,
+			elem: self.element,
 		});
 		Ok(Operand::Reg(dst))
 	}
@@ -2908,7 +3169,7 @@ impl<'a> Lowerer<'a> {
 				.into_iter()
 				.filter_map(|at| u16::try_from(at).ok())
 				.collect(),
-			writing: false,
+			writing: self.writing_labels,
 		})?;
 		let closure = if descriptor.fallback.is_some() {
 			None
@@ -2981,6 +3242,7 @@ impl<'a> Lowerer<'a> {
 			args,
 			dst,
 			frame: self.frame.program,
+			elem: None,
 		});
 		self.keeps_row_order = true;
 		self.writes();
@@ -3267,7 +3529,8 @@ mod tests {
 				call: 0,
 				args: Vec::new(),
 				dst: 1,
-				frame: None
+				frame: None,
+				elem: None
 			}
 		);
 		assert_eq!(operand, Operand::Reg(1));
@@ -3907,7 +4170,13 @@ mod tests {
 			Err(IrError::Invariant { .. })
 		));
 		assert!(matches!(
-			lowerer.lower_explain_group(region, owner, PoolBase::default(), 0),
+			lowerer.lower_explain_group(
+				region,
+				owner,
+				PoolBase::default(),
+				0,
+				super::super::explain::Purpose::Described
+			),
 			Err(IrError::Invariant { .. })
 		));
 		assert!(matches!(

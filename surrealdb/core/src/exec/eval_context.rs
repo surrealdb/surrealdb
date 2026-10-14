@@ -102,6 +102,12 @@ pub struct EvalContext<'a> {
 	/// [`Self::root_document`] and [`Self::document`].
 	document_root: Option<&'a Value>,
 
+	/// Whether the value in scope is the element an element filter's body is
+	/// applied to, set by [`Self::with_element`]. A closure invoked from here
+	/// reads the element as its row, and the document root only where its
+	/// body evaluates an index or a method argument.
+	element_frame: bool,
+
 	/// `$before`: the field, or the record, as it stood before the statement.
 	pub write_before: Option<&'a Value>,
 
@@ -186,6 +192,7 @@ impl<'a> EvalContext<'a> {
 			local_params: None,
 			recursion_ctx: None,
 			document_root: None,
+			element_frame: false,
 			// Nothing to carry: this builds a context out of the execution
 			// context alone, with no row and no write in scope. A caller that
 			// rebuilds a row's context on top of it restores the bindings
@@ -210,6 +217,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: self.document_root,
+			element_frame: false,
 			// The bindings belong to the record being written, not to the
 			// position within it that evaluation has reached, so narrowing
 			// the current value leaves them alone.
@@ -235,6 +243,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: Some(value),
+			element_frame: false,
 			// Still the same record being written: a new document root
 			// changes what an idiom resolves against, not what the statement
 			// bound.
@@ -250,6 +259,23 @@ impl<'a> EvalContext<'a> {
 		}
 	}
 
+	/// For the evaluation of an element filter's body: `element` is the value in
+	/// scope, and the document root stays the row the filter is applied over.
+	pub fn with_element(&self, element: &'a Value) -> Self {
+		Self {
+			current_value: Some(element),
+			element_frame: true,
+			..self.clone()
+		}
+	}
+
+	/// Whether the value in scope is an element filter's element
+	/// ([`Self::with_element`]).
+	#[inline]
+	pub(crate) fn in_element(&self) -> bool {
+		self.element_frame
+	}
+
 	/// Set the recursion context for RepeatRecurse evaluation.
 	pub fn with_recursion_ctx(&self, ctx: RecursionCtx) -> Self {
 		Self {
@@ -258,6 +284,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: Some(ctx),
 			document_root: self.document_root,
+			element_frame: self.element_frame,
 			// A recursion context changes how `@` is evaluated, nothing
 			// about which record is being written, so the bindings stay.
 			write_before: self.write_before,

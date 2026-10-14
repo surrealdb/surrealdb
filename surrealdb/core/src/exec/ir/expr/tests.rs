@@ -1014,6 +1014,8 @@ fn closure_attrs() -> ClosureAttrs {
 		returns: None,
 		body_sql: Arc::from("1"),
 		captures: Box::new([]),
+		reads_row: false,
+		reads_root: false,
 		literal: Default::default(),
 	}
 }

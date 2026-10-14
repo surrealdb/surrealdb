@@ -99,10 +99,10 @@ use super::super::program::{
 use super::ddl::{Reservations, lower_guard, schema_op};
 use super::dispatch::{Coverage, check_write_region, coverage_of, timed_write_in, write_of};
 use super::emit::Emitter;
-use super::explain::{Explained, explain_of};
-use super::expr::{Claim, Lowerer, Needs, invariant};
+use super::explain::{Explained, Purpose, explain_of};
+use super::expr::{Claim, LoopPads, Lowerer, Needs, ReturnScope, invariant};
 use super::info::InfoLowered;
-use super::pipe::{PoolBase, Pools, ReadScope, Reads, is_for_pipeline};
+use super::pipe::{PoolBase, Pools, ReadScope, Reads, is_for_pipeline, path_steps};
 use super::place::{Provenance, parallel_of};
 use super::units::{LowerCx, UnitRequest};
 use super::write_stmt::WritePipelines;
@@ -116,8 +116,31 @@ use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::logical::ops::{LetAttrs, LetBinding, LoopKind, StepAttrs};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::PhysOp;
+use crate::exec::vm::dispatch::Reach;
 use crate::exec::{AccessMode, ContextLevel};
 use crate::val::Value;
+
+/// Where a `RETURN` that a statement held in an expression of a list signals is taken: at the
+/// statement, whose value it is, outside a permission frame; a loop signal passes to the loop
+/// around the list.
+const IN_A_LIST: ReturnScope = ReturnScope {
+	any_frame: false,
+	loops_fail: false,
+};
+
+/// Whether a loop of kind `kind` evaluates an expression in value position, or is a `FOR`, and so
+/// is no group of its own.
+fn is_value_loop(kind: LoopKind) -> bool {
+	match kind {
+		LoopKind::For
+		| LoopKind::ElementFilter
+		| LoopKind::Broadcast
+		| LoopKind::Closure
+		| LoopKind::Recurse
+		| LoopKind::GraphStep => true,
+		LoopKind::Select | LoopKind::Write => false,
+	}
+}
 
 /// A statement program lowered from a container whose top region holds control flow.
 pub(super) struct BlockProgram {
@@ -346,28 +369,59 @@ pub(super) fn lower_analysed_program(
 	let statement = u16::try_from(blocks.lw.block_groups().specs.len())
 		.map_err(|_| IrError::Capacity("vm statement groups"))?;
 	let base = blocks.lw.block_groups().base()?;
+	if let Some((write, held, duration)) = written_in(ir, ir.top())? {
+		let analysis = blocks.lw.explain_analysis(explain, Purpose::Measured)?;
+		blocks.write_group(write, held, duration, base, statement)?;
+		blocks.run_analyzed(statement, analysis, result, Collect::Block, None)?;
+		let finished = blocks.finish_analysed(result);
+		return analysed_program(em, finished);
+	}
 	let (explained, permissions) =
-		blocks.lw.lower_explain_group(ir.top(), explain, base, statement)?;
-	let Explained::Analysed {
-		scope,
-		analysis,
-	} = explained
-	else {
-		return Err(invariant("a plain EXPLAIN is rendered by a program of its own, never run"));
+		blocks.lw.lower_explain_group(ir.top(), explain, base, statement, Purpose::Measured)?;
+	let analysis = match explained {
+		Explained::Plain(_) => {
+			return Err(invariant(
+				"a plain EXPLAIN is rendered by a program of its own, never run",
+			));
+		}
+		Explained::Analysed {
+			scope,
+			analysis,
+		} => {
+			let ReadScope {
+				reads,
+				tail,
+			} = scope;
+			let scalar = tail.as_ref().is_some_and(|tail| tail.only);
+			let spec = reads.group_spec(permissions, tail, scalar, false)?;
+			blocks.lw.block_groups().append(reads, spec);
+			analysis
+		}
+		Explained::AnalysedValue {
+			pipeline,
+			claims,
+			analysis,
+			..
+		} => {
+			blocks.lw.block_groups().append_pipeline(
+				pipeline,
+				claims,
+				value_group_spec(base, permissions),
+			);
+			analysis
+		}
 	};
-	let ReadScope {
-		reads,
-		tail,
-	} = scope;
-	let scalar = tail.as_ref().is_some_and(|tail| tail.only);
-	let spec = reads.group_spec(permissions, tail, scalar, false)?;
-	blocks.lw.block_groups().append(reads, spec);
 	blocks.run_analyzed(statement, analysis, result, Collect::Block, None)?;
-	blocks.emit(Instr::Emit {
-		src: result,
-	});
-	blocks.emit(Instr::EndRow);
-	let (needs, claims, writes, groups, reservations) = blocks.finish();
+	let finished = blocks.finish_analysed(result);
+	analysed_program(em, finished)
+}
+
+/// The program of an analysed statement from what its lowering into `em` left: its own pipeline
+/// emits the one row of the rendering.
+fn analysed_program(
+	em: &mut Emitter,
+	(needs, claims, writes, groups, reservations): (Needs, Vec<Claim>, bool, Groups, Reservations),
+) -> Result<BlockProgram, IrError> {
 	Ok(BlockProgram {
 		pipeline: em.finish_pipeline(Source::Once)?,
 		needs,
@@ -464,6 +518,7 @@ impl<'a> Blocks<'a> {
 		// The statements that run as groups of the program are held by the lowerer, which adds the
 		// groups of the statements its expressions run in place.
 		lw.hold_block_groups();
+		lw.catch_returns(IN_A_LIST);
 		Self {
 			lw,
 			ir,
@@ -485,6 +540,16 @@ impl<'a> Blocks<'a> {
 	fn finish(mut self) -> (Needs, Vec<Claim>, bool, Groups, Reservations) {
 		let groups = self.lw.take_block_groups();
 		(self.lw.needs(), self.lw.take_claims(), self.writes, groups, self.reservations)
+	}
+
+	/// Ends the program of an analysed statement, whose one row is the rendering left in `result`,
+	/// and answers what [`Blocks::finish`] does.
+	fn finish_analysed(mut self, result: Reg) -> (Needs, Vec<Claim>, bool, Groups, Reservations) {
+		self.emit(Instr::Emit {
+			src: result,
+		});
+		self.emit(Instr::EndRow);
+		self.finish()
 	}
 
 	fn reg(&mut self) -> Result<Reg, IrError> {
@@ -628,7 +693,14 @@ impl<'a> Blocks<'a> {
 				return Err(IrError::Stale("ir_lower::block: an op after a terminator"));
 			}
 			let data = ir.op(*op).ok_or(IrError::Stale("ir_lower::block: op"))?;
-			ended = self.statement(*op, data)?;
+			// A statement after one that changed the catalog runs in the frame the change left,
+			// whose names are resolved again: it raises for a missing namespace or database where
+			// it reads one, not before the program starts.
+			let required = self.catalog_changed.then(|| self.lw.required());
+			ended = self.padded_statement(*op, data)?;
+			if let Some(required) = required {
+				self.lw.restore_required(required);
+			}
 		}
 		let exit = match (ended, top) {
 			(Some(exit), _) => exit,
@@ -636,6 +708,54 @@ impl<'a> Blocks<'a> {
 			(None, false) => return Err(IrError::Stale("ir_lower::block: a region with no end")),
 		};
 		Ok(exit)
+	}
+
+	/// [`Self::statement`], with a `BREAK` or `CONTINUE` that a statement held in one of its
+	/// expressions signals taken by the `FOR` around the list: the expression's instruction jumps
+	/// to a pad emitted after the statement, which restores the frames saved since the loop's
+	/// iteration began and jumps to the loop's exit or its next element. Outside a `FOR` the signal
+	/// propagates.
+	fn padded_statement(&mut self, op: OpId, data: &OpData) -> Result<Option<Exit>, IrError> {
+		let Some(&LoopTargets {
+			depth,
+			broken,
+			continued,
+		}) = self.loops.last()
+		else {
+			return self.statement(op, data);
+		};
+		let pads = LoopPads {
+			on_break: self.label()?,
+			on_continue: self.label()?,
+		};
+		let saved = self.saved;
+		let (ended, taken) = self.with_lw_loop_pads(pads, |this| this.statement(op, data))?;
+		if taken {
+			let over = self.label()?;
+			self.jump(over);
+			for (pad, target) in [(pads.on_break, broken), (pads.on_continue, continued)] {
+				self.bind(pad)?;
+				for _ in depth..saved {
+					self.block(BlockInstr::Restore);
+				}
+				self.jump(target);
+			}
+			self.bind(over)?;
+		}
+		Ok(ended)
+	}
+
+	/// Runs `body` with the expression lowerer's loop pads set to `pads`, and answers whether a
+	/// statement held in an expression took them.
+	fn with_lw_loop_pads<T>(
+		&mut self,
+		pads: LoopPads,
+		body: impl FnOnce(&mut Self) -> Result<T, IrError>,
+	) -> Result<(T, bool), IrError> {
+		let outer = self.lw.set_loop_pads(Some(pads));
+		let lowered = body(self);
+		let taken = self.lw.restore_loop_pads(outer);
+		lowered.map(|lowered| (lowered, taken))
 	}
 
 	/// Lowers the op `op`; answers how the list ends when `op` is the terminator that ends it.
@@ -779,6 +899,10 @@ impl<'a> Blocks<'a> {
 				self.info_statement(op, data)?;
 				Ok(None)
 			}
+			OpKind::Phys(PhysOp::Fetch) => {
+				self.value_fetch(data)?;
+				Ok(None)
+			}
 			// SECURITY: a statement that writes the request's session lowers only as a statement
 			// of the request's own list, so code a list holds (a function body, an event) can
 			// never switch the caller's namespace or database, set its options or bind one of its
@@ -904,6 +1028,33 @@ impl<'a> Blocks<'a> {
 		Ok(())
 	}
 
+	/// The `FETCH` of a `RETURN` whose value is no read: the records its paths reach in the one
+	/// value it reads, fetched in place where the list reaches it. The value is copied first, as
+	/// the fetch takes the register it reads. The walk may read records of any table.
+	fn value_fetch(&mut self, data: &OpData) -> Result<(), IrError> {
+		let [value] = Self::operands::<1>(data)?;
+		if data.regions.is_empty() {
+			return Err(invariant("a fetch with no path"));
+		}
+		let value = self.lw.value(value)?;
+		let src = self.reg()?;
+		self.load(src, value);
+		let mut paths = Vec::with_capacity(data.regions.len());
+		for region in &data.regions {
+			paths.push(path_steps(&mut self.lw, self.ir, *region)?);
+		}
+		let fetch = self.lw.emitter().fetch(paths)?;
+		self.lw.reaches(Reach::Any);
+		let dst = self.reg()?;
+		self.emit(Instr::Fetch {
+			fetch,
+			src,
+			dst,
+		});
+		self.define(data, Operand::Reg(dst));
+		Ok(())
+	}
+
 	/// `INFO`: a group of one pipeline over [`Source::Once`] that emits the statement's object as
 	/// its one row, run where the list reaches it ([`BlockInstr::RunEmbedded`]).
 	///
@@ -975,135 +1126,129 @@ impl<'a> Blocks<'a> {
 				}
 			};
 		}
+		if self.evaluates_only(region)? {
+			// An expression of the list that reads the clock: it is no group, so it runs where it
+			// stands, after the instant its statement starts at is taken.
+			self.block(BlockInstr::Clock);
+			return match self.statements(region, false)? {
+				Exit::Diverges => Ok(Some(Exit::Diverges)),
+				Exit::Yields(value) => {
+					if let Some(value) = value {
+						self.define(data, value);
+					}
+					Ok(None)
+				}
+			};
+		}
 		let statement = u16::try_from(self.lw.block_groups().specs.len())
 			.map_err(|_| IrError::Capacity("vm statement groups"))?;
 		let base = self.lw.block_groups().base()?;
 		let mut analysed = None;
-		// A write, alone or in the `Deadline` region of the `TIMEOUT` that bounds it, with the
-		// region that holds it and its duration.
-		let written = match timed_write_in(self.ir, region)? {
-			Some((timed, write)) => {
-				let held = self.ir.op(timed).ok_or(IrError::Stale("ir_lower::block: op"))?;
-				match (held.operands.as_slice(), held.regions.as_slice()) {
-					([duration], [deadline]) => Some((write, *deadline, Some(*duration))),
-					_ => {
-						return Err(invariant(
-							"a phys.timeout with other than one operand and one region",
-						));
+		let written = written_in(self.ir, region)?;
+		// `EXPLAIN ANALYZE` of a write runs the write as the group and renders what it measured.
+		let explained = explain_of(self.ir, region);
+		let context =
+			if let (Some((explain, true)), Some((write, held, duration))) = (explained, written) {
+				analysed = Some(self.lw.explain_analysis(explain, Purpose::Measured)?);
+				self.write_group(write, held, duration, base, statement)?
+			} else if let Some((explain, _)) = explained {
+				let (explained, permissions) = self.lw.lower_explain_group(
+					region,
+					explain,
+					base,
+					statement,
+					Purpose::Described,
+				)?;
+				match explained {
+					Explained::Plain(pipeline) => {
+						// The rendering is one row of constant work: a scalar statement that reads
+						// nothing.
+						let spec = GroupSpec {
+							write: None,
+							scalar: true,
+							rowless: true,
+							sorts: base.sorts..base.sorts,
+							aggregates: base.aggregates..base.aggregates,
+							permissions,
+							version: None,
+							timeout: None,
+							only: false,
+						};
+						self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
+						ContextLevel::Root
+					}
+					Explained::Analysed {
+						scope,
+						analysis,
+					} => {
+						let ReadScope {
+							reads,
+							tail,
+						} = scope;
+						// A group with rows checks the record user's access in the database it
+						// starts in, so it reads the database whatever it reads itself.
+						let context = reads.needs.context.max(ContextLevel::Database);
+						let scalar = tail.as_ref().is_some_and(|tail| tail.only);
+						let spec = reads.group_spec(permissions, tail, scalar, false)?;
+						self.lw.block_groups().append(reads, spec);
+						analysed = Some(analysis);
+						context
+					}
+					Explained::AnalysedValue {
+						pipeline,
+						claims,
+						needs,
+						analysis,
+					} => {
+						self.lw.block_groups().append_pipeline(
+							pipeline,
+							claims,
+							value_group_spec(base, permissions),
+						);
+						analysed = Some(analysis);
+						needs.context
 					}
 				}
-			}
-			None => write_of(self.ir, region).map(|write| (write, region, None)),
-		};
-		let context = if let Some((explain, _)) = explain_of(self.ir, region) {
-			let (explained, permissions) =
-				self.lw.lower_explain_group(region, explain, base, statement)?;
-			match explained {
-				Explained::Plain(pipeline) => {
-					// The rendering is one row of constant work: a scalar statement that reads
-					// nothing.
-					let spec = GroupSpec {
-						write: None,
-						scalar: true,
-						rowless: true,
-						sorts: base.sorts..base.sorts,
-						aggregates: base.aggregates..base.aggregates,
-						permissions,
-						version: None,
-						timeout: None,
-						only: false,
-					};
-					self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
-					ContextLevel::Root
-				}
-				Explained::Analysed {
-					scope,
-					analysis,
-				} => {
-					let ReadScope {
-						reads,
-						tail,
-					} = scope;
-					let context = match reads.table {
-						Some(_) => reads.needs.context.max(ContextLevel::Database),
-						None => reads.needs.context,
-					};
-					let scalar = tail.as_ref().is_some_and(|tail| tail.only);
-					let spec = reads.group_spec(permissions, tail, scalar, false)?;
-					self.lw.block_groups().append(reads, spec);
-					analysed = Some(analysis);
-					context
-				}
-			}
-		} else if let Some((write, held, duration)) = written {
-			check_write_region(self.ir, held, write)?;
-			let (lowered, timeout, permissions) =
-				self.lw.lower_write_group(write, held, base, duration, statement)?;
-			// A write's value is its one record when it is `ONLY`, and its records otherwise; its
-			// clauses are the write's own, so the group's tail is only its `TIMEOUT`.
-			let scalar = lowered.spec.only;
-			match lowered.pipelines {
-				WritePipelines::Own(pipeline) => {
-					let spec = GroupSpec {
-						write: Some(lowered.spec),
-						scalar,
-						rowless: false,
-						sorts: base.sorts..base.sorts,
-						aggregates: base.aggregates..base.aggregates,
-						permissions,
-						version: None,
-						timeout,
-						only: false,
-					};
-					self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
-				}
-				WritePipelines::Over(reads) => {
-					let mut spec = reads.group_spec(permissions, None, scalar, false)?;
-					spec.write = Some(lowered.spec);
-					spec.timeout = timeout;
-					self.lw.block_groups().append(reads, spec);
-				}
-			}
-			self.writes = true;
-			lowered.needs.context.max(ContextLevel::Database)
-		} else if schema_op(self.ir, region)?.is_some() {
-			let (pipeline, permissions, needs) =
-				self.lw.lower_schema_group(region, statement, &mut self.reservations)?;
-			// A schema statement answers `NONE` as one row and writes, so its program does.
-			let spec = GroupSpec {
-				write: None,
-				scalar: true,
-				rowless: true,
-				sorts: base.sorts..base.sorts,
-				aggregates: base.aggregates..base.aggregates,
-				permissions,
-				version: None,
-				timeout: None,
-				only: false,
+			} else if let Some((write, held, duration)) = written {
+				self.write_group(write, held, duration, base, statement)?
+			} else if schema_op(self.ir, region)?.is_some() {
+				let (pipeline, permissions, needs) =
+					self.lw.lower_schema_group(region, statement, &mut self.reservations)?;
+				// A schema statement answers `NONE` as one row and writes, so its program does.
+				let spec = GroupSpec {
+					write: None,
+					scalar: true,
+					rowless: true,
+					sorts: base.sorts..base.sorts,
+					aggregates: base.aggregates..base.aggregates,
+					permissions,
+					version: None,
+					timeout: None,
+					only: false,
+				};
+				self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
+				self.writes = true;
+				needs.context
+			} else {
+				let (scope, permissions) = self.lw.lower_group(region, base, statement)?;
+				let ReadScope {
+					reads,
+					tail,
+				} = scope;
+				// A group with rows checks the record user's access in the database it starts in,
+				// so it reads the database whatever it reads itself.
+				let context = reads.needs.context.max(ContextLevel::Database);
+				let scalar = tail.as_ref().is_some_and(|tail| tail.only);
+				let spec = reads.group_spec(permissions, tail, scalar, false)?;
+				self.lw.block_groups().append(reads, spec);
+				context
 			};
-			self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
-			self.writes = true;
-			needs.context
-		} else {
-			let (scope, permissions) = self.lw.lower_group(region, base, statement)?;
-			let ReadScope {
-				reads,
-				tail,
-			} = scope;
-			let context = match reads.table {
-				Some(_) => reads.needs.context.max(ContextLevel::Database),
-				None => reads.needs.context,
-			};
-			let scalar = tail.as_ref().is_some_and(|tail| tail.only);
-			let spec = reads.group_spec(permissions, tail, scalar, false)?;
-			self.lw.block_groups().append(reads, spec);
-			context
-		};
 		let dst = self.reg()?;
 		let collect = self.collect_of(op, data)?;
 		// The statements after one that changes the catalog run against what it leaves, so the
 		// session's names are resolved again before they run.
 		let resolve = self.catalog_changed.then_some(context);
+		self.block(BlockInstr::Clock);
 		match analysed {
 			Some(analysis) => self.run_analyzed(statement, analysis, dst, collect, resolve)?,
 			None => self.run_group(Runner::Embedded(statement), dst, collect, resolve)?,
@@ -1114,6 +1259,49 @@ impl<'a> Blocks<'a> {
 		}
 		self.define(data, Operand::Reg(dst));
 		Ok(None)
+	}
+
+	/// Lowers the write `write`, which the region `held` holds with what it is made of and which
+	/// the `TIMEOUT` of `duration` bounds where given, as the group `statement` of the program,
+	/// numbering its pools from `base`. Answers the context level its run resolves.
+	fn write_group(
+		&mut self,
+		write: OpId,
+		held: RegionId,
+		duration: Option<ValueId>,
+		base: PoolBase,
+		statement: u16,
+	) -> Result<ContextLevel, IrError> {
+		check_write_region(self.ir, held, write)?;
+		let (lowered, timeout, permissions) =
+			self.lw.lower_write_group(write, held, base, duration, statement)?;
+		// A write's value is its one record when it is `ONLY`, and its records otherwise; its
+		// clauses are the write's own, so the group's tail is only its `TIMEOUT`.
+		let scalar = lowered.spec.only;
+		match lowered.pipelines {
+			WritePipelines::Own(pipeline) => {
+				let spec = GroupSpec {
+					write: Some(lowered.spec),
+					scalar,
+					rowless: false,
+					sorts: base.sorts..base.sorts,
+					aggregates: base.aggregates..base.aggregates,
+					permissions,
+					version: None,
+					timeout,
+					only: false,
+				};
+				self.lw.block_groups().append_pipeline(pipeline, Vec::new(), spec);
+			}
+			WritePipelines::Over(reads) => {
+				let mut spec = reads.group_spec(permissions, None, scalar, false)?;
+				spec.write = Some(lowered.spec);
+				spec.timeout = timeout;
+				self.lw.block_groups().append(reads, spec);
+			}
+		}
+		self.writes = true;
+		Ok(lowered.needs.context.max(ContextLevel::Database))
 	}
 
 	/// The index of the late-bound statement the program serves next, the statement as written
@@ -1154,6 +1342,7 @@ impl<'a> Blocks<'a> {
 		let dst = self.reg()?;
 		let collect = self.collect_of(op, data)?;
 		let served = self.served_spec(written)?;
+		self.block(BlockInstr::Clock);
 		self.run_group(Runner::Served(served), dst, collect, Some(context))?;
 		if changes_catalog {
 			self.block(BlockInstr::Resolve);
@@ -1163,15 +1352,55 @@ impl<'a> Blocks<'a> {
 		Ok(None)
 	}
 
-	/// Whether `region`, the region of a statement, holds the raise of an error where it stands.
+	/// Whether `region`, the region of a statement, holds the evaluation of an expression and
+	/// nothing that runs as a group: its ops are expression ops, the control flow and the loops
+	/// an expression holds in value position, and its yield.
+	fn evaluates_only(&self, region: RegionId) -> Result<bool, IrError> {
+		for op in ops_in(self.ir, region) {
+			let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::block: op"))?;
+			let evaluates = match &data.kind {
+				OpKind::Expr(_)
+				| OpKind::Phys(PhysOp::Yield | PhysOp::Block)
+				| OpKind::Phys(PhysOp::If {
+					..
+				}) => true,
+				OpKind::Phys(PhysOp::Loop {
+					kind,
+					..
+				}) => is_value_loop(*kind),
+				OpKind::Phys(PhysOp::Pipeline(_)) => {
+					let [inner] = Self::regions::<1>(data)?;
+					ops_in(self.ir, inner).any(|looped| {
+						matches!(
+							self.ir.op(looped).map(|held| &held.kind),
+							Some(OpKind::Phys(PhysOp::Loop { kind, .. })) if is_value_loop(*kind)
+						)
+					})
+				}
+				OpKind::Phys(_) | OpKind::Logical(_) => false,
+			};
+			if !evaluates {
+				return Ok(false);
+			}
+		}
+		Ok(true)
+	}
+
+	/// Whether `region`, the region of a statement, ends where it stands rather than running as a
+	/// group: it holds the raise of an error, or ends in a `BREAK`, `CONTINUE` or `RETURN` its
+	/// statement diverges to before it reads a row (a source that is the loop control itself).
 	fn raises(&self, region: RegionId) -> Result<bool, IrError> {
+		let mut last = None;
 		for op in ops_in(self.ir, region) {
 			let data = self.ir.op(op).ok_or(IrError::Stale("ir_lower::block: op"))?;
 			if matches!(&data.kind, OpKind::Expr(ExprOp::Raise(_) | ExprOp::Throw)) {
 				return Ok(true);
 			}
+			last = Some(data);
 		}
-		Ok(false)
+		Ok(last.is_some_and(|data| {
+			matches!(&data.kind, OpKind::Phys(PhysOp::Break | PhysOp::Next | PhysOp::Return))
+		}))
 	}
 
 	/// How the run of the statement `op` gathers its value: as the `LET` or the `RETURN` that
@@ -1682,6 +1911,40 @@ impl<'a> Blocks<'a> {
 		}
 		self.jump(target);
 		Ok(())
+	}
+}
+
+/// The spec of a group of one pipeline over [`Source::Once`] that evaluates a value and emits it
+/// as its one row: a scalar statement that reads no rows, whose pools start at `base`.
+fn value_group_spec(base: PoolBase, permissions: std::ops::Range<u16>) -> GroupSpec {
+	GroupSpec {
+		write: None,
+		scalar: true,
+		rowless: true,
+		sorts: base.sorts..base.sorts,
+		aggregates: base.aggregates..base.aggregates,
+		permissions,
+		version: None,
+		timeout: None,
+		only: false,
+	}
+}
+
+/// The write `region` holds, alone or in the `Deadline` region of the `TIMEOUT` that bounds it,
+/// with the region that holds it and the timeout's duration.
+fn written_in(
+	ir: &Ir,
+	region: RegionId,
+) -> Result<Option<(OpId, RegionId, Option<ValueId>)>, IrError> {
+	match timed_write_in(ir, region)? {
+		Some((timed, write)) => {
+			let held = ir.op(timed).ok_or(IrError::Stale("ir_lower::block: op"))?;
+			match (held.operands.as_slice(), held.regions.as_slice()) {
+				([duration], [deadline]) => Ok(Some((write, *deadline, Some(*duration)))),
+				_ => Err(invariant("a phys.timeout with other than one operand and one region")),
+			}
+		}
+		None => Ok(write_of(ir, region).map(|write| (write, region, None))),
 	}
 }
 

@@ -1583,9 +1583,14 @@ fn explained_group(
 ) -> Result<u16, IrError> {
 	let at = reads.groups.len();
 	let group = nested::lower_group(em, cx, facts, reads, |em, cx, _facts, reads| {
-		match super::explain::lower_explained(cx, em, ir, region, explain, PoolBase::default())? {
+		let base = PoolBase::default();
+		let plain = super::explain::Purpose::Plan;
+		match super::explain::lower_explained(cx, em, ir, region, explain, base, plain)? {
 			super::explain::Explained::Plain(pipeline) => reads.append(pipeline),
 			super::explain::Explained::Analysed {
+				..
+			}
+			| super::explain::Explained::AnalysedValue {
 				..
 			} => return Err(invariant("an analysed EXPLAIN lowered as a plain one")),
 		}
@@ -1739,7 +1744,7 @@ fn open_source(
 				KnnTargetShape::Literal(vector) => {
 					(KnnVector::Literal(Arc::from(vector.as_slice())), None)
 				}
-				KnnTargetShape::Deferred(text) => {
+				KnnTargetShape::Deferred(text, before_rows) => {
 					let target = *data
 						.operands
 						.get(1)
@@ -1755,6 +1760,7 @@ fn open_source(
 								text: Arc::from(text.as_str()),
 							},
 							group: em.group(),
+							before_rows: *before_rows,
 						}),
 					)
 				}

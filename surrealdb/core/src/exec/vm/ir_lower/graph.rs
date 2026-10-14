@@ -45,9 +45,10 @@
 //! The hops read nothing from the catalog. A hop holds no per-table permission or field view,
 //! so each record a hop reaches is read by a scan of its table, which resolves the table's
 //! permission and field view when it reads the record. The `WHERE` of a hop is a host pipeline
-//! over the record reached, whose block argument is the row. The bounds of a range subject are
-//! host scalars, evaluated with no row when the hop is taken. The program needs the database
-//! context.
+//! over the record reached, whose block argument is the row. A hop the physical plan gave a key
+//! condition ([`crate::exec::ir::phys::hop_key`]) judges that pipeline over each adjacency entry
+//! instead, before its edge is read. The bounds of a range subject are host scalars, evaluated
+//! with no row when the hop is taken. The program needs the database context.
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
@@ -56,8 +57,8 @@ use std::sync::Arc;
 
 use super::super::plain::ValueData;
 use super::super::program::{
-	EdgeSpec, HopRead, HostScalar, Instr, KeyShape as RecordKey, LookupHop, LookupPage, LookupSpec,
-	NavOp, Operand, ReferenceSubject,
+	CompareOp, EdgeSpec, HopRead, HostScalar, Instr, KeyCheck, KeyCond, KeyShape as RecordKey,
+	LookupHop, LookupPage, LookupSpec, NavOp, Operand, ReferenceSubject,
 };
 use super::expr::{Lowerer, exactly, invariant, region_at};
 use crate::exec::ContextLevel;
@@ -67,10 +68,11 @@ use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{ExprOp, KeyBound};
-use crate::exec::ir::iface::ids::{RegionId, ValueId};
+use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::iface::statements::OperandSlot;
 use crate::exec::ir::logical::ops::{FieldShape, FieldsShape, LookupAttrs, LoopKind, StepAttrs};
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::ir::phys::hop_key::HopKey;
 use crate::exec::ir::phys::ops::PhysOp;
 use crate::expr::Dir;
 use crate::expr::lookup::LookupKind;
@@ -271,10 +273,39 @@ impl Lowerer<'_> {
 /// A hop of a graph lookup: the loop that states it.
 #[derive(Clone, Copy)]
 struct Hop<'a> {
+	/// The loop.
+	op: OpId,
 	data: &'a OpData,
 	attrs: &'a LookupAttrs,
 	/// The region the loop stands in.
 	region: RegionId,
+}
+
+/// The key condition `key` states over the host pipeline `pipeline` of the hop's `WHERE`. Its
+/// comparisons are checked in place of the pipeline only when every one compares by an operator
+/// the check applies.
+fn key_cond(pipeline: u16, key: &HopKey) -> KeyCond {
+	let checks = key.checks.as_ref().and_then(|checks| {
+		checks
+			.iter()
+			.map(|check| {
+				Some(KeyCheck {
+					field: check.field.clone(),
+					op: CompareOp::of(&check.op)?,
+					value: ValueData::new(check.value.clone(), "a key check").ok()?,
+					swapped: check.swapped,
+				})
+			})
+			.collect()
+	});
+	KeyCond {
+		pipeline,
+		needs_id: key.needs_id,
+		needs_in: key.needs_in,
+		needs_out: key.needs_out,
+		payload: key.payload.clone(),
+		checks,
+	}
 }
 
 /// How a hop pages the records it reaches.
@@ -339,6 +370,7 @@ fn hop_of(ir: &Ir, value: ValueId) -> Option<Hop<'_>> {
 		return None;
 	};
 	Some(Hop {
+		op,
 		data,
 		attrs,
 		region: ir.enclosing_region(op),
@@ -572,6 +604,7 @@ impl Lowerer<'_> {
 		if operands.count() != paged {
 			return Err(IrError::Stale("ir_lower::graph: a hop's operands"));
 		}
+		let key = self.ir.hop_key(hop.op);
 		let cond = match attrs.cond {
 			true => {
 				let region = region_at(hop.data, 1, regions)?;
@@ -588,12 +621,16 @@ impl Lowerer<'_> {
 			}
 			false => None,
 		};
+		let (cond, key_cond) = match (cond, key) {
+			(Some(pipeline), Some(key)) => (None, Some(key_cond(pipeline, key))),
+			(cond, _) => (cond, None),
+		};
 		Ok(LookupHop {
 			read: Arc::new(read),
-			full: attrs.cond || attrs.fields.is_some(),
+			full: cond.is_some() || attrs.fields.is_some(),
 			tables: Vec::new(),
 			cond,
-			key_cond: None,
+			key_cond,
 		})
 	}
 

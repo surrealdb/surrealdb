@@ -188,6 +188,23 @@ pub(super) async fn check_key_components(
 	.await
 }
 
+/// Whether the user-defined functions the `COMPUTED` body of `definition`, a
+/// field of the database `ns`, `db`, calls are read-only in the catalog `txn`
+/// holds, as `DEFINE FIELD` judges them.
+pub(super) async fn check_computed_callees(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	definition: &crate::catalog::FieldDefinition,
+) -> anyhow::Result<()> {
+	crate::exec::vm::descriptor::schema(
+		crate::ddl::define::field::define_field_statement_validate_computed_callees(
+			ns, db, txn, definition,
+		),
+	)
+	.await
+}
+
 /// What refuses `REMOVE FIELD id` on the table `table` of the database `ns`,
 /// `db`: a definition of the table that reads a component of its record id,
 /// as `txn` holds the catalog and the rows of the table's views.

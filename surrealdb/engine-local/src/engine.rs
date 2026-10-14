@@ -528,6 +528,8 @@ impl SurrealEngine for LocalEngine {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
 			ensure_session_active(&state).await?;
+			surrealdb_rpc::check_protected_param(&key)
+				.map_err(|e| Error::internal(e.to_string()))?;
 			state.vars.write().await.remove(&key);
 			Ok(())
 		})

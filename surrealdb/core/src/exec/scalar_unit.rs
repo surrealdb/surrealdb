@@ -95,7 +95,7 @@ impl ScalarUnit {
 		}
 		let value = CompiledClosure::planned(&self.closure, self.digest, captures)
 			.without_call()
-			.over_invoking_row(self.reads_row);
+			.reading_row(self.reads_row);
 		if !self.predicate {
 			return Box::pin(value.invoke(ctx, Vec::new())).await;
 		}

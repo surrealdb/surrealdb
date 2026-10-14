@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "The body is written in `RETURN [{score: [95]}, {score: [10]}][WHERE score.any(|$e| $e >= $min)]`. It runs and reads the names and the row of the frame where the closure is written."
+reason = "The body is written in `RETURN [{score: [95]}, {score: [10]}][WHERE score.any(|$e| $e >= $min)]`. It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

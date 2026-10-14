@@ -252,6 +252,24 @@ impl Builder {
 		)
 	}
 
+	/// The closure literal `|| NONE`, made where the ops go, which captures nothing.
+	pub(super) fn closure(&mut self) -> ValueId {
+		let attrs = crate::exec::ir::expr::ops::ClosureAttrs {
+			params: Box::new([]),
+			returns: None,
+			body_sql: std::sync::Arc::from("NONE"),
+			captures: Default::default(),
+			reads_row: false,
+			reads_root: false,
+			literal: crate::exec::ir::expr::ops::ClosureLiteral::none_written_as("NONE"),
+		};
+		let owner = self.add_with_regions(ExprOp::ClosureCreate(Box::new(attrs)), &[]);
+		self.region_with_args(owner, RegionKind::ClosureBody, &[TypeKnowledge::Unknown], |b, _| {
+			b.literal(Value::None)
+		});
+		self.result_of(owner)
+	}
+
 	/// A call of the builtin `name`.
 	pub(super) fn call(&mut self, name: &str, args: &[ValueId]) -> ValueId {
 		self.add(ExprOp::call(Function::Normal(name.to_owned())), args)

@@ -177,42 +177,35 @@ fn record_user_session(ns: &str, db: &str, user_key: &str) -> Session {
 	.with_rt(true)
 }
 
-/// SECURITY (#101): the trusted LIVE `$value` / `$before` / `$after` /
-/// `$event` bindings must NOT be shadowed by a user-captured `$value` in
-/// `live_subscription.vars`. A user can `LET $value = { ok: true }`
-/// before registering a LIVE query whose WHERE references `$value.ok`;
-/// if the user binding wins, the WHERE will match every notification
-/// regardless of the real document. The fix adds user vars to the
-/// context BEFORE the trusted bindings so the trusted ones overwrite.
+/// SECURITY: a user cannot bind the `$value` / `$before` / `$after` / `$event` a LIVE query's
+/// WHERE reads from the notification's document, so no variable captured into
+/// `live_subscription.vars` stands for the real document. A `LET` of the name is refused, and
+/// so is a variable bound to the request or the session.
 #[tokio::test]
-async fn test_live_user_value_does_not_shadow_real_document() {
-	let (recv, ds) = new_ds_with_broker().await.unwrap();
+async fn test_live_user_value_is_refused() {
+	let (_recv, ds) = new_ds_with_broker().await.unwrap();
 	let (ns, db, tb) = ("test", "test", "person");
 	setup_ns_db_table(&ds, ns, db, tb).await;
 
 	let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
-	ds.execute(
-		"LET $value = { ok: true }; LIVE SELECT * FROM person WHERE $value.ok = true",
-		&ses,
-		None,
-	)
-	.await
-	.unwrap();
-
-	let ses_write = Session::owner().with_ns(ns).with_db(db);
-	let mut res = ds
-		.execute("CREATE person:42 SET ok = false", &ses_write, None)
+	let err = ds
+		.execute("LET $value = { ok: true };", &ses, None)
 		.await
-		.expect("execute should not return an Err");
-	res.remove(0).result.expect("CREATE should succeed");
+		.unwrap()
+		.remove(0)
+		.result
+		.expect_err("a LET of $value is refused");
+	assert_eq!(err.to_string(), "'value' is a protected variable and cannot be set");
 
-	// With the fix the system `$value` (the real document, ok=false) wins, so
-	// the WHERE clause evaluates to false and no notification fires.
-	let result = tokio::time::timeout(tokio::time::Duration::from_millis(300), recv.recv()).await;
-	assert!(
-		result.is_err(),
-		"no notification should fire when the real document does not match the WHERE",
-	);
+	let vars = surrealdb_types::vars! { value: true };
+	let refused =
+		match ds.execute("LIVE SELECT * FROM person WHERE $value = true", &ses, Some(vars)).await {
+			Err(err) => err.to_string(),
+			Ok(mut res) => {
+				res.remove(0).result.expect_err("a request variable $value is refused").to_string()
+			}
+		};
+	assert!(refused.contains("'value' is a protected variable"), "{refused}");
 }
 
 /// SECURITY: a LIVE query whose originating session has expired via TTL

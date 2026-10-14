@@ -6,8 +6,10 @@
 //! need one.
 //!
 //! Two clause positions are rewritten: a predicate (a mutation's `WHERE`
-//! included), and a `FROM` source. Every other clause — a mutation's data
-//! clause among them — keeps its parameters and resolves them per row. What is
+//! included), and a `FROM` source. The query of a `MATCHES` in a statement's
+//! own projection is rewritten too, so it names the full-text clause its
+//! `WHERE` registers. Every other clause — a mutation's data clause among
+//! them — keeps its parameters and resolves them per row. What is
 //! substituted in those two positions, and what is deliberately left for
 //! runtime:
 //!
@@ -400,6 +402,18 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 			}
 			LogicalOp::Write(write)
 		}
+		// A `MATCHES` of the statement's own projection takes the query its `WHERE` takes, so
+		// the two name one full-text clause.
+		LogicalOp::Project(mut project) => {
+			if !project.is_layer() {
+				let mut exprs = Vec::new();
+				project.fields.exprs_mut(&mut exprs);
+				for expr in exprs {
+					substitute_matches_queries(expr, subs);
+				}
+			}
+			LogicalOp::Project(project)
+		}
 		LogicalOp::Join(mut join) => {
 			for (left, right) in &mut join.on {
 				substitute(left, subs);
@@ -462,7 +476,6 @@ fn substitute_node(node: LogicalOp, subs: &Substitutions, privileged: &Substitut
 		| LogicalOp::Distinct(_)
 		| LogicalOp::Sort(_)
 		| LogicalOp::Limit(_)
-		| LogicalOp::Project(_)
 		| LogicalOp::Fetch(_)
 		| LogicalOp::Timeout(_)
 		| LogicalOp::VersionScope(_)
@@ -599,6 +612,23 @@ fn substitute(expr: &mut LogicalExpr, subs: &Substitutions) {
 		{
 			*e = literal.clone();
 			return Descend::Over;
+		}
+		Descend::Into
+	});
+}
+
+/// Replaces the parameter that is the right operand of a `MATCHES` in `expr` with its literal in
+/// `subs`, not entering a nested plan or a closure body. Every other parameter is left in place.
+fn substitute_matches_queries(expr: &mut LogicalExpr, subs: &Substitutions) {
+	visit_binding_pruning_mut(expr, &mut |e| {
+		if let LogicalExpr::Binary {
+			op: BinaryOperator::Matches(_),
+			right,
+			..
+		} = e && let LogicalExpr::Param(param) = right.as_ref()
+			&& let Some(literal) = subs.literals.get(param.as_str())
+		{
+			**right = literal.clone();
 		}
 		Descend::Into
 	});

@@ -223,8 +223,8 @@ pub(crate) fn envelope(
 /// The context a subscription's work runs in, before its principal is applied.
 ///
 /// The shadowing order is load-bearing: the subscription's own captured
-/// variables go in first, so the trusted bindings below overwrite a
-/// subscriber's `LET $value = { ok: true }` rather than the other way round.
+/// variables go in first, so the trusted bindings below overwrite a captured
+/// variable of the same name rather than the other way round.
 /// A subscriber that could shadow `$value`, `$before`, `$after`, `$session`,
 /// `$auth`, `$access` or `$token` would be feeding the table's own permission
 /// expressions a document of its choosing.

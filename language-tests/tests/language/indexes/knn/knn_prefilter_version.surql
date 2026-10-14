@@ -30,7 +30,7 @@ value = "NONE"
 value = '''
 "VersionScope [ctx: Db] [version: $ts]
     SelectProject [ctx: Db] [projections: id]
-        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 1]
+        KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: deferred]
             TableScan [ctx: Db] [table: pts, direction: Forward, predicate: category = 'a', pre_decode_filter: yes]
 "'''
 

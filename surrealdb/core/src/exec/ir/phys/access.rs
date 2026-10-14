@@ -211,6 +211,18 @@ pub(crate) struct TableAnswers {
 	/// What the table's `SELECT` permission does to a caller whose reads are checked, as a count
 	/// of its records needs it: a table that is not defined is `Deny`.
 	pub(crate) select: CountSelect,
+	/// For a relation table that is not lightweight, what each adjacency entry of one of its edges
+	/// carries of the edge's fields; `None` for any other table.
+	pub(crate) inline: Option<Arc<InlineFields>>,
+}
+
+/// The `INLINE` fields of a relation table, as an adjacency entry carries them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InlineFields {
+	/// The table's inline generation, which stamps every entry written under these fields.
+	pub(crate) generation: u32,
+	/// The raw name of every inline field, in the order an entry holds their values.
+	pub(crate) names: Arc<[String]>,
 }
 
 impl TableAnswers {
@@ -238,6 +250,7 @@ impl TableAnswers {
 			} else {
 				CountSelect::Deny
 			},
+			inline: None,
 		}
 	}
 
@@ -249,6 +262,8 @@ impl TableAnswers {
 			enforces: true,
 			restricted: RestrictedSelect::Unresolved,
 			version,
+			// The permission is the one the run meets, so a count runs the ordinary plan beside it.
+			select: CountSelect::Conditional,
 			..Self::plain(table, true)
 		}
 	}
@@ -736,6 +751,31 @@ fn empties_unobserved(predicate: &Reconstructed) -> bool {
 		Some(at) => predicate.withheld.iter().all(|withheld| *withheld > at),
 		None => true,
 	}
+}
+
+/// `predicate` with each conjunct the physical catalog holds a record fold for replaced by it, or
+/// `None` where it holds none.
+fn record_folded(
+	predicate: &Reconstructed,
+	physical: &dyn PhysicalCatalog,
+) -> Option<Reconstructed> {
+	let mut folded = None;
+	for (at, (_, conjunct)) in predicate.conjuncts.iter().enumerate() {
+		if let Some(replaced) = physical.record_folded(conjunct) {
+			folded.get_or_insert_with(|| predicate.clone()).conjuncts[at].1 = replaced;
+		}
+	}
+	folded
+}
+
+/// Whether `predicate` holds the literal `false` and no conjunct before it is withheld: no row
+/// passes it, and reading none raises nothing a conjunct judged first would.
+fn settled_false(predicate: &Reconstructed) -> bool {
+	predicate
+		.conjuncts
+		.iter()
+		.any(|(_, expr)| matches!(expr, LogicalExpr::Literal(LogicalLiteral::Bool(false))))
+		&& empties_unobserved(predicate)
 }
 
 /// The op of the decision, and the residual it leaves.
@@ -1407,10 +1447,14 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 			});
 		}
 	};
+	// A read at a stamp only the run evaluates ranks over the vector indexes the table declares
+	// now, the only ones the plan can name.
 	let exact = match (&stages, answers.version, &attrs.source_ref) {
-		(Some(stages), ReadVersion::Stamped(_), SourceRefShape::Table(_)) => {
-			knn::exact_at_stamp(ir, stages, &answers.indexes)?
-		}
+		(
+			Some(stages),
+			ReadVersion::Stamped(_) | ReadVersion::Deferred,
+			SourceRefShape::Table(_),
+		) => knn::exact_at_stamp(ir, stages, &answers.indexes)?,
 		_ => Vec::new(),
 	};
 	let ranks = match stages.as_ref() {
@@ -1421,14 +1465,20 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 		if ranks {
 			knn::withhold_handled(&mut offer.predicate);
 		}
-		let cond = offer.predicate.condition();
+		// The decision reads each conjunct with the record paths the planner folded from the
+		// current records, unless the read is at another version; the filter keeps it as written.
+		let folded = match answers.version {
+			ReadVersion::Current => record_folded(&offer.predicate, cx.physical),
+			ReadVersion::Stamped(_) | ReadVersion::Deferred => None,
+		};
+		let predicate = folded.as_ref().unwrap_or(&offer.predicate);
+		let cond = predicate.condition();
 		let knn_vectors = knn_vectors_of(cx, data, &answers, cond.as_ref())?;
 		let decision = DecisionCx {
 			registry: cx.effects.registry,
 			knn_vectors: &knn_vectors,
 		};
-		let choice =
-			select_access(attrs, &answers, &offer.predicate, offer.sort.as_ref(), &decision)?;
+		let choice = select_access(attrs, &answers, predicate, offer.sort.as_ref(), &decision)?;
 		Ok((offer, choice))
 	};
 	// A member of a union of sources whose predicate holds a `KNN` operator is searched when the
@@ -1462,7 +1512,7 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 	};
 	let (offer, mut choice) = match across {
 		Some(decided) if searched(&decided) => decided,
-		Some(_) | None => decide(offer_of(ir, op)?)?,
+		Some(_) | None => decide(united_offer(ir, op, write || ranks)?)?,
 	};
 	// A search judges the source's rows, and a conjunct past a resolver layer reads the rows the
 	// layer resolves: it stays in the filter above the layer and out of the search's regions.
@@ -1487,9 +1537,43 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 			}
 		}
 	}
+	// A permission over the source's own rows that admits no row leaves the read nothing to list:
+	// the read is the empty scan, and the permission filter stays above it.
+	if matches!(attrs.source_ref, SourceRefShape::Table(_))
+		&& choice.refusal.is_none()
+		&& choice.knn.is_none()
+		&& offer.permissions.iter().any(|permission| admits_no_row(ir, *permission))
+	{
+		choice.access = PhysOp::Union;
+		choice.fallback = None;
+		choice.point_lookup = None;
+		choice.key_operands.clear();
+	}
+	// A member of a union of sources under a predicate settled false, which the fold leaves only
+	// where no member's rows can dereference a record, lists nothing: every row of the union is
+	// refused, so the table's read is the empty scan.
+	if matches!(attrs.source_ref, SourceRefShape::Table(_))
+		&& choice.refusal.is_none()
+		&& choice.knn.is_none()
+		&& !matches!(choice.access, PhysOp::Union)
+	{
+		let across = offer_across(ir, op)?;
+		if across.united && !across.in_write && settled_false(&across.predicate) {
+			choice.access = PhysOp::Union;
+			choice.fallback = None;
+			choice.point_lookup = None;
+			choice.key_operands.clear();
+		}
+	}
 	// A source the bind resolved has its table's declarations enforced by the nodes above it, and
-	// enforcing them again would judge a row twice.
-	if offer.enforced_above && (offer.write_subjects || !attrs.may_meet_change) {
+	// enforcing them again would judge a row twice. A resolved source with no such node above it
+	// needs none: what the statement reads of it declares nothing the read must enforce. The
+	// answers of a table the catalog does not define, or whose permission context is unresolved,
+	// are not the ones the resolution read, so its read enforces what it meets.
+	let resolved = attrs.resolved
+		&& answers.defined
+		&& !matches!(answers.restricted, RestrictedSelect::Unresolved);
+	if (offer.enforced_above || resolved) && (offer.write_subjects || !attrs.may_meet_change) {
 		choice.enforce = None;
 	}
 	let point = match choice.point_lookup {
@@ -1533,6 +1617,48 @@ fn plan_source(ir: &Ir, op: OpId, cx: &PhysCx<'_>) -> Result<Option<Planned>, Ir
 		knn_vector,
 		keyed,
 	}))
+}
+
+/// The offer a source's access path is chosen from where no search or write reads it across a
+/// union: [`offer_of`], or, for a table member of a union of sources that nothing between it and
+/// the union filters, the predicate the filters over the union's rows state ([`offer_across`]).
+/// Such a predicate judges every row of the union, so a conjunct it holds holds of each row the
+/// union yields: the access path lists a superset of the member's rows that survive it, and the
+/// filters above the union keep every conjunct. A predicate with a `KNN` or `MATCHES` operator is
+/// not offered this way, and `searched` withholds it from a source read for a `KNN` search or a
+/// write, whose offers [`plan_source`] reads itself.
+fn united_offer(ir: &Ir, op: OpId, searched: bool) -> Result<Offer, IrError> {
+	let own = offer_of(ir, op)?;
+	if searched || !own.predicate.is_empty() {
+		return Ok(own);
+	}
+	let across = offer_across(ir, op)?;
+	let unindexed = across
+		.predicate
+		.condition()
+		.is_none_or(|cond| has_knn_operator(&cond) || expr_contains_matches(&cond));
+	if !across.united || across.in_write || unindexed {
+		return Ok(own);
+	}
+	Ok(across)
+}
+
+/// Whether the permission filter `permission` admits no row: its predicate is the literal `false`.
+fn admits_no_row(ir: &Ir, permission: OpId) -> bool {
+	let Some(region) = ir.op(permission).and_then(|data| data.regions.first().copied()) else {
+		return false;
+	};
+	let Some(closing) = ops_in(ir, region).last().and_then(|last| ir.op(last)) else {
+		return false;
+	};
+	let (OpKind::Expr(ExprOp::Yield), [value]) = (&closing.kind, closing.operands.as_slice())
+	else {
+		return false;
+	};
+	matches!(
+		producer_kind(ir, *value),
+		Some(ExprOp::Literal(literal)) if matches!(**literal, Value::Bool(false))
+	)
 }
 
 /// The key of the table read the source `op` makes, or `None` when the source names a value and
@@ -1586,7 +1712,8 @@ fn producer_kind(ir: &Ir, value: ValueId) -> Option<&ExprOp> {
 /// The version the read of the source `data` observes.
 ///
 /// A read at a datetime the plan knows (a literal, or a name the compile binds to one) whose stamp
-/// the datastore resolves is [`ReadVersion::Stamped`]; a read at any other version is
+/// the datastore resolves is [`ReadVersion::Stamped`], and so is a read under no `VERSION` of its
+/// own in a compile at a stamp ([`PhysicalCatalog::read_stamp`]); a read at any other version is
 /// [`ReadVersion::Deferred`].
 fn read_version(
 	ir: &Ir,
@@ -1594,9 +1721,13 @@ fn read_version(
 	catalog: &dyn SemanticCatalog,
 	physical: &dyn PhysicalCatalog,
 ) -> Result<ReadVersion, IrError> {
+	// A read under no `VERSION` of its own reads at the stamp the compile reads at, where it is
+	// one.
 	let version = match ir.snapshot(data.snapshot) {
 		Some(Snapshot::Version(version)) => *version,
-		Some(Snapshot::Current) | None => return Ok(ReadVersion::Current),
+		Some(Snapshot::Current) | None => {
+			return Ok(physical.read_stamp().map_or(ReadVersion::Current, ReadVersion::Stamped));
+		}
 	};
 	let datetime = match producer_kind(ir, version) {
 		Some(ExprOp::Literal(value)) => match &**value {
@@ -2420,6 +2551,7 @@ mod tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		}
 	}
 
@@ -2509,6 +2641,7 @@ mod tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		};
 		let mut table = answers(vec![idx(1, "ix", &["x"])]);
 		table.lightweight = true;
@@ -2528,6 +2661,7 @@ mod tests {
 			for_update: true,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		};
 		let mut table = answers(Vec::new());
 		table.lightweight = true;
@@ -3049,6 +3183,7 @@ mod tests {
 				for_update: false,
 				may_be_defined: false,
 				may_meet_change: false,
+				resolved: false,
 			};
 			let error =
 				select_access(&source, &table, &Reconstructed::default(), None, &decision())
@@ -3066,6 +3201,7 @@ mod tests {
 			for_update,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		};
 		let read = |source: &SourceAttrs, call_shaped| match value_source(source, call_shaped) {
 			Ok(Some(PhysOp::Values {
@@ -3838,6 +3974,7 @@ mod convert_tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		}
 	}
 
@@ -3943,6 +4080,7 @@ mod convert_tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		};
 		let record = ExprOp::RecordId(Box::new(RecordIdAttrs {
 			table: "t".into(),
@@ -4079,6 +4217,7 @@ mod convert_tests {
 			for_update: false,
 			may_be_defined: false,
 			may_meet_change: false,
+			resolved: false,
 		};
 		let operand = ExprOp::FreeParam {
 			name: Strand::new("p"),

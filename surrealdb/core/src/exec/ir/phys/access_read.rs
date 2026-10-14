@@ -214,22 +214,26 @@ fn knn_in_cone(ir: &Ir, value: ValueId, first_only: bool) -> Vec<ValueId> {
 
 /// What the ops `pending` and the ops they stand on hold: the ops that define their operands and
 /// the ops in their regions. A nested statement's region is not entered, and a `KNN` operator's
-/// own operands are not searched (reading the operator reads them). With `first_only` the search
-/// ends at the first `KNN` operator.
-fn cone_of(ir: &Ir, mut pending: Vec<OpId>, first_only: bool) -> Cone {
+/// own operands are not searched (reading the operator reads them). A `KNN` operator in the body
+/// of a closure literal runs only where the closure is invoked, as an ordinary expression, so it
+/// is no operator of the cone; the fields that body reads are. With `first_only` the search ends
+/// at the first `KNN` operator.
+fn cone_of(ir: &Ir, pending: Vec<OpId>, first_only: bool) -> Cone {
 	let mut cone = Cone::default();
 	let mut seen: HashSet<OpId> = HashSet::new();
-	while let Some(op) = pending.pop() {
+	let mut pending: Vec<(OpId, bool)> = pending.into_iter().map(|op| (op, false)).collect();
+	while let Some((op, in_closure)) = pending.pop() {
 		if !seen.insert(op) {
 			continue;
 		}
 		let Some(data) = ir.op(op) else {
 			continue;
 		};
+		let mut body_in_closure = in_closure;
 		match &data.kind {
 			OpKind::Expr(ExprOp::Binary {
 				op: BinaryOperator::NearestNeighbor(_),
-			}) => {
+			}) if !in_closure => {
 				cone.knn.extend(data.results.first().copied());
 				if first_only {
 					return cone;
@@ -237,6 +241,7 @@ fn cone_of(ir: &Ir, mut pending: Vec<OpId>, first_only: bool) -> Cone {
 				continue;
 			}
 			OpKind::Expr(ExprOp::Subquery(_)) => continue,
+			OpKind::Expr(ExprOp::ClosureCreate(_)) => body_in_closure = true,
 			OpKind::Expr(ExprOp::Field {
 				name,
 			}) => note_field(&mut cone, name),
@@ -244,9 +249,14 @@ fn cone_of(ir: &Ir, mut pending: Vec<OpId>, first_only: bool) -> Cone {
 			OpKind::Expr(ExprOp::Doc) => note_field(&mut cone, &Strand::from("id")),
 			OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => {}
 		}
-		pending.extend(data.operands.iter().filter_map(|value| defining_op(ir, *value)));
+		pending.extend(
+			data.operands
+				.iter()
+				.filter_map(|value| defining_op(ir, *value))
+				.map(|op| (op, in_closure)),
+		);
 		for region in &data.regions {
-			pending.extend(ops_in(ir, *region));
+			pending.extend(ops_in(ir, *region).map(|op| (op, body_in_closure)));
 		}
 	}
 	cone

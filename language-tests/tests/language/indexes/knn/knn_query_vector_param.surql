@@ -104,9 +104,9 @@ SELECT q, bf FROM out ORDER BY q;
 { LET $q = [5f, 0f]; RETURN SELECT VALUE id FROM bpts WHERE point <|1,EUCLIDEAN|> $q; };
 -- Before the block's own LET, the statement parameter is still the one read.
 {
-	LET $before = (SELECT VALUE id FROM pts WHERE point <|1,40|> $q);
+	LET $earlier = (SELECT VALUE id FROM pts WHERE point <|1,40|> $q);
 	LET $q = [5f, 0f];
-	RETURN $before;
+	RETURN $earlier;
 };
 -- A later LET of the block shadows its name as the first one does.
 {

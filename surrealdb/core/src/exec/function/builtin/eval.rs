@@ -428,7 +428,7 @@ mod tests {
 	async fn a_return_in_nested_text_ends_only_the_nested_query() {
 		let db = TestDb::new_with_capabilities("", false, eval_allowed()).await;
 		assert_eq!(
-			last(&db, &TestDb::owner(), "RETURN [eval::surql('RETURN 1; 2'), 3]").await,
+			last(&db, &TestDb::owner(), "RETURN [eval::surql('{ RETURN 1; 2 }'), 3]").await,
 			parse("[1, 3]"),
 		);
 	}

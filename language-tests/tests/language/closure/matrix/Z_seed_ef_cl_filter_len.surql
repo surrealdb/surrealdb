@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "The body is written in `RETURN [{score: [95]}, {score: [10]}][WHERE array::len(array::filter(score, |$e| $e >= $min)) > 0]`. It runs and reads the names and the row of the frame where the closure is written."
+reason = "The body is written in `RETURN [{score: [95]}, {score: [10]}][WHERE array::len(array::filter(score, |$e| $e >= $min)) > 0]`. It runs and reads the names of the frame where the closure is written and the row of the frame that invokes it."
 
 [[test.results]]
 value = "NONE"

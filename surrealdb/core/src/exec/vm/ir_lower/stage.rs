@@ -109,7 +109,7 @@ use super::super::write::{
 	ViewRows,
 };
 use super::emit::Emitter;
-use super::expr::{LowerLimits, Lowerer, Needs};
+use super::expr::{LowerLimits, Lowerer, Needs, ReturnScope};
 use super::pipe::{
 	first_arg, lower_layers, lower_stored_guards, project_image, region_frame, yielded_value,
 };
@@ -197,9 +197,10 @@ pub(super) struct StageRun {
 	/// Whether the frame the program is lowered for has its reads permission-checked and does not
 	/// suppress the check: the caller whose images a table's cut fields reduce.
 	pub(super) checked: bool,
-	/// How deep the write stands below the statement the session runs ([`statement_nesting`]),
-	/// which the computation-depth count resumed for the events a record fires starts from.
-	pub(super) nesting: u32,
+	/// Where the write stands in the container that holds it ([`statement_nesting`]), which,
+	/// within where the container stands, is the computation-depth count resumed for the events
+	/// a record fires ([`StatementNesting::depth`]).
+	pub(super) nesting: StatementNesting,
 }
 
 /// The regions the stage op that applies the field schema hosts after its own, by kind and in the
@@ -543,63 +544,107 @@ impl StageRun {
 	}
 }
 
-/// How deep the write `write` stands below the statement the session runs, as the computation-depth
-/// count of the events it fires is resumed from: two for each `IF` arm that holds it, and one more
-/// when it stands in a block or a loop body, or in an expression that no `IF` arm holds.
+/// Where a statement stands below the statement the session runs, as the computation-depth count
+/// of the events a write there fires is resumed from ([`StatementNesting::depth`]).
 ///
-/// A statement the session runs is at depth `0`. The count follows the regions that enclose the
-/// write: an arm of an `IF` standing as a statement is one arm, a block or the body of a `FOR`
-/// nests what it holds, and a statement in the position of an expression (a value block, a value
-/// `FOR` or `IF`, a subquery, a clause) nests it only where no arm of an `IF` already does.
-///
-/// Only the container that holds the write is read. A write that stands in a unit of its own (the
-/// region of a statement in an expression, a body, an event's clause) sees the unit's top and
-/// none of the arms and blocks around the statement that asked for the unit.
-fn statement_nesting(ir: &Ir, write: &OpData) -> u32 {
-	let mut arms = 0_u32;
-	let mut block = false;
-	let mut expression = false;
-	let mut region = ir.block(write.parent).map(|held| held.parent);
-	while let Some(current) = region {
-		match ir.region(current).map(|held| held.kind) {
-			Some(RegionKind::StatementIf) => arms += 1,
-			Some(RegionKind::Block | RegionKind::StatementFor) => block = true,
-			Some(
-				RegionKind::ValueBlock
-				| RegionKind::ValueIf
-				| RegionKind::ValueFor
-				| RegionKind::Subquery
-				| RegionKind::Loop
-				| RegionKind::Clause(_),
-			) => expression = true,
-			Some(
-				RegionKind::Request
-				| RegionKind::Transaction(_)
-				| RegionKind::Statement(_)
-				| RegionKind::FunctionBody
-				| RegionKind::ClosureBody
-				| RegionKind::PermissionFrame
-				| RegionKind::FieldFrame(_)
-				| RegionKind::EventFrame
-				| RegionKind::SubscriberFrame
-				| RegionKind::LazyOperand
-				| RegionKind::ErrorScope(_)
-				| RegionKind::ChooseArm
-				| RegionKind::Pipeline
-				| RegionKind::WriteStage
-				| RegionKind::CatalogUnit
-				| RegionKind::Deadline
-				| RegionKind::StoredClause(_),
-			)
-			| None => {}
+/// A statement the session runs stands nowhere. The count follows the regions that enclose the
+/// statement: an arm of an `IF`, in a statement's place or a value's, is one arm; a block, in a
+/// statement's place or a value's, or the body of a statement `FOR` nests what it holds; and a
+/// statement in the position of any other expression (a value `FOR`, a subquery, a clause) is
+/// held in an expression.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct StatementNesting {
+	/// How many arms of an `IF` hold the statement.
+	pub(crate) arms: u32,
+	/// Whether a block or a loop body holds it.
+	pub(crate) block: bool,
+	/// Whether an expression holds it.
+	pub(crate) expression: bool,
+}
+
+impl StatementNesting {
+	/// Where a statement stands that `self` holds, standing at `inner` within it: the arms add up,
+	/// and a block or an expression around either holds it.
+	pub(crate) fn within(self, inner: StatementNesting) -> StatementNesting {
+		StatementNesting {
+			arms: self.arms + inner.arms,
+			block: self.block || inner.block,
+			expression: self.expression || inner.expression,
 		}
-		region = ir
-			.parent_op(current)
+	}
+
+	/// The count: two for each arm, and one more where a block holds the statement, or an
+	/// expression that no arm holds.
+	pub(crate) fn depth(self) -> u32 {
+		2 * self.arms + u32::from(self.block || (self.expression && self.arms == 0))
+	}
+
+	/// Where the regions from `region` outwards to the top of the container place what `region`
+	/// holds.
+	pub(crate) fn from_region(ir: &Ir, region: Option<RegionId>) -> StatementNesting {
+		let mut nesting = StatementNesting::default();
+		let mut region = region;
+		while let Some(current) = region {
+			match ir.region(current).map(|held| held.kind) {
+				Some(RegionKind::StatementIf | RegionKind::ValueIf) => nesting.arms += 1,
+				Some(RegionKind::Block | RegionKind::ValueBlock | RegionKind::StatementFor) => {
+					nesting.block = true
+				}
+				Some(
+					RegionKind::ValueFor
+					| RegionKind::Subquery
+					| RegionKind::Loop
+					| RegionKind::Clause(_),
+				) => nesting.expression = true,
+				Some(
+					RegionKind::Request
+					| RegionKind::Transaction(_)
+					| RegionKind::Statement(_)
+					| RegionKind::FunctionBody
+					| RegionKind::ClosureBody
+					| RegionKind::PermissionFrame
+					| RegionKind::FieldFrame(_)
+					| RegionKind::EventFrame
+					| RegionKind::SubscriberFrame
+					| RegionKind::LazyOperand
+					| RegionKind::ErrorScope(_)
+					| RegionKind::ChooseArm
+					| RegionKind::Pipeline
+					| RegionKind::WriteStage
+					| RegionKind::CatalogUnit
+					| RegionKind::Deadline
+					| RegionKind::StoredClause(_),
+				)
+				| None => {}
+			}
+			region = ir
+				.parent_op(current)
+				.and_then(|owner| ir.op(owner))
+				.and_then(|owner| ir.block(owner.parent))
+				.map(|held| held.parent);
+		}
+		nesting
+	}
+
+	/// Where the regions around `region`, from the op that owns it outwards to the top of the
+	/// container, place it: what a unit copied out of `region` stands within.
+	pub(crate) fn around(ir: &Ir, region: RegionId) -> StatementNesting {
+		let outer = ir
+			.parent_op(region)
 			.and_then(|owner| ir.op(owner))
 			.and_then(|owner| ir.block(owner.parent))
 			.map(|held| held.parent);
+		Self::from_region(ir, outer)
 	}
-	2 * arms + u32::from(block || (expression && arms == 0))
+}
+
+/// Where the write `write` stands in the container that holds it.
+///
+/// Only the container is read. A write that stands in a unit of its own (the region of a statement
+/// in an expression, a body, an event's clause) sees the unit's top; where the unit stands is the
+/// lowering context's ([`LowerCx::nesting`](super::units::LowerCx::nesting)).
+fn statement_nesting(ir: &Ir, write: &OpData) -> StatementNesting {
+	StatementNesting::from_region(ir, ir.block(write.parent).map(|held| held.parent))
 }
 
 /// What the data clause whose region is `region`, of role `role`, says: a `SET` and an `ON
@@ -2080,7 +2125,7 @@ fn events_stage(
 	let units = cx.cx.as_deref_mut().ok_or(IrError::Invariant {
 		what: "ir_lower::stage: the events of a write are lowered with no unit table",
 	})?;
-	let depth = units.depth() + nesting;
+	let depth = units.depth() + units.nesting().within(nesting).depth();
 	let unit = units.unit_for(UnitRequest::Events {
 		table,
 		action,
@@ -2455,7 +2500,9 @@ fn next_index_region(regions: &mut impl Iterator<Item = RegionId>) -> Result<Reg
 /// Binds the one block argument of the index column region `region`, which is the image the index
 /// is evaluated over, as the row of the pipeline being lowered, and enters the frame an index
 /// evaluates its columns in: the statement's own context, privileged, holding none of the caller's
-/// bindings. `objects` is whether the image is a record whose fields are read from the row.
+/// bindings. The region is bound in the frame of the write stage that hosts it, whatever clause
+/// encloses the write, and runs as an index entry under no `AUTH LIMIT` whatever that frame
+/// states. `objects` is whether the image is a record whose fields are read from the row.
 fn index_value(
 	lowerer: &mut Lowerer<'_>,
 	region: RegionId,
@@ -2463,10 +2510,12 @@ fn index_value(
 ) -> Result<Operand, IrError> {
 	let ir = lowerer.ir;
 	let container = region_frame(ir, region)?;
-	let held = ir
-		.frame(container)
-		.ok_or(IrError::Stale("ir_lower::stage: the frame of an index column"))?;
-	if held.eval != crate::expr::logical::EvalFrame::caller() {
+	let owner = ir
+		.region(region)
+		.and_then(|held| held.parent)
+		.and_then(|owner| ir.op(owner))
+		.ok_or(IrError::Stale("ir_lower::stage: the stage that hosts an index column"))?;
+	if container != owner.frame {
 		return Err(IrError::Invariant {
 			what: "ir_lower::stage: an index column outside the frame of the statement",
 		});
@@ -3228,13 +3277,22 @@ fn condition_pipeline(lowerer: &mut Lowerer<'_>, region: RegionId) -> Result<Pip
 	emit_clause(lowerer, out)
 }
 
+/// Where a `RETURN` a statement in a value of a data clause signals is taken: at the statement,
+/// outside a permission frame, so the value is the returned value. A loop signal passes to the
+/// loop around the write.
+const DATA_VALUE: ReturnScope = ReturnScope {
+	any_frame: false,
+	loops_fail: false,
+};
+
 /// The host pipeline over the snapshot that evaluates the data clause region `region`.
 ///
 /// With `many` it emits one array holding the value of each assignment of the region, in written
 /// order, all over the one snapshot; otherwise it emits the one value the region's content op
 /// stores. A region that ends in a raise, a value of the clause that throws, raises there and
-/// stores nothing past it. The subscripts and filters of a place are not evaluated here: the
-/// places a clause writes at are the write's own steps.
+/// stores nothing past it. A statement in a value takes a `RETURN` it signals as its own value
+/// ([`DATA_VALUE`]). The subscripts and filters of a place are not evaluated here: the places a
+/// clause writes at are the write's own steps.
 fn data_pipeline(
 	lowerer: &mut Lowerer<'_>,
 	region: RegionId,
@@ -3271,7 +3329,7 @@ fn data_pipeline(
 				.ok_or(IrError::Stale("ir_lower::stage: a clause op holds no value"))?,
 			OpKind::Logical(_) | OpKind::Expr(_) | OpKind::Phys(_) => continue,
 		};
-		let operand = lowerer.value(value)?;
+		let operand = lowerer.catching(DATA_VALUE, |lowerer| lowerer.value(value))?;
 		if many {
 			lowerer.emit(Instr::ArrayPush {
 				array: out,
@@ -3344,7 +3402,7 @@ mod tests {
 			repairs: Vec::new(),
 			layers: Vec::new(),
 			checked: true,
-			nesting: 0,
+			nesting: StatementNesting::default(),
 		}
 	}
 
@@ -3714,6 +3772,20 @@ mod tests {
 		derived: EvalFrame,
 		derivations: usize,
 	) -> Hosted {
+		hosting_with(b, stage, frame, derived, derivations, |b, at| {
+			b.literal(Value::from(at as i64))
+		})
+	}
+
+	/// [`hosting`], with the body of each derivation built by `body` from its number.
+	fn hosting_with(
+		b: &mut Builder,
+		stage: WriteStageKind,
+		frame: EvalFrame,
+		derived: EvalFrame,
+		derivations: usize,
+		body: impl Fn(&mut Builder, usize) -> ValueId,
+	) -> Hosted {
 		let (id, derived) = (b.frame(frame), b.frame(derived));
 		let owner = b.add_logical(
 			LogOp::WriteStage {
@@ -3738,9 +3810,7 @@ mod tests {
 		b.in_frame(derived, |b| {
 			for at in 0..derivations {
 				let kind = RegionKind::FieldFrame(FieldRole::Computed);
-				b.region_with_args(owner, kind, &arguments, |b, _| {
-					b.literal(Value::from(at as i64))
-				});
+				b.region_with_args(owner, kind, &arguments, |b, _| body(b, at));
 			}
 		});
 		let regions = b.ir.op(owner).expect("the stage op").regions.to_vec();
@@ -3967,41 +4037,40 @@ mod tests {
 		assert!(matches!(emitted_in(&b.ir, &run, stage), Err(IrError::Invariant { .. })));
 	}
 
+	/// A derivation under an `AUTH LIMIT` that narrows the caller lowers when its body holds a
+	/// statement or a call, which run as units planned for the narrowed principal, and answers
+	/// `NotYet` when it makes a closure. With no limit the body is lowered for the caller.
 	#[test]
-	fn a_derivation_under_an_auth_limit_that_holds_caller_bound_code_is_not_yet() {
-		let mut b = Builder::new();
+	fn a_derivation_under_an_auth_limit_that_makes_a_closure_is_not_yet() {
 		let stage = WriteStageKind::CheckUpdatePermissions;
 		let limit = surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None);
-		let hosted = hosting(
-			&mut b,
-			stage,
-			EvalFrame::mutable_permission(None),
-			EvalFrame::permission(Some(limit)),
-			1,
-		);
-		let mut run = predicated(DERIVING, stage, hosted);
-		run.derived.update = vec![DerivedField {
-			caller_bound: true,
-			..derived_field("net")
-		}]
-		.into();
-		assert!(matches!(emitted_in(&b.ir, &run, stage), Err(IrError::NotYet { .. })));
-		// The same field with no limit lowers: its body is lowered for the caller.
-		let mut b = Builder::new();
-		let hosted = hosting(
-			&mut b,
-			stage,
-			EvalFrame::mutable_permission(None),
-			EvalFrame::permission(None),
-			1,
-		);
-		let mut run = predicated(DERIVING, stage, hosted);
-		run.derived.update = vec![DerivedField {
-			caller_bound: true,
-			..derived_field("net")
-		}]
-		.into();
-		assert!(emitted_in(&b.ir, &run, stage).is_ok());
+		for (auth, closure, lowers) in
+			[(None, false, true), (Some(limit.clone()), false, true), (Some(limit), true, false)]
+		{
+			let mut b = Builder::new();
+			let hosted = hosting_with(
+				&mut b,
+				stage,
+				EvalFrame::mutable_permission(None),
+				EvalFrame::permission(auth.clone()),
+				1,
+				|b, at| match closure {
+					true => b.closure(),
+					false => b.literal(Value::from(at as i64)),
+				},
+			);
+			let mut run = predicated(DERIVING, stage, hosted);
+			run.derived.update = vec![DerivedField {
+				caller_bound: true,
+				..derived_field("net")
+			}]
+			.into();
+			let lowered = emitted_in(&b.ir, &run, stage);
+			match lowers {
+				true => assert!(lowered.is_ok(), "{auth:?} {closure}: {:?}", lowered.err()),
+				false => assert!(matches!(lowered, Err(IrError::NotYet { .. }))),
+			}
+		}
 	}
 
 	/// A stage op of `MaterialiseObservedFields` hosting `derivations` computed regions under the
@@ -4012,6 +4081,17 @@ mod tests {
 		frame: EvalFrame,
 		derivations: usize,
 		fields: Option<Vec<DerivedField>>,
+	) -> StageRun {
+		observing_with(b, frame, derivations, fields, |b, at| b.literal(Value::from(at as i64)))
+	}
+
+	/// [`observing`], with the body of each derivation built by `body` from its number.
+	fn observing_with(
+		b: &mut Builder,
+		frame: EvalFrame,
+		derivations: usize,
+		fields: Option<Vec<DerivedField>>,
+		body: impl Fn(&mut Builder, usize) -> ValueId,
 	) -> StageRun {
 		let id = b.frame(frame);
 		let stage = WriteStageKind::MaterialiseObservedFields;
@@ -4028,7 +4108,7 @@ mod tests {
 					owner,
 					RegionKind::FieldFrame(FieldRole::Computed),
 					&[TypeKnowledge::Unknown, TypeKnowledge::Unknown],
-					|b, _| b.literal(Value::from(at as i64)),
+					|b, _| body(b, at),
 				);
 			}
 		});
@@ -4109,8 +4189,11 @@ mod tests {
 		assert!(matches!(emitted_in(&b.ir, &wrong, stage), Err(IrError::Invariant { .. })));
 	}
 
+	/// An observed field whose body holds a statement or a call lowers with or without an `AUTH
+	/// LIMIT`; one whose body makes a closure answers `NotYet` only under a limit that narrows the
+	/// caller.
 	#[test]
-	fn an_observed_field_holding_caller_bound_code_is_not_yet_only_under_an_auth_limit() {
+	fn an_observed_field_making_a_closure_is_not_yet_only_under_an_auth_limit() {
 		let stage = WriteStageKind::MaterialiseObservedFields;
 		let bound = || {
 			Some(vec![DerivedField {
@@ -4118,14 +4201,24 @@ mod tests {
 				..derived_field("net")
 			}])
 		};
-		// With no limit the body is lowered for the caller.
-		let mut b = Builder::new();
-		let run = observing(&mut b, EvalFrame::computed(None), 1, bound());
-		assert!(emitted_in(&b.ir, &run, stage).is_ok());
-		let mut b = Builder::new();
 		let limit = surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None);
-		let run = observing(&mut b, EvalFrame::computed(Some(limit)), 1, bound());
-		assert!(matches!(emitted_in(&b.ir, &run, stage), Err(IrError::NotYet { .. })));
+		for (auth, closure, lowers) in
+			[(None, false, true), (Some(limit.clone()), false, true), (Some(limit), true, false)]
+		{
+			let mut b = Builder::new();
+			let run =
+				observing_with(&mut b, EvalFrame::computed(auth.clone()), 1, bound(), |b, at| {
+					match closure {
+						true => b.closure(),
+						false => b.literal(Value::from(at as i64)),
+					}
+				});
+			let lowered = emitted_in(&b.ir, &run, stage);
+			match lowers {
+				true => assert!(lowered.is_ok(), "{auth:?} {closure}: {:?}", lowered.err()),
+				false => assert!(matches!(lowered, Err(IrError::NotYet { .. }))),
+			}
+		}
 	}
 
 	#[test]
@@ -5335,7 +5428,11 @@ mod tests {
 	#[test]
 	fn the_events_of_a_table_are_one_unit_asked_for_by_table_action_and_frame() {
 		let run = StageRun {
-			nesting: 3,
+			nesting: StatementNesting {
+				arms: 1,
+				block: true,
+				expression: false,
+			},
 			..stored_run(storing(Stored::Declared))
 		};
 		let (code, needed) =
@@ -5435,9 +5532,6 @@ mod tests {
 					..
 				}
 				| Instr::LoadSlot {
-					..
-				}
-				| Instr::LoadElement {
 					..
 				}
 				| Instr::SortKey {
@@ -5737,7 +5831,7 @@ mod tests {
 	fn a_write_stands_as_deep_as_the_arms_and_blocks_that_hold_it() {
 		use crate::exec::ir::iface::region_kind::RegionKind as Kind;
 
-		fn depth(kinds: &[Kind]) -> u32 {
+		fn nesting(kinds: &[Kind]) -> StatementNesting {
 			let mut b = Builder::new();
 			let mut owner = b.add_phys(PhysOp::Eval, &[]);
 			for kind in kinds {
@@ -5746,6 +5840,9 @@ mod tests {
 			}
 			let write = b.ir.op(owner).expect("the write exists").clone();
 			statement_nesting(&b.ir, &write)
+		}
+		fn depth(kinds: &[Kind]) -> u32 {
+			nesting(kinds).depth()
 		}
 
 		assert_eq!(depth(&[]), 0);
@@ -5760,6 +5857,16 @@ mod tests {
 		// container does not hold the arm around it.
 		assert_eq!(depth(&[Kind::StatementIf, Kind::Subquery]), 2);
 		assert_eq!(depth(&[Kind::Block, Kind::Block]), 1);
+		// An arm of a value `IF` is an arm, and a value block is a block.
+		assert_eq!(depth(&[Kind::ValueIf]), 2);
+		assert_eq!(depth(&[Kind::ValueBlock]), 1);
+		assert_eq!(depth(&[Kind::ValueIf, Kind::ValueBlock]), 3);
+		// A unit stands where the region it is copied from does: the arm around a value block
+		// that runs as a unit holds the write in the unit.
+		let around = nesting(&[Kind::ValueIf]);
+		assert_eq!(around.within(nesting(&[Kind::ValueBlock])).depth(), 3);
+		assert_eq!(around.within(nesting(&[Kind::Subquery])).depth(), 2);
+		assert_eq!(StatementNesting::default().within(nesting(&[Kind::Subquery])).depth(), 1);
 	}
 
 	#[test]
@@ -6223,33 +6330,47 @@ mod tests {
 		assert!(matches!(emitted_in(&b.ir, &run, stage), Err(IrError::Invariant { .. })));
 	}
 
+	/// A clause of a field under an `AUTH LIMIT` that narrows the caller lowers when it holds a
+	/// statement or a call, which run as units planned for the narrowed principal, and answers
+	/// `NotYet` when it makes a closure, whose body no unit of that principal is requested for.
 	#[test]
-	fn a_clause_of_a_field_under_an_auth_limit_that_holds_caller_bound_code_is_not_yet() {
+	fn a_clause_of_a_field_under_an_auth_limit_that_makes_a_closure_is_not_yet() {
 		let stage = WriteStageKind::ProcessTableFields;
 		let limit = surrealdb_iam::AuthLimit::new(surrealdb_iam::Level::Root, None);
-		for (frame, caller_bound, lowers) in [
-			(EvalFrame::caller(), true, true),
-			(
-				EvalFrame {
-					auth: Some(limit.clone()),
-					..EvalFrame::caller()
-				},
-				false,
-				true,
-			),
-			(
-				EvalFrame {
-					auth: Some(limit),
-					..EvalFrame::caller()
-				},
-				true,
-				false,
-			),
+		let limited = || EvalFrame {
+			auth: Some(limit.clone()),
+			..EvalFrame::caller()
+		};
+		for (frame, caller_bound, closure, lowers) in [
+			(EvalFrame::caller(), true, false, true),
+			(limited(), false, false, true),
+			(limited(), true, false, true),
+			(limited(), true, true, false),
 		] {
 			let mut b = Builder::new();
 			let owner = field_stage_owner(&mut b, stage);
-			let region =
-				field_region(&mut b, owner, RegionKind::FieldFrame(FieldRole::Value), frame, false);
+			let region = match closure {
+				false => field_region(
+					&mut b,
+					owner,
+					RegionKind::FieldFrame(FieldRole::Value),
+					frame,
+					false,
+				),
+				true => {
+					let id = b.frame(frame);
+					let args = vec![TypeKnowledge::Unknown; 5];
+					b.in_frame(id, |b| {
+						b.region_with_args(
+							owner,
+							RegionKind::FieldFrame(FieldRole::Value),
+							&args,
+							|b, _| b.closure(),
+						);
+					});
+					*b.ir.op(owner).expect("the stage op").regions.last().expect("a region")
+				}
+			};
 			let field = FieldClauses {
 				value: Some(FieldClause {
 					caller_bound,
@@ -6263,7 +6384,7 @@ mod tests {
 			let run = schema_run(vec![FieldStep::Field(field)], &["a"], &[], regions);
 			let lowered = emitted_in(&b.ir, &run, stage);
 			match lowers {
-				true => assert!(lowered.is_ok()),
+				true => assert!(lowered.is_ok(), "{caller_bound} {closure}: {:?}", lowered.err()),
 				false => assert!(matches!(lowered, Err(IrError::NotYet { .. }))),
 			}
 		}
@@ -6654,6 +6775,17 @@ mod tests {
 				"a column under another frame"
 			);
 		}
+	}
+
+	#[test]
+	fn an_index_column_of_a_write_under_another_frame_is_evaluated_in_that_frame() {
+		let mut b = Builder::new();
+		let id = b.frame(EvalFrame::mutable_permission(None));
+		let regions =
+			b.in_frame(id, |b| column_regions(b, EvalFrame::mutable_permission(None), &["name"]));
+		let def = index_def(1, "by_name", &["name"], crate::catalog::Index::Uniq);
+		emitted_in(&b.ir, &indexing(vec![def], regions), WriteStageKind::StoreIndexData)
+			.expect("a column in the frame of its stage lowers");
 	}
 
 	#[test]

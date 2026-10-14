@@ -406,7 +406,8 @@ pub(super) fn is_loop_body(kind: RegionKind) -> bool {
 	kind == RegionKind::Loop || kind == RegionKind::StatementFor || kind == RegionKind::ValueFor
 }
 
-pub(super) fn is_write(kind: &OpKind) -> bool {
+/// Whether `kind` is a write statement, logical or physical.
+pub(crate) fn is_write(kind: &OpKind) -> bool {
 	let tag = kind.tag();
 	tag == OpTag::Logical(LogTag::Write) || tag == OpTag::Phys(PhysTag::Write)
 }

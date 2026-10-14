@@ -597,6 +597,40 @@ impl crate::expr::visit::Visitor for StoredReach<'_> {
 	}
 }
 
+/// Whether a statement of the list block `op` holds may change the catalog for the statements
+/// after it through code no speculative run models: a body its text does not show, which
+/// [`runs_unseen_schema`] finds may run a schema statement. A statement that holds a schema
+/// statement of its own is not judged here. The statements of a `FOR` body follow each other on
+/// every iteration, so the last of them is judged too. `false` for a planner that already plans
+/// the block's statements after a change when the block reaches them.
+pub(crate) async fn hides_a_change_point(planner: &Planner<'_>, op: &LogicalOp) -> bool {
+	if planner.is_late_bound() || planner.binds_late_after_schema() || planner.txn().is_none() {
+		return false;
+	}
+	let (statements, looped) = match op {
+		LogicalOp::Sequence(sequence) => (sequence.stmts.as_slice(), false),
+		LogicalOp::Foreach(foreach) => match foreach.body.as_ref() {
+			LogicalOp::Sequence(sequence) => (sequence.stmts.as_slice(), true),
+			body => (std::slice::from_ref(body), true),
+		},
+		_ => return false,
+	};
+	let judged = match looped {
+		true => statements,
+		false => statements.split_last().map_or(&[][..], |(_, before)| before),
+	};
+	for statement in judged {
+		if crate::exec::planner::fold::changes_the_catalog(statement) {
+			continue;
+		}
+		let outside = closures_from_outside(planner, [statement], &[]);
+		if runs_unseen_schema(planner, statement, outside).await {
+			return true;
+		}
+	}
+	false
+}
+
 /// How statement `op`, which `bound` names are bound around, reaches what code
 /// it runs may redefine while it runs ([`crate::exec::planner::CatalogWithin`]).
 ///

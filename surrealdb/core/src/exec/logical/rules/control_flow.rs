@@ -19,11 +19,12 @@
 //! - No branches left is no choice left: the expression is its `ELSE`, or `NONE` where it has none.
 //!
 //! Code that never runs goes only where it holds no `LET` that planning refuses: a `LET` of a
-//! protected name (`$auth`, `$access`, `$token`, `$session`), or a `LET` written as an expression
-//! (`WHERE (LET $x = 1)`, `[(LET $x = 1)]`). Either is refused wherever the statement holds it,
-//! whether or not it runs, and the refusal is raised where the statement is mapped, so a `false`
-//! branch holding one is kept, and so is a `true` branch followed by an arm or an `ELSE` holding
-//! one. Any other code an arm that never runs holds — a statement, a closure — goes with it.
+//! protected name (`$auth`, `$access`, `$token`, `$session`) or of a name the system binds
+//! (`$this`, `$value`, ...), or a `LET` written as an expression (`WHERE (LET $x = 1)`, `[(LET $x =
+//! 1)]`). Either is refused wherever the statement holds it, whether or not it runs, and the
+//! refusal is raised where the statement is mapped, so a `false` branch holding one is kept, and so
+//! is a `true` branch followed by an arm or an `ELSE` holding one. Any other code an arm that never
+//! runs holds — a statement, a closure — goes with it.
 
 use super::{ExprContext, RuleContext, RuleDef};
 use crate::exec::logical::{holds_let_expression, holds_protected_let};
@@ -138,7 +139,7 @@ fn op_holds_refused_let(op: &LogicalOp) -> bool {
 	op.visit_ops_deep(&mut |node| {
 		let protected = matches!(
 			node,
-			LogicalOp::Let(stmt) if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&stmt.name.as_str())
+			LogicalOp::Let(stmt) if stmt.is_refused()
 		);
 		match protected || node.scalars().into_iter().any(holds_let_expression) {
 			true => ControlFlow::Break(()),

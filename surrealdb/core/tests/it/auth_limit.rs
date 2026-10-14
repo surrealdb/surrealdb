@@ -187,12 +187,9 @@ async fn auth_limit_alter_api_recomputes() -> Result<()> {
 	Ok(())
 }
 
-/// The `id` field's ASSERT is run by the regular field pipeline, which clamps
-/// to the defining field's auth_limit just like any other field's clauses. A
-/// DB-editor defines an `id` ASSERT whose body attempts a database-level DEFINE
-/// USER ROLES OWNER; when a DB-owner creates a record the embedded escalation
-/// must be blocked by the editor-level clamp. (The id field's DEFAULT is
-/// evaluated in `generate_record_id`, which applies the same clamp separately.)
+/// A field's ASSERT may not hold a schema statement, whoever defines the
+/// field: a DB-editor's `id` ASSERT embedding a DEFINE USER ROLES OWNER is
+/// refused at DEFINE, so no later write can run the embedded escalation.
 #[tokio::test]
 async fn auth_limit_id_field_assert() -> Result<()> {
 	let (_, dbs) = new_ds("test", "test", true).await?;
@@ -200,25 +197,17 @@ async fn auth_limit_id_field_assert() -> Result<()> {
 	let ses_owner = Session::owner().with_ns("test").with_db("test");
 	let ses_editor = Session::editor().with_ns("test").with_db("test");
 
-	// DB-editor defines an `id` ASSERT embedding a DEFINE USER ROLES OWNER the
-	// editor itself is not allowed to perform.
 	let sql = "
 		DEFINE FIELD id ON ta ASSERT (DEFINE USER escalate_assert ON DATABASE ROLES OWNER PASSWORD 'pass') OR true;
 	";
-	let res = &mut dbs.execute(sql, &ses_editor, None).await?;
-	skip_ok(res, 1)?;
-
-	// DB-owner triggers the ASSERT via a create; the embedded DEFINE USER must
-	// run clamped to the editor level and fail.
-	let sql = "CREATE ta:foo;";
-	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
-	assert_eq!(res.len(), 1);
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err(), "id ASSERT escalation was not blocked");
-	assert_eq!(
-		tmp.unwrap_err().to_string(),
-		"IAM error: Not enough permissions to perform this action"
+	let refused = dbs.execute(sql, &ses_editor, None).await.expect_err("the DEFINE is refused");
+	assert!(
+		refused.to_string().contains("a schema statement is not allowed in an ASSERT clause"),
+		"{refused}"
 	);
+
+	let res = &mut dbs.execute("CREATE ta:foo;", &ses_owner, None).await?;
+	skip_ok(res, 1)?;
 
 	// Belt-and-suspenders: the escalated user must not have been created.
 	let info = &mut dbs.execute("INFO FOR DB", &ses_owner, None).await?;
@@ -385,23 +374,22 @@ async fn auth_limit_field_clauses_call_functions_for_every_writer() -> Result<()
 	Ok(())
 }
 
-/// A statement in a field's `VALUE` runs for the field's definer narrowed by
-/// its `AUTH LIMIT`, not for the writer: an editor's field cannot define an
-/// owner when an owner writes the record.
+/// A field's VALUE may not hold a schema statement, whoever defines the
+/// field: an editor's field that would define an owner is refused at DEFINE,
+/// so an owner's write cannot run it.
 #[tokio::test]
 async fn auth_limit_field_value_statement() -> Result<()> {
 	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses_owner = Session::owner().with_ns("test").with_db("test");
 	let ses_editor = Session::editor().with_ns("test").with_db("test");
 	let sql = "DEFINE FIELD x ON t VALUE (DEFINE USER escalate_value ON DATABASE ROLES OWNER PASSWORD 'pass');";
-	let res = &mut dbs.execute(sql, &ses_editor, None).await?;
-	skip_ok(res, 1)?;
-	let res = &mut dbs.execute("CREATE t:1;", &ses_owner, None).await?;
-	let tmp = res.remove(0).result;
-	assert_eq!(
-		tmp.expect_err("the escalation was not blocked").to_string(),
-		"IAM error: Not enough permissions to perform this action"
+	let refused = dbs.execute(sql, &ses_editor, None).await.expect_err("the DEFINE is refused");
+	assert!(
+		refused.to_string().contains("a schema statement is not allowed in a VALUE clause"),
+		"{refused}"
 	);
+	let res = &mut dbs.execute("CREATE t:1;", &ses_owner, None).await?;
+	skip_ok(res, 1)?;
 	let info = dbs.execute("INFO FOR DB", &ses_owner, None).await?.remove(0).result?.to_sql();
 	assert!(!info.contains("escalate_value"), "an owner-level user was created: {info}");
 	Ok(())

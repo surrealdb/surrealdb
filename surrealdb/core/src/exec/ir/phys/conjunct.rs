@@ -627,6 +627,30 @@ pub(super) fn reorder(
 	Ok(true)
 }
 
+/// Whether [`keep_per_row`] can make `kept`, conjuncts of the predicate of `site`, the predicate
+/// judged per row.
+pub(super) fn can_keep(ir: &Ir, site: &Site, kept: &[ValueId]) -> bool {
+	kept.is_empty() || can_rebuild(ir, site, kept)
+}
+
+/// Makes `kept`, conjuncts of the predicate of `site` in written order, the predicate the filter
+/// judges per row, or the literal `true` when it is empty, and erases the replaced chain. The
+/// conjuncts left out must already be read elsewhere or be erased by the caller.
+pub(super) fn keep_per_row(
+	rw: &mut Rewriter<'_>,
+	site: &Site,
+	kept: &[ValueId],
+) -> Result<(), IrError> {
+	let spine = chain_spine(rw.ir(), site.root);
+	let rebuilt = if kept.is_empty() {
+		literal_true(rw, site)?
+	} else {
+		rebuild_lazy_and_chain(rw, InsertPoint::Before(site.holder), kept)?
+	};
+	rw.set_operand(site.holder, 0, rebuilt)?;
+	retire(rw, &spine, &[])
+}
+
 /// The literal `true`, made before the op that reads the predicate of `site`.
 fn literal_true(rw: &mut Rewriter<'_>, site: &Site) -> Result<ValueId, IrError> {
 	let data = rw.ir().op(site.holder).ok_or(IrError::Stale("op"))?;

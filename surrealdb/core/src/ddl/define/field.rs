@@ -520,14 +520,14 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 /// Refuse a `COMPUTED` body whose user-defined callees may write, as seen in
 /// `txn`'s catalog at the version the definition is written at.
 ///
-/// The answer is [`ResolvedMutability::possibly_writes`], so a callee that is
-/// not defined yet and an opaque callable (a script, `eval`, a closure arriving
-/// as data) count as writers. The check reads the catalog as of the
-/// transaction's current state and is made when the definition is applied, not
-/// when a statement holding it is planned, because a callee defined earlier in
-/// the same request is in no catalog before then.
-///
-/// [`ResolvedMutability::possibly_writes`]: crate::fnc::mutability::ResolvedMutability::possibly_writes
+/// A callee whose body provably writes, through any chain of calls, is refused,
+/// and so is a callee that is not defined yet, which cannot be shown read-only.
+/// An opaque callable (a script, `eval`, a closure arriving as data) is not
+/// refused: its body cannot be inspected, and the runtime frame refuses a write
+/// it reaches. The check reads the catalog as of the transaction's current
+/// state and is made when the definition is applied, not when a statement
+/// holding it is planned, because a callee defined earlier in the same request
+/// is in no catalog before then.
 pub(crate) async fn define_field_statement_validate_computed_callees(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -547,7 +547,10 @@ pub(crate) async fn define_field_statement_validate_computed_callees(
 		None,
 	)
 	.await?;
-	ensure!(!resolved.possibly_writes(), ExecError::ComputedWrite(definition.name.to_sql()));
+	ensure!(
+		resolved.write.is_none() && !resolved.undefined_callee,
+		ExecError::ComputedWrite(definition.name.to_sql())
+	);
 	Ok(())
 }
 

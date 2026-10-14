@@ -72,9 +72,12 @@ pub(crate) struct MatchesTable {
 	/// The `KNN` operators held by a select loop whose stages, or those of a loop around it, hold
 	/// a `KNN` operator: the operators a search is in scope for.
 	knn: SecondaryMap<OpId, ()>,
-	/// Of those, the ones that judge the rows of a loop over a table defining a vector index that
-	/// no search of the statement reads ([`crate::exec::ir::phys::knn`]).
+	/// Of those, the ones that judge the subjects of a write that no search of the statement
+	/// reads ([`crate::exec::ir::phys::knn`]).
 	unsearched: SecondaryMap<OpId, ()>,
+	/// The literals that stand for a `KNN` operator no search answers
+	/// ([`crate::exec::ir::phys::knn`]): each reads the row as the operator it replaces does.
+	unanswered: SecondaryMap<OpId, ()>,
 	/// The scope each index function call held by a select loop reports against, keyed by the id
 	/// of its `expr.call` op.
 	calls: SecondaryMap<OpId, Arc<IndexScope>>,
@@ -119,6 +122,31 @@ pub(crate) enum ClauseQuery {
 }
 
 impl IndexScope {
+	/// This scope in a container whose values `values` names for those of the container it was
+	/// decided for ([`MatchesTable::carry`]).
+	fn mapped(&self, values: &dyn Fn(ValueId) -> Option<ValueId>) -> Self {
+		let clauses = self
+			.clauses
+			.iter()
+			.filter_map(|clause| {
+				let query = match &clause.query {
+					ClauseQuery::Bound(value) => ClauseQuery::Bound(values(*value)?),
+					other => other.clone(),
+				};
+				Some(Clause {
+					rf: clause.rf,
+					field: clause.field.clone(),
+					query,
+				})
+			})
+			.collect();
+		Self {
+			table: self.table.clone(),
+			clauses,
+			knn: self.knn,
+		}
+	}
+
 	/// The clause match reference `rf` names, or the only clause the scope holds when none carries
 	/// that reference.
 	pub(crate) fn resolve(&self, rf: MatchRef) -> Option<&Clause> {
@@ -137,6 +165,7 @@ impl MatchesTable {
 			matches: SecondaryMap::new(),
 			knn: SecondaryMap::new(),
 			unsearched: SecondaryMap::new(),
+			unanswered: SecondaryMap::new(),
 			calls: SecondaryMap::new(),
 			regions: SecondaryMap::new(),
 		}
@@ -163,14 +192,24 @@ impl MatchesTable {
 		self.knn.contains_key(op)
 	}
 
-	/// Whether the `KNN` operator `op` judges the rows of a loop no search reads.
+	/// Whether the `KNN` operator `op` judges the subjects of a write no search reads.
 	pub(crate) fn knn_unsearched(&self, op: OpId) -> bool {
 		self.unsearched.contains_key(op)
 	}
 
-	/// Records that the `KNN` operator `op` judges the rows of a loop no search reads.
+	/// Records that the `KNN` operator `op` judges the subjects of a write no search reads.
 	pub(crate) fn mark_unsearched(&mut self, op: OpId) {
 		self.unsearched.insert(op, ());
+	}
+
+	/// Whether the literal `op` stands for a `KNN` operator no search answers.
+	pub(crate) fn knn_unanswered(&self, op: OpId) -> bool {
+		self.unanswered.contains_key(op)
+	}
+
+	/// Records that the literal `op` stands for a `KNN` operator no search answers.
+	pub(crate) fn mark_unanswered(&mut self, op: OpId) {
+		self.unanswered.insert(op, ());
 	}
 
 	/// Whether this table holds a decision for `op`.
@@ -178,6 +217,7 @@ impl MatchesTable {
 		self.matches.contains_key(op)
 			|| self.knn.contains_key(op)
 			|| self.unsearched.contains_key(op)
+			|| self.unanswered.contains_key(op)
 			|| self.calls.contains_key(op)
 	}
 
@@ -192,17 +232,36 @@ impl MatchesTable {
 		if self.unsearched.contains_key(from) {
 			self.unsearched.insert(to, ());
 		}
+		if self.unanswered.contains_key(from) {
+			self.unanswered.insert(to, ());
+		}
 		if let Some(scope) = self.calls.get(from).cloned() {
 			self.calls.insert(to, scope);
 		}
 	}
 
-	/// Gives each `to` of `pairs` the decision `source` holds for the `from` it is paired with.
+	/// Gives each `to` of `pairs` the decision `source` holds for the `from` it is paired with, in
+	/// a container whose values and regions `values` and `regions` name for those of the container
+	/// `source` decides for. The values a scope's clauses read are those `values` names, and a
+	/// clause whose query value it names none for is dropped. The scope a region `regions` names
+	/// holds is the one its original holds.
 	pub(in crate::exec::ir) fn carry(
 		&mut self,
 		source: &MatchesTable,
 		pairs: impl IntoIterator<Item = (OpId, OpId)>,
+		values: &dyn Fn(ValueId) -> Option<ValueId>,
+		regions: &dyn Fn(RegionId) -> Option<RegionId>,
 	) {
+		let mut mapped: Vec<(*const IndexScope, Arc<IndexScope>)> = Vec::new();
+		let mut remap = |scope: &Arc<IndexScope>| {
+			let key = Arc::as_ptr(scope);
+			if let Some((_, held)) = mapped.iter().find(|(at, _)| *at == key) {
+				return Arc::clone(held);
+			}
+			let held = Arc::new(scope.mapped(values));
+			mapped.push((key, Arc::clone(&held)));
+			held
+		};
 		for (from, to) in pairs {
 			if let Some(attr) = source.matches.get(from) {
 				self.matches.insert(to, attr.clone());
@@ -213,8 +272,16 @@ impl MatchesTable {
 			if source.unsearched.contains_key(from) {
 				self.unsearched.insert(to, ());
 			}
+			if source.unanswered.contains_key(from) {
+				self.unanswered.insert(to, ());
+			}
 			if let Some(scope) = source.calls.get(from) {
-				self.calls.insert(to, Arc::clone(scope));
+				self.calls.insert(to, remap(scope));
+			}
+		}
+		for (region, scope) in &source.regions {
+			if let Some(copy) = regions(region) {
+				self.regions.insert(copy, remap(scope));
 			}
 		}
 	}

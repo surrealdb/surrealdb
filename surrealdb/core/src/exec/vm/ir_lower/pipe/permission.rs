@@ -450,6 +450,29 @@ mod tests {
 		assert_eq!(lowered.program.verdicts, vec![None]);
 		let code = &lowered.program.pipelines[0].code;
 		assert!(matches!(code[0], Instr::VerdictJump { .. }), "{code:?}");
+		// The jumps of a held verdict land on code positions: a refusal on the jump that ends the
+		// row, right after the instruction that holds the refusal, and an admission just past it.
+		let Instr::VerdictJump {
+			admitted,
+			refused,
+			..
+		} = code[0]
+		else {
+			unreachable!()
+		};
+		let (admitted, refused) = (admitted as usize, refused as usize);
+		assert!(
+			matches!(
+				code.get(refused - 1),
+				Some(Instr::VerdictSet {
+					admits: false,
+					..
+				})
+			),
+			"{code:?}"
+		);
+		assert!(matches!(code.get(refused), Some(Instr::Jump { .. })), "{code:?}");
+		assert_eq!(admitted, refused + 1, "{code:?}");
 	}
 
 	fn computed(derived: DerivedReads) -> PermissionFilterAttrs {

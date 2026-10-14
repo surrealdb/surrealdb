@@ -14,6 +14,8 @@ use semver::Version;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
+#[cfg(feature = "internal-fragments")]
+use surrealdb_core::kvs::QueryRequest;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 

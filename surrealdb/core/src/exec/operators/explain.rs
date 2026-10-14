@@ -233,40 +233,6 @@ fn format_execution_plan_json(plan: &dyn ExecOperator, redaction: Redaction) -> 
 // ANALYZE Formatters (include metrics)
 // =========================================================================
 
-/// The text `EXPLAIN ANALYZE` renders of `plan` cut where it writes metrics,
-/// for a plan whose operators all report one set of metrics: the rendering
-/// is the pieces joined by those metrics ([`render_analyze_text`]). `None`
-/// where two operators report different metrics.
-pub(crate) fn analyze_text_pieces(plan: &dyn ExecOperator) -> Option<Vec<String>> {
-	let mut pieces = Vec::new();
-	let mut reported: Option<*const OperatorMetrics> = None;
-	let mut shared = true;
-	let mut output = String::new();
-	format_analyze_plan_by(plan, &mut output, "", Redaction::default(), &mut |metrics, output| {
-		let at = std::ptr::from_ref(metrics);
-		shared &= *reported.get_or_insert(at) == at;
-		pieces.push(std::mem::take(output));
-	});
-	pieces.push(output);
-	shared.then_some(pieces)
-}
-
-/// The value `EXPLAIN ANALYZE` answers in text for the plan
-/// [`analyze_text_pieces`] cut into `pieces`, whose operators reported
-/// `metrics`, after it yielded `total_rows` rows.
-pub(crate) fn render_analyze_text(
-	pieces: &[String],
-	metrics: &OperatorMetrics,
-	redact_volatile_explain_attrs: bool,
-	total_rows: u64,
-) -> Value {
-	let reported = format!(" {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
-	let mut plan_text = pieces.join(&reported);
-	let _ = writeln!(plan_text);
-	let _ = write!(plan_text, "Total rows: {}", total_rows);
-	Value::String(plan_text.into())
-}
-
 /// The `metrics` object `EXPLAIN ANALYZE` renders in JSON for `metrics`.
 fn metrics_json(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> Object {
 	let mut metrics_obj = Object::default();
@@ -323,52 +289,6 @@ fn metrics_json(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) 
 		metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
 	}
 	metrics_obj
-}
-
-/// The JSON `EXPLAIN ANALYZE` renders for `plan`, every operator of which
-/// reports the one set of metrics a run records, with that set's `metrics`
-/// objects to be filled when the run ends ([`render_analyze_json`]); `None`
-/// where operators report metrics of their own.
-pub(crate) fn analyze_json_template(plan: &dyn ExecOperator) -> Option<Object> {
-	analyze_text_pieces(plan)?;
-	Some(format_analyze_plan_json(plan, false, Redaction::default()))
-}
-
-/// The value `EXPLAIN ANALYZE` answers in JSON for the plan rendered as
-/// `template` ([`analyze_json_template`]), whose operators reported
-/// `metrics`, after it yielded `total_rows` rows.
-pub(crate) fn render_analyze_json(
-	template: &Object,
-	metrics: &OperatorMetrics,
-	redact_volatile_explain_attrs: bool,
-	total_rows: u64,
-) -> Value {
-	fn fill(value: &mut Value, metrics: &Object) {
-		match value {
-			Value::Object(object) => {
-				for (key, inner) in object.iter_mut() {
-					if key == "metrics" && matches!(inner, Value::Object(_)) {
-						*inner = Value::Object(metrics.clone());
-					} else {
-						fill(inner, metrics);
-					}
-				}
-			}
-			Value::Array(items) => {
-				for item in items.iter_mut() {
-					fill(item, metrics);
-				}
-			}
-			_ => {}
-		}
-	}
-	let metrics = metrics_json(metrics, redact_volatile_explain_attrs);
-	let mut plan = Value::Object(template.clone());
-	fill(&mut plan, &metrics);
-	if let Value::Object(object) = &mut plan {
-		object.insert("total_rows", Value::from(total_rows as i64));
-	}
-	plan
 }
 
 /// Format metrics as a human-readable string fragment.

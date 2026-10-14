@@ -592,9 +592,10 @@ pub(crate) struct ConvertAttrs {
 
 /// The attributes of a closure value.
 ///
-/// The op's operands are the values its body captures, one per name of `captures` in order, and
-/// then the row when the body reads one. The body region's block arguments are the statement
-/// timestamp, the parameters, then one per operand.
+/// The op's operands are the values its body captures, one per name of `captures` in order. The
+/// body region's block arguments are the statement timestamp, the parameters, one per operand,
+/// then the row of the frame that invokes the closure where `reads_row` holds, then that frame's
+/// document root where `reads_root` holds.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ClosureAttrs {
 	pub(crate) params: Box<[(Strand, Kind)]>,
@@ -605,18 +606,18 @@ pub(crate) struct ClosureAttrs {
 	/// The name each captured operand has where the closure is written, which the value carries
 	/// so that the closure's unit reads it by name.
 	pub(crate) captures: Box<[Strand]>,
+	/// Whether the body reads the row it is invoked over, by a field, `@`, `$this` or a call that
+	/// reads its caller's row. Its body region then takes that row as its last block argument.
+	pub(crate) reads_row: bool,
+	/// Whether the body reads the document root of the frame that invokes it through an index or a
+	/// method argument, which is not the row it reads by a field where the frame is an element
+	/// filter's body. Its body region then takes the root as the block argument after the row.
+	/// Never set where `reads_row` is not.
+	pub(crate) reads_root: bool,
 	/// The closure as written. Every value the op makes carries it, so a host can compile the body
 	/// when a value reaches it with no unit of its program. The IR never reads it. A container
 	/// parsed from text holds none, because text does not carry it.
 	pub(crate) literal: ClosureLiteral,
-}
-
-impl ClosureAttrs {
-	/// Whether the op takes the row as its last operand, which it does exactly when it has one
-	/// operand more than it names captures.
-	pub(crate) fn reads_row(&self, operands: usize) -> bool {
-		operands == self.captures.len() + 1
-	}
 }
 
 /// The written form of a closure literal, held beside the attributes that stand for it, or none

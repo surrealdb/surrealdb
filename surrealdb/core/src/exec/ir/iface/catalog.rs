@@ -34,7 +34,7 @@ pub(crate) use crate::exec::ir::cache::answer::{
 	CatalogAnswer, ExactAnswer, FreeName, LayoutFacts,
 };
 use crate::exec::ir::phys::access::{ReadVersion, TableAnswers};
-use crate::expr::logical::{LogicalFields, Schema};
+use crate::expr::logical::{LogicalExpr, LogicalFields, Schema};
 use crate::expr::with::With;
 use crate::kvs::cache::ds::TableSnapshot;
 use crate::val::{Datetime, TableName};
@@ -187,6 +187,13 @@ pub(crate) trait PhysicalCatalog: Send + Sync {
 		None
 	}
 
+	/// The `VERSION` stamp the compile reads the catalog at, where its planner reads at one: a unit
+	/// compiled for a call or a closure run under a stamp. A read the container makes under no
+	/// `VERSION` of its own is a read at this stamp.
+	fn read_stamp(&self) -> Option<u64> {
+		None
+	}
+
 	/// What the datastore offers.
 	fn backend(&self) -> BackendCaps {
 		BackendCaps::default()
@@ -196,6 +203,14 @@ pub(crate) trait PhysicalCatalog: Send + Sync {
 	/// answered: a table that is not defined is a `Found` answer with `defined` false.
 	fn table_answers(&self, _key: &SourceKey) -> CatalogAnswer<Arc<TableAnswers>> {
 		CatalogAnswer::Unknown
+	}
+
+	/// The conjunct `conjunct` of a predicate, as an access-path decision reads it, with its
+	/// row-independent record paths replaced by the values the planning transaction holds for
+	/// them and simplified again; `None` where nothing was folded. The filter itself keeps the
+	/// conjunct as written.
+	fn record_folded(&self, _conjunct: &LogicalExpr) -> Option<LogicalExpr> {
+		None
 	}
 
 	/// Whether a read whose table answers are `Unknown` is planned as one that knows nothing of

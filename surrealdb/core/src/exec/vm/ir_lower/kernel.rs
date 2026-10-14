@@ -894,7 +894,6 @@ mod tests {
 			plan_depth: 0,
 			index: None,
 			closure_args: Vec::new(),
-			reads_element: false,
 		}
 	}
 }

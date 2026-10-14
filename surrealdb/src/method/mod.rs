@@ -347,6 +347,9 @@ where
 
 	/// Assigns a value as a parameter for this connection
 	///
+	/// A name the engine reserves or binds itself is refused: `auth`, `access`, `token`, `session`,
+	/// `this`, `self`, `parent`, `value`, `input`, `before`, `after` and `event`.
+	///
 	/// # Examples
 	///
 	/// ```no_run
@@ -386,6 +389,8 @@ where
 	}
 
 	/// Removes a parameter from this connection
+	///
+	/// A name the engine reserves or binds itself is refused, as it is by [`Self::set`].
 	///
 	/// # Examples
 	///

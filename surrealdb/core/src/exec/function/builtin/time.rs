@@ -1,11 +1,15 @@
 //! Time functions
 //!
-//! The CLOCK builtins (`EffectSet::CLOCK`) read one timestamp per top-level
-//! statement, through [`statement_clock`]: repeated reads inside a statement
-//! agree, whatever the row, iteration or nested frame they run in, and no
-//! builtin folds or caches the value itself. They are context-reading
-//! functions, so the executor calls them through `invoke_async` with the
-//! `EvalContext`, and their synchronous `invoke` is an error.
+//! The CLOCK builtins (`EffectSet::CLOCK`) read one timestamp per statement,
+//! through [`statement_clock`]: repeated reads inside a statement agree,
+//! whatever the row or nested frame they run in, and no builtin folds or
+//! caches the value itself. A top-level statement takes its instant when the
+//! executor starts it, and every statement of a block, of the body of a `FOR`
+//! or an `IF`, and of a function takes one when it starts, so the clock
+//! advances from one statement of a list to the next. They are
+//! context-reading functions, so the executor calls them through
+//! `invoke_async` with the `EvalContext`, and their synchronous `invoke` is
+//! an error.
 
 use anyhow::Result;
 use chrono::{Local, TimeZone};
@@ -17,8 +21,8 @@ use crate::val::{Datetime, Value};
 use crate::{define_pure_function, register_functions};
 
 /// The timestamp every CLOCK builtin reads as the current time: that of the
-/// top-level statement `ctx` runs in, taken when it started, so every read in
-/// one statement agrees. A `sleep` inside the statement does not advance it.
+/// statement `ctx` runs in, taken when it started, so every read in one
+/// statement agrees. A `sleep` inside the statement does not advance it.
 ///
 /// A context that carries no statement timestamp answers the wall clock at the
 /// call.

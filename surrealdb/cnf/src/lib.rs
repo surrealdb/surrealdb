@@ -42,6 +42,22 @@ pub const ID_CHARS: [char; 36] = [
 /// Specifies the names of parameters which can not be specified in a query
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
+/// Specifies the names the system binds itself in the frame of a statement, a clause, a field, an
+/// event or a function: the value a clause or an element filter reads (`this`, `self`, `parent`),
+/// and the values an event or a field definition reads (`value`, `input`, `before`, `after`,
+/// `event`). They are not in [`PROTECTED_PARAM_NAMES`]: that list names the values read from the
+/// session, and the planner folds, captures and scopes by it, which these names are not.
+pub const SYSTEM_BOUND_PARAM_NAMES: &[&str] =
+	&["this", "self", "parent", "value", "input", "before", "after", "event"];
+
+/// Whether a user may not set or unset the variable `name`, by `LET`, by the session's `set` and
+/// `unset`, or by a variable bound to a request: a protected parameter name, and a name the system
+/// binds. A `LET` the planner writes to bind a system name into a frame is exempt, see
+/// [`SYSTEM_BOUND_PARAM_NAMES`].
+pub fn is_refused_let_name(name: &str) -> bool {
+	SYSTEM_BOUND_PARAM_NAMES.contains(&name) || PROTECTED_PARAM_NAMES.contains(&name)
+}
+
 /// Default capacity for the bounded channel used to deliver live-query
 /// notifications from the datastore to subscribers.
 pub const NOTIFICATIONS_CHANNEL_SIZE: usize = 15_000;

@@ -243,40 +243,42 @@ test("query bindings vs LET: binding is visible before the LET, shadowed after",
 	await db.close();
 });
 
-test("protected params: $auth/$session/$token bindings rejected; $this/$parent accepted but shadowed by document context", async () => {
+test("protected params: $auth/$session/$token and the names the system binds are rejected as bindings", async () => {
 	const { db } = await rootClient(server);
 
 	// Server-side rejection ("'<name>' is a protected variable and cannot be
-	// set") — the whole call fails.
-	for (const name of ["auth", "session", "token"]) {
+	// set") — the whole call fails. The names the system binds in a frame
+	// ($this, $parent, $value, ...) are refused as the session's are.
+	const names = [
+		"auth",
+		"session",
+		"token",
+		"this",
+		"self",
+		"parent",
+		"value",
+		"input",
+		"before",
+		"after",
+		"event",
+	];
+	for (const name of names) {
 		const err = await rejects(db.query(`RETURN $${name}`, { [name]: "injected" }).collect());
 		expect(err.constructor.name).toBe("ValidationError");
 		expect(String(err)).toMatch(new RegExp(`'${name}' is a protected variable`));
 	}
 
-	// Surprising but observed: $this and $parent are NOT protected — a wire
-	// binding for them is accepted and readable at the top level. Pinned.
-	const [topThis] = await db.query<[string]>("RETURN $this", { this: "injected" }).json();
-	expect(topThis).toBe("injected");
-	const [topParent] = await db.query<[string]>("RETURN $parent", { parent: "injected" }).json();
-	expect(topParent).toBe("injected");
-
-	// Inside per-record evaluation the document context wins over the
-	// injected binding: $this is the current record, not "injected".
+	// Without a binding, per-record evaluation reads the document context:
+	// $this is the current record and $parent the outer record of a subquery.
 	await db.query("CREATE scope_probe:one SET n = 1");
 	const [rows] = await db
-		.query<[Array<{ me: unknown; n: number }>]>(
-			"SELECT $this AS me, n FROM scope_probe",
-			{ this: "injected" },
-		)
+		.query<[Array<{ me: unknown; n: number }>]>("SELECT $this AS me, n FROM scope_probe")
 		.json();
 	expect(rows).toEqual([{ me: { id: "scope_probe:one", n: 1 }, n: 1 }]);
 
-	// Likewise $parent inside a subquery refers to the outer record.
 	const [sub] = await db
 		.query<[Array<{ sub: Array<{ pn: number }>; n: number }>]>(
 			"SELECT (SELECT $parent.n AS pn FROM scope_probe) AS sub, n FROM scope_probe",
-			{ parent: "injected" },
 		)
 		.json();
 	expect(sub).toEqual([{ sub: [{ pn: 1 }], n: 1 }]);

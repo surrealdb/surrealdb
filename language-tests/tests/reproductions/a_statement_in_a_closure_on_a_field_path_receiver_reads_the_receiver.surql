@@ -4,19 +4,19 @@ namespace = true
 database = true
 
 [test]
-reason = "A statement or a block that a method argument's closure holds, on a receiver read from a name (a field path of a `LET` value), reads the current value of the step through `$this` and `$parent`, which in a frame with no row is the method's receiver, whether or not the body also reads the current value elsewhere, as the closure-free twin does."
+reason = "A statement that a method argument's closure holds, on a receiver read from a name (a field path of a `LET` value), reads `$this` as the document of the frame that invokes the closure, which a frame with no row does not have, so the statement reads no rows whether or not the body also reads `$this` elsewhere. A block in the body takes the document of the frame that invokes the closure as its `$parent`, which a frame with no row does not have, so it reads `NONE`. The closure-free twin (`concat`) reads the receiver as the step's root."
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
-value = "[[1, 2], [1, 2]]"
+value = "[[], []]"
 
 [[test.results]]
-value = "[[{ lim: 1 }, { lim: 2 }], [{ lim: 1 }, { lim: 2 }]]"
+value = "[NONE, NONE]"
 
 [[test.results]]
 value = "[{ lim: 1 }, { lim: 2 }, [1, 2]]"

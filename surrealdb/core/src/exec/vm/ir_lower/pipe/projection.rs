@@ -372,7 +372,6 @@ fn write_projection(
 		plan_depth: 0,
 		index: None,
 		closure_args: Vec::new(),
-		reads_element: false,
 	})?;
 	let args = site.call_operands(region, args)?;
 	site.emitter().emit(Instr::WriteProjection {

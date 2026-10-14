@@ -473,15 +473,19 @@ async fn a_finished_transaction_opens_no_cursor(b: &TestBackend) {
 
 kvs_test!(a_finished_transaction_opens_no_cursor, only = [rocksdb]);
 
-/// A writable transaction reads its own buffered writes, which a view over the snapshot would not.
-async fn a_writable_rocksdb_transaction_gives_no_view(b: &TestBackend) {
+/// A writable transaction has a view while it holds no buffered write, since its reads are then
+/// the snapshot's. Once it buffers a put its reads merge that write, which a view over the
+/// snapshot would not, so it has none.
+async fn a_writable_rocksdb_transaction_gives_a_view_until_its_first_write(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Write).await.unwrap();
-	assert!(tx.snapshot().is_none());
+	assert!(tx.snapshot().is_some(), "a writable transaction with no write gives a view");
+	tx.set(b"first/write".to_vec().into(), value()).await.unwrap();
+	assert!(tx.snapshot().is_none(), "a writable transaction with a buffered put gives no view");
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(a_writable_rocksdb_transaction_gives_no_view, only = [rocksdb]);
+kvs_test!(a_writable_rocksdb_transaction_gives_a_view_until_its_first_write, only = [rocksdb]);
 
 /// A read-only transaction has nothing buffered, so its reads are the snapshot's.
 async fn a_read_only_rocksdb_transaction_gives_a_view(b: &TestBackend) {

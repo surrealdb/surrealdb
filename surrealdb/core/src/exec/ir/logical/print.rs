@@ -2649,6 +2649,7 @@ text_struct!(SourceAttrs {
 	for_update: bool,
 	may_be_defined: bool,
 	may_meet_change: bool,
+	resolved: bool,
 });
 text_struct!(ComputedReadsShape {
 	table: TableName,

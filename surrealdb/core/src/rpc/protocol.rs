@@ -1239,12 +1239,10 @@ pub trait RpcProtocol {
 			return Err(session_expired());
 		}
 
+		check_protected_param(&key)?;
 		match val {
 			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
-			Some(val) => {
-				check_protected_param(&key)?;
-				session.variables.insert(key, val)
-			}
+			Some(val) => session.variables.insert(key, val),
 		}
 
 		// Return nothing
@@ -1271,6 +1269,8 @@ pub trait RpcProtocol {
 		let Some(PublicValue::String(key)) = extract_args(params.into_vec()) else {
 			return Err(invalid_params("Expected (key)".to_string()));
 		};
+
+		check_protected_param(&key)?;
 
 		// Get a write lock on the session
 		let mut session = session_lock.write().await;
@@ -3206,6 +3206,50 @@ mod tests {
 	#[tokio::test]
 	async fn an_unobserved_rpc_builds_no_event() {
 		assert_eq!(count_rpc_events(true).await, 0, "the no-op short-circuit did not fire");
+	}
+
+	/// The `set`/`let` and `unset` methods refuse a protected name and each name the system
+	/// binds, and leave the session's variables as they were.
+	#[tokio::test]
+	async fn set_and_unset_refuse_the_names_the_system_binds() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(41);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		let key = |name: &str| -> PublicArray { vec![PublicValue::String(name.to_owned())].into() };
+		let keyed = |name: &str| -> PublicArray {
+			vec![
+				PublicValue::String(name.to_owned()),
+				PublicValue::Number(surrealdb_types::Number::Int(1)),
+			]
+			.into()
+		};
+		for name in [
+			"auth", "access", "token", "session", "this", "self", "parent", "value", "input",
+			"before", "after", "event",
+		] {
+			for method in [Method::Set, Method::Unset] {
+				let params = if matches!(method, Method::Set) {
+					keyed(name)
+				} else {
+					key(name)
+				};
+				let err = rpc
+					.execute(None, sid, Some(sid), method, params)
+					.await
+					.expect_err("a refused name is not set or unset");
+				assert!(err.to_string().contains(name), "the refusal of `{name}` names it: {err}");
+			}
+			// Setting a name to NONE removes it, which is an unset.
+			let params: PublicArray =
+				vec![PublicValue::String(name.to_owned()), PublicValue::None].into();
+			rpc.execute(None, sid, Some(sid), Method::Set, params)
+				.await
+				.expect_err("a refused name is not removed by a set to NONE");
+		}
+		// An ordinary name is set and unset.
+		rpc.execute(None, sid, Some(sid), Method::Set, keyed("limit")).await.unwrap();
+		rpc.execute(None, sid, Some(sid), Method::Unset, key("limit")).await.unwrap();
 	}
 
 	/// A query and a session mutation on the same session must both complete.
