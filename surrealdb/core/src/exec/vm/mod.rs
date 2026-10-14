@@ -365,14 +365,14 @@ impl RequestBuilder {
 	}
 }
 
-/// The message of the region-constraint rejection of the bound statement `op`, the statement at
+/// The refusal of the region-constraint rejection of the bound statement `op`, the statement at
 /// `position` of its request; `None` when every region admits what it holds, and when `op` does
 /// not bind.
 pub(crate) async fn rejection(
 	planner: &Planner<'_>,
 	op: &LogicalOp,
 	position: usize,
-) -> Option<String> {
+) -> Option<payload::Refusal> {
 	compile::rejection(planner, op, position).await.ok().flatten()
 }
 

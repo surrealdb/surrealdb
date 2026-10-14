@@ -172,8 +172,8 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub use self::effects::{
 	ChildFacts, EffectOracle, EffectSet, Effects, ITERATION_PARAMS, ROW_PARAMS, effects_of,
-	facts_of, invokes_unseen_body, key_is_generated, may_dereference, node_effects,
-	node_may_dereference,
+	facts_of, invokes_unseen_body, key_is_generated, may_carry_unseen_closure, may_dereference,
+	node_effects, node_may_dereference,
 };
 pub use self::exits::Exits;
 pub use self::expr::{
@@ -1178,12 +1178,9 @@ pub struct LogicalPermissionFilter {
 /// Which stored `PERMISSIONS` clause a guard is, which decides the frame its
 /// predicate is evaluated in.
 ///
-/// A read guard is evaluated write-refusing and a write guard is not: the
-/// line is drawn by giving a `SELECT` clause
-/// `Options::new_for_permission_predicate` and a create/update/delete clause
-/// `Options::new_for_mutable_permission_predicate`. A write inside a write
-/// guard is therefore performed rather than refused, which is not a nicety —
-/// a guard that records an access attempt is written that way.
+/// Both kinds are evaluated with reads unchecked and refusing every effect a
+/// schema clause must not have; the frame each raises its refusal under
+/// differs, so a refusal names the read guard as the one a read reached.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum GuardKind {
 	/// `PERMISSIONS FOR select`, on a table or a field.

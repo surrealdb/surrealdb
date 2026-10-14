@@ -12,7 +12,7 @@ use super::{
 use crate::catalog::TableType;
 use crate::ddl::define::table::TableConversion;
 use crate::exec::ir::iface::statements::{AlterTable, DdlChecks, DefineTable, ViewShape};
-use crate::exec::vm::program::{Backfill, CompareOp, FieldRefusal};
+use crate::exec::vm::program::{Backfill, ClauseObject, CompareOp, FieldRefusal};
 use crate::expr::statements::alter::AlterKind;
 
 /// The view the definition template `template` holds, as the catalog compiles it.
@@ -239,6 +239,13 @@ impl Ddl<'_, '_> {
 			});
 		}
 
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition,
+			previous: None,
+			object: ClauseObject::Table,
+		});
 		// The table key is locked before the write, so the write is serialised against a concurrent
 		// graph fold that flips the table's marker. The write is followed by its stamp.
 		self.store(StoreInstr::Lock {

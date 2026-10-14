@@ -311,7 +311,9 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   a `WHERE` guard that reads stored fields alone is judged once against the
   record as stored and derives the body only when it admits. Both leave no
   trace of the body in the result, and the read-time and bind-time paths
-  decide through the same function. `materialise_fields_with_permissions` in
+  decide through the same function. A field that another reader needs derived
+  (a guard that reads it, another body that names it) stays derived first; a
+  body whose reads are not known reads a denied field as `NONE`. `materialise_fields_with_permissions` in
   `exec/operators/scan/pipeline.rs` is what orders those passes for a view
   with no layer form (`Enforce::Image`), and every site that materialises
   computed fields on a reduced view has to go through it or through the
@@ -572,24 +574,60 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   and `reproductions/a_permission_derives_a_computed_field_under_its_auth_limit.surql`.
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
-- A `SELECT` permission expression (the WHERE clause in `PERMISSIONS FOR select`)
-  must not produce observable side effects (writes, deletes, event triggers).
-  A read must never trigger a write — the core escalation GHSA-66r2-5gwj-gxm2
-  closes — and the predicate is evaluated with permission enforcement already
-  disabled, so a write reached from one bypasses every gate.
+- **A schema clause has no effects.** `COMPUTED`, every `PERMISSIONS` clause (a
+  table's and a field's `select`/`create`/`update`/`delete`, a function's, a
+  parameter's), `ASSERT`, `VALUE` and `DEFAULT` may not hold a write
+  (CREATE/UPDATE/UPSERT/DELETE/RELATE/INSERT, or a function whose body writes,
+  transitively), a schema statement (DEFINE/REMOVE/ALTER/REBUILD), a builtin
+  whose `EffectSet` holds `ADVANCES_STATE` (`sequence::nextval`), or `SLEEP`.
+  `VALUE` and `DEFAULT` may advance a sequence.
+  Randomness and the clock are allowed. A read must never trigger a write — the
+  core escalation GHSA-66r2-5gwj-gxm2 closes — and a permission predicate is
+  evaluated with permission enforcement already disabled, so a write reached
+  from one would bypass every gate. A `DEFINE EVENT` body is the sanctioned
+  definer-authority side-effect mechanism and may write.
 
-  This is enforced **at runtime only**. Predicate evaluation carries
-  `skip_fetch_perms` and a `NoWriteFrame::PermissionPredicate`, so the VM refuses
-  CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL — including writes reached
-  through custom-function bodies, `eval`, scripts and closures arriving as data.
-  The block logs a warning steering operators to `DEFINE EVENT`, the sanctioned
-  definer-authority side-effect mechanism.
+  Two enforcement points, one error (`Error::SchemaClauseEffect`, naming the
+  clause and the construct):
+  - **Where the clause is defined.** `DEFINE`/`ALTER` of a table, field,
+    function or parameter judges each clause it writes
+    (`exec/clause_effects.rs`, run by `StoreInstr::RefuseClauseEffects`, by
+    `CheckTableAlter`, and by the field DDL in `ddl/`): the declared effects of
+    the builtins and methods the clause calls, the statements it holds, and the
+    bodies of the stored functions it reaches, read from the catalog the
+    statement runs against. A call whose effects cannot be known there — a
+    closure whose body is not in the clause (one the clause neither writes in
+    place nor binds with `LET`), a script, module or silo function, `eval::*`,
+    `api::invoke` — is refused; a function the catalog does not define has no
+    body to judge, so the clause is accepted and the call fails where it runs.
+    A clause an `ALTER` leaves as it was is not judged, nor is an import, which
+    restores definitions as stored. The planner's
+    region constraints (`exec/ir/logical/constraints.rs`) refuse a write or
+    schema statement written directly in a `DEFINE` before the request runs,
+    with the same error.
+  - **Where the clause runs.** Every clause is evaluated in a `NoWriteFrame`
+    (`dbs/options.rs`), which refuses a write and a schema statement where it
+    is reached, however deep — through custom-function bodies, `eval`, scripts
+    and closures arriving as data — a builtin declaring `BLOCKING`, or
+    `ADVANCES_STATE` outside a `VALUE` or `DEFAULT`
+    (`NoWriteFrame::refuses_builtin_call`), and `SLEEP`. This is what
+    holds for a definition stored before the rule and for a callee redefined
+    after the clause. The read-guard frame logs a warning steering operators to
+    `DEFINE EVENT`.
+
+  A builtin that writes outside the transaction (`http::post`, `file::put`) is
+  not refused by either: it is no write through the transaction, and refusing it
+  is a behaviour change of its own.
   Verified by: `options_for_frame` (`exec/frame.rs`), the one place the frame an
   evaluation runs in is turned into the `Options` a callee takes, with the unit
-  tests beside it; end to end by `reproductions/perm_predicate_runtime_block.surql`
-  (guard reached by a scan) and `reproductions/udf_frame_write.surql`
-  (guard reached by a record dereference, where the frame is marked on the
-  `EvalContext` alone and the function call carries it onto the body's context).
+  tests beside it and in `dbs/options.rs`; end to end by
+  `reproductions/perm_predicate_runtime_block.surql` (guard reached by a scan),
+  `reproductions/udf_frame_write.surql` (guard reached by a record dereference,
+  where the frame is marked on the `EvalContext` alone and the function call
+  carries it onto the body's context), the tests under
+  `language/statements/define/clause_effects/`, and the upgrade test
+  `upgrade/define/3.00.00_computed_write_stored.surql` (a stored clause refused
+  where it runs).
 - A permission predicate a read applies reaches the caller only as its verdict.
   It runs with reads unchecked, so a value it computes must never become the
   value of the statement it guards: a `RETURN` ends the block that holds it with
@@ -607,42 +645,6 @@ gate — `check_permission_for_value`, `validate_record_user_access`;
   derived for a predicate takes it as the field's value; neither hands it to
   the caller.
   Verified by: `reproductions/a_return_in_a_permission_block_is_its_value.surql`.
-
-  **Scope: statements, not side-effecting calls.** This frame blocks statement
-  forms. It does *not* block a call to a builtin that changes something without
-  one — `file::put`, `http::post`, `sequence::nextval`. The Surrealism read-only
-  frame does block those (`NoWriteFrame::refuses_builtin_call`), and the
-  mechanism is shared, so extending it here is a one-line change.
-
-  It is not extended here yet, and the reason is scope rather than safety: a
-  `SELECT` predicate calling `http::post` is the same shape of read-triggered
-  side effect the advisory is about, and closing it would be a behaviour change
-  for any deployment that has such a predicate today. It wants its own change,
-  with its own note in the changelog and its own reproduction — not a quiet
-  widening carried in on a Surrealism PR.
-
-  Whoever takes it: the frame already travels correctly, and both enforcement
-  points ask `NoWriteFrame` for the verdict *and* for the error
-  (`refuses_builtin_call`, `side_effect_error`), so widening the scoping is the
-  whole change — a predicate refused through either path still raises
-  `PermissionPredicateSideEffect` and still logs the GHSA warning.
-  `each_frame_raises_its_own_error` (`dbs/options.rs`) pins that the frames'
-  errors stay distinct, which is what makes naming one at an enforcement point
-  wrong even while the scoping keeps it unreachable.
-
-  There is deliberately **no definition-time counterpart**. A `DEFINE`/`ALTER`
-  that stores a writing `SELECT` guard is accepted; it fails when a read reaches
-  the write. Rejecting at definition time cannot be made sound — whether a called
-  function reaches a write depends on which branch its arguments select — and a
-  check that guesses either refuses working schemas or gives false assurance.
-  Treat the runtime frame as the whole of the control.
-  - **create/update/delete permission predicates** (table clauses, and the
-    create/update field clauses) carry no such frame: they are only ever reached
-    from a statement that is already writing, so their side effects run, with
-    permissions bypassed as with any predicate. The frame decision is the
-    clause's `GuardKind` (`Read` for `select`, `Write` otherwise), applied by
-    `permission_frame` in `exec/operators/permission_filter.rs` for a read and
-    by `PermissionSpec::context` in `exec/vm/program.rs` for a write gate.
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.

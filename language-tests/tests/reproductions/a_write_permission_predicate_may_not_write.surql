@@ -8,16 +8,21 @@ reason = """
 Register #28, row PermissionOrAssertFrame: a `PERMISSIONS FOR create`, `update`
 or `delete` predicate may not write either. The permission is refused at the
 statement that defines it, not at the first read or write that judges it, and
-the request fails as a whole.
+that statement alone fails.
 
 The two clauses below differ only in which action they guard, and both are
 refused: the row names the permission frame, not the action it guards. The
-`audit` definition before them is a statement of the same request and never
-runs.
+`audit` definition before them holds no write and succeeds.
 """
 
-[test.results]
-request-error = "Invalid statement: a write is not allowed in a permission (statement 2)"
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `CREATE` writes data"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `CREATE` writes data"
 */
 DEFINE TABLE audit SCHEMALESS PERMISSIONS FULL;
 

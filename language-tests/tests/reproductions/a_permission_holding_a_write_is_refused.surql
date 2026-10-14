@@ -8,13 +8,19 @@ reason = """
 Register #28, row PermissionOrAssertFrame: a statement that writes data is not
 allowed in the permission of a table or a field, whichever action the
 permission guards and however the write is reached. A permission is evaluated
-as a predicate, so a write there is refused when the definition is written and
-the request fails as a whole before any statement of it runs. The refusal names
-the first such statement of the request, and the statements before it never run.
+as a predicate, so a write there is refused when the definition is written.
+Each definition is a statement of its own: one holding a write fails with the
+error naming the write, and the definitions around it are unaffected.
 """
 
-[test.results]
-request-error = "Invalid statement: a write is not allowed in a permission (statement 2)"
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `CREATE` writes data"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `DELETE` writes data"
 */
 DEFINE TABLE ok SCHEMALESS PERMISSIONS FULL;
 DEFINE TABLE d SCHEMALESS PERMISSIONS FOR select WHERE (CREATE x:1) != NONE, FOR create, update FULL;

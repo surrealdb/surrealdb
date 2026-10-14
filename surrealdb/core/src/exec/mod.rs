@@ -54,6 +54,7 @@ pub(crate) mod buffer;
 pub(crate) mod cardinality;
 pub(crate) mod catalog_deps;
 pub(crate) mod clause;
+pub(crate) mod clause_effects;
 pub(crate) mod closure;
 pub(crate) mod compiles;
 pub(crate) mod config;

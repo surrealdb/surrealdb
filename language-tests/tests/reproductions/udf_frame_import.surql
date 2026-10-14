@@ -21,11 +21,15 @@ DEFINE TABLE audit SCHEMALESS PERMISSIONS FOR select FULL;
 
 -- Idempotent marker, so the assertion does not depend on how many times a
 -- guard is evaluated per statement.
-DEFINE FUNCTION fn::mark_read() { UPSERT audit:reader SET hit = true; RETURN true; } PERMISSIONS FULL;
+DEFINE FUNCTION fn::mark_read() { RETURN true; } PERMISSIONS FULL;
 
 -- A `select` guard reached through a record link. Its write must be refused.
 DEFINE TABLE secret SCHEMALESS PERMISSIONS FOR select WHERE fn::mark_read();
 DEFINE TABLE pub SCHEMALESS PERMISSIONS FULL;
+
+-- The guard's function writes only after the guard is defined, so the
+-- definition-time check accepts it and the write meets the runtime frame.
+DEFINE FUNCTION OVERWRITE fn::mark_read() { UPSERT audit:reader SET hit = true; RETURN true; } PERMISSIONS FULL;
 
 -- A membership table no record user may read directly; its `active` field
 -- denies `select` on its own as well.

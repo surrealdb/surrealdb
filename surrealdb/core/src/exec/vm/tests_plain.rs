@@ -292,12 +292,6 @@ const PLAN_TIME_FUNCTIONS: &[(&str, &str, &str)] = &[
 	),
 	(
 		"schema_host.rs",
-		"check_computed_callees",
-		"declared schema service: whether the functions a COMPUTED body calls are read-only, \
-		 read from the catalog as DEFINE FIELD reads them",
-	),
-	(
-		"schema_host.rs",
 		"refuse_removing_id",
 		"declared schema service: what REMOVE FIELD refuses of the id of a table whose \
 		 definitions read its record id components, judged as its body judges it",

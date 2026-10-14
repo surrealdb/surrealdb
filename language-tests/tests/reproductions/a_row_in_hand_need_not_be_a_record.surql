@@ -18,10 +18,10 @@ reason = """
 	argument it may duplicate has to answer the same both times; the call
 	itself evaluates its argument once, and the two elements are equal.
 
-	The `COMPUTED` field draws from a sequence rather than at random so that a
-	second fetch is always visible: two reads of one record can never answer
-	alike. The last two queries are the controls — a field base, which was
-	never exempt, and a row that really is a record.
+	The `COMPUTED` field answers `rand::uuid()`, so a second fetch is visible:
+	two reads of one record never answer alike. The last two queries are the
+	controls — a field base, which was never exempt, and a row that really is a
+	record.
 """
 
 [[test.results]]
@@ -34,9 +34,6 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -62,11 +59,11 @@ value = "NONE"
 
 [[test.results]]
 value = "true"
+
 */
 
-DEFINE SEQUENCE s BATCH 1000 START 0;
 DEFINE TABLE p SCHEMALESS;
-DEFINE FIELD n ON p COMPUTED sequence::nextval('s');
+DEFINE FIELD n ON p COMPUTED rand::uuid();
 DEFINE TABLE o SCHEMALESS;
 CREATE p:1 RETURN NONE;
 CREATE o:1 SET link = p:1 RETURN NONE;

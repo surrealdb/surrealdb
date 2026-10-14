@@ -115,6 +115,12 @@ pub(crate) enum Refusal {
 	AccessRedactedKey {
 		ac: String,
 	},
+	/// A schema clause, named as `clause`, written holding `construct`, an
+	/// effect a schema clause must not have.
+	SchemaClauseEffect {
+		clause: String,
+		construct: String,
+	},
 	/// A statement that reads its database's catalog, run by a session that
 	/// selects no namespace.
 	NamespaceEmpty,
@@ -188,6 +194,13 @@ impl Refusal {
 			} => crate::err::Error::Exec(crate::exec::Error::AccessRedactedKey {
 				ac: ac.clone(),
 			}),
+			Self::SchemaClauseEffect {
+				clause,
+				construct,
+			} => crate::err::Error::Exec(crate::exec::Error::SchemaClauseEffect {
+				clause: clause.clone(),
+				construct: construct.clone(),
+			}),
 			Self::NamespaceEmpty => crate::err::Error::Exec(crate::exec::Error::NsEmpty),
 			Self::DatabaseEmpty => crate::err::Error::Exec(crate::exec::Error::DbEmpty),
 		}
@@ -225,6 +238,13 @@ impl Refusal {
 				value,
 			}) => Some(Self::InvalidFetch {
 				value: value.clone(),
+			}),
+			crate::err::Error::Exec(crate::exec::Error::SchemaClauseEffect {
+				clause,
+				construct,
+			}) => Some(Self::SchemaClauseEffect {
+				clause: clause.clone(),
+				construct: construct.clone(),
 			}),
 			crate::err::Error::Exec(crate::exec::Error::InvalidBound {
 				found,

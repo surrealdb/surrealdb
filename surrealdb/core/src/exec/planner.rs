@@ -1619,7 +1619,7 @@ pub(crate) async fn plan_request_statement(
 	}
 }
 
-/// The message of the region-constraint rejection of `op`, the statement at `position` of its
+/// The refusal of the region-constraint rejection of `op`, the statement at `position` of its
 /// request, bound in `txn` as [`plan_request_statement`] binds it; `None` when every region
 /// admits what it holds, and when the statement does not bind against the catalog `txn` holds.
 pub(crate) async fn request_statement_rejection(
@@ -1629,7 +1629,7 @@ pub(crate) async fn request_statement_rejection(
 	txn: Arc<crate::kvs::Transaction>,
 	auth: Option<Arc<crate::iam::Auth>>,
 	position: usize,
-) -> Option<String> {
+) -> Option<crate::exec::vm::payload::Refusal> {
 	let (ns, db) = session_ns_db(ctx);
 	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db);
 	if let Some(auth) = auth {

@@ -7,14 +7,14 @@ DEFINE ACCESS a7237_access ON DATABASE TYPE RECORD
 	SIGNIN ( SELECT * FROM ONLY $id )
 	DURATION FOR TOKEN 1h, FOR SESSION 1h;
 
+DEFINE FUNCTION fn::perm_a7237::sel($id: record<a7237>) {
+	RETURN true;
+};
+
 DEFINE TABLE a7237 SCHEMAFULL
 	PERMISSIONS
 		FOR create, update, delete FULL
 		FOR select WHERE fn::perm_a7237::sel(id);
-
-DEFINE FUNCTION fn::perm_a7237::sel($id: record<a7237>) {
-	RETURN true;
-};
 
 DEFINE FIELD bs ON a7237 COMPUTED <~b7237;
 

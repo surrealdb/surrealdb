@@ -6566,7 +6566,7 @@ async fn call_builtin(
 			message: format!("Experimental feature {target} is not enabled"),
 		})));
 	}
-	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
+	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
 	let mut ctx = ctx;
 	ctx.plan_depth = ctx.plan_depth.max(call.plan_depth);
 	invoke_builtin(func.as_ref(), args, &ctx).await?.map_err(ControlFlow::Err)
@@ -6608,14 +6608,20 @@ async fn invoke_builtin(
 	Ok(result)
 }
 
-/// Refuse a call of builtin `name` that the frame `ctx` runs in does not let
-/// change state: a Surrealism function declared read-only reaches a mutating
-/// builtin by a call or by a method on a value, and either is refused with
-/// the frame's error.
-fn refuse_mutating_builtin(name: &str, ctx: &ExecutionContext) -> FlowResult<()> {
+/// Refuse a call of the builtin `name`, which declares `effects`, that the
+/// frame `ctx` runs in does not admit: a schema clause reaching a builtin
+/// that advances state outside the transaction or blocks, or a Surrealism
+/// function declared read-only reaching a mutating builtin, by a call or by a
+/// method on a value alike, each refused with the frame's error.
+fn refuse_mutating_builtin(
+	name: &str,
+	effects: crate::expr::logical::EffectSet,
+	ctx: &ExecutionContext,
+) -> FlowResult<()> {
 	match ctx.root().no_write {
-		Some(frame) if frame.refuses_builtin_call(name) => {
-			Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error())))
+		Some(frame) if frame.refuses_builtin_call(name, effects) => {
+			let construct = crate::exec::clause_effects::builtin_text(name, effects);
+			Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error(&construct))))
 		}
 		_ => Ok(()),
 	}
@@ -7355,7 +7361,7 @@ async fn call_method(
 			message: format!("Experimental feature {target} is not enabled"),
 		})));
 	}
-	refuse_mutating_builtin(func.name(), ctx.exec_ctx)?;
+	refuse_mutating_builtin(func.name(), func.effects(), ctx.exec_ctx)?;
 	let result = invoke_builtin(func.as_ref(), func_args, &ctx).await?;
 	let writing = method.writing || ctx.exec_ctx.root().writing;
 	let resolved = func.name();
@@ -7397,7 +7403,8 @@ pub(super) fn method_arguments_error(name: &str, message: &str) -> anyhow::Error
 /// statement's work begins, as the write operator refuses one.
 fn refuse_unwritable(spec: &super::program::WriteSpec, ctx: &ExecutionContext) -> FlowResult<()> {
 	if let Some(frame) = ctx.root().no_write {
-		return Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error())));
+		let construct = crate::exec::clause_effects::write_text(spec.form.kind());
+		return Err(ControlFlow::Err(anyhow::anyhow!(frame.side_effect_error(&construct))));
 	}
 	let Some(txn) = ctx.try_txn() else {
 		return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(

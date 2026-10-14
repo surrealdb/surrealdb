@@ -14,8 +14,8 @@ use super::codec;
 use super::codec::TypeId;
 use super::codec::key::RouteId;
 use super::program::{
-	AccessCheck, ClauseConversion, ColumnSource, FieldCheck, GrantSubject, IdSequence, PathSource,
-	Program, Service, StatementError, StoreInstr,
+	AccessCheck, ClauseConversion, ClauseObject, ColumnSource, FieldCheck, GrantSubject,
+	IdSequence, PathSource, Program, Service, StatementError, StoreInstr,
 };
 use super::scalar::Scalar;
 use crate::catalog::stored::StoredField;
@@ -73,6 +73,7 @@ pub(super) async fn step(
 			StoreInstr::Raise { .. }
 				| StoreInstr::RefuseField { .. }
 				| StoreInstr::RefuseRemovingLightweight { .. }
+				| StoreInstr::RefuseClauseEffects { .. }
 				| StoreInstr::RefuseRedefiningTable { .. }
 				| StoreInstr::RefuseNamedIdConversion { .. }
 				| StoreInstr::FieldCheck { .. }
@@ -163,7 +164,9 @@ async fn step_inner(
 		}
 		StoreInstr::RefuseNoWrite => {
 			if let Some(frame) = ctx.root().no_write {
-				return Err(ControlFlow::Err(anyhow!(frame.side_effect_error())));
+				return Err(ControlFlow::Err(anyhow!(
+					frame.side_effect_error(crate::exec::clause_effects::SCHEMA_STATEMENT_TEXT)
+				)));
 			}
 		}
 		StoreInstr::Allow {
@@ -453,6 +456,69 @@ async fn step_inner(
 			if let Some(refusal) = refusal {
 				return Err(ControlFlow::Err(refusal.error()));
 			}
+		}
+		StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition,
+			previous,
+			object,
+		} => {
+			if ctx.options().is_some_and(|options| options.import) {
+				return Ok(None);
+			}
+			use crate::catalog::FromStored as _;
+			let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
+			let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
+			let txn = ctx.txn();
+			let registry = ctx.function_registry();
+			let check = crate::exec::clause_effects::ClauseCheck {
+				txn: &txn,
+				ns,
+				db,
+				registry,
+			};
+			let value = read(regs, *definition);
+			let previous = previous.map(|reg| read(regs, reg));
+			let refused = match object {
+				ClauseObject::Table => {
+					let table = |value: &Value| -> FlowResult<crate::catalog::TableDefinition> {
+						let stored: crate::catalog::StoredTableDefinition = rust(value)?;
+						crate::catalog::TableDefinition::from_stored(&stored)
+							.map_err(ControlFlow::Err)
+					};
+					let previous = previous.as_ref().map(table).transpose()?;
+					super::descriptor::schema(
+						check.refuse_table(previous.as_ref(), &table(&value)?),
+					)
+					.await
+				}
+				ClauseObject::Field => {
+					let field = |value: &Value| -> FlowResult<crate::catalog::FieldDefinition> {
+						let stored: crate::catalog::StoredFieldDefinition = rust(value)?;
+						crate::catalog::FieldDefinition::from_stored(&stored)
+							.map_err(ControlFlow::Err)
+					};
+					let previous = previous.as_ref().map(field).transpose()?;
+					super::descriptor::schema(
+						check.refuse_field(previous.as_ref(), &field(&value)?),
+					)
+					.await
+				}
+				ClauseObject::Function => {
+					let stored: crate::catalog::StoredFunctionDefinition = rust(&value)?;
+					let function = crate::catalog::FunctionDefinition::from_stored(&stored)
+						.map_err(ControlFlow::Err)?;
+					super::descriptor::schema(check.refuse_function(&function)).await
+				}
+				ClauseObject::Param => {
+					let stored: crate::catalog::StoredParamDefinition = rust(&value)?;
+					let param = crate::catalog::ParamDefinition::from_stored(&stored)
+						.map_err(ControlFlow::Err)?;
+					super::descriptor::schema(check.refuse_param(&param)).await
+				}
+			};
+			refused.map_err(ControlFlow::Err)?;
 		}
 		StoreInstr::ViewSources {
 			ns,
@@ -1402,19 +1468,6 @@ async fn step_inner(
 						.await
 						.map_err(ControlFlow::Err)?;
 				}
-				FieldCheck::ComputedCallees {
-					field: reg,
-					ns,
-					db,
-				} => {
-					let definition = field(*reg)?;
-					let ns = crate::catalog::NamespaceId(scope(regs, Some(*ns), "namespace")?);
-					let db = crate::catalog::DatabaseId(scope(regs, Some(*db), "database")?);
-					let txn = ctx.txn();
-					super::schema_host::check_computed_callees(&txn, ns, db, &definition)
-						.await
-						.map_err(ControlFlow::Err)?;
-				}
 				FieldCheck::IdUnread {
 					ns,
 					db,
@@ -1976,6 +2029,17 @@ async fn step_inner(
 			let previous = table(previous)?;
 			let mut altered = table(updated)?;
 			let txn = ctx.txn();
+			if !ctx.options().is_some_and(|options| options.import) {
+				let check = crate::exec::clause_effects::ClauseCheck {
+					txn: &txn,
+					ns: previous.namespace_id,
+					db: previous.database_id,
+					registry: ctx.function_registry(),
+				};
+				super::descriptor::schema(check.refuse_table(Some(&previous), &altered))
+					.await
+					.map_err(ControlFlow::Err)?;
+			}
 			super::schema_host::check_table_altered(&txn, &previous, &mut altered)
 				.await
 				.map_err(ControlFlow::Err)?;

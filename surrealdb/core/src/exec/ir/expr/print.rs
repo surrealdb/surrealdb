@@ -814,6 +814,16 @@ fn print_refusal(out: &mut String, refusal: &Refusal) {
 			print_string(map.key("expected"), expected);
 			map.close();
 		}
+		Refusal::SchemaClauseEffect {
+			clause,
+			construct,
+		} => {
+			out.push_str("SchemaClauseEffect ");
+			let mut map = Map::open(out);
+			print_string(map.key("clause"), clause);
+			print_string(map.key("construct"), construct);
+			map.close();
+		}
 		Refusal::RecursionInstructionPlanConflict => {
 			out.push_str("RecursionInstructionPlanConflict");
 		}
@@ -1924,6 +1934,16 @@ fn read_refusal(node: Node) -> Result<Refusal, ParseError> {
 				expected,
 			})
 		}
+		("SchemaClauseEffect", Some(arg)) => {
+			let mut map = arg.map()?;
+			let clause = map.take("clause")?.string()?;
+			let construct = map.take("construct")?.string()?;
+			map.done()?;
+			Ok(Refusal::SchemaClauseEffect {
+				clause,
+				construct,
+			})
+		}
 		("RecursionInstructionPlanConflict", None) => Ok(Refusal::RecursionInstructionPlanConflict),
 		("UnsupportedRepeatRecurse", None) => Ok(Refusal::UnsupportedRepeatRecurse),
 		("ComputationDepthExceeded", None) => Ok(Refusal::ComputationDepthExceeded),
@@ -2702,6 +2722,10 @@ mod tests {
 			},
 			Refusal::InvalidFetch {
 				value: "v".to_owned(),
+			},
+			Refusal::SchemaClauseEffect {
+				clause: "VALUE".to_owned(),
+				construct: "`CREATE` writes data".to_owned(),
 			},
 			Refusal::AccessContextNotReadOnly,
 			Refusal::AccessContextRequiresRecord,

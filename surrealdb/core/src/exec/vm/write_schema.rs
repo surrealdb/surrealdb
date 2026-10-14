@@ -21,6 +21,7 @@ use surrealdb_types::ToSql;
 use super::data::statement_input;
 use super::{State, WriteState, internal, run_image, spec_of};
 use crate::catalog::{DefineDefault, FieldDefinition};
+use crate::dbs::NoWriteFrame;
 use crate::doc::Error as DocError;
 use crate::exec::operators::write::ctx::WriteCtx;
 use crate::exec::operators::write::stages::schema::{
@@ -345,7 +346,8 @@ fn record(write: &mut WriteState) -> Result<&mut SchemaRecord, ControlFlow> {
 
 /// Run clause pipeline `pipeline` for the open field's place: over the
 /// post-image as it stands, in the field's frame with the place's parameters
-/// bound to `value`, or to the place's own value.
+/// bound to `value`, or to the place's own value, refusing what the clause
+/// `refusing` names must not do.
 ///
 /// A field clause is a barrier to loops. A `BREAK` or `CONTINUE` in it names
 /// a loop outside the clause, so it fails with
@@ -356,6 +358,7 @@ async fn place_clause(
 	pipeline: u16,
 	state: &mut State,
 	value: Option<Value>,
+	refusing: NoWriteFrame,
 ) -> FlowResult<Value> {
 	let write = write_state(state)?;
 	let (row, ctx) = write.in_flight()?;
@@ -364,7 +367,7 @@ async fn place_clause(
 	let cursor = record(write)?.cursor()?;
 	let place = cursor.place.as_ref().ok_or_else(|| internal("a clause with no place"))?;
 	let value = value.unwrap_or_else(|| place.val.clone());
-	let bound = clause_frame(&cursor.frame, place, &value);
+	let bound = clause_frame(&cursor.frame, place, &value).refusing_writes(refusing);
 	match run_image(program, pipeline, doc, Some(bound), state, &exec).await {
 		Err(ControlFlow::Return(value)) => Ok(value),
 		Err(ControlFlow::Break | ControlFlow::Continue) => {
@@ -385,7 +388,8 @@ async fn judged(
 	value: Value,
 ) -> FlowResult<bool> {
 	let outer = std::mem::replace(&mut state.unchecked_reads, true);
-	let answer = place_clause(program, pipeline, state, Some(value)).await;
+	let answer =
+		place_clause(program, pipeline, state, Some(value), NoWriteFrame::WritePermission).await;
 	state.unchecked_reads = outer;
 	Ok(answer?.is_truthy())
 }
@@ -552,13 +556,19 @@ pub(super) async fn step(
 		} => {
 			let schema = record(write_state(state)?)?;
 			let creating = schema.creating;
-			let always = matches!(schema.definition()?.default, DefineDefault::Always(_));
+			// A field that declares no `DEFAULT` is defaulted by its static
+			// `VALUE`, and an effect that body reaches is the `VALUE` clause's.
+			let (always, clause) = match schema.definition()?.default {
+				DefineDefault::None => (false, NoWriteFrame::FieldValue),
+				DefineDefault::Set(_) => (false, NoWriteFrame::FieldDefault),
+				DefineDefault::Always(_) => (true, NoWriteFrame::FieldDefault),
+			};
 			// A place holding a value keeps it, and a plain `DEFAULT` spares a
 			// record that already exists.
 			if !schema.place()?.val.is_none() || (!creating && !always) {
 				return Ok(next);
 			}
-			let value = place_clause(program, *pipeline, state, None).await?;
+			let value = place_clause(program, *pipeline, state, None, clause).await?;
 			record(write_state(state)?)?.place()?.val = value;
 			Ok(next)
 		}
@@ -595,7 +605,8 @@ pub(super) async fn step(
 		SchemaInstr::Value {
 			pipeline,
 		} => {
-			let value = place_clause(program, *pipeline, state, None).await?;
+			let value =
+				place_clause(program, *pipeline, state, None, NoWriteFrame::FieldValue).await?;
 			record(write_state(state)?)?.place()?.val = value;
 			Ok(next)
 		}
@@ -675,7 +686,8 @@ pub(super) async fn step(
 					val: Value::None,
 				};
 				let frame = field_default_frame(&exec, fd).map_err(ControlFlow::Err)?;
-				let bound = clause_frame(&frame, &place, &val);
+				let bound =
+					clause_frame(&frame, &place, &val).refusing_writes(NoWriteFrame::FieldAssert);
 				let answer = run_image(program, pipeline, doc, Some(bound), state, &exec).await?;
 				if !answer.is_truthy() {
 					return Err(fail(DocError::FieldValue {

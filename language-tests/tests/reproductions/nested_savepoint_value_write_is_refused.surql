@@ -7,13 +7,29 @@ database = true
 reason = """
 A write in a field's VALUE clause is refused when the field is defined, so the
 clause cannot nest a savepoint inside the per-document savepoint of an INSERT.
-The request is refused at plan time, at the DEFINE FIELD (statement 5), before
-any statement of it runs: none of the statements around it executes, and no
-state is written.
+The DEFINE FIELD (statement 5) follows other statements of the request, so it
+is planned when it is reached and fails on its own with the clause-effect
+error; the statements around it run. The field is not defined, so the INSERT
+IGNORE sees no VALUE clause and ignores the duplicate key.
 """
 
-[test.results]
-request-error = "Invalid statement: a write is not allowed in a VALUE clause (statement 5)"
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: thing:0, k: 1 }]"
+
+[[test.results]]
+error = "The VALUE clause must not have effects: `UPSERT` writes data"
+
+[[test.results]]
+value = "[]"
 */
 
 DEFINE TABLE audit SCHEMALESS;

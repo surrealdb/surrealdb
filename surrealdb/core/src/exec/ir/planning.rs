@@ -168,9 +168,7 @@ pub(crate) async fn plan_request(
 	};
 	let (ir, rejection, notes) = bind_loaded(&bound, planner, registry, &memo, &frames).await?;
 	if let Some(rejection) = rejection {
-		return Err(IrError::Rejected(Box::new(Refusal::InvalidStatement {
-			message: rejection.message(),
-		})));
+		return Err(IrError::Rejected(Box::new(rejection.refusal())));
 	}
 	plan_bound(ir, &bound, notes, planning, memo, &folder).await
 }

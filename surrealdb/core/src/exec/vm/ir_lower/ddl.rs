@@ -53,8 +53,8 @@ use std::collections::{HashMap, VecDeque};
 use super::super::codec::TypeId;
 use super::super::codec::key::RouteId;
 use super::super::program::{
-	ClauseConversion, CompareOp, IdSequence, ImplicitTable, Instr, Label, NameClause, Operand, Reg,
-	Service, StatementError, StoreInstr, StoreRefusal,
+	ClauseConversion, ClauseObject, CompareOp, IdSequence, ImplicitTable, Instr, Label, NameClause,
+	Operand, Reg, Service, StatementError, StoreInstr, StoreRefusal,
 };
 use super::emit::Emitter;
 use super::expr::{Lowerer, Needs};
@@ -2124,6 +2124,13 @@ impl Ddl<'_, '_> {
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment)?;
 		self.set_field(definition, "value", Operand::Reg(value))?;
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition,
+			previous: None,
+			object: ClauseObject::Param,
+		});
 		self.store(StoreInstr::Put {
 			route: RouteId::named("ParamKey"),
 			key,
@@ -2162,6 +2169,13 @@ impl Ddl<'_, '_> {
 		let definition = self.load(template)?;
 		self.set_comment(definition, &comment)?;
 		self.session_auth_limit(definition)?;
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition,
+			previous: None,
+			object: ClauseObject::Function,
+		});
 		self.store(StoreInstr::Put {
 			route: RouteId::named("FunctionKey"),
 			key,

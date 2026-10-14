@@ -575,7 +575,9 @@ pub(super) async fn step(
 			else {
 				return Err(internal("an id DEFAULT the statement was not planned with"));
 			};
-			let frame = field_default_frame(&exec, field).map_err(ControlFlow::Err)?;
+			let frame = field_default_frame(&exec, field)
+				.map_err(ControlFlow::Err)?
+				.refusing_writes(crate::dbs::NoWriteFrame::FieldDefault);
 			let doc = data::id_default_doc(row).clone();
 			let value =
 				field_clause(run_image(program, *pipeline, doc, Some(frame), state, &exec).await)?;

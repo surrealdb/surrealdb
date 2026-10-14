@@ -1009,23 +1009,27 @@ pub(crate) fn guard_shape(permission: &Permission, checked: bool) -> GuardShape 
 /// A field is anything other than [`Derivation::AsMain`] only when no other
 /// reader can observe its value and its body reads nothing masked, so that
 /// withholding or deferring the derivation leaves every visible answer equal
-/// to the one derive-then-mask gives. A [`Derivation::Hidden`] field is never
-/// derived, so it reads nothing: only the bodies and guards of the fields
-/// that are not hidden count as readers. The answer is the largest set of
-/// hidden fields closed under that rule, reached by demoting to `AsMain`
-/// until nothing changes:
+/// to the one derive-then-mask gives. The one exception is a denied field read
+/// only by a body whose reads are not known, which reads it as `NONE`. A
+/// [`Derivation::Hidden`] field is never derived, so it reads nothing: only the
+/// bodies and guards of the fields that are not hidden count as readers, and a
+/// field's own body is never its reader. The answer is the largest set of hidden
+/// fields closed under that rule, reached by demoting to `AsMain` until nothing
+/// changes:
 ///
 /// 1. a [`GuardShape::Full`] guard hides nothing: `AsMain`;
-/// 2. a field that another live computed body reads by name, that any non-computed guard reads, or
-///    that another live computed guard reads is `AsMain`, as is every field of a table where a live
-///    body's reads, a live computed guard's reads or the non-computed guards' reads are not known;
+/// 2. a field that another live computed body names, that any non-computed guard reads, or that
+///    another live computed guard reads is `AsMain`, as is every field of a table where a live
+///    computed guard's reads or the non-computed guards' reads are not known;
 /// 3. a [`GuardShape::Deny`] guard: [`Derivation::Hidden`], whatever its own body reads, since that
 ///    body never runs;
-/// 4. a body reading a computed field whose guard is not `Full` would read a masked value:
+/// 4. a judged field is `AsMain` when another live body's reads are not known, since that body may
+///    read it and must see the value the field holds when its guard admits;
+/// 5. a body reading a computed field whose guard is not `Full` would read a masked value:
 ///    `AsMain`;
-/// 5. a [`GuardShape::Where`] guard reading no computed field: [`Derivation::JudgeFirst`], since
+/// 6. a [`GuardShape::Where`] guard reading no computed field: [`Derivation::JudgeFirst`], since
 ///    the stored record decides it;
-/// 6. anything else (an opaque guard, or a guard reading a computed field): `AsMain`.
+/// 7. anything else (an opaque guard, or a guard reading a computed field): `AsMain`.
 ///
 /// Reads only the definitions: no data, no context.
 pub(crate) fn plan_derivations(
@@ -1055,11 +1059,7 @@ pub(crate) fn plan_derivations(
 	// `fields.len() + 1` passes.
 	loop {
 		let live = |j: usize| plan[j] != Derivation::Hidden;
-		let unknown_reads = other_guard_reads.is_none()
-			|| fields
-				.iter()
-				.enumerate()
-				.any(|(j, f)| live(j) && (f.body_reads.is_none() || f.guard == GuardShape::Opaque));
+		let guards_unknown = other_guard_reads.is_none();
 		let next: Vec<Derivation> = fields
 			.iter()
 			.enumerate()
@@ -1067,17 +1067,32 @@ pub(crate) fn plan_derivations(
 				if plan[i] == Derivation::AsMain {
 					return Derivation::AsMain;
 				}
-				// Another reader needs the real value, or its reads cannot be shown
-				// not to need it.
-				if unknown_reads || other_guard_reads.is_some_and(|reads| reads.contains(c.name)) {
+				// A guard needs the real value, or its reads cannot be shown not to need it.
+				let other_live = |j: usize| j != i && live(j);
+				let guard_unknown = fields
+					.iter()
+					.enumerate()
+					.any(|(j, f)| other_live(j) && f.guard == GuardShape::Opaque);
+				if guards_unknown
+					|| guard_unknown
+					|| other_guard_reads.is_some_and(|reads| reads.contains(c.name))
+				{
+					return Derivation::AsMain;
+				}
+				// A body whose reads are not known may read a judged field, which then has
+				// to hold its value; a denied field is read as `NONE` by such a body.
+				if plan[i] == Derivation::JudgeFirst
+					&& fields
+						.iter()
+						.enumerate()
+						.any(|(j, f)| other_live(j) && f.body_reads.is_none())
+				{
 					return Derivation::AsMain;
 				}
 				let read_by_another = fields.iter().enumerate().any(|(j, other)| {
-					j != i
-						&& live(j) && (other
-						.body_reads
-						.is_some_and(|reads| reads.iter().any(|r| r == c.name))
-						|| matches!(&other.guard, GuardShape::Where { reads } if reads.contains(c.name)))
+					other_live(j)
+						&& (other.body_reads.is_some_and(|reads| reads.iter().any(|r| r == c.name))
+							|| matches!(&other.guard, GuardShape::Where { reads } if reads.contains(c.name)))
 				});
 				if read_by_another {
 					return Derivation::AsMain;
@@ -1657,7 +1672,7 @@ mod tests {
 			.expect_err("a write from a guard is refused");
 		assert!(
 			err.to_string()
-				.contains("A PERMISSIONS clause cannot contain a statement that modifies data"),
+				.contains("The PERMISSIONS clause must not have effects: `CREATE` writes data"),
 			"expected the permission-clause write refusal, got {err:?}"
 		);
 	}
@@ -2025,15 +2040,35 @@ mod tests {
 		assert_eq!(plan_derivations(&fields, Some(&names(&[]))), [Derivation::Hidden]);
 	}
 
-	/// A judged field whose body reads are unknown may read any field.
+	/// A body whose reads are unknown is no reader of its own field, and a denied
+	/// field it may read is never derived: the body reads it as `NONE`.
 	#[test]
-	fn a_judged_field_with_an_opaque_body_makes_every_field_derived_as_main() {
+	fn a_judged_field_with_an_opaque_body_is_judged_first_beside_denied_fields() {
 		let none: Vec<String> = Vec::new();
-		let fields =
-			[shape("c", GuardShape::Deny, Some(&none)), shape("d", where_reading(&["flag"]), None)];
+		let fields = [
+			shape("shown", GuardShape::Full, Some(&none)),
+			shape("hidden", GuardShape::Deny, Some(&none)),
+			shape("admin_only", where_reading(&[]), None),
+			shape("bad", GuardShape::Deny, None),
+		];
 		assert_eq!(
 			plan_derivations(&fields, Some(&names(&[]))),
-			[Derivation::AsMain, Derivation::AsMain]
+			[Derivation::AsMain, Derivation::Hidden, Derivation::JudgeFirst, Derivation::Hidden]
+		);
+	}
+
+	/// A body whose reads are unknown may read another judged field, which then
+	/// holds its value; the opaque body's own field is not read by itself.
+	#[test]
+	fn a_judged_field_is_derived_as_main_beside_another_opaque_body() {
+		let none: Vec<String> = Vec::new();
+		let fields = [
+			shape("c", where_reading(&["flag"]), Some(&none)),
+			shape("d", where_reading(&["flag"]), None),
+		];
+		assert_eq!(
+			plan_derivations(&fields, Some(&names(&[]))),
+			[Derivation::AsMain, Derivation::JudgeFirst]
 		);
 	}
 
@@ -2190,14 +2225,16 @@ mod tests {
 		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
 	}
 
+	/// A denied field is never derived for a body whose reads are unknown; the
+	/// body reads it as `NONE`.
 	#[test]
-	fn a_visible_computed_body_with_unknown_reads_makes_every_field_derived_as_main() {
+	fn a_visible_computed_body_with_unknown_reads_leaves_a_denied_field_hidden() {
 		let fields = [
 			computed_field("hidden", "1 + 1", Permission::None),
 			computed_field("wide", "(SELECT * FROM other)", Permission::Full),
 		];
 		let plan = plan_table_derivations(&fields, true);
-		assert_eq!(derivation_of(&plan, "hidden"), Derivation::AsMain);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::Hidden);
 	}
 
 	/// A table with a shown field, a hidden one, one judged by `$auth`, and a
@@ -2219,16 +2256,19 @@ mod tests {
 	}
 
 	/// The same table with the function call on a field that is shown: that
-	/// body may read anything, so nothing is withheld.
+	/// body may read a judged field, which is then derived first, and reads a
+	/// denied one as `NONE`.
 	#[test]
-	fn a_shown_field_calling_a_function_makes_every_field_derived_as_main() {
+	fn a_shown_field_calling_a_function_derives_a_judged_field_and_hides_a_denied_one() {
 		let fields = [
 			computed_field("shown", "fn::r()", Permission::Full),
 			computed_field("hidden", "1", Permission::None),
 			computed_field("admin_only", "2", specific("$auth.admin = true")),
 		];
 		let plan = plan_table_derivations(&fields, true);
-		assert!(plan.iter().all(|(_, d)| *d == Derivation::AsMain));
+		assert_eq!(derivation_of(&plan, "shown"), Derivation::AsMain);
+		assert_eq!(derivation_of(&plan, "hidden"), Derivation::Hidden);
+		assert_eq!(derivation_of(&plan, "admin_only"), Derivation::AsMain);
 	}
 
 	/// Masking `a` removes everything beneath it, so `a.b` is never derived.
@@ -2298,13 +2338,13 @@ mod tests {
 	}
 
 	#[test]
-	fn a_computed_body_reading_a_computed_field_through_a_doc_part_is_derived_as_main() {
+	fn a_computed_body_reading_a_denied_field_through_a_doc_part_reads_it_as_none() {
 		let fields = [
 			computed_field("c", "1", Permission::None),
 			computed_field("d", "@.c + 1", Permission::Full),
 		];
 		let plan = plan_table_derivations(&fields, true);
-		assert_eq!(derivation_of(&plan, "c"), Derivation::AsMain);
+		assert_eq!(derivation_of(&plan, "c"), Derivation::Hidden);
 		assert_eq!(derivation_of(&plan, "d"), Derivation::AsMain);
 	}
 

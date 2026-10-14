@@ -202,7 +202,7 @@ pub(super) async fn compile(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Co
 	compile_planned(planner, &session, &indexes, planned, served, None).await
 }
 
-/// The message of the region-constraint rejection of `op`, bound by `planner`, as the statement at
+/// The refusal of the region-constraint rejection of `op`, bound by `planner`, as the statement at
 /// `position` of its request; `None` when every region admits what it holds.
 ///
 /// The whole statement is bound, the code that follows a schema statement of its lists included,
@@ -211,7 +211,7 @@ pub(super) async fn rejection(
 	planner: &Planner<'_>,
 	op: &LogicalOp,
 	position: usize,
-) -> Lowered<Option<String>> {
+) -> Lowered<Option<super::payload::Refusal>> {
 	let session = session_of(planner);
 	let statements = [RequestStatement::Logical(op)];
 	let input = RequestInput {
@@ -232,7 +232,7 @@ pub(super) async fn rejection(
 		held: Vec::new(),
 		session: &session,
 	};
-	Ok(request_rejection(&input, &planning).await?.map(|rejection| rejection.message()))
+	Ok(request_rejection(&input, &planning).await?.map(|rejection| rejection.refusal()))
 }
 
 /// The bundle of the stages `write`, a bound write that names no one table, applies to the

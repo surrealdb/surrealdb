@@ -1199,8 +1199,13 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 				name: "sample".to_string(),
 			},
 		),
-		("PermissionPredicateSideEffect", ExecError::PermissionPredicateSideEffect),
-		("ComputedFieldSideEffect", ExecError::ComputedFieldSideEffect),
+		(
+			"SchemaClauseEffect",
+			ExecError::SchemaClauseEffect {
+				clause: "sample".to_string(),
+				construct: "sample".to_string(),
+			},
+		),
 		("SurrealismReadOnlySideEffect", ExecError::SurrealismReadOnlySideEffect),
 		(
 			"SetCoerce",
@@ -1303,7 +1308,6 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			ExecError::ComputedParentFieldConflict("sample".to_string(), "sample".to_string()),
 		),
 		("ComputedNestedField", ExecError::ComputedNestedField("sample".to_string())),
-		("ComputedWrite", ExecError::ComputedWrite("sample".to_string())),
 		("ComputedFieldCycle", ExecError::ComputedFieldCycle("sample".to_string())),
 		("IdFieldKeywordConflict", ExecError::IdFieldKeywordConflict("sample".to_string())),
 		("IdFieldUnsupportedKind", ExecError::IdFieldUnsupportedKind("sample".to_string())),
@@ -1662,7 +1666,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 168;
+const UNTYPED_INTERNAL_BUDGET: usize = 167;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

@@ -258,8 +258,7 @@ KillStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot ex
 SingleOnlyOutput	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Expected a single result output when using the ONLY keyword' }
 ParamPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to view the $sample parameter" }
 FunctionPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to run the sample function" }
-PermissionPredicateSideEffect	{ cause: NONE, code: -32000, kind: 'Internal', message: 'A PERMISSIONS clause cannot contain a statement that modifies data' }
-ComputedFieldSideEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A COMPUTED clause cannot contain a statement that modifies data' }
+SchemaClauseEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'The sample clause must not have effects: sample' }
 SurrealismReadOnlySideEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A read-only Surrealism function cannot modify data; the function must declare that it requires a writeable transaction' }
 SetCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Tried to set `$sample`, but couldn't coerce value: Expected `sample` but found `NONE`" }
 ReturnCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce return value from function `sample`: Expected `sample` but found `NONE`" }
@@ -288,7 +287,6 @@ ComputedKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 
 ComputedNestedFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` since a nested field `sample` already exists.' }
 ComputedParentFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define nested field `sample` as parent field `sample` is a `COMPUTED` field.' }
 ComputedNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` fields must be top-level.' }
-ComputedWrite	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample` as `COMPUTED` bodies must be read-only.' }
 ComputedFieldCycle	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cyclic dependency detected among field clauses: sample' }
 IdFieldKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword on the `id` field.' }
 IdFieldUnsupportedKind	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot use the `sample` type on the `id` field, as that's not a valid record id key." }

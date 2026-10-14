@@ -45,7 +45,7 @@ use crate::exec::ir::iface::ids::{OpId, RegionId};
 use crate::exec::ir::iface::region_kind::{
 	Admission, ClauseRole, Construct, ErrorScope, FieldRole, RegionKind, Section4bRow, StoredRole,
 };
-use crate::exec::ir::iface::statements::DefineObject;
+use crate::exec::ir::iface::statements::{DefineObject, WriteForm};
 use crate::exec::ir::logical::ops::LogOp;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::vm::payload::Refusal;
@@ -418,11 +418,29 @@ pub(crate) struct RegionRejection {
 	pub(crate) op: OpId,
 	/// Where the op was written.
 	pub(crate) loc: Location,
+	/// The op as a schema-clause refusal names it ([`construct_named`]), for a rejection in a
+	/// schema clause that must not have effects.
+	pub(crate) named: Option<String>,
 }
 
 impl RegionRejection {
-	/// The message of the error: the construct, the region and the statement's 1-based position in
-	/// its request or fragment.
+	/// The refusal the request is answered with: for a schema clause that must not have effects
+	/// ([`schema_clause`]), [`Refusal::SchemaClauseEffect`] naming the clause and the construct;
+	/// for any other region, an invalid statement with [`Self::message`].
+	pub(crate) fn refusal(&self) -> Refusal {
+		match (schema_clause(self.row, self.region), &self.named) {
+			(Some(clause), Some(construct)) => Refusal::SchemaClauseEffect {
+				clause: clause.to_owned(),
+				construct: construct.clone(),
+			},
+			_ => Refusal::InvalidStatement {
+				message: self.message(),
+			},
+		}
+	}
+
+	/// The message of an invalid-statement rejection: the construct, the region and the
+	/// statement's 1-based position in its request or fragment.
 	pub(crate) fn message(&self) -> String {
 		format!(
 			"{} {REJECTION_INFIX} {} (statement {})",
@@ -432,31 +450,156 @@ impl RegionRejection {
 		)
 	}
 
-	/// The error the request is answered with: an invalid statement.
+	/// The error the request is answered with ([`Self::refusal`]).
 	pub(crate) fn error(&self) -> crate::err::Error {
-		Refusal::InvalidStatement {
-			message: self.message(),
+		self.refusal().error()
+	}
+}
+
+/// The schema clause a rejection by `row` in a region of `kind` is in, as
+/// [`crate::exec::Error::SchemaClauseEffect`] names it, when the row is one of the rows of the
+/// clauses that must not have effects ([`crate::exec::clause_effects`]).
+fn schema_clause(row: Section4bRow, kind: RegionKind) -> Option<&'static str> {
+	match row {
+		Section4bRow::PermissionOrAssertFrame | Section4bRow::FieldValueFrame => {}
+		Section4bRow::ConditionClause
+		| Section4bRow::IndexColumn
+		| Section4bRow::ExpressionRegion => {
+			return None;
 		}
-		.error()
+	}
+	match kind {
+		RegionKind::PermissionFrame | RegionKind::StoredClause(StoredRole::Permissions) => {
+			Some("PERMISSIONS")
+		}
+		RegionKind::FieldFrame(FieldRole::Assert)
+		| RegionKind::StoredClause(StoredRole::Assert) => Some("ASSERT"),
+		RegionKind::FieldFrame(FieldRole::Value) | RegionKind::StoredClause(StoredRole::Value) => {
+			Some("VALUE")
+		}
+		RegionKind::FieldFrame(FieldRole::Default)
+		| RegionKind::StoredClause(StoredRole::Default) => Some("DEFAULT"),
+		RegionKind::FieldFrame(FieldRole::Computed)
+		| RegionKind::StoredClause(StoredRole::Computed) => Some("COMPUTED"),
+		RegionKind::StoredClause(
+			StoredRole::When
+			| StoredRole::Then
+			| StoredRole::Body
+			| StoredRole::View
+			| StoredRole::IndexColumn
+			| StoredRole::Authenticate
+			| StoredRole::Context
+			| StoredRole::Signup
+			| StoredRole::Signin
+			| StoredRole::Action
+			| StoredRole::Fallback
+			| StoredRole::LiveFields
+			| StoredRole::LiveCond
+			| StoredRole::LiveFetch,
+		)
+		| RegionKind::Request
+		| RegionKind::Transaction(_)
+		| RegionKind::Statement(_)
+		| RegionKind::Block
+		| RegionKind::ValueBlock
+		| RegionKind::StatementIf
+		| RegionKind::ValueIf
+		| RegionKind::StatementFor
+		| RegionKind::ValueFor
+		| RegionKind::Loop
+		| RegionKind::Subquery
+		| RegionKind::FunctionBody
+		| RegionKind::ClosureBody
+		| RegionKind::EventFrame
+		| RegionKind::SubscriberFrame
+		| RegionKind::Clause(_)
+		| RegionKind::LazyOperand
+		| RegionKind::ErrorScope(_)
+		| RegionKind::ChooseArm
+		| RegionKind::Pipeline
+		| RegionKind::WriteStage
+		| RegionKind::CatalogUnit
+		| RegionKind::Deadline => None,
+	}
+}
+
+/// The construct `kind`, rejected as `construct`, in the words a schema-clause refusal names it
+/// with ([`crate::exec::clause_effects`]).
+fn construct_named(kind: &OpKind, construct: Construct) -> String {
+	use crate::exec::clause_effects::{SLEEP_TEXT, write_text};
+	match kind {
+		OpKind::Logical(LogOp::Write(attrs)) => write_text(match attrs.form {
+			WriteForm::Create => "CREATE",
+			WriteForm::Update => "UPDATE",
+			WriteForm::Upsert => "UPSERT",
+			WriteForm::Delete => "DELETE",
+			WriteForm::Insert => "INSERT",
+			WriteForm::Relate => "RELATE",
+		}),
+		OpKind::Logical(LogOp::Define(_)) => "`DEFINE` changes the schema".to_owned(),
+		OpKind::Logical(LogOp::Remove(_)) => "`REMOVE` changes the schema".to_owned(),
+		OpKind::Logical(LogOp::Alter(_)) => "`ALTER` changes the schema".to_owned(),
+		OpKind::Logical(LogOp::Rebuild(_)) => "`REBUILD` changes the schema".to_owned(),
+		OpKind::Logical(LogOp::Sleep) => SLEEP_TEXT.to_owned(),
+		OpKind::Expr(ExprOp::Call(attrs)) => match &attrs.function {
+			crate::expr::Function::Normal(name) => format!("a call to `{name}` writes data"),
+			crate::expr::Function::Custom(name) => format!("a call to `fn::{name}` writes data"),
+			crate::expr::Function::Script(_)
+			| crate::expr::Function::Model(_)
+			| crate::expr::Function::Module(..)
+			| crate::expr::Function::Silo {
+				..
+			} => "a call writes data".to_owned(),
+		},
+		OpKind::Expr(_) | OpKind::Logical(_) | OpKind::Phys(_) => match construct {
+			Construct::Write => "a write writes data".to_owned(),
+			Construct::Ddl => crate::exec::clause_effects::SCHEMA_STATEMENT_TEXT.to_owned(),
+			Construct::Sleep => SLEEP_TEXT.to_owned(),
+			other @ (Construct::Let
+			| Construct::ExternalCall
+			| Construct::NonDeterministic
+			| Construct::OtherRecordRead
+			| Construct::UnenclosedBreak
+			| Construct::EscapingReturn
+			| Construct::TxnControl
+			| Construct::Use) => construct_text(other).to_owned(),
+		},
 	}
 }
 
 /// The words between the construct and the region in a rejection's message.
 const REJECTION_INFIX: &str = "is not allowed in";
 
-/// The message of `error` when it is the error of a [`RegionRejection`], which refuses the request
-/// as a whole and not the statement that holds the construct.
+/// The refusal `error` raises when it is the error of a [`RegionRejection`], which refuses the
+/// request as a whole and not the statement that holds the construct.
 ///
-/// A rejection is an invalid-statement error whose message has the shape
+/// A rejection is a schema-clause error ([`crate::exec::Error::SchemaClauseEffect`]), which the
+/// planner raises for no other reason, or an invalid-statement error whose message has the shape
 /// [`RegionRejection::message`] writes: the construct, [`REJECTION_INFIX`], the region and the
 /// statement's position as `(statement N)`. No other error of the planner has that shape.
-pub(crate) fn rejection_message(error: &crate::err::Error) -> Option<&str> {
-	let crate::err::Error::Exec(crate::exec::Error::InvalidStatement(message)) = error else {
-		return None;
-	};
-	let (head, position) = message.rsplit_once(" (statement ")?;
-	position.strip_suffix(')')?.parse::<u32>().ok()?;
-	head.contains(REJECTION_INFIX).then_some(message.as_str())
+pub(crate) fn request_rejection(error: &crate::err::Error) -> Option<Refusal> {
+	match error {
+		crate::err::Error::Exec(crate::exec::Error::SchemaClauseEffect {
+			..
+		}) => Refusal::of(error),
+		crate::err::Error::Exec(crate::exec::Error::InvalidStatement(message)) => {
+			let (head, position) = message.rsplit_once(" (statement ")?;
+			position.strip_suffix(')')?.parse::<u32>().ok()?;
+			head.contains(REJECTION_INFIX).then(|| Refusal::InvalidStatement {
+				message: message.clone(),
+			})
+		}
+		crate::err::Error::Engine(_)
+		| crate::err::Error::Exec(_)
+		| crate::err::Error::Catalog(_)
+		| crate::err::Error::Idx(_)
+		| crate::err::Error::Kvs(_)
+		| crate::err::Error::IamError(_)
+		| crate::err::Error::ApiError(_)
+		| crate::err::Error::InvalidPath(_)
+		| crate::err::Error::InvalidUrl(_)
+		| crate::err::Error::Http(_) => None,
+	}
 }
 
 /// How the message names a construct.
@@ -644,12 +787,15 @@ impl Walk<'_, '_> {
 					row,
 				} = admits(active.kind, construct)
 				{
+					let named = schema_clause(row, active.kind)
+						.map(|_| construct_named(&data.kind, construct));
 					return Ok(Some(RegionRejection {
 						construct,
 						row,
 						region: active.kind,
 						op,
 						loc: data.loc.clone(),
+						named,
 					}));
 				}
 			}
@@ -845,18 +991,34 @@ mod tests {
 				span: None,
 				origin: LocOrigin::Query,
 			},
+			named: None,
 		};
 		assert_eq!(
-			rejection_message(&rejection.error()),
-			Some("a write is not allowed in a WHERE clause (statement 2)")
+			request_rejection(&rejection.error()),
+			Some(Refusal::InvalidStatement {
+				message: "a write is not allowed in a WHERE clause (statement 2)".to_owned()
+			})
+		);
+		let clause = RegionRejection {
+			row: Section4bRow::FieldValueFrame,
+			region: RegionKind::StoredClause(StoredRole::Value),
+			named: Some("`CREATE` writes data".to_owned()),
+			..rejection
+		};
+		assert_eq!(
+			request_rejection(&clause.error()),
+			Some(Refusal::SchemaClauseEffect {
+				clause: "VALUE".to_owned(),
+				construct: "`CREATE` writes data".to_owned(),
+			})
 		);
 		let other = crate::err::Error::Exec(crate::exec::Error::InvalidStatement(
 			"Import requires `OPTION IMPORT;` as the first statement".to_owned(),
 		));
-		assert_eq!(rejection_message(&other), None);
+		assert_eq!(request_rejection(&other), None);
 		let positioned = crate::err::Error::Exec(crate::exec::Error::InvalidStatement(
 			"a statement is not allowed here (statement x)".to_owned(),
 		));
-		assert_eq!(rejection_message(&positioned), None);
+		assert_eq!(request_rejection(&positioned), None);
 	}
 }

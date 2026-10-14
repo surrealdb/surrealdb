@@ -1214,6 +1214,21 @@ impl NameClause {
 	}
 }
 
+/// The definition a [`StoreInstr::RefuseClauseEffects`] judges, by the
+/// stored type its register holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClauseObject {
+	/// A `StoredTableDefinition`: its `PERMISSIONS` clauses.
+	Table,
+	/// A `StoredFieldDefinition`: its `COMPUTED`, `VALUE`, `DEFAULT`, `ASSERT`
+	/// and `PERMISSIONS` clauses.
+	Field,
+	/// A `StoredFunctionDefinition`: its `PERMISSIONS` clause.
+	Function,
+	/// A `StoredParamDefinition`: its `PERMISSIONS` clause.
+	Param,
+}
+
 /// A step over the store or the session: what a schema statement's program
 /// is made of.
 ///
@@ -1452,6 +1467,20 @@ pub(super) enum StoreInstr {
 		ns: Reg,
 		db: Reg,
 		tb: Reg,
+	},
+	/// Raise [`crate::exec::Error::SchemaClauseEffect`] when a schema clause of
+	/// the definition in `definition`, stored as `object` names, has an effect
+	/// a schema clause must not have, judged against the catalog of the
+	/// database `ns`, `db` as it stands when the instruction runs
+	/// ([`crate::exec::clause_effects`]). With `previous`, the definition an
+	/// `ALTER` replaces, only a clause that differs from it is judged. Does
+	/// nothing for an import, which restores definitions as they were stored.
+	RefuseClauseEffects {
+		ns: Reg,
+		db: Reg,
+		definition: Reg,
+		previous: Option<Reg>,
+		object: ClauseObject,
 	},
 	/// `dst` = the names of the tables the view `tb` of the database `ns`,
 	/// `db` reads from, as the catalog holds its definition when the
@@ -2073,7 +2102,10 @@ pub(crate) enum FieldRefusal {
 		field: String,
 		index: String,
 	},
-	ComputedWrite(String),
+	SchemaClauseEffect {
+		clause: String,
+		construct: String,
+	},
 	ComputedNestedField(String),
 	ComputedKeywordConflict(String),
 	ComputedNestedFieldConflict(String, String),
@@ -2213,7 +2245,13 @@ impl FieldRefusal {
 				field: field.clone(),
 				index: index.clone(),
 			},
-			E::ComputedWrite(f) => Self::ComputedWrite(f.clone()),
+			E::SchemaClauseEffect {
+				clause,
+				construct,
+			} => Self::SchemaClauseEffect {
+				clause: clause.clone(),
+				construct: construct.clone(),
+			},
 			E::ComputedNestedField(f) => Self::ComputedNestedField(f.clone()),
 			E::ComputedKeywordConflict(k) => Self::ComputedKeywordConflict(k.clone()),
 			E::ComputedNestedFieldConflict(f, n) => {
@@ -2424,7 +2462,13 @@ impl FieldRefusal {
 				field,
 				index,
 			},
-			Self::ComputedWrite(f) => E::ComputedWrite(f),
+			Self::SchemaClauseEffect {
+				clause,
+				construct,
+			} => E::SchemaClauseEffect {
+				clause,
+				construct,
+			},
 			Self::ComputedNestedField(f) => E::ComputedNestedField(f),
 			Self::ComputedKeywordConflict(k) => E::ComputedKeywordConflict(k),
 			Self::ComputedNestedFieldConflict(f, n) => E::ComputedNestedFieldConflict(f, n),
@@ -2643,16 +2687,6 @@ pub(super) enum FieldCheck {
 		ns: Reg,
 		db: Reg,
 		kind: crate::expr::statements::define::DefineKind,
-	},
-	/// The user-defined functions the `COMPUTED` body of the definition in
-	/// `field` calls are read-only in the catalog of the database `ns`, `db`
-	/// as the check runs, so a callee an earlier statement of the request
-	/// defines is judged by that definition and one not defined yet counts as
-	/// a writer (`ddl::define::field::define_field_statement_validate_computed_callees`).
-	ComputedCallees {
-		field: Reg,
-		ns: Reg,
-		db: Reg,
 	},
 	/// No definition of the table named in `table` reads a component of its
 	/// record id, judged against the catalog of the database `ns`, `db` and
@@ -3777,8 +3811,8 @@ pub(super) enum FrameMode {
 	/// A `COMPUTED` field's body: writes are refused, reads stay checked.
 	Computed,
 	/// A table permission a write judges against one of the record's images,
-	/// as the write gates judge it: a read guard refuses writes, a write
-	/// guard does not, and what its host steps read is not permission-checked
+	/// as the write gates judge it: either guard refuses an effect a schema
+	/// clause must not have, and what its host steps read is not permission-checked
 	/// ([`EvalContext::skip_fetch_perms`](crate::exec::EvalContext)), while the
 	/// statement's own context is left as it is.
 	Gate(crate::expr::logical::GuardKind),
@@ -3814,9 +3848,11 @@ impl PermissionSpec {
 				.clone()
 				.privileged_frame()
 				.refusing_writes(crate::dbs::NoWriteFrame::PermissionPredicate),
-			FrameMode::Gate(crate::expr::logical::GuardKind::Write) | FrameMode::IndexEntry => {
-				ctx.clone().privileged_frame()
-			}
+			FrameMode::Gate(crate::expr::logical::GuardKind::Write) => ctx
+				.clone()
+				.privileged_frame()
+				.refusing_writes(crate::dbs::NoWriteFrame::WritePermission),
+			FrameMode::IndexEntry => ctx.clone().privileged_frame(),
 			FrameMode::Computed => {
 				let frame = ctx.clone().privileged_frame().computing_field();
 				match &self.auth {

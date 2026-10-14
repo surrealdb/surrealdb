@@ -29,7 +29,7 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::cache::deps::BindingOrigin;
 use crate::exec::ir::iface::premise::{OpenRegionShape, RegionContext, TxnContext};
 use crate::exec::ir::iface::region_kind::StatementCommit;
-use crate::exec::ir::logical::constraints::rejection_message;
+use crate::exec::ir::logical::constraints::request_rejection;
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::logical::{
@@ -755,11 +755,11 @@ pub struct Executor {
 	/// statement that set it: a block it was inside is cancelled and nothing
 	/// after it is pulled.
 	carry_crossed: bool,
-	/// The message of the region rejection ([`rejection_message`]) found
+	/// The refusal of the region rejection ([`request_rejection`]) found
 	/// while the request was compiled at its arrival, before any statement of
 	/// it ran. It refuses the request as a whole: no statement runs, and the
 	/// driver answers the request with it.
-	request_rejection: Option<String>,
+	request_rejection: Option<crate::exec::vm::payload::Refusal>,
 	/// The bindings the open explicit block has written, for the undo its end
 	/// may owe them.
 	let_undo: LetUndo,
@@ -4408,9 +4408,9 @@ impl Executor {
 			yield_now!();
 		}
 		self.emit_query_event_for_results(kvs, batch_start, &self.results[batch_results_start..]);
-		if let Some(message) = self.request_rejection.take() {
+		if let Some(refusal) = self.request_rejection.take() {
 			self.results.truncate(batch_results_start);
-			return Err(anyhow::Error::new(Error::Exec(ExecError::InvalidStatement(message))));
+			return Err(anyhow::Error::new(refusal.error()));
 		}
 		Ok(())
 	}
@@ -4544,9 +4544,9 @@ impl Executor {
 		}
 		// A request the language rejects runs no statement: each statement
 		// reached before the driver stops answers with the rejection.
-		if let Some(message) = &self.request_rejection {
+		if let Some(refusal) = &self.request_rejection {
 			return Some(CompiledStatement {
-				plan: Err(Error::Exec(ExecError::InvalidStatement(message.clone()))),
+				plan: Err(refusal.error()),
 				logged: None,
 			});
 		}
@@ -4629,7 +4629,7 @@ impl Executor {
 		let mut explicit = in_block && !self.in_session_txn && self.let_undo.is_open();
 		// The first region-constraint rejection of a request compiled from its
 		// first statement, with the statement's position.
-		let mut judged: Option<(usize, String)> = None;
+		let mut judged: Option<(usize, crate::exec::vm::payload::Refusal)> = None;
 		if explicit {
 			block_names.extend(self.let_undo.log.iter().map(|(name, _)| name.to_string()));
 		}
@@ -4827,7 +4827,7 @@ impl Executor {
 		// rejection in statement order answers. A statement compiled after
 		// others ran fails alone, as any statement that fails to plan does.
 		if first == 0 {
-			self.request_rejection = judged.map(|(_, message)| message);
+			self.request_rejection = judged.map(|(_, refusal)| refusal);
 		}
 		let program = crate::exec::planner::finish_request(builder, steps);
 		match program {
@@ -4842,7 +4842,9 @@ impl Executor {
 	/// of the request, planned as `planned`. A statement compiled now was
 	/// judged by its compile, and is bound again only to number a rejection
 	/// by its position. A statement served or planned when it is reached is
-	/// bound here when it may hold a rejected construct ([`may_be_rejected`]).
+	/// bound here when it may hold a rejected construct ([`may_be_rejected`]);
+	/// a schema clause that has an effect is refused by the statement that
+	/// defines it when it is reached, so it does not refuse the request.
 	async fn judge(
 		&self,
 		txn: &Arc<Transaction>,
@@ -4850,15 +4852,15 @@ impl Executor {
 		planning: &crate::exec::vm::PlanSession,
 		position: usize,
 		planned: &PlannedStatement,
-	) -> Option<(usize, String)> {
+	) -> Option<(usize, crate::exec::vm::payload::Refusal)> {
 		match &planned.entry {
 			Planned::Compiled(Ok(_)) => None,
 			Planned::Compiled(Err(error)) => {
-				let message = rejection_message(error)?.to_owned();
+				let refusal = request_rejection(error)?;
 				Some(
 					self.rejection_of(txn, op, planning, position)
 						.await
-						.unwrap_or((position, message)),
+						.unwrap_or((position, refusal)),
 				)
 			}
 			Planned::Served {
@@ -4867,7 +4869,14 @@ impl Executor {
 			| Planned::Reached {
 				..
 			} => match may_be_rejected(op) {
-				true => self.rejection_of(txn, op, planning, position).await,
+				true => {
+					self.rejection_of(txn, op, planning, position).await.filter(|(_, refusal)| {
+						!matches!(
+							refusal,
+							crate::exec::vm::payload::Refusal::SchemaClauseEffect { .. }
+						)
+					})
+				}
 				false => None,
 			},
 		}
@@ -4882,7 +4891,7 @@ impl Executor {
 		op: &LogicalOp,
 		planning: &crate::exec::vm::PlanSession,
 		position: usize,
-	) -> Option<(usize, String)> {
+	) -> Option<(usize, crate::exec::vm::payload::Refusal)> {
 		let mut ctx = Context::snapshot(&self.ctx);
 		ctx.set_transaction(Arc::clone(txn));
 		ctx.add_value("session", planning.session.clone().into());
@@ -4899,7 +4908,7 @@ impl Executor {
 			position,
 		)
 		.await
-		.map(|message| (position, message))
+		.map(|refusal| (position, refusal))
 	}
 
 	/// Compile `op`, a statement of the request, in `txn` under the session

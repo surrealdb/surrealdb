@@ -59,11 +59,18 @@ pub(crate) async fn define_field_definition_apply(
 	crate::ddl::define_field_statement_validate_computed_options(ns, db, ctx.tx(), definition)
 		.await?;
 
-	// Validate the user-defined functions a computed body calls. An import
-	// restores definitions in export order, so a callee may be defined after
-	// the field that names it.
+	// The field's clauses hold no effect a schema clause must not have. An
+	// import restores definitions as they were stored, in export order, so a
+	// callee may be defined after the field that names it.
 	if !opt.import {
-		define_field_statement_validate_computed_callees(ns, db, &ctx.tx(), definition).await?;
+		crate::exec::clause_effects::ClauseCheck {
+			txn: &ctx.tx(),
+			ns,
+			db,
+			registry: ctx.function_registry(),
+		}
+		.refuse_field(None, definition)
+		.await?;
 	}
 
 	// Validate computed field dependencies for cycles
@@ -447,22 +454,7 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 ) -> Result<()> {
 	// Find all existing field definitions
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
-	if let Some(computed) = definition.computed.as_ref() {
-		// A COMPUTED body is evaluated on every read of the field, under a
-		// frame that refuses writes at runtime. A write written directly into
-		// the body can therefore never succeed; it only turns every later read
-		// of the field into an error. Reject it here so the failure lands on
-		// the definition instead.
-		//
-		// `contains_mutation` walks this body alone — subqueries, idiom parts,
-		// blocks, closure bodies and call arguments. The user-defined functions
-		// the body calls live in the catalog, so they are checked against it
-		// when the definition is applied
-		// ([`define_field_statement_validate_computed_callees`]). A callee
-		// redefined after the field is not checked again: the runtime frame
-		// refuses the write at the point it is reached.
-		ensure!(!computed.contains_mutation(), ExecError::ComputedWrite(definition.name.to_sql()));
-
+	if definition.computed.is_some() {
 		// Ensure the field is not the `id` field
 		ensure!(!definition.name.is_id(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));
 
@@ -514,43 +506,6 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 		}
 	}
 
-	Ok(())
-}
-
-/// Refuse a `COMPUTED` body whose user-defined callees may write, as seen in
-/// `txn`'s catalog at the version the definition is written at.
-///
-/// A callee whose body provably writes, through any chain of calls, is refused,
-/// and so is a callee that is not defined yet, which cannot be shown read-only.
-/// An opaque callable (a script, `eval`, a closure arriving as data) is not
-/// refused: its body cannot be inspected, and the runtime frame refuses a write
-/// it reaches. The check reads the catalog as of the transaction's current
-/// state and is made when the definition is applied, not when a statement
-/// holding it is planned, because a callee defined earlier in the same request
-/// is in no catalog before then.
-pub(crate) async fn define_field_statement_validate_computed_callees(
-	ns: NamespaceId,
-	db: DatabaseId,
-	txn: &Transaction,
-	definition: &catalog::FieldDefinition,
-) -> Result<()> {
-	let Some(body) = definition.computed.as_ref() else {
-		return Ok(());
-	};
-	let resolved = crate::fnc::mutability::resolve_mutability(
-		txn,
-		ns,
-		db,
-		None,
-		&body.function_facts(),
-		&|_| false,
-		None,
-	)
-	.await?;
-	ensure!(
-		resolved.write.is_none() && !resolved.undefined_callee,
-		ExecError::ComputedWrite(definition.name.to_sql())
-	);
 	Ok(())
 }
 

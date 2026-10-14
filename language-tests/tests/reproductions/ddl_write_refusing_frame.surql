@@ -10,11 +10,10 @@ reason = """
 	permission enforcement disabled (GHSA-66r2-5gwj-gxm2), and a COMPUTED body,
 	which runs on every read of the field under the definer's auth.
 
-	Both refusals happen when the statement is reached rather than when it is
-	defined: whether a guard or a body reaches a schema statement can depend on
-	the row, so only running it settles the question. The COMPUTED body's callee
-	is redefined after the field is defined, so the read reaches the runtime
-	frame.
+	Both refusals happen when the statement is reached: each callee is
+	redefined with its schema statement after the clause that calls it is
+	defined, so the definition-time check accepted the clause and the read
+	reaches the runtime frame.
 
 	What this file holds is that a schema statement in either frame is refused
 	with the same message. Each frame is enforced twice — the operator that plans a
@@ -27,12 +26,12 @@ reason = """
 
 # 0: reading evaluates the select guard, whose schema statement is refused.
 [[test.results]]
-error = "A PERMISSIONS clause cannot contain a statement that modifies data"
+error = "The PERMISSIONS clause must not have effects: a schema statement changes the schema"
 
 # 1: reading the computed field evaluates its body, whose schema statement is
 # refused the same way, and names its own frame.
 [[test.results]]
-error = "A COMPUTED clause cannot contain a statement that modifies data"
+error = "The COMPUTED clause must not have effects: a schema statement changes the schema"
 */
 
 -- 0: the select guard's schema statement is refused.

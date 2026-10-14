@@ -367,6 +367,19 @@ async fn alter_field_write(
 		crate::ddl::key_scan::validate_record_keys(&exec, &txn, ns, db, what, key).await?;
 	}
 
+	// A clause the statement changed holds no effect a schema clause must not
+	// have; one it left as it was is judged where it runs.
+	if !opt.import {
+		crate::exec::clause_effects::ClauseCheck {
+			txn: &txn,
+			ns,
+			db,
+			registry: ctx.function_registry(),
+		}
+		.refuse_field(Some(&old_definition), &df)
+		.await?;
+	}
+
 	txn.put_tb_field(ns, db, what, &df).await?;
 	if kind_changed {
 		crate::ddl::define_field_statement_process_recursive_definitions(

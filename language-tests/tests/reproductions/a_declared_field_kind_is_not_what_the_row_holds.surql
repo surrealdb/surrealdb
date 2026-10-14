@@ -19,10 +19,9 @@ reason = """
 	is the same reason the `kind` rule refuses to drop a cast to a stored
 	field's declared kind.
 
-	The sequence is the evidence a claim about kinds cannot reach: `n` is a
-	`COMPUTED` field of the linked record, so the draw after the read counts
-	the fetches the read made. One fetch, through a field the catalog says
-	holds an object.
+	The derived field is the evidence a claim about kinds cannot reach: `n` is
+	a `COMPUTED` field of the linked record, so a read that yields it fetched
+	the record, through a field the catalog says holds an object.
 """
 
 [[test.results]]
@@ -32,9 +31,6 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -49,25 +45,19 @@ value = "[]"
 [[test.results]]
 value = "NONE"
 
-# The stored value is the record id it was written as.
 [[test.results]]
 value = "linked:1"
 
 [[test.results]]
 value = "true"
 
-# The read dereferenced it: `n` is the linked record's first draw.
 [[test.results]]
-value = "[{ x: 0 }]"
+value = "[{ x: true }]"
 
-# And it drew exactly once.
-[[test.results]]
-value = "1"
 */
 
-DEFINE SEQUENCE s BATCH 1000 START 0;
 DEFINE TABLE linked SCHEMALESS;
-DEFINE FIELD n ON linked COMPUTED sequence::nextval('s');
+DEFINE FIELD n ON linked COMPUTED rand::uuid();
 CREATE linked:1 RETURN NONE;
 
 DEFINE TABLE holder SCHEMAFULL;
@@ -80,5 +70,4 @@ RETURN (SELECT VALUE addr FROM holder:1)[0];
 RETURN type::is_record((SELECT VALUE addr FROM holder:1)[0]);
 
 -- A read through a field the catalog declares cannot hold a record.
-SELECT addr.n AS x FROM holder;
-RETURN sequence::nextval('s');
+SELECT type::is_uuid(addr.n) AS x FROM holder;

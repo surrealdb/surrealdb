@@ -16,7 +16,7 @@ derivations above.
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+error = "The COMPUTED clause must not have effects: `sequence::nextval` advances state outside the transaction"
 
 [[test.results]]
 value = "NONE"
@@ -25,10 +25,10 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = "[[0, 0]]"
+value = "[[NONE, NONE]]"
 
 [[test.results]]
-value = "[false]"
+value = "[NONE]"
 
 [[test.results]]
 value = "[false]"
@@ -37,7 +37,7 @@ value = "[false]"
 error = "Cannot perform addition with 'int' and 'string'"
 
 [[test.results]]
-value = "[2]"
+value = "[0]"
 */
 
 DEFINE SEQUENCE s;

@@ -23,7 +23,7 @@ use crate::exec::ir::iface::statements::{AlterField, DdlChecks, DefineField};
 use crate::exec::ir::logical::ddl::{
 	self as statement, field_definition_of, written_field_template,
 };
-use crate::exec::vm::program::{FieldCheck, FieldRefusal, PathSource};
+use crate::exec::vm::program::{ClauseObject, FieldCheck, FieldRefusal, PathSource};
 use crate::expr::{Idiom, Kind};
 use crate::val::TableName;
 
@@ -272,24 +272,6 @@ impl Ddl<'_, '_> {
 			});
 		}
 		let template = self.constant(template_value)?;
-		// The functions a `COMPUTED` body calls, judged against the catalog as the statements
-		// before this one leave it, and skipped on an import, which restores a callee after the
-		// field that names it.
-		if definition.computed.is_some() {
-			let import = self.label()?;
-			self.store(StoreInstr::JumpIfImport {
-				target: import,
-			});
-			let computed_field = self.load(template)?;
-			self.store(StoreInstr::FieldCheck {
-				check: FieldCheck::ComputedCallees {
-					field: computed_field,
-					ns,
-					db,
-				},
-			});
-			self.bind(import)?;
-		}
 		// The record id components an `id` names, judged against the catalog and the rows of the
 		// table's views as the statements before this one leave them.
 		if name.is_id() {
@@ -360,6 +342,13 @@ impl Ddl<'_, '_> {
 		}
 		let stored_field = self.load(template)?;
 		self.session_auth_limit(stored_field)?;
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition: stored_field,
+			previous: None,
+			object: ClauseObject::Field,
+		});
 		self.store(StoreInstr::Put {
 			route: RouteId::named("FieldKey"),
 			key: fd_key,
@@ -731,6 +720,13 @@ impl Ddl<'_, '_> {
 				key,
 			});
 		}
+		self.store(StoreInstr::RefuseClauseEffects {
+			ns,
+			db,
+			definition: stored,
+			previous: Some(before),
+			object: ClauseObject::Field,
+		});
 		// `put_tb_field`.
 		self.store(StoreInstr::Put {
 			route: RouteId::named("FieldKey"),

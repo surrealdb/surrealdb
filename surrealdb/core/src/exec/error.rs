@@ -225,22 +225,21 @@ pub(crate) enum Error {
 		name: String,
 	},
 
-	/// A `SELECT` permission predicate attempted to perform a write or other
-	/// side effect while being evaluated (GHSA-66r2-5gwj-gxm2). Permission
-	/// expressions are evaluated with permission enforcement disabled, so they
-	/// must be free of observable side effects. The create/update/delete
-	/// clauses are reached from a write and may carry side effects.
-	#[error("A PERMISSIONS clause cannot contain a statement that modifies data")]
-	PermissionPredicateSideEffect,
-
-	/// A `COMPUTED` body reached a data-modifying statement while being
-	/// evaluated. The definition-time check ([`Error::ComputedWrite`]) rejects a
-	/// mutation written into the body itself, but treats a call to a
-	/// user-defined function as opaque, since the callee is stored separately,
-	/// can be redefined afterwards, and may take its writing branch only on
-	/// inputs this body never supplies. This is where those are caught.
-	#[error("A COMPUTED clause cannot contain a statement that modifies data")]
-	ComputedFieldSideEffect,
+	/// A schema clause that must not have effects holds or reaches one.
+	///
+	/// The clauses are `COMPUTED`, every `PERMISSIONS` clause, `ASSERT`,
+	/// `VALUE` and `DEFAULT`; the effects are a write, a schema statement, a
+	/// builtin that advances state outside the transaction, `SLEEP`, and a call
+	/// whose effects cannot be known when the clause is defined. `clause` names
+	/// the clause and `construct` the offending construct and what it does.
+	///
+	/// Raised where the clause is defined, and where a clause stored before
+	/// the rule reaches the effect while it runs (`NoWriteFrame`).
+	#[error("The {clause} clause must not have effects: {construct}")]
+	SchemaClauseEffect {
+		clause: String,
+		construct: String,
+	},
 
 	/// A Surrealism module function that declared read-only access reached a
 	/// data-modifying statement.
@@ -420,11 +419,6 @@ pub(crate) enum Error {
 
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
-
-	/// A `COMPUTED` body is evaluated on every read of the field, inside the
-	/// reading statement's transaction, so it must not modify data.
-	#[error("Cannot define field `{0}` as `COMPUTED` bodies must be read-only.")]
-	ComputedWrite(String),
 
 	/// A field's DEFAULT / VALUE / ASSERT / COMPUTED clauses read each other in
 	/// a cycle, so there is no order in which they can all be evaluated
@@ -634,13 +628,14 @@ impl LeafError for Error {
 			| Error::UncoercibleKnnVector {
 				..
 			} => TypesError::validation(message, None),
-			// The definition itself is malformed, so the client can act on it.
-			// `ComputedFieldSideEffect` is the same fault caught at read time
-			// instead of definition time, so it reaches clients the same way.
-			// `SurrealismReadOnlySideEffect` is likewise the module author's to
-			// fix: the function's declared mode and its query disagree.
-			Error::ComputedWrite(_)
-			| Error::ComputedFieldSideEffect
+			// The definition itself is malformed, so the client can act on it,
+			// whether the fault is caught where the clause is defined or where a
+			// clause stored earlier runs. `SurrealismReadOnlySideEffect` is
+			// likewise the module author's to fix: the function's declared mode
+			// and its query disagree.
+			Error::SchemaClauseEffect {
+				..
+			}
 			| Error::SurrealismReadOnlySideEffect => {
 				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
@@ -803,7 +798,6 @@ impl LeafError for Error {
 			| Error::FunctionPermissions {
 				..
 			}
-			| Error::PermissionPredicateSideEffect
 			| Error::SetCoerce {
 				..
 			}

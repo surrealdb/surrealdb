@@ -15,16 +15,16 @@ use crate::dbs::Options;
 /// - `skip_fetch_perms` — permission enforcement is off, so the evaluation does not recurse into
 ///   the gates of the very table it is guarding. Every `PERMISSIONS` clause sets it, a read guard
 ///   and a write guard alike, and so do an event body and a bucket predicate.
-/// - `no_write` — a write reached from here is refused, and names why. Only a stored expression a
-///   *read* evaluates sets it: a `SELECT` `PERMISSIONS` predicate (GHSA-66r2-5gwj-gxm2) and a
-///   `COMPUTED` body, which runs on every read of the field and under the definer's auth.
+/// - `no_write` — an effect reached from here that a schema clause must not have is refused, and
+///   names why. Every schema clause sets it: a `PERMISSIONS` predicate of any kind
+///   (GHSA-66r2-5gwj-gxm2), a `COMPUTED` body, and a field's `VALUE`, `DEFAULT` and `ASSERT`
+///   clauses.
 ///
-/// A `PERMISSIONS FOR create/update/delete` guard has the first without the
-/// second: it is reached from a statement that is already writing, so a guard
-/// that records the attempt performs its write rather than being refused. That
-/// is the line between [`Options::new_for_permission_predicate`] and
-/// `Options::new_for_mutable_permission_predicate`, and reading one half off
-/// the other would erase it.
+/// An event body has the first without the second: it runs as the definer
+/// and may write. That is the line between
+/// [`Options::new_for_permission_predicate`] and
+/// `Options::new_with_unchecked_reads`, and reading one half off the other
+/// would erase it.
 ///
 /// A frame the caller's options already refuse in is never lifted here: the
 /// strictest frame on the way in is the one the evaluation runs in.
@@ -46,7 +46,7 @@ pub(crate) fn options_for_frame(
 ) -> Options {
 	let inherited = options.no_write;
 	let mut options = if skip_fetch_perms {
-		options.new_for_mutable_permission_predicate()
+		options.new_with_unchecked_reads()
 	} else {
 		options.clone()
 	};
@@ -77,16 +77,24 @@ mod tests {
 		assert!(!frame.perms);
 	}
 
-	/// A `PERMISSIONS FOR create/update/delete` guard is reached from a
-	/// statement that is already writing, so its own write runs. Enforcement is
-	/// off exactly as for a read guard; only the refusal differs.
+	/// A `PERMISSIONS FOR create/update/delete` guard refuses effects as a
+	/// read guard does, with enforcement off exactly as for a read guard.
 	#[test]
-	fn a_write_guards_frame_allows_a_write_with_enforcement_off() {
+	fn a_write_guards_frame_refuses_effects_with_enforcement_off() {
+		let opt = options();
+		let frame = options_for_frame(&opt, true, Some(NoWriteFrame::WritePermission), None);
+		assert_eq!(frame.no_write, Some(NoWriteFrame::WritePermission));
+		assert!(!frame.perms);
+		assert!(!frame.caller_perms);
+	}
+
+	/// An event body reads with enforcement off and may write.
+	#[test]
+	fn an_event_frame_allows_a_write_with_enforcement_off() {
 		let opt = options();
 		let frame = options_for_frame(&opt, true, None, None);
 		assert_eq!(frame.no_write, None);
 		assert!(!frame.perms);
-		assert!(!frame.caller_perms);
 	}
 
 	/// A computed body may not write either, but its reads stay
@@ -109,8 +117,8 @@ mod tests {
 		assert!(!frame.perms);
 	}
 
-	/// A frame the caller's options already refuse in is never lifted: a write
-	/// guard nested inside a read guard stays refused.
+	/// A frame the caller's options already refuse in is never lifted: an
+	/// event body reached from inside a read guard stays refused.
 	#[test]
 	fn an_inherited_refusal_is_not_lifted() {
 		let opt = options().new_for_permission_predicate();

@@ -16,12 +16,8 @@
 //! are handled by the visited set: a cycle contributes whatever facts its
 //! members carry, nothing more.
 //!
-//! `DEFINE FIELD ... COMPUTED` consumes the answer as a gate: it refuses a
-//! definition whose body [`ResolvedMutability::possibly_writes`]. Everywhere
-//! else it is an execution-planning input only. The frame in
-//! [`crate::dbs::Options`] remains the enforcement point for a callee redefined
-//! after the field and for a `PERMISSIONS` predicate, whose write is refused at
-//! request time.
+//! The answer is an execution-planning input only. Whether a schema clause may
+//! hold what it reaches is decided by [`crate::exec::clause_effects`].
 
 use std::collections::HashSet;
 

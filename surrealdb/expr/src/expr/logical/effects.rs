@@ -619,7 +619,7 @@ pub fn invokes_unseen_body(expr: &LogicalExpr, oracle: &dyn EffectOracle) -> boo
 /// field is included because a row is not always a stored record — a
 /// projection can put a closure in a column — and being wrong here is a
 /// permission leak, so the unclear cases fall on the opaque side.
-fn may_carry_unseen_closure(arg: &LogicalExpr) -> bool {
+pub fn may_carry_unseen_closure(arg: &LogicalExpr) -> bool {
 	match arg {
 		LogicalExpr::Closure(_)
 		| LogicalExpr::Literal(_)

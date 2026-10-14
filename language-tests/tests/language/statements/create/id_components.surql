@@ -97,18 +97,15 @@ error = "Cannot create a record in `reading` without the record id component `ti
 error = "Cannot create a record in `reading` without the record id component `city`: set `city`, give the record id, or define a DEFAULT on the `id` field"
 
 # The DEFAULT is not evaluated while every component is written, and is
-# evaluated once when one is not.
+# evaluated when one is not.
 [[test.results]]
 value = "[sensor:['Rome', d'2024-02-01T00:00:00Z']]"
 
 [[test.results]]
-value = "1"
+value = "NONE"
 
 [[test.results]]
 value = "[sensor:['site-2', d'2024-01-01T00:00:00Z']]"
-
-[[test.results]]
-value = "3"
 
 # What was stored holds no component, and the refused writes stored nothing.
 [[test.results]]
@@ -122,9 +119,9 @@ DEFINE TABLE reading SCHEMALESS;
 DEFINE FIELD id ON reading TYPE [city: string, time: datetime];
 DEFINE TABLE counter SCHEMALESS;
 DEFINE FIELD id ON counter TYPE [site: string, n: int];
-DEFINE SEQUENCE draws START 1;
+DEFINE PARAM $default_raises VALUE true;
 DEFINE TABLE sensor SCHEMALESS;
-DEFINE FIELD id ON sensor TYPE [city: string, time: datetime] DEFAULT [string::concat('site-', sequence::nextval('draws')), d'2024-01-01T00:00:00Z'];
+DEFINE FIELD id ON sensor TYPE [city: string, time: datetime] DEFAULT IF $default_raises { THROW 'the DEFAULT was evaluated' } ELSE { ['site-2', d'2024-01-01T00:00:00Z'] };
 
 -- The key is made of the components the record is written with.
 CREATE reading SET city = 'London', time = d'2024-01-01T00:00:00Z', temp = 4 RETURN VALUE id;
@@ -158,12 +155,11 @@ CREATE reading:['London', d'2024-01-04T00:00:00Z', 1] SET temp = 1;
 CREATE reading SET city = 'London', temp = 1;
 CREATE reading SET temp = 1;
 
--- With every component written the DEFAULT is not evaluated, which the
--- sequence it draws from shows; with one missing it is, once.
+-- With every component written the DEFAULT is not evaluated, which it would
+-- show by raising; with one missing it is.
 CREATE sensor SET city = 'Rome', time = d'2024-02-01T00:00:00Z' RETURN VALUE id;
-RETURN sequence::nextval('draws');
+DEFINE PARAM OVERWRITE $default_raises VALUE false;
 CREATE sensor SET temp = 3 RETURN VALUE id;
-RETURN sequence::nextval('draws');
 
 -- Retyping the id to one with no names shows the stored bodies as they are.
 DEFINE FIELD OVERWRITE id ON reading TYPE [string, datetime];

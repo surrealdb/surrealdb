@@ -307,6 +307,14 @@ pub(super) async fn step(
 			duration,
 		} => {
 			let frame = state.frame.as_ref().unwrap_or(ctx);
+			// A schema clause must not block.
+			if let Some(refusing) = frame.root().no_write
+				&& refusing.clause().is_some()
+			{
+				return Err(ControlFlow::Err(anyhow!(
+					refusing.side_effect_error(crate::exec::clause_effects::SLEEP_TEXT)
+				)));
+			}
 			frame
 				.is_allowed(
 					crate::iam::Action::Edit,

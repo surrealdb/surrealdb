@@ -8,12 +8,13 @@ reason = """
 	A COMPUTED body is evaluated on every read of the field, so it must not
 	modify data. DEFINE FIELD refuses a body whose effects include a write,
 	whether the write is written directly, reached through a chain of
-	user-defined functions, or is a schema change inside a callee. A body whose
-	effects are read-only is accepted, and so is a sequence draw. A body that
-	may write is refused as well: a call to a function that is not defined yet
-	cannot be shown read-only. A callee redefined after the field is defined is
-	not re-checked then, so the runtime frame refuses the write when a read
-	reaches it. Nothing is written by any attempt. Each case uses its own table
+	user-defined functions, or is a schema change inside a callee, and refuses
+	a sequence draw, which advances state outside the transaction. A body
+	whose effects are read-only is accepted, and so is a call to a function
+	that is not defined yet: there is no body to judge, and the call fails as
+	any call of an undefined function does. A callee redefined after the field
+	is defined is not re-checked then, so the runtime frame refuses the write
+	when a read reaches it. Nothing is written by any attempt. Each case uses its own table
 	and no table with an accepted field is written or read after that field is
 	defined, so no CREATE output derives a field another case defined.
 """
@@ -25,25 +26,19 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Cannot define field `f` as `COMPUTED` bodies must be read-only."
+error = "The COMPUTED clause must not have effects: it calls `fn::w`, in whose body `CREATE` writes data"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "Cannot define field `g` as `COMPUTED` bodies must be read-only."
+error = "The COMPUTED clause must not have effects: it calls `fn::outer`, which reaches `fn::w`, in whose body `CREATE` writes data"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "Cannot define field `h` as `COMPUTED` bodies must be read-only."
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
+error = "The COMPUTED clause must not have effects: it calls `fn::d`, in whose body `DEFINE` changes the schema"
 
 [[test.results]]
 value = "NONE"
@@ -55,7 +50,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Cannot define field `late` as `COMPUTED` bodies must be read-only."
+value = "NONE"
+
+[[test.results]]
+error = "The COMPUTED clause must not have effects: it calls `fn::n`, in whose body `sequence::nextval` advances state outside the transaction"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -70,10 +71,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "A COMPUTED clause cannot contain a statement that modifies data"
+error = "The COMPUTED clause must not have effects: `CREATE` writes data"
 
 [[test.results]]
 value = "[{ count: 0 }]"
+
 */
 
 DEFINE TABLE log SCHEMALESS;
@@ -94,12 +96,12 @@ DEFINE FIELD h ON t3 COMPUTED fn::d();
 DEFINE FUNCTION fn::r($x: int) { RETURN $x * 2; };
 DEFINE FIELD ok ON t4 COMPUTED fn::r(2);
 
--- A sequence draw is accepted.
+-- A sequence draw is refused.
 DEFINE SEQUENCE s;
 DEFINE FUNCTION fn::n() { RETURN sequence::nextval('s'); };
 DEFINE FIELD sq ON t5 COMPUTED fn::n();
 
--- A function that is not defined yet may write, so it is refused.
+-- A function that is not defined yet has no body to judge, so it is accepted.
 DEFINE FIELD late ON t6 COMPUTED fn::not_yet();
 
 -- A callee redefined after the field is defined is refused at read time. The

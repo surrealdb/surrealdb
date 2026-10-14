@@ -4,11 +4,12 @@ allow-eval-query = ["system"]
 
 [test]
 reason = """
-eval::surql runs where any expression runs: a function body, a table's
-PERMISSIONS clause (bypassed for the owner), a field's VALUE clause, an
-event's THEN clause, a closure and a closure handed to a builtin, and a
-projection over many rows with bindings read per row. The nested query is
-isolated: `$this` is not the caller's, while the session's own values are."""
+eval::surql runs where any expression runs: a function body, an event's
+THEN clause, a closure and a closure handed to a builtin, and a projection
+over many rows with bindings read per row. A table's PERMISSIONS clause and a
+field's VALUE clause calling it are refused where they are defined, since what
+it runs cannot be known there, and neither definition is stored. The nested query is isolated: `$this` is not the caller's,
+while the session's own values are."""
 
 [[test.results]]
 value = "NONE"
@@ -17,7 +18,7 @@ value = "NONE"
 value = "42"
 
 [[test.results]]
-value = "NONE"
+error = "The PERMISSIONS clause must not have effects: `eval::surql` runs code whose effects cannot be known where the clause is defined"
 
 [[test.results]]
 value = "[{ id: item:1, n: 1 }]"
@@ -29,19 +30,19 @@ value = "[{ id: item:2, n: 2 }]"
 value = "[{ id: item:3, n: 3 }]"
 
 [[test.results]]
-value = "NONE"
+error = "The VALUE clause must not have effects: `eval::surql` runs code whose effects cannot be known where the clause is defined"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: item:2, n: 5, twice: 10 }]"
+value = "[{ id: item:2, n: 5 }]"
 
 [[test.results]]
 value = "[item:2]"
 
 [[test.results]]
-value = "[{ n: 1, twice: NONE }, { n: 3, twice: NONE }, { n: 5, twice: 10 }]"
+value = "[{ n: 1, twice: NONE }, { n: 3, twice: NONE }, { n: 5, twice: NONE }]"
 
 [[test.results]]
 value = "NONE"

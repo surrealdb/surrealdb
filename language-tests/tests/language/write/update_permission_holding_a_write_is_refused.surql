@@ -7,12 +7,21 @@ database = true
 reason = """
 Register #28, row PermissionOrAssertFrame: a `PERMISSIONS FOR update` predicate
 that writes is refused where it is defined, on a normal table and on a relation
-table alike, so no update-shaped statement can judge such a predicate. The
-request fails as a whole at the first definition that holds the write.
+table alike, so no update-shaped statement can judge such a predicate. Each
+definition holding the write fails on its own.
 """
 
-[test.results]
-request-error = "Invalid statement: a write is not allowed in a permission (statement 3)"
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `UPSERT` writes data"
+
+[[test.results]]
+error = "The PERMISSIONS clause must not have effects: `UPSERT` writes data"
 */
 DEFINE TABLE person SCHEMALESS PERMISSIONS FULL;
 DEFINE TABLE counter SCHEMALESS PERMISSIONS FULL;

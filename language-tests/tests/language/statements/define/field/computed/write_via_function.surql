@@ -35,7 +35,7 @@ value = "NONE"
 value = "[{ id: node:1 }]"
 
 [[test.results]]
-error = "Cannot define field `indirect` as `COMPUTED` bodies must be read-only."
+error = "The COMPUTED clause must not have effects: it calls `fn::bump`, in whose body `CREATE` writes data"
 
 [[test.results]]
 value = "NONE"
@@ -47,13 +47,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "A COMPUTED clause cannot contain a statement that modifies data"
+error = "The COMPUTED clause must not have effects: `CREATE` writes data"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "A COMPUTED clause cannot contain a statement that modifies data"
+error = "The COMPUTED clause must not have effects: `CREATE` writes data"
 
 [[test.results]]
 error = "Cannot COMMIT: the transaction was aborted due to a prior error"

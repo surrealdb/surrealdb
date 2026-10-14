@@ -8,6 +8,7 @@ use crate::err::Error;
 use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::expr::Base;
+use crate::expr::logical::EffectSet;
 use crate::iam::Auth;
 
 /// Per-call execution frame passed along with [`crate::ctx::Context`].
@@ -73,36 +74,47 @@ pub enum Force {
 	None,
 }
 
-/// The kind of stored expression being evaluated, for frames where a
-/// data-modifying statement must be rejected.
+/// The kind of stored expression being evaluated, for frames where an effect
+/// must be refused.
 ///
-/// Each variant is a body the database evaluates on behalf of a reader who did
-/// not write it and cannot see it. This frame is where the rejection happens:
-/// it fires at the point a write is actually reached, so it holds regardless of
-/// how many function calls deep the write sits or which branch selected it.
+/// Each variant but [`Self::SurrealismReadOnly`] is a schema clause that must
+/// not have effects: a `PERMISSIONS` clause, a `COMPUTED`, `VALUE`, `DEFAULT`
+/// or `ASSERT` clause. A definition holding such an effect is refused where it
+/// is defined; this frame is where a clause stored before that rule is refused
+/// at the point the effect is reached, however many function calls deep it
+/// sits or whichever branch selected it. It refuses a write and a schema
+/// statement, a `SLEEP`, and a builtin [`Self::refuses_builtin_call`] names,
+/// each with [`Self::side_effect_error`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NoWriteFrame {
-	/// A stored `SELECT` `PERMISSIONS` predicate. Evaluated with `perms`
-	/// disabled so it does not recurse into its own table's gates, which is
-	/// exactly why it must not be able to write (GHSA-66r2-5gwj-gxm2). The
-	/// create/update/delete clauses are reached from a write and use
-	/// [`Options::new_for_mutable_permission_predicate`] instead.
+	/// A stored permission predicate a read judges: a table's or field's
+	/// `PERMISSIONS FOR select`, a function's or parameter's `PERMISSIONS`.
+	/// Evaluated with `perms` disabled so it does not recurse into its own
+	/// table's gates, which is why a write reached from it would bypass every
+	/// gate (GHSA-66r2-5gwj-gxm2).
 	PermissionPredicate,
+	/// A stored `PERMISSIONS FOR create/update/delete` predicate a write
+	/// judges, a table's or a field's. Evaluated with `perms` disabled, as a
+	/// read's predicate is.
+	WritePermission,
 	/// A `COMPUTED` field body. Evaluated on every read of the field, under the
-	/// definer's auth rather than the reader's, so a write here would let a
-	/// read mutate the database as somebody else. `DEFINE FIELD` rejects a
-	/// mutation written directly into the body; this frame covers the writes
-	/// that only a call can reach.
+	/// definer's auth rather than the reader's.
 	ComputedField,
+	/// A field's `VALUE` clause.
+	FieldValue,
+	/// A field's `DEFAULT` clause.
+	FieldDefault,
+	/// A field's `ASSERT` clause.
+	FieldAssert,
 	/// A Surrealism module function that declared read-only access.
 	///
 	/// The guest reaches the datastore through a `transaction` handle, and
 	/// declares in its signature whether it needs write access. That declaration
 	/// reaches the host as the `writeable` flag in the baked exports manifest,
-	/// and the planner already uses it to pick an access mode. Nothing enforced
-	/// it, because the guest composes its query as a string at runtime — so a
-	/// read-only function could still issue `CREATE`. This frame is that
-	/// enforcement, and it fires wherever the write is reached, however deep.
+	/// and the planner uses it to pick an access mode. The guest composes its
+	/// query as a string at runtime, so a read-only function could still issue
+	/// `CREATE`; this frame is what refuses it, wherever the write is reached,
+	/// however deep.
 	///
 	/// How the declaration is spelled is the guest language's business; the host
 	/// sees only the flag.
@@ -110,42 +122,65 @@ pub(crate) enum NoWriteFrame {
 }
 
 impl NoWriteFrame {
-	/// Whether this frame refuses a *call* to the named builtin.
+	/// The schema clause this frame evaluates, as an error names it; `None`
+	/// for [`Self::SurrealismReadOnly`], which is no schema clause.
+	pub(crate) fn clause(self) -> Option<&'static str> {
+		match self {
+			Self::PermissionPredicate | Self::WritePermission => Some("PERMISSIONS"),
+			Self::ComputedField => Some("COMPUTED"),
+			Self::FieldValue => Some("VALUE"),
+			Self::FieldDefault => Some("DEFAULT"),
+			Self::FieldAssert => Some("ASSERT"),
+			Self::SurrealismReadOnly => None,
+		}
+	}
+
+	/// Whether this frame refuses a *call* to the builtin `name` that declares
+	/// `effects`.
 	///
 	/// Asked wherever a builtin is applied, by a function call and by a method
 	/// on a value (`f'bucket:k'.put(..)`) alike, so the answer cannot differ
 	/// between them.
 	///
-	/// Scoped to [`Self::SurrealismReadOnly`]: the other two frames permit
-	/// these calls and refuse the writes they make where they are made, and
-	/// `SECURITY_GUIDE.md` records the decision that keeps
-	/// [`Self::PermissionPredicate`] out of it.
-	pub(crate) fn refuses_builtin_call(self, name: &str) -> bool {
-		matches!(self, Self::SurrealismReadOnly) && crate::expr::method::mutates_state_builtin(name)
+	/// A schema clause refuses a builtin that blocks, and one that advances
+	/// state outside the transaction unless the clause is a `VALUE` or
+	/// `DEFAULT` ([`crate::exec::clause_effects::refused_builtin_by`]); a
+	/// builtin that writes data through the transaction is refused where the
+	/// write is made. A read-only Surrealism function refuses every builtin
+	/// that changes state ([`crate::expr::method::mutates_state_builtin`]).
+	pub(crate) fn refuses_builtin_call(self, name: &str, effects: EffectSet) -> bool {
+		match self.clause() {
+			Some(clause) => {
+				effects.intersects(crate::exec::clause_effects::refused_builtin_by(clause))
+			}
+			None => crate::expr::method::mutates_state_builtin(name),
+		}
 	}
 
-	/// The error a refused write raises under this frame, and any operator
-	/// warning that goes with it.
+	/// The error a refused effect raises under this frame. `construct` names
+	/// the construct refused and what it does, as
+	/// [`crate::exec::clause_effects`] phrases it.
 	///
 	/// Lives here for the same reason [`Self::refuses_builtin_call`] does: the
-	/// two enforcement points must not answer differently. Deciding *whether*
-	/// to refuse in one place and *what to say* in another is how a frame ends
-	/// up refused correctly under the wrong error — and these are not
-	/// interchangeable, because they carry different wire codes and kinds that
-	/// a client may branch on.
-	pub(crate) fn side_effect_error(self) -> ExecError {
-		match self {
-			Self::PermissionPredicate => {
-				// Point the operator at the sanctioned mechanism for write side
-				// effects driven by a read.
-				warn!(
-					"A SELECT PERMISSIONS clause attempted to modify data and was blocked \
-					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT."
-				);
-				ExecError::PermissionPredicateSideEffect
-			}
-			Self::ComputedField => ExecError::ComputedFieldSideEffect,
-			Self::SurrealismReadOnly => ExecError::SurrealismReadOnlySideEffect,
+	/// enforcement points must not answer differently. A schema clause raises
+	/// [`ExecError::SchemaClauseEffect`] naming itself; a read-only Surrealism
+	/// function raises its own error, which carries a different meaning for
+	/// the client.
+	pub(crate) fn side_effect_error(self, construct: &str) -> ExecError {
+		if self == Self::PermissionPredicate {
+			// Point the operator at the sanctioned mechanism for side effects
+			// driven by a read.
+			warn!(
+				"A PERMISSIONS clause attempted an effect and was blocked \
+				 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT."
+			);
+		}
+		match self.clause() {
+			Some(clause) => ExecError::SchemaClauseEffect {
+				clause: clause.to_owned(),
+				construct: construct.to_owned(),
+			},
+			None => ExecError::SurrealismReadOnlySideEffect,
 		}
 	}
 }
@@ -349,15 +384,14 @@ impl Options {
 		}
 	}
 
-	/// Create a new Options object for evaluating a `PERMISSIONS FOR
-	/// create/update/delete` predicate.
+	/// Create a new Options object whose reads are not permission-checked,
+	/// with no write refusal of its own.
 	///
 	/// Like [`Self::new_for_permission_predicate`] it disables permission
-	/// recursion, but it leaves `no_write` unset so a data-modifying statement
-	/// in the predicate runs instead of being rejected. Only the clauses a
-	/// *write* triggers use this frame; a `SELECT` predicate never does. The
-	/// write runs with `perms` disabled, like the blocking frame.
-	pub fn new_for_mutable_permission_predicate(&self) -> Self {
+	/// recursion, but it leaves `no_write` unset: what the frame refuses is
+	/// the caller's to set. An event body runs here and may write; a
+	/// permission predicate is given its [`NoWriteFrame`] on top.
+	pub fn new_with_unchecked_reads(&self) -> Self {
 		Self {
 			perms: false,
 			caller_perms: false,
@@ -523,44 +557,84 @@ const _: () = assert!(std::mem::size_of::<Options>() <= 128);
 #[cfg(test)]
 mod tests {
 	use super::{ExecError, NoWriteFrame};
+	use crate::expr::logical::EffectSet;
 
-	/// Every frame raises its own error, and no two share one.
+	/// Every schema-clause frame raises the schema-clause error naming its own
+	/// clause and the construct refused; the read-only Surrealism frame raises
+	/// its own error, which a client branches on apart.
 	///
-	/// The errors are not interchangeable — `PermissionPredicateSideEffect` is
-	/// `-32000` / `Internal` and carries the GHSA warning, while
-	/// `SurrealismReadOnlySideEffect` is `-32600` / `Validation` — so a client
-	/// branching on code or kind takes a different branch for each. That is
-	/// what makes naming a variant at an enforcement point wrong even when the
-	/// scoping happens to make it unreachable, and it is the trap waiting for
-	/// whoever widens `refuses_builtin_call` to cover the predicate frame.
-	///
-	/// Exhaustive by construction: a new variant that forgot to be listed here
-	/// fails the count assertion below.
+	/// Exhaustive by construction: a new variant must be placed in the match.
 	#[test]
-	fn each_frame_raises_its_own_error() {
+	fn each_frame_raises_its_clauses_error() {
 		let frames = [
 			NoWriteFrame::PermissionPredicate,
+			NoWriteFrame::WritePermission,
 			NoWriteFrame::ComputedField,
+			NoWriteFrame::FieldValue,
+			NoWriteFrame::FieldDefault,
+			NoWriteFrame::FieldAssert,
 			NoWriteFrame::SurrealismReadOnly,
 		];
 		for frame in frames {
 			let expected = match frame {
-				NoWriteFrame::PermissionPredicate => ExecError::PermissionPredicateSideEffect,
-				NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
-				NoWriteFrame::SurrealismReadOnly => ExecError::SurrealismReadOnlySideEffect,
+				NoWriteFrame::PermissionPredicate | NoWriteFrame::WritePermission => {
+					Some("PERMISSIONS")
+				}
+				NoWriteFrame::ComputedField => Some("COMPUTED"),
+				NoWriteFrame::FieldValue => Some("VALUE"),
+				NoWriteFrame::FieldDefault => Some("DEFAULT"),
+				NoWriteFrame::FieldAssert => Some("ASSERT"),
+				NoWriteFrame::SurrealismReadOnly => None,
 			};
+			let raised = frame.side_effect_error("`CREATE` writes data");
+			match expected {
+				Some(clause) => assert_eq!(
+					raised.to_string(),
+					ExecError::SchemaClauseEffect {
+						clause: clause.to_owned(),
+						construct: "`CREATE` writes data".to_owned(),
+					}
+					.to_string(),
+					"{frame:?} raised the wrong error"
+				),
+				None => assert_eq!(
+					raised.to_string(),
+					ExecError::SurrealismReadOnlySideEffect.to_string()
+				),
+			}
+		}
+	}
+
+	/// A schema clause refuses a call that blocks, and one that advances state
+	/// outside the transaction unless it is a `VALUE` or `DEFAULT`; it leaves
+	/// randomness, the clock and a write through the transaction to be judged
+	/// elsewhere.
+	#[test]
+	fn a_clause_frame_refuses_state_advancing_and_blocking_builtins() {
+		let advances = [
+			(NoWriteFrame::PermissionPredicate, true),
+			(NoWriteFrame::WritePermission, true),
+			(NoWriteFrame::ComputedField, true),
+			(NoWriteFrame::FieldAssert, true),
+			(NoWriteFrame::FieldValue, false),
+			(NoWriteFrame::FieldDefault, false),
+		];
+		for (frame, refused) in advances {
 			assert_eq!(
-				frame.side_effect_error().to_string(),
-				expected.to_string(),
-				"{frame:?} raised the wrong error"
+				frame.refuses_builtin_call("sequence::nextval", EffectSet::ADVANCES_STATE),
+				refused,
+				"{frame:?}"
+			);
+			assert!(frame.refuses_builtin_call("sleep", EffectSet::BLOCKING), "{frame:?}");
+			assert!(!frame.refuses_builtin_call("rand::uuid", EffectSet::ENTROPY), "{frame:?}");
+			assert!(!frame.refuses_builtin_call("time::now", EffectSet::CLOCK), "{frame:?}");
+			assert!(
+				!frame.refuses_builtin_call(
+					"eval::surql",
+					EffectSet::OPAQUE_BODY.union(EffectSet::WRITES_DATA)
+				),
+				"{frame:?}"
 			);
 		}
-
-		// Distinct messages, so a client can tell which frame refused.
-		let mut seen: Vec<String> =
-			frames.iter().map(|f| f.side_effect_error().to_string()).collect();
-		seen.sort();
-		seen.dedup();
-		assert_eq!(seen.len(), frames.len(), "two frames report the same error");
 	}
 }
