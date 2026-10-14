@@ -2922,7 +2922,7 @@ impl<'a> Lowerer<'a> {
 
 	/// The call `data` of the function `call` names.
 	fn call(&mut self, data: &OpData, call: &CallAttrs) -> Result<Operand, IrError> {
-		let args = data.operands.as_slice();
+		let args = call_args(data, call)?;
 		match &call.function {
 			Function::Normal(name) => {
 				if self.registry.is_index_function(name) {

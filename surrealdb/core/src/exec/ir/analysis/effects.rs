@@ -412,6 +412,12 @@ pub(crate) fn is_write(kind: &OpKind) -> bool {
 	tag == OpTag::Logical(LogTag::Write) || tag == OpTag::Phys(PhysTag::Write)
 }
 
+/// Whether the regions of an op of kind `owner` run after the op's own effect: the projection and
+/// image layers of a write read the records it has just written.
+pub(crate) fn follows_effect(owner: &OpKind) -> bool {
+	is_write(owner)
+}
+
 /// Whether `kind` is a `logical.write`, whose stage ops stand in the subject loop beside it.
 pub(super) fn is_logical_write(kind: &OpKind) -> bool {
 	kind.tag() == OpTag::Logical(LogTag::Write)

@@ -19,6 +19,7 @@ pub(crate) mod print;
 pub(crate) mod region;
 pub(crate) mod rewriter;
 pub(crate) mod text;
+pub(crate) mod token;
 pub(crate) mod value;
 pub(crate) mod value_table;
 pub(crate) mod verify;

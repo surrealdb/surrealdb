@@ -11,6 +11,10 @@ use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 #[derive(Clone, Debug)]
 pub(crate) struct BlockData {
 	pub(crate) args: SmallVec<[ValueId; 2]>,
+	/// The effect tokens the block receives, one per class, apart from `args` so that the
+	/// positions of the data arguments never move. Empty in a container no token is threaded
+	/// through.
+	pub(crate) token_args: SmallVec<[ValueId; 2]>,
 	pub(crate) ops: Vec<OpId>,
 	pub(crate) parent: RegionId,
 }

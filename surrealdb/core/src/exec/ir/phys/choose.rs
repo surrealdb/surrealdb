@@ -308,6 +308,7 @@ pub(crate) fn type_guard(knowledge: &TypeKnowledge) -> Option<Guard> {
 		TypeKnowledge::Fact {
 			..
 		}
+		| TypeKnowledge::Token(_)
 		| TypeKnowledge::Unknown => None,
 	}
 }

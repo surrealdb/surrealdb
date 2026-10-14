@@ -17,6 +17,7 @@ use super::block::BlockData;
 use super::op::OpData;
 use super::region::RegionData;
 use super::rewriter::Provenance;
+use super::token::OpTokens;
 use super::value::{Use, ValueData, ValueDef};
 use super::walk::ops_in;
 use crate::exec::ir::error::IrError;
@@ -120,6 +121,13 @@ pub(crate) struct Ir {
 	/// Whether the container holds code the request wrote, which the region constraints judge
 	/// ([`Ir::judges_constraints`]).
 	pub(super) constrained: bool,
+	/// The effect tokens each op takes and produces, apart from its operands and results.
+	pub(super) op_tokens: SecondaryMap<OpId, OpTokens>,
+	/// Whether effect tokens are threaded through the container ([`Ir::is_threaded`]).
+	pub(super) threaded: bool,
+	/// The ops created while the container is threaded and not threaded themselves since
+	/// ([`Ir::holds_no_tokens`]).
+	pub(super) untokened: SecondaryMap<OpId, ()>,
 }
 
 impl Ir {
@@ -145,6 +153,7 @@ impl Ir {
 		});
 		let block = blocks.insert(BlockData {
 			args: Default::default(),
+			token_args: Default::default(),
 			ops: Vec::new(),
 			parent: top_id,
 		});
@@ -190,6 +199,9 @@ impl Ir {
 			sealed: SecondaryMap::new(),
 			sealed_regions: SecondaryMap::new(),
 			constrained: false,
+			op_tokens: SecondaryMap::new(),
+			threaded: false,
+			untokened: SecondaryMap::new(),
 		}
 	}
 
@@ -689,6 +701,13 @@ impl Ir {
 			self.values.remove(*value);
 			forget(Freed::Value(*value));
 		}
+		self.untokened.remove(op);
+		if let Some(tokens) = self.op_tokens.remove(op) {
+			for value in &tokens.results {
+				self.values.remove(*value);
+				forget(Freed::Value(*value));
+			}
+		}
 		for region in &data.regions {
 			self.sealed_regions.remove(*region);
 			let Some(region) = self.regions.remove(*region) else {
@@ -698,7 +717,7 @@ impl Ir {
 				let Some(block) = self.blocks.remove(*block) else {
 					continue;
 				};
-				for arg in &block.args {
+				for arg in block.args.iter().chain(&block.token_args) {
 					self.values.remove(*arg);
 					forget(Freed::Value(*arg));
 				}

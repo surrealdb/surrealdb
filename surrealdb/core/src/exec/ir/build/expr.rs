@@ -33,7 +33,7 @@ use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{
 	CallAttrs, ComputedReadAttrs, ConvertAttrs, ConvertMode, ConvertSite, DestructureEntry,
 	DispatchTarget, ExprOp, KeyBound, KeyRange, KeyShape, NowWhich, OnFail, RaiseKind,
-	RecordIdAttrs, ShortCircuitOp,
+	RecordIdAttrs, ShortCircuitOp, passes_row_names,
 };
 use crate::exec::ir::expr::types::result_type;
 use crate::exec::ir::iface::ids::{BlockId, OpId, RegionId, ValueId};
@@ -200,8 +200,8 @@ pub(crate) trait ExprHost {
 	fn aggregating(&self) -> bool;
 	/// A conversion site distinct from every other handed out for this request.
 	fn next_convert_site(&mut self) -> ConvertSite;
-	/// The row-name operands a call of `callee` passes; empty for a builtin.
-	fn row_name_operands(&self, callee: &Function) -> SmallVec<[ValueId; 2]>;
+	/// The row-name operands in scope here, in the order of `ROW_PARAMS`.
+	fn row_name_operands(&self) -> SmallVec<[ValueId; 2]>;
 	/// Binds a statement in value position (`LogicalExpr::Subquery`), `expr.subquery` and its
 	/// region included.
 	fn bind_value_statement(&mut self, op: &LogicalOp) -> Result<Built, IrError>;
@@ -1074,7 +1074,11 @@ fn bind_call(host: &mut dyn ExprHost, call: &LogicalCall) -> Result<Built, IrErr
 	let Some(mut operands) = bind_all(host, &call.args)? else {
 		return Ok(Built::Diverged);
 	};
-	let row_names = host.row_name_operands(&call.receiver);
+	let row_names = if passes_row_names(&call.receiver, host.registry()) {
+		host.row_name_operands()
+	} else {
+		SmallVec::new()
+	};
 	let attrs = CallAttrs {
 		function: call.receiver.clone(),
 		row_names: u8::try_from(row_names.len())

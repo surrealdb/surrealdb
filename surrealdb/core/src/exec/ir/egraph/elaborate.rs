@@ -33,6 +33,7 @@ use super::decl::{BinderId, ClassRef, ENodeSnapshot, LeafId, NodeShape, PayloadI
 use super::extract::{Candidate, PhysChoice, Term};
 use super::guards::{deterministic, infallible};
 use super::lang::{ENode, region_kind_key, snapshot_of};
+use crate::exec::ir::analysis::tokens;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
 use crate::exec::ir::core::location::{LocOrigin, Location};
@@ -1330,8 +1331,8 @@ pub(crate) fn write_logical(
 		apply(&built, &mut rw).map_err(aborted)?;
 	}
 	surgery.adopt_statement(ir, facts, stmt, target, &target_map).map_err(aborted)?;
-	let sound = verify(ir, facts, VerifyAt::PhaseBoundary(Phase::Logical), &LOGICAL_PHASE, cx)
-		.is_ok()
+	let sound = tokens::rethread_statement(ir, facts, cx, stmt).is_ok()
+		&& verify(ir, facts, VerifyAt::PhaseBoundary(Phase::Logical), &LOGICAL_PHASE, cx).is_ok()
 		&& surgery.retake_legality(ir, facts, stmt).is_ok();
 	if sound {
 		super::note_adopted();
@@ -1339,6 +1340,8 @@ pub(crate) fn write_logical(
 	}
 	let restored = surgery.adopt_statement(ir, facts, stmt, backup, &backup_map);
 	debug_assert!(restored.is_ok(), "a statement copy adopts back into its own container");
+	let rethreaded = tokens::rethread_statement(ir, facts, cx, stmt);
+	debug_assert!(rethreaded.is_ok(), "a restored statement is threaded again");
 	Err(FallbackReason::LogicalVerifyFailed)
 }
 

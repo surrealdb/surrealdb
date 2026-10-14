@@ -1,8 +1,9 @@
 //! Value identity: the key under which two ops compute one value.
 //!
 //! Two ops are one value only when their keys are equal. An op that reads stored data carries the
-//! write epoch of its read, so reads a write of the statement separates are two values. A clock
-//! read is constant within a statement, so equal clock reads are one value.
+//! write epoch of its read, and the effect tokens it takes, so reads a write of the statement
+//! separates are two values. A clock read is constant within a statement, so equal clock reads are
+//! one value.
 
 use super::cx::default_cx;
 use super::{effects, write_epoch};
@@ -49,6 +50,7 @@ pub(crate) fn key_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: Op
 			tag: OpTag::ALL[0],
 			attrs: AttrDigest::OPAQUE,
 			operands: Default::default(),
+			tokens: Default::default(),
 			frame: FrameId::new(0),
 			snapshot: SnapshotId::new(0),
 			epoch: None,
@@ -81,6 +83,7 @@ pub(crate) fn key_with(ir: &Ir, facts: &mut FactCache, cx: &EffectCx<'_>, op: Op
 		tag,
 		attrs,
 		operands: data.operands.clone(),
+		tokens: ir.token_operands(op).iter().copied().collect(),
 		frame: data.frame,
 		snapshot: data.snapshot,
 		epoch,

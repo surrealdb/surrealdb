@@ -24,7 +24,7 @@ use crate::exec::ir::iface::ids::OpId;
 use crate::exec::ir::iface::region_kind::{
 	ClauseRole, ErrorScope, FieldRole, RegionKind, StatementCommit, StoredRole, TxnKind,
 };
-use crate::exec::ir::iface::types::{FactSource, HintSource, TypeKnowledge};
+use crate::exec::ir::iface::types::{FactSource, HintSource, TokenClass, TypeKnowledge};
 use crate::exec::ir::op_kind::OpTag;
 use crate::exec::vm::program::UnitFrame;
 use crate::expr::logical::{EvalFrame, EvalMode};
@@ -512,12 +512,18 @@ pub(super) fn push_quoted(out: &mut String, text: &str) {
 	out.push('"');
 }
 
-/// Appends the text of `ty`: `unknown`, `fact(<kind>,<source>)` or `hint(<kind>,<source>)`.
+/// Appends the text of `ty`: `unknown`, `token(<class>)`, `fact(<kind>,<source>)` or
+/// `hint(<kind>,<source>)`.
 ///
 /// The kind is the SurrealQL text of the kind. A source that names a table holds it quoted.
 pub(super) fn push_type(out: &mut String, ty: &TypeKnowledge) {
 	match ty {
 		TypeKnowledge::Unknown => out.push_str("unknown"),
+		TypeKnowledge::Token(class) => {
+			out.push_str("token(");
+			out.push_str(class.name());
+			out.push(')');
+		}
 		TypeKnowledge::Fact {
 			kind,
 			source,
@@ -625,9 +631,15 @@ pub(super) fn parse_type(c: &mut Cursor<'_>) -> Result<TypeKnowledge, ParseError
 	if c.eat("unknown") {
 		return Ok(TypeKnowledge::Unknown);
 	}
+	if c.eat("token(") {
+		let inner = c.balanced_parens()?;
+		return TokenClass::named(inner)
+			.map(TypeKnowledge::Token)
+			.ok_or_else(|| c.error(format!("unknown token class `{inner}`")));
+	}
 	let is_fact = c.eat("fact(");
 	if !is_fact && !c.eat("hint(") {
-		return Err(c.error("expected `fact(`, `hint(` or `unknown`"));
+		return Err(c.error("expected `fact(`, `hint(`, `token(` or `unknown`"));
 	}
 	let inner = c.balanced_parens()?;
 	let Some(comma) = find_top(inner, |ch| ch == ',') else {

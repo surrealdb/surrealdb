@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use surrealdb_strand::{Strand, TableName};
 
+use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::iface::{CatalogObjectKey, IndexRef, Place};
 use crate::exec::logical::pipelines::AggregateCombine;
 use crate::exec::vm::compile_cache::ObjectVersion;
@@ -469,14 +470,30 @@ pub(crate) struct CallAttrs {
 	/// The function called.
 	pub(crate) function: Function,
 	/// How many of the op's operands, at the end, are the values of the row names the call passes
-	/// rather than arguments. A user-defined, module or silo function's body reads the row it is
-	/// called for, so the call depends on the row those names resolve to where it is written. Zero
-	/// for a builtin, a script and a model.
+	/// rather than arguments. A function that reads the row it is called for, whether through its
+	/// body or by its kind, makes the call depend on the row those names resolve to where it is
+	/// written ([`passes_row_names`]). Zero for any other function.
 	pub(crate) row_names: u8,
 	/// What the physical phase read of the definition of a user-defined function. `None` before
 	/// the physical phase, for any other function, and for a call in a stored-clause region, which
 	/// is never run.
 	pub(crate) callee: Option<CalleeFacts>,
+}
+
+/// Whether a call of `function` passes row names: a user-defined, module or silo function whose
+/// body reads the row it is called for, and a builtin projection or index function, which reads
+/// the row or the match state of the scan that yields it without taking either as an argument.
+/// Without the row names such a call would take nothing from the loop it is evaluated in.
+pub(crate) fn passes_row_names(function: &Function, registry: &FunctionRegistry) -> bool {
+	match function {
+		Function::Custom(_)
+		| Function::Module(..)
+		| Function::Silo {
+			..
+		} => true,
+		Function::Normal(name) => registry.is_projection(name) || registry.is_index_function(name),
+		Function::Script(_) | Function::Model(_) => false,
+	}
 }
 
 impl CallAttrs {

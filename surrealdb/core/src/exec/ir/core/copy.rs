@@ -618,6 +618,7 @@ impl<'s, 'd> Transplant<'s, 'd> {
 			provenance: Provenance::Bound,
 			parent,
 		});
+		self.dst.note_created(new);
 		self.map.insert_op(op, new);
 		self.ops.push((op, new));
 		if stored {
@@ -674,6 +675,7 @@ impl<'s, 'd> Transplant<'s, 'd> {
 		for block in &data.blocks {
 			let held = src.blocks.get(*block).ok_or(IrError::Stale("block"))?;
 			let new = self.dst.blocks.insert(BlockData {
+				token_args: SmallVec::new(),
 				args: SmallVec::new(),
 				ops: Vec::with_capacity(held.ops.len()),
 				parent: id,

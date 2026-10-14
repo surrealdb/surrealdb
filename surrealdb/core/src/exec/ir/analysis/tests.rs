@@ -12,7 +12,7 @@ use super::row_dep::{DepCause, Invariance};
 use super::slice::{OnFailure, SliceExclusion};
 use super::{
 	certainty, effects, fallibility, footprint, frames, identity, liveness, loop_legality,
-	multiplicity, row_dep, slice, types, write_epoch,
+	multiplicity, row_dep, slice, tokens, types, write_epoch,
 };
 use crate::exec::function::FunctionRegistry;
 use crate::exec::ir::build::logical::bind_request;
@@ -28,7 +28,7 @@ use crate::exec::ir::iface::frame::FrameTable;
 use crate::exec::ir::iface::identity::AttrDigest;
 use crate::exec::ir::iface::ids::{FrameId, OpId, SnapshotId, ValueId, WriteEpoch};
 use crate::exec::ir::iface::region_kind::{FieldRole, RegionKind, RegionProperties};
-use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
+use crate::exec::ir::iface::types::{FactSource, TokenClass, TypeKnowledge};
 use crate::exec::ir::logical::ops::{FieldsShape, LogOp, LogTag, LoopKind, ProjectAttrs};
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::{RequestInput, RequestStatement};
@@ -612,10 +612,114 @@ fn data_reads_below(ir: &Ir, env: &Env, scope: OpId) -> Vec<OpId> {
 		.collect()
 }
 
+/// The class of the token that makes an answer dependent, when it is one.
+fn carried(ir: &Ir, answer: &Invariance) -> Option<TokenClass> {
+	match answer {
+		Invariance::Dependent(DepCause::BlockArg(arg)) => ir.token_class(*arg),
+		Invariance::Dependent(_) | Invariance::Invariant => None,
+	}
+}
+
+/// The reads of a table beneath `scope`: its `logical.source` ops.
+fn sources_below(ir: &Ir, scope: OpId) -> Vec<OpId> {
+	ops_below(ir, scope)
+		.into_iter()
+		.filter(|op| kind_of(ir, *op).tag() == OpTag::Logical(LogTag::Source))
+		.collect()
+}
+
+/// A read of the table a write's statement writes, in a subquery of the write, depends on the
+/// store token the loop of the write's subjects carries.
+#[tokio::test]
+async fn a_read_in_a_write_depends_on_the_store_the_write_carries() {
+	for sql in [
+		"UPDATE t SET n = (SELECT VALUE count() FROM t GROUP ALL)[0]",
+		"DELETE t WHERE n > (SELECT VALUE count() FROM t GROUP ALL)[0]",
+	] {
+		let ir = bind(sql).await;
+		let scope = loop_of(&ir, LoopKind::Write);
+		let reads = sources_below(&ir, scope);
+		assert!(!reads.is_empty(), "{sql}: the loop holds a read of `t`");
+		for read in reads {
+			let answer = row_dep::invariant_in(&ir, result_of(&ir, read), scope);
+			assert_eq!(carried(&ir, &answer), Some(TokenClass::Store), "{sql}: {answer:?}");
+		}
+	}
+}
+
+/// A write in the body of a `FOR` makes the loop carry the store, and a read of the written table
+/// in the body is not invariant.
+#[tokio::test]
+async fn a_write_in_a_for_body_is_carried_by_the_loop() {
+	let ir = bind(
+		"FOR $i IN [1, 2] { CREATE t SET n = $i; RETURN (SELECT VALUE count() FROM t GROUP ALL) }",
+	)
+	.await;
+	let scope = loop_of(&ir, LoopKind::For);
+	let body = multiplicity::loop_body(&ir, scope).expect("the loop has a body");
+	let block = ir.region(body).and_then(|info| info.blocks.first().copied()).expect("a block");
+	let carries: Vec<_> =
+		ir.token_args(block).iter().filter_map(|arg| ir.token_class(*arg)).collect();
+	assert!(carries.contains(&TokenClass::Store), "the body carries {carries:?}");
+	let reads = sources_below(&ir, scope);
+	assert!(!reads.is_empty(), "the loop holds a read of `t`");
+	for read in reads {
+		let answer = row_dep::invariant_in(&ir, result_of(&ir, read), scope);
+		assert!(matches!(answer, Invariance::Dependent(_)), "{answer:?}");
+	}
+}
+
+/// An op a pass creates in a threaded container holds no token until the container is threaded
+/// again, and no answer holds it invariant before then.
+#[tokio::test]
+async fn an_op_created_after_the_threading_is_not_invariant_until_it_is_threaded() {
+	let env = Env::new();
+	let mut ir = bind("SELECT *, string::uppercase($auth) FROM user").await;
+	let select = loop_of(&ir, LoopKind::Select);
+	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
+	let mut facts = FactCache::new();
+	let (frame, snapshot) = {
+		let data = ir.op(call).expect("the call exists");
+		(data.frame, data.snapshot)
+	};
+	let created = Rewriter::new(&mut ir, &mut facts)
+		.create(
+			InsertPoint::After(call),
+			OpSpec {
+				kind: OpKind::Expr(ExprOp::Literal(Box::new(Value::from(1)))),
+				operands: Default::default(),
+				results: vec![TypeKnowledge::Unknown].into(),
+				frame,
+				snapshot,
+				loc: Location {
+					stmt: 0,
+					span: None,
+					origin: LocOrigin::Synthesized,
+				},
+			},
+		)
+		.expect("the literal is created");
+	assert_eq!(
+		row_dep::invariant_in(&ir, result_of(&ir, created), select),
+		Invariance::Dependent(DepCause::Opaque(created)),
+		"the literal holds no token"
+	);
+	assert_eq!(
+		row_dep::invariant_in(&ir, result_of(&ir, call), select),
+		Invariance::Invariant,
+		"an op that is threaded is judged as before"
+	);
+	tokens::rethread(&mut ir, &mut facts, &env.cx()).expect("the container is threaded again");
+	assert_eq!(
+		row_dep::invariant_in(&ir, result_of(&ir, created), select),
+		Invariance::Invariant,
+		"a literal depends on nothing the loop defines"
+	);
+}
+
 #[tokio::test]
 async fn row_dep_cases() {
 	let env = Env::new();
-	let cx = env.cx();
 
 	// A call of a pure builtin over a value that is fixed for the statement is invariant in the
 	// select loop.
@@ -623,45 +727,55 @@ async fn row_dep_cases() {
 	let select = loop_of(&ir, LoopKind::Select);
 	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
 	assert_eq!(
-		row_dep::invariant_in_with(&ir, &mut FactCache::new(), &cx, result_of(&ir, call), select),
+		row_dep::invariant_in(&ir, result_of(&ir, call), select),
 		Invariance::Invariant,
 		"`$auth` is the same for every row"
 	);
-	assert_eq!(
-		row_dep::invariant_in(&ir, &mut FactCache::new(), result_of(&ir, call), select),
-		Invariance::Invariant,
-		"the frozen entry point answers under the default context"
-	);
 
-	// A call of a function the container holds no body for takes the row it is called for, so it
-	// varies with the row even over a fixed value.
+	// A call of a function the container holds no body for may do anything, so it is not
+	// invariant even over a fixed value.
 	let ir = bind("SELECT *, fn::f($auth) FROM user").await;
 	let select = loop_of(&ir, LoopKind::Select);
 	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
-	let answer =
-		row_dep::invariant_in_with(&ir, &mut FactCache::new(), &cx, result_of(&ir, call), select);
-	assert!(matches!(answer, Invariance::Dependent(DepCause::BlockArg(_))), "{answer:?}");
+	let answer = row_dep::invariant_in(&ir, result_of(&ir, call), select);
+	assert!(matches!(answer, Invariance::Dependent(_)), "{answer:?}");
 
 	// A call that takes the row varies with it.
 	let ir = bind("SELECT *, fn::f($this) FROM user").await;
 	let select = loop_of(&ir, LoopKind::Select);
 	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
-	let answer =
-		row_dep::invariant_in_with(&ir, &mut FactCache::new(), &cx, result_of(&ir, call), select);
+	let answer = row_dep::invariant_in(&ir, result_of(&ir, call), select);
 	assert!(matches!(answer, Invariance::Dependent(DepCause::BlockArg(_))), "{answer:?}");
 
-	// A draw of entropy is never one value for every row.
+	// A projection function and an index function read the row the loop visits, though neither
+	// takes it as an argument, so neither is one value for every row.
+	for sql in [
+		"SELECT *, type::field('a') FROM user",
+		"SELECT *, type::fields(['a']) FROM user",
+		"SELECT *, search::score(1) FROM user WHERE a @1@ 'x'",
+		"SELECT *, search::highlight('<b>', '</b>', 1) FROM user WHERE a @1@ 'x'",
+		"SELECT *, search::offsets(1) FROM user WHERE a @1@ 'x'",
+	] {
+		let ir = bind(sql).await;
+		let select = loop_of(&ir, LoopKind::Select);
+		let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
+		let answer = row_dep::invariant_in(&ir, result_of(&ir, call), select);
+		assert!(
+			matches!(answer, Invariance::Dependent(DepCause::BlockArg(_))),
+			"{sql}: {answer:?}"
+		);
+	}
+
+	// A draw of entropy is never one value for every row: it takes the random token the loop
+	// carries.
 	let ir = bind("SELECT *, rand() FROM user").await;
 	let select = loop_of(&ir, LoopKind::Select);
 	let call = first_tagged(&ir, OpTag::Expr(ExprTag::Call));
-	let answer =
-		row_dep::invariant_in_with(&ir, &mut FactCache::new(), &cx, result_of(&ir, call), select);
-	let Invariance::Dependent(DepCause::Effect(flags)) = answer else {
-		panic!("a draw of entropy is not invariant: {answer:?}");
-	};
-	assert!(flags.contains(EffectSet::ENTROPY), "{flags:?}");
+	let answer = row_dep::invariant_in(&ir, result_of(&ir, call), select);
+	assert_eq!(carried(&ir, &answer), Some(TokenClass::Rng), "{answer:?}");
 
-	// A read of stored data that a write of the statement reaches is not one value.
+	// A read of stored data in a loop whose body writes is not one value: it takes the store
+	// token the loop carries.
 	let ir = bind(
 		"CREATE t:1 SET n = 1; \
 		 SELECT VALUE [t:1.n, (UPDATE t:1 SET n += 1 RETURN NONE)] FROM [1, 2];",
@@ -670,16 +784,22 @@ async fn row_dep_cases() {
 	let select = loop_of(&ir, LoopKind::Select);
 	let reads = data_reads_below(&ir, &env, select);
 	assert!(!reads.is_empty(), "the projection reads `t:1.n`");
-	let answer = row_dep::invariant_in_with(
-		&ir,
-		&mut FactCache::new(),
-		&cx,
-		result_of(&ir, reads[0]),
-		select,
-	);
-	assert!(matches!(answer, Invariance::Dependent(DepCause::ReachedByWrite(_))), "{answer:?}");
+	let answer = row_dep::invariant_in(&ir, result_of(&ir, reads[0]), select);
+	assert_eq!(carried(&ir, &answer), Some(TokenClass::Store), "{answer:?}");
 
-	// A catalog read in a statement that changes the catalog is never one value.
+	// A read of stored data in a loop whose body writes nothing is one value, whatever an earlier
+	// statement of the request wrote.
+	let ir = bind("CREATE t:1 SET n = 1; SELECT VALUE (SELECT VALUE n FROM t) FROM [1, 2];").await;
+	let select = loop_of(&ir, LoopKind::Select);
+	let reads = data_reads_below(&ir, &env, select);
+	assert!(!reads.is_empty(), "the projection reads `t`");
+	assert_eq!(
+		row_dep::invariant_in(&ir, result_of(&ir, reads[0]), select),
+		Invariance::Invariant,
+		"the read takes the token the statement starts from"
+	);
+
+	// A catalog read in a loop whose body changes the catalog is never one value.
 	let ir = bind(
 		"DEFINE PARAM $q VALUE 1; \
 		 SELECT VALUE [$q + 1, (DEFINE PARAM OVERWRITE $q VALUE $q + 5), $q + 1] FROM [1, 2];",
@@ -694,14 +814,26 @@ async fn row_dep_cases() {
 		})
 		.collect();
 	assert!(!reads.is_empty(), "the projection reads `$q`");
-	let answer = row_dep::invariant_in_with(
-		&ir,
-		&mut FactCache::new(),
-		&cx,
-		result_of(&ir, reads[0]),
-		select,
+	let answer = row_dep::invariant_in(&ir, result_of(&ir, reads[0]), select);
+	assert_eq!(carried(&ir, &answer), Some(TokenClass::Catalog), "{answer:?}");
+
+	// A catalog change before the loop is outside it: the read after it takes the token the
+	// change produced, which the loop does not define.
+	let ir = bind("{ DEFINE PARAM $q VALUE 1; RETURN (SELECT VALUE $q + 1 FROM [1, 2]); }").await;
+	let select = loop_of(&ir, LoopKind::Select);
+	let reads: Vec<OpId> = ops_below(&ir, select)
+		.into_iter()
+		.filter(|op| {
+			let tag = kind_of(&ir, *op).tag();
+			tag == OpTag::Expr(ExprTag::CatalogParam) || tag == OpTag::Expr(ExprTag::FreeParam)
+		})
+		.collect();
+	assert!(!reads.is_empty(), "the projection reads `$q`");
+	assert_eq!(
+		row_dep::invariant_in(&ir, result_of(&ir, reads[0]), select),
+		Invariance::Invariant,
+		"the change precedes the loop"
 	);
-	assert!(matches!(answer, Invariance::Dependent(DepCause::CatalogChange(_))), "{answer:?}");
 
 	// A value is invariant in every loop it does not depend on, and the outermost is reported.
 	let ir = bind("FOR $i IN [1, 2] { FOR $j IN [3, 4] { RETURN <int>$p + 1 } }").await;
@@ -711,7 +843,7 @@ async fn row_dep_cases() {
 		.last()
 		.expect("the body adds one to the cast");
 	assert_eq!(
-		row_dep::outermost_scope(&ir, &mut FactCache::new(), result_of(&ir, sum)),
+		row_dep::outermost_scope(&ir, result_of(&ir, sum)),
 		Some(loops[0]),
 		"the sum depends on neither element"
 	);
@@ -720,10 +852,28 @@ async fn row_dep_cases() {
 		.last()
 		.expect("the body adds one to the element");
 	assert_eq!(
-		row_dep::outermost_scope(&ir, &mut FactCache::new(), result_of(&ir, sum)),
+		row_dep::outermost_scope(&ir, result_of(&ir, sum)),
 		None,
 		"the sum depends on the inner element"
 	);
+}
+
+#[tokio::test]
+async fn reads_that_take_different_tokens_are_two_values() {
+	let env = Env::new();
+	let ir = bind(
+		"{ LET $a = (SELECT * FROM t); LET $b = (SELECT * FROM t); \
+		   CREATE t:1 SET n = 1; LET $c = (SELECT * FROM t); }",
+	)
+	.await;
+	let mut facts = FactCache::new();
+	let sources = ops_tagged(&ir, OpTag::Logical(LogTag::Source));
+	assert_eq!(sources.len(), 3, "the three reads of `t`");
+	let keys: Vec<_> =
+		sources.iter().map(|op| identity::key_with(&ir, &mut facts, &env.cx(), *op)).collect();
+	assert_eq!(keys[0].tokens.len(), 1, "a read takes the store token");
+	assert_eq!(keys[0].tokens, keys[1].tokens, "no write stands between the first two reads");
+	assert_ne!(keys[1].tokens, keys[2].tokens, "the write stands between the last two");
 }
 
 /// The stored fields a demand names, or `None` for the whole row.

@@ -24,7 +24,7 @@ use super::ir::{Freed, Ir, held_ids};
 use super::location::Location;
 use super::op::OpData;
 use super::region::RegionData;
-use super::value::{Use, ValueData, ValueDef};
+use super::value::{TOKEN_SLOT_BASE, Use, ValueData, ValueDef};
 use crate::exec::ir::analysis::effects;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::ExprOp;
@@ -32,8 +32,8 @@ use crate::exec::ir::iface::conversion::{EliminationReason, Phase};
 use crate::exec::ir::iface::fold::{FoldOutcome, FoldRequest};
 use crate::exec::ir::iface::frame::{AuthorityFrame, Snapshot};
 use crate::exec::ir::iface::ids::{BlockId, FrameId, OpId, RegionId, SnapshotId, ValueId};
-use crate::exec::ir::iface::region_kind::RegionKind;
-use crate::exec::ir::iface::types::TypeKnowledge;
+use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties};
+use crate::exec::ir::iface::types::{TokenClass, TypeKnowledge};
 use crate::exec::ir::logical::ops::LogOp;
 use crate::exec::ir::op_kind::{OpKind, Terminator};
 use crate::exec::ir::phys::ops::PhysOp;
@@ -198,6 +198,7 @@ impl<'a> Rewriter<'a> {
 			provenance,
 			parent: block,
 		});
+		self.ir.note_created(op);
 		for (at, ty) in results.into_iter().enumerate() {
 			let value = self.ir.values.insert(ValueData {
 				def: ValueDef::OpResult {
@@ -268,6 +269,7 @@ impl<'a> Rewriter<'a> {
 		});
 		let block = self.ir.blocks.insert(BlockData {
 			args: SmallVec::new(),
+			token_args: SmallVec::new(),
 			ops: Vec::new(),
 			parent: region,
 		});
@@ -293,6 +295,199 @@ impl<'a> Rewriter<'a> {
 		}
 		self.ir.bump_with_ancestors(owner);
 		Ok((region, block))
+	}
+
+	/// Gives `op` the token `value` as its next token operand and answers its slot.
+	///
+	/// The tokens an op takes are held apart from its data operands and are not identity, so the
+	/// generation of the op does not move.
+	pub(crate) fn add_token_operand(&mut self, op: OpId, value: ValueId) -> Result<(), IrError> {
+		if self.ir.ops.get(op).is_none() {
+			return Err(IrError::Stale("op"));
+		}
+		if self.ir.token_class(value).is_none() {
+			return Err(IrError::Refused("token operand"));
+		}
+		let tokens = self.ir.op_tokens.entry(op).ok_or(IrError::Stale("op"))?.or_default();
+		let slot = tokens.operands.len();
+		if slot >= usize::from(u16::MAX - TOKEN_SLOT_BASE) {
+			return Err(IrError::Capacity("token operands"));
+		}
+		tokens.operands.push(value);
+		if let Some(held) = self.ir.values.get_mut(value) {
+			held.uses.push(Use {
+				user: op,
+				operand: TOKEN_SLOT_BASE + index_u16(slot),
+			});
+		}
+		Ok(())
+	}
+
+	/// Gives `op` a new token of `class` as its next token result and answers it.
+	pub(crate) fn add_token_result(
+		&mut self,
+		op: OpId,
+		class: TokenClass,
+	) -> Result<ValueId, IrError> {
+		if self.ir.ops.get(op).is_none() {
+			return Err(IrError::Stale("op"));
+		}
+		let tokens = self.ir.op_tokens.entry(op).ok_or(IrError::Stale("op"))?.or_default();
+		let slot = tokens.results.len();
+		if slot >= usize::from(u16::MAX - TOKEN_SLOT_BASE) {
+			return Err(IrError::Capacity("token results"));
+		}
+		let value = self.ir.values.insert(ValueData {
+			def: ValueDef::OpResult {
+				op,
+				index: TOKEN_SLOT_BASE + index_u16(slot),
+			},
+			ty: TypeKnowledge::Token(class),
+			uses: SmallVec::new(),
+			hint_name: None,
+		});
+		if let Some(tokens) = self.ir.op_tokens.get_mut(op) {
+			tokens.results.push(value);
+		}
+		Ok(value)
+	}
+
+	/// Gives `block` a new token of `class` as its next token argument and answers it.
+	pub(crate) fn add_token_arg(
+		&mut self,
+		block: BlockId,
+		class: TokenClass,
+	) -> Result<ValueId, IrError> {
+		let slot = self.ir.blocks.get(block).ok_or(IrError::Stale("block"))?.token_args.len();
+		if slot >= usize::from(u16::MAX - TOKEN_SLOT_BASE) {
+			return Err(IrError::Capacity("token arguments"));
+		}
+		let value = self.ir.values.insert(ValueData {
+			def: ValueDef::BlockArg {
+				block,
+				index: TOKEN_SLOT_BASE + index_u16(slot),
+			},
+			ty: TypeKnowledge::Token(class),
+			uses: SmallVec::new(),
+			hint_name: None,
+		});
+		if let Some(held) = self.ir.blocks.get_mut(block) {
+			held.token_args.push(value);
+		}
+		Ok(value)
+	}
+
+	/// Records that `op` has been threaded: it holds the tokens its effects call for.
+	pub(crate) fn mark_threaded(&mut self, op: OpId) {
+		self.ir.untokened.remove(op);
+	}
+
+	/// States whether effect tokens are threaded through the container
+	/// ([`Ir::is_threaded`](super::ir::Ir)).
+	pub(crate) fn set_threaded(&mut self, threaded: bool) {
+		self.ir.threaded = threaded;
+		if !threaded {
+			self.ir.untokened.clear();
+		}
+	}
+
+	/// Removes every token of the ops and blocks at and beneath `region`: the token operands, the
+	/// token results and the token block arguments. A token is defined and read within one
+	/// threaded region, so no use outside it is left behind. In a threaded container the ops hold
+	/// no tokens afterwards ([`Ir::holds_no_tokens`](super::ir::Ir)) until they are threaded
+	/// again.
+	pub(crate) fn strip_tokens(&mut self, region: RegionId) {
+		let mut ops: Vec<OpId> = Vec::new();
+		let mut blocks: Vec<BlockId> = Vec::new();
+		self.collect_scope(region, &mut ops, &mut blocks);
+		for op in &ops {
+			self.drop_token_operand_uses(*op);
+		}
+		for op in &ops {
+			self.ir.note_created(*op);
+			let Some(tokens) = self.ir.op_tokens.remove(*op) else {
+				continue;
+			};
+			for value in &tokens.results {
+				self.ir.values.remove(*value);
+				self.facts.invalidate_value(*value);
+			}
+		}
+		for block in &blocks {
+			let args = match self.ir.blocks.get_mut(*block) {
+				Some(held) => ::core::mem::take(&mut held.token_args),
+				None => continue,
+			};
+			for value in &args {
+				self.ir.values.remove(*value);
+				self.facts.invalidate_value(*value);
+			}
+		}
+	}
+
+	/// Every op and block at and beneath `region`.
+	fn collect_scope(&self, region: RegionId, ops: &mut Vec<OpId>, blocks: &mut Vec<BlockId>) {
+		let Some(data) = self.ir.regions.get(region) else {
+			return;
+		};
+		for block in &data.blocks {
+			blocks.push(*block);
+			for op in self.ir.blocks.get(*block).map_or(&[][..], |held| &held.ops) {
+				ops.push(*op);
+				for nested in self.ir.ops.get(*op).map_or(&[][..], |held| &held.regions) {
+					self.collect_scope(*nested, ops, blocks);
+				}
+			}
+		}
+	}
+
+	/// Removes the uses `op`'s token operands hold on their values, and the operands.
+	fn drop_token_operand_uses(&mut self, op: OpId) {
+		let Some(tokens) = self.ir.op_tokens.get_mut(op) else {
+			return;
+		};
+		let operands = ::core::mem::take(&mut tokens.operands);
+		for (slot, operand) in operands.iter().enumerate() {
+			let Some(value) = self.ir.values.get_mut(*operand) else {
+				continue;
+			};
+			let at = TOKEN_SLOT_BASE + index_u16(slot);
+			if let Some(held) = value.uses.iter().position(|u| u.user == op && u.operand == at) {
+				value.uses.remove(held);
+			}
+		}
+	}
+
+	/// The token `op` takes of the class of its token result `result`.
+	fn incoming_of(&self, op: OpId, result: ValueId) -> Option<ValueId> {
+		let class = self.ir.token_class(result)?;
+		self.ir.token_of_class(self.ir.token_operands(op), class)
+	}
+
+	/// Fails when a token `op` produces is read and `op` takes no token of its class to stand in
+	/// for it. An op takes the class of every token it produces, so this holds for a well-formed
+	/// container.
+	fn check_token_results_forwardable(&self, op: OpId) -> Result<(), IrError> {
+		for result in self.ir.token_results(op) {
+			if !self.ir.uses(*result).is_empty() && self.incoming_of(op, *result).is_none() {
+				return Err(IrError::HasUses(op));
+			}
+		}
+		Ok(())
+	}
+
+	/// Makes every read of a token `op` produces read the token `op` takes of that class, so
+	/// erasing or replacing `op` leaves the chain of every class unbroken.
+	fn forward_token_results(&mut self, op: OpId) -> Result<(), IrError> {
+		let results: SmallVec<[ValueId; 2]> = self.ir.token_results(op).iter().copied().collect();
+		for result in results {
+			if self.ir.uses(result).is_empty() {
+				continue;
+			}
+			let incoming = self.incoming_of(op, result).ok_or(IrError::HasUses(op))?;
+			self.replace_all_uses(result, incoming)?;
+		}
+		Ok(())
 	}
 
 	/// Makes the `index`th operand of `op` read `to`. Reading the value it already reads changes
@@ -343,6 +538,17 @@ impl<'a> Rewriter<'a> {
 			None => SmallVec::new(),
 		};
 		for held in &moved {
+			if let Some(slot) = held.token_slot() {
+				if let Some(operand) = self
+					.ir
+					.op_tokens
+					.get_mut(held.user)
+					.and_then(|tokens| tokens.operands.get_mut(slot))
+				{
+					*operand = to;
+				}
+				continue;
+			}
 			if let Some(data) = self.ir.ops.get_mut(held.user)
 				&& let Some(operand) = data.operands.get_mut(usize::from(held.operand))
 			{
@@ -417,6 +623,7 @@ impl<'a> Rewriter<'a> {
 			}
 		}
 		let subtree = self.erasable_subtree(op, true)?;
+		self.check_token_results_forwardable(op)?;
 		let ids: SmallVec<[OpId; 2]> = held_ids(&data.provenance, op).collect();
 		let reason = with
 			.iter()
@@ -425,6 +632,7 @@ impl<'a> Rewriter<'a> {
 		for (result, value) in results.iter().zip(with) {
 			self.replace_all_uses(*result, *value)?;
 		}
+		self.forward_token_results(op)?;
 		for value in with {
 			self.merge_provenance_into_definer(*value, &ids);
 		}
@@ -447,6 +655,8 @@ impl<'a> Rewriter<'a> {
 	pub(crate) fn erase(&mut self, op: OpId, reason: EliminationReason) -> Result<(), IrError> {
 		let parent = self.ir.ops.get(op).ok_or(IrError::Stale("op"))?.parent;
 		let subtree = self.erasable_subtree(op, false)?;
+		self.check_token_results_forwardable(op)?;
+		self.forward_token_results(op)?;
 		for member in &subtree {
 			self.drop_operand_uses(*member);
 		}
@@ -467,6 +677,12 @@ impl<'a> Rewriter<'a> {
 	/// top region or does not hold one block ending in a yield, `args` does not match the block's
 	/// arguments or names a dangling value or one defined inside `region`, `at` lies inside
 	/// `region`, or the yield's results are used.
+	///
+	/// A token the region's ops read is replaced by the token the owner takes of its class. When
+	/// the region runs after the owner's effect ([`effects::follows_effect`]) it is replaced by
+	/// the token the owner produces instead, so the reads still see the effect; the call is
+	/// refused when that token is not visible at `at`, which a point before the owner never
+	/// sees. It is also refused when the owner holds no token of the class.
 	pub(crate) fn inline_region(
 		&mut self,
 		region: RegionId,
@@ -511,8 +727,35 @@ impl<'a> Rewriter<'a> {
 			return Err(IrError::HasUses(terminator));
 		}
 		let formals = block.args.clone();
+		let token_formals = block.token_args.clone();
+		let follows =
+			self.ir.ops.get(owner).is_some_and(|data| effects::follows_effect(&data.kind));
+		let mut standing_in: SmallVec<[(ValueId, ValueId); 2]> = SmallVec::new();
+		for formal in &token_formals {
+			if self.ir.uses(*formal).is_empty() {
+				continue;
+			}
+			let class =
+				self.ir.token_class(*formal).ok_or(IrError::Refused("inline_region token"))?;
+			let stands_in = match self.ir.token_of_class(self.ir.token_results(owner), class) {
+				Some(produced) if follows => {
+					if !self.visible_at(produced, dest, index) {
+						return Err(IrError::Refused("inline_region token"));
+					}
+					produced
+				}
+				_ => self
+					.ir
+					.token_of_class(self.ir.token_operands(owner), class)
+					.ok_or(IrError::Refused("inline_region token"))?,
+			};
+			standing_in.push((*formal, stands_in));
+		}
 		for (formal, actual) in formals.iter().zip(args) {
 			self.replace_all_uses(*formal, *actual)?;
+		}
+		for (formal, incoming) in standing_in {
+			self.replace_all_uses(formal, incoming)?;
 		}
 		let yielded: SmallVec<[ValueId; 2]> = match self.ir.ops.get(terminator) {
 			Some(data) => data.operands.iter().copied().collect(),
@@ -541,7 +784,7 @@ impl<'a> Rewriter<'a> {
 		}
 		self.ir.regions.remove(region);
 		self.ir.blocks.remove(source);
-		for formal in &formals {
+		for formal in formals.iter().chain(&token_formals) {
 			self.ir.values.remove(*formal);
 			self.facts.invalidate_value(*formal);
 		}
@@ -551,6 +794,34 @@ impl<'a> Rewriter<'a> {
 		self.ir.bump_enclosing(dest);
 		self.ir.bump_with_ancestors(owner);
 		Ok(yielded)
+	}
+
+	/// Whether `value` is visible to an op inserted at position `index` of `block`: it is an
+	/// argument of an enclosing block, or a result of an op that stands before the position, or
+	/// before an op enclosing it, in an enclosing block. A value outside a region isolated from
+	/// above is not visible inside it.
+	fn visible_at(&self, value: ValueId, block: BlockId, index: usize) -> bool {
+		let Some(held) = self.ir.blocks.get(block) else {
+			return false;
+		};
+		if let Some(next) = held.ops.get(index) {
+			return self.ir.dominates(value, *next);
+		}
+		match self.ir.values.get(value).map(|data| data.def) {
+			Some(ValueDef::OpResult {
+				op,
+				..
+			}) if self.ir.ops.get(op).is_some_and(|data| data.parent == block) => true,
+			Some(ValueDef::BlockArg {
+				block: defined,
+				..
+			}) if defined == block => true,
+			Some(_) => self.ir.regions.get(held.parent).is_some_and(|region| {
+				!region.kind.isolated_from_above()
+					&& region.parent.is_some_and(|enclosing| self.ir.dominates(value, enclosing))
+			}),
+			None => false,
+		}
 	}
 
 	/// Makes `new_owner` the owner of `region`, appended after the regions it already owns.
@@ -917,6 +1188,18 @@ impl<'a> Rewriter<'a> {
 				continue;
 			};
 			let at = index_u16(at);
+			if let Some(held) = value.uses.iter().position(|u| u.user == op && u.operand == at) {
+				value.uses.remove(held);
+			}
+		}
+		let Some(tokens) = self.ir.op_tokens.get(op) else {
+			return;
+		};
+		for (slot, operand) in tokens.operands.iter().enumerate() {
+			let Some(value) = self.ir.values.get_mut(*operand) else {
+				continue;
+			};
+			let at = TOKEN_SLOT_BASE + index_u16(slot);
 			if let Some(held) = value.uses.iter().position(|u| u.user == op && u.operand == at) {
 				value.uses.remove(held);
 			}

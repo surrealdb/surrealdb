@@ -21,9 +21,9 @@ use super::facts::FactCache;
 use super::ir::{Ir, held_ids};
 use super::location::LocOrigin;
 use super::op::OpData;
-use super::value::{Use, ValueDef};
+use super::value::{TOKEN_SLOT_BASE, Use, ValueDef};
 use super::walk::{ControlTarget, control_target};
-use crate::exec::ir::analysis::{effects, fallibility};
+use crate::exec::ir::analysis::{effects, fallibility, tokens};
 use crate::exec::ir::iface::catalog::EffectCx;
 use crate::exec::ir::iface::choose::{
 	ArmBody, ChooseOrigin, ChooseSpec, GenericArm, Guard, MAX_CHOOSE_ARMS,
@@ -98,6 +98,10 @@ pub(crate) enum VerifyRule {
 	/// No op of a stored-clause region changed after bind, and its digest equals the digest of
 	/// the clause its definition template holds.
 	StoredClause,
+	/// In a container with effect tokens threaded through it, every op takes the tokens of the
+	/// classes its effects consume and produces those it changes, and every region receives the
+	/// token arguments its kind calls for ([`tokens::disagreement`]).
+	TokenAgreement,
 	/// A dialect's own per-op rules.
 	PerOp,
 }
@@ -122,7 +126,7 @@ impl fmt::Display for VerifyError {
 }
 
 /// The number of [`VerifyRule`] variants.
-const RULE_COUNT: usize = 18;
+const RULE_COUNT: usize = 19;
 
 /// The position of `rule` in declaration order. Exhaustive, so a new rule fails to compile until
 /// it is placed.
@@ -146,7 +150,8 @@ const fn rule_index(rule: VerifyRule) -> usize {
 		VerifyRule::LegalityRecompute => 14,
 		VerifyRule::RegionConstraints => 15,
 		VerifyRule::StoredClause => 16,
-		VerifyRule::PerOp => 17,
+		VerifyRule::TokenAgreement => 17,
+		VerifyRule::PerOp => 18,
 	}
 }
 
@@ -350,6 +355,7 @@ struct Tally {
 struct Walk<'a> {
 	ir: &'a Ir,
 	facts: &'a mut FactCache,
+	cx: &'a EffectCx<'a>,
 	target: &'a LegalityTarget,
 	/// Whether this is the verification that ends the physical phase, which alone checks that
 	/// conversion kept every logical id and placed every pipeline.
@@ -368,10 +374,17 @@ struct Walk<'a> {
 }
 
 impl<'a> Walk<'a> {
-	fn new(ir: &'a Ir, facts: &'a mut FactCache, at: VerifyAt, target: &'a LegalityTarget) -> Self {
+	fn new(
+		ir: &'a Ir,
+		facts: &'a mut FactCache,
+		at: VerifyAt,
+		target: &'a LegalityTarget,
+		cx: &'a EffectCx<'a>,
+	) -> Self {
 		Self {
 			ir,
 			facts,
+			cx,
 			target,
 			physical_boundary: matches!(at, VerifyAt::PhaseBoundary(Phase::Physical)),
 			first: ::core::array::from_fn(|_| None),
@@ -416,10 +429,13 @@ impl<'a> Walk<'a> {
 		}
 		self.tally.entry(value).or_default().checked = true;
 		for held in &data.uses {
-			let reads = ir
-				.op(held.user)
-				.and_then(|user| user.operands.get(usize::from(held.operand)))
-				.is_some_and(|read| *read == value);
+			let reads = match held.token_slot() {
+				Some(slot) => ir.token_operands(held.user).get(slot),
+				None => {
+					ir.op(held.user).and_then(|user| user.operands.get(usize::from(held.operand)))
+				}
+			}
+			.is_some_and(|read| *read == value);
 			if !reads {
 				self.fail(VerifyRule::UseList, Some(held.user), || {
 					format!(
@@ -560,6 +576,18 @@ impl<'a> Walk<'a> {
 			);
 			self.scope.insert(*arg);
 		}
+		for (slot, arg) in data.token_args.iter().enumerate() {
+			let index = TOKEN_SLOT_BASE.saturating_add(u16::try_from(slot).unwrap_or(u16::MAX));
+			self.check_uses(
+				*arg,
+				ValueDef::BlockArg {
+					block,
+					index,
+				},
+				held.parent,
+			);
+			self.scope.insert(*arg);
+		}
 		let mut terminators = 0usize;
 		let mut ends_with_terminator = false;
 		for op in &data.ops {
@@ -629,6 +657,21 @@ impl<'a> Walk<'a> {
 			if !self.scope.contains(*value) {
 				self.fail(VerifyRule::Dominance, Some(id), || {
 					format!("operand {index}, {value:?}, is not defined before the op")
+				});
+			}
+		}
+
+		for (slot, value) in ir.token_operands(id).iter().enumerate() {
+			if ir.value(*value).is_none() {
+				self.fail(VerifyRule::UseList, Some(id), || {
+					format!("token operand {slot} names no value")
+				});
+				continue;
+			}
+			self.tally.entry(*value).or_default().read += 1;
+			if !self.scope.contains(*value) {
+				self.fail(VerifyRule::Dominance, Some(id), || {
+					format!("token operand {slot}, {value:?}, is not defined before the op")
 				});
 			}
 		}
@@ -734,6 +777,18 @@ impl<'a> Walk<'a> {
 
 		for (index, value) in data.results.iter().enumerate() {
 			let index = u16::try_from(index).unwrap_or(u16::MAX);
+			self.check_uses(
+				*value,
+				ValueDef::OpResult {
+					op: id,
+					index,
+				},
+				Some(id),
+			);
+			self.scope.insert(*value);
+		}
+		for (slot, value) in ir.token_results(id).iter().enumerate() {
+			let index = TOKEN_SLOT_BASE.saturating_add(u16::try_from(slot).unwrap_or(u16::MAX));
 			self.check_uses(
 				*value,
 				ValueDef::OpResult {
@@ -888,6 +943,18 @@ impl<'a> Walk<'a> {
 		}
 	}
 
+	/// Checks, in a container with tokens threaded through it, that every op takes and produces the
+	/// tokens its effects call for.
+	fn finish_tokens(&mut self) {
+		let ir = self.ir;
+		if !ir.is_threaded() {
+			return;
+		}
+		if let Some((op, detail)) = tokens::disagreement(ir, self.facts, self.cx) {
+			self.fail(VerifyRule::TokenAgreement, op, || detail);
+		}
+	}
+
 	/// Checks that every stored-clause region sealed when the container left [`Phase::Bound`]
 	/// is still there and holds the number of ops it held: an op removed from, or moved out of,
 	/// stored code changes no seal of the ops that remain.
@@ -1038,13 +1105,15 @@ fn run<'a>(
 	facts: &'a mut FactCache,
 	at: VerifyAt,
 	target: &'a LegalityTarget,
+	cx: &'a EffectCx<'a>,
 ) -> Walk<'a> {
-	let mut walk = Walk::new(ir, facts, at, target);
+	let mut walk = Walk::new(ir, facts, at, target, cx);
 	walk.region(None, ir.top());
 	if walk.stopped {
 		return walk;
 	}
 	walk.finish_uses();
+	walk.finish_tokens();
 	walk.finish_stored_regions();
 	walk.finish_physical_boundary();
 	walk.finish_region_constraints();
@@ -1119,7 +1188,8 @@ pub(super) fn violation_of(
 	target: &LegalityTarget,
 	rule: VerifyRule,
 ) -> Option<VerifyError> {
-	let mut walk = run(ir, facts, at, target);
+	let cx = crate::exec::ir::analysis::cx::default_cx(ir);
+	let mut walk = run(ir, facts, at, target, &cx);
 	walk.first.get_mut(rule_index(rule)).and_then(Option::take)
 }
 
@@ -1139,17 +1209,18 @@ pub(super) fn violation_of(
 /// rule is violated. A container that cannot be walked, such as one that reaches an op twice, is
 /// reported and never passed, and so is one that holds a live op no block lists.
 ///
-/// `_cx` is the effect context the caller analyses with. The fallibility and effects the walk
-/// reads come from `effects::of` and `fallibility::of`, which answer from the builtin function
-/// registry whatever `_cx` carries.
+/// `cx` is the effect context the caller analyses with. The agreement of the tokens of a threaded
+/// container with its effects is judged under it. The fallibility and effects the other rules read
+/// come from `effects::of` and `fallibility::of`, which answer from the builtin function registry
+/// whatever `cx` carries.
 pub(crate) fn verify(
 	ir: &Ir,
 	facts: &mut FactCache,
 	at: VerifyAt,
 	target: &LegalityTarget,
-	_cx: &EffectCx<'_>,
+	cx: &EffectCx<'_>,
 ) -> Result<(), VerifyError> {
-	match run(ir, facts, at, target).into_first() {
+	match run(ir, facts, at, target, cx).into_first() {
 		Some(error) => Err(error),
 		None => Ok(()),
 	}
@@ -1179,6 +1250,7 @@ mod tests {
 		VerifyRule::LegalityRecompute,
 		VerifyRule::RegionConstraints,
 		VerifyRule::StoredClause,
+		VerifyRule::TokenAgreement,
 		VerifyRule::PerOp,
 	];
 
@@ -1198,7 +1270,8 @@ mod tests {
 			RegionKind::Request,
 		);
 		let mut facts = FactCache::new();
-		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE);
+		let cx = crate::exec::ir::analysis::cx::default_cx(&ir);
+		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE, &cx);
 		for rule in [VerifyRule::PerOp, VerifyRule::Arity, VerifyRule::Terminator] {
 			walk.fail(rule, None, || format!("{rule:?}"));
 		}
@@ -1217,7 +1290,8 @@ mod tests {
 			RegionKind::Request,
 		);
 		let mut facts = FactCache::new();
-		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE);
+		let cx = crate::exec::ir::analysis::cx::default_cx(&ir);
+		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE, &cx);
 		let at = OpId::default();
 		walk.file(
 			VerifyError {
@@ -1242,7 +1316,8 @@ mod tests {
 			RegionKind::Request,
 		);
 		let mut facts = FactCache::new();
-		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE);
+		let cx = crate::exec::ir::analysis::cx::default_cx(&ir);
+		let mut walk = Walk::new(&ir, &mut facts, VerifyAt::AfterPass("test"), &LOGICAL_PHASE, &cx);
 		walk.file(
 			VerifyError {
 				op: None,

@@ -24,6 +24,9 @@ pub(crate) struct ValueKey {
 	/// The structural digest of the op's identity-bearing attributes only.
 	pub(crate) attrs: AttrDigest,
 	pub(crate) operands: SmallVec<[ValueId; 4]>,
+	/// The effect tokens the op takes, which order it against the writes of its statement: two ops
+	/// that take different tokens are two values.
+	pub(crate) tokens: SmallVec<[ValueId; 2]>,
 	pub(crate) frame: FrameId,
 	pub(crate) snapshot: SnapshotId,
 	/// The write epoch of an op that reads stored data.

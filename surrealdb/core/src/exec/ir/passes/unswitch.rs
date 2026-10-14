@@ -18,7 +18,7 @@ use smallvec::{SmallVec, smallvec};
 use super::driver::{LoCx, LoPass, PassConfig, PassReport};
 use super::rehome::{RehomeMode, and_chain, can_rehome, rehome_tree};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
-use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in_with};
+use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -641,7 +641,7 @@ fn condition_of(
 	if !consumed_as_boolean(ir, value) {
 		return None;
 	}
-	if !matches!(invariant_in_with(ir, facts, cx, value, loop_op), Invariance::Invariant) {
+	if !matches!(invariant_in(ir, value, loop_op), Invariance::Invariant) {
 		return None;
 	}
 	let tree = copy_tree(ir, op);

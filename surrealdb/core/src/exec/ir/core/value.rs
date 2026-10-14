@@ -34,9 +34,24 @@ pub(crate) enum ValueDef {
 	},
 }
 
-/// One use of a value: the `operand`th operand of `user`.
+/// The first operand index that names an effect-token slot instead of a data operand.
+///
+/// The token operands of an op live in their own list ([`Ir::token_operands`](super::ir::Ir)), so
+/// the positions of its data operands never move when the op takes a token. A use of a value as
+/// the `n`th token operand is recorded with the operand index `TOKEN_SLOT_BASE + n`.
+pub(crate) const TOKEN_SLOT_BASE: u16 = 0x8000;
+
+/// One use of a value: the `operand`th operand of `user`, or the `(operand - TOKEN_SLOT_BASE)`th
+/// token operand when the index is at least [`TOKEN_SLOT_BASE`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Use {
 	pub(crate) user: OpId,
 	pub(crate) operand: u16,
+}
+
+impl Use {
+	/// The position among the token operands of `user` when the use is of a token slot.
+	pub(crate) fn token_slot(&self) -> Option<usize> {
+		self.operand.checked_sub(TOKEN_SLOT_BASE).map(usize::from)
+	}
 }

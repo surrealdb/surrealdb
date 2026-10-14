@@ -69,6 +69,13 @@ pub(super) fn empty_ir() -> Ir {
 	Ir::new(request_scope(), RegionKind::Request)
 }
 
+/// Threads effect tokens through a container built by hand, as the binder threads one it builds.
+pub(super) fn thread_tokens(ir: &mut Ir) {
+	let env = Env::new();
+	crate::exec::ir::analysis::tokens::thread(ir, &mut FactCache::new(), &env.cx())
+		.expect("the container is threaded");
+}
+
 /// Binds `sql` into a container in the logical dialect.
 pub(super) async fn bind(sql: &str) -> Ir {
 	let env = Env::new();

@@ -35,7 +35,7 @@ use std::sync::Arc;
 use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_strand::TableName;
 
-use super::analysis::loop_legality;
+use super::analysis::{loop_legality, tokens};
 use super::core::facts::{FactCache, LegalitySnapshotSlot, LogicalLegalities};
 use super::core::ir::{Ir, IrScope, Walk, WalkOrder};
 use super::core::verify::{VerifyAt, VerifyError, verify};
@@ -507,6 +507,11 @@ async fn plan_bound(
 			catalog: &memo,
 			frames: &frames,
 		};
+		// A container the request binder built is threaded already. A unit another binder built
+		// is threaded where it stands, under the catalog the fill completed.
+		if !ir.is_threaded() {
+			tokens::thread(&mut ir, &mut facts, &effects)?;
+		}
 		compile_phase!(
 			"verify",
 			verify(
@@ -567,6 +572,8 @@ async fn plan_bound(
 	});
 
 	compile_phase!("phys", top_up(&ir, planner, &memo).await?);
+	// The physical dialect holds no effect token.
+	tokens::strip(&mut ir, &mut facts);
 	let physical_deps = {
 		let cx = PhysCx {
 			effects: EffectCx {

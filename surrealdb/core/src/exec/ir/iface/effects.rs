@@ -9,6 +9,7 @@ use surrealdb_strand::{Strand, TableName};
 
 use super::fallibility::{ContextDep, Fallibility};
 use super::ids::SnapshotId;
+use super::types::{TokenClass, TokenSet};
 use crate::exec::logical::footprint::CatalogKind;
 use crate::expr::logical::EffectSet;
 
@@ -45,6 +46,109 @@ impl OpEffects {
 			determinism: Determinism::NonDeterministic,
 		}
 	}
+}
+
+/// The effect-token classes an op takes and produces.
+///
+/// An op that produces a class takes the class's incoming token as well, so `produces` is a subset
+/// of `consumes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct TokenUse {
+	pub(crate) consumes: TokenSet,
+	pub(crate) produces: TokenSet,
+}
+
+impl TokenUse {
+	/// A class the op reads and leaves unchanged.
+	const fn reads(self, class: TokenClass) -> Self {
+		Self {
+			consumes: self.consumes.with(class),
+			produces: self.produces,
+		}
+	}
+
+	/// A class the op reads and changes.
+	const fn advances(self, class: TokenClass) -> Self {
+		Self {
+			consumes: self.consumes.with(class),
+			produces: self.produces.with(class),
+		}
+	}
+
+	pub(crate) const fn union(self, other: Self) -> Self {
+		Self {
+			consumes: self.consumes.union(other.consumes),
+			produces: self.produces.union(other.produces),
+		}
+	}
+}
+
+/// The flags a non-deterministic answer is explained by: an answer that is non-deterministic with
+/// none of them is not understood, and orders against every class.
+const EXPLAINING_FLAGS: EffectSet = EffectSet::WRITES_DATA
+	.union(EffectSet::WRITES_EXTERNAL)
+	.union(EffectSet::READS_EXTERNAL)
+	.union(EffectSet::ADVANCES_STATE)
+	.union(EffectSet::ENTROPY)
+	.union(EffectSet::BLOCKING)
+	.union(EffectSet::WRITES_SESSION)
+	.union(EffectSet::NOTIFY)
+	.union(EffectSet::DEFERS)
+	.union(EffectSet::CHANGES_CATALOG);
+
+/// The effect-token classes an answer takes and produces: the one place a flag becomes a token.
+///
+/// - Reading stored data takes `Store`; writing it, notifying and deferring take and produce it.
+/// - A catalog read takes `Catalog`; a catalog change takes and produces `Catalog` and `Store`.
+/// - The session database is read through `Session` and the session written through it.
+/// - Entropy is `Rng`, an advancing counter is `Seq`, and external reads and writes and waiting are
+///   `Extern`.
+/// - A body nothing is known about, and an answer that is non-deterministic for no flag it names,
+///   takes and produces every class.
+///
+/// The clock, the row, the principal and a possible rejection take no token. The clock is the
+/// statement timestamp an op reads as an operand, the row is a block argument, the principal is
+/// constant for the request, and a rejection is a failure class, not state.
+pub(crate) fn token_use(set: EffectSet, determinism: Determinism) -> TokenUse {
+	let mut used = TokenUse::default();
+	if set.contains(EffectSet::OPAQUE_BODY)
+		|| (determinism == Determinism::NonDeterministic && !set.intersects(EXPLAINING_FLAGS))
+	{
+		return TokenUse {
+			consumes: TokenSet::ALL,
+			produces: TokenSet::ALL,
+		};
+	}
+	if set.contains(EffectSet::READS_DATA) {
+		used = used.reads(TokenClass::Store);
+	}
+	if set.intersects(EffectSet::WRITES_DATA.union(EffectSet::NOTIFY).union(EffectSet::DEFERS)) {
+		used = used.advances(TokenClass::Store);
+	}
+	if set.contains(EffectSet::READS_CATALOG) {
+		used = used.reads(TokenClass::Catalog);
+	}
+	if set.contains(EffectSet::CHANGES_CATALOG) {
+		used = used.advances(TokenClass::Catalog).advances(TokenClass::Store);
+	}
+	if set.contains(EffectSet::READS_SESSION_DB) {
+		used = used.reads(TokenClass::Session);
+	}
+	if set.contains(EffectSet::WRITES_SESSION) {
+		used = used.advances(TokenClass::Session);
+	}
+	if set.contains(EffectSet::ENTROPY) {
+		used = used.advances(TokenClass::Rng);
+	}
+	if set.contains(EffectSet::ADVANCES_STATE) {
+		used = used.advances(TokenClass::Seq);
+	}
+	if set.intersects(
+		EffectSet::READS_EXTERNAL.union(EffectSet::WRITES_EXTERNAL).union(EffectSet::BLOCKING),
+	) {
+		used = used.advances(TokenClass::Extern);
+	}
+	used
 }
 
 /// Whether the effects of an op are undone when the enclosing transaction or block rolls back.
@@ -150,4 +254,138 @@ pub(crate) enum ElemPath {
 pub(crate) enum Multiplicity {
 	Distinct,
 	MayRepeat,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn used(set: EffectSet) -> TokenUse {
+		let determinism = if set.is_deterministic() {
+			Determinism::Deterministic
+		} else {
+			Determinism::NonDeterministic
+		};
+		token_use(set, determinism)
+	}
+
+	fn classes(set: TokenSet) -> Vec<TokenClass> {
+		set.iter().collect()
+	}
+
+	#[test]
+	fn a_pure_set_takes_no_token() {
+		assert_eq!(used(EffectSet::PURE), TokenUse::default());
+	}
+
+	#[test]
+	fn the_clock_the_row_the_principal_and_a_rejection_take_no_token() {
+		for flag in [
+			EffectSet::CLOCK,
+			EffectSet::READS_ROW,
+			EffectSet::READS_PRINCIPAL,
+			EffectSet::MAY_REJECT,
+		] {
+			let determinism = if flag == EffectSet::CLOCK {
+				Determinism::PerStatement
+			} else {
+				Determinism::Deterministic
+			};
+			assert_eq!(token_use(flag, determinism), TokenUse::default(), "{flag:?}");
+		}
+	}
+
+	#[test]
+	fn a_read_takes_its_class_and_leaves_it() {
+		let data = used(EffectSet::READS_DATA);
+		assert_eq!(classes(data.consumes), [TokenClass::Store]);
+		assert!(data.produces.is_empty());
+		let catalog = used(EffectSet::READS_CATALOG);
+		assert_eq!(classes(catalog.consumes), [TokenClass::Catalog]);
+		assert!(catalog.produces.is_empty());
+		let session = used(EffectSet::READS_SESSION_DB);
+		assert_eq!(classes(session.consumes), [TokenClass::Session]);
+		assert!(session.produces.is_empty());
+	}
+
+	#[test]
+	fn a_free_parameter_orders_against_the_catalog_alone() {
+		let free = used(EffectSet::READS_CATALOG | EffectSet::READS_PRINCIPAL);
+		assert_eq!(classes(free.consumes), [TokenClass::Catalog]);
+		assert!(free.produces.is_empty());
+	}
+
+	#[test]
+	fn a_change_takes_and_produces_its_class() {
+		for (flag, class) in [
+			(EffectSet::WRITES_DATA, TokenClass::Store),
+			(EffectSet::NOTIFY, TokenClass::Store),
+			(EffectSet::DEFERS, TokenClass::Store),
+			(EffectSet::WRITES_SESSION, TokenClass::Session),
+			(EffectSet::ENTROPY, TokenClass::Rng),
+			(EffectSet::ADVANCES_STATE, TokenClass::Seq),
+			(EffectSet::READS_EXTERNAL, TokenClass::Extern),
+			(EffectSet::WRITES_EXTERNAL, TokenClass::Extern),
+			(EffectSet::BLOCKING, TokenClass::Extern),
+		] {
+			let answer = used(flag);
+			assert_eq!(classes(answer.consumes), [class], "{flag:?}");
+			assert_eq!(answer.consumes, answer.produces, "{flag:?}");
+		}
+	}
+
+	#[test]
+	fn a_catalog_change_takes_and_produces_the_catalog_and_the_store() {
+		let answer = used(EffectSet::CHANGES_CATALOG);
+		assert_eq!(classes(answer.consumes), [TokenClass::Store, TokenClass::Catalog]);
+		assert_eq!(answer.consumes, answer.produces);
+	}
+
+	#[test]
+	fn an_opaque_or_unexplained_answer_orders_against_every_class() {
+		let every = TokenUse {
+			consumes: TokenSet::ALL,
+			produces: TokenSet::ALL,
+		};
+		assert_eq!(used(EffectSet::OPAQUE_BODY), every);
+		assert_eq!(token_use(EffectSet::PURE, Determinism::NonDeterministic), every);
+		assert_eq!(token_use(EffectSet::TOP, Determinism::NonDeterministic), every);
+	}
+
+	#[test]
+	fn a_produced_class_is_always_taken() {
+		for flag in [
+			EffectSet::WRITES_DATA,
+			EffectSet::WRITES_EXTERNAL,
+			EffectSet::READS_EXTERNAL,
+			EffectSet::ADVANCES_STATE,
+			EffectSet::ENTROPY,
+			EffectSet::CLOCK,
+			EffectSet::BLOCKING,
+			EffectSet::OPAQUE_BODY,
+			EffectSet::READS_DATA,
+			EffectSet::READS_CATALOG,
+			EffectSet::READS_ROW,
+			EffectSet::READS_PRINCIPAL,
+			EffectSet::READS_SESSION_DB,
+			EffectSet::WRITES_SESSION,
+			EffectSet::NOTIFY,
+			EffectSet::DEFERS,
+			EffectSet::MAY_REJECT,
+			EffectSet::CHANGES_CATALOG,
+		] {
+			let answer = used(flag);
+			assert_eq!(answer.produces.union(answer.consumes), answer.consumes, "{flag:?}");
+		}
+	}
+
+	#[test]
+	fn the_sets_of_flags_union_their_classes() {
+		let answer = used(EffectSet::READS_DATA | EffectSet::ENTROPY | EffectSet::READS_CATALOG);
+		assert_eq!(
+			classes(answer.consumes),
+			[TokenClass::Store, TokenClass::Catalog, TokenClass::Rng]
+		);
+		assert_eq!(classes(answer.produces), [TokenClass::Rng]);
+	}
 }

@@ -79,7 +79,8 @@ pub(crate) fn known(ir: &Ir, _facts: &FactCache, value: ValueId) -> TypeKnowledg
 /// `Derived`; the source of a joined hint is the first hint's.
 pub(crate) fn join(a: &TypeKnowledge, b: &TypeKnowledge) -> TypeKnowledge {
 	match (a, b) {
-		(TypeKnowledge::Unknown, _) | (_, TypeKnowledge::Unknown) => TypeKnowledge::Unknown,
+		(TypeKnowledge::Unknown | TypeKnowledge::Token(_), _)
+		| (_, TypeKnowledge::Unknown | TypeKnowledge::Token(_)) => TypeKnowledge::Unknown,
 		(
 			TypeKnowledge::Fact {
 				kind: left,
@@ -416,7 +417,7 @@ fn element_knowledge(ir: &Ir, value: ValueId, depth: usize) -> TypeKnowledge {
 			kind,
 			source,
 		}),
-		TypeKnowledge::Unknown => TypeKnowledge::Unknown,
+		TypeKnowledge::Unknown | TypeKnowledge::Token(_) => TypeKnowledge::Unknown,
 	}
 }
 

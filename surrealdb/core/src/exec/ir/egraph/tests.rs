@@ -4383,11 +4383,40 @@ mod kv {
 		elapsed_ns.replace_all(&answers, "elapsed_ns: <elapsed>").into_owned()
 	}
 
+	/// The stack of the thread [`forced_on_answers_equal`] runs on: the worker stack the language
+	/// tests' runner takes in an unoptimised build. A statement of the corpus recurses to the
+	/// computation-depth budget, and at that depth an unoptimised build's frames overflow the
+	/// test thread's default stack.
+	const CORPUS_STACK: usize = 20 * 1024 * 1024;
+
+	/// Runs the future `body` builds to completion on a current-thread runtime, on a thread of
+	/// [`CORPUS_STACK`] bytes, and resumes its panic on the calling thread.
+	fn on_corpus_stack<Fut: Future<Output = ()>>(body: impl FnOnce() -> Fut + Send + 'static) {
+		let thread = std::thread::Builder::new()
+			.stack_size(CORPUS_STACK)
+			.spawn(move || {
+				tokio::runtime::Builder::new_current_thread()
+					.enable_all()
+					.build()
+					.expect("a current-thread runtime")
+					.block_on(body())
+			})
+			.expect("the corpus thread spawns");
+		if let Err(panic) = thread.join() {
+			std::panic::resume_unwind(panic);
+		}
+	}
+
 	/// With the registered rules, the logical-only run answers every statement of the corpus as
 	/// the forced-off run does, and it rewrites and adopts the statements those rules match. A
 	/// record id the engine generates is not part of the answer.
-	#[tokio::test]
-	async fn forced_on_answers_equal() {
+	#[test]
+	fn forced_on_answers_equal() {
+		on_corpus_stack(forced_on_answers_equal_in);
+	}
+
+	/// The body of [`forced_on_answers_equal`].
+	async fn forced_on_answers_equal_in() {
 		let rules = registered();
 		let mut forced_calls = 0usize;
 		for (path, text) in deterministic_corpus() {

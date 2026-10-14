@@ -23,7 +23,7 @@ use std::pin::Pin;
 use super::driver::{LoCx, LoPass, PassConfig, PassReport};
 use super::rehome::{and_chain, can_rehome, rebuild_and_chain};
 use crate::exec::ir::analysis::multiplicity::is_loop_body;
-use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in_with, outermost_scope_with};
+use crate::exec::ir::analysis::row_dep::{Invariance, invariant_in, outermost_scope};
 use crate::exec::ir::analysis::{effects, fallibility};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -277,14 +277,8 @@ fn enclosing_loop(ir: &Ir, op: OpId) -> Option<OpId> {
 }
 
 /// Whether `value` is invariant in the loop `scope`.
-fn invariant(
-	ir: &Ir,
-	facts: &mut FactCache,
-	cx: &EffectCx<'_>,
-	value: ValueId,
-	scope: OpId,
-) -> bool {
-	matches!(invariant_in_with(ir, facts, cx, value, scope), Invariance::Invariant)
+fn invariant(ir: &Ir, value: ValueId, scope: OpId) -> bool {
+	matches!(invariant_in(ir, value, scope), Invariance::Invariant)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -316,7 +310,7 @@ impl Sweep<'_, '_> {
 			return;
 		};
 		if let (OpKind::Expr(_), [result]) = (&data.kind, data.results.as_slice())
-			&& invariant(ir, self.facts, self.cx, *result, self.scope)
+			&& invariant(ir, *result, self.scope)
 		{
 			if self.is_maximal(*result) {
 				self.roots.push(op);
@@ -373,7 +367,7 @@ impl Sweep<'_, '_> {
 			return true;
 		};
 		match (&carried.kind, carried.results.as_slice()) {
-			(OpKind::Expr(_), [result]) => !invariant(ir, self.facts, self.cx, *result, self.scope),
+			(OpKind::Expr(_), [result]) => !invariant(ir, *result, self.scope),
 			(OpKind::Expr(_), _) | (OpKind::Logical(_) | OpKind::Phys(_), _) => true,
 		}
 	}
@@ -415,7 +409,7 @@ fn candidate_of(
 	if holds_control_exit(ir, root) {
 		return None;
 	}
-	let scope = outermost_scope_with(ir, facts, cx, *result)?;
+	let scope = outermost_scope(ir, *result)?;
 	let levels = per_row_scopes(ir, root, scope)?;
 	Some(MemoCandidate {
 		root,
@@ -689,7 +683,7 @@ fn hoisted_order(
 	let mut eligible: Vec<(usize, bool)> = Vec::new();
 	for (position, value) in chain.iter().enumerate() {
 		let verdict = judge(ir, facts, cx, *value);
-		if invariant(ir, facts, cx, *value, site.loop_op) {
+		if invariant(ir, *value, site.loop_op) {
 			eligible.push((position, verdict.infallible));
 		} else if !verdict.total() {
 			break;

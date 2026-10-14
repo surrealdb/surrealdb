@@ -45,10 +45,10 @@ use crate::exec::ir::iface::region_kind::{RegionKind, RegionProperties, Visibili
 use crate::exec::ir::iface::types::{FactSource, TypeKnowledge};
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::vm::payload::Refusal;
+use crate::expr::Kind;
 use crate::expr::logical::{
 	EvalFrame, LogicalClosure, LogicalExpr, LogicalFields, LogicalOp, ROW_PARAMS,
 };
-use crate::expr::{Function, Kind};
 use crate::val::Value;
 
 /// The error of an invariant the binder relies on and that no request can break: a request that
@@ -1209,15 +1209,8 @@ impl ExprHost for BindCx<'_> {
 		site
 	}
 
-	fn row_name_operands(&self, callee: &Function) -> SmallVec<[ValueId; 2]> {
-		match callee {
-			Function::Custom(_)
-			| Function::Module(..)
-			| Function::Silo {
-				..
-			} => self.row_names().collect(),
-			Function::Normal(_) | Function::Script(_) | Function::Model(_) => SmallVec::new(),
-		}
+	fn row_name_operands(&self) -> SmallVec<[ValueId; 2]> {
+		self.row_names().collect()
 	}
 
 	/// The statement takes the document of the frame it is entered from as its `$this` and

@@ -28,7 +28,7 @@ use crate::exec::ir::phys::ops::{
 	OmissionShape, ProjectedFieldShape, ProjectionShape, WalkActionShape, WalkStepShape,
 };
 use crate::exec::vm::ir_lower::emit::Emitter;
-use crate::exec::vm::ir_lower::expr::{Lowerer, ReturnScope};
+use crate::exec::vm::ir_lower::expr::{Lowerer, ReturnScope, call_args};
 use crate::exec::vm::payload::{Walk, WalkAction, WalkStep};
 use crate::exec::vm::program::{CallSpec, Instr, Operand, ROW, Reg};
 use crate::expr::Function;
@@ -558,7 +558,8 @@ fn projection_call(ir: &Ir, region: RegionId) -> Option<(String, Vec<ValueId>)> 
 	match &data.kind {
 		OpKind::Expr(ExprOp::Call(function)) => match &function.function {
 			Function::Normal(name) if builtin_registry().is_projection(name) => {
-				Some((name.clone(), data.operands.to_vec()))
+				let arguments = call_args(data, function).ok()?;
+				Some((name.clone(), arguments.to_vec()))
 			}
 			_ => None,
 		},

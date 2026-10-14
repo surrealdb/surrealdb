@@ -4,7 +4,7 @@
 
 use super::driver::{LoCx, LoPass, NoObserver, PassConfig, PassReport};
 use super::reg::lo_passes;
-use super::tests_support::{Env, create, empty_ir, kind_of, literal, ops_of_tag};
+use super::tests_support::{Env, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens};
 use super::unswitch::{UNSWITCH_MAX_OPS, Unswitch};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -161,6 +161,7 @@ fn build(shape: &Shape<'_>) -> Built {
 			create(&mut rw, at, OpKind::Expr(ExprOp::Truthy), &[produced[0]], 1);
 		}
 	}
+	thread_tokens(&mut ir);
 	Built {
 		ir,
 		statement,

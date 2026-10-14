@@ -56,15 +56,17 @@ use crate::exec::ir::iface::premise::{CatalogObjectKey, CatalogVersionVector, Pr
 use crate::exec::ir::iface::region_kind::{
 	ErrorScope, RegionKind, StatementCommit, StoredRole, TxnKind,
 };
-use crate::exec::ir::iface::types::{FactSource, HintSource, TypeKnowledge};
+use crate::exec::ir::iface::statements::{OutputShape, WriteFlags, WriteForm};
+use crate::exec::ir::iface::types::{FactSource, HintSource, TokenClass, TypeKnowledge};
 use crate::exec::ir::iface::unit::UnitKind;
 use crate::exec::ir::logical::ops::{
-	LogOp, LogTag, LoopKind, LoopSink, SourceOrder, TxnRegionMode,
+	LogOp, LogTag, LoopKind, LoopSink, SourceOrder, TxnRegionMode, WriteAttrs,
 };
 use crate::exec::ir::logical::verify::timestamp_arg;
 use crate::exec::ir::op_kind::{OpKind, OpTag};
 use crate::exec::ir::phys::ops::{
-	MaterializeImage, PhysOp, PhysTag, PipelineAttrs, PipelineId, PrefetchKeys,
+	MaterializeImage, PhysOp, PhysTag, PhysWriteAttrs, PipelineAttrs, PipelineId, PrefetchKeys,
+	WriteSubjectsShape,
 };
 use crate::exec::ir::phys::placement::place_for_test;
 use crate::exec::ir::registry::Registry;
@@ -916,6 +918,74 @@ fn inline_region_binds_arguments_and_returns_yields() {
 	assert_eq!(provenance_of(&ir, x), Provenance::Bound);
 }
 
+fn write_kind() -> OpKind {
+	OpKind::Phys(PhysOp::Write(Box::new(PhysWriteAttrs {
+		write: WriteAttrs {
+			form: WriteForm::Create,
+			only: false,
+			output: OutputShape::After,
+			with: None,
+			explain: None,
+			flags: WriteFlags::default(),
+			body: Default::default(),
+			gates: Default::default(),
+			image: Default::default(),
+			stored: Default::default(),
+			derived: Default::default(),
+			into_text: None,
+			statement: None,
+		},
+		subjects: WriteSubjectsShape::Targets,
+	})))
+}
+
+/// An owner holding one store token in and one out, a region under it whose read takes the
+/// region's store token, and the read op. Answers the owner, its region, the read, the token the
+/// owner takes and the token it produces.
+fn token_owner(ir: &mut Ir, kind: OpKind) -> (OpId, RegionId, OpId, ValueId, ValueId) {
+	let top = top_block(ir);
+	edit(ir, |rw| {
+		let incoming =
+			rw.add_token_arg(top, TokenClass::Store).expect("the token argument is added");
+		let (owner, _) = add(rw, InsertPoint::End(top), kind, &[], 0);
+		rw.add_token_operand(owner, incoming).expect("the token operand is added");
+		let produced =
+			rw.add_token_result(owner, TokenClass::Store).expect("the token is produced");
+		let (region, block) =
+			rw.create_region(owner, RegionKind::ValueBlock, &[]).expect("the region is created");
+		let formal =
+			rw.add_token_arg(block, TokenClass::Store).expect("the token argument is added");
+		let (read, _) = add(rw, InsertPoint::End(block), literal(1), &[], 1);
+		rw.add_token_operand(read, formal).expect("the token operand is added");
+		add(rw, InsertPoint::End(block), yield_kind(), &[], 0);
+		(owner, region, read, incoming, produced)
+	})
+}
+
+#[test]
+fn inline_region_of_a_write_reads_the_token_the_write_produces() {
+	let mut ir = request();
+	let (owner, region, read, incoming, produced) = token_owner(&mut ir, write_kind());
+	let formal = ir.token_operands(read).to_vec();
+	let before = edit(&mut ir, |rw| rw.inline_region(region, InsertPoint::Before(owner), &[]));
+	assert!(matches!(before, Err(IrError::Refused("inline_region token"))));
+	assert!(ir.region(region).is_some(), "a refused call changes nothing");
+	assert_eq!(ir.token_operands(read).to_vec(), formal);
+	edit(&mut ir, |rw| rw.inline_region(region, InsertPoint::After(owner), &[]))
+		.expect("the region is inlined after the write");
+	assert_eq!(ir.token_operands(read).to_vec(), vec![produced]);
+	assert!(ir.uses(incoming).iter().all(|used| used.user == owner));
+}
+
+#[test]
+fn inline_region_of_a_pure_owner_reads_the_token_the_owner_takes() {
+	let mut ir = request();
+	let (owner, region, read, incoming, _) = token_owner(&mut ir, stmt_kind());
+	edit(&mut ir, |rw| rw.inline_region(region, InsertPoint::Before(owner), &[]))
+		.expect("the region is inlined");
+	assert_eq!(ir.token_operands(read).to_vec(), vec![incoming]);
+}
+
 #[test]
 fn inline_region_needs_a_yield_terminator() {
 	let mut ir = request();
@@ -1167,6 +1237,7 @@ fn value_table_never_shares_opaque_keys_or_across_statements() {
 		tag: literal(0).tag(),
 		attrs: AttrDigest([digest; 16]),
 		operands: SmallVec::new(),
+		tokens: SmallVec::new(),
 		frame: FrameId::new(frame),
 		snapshot: SnapshotId::new(0),
 		epoch: None,
@@ -1222,6 +1293,7 @@ fn value_table_confirms_a_digest_hit_by_attributes() {
 		tag: literal(0).tag(),
 		attrs: AttrDigest([1; 16]),
 		operands: SmallVec::new(),
+		tokens: SmallVec::new(),
 		frame: FrameId::new(0),
 		snapshot: SnapshotId::new(0),
 		epoch: None,
@@ -1257,6 +1329,7 @@ fn value_table_forgets_the_keys_of_a_region_it_leaves() {
 		tag: literal(0).tag(),
 		attrs: AttrDigest([digest; 16]),
 		operands: SmallVec::new(),
+		tokens: SmallVec::new(),
 		frame: FrameId::new(0),
 		snapshot: SnapshotId::new(0),
 		epoch: None,

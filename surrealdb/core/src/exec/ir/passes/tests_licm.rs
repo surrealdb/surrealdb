@@ -8,7 +8,7 @@ use super::licm::{
 };
 use super::rehome::and_chain;
 use super::tests_support::{
-	Env, bind, create, empty_ir, kind_of, literal, ops_of_tag, verify_logical,
+	Env, bind, create, empty_ir, kind_of, literal, ops_of_tag, thread_tokens, verify_logical,
 };
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, Walk, WalkOrder};
@@ -257,6 +257,7 @@ async fn an_op_in_a_function_body_is_not_a_candidate() {
 	let verdict = fallible(&mut rw, InsertPoint::End(function));
 	create(&mut rw, InsertPoint::End(function), yield_op(), &[verdict], 0);
 
+	thread_tokens(&mut ir);
 	let env = Env::new();
 	assert!(candidates(&ir, &mut FactCache::new(), &env.cx(), stmt).is_empty());
 }
@@ -312,6 +313,7 @@ async fn the_table_permission_predicate_holds_candidates() {
 	let verdict = fallible(&mut rw, InsertPoint::End(frame));
 	create(&mut rw, InsertPoint::End(frame), yield_op(), &[verdict], 0);
 
+	thread_tokens(&mut ir);
 	let env = Env::new();
 	let found = candidates(&ir, &mut FactCache::new(), &env.cx(), stmt);
 	let [candidate] = found.as_slice() else {
@@ -348,6 +350,7 @@ async fn a_field_guard_holds_no_candidate() {
 	let verdict = fallible(&mut rw, InsertPoint::End(guard));
 	create(&mut rw, InsertPoint::End(guard), yield_op(), &[verdict], 0);
 
+	thread_tokens(&mut ir);
 	let env = Env::new();
 	assert!(candidates(&ir, &mut FactCache::new(), &env.cx(), stmt).is_empty());
 }

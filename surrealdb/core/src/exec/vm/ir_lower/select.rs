@@ -194,6 +194,7 @@ fn int_literal(ir: &crate::exec::ir::core::ir::Ir, value: ValueId) -> Option<i64
 pub(super) fn admits_int(ty: &TypeKnowledge) -> bool {
 	match ty {
 		TypeKnowledge::Unknown => true,
+		TypeKnowledge::Token(_) => false,
 		TypeKnowledge::Fact {
 			kind,
 			..
@@ -293,6 +294,7 @@ mod tests {
 		for known in &knowledge {
 			let expected = match known {
 				TypeKnowledge::Unknown => main_may_hold_int(None),
+				TypeKnowledge::Token(_) => false,
 				TypeKnowledge::Fact {
 					kind,
 					..

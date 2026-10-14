@@ -365,15 +365,8 @@ impl ExprHost for TestHost {
 		site
 	}
 
-	fn row_name_operands(&self, callee: &Function) -> SmallVec<[ValueId; 2]> {
-		match callee {
-			Function::Custom(_)
-			| Function::Module(..)
-			| Function::Silo {
-				..
-			} => self.row_names.clone(),
-			Function::Normal(_) | Function::Model(_) | Function::Script(_) => SmallVec::new(),
-		}
+	fn row_name_operands(&self) -> SmallVec<[ValueId; 2]> {
+		self.row_names.clone()
 	}
 
 	fn bind_value_statement(&mut self, _op: &LogicalOp) -> Result<Built, IrError> {
@@ -2044,12 +2037,21 @@ fn fn_calls_take_row_name_operands() -> Result<(), IrError> {
 	));
 	assert_eq!(built, Built::Value(host.value_of(1)));
 
-	// A builtin passes none.
+	// A builtin that reads no row passes none.
 	let mut host = TestHost::with_row();
 	let row_name = host.fresh();
 	host.row_names = smallvec![row_name];
 	host.bind(&call("math::abs", vec![field("a")]))?;
 	assert_eq!(host.op(1).operands.as_slice(), [host.value_of(0)]);
+
+	// A projection function and an index function read the row without taking it.
+	for name in ["type::field", "search::score"] {
+		let mut host = TestHost::with_row();
+		let row_name = host.fresh();
+		host.row_names = smallvec![row_name];
+		host.bind(&call(name, vec![field("a")]))?;
+		assert_eq!(host.op(1).operands.as_slice(), [host.value_of(0), row_name], "{name}");
+	}
 
 	// An argument that diverges ends the call before any operand is asked of the host.
 	let mut host = TestHost::new();

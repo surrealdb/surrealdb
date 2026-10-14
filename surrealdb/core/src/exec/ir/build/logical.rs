@@ -61,6 +61,7 @@ use std::ops::ControlFlow;
 use std::slice;
 use std::sync::Arc;
 
+use smallvec::SmallVec;
 use surrealdb_expr::parser::TopLevelExpr;
 use surrealdb_iam::AuthLimit;
 use surrealdb_strand::{Strand, TableName};
@@ -72,11 +73,13 @@ use super::subscription::{bind_layer, subscriber_layer};
 use super::{stage_bundle, stmt};
 use crate::exec::expression_registry::resolve_order_by_alias;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::analysis::tokens;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::{Ir, IrScope};
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::expr::ops::{
 	CallAttrs, ClosureAttrs, ClosureLiteral, DispatchTarget, ExprOp, NestedStrategy, RaiseKind,
+	passes_row_names,
 };
 use crate::exec::ir::iface::catalog::{CatalogAnswer, EffectCx, FieldView, SemanticCatalog};
 use crate::exec::ir::iface::ids::{OpId, ValueId};
@@ -231,6 +234,7 @@ pub(crate) async fn bind_request_noted(
 	} else {
 		None
 	};
+	tokens::thread(&mut ir, &mut FactCache::new(), cx)?;
 	Ok((ir, rejection, notes))
 }
 
@@ -4117,6 +4121,7 @@ fn collection_of(cx: &BindCx<'_>, value: ValueId) -> Option<Collection> {
 		| TypeKnowledge::Hint {
 			..
 		}
+		| TypeKnowledge::Token(_)
 		| TypeKnowledge::Unknown => None,
 	}
 }
@@ -4248,7 +4253,11 @@ fn bind_plain_call(
 		};
 		operands.push(value);
 	}
-	let row_names = cx.row_name_operands(&call.receiver);
+	let row_names = if passes_row_names(&call.receiver, cx.registry()) {
+		cx.row_name_operands()
+	} else {
+		SmallVec::new()
+	};
 	let attrs = CallAttrs {
 		function: call.receiver.clone(),
 		row_names: u8::try_from(row_names.len())

@@ -19,19 +19,21 @@
 //! | V-E9 | `subquery` takes a strategy other than `Apply` only in the physical phase |
 //! | V-E10 | `closure_create` takes one operand per captured name |
 //! | V-E11 | `tuple_row` addresses only operands and regions it holds, and its one use is an element of an `array` |
-//! | V-E12 | `call` passes row names only to a user-defined, module or silo function, no more than its operands, and holds a callee's facts only for a user-defined function in the physical phase |
+//! | V-E12 | `call` passes row names only to a user-defined, module or silo function, a builtin projection function or an index function, no more than its operands, and holds a callee's facts only for a user-defined function in the physical phase |
 //! | V-E13 | `closure_create` holds one body whose entry arguments are the timestamp, the parameters, one per operand, then the invoking row where it reads one |
 
 #![deny(clippy::wildcard_enum_match_arm)]
 
 use std::ops::Bound;
 
+use crate::exec::ir::analysis::cx::builtin_registry;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::op::OpData;
 use crate::exec::ir::core::value::ValueDef;
 use crate::exec::ir::core::verify::{VerifyError, VerifyRule};
 use crate::exec::ir::expr::ops::{
 	CallAttrs, ClosureAttrs, DestructureEntry, DispatchTarget, ExprOp, NestedStrategy,
+	passes_row_names,
 };
 use crate::exec::ir::iface::conversion::Phase;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
@@ -502,12 +504,11 @@ fn subquery_strategy_in_physical_phase(ir: &Ir, strategy: &NestedStrategy) -> Ru
 	}
 }
 
-/// V-E12: a call passes no more row names than it has operands, and only a function whose body
-/// reads the row may receive them. A callee's facts belong to a user-defined function and are
+/// V-E12: a call passes no more row names than it has operands, and only a function that reads the
+/// row may receive them. A callee's facts belong to a user-defined function and are
 /// read only in the physical phase.
 fn call_row_names_and_callee(ir: &Ir, data: &OpData, call: &CallAttrs) -> Rule {
-	let takes_row =
-		matches!(call.function, Function::Custom(_) | Function::Module(..) | Function::Silo { .. });
+	let takes_row = passes_row_names(&call.function, builtin_registry());
 	if call.row_names > 0 && !takes_row {
 		return Err("V-E12: a call passes row names to a function whose body reads no row".into());
 	}
@@ -1279,9 +1280,12 @@ mod tests {
 		let builtin = || Function::Normal("math::abs".to_owned());
 		let passed = fx.expr(block, call(custom(), 1, None), &[row]);
 		let to_builtin = fx.expr(block, call(builtin(), 1, None), &[row]);
+		let to_projection =
+			fx.expr(block, call(Function::Normal("type::field".to_owned()), 1, None), &[row]);
 		let too_many = fx.expr(block, call(custom(), 2, None), &[row]);
 		fx.passes(passed);
 		fx.fails(to_builtin, "V-E12");
+		fx.passes(to_projection);
 		fx.fails(too_many, "V-E12");
 		let facts = || Some(CalleeFacts::Absent);
 		let custom_facts = fx.expr(block, call(custom(), 0, facts()), &[]);

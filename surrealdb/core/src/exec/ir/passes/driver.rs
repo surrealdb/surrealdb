@@ -10,6 +10,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use super::reg::lo_passes;
+use crate::exec::ir::analysis::tokens;
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
 use crate::exec::ir::core::pattern::Limit;
@@ -183,6 +184,7 @@ pub(super) async fn run_passes(
 			reports.push((name, PassReport::default()));
 			continue;
 		}
+		let marks = ir.is_threaded().then(|| tokens::mark(ir));
 		let report = {
 			let mut cx = LoCx {
 				ir: &mut *ir,
@@ -195,6 +197,12 @@ pub(super) async fn run_passes(
 			pass.run(&mut cx).await?
 		};
 		settle_folds(ir, facts, folder, effects).await;
+		if report.rewrites > 0
+			&& ir.is_threaded()
+			&& let Some(marks) = &marks
+		{
+			tokens::rethread_changed(ir, facts, effects, marks)?;
+		}
 		verify_after(ir, facts, effects, name)?;
 		reports.push((name, report));
 	}

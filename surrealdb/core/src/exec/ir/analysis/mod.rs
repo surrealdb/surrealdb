@@ -28,6 +28,7 @@ pub(crate) mod reg;
 pub(crate) mod row_dep;
 pub(crate) mod selectivity;
 pub(crate) mod slice;
+pub(crate) mod tokens;
 pub(crate) mod types;
 pub(crate) mod write_epoch;
 
