@@ -22,9 +22,15 @@
 //! - Every root it reads is `id`, `in` or `out`, which the entry's key carries; or, for every edge
 //!   table the hop names, the table is a relation that is not lightweight, its record ids name no
 //!   components, every other root is one of its `INLINE` fields, and the caller's reads of the
-//!   table and of every field under those roots are not judged by a `SELECT` permission. The table
-//!   answers the physical catalog holds for the table's current read decide each of these; a table
-//!   it holds none for gives the hop no key condition.
+//!   table and of every field under those roots are not judged by a `SELECT` permission.
+//! - For every edge table the hop names, no field at or beneath the `id`, `in` or `out` it reads is
+//!   governed for the caller by a `SELECT` permission that is not `FULL`. The entry's key holds the
+//!   raw value, while the record path judges the `WHERE` over the caller's view of the edge, where
+//!   such a field the caller fails reads `NONE`; a key condition would prune edges by a value the
+//!   caller may not read.
+//!
+//! The table answers the physical catalog holds for each edge table's current read decide the
+//! conditions on the table; a table it holds none for gives the hop no key condition.
 //!
 //! The condition covers the whole `WHERE` or the hop has none. An entry that cannot answer the
 //! fields the `WHERE` reads is judged over its record when the hop runs, so the condition only
@@ -185,6 +191,14 @@ fn key_of(ir: &Ir, facts: &mut FactCache, cx: &PhysCx<'_>, hop: OpId) -> Option<
 	let needs_id = roots.contains("id");
 	let needs_in = roots.contains("in");
 	let needs_out = roots.contains("out");
+	if (needs_id || needs_in || needs_out)
+		&& attrs
+			.subjects
+			.iter()
+			.any(|subject| !key_fields_readable(cx, &subject.table, needs_id, needs_in, needs_out))
+	{
+		return None;
+	}
 	let needed: Vec<&String> =
 		roots.iter().filter(|root| !matches!(root.as_str(), "id" | "in" | "out")).collect();
 	let payload = if needed.is_empty() {
@@ -375,6 +389,40 @@ fn admitted_form(ir: &Ir, cx: &PhysCx<'_>, kind: &ExprOp, operands: &[ValueId]) 
 		| ExprOp::DepthCharge {
 			..
 		} => false,
+	}
+}
+
+/// Whether the caller reads every key field among `id`, `in` and `out` that `needs_id`,
+/// `needs_in` and `needs_out` select, of the edge table `table`, as the entry's key holds it: no
+/// field at or beneath one of them is governed by a `SELECT` permission that is not `FULL` for the
+/// caller. `false` where the physical catalog holds no answers for the table's current read, or
+/// holds an unresolved permission context.
+fn key_fields_readable(
+	cx: &PhysCx<'_>,
+	table: &TableName,
+	needs_id: bool,
+	needs_in: bool,
+	needs_out: bool,
+) -> bool {
+	let key: SourceKey = (table.clone(), None, ReadVersion::Current);
+	let answers = match cx.physical.table_answers(&key) {
+		CatalogAnswer::Found(answers) => answers,
+		CatalogAnswer::NotLoaded | CatalogAnswer::Unknown | CatalogAnswer::Absent => return false,
+	};
+	match &answers.restricted {
+		super::access::RestrictedSelect::None => true,
+		super::access::RestrictedSelect::Unresolved => false,
+		super::access::RestrictedSelect::Fields(paths) => {
+			!paths.iter().any(|path| match path.segments().first() {
+				Some(FieldSegment::Field(root)) => match root.as_str() {
+					"id" => needs_id,
+					"in" => needs_in,
+					"out" => needs_out,
+					_ => false,
+				},
+				Some(FieldSegment::All) | None => true,
+			})
+		}
 	}
 }
 

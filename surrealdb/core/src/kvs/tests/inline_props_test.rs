@@ -706,3 +706,58 @@ async fn legacy_entries_answer_key_predicates_through_the_record() {
 	let (evals, fallbacks) = props_counters(&legacy, &ses, by_id).await;
 	assert_eq!((evals, fallbacks), (3, 0), "a pure-id predicate needs no record fetch");
 }
+
+/// A key predicate reads `out` as the adjacency entry's key holds it, the
+/// raw value. For an actor whose checks run and whose field-level SELECT
+/// permission hides `out`, the hop takes the record path instead, where
+/// `out` reads NONE before the predicate sees it: the counters show no
+/// edge judged from its key, and the hidden value prunes nothing. The owner
+/// keeps the key path and the stored value. The record-user outcome is
+/// pinned end to end by the `graph_where_on_a_hidden_edge_key` language test.
+#[tokio::test]
+async fn a_hidden_key_field_declines_the_key_path() {
+	let ds = ds().await;
+	let owner = Session::owner().with_ns("test").with_db("test");
+	run(
+		&ds,
+		&owner,
+		"DEFINE NAMESPACE test;
+		 DEFINE DATABASE test;
+		 DEFINE TABLE person SCHEMALESS PERMISSIONS FULL;
+		 DEFINE TABLE knows TYPE RELATION PERMISSIONS FULL;
+		 DEFINE FIELD OVERWRITE out ON knows TYPE record<person> PERMISSIONS FOR select WHERE false;
+		 CREATE person:me, person:friend, person:secret RETURN NONE;
+		 RELATE person:me->knows:to_friend->person:friend RETURN NONE;
+		 RELATE person:me->knows:to_secret->person:secret RETURN NONE;",
+	)
+	.await;
+	let user = Session::for_record(
+		"test",
+		"test",
+		"user",
+		crate::types::PublicValue::String("person:me".to_owned()),
+	);
+	let query = "SELECT VALUE ->(knows WHERE out = person:secret) FROM person:me";
+
+	let (evals, fallbacks) = props_counters(&ds, &owner, query).await;
+	assert_eq!((evals, fallbacks), (2, 0), "the owner's key path judges both edges");
+	assert_eq!(
+		run(&ds, &owner, query).await,
+		run(&ds, &owner, "RETURN [[knows:to_secret]];").await
+	);
+
+	// The user's plan reports the key path's counters where the `WHERE` reads
+	// only `in`, a key field no permission hides from them.
+	let visible = "SELECT VALUE ->(knows WHERE in = person:me) FROM person:me";
+	let (evals, fallbacks) = props_counters(&ds, &user, visible).await;
+	assert_eq!((evals, fallbacks), (2, 0), "an unhidden key field keeps the key path");
+
+	let (evals, fallbacks) = props_counters(&ds, &user, query).await;
+	assert_eq!((evals, fallbacks), (0, 0), "no edge is judged from its key");
+	assert_eq!(run(&ds, &user, query).await, run(&ds, &owner, "RETURN [[]];").await);
+	let unpruned = "SELECT VALUE ->(knows WHERE out != person:secret) FROM person:me";
+	assert_eq!(
+		run(&ds, &user, unpruned).await,
+		run(&ds, &owner, "RETURN [[knows:to_friend, knows:to_secret]];").await
+	);
+}
