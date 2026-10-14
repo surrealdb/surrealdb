@@ -107,19 +107,72 @@ impl Document {
 					action != Action::Delete
 				};
 
+				let ns = self.doc_ctx.ns();
 				let db = self.doc_ctx.db();
+				let tx = ctx.tx();
 
-				if set {
-					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
+				let before =
+					tx.get_record(db.namespace_id, db.database_id, table_name, id, None).await?;
+				let existed = !before.data.is_none();
+				let view_id = RecordId {
+					table: table_name.clone(),
+					key: id.clone(),
+				};
+				if !set && !existed {
+					return Ok(());
+				}
+
+				let (action, after) = if set {
+					let mut data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
+					// Reads replace `id` with the view record's own id, so do the same for events
+					if let Value::Object(obj) = &mut data {
+						obj.insert("id", Value::RecordId(view_id.clone()));
+					}
 					let record = Arc::new(Record::new(data));
 
-					ctx.tx()
-						.set_record(db.namespace_id, db.database_id, table_name, id, record)
-						.await?;
+					tx.set_record(
+						db.namespace_id,
+						db.database_id,
+						table_name,
+						id,
+						Arc::clone(&record),
+					)
+					.await?;
+					(
+						if existed {
+							Action::Update
+						} else {
+							Action::Create
+						},
+						Some(record),
+					)
 				} else {
-					ctx.tx().del_record(db.namespace_id, db.database_id, table_name, id).await?;
-				}
-				Ok(())
+					tx.del_record(db.namespace_id, db.database_id, table_name, id).await?;
+					(Action::Delete, None)
+				};
+
+				let tb = tx
+					.get_or_add_tb(Some(ctx), &ns.name, &db.name, table_name, opt.version)
+					.await?;
+				let parent = NsDbCtx {
+					ns: Arc::clone(ns),
+					db: Arc::clone(db),
+				};
+				let doc_ctx =
+					DocumentContext::initialise(ctx, &parent, tb, table_name, opt.version, true)
+						.await?;
+
+				Self::run_triggers(
+					stk,
+					ctx,
+					opt,
+					doc_ctx,
+					view_id.into(),
+					action,
+					existed.then_some(before),
+					after,
+				)
+				.await
 			}
 			ViewDefinition::Aggregated {
 				analysis,
