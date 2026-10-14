@@ -1,4 +1,4 @@
-//! A copy of a region inside the container that holds it.
+//! A copy of a region, or of a run of ops, inside the container that holds it.
 //!
 //! [`region`] re-creates the ops of a region, and of the regions they own, as a new region of the
 //! same kind owned by another op. An operand defined outside the region is read by the copy as the
@@ -67,6 +67,61 @@ pub(super) fn region(
 		region: copied,
 		ops: copy.ops,
 	})
+}
+
+/// The copy of a run of ops and the correspondence of its values and ops with the original's.
+pub(super) struct CopiedOps {
+	/// Each op of the original, and of the regions it owns, with the op that copies it.
+	pub(super) ops: HashMap<OpId, OpId>,
+	/// Each value an op of the original defines, with the value its copy defines.
+	pub(super) values: HashMap<ValueId, ValueId>,
+}
+
+/// Copies `ops`, which stand in one block in definition order, to the end of `block`.
+///
+/// An operand defined outside `ops` is read by the copy as the original reads it, so the copy of
+/// an op reads the copy of the op that defines its operand within `ops` and the original value
+/// otherwise. Every `phys.pipeline` among `ops`, or in a region they hold, is given an id of its
+/// own, and an edge between two of them names the copies. The copy keeps provenance, frame,
+/// snapshot and location as [`region`] does.
+pub(super) fn ops_into(
+	rw: &mut Rewriter<'_>,
+	ops: &[OpId],
+	block: BlockId,
+) -> Result<CopiedOps, IrError> {
+	let mut copy = Copy {
+		values: HashMap::new(),
+		ops: HashMap::new(),
+		pipelines: HashMap::new(),
+	};
+	let mut ids = PipelineIds::following(&PipelineDag::of(rw.ir()))?;
+	for op in ops {
+		for old in pipelines_of(rw.ir(), *op) {
+			copy.pipelines.insert(old, ids.allocate()?);
+		}
+	}
+	for op in ops {
+		copy_op(rw, *op, block, &mut copy)?;
+	}
+	Ok(CopiedOps {
+		ops: copy.ops,
+		values: copy.values,
+	})
+}
+
+/// The ids of the pipelines `op` is, and of those its regions hold at any depth.
+fn pipelines_of(ir: &Ir, op: OpId) -> Vec<PipelineId> {
+	let Some(data) = ir.op(op) else {
+		return Vec::new();
+	};
+	let mut found = Vec::new();
+	if let OpKind::Phys(PhysOp::Pipeline(attrs)) = &data.kind {
+		found.push(attrs.id);
+	}
+	for region in &data.regions {
+		found.extend(pipelines_in(ir, *region));
+	}
+	found
 }
 
 /// The ids of the pipelines `region` holds, at any depth.

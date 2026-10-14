@@ -212,6 +212,7 @@ pub(crate) fn importable(kind: RegionKind) -> bool {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline

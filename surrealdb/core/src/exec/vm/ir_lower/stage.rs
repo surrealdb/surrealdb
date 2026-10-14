@@ -454,6 +454,7 @@ impl StageRun {
 					| RegionKind::ErrorScope(_)
 					| RegionKind::ChooseArm
 					| RegionKind::Pipeline
+					| RegionKind::JoinLookupArm
 					| RegionKind::WriteStage
 					| RegionKind::CatalogUnit
 					| RegionKind::Deadline
@@ -610,6 +611,7 @@ impl StatementNesting {
 					| RegionKind::ErrorScope(_)
 					| RegionKind::ChooseArm
 					| RegionKind::Pipeline
+					| RegionKind::JoinLookupArm
 					| RegionKind::WriteStage
 					| RegionKind::CatalogUnit
 					| RegionKind::Deadline

@@ -172,6 +172,7 @@ fn row_of(kind: RegionKind) -> Option<&'static Row> {
 		| RegionKind::SubscriberFrame
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline => None,
@@ -218,6 +219,7 @@ fn holds_persisted_code(kind: RegionKind) -> bool {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::Deadline
 		| RegionKind::StoredClause(_) => false,
 	}
@@ -517,6 +519,7 @@ fn schema_clause(row: Section4bRow, kind: RegionKind) -> Option<&'static str> {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline => None,
@@ -689,6 +692,7 @@ fn region_text(kind: RegionKind) -> &'static str {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline => "an expression",

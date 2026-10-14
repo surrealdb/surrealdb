@@ -132,6 +132,7 @@ pub(crate) fn region_kind_key(kind: RegionKind) -> u16 {
 		},
 		RegionKind::ChooseArm => 41,
 		RegionKind::Pipeline => 42,
+		RegionKind::JoinLookupArm => 68,
 		RegionKind::WriteStage => 43,
 		RegionKind::CatalogUnit => 44,
 		RegionKind::Deadline => 45,

@@ -899,3 +899,63 @@ async fn is_lightweight(planner: &Planner<'_>, table: &TableName) -> Result<bool
 		crate::kvs::lightweight::lightweight_relation(&def.table_type).is_some()
 	}))
 }
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use super::*;
+	use crate::dbs::Session;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::kvs::TransactionType;
+
+	const SETUP: &str = "
+		DEFINE TABLE b SCHEMALESS PERMISSIONS FULL;
+		DEFINE FIELD k ON b PERMISSIONS FOR select NONE;
+		DEFINE INDEX b_k ON b FIELDS k;
+		DEFINE INDEX b_j ON b FIELDS j;
+	";
+
+	/// The answers a fill holds for a current read of `b`, read as the principal of `session`.
+	async fn answers_as(db: &TestDb, session: &Session) -> TableAnswers {
+		let ctx = db.exec_ctx_as(session, TransactionType::Read).await;
+		let txn = ctx.try_txn().expect("a transaction");
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			ctx.function_registry(),
+			txn,
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		)
+		.with_auth(Arc::clone(&ctx.root().auth));
+		let key: SourceKey = ("b".into(), None, ReadVersion::Current);
+		read_answers(&planner, &key).await.expect("the answers are read")
+	}
+
+	/// The answers a fill holds name the restricted columns of the principal the compile is for:
+	/// the owner's carry none, a record user's name the column its permission hides, whichever
+	/// principal planned before it on the same datastore.
+	#[tokio::test]
+	async fn answers_carry_the_restricted_columns_of_the_principal_they_are_read_for() {
+		let db = TestDb::new(SETUP).await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"test",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("users", "alice")),
+		);
+		let owner = TestDb::owner();
+		for session in [&owner, &record, &owner, &record] {
+			let answers = answers_as(&db, session).await;
+			if std::ptr::eq(session, &owner) {
+				assert_eq!(answers.restricted, RestrictedSelect::None);
+			} else {
+				assert!(
+					matches!(&answers.restricted, RestrictedSelect::Fields(fields) if fields.len() == 1),
+					"a record user's answers name the column its permission hides, got {:?}",
+					answers.restricted
+				);
+			}
+		}
+	}
+}

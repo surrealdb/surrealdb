@@ -319,6 +319,7 @@ fn decides_execution(kind: RegionKind) -> bool {
 		|| kind == RegionKind::ValueIf
 		|| kind == RegionKind::LazyOperand
 		|| kind == RegionKind::ChooseArm
+		|| kind == RegionKind::JoinLookupArm
 }
 
 /// Every op that uses an argument of a block of the loop body `region`.

@@ -102,6 +102,7 @@ fn may_not_run(kind: RegionKind) -> bool {
 		|| kind == RegionKind::ValueIf
 		|| kind == RegionKind::LazyOperand
 		|| kind == RegionKind::ChooseArm
+		|| kind == RegionKind::JoinLookupArm
 		|| effects::is_loop_body(kind)
 		|| kind == RegionKind::ClosureBody
 		|| kind == RegionKind::FunctionBody

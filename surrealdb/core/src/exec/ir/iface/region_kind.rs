@@ -7,7 +7,7 @@
 //! There is no session region (the session is host-side state) and no fragment region (a
 //! fragment is a request scope whose top region is [`RegionKind::Request`]). A physical op's
 //! region keeps the kind of the logical region it replaces; a new physical region is a
-//! [`RegionKind::Pipeline`] or a [`RegionKind::ChooseArm`].
+//! [`RegionKind::Pipeline`], a [`RegionKind::ChooseArm`] or a [`RegionKind::JoinLookupArm`].
 
 /// The kind of a region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +61,11 @@ pub(crate) enum RegionKind {
 	ChooseArm,
 	/// A pipeline of physical operators.
 	Pipeline,
+	/// The read of a join's right input through an index lookup: a copy of the right input's
+	/// chain whose scan is an index lookup keyed by the block argument, which is the left row's
+	/// key value. It runs per left row, for the first rows only and only while no build table
+	/// exists, so its ops may run zero times.
+	JoinLookupArm,
 	/// The stored code at one stage of a write: field state, permissions, events, view
 	/// maintenance, reference actions. The statement's own clauses are never inside one.
 	WriteStage,
@@ -202,6 +207,7 @@ impl RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::CatalogUnit
 			| Self::Deadline => false,
 		}
@@ -340,6 +346,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::Deadline => ReturnRule::PassesOutward,
 		}
 	}
@@ -370,6 +377,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::Deadline => LoopRule::Passes,
 		}
 	}
@@ -401,6 +409,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::Deadline => Visibility::Inherits,
 		}
 	}
@@ -430,6 +439,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::WriteStage
 			| Self::CatalogUnit
 			| Self::Deadline
@@ -464,6 +474,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::CatalogUnit
 			| Self::Deadline => FrameRule::Inherits,
 		}
@@ -492,6 +503,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::WriteStage
 			| Self::CatalogUnit
 			| Self::Deadline
@@ -526,6 +538,7 @@ impl RegionProperties for RegionKind {
 			| Self::ErrorScope(_)
 			| Self::ChooseArm
 			| Self::Pipeline
+			| Self::JoinLookupArm
 			| Self::Deadline => false,
 		}
 	}

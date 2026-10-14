@@ -1830,7 +1830,7 @@ d0c33f48673c1da3 language-tests/tests/language/parameters/scoping.surql
 370c74aa5ebc3019 language-tests/tests/language/planner/bitmap_fusion_differential.surql
 8e19a2e1ae835163 language-tests/tests/language/planner/bitmap_fusion_new_executor.surql
 a787aee5a612f48b language-tests/tests/language/planner/bitmap_fusion_version_new_executor.surql
-6f106ed698e2ff19 language-tests/tests/language/planner/bitmap_graph_semijoin.surql
+0122db9ede9caffb language-tests/tests/language/planner/bitmap_graph_semijoin.surql
 6652d05851861e93 language-tests/tests/language/planner/bitmap_graph_semijoin_differential.surql
 79969e7583b478d7 language-tests/tests/language/planner/bitmap_or_fusion.surql
 4751deb01b033029 language-tests/tests/language/planner/bitmap_or_fusion_differential.surql
@@ -3147,6 +3147,10 @@ d4255c2ba678f50a language-tests/tests/parsing/strings/error/unclosed_string_sing
 1564c4598a74c30b language-tests/tests/parsing/strings/line_break.surql
 1827144d7051ccd2 language-tests/tests/parsing/strings/unicode_escape_sequence.surql
 88d88fe2ad6dfd09 language-tests/tests/parsing/strings/unicode_escape_squence_null.surql
+9c078109e02c0163 language-tests/tests/pgsql/_join_lookup.surql
+24d01586b9504120 language-tests/tests/pgsql/_join_lookup_errors.surql
+1c35cc65acf9c46f language-tests/tests/pgsql/_join_lookup_permissions.surql
+d9e1bfb2f85fd763 language-tests/tests/pgsql/_join_lookup_restricted.surql
 8dc2b843ca68d35f language-tests/tests/pgsql/_native.surql
 1496965435d599d3 language-tests/tests/pgsql/_native_join_indexes.surql
 9e1514563ddd2b32 language-tests/tests/pgsql/_native_perms.surql

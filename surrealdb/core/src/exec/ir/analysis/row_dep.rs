@@ -242,6 +242,7 @@ fn crossable(kind: RegionKind) -> bool {
 		| RegionKind::EventFrame
 		| RegionKind::SubscriberFrame
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::StoredClause(_) => false,
@@ -678,6 +679,7 @@ mod tests {
 			RegionKind::EventFrame,
 			RegionKind::SubscriberFrame,
 			RegionKind::Pipeline,
+			RegionKind::JoinLookupArm,
 			RegionKind::WriteStage,
 			RegionKind::CatalogUnit,
 			RegionKind::StoredClause(StoredRole::Value),

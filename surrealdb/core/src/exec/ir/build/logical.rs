@@ -2132,6 +2132,7 @@ fn region_row_names(kind: RegionKind) -> &'static [RowName] {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline => &[],

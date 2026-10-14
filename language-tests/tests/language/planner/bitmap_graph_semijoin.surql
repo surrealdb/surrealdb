@@ -90,6 +90,32 @@ value = '''
                 BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote] {rows: 4}
 
 Total rows: 2''''
+
+[[test.results]]
+value = "[{ count: 2 }]"
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: *]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS (doc:x)]
+            BitmapScan [ctx: Db] [table: person]
+                BitmapAnd [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true]
+                    BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote]
+''''
+
+[[test.results]]
+value = '''
+'SelectProject [ctx: Db] [projections: *] {rows: 1}
+    Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+        Filter [ctx: Db] [predicate: flag = true AND ->wrote->doc CONTAINS (doc:x)] {rows: 1}
+            BitmapScan [ctx: Db] [table: person] {rows: 1}
+                BitmapAnd [ctx: Db] {rows: 2}
+                    BitmapIndexScan [ctx: Db] [index: idx_flag, access: = true] {rows: 3}
+                    BitmapGraphScan [ctx: Db] [source: doc:x, direction: <-, edges: wrote] {rows: 4}
+
+Total rows: 1''''
 */
 
 DEFINE FIELD flag ON person TYPE bool;
@@ -125,3 +151,9 @@ EXPLAIN SELECT VALUE id FROM person WHERE flag = true AND ->wrote->doc->wrote->d
 
 -- EXPLAIN ANALYZE reports the reachable-set cardinality per branch.
 EXPLAIN ANALYZE SELECT VALUE id FROM person WHERE flag = true AND ->wrote->doc CONTAINS doc:x;
+
+-- A count over the same conjunction takes the bitmap plan too, so the aggregate never visits a
+-- row the reachable set does not hold.
+SELECT count() FROM person WHERE flag = true AND ->wrote->doc CONTAINS doc:x GROUP ALL;
+EXPLAIN SELECT count() FROM person WHERE flag = true AND ->wrote->doc CONTAINS doc:x GROUP ALL;
+EXPLAIN ANALYZE SELECT count() FROM person WHERE flag = true AND ->wrote->doc CONTAINS doc:x GROUP ALL;

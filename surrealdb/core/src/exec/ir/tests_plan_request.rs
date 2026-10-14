@@ -44,8 +44,18 @@ pub(crate) fn test_session() -> PlanSession {
 
 /// Plans `input` over a database `setup` builds, as the owner, in a read transaction.
 pub(crate) async fn plan(setup: &str, input: &RequestInput<'_>) -> Result<PlannedRequest, IrError> {
+	plan_as(setup, &TestDb::owner(), input).await
+}
+
+/// Plans `input` over a database `setup` builds, as the principal of `principal`, in a read
+/// transaction.
+pub(crate) async fn plan_as(
+	setup: &str,
+	principal: &crate::dbs::Session,
+	input: &RequestInput<'_>,
+) -> Result<PlannedRequest, IrError> {
 	let db = TestDb::new(setup).await;
-	let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
+	let ctx = db.exec_ctx_as(principal, TransactionType::Read).await;
 	let txn = ctx.try_txn().expect("a transaction");
 	let planner = Planner::with_txn(
 		ctx.ctx(),

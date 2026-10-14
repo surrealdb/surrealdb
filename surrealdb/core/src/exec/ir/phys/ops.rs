@@ -989,7 +989,12 @@ pub(crate) struct JoinAttrs {
 	pub(crate) keys: u16,
 	/// Whether a residual predicate follows the key pairs.
 	pub(crate) residual: bool,
-	/// The key pair the right side is read through an index lookup of, when it is.
+	/// The key pair whose index the right side is read through for a left row's key, when it is.
+	/// The join's last region is then the lookup arm
+	/// ([`RegionKind::JoinLookupArm`](crate::exec::ir::iface::region_kind::RegionKind::JoinLookupArm)),
+	/// which yields the right input's chain over a `phys.index_lookup` keyed by the arm's
+	/// argument. The build side is `Right`, and is read for the left rows the lookup does not
+	/// serve.
 	pub(crate) lookup: Option<u16>,
 }
 

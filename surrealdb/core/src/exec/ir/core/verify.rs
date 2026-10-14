@@ -178,6 +178,7 @@ fn position_twin(kind: RegionKind) -> Option<RegionKind> {
 		| RegionKind::ErrorScope(_)
 		| RegionKind::ChooseArm
 		| RegionKind::Pipeline
+		| RegionKind::JoinLookupArm
 		| RegionKind::WriteStage
 		| RegionKind::CatalogUnit
 		| RegionKind::Deadline

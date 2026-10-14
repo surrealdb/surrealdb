@@ -47,6 +47,7 @@ pub(crate) mod facts;
 mod hold_left;
 pub(crate) mod hop_key;
 mod index_answer;
+mod join_lookup;
 mod keyed_record;
 mod knn;
 mod knn_ids;
@@ -344,7 +345,7 @@ impl PhysOp {
 				)
 				.collect();
 				if attrs.lookup.is_some() {
-					kinds.push(RegionKind::Pipeline);
+					kinds.push(RegionKind::JoinLookupArm);
 				}
 				kinds
 			}

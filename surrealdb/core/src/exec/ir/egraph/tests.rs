@@ -855,6 +855,7 @@ fn always_opaque_kinds() -> Vec<RegionKind> {
 		RegionKind::SubscriberFrame,
 		RegionKind::ChooseArm,
 		RegionKind::Pipeline,
+		RegionKind::JoinLookupArm,
 		RegionKind::WriteStage,
 		RegionKind::CatalogUnit,
 		RegionKind::Deadline,

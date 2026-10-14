@@ -24,7 +24,11 @@
 use surrealdb_strand::TableName;
 
 use super::choose::sort_keys_total;
-use super::ops::{Batch, KeyBoundShape, KeyRangeShape, PhysOp, PhysTag, PrefetchKeys};
+use super::join_lookup::{build_key_field, right_table};
+use super::nested::yielded;
+use super::ops::{
+	Batch, JoinAttrs, KeyBoundShape, KeyRangeShape, LookupKeyShape, PhysOp, PhysTag, PrefetchKeys,
+};
 use super::pipeline::PipelineDag;
 use super::schedule;
 use crate::exec::index::key_range::DeliveredKeyOrder;
@@ -37,6 +41,7 @@ use crate::exec::ir::iface::ids::{OpId, RegionId};
 use crate::exec::ir::logical::ops::{WriteMark, WriteStageKind};
 use crate::exec::ir::logical::verify::{TopRole, statement_structure, transaction_ends};
 use crate::exec::ir::op_kind::OpKind;
+use crate::exec::vm::payload::JoinBuild;
 use crate::kvs::Direction;
 
 /// The most iterations of a batch form one execution of a loop takes at once.
@@ -98,6 +103,7 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 			}
 		}
 		PhysOp::KeyRangeScan(attrs) => check_key_range(op, &attrs.access, data.operands.len()),
+		PhysOp::Join(attrs) => check_join(ir, op, data, attrs),
 		PhysOp::TableScan(_)
 		| PhysOp::IndexScan(_)
 		| PhysOp::IndexUnion(_)
@@ -122,7 +128,6 @@ fn own_rules(ir: &Ir, op: OpId, data: &OpData, kind: &PhysOp) -> Result<(), Veri
 			..
 		}
 		| PhysOp::Union
-		| PhysOp::Join(_)
 		| PhysOp::Distinct {
 			..
 		}
@@ -250,6 +255,77 @@ fn phase_gated(op: OpId, what: &str, executable: bool) -> Result<(), VerifyError
 // ---------------------------------------------------------------------------------------------
 // PerOp
 // ---------------------------------------------------------------------------------------------
+
+/// A join that reads its right input through an index has one key pair that index serves, builds
+/// on its right input, and ends in a lookup arm that yields the right input's chain over exactly
+/// one `phys.index_lookup`: keyed by the arm's argument, over the field the pair's right key reads
+/// of the alias, and of the table the right input scans.
+fn check_join(ir: &Ir, op: OpId, data: &OpData, attrs: &JoinAttrs) -> Result<(), VerifyError> {
+	let Some(pair) = attrs.lookup else {
+		return Ok(());
+	};
+	let fail = |detail: String| Err(fault(op, VerifyRule::PerOp, detail));
+	if pair >= attrs.keys {
+		return fail(format!(
+			"phys.join reads key pair {pair} through an index, and has {} key pairs",
+			attrs.keys
+		));
+	}
+	if attrs.build != JoinBuild::Right {
+		return fail("phys.join reads an index lookup and holds its left row".to_owned());
+	}
+	let regions = usize::from(attrs.keys) * 2 + usize::from(attrs.residual) + 1;
+	if data.regions.len() != regions {
+		return fail(format!(
+			"phys.join has {} regions, and its key pairs, residual and lookup arm are {regions}",
+			data.regions.len()
+		));
+	}
+	let (Some(arm), Some(right)) = (data.regions.last().copied(), data.operands.get(1).copied())
+	else {
+		return fail("phys.join reads an index lookup and has no right input".to_owned());
+	};
+	if yielded(ir, arm).is_none() {
+		return fail("the lookup arm of a phys.join yields no value".to_owned());
+	}
+	let mut lookups =
+		ops_in(ir, arm).filter_map(|member| match ir.op(member).map(|held| &held.kind) {
+			Some(OpKind::Phys(PhysOp::IndexLookup(lookup))) => Some((member, lookup)),
+			Some(OpKind::Phys(_) | OpKind::Expr(_) | OpKind::Logical(_)) | None => None,
+		});
+	let (Some((lookup_op, lookup)), None) = (lookups.next(), lookups.next()) else {
+		return fail("the lookup arm of a phys.join holds other than one index lookup".to_owned());
+	};
+	let keyed = ir
+		.region(arm)
+		.and_then(|held| held.blocks.first().copied())
+		.and_then(|block| ir.block(block))
+		.and_then(|block| block.args.first().copied());
+	let key = ir.op(lookup_op).and_then(|held| held.operands.first().copied());
+	if lookup.key != LookupKeyShape::Probe || key.is_none() || key != keyed {
+		return fail(
+			"the index lookup of a phys.join is not keyed by its arm's argument".to_owned(),
+		);
+	}
+	let field = data
+		.regions
+		.get(usize::from(pair) * 2 + 1)
+		.and_then(|region| build_key_field(ir, *region, &attrs.alias));
+	if field.as_ref() != Some(&lookup.field) {
+		return fail(format!(
+			"the index lookup of a phys.join reads `{}`, and the right key of pair {pair} reads \
+			 another field of the alias",
+			lookup.field
+		));
+	}
+	if right_table(ir, right).as_ref() != Some(&lookup.table) {
+		return fail(format!(
+			"the index lookup of a phys.join reads table `{}`, which its right input does not scan",
+			lookup.table
+		));
+	}
+	Ok(())
+}
 
 /// A loop's `unroll` is `1..=MAX_UNROLL` and both of its batch bounds are non-zero.
 fn check_loop(op: OpId, batch: Batch, unroll: u8) -> Result<(), VerifyError> {

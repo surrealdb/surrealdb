@@ -33,7 +33,8 @@ use super::facts::NestedReading;
 use super::ops::{KeyEqShape, KeyRangeShape, PhysOp, PhysTag, SortAttrs, SortKeyReadShape};
 use super::placement::{Placement, install, place_all_reading};
 use super::{
-	chain, conjunct, hold_left, hop_key, index_answer, knn_ids, nested, once, prefilter, recheck,
+	chain, conjunct, hold_left, hop_key, index_answer, join_lookup, knn_ids, nested, once,
+	prefilter, recheck,
 };
 use crate::catalog::KeyStructure;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
@@ -85,7 +86,9 @@ pub(crate) fn patterns() -> Vec<Box<dyn Pattern<PhysDialect>>> {
 /// statements nested in it. `cx` answers the catalog questions of that step. A catalog that answers
 /// no index leaves the strategies `Apply`, `Once` and `Hash`.
 ///
-/// Before the strategies, every join whose left input yields at most one row holds that row
+/// Before the strategies, every join that reads an indexed table as its right input reads that
+/// input through the index for its first left rows ([`join_lookup::run`]). Every join left
+/// without a lookup whose left input yields at most one row then holds that row
 /// ([`hold_left::run`]), judged from the inputs the rules left.
 ///
 /// Then every filter judges once the conjuncts that answer the same at every row ([`once::run`]).
@@ -119,6 +122,7 @@ pub(crate) async fn run(
 	}
 	let mut report =
 		apply_greedy(ir, facts, &registry::build().phys_patterns, folder, GREEDY_DEFAULT).await?;
+	report.rewrites += join_lookup::run(ir, facts, cx)?;
 	report.rewrites += hold_left::run(ir, facts, cx)?;
 	report.rewrites += nested::run(ir, facts, cx)?;
 	report.rewrites += once::run(ir, facts, cx)?;
@@ -155,9 +159,11 @@ fn producer(ir: &Ir, value: ValueId) -> Option<OpId> {
 
 /// The ops beneath the rows `from`: the ops of `crossing` that keep their input's row order and
 /// identity, nearest first, and the op that produces the rows they pass on.
-struct Beneath {
-	crossed: SmallVec<[OpId; 4]>,
-	source: OpId,
+pub(super) struct Beneath {
+	/// The ops crossed, nearest `from` first.
+	pub(super) crossed: SmallVec<[OpId; 4]>,
+	/// The op that produces the rows the crossed ops pass on.
+	pub(super) source: OpId,
 }
 
 /// Follows the first operand from `from` through every op `crossing` admits to the op that
@@ -170,7 +176,7 @@ struct Beneath {
 /// Answers `None` when a value on the way is read by another op as well, or is not the result of
 /// a physical op. Every op in the answer is therefore read only by the next one, so a rule may
 /// rewrite them without changing any other consumer.
-fn beneath(ir: &Ir, from: ValueId, crossing: fn(&PhysOp) -> bool) -> Option<Beneath> {
+pub(super) fn beneath(ir: &Ir, from: ValueId, crossing: fn(&PhysOp) -> bool) -> Option<Beneath> {
 	let mut crossed = SmallVec::new();
 	let mut value = from;
 	loop {
@@ -197,7 +203,7 @@ fn beneath(ir: &Ir, from: ValueId, crossing: fn(&PhysOp) -> bool) -> Option<Bene
 /// The ops that pass their input's rows on in the order they arrive and leave a row's fields as
 /// stored or as a resolver layer gives them: a layer, a predicate, a permission and table
 /// enforcement.
-fn keeps_order(kind: &PhysOp) -> bool {
+pub(super) fn keeps_order(kind: &PhysOp) -> bool {
 	matches!(
 		kind,
 		PhysOp::Layer(_) | PhysOp::Filter | PhysOp::PermissionFilter(_) | PhysOp::Enforced { .. }

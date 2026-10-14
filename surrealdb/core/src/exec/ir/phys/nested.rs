@@ -1006,7 +1006,7 @@ pub(super) fn holds_version(ir: &Ir, filter: OpId) -> bool {
 
 /// The B-tree index of `table` over the plain field `field` alone that the access-path decision
 /// reads an equality on `field` through.
-fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> Option<IndexRef> {
+pub(super) fn index_for(cx: &PhysCx<'_>, table: &TableName, field: &Strand) -> Option<IndexRef> {
 	let key: SourceKey = (table.clone(), None, ReadVersion::Current);
 	let CatalogAnswer::Found(answers) = cx.physical.table_answers(&key) else {
 		return None;

@@ -1,8 +1,9 @@
 //! A join: `phys.join` as the source of the pipeline that reads its pairings.
 //!
 //! The op reads two inputs, the left rows first, and its `Clause(Where)` regions are a left and a
-//! right key region per key pair, then the residual when the op states one. The join is an entry of
-//! the program's joins ([`JoinSpec`]), and the pipeline that reads it opens [`Source::Join`]:
+//! right key region per key pair, then the residual when the op states one, then the lookup arm
+//! when the op reads an index. The join is an entry of the program's joins ([`JoinSpec`]), and the
+//! pipeline that reads it opens [`Source::Join`]:
 //!
 //! - The left input is a feeder that ends in the hand-off of each row to the join, keyed by the
 //!   values its left key regions take over the row ([`Sink::JoinProbe`]).
@@ -20,14 +21,19 @@
 //! lowered belongs to, or none for the program's own pipelines. A pairing is the left row with the
 //! right row under the alias, which no schema of the program describes and the body reads as a
 //! value. The op states the join's build side and its index read; this lowers what it states and
-//! decides neither. An index read of the right input names a read of its own that the op does not
-//! carry, so a join that states one is an internal error.
+//! decides neither. A join that reads its right input through an index
+//! ([`JoinAttrs::lookup`](crate::exec::ir::phys::ops::JoinAttrs::lookup)) holds the read in its
+//! last region, the lookup arm, which yields the right input's chain over a lookup keyed by the
+//! left row's value of the key pair the op names. The arm is a group of the program beside the
+//! build group, and the join's spec names both: the run reads the arm for the first left rows and
+//! the build group for the rest, and neither is compiled while the join runs.
 
 use super::nested::lower_group;
 use super::step::row_scalar;
 use super::{Needs, Opened, Reads, Sink, lower_feeder, pipeline_behind, pool_index};
 use crate::exec::ir::core::facts::FactCache;
 use crate::exec::ir::core::ir::Ir;
+use crate::exec::ir::core::walk::ops_in;
 use crate::exec::ir::error::IrError;
 use crate::exec::ir::iface::ids::{OpId, RegionId, ValueId};
 use crate::exec::ir::op_kind::OpKind;
@@ -54,14 +60,17 @@ pub(super) fn open_join(
 	};
 	let [left, right] = <[ValueId; 2]>::try_from(data.operands.as_slice())
 		.map_err(|_| invariant("a join with other than two inputs"))?;
-	if attrs.lookup.is_some() {
-		return Err(invariant("a join read through an index that states no read of its own"));
-	}
 	let pairs = usize::from(attrs.keys) * 2;
-	if data.regions.len() != pairs + usize::from(attrs.residual) {
+	if data.regions.len()
+		!= pairs + usize::from(attrs.residual) + usize::from(attrs.lookup.is_some())
+	{
 		return Err(invariant("a join whose regions disagree with its key pairs"));
 	}
-	let (keys, residual) = data.regions.split_at(pairs);
+	let (keys, rest) = data.regions.split_at(pairs);
+	let (residual, arm) = rest.split_at(usize::from(attrs.residual));
+	if attrs.lookup.is_some() && attrs.build != JoinBuild::Right {
+		return Err(invariant("a join that holds its left row and reads an index lookup"));
+	}
 	let probe_keys: Vec<RegionId> = keys.iter().step_by(2).copied().collect();
 	let build_keys: Vec<RegionId> = keys.iter().skip(1).step_by(2).copied().collect();
 	let id = pool_index(reads.base.joins, reads.joins.len(), "vm joins")?;
@@ -90,6 +99,19 @@ pub(super) fn open_join(
 				lower_feeder(em, cx, ir, facts, input, &trail, &Sink::Output, reads)?;
 				Ok(None)
 			})?;
+			// The lookup arm is a group of the program too, read in place of the build group for
+			// the first left rows. The run hands it the left row's key.
+			if let (Some(key), [region]) = (attrs.lookup, arm) {
+				let rows = arm_rows(ir, *region)?;
+				let looked = lower_group(em, cx, facts, reads, |em, cx, facts, reads| {
+					let (input, trail) = pipeline_behind(ir, rows)?;
+					lower_feeder(em, cx, ir, facts, input, &trail, &Sink::Output, reads)?;
+					Ok(None)
+				})?;
+				let spec =
+					reads.joins.get_mut(at).ok_or_else(|| invariant("a join reserved and lost"))?;
+				spec.lookup = Some((looked, usize::from(key)));
+			}
 			let (build_keys, residual) = scalars(em, cx, ir, reads, &build_keys, residual)?;
 			set_scalars(reads, at, build_keys, residual)?;
 			let (input, trail) = pipeline_behind(ir, left)?;
@@ -131,6 +153,15 @@ pub(super) fn open_join(
 		objects: false,
 		ids: false,
 	})
+}
+
+/// The rows the lookup arm `region` of a join yields.
+fn arm_rows(ir: &Ir, region: RegionId) -> Result<ValueId, IrError> {
+	let last = ops_in(ir, region).last().ok_or_else(|| invariant("a lookup arm with no op"))?;
+	match ir.op(last).map(|data| (&data.kind, data.operands.as_slice())) {
+		Some((OpKind::Phys(PhysOp::Yield), [rows])) => Ok(*rows),
+		_ => Err(invariant("a lookup arm that does not yield one value")),
+	}
 }
 
 /// The host scalars of the right key regions `keys` and of the residual region `residual`, if

@@ -748,9 +748,8 @@ fn defining_op(ir: &Ir, value: ValueId) -> Option<OpId> {
 
 /// A join: the key pairs and the residual are the `Clause(Where)` regions, a left and a right key
 /// region per pair and then the residual when one is present. The right side is the build side and
-/// is read through no index lookup: a lookup reads the right input through an index for one left
-/// row's key, a read of its own that the op holds no region for. A join that is neither inner,
-/// left nor semi is not a physical join.
+/// is read through no index lookup: [`super::join_lookup::run`] states a lookup afterwards, as a
+/// region of the join. A join that is neither inner, left nor semi is not a physical join.
 fn join(
 	ir: &Ir,
 	data: &OpData,
