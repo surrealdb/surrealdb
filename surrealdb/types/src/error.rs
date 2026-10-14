@@ -425,6 +425,16 @@ impl Error {
 		self.details.is_context()
 	}
 
+	/// Returns true if the failed transaction can be retried safely.
+	///
+	/// This currently identifies transaction conflicts. Retry the entire transaction,
+	/// not only the statement that reported the error. The cause chain is inspected so
+	/// adding context does not discard retryability.
+	pub fn is_retryable(&self) -> bool {
+		matches!(self.query_details(), Some(QueryError::TransactionConflict))
+			|| self.cause.as_deref().is_some_and(Error::is_retryable)
+	}
+
 	/// Returns structured validation error details, if this is a validation error with specifics.
 	pub fn validation_details(&self) -> Option<&ValidationError> {
 		match &self.details {

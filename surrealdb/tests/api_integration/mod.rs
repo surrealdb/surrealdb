@@ -651,6 +651,11 @@ mod surrealkv {
 		}
 	}
 
+	#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+	async fn issue_7428_retryable_query_transaction_conflict() {
+		super::basic::issue_7428_retryable_query_transaction_conflict(new_db).await;
+	}
+
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
