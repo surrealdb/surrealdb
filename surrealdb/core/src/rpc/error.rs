@@ -143,3 +143,33 @@ pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::QueryError;
+
+	use super::*;
+	use crate::kvs::Error as KvsError;
+
+	#[test]
+	fn test_types_error_from_anyhow_bare_kvs_transaction_conflict() {
+		// The WebSocket server's `commit` converts what `Transaction::commit` bails with: the kvs
+		// error itself, not wrapped in `err::Error::Kvs`
+		let kvs_error =
+			KvsError::TransactionConflict("Write conflict, retry the transaction".to_string());
+
+		let message = kvs_error.to_string();
+
+		let types_error = types_error_from_anyhow(anyhow::Error::new(kvs_error));
+
+		assert_eq!(
+			types_error.query_details(),
+			Some(&QueryError::TransactionConflict),
+			"{types_error:?}"
+		);
+
+		assert_eq!(types_error.message(), message);
+
+		assert!(types_error.cause().is_none(), "{types_error:?}");
+	}
+}

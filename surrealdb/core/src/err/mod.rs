@@ -1465,4 +1465,40 @@ mod tests {
 			types_error.message()
 		);
 	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_transaction_conflict() {
+		// `Transaction::commit` bails with the kvs error itself, not wrapped in `Error::Kvs`
+		let kvs_error =
+			KvsError::TransactionConflict("Write conflict, retry the transaction".to_string());
+
+		let message = kvs_error.to_string();
+
+		let types_error = anyhow_to_types_error(anyhow::Error::new(kvs_error));
+
+		assert_eq!(
+			types_error.query_details(),
+			Some(&surrealdb_types::QueryError::TransactionConflict),
+			"{types_error:?}"
+		);
+
+		assert_eq!(types_error.message(), message);
+
+		assert!(types_error.cause().is_none(), "{types_error:?}");
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_bare_kvs_transaction_finished() {
+		let kvs_error = KvsError::TransactionFinished;
+
+		let message = kvs_error.to_string();
+
+		let types_error = anyhow_to_types_error(anyhow::Error::new(kvs_error));
+
+		assert!(types_error.is_query(), "{types_error:?}");
+
+		assert_eq!(types_error.query_details(), None, "{types_error:?}");
+
+		assert_eq!(types_error.message(), message);
+	}
 }
