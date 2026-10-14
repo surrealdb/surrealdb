@@ -4754,8 +4754,11 @@ mod tests {
 			std::time::Duration::from_secs(86_400)
 		}
 
+		/// Every column is known to hold no array: a range over a column that may
+		/// hold one is dropped from the candidates, and these tests read the
+		/// candidates a clock-bounded range yields.
 		fn permitted<'a>(defs: Vec<IndexDefinition>) -> IndexAnalyzer<'a> {
-			analyzer(defs, None).with_clock(true)
+			scalar_analyzer(defs, None).with_clock(true)
 		}
 
 		#[test]
