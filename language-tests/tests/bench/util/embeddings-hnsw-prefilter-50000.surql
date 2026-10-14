@@ -7,13 +7,17 @@
 #   cat100    int (typed)   = 7          500      1%           exact
 #   cat10     int (typed)   = 7          5000     10%          graph
 #   flag90    bool (typed)  = true       45000    90%          graph
-#   rawcat    (undeclared)  = 7          500      1%           in-traversal residual
+#   rawcat    (undeclared)  = 7          500      1%           exact tier, residual kept
 #
-# The typed columns are exactly bitmap-coverable, so their equalities become
-# allow-list prefilters; `rawcat` is indexed but has no declared field kind,
-# so its equality stays an in-traversal residual — the pre-#548 path — making
-# `rawcat = 7` vs `cat100 = 7` a same-dataset, same-graph A/B of the
-# prefilter (see knn_hnsw_prefilter_residual_1pct.surql).
+# Every column's equality becomes an allow-list prefilter. A column whose
+# index has recorded one entry per record answers it exactly and the conjunct
+# leaves the in-traversal filter; any other column's allow-list is a superset,
+# so the conjunct is also judged on each candidate. The typed columns hold a
+# scalar in every row, so each of their indexes records one entry per record. One extra row,
+# `embeddings:mixed`, stores an array in `rawcat` and matches no probe, so
+# `rawcat`'s index never records one entry per record. `rawcat = 7` vs
+# `cat100 = 7` is a same-dataset, same-graph A/B of that exactness
+# (knn_hnsw_prefilter_residual_1pct.surql vs knn_hnsw_prefilter_sel01.surql).
 #
 # Vectors and categories are DETERMINISTIC (derived from the record index, no
 # `rand`). Combined with `SURREAL_HNSW_BUILD_SEED`, the built graph is
@@ -59,5 +63,13 @@ value = "'OK'"
 			RETURN NONE;
 		};
 	};
+	CREATE embeddings:mixed SET
+		vec = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+		cat1000 = -1,
+		cat100 = -1,
+		cat10 = -1,
+		flag90 = false,
+		rawcat = [-1, -2]
+	RETURN NONE;
 	RETURN 'OK';
 }

@@ -3,7 +3,7 @@
 imports = ["bench/util/embeddings-hnsw-prefilter-50000.surql"]
 
 [bench]
-reason = "KNN prefilter (#548) at 10% selectivity: cat10 = 7 covers 5000 of 50k rows (> the 2000 exact threshold) so the allow-list gates graph traversal with boosted ef — zero in-traversal record fetches. Export SURREAL_HNSW_BUILD_SEED for graph-identical A/B runs."
+reason = "KNN prefilter (#548) at 10% selectivity: cat10 = 7 covers 5000 of 50k rows (> the 2000 exact threshold) so the allow-list gates graph traversal with boosted ef; cat10's index holds one entry per record, so its allow-list is exact and no admitted candidate is fetched to judge the conjunct. Export SURREAL_HNSW_BUILD_SEED for graph-identical A/B runs."
 run = true
 rebuild = false
 warmup = "2s"

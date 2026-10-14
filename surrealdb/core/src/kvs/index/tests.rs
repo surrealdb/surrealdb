@@ -6603,12 +6603,14 @@ async fn btree_index_entries_carry_doc_ids() -> Result<()> {
 
 /// An index-only bitmap COUNT (`SELECT count() … WHERE <AND of indexed
 /// predicates> GROUP ALL`, issue #547) reads index entries only — zero
-/// record fetches. Proved behaviorally: after deleting the record *values*
-/// directly at the KV layer (leaving index entries and doc-ID mappings
-/// intact), the bitmap count still reports the indexed cardinality, while a
-/// NOINDEX count — which must fetch records — finds none. Finding none is
-/// no row rather than a count of zero: the count comes from the rows read,
-/// and an aggregation over no row reports nothing.
+/// record fetches. The conjuncts are full-text matches, whose postings are
+/// exactly their truth set; a b-tree conjunct is exact only over a column
+/// holding one entry per record. Proved behaviorally: after deleting the
+/// record *values* directly at the KV layer (leaving index entries and doc-ID
+/// mappings intact), the bitmap count still reports the indexed cardinality,
+/// while a count with no index to read — which must fetch records — finds
+/// none. Finding none is no row rather than a count of zero: the count comes
+/// from the rows read, and an aggregation over no row reports nothing.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
@@ -6619,14 +6621,13 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 	execute_all(
 		&ds,
 		&session,
-		"DEFINE FIELD a ON t TYPE string;
-		 DEFINE FIELD b ON t TYPE bool;
-		 DEFINE INDEX idx_a ON t FIELDS a;
-		 DEFINE INDEX idx_b ON t FIELDS b;
-		 CREATE t:1 SET a = 'x', b = true;
-		 CREATE t:2 SET a = 'x', b = true;
-		 CREATE t:3 SET a = 'x', b = false;
-		 CREATE t:4 SET a = 'y', b = true;",
+		"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+		 DEFINE INDEX ft_a ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft_b ON t FIELDS b FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'x', b = 'yes';
+		 CREATE t:2 SET a = 'x', b = 'yes';
+		 CREATE t:3 SET a = 'x', b = 'no';
+		 CREATE t:4 SET a = 'y', b = 'yes';",
 	)
 	.await?;
 
@@ -6653,9 +6654,8 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 		}
 	};
 
-	const BITMAP_COUNT: &str = "SELECT count() FROM t WHERE a = 'x' AND b = true GROUP ALL";
-	const NOINDEX_COUNT: &str =
-		"SELECT count() FROM t WITH NOINDEX WHERE a = 'x' AND b = true GROUP ALL";
+	const BITMAP_COUNT: &str = "SELECT count() FROM t WHERE a @1@ 'x' AND b @2@ 'yes' GROUP ALL";
+	const NOINDEX_COUNT: &str = "SELECT count() FROM t WHERE a = 'x' AND b = 'yes' GROUP ALL";
 	assert_eq!(count(BITMAP_COUNT).await?, 2);
 	assert_eq!(count(NOINDEX_COUNT).await?, 2);
 
@@ -9288,17 +9288,19 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	Ok(())
 }
 
-/// A pre-filtered KNN search (#548) whose WHERE is fully index-coverable
-/// performs zero record fetches inside the ANN search, on both the exact and
-/// the graph tier: EXPLAIN ANALYZE (unredacted under `Session::owner()`)
-/// reports the chosen `prefilter_tier` and no in-traversal `fetched:`
-/// counter. The contrast query filters on an indexed column with no declared
-/// field kind — not provably exact, so it stays an in-traversal residual and
-/// reports its per-candidate record fetches.
+/// A pre-filtered KNN search (#548) narrows the ANN search to the allow-list
+/// its b-tree conjunct builds, on both the exact and the graph tier: EXPLAIN
+/// ANALYZE (unredacted under `Session::owner()`) reports the chosen
+/// `prefilter_tier`. A b-tree column whose index has recorded storing no array
+/// answers its equality exactly, typed (`category`) or not (`plaincat`): the
+/// allow-list is the conjunct's truth set and no candidate is fetched to judge
+/// it. A column whose index has stored an array (`rawcat`) lists a superset, so
+/// its conjunct is still judged on each candidate. A declared kind plays no
+/// part.
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
-async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
+async fn knn_prefilter_narrows_the_search_to_the_allow_list() -> Result<()> {
 	use surrealdb_types::Value as PublicValue;
 
 	let (ds, session) = new_index_test_ds().await?;
@@ -9348,8 +9350,8 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 	assert!(plan.contains("prefilter_tier: exact"), "expected exact tier:\n{plan}");
 	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
 
-	// Graph tier (2200 members): admission is pure bitmap membership — still
-	// zero in-traversal fetches.
+	// Graph tier (2200 members): the allow-list gates admission, and being
+	// exact it needs no fetch to judge the conjunct.
 	let plan =
 		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE category = 'a' AND point <|3,40|> [0f]")
 			.await?;
@@ -9364,14 +9366,13 @@ async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
 	assert!(plan.contains("prefilter_tier: exact"), "expected exact tier:\n{plan}");
 	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
 
-	// Contrast: `rawcat`'s index has stored an array, so its equality is not
-	// provably exact and remains an in-traversal residual — the filter
-	// fetches candidate records and says so.
+	// Contrast: `rawcat`'s index has stored an array, so its equality is a
+	// superset and the conjunct is still judged.
 	let plan =
 		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE rawcat = 'b' AND point <|3,40|> [0f]")
 			.await?;
-	assert!(!plan.contains("prefilter_tier"), "no prefilter expected:\n{plan}");
-	assert!(plan.contains("fetched:"), "in-traversal fetches expected:\n{plan}");
+	assert!(plan.contains("prefilter_tier: exact"), "expected exact tier:\n{plan}");
+	assert!(plan.contains("predicate: rawcat = 'b'"), "the conjunct is still judged:\n{plan}");
 	Ok(())
 }
 

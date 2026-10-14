@@ -4,7 +4,7 @@ namespace = true
 database = true
 
 [test]
-reason = "A COUNT over an index on an element column (`tags.*`) whose element field is declared a scalar kind counts its keys: a containment pins one element, and a record lists each element value once. The plan reads `IndexCountScan`, and the counts match the records, a record repeating an element included."
+reason = "A COUNT over an index on an element column (`tags.*`) whose element field is declared a scalar kind reads the records the index lists rather than counting its keys: the declaration does not cover the values stored before it, so an element that is itself an array could list a record more than once. The counts match the records, a record repeating an element included."
 
 [[test.results]]
 value = "NONE"
@@ -28,13 +28,13 @@ value = "[{ id: t:2, tags: ['a', 'a'] }]"
 value = "[{ id: t:3, tags: ['c'] }]"
 
 [[test.results]]
-value = """{ attributes: { projections: '*' }, children: [{ attributes: { condition: "tags CONTAINS 'a'", source: 't' }, context: 'Db', operator: 'IndexCountScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: '*' }, children: [{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { access: "= 'a'", direction: 'Forward', index: 'ix', table: 't' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'Aggregate' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ count: 2 }]"
 
 [[test.results]]
-value = """{ attributes: { projections: '*' }, children: [{ attributes: { condition: "'a' INSIDE tags", source: 't' }, context: 'Db', operator: 'IndexCountScan' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: '*' }, children: [{ attributes: { mode: 'GROUP ALL' }, children: [{ attributes: { access: "= 'a'", direction: 'Forward', index: 'ix', table: 't' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'Aggregate' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ count: 2 }]"

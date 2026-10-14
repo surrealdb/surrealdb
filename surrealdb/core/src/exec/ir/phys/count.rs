@@ -62,7 +62,6 @@ use crate::exec::ir::logical::ops::{
 };
 use crate::exec::ir::op_kind::{OpKind, Terminator};
 use crate::exec::operators::scan::CountOutput;
-use crate::exec::planner::field_def_excludes_arrays;
 use crate::exec::planner::util::strip_index_conditions_in;
 use crate::exec::vm::payload::CountSelect;
 use crate::expr::logical::LogicalExpr;
@@ -484,7 +483,7 @@ fn indexed(
 ///
 /// An array value is indexed once per element, so a record holding `[3, 4]` is listed under `3`
 /// although `[3, 4] = 3` is false: the walk is chosen only for an index every column of which holds
-/// one entry per record, recorded as storing no array or declared a kind that holds none. A range
+/// one entry per record, as recorded by the index as storing no array in it. A range
 /// widened to the seconds of its bounds counts records its predicate rejects.
 fn btree_walk(
 	answers: &TableAnswers,
@@ -495,16 +494,8 @@ fn btree_walk(
 		return None;
 	}
 	let columns = answers.columns.as_ref()?;
-	let one_key_per_record = |index: &AccessIndexRef| {
-		index.cols.iter().enumerate().all(|(at, col)| {
-			index.one_entry_per_record(at)
-				|| answers
-					.fields
-					.iter()
-					.find(|field| &field.name == col)
-					.is_some_and(field_def_excludes_arrays)
-		})
-	};
+	let one_key_per_record =
+		|index: &AccessIndexRef| (0..index.cols.len()).all(|at| index.one_entry_per_record(at));
 	let analyzer = columns
 		.analyzer(with, super::access::DecisionCx::builtin().registry)
 		.with_key(answers.key.clone())
@@ -544,18 +535,11 @@ fn bitmap_fusion(
 		return None;
 	}
 	let columns = answers.columns.as_ref()?;
-	let exact_col = |col: &crate::expr::Idiom| -> bool {
-		answers
-			.fields
-			.iter()
-			.find(|field| &field.name == col)
-			.is_some_and(field_def_excludes_arrays)
-	};
 	columns
 		.analyzer(with, super::access::DecisionCx::builtin().registry)
 		.with_key(answers.key.clone())
 		.with_clock(answers.allows_clock)
-		.try_bitmap_count_fusion(cond, &exact_col)
+		.try_bitmap_count_fusion(cond, &|index, col| index.one_entry_per_record(col))
 }
 
 // ---------------------------------------------------------------------------------------------

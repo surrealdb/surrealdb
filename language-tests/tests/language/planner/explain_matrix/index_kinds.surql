@@ -125,7 +125,8 @@ value = "[{ id: fan:1 }, { id: fan:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: fan, condition: tags CONTAINS 'x']
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: fan, index: fan_tags, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]
@@ -217,7 +218,8 @@ value = "[{ id: fanu:1 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: fanu, condition: tags CONTAINS 'p']
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: fanu, index: fanu_tags, access: = 'p', direction: Forward]
 "'''
 
 [[test.results]]
@@ -517,7 +519,8 @@ value = "[{ id: dupe:1 }, { id: dupe:2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: dupe, condition: tags CONTAINS 'x']
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: dupe, index: dupe_tags, access: = 'x', direction: Forward]
 "'''
 
 [[test.results]]

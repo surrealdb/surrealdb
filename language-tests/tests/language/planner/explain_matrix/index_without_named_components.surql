@@ -137,7 +137,8 @@ value = '''
 value = '''
 "WriteOperator [ctx: Db] [form: DELETE]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [table: plain, index: by_at, access: <d'2024-01-01T00:00:00.600Z', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plain, index: by_at, access: <d'2024-01-01T00:00:00.600Z', direction: Forward]
 "'''
 
 [[test.results]]

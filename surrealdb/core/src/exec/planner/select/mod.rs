@@ -426,16 +426,6 @@ pub(crate) fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
 	}
 }
 
-/// Like [`crate::exec::index::access_path::field_kind_excludes_arrays`], but starting from a field
-/// definition's declared kind. A definition with no declared `TYPE` is
-/// conservatively not exact.
-pub(crate) fn field_def_excludes_arrays(fd: &crate::catalog::FieldDefinition) -> bool {
-	let Some(kind) = fd.field_kind.as_ref() else {
-		return false;
-	};
-	crate::exec::index::access_path::field_kind_excludes_arrays(kind)
-}
-
 /// Removes every index whose columns are governed by a non-`Full` SELECT
 /// permission for the current actor.
 ///

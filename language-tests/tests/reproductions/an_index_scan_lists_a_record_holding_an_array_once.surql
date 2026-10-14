@@ -7,15 +7,16 @@ auth = { level = "owner" }
 [test]
 reason = """
 	An index stores a record holding an array once per element, in any column
-	not known to hold no array. A scan whose key range leaves such a column
-	open reaches the record through several entries, and lists it once: on a
-	column with no declared kind, on one declared a kind admitting an array, and
-	as the trailing column of a compound index seeked on its leading column. The
-	rows and the count are the table scan's. A range over such a column that
-	reaches the band of the value order arrays sort in admits an array none of
-	whose elements is in the range, so a table scan answers it. A column
-	declared a scalar kind holds one entry per record, and its scan carries no
-	dedupe.
+	not known to hold one entry per record. A scan whose key range leaves such a
+	column open reaches the record through several entries, and lists it once:
+	on a column with no declared kind, on one declared a kind admitting an
+	array, and as the trailing column of a compound index seeked on its leading
+	column. The rows and the count are the table scan's. A range over such a
+	column that reaches the band of the value order arrays sort in admits an
+	array none of whose elements is in the range, so a table scan answers it. A
+	column whose index has recorded storing no array, here one declared a
+	scalar kind holding scalars only, holds one entry per record, and its scan
+	carries no dedupe; the declaration alone does not establish that.
 """
 
 [[test.results]]

@@ -22,7 +22,7 @@ use crate::exec::planner::util::{
 };
 use crate::exec::planner::{
 	RestrictedPrefixes, adjust_direction_for_order, detect_order_for_composite_union,
-	drop_restricted_indexes, field_def_excludes_arrays,
+	drop_restricted_indexes,
 };
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOrdering};
 use crate::expr::operator::MatchesOperator;
@@ -43,9 +43,9 @@ pub(crate) struct IndexRef {
 	/// made.
 	pub(crate) idx: usize,
 	definition: Arc<IndexDefinition>,
-	/// Per column, whether it is known to hold no array: its declared kind
-	/// holds none, or the index has recorded storing none in it. A column
-	/// past the end is not known to, and may hold one.
+	/// Per column, whether it is known to hold no array: the index has
+	/// recorded storing none in it. A column past the end is not known to, and
+	/// may hold one.
 	scalar: ColumnFlags,
 	/// Per column, whether it is a datetime component of the table's record
 	/// id, whose entries order only by the whole second
@@ -117,9 +117,28 @@ impl IndexRef {
 		self.definition.cols.get(col).is_some_and(|c| is_plain_column(c) && !self.is_scalar(col))
 	}
 
-	/// Whether the index holds each record at one entry for column `col`, at
-	/// the place the column's whole value sorts: a column spelled with no `*`
-	/// or flatten that is known to hold no array.
+	/// Whether column `col` of this index is known to hold every record under
+	/// exactly one entry, at the place the record's whole value there sorts: a
+	/// column spelled with no `*` or flatten that the index has recorded
+	/// storing no array in ([`with_array_columns_as_elements`]). The index
+	/// writer stores an array once per element, and an empty one under `NULL`,
+	/// so a column that may hold one lists a record under keys its own value
+	/// does not compare equal to.
+	///
+	/// The column's declared kind does not establish this. A declared kind is
+	/// declared, not checked (see `FieldSchema::checked`): `DEFINE FIELD`
+	/// coerces the values written after it and leaves the records already
+	/// stored as they are, a later definition with another kind leaves the
+	/// values written under the earlier one, and an import skips coercion.
+	///
+	/// Every planning decision that counts on a column's entries being its
+	/// records asks this: whether a scan must list each record once (and so
+	/// whether it can page at the scan), whether a scan delivers the column's
+	/// order, whether a scan lists exactly the records its conjuncts accept
+	/// (and so drops those conjuncts above it), whether counting keys counts
+	/// rows, and whether a bitmap equals its predicate's truth set (an
+	/// index-only count, a `NOT` subtraction, a KNN allow-list that replaces
+	/// its conjunct).
 	pub(crate) fn one_entry_per_record(&self, col: usize) -> bool {
 		self.definition.cols.get(col).is_some_and(|c| is_plain_column(c) && self.is_scalar(col))
 	}
@@ -801,9 +820,10 @@ pub(crate) fn access_fans_out(cols: &[Idiom], access: &BTreeAccess) -> bool {
 ///
 /// Beyond what [`access_fans_out`] states for a column spelled with `*`, a
 /// column the access leaves unpinned that may hold an array — no `*` or
-/// flatten in its spelling, and no declared kind holding no array — stores a
-/// record holding an array once per element. A column declared a scalar kind
-/// holds one entry per record, so an index of such columns needs no dedupe.
+/// flatten in its spelling, and not known to hold one entry per record
+/// ([`IndexRef::one_entry_per_record`]) — stores a record holding an array
+/// once per element. A column known to hold one entry per record needs no
+/// dedupe.
 pub(crate) fn access_repeats_records(index: &IndexRef, access: &BTreeAccess) -> bool {
 	if access_fans_out(&index.cols, access) {
 		return true;
@@ -862,26 +882,27 @@ pub(crate) fn access_misses_arrays(index: &IndexRef, access: &BTreeAccess) -> bo
 	range_reaches_arrays(start.as_ref().map(|v| &**v), end.as_ref().map(|v| &**v))
 }
 
-/// Whether the key range of `access` admits exactly the values its predicate
-/// does, for a column holding one entry per record: every number bounding the
-/// range is the same number as a float and as a decimal
-/// ([`exact_across_kinds`]). Numbers are keyed by their exact value, while a
-/// comparison between a float and a decimal converts the float to the decimal
-/// it prints as — the float `0.1` compares equal to the decimal `0.1` it keys
-/// above — so a range bounded by such a number lists records its comparison
-/// rejects, and the comparison has to judge each one. An equality reads the
-/// entries keyed by its value alone.
+/// Whether the keys `access` reads hold exactly the values its predicate
+/// admits, for a column holding one entry per record: every number the access
+/// names, as an equality, a compound prefix or a range bound, is the same
+/// number as a float and as a decimal ([`exact_across_kinds`]). Numbers are
+/// keyed by their exact value, while a comparison between a float and a
+/// decimal converts the float to the decimal it prints as — the float `0.1`
+/// compares equal to the decimal `0.1` it keys apart from — so an access that
+/// names such a number reads keys that miss records its comparison accepts, or
+/// lists records it rejects, and the comparison has to judge each one.
 pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
 	// A bound that reads the clock is a datetime, which is no number.
 	let inexact = |v: &BoundOperand| matches!(v.as_literal(), Some(Value::Number(n)) if !exact_across_kinds(n));
 	match access {
+		BTreeAccess::Equality(v) => !inexact(v),
 		BTreeAccess::Range {
 			range,
 		} => !range.operands().any(inexact),
 		BTreeAccess::Compound {
-			range: Some((_, v)),
-			..
-		} => !inexact(v),
+			prefix,
+			range,
+		} => !prefix.iter().any(inexact) && range.as_ref().is_none_or(|(_, v)| !inexact(v)),
 		_ => true,
 	}
 }
@@ -890,7 +911,7 @@ pub(crate) fn range_matches_comparison(access: &BTreeAccess) -> bool {
 /// every comparison with it agree: an integer, which compares exactly with
 /// both, or a finite float or a decimal whose value a float and a decimal both
 /// hold exactly (`1.5`, not `0.1`).
-fn exact_across_kinds(n: &Number) -> bool {
+pub(crate) fn exact_across_kinds(n: &Number) -> bool {
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 	match n {
@@ -918,30 +939,6 @@ fn range_reaches_arrays(start: Bound<&Value>, end: Bound<&Value>) -> bool {
 		Bound::Excluded(v) => *v > empty,
 	};
 	starts_before_band_end && ends_after_band_start
-}
-
-/// Whether a declared field kind guarantees the stored value is never an
-/// array (or set). Array values fan out to one b-tree index entry per
-/// element. Conservative: any kind not on the allowlist (including `any`,
-/// objects, literals and geometry) reports `false`.
-pub(crate) fn field_kind_excludes_arrays(kind: &Kind) -> bool {
-	match kind {
-		Kind::None
-		| Kind::Null
-		| Kind::Bool
-		| Kind::Bytes
-		| Kind::Datetime
-		| Kind::Decimal
-		| Kind::Duration
-		| Kind::Float
-		| Kind::Int
-		| Kind::Number
-		| Kind::String
-		| Kind::Uuid
-		| Kind::Record(_) => true,
-		Kind::Either(kinds) => kinds.iter().all(field_kind_excludes_arrays),
-		_ => false,
-	}
 }
 
 /// `indexes` as access-path selection has to see them: every b-tree column
@@ -1030,9 +1027,9 @@ pub(crate) fn with_array_columns_as_elements(
 			masks.push(Box::default());
 		}
 	}
-	// A plain column declared a kind that holds no array, or one the index
-	// has recorded storing no array in, keeps one entry per record; scans
-	// over it need no dedupe.
+	// A plain column the index has recorded storing no array in keeps one
+	// entry per record; its declared kind is not consulted (see
+	// `IndexRef::one_entry_per_record`).
 	let scalar: Vec<ColumnFlags> = indexes
 		.iter()
 		.map(|ix| {
@@ -1042,8 +1039,7 @@ pub(crate) fn with_array_columns_as_elements(
 				.enumerate()
 				.map(|(i, col)| {
 					is_plain_column(col)
-						&& (declared_kind(&col.0, fields).is_some_and(field_kind_excludes_arrays)
-							|| stored.is_some_and(|s| !s.may_hold(i, ValueShape::Array)))
+						&& stored.is_some_and(|s| !s.may_hold(i, ValueShape::Array))
 				})
 				.collect()
 		})
@@ -1254,8 +1250,9 @@ pub(crate) struct ElementColumns {
 	/// Per index, in order, whether each column was rewritten; a column past
 	/// the end of its index's flags was not. `None` when none was.
 	pub(crate) rewritten: Option<Arc<[ColumnFlags]>>,
-	/// Per index, in order, whether each column is declared a kind that holds
-	/// no array. `None` when none is, or when the fields were not read.
+	/// Per index, in order, whether each column is one the index has recorded
+	/// storing no array in; a column past the end of its index's flags is not.
+	/// `None` when none is, or when the shapes were not read.
 	pub(crate) scalar: Option<Arc<[ColumnFlags]>>,
 	/// Per index, in order, whether each column flattens a value declared a
 	/// set; a column past the end of its index's flags does not. `None` when
@@ -1989,9 +1986,6 @@ pub(crate) struct AccessInputs<'a> {
 	/// `None` when the field list or the indexes' recorded shapes could not be read. Read only
 	/// when that list is not empty.
 	pub(crate) columns: Option<ElementColumns>,
-	/// The table's declared fields, which decide which columns provably hold no array. `None`
-	/// when they could not be read: no column is then taken to hold none.
-	pub(crate) fields: Option<&'a [FieldDefinition]>,
 	/// The query vectors of the `KNN` operators whose right operand is a parameter holding an
 	/// array of numbers, read only when an approximate index survives the narrowing.
 	pub(crate) knn_vectors: &'a super::analysis::KnnQueryVectors,
@@ -2159,14 +2153,6 @@ pub(crate) fn decide_access(
 		None => candidates,
 	};
 
-	// The declared kinds that gate exactness: `NOT` subtraction of a bitmap, and the allow-list of
-	// a KNN search, are exact only over columns declared a kind that holds no array.
-	let exact_col = |col: &Idiom| -> bool {
-		inputs.fields.is_some_and(|fields| {
-			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
-		})
-	};
-
 	// Bitmap candidate fusion: when the WHERE clause is an AND of several index-backed predicates,
 	// intersect per-branch candidate bitmaps over the table's shared doc-ID space instead of
 	// driving from one index and filtering the rest per row. Chosen conservatively — the streaming
@@ -2187,7 +2173,8 @@ pub(crate) fn decide_access(
 				op: BinaryOperator::And,
 				..
 			}
-		) && let Some(root) = analyzer.try_bitmap_fusion(Some(cond), &candidates, &exact_col)
+		) && let Some(root) = analyzer
+		.try_bitmap_fusion(Some(cond), &candidates, &|index, col| index.one_entry_per_record(col))
 	{
 		return Ok(Some((
 			AccessPath::BitmapFusion {
@@ -2282,7 +2269,7 @@ pub(crate) fn decide_access(
 		&& !inputs.reads_versioned
 		&& *surrealdb_cnf::KNN_PREFILTER_ENABLED
 	{
-		*prefilter = knn_prefilter_plan(&analyzer, analysis_cond, inputs.fields);
+		*prefilter = knn_prefilter_plan(&analyzer, analysis_cond);
 	}
 
 	// When the best single-index path is a full-range scan (ORDER BY only, no WHERE selectivity),
@@ -2331,24 +2318,15 @@ pub(crate) fn decide_access(
 
 /// The pre-filter plan of a KNN access path: the KNN-stripped condition split per conjunct, those
 /// whose truth set is exactly a candidate bitmap joining the allow-list and the rest staying the
-/// true residual. `None` when the declared fields could not be read, which only costs the
-/// optimisation.
+/// true residual.
 fn knn_prefilter_plan(
 	analyzer: &super::analysis::IndexAnalyzer<'_>,
 	cond: Option<&LogicalExpr>,
-	fields: Option<&[FieldDefinition]>,
 ) -> Option<KnnPrefilterPlan> {
 	let cond = cond?;
 	let stripped = strip_knn_from_condition(cond)?;
-	let fields = fields?;
-	let exact_col = |col: &Idiom| -> bool {
-		fields
-			.iter()
-			.find(|fd| &fd.name == col)
-			.and_then(|fd| fd.field_kind.as_ref())
-			.is_some_and(field_kind_excludes_arrays)
-	};
-	let mut plan = analyzer.try_knn_prefilter(&stripped, &exact_col)?;
+	let mut plan =
+		analyzer.try_knn_prefilter(&stripped, &|index, col| index.one_entry_per_record(col))?;
 	// The plan indexes the chain of `stripped`, which has no KNN conjunct; its indexes are
 	// restated in the chain of `cond`.
 	let kept: Vec<usize> = crate::exec::logical::conjuncts(cond)
@@ -2368,7 +2346,7 @@ fn knn_prefilter_plan(
 mod range_comparison_tests {
 	use std::ops::Bound;
 
-	use super::{BTreeAccess, range_matches_comparison};
+	use super::{BTreeAccess, BoundOperand, range_matches_comparison};
 	use crate::val::{Number, Range, Value};
 
 	fn below(v: Value) -> BTreeAccess {
@@ -2393,8 +2371,29 @@ mod range_comparison_tests {
 		] {
 			assert_eq!(range_matches_comparison(&below(bound.clone())), exact, "{bound:?}");
 		}
-		assert!(range_matches_comparison(&BTreeAccess::literal_equality(Value::Number(
-			Number::Float(0.1)
-		))));
+		for (value, exact) in [
+			(Value::Number(Number::Float(0.1)), false),
+			(Value::Number(Number::Float(1.5)), true),
+			(decimal("0.1"), false),
+			(Value::from(3), true),
+			(Value::from("a"), true),
+		] {
+			assert_eq!(
+				range_matches_comparison(&BTreeAccess::literal_equality(value.clone())),
+				exact,
+				"= {value:?}"
+			);
+			assert_eq!(
+				range_matches_comparison(&BTreeAccess::Compound {
+					prefix: vec![
+						BoundOperand::Literal(Value::from("a")),
+						BoundOperand::Literal(value.clone()),
+					],
+					range: None,
+				}),
+				exact,
+				"compound prefix {value:?}"
+			);
+		}
 	}
 }

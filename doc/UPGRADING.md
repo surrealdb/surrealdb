@@ -326,6 +326,15 @@ inside a cancelled transaction must bind it again outside the transaction.
 - A value containing a deeply nested `GeometryCollection` that was stored by an
   earlier release may now return `The value is nested too deeply` when read. It
   can be repaired in place by overwriting the field; see below.
+- B-tree index plans follow what each index has recorded storing, not a
+  field's declared type. An index built by an earlier release recorded nothing,
+  so every query over it plans as if its fields could hold an array, typed or
+  not: `ORDER BY` sorts instead of reading the index in order, a scan lists each
+  record once rather than stopping at a `LIMIT`, a range open at its upper end
+  reads the table, `count()` over an indexed condition reads the matching
+  records, and a KNN query checks a range condition during the search. Rows are
+  unchanged. `REBUILD INDEX`, once every node runs this release, restores the
+  index plans for a field that never held an array. See below.
 - A table whose `id` field names the components of its array ids, such as
   `DEFINE FIELD id ON reading TYPE [city: string, time: datetime]`, cannot be
   read by an earlier release. Defining one while any node still runs an earlier
@@ -1016,15 +1025,22 @@ Code that builds or matches on their types has to name the additions:
   keeps the unnamed form (`[string, datetime]`), so a client that parses `kind`
   is unaffected.
 
-### Index order on fields with no declared type
+### Index plans follow what an index has stored, not a field's declared type
 
 The index writer stores a record whose indexed field holds an array once per
-element of the array, so the order of such an index's entries is not the order
-of the field's values. A B-tree index built on this release records, per
-column, whether it has stored an array, and the planner treats a column that
-never has as it treats a column declared a scalar type: the index delivers the
-column's order, a `LIMIT` stops the scan, and a range over the column is
-answered by its keys. The first array written to the column changes every plan
+element of the array, so such an index's entries do not stand one for each
+record, and their order is not the order of the field's values. `DEFINE FIELD`
+does not rewrite records stored before it, and an import skips coercion, so a
+field declared `TYPE int` can still hold an array written earlier: an earlier
+release trusted the declared type, and such a record could be counted, returned
+or ranked once per element, or match a condition it does not satisfy.
+
+A B-tree index built on this release records, per column, whether it has
+stored an array, and the planner trusts that record alone, typed field or not.
+For a column that never has, the index delivers the column's order, a `LIMIT`
+stops the scan, a range over the column is answered by its keys, `count()`
+counts index keys, and a KNN query narrows its search exactly to the
+condition's matches. The first array written to the column changes every plan
 over it from then on. Deleting the record does not change it back; rebuilding
 the index does.
 
@@ -1034,24 +1050,37 @@ place arrays sort, after every scalar: a record holding `[1]` satisfies
 Such a range — one open at its upper end, or bounded above by an array or a
 later value — reads the table instead.
 
-An index built by an earlier release recorded nothing, so this release cannot
-tell whether its columns hold arrays and plans them as columns that may. Every
-query still returns the same rows; a schemaless "latest N" query such as
-`SELECT * FROM event ORDER BY time DESC LIMIT 10` sorts the matching rows
-rather than reading ten index entries, and `WHERE time > $since` reads the
-table.
+An index built by an earlier release recorded nothing, so this release plans
+all its columns as columns that may hold an array. Every query still returns
+the same rows, but:
+
+- `ORDER BY` over an indexed field sorts the matching rows: `SELECT * FROM
+  event ORDER BY time DESC LIMIT 10` no longer reads just ten index entries,
+  and `WHERE time > $since` reads the table.
+- `count()` over an indexed condition reads the matching records rather than
+  counting index keys (about five to seven times slower at 1–20% of a table).
+  A `COUNT` index whose condition is the query's still answers from its
+  counter.
+- Range and compound scans remove duplicate records, which adds a small
+  constant to each scan.
+- A KNN query (`<|k,ef|>`) combined with a range condition checks that
+  condition during the graph search rather than narrowing the search
+  beforehand, so a selective range can return fewer than `k` rows and lower
+  recall.
 
 A statement that may write — `UPDATE`, `DELETE`, a block holding a write, or
-any statement calling a user-defined function or a script — plans every such
-column as one that may hold an array, rebuilt or not: it is planned before its
-writes run, and a write can store the first array.
+any statement calling a user-defined function or a script — plans every column
+as one that may hold an array, rebuilt or not: it is planned before its writes
+run, and a write can store the first array.
 
-**What to do**: once every node of the cluster runs this release, run
-`REBUILD INDEX` on each B-tree index whose queries order by, or take ranges
-over, a field with no declared type. A node still on an earlier release writes
-arrays into an index without recording them, so an index rebuilt while such a
-node is still writing can plan a column that holds an array as one that never
-has, and order or bound it by element.
+**What to do**: nothing is required for correct results. To restore the index
+plans, once every node of the cluster runs this release, run `REBUILD INDEX` on
+each B-tree index whose queries order by, count over, or take ranges over its
+fields. A node still on an earlier release writes arrays into an index without
+recording them, so an index rebuilt while such a node is still writing can
+plan a column that holds an array as one that never has, and order or bound it
+by element. For a KNN query with a selective range condition on an index not
+yet rebuilt, a larger `ef` recovers recall at some cost.
 
 ## v3.3.0 — datastore version stamp, startup data migrations, the sequence keyspace move, module re-keying, rollbacks reported as `cancelled`, and ANN pending entries at a new revision
 

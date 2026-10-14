@@ -59,7 +59,7 @@ value = '''
 value = '''
 "ProjectValue [ctx: Db] [expr: id]
     Filter [ctx: Db] [predicate: category = 'a']
-        KnnScan [ctx: Db] [index: hn, k: 2, ef: 40, dimension: deferred]
+        KnnScan [ctx: Db] [index: hn, k: 2, ef: 40, dimension: deferred, predicate: category = 'a']
             BitmapIndexScan [ctx: Db] [index: cat, access: = 'a']
 "'''
 

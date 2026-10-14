@@ -71,13 +71,15 @@ LET $go = true;
 	SELECT id FROM doc WHERE text @@ 'hello';
 };
 {
-	-- `v` is declared a scalar kind, so its index holds one entry per record and
-	-- a scan of it delivers the column's order: a plain column that may hold an
-	-- array is stored once per element and orders nothing.
+	-- The index defined after the block's writes lists none of them, so the
+	-- B-tree access path it offers returns no row. A block that writes plans
+	-- every column as one that may hold an array, whatever `v` is declared, so
+	-- it is an equality that takes the index here: an open range reaching the
+	-- place arrays sort reads the table instead.
 	DEFINE FIELD v ON n TYPE option<int>;
 	CREATE n:1 SET v = 3; CREATE n:2 SET v = 1; CREATE n:3 SET v = 2;
 	IF $go { DEFINE INDEX iv ON n FIELDS v };
-	SELECT id FROM n WHERE v > 0 LIMIT 2;
+	SELECT id FROM n WHERE v = 3 LIMIT 2;
 };
 {
 	IF $go { DEFINE INDEX iv2 ON n FIELDS w };

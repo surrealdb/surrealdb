@@ -15,7 +15,10 @@ does not collide with it, and an equality read then returns both, one from the
 slot and one from the non-unique entry written now.
 
 The write is asserted against the current checkout only because releases
-differ on whether such a tuple collides. `EXPLAIN` output is not stable across
+differ on whether such a tuple collides. The read of the `a` prefix alone is
+asserted on its index scan only: over an index an older binary built, which
+recorded no value shapes, the scan lists each record once behind a dedupe, and
+over one this binary built it needs none. `EXPLAIN` output is not stable across
 the 3.x line either; the seed axis sends every released version straight to
 the current checkout."""
 
@@ -38,10 +41,7 @@ value = '''
 "'''
 
 [[test.results]]
-value = '''
-"ProjectValue [ctx: Db] [expr: id]
-    IndexScan [ctx: Db] [table: pair, index: pair_ab, access: ['k'], direction: Forward]
-"'''
+match = '''string::contains(<string> $result, "IndexScan [ctx: Db] [table: pair, index: pair_ab, access: ['k'], direction: Forward]")'''
 
 [[test.results]]
 value = "[{ a: 'k', id: pair:7 }]"

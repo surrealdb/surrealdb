@@ -441,7 +441,8 @@ value = "[{ id: bs:1 }, { id: bs:2 }, { id: bs:3 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red']
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        IndexScan [ctx: Db] [table: bs, index: idx_tags, access: = 'red', direction: Forward]
 "'''
 
 [[test.results]]
@@ -469,10 +470,12 @@ value = "[{ id: bs:1 }, { id: bs:3 }, { id: bs:6 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: bs, condition: tags CONTAINS 'red' AND b = true]
-        BitmapAnd [ctx: Db]
-            BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
-            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: tags CONTAINS 'red' AND b = true]
+            BitmapScan [ctx: Db] [table: bs]
+                BitmapAnd [ctx: Db]
+                    BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
+                    BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
 "'''
 
 [[test.results]]
@@ -575,11 +578,8 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: id]
-    Filter [ctx: Db] [predicate: b = true AND not(tags CONTAINS 'red')]
-        BitmapScan [ctx: Db] [table: bs]
-            BitmapAndNot [ctx: Db]
-                BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-                BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
+    Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+        IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]
@@ -591,10 +591,9 @@ value = "[{ id: bs:5 }]"
 [[test.results]]
 value = '''
 "SelectProject [ctx: Db] [projections: *]
-    IndexCountScan [ctx: Db] [source: bs, condition: b = true AND not(tags CONTAINS 'red')]
-        BitmapAndNot [ctx: Db]
-            BitmapIndexScan [ctx: Db] [index: idx_b, access: = true]
-            BitmapIndexScan [ctx: Db] [index: idx_tags, access: = 'red']
+    Aggregate [ctx: Db] [mode: GROUP ALL]
+        Filter [ctx: Db] [predicate: not(tags CONTAINS 'red')]
+            IndexScan [ctx: Db] [table: bs, index: idx_b, access: = true, direction: Forward]
 "'''
 
 [[test.results]]

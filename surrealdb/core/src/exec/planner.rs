@@ -54,8 +54,7 @@ pub(crate) use aggregate::analyse_aggregation;
 pub(crate) use cycle_guard::{CycleGuard, UnitKey};
 pub(crate) use select::{
 	RestrictedPrefixes, adjust_direction_for_order, bitmap_plan_to_node, decide_union_merge,
-	detect_order_for_composite_union, drop_restricted_indexes, field_def_excludes_arrays,
-	output_field_path,
+	detect_order_for_composite_union, drop_restricted_indexes, output_field_path,
 };
 
 use crate::ctx::FrozenContext;

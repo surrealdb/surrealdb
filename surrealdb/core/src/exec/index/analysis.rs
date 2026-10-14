@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, BoundOperand, IndexRef, KnnPrefilterPlan, OperandRange,
-	select_access_path,
+	exact_across_kinds, select_access_path,
 };
 use crate::catalog::{Index, IndexDefinition, KeyStructure};
 use crate::exec::planner::util::{
@@ -21,7 +21,7 @@ use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Function, Idiom, Part};
 use crate::kvs::Direction;
-use crate::val::{Number, Range, Value};
+use crate::val::{Number, Range, RecordIdKey, Value};
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
@@ -36,9 +36,10 @@ pub struct IndexAnalyzer<'a> {
 	/// column; a column past the end of its index's flags may be sought.
 	/// `None` withholds nothing.
 	no_containment: Option<Arc<[super::access_path::ColumnFlags]>>,
-	/// Per index of `indexes`, whether each column is declared a kind that
-	/// holds no array; a column past the end of its index's flags is not
-	/// known to. `None` knows of none. Carried on each [`IndexRef`] made.
+	/// Per index of `indexes`, whether each column is known to hold no array
+	/// (see [`IndexRef::one_entry_per_record`]); a column past the end of its
+	/// index's flags is not known to. `None` knows of none. Carried on each
+	/// [`IndexRef`] made.
 	scalar: Option<Arc<[super::access_path::ColumnFlags]>>,
 	/// The function registry, which says which calls read the row (see
 	/// [`classify_knn_vector`]).
@@ -96,8 +97,8 @@ impl<'a> IndexAnalyzer<'a> {
 		self
 	}
 
-	/// Know the columns `flags` marks, per index of `indexes`, to be declared
-	/// kinds that hold no array.
+	/// Know the columns `flags` marks, per index of `indexes`, to hold no
+	/// array.
 	pub(crate) fn with_scalar_columns(
 		mut self,
 		flags: Arc<[super::access_path::ColumnFlags]>,
@@ -440,15 +441,15 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Returns `None` (caller uses the union plans) unless the
 	/// plan has at least two positive members, or one positive member plus a
 	/// subtraction. Order/limit/version gating is the caller's
-	/// responsibility; `exact_col` reports whether a column's declared
-	/// field kind guarantees scalar values (array values fan out to one
-	/// index entry per element, making b-tree bitmaps over-approximate and
-	/// therefore unusable for subtraction).
+	/// responsibility; `exact_col` reports whether a column of an index holds
+	/// one entry per record ([`IndexRef::one_entry_per_record`]: array values
+	/// fan out to one index entry per element, making b-tree bitmaps
+	/// over-approximate and therefore unusable for subtraction).
 	pub(crate) fn try_bitmap_fusion(
 		&self,
 		cond: Option<&LogicalExpr>,
 		candidates: &[IndexCandidate],
-		exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&IndexRef, usize) -> bool,
 	) -> Option<BitmapPlan> {
 		let cond = cond?;
 		// Explicit hints pin the plan (NOINDEX is handled before analysis).
@@ -1000,7 +1001,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub(crate) fn try_bitmap_count_fusion(
 		&self,
 		cond: &LogicalExpr,
-		exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&IndexRef, usize) -> bool,
 	) -> Option<BitmapPlan> {
 		if self.with_hints.is_some() {
 			return None;
@@ -1056,19 +1057,64 @@ impl<'a> IndexAnalyzer<'a> {
 	/// - full-text MATCHES leaves — the posting bitmap *is* the operator's truth set (the MATCHES
 	///   filter path evaluates membership on the same bitmaps);
 	/// - b-tree equality/range/compound leaves whose pinned columns each hold one entry per record
-	///   ([`IndexRef::one_entry_per_record`]) or are declared with an array-free field kind
 	///   (`exact_col`) — array values fan out to one index entry per element, which would make the
-	///   bitmap a superset of the predicate's truth set — and whose range no number bounds
-	///   ([`super::access_path::range_matches_comparison`]);
+	///   bitmap a superset of the predicate's truth set — whose range no number bounds
+	///   ([`super::access_path::range_matches_comparison`]), and whose equalities name only values
+	///   of a kind [`Self::key_equality_covers`] admits ([`Self::equality_keys_cover`]);
 	/// - an OR of such leaves (`B OR C` is exactly `B ∪ C`).
 	///
 	/// Anything else returns `None`.
 	fn bitmap_exact_plan(
 		&self,
 		inner: &LogicalExpr,
-		exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&IndexRef, usize) -> bool,
 	) -> Option<BitmapPlan> {
-		// `NOT (B OR C)` — subtract the union when every branch is exact.
+		self.bitmap_plan_of(inner, &|c| match &c.access {
+			BTreeAccess::FullText {
+				..
+			} => true,
+			// A range over a datetime component of the record id lists records
+			// whose datetime lies in the second of a bound, not beyond it, so
+			// its bitmap is a superset of the truth set.
+			access if super::derived_columns::range_is_widened(&c.index_ref, access) => false,
+			_ => {
+				super::access_path::range_matches_comparison(&c.access)
+					&& Self::equality_keys_cover(&c.access)
+					&& (0..Self::candidate_pinned_columns(c).len())
+						.all(|col| exact_col(&c.index_ref, col))
+			}
+		})
+	}
+
+	/// Whether every value `access` seeks by equality is of a kind
+	/// [`Self::key_equality_covers`] admits: the keys it reads then hold every
+	/// record the equality accepts. A value of another kind (an array, an
+	/// object, a regex, a record id with a compound key) may equal values
+	/// stored under keys of their own, which a bitmap that stands in for the
+	/// conjunct would omit. A range bound is judged by
+	/// [`super::access_path::range_matches_comparison`].
+	fn equality_keys_cover(access: &BTreeAccess) -> bool {
+		let covers =
+			|operand: &BoundOperand| operand.as_literal().is_none_or(Self::key_equality_covers);
+		match access {
+			BTreeAccess::Equality(value) => covers(value),
+			BTreeAccess::Compound {
+				prefix,
+				..
+			} => prefix.iter().all(covers),
+			_ => true,
+		}
+	}
+
+	/// The bitmap plan of `inner` built from the candidates `admits` accepts:
+	/// an OR is the union of its branches' plans, any other single predicate
+	/// the leaf of its best admitted candidate. An AND has none.
+	fn bitmap_plan_of(
+		&self,
+		inner: &LogicalExpr,
+		admits: &dyn Fn(&IndexCandidate) -> bool,
+	) -> Option<BitmapPlan> {
+		// `B OR C` — the union, when every branch has a plan.
 		if let LogicalExpr::Binary {
 			op: BinaryOperator::Or,
 			..
@@ -1078,7 +1124,7 @@ impl<'a> IndexAnalyzer<'a> {
 			Self::flatten_or(inner, &mut branches);
 			let mut children = Vec::with_capacity(branches.len());
 			for branch in branches {
-				children.push(self.bitmap_exact_plan(branch, exact_col)?);
+				children.push(self.bitmap_plan_of(branch, admits)?);
 			}
 			return Some(BitmapPlan::Or(children));
 		}
@@ -1099,39 +1145,106 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 
 		// A single predicate: analyze it in isolation and keep the best
-		// exact candidate.
+		// admitted candidate.
 		let candidates = self.analyze(Some(inner), None);
 		candidates
 			.into_iter()
-			.filter(|c| {
-				if !Self::bitmap_capable_candidate(c) {
-					return false;
-				}
-				match &c.access {
-					BTreeAccess::FullText {
-						..
-					} => true,
-					// A range over a datetime component of the record id lists
-					// records whose datetime lies in the second of a bound, not
-					// beyond it, so its bitmap is a superset of the truth set.
-					access if super::derived_columns::range_is_widened(&c.index_ref, access) => {
-						false
-					}
-					_ => {
-						super::access_path::range_matches_comparison(&c.access)
-							&& Self::candidate_pinned_columns(c).iter().enumerate().all(
-								|(i, col)| c.index_ref.one_entry_per_record(i) || exact_col(col),
-							)
-					}
-				}
-			})
+			.filter(|c| Self::bitmap_capable_candidate(c) && admits(c))
 			.max_by_key(|c| c.score())
 			.as_ref()
 			.and_then(Self::bitmap_leaf_from_candidate)
 	}
 
-	/// Split a KNN query's stripped WHERE into an exact allow-list bitmap
-	/// plan and a true residual (pre-filtered vector search).
+	/// A bitmap plan holding every record that satisfies `inner`, and possibly
+	/// others, whatever the indexed columns hold: an equality between a plain
+	/// column and a value of a kind [`Self::key_equality_covers`] admits,
+	/// answered by a b-tree leaf that pins every column it reads, or an OR of
+	/// such equalities.
+	///
+	/// A value equal to the sought one is stored under its own key, and a
+	/// record holding an array is listed under each element besides, so the
+	/// leaf lists every record the equality accepts. No other comparison is
+	/// answered this way. A range is satisfied by values stored outside it —
+	/// a value of a kind that sorts after the bound, such as `[] > 'blue'` or
+	/// `[1, 2] > 'blue'`, while an empty array is stored under one key below
+	/// every string and `[1, 2]` under its numbers — and a containment by a
+	/// string holding the sought one as a substring, stored whole.
+	fn bitmap_superset_plan(&self, inner: &LogicalExpr) -> Option<BitmapPlan> {
+		match inner {
+			LogicalExpr::Binary {
+				op: BinaryOperator::Or,
+				..
+			} => {
+				let mut branches = Vec::new();
+				Self::flatten_or(inner, &mut branches);
+				let children = branches
+					.into_iter()
+					.map(|branch| self.bitmap_superset_plan(branch))
+					.collect::<Option<Vec<_>>>()?;
+				Some(BitmapPlan::Or(children))
+			}
+			LogicalExpr::Binary {
+				op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
+				..
+			} => self.bitmap_plan_of(inner, &|c| {
+				let pinned_plain = || {
+					Self::candidate_pinned_columns(c)
+						.iter()
+						.all(|col| !col.0.iter().any(|p| matches!(p, Part::All | Part::Flatten)))
+				};
+				let sought: &[BoundOperand] = match &c.access {
+					BTreeAccess::Equality(value) => std::slice::from_ref(value),
+					BTreeAccess::Compound {
+						prefix,
+						range: None,
+					} => prefix,
+					_ => return false,
+				};
+				// An operand that reads the clock is no value fixed before the scan opens.
+				sought
+					.iter()
+					.all(|operand| operand.as_literal().is_some_and(Self::key_equality_covers))
+					&& pinned_plain()
+			}),
+			_ => None,
+		}
+	}
+
+	/// Whether every value `=` holds equal to `value` is stored under
+	/// `value`'s own index key. True for the kinds whose equality is equality
+	/// of their keys: `NONE`, `NULL`, booleans, strings, durations, datetimes,
+	/// UUIDs, record ids whose key is a whole number, string or UUID, and a
+	/// number the same as a float and as a decimal ([`exact_across_kinds`]).
+	/// An index key holds a number's exact value, while a comparison converts
+	/// a float to the decimal it prints as, so the float `0.1` equals the
+	/// decimal `0.1` yet is keyed apart from it; a record id whose key is an
+	/// array, object or range may hold such a number, and is not taken on
+	/// trust. Not for a regex, which `=` holds equal to every string it
+	/// matches, each stored under its own key; nor for any other kind.
+	fn key_equality_covers(value: &Value) -> bool {
+		matches!(
+			value,
+			Value::None
+				| Value::Null
+				| Value::Bool(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+		) || matches!(value, Value::Number(n) if exact_across_kinds(n))
+			|| matches!(
+				value,
+				Value::RecordId(id) if matches!(
+					id.key,
+					RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_)
+				)
+			)
+	}
+
+	/// Split a KNN query's stripped WHERE into an allow-list bitmap plan and
+	/// a true residual (#548, pre-filtered vector search). Every record that
+	/// satisfies the stripped WHERE is in the allow-list, and every record of
+	/// the allow-list that satisfies the residual satisfies it.
 	///
 	/// Per conjunct of the AND chain:
 	/// - a conjunct containing a MATCHES operator joins the prefilter when it is exactly
@@ -1141,13 +1254,17 @@ impl<'a> IndexAnalyzer<'a> {
 	///   is enforced only by the outer `Filter` re-applying the KNN-stripped WHERE;
 	/// - a negated conjunct always stays residual (no table-universe bitmap is maintained, and
 	///   index-NOT is inexact for records missing the field);
-	/// - any other conjunct joins the prefilter iff its truth set is *exactly* a candidate bitmap
-	///   ([`Self::bitmap_exact_plan`]). Exactness is mandatory: covered conjuncts are dropped from
-	///   the in-traversal filter, and a superset bitmap would let non-matching candidates consume
-	///   top-K slots (the outer `Filter` would drop them, silently returning fewer than k rows).
+	/// - any other conjunct whose truth set is *exactly* a candidate bitmap
+	///   ([`Self::bitmap_exact_plan`]) joins the prefilter and is dropped from the in-traversal
+	///   filter;
+	/// - any other conjunct an index answers only as a superset ([`Self::bitmap_superset_plan`])
+	///   joins the prefilter and also stays in the residual: the bitmap narrows the candidates, and
+	///   the residual rejects the ones it holds that the conjunct does not, so none takes a top-K
+	///   slot;
+	/// - the rest stay in the residual.
 	///
 	/// One covered conjunct suffices — unlike [`Self::try_bitmap_fusion`]'s
-	/// ≥ 2 rule — because it already eliminates in-traversal record fetches.
+	/// ≥ 2 rule — because it already narrows the search to its members.
 	///
 	/// The covered conjuncts are reported by their index in the `AND` chain of `stripped`
 	/// ([`KnnPrefilterPlan::covered`]), never by their text, so a caller maps them back to its own
@@ -1155,7 +1272,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub(crate) fn try_knn_prefilter(
 		&self,
 		stripped: &LogicalExpr,
-		exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&IndexRef, usize) -> bool,
 	) -> Option<KnnPrefilterPlan> {
 		// Explicit hints pin the plan.
 		if self.with_hints.is_some() {
@@ -1183,6 +1300,9 @@ impl<'a> IndexAnalyzer<'a> {
 			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
 				covered.push(leaf);
 				covered_at.push(at);
+			} else if let Some(leaf) = self.bitmap_superset_plan(conjunct) {
+				covered.push(leaf);
+				residual.push(conjunct);
 			} else {
 				residual.push(conjunct);
 			}
@@ -2797,9 +2917,8 @@ mod tests {
 		IndexAnalyzer::new(Arc::<[_]>::from(defs.into_boxed_slice()), with, &REGISTRY)
 	}
 
-	/// An analyzer that knows every column of `defs` to be declared a kind
-	/// holding no array, as a table defining its indexed fields with scalar
-	/// types offers it.
+	/// An analyzer that knows every column of `defs` to hold no array, as an
+	/// index that has recorded storing none offers it.
 	fn scalar_analyzer<'a>(
 		defs: Vec<IndexDefinition>,
 		with: Option<&'a With>,
@@ -2898,10 +3017,11 @@ mod tests {
 
 		/// Run `try_bitmap_fusion` the way `resolve_access_path` does: analyze
 		/// without ORDER BY, then attempt the fusion. `exact` stands in for
-		/// the field-kind check gating NOT subtraction.
+		/// the per-column check, whether the column's entries are its records'
+		/// values, that gates NOT subtraction.
 		fn fuse(az: &IndexAnalyzer<'_>, cond: &LogicalExpr, exact: bool) -> Option<BitmapPlan> {
 			let candidates = az.analyze(Some(cond), None);
-			az.try_bitmap_fusion(Some(cond), &candidates, &move |_| exact)
+			az.try_bitmap_fusion(Some(cond), &candidates, &move |_, _| exact)
 		}
 
 		#[test]
@@ -3120,9 +3240,9 @@ mod tests {
 			let cond = parse_cond("a = 1 AND !(b = 2)");
 			let plan = fuse(&az, &cond, true).expect("exact NOT subtracts");
 			assert!(matches!(plan, BitmapPlan::AndNot { .. }));
-			// Without the field-kind exactness guarantee the NOT stays a
-			// residual-only filter, and a single positive branch is not
-			// worth fusing.
+			// Where no column's entries are known to be its records' values
+			// the NOT stays a residual-only filter, and a single positive
+			// branch is not worth fusing.
 			assert!(fuse(&az, &cond, false).is_none());
 		}
 
@@ -3194,15 +3314,15 @@ mod tests {
 			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
 			// Fully covered: eligible.
 			let cond = parse_cond("a = 1 AND b = 2");
-			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_some());
+			assert!(az.try_bitmap_count_fusion(&cond, &|_, _| true).is_some());
 			// One conjunct not index-covered: ineligible (no residual filter
 			// exists to repair the count).
 			let cond = parse_cond("a = 1 AND b = 2 AND unindexed = 3");
-			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_none());
-			// Array-admitting field kinds are ineligible (entry fan-out
-			// would inflate the count).
+			assert!(az.try_bitmap_count_fusion(&cond, &|_, _| true).is_none());
+			// A column not known to hold one entry per record is ineligible
+			// (an array's entry fan-out would inflate the count).
 			let cond = parse_cond("a = 1 AND b = 2");
-			assert!(az.try_bitmap_count_fusion(&cond, &|_| false).is_none());
+			assert!(az.try_bitmap_count_fusion(&cond, &|_, _| false).is_none());
 		}
 	}
 
@@ -4167,7 +4287,7 @@ mod tests {
 		) -> Option<KnnPrefilterPlan> {
 			let stripped = crate::exec::planner::util::strip_knn_from_condition(cond)
 				.expect("a non-KNN residual remains");
-			az.try_knn_prefilter(&stripped, &move |_| exact)
+			az.try_knn_prefilter(&stripped, &move |_, _| exact)
 		}
 
 		#[test]
@@ -4186,13 +4306,42 @@ mod tests {
 		}
 
 		#[test]
-		fn inexact_column_stays_residual() {
-			// Without a declared array-free field kind the equality is not
-			// provably exact, so nothing is covered and no prefilter forms.
+		fn inexact_column_joins_as_a_superset_and_stays_residual() {
+			// A column not known to hold one entry per record answers the
+			// equality only as a superset: it narrows the allow-list and is
+			// still judged.
 			let az =
 				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
 			let cond = parse_cond("a = 1 AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, false).expect("the equality narrows the allow-list");
+			assert!(
+				matches!(plan.root, BitmapPlan::BTree { .. }),
+				"the superset leaf forms the bitmap root: {:?}",
+				plan.root
+			);
+			let residual = plan.residual.expect("the superset conjunct stays residual");
+			assert_eq!(surrealdb_types::ToSql::to_sql(&residual), "a = 1");
+		}
+
+		#[test]
+		fn inexact_range_stays_residual() {
+			// A range over a column that may hold an array is no superset of
+			// its truth set (`[] > 0` holds, an empty array is not stored
+			// above 0), so it neither narrows the allow-list nor leaves the
+			// residual.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a > 1 AND vec <|2,100|> [0.0, 0.0]");
 			assert!(split(&az, &cond, false).is_none());
+			assert!(split(&az, &cond, true).is_none());
+			// Over a column its index has recorded storing no array, the range
+			// is exact and covers the conjunct.
+			let az = scalar_analyzer(
+				vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])],
+				None,
+			);
+			let plan = split(&az, &cond, true).expect("an exact range covers the conjunct");
+			assert!(plan.residual.is_none(), "{:?}", plan.residual);
 		}
 
 		#[test]
@@ -4562,8 +4711,8 @@ mod tests {
 		}
 
 		/// An analyzer over a table whose id names its components, and whose
-		/// indexed columns are declared kinds holding no array (a component never
-		/// holds one).
+		/// indexed columns are ones the index has recorded storing no array in
+		/// (a component never holds one).
 		fn keyed<'a>(defs: Vec<IndexDefinition>) -> IndexAnalyzer<'a> {
 			scalar_analyzer(defs, None).with_key(Some(key()))
 		}

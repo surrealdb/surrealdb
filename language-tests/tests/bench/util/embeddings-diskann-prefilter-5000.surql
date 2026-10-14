@@ -1,8 +1,10 @@
 /**
 # 5000 8-dimensional embeddings with a DISKANN index and both a typed,
-# indexed `cat100` column (1% selectivity, exactly bitmap-coverable — its
-# equality becomes a #548 allow-list prefilter) and an undeclared `rawcat`
-# twin (in-traversal residual baseline). Vectors and categories are
+# indexed `cat100` column (1% selectivity — its equality becomes a #548
+# allow-list prefilter, exact when its index is known to hold one entry
+# per record) and an undeclared `rawcat` twin (never exact: one extra row,
+# `embeddings:mixed`, stores an array in it, so its allow-list is a superset
+# and the conjunct is judged on each candidate). Vectors and categories are
 # DETERMINISTIC (derived from the record index). `run = false`.
 
 [test]
@@ -28,5 +30,10 @@ value = "'OK'"
 			rawcat = $i % 100
 		RETURN NONE;
 	};
+	CREATE embeddings:mixed SET
+		vec = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+		cat100 = -1,
+		rawcat = [-1, -2]
+	RETURN NONE;
 	RETURN 'OK';
 }

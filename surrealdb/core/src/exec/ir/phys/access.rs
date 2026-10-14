@@ -658,7 +658,6 @@ pub(crate) fn decide(
 		restricted: &prefixes,
 		key: table.key.clone(),
 		columns: table.columns.clone(),
-		fields: Some(&table.fields[..]),
 		knn_vectors: cx.knn_vectors,
 		allows_clock: table.allows_clock,
 		reads_versioned: table.version != ReadVersion::Current,
@@ -1078,8 +1077,8 @@ fn knn_residual(predicate: &Reconstructed) -> Result<Vec<usize>, IrError> {
 
 /// Whether the B-tree `access` over `index` lists exactly the records whose columns satisfy the
 /// conjuncts it was chosen from: every column it pins is a plain field path the index holds at one
-/// entry per record ([`IndexRef::one_entry_per_record`]), because the table declares it with a kind
-/// that holds no array or the index has stored no array in it. An array value is listed once per
+/// entry per record ([`IndexRef::one_entry_per_record`]), because the index has recorded storing no
+/// array in it. An array value is listed once per
 /// element, and an empty one under `NULL`, so such a column lists records its conjunct rejects.
 ///
 /// A range whose bounds the keys do not order as the comparison does lists records the comparison

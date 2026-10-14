@@ -68,21 +68,24 @@ value = "NONE"
 value = '''
 "WriteOperator [ctx: Db] [form: DELETE]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [table: plain, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plain, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "WriteOperator [ctx: Db] [form: UPDATE]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [table: plain, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plain, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
 value = '''
 "WriteOperator [ctx: Db] [form: UPDATE]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [table: plain, index: by_time, access: >=d'2025-06-04T00:00:00Z' <d'2025-06-05T00:00:00Z', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: plain, index: by_time, access: >=d'2025-06-04T00:00:00Z' <d'2025-06-05T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]
@@ -159,7 +162,8 @@ value = "NONE"
 value = '''
 "WriteOperator [ctx: Db] [form: UPDATE]
     SelectProject [ctx: Db] [projections: *]
-        IndexScan [ctx: Db] [table: hall, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
+        DistinctRecords [ctx: Db]
+            IndexScan [ctx: Db] [table: hall, index: by_time, access: <d'2025-06-04T00:00:00Z', direction: Forward]
 "'''
 
 [[test.results]]

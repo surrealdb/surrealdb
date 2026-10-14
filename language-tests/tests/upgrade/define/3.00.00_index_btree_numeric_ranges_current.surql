@@ -19,6 +19,18 @@ return the same rows.
 the current checkout; the seed axis sends every released version straight to
 it."""
 
+[[test.repair]]
+since = ">=3.4.0-a"
+script = "upgrade/define/3.00.00_index_btree_numeric_ranges_rebuild.surql"
+unrepaired = "degraded"
+reason = """
+An index an older binary built recorded nothing about the value shapes it
+stores, so this release cannot tell that its typed columns never held an
+array, and plans their ranges, order and counts as it would over a column that may: a range
+open at its upper end reads the table, and the order is sorted. Rows are
+unchanged. `REBUILD INDEX` starts the index recording its shapes, and the
+plans below return."""
+
 [[test.results]]
 value = '''
 'ProjectValue [ctx: Db] [expr: n]
