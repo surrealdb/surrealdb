@@ -920,6 +920,34 @@ jobs:
       - name: Test CJK segmentation
         run: cargo make ci-cjk-test
 
+  # The compile-phase timers' event tests exist only with the `compile-timers` feature, which no
+  # other lane enables.
+  test-compile-timers:
+    name: Test compile timers
+    needs: changes
+    if: ${{ github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true' }}
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: build-nightly
+          kache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          kache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          kache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          preset: test
+
+      - name: Test compile timers
+        run: cargo make ci-compile-timers-test
+
   # ----------------------------------------
   # Storage engine tests
   # ----------------------------------------
@@ -1740,6 +1768,7 @@ jobs:
       # Workspace tests
       - test-build
       - test
+      - test-compile-timers
       # SDK tests
       - sdk-build
       - sdk-engines

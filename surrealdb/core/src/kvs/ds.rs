@@ -69,6 +69,7 @@ use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::timers::compile_phase;
 use crate::expr::logical::LogicalOp;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::DefineUserStatement;
@@ -6357,9 +6358,11 @@ impl Datastore {
 					&self.capabilities.load(),
 					&self.parser_config,
 				);
-				let statements =
+				let statements = compile_phase!(
+					"parse",
 					surrealdb_expr::parser::execution_query_with_settings(text, settings)
-						.map_err(|e| TypesError::validation(e.to_string(), None))?;
+				)
+				.map_err(|e| TypesError::validation(e.to_string(), None))?;
 				return Ok(statements
 					.into_iter()
 					.map(|statement| match statement {

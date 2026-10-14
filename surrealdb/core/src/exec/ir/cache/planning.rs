@@ -64,6 +64,7 @@ use crate::exec::ir::iface::catalog::{
 use crate::exec::ir::iface::fold::FoldConsumer;
 use crate::exec::ir::iface::ids::{FrameId, ValueId};
 use crate::exec::ir::phys::access::{ReadVersion, TableAnswers};
+use crate::exec::ir::timers::ReadCount;
 use crate::expr::logical::{ITERATION_PARAMS, LogicalExpr};
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::{CatalogSnapshot, TableSnapshot};
@@ -95,6 +96,8 @@ pub(crate) struct PlanningCatalog {
 	plans_unknown_reads: bool,
 	state: Mutex<MemoState>,
 	deps: DepRecorder,
+	/// The reads the memo issued to its transaction, for the compile timers.
+	reads: ReadCount,
 	/// The identity a fact cache files this memo's answers by
 	/// ([`SemanticCatalog::memo_identity`]).
 	lineage: u64,
@@ -248,6 +251,7 @@ impl PlanningCatalog {
 				catalog_changed: false,
 			}),
 			deps: DepRecorder::new(),
+			reads: ReadCount::default(),
 			lineage: next_lineage(),
 		}
 	}
@@ -406,6 +410,15 @@ impl PlanningCatalog {
 	/// The slot table of statement `index`, once [`Self::preload`] has run for it.
 	pub(crate) fn slots(&self, index: usize) -> Option<Arc<SlotTable>> {
 		self.lock().slots.get(&index).cloned()
+	}
+
+	/// The reads the memo has issued to its transaction, and none for an answer served from what
+	/// the memo holds. A preload of `n` tables counts `2n + 1`: the snapshot, then each table's
+	/// events and views. It counts the calls made, not the datastore reads they cost, so a snapshot
+	/// the datastore's cache serves counts all the same.
+	#[cfg(feature = "compile-timers")]
+	pub(crate) fn issued_reads(&self) -> u64 {
+		self.reads.issued()
 	}
 
 	/// The value-dependence record of each statement, sorted by statement index. Consumes the
@@ -919,6 +932,7 @@ impl PlanningCatalog {
 		let Some((ns, db)) = self.ns_db else {
 			return Ok(());
 		};
+		self.reads.add(1);
 		let read = self.txn.reference_fields(ns, db, None).await?;
 		let mut state = self.lock();
 		for table in tables {
@@ -938,6 +952,7 @@ impl PlanningCatalog {
 		if self.lock().database.is_some() {
 			return Ok(());
 		}
+		self.reads.add(1);
 		let def = self.txn.get_db_by_name(ns, db, None).await?;
 		self.lock().database = Some(def);
 		Ok(())
@@ -1016,6 +1031,9 @@ impl PlanningCatalog {
 		let mut loaded = Loaded::default();
 		if !missing.tables.is_empty() {
 			let tables: Vec<TableName> = missing.tables.iter().cloned().collect();
+			// The snapshot, then the events and the views of each table
+			let tables_read = u64::try_from(tables.len()).unwrap_or(u64::MAX);
+			self.reads.add(tables_read.saturating_mul(2).saturating_add(1));
 			let cache = self.ctx.get_cache();
 			loaded.snapshot = Some(match base {
 				Some(base) => base.extended(cache.as_deref(), &self.txn, &tables).await?,
@@ -1036,6 +1054,7 @@ impl PlanningCatalog {
 				loaded.functions.push((name.clone(), None));
 				continue;
 			}
+			self.reads.add(1);
 			let def = match self.txn.get_db_function(ns, db, name, self.read_stamp).await {
 				Ok(def) => Some(def),
 				Err(e)
@@ -1048,6 +1067,7 @@ impl PlanningCatalog {
 			loaded.functions.push((name.clone(), def));
 		}
 		for name in &missing.params {
+			self.reads.add(1);
 			let def = match self.txn.get_db_param(ns, db, name, None).await {
 				Ok(def) => Some(def),
 				Err(e)

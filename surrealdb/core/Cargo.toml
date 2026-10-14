@@ -172,8 +172,10 @@ arbitrary = [
     "surrealdb-rpc/arbitrary",
 ]
 allocation-tracking = []
-# Reserved for per-phase compile timers read by the `compile` bench.
-# Nothing is gated on it and no default build enables it.
+# Per-phase compile timers. The compile path emits `surrealdb::compile::phase`,
+# `::request`, `::catalog_reads` and `::egraph` tracing events at `DEBUG`, which the `compile`
+# bench collects. Without it the compile path holds no event and reads no clock,
+# and no default build enables it.
 compile-timers = []
 # Reserved for the equivalence lane's access to the internal fragment path.
 # Nothing is gated on it and no default build enables it.

@@ -21,9 +21,9 @@
 //! - `compile_allocations` (built only without the `allocator` feature, which installs its own
 //!   global allocator): allocations and bytes per execution of each arrival text, from a counting
 //!   `#[global_allocator]`, then timed by criterion like the arrival group.
-//! - `compile_phases`: the mean time per planning phase, each phase's share of the total, the
-//!   catalog reads per compile and the e-graph share against its budget, from the
-//!   `surrealdb::compile::*` events the planning phases emit.
+//! - `compile_phases`: the mean time per planning phase, each phase's share of the total, the share
+//!   of the request's compile time the phases cover, the catalog reads per compile and the e-graph
+//!   share against its budget, from the `surrealdb::compile::*` events the planning phases emit.
 
 mod common;
 
@@ -144,6 +144,52 @@ fn insert_literal_1000(salt: u64) -> String {
 	text
 }
 
+/// Fixture of the planning-shape cases: a small indexed table, and a schemafull table with
+/// defaults, an assertion and an index, so that execution is negligible next to planning.
+const SHAPES_FIXTURE: &str = "
+	DEFINE TABLE emp SCHEMALESS;
+	DEFINE INDEX emp_dept ON emp FIELDS dept;
+	CREATE emp:1 SET name = 'a', dept = 1, age = 5;
+	CREATE emp:2 SET name = 'b', dept = 2, age = 7;
+	DEFINE TABLE sw SCHEMAFULL;
+	DEFINE FIELD name ON sw TYPE string ASSERT string::len($value) > 0;
+	DEFINE FIELD age ON sw TYPE int DEFAULT 0;
+	DEFINE FIELD tags ON sw TYPE array<string> DEFAULT [];
+	DEFINE FIELD created ON sw TYPE datetime DEFAULT time::now();
+	DEFINE INDEX sw_age ON sw FIELDS age;
+";
+
+fn shape_return_literal(salt: u64) -> String {
+	format!("RETURN {salt};")
+}
+
+fn shape_simple_select(salt: u64) -> String {
+	format!("SELECT * FROM emp LIMIT {};", salt % 1000 + 1)
+}
+
+fn shape_filtered_indexed_select(salt: u64) -> String {
+	format!(
+		"SELECT name, dept FROM emp WHERE dept = {} AND age > {salt} ORDER BY name LIMIT 10;",
+		salt % 3
+	)
+}
+
+fn shape_five_subqueries(salt: u64) -> String {
+	format!(
+		"SELECT name, \
+		 (SELECT count() FROM emp WHERE dept = {salt} GROUP ALL) AS a, \
+		 (SELECT * FROM emp WHERE age > {salt} LIMIT 1) AS b, \
+		 (SELECT name FROM emp WHERE dept = 2 LIMIT 3) AS c, \
+		 (SELECT math::max(age) AS m FROM emp GROUP ALL) AS d, \
+		 (SELECT * FROM emp WHERE id = emp:1) AS e \
+		 FROM emp LIMIT 1;"
+	)
+}
+
+fn shape_schema_write(salt: u64) -> String {
+	format!("CREATE sw SET name = 'n{salt}', age = {salt}, tags = ['a', 'b'];")
+}
+
 fn corpus() -> Vec<Case> {
 	vec![
 		Case {
@@ -199,6 +245,36 @@ fn corpus() -> Vec<Case> {
 			setup: FIXTURE.into(),
 			text: point_create_params,
 			vars: Some(point_create_params_vars),
+		},
+		Case {
+			name: "shape_return_literal",
+			setup: SHAPES_FIXTURE.into(),
+			text: shape_return_literal,
+			vars: None,
+		},
+		Case {
+			name: "shape_simple_select",
+			setup: SHAPES_FIXTURE.into(),
+			text: shape_simple_select,
+			vars: None,
+		},
+		Case {
+			name: "shape_filtered_indexed_select",
+			setup: SHAPES_FIXTURE.into(),
+			text: shape_filtered_indexed_select,
+			vars: None,
+		},
+		Case {
+			name: "shape_five_subqueries",
+			setup: SHAPES_FIXTURE.into(),
+			text: shape_five_subqueries,
+			vars: None,
+		},
+		Case {
+			name: "shape_schema_write",
+			setup: SHAPES_FIXTURE.into(),
+			text: shape_schema_write,
+			vars: None,
 		},
 	]
 }
@@ -394,15 +470,20 @@ mod phases {
 
 	const TARGET_PREFIX: &str = "surrealdb::compile::";
 
-	/// The phase names the timers report, in the order a compile runs them.
-	pub const PHASES: [&str; 8] =
-		["parse", "bind", "logical", "egraph", "map", "optimize", "place", "lower"];
+	/// The phase names the timers report, in the order a compile runs them. The list is the
+	/// one the emitter checks its names against.
+	pub use surrealdb_core::COMPILE_PHASES as PHASES;
 
 	/// What the layer collected since the last `take`.
 	#[derive(Default)]
 	pub struct Collected {
 		/// Per phase name: total nanoseconds and number of events.
 		pub phases: HashMap<&'static str, (u64, u64)>,
+		/// Total nanoseconds the request compiles took, and how many request events said so.
+		pub request_nanos: u64,
+		pub requests: u64,
+		/// Every compile event reported, whatever its target.
+		pub events: u64,
 		/// Total catalog reads reported.
 		pub catalog_reads: u64,
 		/// E-graph events reported, with their total nodes and iterations.
@@ -433,6 +514,28 @@ mod phases {
 		ACTIVE.store(true, Ordering::SeqCst);
 	}
 
+	/// The nanoseconds one stretch costs under this layer: the two clock reads that bound it and
+	/// the delivery of its event. That time passes between the stretches a compile reports, not
+	/// inside them.
+	pub fn stretch_cost_nanos() -> f64 {
+		const STRETCHES: u32 = 100_000;
+		start();
+		let begun = web_time::Instant::now();
+		for _ in 0..STRETCHES {
+			let started = web_time::Instant::now();
+			let nanos = started.elapsed().as_nanos() as u64;
+			tracing::event!(
+				target: "surrealdb::compile::phase",
+				tracing::Level::DEBUG,
+				phase = PHASES[0],
+				nanos
+			);
+		}
+		let spent = begun.elapsed();
+		stop();
+		spent.as_nanos() as f64 / f64::from(STRETCHES)
+	}
+
 	/// Stop collecting and return what was collected since `start`.
 	pub fn stop() -> Collected {
 		ACTIVE.store(false, Ordering::SeqCst);
@@ -458,6 +561,7 @@ mod phases {
 			let mut fields = Fields::default();
 			event.record(&mut fields);
 			let mut collected = COLLECTED.lock().unwrap();
+			collected.events += 1;
 			match event.metadata().target() {
 				"surrealdb::compile::phase" => {
 					if let Some(name) = fields.phase {
@@ -465,6 +569,10 @@ mod phases {
 						entry.0 += fields.nanos;
 						entry.1 += 1;
 					}
+				}
+				"surrealdb::compile::request" => {
+					collected.request_nanos += fields.nanos;
+					collected.requests += 1;
 				}
 				"surrealdb::compile::catalog_reads" => collected.catalog_reads += fields.count,
 				"surrealdb::compile::egraph" => {
@@ -513,21 +621,38 @@ mod phases {
 #[cfg(feature = "compile-timers")]
 const EGRAPH_BUDGET_PERCENT: f64 = 15.0;
 
-/// Print, per case, the mean time per planning phase, each phase's share of the total, the
-/// catalog reads per compile and the e-graph share against its budget.
+/// The share of the request's compile time the phases must cover, net of the timers' own cost.
+#[cfg(feature = "compile-timers")]
+const COVERAGE_FLOOR_PERCENT: f64 = 90.0;
+
+/// Print, per case, the mean time per planning phase, each phase's share of the total, how much of
+/// the request's compile time the phases cover, the catalog reads per compile and the e-graph
+/// share against its budget.
 ///
 /// A mean is the phase's total over the executions, so a phase that runs once per statement of a
-/// block counts all of its runs. The total is the sum of the phase totals. Exceeding the e-graph
-/// budget is reported, never a failure. Without call sites for the timers the report is empty.
+/// block counts all of its runs. The total is the sum of the phase totals. The coverage is the
+/// phases' total, parse excluded, over the time the request compiles took, which spans every
+/// statement the request compiles at its arrival. The timers' own cost passes between the
+/// stretches and does not exist without them, so the coverage measured against
+/// [`COVERAGE_FLOOR_PERCENT`] is the one net of that cost. The catalog reads are the sum of the
+/// legacy bind's distinct entries and the memo's issued reads, as
+/// `surrealdb::compile::catalog_reads` reports them; the figure is not a count of datastore reads.
+/// A coverage whose request time is not positive is reported as `n/a`. Exceeding the e-graph
+/// budget or falling below the coverage floor is reported, never a failure.
+/// Without call sites for the timers the report is empty.
 #[cfg(feature = "compile-timers")]
 fn bench_phases(_c: &mut Criterion) {
 	phases::install();
+	let stretch_cost = phases::stretch_cost_nanos();
+	println!("compile_phases: one stretch costs {stretch_cost:.0} ns under the collecting layer");
 	let runtime = create_runtime();
 	for case in corpus() {
 		let (dbs, ses) = prepare(&runtime, &case);
 		execute_arrivals(&runtime, &case, &dbs, &ses, 1, WARMUP_EXECUTIONS);
 		phases::start();
+		let started = web_time::Instant::now();
 		execute_arrivals(&runtime, &case, &dbs, &ses, 1_000, REPORT_EXECUTIONS);
+		let wall = started.elapsed();
 		let collected = phases::stop();
 		let executions = REPORT_EXECUTIONS as f64;
 		let total: u64 = collected.phases.values().map(|(nanos, _)| nanos).sum();
@@ -536,7 +661,7 @@ fn bench_phases(_c: &mut Criterion) {
 			println!("  no compile events collected");
 			continue;
 		}
-		for name in phases::PHASES {
+		for name in phases::PHASES.iter().copied() {
 			let Some((nanos, events)) = collected.phases.get(name) else {
 				continue;
 			};
@@ -547,7 +672,44 @@ fn bench_phases(_c: &mut Criterion) {
 				*events as f64 / executions,
 			);
 		}
-		println!("  catalog reads per compile: {:.2}", collected.catalog_reads as f64 / executions);
+		// Parsing runs before the request is compiled, so the request's compile time holds every
+		// phase but it. The timers' own cost passes between the stretches, and does not exist
+		// without them, so coverage is also stated net of it.
+		let parse_nanos = collected.phases.get("parse").map_or(0, |(nanos, _)| *nanos);
+		let covered = (total - parse_nanos) as f64;
+		let request = collected.request_nanos as f64;
+		// The parse event and the request event are delivered outside the request's compile time
+		let parse_events = collected.phases.get("parse").map_or(0, |(_, events)| *events);
+		let inside = (collected.events - parse_events - collected.requests) as f64;
+		let timers = inside * stretch_cost;
+		// A case that records phase events but no request event, or whose timer cost exceeds its
+		// request time, has no coverage to state
+		let coverage = |whole: f64| (whole > 0.0).then(|| covered / whole * 100.0);
+		let gross_coverage = coverage(request);
+		let net_coverage = coverage(request - timers);
+		let percent =
+			|coverage: Option<f64>| coverage.map_or("n/a".to_owned(), |c| format!("{c:.1}%"));
+		let coverage_verdict = match net_coverage {
+			Some(c) if c < COVERAGE_FLOOR_PERCENT => "BELOW FLOOR",
+			Some(_) => "meets floor",
+			None => "no verdict",
+		};
+		println!(
+			"  phases cover {} of the {:.1} us per execution the request compile took (parse \
+			 excluded), {} net of the {:.1} us per execution the {:.1} events cost \
+			 ({coverage_verdict} of {COVERAGE_FLOOR_PERCENT:.0}%); {:.1} us per execution end to \
+			 end",
+			percent(gross_coverage),
+			request / executions / 1_000.0,
+			percent(net_coverage),
+			timers / executions / 1_000.0,
+			inside / executions,
+			wall.as_nanos() as f64 / executions / 1_000.0,
+		);
+		println!(
+			"  catalog reads per compile (bind entries plus memo reads): {:.2}",
+			collected.catalog_reads as f64 / executions
+		);
 		let egraph_nanos = collected.phases.get("egraph").map_or(0, |(nanos, _)| *nanos);
 		let egraph_share = egraph_nanos as f64 / total as f64 * 100.0;
 		let verdict = if egraph_share > EGRAPH_BUDGET_PERCENT {

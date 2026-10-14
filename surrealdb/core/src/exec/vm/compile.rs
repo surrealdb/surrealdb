@@ -40,6 +40,7 @@ use crate::exec::ir::iface::ids::RegionId;
 use crate::exec::ir::iface::region_kind::RegionKind;
 use crate::exec::ir::op_kind::OpKind;
 use crate::exec::ir::phys::ops::PhysOp;
+use crate::exec::ir::timers::{NestedPlanning, compile_phase, compile_phase_scope};
 use crate::exec::ir::{
 	PlanningInput, RequestInput, RequestStatement, SubscriptionRequest, UnitKind, plan_request,
 	plan_subscription, request_rejection,
@@ -107,9 +108,11 @@ async fn plan_serving(
 		session,
 	};
 	let planned = plan_request(&input, &planning).await?;
-	for answers in &planned.outcome.answers {
-		indexes.learn(answers)?;
-	}
+	compile_phase!("lower", {
+		for answers in &planned.outcome.answers {
+			indexes.learn(answers)?;
+		}
+	});
 	Ok((Planned::new(planned.ir, planned.facts), planned.outcome.served))
 }
 
@@ -193,12 +196,12 @@ fn statement_body(planned: Planned) -> Lowered<Planned> {
 /// statements the program serves: each is planned for the catalog its transaction reads when the
 /// list reaches it, served from the compile cache by its text.
 pub(super) async fn compile(planner: &Planner<'_>, op: &LogicalOp) -> Lowered<Compiled> {
-	let session = session_of(planner);
+	let session = compile_phase!("bind", session_of(planner));
 	let indexes = SharedIndexes::new();
 	let serves_late = planner.binds_late_after_schema();
 	let (planned, served) =
 		plan_serving(planner, &session, op, UnitKind::Request, &[], &indexes, serves_late).await?;
-	let planned = statement_body(planned)?;
+	let planned = compile_phase!("lower", statement_body(planned)?);
 	compile_planned(planner, &session, &indexes, planned, served, None).await
 }
 
@@ -329,6 +332,9 @@ async fn compile_planned(
 	served: Vec<Arc<LogicalOp>>,
 	actor: Option<bool>,
 ) -> Lowered<Compiled> {
+	// The units the program needs are planned while it lowers, and report their own phases
+	let nested = NestedPlanning::default();
+	let _lowering = compile_phase_scope!("lower", excluding nested);
 	let frozen = planner.frozen();
 	let env = CompileEnv {
 		registry: planner.function_registry(),
@@ -342,8 +348,12 @@ async fn compile_planned(
 		session: session.clone(),
 		redact_volatile: frozen.redact_volatile_explain_attrs(),
 	};
-	let mut compiler =
-		Compiler::over(&env, StatementPlanner::new(planner, session, indexes).serving(served));
+	let mut compiler = Compiler::over(
+		&env,
+		StatementPlanner::new(planner, session, indexes)
+			.serving(served)
+			.timing_units_in(nested.clone()),
+	);
 	compiler.on_behalf_of(actor);
 	crate::kvs::catalog_reads::sealed(false, compiler.program(planned, BTreeSet::new())).await
 }
@@ -497,6 +507,8 @@ struct StatementPlanner<'a> {
 	/// The statements the root container serves when its lists reach them, as written, by the
 	/// index their statement op names.
 	served: Vec<Arc<LogicalOp>>,
+	/// The time spent planning units, for the stretch that lowers them.
+	nested: NestedPlanning,
 }
 
 impl<'a> StatementPlanner<'a> {
@@ -506,7 +518,14 @@ impl<'a> StatementPlanner<'a> {
 			session,
 			indexes,
 			served: Vec::new(),
+			nested: NestedPlanning::default(),
 		}
+	}
+
+	/// This planner adding the time it spends planning each unit to `nested`.
+	fn timing_units_in(mut self, nested: NestedPlanning) -> Self {
+		self.nested = nested;
+		self
 	}
 
 	/// This planner answering the root container's late-bound statements from `served`.
@@ -1086,6 +1105,7 @@ impl UnitPlanner for StatementPlanner<'_> {
 			let Some(_open) = self.planner.cycle_guard.try_enter_unit(key) else {
 				return Err(NotCovered::refused(super::payload::Refusal::ComputationDepthExceeded));
 			};
+			let _planning = self.nested.timing();
 			match ask.request {
 				UnitRequest::FunctionBody {
 					name,

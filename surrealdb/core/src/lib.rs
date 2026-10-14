@@ -70,6 +70,9 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod exec;
+/// The phase names a compile reports under the `compile-timers` feature.
+#[cfg(feature = "compile-timers")]
+pub use exec::ir::timers::COMPILE_PHASES;
 pub(crate) use surrealdb_expr::expr;
 #[cfg(feature = "gql")]
 pub mod gql;

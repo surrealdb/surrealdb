@@ -70,6 +70,7 @@ mod planning;
 pub(crate) mod registry;
 #[cfg(all(test, feature = "kv-mem"))]
 pub(crate) mod tests_plan_request;
+pub(crate) mod timers;
 pub(crate) mod unit;
 
 use surrealdb_expr::parser::TopLevelExpr;

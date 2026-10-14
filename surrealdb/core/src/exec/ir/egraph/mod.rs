@@ -86,6 +86,15 @@ pub(crate) struct EgraphOutcome {
 }
 
 impl EgraphOutcome {
+	/// Reports the run to the compile timers; a statement the e-graph did not run on reports
+	/// nothing.
+	#[cfg(feature = "compile-timers")]
+	pub(crate) fn report(&self) {
+		if self.ran.is_ok() {
+			crate::exec::ir::timers::compile_egraph!(self.nodes, self.iterations);
+		}
+	}
+
 	/// The outcome of a statement the e-graph did not run on.
 	pub(crate) fn skipped(reason: SkipReason) -> Self {
 		Self {

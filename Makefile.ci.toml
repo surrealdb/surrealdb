@@ -1674,6 +1674,25 @@ args = [
     "--lib",
 ]
 
+# The compile-phase timers' event tests are built only with `compile-timers`, which no other
+# lane enables, so they compile and run nowhere else.
+[tasks.ci-compile-timers-test]
+category = "CI - WORKSPACE TESTS"
+description = "Run the compile-phase timers' tests in surrealdb-core"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-core",
+    "--features",
+    "compile-timers,kv-mem",
+    "--lib",
+    "--",
+    "timers::",
+]
+
 # --------------------------------------------------
 # Workspace tests
 # --------------------------------------------------
@@ -2067,6 +2086,7 @@ dependencies = [
     "ci-doctests",
     # Workspace tests
     "ci-workspace-test",
+    "ci-compile-timers-test",
     # Integration tests
     "ci-cli-integration",
     "ci-http-integration",

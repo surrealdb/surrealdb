@@ -147,6 +147,7 @@ use std::sync::Arc;
 
 use crate::exec::ExecOperator;
 use crate::exec::ir::error::IrError;
+use crate::exec::ir::timers::compile_phase;
 use crate::exec::planner::Planner;
 use crate::expr::logical::LogicalOp;
 
@@ -326,17 +327,19 @@ impl RequestBuilder {
 		if leaf::reporting() {
 			leaf::report(op, &compiled.program, planner.function_registry());
 		}
-		let Ok(index) = u32::try_from(self.statements.len()) else {
-			return Err(NotCovered::internal("more statements than a request holds"));
-		};
-		self.statements.push(Arc::new(compiled.program));
-		self.served.push((!compiled.served.is_empty()).then(|| compiled.served.into()));
-		if let Some(speculating) = &planner.speculation
-			&& !speculating.held.is_empty()
-		{
-			self.held.push(Arc::clone(&speculating.held));
-		}
-		Ok(index)
+		compile_phase!("finish", {
+			let Ok(index) = u32::try_from(self.statements.len()) else {
+				return Err(NotCovered::internal("more statements than a request holds"));
+			};
+			self.statements.push(Arc::new(compiled.program));
+			self.served.push((!compiled.served.is_empty()).then(|| compiled.served.into()));
+			if let Some(speculating) = &planner.speculation
+				&& !speculating.held.is_empty()
+			{
+				self.held.push(Arc::clone(&speculating.held));
+			}
+			Ok(index)
+		})
 	}
 
 	/// The program of the request: `steps`, and the statements compiled into

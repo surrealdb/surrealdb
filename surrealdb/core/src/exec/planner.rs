@@ -61,6 +61,7 @@ pub(crate) use select::{
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
+use crate::exec::ir::timers::{RequestTiming, compile_phase, compile_recorded_catalog_reads};
 use crate::exec::{Clause, Error as ExecError, ExecOperator};
 use crate::expr::logical::{LogicalExpr, LogicalLiteral, LogicalOp, LogicalRecordIdKey};
 use crate::val::Value;
@@ -1598,22 +1599,29 @@ pub(crate) async fn plan_request_statement(
 			reason: why,
 		}));
 	}
-	let (ns, db) = session_ns_db(ctx);
-	let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
-		.trusting_index_shapes(op.read_only());
-	if let Some(auth) = auth {
-		planner = planner.with_auth(auth);
-	}
-	planner.speculate_with(speculation);
-	let within =
-		crate::exec::vm::out_of_line(|| crate::exec::vm::catalog_within(&planner, &op, &[])).await;
-	let planner = planner.reaching(within);
+	let planner = compile_phase!("bind", {
+		let (ns, db) = session_ns_db(ctx);
+		let mut planner = Planner::with_txn(ctx, registry, Arc::clone(&txn), ns, db)
+			.trusting_index_shapes(op.read_only());
+		if let Some(auth) = auth {
+			planner = planner.with_auth(auth);
+		}
+		planner.speculate_with(speculation);
+		let within =
+			crate::exec::vm::out_of_line(|| crate::exec::vm::catalog_within(&planner, &op, &[]))
+				.await;
+		planner.reaching(within)
+	});
 	let unbound = matches!(
 		op,
 		LogicalOp::Sequence(_) | LogicalOp::Foreach(_) | LogicalOp::Let(_) | LogicalOp::Eval(_)
 	)
 	.then(|| op.clone());
-	match Box::pin(planner.bind(op)).await {
+	let bound = compile_phase!(
+		"bind",
+		compile_recorded_catalog_reads!(txn, Box::pin(planner.bind(op)).await)
+	);
+	match bound {
 		Ok(bound) => Box::pin(request.plan(&planner, &bound, unbound.as_ref())).await,
 		Err(e) => Err(e),
 	}
@@ -1675,6 +1683,7 @@ async fn plan_statement_with(
 			reason: why,
 		}));
 	}
+	let _compiling = RequestTiming::begin();
 	let (ns, db) = session_ns_db(ctx);
 	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db)
 		.with_depth(depth)
@@ -1687,9 +1696,11 @@ async fn plan_statement_with(
 		planner = planner.shadowing(shadowed.iter().cloned());
 	}
 	planner.speculate_with(speculation);
-	let within =
+	let within = compile_phase!(
+		"bind",
 		crate::exec::vm::out_of_line(|| crate::exec::vm::catalog_within(&planner, &op, shadowed))
-			.await;
+			.await
+	);
 	let planner = planner.reaching(within);
 	// A block the VM plans again late-bound after its schema statements is
 	// planned from the statement as written.
@@ -1708,7 +1719,7 @@ async fn plan_statement_with(
 	// Boxed for the same reason as `plan_logical_inner`: the bind passes and the
 	// planner together are the bulk of a statement's future, and every enclosing
 	// async frame would otherwise carry and copy them.
-	let bound = crate::exec::vm::out_of_line(|| planner.bind(op)).await?;
+	let bound = compile_phase!("bind", crate::exec::vm::out_of_line(|| planner.bind(op)).await?);
 	crate::exec::vm::out_of_line(|| {
 		crate::exec::vm::plan_checked(&planner, &bound, unbound.as_ref())
 	})

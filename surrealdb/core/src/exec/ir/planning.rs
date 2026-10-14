@@ -54,6 +54,7 @@ use super::phys::access::TableAnswers;
 use super::phys::placement::Placement;
 use super::phys::seed_host::PhysSeedHost;
 use super::phys::{plan_physical, rewrite};
+use super::timers::{compile_catalog_reads, compile_phase};
 use super::unit::UnitKind;
 use super::{RequestInput, RequestStatement};
 use crate::catalog::CompiledSubscription;
@@ -143,7 +144,7 @@ pub(crate) async fn plan_request(
 	planning: &PlanningInput<'_>,
 ) -> Result<PlannedRequest, IrError> {
 	let planner = planning.planner;
-	let (txn, ids) = request_catalog(planning).await?;
+	let (txn, ids) = compile_phase!("bind", request_catalog(planning).await?);
 	let _held: Vec<_> = match ids {
 		Some((ns, db)) => planning
 			.held
@@ -152,13 +153,16 @@ pub(crate) async fn plan_request(
 			.collect(),
 		None => Vec::new(),
 	};
-	let (memo, lowered) = prepare(input, planning, txn, ids).await?;
-	let statements = bound_statements(input, &lowered);
-	charge_prefix_chains(planner, &statements)?;
+	let (memo, lowered) = compile_phase!("bind", prepare(input, planning, txn, ids).await?);
 	let registry = planner.function_registry();
-	let folder =
-		VmFolder::new(CapabilityPolicy::Request(Arc::clone(&planning.capabilities)), &HOST_RUNNER);
-	let frames = FrameTable::default();
+	let (folder, frames, statements) = compile_phase!("bind", {
+		let folder = VmFolder::new(
+			CapabilityPolicy::Request(Arc::clone(&planning.capabilities)),
+			&HOST_RUNNER,
+		);
+		(folder, FrameTable::default(), bound_statements(input, &lowered))
+	});
+	charge_prefix_chains(planner, &statements)?;
 	let bound = RequestInput {
 		statements: &statements,
 		scope: input.scope.clone(),
@@ -166,7 +170,8 @@ pub(crate) async fn plan_request(
 		serves_late: input.serves_late,
 		late_bound: input.late_bound,
 	};
-	let (ir, rejection, notes) = bind_loaded(&bound, planner, registry, &memo, &frames).await?;
+	let (ir, rejection, notes) =
+		compile_phase!("bind", bind_loaded(&bound, planner, registry, &memo, &frames).await?);
 	if let Some(rejection) = rejection {
 		return Err(IrError::Rejected(Box::new(rejection.refusal())));
 	}
@@ -490,32 +495,51 @@ async fn plan_bound(
 ) -> Result<PlannedRequest, IrError> {
 	let planner = planning.planner;
 	let registry = planner.function_registry();
-	fill(&ir, planner, &mut memo).await?;
-	let mut frames = ir.frames().clone();
-	let mut facts = FactCache::new();
-	fill_field_checks(&mut ir, &mut facts, planner).await?;
-	state_legalities(planner, bound, &notes, &mut facts).await;
+	let (mut frames, mut facts) = compile_phase!("bind", {
+		fill(&ir, planner, &mut memo).await?;
+		(ir.frames().clone(), FactCache::new())
+	});
+	compile_phase!("bind", fill_field_checks(&mut ir, &mut facts, planner).await?);
+	compile_phase!("bind", state_legalities(planner, bound, &notes, &mut facts).await);
 	{
 		let effects = EffectCx {
 			registry,
 			catalog: &memo,
 			frames: &frames,
 		};
-		verify(&ir, &mut facts, VerifyAt::PhaseBoundary(Phase::Logical), &LOGICAL_PHASE, &effects)
-			.map_err(IrError::Verify)?;
-		super::core::rewriter::Rewriter::new(&mut ir, &mut facts).advance_phase(Phase::Logical)?;
-		run_lo(&mut ir, &mut facts, folder, &effects, &PassConfig::PRODUCTION, &mut NoObserver)
-			.await?;
-		fill_record_folds(&ir, &mut facts, &effects, planner, &memo, &bound.unit).await?;
+		compile_phase!(
+			"verify",
+			verify(
+				&ir,
+				&mut facts,
+				VerifyAt::PhaseBoundary(Phase::Logical),
+				&LOGICAL_PHASE,
+				&effects
+			)
+			.map_err(IrError::Verify)?
+		);
+		compile_phase!("logical", {
+			super::core::rewriter::Rewriter::new(&mut ir, &mut facts)
+				.advance_phase(Phase::Logical)?;
+			run_lo(&mut ir, &mut facts, folder, &effects, &PassConfig::PRODUCTION, &mut NoObserver)
+				.await?
+		});
+		compile_phase!(
+			"logical",
+			fill_record_folds(&ir, &mut facts, &effects, planner, &memo, &bound.unit).await?
+		);
 	}
 	// The legality of each logical loop, which the e-graph's surgery keeps current and the
 	// physical boundary's verification judges each placed pipeline against.
 	let mut legality = LegalitySnapshotSlot::new();
-	loop_legality::snapshot_into(&ir, &mut facts, ir.top(), &mut legality)?;
+	compile_phase!(
+		"logical",
+		loop_legality::snapshot_into(&ir, &mut facts, ir.top(), &mut legality)?
+	);
 	facts.set_legality_snapshot(legality);
 	frames = ir.frames().clone();
 
-	let egraph = {
+	let egraph = compile_phase!("egraph", {
 		let loader = PlannerLoader {
 			planner,
 			memo: &memo,
@@ -534,12 +558,15 @@ async fn plan_bound(
 		cx.seed = Some(&seed);
 		let mut outcomes = Vec::new();
 		for stmt in statements_of(&ir) {
-			outcomes.push(plan_statement(&mut ir, &mut facts, stmt, &cx).await);
+			let outcome = plan_statement(&mut ir, &mut facts, stmt, &cx).await;
+			#[cfg(feature = "compile-timers")]
+			outcome.report();
+			outcomes.push(outcome);
 		}
 		outcomes
-	};
+	});
 
-	top_up(&ir, planner, &memo).await?;
+	compile_phase!("phys", top_up(&ir, planner, &memo).await?);
 	let physical_deps = {
 		let cx = PhysCx {
 			effects: EffectCx {
@@ -551,26 +578,39 @@ async fn plan_bound(
 			config: &planner.frozen().config.exec,
 		};
 		let placement = Placement::default();
-		let physical = plan_physical(&mut ir, &mut facts, &cx, folder, &placement).await?;
-		super::core::rewriter::Rewriter::new(&mut ir, &mut facts).advance_phase(Phase::Physical)?;
-		rewrite::run(&mut ir, &mut facts, folder, &cx, &placement).await?;
-		phys_cse::run(&mut ir, &mut facts, &cx.effects)?;
-		verify(
-			&ir,
-			&mut facts,
-			VerifyAt::PhaseBoundary(Phase::Physical),
-			&PHYSICAL_PHASE,
-			&cx.effects,
-		)
-		.map_err(|error: VerifyError| IrError::Verify(error))?;
+		let physical = compile_phase!(
+			"phys",
+			plan_physical(&mut ir, &mut facts, &cx, folder, &placement).await?
+		);
+		compile_phase!("phys", {
+			super::core::rewriter::Rewriter::new(&mut ir, &mut facts)
+				.advance_phase(Phase::Physical)?;
+			rewrite::run(&mut ir, &mut facts, folder, &cx, &placement).await?
+		});
+		compile_phase!("cse", phys_cse::run(&mut ir, &mut facts, &cx.effects)?);
+		compile_phase!(
+			"verify",
+			verify(
+				&ir,
+				&mut facts,
+				VerifyAt::PhaseBoundary(Phase::Physical),
+				&PHYSICAL_PHASE,
+				&cx.effects,
+			)
+			.map_err(|error: VerifyError| IrError::Verify(error))?
+		);
 		(physical.deps, physical.deps_complete)
 	};
-	let answers = memo.held_answers();
+	let (answers, deps) = compile_phase!("bind", {
+		let answers = memo.held_answers();
+		compile_catalog_reads!(memo.issued_reads());
+		(answers, memo.finish())
+	});
 	Ok(PlannedRequest {
 		ir,
 		facts,
 		outcome: PlanOutcome {
-			deps: memo.finish(),
+			deps,
 			physical_deps,
 			egraph,
 			answers,

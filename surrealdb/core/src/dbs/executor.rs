@@ -30,6 +30,7 @@ use crate::exec::ir::cache::deps::BindingOrigin;
 use crate::exec::ir::iface::premise::{OpenRegionShape, RegionContext, TxnContext};
 use crate::exec::ir::iface::region_kind::StatementCommit;
 use crate::exec::ir::logical::constraints::request_rejection;
+use crate::exec::ir::timers::{RequestTiming, compile_phase};
 use crate::exec::planner::plan_statement_inner;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::logical::{
@@ -4605,6 +4606,7 @@ impl Executor {
 		let Some(request) = self.request.as_mut() else {
 			return (Vec::new(), None);
 		};
+		let _compiling = RequestTiming::begin();
 		let mut entries = std::mem::take(&mut request.entries);
 		let mut compiled: Vec<Option<PlannedStatement>> =
 			std::iter::repeat_with(|| None).take(entries.len()).collect();
@@ -4829,7 +4831,8 @@ impl Executor {
 		if first == 0 {
 			self.request_rejection = judged.map(|(_, refusal)| refusal);
 		}
-		let program = crate::exec::planner::finish_request(builder, steps);
+		let program =
+			compile_phase!("finish", crate::exec::planner::finish_request(builder, steps));
 		match program {
 			Ok(program) => (compiled, Some(program)),
 			// A request whose program cannot be put together plans each
@@ -4933,13 +4936,15 @@ impl Executor {
 			return served();
 		}
 		let opt = &planning.opt;
-		let mut ctx = Context::snapshot(&self.ctx);
-		ctx.set_transaction(Arc::clone(txn));
-		ctx.add_value("session", planning.session.clone().into());
-		for (name, value) in &planning.bound {
-			ctx.add_value(name.clone(), value.clone().into());
-		}
-		let ctx = ctx.freeze();
+		let ctx = compile_phase!("bind", {
+			let mut ctx = Context::snapshot(&self.ctx);
+			ctx.set_transaction(Arc::clone(txn));
+			ctx.add_value("session", planning.session.clone().into());
+			for (name, value) in &planning.bound {
+				ctx.add_value(name.clone(), value.clone().into());
+			}
+			ctx.freeze()
+		});
 		let planned = crate::exec::planner::plan_request_statement(
 			op.clone(),
 			&ctx,
